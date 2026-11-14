@@ -550,6 +550,16 @@ async fn arrange(h: &Harness, method: &str, session_id: &str) {
             .await;
         }
         "import.run" => std::fs::write(h.project.join("CLAUDE.md"), "# notes\n").unwrap(),
+        "session.rewind" => {
+            for turn in ["t1", "t2"] {
+                ok(
+                    &h.sock,
+                    "session.run_turn",
+                    json!({"session_id": session_id, "message": turn, "turn_id": turn}),
+                )
+                .await;
+            }
+        }
         _ => {}
     }
 }
@@ -1657,6 +1667,35 @@ async fn a_goal_and_an_extension_entry(obs: &mut Observed) {
     obs.watched(&watch);
 }
 
+async fn a_rewind_of_the_conversation(obs: &mut Observed) {
+    let h = start_code(Arc::new(OneTurnClient)).await;
+    let session = new_session(&h).await;
+    let watch = Watch::session(&h.sock, &session).await;
+    for turn in ["t1", "t2"] {
+        ok(
+            &h.sock,
+            "session.run_turn",
+            json!({"session_id": session, "message": turn, "turn_id": turn}),
+        )
+        .await;
+    }
+    ok(
+        &h.sock,
+        "session.rewind",
+        json!({"session_id": session, "to_turn": "t1", "scope": "conversation"}),
+    )
+    .await;
+    let menu = ok(
+        &h.sock,
+        "session.checkpoints",
+        json!({"session_id": session}),
+    )
+    .await;
+    assert_eq!(menu["turns"].as_array().map(Vec::len), Some(1), "{menu}");
+    watch.wait_kind("rewound").await;
+    obs.watched(&watch);
+}
+
 fn write_skill(project: &Path, name: &str) {
     let dir = project.join(".agents/skills").join(name);
     std::fs::create_dir_all(&dir).unwrap();
@@ -1741,6 +1780,7 @@ async fn observe_session_events() -> Observed {
     a_sub_agent_the_host_starts(&mut obs).await;
     a_shell_command_that_runs_on(&mut obs).await;
     a_goal_and_an_extension_entry(&mut obs).await;
+    a_rewind_of_the_conversation(&mut obs).await;
     a_skill_that_appears_between_turns(&mut obs).await;
     a_notification_from_the_model(&mut obs).await;
     obs

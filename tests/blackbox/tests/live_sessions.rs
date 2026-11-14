@@ -4,8 +4,8 @@
 //! its model switched between turns, cleared, compacted and renamed over
 //! RPC, exported and deleted with its sidechain, its goal paused, edited and
 //! cleared, resumed across a daemon restart that took a background task
-//! down, given attachments, a 200 KB message, Unicode everywhere, and an
-//! empty message.
+//! down, given attachments, a 200 KB message, Unicode everywhere, an empty
+//! message, and a turn of file edits rewound.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -1019,6 +1019,109 @@ async fn an_interrupt_ends_a_turn_still_waiting_for_the_model() -> anyhow::Resul
         interrupted_at.elapsed() < Duration::from_secs(5),
         "the turn waited for the held request: {:?}",
         interrupted_at.elapsed()
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// A host rewinds a real model's edits of three files by one turn: the files
+/// are byte for byte what the first turn left, the model's next request has
+/// nothing of the rewound turn, and its next edit lands on the restored text
+/// — it read the file again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_rewinds_a_turn_that_edited_three_files() -> anyhow::Result<()> {
+    let mut run = LiveRun::start(
+        "rewind-live",
+        json!({ "permission_mode": "acceptEdits" }),
+        Mode::InProcess,
+    )
+    .await?;
+    let session = run.session().await?;
+    let watcher = run.watch(&session, false).await?;
+    run.turn(
+        &session,
+        "Create three files with the Write tool, exactly as given, then reply DONE:\n\
+         notes.md containing \"# Notes\\n\\nfirst line\\n\";\n\
+         config.toml containing \"retries = 3\\n\";\n\
+         src/lib.rs containing \"pub fn greet() -> &'static str {\\n    \\\"hi\\\"\\n}\\n\".",
+    )
+    .await?;
+    let baseline: Vec<Option<String>> = ["notes.md", "config.toml", "src/lib.rs"]
+        .iter()
+        .map(|f| run.read_file(f))
+        .collect();
+    assert!(baseline.iter().all(Option::is_some), "{baseline:?}");
+    let marker = format!("REWOUND-TURN-{}", nonce());
+    run.turn(
+        &session,
+        &format!(
+            "Now edit all three files with the Edit tool: in src/lib.rs rename `greet` to \
+             `welcome`; in config.toml change retries to 7; append a section \"## {marker}\" \
+             to notes.md. Reply DONE."
+        ),
+    )
+    .await?;
+    assert_ne!(
+        run.read_file("config.toml"),
+        baseline[1],
+        "the model made no edit"
+    );
+
+    let menu = run
+        .client
+        .call("session.checkpoints", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default();
+    let second: Vec<String> = menu["turns"][1]["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f["path"].as_str().map(str::to_string))
+        .collect();
+    for file in ["notes.md", "config.toml", "src/lib.rs"] {
+        assert!(second.iter().any(|p| p == file), "{file} not in {menu}");
+    }
+    let first_turn = menu["turns"][0]["turn_id"].clone();
+    let rewound = run
+        .client
+        .call(
+            "session.rewind",
+            json!({ "session_id": session, "to_turn": first_turn, "scope": "both" }),
+        )
+        .await?;
+    assert!(rewound.error.is_none(), "{:?}", rewound.error);
+    for (file, before) in ["notes.md", "config.toml", "src/lib.rs"]
+        .iter()
+        .zip(&baseline)
+    {
+        assert_eq!(&run.read_file(file), before, "{file}");
+    }
+    let frame = watcher
+        .wait_for("rewound", Duration::from_secs(10), |e| {
+            e["kind"] == "rewound"
+        })
+        .await?;
+    assert_eq!(frame["event"]["files_restored"], 3, "{frame}");
+
+    let before = run.provider.calls().len();
+    run.turn(
+        &session,
+        "Append a final line `rewound-ok` to notes.md with the Edit tool. Reply DONE.",
+    )
+    .await?;
+    let expected = format!("{}rewound-ok", baseline[0].clone().unwrap_or_default());
+    assert_eq!(
+        run.read_file("notes.md").map(|s| s.trim_end().to_string()),
+        Some(expected.trim_end().to_string())
+    );
+    let later = run.provider.calls();
+    assert!(
+        later[before..]
+            .iter()
+            .filter(|c| c.purpose() == blackbox::Purpose::Turn)
+            .all(|c| !c.messages_contain(&marker)),
+        "the model still saw the rewound turn"
     );
     run.finish().await;
     Ok(())

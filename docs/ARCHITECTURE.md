@@ -809,6 +809,8 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
   | `agix.goal` / `change` | 引擎与会话池,目标变化时 | `{goal}`,清除后为 `null` | 恢复时取回目标,不武装(§3.4) |
   | `agix.session_state` / `change` | 引擎,一轮结束和引擎停下时,有变化才写 | `{plan: null \| {exit_to: <模式> \| null}, todos: [{content, status, active_form}]}` | `Agent::restore_state_from_log` 放回 `plan` 模式(`exit_to` 为 `null` 即退出到 `default`)和 todo 列表 |
   | `agix.context` / `drop`、`edit` | 会话池,宿主改上下文时 | `{at, text?, at_ms}` | 投影时套到消息上 |
+  | `agix.checkpoint` / `pre`、`post` | 工具管线,文件工具写盘之前(已 sync)与之后;写在**根会话**里,子 Agent 的也是 | `pre`:`{id, files:[{path:{rel\|abs}, before:{state, sha256?, bytes?}}], tool, tool_use_id, rewind_id?, agent?}`;`post`:`{pre, ok, after:[{state, sha256?}]}` | `session.rewind` 算恢复什么、`session.checkpoints` 列每轮写了什么 |
+  | `agix.rewind` / `begin`、`commit`、`abort` | 引擎,宿主回滚时 | `{rewind_id, cut_after, conversation, …}` | `commit` 且 `conversation` 时作废一段对话(见下) |
 
   `agix.session_state` 只记会话自己定下、设置里推不出来的那部分(`base::context::DurableState`)。
   不在 `plan` 里的会话,权限模式仍由恢复时的设置与 `options` 决定,不由这条决定。
@@ -819,6 +821,19 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
 - 大内容可以外置到 `BlobStore`,日志里只留引用;**引用解析不了时条目保持惰性,不是报错**。
   store 要由嵌入方自己装(`JsonlHistoryStore::with_blob_store` / `with_paste_store`);
   daemon 默认不装,大内容照样写在日志行里
+
+**文件 checkpoint 与回滚。** 统一工具管线在 `authorize` 之后、`call_tool` 之前,凭工具声明的
+`Subject::WritePath`(`Edit(...)` 规则认写的同一份声明)认出这次调用要写哪个文件,先把它此刻的
+字节按完整 sha256 存进根会话 sidecar 的 `checkpoints/objects/`(`HistoryStore::checkpoint_objects`),
+再追加并 sync 一条 `pre`,然后才放行;写完记 `post`(只记哈希)。记不下来就不执行这次调用。
+`Bash` 与 MCP 工具不声明写路径,不在其中——命令跑之前不知道它会写什么。回滚由宿主经
+`session.rewind` 发起、在引擎里执行:文件按**物理时间线**恢复(切点之后每个路径最早一次写的
+写前内容,不论那次写所在的轮次是否已被作废),恢复本身也记 `pre` / `post`,所以回滚可以再被
+回滚;对话不截日志,追加一条 `agix.rewind/commit`,`history::transcript::voided` 把
+`(cut_after, commit)` 之间的可作废行(消息、压缩、`agix.context`、`agix.session_state`)标出来,
+**所有投影入口先过它**,而不是放进可替换的 `TranscriptProjection::apply`——自定义投影漏不掉,
+resume、轮数、durable state 的恢复与回滚后当场的视图是同一个函数算的。目标、宿主与插件的
+扩展条目不作废。日志仍然 append-only。
 
 **一个会话连同它的侧链可以在同一时刻截下来**(`HistoryStore::snapshot_lineage`)。
 `JsonlHistoryStore` 不持任何锁:先量一遍父会话项目目录里每份日志的长度,再各自读到量下的
@@ -1852,7 +1867,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 |---|---|---|
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
-| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3) |
+| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删 |
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
 | `scenes/<id>/mcp/oauth/` | MCP server URL | 远端 MCP server 的 OAuth 凭据,一个 server 一个 0600 文件(§6.5) |
@@ -1879,6 +1894,10 @@ sidecar 不能塞进 `projects/<cwd>/`,因为按 session id 查找时没有项�
 sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道它在哪个项目
 目录下。所以 `Meta` 落盘前先写 sidecar,顺序与计数器那类"从已有日志算出来的"
 附带信息相反。
+
+文件 checkpoint 的副本放在 sidecar 而不是项目的 `.agix/` 里:那是用户的仓库,快照里是项目文件
+的历史内容,不该出现在仓库目录树里,也不该进 `git status`。按会话 id 找得到,随 `session.delete`
+一起删;不跨会话去重,所以删一个会话就是删一个目录。分叉不带它们(分叉和源会话共用工作区)。
 
 区分两类目录靠**目录名能否解析成 `SessionId`**:sanitize 后的 cwd 必然以 `-` 开头
 (绝对路径首字符是分隔符),`_no-project` 以 `_` 开头,都解析不成 base58 id。

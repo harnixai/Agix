@@ -545,6 +545,11 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 进程写不进这个会话,已被别人占着时报 `HistoryError::Locked`。两者都有缺省实现(什么都
 不做),只在内存里的后端不用管。
 
+`checkpoint_objects(root)` 给出根会话的文件 checkpoint 副本存在哪(一个按完整 sha256
+寻址的 `BlobStore`);缺省 `None`,这个后端存的会话就没有文件 checkpoint,`session.rewind`
+只能回对话。两个自带实现都给:JSONL 放在 `sessions/<id>/checkpoints/objects/`,随会话
+删除一起删。包一层别的 store 的(像 `ObservedHistoryStore`)必须转发它。
+
 ### 找会话 — `history.query`
 
 `HistoryStore::find_sessions` 收一个 `history::query::SessionQuery`——一根针、一个

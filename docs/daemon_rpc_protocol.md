@@ -765,6 +765,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
+| `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -1734,8 +1735,10 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 分叉的结果**写到磁盘就完了,不会被拉进内存**:源会话完全不受影响,新 id 表现得像
 任何一个有历史的 id,下一次 `session.resume` / `session.run_turn` 带上它就是。
 
-两处有意的丢失:**侧链条目不复制**;源的 `Meta` 行被换成一条新的,记下
-`parent_session_id`。
+有意不复制的:**侧链条目**;源的 `Meta` 行(换成一条新的,记下 `parent_session_id`);
+**文件 checkpoint 与回滚条目**(`agix.checkpoint`、`agix.rewind`)——分叉和源会话共用同一个
+工作区,在分叉上回滚到分叉点之前会把源会话的文件改回去,所以分叉从"没有可回滚的写"开始;
+以及被 `session.rewind` 作废的行——分叉里只有源会话此刻的对话视图。这些都不改变投影出的消息。
 
 整段复制(省略 `at_message`,或它不小于消息总数)时复制到日志末尾,最后一条消息之后
 写下的扩展条目(`session.appendEntry`)也在;从中间分叉时截在第 `at_message` 条消息
@@ -1755,7 +1758,8 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 { "session_id": "…",
   "path": "/abs/dir/S1.agix.zip",            // daemon 所在机器上的绝对路径
   "format": "zip",                            // 可选:zip(默认)| dir
-  "include": ["sidechains", "attachments"] }  // 可选,省略即这两项;录像只在列了 "recording" 时带
+  "include": ["sidechains", "attachments"] }  // 可选,省略即这两项;录像只在列了 "recording" 时带,
+                                              // 文件 checkpoint 只在列了 "checkpoints" 时带
 // ← result
 { "session_id": "…",
   "path": "…",
@@ -1792,6 +1796,8 @@ sessions/<session_id>/session_memory.md  有才有
 sessions/<session_id>/runtime.json       会话在内存里时才有:权限模式、todo、目标;"durable": false
 attachments/<sha256>.<扩展名>             消息里的 base64 图片解码后的本体,同样内容只存一份
 recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
+checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时:根会话日志里 agix.checkpoint
+                                         记下的写前内容,还在的每份一个文件(不论属于哪一轮)
 ```
 
 `history.json` 里的图片块,`source` 换成 `{"attachment": "attachments/<sha256>.png",
@@ -1819,6 +1825,7 @@ recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
   "unresolved_blobs": [ ],  // 外置内容的引用,而这个 daemon 没挂那个存储
   "forks": [ ],             // 从这些会话分叉出去的会话 id,不进归档
   "recordings": [ { "dir": "recordings/…", "sessions": ["…"], "calls": 3, "covers": "latest_run" } ],
+  "checkpoints": null,      // 列了 "checkpoints" 时 { "objects": 3, "bytes": 1234, "pruned_before": null }
   "warnings": [ ] }
 ```
 
@@ -1833,7 +1840,8 @@ recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
 录制会重写 `calls.jsonl`);会话的 `recorder` 不记进日志,daemon 重启后只找得到 daemon 自己的
 录像根下以会话 id 命名的那份。
 
-归档与转录一样敏感:它就是这些会话说过的全部内容。
+归档与转录一样敏感:它就是这些会话说过的全部内容。带了 `checkpoints` 的还有项目文件的历史内容,
+体积也可能远大于转录,所以缺省不带。
 
 `include` 里有不认识的项、`format` 不是 `zip` / `dir`、路径不合上面的规则 → `INVALID_PARAMS`;
 会话不存在 → `SESSION_NOT_FOUND`;写盘失败 → `INTERNAL_ERROR`。
@@ -1868,8 +1876,9 @@ recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
   "sidechains_deleted": 0, "sidechain_ids": [ ] }
 ```
 
-**真正删除磁盘 transcript 与 `sessions/<id>/` 整个目录(会话记忆、metadata、输入历史),
-并级联删除记着它作父会话的全部会话(侧链,以及它的分叉)。不可逆。**
+**真正删除磁盘 transcript 与 `sessions/<id>/` 整个目录(会话记忆、metadata、输入历史、
+文件 checkpoint 的写前副本 `checkpoints/`),并级联删除记着它作父会话的全部会话(侧链,以及它的
+分叉)。不可逆。**
 
 `dry_run: true` 只返回将要删除的清单(`deleted` 为 `false`),不实际删除 —— 供宿主
 做二次确认。
@@ -1933,6 +1942,101 @@ recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
 // ← result
 { "edited": 0 }
 ```
+
+#### `session.rewind`
+
+把文件、对话或两者退回到之前的某一点。由宿主发起,模型没有对应的工具。
+
+```jsonc
+// → params
+{ "session_id": "…",
+  "to_turn": "t1",          // 三者恰好一个:to_turn | to_tool_use | to_start: true
+  "scope": "both",          // 必填:files | conversation | both
+  "force": false,           // 可选:覆盖会话之外改过的文件
+  "allow_partial": false,   // 可选:跳过回不去的文件,而不是整个拒绝
+  "dry_run": false,         // 可选:只算计划和问题,什么都不写
+  "fork_first": false }     // 可选:先 session.fork 一份当前全貌,再回滚
+// ← result
+{ "session_id": "…", "rewind_id": "…", "dry_run": false, "scope": "both",
+  "cut": { "to_turn": "t1", "to_tool_use": null, "to_start": false },
+  "conversation": { "messages_before": 6, "messages_after": 2,
+                    "removed_turns": [ { "turn_id": "t2", "prompt": [ { "type": "text", "text": "…" } ] } ] },
+  "files": { "restored": [ { "path": "src/a.rs", "to": "file", "sha256": "…",
+                             "outside_project": false, "unverified": false } ],
+             "skipped": [ ] },
+  "fork_session_id": null }
+```
+
+**退回到哪里。** `to_turn` 是这一轮刚结束时;`to_start` 是第一轮之前;`to_tool_use` 是那次工具
+调用(或 `RunCode` 程序在它名下的子调用,id 为 `<id>.<n>`)写任何东西之前,只能配
+`scope: "files"`——对话从一轮中间切开会留下没有结果的工具调用。被先前的回滚作废的轮次不能作
+目标。`to_turn: T` 也会撤掉 T 结束之后、下一轮之前的写(比如后台子 Agent 在父会话空闲时写的)。
+
+**文件。** 只回滚**文件工具**的写:`Write`、`Edit`、`NotebookEdit`、声明了写路径的插件工具、
+`RunCode` 程序里的这些调用,以及子 Agent、团队成员、`session.startAgent` 起的子 Agent 的这些
+调用(都记在根会话里)。**命令的副作用不回滚**:`Bash` 里的重定向、`sed -i`、`git` 操作、包
+安装、删除都不在其中;MCP 工具的写也不在。每个被写过的文件恢复成切点之后**第一次**写之前的
+内容;切点之后才建的文件被删掉(留下的空目录不删)。按物理时间线算:已经被回滚作废的轮次里的
+写照样算,所以多次回滚、只回对话后再回文件都回到正确的内容。恢复用原地写,已存在文件的权限位
+保留;被删掉后重建的文件拿缺省权限。git 的分支、索引不动,只动工作树文件。
+
+回滚前逐个检查,有问题就整个拒绝(`REWIND_PRECONDITION`,什么都不改),`data.issues` 列出全部:
+
+| `issue` | 什么情况 | 放过它 |
+|---|---|---|
+| `modified` | 文件此刻不是会话最后写成的样子——用户手改、`Bash` 改、别的进程改 | `force: true` 覆盖 |
+| `unavailable` | 写前内容没留下(超过 16 MiB 只记了哈希)、读不出来、不是普通文件,或副本与哈希对不上 | `allow_partial: true` 跳过 |
+| `denied` | 写路径策略此刻拒绝这个位置(凭据、引擎配置、系统目录……) | `allow_partial` |
+| `symlink` | 它此刻是符号链接,或上面某一级目录解析到了别处;回滚**从不**跟随链接写 | `allow_partial` |
+| `worktree_removed` | 它在一个已经移除的 worktree 里 | `allow_partial` |
+
+会话最后一次写它之后没来得及记下结果的(进程在写完之后死掉),不做 `modified` 检查,
+`restored` 里标 `unverified: true`。项目外但当年被批准过的写照常恢复,标 `outside_project: true`。
+回滚的写不走询问与 allow/ask 规则、不受权限模式影响(宿主本来就是全权,当年那次写也已过了
+判定),但重跑硬性的写路径检查;也不触发 `PreToolUse` / `PostToolUse`。**回滚会写项目文件,
+由宿主负责让用户确认**——`dry_run: true` 先给出计划与问题,`files.skipped` 里是全部问题。
+
+**对话。** 切点之后的消息从 `session.history` 里消失(`total` 变小,`seq` 从切点接着编),
+日志里**不删**,只追加一条作废标记(原样的行在 `session.export` 的 `transcript.jsonl` 里)。
+被作废的范围里有压缩时,视图回到压缩前,下一轮可能因此重新压缩;提示缓存从切点往后失效。
+计划模式与 todo 回到切点时的样子,目标不动。`removed_turns` 是被撤掉的轮次与开启它的那条消息,
+供宿主放回输入框。只回对话时,那几轮改过的文件保持现状,下一轮开头会提醒模型;只回文件时,
+下一轮开头提醒模型这些文件被恢复了,编辑前要重新读。想留着被回滚的那一支,用 `fork_first: true`,
+`fork_session_id` 是那份分叉。
+
+**原子性。** 要么全做了,要么什么都没变:恢复到一半失败,已恢复的会按倒序退回原样,对话不动,
+返回 `REWIND_FAILED`;只有退回也失败时才是部分完成,`data.partial` 为 `true`,`not_rolled_back`
+列出留在恢复后状态的文件。进程在回滚中途死掉的,`session.checkpoints` 报 `interrupted_rewind`,
+再发同一个回滚是安全的。
+
+会话不在内存就先恢复。一轮在跑、在重建、另一个上下文操作或回滚还没完 → `SESSION_BUSY`
+(`reason` 分别为 `turn_running` / `rebuilding` / `context_operation` / `rewinding`);后台任务或
+团队成员在跑 → `SESSION_BUSY`,`reason: "background_tasks"`(它们会在回滚中途写文件)。不排队:
+回滚的目标是看着某个状态选的。回滚期间到达的 `run_turn` 按 `on_busy` 处理。`session.interrupt`
+对回滚无效。目标是侧链会话、参数不是恰好一个目标、轮不存在或已被作废、`to_tool_use` 配了对话、
+会话不记 checkpoint 却要回文件 → `INVALID_PARAMS`。成功后向该会话全部订阅者推一帧 `rewound`
+(§7),`dry_run` 与失败不推。
+
+#### `session.checkpoints`
+
+给宿主做"回滚菜单":还在对话里的每一轮,以及每一轮里哪些文件被写过。只读,会话冷着也能答,
+不把它拉进内存。
+
+```jsonc
+// → params
+{ "session_id": "…" }
+// ← result
+{ "session_id": "…",
+  "turns": [ { "turn_id": "t1", "started_at": "…",
+               "prompt": "…",                                   // 开启这一轮的那条消息的前 200 个字符
+               "files": [ { "path": "src/a.rs", "tool": "Write", "agent": null } ],  // agent:写它的子 Agent 会话
+               "restorable": true } ],
+  "pruned_before_turn": null,
+  "interrupted_rewind": null,                                   // { "rewind_id", "ts" }:开始了却没结束的回滚
+  "enabled": true }                                             // 这个会话记不记 checkpoint
+```
+
+`turns` 按时间顺序,只列没被回滚作废的轮。子 Agent 的写算在它写下时最近的那一轮里。
 
 #### `session.tasks`
 
@@ -2745,6 +2849,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
+| `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
 | `subscription_dropped` | `{reason}` | 这条连接对该会话的订阅被取消了(`reason` 目前只有 `"overflow"`,§5.4);不属于任何一轮,`turn_id` 为 `null`。重新 `session.subscribe` 并追平 |
 
 `prompt`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:
@@ -2939,7 +3044,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32602 | INVALID_PARAMS | 参数缺失/类型错/取值非法 |
 | -32603 | INTERNAL_ERROR | 服务端内部错误(写盘失败、会话创建失败等) |
 | -32000 | SESSION_NOT_FOUND | 会话不存在,或该方法要求它在内存里而它不在 |
-| -32002 | ENGINE_ERROR | turn 执行期错误,或引擎没有接下、没有回答一个回合之外的请求(`session.inspectContext` / `dropMessages` / `editMessage`),或重建之前补写日志失败(`session.setPrompt`、换厂商的 `session.setModel`);`message` 形如 `"<kind>: <描述>"`,`data` 见 §9.1 |
+| -32002 | ENGINE_ERROR | turn 执行期错误,或引擎没有接下、没有回答一个回合之外的请求(`session.inspectContext` / `dropMessages` / `editMessage` / `rewind`),或重建之前补写日志失败(`session.setPrompt`、换厂商的 `session.setModel`);`message` 形如 `"<kind>: <描述>"`,`data` 见 §9.1 |
 | -32003 | UNAUTHORIZED | TCP / WebSocket 握手缺失或失败,开了 `--unix-socket-auth` 时 Unix socket 也一样;Unix socket 上的对端是 daemon 自己起的进程(§5.1)。不需要握手的连接上发 `daemon.auth` 得到的是 `METHOD_NOT_FOUND`(-32601) |
 | -32004 | SCENE_NOT_FOUND | 场景未注册,或(`session.create`)未激活 |
 | -32006 | SCENE_MISMATCH | 会话记录的场景与这个 daemon 的不符 |
@@ -2947,7 +3052,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32010 | PROJECT_NOT_FOUND | `project_root` 不存在或不是目录 |
 | -32012 | PROJECT_REQUIRED | 场景 `requires_project` 为真,但传了 `project_root: null` |
 | -32014 | SIDECHAIN_TERMINAL | 侧链会话已终态收尾,不可 resume |
-| -32015 | SESSION_BUSY | 会话正忙,`data.reason` 说它在忙什么(§9.1):已有 turn 在跑且 `on_busy` 是 `reject`(§5.3),正在原地重建,有后台任务挡着需要重建的调用,正在做上下文操作,或要把它调回内存时它上一个引擎还没停下(`session.resume`) |
+| -32015 | SESSION_BUSY | 会话正忙,`data.reason` 说它在忙什么(§9.1):已有 turn 在跑且 `on_busy` 是 `reject`(§5.3),正在原地重建,有后台任务挡着需要重建的调用,正在做上下文操作或回滚,或要把它调回内存时它上一个引擎还没停下(`session.resume`) |
 | -32016 | PLUGINS_DISABLED | 插件子系统不可用 —— 被编译裁掉或被策略关闭 |
 | -32017 | TOO_MANY_IN_FLIGHT | 这条连接同时在途的请求已达上限(§5.2) |
 | -32018 | TASK_NOT_FOUND | `session.taskOutput`:引擎不知道这个任务(没跑过、结束得早已被忘掉,或引擎不在内存里) |
@@ -2955,12 +3060,14 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
 | -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`:目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
+| -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
+| -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 
 ### 9.1 `error.data` 的形状
 
-**只有六个错误码带结构化 `data`**,客户端可以依赖:
+**只有八个错误码带结构化 `data`**,客户端可以依赖:
 
 ```jsonc
 // ENGINE_ERROR
@@ -2982,6 +3089,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // METHOD_NOT_FOUND
 { "module": "mcp" }   // 只在方法所属的模块没有编入这个构建时;未知方法没有 data
+
+// REWIND_PRECONDITION
+{ "issues": [ { "path": "a.txt", "issue": "modified", "detail": "…", "overridable_by": "force" } ] }
+
+// REWIND_FAILED
+{ "rewind_id": "…", "failed": { "path": "b/b.txt", "error": "…" }, "rolled_back": [ "a.txt" ],
+  "not_rolled_back": [ ], "partial": false, "commit_not_recorded": false, "conversation_changed": false }
 ```
 
 `ENGINE_ERROR` 的四项总是都在:
@@ -3018,11 +3132,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 |---|---|---|
 | `turn_running` | 有一轮在跑(`run_turn` 的 `reject`、`setModel`、`setPrompt`、`inspectContext` 等都报这一项) | 那一轮的 id,必定有值 |
 | `rebuilding` | 正在原地重建(`setPrompt`、换厂商的 `setModel`、配置变更后下一轮开始前) | `null` |
-| `background_tasks` | 空闲,但有后台任务在跑,挡住了需要重建的调用;另带 `running_task_ids` | `null` |
+| `background_tasks` | 空闲,但有后台任务在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids` | `null` |
 | `previous_engine` | 刚被关闭、驱逐或重建,上一个引擎在宽限期内还没停下 | `null` |
 | `context_operation` | 一个 `inspectContext` / `dropMessages` / `editMessage` 还没答完,会话归它独占 | `null` |
+| `rewinding` | 一个 `session.rewind` 还没答完,会话归它独占 | `null` |
 
-`rebuilding`、`previous_engine` 和 `context_operation` 的 `data` 形状与第一行相同。以后可能增加取值,不认识的
+`rebuilding`、`previous_engine`、`context_operation` 和 `rewinding` 的 `data` 形状与第一行相同。`session.rewind`
+被后台任务挡住时报 `background_tasks`,同样带 `running_task_ids`。以后可能增加取值,不认识的
 `reason` 按"稍后再试"处理。
 
 其余错误码**没有 `data`**,信息全在 `message` 里 —— 包括

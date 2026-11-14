@@ -666,6 +666,14 @@ const NOT_COMPARED: &[(&str, &str)] = &[
         "the example is the union of every kind's and every status's fields, not one answer",
     ),
     (
+        "session.rewind",
+        "needs a scripted model that writes files over two turns;          tests/blackbox/tests/session_rewind.rs drives it over the socket and checks the fields",
+    ),
+    (
+        "session.checkpoints",
+        "lists the writes of a session that made some; compared field by field in          tests/blackbox/tests/session_rewind.rs",
+    ),
+    (
         "mcp.auth.start",
         "needs a remote MCP server behind an authorization server",
     ),
