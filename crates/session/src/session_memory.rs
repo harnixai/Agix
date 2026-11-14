@@ -75,16 +75,6 @@ impl SessionMemory {
         Ok(())
     }
 
-    /// Record that an extraction cycle has started by writing the current
-    /// UTC timestamp into the frontmatter.
-    pub async fn mark_extraction_started(&self) -> std::io::Result<()> {
-        let _guard = self.inner.io_lock.lock().await;
-        let now = iso_now();
-        self.update_frontmatter_field("extraction_started", &now)
-            .await?;
-        Ok(())
-    }
-
     /// Record that extraction completed. Updates the completion timestamp and
     /// the `last_update_turn` counter so staleness can be computed.
     pub async fn mark_extraction_completed(&self, turn_count: u32) -> std::io::Result<()> {
@@ -218,12 +208,6 @@ mod tests {
         let sm = sm(path.clone());
         sm.init_session_memory().await.unwrap();
 
-        sm.mark_extraction_started().await.unwrap();
-        let content = tokio::fs::read_to_string(&path).await.unwrap();
-        assert!(!content.contains("extraction_started: ~"));
-        assert!(content.contains("extraction_started: "));
-
-        // Skip the ~ check above — we just verify the field was updated
         sm.mark_extraction_completed(5).await.unwrap();
         let content = tokio::fs::read_to_string(&path).await.unwrap();
         assert!(!content.contains("extraction_completed: ~"));
