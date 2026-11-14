@@ -510,6 +510,7 @@ const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/DoctorReport/properties/settings_tiers",
     "/$defs/EntryView/properties/payload",
     "/$defs/HostToolOption/properties/input_schema",
+    "/$defs/McpElicitationAnswer/oneOf/0/properties/content",
     "/$defs/McpPutServerParams/properties/config",
     "/$defs/RpcError/properties/data",
     "/$defs/RpcRequest/properties/id",

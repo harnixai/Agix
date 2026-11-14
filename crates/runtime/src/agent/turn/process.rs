@@ -139,6 +139,10 @@ impl Agent {
                 self.gate.resolve_question(&prompt_id, answer);
                 Ok(TurnOutcome::default())
             }
+            InputMessage::McpElicitationResponse { prompt_id, answer } => {
+                self.gate.resolve_mcp(&prompt_id, answer);
+                Ok(TurnOutcome::default())
+            }
             InputMessage::HostToolResponse { call_id, end } => {
                 crate::host_tools::resolve_host_call(
                     &self.channels.pending_host_calls,

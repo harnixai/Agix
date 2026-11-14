@@ -104,6 +104,7 @@ pub(crate) enum QuestionRoute {
     Channel {
         events: runtime::agent::EventSender,
         pending: runtime::agent::PendingPermissions,
+        mcp: Option<runtime::elicitation::PendingMcpAnswers>,
     },
     /// The parent is a delegate: how it asks its own questions.
     Upstream(Arc<dyn Elicitation>),
@@ -136,14 +137,17 @@ impl ParentElicitation {
         request: ElicitRequest,
         within: Option<std::time::Duration>,
     ) -> Option<ElicitOutcome> {
-        let ElicitKind::Authorization {
-            tool_name, paths, ..
-        } = &request.kind
-        else {
-            return Some(ElicitOutcome::declined(
-                "a sub-agent can put only permission questions to the person, through its \
-                 parent session",
-            ));
+        let (tool_name, paths) = match &request.kind {
+            ElicitKind::Authorization {
+                tool_name, paths, ..
+            } => (tool_name, paths),
+            ElicitKind::McpServer { .. } => return self.put_mcp(request, within).await,
+            _ => {
+                return Some(ElicitOutcome::declined(
+                    "a sub-agent can put only permission questions and its MCP servers' \
+                     questions to the person, through its parent session",
+                ))
+            }
         };
         let _waiting = Waiting::begin(self.task.as_deref(), request.id.clone());
         let message = format!("[sub-agent {}] {}", self.delegate_id, request.message);
@@ -153,7 +157,9 @@ impl ParentElicitation {
                 request.message = message;
                 return upstream.ask_within(request, within).await;
             }
-            QuestionRoute::Channel { events, pending } => (events, pending),
+            QuestionRoute::Channel {
+                events, pending, ..
+            } => (events, pending),
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let mut open =
@@ -177,6 +183,36 @@ impl ParentElicitation {
             Ok(decision) => ElicitOutcome::answered(&decision),
             Err(_) => ElicitOutcome::declined("permission request closed without an answer"),
         })
+    }
+}
+
+impl ParentElicitation {
+    async fn put_mcp(
+        &self,
+        mut request: ElicitRequest,
+        within: Option<std::time::Duration>,
+    ) -> Option<ElicitOutcome> {
+        let _waiting = Waiting::begin(self.task.as_deref(), request.id.clone());
+        request.message = format!("[sub-agent {}] {}", self.delegate_id, request.message);
+        match &self.route {
+            QuestionRoute::Upstream(upstream) => upstream.ask_within(request, within).await,
+            QuestionRoute::Channel {
+                events,
+                mcp: Some(pending),
+                ..
+            } => {
+                runtime::elicitation::McpAsk {
+                    events,
+                    pending,
+                    task_id: self.task.as_ref().map(|task| task.task_id.clone()),
+                }
+                .ask(request, within)
+                .await
+            }
+            QuestionRoute::Channel { mcp: None, .. } => Some(ElicitOutcome::declined(
+                "the parent session's host does not answer MCP servers' questions",
+            )),
+        }
     }
 }
 

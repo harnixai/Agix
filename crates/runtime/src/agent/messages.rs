@@ -18,6 +18,11 @@ pub enum InputMessage {
         prompt_id: String,
         answer: QuestionAnswer,
     },
+    /// The host's answer to an `AgentEvent::McpElicitationPrompt`.
+    McpElicitationResponse {
+        prompt_id: String,
+        answer: base::interface::elicitation::McpElicitationAnswer,
+    },
     /// How the host call `call_id` (`AgentEvent::HostToolCall`) ended on the
     /// host's side: its answer, or that no host is there to give one.
     HostToolResponse {

@@ -182,6 +182,7 @@ impl Builder {
         let pending_permissions: PendingPermissions =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let pending_questions: crate::elicitation::PendingQuestions = Default::default();
+        let pending_mcp: crate::elicitation::PendingMcpAnswers = Default::default();
         let pending_host_calls: crate::host_tools::PendingHostCalls = Default::default();
         let host_calls = self.ext.host_calls.take().unwrap_or_else(|| {
             Arc::new(crate::host_tools::ChannelHostCalls::new(
@@ -194,6 +195,7 @@ impl Builder {
             rx: event_rx,
             pending_permissions,
             pending_questions,
+            pending_mcp,
             pending_host_calls,
             host_calls,
         }

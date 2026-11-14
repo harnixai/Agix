@@ -29,7 +29,7 @@ use crate::config::McpServerConfig;
 use crate::error::McpError;
 use async_trait::async_trait;
 use futures::StreamExt;
-use rmcp::{model::CallToolRequestParams, service::ServiceExt};
+use rmcp::{model::CallToolRequestParams, service::ClientServiceExt};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -82,6 +82,9 @@ pub struct StdioMcpClient {
     /// changed, so losing the sink here would silence the case that matters
     /// most.
     sink: Option<crate::notify::NotificationSink>,
+    /// Where an older server's own question finds the call it belongs to;
+    /// shared by every connection this client makes.
+    route: Arc<crate::elicit::ElicitRoute>,
     /// The environment policy a stdio server's process starts under, kept
     /// for the same reason: a reconnect must not start it under another.
     env_policy: base::interface::exec::SubprocessEnv,
@@ -131,14 +134,13 @@ impl StdioMcpClient {
         env_policy: base::interface::exec::SubprocessEnv,
         auth: Option<Arc<crate::oauth::McpAuth>>,
     ) -> Result<Arc<Self>, McpError> {
-        let spawned = spawn_service_within(
-            server_name,
-            config,
-            sink.clone(),
-            &env_policy,
-            auth.as_deref(),
-        )
-        .await?;
+        let route = Arc::<crate::elicit::ElicitRoute>::default();
+        let wiring = crate::notify::HandlerWiring {
+            sink: sink.clone(),
+            route: route.clone(),
+        };
+        let spawned =
+            spawn_service_within(server_name, config, wiring, &env_policy, auth.as_deref()).await?;
         let instructions = spawned
             .service
             .peer_info()
@@ -153,6 +155,7 @@ impl StdioMcpClient {
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink,
+            route,
             env_policy,
             auth,
             authorized: spawned.authorized.into(),
@@ -295,10 +298,14 @@ impl StdioMcpClient {
             close(old).await;
         }
 
+        let wiring = crate::notify::HandlerWiring {
+            sink: self.sink.clone(),
+            route: self.route.clone(),
+        };
         match spawn_service_within(
             &self.server_name,
             &self.config,
-            self.sink.clone(),
+            wiring,
             &self.env_policy,
             self.auth.as_deref(),
         )
@@ -441,17 +448,16 @@ impl StdioMcpClient {
         &self,
         tool_name: &str,
         args: serde_json::Map<String, serde_json::Value>,
+        scope: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError> {
         let svc = self.service().await?;
+        let _in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
-        let result = self
-            .request(
-                "call_tool",
-                self.config.timeouts().tool(),
-                &svc,
-                svc.call_tool(req),
-            )
-            .await?;
+        let limit = self.config.timeouts().tool();
+        let result = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
+            self.request("call_tool", limit, &svc, svc.call_tool_once(params))
+        })
+        .await?;
 
         let mut content_blocks = Vec::new();
         for c in result.content.iter() {
@@ -490,6 +496,7 @@ impl StdioMcpClient {
     async fn read_resource_inner(&self, uri: &str) -> Result<Vec<McpContent>, McpError> {
         use rmcp::model::ReadResourceRequestParams;
         let svc = self.service().await?;
+        let _in_flight = self.route.enter(None);
         let result = self
             .request(
                 "read_resource",
@@ -547,6 +554,7 @@ impl StdioMcpClient {
             params = params.with_arguments(json_args);
         }
 
+        let _in_flight = self.route.enter(None);
         let result = self
             .request(
                 "get_prompt",
@@ -593,9 +601,10 @@ impl McpClient for StdioMcpClient {
         &self,
         tool_name: &str,
         args: serde_json::Map<String, serde_json::Value>,
+        scope: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError> {
         let result = self
-            .authorized(|| self.call_tool_inner(tool_name, args.clone()))
+            .authorized(|| self.call_tool_inner(tool_name, args.clone(), scope))
             .await;
         if let Err(e @ (McpError::ConnectionLost { .. } | McpError::Timeout { .. })) = &result {
             warn!(server = %self.server_name, tool = tool_name, error = %e, "MCP tool call failed; not repeated");
@@ -701,14 +710,14 @@ impl From<Service> for Spawned {
 async fn spawn_service_within(
     server_name: &str,
     config: &McpServerConfig,
-    sink: Option<crate::notify::NotificationSink>,
+    wiring: crate::notify::HandlerWiring,
     env_policy: &base::interface::exec::SubprocessEnv,
     auth: Option<&crate::oauth::McpAuth>,
 ) -> Result<Spawned, McpError> {
     let limit = config.timeouts().startup();
     tokio::time::timeout(
         limit,
-        spawn_service(server_name, config, sink, env_policy, auth),
+        spawn_service(server_name, config, wiring, env_policy, auth),
     )
     .await
     .unwrap_or(Err(McpError::Timeout {
@@ -722,7 +731,7 @@ async fn spawn_service_within(
 async fn spawn_service(
     server_name: &str,
     config: &McpServerConfig,
-    sink: Option<crate::notify::NotificationSink>,
+    wiring: crate::notify::HandlerWiring,
     env_policy: &base::interface::exec::SubprocessEnv,
     auth: Option<&crate::oauth::McpAuth>,
 ) -> Result<Spawned, McpError> {
@@ -765,7 +774,7 @@ async fn spawn_service(
                 &args,
                 &env,
                 working_dir.as_deref(),
-                sink,
+                wiring,
                 env_policy,
             )
             .await
@@ -781,7 +790,7 @@ async fn spawn_service(
             let auth = auth
                 .filter(|_| config.oauth_capable())
                 .map(|auth| (auth, config.oauth(), config.tier()));
-            spawn_streamable_http_service(server_name, &url, &headers, auth, sink).await
+            spawn_streamable_http_service(server_name, &url, &headers, auth, wiring).await
         }
         McpServerConfig::WebSocket { url, headers, .. } => {
             let url = parsed_url(server_name, &crate::config::expand_env_vars(url))?;
@@ -789,7 +798,7 @@ async fn spawn_service(
                 .iter()
                 .map(|(k, v)| (k.clone(), crate::config::expand_env_vars(v)))
                 .collect();
-            spawn_websocket_service(server_name, &url, &headers, sink)
+            spawn_websocket_service(server_name, &url, &headers, wiring)
                 .await
                 .map(Spawned::from)
         }
@@ -813,7 +822,7 @@ async fn spawn_stdio_service(
     args: &[String],
     env: &std::collections::HashMap<String, String>,
     working_dir: Option<&std::path::Path>,
-    sink: Option<crate::notify::NotificationSink>,
+    wiring: crate::notify::HandlerWiring,
     env_policy: &base::interface::exec::SubprocessEnv,
 ) -> Result<
     rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>,
@@ -845,19 +854,29 @@ async fn spawn_stdio_service(
         }
     })?;
 
-    let handler = crate::notify::NotifyingHandler::new(server_name, sink);
+    let handler = crate::notify::NotifyingHandler::new(server_name, wiring);
     #[cfg(unix)]
     let handler = match transport.id() {
         Some(pid) => handler.keeping(platform::orphans::list(pid as i32)),
         None => handler,
     };
     handler
-        .serve(transport)
+        .serve_with_lifecycle(transport, lifecycle())
         .await
         .map_err(|e| McpError::ConnectFailed {
             name: server_name.into(),
             source: anyhow::anyhow!("{e}"),
         })
+}
+
+/// `server/discover` at the newest protocol, and `initialize` at 2025-11-25
+/// for a server that turns that down.
+fn lifecycle() -> rmcp::service::ClientLifecycleMode {
+    use rmcp::model::ProtocolVersion;
+    rmcp::service::ClientLifecycleMode::Auto {
+        preferred_versions: vec![ProtocolVersion::LATEST],
+        legacy_version: Some(ProtocolVersion::LATEST_WITH_INITIALIZE),
+    }
 }
 
 /// Headers the transport sets itself; rmcp rejects a request that also carries
@@ -929,17 +948,17 @@ async fn spawn_streamable_http_service(
         Option<&crate::config::McpOAuthConfig>,
         Option<&str>,
     )>,
-    sink: Option<crate::notify::NotificationSink>,
+    wiring: crate::notify::HandlerWiring,
 ) -> Result<Spawned, McpError> {
     use rmcp::transport::StreamableHttpClientTransport;
 
     let http = crate::oauth::http::transport_client(url);
     let transport_config = http_transport_config(server_name, url, headers);
-    let handler = crate::notify::NotifyingHandler::new(server_name, sink);
+    let handler = crate::notify::NotifyingHandler::new(server_name, wiring);
     let Some((auth, oauth, tier)) = auth else {
         let transport = StreamableHttpClientTransport::with_client(http, transport_config);
         return handler
-            .serve(transport)
+            .serve_with_lifecycle(transport, lifecycle())
             .await
             .map(Spawned::from)
             .map_err(|e| init_error(server_name, e));
@@ -950,7 +969,7 @@ async fn spawn_streamable_http_service(
         .await?;
     let client = rmcp::transport::AuthClient::new(http, manager);
     let transport = StreamableHttpClientTransport::with_client(client, transport_config);
-    match handler.serve(transport).await {
+    match handler.serve_with_lifecycle(transport, lifecycle()).await {
         Ok(service) => {
             auth.connected(server_name, url, tier, authorized);
             Ok(Spawned {
@@ -1222,7 +1241,7 @@ async fn spawn_websocket_service(
     server_name: &str,
     url: &str,
     headers: &std::collections::HashMap<String, String>,
-    sink: Option<crate::notify::NotificationSink>,
+    wiring: crate::notify::HandlerWiring,
 ) -> Result<
     rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>,
     McpError,
@@ -1235,8 +1254,8 @@ async fn spawn_websocket_service(
                 url = %url,
                 "Connected to MCP server via WebSocket transport"
             );
-            return crate::notify::NotifyingHandler::new(server_name, sink)
-                .serve(transport)
+            return crate::notify::NotifyingHandler::new(server_name, wiring)
+                .serve_with_lifecycle(transport, lifecycle())
                 .await
                 .map_err(|e| McpError::ConnectFailed {
                     name: server_name.into(),
@@ -1261,7 +1280,7 @@ async fn spawn_websocket_service(
         http_url = %http_url,
         "WebSocket unavailable; falling back to StreamableHTTP transport"
     );
-    spawn_streamable_http_service(server_name, &http_url, headers, None, sink)
+    spawn_streamable_http_service(server_name, &http_url, headers, None, wiring)
         .await
         .map(|spawned| spawned.service)
 }
@@ -1324,8 +1343,9 @@ impl McpClient for WebSocketMcpClient {
         &self,
         tool_name: &str,
         args: serde_json::Map<String, serde_json::Value>,
+        scope: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError> {
-        self.inner.call_tool(tool_name, args).await
+        self.inner.call_tool(tool_name, args, scope).await
     }
 
     async fn list_resources(&self) -> Result<Vec<McpResourceMeta>, McpError> {
@@ -1426,7 +1446,7 @@ done
         );
         let client = StdioMcpClient::connect("sh", &cfg).await.unwrap();
         let err = client
-            .call_tool("hang", Default::default())
+            .call_tool("hang", Default::default(), &Default::default())
             .await
             .unwrap_err();
         assert!(
@@ -1440,7 +1460,10 @@ done
             "{err}"
         );
         assert!(client.is_connected());
-        let pong = client.call_tool("ping", Default::default()).await.unwrap();
+        let pong = client
+            .call_tool("ping", Default::default(), &Default::default())
+            .await
+            .unwrap();
         assert!(matches!(&pong.content[..], [McpContent::Text(t)] if t == "pong"));
         client.shutdown().await;
     }
@@ -1460,7 +1483,10 @@ done
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!client.is_connected());
-        let pong = client.call_tool("ping", Default::default()).await.unwrap();
+        let pong = client
+            .call_tool("ping", Default::default(), &Default::default())
+            .await
+            .unwrap();
         assert!(matches!(&pong.content[..], [McpContent::Text(t)] if t == "pong"));
         assert!(client.is_connected());
         client.shutdown().await;
@@ -1489,7 +1515,10 @@ done
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        client.call_tool("ping", Default::default()).await.unwrap();
+        client
+            .call_tool("ping", Default::default(), &Default::default())
+            .await
+            .unwrap();
         let after = announcements.of("sh");
         assert_eq!((after.tools, after.prompts), (1, 1));
         client.shutdown().await;
@@ -1790,6 +1819,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: None,
             authorized: false.into(),
@@ -1814,6 +1844,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: None,
             authorized: false.into(),
@@ -1847,6 +1878,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: Some(auth.clone()),
             authorized: false.into(),
@@ -1884,6 +1916,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: None,
             authorized: false.into(),
@@ -1962,6 +1995,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: None,
             authorized: false.into(),
@@ -2018,6 +2052,7 @@ done
             tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
+            route: Default::default(),
             env_policy: Default::default(),
             auth: None,
             authorized: false.into(),
@@ -2041,6 +2076,7 @@ done
                 tools_cut: Default::default(),
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
+                route: Default::default(),
                 env_policy: Default::default(),
                 auth: None,
                 authorized: false.into(),
@@ -2070,6 +2106,7 @@ done
                 tools_cut: Default::default(),
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
+                route: Default::default(),
                 env_policy: Default::default(),
                 auth: None,
                 authorized: false.into(),

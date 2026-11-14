@@ -115,10 +115,12 @@ pub trait McpClient: Send + Sync {
 
     async fn list_tools(&self) -> Result<Vec<McpToolMeta>, McpError>;
 
+    /// `scope` answers what the server asks the user during the call.
     async fn call_tool(
         &self,
         tool_name: &str,
         args: serde_json::Map<String, Value>,
+        scope: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError>;
 
     /// MCP resources/list —— server 暴露的非工具资源（默认空，子类按需 override）
@@ -262,6 +264,7 @@ impl McpClient for MockMcpClient {
         &self,
         tool_name: &str,
         args: serde_json::Map<String, Value>,
+        _: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError> {
         self.calls
             .lock()
@@ -371,7 +374,10 @@ mod tests {
                 meta: None,
             },
         );
-        let result = c.call_tool("a", Default::default()).await.unwrap();
+        let result = c
+            .call_tool("a", Default::default(), &Default::default())
+            .await
+            .unwrap();
         assert!(!result.is_error);
         assert_eq!(result.content.len(), 1);
         assert!(matches!(&result.content[0], McpContent::Text(s) if s == "hello"));
@@ -380,7 +386,10 @@ mod tests {
     #[tokio::test]
     async fn mock_unknown_tool_errors() {
         let c = MockMcpClient::new("test", vec![]);
-        let err = c.call_tool("ghost", Default::default()).await.unwrap_err();
+        let err = c
+            .call_tool("ghost", Default::default(), &Default::default())
+            .await
+            .unwrap_err();
         assert!(matches!(err, McpError::UnknownTool { .. }));
     }
 
@@ -391,8 +400,14 @@ mod tests {
         c.push_response("a", McpCallResult::default());
         let mut args1 = serde_json::Map::new();
         args1.insert("x".into(), json!(1));
-        let _ = c.call_tool("a", args1.clone()).await.unwrap();
-        let _ = c.call_tool("a", Default::default()).await.unwrap();
+        let _ = c
+            .call_tool("a", args1.clone(), &Default::default())
+            .await
+            .unwrap();
+        let _ = c
+            .call_tool("a", Default::default(), &Default::default())
+            .await
+            .unwrap();
         let calls = c.calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "a");

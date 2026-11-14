@@ -157,6 +157,7 @@ const ENGINE_NS_PREFIX: &str = "agix.";
 pub enum PromptAnswer {
     Permission(runtime::agent::PermissionDecision),
     Question(runtime::agent::QuestionAnswer),
+    McpElicitation(base::interface::elicitation::McpElicitationAnswer),
 }
 
 impl PromptAnswer {
@@ -164,6 +165,7 @@ impl PromptAnswer {
         match self {
             Self::Permission(_) => AskKind::Permission,
             Self::Question(_) => AskKind::Question,
+            Self::McpElicitation(_) => AskKind::McpElicitation,
         }
     }
 }

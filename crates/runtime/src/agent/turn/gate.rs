@@ -1,7 +1,7 @@
 //! 一个会话的闸口：权限、向宿主提的问题、hooks，以及回合开始时要重置的授权与计数。
 
 use crate::agent::{PendingPermissions, PermissionDecision};
-use crate::elicitation::PendingQuestions;
+use crate::elicitation::{PendingMcpAnswers, PendingQuestions};
 use base::interface::elicitation::Elicitation;
 use base::interface::permission::PermissionSet;
 use hooks::HookRunner;
@@ -15,6 +15,7 @@ pub(crate) struct Gate {
     /// is ignored by whoever resolves it.
     pending_permissions: PendingPermissions,
     pending_questions: PendingQuestions,
+    pending_mcp: PendingMcpAnswers,
     elicitation: Arc<dyn Elicitation>,
     /// Atomic and shared because the input demultiplexer resolves permission
     /// responses off the turn's thread, with no `&mut self`.
@@ -30,6 +31,7 @@ pub(crate) struct Gate {
 pub(crate) struct DemuxHandles {
     pub(crate) pending: PendingPermissions,
     pub(crate) questions: PendingQuestions,
+    pub(crate) mcp: PendingMcpAnswers,
     pub(crate) denials: Arc<AtomicU32>,
 }
 
@@ -39,6 +41,7 @@ impl Gate {
         elicitation: Arc<dyn Elicitation>,
         pending_permissions: PendingPermissions,
         pending_questions: PendingQuestions,
+        pending_mcp: PendingMcpAnswers,
         hooks: Arc<HookRunner>,
         turn_starts: Vec<crate::plugin::TurnStart>,
     ) -> Self {
@@ -47,6 +50,7 @@ impl Gate {
             elicitation,
             pending_permissions,
             pending_questions,
+            pending_mcp,
             permission_denial_count: Arc::new(AtomicU32::new(0)),
             hooks,
             turn_starts: Arc::new(turn_starts),
@@ -75,6 +79,7 @@ impl Gate {
         DemuxHandles {
             pending: self.pending_permissions.clone(),
             questions: self.pending_questions.clone(),
+            mcp: self.pending_mcp.clone(),
             denials: self.permission_denial_count.clone(),
         }
     }
@@ -90,6 +95,14 @@ impl Gate {
 
     pub(crate) fn resolve_question(&self, prompt_id: &str, answer: crate::agent::QuestionAnswer) {
         crate::elicitation::resolve_question_response(&self.pending_questions, prompt_id, answer);
+    }
+
+    pub(crate) fn resolve_mcp(
+        &self,
+        prompt_id: &str,
+        answer: base::interface::elicitation::McpElicitationAnswer,
+    ) {
+        crate::elicitation::resolve_mcp_answer(&self.pending_mcp, prompt_id, answer);
     }
 
     pub(crate) fn denials(&self) -> u32 {

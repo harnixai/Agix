@@ -54,6 +54,7 @@ pub(super) struct EventWiring {
     pub(super) rx: EventReceiver,
     pub(super) pending_permissions: PendingPermissions,
     pub(super) pending_questions: crate::elicitation::PendingQuestions,
+    pub(super) pending_mcp: crate::elicitation::PendingMcpAnswers,
     pub(super) pending_host_calls: crate::host_tools::PendingHostCalls,
     pub(super) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
@@ -87,6 +88,7 @@ pub(super) struct Wired {
     pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
     pub(super) attachment: base::context::EngineAttachment,
     pub(super) hooks: HookWiring,
+    pub(super) ambient: hooks::payload::Ambient,
     pub(super) events: EventWiring,
     pub(super) input_tx: InputSender,
     pub(super) input_rx: mpsc::UnboundedReceiver<InputMessage>,

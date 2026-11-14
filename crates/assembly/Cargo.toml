@@ -58,12 +58,12 @@ opentelemetry-http = { version = "0.27", default-features = false, optional = tr
 tonic              = { version = "0.12", optional = true }
 
 tokio-tungstenite = { workspace = true, optional = true }
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 session       = { workspace = true }
 model         = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
-jsonschema = { workspace = true }
 # Paused-clock tests: a steer that the engine reads late.
 tokio = { workspace = true, features = ["test-util"] }
 

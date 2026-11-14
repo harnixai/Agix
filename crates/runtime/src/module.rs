@@ -78,6 +78,9 @@ pub struct SessionContext<'a> {
     /// accounted to this session.
     pub model: &'a Arc<dyn Model>,
     pub pending_permissions: &'a PendingPermissions,
+    /// Where an MCP server's question waits for the host's answer, when the
+    /// host answers those: a delegate's go to its parent's host the same way.
+    pub pending_mcp_answers: Option<&'a crate::elicitation::PendingMcpAnswers>,
     /// What the session was handed to put its questions to a person
     /// (`Builder::elicitation`), if anything: for a delegate, its way to the
     /// host its parent answers to.

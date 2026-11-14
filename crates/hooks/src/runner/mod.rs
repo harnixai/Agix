@@ -21,7 +21,7 @@ pub use contracts::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
 pub use report::HookRunReport;
 
 use crate::config::{HookConfig, HookEvent, HooksSettings, OnError};
-use crate::payload::{HookDecision, HookInput, HookResponse};
+use crate::payload::{HookDecision, HookInput, HookResponse, McpElicitationHook};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -365,61 +365,33 @@ impl HookRunner {
             .unwrap_or(false)
     }
 
-    /// Fire the `Elicitation` hook event when an MCP tool result is found to
-    /// contain an elicitation URL (`mcp://` or `elicitation://`) — i.e. the
-    /// server is asking for user attention (e.g. an out-of-band
-    /// authorization link). This is the request/notification half of the
-    /// pair; see [`Self::run_elicitation_result`] for the response half.
-    ///
-    /// `ambient` is the session's payload (its id, cwd and permission mode);
-    /// `server_name` identifies the MCP server that raised the elicitation.
-    /// `url` is the elicitation URL found in its tool result.
+    /// `Elicitation`: an MCP server is about to put `asked` to the user.
+    /// A block means the user is not asked and the server is told no.
     pub async fn run_elicitation(
         &self,
         ambient: &crate::payload::Ambient,
-        server_name: &str,
-        url: &str,
+        asked: &McpElicitationHook<'_>,
         stop: &CancellationToken,
     ) -> HookRunResult {
-        let input = HookInput::from_ambient(ambient, "Elicitation").with_tool(
-            format!("mcp_elicitation_{server_name}"),
-            serde_json::json!({ "server_name": server_name, "url": url }),
-        );
+        let input = asked.input(ambient, "Elicitation");
         self.run(HookEvent::Elicitation, &input, stop).await
     }
 
-    /// Fire the `ElicitationResult` hook event with the elicitation context
-    /// and user response. This is the response half of the pair started by
-    /// [`Self::run_elicitation`] — it fires once a host has actually
-    /// collected the user's answer to an elicitation request.
-    ///
-    /// **Currently has no production caller.** The MCP adapter
-    /// (`crates/mcp/src/adapter.rs`) only detects that a server *raised* an
-    /// elicitation (see `run_elicitation`) — nothing in this codebase
-    /// implements the host-side round-trip that collects a response and
-    /// reports it back here. Kept (not deleted) because the shape is right
-    /// and a host that does implement that round-trip has a real method to
-    /// call;
-    ///
-    /// `ambient` is the session's payload, as for [`Self::run_elicitation`].
-    /// `server_name` identifies the MCP server that initiated the elicitation.
-    /// `url` is the elicitation URL the user responded to.
-    /// `response` is the user's response data (optional).
+    /// `ElicitationResult`: how `asked` was answered — `action` is `accept`,
+    /// `decline` or `cancel`, `content` what an accepted form carried.
     pub async fn run_elicitation_result(
         &self,
         ambient: &crate::payload::Ambient,
-        server_name: &str,
-        url: &str,
-        response: Option<&serde_json::Value>,
+        asked: &McpElicitationHook<'_>,
+        action: &str,
+        content: Option<&serde_json::Value>,
         stop: &CancellationToken,
     ) -> HookRunResult {
-        let mut tool_input = serde_json::json!({ "server_name": server_name, "url": url });
-        if let Some(r) = response {
-            tool_input["response"] = r.clone();
+        let mut input = asked.input(ambient, "ElicitationResult");
+        if let Some(tool_input) = input.tool_input.as_mut() {
+            tool_input["action"] = serde_json::Value::from(action);
         }
-        let mut input = HookInput::from_ambient(ambient, "ElicitationResult")
-            .with_tool(format!("mcp_elicitation_{server_name}"), tool_input);
-        input.tool_result = response.cloned();
+        input.tool_result = content.cloned();
         self.run(HookEvent::ElicitationResult, &input, stop).await
     }
 

@@ -6,6 +6,7 @@
 //! ```text
 //! mcp-toy-server [--transport stdio|http|sse] [--port N] [--port-file PATH]
 //!                [--calls PATH] [--name NAME] [--resources DIR] [--mute] [--liar]
+//!                [--max-protocol VERSION] [--task]
 //! ```
 //!
 //! - `http` / `sse` 在 127.0.0.1 上起 streamable HTTP，绑定后先在 stdout 第一行打出
@@ -21,23 +22,35 @@
 //!   `--calls` 记一行 `<name>\tmuted`，测试据此知道连接已经卡在它身上。
 //! - `--liar`：任何没有列出的 URI 也读得出内容 `LIAR-<name>:<uri>`，用来证明不带 server
 //!   的资源读取只会问列出了该 URI 的那个 server。
+//! - `--max-protocol VERSION`：扮成只认到这个 MCP 版本的老 server，如 `2025-11-25`——
+//!   `server/discover` 答"没有这个方法"，客户端回落到 `initialize`，询问改由 server 主动发
+//!   `elicitation/create`。
+//! - `--task`：每次 `tools/call` 都想回一个任务而不是结果。客户端没声明 tasks 扩展时，
+//!   rmcp 的 server 侧会把它换成 `-32021`（Missing required client capability）。
 //!
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
-//! `elicit`（结果里带一个 `elicitation://` URL，Agix 据此触发 Elicitation hook）。
+//! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
+//! 2026-07-28 时走 `input_required` 一轮，更早的版本由 server 发 `elicitation/create`，
+//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）。收到的每个回答原样记一行
+//! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
 //! 资源：`toy://notes/readme.md`、`toy://unicode`、`toy://big`，以及 `--resources` 的。
 //! 提示词：`greet`（`name` 必填、`style` 可选）、`mark`（无参数）。
 
+use std::borrow::Cow;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use rmcp::handler::server::tool::{InputResponses, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    GetPromptRequestParams, GetPromptResponse, GetPromptResult, ListPromptsResult,
-    ListResourcesResult, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, Role, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, CreateTaskResult,
+    DiscoverRequestMethod, DiscoverResult, ElicitRequest, ElicitRequestParams,
+    GetPromptRequestParams, GetPromptResponse, GetPromptResult, InputRequest, InputRequiredResult,
+    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, Prompt, PromptArgument,
+    PromptMessage, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, Role, ServerCapabilities, ServerConfig, Task,
+    TaskStatus,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler, ServiceExt};
@@ -57,6 +70,8 @@ struct Options {
     resources: Option<PathBuf>,
     mute: bool,
     liar: bool,
+    max_protocol: Option<ProtocolVersion>,
+    task: bool,
 }
 
 fn parse_args() -> anyhow::Result<Options> {
@@ -69,6 +84,8 @@ fn parse_args() -> anyhow::Result<Options> {
         resources: None,
         mute: false,
         liar: false,
+        max_protocol: None,
+        task: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -85,6 +102,10 @@ fn parse_args() -> anyhow::Result<Options> {
             "--resources" => opts.resources = Some(value()?.into()),
             "--mute" => opts.mute = true,
             "--liar" => opts.liar = true,
+            "--max-protocol" => {
+                opts.max_protocol = Some(serde_json::from_value(serde_json::json!(value()?))?)
+            }
+            "--task" => opts.task = true,
             other => anyhow::bail!("unknown argument {other}"),
         }
     }
@@ -101,7 +122,8 @@ struct State {
     calls: Option<PathBuf>,
     resources: Option<PathBuf>,
     liar: bool,
-    elicitations: AtomicUsize,
+    max_protocol: Option<ProtocolVersion>,
+    task: bool,
 }
 
 impl State {
@@ -166,9 +188,13 @@ struct BigRequest {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-struct ElicitRequest {
-    #[schemars(description = "what the user is asked to confirm")]
-    reason: Option<String>,
+struct AskRequest {
+    #[schemars(description = "form (pick a color, the default) or url (visit a page)")]
+    mode: Option<String>,
+    #[schemars(description = "milliseconds to wait before asking, for a server that asks itself")]
+    wait_ms: Option<u64>,
+    #[schemars(description = "milliseconds to wait after the answer before finishing the call")]
+    hold_ms: Option<u64>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -225,28 +251,181 @@ impl ToyServer {
         sized_text(bytes, tail.as_deref().unwrap_or("BIG-END"))
     }
 
-    #[tool(description = "Ask the user to confirm something before the work can continue.")]
-    fn elicit(&self, Parameters(ElicitRequest { reason }): Parameters<ElicitRequest>) -> String {
-        self.state.record("elicit");
-        let n = self.state.elicitations.fetch_add(1, Ordering::SeqCst) + 1;
-        format!(
-            "Confirmation required ({}). Open elicitation://toy/confirm?call={n} to continue",
-            reason.unwrap_or_else(|| "no reason given".into())
-        )
+    #[tool(description = "Ask the user a question and report the answer.")]
+    async fn ask(
+        &self,
+        Parameters(AskRequest {
+            mode,
+            wait_ms,
+            hold_ms,
+        }): Parameters<AskRequest>,
+        InputResponses(responses): InputResponses,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.state.record("ask");
+        let asked = [("q", question(mode.as_deref()))];
+        let answered = self.put(&asked, responses, wait_ms, &context).await;
+        if let Some(ms) = hold_ms {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
+        answered
+    }
+
+    #[tool(description = "Ask the user two questions at once and report both answers.")]
+    async fn ask_twice(
+        &self,
+        Parameters(Empty {}): Parameters<Empty>,
+        InputResponses(responses): InputResponses,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.state.record("ask_twice");
+        let asked = [
+            ("q1", question(Some("form"))),
+            ("q2", question(Some("form"))),
+        ];
+        self.put(&asked, responses, None, &context).await
+    }
+}
+
+/// What `ask` puts to the user in each mode.
+fn question(mode: Option<&str>) -> ElicitRequestParams {
+    let wire = match mode {
+        Some("url") => serde_json::json!({
+            "mode": "url",
+            "message": "Sign in to the toy service",
+            "url": "https://auth.example.com/toy/sign-in",
+            "elicitationId": "toy-sign-in",
+        }),
+        _ => serde_json::json!({
+            "mode": "form",
+            "message": "Pick a color",
+            "requestedSchema": {
+                "type": "object",
+                "properties": { "color": { "type": "string", "enum": ["red", "blue"] } },
+                "required": ["color"],
+            },
+        }),
+    };
+    serde_json::from_value(wire).unwrap_or_else(|e| panic!("toy question: {e}"))
+}
+
+impl ToyServer {
+    /// Ask `asked` the way the negotiated protocol allows, and answer with
+    /// what came back.
+    async fn put(
+        &self,
+        asked: &[(&str, ElicitRequestParams)],
+        responses: Option<rmcp::model::InputResponses>,
+        wait_ms: Option<u64>,
+        context: &RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let modern = context
+            .protocol_version()
+            .is_some_and(|v| !v.has_initialize());
+        let answers: Vec<serde_json::Value> = if modern {
+            let Some(responses) = responses else {
+                let requests = asked
+                    .iter()
+                    .map(|(key, params)| {
+                        let request = ElicitRequest::new(params.clone());
+                        (key.to_string(), InputRequest::Elicitation(request))
+                    })
+                    .collect();
+                return Ok(InputRequiredResult::from_input_requests(requests).into());
+            };
+            asked
+                .iter()
+                .map(|(key, _)| responses.get(*key).cloned().unwrap_or_default())
+                .collect()
+        } else {
+            if let Some(ms) = wait_ms {
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            }
+            let mut answers = Vec::new();
+            for (_, params) in asked {
+                let result = context
+                    .peer
+                    .create_elicitation(params.clone())
+                    .await
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                answers.push(serde_json::to_value(result).unwrap_or_default());
+            }
+            answers
+        };
+        let text = answers
+            .iter()
+            .map(|answer| {
+                self.state.record(&format!("ask {answer}"));
+                format!("answer: {answer}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
     }
 }
 
 #[tool_handler]
 impl ServerHandler for ToyServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
+        let info = ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
                 .enable_prompts()
                 .build(),
         )
-        .with_instructions("Test-only MCP server: tools, resources and prompts for the harness.")
+        .with_instructions("Test-only MCP server: tools, resources and prompts for the harness.");
+        match &self.state.max_protocol {
+            Some(max) => info.with_protocol_version(max.clone()),
+            None => info,
+        }
+    }
+
+    /// With `--max-protocol`, the newest version is listed too: rmcp turns a
+    /// probe at a version not listed down before `discover` below sees it,
+    /// with a version list rather than the "method not found" an old server
+    /// answers.
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        match &self.state.max_protocol {
+            Some(max) => {
+                let mut known = ProtocolVersion::known_up_to(max).to_vec();
+                known.push(ProtocolVersion::LATEST);
+                Cow::Owned(known)
+            }
+            None => Cow::Borrowed(ProtocolVersion::KNOWN_VERSIONS),
+        }
+    }
+
+    /// A server from before 2026-07-28 has never heard of `server/discover`.
+    async fn discover(
+        &self,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<DiscoverResult, ErrorData> {
+        match &self.state.max_protocol {
+            Some(max) if max.has_initialize() => {
+                Err(ErrorData::method_not_found::<DiscoverRequestMethod>())
+            }
+            _ => Ok(DiscoverResult::from_server_info(
+                self.supported_protocol_versions().into_owned(),
+                self.get_info(),
+            )),
+        }
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if self.state.task {
+            self.state.record(&format!("task:{}", request.name));
+            let at = "2026-11-14T00:00:00Z";
+            let task = Task::new("toy-task", TaskStatus::Working, at, at);
+            return Ok(CallToolResponse::Task(CreateTaskResult::new(task)));
+        }
+        Self::tool_router()
+            .call(ToolCallContext::new(self, request, context))
+            .await
     }
 
     async fn list_resources(
@@ -379,7 +558,8 @@ async fn main() -> anyhow::Result<()> {
         calls: opts.calls.clone(),
         resources: opts.resources.clone(),
         liar: opts.liar,
-        elicitations: AtomicUsize::new(0),
+        max_protocol: opts.max_protocol.clone(),
+        task: opts.task,
     });
     if opts.mute {
         return stay_mute(&state).await;

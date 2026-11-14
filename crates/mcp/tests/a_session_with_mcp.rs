@@ -1,6 +1,6 @@
 //! MCP as the kernel sees it: a session assembled with [`McpModule`] offers
-//! the servers' tools, runs their prompts as slash commands, inlines their
-//! resources, and routes their elicitation URLs to the session's hooks.
+//! the servers' tools, runs their prompts as slash commands and inlines their
+//! resources.
 //!
 //! [`McpModule`]: mcp::McpModule
 
@@ -147,124 +147,6 @@ async fn build_registers_mcp_tool_adapters_into_the_executable_tool_registry() {
         "MCP tool adapter should be registered in the executable tool registry, found: {:?}",
         agent.tools().names()
     );
-}
-
-/// An MCP tool result containing an elicitation URL must reach the hook
-/// system. This exercises the real path end to end: an MCP tool call
-/// returns a result with an `elicitation://` URL in it, and a configured
-/// `Elicitation` hook must actually fire.
-#[tokio::test]
-async fn build_wires_mcp_elicitation_urls_to_the_elicitation_hook() {
-    // Observed through an injected hook executor, in this process. The
-    // previous version configured a `command` hook that appended to a file
-    // and polled for it, which measured how long the machine took to fork
-    // a shell under a full `cargo test --workspace` — not what this test is
-    // about, and it timed out at sixty seconds saying so. An `http` hook is
-    // not an option either: the SSRF guard blocks loopback, correctly.
-    struct RecordingPromptExecutor {
-        fired: tokio::sync::mpsc::Sender<serde_json::Value>,
-    }
-
-    #[async_trait::async_trait]
-    impl hooks::runner::PromptHookExecutor for RecordingPromptExecutor {
-        async fn execute(
-            &self,
-            _prompt: &str,
-            _model: Option<&str>,
-            payload: &hooks::HookInput,
-            _stop: &tokio_util::sync::CancellationToken,
-        ) -> Result<String, String> {
-            let _ = self
-                .fired
-                .send(payload.tool_input.clone().unwrap_or_default())
-                .await;
-            Ok("{}".to_string())
-        }
-    }
-
-    let (fired_tx, mut fired_rx) = tokio::sync::mpsc::channel(1);
-    let mut hooks_settings: hooks::HooksSettings = Default::default();
-    hooks_settings.insert(
-        hooks::HookEvent::Elicitation,
-        vec![hooks::config::HookConfig::Prompt {
-            prompt: "an elicitation happened".into(),
-            timeout: None,
-            model: None,
-            if_pattern: None,
-            on_error: hooks::OnError::Allow,
-            may_approve: false,
-        }],
-    );
-    let runner = Arc::new(
-        local_hook_runner(hooks_settings)
-            .with_prompt_executor(Arc::new(RecordingPromptExecutor { fired: fired_tx })),
-    );
-
-    let dir = tempfile::tempdir().unwrap();
-    let settings = Arc::new(test_settings());
-    let model: Arc<dyn Model> = Arc::new(DummyModel);
-    let scene: Arc<SceneSpec> = Arc::new(scene::code::spec(scene::code::Interaction::Interactive));
-
-    let mock_client = Arc::new(mcp::client::MockMcpClient::new(
-        "test-server",
-        vec![mcp::client::McpToolMeta {
-            name: "authorize".into(),
-            description: Some("needs out-of-band authorization".into()),
-            input_schema: serde_json::json!({"type": "object"}),
-            hints: Default::default(),
-        }],
-    ));
-    mock_client.push_response(
-        "authorize",
-        mcp::client::McpCallResult {
-            content: vec![mcp::client::McpContent::Text(
-                "Please authorize at elicitation://example.com/auth/123".into(),
-            )],
-            is_error: false,
-            meta: None,
-        },
-    );
-    let mut mcp_manager = McpManager::from_clients(vec![mock_client]).await;
-    mcp_manager.refresh_tools().await;
-
-    let (agent, _event_rx, _input_tx) = Builder::new()
-        .scene(scene)
-        .model(model)
-        .settings(settings)
-        .hooks(runner)
-        .module(Arc::new(mcp::McpModule::new(mcp_manager)))
-        .skip_warmup(true)
-        .build()
-        .expect("build should succeed");
-
-    assert!(agent.hooks().has_hooks_for(hooks::HookEvent::Elicitation));
-
-    let tool = agent
-        .tools()
-        .get("mcp__test-server__authorize")
-        .expect("MCP tool adapter registered");
-    let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
-    let progress = base::tool::ProgressSender::noop("test-tool-use");
-    tool.call(serde_json::json!({}), ctx, progress)
-        .await
-        .expect("mock tool call succeeds");
-
-    // The callback dispatches through `tokio::spawn`, so this arrives
-    // after `call` returns. Waiting on the dispatch itself means a slow
-    // machine makes the test slower and never makes it fail.
-    let payload = tokio::time::timeout(std::time::Duration::from_secs(30), fired_rx.recv())
-        .await
-        .expect(
-            "an MCP tool result containing an elicitation URL should have fired the \
-             Elicitation hook",
-        )
-        .expect("the executor sends before returning");
-    assert_eq!(
-        payload["url"],
-        serde_json::json!("elicitation://example.com/auth/123"),
-        "the hook must be told which URL, got: {payload}"
-    );
-    assert_eq!(payload["server_name"], serde_json::json!("test-server"));
 }
 
 fn prompt_arg(name: &str, required: bool) -> mcp::client::McpPromptArg {
@@ -464,15 +346,4 @@ async fn an_unresolvable_at_reference_degrades_to_visible_text() {
         transcript.contains("error=\"true\"") && transcript.contains("no such resource"),
         "the bad URI was not surfaced as visible text: {transcript}"
     );
-}
-
-fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
-    let providers = platform::local_providers();
-    hooks::HookRunner::new(
-        settings,
-        hooks::HookExec {
-            process: providers.process,
-            network: providers.network,
-        },
-    )
 }

@@ -79,6 +79,7 @@ impl Delegator {
                     None => QuestionRoute::Channel {
                         events: env.parent.events.clone(),
                         pending: env.parent.pending_permissions.clone(),
+                        mcp: env.parent.pending_mcp_answers.clone(),
                     },
                 },
                 task: task.clone(),

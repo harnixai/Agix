@@ -447,6 +447,13 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
                         },
                     });
                 }
+                base::event::AgentEvent::McpElicitationPrompt { prompt_id, .. } => {
+                    prompts.push("mcp_elicitation".into());
+                    let _ = input_tx.send(InputMessage::McpElicitationResponse {
+                        prompt_id,
+                        answer: base::interface::elicitation::McpElicitationAnswer::Cancel,
+                    });
+                }
                 base::event::AgentEvent::TurnComplete { usage, .. } => {
                     reported_usage.push(usage);
                     break;

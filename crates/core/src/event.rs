@@ -135,9 +135,31 @@ pub enum AgentEvent {
         task_id: Option<String>,
     },
 
-    /// The ask `prompt_id` — a `PermissionPrompt` or `QuestionPrompt` — is no
-    /// longer open: answered, or given up on. Emitted once per ask, by the
-    /// engine that stopped waiting on it.
+    /// An MCP server asks the user something during a tool call. `message`,
+    /// `requested_schema` and `url` are the server's; `url_host` is the host
+    /// part of `url`, for a host that shows where the link goes.
+    McpElicitationPrompt {
+        prompt_id: String,
+        server: String,
+        /// `form` or `url`.
+        mode: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requested_schema: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url_host: Option<String>,
+        turn_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+    },
+
+    /// The ask `prompt_id` — a `PermissionPrompt`, `QuestionPrompt` or
+    /// `McpElicitationPrompt` — is no longer open: answered, or given up on.
+    /// Emitted once per ask, by the engine that stopped waiting on it.
     PromptResolved {
         prompt_id: String,
         resolution: PromptResolution,

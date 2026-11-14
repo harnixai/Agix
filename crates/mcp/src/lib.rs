@@ -5,6 +5,7 @@ pub mod adapter;
 pub mod client;
 pub mod config;
 pub mod connect;
+pub mod elicit;
 pub mod error;
 pub mod limits;
 pub mod manager;

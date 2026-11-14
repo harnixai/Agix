@@ -76,6 +76,26 @@ pub struct HookInput {
 /// watcher started would go stale.
 pub type Ambient = std::sync::Arc<dyn Fn() -> HookInput + Send + Sync>;
 
+/// An MCP server's question, as the `Elicitation` and `ElicitationResult`
+/// hooks see it: `tool_name` is `mcp_elicitation_<server>`.
+pub struct McpElicitationHook<'a> {
+    pub server: &'a str,
+    /// `server_name`, `mode`, `message`, and `requested_schema` or `url`.
+    pub tool_input: serde_json::Value,
+    pub tool_use_id: Option<&'a str>,
+}
+
+impl McpElicitationHook<'_> {
+    pub(crate) fn input(&self, ambient: &Ambient, event: &str) -> HookInput {
+        let mut input = HookInput::from_ambient(ambient, event).with_tool(
+            format!("mcp_elicitation_{}", self.server),
+            self.tool_input.clone(),
+        );
+        input.tool_use_id = self.tool_use_id.map(str::to_string);
+        input
+    }
+}
+
 impl HookInput {
     /// Build the payload for a lifecycle event.
     ///

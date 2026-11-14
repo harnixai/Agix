@@ -210,13 +210,17 @@ impl HookEvent {
                 Ignored,
             ),
             HookEvent::Elicitation => (
-                "MCP 工具的结果里带了 elicitation 链接(`mcp://`、`elicitation://`)",
-                "`tool_name`(`mcp_elicitation_<server>`)、`tool_input`:`server_name`、`url`",
-                Ignored,
+                "MCP server 在工具调用中要向用户询问时(2026-07-28 的 MRTR 询问,或老版本 server 的 \
+                 `elicitation/create`),在推给宿主之前;无人值守的会话直接回 server `cancel`,不触发",
+                "`tool_name`(`mcp_elicitation_<server>`)、`tool_input`:`server_name`、`mode`(`form` / \
+                 `url`)、`message`、`requested_schema` 或 `url`;`tool_use_id`",
+                Acts("`decision: \"block\"`:不问人,回 server `decline`"),
             ),
             HookEvent::ElicitationResult => (
-                "宿主把用户对 elicitation 的回答交回来时;还没有宿主侧的回传通路",
-                "`tool_name`、`tool_input`:`server_name`、`url`、`response`;`tool_result`",
+                "`Elicitation` 那次询问有了结局、答案回给 server 之前:宿主答了、超时、宿主没声明接这种\
+                 询问、被 hook 拦下都算;这一轮被中断时整个调用丢弃,不触发",
+                "同 `Elicitation`,`tool_input` 另加 `action`(`accept` / `decline` / `cancel`);\
+                 `tool_result`:接受的表单内容",
                 Ignored,
             ),
             HookEvent::WorktreeCreate => (

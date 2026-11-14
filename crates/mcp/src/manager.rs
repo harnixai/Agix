@@ -43,12 +43,6 @@ pub const MAX_TOTAL_SERVER_INSTRUCTION_BYTES: usize = 12_000;
 const INSTRUCTION_TRUNCATION_NOTE: &str =
     "\n[... truncated: MCP server instructions exceeded the system-prompt budget]";
 
-/// Callback invoked when an MCP tool result contains an elicitation URL
-/// (e.g. `mcp://` or `elicitation://` protocol). The first argument is the
-/// server name, the second is the elicitation URL, the third the number of the
-/// turn the result came in.
-pub type ElicitationCallback = Arc<dyn Fn(String, String, u32) + Send + Sync>;
-
 /// An MCP server prompt exposed as a slash command.
 ///
 /// Defined in [`crate::prompts`] alongside the argument mapping/validation it
@@ -80,15 +74,6 @@ pub struct McpManager {
     seen: HashMap<String, crate::notify::ListEpochs>,
     /// Shared MCP output cache.
     output_cache: Arc<Mutex<McpOutputCache>>,
-    /// Callback invoked when an MCP tool result contains an elicitation URL.
-    /// Set by the CLI/engine to wire into the hook system.
-    ///
-    /// Shared cell, not a plain `Option` — every `McpToolAdapter` this
-    /// manager builds aliases the *same* cell (see that struct's field doc
-    /// comment). `set_elicitation_callback` therefore takes effect for
-    /// already-built adapters too, which matters because `refresh_tools()`
-    /// commonly runs before an embedder gets a chance to call it.
-    elicitation_callback: Arc<Mutex<Option<ElicitationCallback>>>,
     /// What a stdio server this manager starts gets for an environment.
     subprocess_env: base::interface::exec::SubprocessEnv,
     /// The owning pool's authorization state, handed to every connection.
@@ -121,7 +106,6 @@ impl McpManager {
             announcements: crate::notify::Announcements::new(),
             seen: HashMap::new(),
             output_cache: Arc::new(Mutex::new(McpOutputCache::new())),
-            elicitation_callback: Arc::new(Mutex::new(None)),
             subprocess_env: base::interface::exec::SubprocessEnv::default(),
             auth: None,
             configs: HashMap::new(),
@@ -144,19 +128,6 @@ impl McpManager {
         manager.refresh_tools().await;
         manager.refresh_prompts().await;
         manager
-    }
-
-    /// Register an elicitation callback. When an MCP tool result contains an
-    /// elicitation URL (mcp:// or elicitation://), the adapter calls this
-    /// callback which fires the `Elicitation` hook event.
-    ///
-    /// Writes into the shared cell every current and future adapter reads
-    /// from — safe to call before or after `connect_all`/`refresh_tools`.
-    pub fn set_elicitation_callback(&mut self, cb: ElicitationCallback) {
-        *self
-            .elicitation_callback
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(cb);
     }
 
     /// 连所有 server，list_tools 完成后构造 adapters。
@@ -216,7 +187,6 @@ impl McpManager {
     ) -> (Self, Option<LateConnects>) {
         let sharing = sharing_a_segment(&servers);
         servers.retain(|name, _| !sharing.iter().any(|f| &f.name == name));
-        let elicitation_cell: Arc<Mutex<Option<ElicitationCallback>>> = Arc::new(Mutex::new(None));
         let cache = Arc::new(Mutex::new(McpOutputCache::new()));
         let announcements = crate::notify::Announcements::new();
         let mut connecting: Vec<PendingServer> = servers
@@ -234,7 +204,6 @@ impl McpManager {
             announcements: announcements.clone(),
             seen: HashMap::new(),
             output_cache: cache.clone(),
-            elicitation_callback: elicitation_cell.clone(),
             subprocess_env: subprocess_env.clone(),
             auth: auth.clone(),
             configs: servers.clone(),
@@ -260,7 +229,6 @@ impl McpManager {
                     };
                     let link = ServerLink {
                         cache: cache.clone(),
-                        elicitation_cell: elicitation_cell.clone(),
                         announcements: announcements.clone(),
                         subprocess_env: subprocess_env.clone(),
                         auth: auth.clone(),
@@ -395,7 +363,7 @@ impl McpManager {
         .await?;
         let tools = client.list_tools().await?;
         let handle: McpClientHandle = client;
-        let adapters = server_adapters(&handle, tools, &link.cache, &link.elicitation_cell);
+        let adapters = server_adapters(&handle, tools, &link.cache);
         let prompts = prompts_of(&handle).await;
         Ok(Connected {
             client: handle,
@@ -502,7 +470,6 @@ impl McpManager {
         self.connecting.retain(|c| c.name != name);
         let link = ServerLink {
             cache: self.output_cache.clone(),
-            elicitation_cell: self.elicitation_callback.clone(),
             announcements: self.announcements.clone(),
             subprocess_env: self.subprocess_env.clone(),
             auth: self.auth.clone(),
@@ -572,7 +539,6 @@ impl McpManager {
             announcements: self.announcements.clone(),
             seen: self.seen.clone(),
             output_cache: Arc::new(Mutex::new(McpOutputCache::new())),
-            elicitation_callback: Arc::new(Mutex::new(None)),
             subprocess_env: self.subprocess_env.clone(),
             auth: self.auth.clone(),
             configs: self.configs.clone(),
@@ -586,9 +552,9 @@ impl McpManager {
     }
 
     /// [`Self::share`] narrowed to `servers` (every one when `None`) that keeps
-    /// the tools and prompts already listed and the output cache and
-    /// elicitation callback the adapters report through: the servers a
-    /// delegate is granted, ready before its first request.
+    /// the tools and prompts already listed and the output cache the adapters
+    /// report through: the servers a delegate is granted, ready before its
+    /// first request.
     pub fn share_servers(&self, servers: Option<&[String]>) -> Self {
         let keep = |name: &str| servers.is_none_or(|s| s.iter().any(|n| n == name));
         Self {
@@ -618,7 +584,6 @@ impl McpManager {
                 .map(|(name, epochs)| (name.clone(), *epochs))
                 .collect(),
             output_cache: self.output_cache.clone(),
-            elicitation_callback: self.elicitation_callback.clone(),
             subprocess_env: self.subprocess_env.clone(),
             auth: self.auth.clone(),
             configs: self
@@ -969,9 +934,6 @@ impl McpManager {
 
     async fn relist_tools(&mut self, only: Option<&[String]>) {
         let mut adapters: Vec<Arc<dyn Tool>> = Vec::new();
-        // The shared cell, not what it holds now: a callback set after this
-        // runs has to reach these adapters too.
-        let cell = self.elicitation_callback.clone();
         for client in &self.clients {
             let name = client.server_name();
             let listed = match only {
@@ -985,9 +947,7 @@ impl McpManager {
                 },
             };
             match listed {
-                Some(tools) => {
-                    adapters.extend(server_adapters(client, tools, &self.output_cache, &cell))
-                }
+                Some(tools) => adapters.extend(server_adapters(client, tools, &self.output_cache)),
                 None => {
                     adapters.extend(
                         self.adapters
@@ -1074,7 +1034,6 @@ fn server_adapters(
     client: &McpClientHandle,
     tools: Vec<crate::client::McpToolMeta>,
     cache: &Arc<Mutex<McpOutputCache>>,
-    elicitation_cell: &Arc<Mutex<Option<ElicitationCallback>>>,
 ) -> Vec<Arc<dyn Tool>> {
     let mut seen = std::collections::HashSet::new();
     let tools: Vec<_> = tools
@@ -1087,9 +1046,8 @@ fn server_adapters(
         .into_iter()
         .zip(names)
         .map(|(meta, name)| {
-            let adapter = McpToolAdapter::with_cache(client.clone(), meta, cache.clone())
-                .named(name)
-                .with_elicitation_callback(elicitation_cell.clone());
+            let adapter =
+                McpToolAdapter::with_cache(client.clone(), meta, cache.clone()).named(name);
             Arc::new(adapter) as Arc<dyn Tool>
         })
         .collect()
@@ -1125,7 +1083,6 @@ async fn try_prompts_of(client: &McpClientHandle) -> Option<Vec<McpPromptEntry>>
 /// What every connection a manager makes shares with it.
 struct ServerLink {
     cache: Arc<Mutex<McpOutputCache>>,
-    elicitation_cell: Arc<Mutex<Option<ElicitationCallback>>>,
     announcements: Arc<crate::notify::Announcements>,
     subprocess_env: base::interface::exec::SubprocessEnv,
     auth: Option<Arc<crate::oauth::McpAuth>>,
@@ -1397,63 +1354,6 @@ mod tests {
         assert_eq!(api.len(), 1);
         let names: Vec<&str> = m.tool_adapters().iter().map(|a| a.name()).collect();
         assert_eq!(names, vec!["mcp__docs__read", "mcp__api__new_tool"]);
-    }
-
-    /// Every real embedder calls `refresh_tools()` before it gets a chance to
-    /// call `set_elicitation_callback` (see `runtime::agent::Builder::build()`),
-    /// so setting the callback *after* `refresh_tools()` already ran must
-    /// still reach the adapters it built.
-    #[tokio::test]
-    async fn elicitation_callback_set_after_refresh_tools_still_reaches_existing_adapters() {
-        let client = Arc::new(crate::client::MockMcpClient::new(
-            "docs-server",
-            vec![crate::client::McpToolMeta {
-                name: "fetch".into(),
-                description: Some("fetches a doc".into()),
-                input_schema: serde_json::json!({"type": "object"}),
-                hints: Default::default(),
-            }],
-        ));
-        client.push_response(
-            "fetch",
-            crate::client::McpCallResult {
-                content: vec![crate::client::McpContent::Text(
-                    "See elicitation://docs-server.example/confirm for details".into(),
-                )],
-                is_error: false,
-                meta: None,
-            },
-        );
-        let mut manager = McpManager::from_clients(vec![client]).await;
-        // Adapters get built here, *before* any callback is registered —
-        // the ordering every real caller (daemon) actually uses.
-        manager.refresh_tools().await;
-        assert_eq!(manager.tool_count(), 1, "sanity: one adapter should exist");
-
-        let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_for_cb = seen.clone();
-        manager.set_elicitation_callback(Arc::new(move |server, url, _turn| {
-            seen_for_cb.lock().unwrap().push((server, url));
-        }));
-
-        let adapter = manager.tool_adapters()[0].clone();
-        let ctx = platform::tool_context_for_test(std::env::temp_dir());
-        let progress = base::tool::ProgressSender::noop("test");
-        adapter
-            .call(serde_json::json!({}), ctx, progress)
-            .await
-            .expect("mock tool call succeeds");
-
-        let seen = seen.lock().unwrap();
-        assert_eq!(
-            seen.as_slice(),
-            &[(
-                "docs-server".to_string(),
-                "elicitation://docs-server.example/confirm".to_string()
-            )],
-            "callback registered after refresh_tools() should still see the elicitation URL \
-             from an adapter built before it existed"
-        );
     }
 
     #[cfg(unix)]
@@ -1872,6 +1772,7 @@ mod refresh_tests {
             &self,
             _: &str,
             _: serde_json::Map<String, serde_json::Value>,
+            _: &crate::elicit::McpCallScope,
         ) -> Result<McpCallResult, McpError> {
             Err(self.fail())
         }

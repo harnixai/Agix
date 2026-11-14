@@ -59,7 +59,6 @@ const WIRING_CHECKS: &[(&str, &str)] = &[
     ("tools", "register_cron_tools"),
     ("tools", "register_worktree_tools"),
     ("hooks", "enable_file_watching"),
-    ("mcp", "set_elicitation_callback"),
     ("script-host", "bind_into"),
     ("script-host", "bind_lenient"),
 ];

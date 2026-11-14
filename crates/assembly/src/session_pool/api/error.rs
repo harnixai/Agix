@@ -10,6 +10,10 @@ use std::path::PathBuf;
 pub enum PoolError {
     #[error("{0}")]
     InvalidRequest(String),
+    /// An answer to an MCP server's form that the form's schema refuses; the
+    /// question is still open.
+    #[error("the answer does not fit the server's requested schema: {}", .problems.join("; "))]
+    AnswerOutsideSchema { problems: Vec<String> },
     /// A field of the session's `options` the engine refused, which reading
     /// them could not tell: a host tool named like one the session has.
     #[error("options that do not read: {field}")]

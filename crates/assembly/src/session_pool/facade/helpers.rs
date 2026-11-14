@@ -44,6 +44,9 @@ pub(in crate::session_pool) fn ask_of(
         AgentEvent::QuestionPrompt {
             prompt_id, task_id, ..
         } => Some((prompt_id.clone(), task_id.clone(), AskKind::Question)),
+        AgentEvent::McpElicitationPrompt {
+            prompt_id, task_id, ..
+        } => Some((prompt_id.clone(), task_id.clone(), AskKind::McpElicitation)),
         AgentEvent::HostToolCall {
             call_id, task_id, ..
         } => Some((call_id.clone(), task_id.clone(), AskKind::HostToolCall)),

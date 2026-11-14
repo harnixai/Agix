@@ -173,7 +173,8 @@ impl EngineFactory {
             .cron_store(req.cron_store)
             .run_slots(self.run_slots.clone())
             .background_hooks(self.background_hooks.clone())
-            .question_prompts(options.is_some_and(SessionOptions::answers_questions));
+            .question_prompts(options.is_some_and(SessionOptions::answers_questions))
+            .mcp_prompts(options.is_some_and(SessionOptions::answers_mcp_elicitation));
         if let Some(store) = &self.history_store {
             builder = builder.history_store(store.clone());
         }

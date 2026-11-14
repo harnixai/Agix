@@ -172,6 +172,14 @@ impl SessionHub {
         self.lock().pending.get(prompt_id).map(|ask| ask.kind)
     }
 
+    /// The frame the open ask `prompt_id` went out in.
+    pub(in crate::session_pool) fn ask_frame(&self, prompt_id: &str) -> Option<Arc<SessionFrame>> {
+        self.lock()
+            .pending
+            .get(prompt_id)
+            .map(|ask| ask.frame.clone())
+    }
+
     pub(in crate::session_pool) fn forget_asks_of_task(&self, task_id: &str) {
         self.lock()
             .pending

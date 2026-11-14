@@ -49,10 +49,9 @@ impl Builder {
         let mcp = self.run_modules(ModuleInputs {
             resolved: &r,
             config: &config,
-            pending_permissions: &events.pending_permissions,
             hooks: &hooks.hooks,
             ambient: &state.ambient,
-            events: &events.tx,
+            events: &events,
             session: &session,
             session_state: &state.state,
             depth: agent_depth,
@@ -64,7 +63,6 @@ impl Builder {
             host_layers,
             mcp: mcp_slot,
             checkpoints: checkpoints.as_ref(),
-            host_calls: &events.host_calls,
         })?;
         let command_registry = self.command_registry(&skill_catalog, mcp.as_ref());
 
@@ -106,6 +104,7 @@ impl Builder {
             engine_git: state.engine_git,
             attachment,
             hooks,
+            ambient: state.ambient,
             events,
             input_tx,
             input_rx,

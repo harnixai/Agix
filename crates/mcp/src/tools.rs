@@ -429,6 +429,7 @@ mod tests {
             &self,
             _: &str,
             _: serde_json::Map<String, Value>,
+            _: &crate::elicit::McpCallScope,
         ) -> Result<McpCallResult, McpError> {
             Ok(McpCallResult::default())
         }

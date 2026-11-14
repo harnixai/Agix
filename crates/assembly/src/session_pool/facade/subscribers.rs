@@ -269,6 +269,15 @@ impl SessionPool {
                 prompt_id: prompt_id.clone(),
                 answer,
             },
+            PromptAnswer::McpElicitation(answer) => {
+                if let Some(frame) = hub.ask_frame(&prompt_id) {
+                    check_against_requested_schema(&frame, &answer)?;
+                }
+                InputMessage::McpElicitationResponse {
+                    prompt_id: prompt_id.clone(),
+                    answer,
+                }
+            }
         });
         Ok(())
     }
@@ -304,5 +313,50 @@ impl SessionPool {
             end: base::interface::host_call::HostCallEnd::Replied(reply),
         });
         Ok(())
+    }
+}
+
+/// An accepted answer must be what the server asked for: content that fits a
+/// form's schema, none for a URL. The schema is the server's; one that does
+/// not compile is left for the server to judge.
+fn check_against_requested_schema(
+    frame: &SessionFrame,
+    answer: &base::interface::elicitation::McpElicitationAnswer,
+) -> Result<(), PoolError> {
+    let base::interface::elicitation::McpElicitationAnswer::Accept { content } = answer else {
+        return Ok(());
+    };
+    let SessionEvent::Agent(AgentEvent::McpElicitationPrompt {
+        requested_schema, ..
+    }) = &frame.event
+    else {
+        return Ok(());
+    };
+    let problems: Vec<String> = match (requested_schema, content) {
+        (None, None) => Vec::new(),
+        (None, Some(_)) => vec!["a url question's answer carries no content".into()],
+        (Some(_), None) => vec!["an accepted form needs `content`".into()],
+        (Some(schema), Some(content)) => match jsonschema::validator_for(schema) {
+            Ok(validator) => validator
+                .iter_errors(content)
+                .map(|e| {
+                    let at = e.instance_path().to_string();
+                    if at.is_empty() {
+                        e.to_string()
+                    } else {
+                        format!("{at}: {e}")
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e, "an MCP server's requested schema does not compile");
+                Vec::new()
+            }
+        },
+    };
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(PoolError::AnswerOutsideSchema { problems })
     }
 }

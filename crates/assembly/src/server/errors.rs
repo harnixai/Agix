@@ -13,6 +13,10 @@ impl From<PoolError> for RpcError {
             PoolError::InvalidRequest(_) | PoolError::OutputOutOfRange { .. } => {
                 (codes::INVALID_PARAMS, None)
             }
+            PoolError::AnswerOutsideSchema { problems } => (
+                codes::INVALID_PARAMS,
+                Some(json!({ "schema_errors": problems })),
+            ),
             PoolError::InvalidOptions { field, error } => (
                 codes::INVALID_PARAMS,
                 Some(json!({ "invalid_options": [{ "field": field, "error": error }] })),

@@ -6,7 +6,7 @@ use super::lenient_vec;
 use crate::rpc::RawOptions;
 use crate::session_pool::api::{AskKind, TurnOutcome};
 use crate::session_pool::OnBusy;
-use runtime::agent::{Attachment, PermissionDecision, QuestionAnswer};
+use runtime::agent::{Attachment, PermissionDecision};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -110,9 +110,19 @@ pub struct RespondToPromptParams {
     /// The answer to a `permission` prompt.
     #[serde(default)]
     pub decision: Option<PermissionDecision>,
-    /// The answer to a `question`.
+    /// The answer to a `question` or an `mcp_elicitation`, read as the one
+    /// `prompt_type` names.
     #[serde(default)]
-    pub answer: Option<QuestionAnswer>,
+    #[schemars(with = "Option<AnswerShape>")]
+    pub answer: Option<serde_json::Value>,
+}
+
+#[derive(JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum AnswerShape {
+    Question(runtime::agent::QuestionAnswer),
+    McpElicitation(base::interface::elicitation::McpElicitationAnswer),
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

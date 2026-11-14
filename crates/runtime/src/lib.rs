@@ -4,6 +4,7 @@ pub mod agent;
 pub mod checkpoint;
 pub mod commands;
 pub mod elicitation;
+mod elicitation_hooks;
 pub mod event_bus;
 mod exec;
 pub mod hook_executors;

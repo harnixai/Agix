@@ -39,8 +39,8 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
   `hooks_config` 就说明项目配了 hook。
 - **坏一条只丢一条。** 不认识的事件名(拼错、写给更新版本引擎的)、格式不对的条目,丢掉那一条、
   记一条 warn,其余照常生效。事件名区分大小写,不做"最接近的"猜测。
-- **从不触发的事件会说出来。** 有一个事件能配、能解析,但引擎里没有地方触发它们(表里标着
-  **从不触发**,清单是 `hooks::UNWIRED_EVENTS`);给它们配了 hook,会话建起来时记一条 warn。
+- **从不触发的事件会说出来。** 现在没有这样的事件;若将来有,表里会标 **从不触发**(清单是
+  `hooks::UNWIRED_EVENTS`),给它配了 hook,会话建起来时记一条 warn。
 - **整棵会话树一个 runner。** 子 Agent 用父会话的 hooks:子 Agent 里的工具调用、轮次照样
   触发配置的 hook,payload 带的是子 Agent 自己的 `session_id`、`cwd`、`permission_mode`。
 
@@ -316,8 +316,8 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 | `TeammateIdle` | 团队成员的一轮结束(不论怎么结束),在这一轮的 `TaskCompleted` 之后 | `team_name`、`teammate_name`、`turn_id`、`stop_reason` | 只通知,回答被丢弃 |
 | `TaskCreated` | 一个运行中的任务开始:子 Agent、后台 shell 命令、Monitor、团队成员 | `reason`(这个任务在 `session.tasks` 里的 JSON) | 只通知,回答被丢弃 |
 | `TaskCompleted` | 一个运行中的任务结束(完成、失败、被停下),与 `TaskCreated` 成对;另外团队成员的一轮正常结束时也发一次 | 任务结束:`reason`(这个任务在 `session.tasks` 里的 JSON:`task_id`、`kind`、`status` 为 `done` / `failed` / `stopped`……);团队成员的一轮:`team_name`、`teammate_name`、`turn_id`、`stop_reason` | 只通知,回答被丢弃 |
-| `Elicitation` | MCP 工具的结果里带了 elicitation 链接(`mcp://`、`elicitation://`) | `tool_name`(`mcp_elicitation_<server>`)、`tool_input`:`server_name`、`url` | 只通知,回答被丢弃 |
-| `ElicitationResult` | **从不触发**:宿主把用户对 elicitation 的回答交回来时;还没有宿主侧的回传通路 | `tool_name`、`tool_input`:`server_name`、`url`、`response`;`tool_result` | 只通知,回答被丢弃 |
+| `Elicitation` | MCP server 在工具调用中要向用户询问时(2026-07-28 的 MRTR 询问,或老版本 server 的 `elicitation/create`),在推给宿主之前;无人值守的会话直接回 server `cancel`,不触发 | `tool_name`(`mcp_elicitation_<server>`)、`tool_input`:`server_name`、`mode`(`form` / `url`)、`message`、`requested_schema` 或 `url`;`tool_use_id` | `decision: "block"`:不问人,回 server `decline` |
+| `ElicitationResult` | `Elicitation` 那次询问有了结局、答案回给 server 之前:宿主答了、超时、宿主没声明接这种询问、被 hook 拦下都算;这一轮被中断时整个调用丢弃,不触发 | 同 `Elicitation`,`tool_input` 另加 `action`(`accept` / `decline` / `cancel`);`tool_result`:接受的表单内容 | 只通知,回答被丢弃 |
 | `WorktreeCreate` | `EnterWorktree` 成功之后 | `tool_name`、`tool_input`、`turn_id` | 只通知,回答被丢弃 |
 | `WorktreeRemove` | `ExitWorktree` 成功之后 | `tool_name`、`tool_input`、`turn_id` | 只通知,回答被丢弃 |
 | `InstructionsLoaded` | 会话上下文(项目说明)注入转录时,说明非空才发;一个会话一次 | `reason`(注入了多少字节) | 只通知,回答被丢弃 |

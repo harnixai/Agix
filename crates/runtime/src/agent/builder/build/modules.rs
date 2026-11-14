@@ -5,10 +5,9 @@ use super::*;
 pub(super) struct ModuleInputs<'a> {
     pub(super) resolved: &'a Resolved,
     pub(super) config: &'a Arc<base::context::EngineConfig>,
-    pub(super) pending_permissions: &'a PendingPermissions,
     pub(super) hooks: &'a Arc<HookRunner>,
     pub(super) ambient: &'a hooks::payload::Ambient,
-    pub(super) events: &'a crate::event_bus::EventBus,
+    pub(super) events: &'a EventWiring,
     pub(super) session: &'a Transcript,
     pub(super) session_state: &'a Arc<base::context::SessionState>,
     pub(super) depth: u32,
@@ -20,7 +19,6 @@ pub(super) struct ModuleInputs<'a> {
     pub(super) host_layers: HostLayers,
     pub(super) mcp: Option<Box<dyn base::interface::mcp_servers::McpServers>>,
     pub(super) checkpoints: Option<&'a Arc<crate::checkpoint::Checkpoints>>,
-    pub(super) host_calls: &'a Arc<dyn base::interface::host_call::HostCalls>,
 }
 
 impl Builder {
@@ -31,7 +29,6 @@ impl Builder {
         let ModuleInputs {
             resolved,
             config,
-            pending_permissions,
             hooks,
             ambient,
             events,
@@ -46,7 +43,6 @@ impl Builder {
             host_layers,
             mcp: mut mcp_slot,
             checkpoints,
-            host_calls,
         } = inputs;
         let Resolved {
             tools,
@@ -95,11 +91,12 @@ impl Builder {
                 config,
                 scene,
                 model,
-                pending_permissions,
+                pending_permissions: &events.pending_permissions,
+                pending_mcp_answers: self.spec.mcp_prompts.then_some(&events.pending_mcp),
                 elicitation: self.ext.elicitation.as_ref(),
                 hooks,
                 hook_ambient: ambient,
-                events,
+                events: &events.tx,
                 session_id: &session_id,
                 session_state,
                 depth,
@@ -110,7 +107,7 @@ impl Builder {
                 skill_catalog,
                 session_ended,
                 checkpoints,
-                host_calls,
+                host_calls: &events.host_calls,
                 host_tools: &self.spec.host_tools,
             };
             for module in modules {

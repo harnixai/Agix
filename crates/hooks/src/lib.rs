@@ -12,5 +12,5 @@ pub use config::{
     parse_hooks_settings, HookConfig, HookEvent, HooksParseReport, HooksSettings, OnError,
     UNWIRED_EVENTS,
 };
-pub use payload::{HookDecision, HookInput, HookResponse};
+pub use payload::{HookDecision, HookInput, HookResponse, McpElicitationHook};
 pub use runner::{BackgroundHooks, HookExec, HookRunReport, HookRunner};

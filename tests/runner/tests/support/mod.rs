@@ -333,6 +333,9 @@ pub fn normalize_events(events: &[AgentEvent]) -> String {
             AgentEvent::QuestionPrompt { question, .. } => {
                 format!("QuestionPrompt {:?}", first_line(question))
             }
+            AgentEvent::McpElicitationPrompt {
+                server, message, ..
+            } => format!("McpElicitationPrompt {server} {:?}", first_line(message)),
             // How the ask ended already shows in the `ToolResult` it led to.
             AgentEvent::PromptResolved { .. } => continue,
             AgentEvent::HostToolCall { name, .. } => format!("HostToolCall {name}"),

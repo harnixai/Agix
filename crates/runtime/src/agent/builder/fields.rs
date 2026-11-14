@@ -105,6 +105,8 @@ pub(super) struct SpecSetup {
     pub(super) frozen: Option<base::frozen::FrozenContext>,
     /// See [`Builder::question_prompts`].
     pub(super) question_prompts: bool,
+    /// See [`Builder::mcp_prompts`].
+    pub(super) mcp_prompts: bool,
     /// See [`Builder::memory_extraction`].
     pub(super) memory_extraction: bool,
     /// How many delegation hops separate this agent from the root session —
@@ -153,6 +155,7 @@ impl SpecSetup {
             tool_selector: base::interface::tool_selector::ToolSelector::all(),
             frozen: None,
             question_prompts: false,
+            mcp_prompts: false,
             memory_extraction: true,
             agent_depth: 0,
             team_seat: None,

@@ -178,6 +178,10 @@ const NOT_FOR_DELEGATES: &[(&str, &str)] = &[
         "a delegate's questions go to its parent's host",
     ),
     (
+        "mcp_prompts",
+        "a delegate's MCP servers' questions go to its parent's host",
+    ),
+    (
         "prompt_registry",
         "contributions to the root's prompt; a delegate's is its type's",
     ),

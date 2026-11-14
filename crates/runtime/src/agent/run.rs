@@ -29,6 +29,7 @@ struct InputDemux {
     fwd_tx: mpsc::UnboundedSender<Forwarded>,
     pending: PendingPermissions,
     questions: crate::elicitation::PendingQuestions,
+    mcp: crate::elicitation::PendingMcpAnswers,
     host_calls: crate::host_tools::PendingHostCalls,
     denials: Arc<std::sync::atomic::AtomicU32>,
     turn_cancel: Arc<std::sync::Mutex<TurnCancel>>,
@@ -83,6 +84,9 @@ impl InputDemux {
                         &prompt_id,
                         answer,
                     );
+                }
+                InputMessage::McpElicitationResponse { prompt_id, answer } => {
+                    crate::elicitation::resolve_mcp_answer(&self.mcp, &prompt_id, answer);
                 }
                 InputMessage::HostToolResponse { call_id, end } => {
                     crate::host_tools::resolve_host_call(&self.host_calls, &call_id, end);
@@ -218,6 +222,7 @@ impl Agent {
             let crate::turn::DemuxHandles {
                 pending,
                 questions,
+                mcp,
                 denials,
             } = self.gate.demux_handles();
             let turn_cancel = self.channels.current_turn_cancel.clone();
@@ -230,6 +235,7 @@ impl Agent {
                     fwd_tx,
                     pending,
                     questions,
+                    mcp,
                     host_calls,
                     denials,
                     turn_cancel,

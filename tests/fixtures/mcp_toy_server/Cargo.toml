@@ -10,11 +10,12 @@ name = "mcp-toy-server"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "3.9", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "3.9", features = ["server", "macros", "elicitation", "transport-io", "transport-streamable-http-server"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 schemars = { workspace = true }
 anyhow = { workspace = true }

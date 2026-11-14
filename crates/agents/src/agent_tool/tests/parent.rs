@@ -115,6 +115,7 @@ impl TestParent {
                 state: self.state,
                 events,
                 pending_permissions: self.pending,
+                pending_mcp_answers: None,
                 asks_upstream: None,
                 ended: self.ended,
             },

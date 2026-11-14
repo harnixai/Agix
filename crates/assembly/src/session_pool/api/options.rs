@@ -50,7 +50,7 @@ pub struct SessionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<runtime::agent::SessionPrompt>,
     /// The kinds of `prompt` frame this session's host answers: `permission`
-    /// always, `question` when listed. Names this daemon does not know are
+    /// always, `question` and `mcp_elicitation` when listed. Names this daemon does not know are
     /// ignored rather than voiding the options.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_types: Vec<String>,
@@ -153,5 +153,12 @@ impl SessionOptions {
         self.prompt_types
             .iter()
             .any(|t| t == AskKind::Question.as_str())
+    }
+
+    /// Whether the host answers MCP servers' questions.
+    pub fn answers_mcp_elicitation(&self) -> bool {
+        self.prompt_types
+            .iter()
+            .any(|t| t == AskKind::McpElicitation.as_str())
     }
 }

@@ -226,6 +226,21 @@ pub enum PromptPayload {
         header: Option<String>,
         options: Vec<ElicitOption>,
     },
+    /// The server's words: `message`, `requested_schema`, `url`.
+    McpElicitation {
+        prompt_id: String,
+        server: String,
+        mode: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        requested_schema: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url_host: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -428,6 +443,27 @@ impl SessionEventPayload {
                 question: question.clone(),
                 header: header.clone(),
                 options: options.clone(),
+            }),
+            AgentEvent::McpElicitationPrompt {
+                prompt_id,
+                server,
+                mode,
+                message,
+                requested_schema,
+                url,
+                url_host,
+                turn_id: _,
+                tool_use_id,
+                task_id: _,
+            } => Self::Prompt(PromptPayload::McpElicitation {
+                prompt_id: prompt_id.clone(),
+                server: server.clone(),
+                mode: mode.clone(),
+                message: message.clone(),
+                requested_schema: requested_schema.clone(),
+                url: url.clone(),
+                url_host: url_host.clone(),
+                tool_use_id: tool_use_id.clone(),
             }),
             AgentEvent::PromptResolved {
                 prompt_id,

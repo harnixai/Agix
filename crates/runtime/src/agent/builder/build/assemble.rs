@@ -11,6 +11,13 @@ impl Builder {
             Some(prompt) => Arc::new(prompt.applied_to(&w.resolved.settings)),
             None => w.resolved.settings,
         };
+        let gate = self.gate(
+            w.resolved.permission,
+            &w.events,
+            &w.hooks,
+            &w.ambient,
+            chains.turn_starts,
+        );
         let session_end = SessionEnd {
             ended: w.hooks.session_ended,
             stopping: CancellationToken::new(),
@@ -19,14 +26,6 @@ impl Builder {
             attachment: w.attachment,
             reason: EndReasonSlot::default(),
         };
-        let gate = self.gate(
-            w.resolved.permission,
-            &w.events.tx,
-            w.events.pending_permissions,
-            w.events.pending_questions,
-            w.hooks.hooks,
-            chains.turn_starts,
-        );
         let agent = Agent {
             scene: w.resolved.scene,
             exec: w.exec,
@@ -136,29 +135,37 @@ impl Builder {
     pub(super) fn gate(
         &mut self,
         permission: PermissionSet,
-        event_tx: &crate::event_bus::EventBus,
-        pending_permissions: PendingPermissions,
-        pending_questions: crate::elicitation::PendingQuestions,
-        hooks: Arc<HookRunner>,
+        events: &EventWiring,
+        hook_wiring: &HookWiring,
+        ambient: &hooks::payload::Ambient,
         turn_starts: Vec<crate::plugin::TurnStart>,
     ) -> Gate {
         let elicitation = self.ext.elicitation.take().unwrap_or_else(|| {
-            let channel = crate::elicitation::ChannelElicitation::new(
-                event_tx.clone(),
-                pending_permissions.clone(),
+            let mut channel = crate::elicitation::ChannelElicitation::new(
+                events.tx.clone(),
+                events.pending_permissions.clone(),
             );
-            Arc::new(if self.spec.question_prompts {
-                channel.with_questions(pending_questions.clone())
-            } else {
-                channel
-            })
+            if self.spec.question_prompts {
+                channel = channel.with_questions(events.pending_questions.clone());
+            }
+            if self.spec.mcp_prompts {
+                channel = channel.with_mcp(events.pending_mcp.clone());
+            }
+            Arc::new(channel)
         });
+        let elicitation = crate::elicitation_hooks::hooked(
+            elicitation,
+            &hook_wiring.hooks,
+            ambient,
+            &hook_wiring.session_ended,
+        );
         Gate::new(
             permission,
             elicitation,
-            pending_permissions,
-            pending_questions,
-            hooks,
+            events.pending_permissions.clone(),
+            events.pending_questions.clone(),
+            events.pending_mcp.clone(),
+            hook_wiring.hooks.clone(),
             turn_starts,
         )
     }

@@ -16,6 +16,16 @@
       ],
       "type": "object"
     },
+    "AnswerShape": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QuestionAnswer"
+        },
+        {
+          "$ref": "#/$defs/McpElicitationAnswer"
+        }
+      ]
+    },
     "AppendEntryParams": {
       "properties": {
         "event": {
@@ -59,6 +69,11 @@
             "permission",
             "question"
           ],
+          "type": "string"
+        },
+        {
+          "const": "mcp_elicitation",
+          "description": "An MCP server's question during a tool call.",
           "type": "string"
         },
         {
@@ -2816,6 +2831,48 @@
       ],
       "type": "object"
     },
+    "McpElicitationAnswer": {
+      "description": "The answer to [`ElicitKind::McpServer`], as it goes back to the server.\n`decline` is a person saying no; `cancel` is nobody choosing.",
+      "oneOf": [
+        {
+          "properties": {
+            "content": true,
+            "type": {
+              "const": "accept",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "decline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "cancel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "McpPutServerParams": {
       "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
       "properties": {
@@ -3985,14 +4042,14 @@
         "answer": {
           "anyOf": [
             {
-              "$ref": "#/$defs/QuestionAnswer"
+              "$ref": "#/$defs/AnswerShape"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "The answer to a `question`."
+          "description": "The answer to a `question` or an `mcp_elicitation`, read as the one\n`prompt_type` names."
         },
         "decision": {
           "anyOf": [
@@ -5531,7 +5588,7 @@
           "description": "A system-prompt append / override for this session's own agent, over\nthe settings files'. Its delegates do not get it."
         },
         "prompt_types": {
-          "description": "The kinds of `prompt` frame this session's host answers: `permission`\nalways, `question` when listed. Names this daemon does not know are\nignored rather than voiding the options.",
+          "description": "The kinds of `prompt` frame this session's host answers: `permission`\nalways, `question` and `mcp_elicitation` when listed. Names this daemon does not know are\nignored rather than voiding the options.",
           "items": {
             "type": "string"
           },

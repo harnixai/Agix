@@ -83,7 +83,7 @@ impl Module for McpModule {
     }
 
     fn on_session(&self, cx: &mut SessionContext<'_>) -> Result<(), ModuleError> {
-        let Some(mut manager) = self
+        let Some(manager) = self
             .manager
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -91,30 +91,6 @@ impl Module for McpModule {
         else {
             return Ok(());
         };
-        // An elicitation URL a server embeds in a tool result reaches the
-        // session's hooks; the callback is sync, the hook is not.
-        let hooks = cx.hooks.clone();
-        let ambient = cx.hook_ambient.clone();
-        let session_ended = cx.session_ended();
-        let last_turn: Arc<Mutex<std::collections::HashMap<String, u32>>> = Arc::default();
-        manager.set_elicitation_callback(Arc::new(move |server_name, url, turn| {
-            let first_this_turn = last_turn
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(server_name.clone(), turn)
-                != Some(turn);
-            if !first_this_turn {
-                return;
-            }
-            let hooks = hooks.clone();
-            let ambient = ambient.clone();
-            let stop = session_ended.clone();
-            tokio::spawn(async move {
-                hooks
-                    .run_elicitation(&ambient, &server_name, &url, &stop)
-                    .await;
-            });
-        }));
         if !manager.clients().is_empty() {
             let clients = manager.clients().to_vec();
             cx.tools

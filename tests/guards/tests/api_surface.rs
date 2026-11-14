@@ -403,6 +403,14 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "KeyFileNames",
         "a credential the sandbox masks; the mask compiler places every variant",
     ),
+    (
+        "McpElicitMode",
+        "what an MCP server asks for, from the spec; every place it is shown or hooked must say what a new one is",
+    ),
+    (
+        "McpElicitationAnswer",
+        "the spec's three elicitation actions; `mcp::elicit` maps each to the server's `ElicitResult`",
+    ),
     ("McpIdentity", HOST_INPUT),
     ("McpRedirect", HOST_INPUT),
     ("MemberLifetime", DELEGATE_ASK),

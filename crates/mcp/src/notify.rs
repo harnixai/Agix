@@ -10,37 +10,56 @@
 //!
 //! Tool and prompt changes are acted on. A resource change is counted and
 //! otherwise ignored: the resource tools ask the server on every call.
+//!
+//! The handler also declares that this client answers elicitation, and takes
+//! an older server's own `elicitation/create` to [`crate::elicit::ElicitRoute`].
 
+use crate::elicit::ElicitRoute;
 use crate::manager::McpNotification;
 use rmcp::handler::client::ClientHandler;
-use rmcp::service::{NotificationContext, RoleClient};
+use rmcp::model::{
+    ClientConfig, ElicitRequestParams, ElicitResult, ElicitationCapability,
+    FormElicitationCapability, UrlElicitationCapability,
+};
+use rmcp::service::{NotificationContext, RequestContext, RoleClient};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Called on the transport's task when a server sends a notification.
 pub type NotificationSink = Arc<dyn Fn(McpNotification) + Send + Sync>;
 
+/// What a connection's handler reports into, kept by the client so a
+/// reconnect wires the new handler the same way.
+#[derive(Clone, Default)]
+pub struct HandlerWiring {
+    pub sink: Option<NotificationSink>,
+    pub route: Arc<ElicitRoute>,
+}
+
 /// The client handler rmcp drives for one connection. Everything but the
-/// list-changed notifications keeps `ClientHandler`'s default behavior.
+/// list-changed notifications and elicitation keeps `ClientHandler`'s default
+/// behavior.
 #[derive(Clone)]
 pub struct NotifyingHandler {
     server: String,
     sink: Option<NotificationSink>,
+    route: Arc<ElicitRoute>,
     keep: Option<Arc<dyn Send + Sync>>,
 }
 
 impl NotifyingHandler {
-    pub fn new(server: impl Into<String>, sink: Option<NotificationSink>) -> Self {
+    pub fn new(server: impl Into<String>, wiring: HandlerWiring) -> Self {
         Self {
             server: server.into(),
-            sink,
+            sink: wiring.sink,
+            route: wiring.route,
             keep: None,
         }
     }
 
     /// A handler that receives notifications and discards them.
     pub fn silent(server: impl Into<String>) -> Self {
-        Self::new(server, None)
+        Self::new(server, HandlerWiring::default())
     }
 
     /// Hold `value` for as long as the connection runs: rmcp drops the
@@ -58,6 +77,24 @@ impl NotifyingHandler {
 }
 
 impl ClientHandler for NotifyingHandler {
+    fn get_info(&self) -> ClientConfig {
+        let mut info = ClientConfig::default();
+        info.capabilities.elicitation = Some(
+            ElicitationCapability::new()
+                .with_form(FormElicitationCapability::new().with_schema_validation(true))
+                .with_url(UrlElicitationCapability::new()),
+        );
+        info
+    }
+
+    async fn create_elicitation(
+        &self,
+        request: ElicitRequestParams,
+        _context: RequestContext<RoleClient>,
+    ) -> Result<ElicitResult, rmcp::ErrorData> {
+        Ok(self.route.answer(&self.server, request).await)
+    }
+
     fn on_tool_list_changed(
         &self,
         _context: NotificationContext<RoleClient>,
@@ -150,7 +187,13 @@ mod tests {
     #[test]
     fn a_handler_carries_the_server_it_belongs_to() {
         let (sink, seen) = recorder();
-        let h = NotifyingHandler::new("github", Some(sink));
+        let h = NotifyingHandler::new(
+            "github",
+            HandlerWiring {
+                sink: Some(sink),
+                ..Default::default()
+            },
+        );
         h.emit(McpNotification::ToolListChanged {
             server: h.server.clone(),
         });

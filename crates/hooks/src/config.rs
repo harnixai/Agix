@@ -211,19 +211,11 @@ pub enum HookEvent {
     /// turn ends normally, with `team_name` / `teammate_name` instead, just
     /// before `TeammateIdle`.
     TaskCompleted,
-    /// An MCP server's tool result contains an elicitation URL (`mcp://` or
-    /// `elicitation://`) — the server is asking for user attention (e.g. an
-    /// out-of-band authorization link). Fired by
-    /// `hooks::HookRunner::run_elicitation` from the MCP adapter's tool-call
-    /// path (`crates/mcp/src/adapter.rs`).
+    /// An MCP server asks the user something during a tool call (an MRTR
+    /// `input_required` round, or an older server's `elicitation/create`),
+    /// before the host is asked. A block answers the server `decline`.
     Elicitation,
-    /// The response half of an elicitation started by `Elicitation` above.
-    /// See `HookRunner::run_elicitation_result`'s doc comment: no host-side
-    /// response round-trip exists in this codebase yet, so this event has no
-    /// production caller today.
-    ///
-    /// Listed in [`UNWIRED_EVENTS`], which is what makes configuring a hook
-    /// for it warn instead of failing silently.
+    /// The answer to an `Elicitation` question is going back to the server.
     ElicitationResult,
     /// Git worktree lifecycle.
     WorktreeCreate,
@@ -243,11 +235,12 @@ pub enum HookEvent {
 
 /// Events that parse, accept hook configuration, and never fire.
 ///
+/// Events that can be configured but have no firing site in the engine.
 /// Configuring a hook for one warns at startup ([`HookEvent::is_wired`])
 /// instead of failing silently. Kept honest by `tests/guards/tests/wiring.rs`,
 /// which scans the production sources for firing sites and fails if this list
-/// and the code disagree in either direction.
-pub const UNWIRED_EVENTS: &[HookEvent] = &[HookEvent::ElicitationResult];
+/// and the code disagree in either direction. Empty at the moment.
+pub const UNWIRED_EVENTS: &[HookEvent] = &[];
 
 impl HookEvent {
     /// Whether a hook's `additional_context` at this event reaches the model.

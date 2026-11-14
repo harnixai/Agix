@@ -61,6 +61,7 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
         AgentEvent::PermissionPrompt { .. }
             | AgentEvent::PromptResolved { .. }
             | AgentEvent::QuestionPrompt { .. }
+            | AgentEvent::McpElicitationPrompt { .. }
             | AgentEvent::HostToolCall { .. }
             | AgentEvent::HostToolCallResolved { .. }
             | AgentEvent::SubagentProgress { .. }
@@ -79,6 +80,8 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
 pub enum AskKind {
     Permission,
     Question,
+    /// An MCP server's question during a tool call.
+    McpElicitation,
     /// A call to a tool the host declared; answered with
     /// `session.respondToolCall`, never `session.respondToPrompt`.
     HostToolCall,
@@ -89,6 +92,7 @@ impl AskKind {
         match self {
             Self::Permission => "permission",
             Self::Question => "question",
+            Self::McpElicitation => "mcp_elicitation",
             Self::HostToolCall => "host_tool_call",
         }
     }

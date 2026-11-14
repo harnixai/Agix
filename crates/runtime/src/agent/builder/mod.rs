@@ -208,6 +208,15 @@ impl Builder {
         self
     }
 
+    /// Whether the host answers MCP servers' questions over the channel
+    /// protocol: `AgentEvent::McpElicitationPrompt` out,
+    /// `InputMessage::McpElicitationResponse` back. Off by default; with it
+    /// off a server's question is answered `cancel` without asking anyone.
+    pub fn mcp_prompts(mut self, on: bool) -> Self {
+        self.spec.mcp_prompts = on;
+        self
+    }
+
     /// Whether a clarification this session asks can reach a person.
     fn questions_answered(&self) -> bool {
         self.spec.question_prompts

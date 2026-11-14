@@ -253,6 +253,7 @@ pub const CAPABILITIES: &[&str] = &[
     "extension_entries",
     "goals",
     "question_prompts",
+    "mcp_elicitation",
     "session_export",
     "session_import",
     "checkpoints",

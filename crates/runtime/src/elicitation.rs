@@ -4,7 +4,9 @@
 //! An authorization goes out as `AgentEvent::PermissionPrompt` and comes back
 //! as `InputMessage::PermissionResponse`; a clarification, when the host said
 //! it can answer one, goes out as `AgentEvent::QuestionPrompt` and comes back
-//! as `InputMessage::QuestionResponse`. Either way a one-shot is registered
+//! as `InputMessage::QuestionResponse`; an MCP server's question, when the host
+//! said it answers those, goes out as `AgentEvent::McpElicitationPrompt` and
+//! comes back as `InputMessage::McpElicitationResponse`. Either way a one-shot is registered
 //! under the prompt id before the event is emitted. Its timeout passing, or
 //! the ask being dropped (the turn was cancelled), removes the registration,
 //! so a late answer for that id is discarded rather than waking a call that
@@ -29,7 +31,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use base::interface::elicitation::{
-    ElicitKind, ElicitOption, ElicitOutcome, ElicitRequest, Elicitation,
+    ElicitKind, ElicitOption, ElicitOutcome, ElicitRequest, Elicitation, McpElicitMode,
+    McpElicitationAnswer,
 };
 
 use crate::agent::{EventSender, PermissionDecision, QuestionAnswer};
@@ -40,11 +43,15 @@ type Pending = Waiting<PermissionDecision>;
 /// Questions put to the host and not yet answered, keyed by `prompt_id`.
 pub type PendingQuestions = Waiting<QuestionAnswer>;
 
+/// MCP servers' questions put to the host and not yet answered.
+pub type PendingMcpAnswers = Waiting<McpElicitationAnswer>;
+
 /// Asks over the session's event stream.
 pub struct ChannelElicitation {
     events: EventSender,
     pending: Pending,
     questions: Option<PendingQuestions>,
+    mcp: Option<PendingMcpAnswers>,
 }
 
 impl ChannelElicitation {
@@ -53,12 +60,19 @@ impl ChannelElicitation {
             events,
             pending,
             questions: None,
+            mcp: None,
         }
     }
 
     /// Put clarifications to the host too, waiting on `pending` for the answers.
     pub fn with_questions(mut self, pending: PendingQuestions) -> Self {
         self.questions = Some(pending);
+        self
+    }
+
+    /// Put MCP servers' questions to the host too.
+    pub fn with_mcp(mut self, pending: PendingMcpAnswers) -> Self {
+        self.mcp = Some(pending);
         self
     }
 
@@ -161,8 +175,88 @@ impl ChannelElicitation {
                 None => Some(cannot_carry("a clarification")),
             },
             ElicitKind::Import { .. } => Some(cannot_carry("an import confirmation")),
+            ElicitKind::McpServer { .. } => match &self.mcp {
+                Some(pending) => {
+                    McpAsk {
+                        events: &self.events,
+                        pending,
+                        task_id: None,
+                    }
+                    .ask(request, within)
+                    .await
+                }
+                None => Some(cannot_carry("an MCP server's question")),
+            },
             _ => Some(cannot_carry("this kind of question")),
         }
+    }
+}
+
+/// Where an MCP server's question is put: the channel and table of the
+/// session whose host answers it, and the background task asking, if one is.
+pub struct McpAsk<'a> {
+    pub events: &'a EventSender,
+    pub pending: &'a PendingMcpAnswers,
+    pub task_id: Option<String>,
+}
+
+impl McpAsk<'_> {
+    /// `None` once `within` has passed with no answer.
+    pub async fn ask(
+        &self,
+        request: ElicitRequest,
+        within: Option<Duration>,
+    ) -> Option<ElicitOutcome> {
+        let ElicitKind::McpServer {
+            server,
+            mode,
+            tool_use_id,
+        } = request.kind
+        else {
+            return Some(cannot_carry("this kind of question"));
+        };
+        let (mode, requested_schema, url, url_host) = match mode {
+            McpElicitMode::Form { requested_schema } => {
+                ("form", Some(requested_schema), None, None)
+            }
+            McpElicitMode::Url { url, host } => ("url", None, Some(url), Some(host)),
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut open = OpenPrompt::register(&request.id, self.pending, tx, self.events.clone());
+        let _ = self
+            .events
+            .send(base::event::AgentEvent::McpElicitationPrompt {
+                prompt_id: request.id,
+                server,
+                mode: mode.to_string(),
+                message: request.message,
+                requested_schema,
+                url,
+                url_host,
+                turn_id: String::new(),
+                tool_use_id,
+                task_id: self.task_id.clone(),
+            });
+        Some(match open.wait(rx, within).await? {
+            Ok(answer) => ElicitOutcome::answered(&answer),
+            Err(_) => ElicitOutcome::declined("MCP question channel closed without an answer"),
+        })
+    }
+}
+
+/// Wake the MCP question `prompt_id` with `answer`; one nobody waits on is
+/// ignored.
+pub(crate) fn resolve_mcp_answer(
+    pending: &PendingMcpAnswers,
+    prompt_id: &str,
+    answer: McpElicitationAnswer,
+) {
+    if let Some(sender) = pending
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(prompt_id)
+    {
+        let _ = sender.send(answer);
     }
 }
 

@@ -2,10 +2,10 @@
 //!
 //! 工具名按 `mcp__<server>__<tool>` 命名，与权限规则匹配语义一致
 //! （见 agix-permissions::ruleset）；两段怎么从 server 名与工具名得来见 [`crate::naming`]。
+//! 调用中 server 向用户提的问题经 [`ToolCallElicitor`] 走这次调用的 `ToolContext` 去问宿主。
 
 use crate::client::{McpCallResult, McpClientHandle, McpContent, McpToolHints, McpToolMeta};
 use crate::error::McpError;
-use crate::manager::ElicitationCallback;
 use crate::output_cache::McpOutputCache;
 use async_trait::async_trait;
 use base::interface::permission::{PermissionFacts, Reach, Subject};
@@ -22,6 +22,7 @@ use base::{
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// Per-request cap on a server-supplied description. Some servers put pages of
 /// documentation there; the full text stays reachable through `prompt()`, which
@@ -39,20 +40,6 @@ pub struct McpToolAdapter {
     client: McpClientHandle,
     /// Shared output cache across all MCP adapters.
     cache: Arc<Mutex<McpOutputCache>>,
-    /// Callback for MCP elicitation URLs (mcp:// or elicitation:// protocols).
-    ///
-    /// This is the *same* `Arc<Mutex<..>>` cell the owning `McpManager` holds
-    /// (see `with_elicitation_callback`), not a private snapshot. `McpManager`
-    /// rebuilds its adapter list on every `refresh_tools()` call, which
-    /// commonly runs before an embedder has had a chance to call
-    /// `McpManager::set_elicitation_callback` (the daemon connects MCP
-    /// servers and refreshes tools before handing the manager to
-    /// `runtime::agent::Builder`, which is where the callback gets wired to
-    /// the session's real `HookRunner`). A plain `Option<ElicitationCallback>`
-    /// captured at construction time would freeze at `None` forever in that
-    /// ordering — sharing the cell means a callback set *after* adapters
-    /// already exist is still visible to them on their next call.
-    elicitation_callback: Arc<Mutex<Option<ElicitationCallback>>>,
 }
 
 impl McpToolAdapter {
@@ -86,7 +73,6 @@ impl McpToolAdapter {
             hints: meta.hints,
             client,
             cache,
-            elicitation_callback: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -114,20 +100,6 @@ impl McpToolAdapter {
     /// server declares the tool both read-only and idempotent.
     fn is_cacheable(&self) -> bool {
         self.hints.read_only == Some(true) && self.hints.idempotent == Some(true)
-    }
-
-    /// Alias this adapter's elicitation cell to the owning `McpManager`'s
-    /// shared cell — see the field doc comment for why sharing (not copying
-    /// a snapshot) matters. When the adapter detects an elicitation URL
-    /// (`mcp://` or `elicitation://`) in a tool result, it looks up whatever
-    /// callback the cell holds *at that moment*. Returns Self for
-    /// builder-style chaining.
-    pub fn with_elicitation_callback(
-        mut self,
-        cell: Arc<Mutex<Option<ElicitationCallback>>>,
-    ) -> Self {
-        self.elicitation_callback = cell;
-        self
     }
 }
 
@@ -190,10 +162,13 @@ impl Tool for McpToolAdapter {
             }
         }
 
+        let scope = crate::elicit::McpCallScope {
+            elicitor: Some(Arc::new(ToolCallElicitor { ctx: ctx.clone() })),
+        };
         let result = tokio::select! {
             biased;
             _ = ctx.cancel.cancelled() => return Err(ToolError::Cancelled),
-            r = self.client.call_tool(&self.tool_name, args.clone()) => r,
+            r = self.client.call_tool(&self.tool_name, args.clone(), &scope) => r,
         };
 
         let result = result.map_err(|e: McpError| ToolError::Execution(anyhow::Error::new(e)))?;
@@ -203,23 +178,57 @@ impl Tool for McpToolAdapter {
             cache.put(&self.server_name, &self.tool_name, &args, result.clone());
         }
 
-        // Check for elicitation URLs in the result. If found, fire
-        // the elicitation callback to notify the hook system. Locked and
-        // cloned rather than held across the `if` so a callback registered
-        // after this adapter was built (see the field doc comment) is
-        // picked up, and so the lock isn't held while `cb` runs.
-        let cb = self
-            .elicitation_callback
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if let Some(cb) = cb {
-            if let Some(url) = find_elicitation_url(&result) {
-                cb(self.server_name.clone(), url, ctx.turn_no);
-            }
-        }
-
         Ok(into_tool_result(result))
+    }
+}
+
+/// Puts what a server asks during one call to whoever the call's session
+/// asks, for as long as the session waits on a permission prompt. Nobody to
+/// ask, no answer in time, or an answer that does not read is `cancel`.
+pub struct ToolCallElicitor {
+    pub ctx: ToolContext,
+}
+
+#[async_trait]
+impl crate::elicit::McpElicitor for ToolCallElicitor {
+    async fn elicit(
+        &self,
+        server: &str,
+        message: String,
+        mode: base::interface::elicitation::McpElicitMode,
+    ) -> base::interface::elicitation::McpElicitationAnswer {
+        use base::interface::elicitation::{ElicitKind, ElicitRequest, McpElicitationAnswer};
+        let ctx = &self.ctx;
+        let asker = match (&ctx.elicitation, &ctx.attendance) {
+            (Some(asker), base::interface::permission::Attendance::Attended) => asker,
+            _ => {
+                tracing::debug!(server, "nobody to ask an MCP server's question; cancelled");
+                return McpElicitationAnswer::Cancel;
+            }
+        };
+        let secs = ctx.config.permission_prompt_timeout_secs;
+        let request = ElicitRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: ElicitKind::McpServer {
+                server: server.to_string(),
+                mode,
+                tool_use_id: Some(ctx.tool_use_id.clone()).filter(|id| !id.is_empty()),
+            },
+            message,
+            options: Vec::new(),
+        };
+        let asked = tokio::select! {
+            biased;
+            _ = ctx.cancel.cancelled() => return McpElicitationAnswer::Cancel,
+            asked = asker.ask_within(request, (secs > 0).then(|| Duration::from_secs(secs))) => asked,
+        };
+        match asked {
+            Some(outcome) => outcome.answer_as().unwrap_or_else(|| {
+                tracing::debug!(server, reason = ?outcome.decline_reason(), "MCP server's question not answered");
+                McpElicitationAnswer::Cancel
+            }),
+            None => McpElicitationAnswer::Cancel,
+        }
     }
 }
 
@@ -275,26 +284,6 @@ fn into_tool_result(result: McpCallResult) -> ToolResult {
     }
     let blocks = into_tool_result_blocks(result.content);
     ToolResult::blocks(blocks).with_error(is_error)
-}
-
-/// Scan an MCP tool result for an elicitation URL (`mcp://` or `elicitation://`
-/// protocol). Returns the first such URL found, or None if none exists.
-///
-/// Elicitation URLs indicate that the MCP server requires user interaction
-/// (e.g. authorization consent, form fill, confirmation dialog) — the content
-/// of the URL encodes the elicitation request.
-fn find_elicitation_url(result: &McpCallResult) -> Option<String> {
-    for block in &result.content {
-        if let McpContent::Text(text) = block {
-            for word in text.split_whitespace() {
-                let clean = word.trim_matches(|c: char| c.is_ascii_punctuation() && c != ':');
-                if clean.starts_with("mcp://") || clean.starts_with("elicitation://") {
-                    return Some(clean.to_string());
-                }
-            }
-        }
-    }
-    None
 }
 
 const MAX_IMAGE_BYTES: usize = base::tool::MAX_IMAGE_BYTES as usize;

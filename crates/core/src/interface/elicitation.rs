@@ -58,6 +58,47 @@ pub enum ElicitKind {
         /// The detected sources, named for display.
         sources: Vec<String>,
     },
+    /// An MCP server asks the user something during one of its tool calls.
+    /// Its message, schema and URL are the server's words, not the engine's.
+    /// The answer is a [`McpElicitationAnswer`].
+    McpServer {
+        server: String,
+        mode: McpElicitMode,
+        tool_use_id: Option<String>,
+    },
+}
+
+/// What an MCP server's question wants back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpElicitMode {
+    /// Fields to fill in, described by a JSON Schema the server sent.
+    Form { requested_schema: serde_json::Value },
+    /// A page for the user to visit; nothing comes back but the choice.
+    /// `host` is `url`'s, for a host that shows where the link goes.
+    Url { url: String, host: String },
+}
+
+/// The answer to [`ElicitKind::McpServer`], as it goes back to the server.
+/// `decline` is a person saying no; `cancel` is nobody choosing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpElicitationAnswer {
+    Accept {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<serde_json::Value>,
+    },
+    Decline,
+    Cancel,
+}
+
+impl McpElicitationAnswer {
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::Accept { .. } => "accept",
+            Self::Decline => "decline",
+            Self::Cancel => "cancel",
+        }
+    }
 }
 
 /// One offered answer.
@@ -188,6 +229,7 @@ impl Elicitation for DeclineAll {
             }
             ElicitKind::Clarification { .. } => "answer a question".to_string(),
             ElicitKind::Import { .. } => "confirm an import".to_string(),
+            ElicitKind::McpServer { server, .. } => format!("answer MCP server `{server}`"),
         };
         ElicitOutcome::declined(format!(
             "no one is available to {what}: this engine was built without an \

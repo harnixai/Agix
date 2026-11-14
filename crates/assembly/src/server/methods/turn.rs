@@ -96,9 +96,8 @@ async fn respond_to_prompt(
         AskKind::Permission => {
             PromptAnswer::Permission(p.decision.ok_or_else(|| invalid("missing decision"))?)
         }
-        AskKind::Question => {
-            PromptAnswer::Question(p.answer.ok_or_else(|| invalid("missing answer"))?)
-        }
+        AskKind::Question => PromptAnswer::Question(answer_as(p.answer)?),
+        AskKind::McpElicitation => PromptAnswer::McpElicitation(answer_as(p.answer)?),
         AskKind::HostToolCall => {
             return Err(invalid(
                 "a host tool call is answered with session.respondToolCall",
@@ -111,6 +110,13 @@ async fn respond_to_prompt(
     Ok(PromptAnswered {
         prompt_id: p.prompt_id,
     })
+}
+
+fn answer_as<T: serde::de::DeserializeOwned>(
+    answer: Option<serde_json::Value>,
+) -> Result<T, RpcError> {
+    let answer = answer.ok_or_else(|| invalid("missing answer"))?;
+    serde_json::from_value(answer).map_err(|e| invalid(format!("answer: {e}")))
 }
 
 async fn respond_tool_call(
