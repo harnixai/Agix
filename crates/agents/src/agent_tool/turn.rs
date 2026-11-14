@@ -94,7 +94,6 @@ pub(crate) async fn write_sidechain_terminal_marker(
 pub(crate) async fn run_one_turn(
     agent: &mut Agent,
     event_rx: &mut EventReceiver,
-    input_tx: &InputSender,
     prompt: String,
     cancel: tokio_util::sync::CancellationToken,
     // When set, every event this sub-agent emits is also mirrored onto the
@@ -105,11 +104,6 @@ pub(crate) async fn run_one_turn(
     task: Option<&base::context::RunningTask>,
 ) -> (String, DelegateEnd) {
     let turn_id = uuid::Uuid::new_v4().to_string();
-    let _ = input_tx.send(InputMessage::User {
-        content: prompt.clone(),
-        attachments: vec![],
-        turn_id: turn_id.clone(),
-    });
 
     if let Some(tag) = &tag {
         tag.spawned();
@@ -250,7 +244,6 @@ pub(crate) async fn run_one_turn_detached(
                 let outcome = run_one_turn(
                     &mut agent,
                     &mut event_rx,
-                    &input_tx,
                     prompt,
                     stop,
                     tag,

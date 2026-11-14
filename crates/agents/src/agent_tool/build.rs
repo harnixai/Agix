@@ -205,7 +205,6 @@ impl Delegator {
             let (text, end) = run_one_turn(
                 &mut agent,
                 &mut event_rx,
-                &input_tx,
                 prompt,
                 cancel,
                 Some(tag),

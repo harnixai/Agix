@@ -1306,3 +1306,35 @@ async fn a_member_whose_turn_panics_fails_its_task_and_leaves_the_pool() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
+
+/// A member answers message after message on the one agent it keeps, with
+/// nothing put on that agent's input along the way.
+#[tokio::test]
+async fn a_member_answers_one_message_after_another() {
+    let agent_tool = TestParent::new(Arc::new(HoldsUntilCancelled {
+        mark: "NOTHING-IS-HELD",
+        held: Default::default(),
+    }))
+    .with_team()
+    .agent_tool();
+    let session = agent_tool.parent_state();
+    for i in 0..3 {
+        let task_id = agent_tool
+            .spawn_or_message_team_member(
+                "team".into(),
+                "worker".into(),
+                format!("message {i}"),
+                None,
+                std::env::temp_dir(),
+                session.clone(),
+                None,
+            )
+            .await
+            .expect("queued");
+        assert_eq!(
+            ended_status(&agent_tool, &task_id).await,
+            base::context::task::TaskStatus::Done,
+            "message {i}"
+        );
+    }
+}

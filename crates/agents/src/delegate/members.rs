@@ -492,7 +492,6 @@ async fn member_loop(mut m: MemberLoop) {
                 let ran = std::panic::AssertUnwindSafe(run_one_turn(
                     &mut d.agent,
                     &mut d.event_rx,
-                    &d.input_tx,
                     prompt,
                     task.cancel.clone(),
                     None,

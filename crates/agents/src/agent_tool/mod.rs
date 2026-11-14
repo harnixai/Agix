@@ -31,7 +31,7 @@ use base::tool::ProgressSender;
 use base::tool::ToolContext;
 use base::tool::{PathStyle, ToolSpec};
 use history::store::HistoryStore;
-use runtime::agent::{Agent, Builder, EventReceiver, InputMessage, InputSender};
+use runtime::agent::{Agent, Builder, EventReceiver, InputSender};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
