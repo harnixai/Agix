@@ -467,6 +467,14 @@ async fn a_reader_that_runs_a_program_is_asked_about() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_hash_after_an_escaped_space_is_not_a_comment_that_hides_the_rest() -> anyhow::Result<()>
+{
+    runs_a_program_through_a_reader("echo \\ #; touch ran.txt").await?;
+    runs_a_program_through_a_reader("echo a\u{a0}#; touch ran.txt").await?;
+    denied_rm_spelled("echo \\ #; rm victim.txt").await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_read_only_name_behind_a_wrappers_option_is_asked_about() -> anyhow::Result<()> {
     runs_a_program_through_a_reader("env -u ls sh x.sh").await?;
     runs_a_program_through_a_reader("exec -a ls sh x.sh").await?;

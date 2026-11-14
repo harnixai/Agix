@@ -80,7 +80,7 @@ pub fn words(command: &str) -> Vec<String> {
                     word.push(n);
                 }
             }
-            c if c.is_whitespace() => {
+            c if is_blank(c) => {
                 if in_word {
                     out.push(std::mem::take(&mut word));
                     in_word = false;
@@ -150,7 +150,7 @@ pub fn lex(command: &str) -> Vec<Word> {
     while i < chars.len() {
         let c = chars[i];
         match c {
-            c if c.is_whitespace() => end_word(&mut out, &mut word, &mut started),
+            c if is_blank(c) => end_word(&mut out, &mut word, &mut started),
             '\'' => {
                 started = true;
                 i = lex_single_quoted(&chars, i, &mut word);
@@ -337,14 +337,24 @@ fn take_operator_tail(chars: &[char], mut i: usize, op: &mut String) -> usize {
     i
 }
 
+/// The characters bash splits words on. Not `char::is_whitespace`: bash
+/// reads U+00A0 and the like as part of a word.
+fn is_blank(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n')
+}
+
 fn split_into(src: &str, out: &mut Vec<Segment>) {
     let chars: Vec<char> = src.chars().collect();
     let mut current = String::new();
+    // `#` opens a comment only where a word could begin: `echo \ #` and
+    // `echo a#` keep the `#` as text, and the rest of the line still runs.
+    let mut at_word_start = true;
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         match c {
             '\\' => {
+                at_word_start = false;
                 current.push(c);
                 if let Some(&n) = chars.get(i + 1) {
                     current.push(n);
@@ -353,18 +363,21 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                 continue;
             }
             '\'' => {
+                at_word_start = false;
                 let end = find_char(&chars, i + 1, '\'');
                 current.extend(&chars[i..(end + 1).min(chars.len())]);
                 i = end + 1;
                 continue;
             }
             '"' => {
+                at_word_start = false;
                 let end = scan_double_quoted(&chars, i + 1, out);
                 current.extend(&chars[i..(end + 1).min(chars.len())]);
                 i = end + 1;
                 continue;
             }
             '`' => {
+                at_word_start = false;
                 let end = find_unescaped(&chars, i + 1, '`');
                 let inner: String = chars[i + 1..end.min(chars.len())].iter().collect();
                 split_into(&inner, out);
@@ -373,6 +386,7 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                 continue;
             }
             '$' | '<' | '>' if chars.get(i + 1) == Some(&'(') => {
+                at_word_start = false;
                 let end = find_close_paren(&chars, i + 2);
                 let inner: String = chars[i + 2..end.min(chars.len())].iter().collect();
                 split_into(&inner, out);
@@ -380,19 +394,21 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                 i = end + 1;
                 continue;
             }
-            '#' if current.is_empty() || current.ends_with(char::is_whitespace) => {
+            '#' if at_word_start => {
                 while i < chars.len() && chars[i] != '\n' {
                     i += 1;
                 }
                 continue;
             }
             ';' | '\n' | '|' => {
+                at_word_start = true;
                 push_command(&current, out);
                 current.clear();
             }
             '&' => {
                 let redirect =
                     current.trim_end().ends_with(['>', '<']) || chars.get(i + 1) == Some(&'>');
+                at_word_start = !redirect;
                 if redirect {
                     current.push(c);
                 } else {
@@ -400,7 +416,10 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                     current.clear();
                 }
             }
-            _ => current.push(c),
+            _ => {
+                at_word_start = matches!(c, ' ' | '\t' | '(');
+                current.push(c);
+            }
         }
         i += 1;
     }
@@ -764,6 +783,15 @@ mod tests {
                 "true"
             ]
         );
+    }
+
+    #[test]
+    fn a_hash_inside_a_word_is_not_a_comment() {
+        assert!(split("echo \\ #; rm x").contains(&"rm x".to_string()));
+        assert!(split("echo a\u{a0}#; rm x").contains(&"rm x".to_string()));
+        assert!(split("echo a#; rm x").contains(&"rm x".to_string()));
+        assert_eq!(split("echo a # rm x"), vec!["echo a"]);
+        assert_eq!(split("ls;# rm x"), vec!["ls"]);
     }
 
     #[test]

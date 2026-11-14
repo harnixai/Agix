@@ -60,6 +60,7 @@ fn fake(name: &'static str, read_only: bool) -> Arc<dyn Tool> {
 struct ContentAwareFakeTool {
     name: &'static str,
     content: Option<&'static str>,
+    shell: bool,
 }
 
 #[async_trait2]
@@ -88,7 +89,13 @@ impl Tool for ContentAwareFakeTool {
     ) -> base::interface::permission::PermissionFacts {
         use base::interface::permission::{PermissionFacts, Reach, Subject};
         PermissionFacts::new(
-            { self.content.map(|s| s.to_string()) }.map_or(Subject::None, Subject::Opaque),
+            self.content.map(str::to_string).map_or(Subject::None, |s| {
+                if self.shell {
+                    Subject::Shell(s)
+                } else {
+                    Subject::Opaque(s)
+                }
+            }),
             Reach::Unknown,
         )
         .with_question("?")
@@ -107,6 +114,15 @@ fn content_tool(name: &'static str, content: &'static str) -> Arc<dyn Tool> {
     Arc::new(ContentAwareFakeTool {
         name,
         content: Some(content),
+        shell: false,
+    })
+}
+
+fn shell_tool(content: &'static str) -> Arc<dyn Tool> {
+    Arc::new(ContentAwareFakeTool {
+        name: "Bash",
+        content: Some(content),
+        shell: true,
     })
 }
 
@@ -690,6 +706,24 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
     );
 }
 
+#[tokio::test]
+async fn a_deny_holds_for_a_command_after_a_hash_the_shell_does_not_read_as_a_comment() {
+    let settings = with_managed(
+        json!({"permission_rules": [
+            {"tool": "Bash(echo:*)", "action": "allow"},
+            {"tool": "Bash(rm:*)", "action": "deny"}
+        ]}),
+        json!({}),
+    );
+    for command in ["echo \\ #; rm -rf x", "echo a\u{a0}#; rm -rf x"] {
+        let outcome = verdict(&settings, PermissionMode::Default, command).await;
+        assert!(
+            matches!(outcome, PermissionOutcome::Deny { .. }),
+            "{command}: {outcome:?}"
+        );
+    }
+}
+
 fn with_managed(user: serde_json::Value, managed: serde_json::Value) -> settings::LoadedSettings {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("settings.json"), user.to_string()).unwrap();
@@ -711,7 +745,7 @@ async fn verdict(
 ) -> PermissionOutcome {
     decide(
         &Policy::from_settings(&settings.permission_settings(), []),
-        &content_tool("Bash", command),
+        &shell_tool(command),
         &session(mode),
     )
     .await
