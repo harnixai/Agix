@@ -43,8 +43,19 @@ impl HistoryStore for JsonlHistoryStore {
         entry: LogEntry,
         tags: crate::entry::EntryTags,
     ) -> Result<(), HistoryError> {
+        self.refuse_if_deleted(session, &entry)?;
         let writer = self.writer_lock(session).await?;
         let mut log = self.log_of(session).lock_owned().await;
+        // Checked again under the locks: a delete that ran while this append
+        // waited for them has already removed what taking the writer lock
+        // just made again.
+        if let Err(refused) = self.refuse_if_deleted(session, &entry) {
+            drop(log);
+            let sidecar = session_sidecar_dir(&self.sessions_root, &session);
+            let _ =
+                blocking(move || writer.remove_sidecar(&sidecar).map_err(HistoryError::Io)).await;
+            return Err(refused);
+        }
 
         // A `Meta` line is where a session says which project it belongs to,
         // so it is also where that gets recorded — in the map for this
@@ -168,6 +179,10 @@ impl HistoryStore for JsonlHistoryStore {
         .await?;
         self.homes.lock().await.remove(&session);
         self.synced_dirs.lock().await.remove(&session);
+        self.deleted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session);
         Ok(())
     }
 
@@ -176,6 +191,9 @@ impl HistoryStore for JsonlHistoryStore {
         session: SessionId,
         title: Option<String>,
     ) -> Result<(), HistoryError> {
+        if self.was_deleted(session) {
+            return Err(HistoryError::SessionDeleted(session.to_string()));
+        }
         let _writer = self.writer_lock(session).await?;
         let log = self.log_of(session);
         let _log = log.lock().await;

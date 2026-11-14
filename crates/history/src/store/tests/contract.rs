@@ -165,6 +165,27 @@ for_each_store!(deleting_forgets_the_session_and_is_idempotent, |store| {
 });
 
 for_each_store!(
+    a_deleted_session_takes_no_more_lines_until_it_starts_again,
+    |store| {
+        let s = SessionId::new();
+        store.append(s, meta(None)).await.unwrap();
+        store.delete(s).await.unwrap();
+        let late = store.append(s, user("written while stopping")).await;
+        assert!(
+            matches!(late, Err(HistoryError::SessionDeleted(_))),
+            "a line for a deleted session must not bring its log back: {late:?}"
+        );
+        assert!(matches!(
+            store.load(s).await.unwrap_err(),
+            HistoryError::SessionNotFound(_)
+        ));
+        store.append(s, meta(None)).await.unwrap();
+        store.append(s, user("again")).await.unwrap();
+        assert_eq!(store.load(s).await.unwrap().len(), 2);
+    }
+);
+
+for_each_store!(
     the_parent_link_is_readable_and_drives_the_child_walk,
     |store| {
         let parent = SessionId::new();

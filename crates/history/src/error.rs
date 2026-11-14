@@ -25,4 +25,8 @@ pub enum HistoryError {
     /// Another process is writing this session's log.
     #[error("session {0} is being written by another process")]
     Locked(String),
+
+    /// A line other than `Meta` for a session this store deleted.
+    #[error("session {0} was deleted")]
+    SessionDeleted(String),
 }

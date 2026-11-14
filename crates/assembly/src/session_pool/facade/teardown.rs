@@ -59,9 +59,10 @@ impl SessionPool {
         sidechains
     }
 
-    /// Cancel (if live) and delete each of `children`, one `with_session_lock`
-    /// critical section per child. Best-effort throughout — see
-    /// `shutdown_session`'s doc comment.
+    /// Stop (if live) and delete each of `children`, one `with_session_lock`
+    /// critical section per child, each waiting for its engine to stop
+    /// before its log goes. Best-effort throughout — see `shutdown_session`'s
+    /// doc comment.
     pub(in crate::session_pool) async fn delete_sidechain_list(
         &self,
         parent_session_id: &str,
@@ -81,6 +82,7 @@ impl SessionPool {
                         self.live.stop_removed(&child_str, &live, EndReason::Close);
                         live.core.reap_process_groups_later();
                     }
+                    let _ = self.live.wait_until_stopped(&child_str).await;
                     match store.delete(child).await {
                         Ok(()) => {
                             self.scheduler.remove_session(&child_str);
@@ -95,7 +97,7 @@ impl SessionPool {
                                 session_id = %child_str,
                                 parent_session_id,
                                 error = %e,
-                                "failed to delete sidechain during cascade; leaving for startup GC"
+                                "failed to delete sidechain during cascade"
                             );
                             false
                         }
@@ -109,15 +111,9 @@ impl SessionPool {
         deleted
     }
 
-    /// Remove `session_id` from the live map (if present) and cascade-delete
-    /// `children` — the shared body of `shutdown_session` (which scans for
-    /// its own children) and `delete_session` (which reuses a scan it
-    /// already did for its response body).
-    pub(in crate::session_pool) async fn shutdown_session_with_children(
-        &self,
-        session_id: &str,
-        children: Vec<base::session::SessionId>,
-    ) -> usize {
+    /// Take `session_id` out of memory, if it is there, and tell its engine
+    /// to stop.
+    async fn take_out(&self, session_id: &str) {
         if let Some(live) = self.live.remove(session_id).await {
             self.end_cut_off_turn(session_id, &live, SessionEvent::Closed);
             self.live.stop_removed(session_id, &live, EndReason::Close);
@@ -135,7 +131,6 @@ impl SessionPool {
         // The in-memory copy only: a session resumed later reads its spec back
         // from its log.
         self.specs.forget(session_id);
-        self.delete_sidechain_list(session_id, children).await
     }
 
     /// `session.close` — destroys the runtime entity; the parent's
@@ -147,14 +142,12 @@ impl SessionPool {
     /// Returns how many sidechains were
     /// actually deleted.
     ///
-    /// A sidechain still mid-run (background / team member) is cancelled
-    /// before its transcript is deleted, but this doesn't wait for that
-    /// cancellation to finish landing on disk (N2's suggested grace window
-    /// is intentionally not implemented here — it would make an interactive
-    /// `session.close` call noticeably slower for what's normally a rare
-    /// race). A delete that loses that race, or fails for any other reason,
-    /// is logged and left for the startup GC to clean up later (N1) — it
-    /// never fails `session.close` itself.
+    /// The parent's own engine is not waited for: its transcript stays. A
+    /// sidechain still mid-run (background / team member) is stopped and
+    /// waited for, within [`AGENT_EXIT_GRACE`], before its transcript is
+    /// deleted; whatever its engine writes after that is refused by the
+    /// store. A delete that fails is logged — it never fails
+    /// `session.close` itself.
     ///
     /// Waits out a rebuild or resume of the same id in flight: either would
     /// otherwise put the session back in memory after this returned.
@@ -164,8 +157,8 @@ impl SessionPool {
         Ok(self
             .live
             .with_session_lock(session_id, async {
-                self.shutdown_session_with_children(session_id, children)
-                    .await
+                self.take_out(session_id).await;
+                self.delete_sidechain_list(session_id, children).await
             })
             .await)
     }
@@ -185,14 +178,13 @@ impl SessionPool {
         let sid = base::session::SessionId::parse(session_id)
             .map_err(|_| PoolError::InvalidRequest(format!("invalid session_id: {session_id}")))?;
 
-        // One scan shared by both the (possibly dry-run) report below and
-        // the actual cascade delete — `shutdown_session_with_children`
-        // takes this same `Vec` instead of re-scanning, so the two can't
-        // disagree.
-        let children = self.fetch_child_sidechains(session_id).await;
-        let sidechain_ids: Vec<String> = children.iter().map(|id| id.to_string()).collect();
-
         if dry_run {
+            let sidechain_ids: Vec<String> = self
+                .fetch_child_sidechains(session_id)
+                .await
+                .iter()
+                .map(|id| id.to_string())
+                .collect();
             return Ok(api::DeleteReport {
                 session_id: session_id.to_string(),
                 deleted: false,
@@ -203,15 +195,17 @@ impl SessionPool {
 
         // Cascade and the primary delete share one `with_session_lock`
         // critical section — see that method's doc comment for the resume
-        // race this closes.
-        let (sidechains_deleted, delete_result) = self
+        // race this closes. The children are looked for only once the
+        // parent's engine has stopped: until then it can still start one.
+        let (sidechains_deleted, sidechain_ids, delete_result) = self
             .live
             .with_session_lock(session_id, async {
-                let deleted = self
-                    .shutdown_session_with_children(session_id, children)
-                    .await;
-                let result = store.delete(sid).await;
-                (deleted, result)
+                self.take_out(session_id).await;
+                let _ = self.live.wait_until_stopped(session_id).await;
+                let children = self.fetch_child_sidechains(session_id).await;
+                let ids: Vec<String> = children.iter().map(|id| id.to_string()).collect();
+                let deleted = self.delete_sidechain_list(session_id, children).await;
+                (deleted, ids, store.delete(sid).await)
             })
             .await;
         delete_result.map_err(|e| PoolError::Internal(e.to_string()))?;

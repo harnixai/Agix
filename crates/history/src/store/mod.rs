@@ -192,6 +192,9 @@ pub trait HistoryStore: Send + Sync {
 
     /// Forget a session entirely — its log and anything the backend keeps
     /// alongside it. Deleting a session that is not there is not an error.
+    /// Afterwards an append other than `Meta` to it is
+    /// [`HistoryError::SessionDeleted`], so what a stopping engine still
+    /// writes does not bring the session back; a `Meta` starts it again.
     async fn delete(&self, session: SessionId) -> Result<(), HistoryError>;
 
     /// The session's log as messages the model can be given directly.

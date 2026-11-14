@@ -47,6 +47,7 @@ mod session_lifecycle;
 mod session_provider;
 mod session_set_model;
 mod session_tasks;
+mod session_teardown;
 mod session_title_telemetry;
 mod tool_progress;
 mod turn_cancellation;

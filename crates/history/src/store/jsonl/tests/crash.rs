@@ -176,7 +176,11 @@ async fn delete_takes_the_whole_sidecar_with_it() {
     assert!(!store.session_path_of(s).await.exists());
     assert!(!sidecar.exists());
     store.delete(s).await.unwrap();
-    store.append(s, user("again")).await.unwrap();
+    assert!(matches!(
+        store.append(s, user("again")).await,
+        Err(crate::error::HistoryError::SessionDeleted(_))
+    ));
+    assert!(!sidecar.exists());
     assert_eq!(
         store.session_stats(s).await.unwrap(),
         SessionStats::default()

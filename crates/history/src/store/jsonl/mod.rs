@@ -46,6 +46,11 @@ pub struct JsonlHistoryStore {
     logs: std::sync::Mutex<HashMap<SessionId, Arc<Mutex<LogState>>>>,
     /// Sessions whose log's directory entry this process has already synced.
     synced_dirs: Mutex<std::collections::HashSet<SessionId>>,
+    /// Sessions this store deleted. An engine that was still stopping when
+    /// its session was deleted would otherwise write its last lines into a
+    /// fresh log that no `Meta` places in any project; only a `Meta`, which
+    /// starts the session again, is taken.
+    deleted: std::sync::Mutex<std::collections::HashSet<SessionId>>,
     /// Where content too big to keep inline goes. Without one, everything
     /// stays in the JSONL.
     blobs: Option<Arc<dyn BlobStore>>,
@@ -67,6 +72,7 @@ impl JsonlHistoryStore {
             homes: Mutex::new(HashMap::new()),
             logs: std::sync::Mutex::new(HashMap::new()),
             synced_dirs: Mutex::new(std::collections::HashSet::new()),
+            deleted: std::sync::Mutex::new(std::collections::HashSet::new()),
             blobs: None,
             projection: None,
             environment: None,
@@ -168,6 +174,27 @@ impl JsonlHistoryStore {
     /// The path of this session's transcript.
     async fn session_path_of(&self, session: SessionId) -> PathBuf {
         session_file(&self.session_dir_of(session).await, &session)
+    }
+
+    /// [`HistoryError::SessionDeleted`] for a line other than `Meta` to a
+    /// session this store deleted; a `Meta` lifts the tombstone.
+    fn refuse_if_deleted(&self, session: SessionId, entry: &LogEntry) -> Result<(), HistoryError> {
+        let mut deleted = self.deleted.lock().unwrap_or_else(|e| e.into_inner());
+        if !deleted.contains(&session) {
+            return Ok(());
+        }
+        if matches!(entry, LogEntry::Meta { .. }) {
+            deleted.remove(&session);
+            return Ok(());
+        }
+        Err(HistoryError::SessionDeleted(session.to_string()))
+    }
+
+    fn was_deleted(&self, session: SessionId) -> bool {
+        self.deleted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&session)
     }
 
     fn log_of(&self, session: SessionId) -> Arc<Mutex<LogState>> {

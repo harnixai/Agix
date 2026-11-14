@@ -21,6 +21,7 @@ use super::{lineage_of, HistoryStore, LineageSnapshot, SessionFacts, SessionStat
 pub struct InMemoryHistoryStore {
     sessions: std::sync::Mutex<std::collections::HashMap<SessionId, Vec<EnvelopedEntry>>>,
     titles: std::sync::Mutex<std::collections::HashMap<SessionId, String>>,
+    deleted: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
 impl InMemoryHistoryStore {
@@ -42,6 +43,15 @@ impl HistoryStore for InMemoryHistoryStore {
         entry: LogEntry,
         tags: crate::entry::EntryTags,
     ) -> Result<(), HistoryError> {
+        {
+            let mut deleted = self.deleted.lock().unwrap_or_else(|e| e.into_inner());
+            if deleted.contains(&session) {
+                if !matches!(entry, LogEntry::Meta { .. }) {
+                    return Err(HistoryError::SessionDeleted(session.to_string()));
+                }
+                deleted.remove(&session);
+            }
+        }
         self.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -81,6 +91,10 @@ impl HistoryStore for InMemoryHistoryStore {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&session);
+        self.deleted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session);
         Ok(())
     }
 
