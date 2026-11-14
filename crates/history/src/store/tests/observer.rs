@@ -184,7 +184,7 @@ async fn append_enveloped_reaches_the_inner_store() {
     let watched = ObservedHistoryStore::new(inner.clone(), vec![observer.clone()]);
     let session = SessionId::new();
     let line = EnvelopedEntry::new(session, user("imported"));
-    let id = line.id.clone();
+    let id = line.id;
     watched.append_enveloped(session, vec![line]).await.unwrap();
     let stored = inner.load(session).await.unwrap();
     assert_eq!(stored.len(), 1);

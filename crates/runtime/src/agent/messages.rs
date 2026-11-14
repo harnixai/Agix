@@ -142,7 +142,7 @@ pub enum RewindError {
     Invalid(String),
     /// Files that cannot be restored as asked; nothing was changed.
     Precondition(Vec<RewindIssue>),
-    Failed(RewindFailure),
+    Failed(Box<RewindFailure>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]

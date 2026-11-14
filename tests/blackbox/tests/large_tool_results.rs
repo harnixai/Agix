@@ -55,8 +55,7 @@ fn saved_path(run: &LiveRun, session: &str, tool_use_id: &str) -> PathBuf {
 fn last_turn_request(stub: &ProviderStub) -> SeenRequest {
     stub.calls()
         .into_iter()
-        .filter(|c| c.purpose() == Purpose::Turn)
-        .last()
+        .rfind(|c| c.purpose() == Purpose::Turn)
         .expect("a turn reached the model")
 }
 

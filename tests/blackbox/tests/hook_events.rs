@@ -479,12 +479,11 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     assert_eq!(end["session_id"], session.as_str());
 
     let fired = ledger.names();
-    for unwired in ["ElicitationResult"] {
-        assert!(
-            !fired.iter().any(|n| n == unwired),
-            "{unwired} is listed as never fired: {fired:?}"
-        );
-    }
+    let unwired = "ElicitationResult";
+    assert!(
+        !fired.iter().any(|n| n == unwired),
+        "{unwired} is listed as never fired: {fired:?}"
+    );
     run.finish().await;
     Ok(())
 }

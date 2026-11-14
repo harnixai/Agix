@@ -182,9 +182,6 @@ impl SessionPool {
                 )
             })
             .await
-            .map(|(turn_state, current_turn_id, context, health)| {
-                (turn_state, current_turn_id, context, health)
-            })
             .unwrap_or_else(|| (api::TurnState::Idle, None, None, Default::default()));
         let health = if health.is_empty() {
             None

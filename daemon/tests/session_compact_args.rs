@@ -52,13 +52,14 @@ async fn instructions_reach_the_summary_request() {
     )
     .await;
 
-    let requests = seen.lock().unwrap();
-    let summary_request = serde_json::to_string(requests.last().unwrap()).unwrap();
-    assert!(
-        summary_request.contains("keep every file path verbatim"),
-        "{summary_request}"
-    );
-    drop(requests);
+    {
+        let requests = seen.lock().unwrap();
+        let summary_request = serde_json::to_string(requests.last().unwrap()).unwrap();
+        assert!(
+            summary_request.contains("keep every file path verbatim"),
+            "{summary_request}"
+        );
+    }
     assert!(history_text(&history(&srv.sock, &sid).await).contains("the summary"));
     srv.stop().await;
 }

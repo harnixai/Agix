@@ -89,8 +89,7 @@ fn read(path: &Path) -> Option<String> {
 fn last_turn_request(stub: &ProviderStub) -> blackbox::SeenRequest {
     stub.calls()
         .into_iter()
-        .filter(|c| c.purpose() == blackbox::Purpose::Turn)
-        .last()
+        .rfind(|c| c.purpose() == blackbox::Purpose::Turn)
         .expect("a turn reached the model")
 }
 

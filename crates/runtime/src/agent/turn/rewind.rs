@@ -81,7 +81,7 @@ impl Agent {
         {
             let mut failure = self.undo(&rewind_id, undo, "the rewind's commit", e).await;
             failure.commit_not_recorded = true;
-            return Err(RewindError::Failed(failure));
+            return Err(RewindError::Failed(Box::new(failure)));
         }
         self.reload_after_rewind(&request, &plan).await?;
         let mut report = self.rewind_report(&request, &plan, &rewind_id, false);
@@ -179,7 +179,7 @@ impl Agent {
     }
 
     fn failed_before_any(&self, rewind_id: &str, error: String) -> RewindError {
-        RewindError::Failed(RewindFailure {
+        RewindError::Failed(Box::new(RewindFailure {
             rewind_id: rewind_id.to_string(),
             failed: FailedPath {
                 path: String::new(),
@@ -190,7 +190,7 @@ impl Agent {
             partial: false,
             commit_not_recorded: false,
             conversation_changed: false,
-        })
+        }))
     }
 
     async fn restore_files(&self, plan: &Plan, rewind_id: &str) -> Result<Vec<Undo>, RewindError> {
@@ -217,7 +217,7 @@ impl Agent {
                 }),
                 Err(e) => {
                     let failure = self.undo(rewind_id, done, &restore.shown, e).await;
-                    return Err(RewindError::Failed(failure));
+                    return Err(RewindError::Failed(Box::new(failure)));
                 }
             }
         }

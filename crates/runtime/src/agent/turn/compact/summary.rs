@@ -14,6 +14,8 @@ pub(super) enum SummaryAttempt {
 }
 
 impl Agent {
+    // Each argument is a separate fact of one compaction request; a bundle type would only be built to be taken apart again.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn summarized_or_cascaded(
         &self,
         pre_compact: &[ModelMessage],
