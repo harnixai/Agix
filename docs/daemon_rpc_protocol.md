@@ -477,7 +477,7 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
 bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会话按 `default`
 运行,`session.resume` 报出的 `permission.mode` 也是 `default`。
 
-### 4.7 `PermissionDecision` / `QuestionAnswer` — 回答提问
+### 4.7 `PermissionDecision` / `QuestionAnswer` / `McpElicitationAnswer` — 回答提问
 
 `prompt_type` 为 `permission` 时,`session.respondToPrompt` 的 `decision`,四种形态:
 
@@ -504,6 +504,20 @@ bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会�
 ```
 
 `text` 等于某个选项的 `key` 时,模型读到的是 `key: label`(如 `a: main`);否则原样交给模型。
+
+`prompt_type` 为 `mcp_elicitation` 时,`session.respondToPrompt` 的 `answer`,三种形态:
+
+```jsonc
+{ "type": "accept", "content": { "color": "blue" } }   // form:按那一帧的 requested_schema 填
+{ "type": "accept" }                                   // url:人已经去过那个页面,不带 content
+{ "type": "decline" }                                  // 人说了不
+{ "type": "cancel" }                                   // 没做选择
+```
+
+答案原样回给 MCP server,不进转录、不进遥测,模型只看到 server 拿它做出的工具结果。form 的
+`content` 先按 server 的 `requested_schema` 校验,不合 → `INVALID_PARAMS`,错误的 `data.schema_errors`
+列出每一处问题,**提问不撤**,可以改了再答;url 的 `accept` 带了 `content`、form 的 `accept` 没带,
+同样是 `INVALID_PARAMS`。
 
 ### 4.8 `stop_reason`
 
@@ -765,6 +779,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_agents` | 有 `session.startAgent`,宿主不经模型在会话下起子 Agent;子 Agent 任务带 `usage`、`structured_output`、`detail.tag`(§6.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
+| `mcp_elicitation` | `options.prompt_types` 认 `mcp_elicitation`:MCP server 在工具调用中向用户的询问推成 `prompt_type:"mcp_elicitation"` 的 `prompt` 帧,答案按 §4.7 回给 server(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
 | `session_import` | 有 `session.import`,把 `session.export` 的归档装成新会话(§6.3) |
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
@@ -1199,8 +1214,10 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
 列了 `question`,有人值守场景(`ARCHITECTURE.md` §3.2.3,如 `code`)的会话才有
 `AskUserQuestion`,模型的提问推成 `prompt_type:"question"` 的帧等宿主回答;没列时这个
-会话根本没有 `AskUserQuestion` —— 一个只会被拒绝的工具不该给模型看。不认识的取值被忽略,
-不会让整份 `options` 作废。
+会话根本没有 `AskUserQuestion` —— 一个只会被拒绝的工具不该给模型看。列了 `mcp_elicitation`,
+MCP server 在工具调用中要问用户的(2026-07-28 server 的 `input_required` 轮次,或老版本 server
+自己发的 `elicitation/create`)推成 `prompt_type:"mcp_elicitation"` 的帧;没列时不推,server 收到
+`cancel`。无人值守的会话从不问,同样回 `cancel`。不认识的取值被忽略,不会让整份 `options` 作废。
 
 `host_tools` 声明宿主自己实现的工具。它们和会话自己的工具一样宣告给模型,经过同样的权限、
 hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(§7.4),用
@@ -2314,6 +2331,15 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "answer": { "type": "answer", "text": "a" } }   // 见 §4.7
 ```
 
+回答 MCP server 的询问(`prompt_type:"mcp_elicitation"` 的帧)也带 `answer`:
+
+```jsonc
+// → params
+{ "session_id": "…", "prompt_id": "…",
+  "prompt_type": "mcp_elicitation",
+  "answer": { "type": "accept", "content": { "color": "blue" } } }   // 见 §4.7
+```
+
 `prompt_type` 必须与这个 `prompt_id` 那一帧的相同:拿 `decision` 去答一个还悬着的
 `question`(或反过来)→ `INVALID_PARAMS`。认不出的 `prompt_type`、缺了或形状不对的
 `decision` / `answer` 也是 `INVALID_PARAMS`。
@@ -2333,7 +2359,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 未在 `--permission-prompt-timeout`(没给时取设置 `execution.permission_prompt_timeout_secs`,
 默认 300 秒)内回答的提问**失败关闭**:权限提问按拒绝
 处理,turn 带着一条 error `tool_result` 继续;模型的提问以"用户没有回答"作为
-`AskUserQuestion` 的结果交还模型。都不会挂死。
+`AskUserQuestion` 的结果交还模型;MCP server 的询问回 server `cancel`。都不会挂死。
 
 #### `session.respondToolCall`
 
@@ -2956,7 +2982,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `tool_use` | `{id,name,input}` | 模型发起工具调用,参数已完整。参数不是完整 JSON 的(多半被输出上限截断)`input` 为 `{}`,不执行,随后的 `tool_result` 是说明这一点的错误 |
 | `tool_progress` | `{tool_use_id,name,message,progress?,total?,dropped}` | 运行中的工具调用报的进度,`tool_use_id` 是那次 `tool_use` 的 `id`;每次调用每秒至多一帧,`dropped` 是上一帧以来合并掉的条数。不进 transcript,不保证送达(§7.3) |
 | `tool_result` | `{id,name,content,is_error,file_changes?}` | 工具返回。`Write` / `Edit` / `NotebookEdit` 带 `file_changes`(§7.5),其余没有这个键 |
-| `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答 |
+| `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}`;`mcp_elicitation`:`{prompt_type,prompt_id,server,mode,message,requested_schema?,url?,url_host?,tool_use_id?}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答。`mcp_elicitation` 的 `mode` 为 `form`(带 `requested_schema`)或 `url`(带 `url` 与它的主机 `url_host`,只有 `https` 和本机的 `http` 会推到宿主,别的直接回 server `decline`);`message`、`requested_schema`、`url` 都是 **MCP server 写的**,宿主要标明来自 `server`、显示完整 URL 与 `url_host`、不自动打开 —— Agix 自己从不打开它 |
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
 | `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
 | `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者 |
@@ -3369,10 +3395,16 @@ daemon 会话的默认权限模式是 **`default`(ask)**,不是放行一切。
 不限);超时、会话关闭或宿主 `decline`,模型都从 `AskUserQuestion` 的结果里读到用户没有回答,
 不会把沉默当成回答。子 Agent 没有 `AskUserQuestion`。
 
+MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时、会话关闭或这一轮被
+中断,server 都不会拿到人没给过的回答:超时与没人能答回 `cancel`,中断时整个工具调用被丢弃。
+2026-07-28 的 server 一轮一轮地问,工具调用的时限按轮算,人想的时间不算在内;老版本 server 的
+`elicitation/create` 发生在它的 `tools/call` 里,人想的时间也算进工具调用的时限。老版本 server 被几个会话共用、同时
+有不止一个调用在途时,它的询问认不出是哪个调用的,一律回 `cancel` 而不猜。
+
 **子 Agent 的询问在父会话上问。** 子 Agent(模型起的、`session.startAgent` 起的、前台
 的、后台的)的工具调用照父会话的权限判;要问时,父会话推一帧 `prompt`,`message` 以
 `[sub-agent <侧链会话 id>]` 开头。用 `session.respondToPrompt` 回答,`session_id` 填
-**父会话**,不是侧链会话。父会话空闲时这帧照样推(`turn_id` 为 `null`,§7)。等回答
+**父会话**,不是侧链会话。子 Agent 调的 MCP 工具问用户时也一样。父会话空闲时这帧照样推(`turn_id` 为 `null`,§7)。等回答
 期间子 Agent 的任务是 `waiting`,`waiting_for` 里有这个 `prompt_id`(§6.3 `session.tasks`、
 §7 `task_updated`)。超时与关闭的规则同上。
 

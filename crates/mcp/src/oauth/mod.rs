@@ -1,4 +1,4 @@
-//! MCP authorization (the 2025-11-25 authorization spec, OAuth 2.1) for
+//! MCP authorization (the 2026-07-28 authorization spec, OAuth 2.1) for
 //! streamable HTTP / SSE servers.
 //!
 //! One [`McpAuth`] per session pool. It keeps each server's authorization

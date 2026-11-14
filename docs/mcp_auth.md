@@ -1,7 +1,7 @@
 # MCP 授权:远端 MCP server 的 OAuth
 
 远端 MCP server(`streamable_http` / `sse`)可以要求客户端带 OAuth 访问令牌。Agix 按
-[MCP Authorization 规范 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+[MCP Authorization 规范 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 (OAuth 2.1)实现客户端一侧:发现授权服务器、注册客户端、在浏览器里登录、换取并刷新令牌、
 带着令牌连接。浏览器在宿主那边,所以**登录由宿主驱动**:daemon 报出哪个 server 需要登录,
 宿主经 RPC 发起、把用户送去授权页、(必要时)把回调交回来。
@@ -115,8 +115,11 @@ discovery 取授权服务器元数据。server 没有发布任何 OAuth 元数�
 自动加上,以便拿到刷新令牌。
 
 授权请求总是带 `resource`(RFC 8707,server 的规范 URL)、S256 的 `code_challenge` 和
-`state`;回调先校验 `state`,不符的回调被拒绝而流程继续等真正的那个;授权服务器在回调里
-带了 `iss` 就校验它(RFC 9207)。
+`state`;回调先校验 `state`,不符的回调被拒绝而流程继续等真正的那个。然后按 RFC 9207 校验
+`iss`:带了就必须是发现时记下的那个 issuer;授权服务器的元数据声明了
+`authorization_response_iss_parameter_supported` 时,没带也拒。这两种都在换令牌之前拒掉,
+这次登录记为 `failed`(`mcp_auth_failed` 的 `error` 说是 issuer 不符),什么也不存,重新
+`mcp.auth.start` 即可。没声明也没带的放行 —— 那是早于 RFC 9207 的授权服务器,规范要求兼容它们。
 
 **回调去哪:**
 

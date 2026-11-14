@@ -162,10 +162,13 @@ monitors and structured output ([table below](#tools--45-built-in)).
   packages with install-time disclosure.
 - Hooks at twenty-nine moments, with command, prompt, HTTP and agent backends
   ([`docs/hooks.md`](docs/hooks.md)).
-- An MCP client (stdio, SSE, streamable HTTP, WebSocket), declarative scenes,
-  and custom agent types.
-- MCP authorization (the 2025-11-25 spec, OAuth 2.1): discovery, dynamic
-  client registration, PKCE, refresh; sign-in driven by the host over RPC with
+- An MCP client (stdio, SSE, streamable HTTP, WebSocket) on MCP 2026-07-28,
+  falling back to `initialize` for 2025-11-25 servers; what a server asks the
+  user mid-call reaches the host as a prompt. Declarative scenes and custom
+  agent types.
+- MCP authorization (the 2026-07-28 spec, OAuth 2.1): discovery, client ID
+  metadata documents or dynamic client registration, PKCE, the RFC 9207 `iss`
+  check, refresh; sign-in driven by the host over RPC with
   a loopback or host-owned redirect; client credentials and enterprise-managed
   authorization for unattended servers; tokens in 0600 files or the host's own
   store ([`docs/mcp_auth.md`](docs/mcp_auth.md)).

@@ -113,8 +113,10 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 - 公开的 46 个扩展点:31 个契约、9 个拦截点、6 个注册点。
 - 编译进宿主的 Rust 插件,与 QuickJS 脚本;可以打成插件包安装,安装时强制披露。
 - 二十九个时机的 hook,后端有 command、prompt、HTTP、agent 四种([hooks.md](hooks.md))。
-- MCP 客户端(stdio、SSE、streamable HTTP、WebSocket);声明式场景;自定义 Agent 类型。
-- MCP 授权(2025-11-25 规范,OAuth 2.1):发现、动态客户端注册、PKCE、刷新;登录由宿主经 RPC
+- MCP 客户端(stdio、SSE、streamable HTTP、WebSocket),按 MCP 2026-07-28 协商,对 2025-11-25 的
+  server 回落到 `initialize`;server 在调用中向用户的询问推给宿主作答。声明式场景;自定义 Agent 类型。
+- MCP 授权(2026-07-28 规范,OAuth 2.1):发现、客户端 ID 元数据文档或动态客户端注册、PKCE、
+  RFC 9207 `iss` 校验、刷新;登录由宿主经 RPC
   驱动,回调走回环或宿主自己的地址;无人值守的 server 用 client credentials 或企业托管授权;
   令牌存在 0600 文件或宿主自己的存储里([mcp_auth.md](mcp_auth.md))。
 - 企业 MCP 策略:按 server 名、命令、URL 的允许与拒绝列表,从用户写不了的系统路径读

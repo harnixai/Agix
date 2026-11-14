@@ -493,7 +493,7 @@ recorder 不落盘:同一进程里的重建共用同一个 recorder,回放接着
   `server/watch.rs` 为连接实现 `SessionWatcher`。投递是同步入队,所以 `turn_complete`
   一定排在同一连接上 `run_turn` 的响应之前。定时任务与目标轮的 `run_turn` 不带发起订阅者
   (`Option<Arc<dyn SessionWatcher>>` 传 `None`),它们的帧照样发给全部订阅者。
-- **待答提问以引擎为准。** 引擎的待答表(`PendingPermissions` / `PendingQuestions`,子 Agent 经
+- **待答提问以引擎为准。** 引擎的待答表(`PendingPermissions` / `PendingQuestions` / `PendingMcpAnswers`,子 Agent 经
   `ParentElicitation` 用父会话的那张)由 `OpenPrompt` 登记;回答、超时、回合取消都在它的 `Drop` 里
   一处结束,同时发 `AgentEvent::PromptResolved`。`SessionHub` 收到这个事件才把提问从待答里去掉,并在
   同一把锁里广播 `prompt_resolved`;`respondToPrompt` 只把回答交给引擎,不自己去掉。
@@ -1719,9 +1719,32 @@ HTTP;规则里写的 `ws://` / `wss://` 同样换过来):`https://*.corp.example
 项目层只改了全局 server 的一部分(比如只换了 `url`)也算项目层的 server。未信任的项目,
 它自己的 server 根本不启动(§6.6)。
 
+**server 向用户的询问。** 连接按 2026-07-28 协商(`server/discover`),server 答不上来就回落到
+2025-11-25 的 `initialize`。server 在工具调用中要问用户时有两条来路,出口是同一个:
+
+- 2026-07-28 的 server 把 `tools/call` 答成 `input_required`。`mcp::elicit::call_with_rounds`
+  自己驱动轮次(不用 rmcp 内置的重试,那条路只会拿连接级的 handler 作答),每个询问经这次调用的
+  `McpCallScope` 交给它的 `McpElicitor`,答完带着 `input_responses` 再发下一轮;一轮里的几个
+  询问一个一个问。工具时限按轮算。
+- 老版本的 server 自己发 `elicitation/create`,落在连接级的 `NotifyingHandler` 上,而连接是几个
+  会话共用的。`ElicitRoute` 记着这条连接上在途的调用,**恰好一个**时交给它,否则回 `cancel`:
+  猜错了就是把一个会话的 server 的问题拿去问另一个会话的宿主。
+
+`McpElicitor` 的实现是适配器里的 `ToolCallElicitor`:没人值守回 `cancel`;否则以
+`ElicitKind::McpServer` 经这次调用的 `Elicitation` 问出去(子 Agent 的就是父会话的那个),
+`Elicitation` / `ElicitationResult` 两个 hook 由运行时给 `Elicitation` 包的一层
+(`runtime::elicitation_hooks`)触发,所以不管经哪个 `Elicitation` 问都会经过它们。daemon 上它推成
+`prompt_type:"mcp_elicitation"` 的帧,宿主没在 `prompt_types` 里列它就回 `cancel`。
+
+server 写的 `message`、`requested_schema`、`url` 都是不受信的:`url` 只有 `https` 和本机的 `http`
+推给宿主,别的回 `decline`;Agix 从不打开它。宿主的 form 答案在 daemon 收下时
+(`respondToPrompt`)按 `requested_schema` 校验,不合就以 `INVALID_PARAMS` 退回、提问不撤 ——
+只有那里还能叫宿主重答。`decline` 只表示人或 hook 明确说了不,其余没得到回答的都是 `cancel`。
+答案只回给 server,不进转录、不进遥测。Tasks 扩展(SEP-2663)不声明,server 回任务时报错而不等。
+
 ### 6.5 MCP 授权
 
-远端 MCP server 要求 OAuth 时(MCP Authorization 规范 2025-11-25),登录由宿主驱动,令牌由
+远端 MCP server 要求 OAuth 时(MCP Authorization 规范 2026-07-28),登录由宿主驱动,令牌由
 daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在整体里的位置:
 
 - **每个会话池一个 `mcp::oauth::McpAuth`**:各 server 的授权状态、进行中的登录、凭据存储
@@ -1736,6 +1759,8 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
   server 从所有缓存的连接里摘下,登录完成后只重连它,受影响的会话在下一轮之前重建。
 - **MCP 策略在授权之前**:被 §6.4 拒绝的 server 不连接,也就走不到 OAuth;授权服务器在任何
   跳转之前对照 `allowed_authorization_servers`。
+- **回调先过 `state` 再过 `iss`**(RFC 9207,rmcp 的 `handle_callback_url` 校验):`iss` 不是发现时的
+  issuer,或元数据声明了会带却没带,在换令牌之前拒掉,登录记为 `failed`,什么也不存。
 - **无人值守的 server**(`client_credentials`、企业托管授权)不经过登录:令牌在每次请求之前
   检查,快到期或被拒时重新取。企业身份由宿主经 `mcp.auth.setIdentity` 交来,只在内存里。
 - **地址过滤与代理**:OAuth 请求与非回环 server 的 MCP 连接都过 `mcp::oauth::http` 的地址
