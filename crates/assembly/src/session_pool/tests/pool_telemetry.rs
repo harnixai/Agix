@@ -125,8 +125,12 @@ async fn recording_into_the_project_keeps_the_recordings_out_of_git() {
     settings.paths.local_data_dir = mine.path().to_path_buf();
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let _handle = build_pool_telemetry(&settings);
+    let merged = std::fs::read_to_string(mine.path().join(".gitignore")).unwrap();
+    assert_eq!(merged.lines().next(), Some("mine"), "{merged}");
+    assert!(merged.lines().any(|l| l == "telemetry/"), "{merged}");
+    let _handle = build_pool_telemetry(&settings);
     assert_eq!(
         std::fs::read_to_string(mine.path().join(".gitignore")).unwrap(),
-        "mine\n"
+        merged
     );
 }
