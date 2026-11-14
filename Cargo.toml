@@ -46,7 +46,6 @@ repository = "https://github.com/openatta/agix"
 # leaves them out cannot reach the machine through tokio.
 tokio = { version = "1", features = ["fs", "io-util", "macros", "parking_lot", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "rt"] }
-tokio-stream = "0.1"
 futures = "0.3"
 async-trait = "0.1"
 
@@ -87,7 +86,6 @@ libc = "0.2"
 regex = "1"
 globset = "0.4"
 html2text = "0.6"
-which = "7"
 similar = "2"
 base64 = "0.22"
 ignore = "0.4"
@@ -129,7 +127,6 @@ agents     = { path = "crates/agents" }
 assembly   = { path = "crates/assembly", default-features = false }
 daemon     = { path = "daemon" }
 rpc-client = { path = "tests/rpc_client" }
-live = { path = "tests/live" }
 mcp-oauth-mock = { path = "tests/fixtures/mcp_oauth_mock" }
 guards = { path = "tests/guards" }
 

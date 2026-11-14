@@ -1,6 +1,0 @@
-{
-  "$schema": "../../../../docs/schemas/settings.schema.json",
-  "execution": {
-    "team_enabled": true
-  }
-}
