@@ -8,8 +8,8 @@ use crate::session_pool::api::{SessionEvent, SessionFrame};
 use base::context::goal::GoalView;
 use base::context::{TaskEvent, TaskInfo};
 use base::event::{
-    AgentEvent, ContextUsage, FailureKind, PromptResolution, QueuedUserMessage, TeamStageStatus,
-    TurnFailure, WithdrawalReason,
+    AgentEvent, ContextUsage, FailureKind, HostCallWithdrawal, PromptResolution, QueuedUserMessage,
+    TeamStageStatus, TurnFailure, WithdrawalReason,
 };
 use base::interface::elicitation::ElicitOption;
 use base::interface::model::Usage;
@@ -86,6 +86,21 @@ pub enum SessionEventPayload {
         resolution: PromptResolution,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<WithdrawalReason>,
+    },
+    HostToolCall {
+        call_id: String,
+        tool_use_id: String,
+        name: String,
+        input: Value,
+        timeout_ms: u64,
+        task_id: Option<String>,
+        agent_session_id: Option<String>,
+    },
+    HostToolCallResolved {
+        call_id: String,
+        resolution: PromptResolution,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<HostCallWithdrawal>,
     },
     SubagentProgress {
         agent_label: String,
@@ -242,6 +257,8 @@ impl SessionEventPayload {
         "tool_result",
         "prompt",
         "prompt_resolved",
+        "host_tool_call",
+        "host_tool_call_resolved",
         "subagent_progress",
         "team_progress",
         "skills_changed",
@@ -516,9 +533,33 @@ impl SessionEventPayload {
                 agent_id: _,
                 outcome: _,
                 turn_id: _,
-            }
-            | AgentEvent::HostToolCall { .. }
-            | AgentEvent::HostToolCallResolved { .. } => return None,
+            } => return None,
+            AgentEvent::HostToolCall {
+                call_id,
+                tool_use_id,
+                name,
+                input,
+                timeout_ms,
+                task_id,
+                agent_session_id,
+            } => Self::HostToolCall {
+                call_id: call_id.clone(),
+                tool_use_id: tool_use_id.clone(),
+                name: name.clone(),
+                input: input.clone(),
+                timeout_ms: *timeout_ms,
+                task_id: task_id.clone(),
+                agent_session_id: agent_session_id.clone(),
+            },
+            AgentEvent::HostToolCallResolved {
+                call_id,
+                resolution,
+                reason,
+            } => Self::HostToolCallResolved {
+                call_id: call_id.clone(),
+                resolution: *resolution,
+                reason: *reason,
+            },
             AgentEvent::CompactAction {
                 strategy,
                 messages_before,

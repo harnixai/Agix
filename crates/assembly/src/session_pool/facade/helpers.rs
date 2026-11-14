@@ -44,6 +44,9 @@ pub(in crate::session_pool) fn ask_of(
         AgentEvent::QuestionPrompt {
             prompt_id, task_id, ..
         } => Some((prompt_id.clone(), task_id.clone(), AskKind::Question)),
+        AgentEvent::HostToolCall {
+            call_id, task_id, ..
+        } => Some((call_id.clone(), task_id.clone(), AskKind::HostToolCall)),
         _ => None,
     }
 }
@@ -59,6 +62,7 @@ pub(in crate::session_pool) fn publish_agent_event(
     let ask = ask_of(&event);
     let resolved = match &event {
         AgentEvent::PromptResolved { prompt_id, .. } => Some(prompt_id.clone()),
+        AgentEvent::HostToolCallResolved { call_id, .. } => Some(call_id.clone()),
         _ => None,
     };
     let frame = SessionFrame {

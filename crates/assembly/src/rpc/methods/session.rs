@@ -142,6 +142,8 @@ pub struct SubscribeResult {
     pub last_seq: usize,
     /// Each unanswered `kind:"prompt"` `session.event` frame, as sent.
     pub pending_prompts: Vec<serde_json::Value>,
+    /// Each unanswered `kind:"host_tool_call"` `session.event` frame, as sent.
+    pub pending_host_calls: Vec<serde_json::Value>,
     pub resumed: bool,
 }
 

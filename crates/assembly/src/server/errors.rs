@@ -13,6 +13,10 @@ impl From<PoolError> for RpcError {
             PoolError::InvalidRequest(_) | PoolError::OutputOutOfRange { .. } => {
                 (codes::INVALID_PARAMS, None)
             }
+            PoolError::InvalidOptions { field, error } => (
+                codes::INVALID_PARAMS,
+                Some(json!({ "invalid_options": [{ "field": field, "error": error }] })),
+            ),
             PoolError::SessionNotFound { .. } => (codes::SESSION_NOT_FOUND, None),
             PoolError::SessionBusy(busy) => (codes::SESSION_BUSY, Some(busy_data(busy))),
             PoolError::SceneNotFound { .. }

@@ -1,5 +1,6 @@
 //! 跑一轮与上下文：`session.run_turn` / `compact` / `clear` / `respondToPrompt` /
-//! `inspectContext` / `dropMessages` / `editMessage` / `rewind` / `checkpoints`。
+//! `respondToolCall` / `inspectContext` / `dropMessages` / `editMessage` /
+//! `rewind` / `checkpoints`。
 
 use super::*;
 use crate::rpc::methods::session::SessionRef;
@@ -17,6 +18,7 @@ rpc_methods! {
     "session.compact" => compact(SessionRef) -> TurnReply;
     "session.clear" => clear(SessionRef) -> TurnReply;
     "session.respondToPrompt" => respond_to_prompt(RespondToPromptParams) -> PromptAnswered;
+    "session.respondToolCall" => respond_tool_call(RespondToolCallParams) -> ToolCallAnswered;
     "session.inspectContext" => inspect_context(SessionRef) -> ContextReport;
     "session.dropMessages" => drop_messages(DropMessagesParams) -> Dropped;
     "session.editMessage" => edit_message(EditMessageParams) -> Edited;
@@ -96,6 +98,11 @@ async fn respond_to_prompt(
         AskKind::Question => {
             PromptAnswer::Question(p.answer.ok_or_else(|| invalid("missing answer"))?)
         }
+        AskKind::HostToolCall => {
+            return Err(invalid(
+                "a host tool call is answered with session.respondToolCall",
+            ))
+        }
     };
     s.pool
         .respond_to_prompt(&p.session_id, p.prompt_id.clone(), answer)
@@ -103,6 +110,18 @@ async fn respond_to_prompt(
     Ok(PromptAnswered {
         prompt_id: p.prompt_id,
     })
+}
+
+async fn respond_tool_call(
+    s: &DaemonServer,
+    _: &Call,
+    p: RespondToolCallParams,
+) -> Result<ToolCallAnswered, RpcError> {
+    let reply = p.reply().map_err(invalid)?;
+    s.pool
+        .respond_tool_call(&p.session_id, p.call_id.clone(), reply)
+        .await?;
+    Ok(ToolCallAnswered { call_id: p.call_id })
 }
 
 async fn inspect_context(

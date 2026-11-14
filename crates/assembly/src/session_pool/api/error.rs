@@ -10,6 +10,10 @@ use std::path::PathBuf;
 pub enum PoolError {
     #[error("{0}")]
     InvalidRequest(String),
+    /// A field of the session's `options` the engine refused, which reading
+    /// them could not tell: a host tool named like one the session has.
+    #[error("options that do not read: {field}")]
+    InvalidOptions { field: String, error: String },
     #[error("{message}")]
     SessionNotFound { session_id: String, message: String },
     #[error("{}", .0.message)]

@@ -18,6 +18,7 @@ mod hook_events_doc;
 mod hooks_on_the_session_exec;
 mod host_contracts;
 mod host_scenes;
+mod host_tools;
 mod inline_command_pipeline;
 mod instruction_files;
 mod managed_settings;

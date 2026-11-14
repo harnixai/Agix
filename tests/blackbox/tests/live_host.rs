@@ -3,8 +3,8 @@
 //! questions of; a session's tasks as a monitoring view sees them, live, and
 //! stops; the instance's lifecycle and session list across an engine restart,
 //! with a project reached by two paths; a host scene's own tool in the hands
-//! of sub-agents; and the context the next call carries, seen before it is
-//! made and edited by the host.
+//! of sub-agents; the context the next call carries, seen before it is
+//! made and edited by the host; and a tool the host declares and runs itself.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -811,6 +811,85 @@ async fn a_host_edits_what_the_session_carries_and_sees_the_next_call_first() ->
     let after = history(&mut run, &session).await?;
     let at = said.as_u64().unwrap_or_default() as usize;
     assert!(after[at]["content"].to_string().contains(&corrected));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
+    let mut run = LiveRun::start(
+        "host_tool",
+        json!({ "permission_mode": "default" }),
+        Mode::InProcess,
+    )
+    .await?;
+    let key = format!("k-{}", nonce());
+    let secret = format!("V-{}", nonce().chars().rev().collect::<String>());
+    let session = run
+        .session_with(json!({ "options": {
+            "permission_mode": "default",
+            "permission_rules": [
+                { "source": "session", "behavior": "allow", "tool_name": "HostLookup" }
+            ],
+            "host_tools": [{
+                "name": "HostLookup",
+                "description": "Look a key up in the host's own table and return its value.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "key": { "type": "string" } },
+                    "required": ["key"]
+                },
+                "read_only": true
+            }]
+        }}))
+        .await?;
+
+    let mut host = run.daemon.connect().await?;
+    let subscribed = host.session_subscribe(&session).await?;
+    anyhow::ensure!(subscribed.error.is_none(), "{subscribed:?}");
+    let mut answerer = run.daemon.connect().await?;
+    let calls: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let (seen, value, sid) = (calls.clone(), secret.clone(), session.clone());
+    let reader = tokio::spawn(async move {
+        while let Ok(Some(frame)) = host.next_frame().await {
+            let event = &frame["params"]["event"];
+            if event["kind"] != "host_tool_call" {
+                continue;
+            }
+            seen.lock().unwrap().push(event.clone());
+            let asked = event["input"]["key"].as_str().unwrap_or_default();
+            let _ = answerer
+                .call(
+                    "session.respondToolCall",
+                    json!({
+                        "session_id": sid,
+                        "call_id": event["call_id"],
+                        "result": { "content": format!("{asked} → {value}") }
+                    }),
+                )
+                .await;
+        }
+    });
+
+    let turn = run
+        .turn(
+            &session,
+            &format!(
+                "Use the HostLookup tool to look up `{key}`, then tell me exactly what it \
+                 returned."
+            ),
+        )
+        .await?;
+    reader.abort();
+    let calls = calls.lock().unwrap().clone();
+    assert_eq!(calls.len(), 1, "the host is called once: {calls:#?}");
+    assert_eq!(calls[0]["name"], "HostLookup");
+    assert_eq!(calls[0]["input"]["key"], key.as_str());
+    assert!(
+        turn.text.contains(&secret),
+        "the reply carries what only the host knew: {}",
+        turn.text
+    );
     run.finish().await;
     Ok(())
 }

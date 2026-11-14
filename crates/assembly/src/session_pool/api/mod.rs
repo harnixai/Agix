@@ -31,7 +31,9 @@ pub use mcp::{
     McpAuthDone, McpAuthStarted, McpAuthState, McpAuthStatus, McpIdentity, McpReconnected,
     McpRedirect, McpServerRef, McpServerState, McpServerStatus, McpServerWritten,
 };
-pub use options::{ClockOptions, RecorderOptions, SessionOptions, TelemetryOptions};
+pub use options::{
+    ClockOptions, HostToolOption, RecorderOptions, SessionOptions, TelemetryOptions,
+};
 pub use plugin::{
     PluginDisclosure, PluginInfo, PluginInstalled, PluginRemoved, PluginScope, PluginToggled,
     SkillConflict, SkillOrigin, VisibleText,

@@ -121,8 +121,13 @@ impl Tool for DeclaredHostTool {
         self.decl.input_schema.clone()
     }
 
+    /// Not `Reach::Operator`: that reach is contained and never asked about,
+    /// and a host tool runs whatever the host does with it. Asked about like
+    /// an MCP server's tool until a rule allows it; not fenced like one, since
+    /// its result comes from the host the session answers to.
     async fn permission_facts(&self, _: &Value, _: &ToolContext) -> PermissionFacts {
-        PermissionFacts::new(Subject::None, Reach::Operator)
+        PermissionFacts::new(Subject::None, Reach::Unknown)
+            .with_question(format!("Allow the host's tool {}?", self.decl.name))
     }
 
     async fn validate_input(&self, input: &Value, _: &ToolContext) -> ValidationResult {

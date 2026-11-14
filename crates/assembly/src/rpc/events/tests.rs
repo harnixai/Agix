@@ -91,6 +91,30 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             json!({"kind": "prompt_resolved", "prompt_id": "p3", "resolution": "withdrawn", "reason": "timed_out"}),
         ),
         (
+            "tool_result_with_file_changes",
+            json!({"kind": "tool_result", "id": "toolu_2", "name": "Edit", "content": "Applied", "is_error": false, "turn_id": "inner",
+                   "file_changes": [{"path": "/repo/a.txt", "op": "modify", "before_hash": "sha256:00", "after_hash": "sha256:11",
+                                     "before_bytes": 2, "after_bytes": 3, "added": 1, "removed": 1,
+                                     "unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+ab\n", "truncated": false, "omitted": null}]}),
+        ),
+        (
+            "host_tool_call",
+            json!({"kind": "host_tool_call", "call_id": "hc_1", "tool_use_id": "toolu_3", "name": "HostEcho", "input": {"text": "ping"},
+                   "timeout_ms": 120000, "task_id": "a1", "agent_session_id": "sub-1"}),
+        ),
+        (
+            "host_tool_call_bare",
+            json!({"kind": "host_tool_call", "call_id": "hc_2", "tool_use_id": "toolu_4", "name": "HostEcho", "input": {}, "timeout_ms": 1000}),
+        ),
+        (
+            "host_tool_call_resolved",
+            json!({"kind": "host_tool_call_resolved", "call_id": "hc_1", "resolution": "answered"}),
+        ),
+        (
+            "host_tool_call_no_host",
+            json!({"kind": "host_tool_call_resolved", "call_id": "hc_2", "resolution": "withdrawn", "reason": "no_host"}),
+        ),
+        (
             "turn_start",
             json!({"kind": "turn_start", "turn_id": "inner"}),
         ),

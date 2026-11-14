@@ -205,6 +205,8 @@ impl EngineFactory {
         if let Some(schema) = options.and_then(|o| o.output_schema.clone()) {
             builder = builder.output_schema(schema);
         }
+        let host_tools = options.into_iter().flat_map(|o| &o.host_tools);
+        builder = builder.host_tools(host_tools.map(|t| t.declaration()).collect());
         if let Some(ledger) = &req.process_groups {
             builder = builder.process_groups(ledger.clone());
         }
@@ -225,7 +227,7 @@ impl EngineFactory {
         let (agent, event_rx, input_tx) = builder
             .goal_rounds_from_owner()
             .build()
-            .map_err(|e| format!("build agent: {e}"))?;
+            .map_err(build_failed)?;
         let namer = SessionNamer::of(session_id, &agent);
         Ok(BuiltEngine {
             agent,
@@ -478,4 +480,11 @@ fn bind_session_scripts(
         None
     };
     (builder, script_ledger, script_faults)
+}
+
+fn build_failed(e: runtime::agent::EngineError) -> CreateError {
+    match e {
+        runtime::agent::EngineError::HostTools(why) => CreateError::InvalidHostTools(why),
+        e => CreateError::Failed(format!("build agent: {e}")),
+    }
 }

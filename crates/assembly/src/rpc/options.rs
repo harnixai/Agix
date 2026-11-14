@@ -18,12 +18,14 @@ impl SessionOptions {
         "model",
         "prompt",
         "prompt_types",
+        "host_tools",
     ];
 
     /// The fields whose value is a list. Each entry is read on its own, so
     /// one bad entry is left out without the rest — a bad allow rule must not
     /// take the deny rules beside it along.
-    pub const LIST_FIELDS: &'static [&'static str] = &["permission_rules", "prompt_types"];
+    pub const LIST_FIELDS: &'static [&'static str] =
+        &["permission_rules", "prompt_types", "host_tools"];
 
     /// `params.options` as far as it can be read, and what in it could not
     /// be: a field this daemon does not know, one whose value does not
@@ -111,7 +113,39 @@ impl SessionOptions {
                 }),
             }
         }
+        if name == "host_tools" {
+            host_tool_problems(entries, ignored);
+        }
         kept
+    }
+}
+
+/// What the engine would refuse of `options.host_tools`, by the field of the
+/// entry it is in. Whether a name is taken by one of the session's own tools
+/// is known only once its engine is built.
+fn host_tool_problems(entries: &[Value], ignored: &mut Vec<IgnoredOption>) {
+    use crate::session_pool::api::HostToolOption;
+    if entries.len() > runtime::host_tools::MAX_DECLARED {
+        ignored.push(IgnoredOption {
+            field: Some("host_tools".into()),
+            error: format!("at most {} host tools", runtime::host_tools::MAX_DECLARED),
+        });
+    }
+    let mut names = std::collections::HashSet::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let Ok(tool) = serde_json::from_value::<HostToolOption>(entry.clone()) else {
+            continue;
+        };
+        let mut problems = runtime::host_tools::declaration_problems(&tool.declaration());
+        if !names.insert(tool.name.clone()) {
+            problems.push(("name", "declared twice".into()));
+        }
+        for (field, error) in problems {
+            ignored.push(IgnoredOption {
+                field: Some(format!("host_tools[{index}].{field}")),
+                error,
+            });
+        }
     }
 }
 
@@ -189,6 +223,17 @@ mod tests {
             model: Some("m".into()),
             prompt: Some(Default::default()),
             prompt_types: vec![AskKind::Question.as_str().into()],
+            host_tools: vec![crate::session_pool::api::HostToolOption {
+                name: "HostEcho".into(),
+                description: "d".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+                read_only: false,
+                destructive: false,
+                concurrency_safe: None,
+                timeout_ms: 120_000,
+                deferred: false,
+                subagents: false,
+            }],
         };
         let serialized = serde_json::to_value(&every_field).unwrap();
         let mut names: Vec<&str> = serialized

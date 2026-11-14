@@ -18,7 +18,7 @@ fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn   
 fn    crates/agents/src/delegate/mod.rs                          Delegator::delegate                    86
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   102
-fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        284
+fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        308
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              84
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    135
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            119
@@ -28,7 +28,7 @@ fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::se
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            89
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  179
-fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   90
+fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   92
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93

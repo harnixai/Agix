@@ -61,6 +61,8 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
         AgentEvent::PermissionPrompt { .. }
             | AgentEvent::PromptResolved { .. }
             | AgentEvent::QuestionPrompt { .. }
+            | AgentEvent::HostToolCall { .. }
+            | AgentEvent::HostToolCallResolved { .. }
             | AgentEvent::SubagentProgress { .. }
             | AgentEvent::ToolProgress { .. }
             | AgentEvent::SkillsChanged { .. }
@@ -77,6 +79,9 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
 pub enum AskKind {
     Permission,
     Question,
+    /// A call to a tool the host declared; answered with
+    /// `session.respondToolCall`, never `session.respondToPrompt`.
+    HostToolCall,
 }
 
 impl AskKind {
@@ -84,11 +89,13 @@ impl AskKind {
         match self {
             Self::Permission => "permission",
             Self::Question => "question",
+            Self::HostToolCall => "host_tool_call",
         }
     }
 }
 
-/// A permission prompt or question raised and not yet answered.
+/// A permission prompt, question or host tool call raised and not yet
+/// answered. `prompt_id` is a host call's `call_id`.
 #[derive(Debug, Clone)]
 pub struct PendingAsk {
     pub prompt_id: String,

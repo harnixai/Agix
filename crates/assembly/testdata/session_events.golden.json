@@ -611,6 +611,236 @@
     },
     {
       "between_turns": null,
+      "case": "tool_result_with_file_changes",
+      "event": {
+        "content": "Applied",
+        "file_changes": [
+          {
+            "added": 1,
+            "after_bytes": 3,
+            "after_hash": "sha256:11",
+            "before_bytes": 2,
+            "before_hash": "sha256:00",
+            "omitted": null,
+            "op": "modify",
+            "path": "/repo/a.txt",
+            "removed": 1,
+            "truncated": false,
+            "unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+ab\n"
+          }
+        ],
+        "id": "toolu_2",
+        "is_error": false,
+        "kind": "tool_result",
+        "name": "Edit",
+        "turn_id": "inner"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "content": "Applied",
+            "file_changes": [
+              {
+                "added": 1,
+                "after_bytes": 3,
+                "after_hash": "sha256:11",
+                "before_bytes": 2,
+                "before_hash": "sha256:00",
+                "omitted": null,
+                "op": "modify",
+                "path": "/repo/a.txt",
+                "removed": 1,
+                "truncated": false,
+                "unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+ab\n"
+              }
+            ],
+            "id": "toolu_2",
+            "is_error": false,
+            "kind": "tool_result",
+            "name": "Edit"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": "sub-1",
+            "call_id": "hc_1",
+            "input": {
+              "text": "ping"
+            },
+            "kind": "host_tool_call",
+            "name": "HostEcho",
+            "task_id": "a1",
+            "timeout_ms": 120000,
+            "tool_use_id": "toolu_3"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_tool_call",
+      "event": {
+        "agent_session_id": "sub-1",
+        "call_id": "hc_1",
+        "input": {
+          "text": "ping"
+        },
+        "kind": "host_tool_call",
+        "name": "HostEcho",
+        "task_id": "a1",
+        "timeout_ms": 120000,
+        "tool_use_id": "toolu_3"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": "sub-1",
+            "call_id": "hc_1",
+            "input": {
+              "text": "ping"
+            },
+            "kind": "host_tool_call",
+            "name": "HostEcho",
+            "task_id": "a1",
+            "timeout_ms": 120000,
+            "tool_use_id": "toolu_3"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": null,
+            "call_id": "hc_2",
+            "input": {},
+            "kind": "host_tool_call",
+            "name": "HostEcho",
+            "task_id": null,
+            "timeout_ms": 1000,
+            "tool_use_id": "toolu_4"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_tool_call_bare",
+      "event": {
+        "call_id": "hc_2",
+        "input": {},
+        "kind": "host_tool_call",
+        "name": "HostEcho",
+        "timeout_ms": 1000,
+        "tool_use_id": "toolu_4"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": null,
+            "call_id": "hc_2",
+            "input": {},
+            "kind": "host_tool_call",
+            "name": "HostEcho",
+            "task_id": null,
+            "timeout_ms": 1000,
+            "tool_use_id": "toolu_4"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hc_1",
+            "kind": "host_tool_call_resolved",
+            "resolution": "answered"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_tool_call_resolved",
+      "event": {
+        "call_id": "hc_1",
+        "kind": "host_tool_call_resolved",
+        "resolution": "answered"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hc_1",
+            "kind": "host_tool_call_resolved",
+            "resolution": "answered"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hc_2",
+            "kind": "host_tool_call_resolved",
+            "reason": "no_host",
+            "resolution": "withdrawn"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_tool_call_no_host",
+      "event": {
+        "call_id": "hc_2",
+        "kind": "host_tool_call_resolved",
+        "reason": "no_host",
+        "resolution": "withdrawn"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hc_2",
+            "kind": "host_tool_call_resolved",
+            "reason": "no_host",
+            "resolution": "withdrawn"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": null,
       "case": "turn_start",
       "event": {
         "kind": "turn_start",

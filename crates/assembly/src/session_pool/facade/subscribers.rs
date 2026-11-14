@@ -272,4 +272,37 @@ impl SessionPool {
         });
         Ok(())
     }
+
+    /// `session.respondToolCall` — the host's answer to a `host_tool_call`
+    /// frame. A `call_id` nobody waits on is a silent no-op, as for
+    /// `respondToPrompt`; one that names an open prompt is refused.
+    pub async fn respond_tool_call(
+        &self,
+        session_id: &str,
+        call_id: String,
+        reply: base::interface::host_call::HostReply,
+    ) -> Result<(), PoolError> {
+        let (input_tx, hub) = self
+            .live
+            .with_live(session_id, |live| {
+                (live.engine.input_tx.clone(), live.core.hub().clone())
+            })
+            .await
+            .ok_or_else(|| PoolError::session_not_found(session_id))?;
+        if let Some(asked) = hub
+            .ask_kind(&call_id)
+            .filter(|asked| *asked != AskKind::HostToolCall)
+        {
+            return Err(PoolError::InvalidRequest(format!(
+                "`{call_id}` is a {} prompt, not a host tool call; answer it with \
+                 session.respondToPrompt",
+                asked.as_str()
+            )));
+        }
+        let _ = input_tx.send(InputMessage::HostToolResponse {
+            call_id,
+            end: base::interface::host_call::HostCallEnd::Replied(reply),
+        });
+        Ok(())
+    }
 }

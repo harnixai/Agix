@@ -1,5 +1,6 @@
 //! 每个会话自己的事件出口 `SessionHub`：谁在看它、它还在等谁回答、它最近一次
-//! 有动静是什么时候。事件经它同步交给订阅者，不经过池级的 `sessions` 锁。
+//! 有动静是什么时候。宿主工具调用发出时没人在看、或看的人走光了，由它告诉引擎
+//! 不必再等。事件经它同步交给订阅者，不经过池级的 `sessions` 锁。
 //!
 //! 锁序里它是叶子：持着它不 `.await`、不去拿别的锁。帧在锁下定好收件人、排进
 //! 发件队列，放开锁再交给 `SessionWatcher::deliver`。投递由另一把锁串行：同一时刻
@@ -9,6 +10,7 @@
 //! `deliver` 不能等池；要用池的工作交给它另起的任务。
 
 use crate::session_pool::api::{AskKind, PendingAsk, SessionFrame, SessionWatcher, WatcherId};
+use base::interface::host_call::HostCallEnd;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -28,6 +30,27 @@ struct Inner {
     pending: HashMap<String, PendingAsk>,
     outbox: VecDeque<Outgoing>,
     delivering_on: Option<ThreadId>,
+    /// The running engine's input, where a host call nobody can answer is
+    /// ended.
+    engine: Option<runtime::agent::InputSender>,
+}
+
+impl Inner {
+    /// End every open host call with `end` once nobody is left to answer it.
+    fn end_host_calls_if_unwatched(&self, end: fn() -> HostCallEnd) {
+        if !self.watchers.is_empty() {
+            return;
+        }
+        let Some(engine) = &self.engine else { return };
+        for ask in self.pending.values() {
+            if ask.kind == AskKind::HostToolCall {
+                let _ = engine.send(runtime::agent::InputMessage::HostToolResponse {
+                    call_id: ask.prompt_id.clone(),
+                    end: end(),
+                });
+            }
+        }
+    }
 }
 
 struct Outgoing {
@@ -76,8 +99,18 @@ impl SessionHub {
         self.send(self.lock(), frame, except);
     }
 
+    /// Where the session's host calls are ended when nobody can answer
+    /// them: the engine now running it.
+    pub(in crate::session_pool) fn answer_host_calls_with(
+        &self,
+        engine: runtime::agent::InputSender,
+    ) {
+        self.lock().engine = Some(engine);
+    }
+
     /// Recorded before it goes out, under the same lock: a watcher that
-    /// subscribes meanwhile is handed it either way.
+    /// subscribes meanwhile is handed it either way. A host call made while
+    /// nobody watches ends at once.
     pub(in crate::session_pool) fn publish_ask(
         &self,
         frame: Arc<SessionFrame>,
@@ -96,6 +129,9 @@ impl SessionHub {
                 frame: frame.clone(),
             },
         );
+        if kind == AskKind::HostToolCall {
+            inner.end_host_calls_if_unwatched(|| HostCallEnd::NoHost);
+        }
         self.send(inner, &frame, None);
     }
 
@@ -122,7 +158,9 @@ impl SessionHub {
     }
 
     pub(in crate::session_pool) fn unsubscribe(&self, id: WatcherId) {
-        self.lock().watchers.retain(|w| w.id() != id);
+        let mut inner = self.lock();
+        inner.watchers.retain(|w| w.id() != id);
+        inner.end_host_calls_if_unwatched(|| HostCallEnd::HostGone);
     }
 
     #[cfg(test)]
@@ -195,6 +233,7 @@ impl SessionHub {
             let mut inner = self.lock();
             if !dropped.is_empty() {
                 inner.watchers.retain(|w| !is_dropped(&dropped, w));
+                inner.end_host_calls_if_unwatched(|| HostCallEnd::HostGone);
             }
             let Some(Outgoing { frame, to }) = inner.outbox.pop_front() else {
                 inner.delivering_on = None;

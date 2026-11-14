@@ -54,6 +54,62 @@ pub struct SessionOptions {
     /// ignored rather than voiding the options.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_types: Vec<String>,
+    /// Tools this session's host runs itself, offered to the model as the
+    /// session's own; a call to one is a `host_tool_call` frame, answered
+    /// with `session.respondToolCall`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_tools: Vec<HostToolOption>,
+}
+
+/// One entry of `options.host_tools`.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HostToolOption {
+    /// `^[A-Za-z][A-Za-z0-9_]{0,63}$`, not starting `mcp__`, not taken.
+    pub name: String,
+    /// At most 8 KiB.
+    pub description: String,
+    /// A `type: object` JSON Schema, at most 64 KiB; the host only ever gets
+    /// input that matches it.
+    pub input_schema: serde_json::Value,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub destructive: bool,
+    /// Omitted: `read_only`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency_safe: Option<bool>,
+    /// 1000..=600000.
+    #[serde(default = "HostToolOption::default_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Offered by name only; the schema comes from `ToolSearch`.
+    #[serde(default)]
+    pub deferred: bool,
+    /// The session's sub-agents are offered it too.
+    #[serde(default)]
+    pub subagents: bool,
+}
+
+impl HostToolOption {
+    fn default_timeout_ms() -> u64 {
+        120_000
+    }
+
+    pub fn declaration(&self) -> base::interface::host_call::HostToolDecl {
+        let traits = base::tool::CallTraits::default()
+            .read_only(self.read_only)
+            .destructive(self.destructive)
+            .concurrency_safe(self.concurrency_safe.unwrap_or(self.read_only));
+        base::interface::host_call::HostToolDecl::new(
+            &self.name,
+            &self.description,
+            self.input_schema.clone(),
+        )
+        .traits(traits)
+        .timeout(std::time::Duration::from_millis(self.timeout_ms))
+        .deferred(self.deferred)
+        .subagents(self.subagents)
+    }
 }
 
 /// Record or replay this session's LLM calls.

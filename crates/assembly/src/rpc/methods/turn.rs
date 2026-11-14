@@ -1,6 +1,6 @@
 //! 跑一轮与上下文方法（`session.run_turn` / `compact` / `clear` /
-//! `respondToPrompt` / `inspectContext` / `dropMessages` / `editMessage` /
-//! `rewind`）的参数与线上回执。
+//! `respondToPrompt` / `respondToolCall` / `inspectContext` / `dropMessages` /
+//! `editMessage` / `rewind`）的参数与线上回执。
 
 use super::lenient_vec;
 use crate::rpc::RawOptions;
@@ -118,6 +118,93 @@ pub struct RespondToPromptParams {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct PromptAnswered {
     pub prompt_id: String,
+}
+
+/// Exactly one of `result` and `error`.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RespondToolCallParams {
+    pub session_id: String,
+    pub call_id: String,
+    /// The host ran the call; `is_error` when it reports a failure.
+    #[serde(default)]
+    pub result: Option<HostToolResult>,
+    /// The host could not run the call.
+    #[serde(default)]
+    pub error: Option<HostToolError>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct HostToolResult {
+    pub content: HostToolContent,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum HostToolContent {
+    Text(String),
+    Blocks(Vec<HostContentBlock>),
+}
+
+/// The `text` and `image` blocks of §4.1.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HostContentBlock {
+    Text { text: String },
+    Image { source: ImageSource },
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ImageSource {
+    /// Always `base64`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub media_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct HostToolError {
+    pub message: String,
+}
+
+impl RespondToolCallParams {
+    /// The answer the engine takes, or why there is none.
+    pub fn reply(&self) -> Result<base::interface::host_call::HostReply, String> {
+        use base::interface::host_call::HostReply;
+        use base::tool::{ToolResult, ToolResultBlock};
+        match (&self.result, &self.error) {
+            (Some(result), None) => {
+                let answer = match &result.content {
+                    HostToolContent::Text(text) => ToolResult::text(text.clone()),
+                    HostToolContent::Blocks(blocks) => {
+                        let mut out = Vec::with_capacity(blocks.len());
+                        for block in blocks {
+                            out.push(match block {
+                                HostContentBlock::Text { text } => ToolResultBlock::text(text),
+                                HostContentBlock::Image { source } if source.kind == "base64" => {
+                                    ToolResultBlock::image(&source.media_type, &source.data)
+                                }
+                                HostContentBlock::Image { .. } => {
+                                    return Err("an image's source must be `base64`".into())
+                                }
+                            });
+                        }
+                        ToolResult::blocks(out)
+                    }
+                };
+                Ok(HostReply::Result(answer.with_error(result.is_error)))
+            }
+            (None, Some(error)) => Ok(HostReply::Failed(error.message.clone())),
+            _ => Err("give exactly one of `result` and `error`".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ToolCallAnswered {
+    pub call_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

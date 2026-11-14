@@ -174,7 +174,7 @@ impl SessionPool {
             };
         }
 
-        let (engine, event_rx) = run_engine(built, generation, &binding, claim);
+        let (engine, event_rx) = run_engine(built, generation, &binding, claim, core.hub());
         let (event_rx, arrived) = relay_events(event_rx);
         let turn = TurnSlot::new(event_rx);
         Self::forward_events_between_turns(
@@ -291,7 +291,7 @@ impl SessionPool {
             return Err(e);
         }
 
-        let (engine, event_rx) = run_engine(built, generation, &binding, claim);
+        let (engine, event_rx) = run_engine(built, generation, &binding, claim, core.hub());
         let (event_rx, arrived) = relay_events(event_rx);
         let cancel = engine.cancel.clone();
         let swapped = self
@@ -560,12 +560,13 @@ impl SessionPool {
 }
 
 /// Start `built`'s run loop as engine `generation`, holding the session's
-/// log for as long as it runs.
+/// log for as long as it runs; `hub` ends its unanswerable host calls.
 fn run_engine(
     built: BuiltEngine,
     generation: Generation,
     binding: &ProjectBinding,
     claim: Option<history::store::SessionClaim>,
+    hub: &SessionHub,
 ) -> (EngineSlot, EventReceiver) {
     let BuiltEngine {
         agent,
@@ -575,6 +576,7 @@ fn run_engine(
         scripts,
         ..
     } = built;
+    hub.answer_host_calls_with(input_tx.clone());
     let delegator = agent.delegator();
     let health = agent.health();
     let end_reason = agent.end_reason();

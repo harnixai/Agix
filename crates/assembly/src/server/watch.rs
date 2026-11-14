@@ -5,7 +5,7 @@
 use crate::rpc::events::SessionEventNotification;
 use crate::rpc::methods::session::SubscribeResult;
 use crate::rpc::Client;
-use crate::session_pool::api::{SessionFrame, SessionWatcher, Subscribed, WatcherId};
+use crate::session_pool::api::{AskKind, SessionFrame, SessionWatcher, Subscribed, WatcherId};
 
 impl SessionWatcher for Client {
     fn id(&self) -> WatcherId {
@@ -26,18 +26,23 @@ impl SessionWatcher for Client {
     }
 }
 
-/// `session.subscribe`'s result: each open ask as the frame that raised it.
+/// `session.subscribe`'s result: each open ask as the frame that raised it,
+/// the host calls apart from the prompts a person answers.
 pub(super) fn subscribe_result(subscribed: Subscribed) -> SubscribeResult {
-    let pending_prompts = subscribed
-        .pending
-        .iter()
-        .filter_map(|ask| SessionEventNotification::of(&ask.frame))
-        .filter_map(|frame| serde_json::to_value(frame).ok())
-        .collect();
+    let frames = |host_calls: bool| -> Vec<serde_json::Value> {
+        subscribed
+            .pending
+            .iter()
+            .filter(|ask| (ask.kind == AskKind::HostToolCall) == host_calls)
+            .filter_map(|ask| SessionEventNotification::of(&ask.frame))
+            .filter_map(|frame| serde_json::to_value(frame).ok())
+            .collect()
+    };
     SubscribeResult {
+        pending_prompts: frames(false),
+        pending_host_calls: frames(true),
         session_id: subscribed.session_id,
         last_seq: subscribed.last_seq,
-        pending_prompts,
         resumed: subscribed.resumed,
     }
 }
