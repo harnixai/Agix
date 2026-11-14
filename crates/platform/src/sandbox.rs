@@ -301,19 +301,14 @@ fn state_root_of(policy: &SandboxPolicy) -> Option<PathBuf> {
     policy
         .state_root
         .clone()
-        .or_else(|| home_dir().map(|h| h.join(".agix")))
-}
-
-#[cfg(feature = "sandbox")]
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+        .or_else(|| base::paths::home_dir().map(|h| h.join(".agix")))
 }
 
 /// The project's `.agix`, as given and as the kernel sees it.
 #[cfg(feature = "sandbox")]
 fn project_agix_dirs(cwd: &Path) -> Vec<PathBuf> {
     let given = cwd.join(".agix");
-    let real = resolve_path(&given);
+    let real = base::path::resolve_physically(&given);
     if real == given {
         vec![given]
     } else {
@@ -449,13 +444,16 @@ struct Roots {
 #[cfg(feature = "sandbox")]
 impl Roots {
     fn resolve(cwd: &Path, additional: &[PathBuf], policy: &SandboxPolicy) -> Self {
-        let cwd = resolve_path(cwd);
-        let state_root = state_root_of(policy).map(|p| resolve_path(&p));
+        let cwd = base::path::resolve_physically(cwd);
+        let state_root = state_root_of(policy).map(|p| base::path::resolve_physically(&p));
         Self {
             paths: base::paths::SensitivePaths::new(state_root.as_deref(), Some(&cwd)),
             cwd,
             only_additional: policy.only_additional_writable,
-            writable: additional.iter().map(|p| resolve_path(p)).collect(),
+            writable: additional
+                .iter()
+                .map(|p| base::path::resolve_physically(p))
+                .collect(),
             state_root,
         }
     }
@@ -517,27 +515,6 @@ impl Roots {
             && !STATE_ROOT_WORKING_DIRS
                 .iter()
                 .any(|dir| self.cwd.starts_with(state_root.join(dir)))
-    }
-}
-
-/// `path` with its existing prefix canonicalized and the rest appended as
-/// given, so a path that does not exist yet still resolves through the
-/// symlinks above it.
-#[cfg(feature = "sandbox")]
-fn resolve_path(path: &Path) -> PathBuf {
-    let mut missing = Vec::new();
-    let mut existing = path;
-    loop {
-        if let Ok(real) = existing.canonicalize() {
-            return missing.iter().rev().fold(real, |p, name| p.join(name));
-        }
-        match (existing.parent(), existing.file_name()) {
-            (Some(parent), Some(name)) => {
-                missing.push(name.to_os_string());
-                existing = parent;
-            }
-            _ => return path.to_path_buf(),
-        }
     }
 }
 
@@ -627,8 +604,8 @@ struct ProjectGuard {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn project_guard(cwd: &Path) -> ProjectGuard {
     let git = cwd.join(REPOSITORY_CONFIG_DIR);
-    let git_dir = resolve_path(&git);
-    let agix_dir = resolve_path(&cwd.join(".agix"));
+    let git_dir = base::path::resolve_physically(&git);
+    let agix_dir = base::path::resolve_physically(&cwd.join(".agix"));
 
     let mut entries = vec![git.clone()];
     if git_dir != git {
@@ -647,7 +624,7 @@ fn project_guard(cwd: &Path) -> ProjectGuard {
     }
     for name in ENGINE_CONFIG_ROOTS {
         let root = cwd.join(name);
-        let real = resolve_path(&root);
+        let real = base::path::resolve_physically(&root);
         files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
         trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
         if real != root {
@@ -659,13 +636,13 @@ fn project_guard(cwd: &Path) -> ProjectGuard {
         let mut above = cwd.to_path_buf();
         for part in Path::new(dir).components() {
             above.push(part);
-            let real = resolve_path(&above);
+            let real = base::path::resolve_physically(&above);
             if real != above {
                 entries.push(real);
             }
             entries.push(above.clone());
         }
-        trees.push(resolve_path(&above));
+        trees.push(base::path::resolve_physically(&above));
     }
 
     for worktree in subdirs(&agix_dir.join(PROJECT_WORKTREES_DIR)) {
@@ -745,7 +722,9 @@ fn darwin_user_temp_dir() -> Option<PathBuf> {
         return None;
     }
     buf.truncate(len - 1);
-    Some(resolve_path(Path::new(std::ffi::OsStr::from_bytes(&buf))))
+    Some(base::path::resolve_physically(Path::new(
+        std::ffi::OsStr::from_bytes(&buf),
+    )))
 }
 
 #[cfg(all(feature = "sandbox", target_os = "macos"))]
@@ -920,7 +899,7 @@ fn sandbox_escape(s: &str) -> String {
 /// `path` as given and as the kernel will see it, once each.
 #[cfg(all(feature = "sandbox", target_os = "macos"))]
 fn spellings(path: &Path) -> Vec<PathBuf> {
-    let resolved = resolve_path(path);
+    let resolved = base::path::resolve_physically(path);
     if resolved == path {
         vec![resolved]
     } else {
@@ -958,7 +937,10 @@ fn multiplexer_paths() -> Vec<PathBuf> {
                 .map(PathBuf::from),
         );
     }
-    let mut paths: Vec<PathBuf> = paths.iter().map(|p| resolve_path(p)).collect();
+    let mut paths: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| base::path::resolve_physically(p))
+        .collect();
     paths.sort();
     paths.dedup();
     paths
@@ -1700,6 +1682,16 @@ mod without_the_feature {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "sandbox")]
+    #[test]
+    fn a_parent_step_after_a_missing_directory_resolves_to_the_real_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(dir.path()).unwrap();
+        let cwd = dir.path().join("missing/../proj");
+        let dirs = project_agix_dirs(&cwd);
+        assert!(dirs.contains(&real.join("proj/.agix")), "{dirs:?}");
+    }
+
     #[cfg(target_os = "macos")]
     const INHERITED: CommandEnv<'static> = CommandEnv {
         set: &[],
@@ -1966,7 +1958,7 @@ mod tests {
     #[test]
     fn default_deny_read_includes_credential_paths() {
         // Only meaningful when HOME is set; in CI it usually is. Skip if not.
-        let Some(_home) = std::env::var_os("HOME") else {
+        let Some(_home) = base::paths::home_dir() else {
             return;
         };
         let list = default_deny_read();
@@ -2218,10 +2210,13 @@ mod tests {
         }
         let state_mask = args
             .windows(2)
-            .position(|w| w[0] == "--tmpfs" && Path::new(&w[1]) == resolve_path(state.path()))
+            .position(|w| {
+                w[0] == "--tmpfs"
+                    && Path::new(&w[1]) == base::path::resolve_physically(state.path())
+            })
             .expect("the state root is masked with a tmpfs");
         for socket in [&in_state, &served] {
-            let socket = resolve_path(socket).display().to_string();
+            let socket = base::path::resolve_physically(socket).display().to_string();
             let hidden = args
                 .windows(3)
                 .position(|w| w[0] == "--ro-bind-try" && w[1] == "/dev/null" && w[2] == socket)
@@ -2513,10 +2508,11 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_profile_protects_the_instance_root_it_was_given() {
-        let Some(home) = std::env::var_os("HOME") else {
+        let Some(home) = base::paths::home_dir() else {
             return;
         };
-        let home_settings = resolve_path(&PathBuf::from(home).join(".agix/settings.json"));
+        let home_settings =
+            base::path::resolve_physically(&PathBuf::from(home).join(".agix/settings.json"));
         let fallback = build_macos_profile(
             Path::new("/work/project"),
             &[],
@@ -3139,7 +3135,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_a_read_scope_denies_everything_else_before_the_deny_list() {
-        let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/Users/me".into()));
+        let home = base::paths::home_dir().unwrap_or_else(|| PathBuf::from("/Users/me"));
         let project = PathBuf::from("/tmp/work");
         let policy = SandboxPolicy {
             deny_read: vec![home.join(".ssh")],
@@ -3431,7 +3427,7 @@ mod tests {
     #[allow(clippy::unwrap_used)]
     fn a_socket_is_fenced_until_its_fence_is_dropped() {
         let dir = tempfile::tempdir().unwrap();
-        let path = resolve_path(&dir.path().join("served.sock"));
+        let path = base::path::resolve_physically(&dir.path().join("served.sock"));
         let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let fence = fence_socket(&path);
         let twice = fence_socket(&path);
@@ -3469,7 +3465,7 @@ mod tests {
             "(deny network-outbound (remote unix-socket (subpath \"/srv/agix-state\")))";
         let socket_rule = format!(
             "(deny network-outbound (remote unix-socket (literal \"{}\")))",
-            resolve_path(&socket).display()
+            base::path::resolve_physically(&socket).display()
         );
         let allow = profile.find("(allow network-outbound").unwrap();
         for rule in [state_rule, &socket_rule] {
@@ -3500,7 +3496,7 @@ mod tests {
         );
         let rule = format!(
             "(deny file-read* (literal \"{}\"))",
-            resolve_path(&secret).display()
+            base::path::resolve_physically(&secret).display()
         );
         let denied = profile
             .find(&rule)

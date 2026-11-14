@@ -771,10 +771,11 @@ fn brief(input: &Value) -> String {
 
 /// `text` cut at `max_chars`, saying so when it was.
 fn cut_note(text: &str, max_chars: usize) -> String {
-    match truncate(text, max_chars) {
-        (cut, true) => format!("{cut}\n… (cut at {max_chars} characters)"),
-        (whole, false) => whole,
-    }
+    base::text::truncate_chars(
+        text,
+        max_chars,
+        &format!("\n… (cut at {max_chars} characters)"),
+    )
 }
 
 fn truncate(text: &str, max_chars: usize) -> (String, bool) {

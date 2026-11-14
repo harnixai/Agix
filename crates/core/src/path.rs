@@ -5,6 +5,48 @@
 //! for session directories, worktree slugs, and any other case where an
 //! untrusted string must become a safe directory or file name.
 
+use std::path::{Component, Path, PathBuf};
+
+/// `p` with `.` dropped and each `..` taking off the component before it,
+/// without touching the filesystem, so it does not know a `..` after a
+/// symlink climbs out of the link's target ([`resolve_physically`] does).
+pub fn normalize_lexically(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Where `path` lands on this machine's disk: its deepest prefix that exists,
+/// resolved by the OS, with the rest put back on lexically. The rest does not
+/// exist, so it holds no symlink a lexical `..` could misjudge.
+pub fn resolve_physically(path: &Path) -> PathBuf {
+    let parts: Vec<Component> = path.components().collect();
+    for split in (1..=parts.len()).rev() {
+        let prefix: PathBuf = parts[..split].iter().collect();
+        if let Ok(mut out) = std::fs::canonicalize(&prefix) {
+            for part in &parts[split..] {
+                match part {
+                    Component::ParentDir => {
+                        out.pop();
+                    }
+                    Component::CurDir => {}
+                    other => out.push(other),
+                }
+            }
+            return out;
+        }
+    }
+    normalize_lexically(path)
+}
+
 /// djb2 hash constant for initial value.
 const DJB2_INIT: u64 = 5381;
 
@@ -66,6 +108,33 @@ pub fn sanitize_for_fs(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexical_normalization_drops_dots_and_pops_parents() {
+        assert_eq!(
+            normalize_lexically(Path::new("/a/./b/../c")),
+            PathBuf::from("/a/c")
+        );
+    }
+
+    #[test]
+    fn physical_resolution_pops_a_parent_after_a_missing_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(dir.path()).unwrap();
+        let got = resolve_physically(&dir.path().join("missing/../x"));
+        assert_eq!(got, real.join("x"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn physical_resolution_follows_a_symlink_before_a_parent_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(real.join("target/inner")).unwrap();
+        std::os::unix::fs::symlink(real.join("target/inner"), real.join("link")).unwrap();
+        let got = resolve_physically(&real.join("link/../x"));
+        assert_eq!(got, real.join("target/x"));
+    }
 
     #[test]
     fn test_basic_string() {

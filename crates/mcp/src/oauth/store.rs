@@ -240,24 +240,8 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 fn write_private(dir: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
     create_private_dir(dir)?;
-
-    let tmp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let written = (|| {
-        let mut file = options.open(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written
+    base::fs::write_atomic(path, bytes, base::fs::WriteOpts::PRIVATE)
 }
 
 pub(crate) fn now_secs() -> u64 {

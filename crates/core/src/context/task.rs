@@ -144,7 +144,7 @@ impl RunningTask {
             events_log: std::sync::Mutex::new(Vec::new()),
             status: std::sync::Mutex::new(RunningStatus::Running),
             cancel,
-            started_ms: unix_ms(),
+            started_ms: crate::clock::unix_ms(),
             ended_ms: std::sync::Mutex::new(None),
             detail: std::sync::Mutex::new(serde_json::Value::Null),
             announced: std::sync::atomic::AtomicBool::new(false),
@@ -521,13 +521,6 @@ fn ceil_char_boundary(text: &str, mut at: usize) -> usize {
         at += 1;
     }
     at
-}
-
-pub(crate) fn unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

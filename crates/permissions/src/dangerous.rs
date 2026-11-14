@@ -213,15 +213,15 @@ pub fn is_unscoped_grant_in(tool_name: &str, content: Option<&str>, project_root
     if !crate::ruleset::PATH_RULE_TOOLS.contains(&tool_name) {
         return false;
     }
-    let root = path_rule::normalize_path_lexically(project_root);
+    let root = base::path::normalize_lexically(project_root);
     let Some(dir) = literal_dir(content, &root) else {
         return true;
     };
     let below = |dir: &Path, root: &Path| dir != root && dir.starts_with(root);
     !(below(&dir, &root)
         && below(
-            &path_rule::resolve_physically(&dir),
-            &path_rule::resolve_physically(&root),
+            &base::path::resolve_physically(&dir),
+            &base::path::resolve_physically(&root),
         ))
 }
 
@@ -242,7 +242,7 @@ fn path_grant_is_unscoped(content: &str) -> bool {
         .components()
         .filter(|c| matches!(c, Component::Normal(_)))
         .count();
-    named < 2 || path_rule::home_dir().is_some_and(|home| home.starts_with(&dir))
+    named < 2 || base::paths::home_dir().is_some_and(|home| home.starts_with(&dir))
 }
 
 /// The directory a path pattern resolved against `cwd` cannot leave: its
@@ -569,7 +569,7 @@ mod tests {
         ] {
             assert!(!is_unscoped_grant("Write", Some(content)), "{content}");
         }
-        if let Some(home) = path_rule::home_dir() {
+        if let Some(home) = base::paths::home_dir() {
             let home = home.display();
             assert!(is_unscoped_grant("Edit", Some(&format!("{home}/**"))));
             assert!(!is_unscoped_grant(

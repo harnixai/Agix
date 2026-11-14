@@ -362,7 +362,7 @@ impl SessionState {
             if ended.is_some() {
                 return;
             }
-            *ended = Some(super::task::unix_ms());
+            *ended = Some(crate::clock::unix_ms());
             let mut current = task.status.lock().unwrap_or_else(|e| e.into_inner());
             if matches!(*current, RunningStatus::Running) {
                 *current = status;

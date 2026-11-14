@@ -1,7 +1,7 @@
 //! A filesystem that is a map.
 
 use std::collections::BTreeMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::interface::exec::{DirEntry, ExecError, FileSystem, Metadata};
@@ -23,7 +23,7 @@ impl InMemoryFileSystem {
 
     /// Seed a file, creating its parents.
     pub fn with_file(self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Self {
-        let p = normalize(path.as_ref());
+        let p = crate::path::normalize_lexically(path.as_ref());
         self.mark_parents(&p);
         self.files
             .lock()
@@ -63,23 +63,6 @@ impl InMemoryFileSystem {
     }
 }
 
-/// Lexical normalization only. There are no symlinks here, which is the one
-/// place this provider is honestly simpler rather than merely smaller: a
-/// remote's symlink graph is a real thing that this one does not have.
-fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in path.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
 fn missing(path: &Path) -> ExecError {
     ExecError::failed(format!("{}: no such file", path.display()))
 }
@@ -87,7 +70,7 @@ fn missing(path: &Path) -> ExecError {
 #[async_trait::async_trait]
 impl FileSystem for InMemoryFileSystem {
     async fn read(&self, path: &Path) -> Result<Vec<u8>, ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         self.files
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -97,7 +80,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         self.mark_parents(&p);
         self.files
             .lock()
@@ -107,7 +90,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn create_dir_all(&self, path: &Path) -> Result<(), ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         self.dirs
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -117,7 +100,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         if !self.is_dir(&p)
             && !self
                 .files
@@ -160,7 +143,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn remove_dir_all(&self, path: &Path) -> Result<(), ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         self.files
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -173,7 +156,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn metadata(&self, path: &Path) -> Result<Metadata, ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         if let Some(bytes) = self
             .files
             .lock()
@@ -199,7 +182,10 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), ExecError> {
-        let (from_n, to_n) = (normalize(from), normalize(to));
+        let (from_n, to_n) = (
+            crate::path::normalize_lexically(from),
+            crate::path::normalize_lexically(to),
+        );
         let moved = |p: &PathBuf| match p.strip_prefix(&from_n) {
             Ok(rest) if rest.as_os_str().is_empty() => Some(to_n.clone()),
             Ok(rest) => Some(to_n.join(rest)),
@@ -241,7 +227,7 @@ impl FileSystem for InMemoryFileSystem {
     }
 
     async fn canonicalize(&self, path: &Path) -> Result<PathBuf, ExecError> {
-        let p = normalize(path);
+        let p = crate::path::normalize_lexically(path);
         if self
             .files
             .lock()

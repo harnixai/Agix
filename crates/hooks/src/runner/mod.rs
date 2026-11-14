@@ -675,7 +675,7 @@ impl HookRunner {
                         },
                         failure: Some(format!(
                             "agent hook answer is not JSON: {}",
-                            executor::truncate(&response, 200)
+                            base::text::truncate_chars(&response, 200, "…")
                         )),
                         stdout: response,
                         stderr: String::new(),

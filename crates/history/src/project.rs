@@ -9,7 +9,8 @@ use crate::path::{
 use base::session::SessionId;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use time::OffsetDateTime;
+
+pub use base::clock::now_rfc3339;
 
 const PROJECT_SESSION_SCHEMA_VERSION: u32 = 1;
 const SESSION_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -32,7 +33,7 @@ impl ProjectSessionState {
             history_file: session_file(project_history_dir, &session)
                 .display()
                 .to_string(),
-            updated_at: now_rfc3339(),
+            updated_at: base::clock::now_rfc3339(),
         }
     }
 
@@ -95,7 +96,7 @@ impl SessionMetadata {
         project_history_dir: &Path,
         session: SessionId,
     ) -> SessionMetadata {
-        let now = now_rfc3339();
+        let now = base::clock::now_rfc3339();
         Self {
             schema_version: SESSION_METADATA_SCHEMA_VERSION,
             session_id: session,
@@ -234,7 +235,7 @@ pub async fn ensure_session_sidecar_in(
         }
         Err(e) => return Err(HistoryError::Io(e)),
     };
-    metadata.updated_at = now_rfc3339();
+    metadata.updated_at = base::clock::now_rfc3339();
     metadata.canonical_cwd = canonical_cwd.display().to_string();
     metadata.history_file = session_file(project_history_dir, &session)
         .display()
@@ -298,7 +299,7 @@ pub async fn add_counters_in(
         Err(e) => return Err(HistoryError::Io(e)),
     };
     metadata.compact_count += delta.compactions;
-    metadata.updated_at = now_rfc3339();
+    metadata.updated_at = base::clock::now_rfc3339();
     tokio::fs::create_dir_all(&paths.dir).await?;
     write_json_atomic(&paths.metadata, &metadata).await
 }
@@ -327,7 +328,7 @@ pub async fn set_session_title_in(
         Err(e) => return Err(HistoryError::Io(e)),
     };
     metadata.title = title;
-    metadata.updated_at = now_rfc3339();
+    metadata.updated_at = base::clock::now_rfc3339();
     write_json_atomic(&paths.metadata, &metadata).await
 }
 
@@ -357,25 +358,17 @@ pub async fn session_stats_in(
     })
 }
 
-pub fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "unknown".to_string())
-}
-
 async fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), HistoryError> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let tmp = crate::path::temp_sibling(path);
-    if let Err(e) = tokio::fs::write(&tmp, serde_json::to_vec_pretty(value)?).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e.into());
-    }
-    if let Err(e) = tokio::fs::rename(&tmp, path).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e.into());
-    }
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        base::fs::write_atomic(&path, &bytes, base::fs::WriteOpts::DURABLE)
+    })
+    .await
+    .map_err(std::io::Error::other)??;
     Ok(())
 }
 

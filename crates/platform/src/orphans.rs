@@ -90,10 +90,7 @@ fn write(path: &Path, owner: &ProcessIdentity, groups: &BTreeSet<i32>) {
     let Ok(bytes) = serde_json::to_vec(&record) else {
         return;
     };
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    let _ = base::fs::write_atomic(path, &bytes, base::fs::WriteOpts::FAST);
 }
 
 /// Keeps the list at `path` from now on, so a run that dies without a chance

@@ -10,8 +10,9 @@
 //! The tables were measured on macOS with `ls`, `cat`, git directly and
 //! through the xcrun shim; the Linux one is the design's, not yet measured.
 
-use super::{resolve_path, CommandEnv};
+use super::CommandEnv;
 use base::interface::exec::{EnvScope, ReadScope};
+use base::path::resolve_physically;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
@@ -111,7 +112,7 @@ pub(super) fn var(env: CommandEnv<'_>, name: &str) -> Option<OsString> {
 pub(super) fn strict_read_roots(scope: &[PathBuf], dirs: &UserDirs) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = SYSTEM_READ_ROOTS
         .iter()
-        .map(|root| resolve_path(Path::new(root)))
+        .map(|root| resolve_physically(Path::new(root)))
         .chain(selected_developer_dir())
         .chain(scope_read_roots(scope, dirs))
         .collect();
@@ -131,7 +132,7 @@ fn scope_read_roots(scope: &[PathBuf], dirs: &UserDirs) -> Vec<PathBuf> {
                 .flat_map(|x| XDG_CONFIG_READ_ROOTS.iter().map(move |r| x.join(r))),
         )
         .chain(scope.iter().cloned())
-        .map(|p| resolve_path(&p))
+        .map(|p| resolve_physically(&p))
         .collect()
 }
 
@@ -149,7 +150,7 @@ pub(super) fn unmet(read: &ReadScope, dirs: &UserDirs, path: Option<&OsStr>) -> 
     let readable = |p: &Path| roots.iter().any(|root| p.starts_with(root));
     let mut unmet = Vec::new();
     if let Some(git) = path.and_then(git_on_path) {
-        let real = resolve_path(&git);
+        let real = resolve_physically(&git);
         if !readable(&real) {
             unmet.push(format!(
                 "git: the `git` on PATH is {}, which a command under the strict profile cannot \
@@ -169,7 +170,7 @@ pub(super) fn unmet(read: &ReadScope, dirs: &UserDirs, path: Option<&OsStr>) -> 
         .into_iter()
         .chain(xdg_config);
     for config in configs {
-        let real = resolve_path(&config);
+        let real = resolve_physically(&config);
         if real.is_file() && !readable(&real) {
             unmet.push(format!(
                 "git: the user's git configuration is {}, which a command under the strict \
@@ -202,7 +203,7 @@ fn git_on_path(path: &OsStr) -> Option<PathBuf> {
 /// The existing files `config` includes, its includes' includes among them,
 /// resolved. `seen` keeps a file from being read twice.
 fn git_includes(config: &Path, home: Option<&Path>, seen: &mut Vec<PathBuf>) -> Vec<PathBuf> {
-    let config = resolve_path(config);
+    let config = resolve_physically(config);
     if seen.contains(&config) {
         return Vec::new();
     }
@@ -233,7 +234,7 @@ fn git_includes(config: &Path, home: Option<&Path>, seen: &mut Vec<PathBuf>) -> 
             (Some(rest), Some(home)) => home.join(rest),
             _ => config.parent().unwrap_or(Path::new("/")).join(value),
         };
-        let included = resolve_path(&named);
+        let included = resolve_physically(&named);
         if included.is_file() {
             found.extend(git_includes(&included, home, seen));
             found.push(included);

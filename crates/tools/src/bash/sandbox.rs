@@ -93,7 +93,7 @@ pub fn strict_sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
 }
 
 fn cache_directories(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = base::paths::home_dir();
     ctx.session
         .env()
         .cache_directories

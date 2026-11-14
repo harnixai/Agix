@@ -28,13 +28,6 @@ use std::sync::{Arc, Mutex};
 /// `ToolSearch` serves as the tool's guide whenever the two differ.
 const MAX_ADVERTISED_DESCRIPTION_CHARS: usize = 2048;
 
-fn truncate_chars(s: &str, max: usize) -> String {
-    match s.char_indices().nth(max) {
-        Some((cut, _)) => format!("{}…", &s[..cut]),
-        None => s.to_string(),
-    }
-}
-
 pub struct McpToolAdapter {
     full_name: String,
     tool_name: String,
@@ -81,7 +74,8 @@ impl McpToolAdapter {
         let full_description = meta
             .description
             .unwrap_or_else(|| format!("MCP tool: {tool_name}"));
-        let description = truncate_chars(&full_description, MAX_ADVERTISED_DESCRIPTION_CHARS);
+        let description =
+            base::text::truncate_chars(&full_description, MAX_ADVERTISED_DESCRIPTION_CHARS, "…");
         Self {
             full_name,
             tool_name,

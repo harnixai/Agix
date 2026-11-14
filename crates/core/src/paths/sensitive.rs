@@ -716,18 +716,9 @@ fn scene_dirs_in(base: &Path) -> Vec<SceneDir> {
 }
 
 fn absolute_lexically(path: &Path) -> PathBuf {
-    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
+    crate::path::normalize_lexically(
+        &std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
+    )
 }
 
 fn lowered_components(path: &Path) -> Vec<String> {

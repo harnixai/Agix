@@ -11,7 +11,6 @@
 use crate::manifest::PluginError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Enable/disable state for one plugins tier (global or scene).
 pub struct EnableState {
@@ -51,24 +50,16 @@ impl EnableState {
     }
 
     fn save(&self, map: &HashMap<String, bool>) -> Result<(), PluginError> {
-        static SEQ: AtomicU64 = AtomicU64::new(0);
         let parent = self.path.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent)?;
         let json = serde_json::to_string_pretty(map).map_err(|e| {
             PluginError::Schema(format!("failed to serialize plugin enable state: {e}"))
         })?;
-        let tmp = parent.join(format!(
-            ".enabled.json.{}-{}.tmp",
-            std::process::id(),
-            SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        let written = std::fs::write(&tmp, json)
-            .and_then(|()| std::fs::File::open(&tmp)?.sync_all())
-            .and_then(|()| std::fs::rename(&tmp, &self.path));
-        if written.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        Ok(written?)
+        Ok(base::fs::write_atomic(
+            &self.path,
+            json.as_bytes(),
+            base::fs::WriteOpts::DURABLE,
+        )?)
     }
 
     /// Why this tier's file cannot be trusted, or `None` when it is absent

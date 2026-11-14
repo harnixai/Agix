@@ -2,7 +2,7 @@
 
 use base::interface::exec::FileSystem;
 use base::interface::permission::{PermissionFacts, Reach, Subject};
-use permissions::path_rule::{is_within_root_resolved, normalize_path_lexically};
+use permissions::path_rule::is_within_root_resolved;
 use std::path::{Component, Path, PathBuf};
 
 /// A relative path resolved against `cwd`; an absolute one is returned as is.
@@ -30,7 +30,7 @@ pub fn contains_path_traversal(path: &Path) -> bool {
 /// check did not look.
 pub async fn resolve_write_target(raw: &str, cwd: &Path, fs: &dyn FileSystem) -> PathBuf {
     let joined = cwd.join(raw);
-    let lexical = normalize_path_lexically(&joined);
+    let lexical = base::path::normalize_lexically(&joined);
     if !contains_path_traversal(&joined) {
         return lexical;
     }
@@ -62,7 +62,7 @@ async fn resolve_physically(path: &Path, fs: &dyn FileSystem) -> PathBuf {
             return out;
         }
     }
-    normalize_path_lexically(path)
+    base::path::normalize_lexically(path)
 }
 
 /// The write policy for this call, with every root resolved by the same
@@ -185,10 +185,8 @@ pub struct SessionCredentials(std::sync::Arc<base::paths::SensitivePaths>);
 
 impl SessionCredentials {
     pub fn hold_any(&self, path: &Path) -> bool {
-        self.0.is_credential(&normalize_path_lexically(path))
-            || self
-                .0
-                .is_credential(&permissions::path_rule::resolve_physically(path))
+        self.0.is_credential(&base::path::normalize_lexically(path))
+            || self.0.is_credential(&base::path::resolve_physically(path))
     }
 
     /// What a walk from `root` leaves out, for a walk that follows no
@@ -199,10 +197,10 @@ impl SessionCredentials {
         root: &Path,
     ) -> impl Fn(&Path) -> bool + Send + Sync + 'static {
         let credentials = self.0.clone();
-        let root = normalize_path_lexically(root);
-        let real = permissions::path_rule::resolve_physically(&root);
+        let root = base::path::normalize_lexically(root);
+        let real = base::path::resolve_physically(&root);
         move |path| {
-            let path = normalize_path_lexically(path);
+            let path = base::path::normalize_lexically(path);
             credentials.is_credential(&path)
                 || path
                     .strip_prefix(&root)
@@ -217,11 +215,11 @@ pub fn within_readable_roots(path: &Path, ctx: &base::tool::ToolContext) -> bool
     let written = ctx.cwd.join(path);
     let roots: Vec<PathBuf> = readable_roots(ctx)
         .iter()
-        .map(|root| normalize_path_lexically(root))
+        .map(|root| base::path::normalize_lexically(root))
         .collect();
     [
-        normalize_path_lexically(&written),
-        permissions::path_rule::resolve_physically(&written),
+        base::path::normalize_lexically(&written),
+        base::path::resolve_physically(&written),
     ]
     .iter()
     .all(|p| roots.iter().any(|root| is_within_root_resolved(p, root)))

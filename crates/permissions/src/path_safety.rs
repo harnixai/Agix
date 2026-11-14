@@ -458,12 +458,11 @@ mod tests {
 
     #[test]
     fn lexical_normalize_and_root_check_classify_outside_paths() {
-        use crate::path_rule::normalize_path_lexically;
-        let path = normalize_path_lexically(Path::new("/tmp/work/../other/x"));
+        let path = base::path::normalize_lexically(Path::new("/tmp/work/../other/x"));
         assert_eq!(path, PathBuf::from("/tmp/other/x"));
         assert!(!is_within_root_lexical(&path, Path::new("/tmp/work")));
         assert!(is_within_root_lexical(
-            &normalize_path_lexically(Path::new("/tmp/work/sub/../x")),
+            &base::path::normalize_lexically(Path::new("/tmp/work/sub/../x")),
             Path::new("/tmp/work")
         ));
     }

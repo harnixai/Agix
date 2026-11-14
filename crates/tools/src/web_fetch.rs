@@ -173,7 +173,7 @@ impl Tool for WebFetchTool {
             }
             Err(FetchError::HttpStatus { status, body }) => Ok(ToolResult::error_text(format!(
                 "HTTP {status}\n{}",
-                truncate_chars(&body, 4000)
+                base::text::truncate_chars(&body, 4000, "…[truncated]")
             ))),
             Err(FetchError::Redirect(location)) => Ok(ToolResult::text(format!(
                 "Redirected to: {location}\n\nRe-fetch this URL to continue."
@@ -272,15 +272,6 @@ async fn fetch(net: &dyn Network, url: &str) -> Result<(u16, String), FetchError
     };
 
     Ok((status, text))
-}
-
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(max).collect();
-        format!("{head}…[truncated]")
-    }
 }
 
 #[cfg(test)]

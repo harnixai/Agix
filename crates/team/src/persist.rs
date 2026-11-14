@@ -319,10 +319,11 @@ pub fn read_events(team_dir: &Path) -> io::Result<Vec<EventEnvelope>> {
 /// reader never observes a partially-written file.
 fn write_atomic(dir: &Path, filename: &str, body: &str) -> io::Result<()> {
     fs::create_dir_all(dir)?;
-    let path = dir.join(filename);
-    let tmp = dir.join(format!("{filename}.tmp-{}", std::process::id()));
-    fs::write(&tmp, body)?;
-    fs::rename(&tmp, &path)
+    base::fs::write_atomic(
+        &dir.join(filename),
+        body.as_bytes(),
+        base::fs::WriteOpts::DURABLE,
+    )
 }
 
 /// Run blocking filesystem work off the async executor. `spawn_blocking`

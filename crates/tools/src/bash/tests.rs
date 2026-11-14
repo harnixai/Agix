@@ -277,7 +277,7 @@ fn a_sandboxed_command_may_write_the_cache_directories() {
     ctx.session = std::sync::Arc::new(session);
     let writable = sandbox_policy(&ctx).additional_writable;
     assert!(writable.contains(&std::path::PathBuf::from("/opt/cache")));
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(home) = base::paths::home_dir() {
         assert!(writable.contains(&std::path::PathBuf::from(home).join(".npm")));
     }
     assert!(!writable.iter().any(|p| p.starts_with("~")));
@@ -674,7 +674,7 @@ fn to_sandbox_policy_carries_deny_read_and_allowed_domains_through() {
 /// 空 `deny_read` 必须回落到内置默认名单，而不是"什么都不拦"。
 #[test]
 fn to_sandbox_policy_empty_deny_read_falls_back_to_defaults() {
-    let Some(_home) = std::env::var_os("HOME") else {
+    let Some(_home) = base::paths::home_dir() else {
         return; // default_deny_read() 依赖 HOME；没有就没什么可断言的
     };
     let settings = base::tool::SandboxSettings::default();
@@ -913,7 +913,7 @@ fn writes_through_read_only_names_forfeit_it() {
 
 #[test]
 fn a_quoted_credential_path_is_still_a_credential_path() {
-    if std::env::var_os("HOME").is_none() {
+    if base::paths::home_dir().is_none() {
         return;
     }
     for bad in [
@@ -1056,7 +1056,7 @@ fn shell_escape_hatch_commands_left_the_allow_list() {
 
 #[test]
 fn credential_paths_forfeit_read_only_for_any_reader() {
-    let Some(_home) = std::env::var_os("HOME") else {
+    let Some(_home) = base::paths::home_dir() else {
         return;
     };
     for bad in [

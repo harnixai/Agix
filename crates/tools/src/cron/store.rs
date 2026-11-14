@@ -104,7 +104,7 @@ impl CronStore {
             prompt: new.prompt,
             recurring: new.recurring,
             durable: new.durable,
-            created_ms: now_ms(),
+            created_ms: base::clock::unix_ms(),
             agent_id: None,
             last_fired_ms: None,
             session_id: new.session_id,
@@ -272,29 +272,13 @@ fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = sibling(path, &format!(".tmp-{}", std::process::id()));
-    {
-        use std::io::Write;
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(body.as_bytes())?;
-        file.sync_all()?;
-    }
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    base::fs::write_atomic(path, body.as_bytes(), base::fs::WriteOpts::DURABLE)
 }
 
 impl Default for CronStore {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 fn generate_id() -> String {

@@ -56,6 +56,18 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// This machine's home directory: `HOME`, else `USERPROFILE`; an empty value counts as unset.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place this machine's home is looked up"
+)]
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
 /// The shared, committed settings file present in every tier.
 pub const SETTINGS_FILE: &str = "settings.json";
 

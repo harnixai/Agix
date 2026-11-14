@@ -628,12 +628,10 @@ fn normalize_ws(text: &str) -> String {
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
-        return text.to_string();
+        text.to_string()
+    } else {
+        base::text::truncate_chars(text, max_chars.saturating_sub(1), "…")
     }
-    let keep = max_chars.saturating_sub(1);
-    let mut out: String = text.chars().take(keep).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]

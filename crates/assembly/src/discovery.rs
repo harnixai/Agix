@@ -340,22 +340,7 @@ pub fn write_unix_socket_token(path: &Path) -> io::Result<String> {
         .flat_map(|id| id.as_bytes().to_vec())
         .map(|b| format!("{b:02x}"))
         .collect();
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    let _ = fs::remove_file(&tmp);
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    {
-        use std::io::Write;
-        let mut file = options.open(&tmp)?;
-        file.write_all(token.as_bytes())?;
-        file.sync_all()?;
-    }
-    fs::rename(&tmp, path)?;
+    base::fs::write_atomic(path, token.as_bytes(), base::fs::WriteOpts::PRIVATE)?;
     Ok(token)
 }
 
@@ -398,16 +383,7 @@ pub fn write_instance_file(dir: &Path, instance: &str, file: &InstanceFile) -> i
     let path = dir.join(format!("{instance}.json"));
     let body = serde_json::to_string_pretty(file)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let tmp = dir.join(format!(".{instance}.json.tmp-{}", std::process::id()));
-    fs::write(&tmp, body)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&tmp)?.permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&tmp, perms)?;
-    }
-    fs::rename(&tmp, &path)?;
+    base::fs::write_atomic(&path, body.as_bytes(), base::fs::WriteOpts::PRIVATE)?;
     Ok(())
 }
 

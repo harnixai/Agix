@@ -109,7 +109,10 @@ impl HookRunner {
         let status = resp.status;
         let body = resp.body_text();
         if !(200..300).contains(&status) {
-            return HookOutcome::Error(format!("http hook {status}: {}", truncate(&body, 500)));
+            return HookOutcome::Error(format!(
+                "http hook {status}: {}",
+                base::text::truncate_chars(&body, 500, "…")
+            ));
         }
         let (response, failure) = parse_hook_response_lenient(&body);
         HookOutcome::Ran {
@@ -514,7 +517,7 @@ fn response_for_exit(
                     HookResponse::default(),
                     Some(format!(
                         "stdout is not a JSON answer ({e}): {}",
-                        truncate(stdout.trim(), 200)
+                        base::text::truncate_chars(stdout.trim(), 200, "…")
                     )),
                 )
             }
@@ -550,7 +553,7 @@ fn response_for_exit(
             let failure = if stderr.is_empty() {
                 exit
             } else {
-                format!("{exit}: {}", truncate(stderr, 200))
+                format!("{exit}: {}", base::text::truncate_chars(stderr, 200, "…"))
             };
             (HookResponse::default(), Some(failure))
         }
@@ -614,17 +617,11 @@ fn parse_hook_response_lenient(s: &str) -> (HookResponse, Option<String>) {
         Ok(response) => (response, None),
         Err(e) => (
             HookResponse::default(),
-            Some(format!("{e}: {}", truncate(candidate, 200))),
+            Some(format!(
+                "{e}: {}",
+                base::text::truncate_chars(candidate, 200, "…")
+            )),
         ),
-    }
-}
-
-pub(super) fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(max).collect();
-        format!("{head}…")
     }
 }
 
@@ -847,18 +844,6 @@ mod tests {
         assert_eq!(r.decision, None);
         assert_eq!(r.r#continue, None);
         assert!(failure.is_some());
-    }
-
-    #[test]
-    fn truncate_short_string() {
-        assert_eq!(truncate("hello", 10), "hello");
-    }
-
-    #[test]
-    fn truncate_long_string() {
-        let result = truncate("hello world this is a long string", 10);
-        assert!(result.starts_with("hello worl"));
-        assert!(result.ends_with('…'));
     }
 
     #[test]

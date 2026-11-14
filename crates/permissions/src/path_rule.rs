@@ -11,11 +11,11 @@
 //! `**` crosses any number of them. A pattern with no glob characters names
 //! a file or a directory, and a directory covers everything beneath it.
 //!
-//! The path primitives this rests on — lexical normalization, physical
-//! resolution, and the two kinds of root containment — live here too, and
-//! are the only copies: the write policy and the tools use these.
+//! The two kinds of root containment live here too, and are the only copies:
+//! the write policy and the tools use these. Lexical normalization and
+//! physical resolution are `base::path`.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The file a tool call names, and other spellings of the same file.
 pub struct ResolvedPath {
@@ -35,11 +35,11 @@ impl ResolvedPath {
         let primary = absolutize(Path::new(raw), cwd);
         let mut aliases = Vec::new();
         if let Some(expanded) = expand_home(raw) {
-            aliases.push(normalize_path_lexically(&expanded));
+            aliases.push(base::path::normalize_lexically(&expanded));
         }
         for real in [
-            resolve_physically(&primary),
-            resolve_physically(&cwd.join(raw)),
+            base::path::resolve_physically(&primary),
+            base::path::resolve_physically(&cwd.join(raw)),
         ] {
             if real != primary && !aliases.contains(&real) {
                 aliases.push(real);
@@ -59,7 +59,7 @@ impl ResolvedPath {
 /// gitignore reads the same way).
 pub fn resolve_pattern(pattern: &str, cwd: &Path) -> String {
     if let Some(expanded) = expand_home(pattern) {
-        return normalize_path_lexically(&expanded)
+        return base::path::normalize_lexically(&expanded)
             .to_string_lossy()
             .into_owned();
     }
@@ -108,9 +108,9 @@ fn starts_with_glob(s: &str) -> bool {
 
 fn absolutize(p: &Path, cwd: &Path) -> PathBuf {
     if p.is_absolute() {
-        normalize_path_lexically(p)
+        base::path::normalize_lexically(p)
     } else {
-        normalize_path_lexically(&cwd.join(p))
+        base::path::normalize_lexically(&cwd.join(p))
     }
 }
 
@@ -120,54 +120,7 @@ fn expand_home(raw: &str) -> Option<PathBuf> {
     } else {
         raw.strip_prefix("~/")?
     };
-    Some(home_dir()?.join(rest))
-}
-
-pub(crate) fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-}
-
-/// Where `path` lands on this machine's disk: its deepest prefix that exists,
-/// resolved by the OS, with the rest put back on lexically. The rest does not
-/// exist, so it holds no symlink a lexical `..` could misjudge.
-pub fn resolve_physically(path: &Path) -> PathBuf {
-    let parts: Vec<Component> = path.components().collect();
-    for split in (1..=parts.len()).rev() {
-        let prefix: PathBuf = parts[..split].iter().collect();
-        if let Ok(mut out) = std::fs::canonicalize(&prefix) {
-            for part in &parts[split..] {
-                match part {
-                    Component::ParentDir => {
-                        out.pop();
-                    }
-                    Component::CurDir => {}
-                    other => out.push(other),
-                }
-            }
-            return out;
-        }
-    }
-    normalize_path_lexically(path)
-}
-
-/// `p` with `.` dropped and each `..` taking off the component before it,
-/// without touching the filesystem — so it does not know a `..` after a
-/// symlink climbs out of the link's target ([`resolve_physically`] does).
-pub fn normalize_path_lexically(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
+    Some(base::paths::home_dir()?.join(rest))
 }
 
 /// `p` resolved by the OS; when it does not exist, its parent resolved with
@@ -210,7 +163,7 @@ mod tests {
     use super::*;
 
     fn home() -> PathBuf {
-        home_dir().expect("tests need HOME")
+        base::paths::home_dir().expect("tests need HOME")
     }
 
     #[test]

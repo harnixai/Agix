@@ -171,9 +171,8 @@ impl MailboxStore {
                 _ => Ok(()),
             }
         } else {
-            let tmp = file_path.with_extension("jsonl.tmp");
-            std::fs::write(&tmp, snapshot.lines.join("\n") + "\n")
-                .and_then(|()| std::fs::rename(&tmp, &file_path))
+            let body = snapshot.lines.join("\n") + "\n";
+            base::fs::write_atomic(&file_path, body.as_bytes(), base::fs::WriteOpts::FAST)
         };
         if let Err(e) = result {
             tracing::warn!(peer = %snapshot.peer, path = %file_path.display(), error = %e, "mailbox: failed to persist");
