@@ -503,7 +503,7 @@ const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/ConfigTier/properties/managed",
     "/$defs/ConfigTier/properties/settings",
     "/$defs/ContentBlock/oneOf/0/properties/cache_control",
-    "/$defs/ContentBlock/oneOf/2/properties/input",
+    "/$defs/ContentBlock/oneOf/3/properties/input",
     "/$defs/DoctorReport/properties/health",
     "/$defs/DoctorReport/properties/hooks",
     "/$defs/DoctorReport/properties/providers",
