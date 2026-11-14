@@ -30,22 +30,6 @@ const NOT_FORWARDED: &[(&str, &str)] = &[
         "LayeredToolRegistry:ToolRegistry::names",
         "derived from `list`, which merges overlay and base; forwarding would skip the merge",
     ),
-    (
-        "OnlyAtThreshold:Compactor::should_compact",
-        "S3 fixes the forwarding; delete this entry when S3 merges",
-    ),
-    (
-        "OnlyAtThreshold:Compactor::tool_result_budget",
-        "S3 fixes the forwarding; delete this entry when S3 merges",
-    ),
-    (
-        "OnlyAtThreshold:Compactor::trim_tool_results",
-        "S3 fixes the forwarding; delete this entry when S3 merges",
-    ),
-    (
-        "OnlyAtThreshold:Compactor::wants_llm_summary",
-        "S3 fixes the forwarding; delete this entry when S3 merges",
-    ),
 ];
 
 fn mentions_dyn(ty: &str, trait_name: &str) -> bool {
