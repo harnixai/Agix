@@ -12,7 +12,10 @@ use tokio_util::sync::CancellationToken;
 
 /// A permission mode as hooks see it: the name settings files use.
 pub(super) enum PromptScreen {
-    Pass(String),
+    Pass {
+        content: String,
+        context: Vec<String>,
+    },
     Blocked(Option<String>),
 }
 
@@ -372,8 +375,9 @@ impl Agent {
             .await
     }
 
-    /// The response is discarded: no lifecycle event has a recovery path for
-    /// a veto. The `has_hooks_for` guard matters, since `HookRunner::run`
+    /// A veto is discarded: no lifecycle event has a recovery path for it.
+    /// The `additional_context` of the events that take it is posted as a
+    /// notice, which the next step puts in front of the model. The `has_hooks_for` guard matters, since `HookRunner::run`
     /// spawns processes and these sites are on every turn's hot path.
     ///
     /// For an event about the session, or about a turn that is over: an
@@ -399,7 +403,10 @@ impl Agent {
             return;
         }
         let input = build(self.lifecycle_input(format!("{event:?}")));
-        let _ = self.gate.hooks().run(event, &input, stop).await;
+        let result = self.gate.hooks().run(event, &input, stop).await;
+        for reminder in result.context_reminders(event) {
+            self.session_state.post_notice(None, reminder);
+        }
     }
 
     pub(crate) fn lifecycle_input(&self, event: String) -> hooks::HookInput {
@@ -474,13 +481,19 @@ impl Agent {
                     .screen_user_prompt(m.content.clone(), &[], PromptDelivery::Steer, cancel)
                     .await
                 {
-                    PromptScreen::Pass(content) => {
+                    PromptScreen::Pass { content, context } => {
+                        let mut blocks = vec![ModelContentBlock::Text {
+                            text: content.clone(),
+                        }];
+                        blocks.extend(
+                            context
+                                .into_iter()
+                                .map(|text| ModelContentBlock::Text { text }),
+                        );
                         self.session.push_message_from(
                             ModelMessage {
                                 role: MessageRole::User,
-                                content: vec![ModelContentBlock::Text {
-                                    text: content.clone(),
-                                }],
+                                content: blocks,
                             },
                             history::entry::MessageOrigin::Steer,
                         );
@@ -533,8 +546,8 @@ impl Agent {
         delivery: PromptDelivery,
         stop: &CancellationToken,
     ) -> PromptScreen {
-        let mut content = match self.run_prompt_hooks(content, delivery, stop).await {
-            PromptScreen::Pass(content) => content,
+        let (mut content, context) = match self.run_prompt_hooks(content, delivery, stop).await {
+            PromptScreen::Pass { content, context } => (content, context),
             blocked => return blocked,
         };
         let attachments = if self.prompt.middleware().is_empty() {
@@ -566,7 +579,7 @@ impl Agent {
                 }
             }
         }
-        PromptScreen::Pass(content)
+        PromptScreen::Pass { content, context }
     }
 
     pub(super) async fn run_prompt_hooks(
@@ -580,7 +593,10 @@ impl Agent {
             .hooks()
             .has_hooks_for(hooks::HookEvent::UserPromptSubmit)
         {
-            return PromptScreen::Pass(content);
+            return PromptScreen::Pass {
+                content,
+                context: Vec::new(),
+            };
         }
         let prompt_input = hooks::HookInput {
             hook_event_name: "UserPromptSubmit".into(),
@@ -604,10 +620,12 @@ impl Agent {
             );
             return PromptScreen::Blocked(response.message.clone());
         }
-        match hook_result.updated_input().and_then(|v| v.as_str()) {
-            Some(rewritten) => PromptScreen::Pass(rewritten.to_string()),
-            None => PromptScreen::Pass(content),
-        }
+        let context = hook_result.context_reminders(hooks::HookEvent::UserPromptSubmit);
+        let content = match hook_result.updated_input().and_then(|v| v.as_str()) {
+            Some(rewritten) => rewritten.to_string(),
+            None => content,
+        };
+        PromptScreen::Pass { content, context }
     }
 
     /// The one way a user turn ends: persist, then announce.

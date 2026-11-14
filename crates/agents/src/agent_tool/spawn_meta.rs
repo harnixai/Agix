@@ -99,17 +99,17 @@ impl SubagentPayload {
         self
     }
 
-    /// Fire one sub-agent lifecycle hook about this sub-agent. Notification
-    /// only — the response is discarded, so a hook cannot veto a spawn or a
-    /// completion. The hook stops with `stop`.
+    /// Fire one sub-agent lifecycle hook about this sub-agent. A hook cannot
+    /// veto a spawn or a completion; what it can give is the `additional_context`
+    /// of `SubagentStart`, returned as reminders. The hook stops with `stop`.
     pub(crate) async fn fire(
         &self,
         runner: &hooks::HookRunner,
         event: hooks::HookEvent,
         stop: &tokio_util::sync::CancellationToken,
-    ) {
+    ) -> Vec<String> {
         if !runner.has_hooks_for(event) {
-            return;
+            return Vec::new();
         }
         let mut input = hooks::HookInput::lifecycle(
             format!("{event:?}"),
@@ -124,7 +124,10 @@ impl SubagentPayload {
         if let (hooks::HookEvent::SubagentStop, Some(reason)) = (event, &self.stop_reason) {
             input = input.with_stop_reason(reason.clone());
         }
-        let _ = runner.run(event, &input, stop).await;
+        runner
+            .run(event, &input, stop)
+            .await
+            .context_reminders(event)
     }
 }
 

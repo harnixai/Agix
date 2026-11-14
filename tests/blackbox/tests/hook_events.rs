@@ -1,5 +1,5 @@
 //! Every hook event, fired end to end through the assembled daemon with a
-//! scripted model: one command hook bound to all thirty events appends each
+//! scripted model: one command hook bound to every event appends each
 //! payload to a ledger, and the cases read the ledger to say which events
 //! fired, in what order, and with what payload. Then the hook protocol
 //! itself — blocking, rewriting, refusing a message, replacing a result,
@@ -16,7 +16,7 @@ use blackbox::{
 };
 use serde_json::{json, Value};
 
-const EVENTS: [&str; 30] = [
+const EVENTS: [&str; 29] = [
     "PreToolUse",
     "PostToolUse",
     "PostToolUseFailure",
@@ -40,7 +40,6 @@ const EVENTS: [&str; 30] = [
     "TaskCompleted",
     "Elicitation",
     "ElicitationResult",
-    "ConfigChange",
     "WorktreeCreate",
     "WorktreeRemove",
     "InstructionsLoaded",
@@ -480,7 +479,7 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     assert_eq!(end["session_id"], session.as_str());
 
     let fired = ledger.names();
-    for unwired in ["ConfigChange", "ElicitationResult"] {
+    for unwired in ["ElicitationResult"] {
         assert!(
             !fired.iter().any(|n| n == unwired),
             "{unwired} is listed as never fired: {fired:?}"
@@ -1855,6 +1854,303 @@ async fn an_agent_hook_still_judges_when_the_model_holds_every_sub_agent_slot() 
         ));
     }
     assert!(problems.is_empty(), "{problems:#?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// A command hook that prints `answer` whatever it is given.
+fn answering(dir: &Path, name: &str, answer: &Value) -> anyhow::Result<Value> {
+    let script = dir.join(name);
+    executable(
+        &script,
+        &format!("#!/bin/sh\ncat > /dev/null\necho '{answer}'\n"),
+    )?;
+    Ok(command_hook(&script, 30_000))
+}
+
+fn adding_context(dir: &Path, name: &str, context: &str) -> anyhow::Result<Value> {
+    answering(dir, name, &json!({ "additional_context": context }))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_start_context_is_in_the_first_request() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-session-start", &stub)
+        .settings(json!({ "hooks_config": {
+            "SessionStart": [adding_context(dir.path(), "s.sh", "SESSION-CTX-MARK")?]
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("ok")]);
+    run.turn(&session, "USER-WORDS").await?;
+    let first = &stub.calls()[0];
+    let text = first.messages_text();
+    let context = text.find("SESSION-CTX-MARK").expect("context is sent");
+    assert!(context < text.find("USER-WORDS").unwrap(), "{text}");
+    assert!(text.contains("Hook `SessionStart`"), "{text}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_prompt_submit_context_follows_the_prompt_in_the_same_message() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-prompt", &stub)
+        .settings(json!({ "hooks_config": {
+            "UserPromptSubmit": [adding_context(dir.path(), "p.sh", "PROMPT-CTX-MARK")?]
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("ok")]);
+    run.turn(&session, "USER-WORDS").await?;
+    let text = stub.calls()[0].messages_text();
+    assert!(text.find("USER-WORDS").unwrap() < text.find("PROMPT-CTX-MARK").unwrap());
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_tool_use_context_is_in_the_next_request_after_the_result() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-post-tool", &stub)
+        .settings(json!({ "hooks_config": {
+            "PostToolUse": [adding_context(dir.path(), "t.sh", "POST-CTX-MARK")?]
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo TOOL-OUT-MARK" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    let calls = stub.calls();
+    assert!(!calls[0].messages_contain("POST-CTX-MARK"));
+    let text = calls[1].messages_text();
+    assert!(text.find("TOOL-OUT-MARK").unwrap() < text.find("POST-CTX-MARK").unwrap());
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pre_tool_use_context_of_a_blocked_call_is_dropped() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let hook = answering(
+        dir.path(),
+        "b.sh",
+        &json!({ "decision": "block", "message": "BLOCKED-MARK", "additional_context": "DROPPED-CTX" }),
+    )?;
+    let mut run = stubbed("ctx-blocked", &stub)
+        .settings(json!({ "hooks_config": { "PreToolUse": [hook] } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "true" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    let second = &stub.calls()[1];
+    assert!(second.messages_contain("BLOCKED-MARK"));
+    assert!(!second.messages_contain("DROPPED-CTX"));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn context_past_the_cap_is_cut_and_says_so() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let long = format!("{}TAIL-PAST-CAP", "x".repeat(15_000));
+    let mut run = stubbed("ctx-cap", &stub)
+        .settings(json!({ "hooks_config": {
+            "UserPromptSubmit": [adding_context(dir.path(), "c.sh", &long)?]
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("ok")]);
+    run.turn(&session, "go").await?;
+    let first = &stub.calls()[0];
+    assert!(first.messages_contain("only the first 10000 are shown"));
+    assert!(!first.messages_contain("TAIL-PAST-CAP"));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_hooks_context_neither_reaches_the_model_nor_extends_the_turn() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-stop", &stub)
+        .settings(json!({ "hooks_config": {
+            "Stop": [adding_context(dir.path(), "s.sh", "STOP-CTX-MARK")?]
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("all done")]);
+    run.turn(&session, "go").await?;
+    assert_eq!(stub.call_count(), 1);
+    run.turn(&session, "again").await?;
+    assert!(!stub
+        .calls()
+        .iter()
+        .any(|c| c.messages_contain("STOP-CTX-MARK")));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sub_agent_starts_with_its_subagent_start_context() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-subagent", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "Agent", "action": "allow" }],
+            "hooks_config": {
+                "SubagentStart": [adding_context(dir.path(), "a.sh", "SUB-CTX-MARK")?]
+            },
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "prompt": "CHILD-MARK say hi", "description": "child" }),
+            ),
+            Reply::text("done"),
+        ],
+    );
+    stub.script_when("CHILD-MARK", [Reply::text("hi")]);
+    run.turn(&session, "PARENT-MARK go").await?;
+    let child = turns_with(&stub, "CHILD-MARK", &["PARENT-MARK"]);
+    assert!(child.iter().any(|c| c.messages_contain("SUB-CTX-MARK")));
+    let parent = turns_with(&stub, "PARENT-MARK", &[]);
+    assert!(parent.iter().all(|c| !c.messages_contain("SUB-CTX-MARK")));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn permission_requested_approve_runs_the_call_without_a_prompt() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let ledger = Ledger::new()?;
+    let approve = answering(dir.path(), "ok.sh", &json!({ "decision": "approve" }))?;
+    let mut run = stubbed("perm-approve", &stub)
+        .settings(json!({
+            "permission_mode": "default",
+            "permission_rules": [{ "tool": "Bash(echo asked > asked.txt)", "action": "ask" }],
+            "hooks_config": {
+                "PermissionRequested": [approve],
+                "Notification": [ledger.hook()],
+            },
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("SHOULD-NOT-BE-ASKED")))
+        .await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo asked > asked.txt" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    assert!(watcher.asked().is_empty());
+    assert_eq!(run.read_file("asked.txt").as_deref(), Some("asked\n"));
+    assert!(!ledger.names().iter().any(|n| n == "Notification"));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn permission_requested_block_denies_with_its_message() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let ledger = Ledger::new()?;
+    let block = answering(
+        dir.path(),
+        "no.sh",
+        &json!({ "decision": "block", "message": "NOPE-MARK" }),
+    )?;
+    let mut run = stubbed("perm-block", &stub)
+        .settings(json!({
+            "permission_mode": "default",
+            "permission_rules": [{ "tool": "Bash(echo asked > asked.txt)", "action": "ask" }],
+            "hooks_config": {
+                "PermissionRequested": [block],
+                "PermissionDenied": [ledger.hook()],
+            },
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run.watch_with(&session, |_| Some(Answer::permit())).await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo asked > asked.txt" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    assert!(watcher.asked().is_empty());
+    assert!(stub.calls()[1].messages_contain("Denied by PermissionRequested hook: NOPE-MARK"));
+    assert!(run.read_file("asked.txt").is_none());
+    ledger
+        .wait_for("PermissionDenied", Duration::from_secs(30))
+        .await?;
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn permission_requested_cannot_answer_a_managed_ask() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let managed_file = dir.path().join("managed-settings.json");
+    std::fs::write(
+        &managed_file,
+        serde_json::to_string(&json!({
+            "permission_rules": [{ "tool": "Bash(echo managed > managed.txt)", "action": "ask" }]
+        }))?,
+    )?;
+    let managed_arg = managed_file.to_string_lossy().to_string();
+    let approve = answering(dir.path(), "ok.sh", &json!({ "decision": "approve" }))?;
+    let mut run = stubbed("perm-managed", &stub)
+        .settings(json!({
+            "permission_mode": "default",
+            "hooks_config": { "PermissionRequested": [approve] },
+        }))
+        .mode(blackbox::Mode::Spawned)
+        .options(move |o| o.arg("--managed-settings").arg(managed_arg.clone()))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("PERSON-SAID-NO")))
+        .await?;
+    stub.script([
+        Reply::calls(
+            "b1",
+            "Bash",
+            json!({ "command": "echo managed > managed.txt" }),
+        ),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    assert_eq!(watcher.asked().len(), 1);
+    assert!(run.read_file("managed.txt").is_none());
     run.finish().await;
     Ok(())
 }

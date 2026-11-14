@@ -112,7 +112,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 **扩展**
 - 公开的 46 个扩展点:31 个契约、9 个拦截点、6 个注册点。
 - 编译进宿主的 Rust 插件,与 QuickJS 脚本;可以打成插件包安装,安装时强制披露。
-- 三十个时机的 hook,后端有 command、prompt、HTTP、agent 四种([hooks.md](hooks.md))。
+- 二十九个时机的 hook,后端有 command、prompt、HTTP、agent 四种([hooks.md](hooks.md))。
 - MCP 客户端(stdio、SSE、streamable HTTP、WebSocket);声明式场景;自定义 Agent 类型。
 - MCP 授权(2025-11-25 规范,OAuth 2.1):发现、动态客户端注册、PKCE、刷新;登录由宿主经 RPC
   驱动,回调走回环或宿主自己的地址;无人值守的 server 用 client credentials 或企业托管授权;
@@ -259,7 +259,7 @@ let (mut agent, events, input) = runtime::agent::Builder::new()
 |---|---|---|
 | **脚本**(QuickJS,默认) | 九个点:四个写提示词、两个围着工具调用、两个围着模型调用、记忆召回 | 一个 `.js` 文件加一行配置;每次调用微秒级 |
 | **插件包** | MCP 服务器、脚本、声明式场景、agent 类型、skill | 一个带 `plugin.toml` 的 zip;要给模型看的文本安装时全部披露 |
-| **Hooks** | 一轮里的三十个时点、四种后端:命令、提示词、HTTP、agent | 观察、改写输入、拦下工具调用、结束一轮 |
+| **Hooks** | 一轮里的二十九个时点、四种后端:命令、提示词、HTTP、agent | 观察、改写输入、拦下工具调用、结束一轮 |
 
 另外,任何说 MCP 的东西本来就是扩展。脚本和 `RunCode` 跑在同一套内嵌 QuickJS 里:限额
 限的是开销,不是恶意代码,所以脚本能做什么按它从哪来定。引擎不带 WebAssembly 运行时,

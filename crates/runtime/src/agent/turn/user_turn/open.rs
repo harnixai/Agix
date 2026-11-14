@@ -20,14 +20,21 @@ impl Agent {
         mut content: String,
         attachments: &[crate::agent::Attachment],
         cancel: &CancellationToken,
-    ) -> ControlFlow<TurnOutcome, String> {
+    ) -> ControlFlow<TurnOutcome, (String, Vec<String>)> {
+        let context;
         // UserPromptSubmit runs before any turn setup has touched anything. A
         // hook that errors or times out counts as having said nothing.
         match self
             .screen_user_prompt(content, attachments, PromptDelivery::Turn, cancel)
             .await
         {
-            PromptScreen::Pass(screened) => content = screened,
+            PromptScreen::Pass {
+                content: screened,
+                context: hook_context,
+            } => {
+                content = screened;
+                context = hook_context;
+            }
             PromptScreen::Blocked(message) => {
                 self.record_turn_complete("stopped_by_hook", 0, 0, std::time::Instant::now());
                 return ControlFlow::Break(TurnOutcome {
@@ -73,7 +80,7 @@ impl Agent {
         // A skill's `allowed_tools` last for the turn it was invoked in.
         self.gate.begin_turn().await;
 
-        ControlFlow::Continue(content)
+        ControlFlow::Continue((content, context))
     }
 
     pub(super) async fn prepare_turn(&mut self) {
@@ -218,6 +225,7 @@ impl Agent {
     pub(super) async fn push_user_message(
         &mut self,
         mut content: String,
+        hook_context: Vec<String>,
         attachments: &[crate::agent::Attachment],
         origin: history::entry::MessageOrigin,
     ) {
@@ -252,6 +260,11 @@ impl Agent {
                 range: None,
             });
         }
+        user_blocks.extend(
+            hook_context
+                .into_iter()
+                .map(|text| ModelContentBlock::Text { text }),
+        );
         let message = ModelMessage {
             role: MessageRole::User,
             content: user_blocks,

@@ -225,33 +225,6 @@ pub enum HookEvent {
     /// Listed in [`UNWIRED_EVENTS`], which is what makes configuring a hook
     /// for it warn instead of failing silently.
     ElicitationResult,
-    /// Settings/config change.
-    ///
-    /// **Not fired today, and the reason is structural.** The only thing that
-    /// mutates settings at runtime is the daemon's `config.reload` /
-    /// `config.setProvider` RPC, which operates at the *pool* level — above
-    /// any individual session, and therefore above the only place a
-    /// `HookRunner` exists (one per session, built from that session's merged
-    /// settings). Firing it would mean either fanning out to every live
-    /// session from the pool, or giving the pool a hook runner of its own
-    /// with no session to attach it to.
-    ///
-    /// A further wrinkle: the pool's own
-    /// propagation mechanism does not offer a free firing site either. A
-    /// reconfigured pool bumps `config_generation`, and a stale-but-idle
-    /// session is then *destroyed and rebuilt* before its next turn — so the
-    /// session that experienced the change no longer exists by the time
-    /// anything could observe it, and the rebuilt one already fires
-    /// `Setup`/`SessionStart`/`CwdChanged` indistinguishably from a fresh
-    /// start.
-    ///
-    /// Listed here rather than deleted because the RPC surface for it exists
-    /// and a hook for "the daemon was reconfigured under me" is genuinely
-    /// useful; it is a wiring gap with a known shape, not a stray variant.
-    ///
-    /// Listed in [`UNWIRED_EVENTS`], which is what makes configuring a hook
-    /// for it warn instead of failing silently.
-    ConfigChange,
     /// Git worktree lifecycle.
     WorktreeCreate,
     WorktreeRemove,
@@ -270,27 +243,26 @@ pub enum HookEvent {
 
 /// Events that parse, accept hook configuration, and never fire.
 ///
-/// Each one is a known wiring gap whose reason is written on the variant
-/// itself. They are kept rather than deleted for two reasons. The shape of
-/// each is right and a host that supplies the missing half has a real event
-/// to subscribe to; and deleting a variant is far more destructive than it
-/// looks — [`HooksSettings`] is a `HashMap` keyed by this enum with no
-/// `#[serde(other)]` fallback, so one unrecognized event name fails the
-/// *whole* map, and the composition root's `unwrap_or_else` then degrades to
-/// an empty runner. Removing a variant would silently disable **every** hook
-/// belonging to anyone who had configured that one.
-///
-/// The cost of keeping them is that someone configures a hook here and waits
-/// for it forever. [`HookEvent::is_wired`] exists so the composition root can
-/// say so out loud at startup instead.
-///
-/// Kept honest by `tests/guards/tests/wiring.rs`, which scans the
-/// production sources for firing sites and fails if this list and the code
-/// disagree in either direction — so wiring one of these up without removing
-/// it here is a test failure, not a stale comment.
-pub const UNWIRED_EVENTS: &[HookEvent] = &[HookEvent::ElicitationResult, HookEvent::ConfigChange];
+/// Configuring a hook for one warns at startup ([`HookEvent::is_wired`])
+/// instead of failing silently. Kept honest by `tests/guards/tests/wiring.rs`,
+/// which scans the production sources for firing sites and fails if this list
+/// and the code disagree in either direction.
+pub const UNWIRED_EVENTS: &[HookEvent] = &[HookEvent::ElicitationResult];
 
 impl HookEvent {
+    /// Whether a hook's `additional_context` at this event reaches the model.
+    pub fn takes_context(self) -> bool {
+        matches!(
+            self,
+            HookEvent::SessionStart
+                | HookEvent::UserPromptSubmit
+                | HookEvent::PreToolUse
+                | HookEvent::PostToolUse
+                | HookEvent::PostToolUseFailure
+                | HookEvent::SubagentStart
+        )
+    }
+
     /// Whether anything in the engine actually fires this event.
     ///
     /// `false` means a configured hook for it will never run — see

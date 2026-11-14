@@ -160,7 +160,7 @@ monitors and structured output ([table below](#tools--45-built-in)).
   registrations.
 - Rust plugins compiled into the host, and QuickJS scripts, installable as
   packages with install-time disclosure.
-- Hooks at thirty moments, with command, prompt, HTTP and agent backends
+- Hooks at twenty-nine moments, with command, prompt, HTTP and agent backends
   ([`docs/hooks.md`](docs/hooks.md)).
 - An MCP client (stdio, SSE, streamable HTTP, WebSocket), declarative scenes,
   and custom agent types.
@@ -338,7 +338,7 @@ outside a Rust build:
 |---|---|---|
 | **Scripts** (QuickJS, default) | nine points: four that write the prompt, two around a tool call, two around a model call, memory recall | a `.js` file and one line of config; microseconds per call |
 | **Plugin packages** | MCP servers, scripts, a declarative scene, agent types, skills | a zip with a `plugin.toml`; everything it will show the model is disclosed at install |
-| **Hooks** | Thirty named moments in a turn (`HookEvent` (30)), four backends: command, prompt, HTTP, agent | observe, rewrite an input, block a tool call, end a turn |
+| **Hooks** | Twenty-nine named moments in a turn (`HookEvent` (29)), four backends: command, prompt, HTTP, agent | observe, rewrite an input, block a tool call, end a turn |
 
 And anything that speaks MCP is already an extension. Scripts run in the same
 embedded QuickJS as `RunCode`: their limits bound cost, not hostile code, so

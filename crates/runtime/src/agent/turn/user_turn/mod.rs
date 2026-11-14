@@ -72,8 +72,8 @@ impl Agent {
         cancel: CancellationToken,
         origin: history::entry::MessageOrigin,
     ) -> Result<TurnOutcome, TurnError> {
-        let content = match self.open_turn(content, &attachments, &cancel).await {
-            ControlFlow::Continue(content) => content,
+        let (content, hook_context) = match self.open_turn(content, &attachments, &cancel).await {
+            ControlFlow::Continue(opened) => opened,
             ControlFlow::Break(blocked) => return Ok(blocked),
         };
 
@@ -83,7 +83,8 @@ impl Agent {
         self.prepare_turn().await;
         let recall = self.start_memory_recall(&content);
         state.skill_discovery = self.start_skill_discovery();
-        self.push_user_message(content, &attachments, origin).await;
+        self.push_user_message(content, hook_context, &attachments, origin)
+            .await;
         self.announce_output_target();
         if let Some(recall) = recall {
             self.inject_recalled_memories(recall).await;

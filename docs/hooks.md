@@ -2,7 +2,7 @@
 
 hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具之前、一轮要结束时、压缩之前……)
 就把这一刻的情况作为一份 JSON 交给它,它可以只是看看,也可以在允许的地方拦下、改写或者
-把模型送回去接着干。一个会话里一共有三十个这样的时刻,`HookEvent` 的每个变体是一个;
+把模型送回去接着干。一个会话里一共有二十九个这样的时刻,`HookEvent` 的每个变体是一个;
 后端有四种:跑一条 shell 命令、问一次模型、POST 一个 URL、起一个子 Agent。
 
 在扩展面里的位置见 [`extension_points.md`](extension_points.md) 的 `hooks` 一节;
@@ -39,7 +39,7 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
   `hooks_config` 就说明项目配了 hook。
 - **坏一条只丢一条。** 不认识的事件名(拼错、写给更新版本引擎的)、格式不对的条目,丢掉那一条、
   记一条 warn,其余照常生效。事件名区分大小写,不做"最接近的"猜测。
-- **从不触发的事件会说出来。** 有两个事件能配、能解析,但引擎里没有地方触发它们(表里标着
+- **从不触发的事件会说出来。** 有一个事件能配、能解析,但引擎里没有地方触发它们(表里标着
   **从不触发**,清单是 `hooks::UNWIRED_EVENTS`);给它们配了 hook,会话建起来时记一条 warn。
 - **整棵会话树一个 runner。** 子 Agent 用父会话的 hooks:子 Agent 里的工具调用、轮次照样
   触发配置的 hook,payload 带的是子 Agent 自己的 `session_id`、`cwd`、`permission_mode`。
@@ -229,13 +229,20 @@ hook 不能被换个写法绕过去,宁可多跑一次。**文件路径(`file_pa
 
 | 字段 | 作用 |
 |---|---|
-| `decision` | `"block"`:在能拦的事件上拦下(各事件含义见下表);`"approve"`:`PreToolUse` 上替人答应——权限检查要询问的这次调用不再问人、直接放行(无人值守会话同样),权限规则拒绝的照样拒绝,部署方 managed 层(`ARCHITECTURE.md` §6.1"用户规则与部署方规则")的 `ask` 照样问人、无人值守时照样拒绝;别的事件上不起作用。`command` 与 `http` 的 `approve` 都算;`prompt` 与 `agent` 的只在写了 `may_approve: true` 时算 |
+| `decision` | `"block"`:在能拦的事件上拦下(各事件含义见下表);`"approve"`:`PreToolUse` 上替人答应——权限检查要询问的这次调用不再问人、直接放行(无人值守会话同样),权限规则拒绝的照样拒绝,部署方 managed 层(`ARCHITECTURE.md` §6.1"用户规则与部署方规则")的 `ask` 照样问人、无人值守时照样拒绝;`PermissionRequested` 上同理(见下);别的事件上不起作用。`command` 与 `http` 的 `approve` 都算;`prompt` 与 `agent` 的只在写了 `may_approve: true` 时算 |
 | `message` | 拦下的理由——交给模型或写进结果的那句话 |
 | `continue` | `false`:在能结束一轮的事件上结束它 |
 | `updated_input` | `PreToolUse`:新的入参(整个替换);`UserPromptSubmit`:新的消息文本(JSON 字符串) |
+| `additional_context` | 一段文字,在模型的下一步之前放进一个 `<system-reminder>` 交给它(写法也认 `additionalContext`;不认 Claude Code 的 `hookSpecificOutput.additionalContext`,要写在顶层)。只有 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`SubagentStart` 读它,别的事件给了会 warn 一次;被拦下的调用的 context 不收;`Stop` 不收——让一轮接着做用 `decision: "block"`。每个 hook 最多 10,000 字符、一个事件合计最多 20,000,超出截断并注明 |
 | `rewake` | 见 `async_rewake` |
 
-hook 的 stdout 只用来读回答,引擎不把它交给模型或宿主;要让模型看到的话写进 `message`。
+`SessionStart` 的 context 在第一条用户消息之前送进,会话重建、恢复时该事件再发一次,就再注入一次。
+`UserPromptSubmit` 的 context 是同一条用户消息里提示词之后的额外文本块;`SubagentStart` 的接在子 Agent 自己的第一条消息之后。
+`PreToolUse`、`PostToolUse`、`PostToolUseFailure` 的在这批工具结果之后的下一步送进。
+
+`PermissionRequested` 能裁决:`decision: "approve"` 不问人直接放行(managed 层的 `ask` 不认,`prompt` / `agent` hook 要 `may_approve: true`,skill 的内联命令不认),`decision: "block"` 拒绝并把 `message` 交给模型。
+
+hook 的 stdout 只用来读回答,引擎不把它交给模型或宿主;要让模型看到的话写进 `message` 或 `additional_context`。
 所以没有 `suppress_output` 这样的字段,写了也不报错。
 
 **一个事件配了几个 hook,它们并发跑,结果按配置顺序合并:** 有一个说 `block` 就拦(理由取
@@ -288,30 +295,29 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 <!-- BEGIN GENERATED TABLE — see hooks::catalog::render_markdown -->
 | 事件 | 何时触发 | payload(四个公共字段之外) | 回答能做什么 |
 |---|---|---|---|
-| `PreToolUse` | 每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用(`tool_use_id` 由展开它的 `Skill` 调用派生为 `<id>.<n>`,`/name` 展开时为 `slash-<turn_id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id` | `decision: "block"`(或 exit 2):这次调用不执行,模型收到 `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;`decision: "approve"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;`prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判) |
-| `PostToolUse` | 工具真正跑完之后(成功或失败);被 PreToolUse、权限拦下的调用不发;skill 正文里的 `` !`cmd` `` 跑完也发,是这个会话的一次 `Bash` 调用(`tool_use_id` 为派生的 `<id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id`、`tool_result`(结果文本)、`is_error` | `decision: "block"`:结果换成 `Denied by PostToolUse hook: <message>`,同一批并发的其他调用被取消(skill 的内联命令:正文里换成 "[`cmd` failed: Denied by PostToolUse hook: <message>]");`continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,不起作用,展开出的那一轮照常跑) |
-| `PostToolUseFailure` | 工具调用以错误结束(工具返回错误或 panic,或同批的另一个调用出错时被中途放弃)时,在 PostToolUse 之前;工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`(错误文本)、`turn_id` | 只通知,回答被丢弃 |
+| `PreToolUse` | 每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用(`tool_use_id` 由展开它的 `Skill` 调用派生为 `<id>.<n>`,`/name` 展开时为 `slash-<turn_id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id` | `decision: "block"`(或 exit 2):这次调用不执行,模型收到 `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;`decision: "approve"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;`prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(拦下的调用不收) |
+| `PostToolUse` | 工具真正跑完之后(成功或失败);被 PreToolUse、权限拦下的调用不发;skill 正文里的 `` !`cmd` `` 跑完也发,是这个会话的一次 `Bash` 调用(`tool_use_id` 为派生的 `<id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id`、`tool_result`(结果文本)、`is_error` | `decision: "block"`:结果换成 `Denied by PostToolUse hook: <message>`,同一批并发的其他调用被取消(skill 的内联命令:正文里换成 "[`cmd` failed: Denied by PostToolUse hook: <message>]");`continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,不起作用,展开出的那一轮照常跑);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它 |
+| `PostToolUseFailure` | 工具调用以错误结束(工具返回错误或 panic,或同批的另一个调用出错时被中途放弃)时,在 PostToolUse 之前;工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`(错误文本)、`turn_id` | `additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它 |
 | `TurnStart` | 一轮开始,UserPromptSubmit 放行之后、第一次调模型之前 | `turn_id` | 只通知,回答被丢弃 |
 | `TurnComplete` | 一轮正常走完(模型不再要工具,Stop hook 也放行了) | `turn_id`、`stop_reason` | 只通知,回答被丢弃 |
-| `SessionStart` | 会话开始运行,紧接在 `Setup` 之后 | `source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带 | 只通知,回答被丢弃 |
+| `SessionStart` | 会话开始运行,紧接在 `Setup` 之后 | `source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带 | `additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(第一轮开头、第一条用户消息之前;会话重建、恢复时再发一次就再注入一次) |
 | `SessionEnd` | 会话的主循环退出:收到关闭、输入通道关闭、被取消,三种都发 | `reason`:宿主为什么停下这个引擎——`close`(`session.close` / `session.delete`)、`evict`(空闲回收或池满挤出)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而换引擎)、`shutdown`(daemon 关停);引擎自己结束的(输入通道关闭、收到 `Shutdown` 命令)、嵌入方停下时没给原因的不带 | 只通知,回答被丢弃 |
 | `Stop` | 模型这一步不再要工具、这一轮要结束时;每次要结束都问一遍 | `stop_hook_active`(这一轮已经被 Stop hook 送回去过) | `continue: false`:结束这一轮(`stopped_by_hook`,随后发 `StopFailure`);`decision: "block"`(或 exit 2):不让结束,`message` 作为提醒交给模型接着做 |
 | `StopFailure` | 一轮被 Stop hook 的 `continue: false` 截停时 | `reason` | 只通知,回答被丢弃 |
-| `UserPromptSubmit` | 用户消息进转录之前:开一轮的那条,以及运行中 steer 进来的每一条 | `user_prompt`、`delivery`(`turn` / `steer`) | `decision: "block"`:这条消息不处理——开一轮的直接以 `stopped_by_hook` 结束、不调模型,steer 的不进转录;`updated_input`(JSON 字符串):换掉消息文本 |
+| `UserPromptSubmit` | 用户消息进转录之前:开一轮的那条,以及运行中 steer 进来的每一条 | `user_prompt`、`delivery`(`turn` / `steer`) | `decision: "block"`:这条消息不处理——开一轮的直接以 `stopped_by_hook` 结束、不调模型,steer 的不进转录;`updated_input`(JSON 字符串):换掉消息文本;`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(同一条用户消息的附加文本块) |
 | `PreCompact` | 每次压缩之前(按阈值自动压、`/compact`、请求因体积被拒后的压缩)。修剪不算压缩,不触发它 | `tool_input`:`messages_before`、`token_count`、`threshold`、`trigger`(`auto` / `manual`) | `decision: "block"` 或 `continue: false`:这次不压缩 |
 | `PostCompact` | 压缩完成之后;修剪之后不发 | `tool_input`:`strategy`、`messages_before`、`messages_after`、`tokens_before`、`tokens_after` | 只通知,回答被丢弃 |
-| `PermissionRequested` | 权限检查判为"询问"、开始等宿主回答之前(无人值守会话不问,直接按拒绝处理) | `tool_name`、`tool_input`、`reason`(询问的文字)、`turn_id` | 只通知,回答被丢弃 |
+| `PermissionRequested` | 权限检查判为"询问"、开始等宿主回答之前(无人值守会话不问,直接按拒绝处理) | `tool_name`、`tool_input`、`reason`(询问的文字)、`turn_id` | `decision: "approve"`:不问人直接放行(managed 层的询问照样问人;`prompt` / `agent` hook 要写 `may_approve: true`);`decision: "block"`:拒绝,`message` 交给模型,不再询问 |
 | `PermissionDenied` | 一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,它是这个会话的一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`、`turn_id` | 只通知,回答被丢弃 |
 | `Setup` | 会话开始运行,早于 `SessionStart` | `reason`(`scene=<id> model=<模型>`) | 只通知,回答被丢弃 |
 | `Notification` | 需要人注意时:一个权限询问在等回答;模型调了 `PushNotification` | `tool_name`、`tool_input`(被询问的调用,或 `PushNotification` 的入参)、`reason`、`turn_id` | 只通知,回答被丢弃 |
 | `SubagentStop` | 子 Agent 跑完(成功、出错、被取消);常驻团队成员在被停下时 | `session_id` 是子 Agent 的;`agent_type`、`stop_reason`(`end_turn` / `error` / `cancelled` / `shutdown`) | 只通知,回答被丢弃 |
-| `SubagentStart` | 子 Agent 开始跑之前,每一种起法都发:前台、后台、宿主 `session.startAgent`、`TeamCreate` 成员、常驻成员 | `session_id` 是子 Agent 的;`agent_type` | 只通知,回答被丢弃 |
+| `SubagentStart` | 子 Agent 开始跑之前,每一种起法都发:前台、后台、宿主 `session.startAgent`、`TeamCreate` 成员、常驻成员 | `session_id` 是子 Agent 的;`agent_type` | `additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(进子 Agent 自己的第一条消息,不进父的对话) |
 | `TeammateIdle` | 团队成员的一轮结束(不论怎么结束),在这一轮的 `TaskCompleted` 之后 | `team_name`、`teammate_name`、`turn_id`、`stop_reason` | 只通知,回答被丢弃 |
 | `TaskCreated` | 一个运行中的任务开始:子 Agent、后台 shell 命令、Monitor、团队成员 | `reason`(这个任务在 `session.tasks` 里的 JSON) | 只通知,回答被丢弃 |
 | `TaskCompleted` | 一个运行中的任务结束(完成、失败、被停下),与 `TaskCreated` 成对;另外团队成员的一轮正常结束时也发一次 | 任务结束:`reason`(这个任务在 `session.tasks` 里的 JSON:`task_id`、`kind`、`status` 为 `done` / `failed` / `stopped`……);团队成员的一轮:`team_name`、`teammate_name`、`turn_id`、`stop_reason` | 只通知,回答被丢弃 |
 | `Elicitation` | MCP 工具的结果里带了 elicitation 链接(`mcp://`、`elicitation://`) | `tool_name`(`mcp_elicitation_<server>`)、`tool_input`:`server_name`、`url` | 只通知,回答被丢弃 |
 | `ElicitationResult` | **从不触发**:宿主把用户对 elicitation 的回答交回来时;还没有宿主侧的回传通路 | `tool_name`、`tool_input`:`server_name`、`url`、`response`;`tool_result` | 只通知,回答被丢弃 |
-| `ConfigChange` | **从不触发**:配置在运行中变了;改配置的 RPC 在池一级,高于任何一个会话的 hooks | — | 只通知,回答被丢弃 |
 | `WorktreeCreate` | `EnterWorktree` 成功之后 | `tool_name`、`tool_input`、`turn_id` | 只通知,回答被丢弃 |
 | `WorktreeRemove` | `ExitWorktree` 成功之后 | `tool_name`、`tool_input`、`turn_id` | 只通知,回答被丢弃 |
 | `InstructionsLoaded` | 会话上下文(项目说明)注入转录时,说明非空才发;一个会话一次 | `reason`(注入了多少字节) | 只通知,回答被丢弃 |

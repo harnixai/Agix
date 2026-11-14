@@ -80,6 +80,10 @@ const PUTS_A_CALL_TO_THE_POLICY: &[(&str, &str)] = &[
         "the dispatch's one decision per call",
     ),
     (
+        "crates/runtime/src/agent/turn/tool_permission.rs::settled_by_hook",
+        "the same decision again, with a `PermissionRequested` hook's approval as the hook answer",
+    ),
+    (
         "crates/agents/src/agent_tool/permission.rs::DelegateRelay::decide",
         "a delegate's call, relayed to its parent's policy",
     ),

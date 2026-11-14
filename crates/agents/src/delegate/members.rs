@@ -272,7 +272,7 @@ impl Delegator {
                 base::error::ToolError::Execution(e) => DelegateError::Build(e.to_string()),
                 other => DelegateError::Build(other.to_string()),
             })?;
-        let run = DelegateRun::start(
+        let (run, start_context) = DelegateRun::start(
             self,
             &delegate,
             Start {
@@ -284,7 +284,7 @@ impl Delegator {
         )
         .await;
 
-        let prompt = self.opening_prompt(delegate.def.as_ref(), prompt);
+        let prompt = self.opening_prompt(delegate.def.as_ref(), prompt, &start_context);
         let id = format!("member-{}", bg_task_id());
         tracing::debug!(team = %seat.team, member = %seat.member, %id, "spawning new persistent team member");
         let (inbox, messages) = MemberInbox::open();

@@ -4,7 +4,7 @@
 
 use super::process::hook_permission_mode;
 use super::reporting::record_permission_decision;
-use super::tool_exec::{fire_ctx_lifecycle_hook, Caller, ToolExecCtx};
+use super::tool_exec::{fire_ctx_lifecycle_hook, lifecycle_input, Caller, ToolExecCtx};
 use std::sync::Arc;
 
 /// `PreToolUse`: the input the call goes on with, and what the hook answered
@@ -35,7 +35,15 @@ pub(super) async fn pre_tool_use(
         user_prompt: None,
         ..Default::default()
     };
-    match answer_of_pre_tool_use(&ctx.hooks, &pre_input, input, &ctx.cancel).await {
+    match answer_of_pre_tool_use(
+        &ctx.hooks,
+        &pre_input,
+        input,
+        &ctx.cancel,
+        &ctx.session_state,
+    )
+    .await
+    {
         (input, HookAnswer::Approve { .. }) if ctx.caller == Caller::InlineCommand => {
             (input, HookAnswer::None)
         }
@@ -49,6 +57,7 @@ async fn answer_of_pre_tool_use(
     pre_input: &hooks::HookInput,
     input: serde_json::Value,
     cancel: &tokio_util::sync::CancellationToken,
+    session_state: &base::context::SessionState,
 ) -> (serde_json::Value, base::interface::permission::HookAnswer) {
     use base::interface::permission::HookAnswer;
     let hook_result = hooks
@@ -70,6 +79,9 @@ async fn answer_of_pre_tool_use(
                 .unwrap_or_else(|| "no reason given".into()),
         };
         return (input, answer);
+    }
+    for reminder in hook_result.context_reminders(hooks::HookEvent::PreToolUse) {
+        session_state.post_notice(None, reminder);
     }
     let input = hook_result.updated_input().cloned().unwrap_or(input);
     let answer = match hook_result.approved() {
@@ -154,7 +166,7 @@ pub(super) async fn authorize(
                 paths,
                 reason,
             };
-            ask(ctx, name, input, &facts, tool_ctx, asked).await
+            ask(ctx, name, input, &facts, tool_ctx, asked, request).await
         }
         decided => Answer::Decided(decided),
     };
@@ -225,17 +237,73 @@ struct Asked {
 /// Put the policy's question to the host and wait for it. Only the session
 /// going away interrupts the wait; an unanswered prompt within the deadline is
 /// not consent.
-async fn announce_prompt(ctx: &ToolExecCtx, name: &str, input: &serde_json::Value, message: &str) {
-    fire_ctx_lifecycle_hook(ctx, hooks::HookEvent::PermissionRequested, |i| {
-        i.with_tool(name, input.clone()).with_reason(message)
-    })
-    .await;
+async fn announce_prompt(ctx: &ToolExecCtx, name: &str, input: &serde_json::Value) {
     // `Notification` rings when a person's attention is needed.
     fire_ctx_lifecycle_hook(ctx, hooks::HookEvent::Notification, |i| {
         i.with_tool(name, input.clone())
             .with_reason(format!("waiting for a permission decision on `{name}`"))
     })
     .await;
+}
+
+/// `PermissionRequested`: a hook may settle the question before a person is
+/// asked. An approval is put to the policy as a hook's answer, so it counts
+/// as much as for `PreToolUse`: not for what only a person may answer, not
+/// for a skill's inline command.
+async fn settled_by_hook(
+    ctx: &ToolExecCtx,
+    name: &str,
+    input: &serde_json::Value,
+    asked: &Asked,
+    request: base::interface::permission::PermissionRequest<'_>,
+) -> Option<Answer> {
+    use base::interface::permission::{HookAnswer, PermissionOutcome, Reason};
+    if !ctx
+        .hooks
+        .has_hooks_for(hooks::HookEvent::PermissionRequested)
+    {
+        return None;
+    }
+    let hook_input = lifecycle_input(ctx, hooks::HookEvent::PermissionRequested)
+        .with_tool(name, input.clone())
+        .with_reason(&asked.message);
+    let result = ctx
+        .hooks
+        .run(
+            hooks::HookEvent::PermissionRequested,
+            &hook_input,
+            &ctx.cancel,
+        )
+        .await;
+    if ctx.cancel.is_cancelled() {
+        return None;
+    }
+    if let Some(response) = result.blocked() {
+        let why = response.message.as_deref().unwrap_or("no reason given");
+        let message = format!("Denied by PermissionRequested hook: {why}");
+        return Some(Answer::Refused(
+            Reason::new(asked.reason.stage, &message),
+            Refusal {
+                reason: message.clone(),
+                error: message,
+            },
+        ));
+    }
+    if result.approved().is_none() || ctx.caller == Caller::InlineCommand {
+        return None;
+    }
+    let approval = HookAnswer::Approve {
+        hook: "PermissionRequested".into(),
+    };
+    match ctx
+        .permission
+        .policy
+        .decide(&request.with_hook(&approval))
+        .await
+    {
+        permitted @ PermissionOutcome::Permit { .. } => Some(Answer::Decided(permitted)),
+        _ => None,
+    }
 }
 
 async fn ask(
@@ -245,18 +313,23 @@ async fn ask(
     facts: &base::interface::permission::ToolFacts,
     tool_ctx: &base::tool::ToolContext,
     asked: Asked,
+    request: base::interface::permission::PermissionRequest<'_>,
 ) -> Answer {
     use base::interface::permission::{Basis, ExecProfile, Obligations, PermissionOutcome, Reason};
+    if let Some(settled) = settled_by_hook(ctx, name, input, &asked, request).await {
+        return settled;
+    }
     let Asked {
         prompt_id,
         message,
         paths,
         reason: asked,
+        ..
     } = asked;
     let refused =
         |refusal: Refusal| Answer::Refused(Reason::new(asked.stage, &refusal.reason), refusal);
     let waited = std::time::Instant::now();
-    announce_prompt(ctx, name, input, &message).await;
+    announce_prompt(ctx, name, input).await;
     let prompt_timeout = ctx.config.permission_prompt_timeout_secs;
     let ask = ctx.elicitation.ask_within(
         base::interface::elicitation::ElicitRequest {

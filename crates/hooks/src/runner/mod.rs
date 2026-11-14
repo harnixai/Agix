@@ -8,12 +8,14 @@
 //! - `rewake` — `once` and async-rewake bookkeeping, and waking the rewake hooks
 
 mod background;
+mod context;
 mod contracts;
 pub mod executor;
 pub mod matcher;
 mod rewake;
 
 pub use background::BackgroundHooks;
+pub use context::{CONTEXT_BLOCK_CAP, CONTEXT_EVENT_CAP};
 pub use contracts::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
 
 use crate::config::{HookConfig, HookEvent, HooksSettings, OnError};
@@ -111,6 +113,8 @@ fn warn_of_timeouts_past_the_cap(settings: &HooksSettings) {
 #[derive(Debug, Clone, Default)]
 pub struct HookRunResult {
     pub outcomes: Vec<HookOutcome>,
+    /// What each outcome's hook is called, in step with `outcomes`.
+    pub hooks: Vec<String>,
 }
 
 impl HookRunResult {
@@ -204,6 +208,7 @@ pub struct HookRunner {
     project_untrusted: bool,
     process: Arc<dyn base::interface::exec::Process>,
     background: BackgroundHooks,
+    context_warned: Arc<std::sync::Mutex<Vec<HookEvent>>>,
 }
 
 impl HookRunner {
@@ -224,6 +229,7 @@ impl HookRunner {
             project_untrusted: false,
             process: exec.process,
             background: BackgroundHooks::new(),
+            context_warned: Default::default(),
         }
     }
 
@@ -389,7 +395,7 @@ impl HookRunner {
     /// implements the host-side round-trip that collects a response and
     /// reports it back here. Kept (not deleted) because the shape is right
     /// and a host that does implement that round-trip has a real method to
-    /// call; same rationale as `HookEvent::ConfigChange`'s doc comment.
+    /// call;
     ///
     /// `ambient` is the session's payload, as for [`Self::run_elicitation`].
     /// `server_name` identifies the MCP server that initiated the elicitation.
@@ -485,6 +491,7 @@ impl HookRunner {
             project_untrusted: self.project_untrusted,
             process: self.process.clone(),
             background: self.background.clone(),
+            context_warned: self.context_warned.clone(),
         }
     }
 
@@ -543,7 +550,11 @@ impl HookRunner {
         self.remember_rewakes(event, configs, &indexed);
         self.remember_once(event, configs, &indexed);
 
-        HookRunResult {
+        let hooks = indexed
+            .iter()
+            .map(|(idx, _)| configs[*idx].describe())
+            .collect();
+        let result = HookRunResult {
             outcomes: indexed
                 .into_iter()
                 .map(|(idx, outcome)| match configs[idx].on_error() {
@@ -551,7 +562,10 @@ impl HookRunner {
                     OnError::Block => block_on_failure(event, &configs[idx], outcome),
                 })
                 .collect(),
-        }
+            hooks,
+        };
+        self.warn_of_unread_context(event, &result);
+        result
     }
 
     /// Run a single hook config, dispatching to the appropriate executor.
@@ -992,7 +1006,10 @@ mod tests {
     fn an_approval_only_counts_from_the_hook_whose_rewrite_applies() {
         let approve = || ran(Some(HookDecision::Approve), None);
         let rewrite = |n: i32| ran(None, Some(serde_json::json!({ "n": n })));
-        let result = |outcomes| HookRunResult { outcomes };
+        let result = |outcomes| HookRunResult {
+            outcomes,
+            ..Default::default()
+        };
         assert!(result(vec![approve(), rewrite(1)]).approved().is_none());
         assert!(result(vec![rewrite(1), approve()]).approved().is_none());
         assert!(result(vec![approve()]).approved().is_some());

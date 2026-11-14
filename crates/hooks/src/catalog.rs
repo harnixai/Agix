@@ -31,7 +31,7 @@ pub struct EventSpec {
 
 impl HookEvent {
     /// Every variant, in declaration order.
-    pub const ALL: [HookEvent; 30] = [
+    pub const ALL: [HookEvent; 29] = [
         HookEvent::PreToolUse,
         HookEvent::PostToolUse,
         HookEvent::PostToolUseFailure,
@@ -55,7 +55,6 @@ impl HookEvent {
         HookEvent::TaskCompleted,
         HookEvent::Elicitation,
         HookEvent::ElicitationResult,
-        HookEvent::ConfigChange,
         HookEvent::WorktreeCreate,
         HookEvent::WorktreeRemove,
         HookEvent::InstructionsLoaded,
@@ -81,7 +80,7 @@ impl HookEvent {
                      `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;\
                      `decision: \"approve\"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;\
                      `prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,\
-                     批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判)",
+                     批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(拦下的调用不收)",
                 ),
             ),
             HookEvent::PostToolUse => (
@@ -94,7 +93,7 @@ impl HookEvent {
                      \"[`cmd` failed: Denied by PostToolUse hook: <message>]\");\
                      `continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:\
                      模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,\
-                     不起作用,展开出的那一轮照常跑)",
+                     不起作用,展开出的那一轮照常跑);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它",
                 ),
             ),
             HookEvent::PostToolUseFailure => (
@@ -102,7 +101,7 @@ impl HookEvent {
                  工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` \
                  是这个会话的一次 `Bash` 调用",
                 "`tool_name`、`tool_input`、`reason`(错误文本)、`turn_id`",
-                Ignored,
+                Acts("`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它"),
             ),
             HookEvent::TurnStart => (
                 "一轮开始,UserPromptSubmit 放行之后、第一次调模型之前",
@@ -117,7 +116,9 @@ impl HookEvent {
             HookEvent::SessionStart => (
                 "会话开始运行,紧接在 `Setup` 之后",
                 "`source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带",
-                Ignored,
+                Acts(
+                    "`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(第一轮开头、第一条用户消息之前;会话重建、恢复时再发一次就再注入一次)",
+                ),
             ),
             HookEvent::SessionEnd => (
                 "会话的主循环退出:收到关闭、输入通道关闭、被取消,三种都发",
@@ -142,7 +143,7 @@ impl HookEvent {
                 "`user_prompt`、`delivery`(`turn` / `steer`)",
                 Acts(
                     "`decision: \"block\"`:这条消息不处理——开一轮的直接以 `stopped_by_hook` 结束、\
-                     不调模型,steer 的不进转录;`updated_input`(JSON 字符串):换掉消息文本",
+                     不调模型,steer 的不进转录;`updated_input`(JSON 字符串):换掉消息文本;`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(同一条用户消息的附加文本块)",
                 ),
             ),
             HookEvent::PreCompact => (
@@ -158,7 +159,10 @@ impl HookEvent {
             HookEvent::PermissionRequested => (
                 "权限检查判为\"询问\"、开始等宿主回答之前(无人值守会话不问,直接按拒绝处理)",
                 "`tool_name`、`tool_input`、`reason`(询问的文字)、`turn_id`",
-                Ignored,
+                Acts(
+                    "`decision: \"approve\"`:不问人直接放行(managed 层的询问照样问人;`prompt` / `agent` hook 要写 \
+                     `may_approve: true`);`decision: \"block\"`:拒绝,`message` 交给模型,不再询问",
+                ),
             ),
             HookEvent::PermissionDenied => (
                 "一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,它是这个会话的一次 `Bash` 调用",
@@ -185,7 +189,7 @@ impl HookEvent {
                 "子 Agent 开始跑之前,每一种起法都发:前台、后台、宿主 `session.startAgent`、\
                  `TeamCreate` 成员、常驻成员",
                 "`session_id` 是子 Agent 的;`agent_type`",
-                Ignored,
+                Acts("`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(进子 Agent 自己的第一条消息,不进父的对话)"),
             ),
             HookEvent::TeammateIdle => (
                 "团队成员的一轮结束(不论怎么结束),在这一轮的 `TaskCompleted` 之后",
@@ -213,11 +217,6 @@ impl HookEvent {
             HookEvent::ElicitationResult => (
                 "宿主把用户对 elicitation 的回答交回来时;还没有宿主侧的回传通路",
                 "`tool_name`、`tool_input`:`server_name`、`url`、`response`;`tool_result`",
-                Ignored,
-            ),
-            HookEvent::ConfigChange => (
-                "配置在运行中变了;改配置的 RPC 在池一级,高于任何一个会话的 hooks",
-                "—",
                 Ignored,
             ),
             HookEvent::WorktreeCreate => (

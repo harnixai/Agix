@@ -36,12 +36,8 @@ fn build_hook_runner_parses_hooks_config_into_real_hooks() {
     assert!(runner.has_hooks_for(hooks::HookEvent::PreToolUse));
 }
 
-/// The unwired-event warning must stay a *warning*. Refusing the hook, or
-/// dropping it from the runner, would be a behavior change dressed up as
-/// a diagnostic — and it would break anyone who has such a hook
-/// configured today against the day the event gets wired up.
 #[test]
-fn build_hook_runner_keeps_hooks_for_unwired_events_and_only_warns() {
+fn a_config_change_hook_is_an_unknown_event_and_the_rest_still_run() {
     let mut settings = test_settings();
     settings.values.hooks_config = Some(serde_json::json!({
         "ConfigChange": [
@@ -59,15 +55,8 @@ fn build_hook_runner_keeps_hooks_for_unwired_events_and_only_warns() {
         None,
         hooks::HookExec::nowhere(),
     );
-    assert!(
-        runner.has_hooks_for(hooks::HookEvent::ConfigChange),
-        "an unwired event's hook must still be registered — the engine warns, it does \
-         not silently discard"
-    );
-    assert!(
-        runner.has_hooks_for(hooks::HookEvent::PreToolUse),
-        "an unwired event in the same config must not affect the wired ones"
-    );
+    assert!(runner.has_hooks_for(hooks::HookEvent::PreToolUse));
+    assert_eq!(runner.settings().len(), 1);
 }
 
 #[test]

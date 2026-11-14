@@ -78,7 +78,7 @@
 | `exec.sandbox` | 契约 | `Builder::exec` | 命令启动之前 | 真正跑起来的那条命令,以及它能碰什么 | 每次工具调用(10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `compaction` | 契约 | `Builder::compactor` | 每轮一次:两趟老化、一趟预测,最后是阈值 | 消息历史,以及到底要不要重写 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `script.carrier` | 契约 | 模块:`script_host::bindings::bind`、`Builder::plugin` | 载体被绑到哪就在哪;受每轮配额约束 | 所绑那个点允许的一切,按脚本自己的来源定级 | 每轮(10⁰–10¹ 量级) | 完全 | 完全 | 需声明能力 |
-| `hooks` | 拦截 | `Builder::hooks`、设置项 `hooks` | 三十个具名时刻;见 docs/hooks.md | 按事件而异:拦截、改写输入、结束这一轮 | 每次工具调用(10¹ 量级) | 完全 | 完全 | 需声明能力 |
+| `hooks` | 拦截 | `Builder::hooks`、设置项 `hooks` | 二十九个具名时刻;见 docs/hooks.md | 按事件而异:拦截、改写输入、结束这一轮 | 每次工具调用(10¹ 量级) | 完全 | 完全 | 需声明能力 |
 <!-- END GENERATED TABLE -->
 
 上面这张表由 `base::interface::catalog` 生成,这份文件一旦和它对不上,
@@ -1191,7 +1191,7 @@ let store = Arc::new(ObservedHistoryStore::new(inner, vec![my_observer]));
 
 ### 生命周期 hook — `hooks`
 
-三十个具名事件,四种后端(command、prompt、HTTP、agent),在 `settings.json` 的
+二十九个具名事件,四种后端(command、prompt、HTTP、agent),在 `settings.json` 的
 `hooks_config` 里配:事件名 → 一组 hook。各层按事件合并,上层写了某个事件就整组替换下层
 的那一组;没被信任的项目(`ARCHITECTURE.md` §6.6)那一层的整段不加载。有些事件能解析、能接受配置,但还没有任何地方触发它们;`hooks::UNWIRED_EVENTS`
 是那份清单,配到这类事件时引擎会告警,而 `tests/guards/tests/wiring.rs` 从两个

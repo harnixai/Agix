@@ -130,21 +130,39 @@ pub(crate) fn resolve_permission_response(
 /// `Agent::fire_lifecycle_hook`'s counterpart for the free functions in the
 /// tool-dispatch path, which hold a `ToolExecCtx` rather than `&self`.
 ///
-/// Same contract: notification only, response discarded, guarded on
+/// Same contract: a veto is discarded, guarded on
 /// `has_hooks_for` because this sits on the per-tool-call hot path.
 pub(super) async fn fire_ctx_lifecycle_hook(
     ctx: &ToolExecCtx,
     event: hooks::HookEvent,
     build: impl FnOnce(hooks::HookInput) -> hooks::HookInput,
 ) {
+    fire_ctx_hook_until(ctx, event, &ctx.cancel, build).await;
+}
+
+/// [`fire_ctx_lifecycle_hook`] for an event about something that already
+/// happened: `stop` is not the turn's, which a cancelled turn has fired.
+pub(super) async fn fire_ctx_hook_until(
+    ctx: &ToolExecCtx,
+    event: hooks::HookEvent,
+    stop: &tokio_util::sync::CancellationToken,
+    build: impl FnOnce(hooks::HookInput) -> hooks::HookInput,
+) {
     if !ctx.hooks.has_hooks_for(event) {
         return;
     }
     let input = build(lifecycle_input(ctx, event));
-    let _ = ctx.hooks.run(event, &input, &ctx.cancel).await;
+    let result = ctx.hooks.run(event, &input, stop).await;
+    post_context(ctx, event, &result);
 }
 
-fn lifecycle_input(ctx: &ToolExecCtx, event: hooks::HookEvent) -> hooks::HookInput {
+fn post_context(ctx: &ToolExecCtx, event: hooks::HookEvent, result: &hooks::runner::HookRunResult) {
+    for reminder in result.context_reminders(event) {
+        ctx.session_state.post_notice(None, reminder);
+    }
+}
+
+pub(super) fn lifecycle_input(ctx: &ToolExecCtx, event: hooks::HookEvent) -> hooks::HookInput {
     hooks::HookInput::lifecycle(
         format!("{event:?}"),
         ctx.session_id.clone(),
@@ -558,7 +576,8 @@ async fn post_tool_use(
     if let Err(e) = &*outcome {
         let err = e.clone();
         let inp = input_for_post_hook.clone();
-        fire_ctx_lifecycle_hook(ctx, hooks::HookEvent::PostToolUseFailure, |i| {
+        let (event, stop) = (hooks::HookEvent::PostToolUseFailure, Default::default());
+        fire_ctx_hook_until(ctx, event, &stop, |i| {
             i.with_tool(name, inp).with_reason(err)
         })
         .await;
@@ -595,6 +614,7 @@ async fn post_tool_use(
                 &tokio_util::sync::CancellationToken::new(),
             )
             .await;
+        post_context(ctx, hooks::HookEvent::PostToolUse, &hook_result);
         if let Some(response) = hook_result.blocked() {
             *outcome = Err(format!(
                 "Denied by PostToolUse hook: {}",

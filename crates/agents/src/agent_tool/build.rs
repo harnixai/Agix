@@ -193,7 +193,7 @@ impl Delegator {
             Err(e) => return (String::new(), DelegateEnd::Failed(e.to_string())),
         };
         let called_from = spec.called_from.as_ref();
-        let run = DelegateRun::start(
+        let (run, start_context) = DelegateRun::start(
             self,
             &delegate,
             Start {
@@ -215,7 +215,7 @@ impl Delegator {
         } = delegate;
         let sid = payload.session_id.clone();
         let agent_type = spec.agent_type.as_deref();
-        let prompt = self.opening_prompt(def.as_ref(), prompt);
+        let prompt = self.opening_prompt(def.as_ref(), prompt, &start_context);
         let tag = SubagentTag::new(self, &sid, agent_type, called_from).for_task(task.as_ref());
 
         if background {
@@ -252,19 +252,24 @@ impl Delegator {
 
 impl Delegator {
     /// The first message a delegate of type `def` is given: the type's
-    /// preloaded skills, then its system prompt, then `prompt`.
+    /// preloaded skills, then its system prompt, then `prompt`, then what its
+    /// `SubagentStart` hooks added.
     pub(crate) fn opening_prompt(
         &self,
         def: Option<&AgentTypeDefinition>,
         prompt: String,
+        hook_context: &[String],
     ) -> String {
-        match def {
+        let opening = match def {
             Some(d) if !d.skills.is_empty() => {
                 preload_skills_text(self.env.skills.as_ref(), &d.skills) + &typed_prompt(d, &prompt)
             }
             Some(d) => typed_prompt(d, &prompt),
             None => prompt,
-        }
+        };
+        hook_context
+            .iter()
+            .fold(opening, |text, reminder| format!("{text}\n\n{reminder}"))
     }
 }
 

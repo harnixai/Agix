@@ -178,6 +178,13 @@ pub struct HookResponse {
     /// 需要 hook 配置中 `async_rewake: true` 配合。
     #[serde(default)]
     pub rewake: Option<bool>,
+
+    /// Text put in front of the model at its next step, inside a system
+    /// reminder. Only the events that [`HookEvent::takes_context`] read it.
+    ///
+    /// [`HookEvent::takes_context`]: crate::config::HookEvent::takes_context
+    #[serde(default, alias = "additionalContext")]
+    pub additional_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -206,6 +213,14 @@ mod tests {
         assert_eq!(r.decision, Some(HookDecision::Approve));
         assert_eq!(r.message.as_deref(), Some("ok"));
         assert!(r.updated_input.is_some());
+    }
+
+    #[test]
+    fn additional_context_accepts_the_camel_case_spelling() {
+        let r: HookResponse = serde_json::from_value(json!({"additionalContext": "a"})).unwrap();
+        assert_eq!(r.additional_context.as_deref(), Some("a"));
+        let r: HookResponse = serde_json::from_value(json!({"additional_context": "b"})).unwrap();
+        assert_eq!(r.additional_context.as_deref(), Some("b"));
     }
 
     #[test]

@@ -35,7 +35,13 @@ pub(crate) enum StopReason {
 }
 
 impl DelegateRun {
-    pub(crate) async fn start(d: &Delegator, delegate: &Delegate, start: Start<'_>) -> Self {
+    /// The run, and the `additional_context` its `SubagentStart` hooks gave for
+    /// the delegate to open with.
+    pub(crate) async fn start(
+        d: &Delegator,
+        delegate: &Delegate,
+        start: Start<'_>,
+    ) -> (Self, Vec<String>) {
         let run = Self {
             payload: delegate.payload.clone(),
             spawned: SpawnTelemetry::start(
@@ -51,14 +57,14 @@ impl DelegateRun {
             ended: d.env.parent.ended.clone(),
             history: delegate.history_store.clone(),
         };
-        fire(
+        let context = fire(
             &run.hooks,
             hooks::HookEvent::SubagentStart,
             &run.payload,
             start.stops_with,
         )
         .await;
-        run
+        (run, context)
     }
 
     /// `SubagentStop` stops with the parent session's end, not with the run's
@@ -92,8 +98,9 @@ async fn fire(
     event: hooks::HookEvent,
     payload: &SubagentPayload,
     stop: &CancellationToken,
-) {
-    if let Some(runner) = hooks.upgrade() {
-        payload.fire(&runner, event, stop).await;
+) -> Vec<String> {
+    match hooks.upgrade() {
+        Some(runner) => payload.fire(&runner, event, stop).await,
+        None => Vec::new(),
     }
 }
