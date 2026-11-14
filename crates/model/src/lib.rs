@@ -17,6 +17,7 @@ mod cancel;
 pub mod client;
 pub mod error;
 pub mod factory;
+#[cfg(any(test, feature = "testing"))]
 pub mod mock;
 pub mod openai;
 pub mod parser;

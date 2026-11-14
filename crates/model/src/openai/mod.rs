@@ -59,9 +59,6 @@ struct Inner {
     /// [`chat_completions_url`]).
     endpoint: Url,
     api_key: String,
-    /// Provider-specific headers (`OpenAI-Organization`, an Azure
-    /// `api-version`, a gateway's routing header, …). Applied verbatim.
-    extra_headers: Vec<(String, String)>,
     /// Used when [`StreamParams::model`] is empty — the `default_model` from
     /// the provider's config.
     default_model: String,
@@ -95,7 +92,6 @@ impl OpenAICompatibleModel {
                 net: Arc::new(LocalNetwork::default()),
                 endpoint,
                 api_key: api_key.into(),
-                extra_headers: Vec::new(),
                 default_model: model_default.into(),
                 backoff: Arc::new(LadderBackoff::new()),
                 provenance: None,
@@ -103,13 +99,6 @@ impl OpenAICompatibleModel {
                 thinking_toggle: None,
             }),
         })
-    }
-
-    /// Attach provider-specific request headers.
-    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
-        let inner = Arc::make_mut(&mut self.inner);
-        inner.extra_headers = headers;
-        self
     }
 
     /// Shorten the retry ladder. Tests only — the default covers ~1 minute.
@@ -163,7 +152,6 @@ impl Clone for Inner {
             net: self.net.clone(),
             endpoint: self.endpoint.clone(),
             api_key: self.api_key.clone(),
-            extra_headers: self.extra_headers.clone(),
             default_model: self.default_model.clone(),
             backoff: self.backoff.clone(),
             provenance: self.provenance.clone(),
@@ -202,12 +190,9 @@ fn chat_completions_url(base_url: &str) -> Result<Url, ModelError> {
 async fn send_once(inner: &Inner, req: &ChatCompletionsRequest) -> Result<HttpStream, ModelError> {
     let body = serde_json::to_vec(req)
         .map_err(|e| ModelError::protocol(format!("serializing the request: {e}")))?;
-    let mut builder = HttpRequest::post(inner.endpoint.as_str())
+    let builder = HttpRequest::post(inner.endpoint.as_str())
         .header("content-type", "application/json")
         .header("authorization", format!("Bearer {}", inner.api_key));
-    for (k, v) in &inner.extra_headers {
-        builder = builder.header(k, v);
-    }
 
     // `Origin::Operator`: see the same call on the Anthropic side.
     let resp = inner
@@ -483,18 +468,6 @@ mod tests {
             Err(other) => panic!("{other:?}"),
             Ok(_) => panic!("a provider search went out"),
         }
-    }
-
-    /// Extra headers survive the builder chain (the `Arc::make_mut` path).
-    #[test]
-    fn extra_headers_are_retained() {
-        let m = OpenAICompatibleModel::new("https://x/v1", "k", "m")
-            .unwrap()
-            .with_headers(vec![("OpenAI-Organization".into(), "org_1".into())]);
-        assert_eq!(
-            m.inner.extra_headers,
-            vec![("OpenAI-Organization".to_string(), "org_1".to_string())]
-        );
     }
 
     /// The status alone decides here: Chat Completions error bodies carry no

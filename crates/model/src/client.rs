@@ -396,13 +396,6 @@ impl AnthropicClient for HttpAnthropicClient {
 mod tests {
     use super::*;
 
-    /// trait object 可以装 —— 这是给 Engine 用的方式。
-    #[test]
-    fn boxes_into_trait_object() {
-        let c = HttpAnthropicClient::new(AuthMode::ApiKey("dummy".into())).unwrap();
-        let _: Arc<dyn AnthropicClient> = Arc::new(c);
-    }
-
     struct SilentNetwork(Arc<std::sync::atomic::AtomicUsize>);
 
     #[async_trait::async_trait]
