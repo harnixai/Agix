@@ -2,7 +2,7 @@
 //!
 //! Plugins have both a global tier (`~/.agix/plugins/cache/`, shared by every
 //! scene) and a scene-specific tier (`~/.agix/scenes/<scope>/plugins/cache/`)
-//! — see `base::paths::ConfigPaths::{global_plugins_dir, user_plugins_dir}`.
+//! — see `base::paths::ConfigPaths::global_plugins_dir`.
 //! This type itself is root-agnostic (caller resolves which tier's root to
 //! pass in).
 //!

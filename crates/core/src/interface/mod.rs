@@ -36,7 +36,6 @@
 //! | [`permission::PermissionPolicy`] | whether a tool call runs |
 //! | [`permission::PermissionGrants`] | the allows handed out during a session |
 //! | [`delegate::Delegator`] | how sub-agents are launched |
-//! | [`import_callback::ImportCallback`] | the host's answer to an import prompt |
 //! | [`event_sink::EventSink`] | where the engine's events go |
 //! | [`health::HealthCheck`] | whether a subsystem is working |
 //! | [`elicitation::Elicitation`] | how the engine asks a person something |
@@ -74,7 +73,6 @@ pub mod environment;
 pub mod event_sink;
 pub mod exec;
 pub mod health;
-pub mod import_callback;
 pub mod inline_command;
 pub mod instruction_provider;
 pub mod mcp_servers;

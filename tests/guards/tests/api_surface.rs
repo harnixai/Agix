@@ -395,7 +395,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "what the engine's git may write; a security decision",
     ),
     ("ImageSource", PROTOCOL),
-    ("ImportDecision", HOST_ANSWER),
     (
         "Initiator",
         "who asked for a turn decides whether it may cross a scene boundary",
@@ -433,7 +432,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("PromptContent", HOST_INPUT),
     ("PromptDecision", HOST_ANSWER),
     ("PromptDelivery", HOST_ANSWER),
-    ("ProxyEndpoint", SANDBOX),
     ("ReadScope", SANDBOX),
     ("RecorderMode", SETTING),
     ("Recovery", HOST_ANSWER),

@@ -24,6 +24,5 @@ pub mod project_trust;
 pub mod prompt;
 pub mod provider;
 pub mod public_suffix;
-pub mod summary;
 pub mod text;
 pub mod url_rule;

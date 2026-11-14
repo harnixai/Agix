@@ -4,10 +4,8 @@
 //! state into this engine's `AGENTS.md` + `.agents/skills/` + `.agix/rules/`
 //! layout.
 //!
-//! Three layers, kept separate on purpose:
+//! Two layers, kept separate on purpose:
 //! - This module: pure detection + execution, no UI, no callback awareness.
-//! - `ImportCallback` (crate::interface::import_callback): automatic,
-//!   process-level trigger for hosts that want to prompt a human.
 //! - the bundled `import` skill: manual `/import`, does the file work with
 //!   the ordinary file tools rather than through this module. It writes the
 //!   same `IMPORTED_FROM_<TAG>_{BEGIN,END}` markers `merge_marked_section`
@@ -397,9 +395,7 @@ async fn merge_into_agents_md(
 /// Wrap `new_content` in HTML-comment markers tagged with `tag` and merge it
 /// into `existing`. On repeat calls with the same `tag`, replaces only the
 /// content between the markers, preserving anything after `END` (user edits).
-/// Generalizes the marker-wrap strategy `merge_agix_content()` in `memory.rs`
-/// used for the (unwired) `CLAUDE.md -> AGIX.md` auto-migration, parameterized
-/// by `tag` so different import sources don't collide with each other's
+/// Parameterized by `tag` so different import sources don't collide with each other's
 /// sections in the same `AGENTS.md`.
 fn merge_marked_section(existing: &str, new_content: &str, tag: &str) -> String {
     let ts = now_iso();

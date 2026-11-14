@@ -53,7 +53,7 @@ pub enum ElicitKind {
         tool_use_id: Option<String>,
     },
     /// Shall configuration detected from another agent tool be imported? The
-    /// answer is a `base::interface::import_callback::ImportDecision`.
+    /// answer is yes or no.
     Import {
         /// The detected sources, named for display.
         sources: Vec<String>,

@@ -130,39 +130,8 @@ impl ConfigPaths {
         }
     }
 
-    pub fn user_settings_path(&self) -> PathBuf {
-        self.user_data_dir.join("settings.json")
-    }
-
     pub fn user_skills_dir(&self) -> PathBuf {
         self.user_data_dir.join("skills")
-    }
-
-    /// Scene-specific installed plugins: `~/.agix/scenes/<scope>/plugins/`.
-    pub fn user_plugins_dir(&self) -> PathBuf {
-        self.user_data_dir.join("plugins")
-    }
-
-    /// Scene-specific subagent definitions: `~/.agix/scenes/<scope>/agents/`.
-    /// Agix extension, no external standard. Loader not yet implemented.
-    pub fn user_agents_dir(&self) -> PathBuf {
-        self.user_data_dir.join("agents")
-    }
-
-    /// Scene-specific rule documents: `~/.agix/scenes/<scope>/rules/`.
-    /// Agix extension, no external standard. Loader not yet implemented.
-    pub fn user_rules_dir(&self) -> PathBuf {
-        self.user_data_dir.join("rules")
-    }
-
-    /// Scene-specific hook scripts: `~/.agix/scenes/<scope>/hooks/`.
-    /// Agix extension, no external standard. Loader not yet implemented.
-    pub fn user_hooks_dir(&self) -> PathBuf {
-        self.user_data_dir.join("hooks")
-    }
-
-    pub fn global_settings_path(&self) -> PathBuf {
-        self.global_data_dir.join("settings.json")
     }
 
     pub fn global_skills_dir(&self) -> PathBuf {
@@ -180,29 +149,14 @@ impl ConfigPaths {
         self.global_data_dir.join("memory")
     }
 
-    pub fn global_sessions_dir(&self) -> PathBuf {
-        self.global_data_dir.join("sessions")
-    }
-
     pub fn global_recordings_dir(&self) -> PathBuf {
         self.global_data_dir.join("recordings")
-    }
-
-    pub fn local_settings_path(&self) -> PathBuf {
-        self.local_data_dir.join("settings.json")
     }
 
     pub fn local_memory_dir(&self) -> PathBuf {
         self.local_data_dir.join("memory")
     }
 
-    pub fn local_sessions_dir(&self) -> PathBuf {
-        self.local_data_dir.join("sessions")
-    }
-
-    pub fn local_recordings_dir(&self) -> PathBuf {
-        self.local_data_dir.join("recordings")
-    }
 }
 
 #[cfg(test)]
@@ -266,31 +220,13 @@ mod tests {
     #[test]
     fn convenience_methods_derive_from_roots() {
         let p = paths();
-        assert_eq!(
-            p.user_settings_path(),
-            p.user_data_dir.join("settings.json")
-        );
         assert_eq!(p.user_skills_dir(), p.user_data_dir.join("skills"));
-        assert_eq!(p.user_plugins_dir(), p.user_data_dir.join("plugins"));
-        assert_eq!(p.user_agents_dir(), p.user_data_dir.join("agents"));
-        assert_eq!(p.user_rules_dir(), p.user_data_dir.join("rules"));
-        assert_eq!(p.user_hooks_dir(), p.user_data_dir.join("hooks"));
-        assert_eq!(
-            p.global_settings_path(),
-            p.global_data_dir.join("settings.json")
-        );
         assert_eq!(p.global_skills_dir(), p.global_data_dir.join("skills"));
         assert_eq!(p.global_memory_dir(), p.global_data_dir.join("memory"));
-        assert_eq!(p.global_sessions_dir(), p.global_data_dir.join("sessions"));
         assert_eq!(
             p.global_recordings_dir(),
             p.global_data_dir.join("recordings")
         );
         assert_eq!(p.local_memory_dir(), p.local_data_dir.join("memory"));
-        assert_eq!(p.local_sessions_dir(), p.local_data_dir.join("sessions"));
-        assert_eq!(
-            p.local_recordings_dir(),
-            p.local_data_dir.join("recordings")
-        );
     }
 }
