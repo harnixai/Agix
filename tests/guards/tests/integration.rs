@@ -16,7 +16,7 @@ mod session_state;
 mod size;
 mod sources;
 mod support_selftest;
-mod transcript_writers;
 mod tool_pipeline;
+mod transcript_writers;
 mod unused_deps;
 mod wiring;
