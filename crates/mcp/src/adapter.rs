@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 /// Per-request cap on a server-supplied description. Some servers put pages of
 /// documentation there; the full text stays reachable through `prompt()`, which
 /// `ToolSearch` serves as the tool's guide whenever the two differ.
-const MAX_ADVERTISED_DESCRIPTION_CHARS: usize = 2048;
+pub(crate) const MAX_ADVERTISED_DESCRIPTION_CHARS: usize = 2048;
 
 pub struct McpToolAdapter {
     full_name: String,

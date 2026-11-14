@@ -62,8 +62,11 @@ impl Tool for ListMcpResourcesTool {
         ValidationResult::Ok
     }
 
-    async fn permission_facts(&self, _: &Value, _: &ToolContext) -> PermissionFacts {
-        PermissionFacts::new(Subject::None, Reach::Operator)
+    async fn permission_facts(&self, input: &Value, _: &ToolContext) -> PermissionFacts {
+        let server = serde_json::from_value::<ListMcpResourcesInput>(input.clone())
+            .ok()
+            .and_then(|i| i.server);
+        PermissionFacts::new(Subject::None, Reach::Operator).relaying(Relays::McpServer(server))
     }
     async fn call(
         &self,
@@ -296,8 +299,11 @@ impl Tool for DispatchMcpTool {
         ValidationResult::Ok
     }
 
-    async fn permission_facts(&self, _: &Value, _: &ToolContext) -> PermissionFacts {
-        PermissionFacts::new(Subject::None, Reach::Operator)
+    async fn permission_facts(&self, input: &Value, _: &ToolContext) -> PermissionFacts {
+        let server = serde_json::from_value::<DispatchMcpInput>(input.clone())
+            .ok()
+            .and_then(|i| i.server);
+        PermissionFacts::new(Subject::None, Reach::Operator).relaying(Relays::McpServer(server))
     }
     async fn call(
         &self,
@@ -343,6 +349,11 @@ impl Tool for DispatchMcpTool {
                     .filter_map(|t| {
                         let name = t.get("tool_name")?.as_str()?;
                         let desc = t.get("description")?.as_str().unwrap_or("");
+                        let desc = base::text::truncate_chars(
+                            desc,
+                            crate::adapter::MAX_ADVERTISED_DESCRIPTION_CHARS,
+                            "…",
+                        );
                         Some(format!("  · {name} — {desc}"))
                     })
                     .collect::<Vec<_>>()

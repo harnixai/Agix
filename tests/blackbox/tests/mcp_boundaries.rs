@@ -422,6 +422,34 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn what_a_server_wrote_in_the_resource_and_tool_listings_reaches_the_model_fenced(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let servers = json!({ "corp": McpToy::stdio_config(&["--name", "corp"])? });
+    let mut run = stubbed("listing-fence", &stub)
+        .settings(json!({ "mcp_servers": servers }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls("f1", "ListMcpResources", json!({})),
+        Reply::calls("f2", "MCP", json!({})),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "list").await?;
+    for tool in ["ListMcpResources", "MCP"] {
+        let result = result_of(&events, tool).unwrap_or_else(|| panic!("{tool}: {events:?}"));
+        assert!(
+            !result.2 && result.1.starts_with("<external-content"),
+            "{tool} text a server wrote reaches the model unfenced: {result:?}"
+        );
+    }
+    run.finish().await;
+    Ok(())
+}
+
 fn is_api_tool_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
         && name
