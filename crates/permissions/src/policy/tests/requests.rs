@@ -482,9 +482,19 @@ async fn a_session_allow_cannot_carve_an_exception_out_of_a_settings_deny() {
     );
 }
 
+fn trust_projects(global: &Path) {
+    std::fs::create_dir_all(global).unwrap();
+    std::fs::write(
+        global.join("settings.json"),
+        r#"{"project_trust": {"default": "trusted"}}"#,
+    )
+    .unwrap();
+}
+
 fn project_settings(root: &Path) -> settings::LoadedSettings {
     let project = root.join("project");
     std::fs::create_dir_all(&project).unwrap();
+    trust_projects(&root.join("global"));
     settings::LoadedSettings::load(
         root.join("global"),
         root.join("scene"),
@@ -670,7 +680,7 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
     for (dir, body) in [
         (
             &global,
-            r#"{"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
+            r#"{"project_trust": {"default": "trusted"}, "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
         ),
         (
             &project,

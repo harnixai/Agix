@@ -385,7 +385,7 @@ async fn overloaded_answers_are_retried_with_backoff_and_a_bad_request_is_not() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_max_tokens_stop_is_retried_with_a_higher_limit_then_nudged() -> anyhow::Result<()> {
+async fn a_max_tokens_stop_is_retried_with_a_higher_limit_and_a_user_note() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("max-tokens", &stub).start().await?;
     let session = run.session().await?;
@@ -399,12 +399,19 @@ async fn a_max_tokens_stop_is_retried_with_a_higher_limit_then_nudged() -> anyho
     assert_eq!(calls.len(), 3, "{:?}", events.events);
     let limit = |i: usize| calls[i].body["max_tokens"].as_u64().unwrap_or(0);
     assert!(limit(0) < 64_000, "first call at {}", limit(0));
-    assert_eq!(limit(1), 64_000, "first escalation");
+    assert!(limit(1) > limit(0), "first escalation at {}", limit(1));
     assert!(
-        calls[2].messages_contain("Output token limit hit"),
-        "the third call carries the nudge"
+        limit(1) <= 64_000,
+        "held to the model's limit: {}",
+        limit(1)
     );
-    assert!(!calls[1].messages_contain("Output token limit hit"));
+    for i in [1, 2] {
+        assert!(
+            calls[i].messages_contain("cut off at the output token limit"),
+            "call {i} carries the user's note that the reply was cut off"
+        );
+    }
+    assert!(!calls[0].messages_contain("cut off at the output token limit"));
     assert!(events.text.contains("WHOLE-ANSWER"));
     let complete = events.turn_complete_event.clone().unwrap_or_default();
     assert_eq!(complete["stop_reason"], "end_turn", "{complete}");
