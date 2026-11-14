@@ -6,12 +6,13 @@
 |---|---|---|
 | `crates/*/src/**` 的 `mod tests` | 单元测试：一个函数/一个类型的行为 | `cargo test -p <crate>` |
 | `crates/*/tests/*.rs` | crate 验收：从公开的缝进去，这个 crate 的承诺还成立吗 | `cargo test` |
-| `daemon/tests/*.rs` | daemon 的 e2e：真的起一个 server，走真的 socket 收发 JSON-RPC | `cargo test -p daemon` |
+| `daemon/tests/*.rs` | daemon 的 e2e：真的起一个 server，走真的 socket 收发 JSON-RPC；共用装备在 `daemon/tests/support/mod.rs`（脚本化模型回合、起 daemon、一次性 RPC 调用、全局层信任预置、`allow_tools`），文档对账也在这里 | `cargo test -p daemon` |
 | `tests/runner/tests/*.rs` | 引擎行为网：真的驱动 Agent，模型那端是写死的脚本 | `cargo test -p test-runner` |
 | `tests/blackbox/tests/*.rs` | 黑盒层（桩模型）：从 JSON-RPC 进去，模型那端是一个 HTTP 桩；同一批用例跑「本进程」和「另起一个 agixd」两遍 | `cargo test -p blackbox`（跨进程那半在 `-- --ignored` 里） |
 | `tests/blackbox/tests/live_*.rs` | LIVE 层（真实模型，`live_*` 前缀 + `real-model` feature）：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p blackbox --features real-model`，见下文「LIVE 层」 |
 | `tests/guards/tests/*.rs` | 架构守卫：读 `cargo metadata` 和各 target 的模块树，检查依赖方向、进程级状态这类代码结构上的不变量，不跑引擎 | `cargo test -p guards` |
 | `tests/scripts/*.sh` | 运维脚本（目前只有 `disk_report.sh`：报告 `target/` 占用）；构建面的断言（`full` 档不链 `packages` 与 `script-host` 等）在 `tests/guards/tests/deps.rs` | `bash tests/scripts/disk_report.sh` |
+| `tests/fixtures/`、`tests/rpc_client`、`tests/blackbox/src` | 支撑：fixture 项目与假服务器（MCP toy、OAuth mock）、RPC 客户端、黑盒框架（`World`、`Daemon`、`ProviderStub`、`LiveRun`） | 不单独跑 |
 
 一个 crate 的集成测试编成一个测试程序 `integration`：`tests/integration.rs` 把同目录的
 每个文件声明成一个模块（`autotests = false`），共用的辅助模块（如 `tests/runner/tests/support`）
@@ -95,11 +96,11 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_team.rs` | `TeamCreate` 两个阶段，后一阶段从团队记忆里拿前一阶段存的东西；同一阶段的两个成员经 `ListPeers` / `SendMessage` / `ReadMail` 传一个只有发送方读得到的词，宿主收到这一阶段 `started`、`completed` 两帧 `team_progress`，团队之后 `TeamList` 列得出、`TeamDelete` 后列不出 |
 | `live_extensions.rs` | 项目 skill；MCP server 的工具；`PreToolUse` hook 看到工具调用；`context: fork` 的 skill 在自己的上下文里干活，主对话只拿回答复；`allowed-tools` 的授权——项目 skill 写成列表的 `Bash(sh build.sh)` 不再询问，项目 skill 的整类 `Bash` 不算数，用户层 skill 的整类 `Bash` 算数；不写成列表的带空格授权（`Bash(sh build.sh)`）同样不询问；会话中途才建 `.agents/skills/` 写进去的 skill 下一轮就能用，会话中途加的 skill 下一轮发 `skills_changed` |
 | `live_multi_agent.rs` | 主控 + 三个不同模型的后台 worker，每个 worker 里多个后台任务；人为制造一个任务失败、一个 worker 故障，修复后重跑，主控汇总 |
-| `live_host.rs` | 宿主那一侧：父会话空闲时 `session.startAgent` 起修复子 agent，宿主边看边答它的询问（询问期间任务是 `waiting`）、有 deny 规则护着的测试脚本保持原样、用量与代理记下的相等，父会话正在跑一轮时再起一个评审子 agent（`notify_parent: false`）；旁观连接跟着一次构建收 `task_progress`，`daemon.event` 看见每一轮，重启引擎后同一项目两种路径写法的会话各列一次；宿主停掉跑飞的命令、这一轮照常收尾；宿主场景的 `extra_tools` 在前台和后台子 agent 里都能用；宿主改写用户消息、去掉工具结果、写扩展条目，`inspectContext` 报的工具与随后真实请求带的逐个同名 |
+| `live_host.rs` | 宿主那一侧：父会话空闲时 `session.startAgent` 起修复子 agent，宿主边看边答它的询问（询问期间任务是 `waiting`）、有 deny 规则护着的测试脚本保持原样、用量与代理记下的相等，父会话正在跑一轮时再起一个评审子 agent（`notify_parent: false`）；旁观连接跟着一次构建收 `task_progress`，`daemon.event` 看见每一轮，重启引擎后同一项目两种路径写法的会话各列一次；宿主停掉跑飞的命令、这一轮照常收尾；宿主场景的 `extra_tools` 在前台和后台子 agent 里都能用；宿主改写用户消息、去掉工具结果、写扩展条目，`inspectContext` 报的工具与随后真实请求带的逐个同名；宿主在 `options.host_tools` 里声明 `HostLookup`，模型调用它时 `host_tool_call` 帧到达宿主，宿主用 `session.respondToolCall` 交回只有宿主知道的值，模型把它写进了文件 |
 | `live_plugins.rs` | `examples/plugins` 的两个样例：`demo-rust` 编进 daemon、`demo-quickjs` 经 `plugin.install` 装上。`!stamp` 快捷方式展开成 `DemoStamp` 调用；报告里有只有异步提示词钩子读得到的通知、只有工具算得出的指纹，没有被结果改写遮掉的密钥；`generated/` 下的写入被脚本拒绝；`demo-auditor` 子 Agent 用插件的工具交回指纹；`session.get` 的 `health` 报出插件的计数，脚本零失败；`demo-quickjs` 停用、启用、重扫、卸载之后新建的会话各自有或没有它的提示块与 `generated/` 守卫，它的场景跟着进出 `scene.list`，停用前建的会话保持原样 |
 | `live_programs.rs` | `RunCode` 的三种用法：一个程序经 `agent()` 并行起四个子 Agent、按 schema 收回结果再合并写盘（只有输入文件里有的封签一路传上来）；后台运行的程序边跑边推 `log()` 行，结束时以通知回到会话，模型据此交回结果；`acceptEdits` 下 deny 规则在程序里照样拦住写入，程序看得见拒绝 |
 | `live_unattended.rs` | `harnix` 场景、缺省权限、无人值守：项目内 Edit 与沙箱里的 Bash 照常做完，往实例授权的根之外写被拒绝且没有任何询问发给宿主；`AskUserQuestion` 与计划模式连名字都不出现；Bash 的重定向与 `cp` 往授权根之外（不在本机临时目录下）写，被 OS 沙箱挡住，同样没有询问 |
-| `live_mcp.rs` | toy MCP server 那一套：宿主打断一轮时进行中的 `slow` 在 server 那头被取消；一个 server 中途 `crash`，调用报错、另一个 server 照常、它自己下一次调用又连回来；超过 5 万字符的 `big` 结果只有截断后的头到达模型，4 万字符的整段到达；`ListMcpResources` / `ReadMcpResource` 读到运行时写进资源的令牌、unicode 资源原样、20 万字节的资源不整段进模型，`@toy:<uri>` 引用把资源内联进那条消息（大资源带截断标记）而不调工具；`mcp.addServer` 后同一会话下一轮就能用、`mcp.updateServer` 后调用落到新进程；streamable HTTP 与 SSE 两种传输（另起的 daemon，shell 设了代理也直连本机）；`--mcp-policy` 拒绝的 server（含插件声明的 `<插件>-mcp-<名字>`）在 `mcp.status` 里是 `denied`、工具从未出现在请求里、进程从未起过、`mcp.addServer` 它得 `-32020` 且 settings.json 不变；插件声明的 server 在 `config.reload` 之后新会话照样能用；toy 的 `ask` 向用户问颜色，宿主作答，模型复述出用户选的那个 |
+| `live_mcp.rs` | toy MCP server 那一套：宿主打断一轮时进行中的 `slow` 在 server 那头被取消；一个 server 中途 `crash`，调用报错、另一个 server 照常、它自己下一次调用又连回来；超过 5 万字符的 `big` 结果只有截断后的头到达模型，4 万字符的整段到达；`ListMcpResources` / `ReadMcpResource` 读到运行时写进资源的令牌、unicode 资源原样、20 万字节的资源不整段进模型，`@toy:<uri>` 引用把资源内联进那条消息（大资源带截断标记）而不调工具；`mcp.addServer` 后同一会话下一轮就能用、`mcp.updateServer` 后调用落到新进程；streamable HTTP 与 SSE 两种传输（另起的 daemon，shell 设了代理也直连本机）；`--mcp-policy` 拒绝的 server（含插件声明的 `<插件>-mcp-<名字>`）在 `mcp.status` 里是 `denied`、工具从未出现在请求里、进程从未起过、`mcp.addServer` 它得 `-32020` 且 settings.json 不变；插件声明的 server 在 `config.reload` 之后新会话照样能用；toy 的 `ask` 经 `mcp_elicitation` 询问向用户问颜色，宿主作答（`prompt_types` 里没列它时是拒绝），模型复述出用户选的那个 |
 | `live_mcp_oauth.rs` | `OAuthWorld` 上要登录的 MCP server：没登录时 `mcp.status` 是 `auth_required`，模型的请求里没有它的工具、系统提示写明要用户登录；宿主 `mcp.auth.start`、浏览器 GET `authorize_url` 回到回环监听后 `mcp_auth_completed` / `mcp_connected`，同一会话下一轮模型直接调到它，结果里有只有带有效令牌才拿得到的标记；external redirect 经 `mcp.auth.complete` 交回；访问令牌中途过期，模型的调用底下自动刷新照常成功；刷新被 `invalid_grant` 拒绝后 `mcp_auth_required`、工具从下一轮的请求里消失，再登录又回来；`insufficient_scope` 之后按并集 scope 再登录，`write` 能用；登出后工具消失；`client_credentials`（另起的 daemon，密钥经环境变量）无人值守就能用、`mcp.auth.start` 得 `-32602`；`mcp.auth.setIdentity` 交出企业身份后连上；伪造 `state` 的回调得 400、流程继续等真的那个；过期的登录发 `mcp_auth_failed`、`mcp.auth.complete` 得 `-32602`；授权服务器不在 `allowed_authorization_servers` 里时 `mcp.auth.start` 得 `-32020`、授权服务器只被读过元数据。签发过令牌的每条都核对：令牌（及企业身份、客户端密钥）不在任何发给模型的请求、`session.export`、遥测文件、转录与另起 daemon 的 stderr 里，只在凭据存储 `mcp/oauth/` 下 |
 | `live_web.rs` | `PageServer` 上的页面：普通页（实体解码、中文）取回成文本，没配 `task_models.web_fetch` 时即使给了 `prompt` 也没有抽取调用；7 万字符的页在 5 万字符处截断、截断点之后的标记不进模型；404 / 500 以错误返回，重定向交回目标 URL 而不跟随（目标只在模型自己再取时被命中），JSON 原样；宿主打断一轮时等着慢页的 `WebFetch` 立刻收尾；`task_models.web_fetch` 指向第二个 Flash 名字时恰有一次抽取请求落在那个模型上、读的是整页，会话模型的请求里没有整页，抽取请求被注入 400 时退回页面文本；`task_models.web_search` 把搜索请求路由到第三个名字 |
 | `live_permissions.rs` | 权限面，宿主经 `Watcher` 作答：`ask` 规则下的写被宿主拒绝，模型照拒绝理由换路写；`permit_always(local)` 落进 `settings.local.json`，同一会话里同样的命令不再问，`config.reload` 后的新会话也不问；无人作答的询问按 `prompt_timeout` 超时成拒绝、这一轮照常收尾；进计划模式后压缩，写仍被拒，压缩后第一次请求里有计划模式仍在的提醒；`dontAsk` 只放行规则允许的，复合命令里夹带的 `rm` 整条拒绝、不询问；global / project / local 三层规则一起生效，任何一层的 deny 都胜过别处与会话 `options` 里的 allow；父会话的 deny 规则管住子 Agent；`yolo` 按 `bypassPermissions` 报回 |
@@ -122,8 +123,9 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 到达）；只写项目内文件的用 `acceptEdits` 也行。无人值守的场景（`harnix`、声明式场景）不问、
 直接拒，要用的工具由设置里的 `permission_rules` 放行，和真实部署给实例授权一样；定时任务
 跑起来时没人在场，同样用规则放行。只有用例要验证的恰恰是 bypass 本身时才用它，并在用例里
-写明为什么。`finish` 会把因为没人作答而被拒的工具调用打出来（`refused, nobody answered the
-prompt`）——一条用例「过了」却在这里有记录，说明它要验证的东西可能根本没跑到。
+写明为什么。`LiveRun::finish()` 缺省**失败**：有因为没人作答而被拒的工具调用（`refused, nobody answered the
+prompt`）就报错——一条用例「过了」却在这里有记录，说明它要验证的东西可能根本没跑到。
+确实要验证「被拒」本身的用例用 `finish_allowing_refusals()` 收尾。
 
 **断言只看结果，不看措辞。** 真实模型每次说法不同，能断言的是：盘上的文件、任务状态、
 代理记下的请求，以及只有真跑过才拿得到的值——用例里的随机令牌由脚本在运行时从输入文件
@@ -309,7 +311,12 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 |---|---|
 | `daemon/tests/protocol_doc_matches_dispatch.rs` | `daemon_rpc_protocol.md` §6–§9 与方法表、事件类型、错误码一致 |
 | `daemon/tests/protocol_doc_examples.rs` | 文档里的响应示例和真 daemon 的回答逐字段一致;比对不了的方法(示例是各种状态的字段并集、要外部授权服务器等)列在 `NOT_COMPARED` / `NO_EXAMPLE` 里并写明原因,两张表与文档、与比对代码对不上就挂 |
+| `daemon/tests/protocol_doc_wire.rs` | 文档里的事件帧、请求参数形状与 daemon 真发出、真接受的一致 |
 | `daemon/tests/extension_points_doc.rs` | `extension_points.md` 的表由 `catalog` 生成 |
+| `daemon/tests/hook_events_doc.rs` | `hooks.md` 的事件表与 `HookEvent` 一致 |
+| `crates/telemetry/tests/producers.rs` | `telemetry.md` 的事件清单与 `EventPayload::KINDS` 一致，每种都有生产方 |
+| `crates/ptc/src/tests.rs` 的 `the_limits_table_in_the_doc_is_the_default_limits` | `ptc.md` 的限额表与 `ptc::Limits::default()` 一致 |
+| `tests/guards/tests/architecture_doc.rs`（G9） | `ARCHITECTURE.md` §1 的 crate 表、"用 platform 的 crate"、分层图里的模块一行，与 `deps.rs` 的 `CRATES`、`MAY_USE_PLATFORM` 和实现了 `Module` 的 crate 一致 |
 | `crates/assembly/tests/settings_schema.rs` 的 `settings_schema_matches_committed_file` | `docs/schemas/settings.schema.json` 由 `settings` crate 的核心 `Settings` 加 `assembly::settings_sections::all()` 登记的各模块段生成（重新生成：`cargo test -p assembly --test settings_schema write_settings_schema -- --ignored`；CI 的 ignored 那一步跑） |
 | `daemon/tests/readme_matches_the_code.rs` | `README.md` 与 `docs/README.zh-CN.md` 里可数的那些声称——workspace 成员数、RPC 方法数、扩展点数、hook 事件数、遥测事件类型数、内建工具数，以及工具表里每个名字都还实装着 |
 
@@ -345,31 +352,38 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 只降不升：`AGIX_UPDATE_RATCHET=1` 把每条上限收紧到实测值，不会调高；要调高就在同一提交里改
 数据文件并在提交说明里写理由。`AGIX_UPDATE_RATCHET=seed` 只在新建棘轮时用一次。
 
-| 编号 | 内容 | 机制 | 位置 | 状态 |
-|---|---|---|---|---|
-| CT-1 | 只有 assembly 能构造 `SessionPool` | 编译期：`SessionPool::builder` 是 `pub(crate)` | `crates/assembly/src/session_pool/builder.rs` | 已落地 |
-| CT-2 | base 不起进程、不读环境变量 | clippy `disallowed-*` | `crates/core/clippy.toml` | 未落地，归 base 瘦身（D7 S5a） |
-| CT-3 | 方法表只有一份 | 宏生成 | `crates/assembly/src/server/table.rs` | 未落地，归 RPC 层（D4 S8） |
-| DEP-1..7 | 分级、边的方向、platform、没有 wasm 运行时、脚本载体可选、内核不带模块 feature | `cargo metadata` | `tests/guards/tests/deps.rs` | 已落地 |
-| BASE-1..3 | base 的依赖白名单、tokio 特性子集 | `cargo metadata` | `tests/guards/tests/base.rs` | 文件已建、内容为空，归 base 瘦身（D7 S5c） |
-| UD-1 | 未用依赖和放错位置的依赖 | `cargo metadata` 加 syn | `tests/guards/tests/unused_deps.rs` | 已落地 |
-| PS-1..4 | 进程级状态：非朴素类型的 `static`、`thread_local!` 都登记，`static mut` 禁止 | syn | `tests/guards/tests/process_state.rs` | 已落地 |
-| WIR-1 | hook 接线，与 `UNWIRED_EVENTS` 双向比对 | `HookEvent::ALL` 加 syn | `tests/guards/tests/wiring.rs` | 已落地 |
-| WIR-2 | 每种遥测 kind 都有生产方 | `EventPayload::KINDS` 加 syn | 同上 | 已落地 |
-| WIR-3 | 组合根调用了接线用的函数 | syn | 同上 | 已落地 |
-| DLG-1..8 | 会话只在名单上的地方构造、委派只有一个分派、Builder 字段三分类、无晚绑定、`mcp__` 前缀匹配、`DelegateMode` 穷尽、任务只经租约、不造孤儿令牌 | syn | `tests/guards/tests/delegation.rs` | 已落地 |
-| WIR-5 | 只有 tool_policy 询问场景 `permits_tool` | 文本 | `daemon/tests/wiring_coverage.rs` | 保留，归接口收口（D5 S1）改写或删除 |
-| SRC-1 | 只有入口点和机器事实读 `$HOME` | syn | `tests/guards/tests/sources.rs` | 已落地 |
-| SRC-2 | 插件披露不提脚本引擎 | syn | 同上 | 已落地 |
-| SRC-3 | 每个 `.rs` 文件都属于某个 target | 模块树加 fswalk | 同上 | 已落地 |
-| SRC-4 | 只有名单里的 crate 在生产代码里起子进程 | syn | 同上 | 未落地，等 D7 删完子进程入口后（D8-9） |
-| SZ-1..3 | 生产文件不超过 800 行、函数不超过 100 行，超限的按现值入棘轮 | syn 的行号 | `tests/guards/tests/size.rs`、`tests/guards/ratchet/size.txt` | 已落地，拆分（D6）后收紧 |
-| G1、G2a、G3–G5 | 会话池与线格式分层 | syn 加棘轮 | `tests/guards/tests/layering.rs` | 文件已建、内容为空，归 RPC 层（D4） |
-| A1–A8 | 接口面 | syn | `tests/guards/tests/api_surface.rs` | 文件已建、内容为空，归接口收口（D5） |
-| RT-1 | 协议文档对账 | 代码一侧读运行时的方法表、schema 和 `ErrorCode::ALL`，文档用文本 | `daemon/tests/protocol_doc_matches_dispatch.rs` | 已落地 |
-| RT-5 | 两个池互不可见 | 运行时 | `daemon/tests/two_pools_one_process.rs` | 已落地 |
-| DOC-* | 扩展点、hook、README、遥测清单的文档对账 | 文档用文本，代码一侧用运行时常量或 `guards::scan` | 各自原位 | 已落地 |
-| CI-1 | base 和 platform 没有 http 栈（传递依赖） | `cargo tree` | `.github/workflows/ci.yml` | 已落地 |
+| 编号 | 内容 | 机制 | 位置 |
+|---|---|---|---|
+| CT-1 | 只有 assembly 能构造 `SessionPool` | 编译期：`SessionPool::builder` 是 `pub(crate)` | `crates/assembly/src/session_pool/builder.rs` |
+| CT-2 | base 不起进程、不读环境变量（读的地方逐处 `#[expect]` 并写理由） | clippy `disallowed-*` | `crates/core/clippy.toml` |
+| CT-3 | 方法表只有一份：分派、schema、协议文档对账都从它派生 | 宏 `rpc_methods!` | `crates/assembly/src/server/table.rs` |
+| DEP-1..7 | 分级、边的方向、`MAY_USE_PLATFORM`、没有 wasm 运行时、脚本载体与包方案可选、`full` 档依赖图的构成、内核不带模块 feature | `cargo metadata` | `tests/guards/tests/deps.rs` |
+| G9 | `ARCHITECTURE.md` §1 与 `CRATES`、`MAY_USE_PLATFORM`、`impl Module` 对账 | 文档文本 | `tests/guards/tests/architecture_doc.rs` |
+| BASE-1..3、G8 | base 的依赖白名单、tokio 特性子集；生产行数棘轮（`ratchet/base.txt`）；`std::fs` 与模型调用只在白名单模块 | `cargo metadata`、syn、棘轮 | `tests/guards/tests/base.rs` |
+| UD-1 | 未用依赖和放错位置的依赖 | `cargo metadata` 加 syn | `tests/guards/tests/unused_deps.rs` |
+| PS-1..4 | 进程级状态：非朴素类型的 `static`、`thread_local!` 都登记，`static mut` 禁止 | syn | `tests/guards/tests/process_state.rs` |
+| G-D3-1..5 | 一个会话一份 `SessionState`：字段归属清单、创建点、不在引擎间搬状态、`ModelErrorKind` 只在分类处造、会话池派出的任务不带着池 | syn | `tests/guards/tests/session_state.rs` |
+| WIR-1..5 | hook 接线与 `UNWIRED_EVENTS` 双向比对；每种遥测 kind 有生产方；组合根调用接线函数；任务路由取来的模型都被遥测包住；assembly 只经 `read_pair` 读设置 | `HookEvent::ALL`、`EventPayload::KINDS` 加 syn | `tests/guards/tests/wiring.rs` |
+| DLG-1..9 | 会话只在名单上的地方构造、委派只有一个分派、Builder 字段三分类、无晚绑定、`mcp__` 前缀匹配、`DelegateMode` 穷尽、任务只经租约、不造孤儿令牌、子 Agent 的起止只在 `DelegateRun` 里 | syn | `tests/guards/tests/delegation.rs` |
+| PERM-1..8 | 权限管线：工具只陈述事实、判定只在策略里、放行只来自策略或被问的人、有人值守只读一处、沙箱只在受控处约束进程、权限引擎不碰本机、判定矩阵覆盖每个 `Stage` | syn | `tests/guards/tests/permissions.rs` |
+| PIPE-1..4 | 一条工具管线：`Tool::call` 只被 `call_tool` 调、权限只经 `authorize`、`ToolContext` 只在一处造且字段都有读写方、沙箱只有三份类型 | syn | `tests/guards/tests/tool_pipeline.rs` |
+| A1..A8 | 接口面：权限 trait 只有判与授、缺省方法不互相递归、工具不持 `dyn Tool`、契约无线程局部状态、公开枚举 `#[non_exhaustive]`、嵌入方构造的结构体、设置类型不带加载结果、不留 `#[deprecated]` | syn | `tests/guards/tests/api_surface.rs` |
+| DEC-1 | 包装器重写被包装 trait 的每个缺省方法（或登记理由） | syn | `tests/guards/tests/decorators.rs` |
+| ORD-1 | 读了前面模块产物的模块在 `Module::after` 里声明它 | syn | `tests/guards/tests/module_order.rs` |
+| G11 | 只有名单上的几处能改写 `Transcript` 里的对话 | syn | `tests/guards/tests/transcript_writers.rs` |
+| G12 | `live_*.rs` 里出现 `bypassPermissions` / `yolo` / `auto` 即失败，除非同一用例有 `// bypass:` 理由注释 | syn | `tests/guards/tests/blackbox_discipline.rs` |
+| G13 | `every_method_a_client_can_send_is_driven_by_a_test` 不把文档形状比对文件算作"被测试驱动" | 文本 | `daemon/tests/protocol_doc_matches_dispatch.rs` |
+| SRC-1..5 | 只有入口点和机器事实读 `$HOME`；插件披露不提脚本引擎；每个 `.rs` 属于某个 target；只有 `MAY_SPAWN` 里的 crate 起子进程；本机 `Process` 只在装配缺省 provider 处构建 | syn、模块树加 fswalk | `tests/guards/tests/sources.rs` |
+| SZ-1..3 | 生产文件不超过 800 行、函数不超过 80 行，超限的按现值入棘轮 | syn 的行号 | `tests/guards/tests/size.rs`、`tests/guards/ratchet/size.txt` |
+| G1、G2a、G3、G4 | 会话池不认识线格式、池是一组各管一块状态的协作者的门面、`mcp` feature 只在少数几处决定 | syn 加棘轮 | `tests/guards/tests/layering.rs` |
+| RT-1 | 协议文档对账 | 代码一侧读运行时的方法表、schema 和 `ErrorCode::ALL`，文档用文本 | `daemon/tests/protocol_doc_matches_dispatch.rs` |
+| RT-5 | 两个池互不可见 | 运行时 | `daemon/tests/two_pools_one_process.rs` |
+| 无编号 | 只有 tool_policy 询问场景 `permits_tool` | 文本 | `daemon/tests/wiring_coverage.rs` |
+| DOC-* | 扩展点、hook、README、遥测、ptc 限额、ARCHITECTURE §1 的文档对账 | 文档用文本，代码一侧用运行时常量或 `guards::scan` | **不在 `tests/guards`**，在上面「文档不许漂移」表里各自的位置 |
+| CI-1 | base 和 platform 没有 http 栈（传递依赖） | `cargo tree` | `.github/workflows/ci.yml` |
+
+`cargo test -p guards` 当前共 112 个测试。支撑库自己的行为在 `support_selftest.rs` 里用
+`tests/guards/fixtures` 钉住。
 
 ## fixture 项目
 
@@ -387,18 +401,22 @@ MCP）、`.agents/skills/`、`AGENTS.md`。用例跑之前会整个拷贝到临�
   skill 和两层深的嵌套仓库。`LiveRunBuilder::untrusted()` 让项目保持未信任。
 - `tests/fixtures/hostile_plugins/`：`register` 里 panic、工具 panic、`health_check` 阻塞、
   与内建同名的 Rust 插件，经 `Host { plugins }` 装进本进程 daemon。
-- `plugin_fixture::zip_with_entries`：按条目名原样打 zip，造 `../escape`、绝对路径、符号链接、
+- `plugin_fixture::zip_with_entries`（恶意包构造器）：按条目名原样打 zip，造 `../escape`、绝对路径、符号链接、
   高压缩比条目。
 - `Reply::cut_after_first_delta`：流在第一个文本增量之后断开，宿主已经画出了一部分。
 
 ## 磁盘
 
-一次干净构建 **~13 GB**，这不是浪费：每个集成测试文件都是一个独立二进制，静态链接
+一次干净构建 **~13 GB**，这不是浪费：每个测试程序都是一个独立二进制，静态链接
 整张依赖图，所以单个测试二进制约 190 MB，
 而这样的二进制有几十个。strip 只能省 18 MB——macOS 上调试信息本来就不在二进制里，
 那 190 MB 是实打实的机器码。
 
 **变成浪费的是 cargo 从不回收。** 被取代的那一套会原地留着，和活着的那套一样久。
+
+**多个 worktree 各自有一份 `target/`，加起来会撞满磁盘。** 每个 worktree 一次干净构建 ~13 GB，
+并行开三四个就是几十 GB；不要用共享的 `CARGO_TARGET_DIR` 绕开（不同分支的产物会互相污染增量缓存，
+跨进程用例还会捡到别人的 `agixd`），改成少开 worktree、做完就删它的 `target/`。
 
 两条规矩：
 
@@ -408,7 +426,7 @@ MCP）、`.agents/skills/`、`AGENTS.md`。用例跑之前会整个拷贝到临�
 | 每周 | `cargo sweep --time 7`（`cargo install cargo-sweep`） |
 
 第一条是硬性的：版本号一变，workspace 里每个 crate 的指纹全变，整套重编而旧的一份不会被删——
-这就是本仓库反复出现「几十 GB 突然爆掉」的直接原因。全量重建约 1 分 10 秒，比排查磁盘
+这就是本仓库反复出现「几十 GB 突然爆掉」的直接原因。重建比排查磁盘
 满便宜得多。
 
 `tests/scripts/disk_report.sh` 会报告当前占用、**7 天没被碰过的字节数**（即
