@@ -65,15 +65,32 @@ impl TeamRegistry {
         Self::default()
     }
 
-    /// Insert or replace a team's recorded state. A second `TeamCreate` call
-    /// reusing the same `name` overwrites the earlier entry — the model
-    /// chose the name, so a collision is the model's own bookkeeping to
-    /// avoid, not something this registry arbitrates.
+    /// Insert or replace a team's recorded state.
     pub fn upsert(&self, info: TeamInfo) {
         self.teams
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(info.name.clone(), info);
+    }
+
+    /// Record a finished `TeamCreate` batch under its name. A team already
+    /// registered under it keeps its other members and its permission grant:
+    /// a batch and a persistent member may share a name, and `TeamDelete`
+    /// finds the members it stops here.
+    pub fn record_batch(&self, info: TeamInfo) {
+        let mut teams = self.teams.write().unwrap_or_else(|e| e.into_inner());
+        let Some(team) = teams.get_mut(&info.name) else {
+            teams.insert(info.name.clone(), info);
+            return;
+        };
+        team.team_id = info.team_id;
+        team.team_dir = info.team_dir;
+        for member in info.members {
+            match team.members.iter_mut().find(|m| m.label == member.label) {
+                Some(recorded) => *recorded = member,
+                None => team.members.push(member),
+            }
+        }
     }
 
     /// All currently-registered teams, sorted by name for stable output.

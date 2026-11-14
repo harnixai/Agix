@@ -203,11 +203,21 @@ impl Coordinator for DefaultCoordinator {
             ));
         };
         if let Some(delegator) = &self.delegator {
-            for member in &info.members {
+            let mut members: Vec<String> = info.members.iter().map(|m| m.label.clone()).collect();
+            members.extend(
+                delegator
+                    .live_members()
+                    .into_iter()
+                    .filter(|m| m.seat.team == name)
+                    .map(|m| m.seat.member),
+            );
+            members.sort();
+            members.dedup();
+            for member in members {
                 delegator
                     .stop_member(&TeamSeat {
                         team: name.to_string(),
-                        member: member.label.clone(),
+                        member,
                     })
                     .await;
             }

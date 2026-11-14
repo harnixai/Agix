@@ -384,7 +384,7 @@ impl<'a> Run<'a> {
         .await;
 
         if let Some(registry) = &self.coord.registry {
-            registry.upsert(crate::registry::TeamInfo {
+            registry.record_batch(crate::registry::TeamInfo {
                 team_id: self.team_id.clone(),
                 name: self.name.clone(),
                 created_at_secs: std::time::SystemTime::now()
