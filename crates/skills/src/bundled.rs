@@ -452,7 +452,7 @@ Body sections — keep terse:
 
 1. **Goal** — one sentence
 2. **Steps** — numbered, actionable
-3. **Variables** — use `{ARGS}` placeholder for user-provided arg
+3. **Variables** — use `$ARGUMENTS` placeholder for user-provided arg
 4. **Example** — minimal worked example
 5. **Failure modes** — common gotchas (only if non-obvious)
 

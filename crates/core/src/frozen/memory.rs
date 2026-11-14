@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-
 /// AGIX.md total length cap.
 const MAX_CLAUDE_MD_CHARS: usize = 20_000;
 

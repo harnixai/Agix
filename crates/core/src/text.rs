@@ -7,12 +7,6 @@
 //! conversation text in this repo are frequently Chinese, where one character
 //! is 3 bytes and a cut at an arbitrary byte offset lands mid-character with
 //! probability ~2/3.
-//!
-//! Three private near-duplicates of this helper already existed (in
-//! `compaction::compact`, `runtime::turn`, and `core::frozen::utils`) and were
-//! correct; the bug was that four *other* truncation sites sliced raw bytes
-//! instead of calling one. This module is the single canonical implementation
-//! those sites now use.
 
 /// Truncate `s` to at most `max_bytes` bytes, cutting at a character boundary.
 ///

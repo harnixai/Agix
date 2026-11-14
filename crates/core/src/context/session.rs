@@ -887,13 +887,6 @@ impl SessionState {
         }
     }
 
-    /// 文件是否已读且未变化。用于 Read 工具跳过重复读取。
-    /// 与 `check_read_staleness` 不同——后者给 Edit/Write 用，返回错误信息；
-    /// 这个给 Read 自己用，只回答 bool。
-    pub fn check_read_dedup(&self, path: &Path) -> bool {
-        self.check_read_dedup_with_range(path, None, None)
-    }
-
     /// Check read dedup with explicit offset/limit range.
     /// Only deduplicates when both the mtime AND the exact offset/limit range match.
     pub fn check_read_dedup_with_range(
@@ -920,7 +913,7 @@ impl SessionState {
     }
 
     /// 给定路径是否与最近一次读取的文件一致。
-    /// 仅检查路径相等；mtime 一致性由调用方通过 `check_read_dedup` 保证。
+    /// 仅检查路径相等；mtime 一致性由调用方通过 `check_read_dedup_with_range` 保证。
     pub fn is_consecutive_read(&self, path: &Path) -> bool {
         let last = self
             .last_read_path

@@ -116,11 +116,6 @@ impl RedactLiterals {
             replacement: "<redacted>".to_string(),
         }
     }
-
-    pub fn with_replacement(mut self, replacement: impl Into<String>) -> Self {
-        self.replacement = replacement.into();
-        self
-    }
 }
 
 impl ToolResultTransformer for RedactLiterals {

@@ -32,14 +32,6 @@ mod tests {
         assert_eq!(infer_context_window_tokens("gpt-5.2-codex"), 400_000);
     }
 
-    #[test]
-    fn thresholds_follow_effective_window() {
-        let auto = default_auto_compact_threshold("deepseek-v4-flash", 65535);
-        let blocking = default_blocking_limit("deepseek-v4-flash", 65535);
-        assert!(blocking > auto);
-        assert!(auto > 900_000);
-    }
-
     fn task_events(rx: &mut tokio::sync::broadcast::Receiver<TaskEvent>) -> Vec<serde_json::Value> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .map(|e| serde_json::to_value(e).unwrap())

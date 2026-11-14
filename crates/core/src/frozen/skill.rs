@@ -385,7 +385,7 @@ fn regex_escape(s: &str) -> String {
 /// - `name` 不在 skills 列表 -> None（让 caller 走原本 slash 分派 / Unknown 流程）
 /// - 命中：异步读 SKILL.md，剥 frontmatter，返回拼好的 prompt（含 args 透传）
 ///
-/// args 拼接策略简单：`{ARGS}` 占位符替换；没占位符则在 body 末尾追加。
+/// args 拼接策略简单：`$ARGUMENTS` 占位符替换；没占位符则在 body 末尾追加。
 /// 这是 first cut，刻意不实现 `$1` 等完整变量代换 -- 用户场景里现在不卡这个。
 pub async fn try_expand_skill_command(
     line: &str,
@@ -417,11 +417,10 @@ pub fn body_runs_commands(body: &str) -> bool {
 /// `arguments` frontmatter list on hand.
 ///
 /// Substitution rules (applied in order):
-/// 1. `{ARGS}` -> full `args` string (legacy agix convention)
-/// 2. `$ARGUMENTS` -> full `args` string (alternative legacy convention)
-/// 3. `$1`..`$9` -> corresponding positional arg (whitespace-separated); missing
+/// 1. `$ARGUMENTS` -> full `args` string
+/// 2. `$1`..`$9` -> corresponding positional arg (whitespace-separated); missing
 ///    positions become empty string
-/// 4. If none of 1-3 substituted **anything** and `args` is non-empty, append
+/// 3. If none of 1-2 substituted **anything** and `args` is non-empty, append
 ///    "\n\nUser arguments: {args}" at the end (legacy fallback).
 pub fn expand_skill_vars(body: &str, args: &str) -> String {
     expand_skill_vars_named(body, args, &[], None)
@@ -466,12 +465,6 @@ pub fn expand_skill_vars_named(
         }
     }
 
-    // Legacy: {ARGS} placeholder
-    if out.contains("{ARGS}") {
-        out = out.replace("{ARGS}", args);
-        substituted = true;
-    }
-    // Legacy: $ARGUMENTS
     if out.contains("$ARGUMENTS") {
         out = out.replace("$ARGUMENTS", args);
         substituted = true;
@@ -519,8 +512,7 @@ pub async fn format_skill_invocation(
 ) -> Result<String, std::io::Error> {
     let body = skill.read_body().await?;
     // Variable expansion supports:
-    //   - `{ARGS}` -- full args string (legacy; we keep it for backwards compat)
-    //   - `$ARGUMENTS` -- same (alternative convention)
+    //   - `$ARGUMENTS` -- full args string
     //   - `$1`..`$9` -- positional args split on whitespace
     // If none of the above are present and args is non-empty, args is appended
     // verbatim at the end (legacy behavior).
@@ -846,17 +838,11 @@ mod tests {
 
     #[test]
     fn expand_skill_vars_with_empty_names_matches_unnamed_variant() {
-        let body = "Run with {ARGS}.";
+        let body = "Run with $ARGUMENTS.";
         assert_eq!(
             expand_skill_vars_named(body, "x y z", &[], None),
             expand_skill_vars(body, "x y z")
         );
-    }
-
-    #[test]
-    fn expand_curly_brace_args_still_works() {
-        let body = "Run with {ARGS}.";
-        assert_eq!(expand_skill_vars(body, "x y z"), "Run with x y z.");
     }
 
     #[test]
@@ -884,9 +870,12 @@ mod tests {
     async fn try_expand_substitutes_args_placeholder() {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("SKILL.md");
-        tokio::fs::write(&p, "---\ndescription: test\n---\nReview {ARGS} and report.")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &p,
+            "---\ndescription: test\n---\nReview $ARGUMENTS and report.",
+        )
+        .await
+        .unwrap();
         let skills = vec![SkillEntry {
             name: "x".into(),
             description: "test".into(),
@@ -900,7 +889,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(result.contains("Review PR #42 and report."));
-        assert!(!result.contains("{ARGS}"));
+        assert!(!result.contains("$ARGUMENTS"));
         assert!(!result.contains("User arguments:"));
     }
 }

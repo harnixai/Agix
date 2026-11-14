@@ -156,7 +156,6 @@ impl ConfigPaths {
     pub fn local_memory_dir(&self) -> PathBuf {
         self.local_data_dir.join("memory")
     }
-
 }
 
 #[cfg(test)]

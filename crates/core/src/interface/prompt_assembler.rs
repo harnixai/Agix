@@ -86,11 +86,6 @@ impl MergedSystemPrompt {
             name: Self::MERGED_NAME.to_string(),
         }
     }
-
-    pub fn with_separator(mut self, separator: impl Into<String>) -> Self {
-        self.separator = separator.into();
-        self
-    }
 }
 
 impl Default for MergedSystemPrompt {

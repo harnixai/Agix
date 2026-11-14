@@ -411,20 +411,6 @@ pub fn infer_context_window_tokens(model: &str) -> usize {
     }
 }
 
-/// Proactive compact threshold:
-/// effective_window - 13k buffer.
-pub fn default_auto_compact_threshold(model: &str, max_tokens: u32) -> usize {
-    let effective_window = infer_context_window_tokens(model).saturating_sub(max_tokens as usize);
-    effective_window.saturating_sub(13_000)
-}
-
-/// Blocking limit:
-/// effective_window - 3k buffer, used to preserve room for manual /compact.
-pub fn default_blocking_limit(model: &str, max_tokens: u32) -> usize {
-    let effective_window = infer_context_window_tokens(model).saturating_sub(max_tokens as usize);
-    effective_window.saturating_sub(3_000)
-}
-
 #[cfg(test)]
 mod sandbox_wiring_tests {
     use super::*;

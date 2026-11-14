@@ -558,52 +558,6 @@ async fn collect_output_style(
     None
 }
 
-/// List all output style names from user + project dirs (no
-/// content read). Used by `/output-style` slash command.
-pub async fn list_output_style_names(cwd: &Path, paths: &ConfigPaths) -> Vec<String> {
-    let mut all: Vec<(String, OutputStyleSource)> = Vec::new();
-    all.extend(
-        scan_output_style_dir(&paths.user_data_dir.join("output-styles"))
-            .await
-            .into_iter()
-            .map(|n| (n, OutputStyleSource::User)),
-    );
-    all.extend(
-        scan_output_style_dir(&cwd.join(".agix").join("output-styles"))
-            .await
-            .into_iter()
-            .map(|n| (n, OutputStyleSource::Project)),
-    );
-    // Dedup: keep last (project wins over user when names collide).
-    let mut seen = std::collections::HashSet::new();
-    let mut out: Vec<String> = Vec::new();
-    for (name, _) in all.into_iter().rev() {
-        if seen.insert(name.clone()) {
-            out.push(name);
-        }
-    }
-    out.reverse();
-    out
-}
-
-async fn scan_output_style_dir(dir: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(_) => return out,
-    };
-    while let Ok(Some(e)) = entries.next_entry().await {
-        let p = e.path();
-        if p.extension().and_then(|s| s.to_str()) == Some("md") {
-            if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                out.push(stem.to_string());
-            }
-        }
-    }
-    out.sort();
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -903,33 +857,5 @@ mod tests {
         )
         .await
         .is_none());
-    }
-
-    #[tokio::test]
-    async fn list_output_style_names_dedups_user_and_project() {
-        let home = TempDir::new().unwrap();
-        let cwd = TempDir::new().unwrap();
-        let user_dir = test_paths(home.path()).user_data_dir.join("output-styles");
-        let proj_dir = cwd.path().join(".agix/output-styles");
-        tokio::fs::create_dir_all(&user_dir).await.unwrap();
-        tokio::fs::create_dir_all(&proj_dir).await.unwrap();
-        tokio::fs::write(user_dir.join("terse.md"), "x")
-            .await
-            .unwrap();
-        tokio::fs::write(user_dir.join("verbose.md"), "x")
-            .await
-            .unwrap();
-        tokio::fs::write(proj_dir.join("terse.md"), "y")
-            .await
-            .unwrap();
-        tokio::fs::write(proj_dir.join("local.md"), "y")
-            .await
-            .unwrap();
-
-        let names = list_output_style_names(cwd.path(), &test_paths(home.path())).await;
-        // expected: terse (deduped), verbose (user), local (project)
-        let mut sorted = names.clone();
-        sorted.sort();
-        assert_eq!(sorted, vec!["local", "terse", "verbose"]);
     }
 }

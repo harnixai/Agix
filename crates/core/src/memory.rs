@@ -419,13 +419,10 @@ impl MemoryStore {
             }
         };
 
-        use crate::frozen::frontmatter::{nested_scalar, scalar};
+        use crate::frozen::frontmatter::scalar;
         let name = scalar(frontmatter, "name").filter(|n| !n.is_empty())?;
         let description = scalar(frontmatter, "description").unwrap_or_default();
-        // Flat `type:` first; files written before the fields were flattened
-        // nest it under `metadata:`.
         let memory_type = scalar(frontmatter, "type")
-            .or_else(|| nested_scalar(frontmatter, "metadata", "type"))
             .map(|t| match t.as_str() {
                 "user" => MemoryType::User,
                 "feedback" => MemoryType::Feedback,
@@ -1190,26 +1187,6 @@ It can have multiple lines."#;
         };
         let saved = store.persist_batch(vec![mem]).unwrap();
         assert_eq!(saved, 0);
-    }
-
-    #[test]
-    fn parse_backward_compat_nested_type() {
-        // Old format: metadata:\n  type:  — should still parse correctly
-        let raw = r#"---
-name: old-format
-description: written by old write_memory_file
-metadata:
-  type: feedback
----
-
-This memory was written before the flat-format fix."#;
-        let mem = MemoryStore::parse_memory_file(raw).unwrap();
-        assert_eq!(mem.name, "old-format");
-        assert_eq!(mem.memory_type, MemoryType::Feedback);
-        assert_eq!(
-            mem.content,
-            "This memory was written before the flat-format fix."
-        );
     }
 
     #[test]

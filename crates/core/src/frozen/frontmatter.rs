@@ -7,7 +7,6 @@ use super::skill::{SkillEntry, SkillSource};
 /// 把 `---\n<yaml>\n---\n<body>` 切成 (Some(yaml), body)；不带 frontmatter 时
 /// 返回 (None, content)。
 pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
-    let bytes = content.as_bytes();
     if !content.starts_with("---") {
         return (None, content);
     }
@@ -23,7 +22,6 @@ pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     // 跳过 `---` 后的换行
     let after_close = after_close.strip_prefix("---").unwrap_or(after_close);
     let after_close = after_close.strip_prefix('\n').unwrap_or(after_close);
-    let _ = bytes;
     (Some(yaml), after_close)
 }
 
@@ -279,23 +277,6 @@ pub fn scalar(frontmatter: &str, key: &str) -> Option<String> {
     }
 }
 
-/// `child` under the top-level mapping `parent` — the layout memory files
-/// used before their fields were flattened.
-pub fn nested_scalar(frontmatter: &str, parent: &str, child: &str) -> Option<String> {
-    let lines: Vec<&str> = frontmatter.lines().collect();
-    let header = format!("{parent}:");
-    let start = lines.iter().position(|l| l.trim_end() == header)?;
-    let prefix = format!("{child}:");
-    lines[start + 1..]
-        .iter()
-        .take_while(|l| l.starts_with([' ', '\t']))
-        .find_map(|l| {
-            l.trim()
-                .strip_prefix(prefix.as_str())
-                .map(|v| inline_scalar(v.trim()))
-        })
-}
-
 fn inline_scalar(raw: &str) -> String {
     if let Some(body) = raw.strip_prefix('"') {
         let mut out = String::new();
@@ -392,10 +373,6 @@ mod tests {
             scalar(fm, "type"),
             None,
             "a nested key is not a top-level one"
-        );
-        assert_eq!(
-            nested_scalar(fm, "metadata", "type").as_deref(),
-            Some("feedback")
         );
         assert_eq!(scalar(fm, "missing"), None);
     }
