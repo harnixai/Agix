@@ -100,8 +100,7 @@ async fn settled(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_started_on_an_idle_session_runs_as_its_task() -> anyhow::Result<()> {
-    let (_world, provider, daemon, mut client, session) =
-        daemon_with("idle", json!({ "permission_mode": "bypassPermissions" })).await?;
+    let (_world, provider, daemon, mut client, session) = daemon_with("idle", json!({})).await?;
     let mut watcher = daemon.connect().await?;
     watcher.session_subscribe(&session).await?;
     provider.script([Reply::text("REVIEWED-OK")]);
@@ -224,8 +223,7 @@ async fn an_agent_started_on_an_idle_session_runs_as_its_task() -> anyhow::Resul
 
 #[tokio::test(flavor = "multi_thread")]
 async fn structured_output_is_on_the_task_and_the_parent_can_be_left_out() -> anyhow::Result<()> {
-    let (_world, provider, daemon, mut client, session) =
-        daemon_with("schema", json!({ "permission_mode": "bypassPermissions" })).await?;
+    let (_world, provider, daemon, mut client, session) = daemon_with("schema", json!({})).await?;
     provider.script_when(
         "grade the change",
         [
@@ -320,7 +318,7 @@ async fn the_session_cap_refuses_one_agent_too_many() -> anyhow::Result<()> {
     let (_world, provider, daemon, mut client, session) = daemon_with(
         "cap",
         json!({
-            "permission_mode": "bypassPermissions",
+            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
             "execution": { "max_concurrent_subagents": 1 }
         }),
     )

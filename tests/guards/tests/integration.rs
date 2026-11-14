@@ -5,6 +5,7 @@
 mod api_surface;
 mod architecture_doc;
 mod base;
+mod blackbox_discipline;
 mod decorators;
 mod delegation;
 mod deps;

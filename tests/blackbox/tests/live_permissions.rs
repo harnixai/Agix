@@ -456,6 +456,7 @@ async fn a_plan_mode_agent_type_cannot_write() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn yolo_in_settings_is_bypass_permissions_by_its_own_name() -> anyhow::Result<()> {
+    // bypass: the case is about bypass itself — that the `yolo` alias resolves to it.
     let mut run = LiveRun::start(
         "perm-yolo",
         json!({ "permission_mode": "yolo" }),
