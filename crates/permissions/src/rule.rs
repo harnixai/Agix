@@ -36,7 +36,7 @@ pub fn parse_rule_string(
         if tool_name.is_empty() {
             return Err(ParseRuleError::Malformed(s.to_string()));
         }
-        let content = s[open_idx + 1..s.len() - 1].to_string();
+        let content = s[open_idx + 1..s.len() - 1].trim().to_string();
         return Ok(PermissionRule {
             source,
             behavior,
@@ -67,9 +67,10 @@ pub fn format_rule_string(r: &PermissionRule) -> String {
 /// "action": "deny"}`（面向人手写的一行字符串），引擎侧是拆好的
 /// `{tool_name, rule_content, behavior, source}`。
 ///
-/// 解析不了的条目（空串、括号不配对……）**跳过并 warn**，不整体失败：一条
-/// 手写错的规则不该让整个 session 拒绝启动；跳过的后果是"这条规则不生效"，
-/// 在 `ask` 默认下是更保守的方向（该问的还是会问），不是静默放行。
+/// 解析不了的条目（空串、括号不配对……）跳过并 warn，不整体失败：一条手写错
+/// 的规则不该让整个 session 拒绝启动。跳过的 deny 意味着这条拒绝不生效，所以
+/// 加载设置时（`settings::LoadedSettings::ignored`，`daemon.doctor` 报出）就把
+/// 这类条目挑出来，不等到这里。
 ///
 /// 多数调用方要的是 [`rules_from`]——它按来源分别调用本函数，
 /// 直接用本函数意味着调用方自己决定 `source`。
@@ -169,6 +170,12 @@ mod tests {
 
     fn parse(s: &str) -> Result<PermissionRule, ParseRuleError> {
         parse_rule_string(s, RuleSource::UserSettings, RuleBehavior::Allow)
+    }
+
+    #[test]
+    fn padding_inside_the_parentheses_is_not_part_of_the_content() {
+        let r = parse("Bash( rm:* )").unwrap();
+        assert_eq!(r.rule_content.as_deref(), Some("rm:*"));
     }
 
     #[test]

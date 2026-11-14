@@ -741,6 +741,32 @@ fn a_bad_permission_rule_is_left_out_alone_and_reported() {
 }
 
 #[test]
+fn a_deny_rule_that_does_not_parse_is_reported_rather_than_skipped_silently() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"permission_rules": [
+             {"tool": "Bash(rm:*", "action": "deny"},
+             {"tool": "(rm:*)", "action": "deny"},
+             {"tool": "Bash(ls:*)", "action": "deny"}
+           ]}"#,
+    )
+    .unwrap();
+    let settings = LoadedSettings::load(
+        dir.path().to_path_buf(),
+        dir.path().join("scene"),
+        dir.path().join("project"),
+        "code",
+        "m",
+        &Sections::none(),
+    );
+    let keys: Vec<_> = settings.ignored.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(keys, ["permission_rules[0]", "permission_rules[1]"]);
+    assert!(settings.ignored[0].error.contains("Bash(rm:*"));
+    assert_eq!(shared_rules(&settings).len(), 1);
+}
+
+#[test]
 fn load_missing_directories_returns_plain_defaults() {
     let root = tempfile::tempdir().unwrap();
     let settings = LoadedSettings::load(

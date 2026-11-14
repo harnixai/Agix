@@ -376,55 +376,13 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        if let Some(next) = step_over_quoted(&chars, i, out) {
+            at_word_start = false;
+            current.extend(&chars[i..next.min(chars.len())]);
+            i = next;
+            continue;
+        }
         match c {
-            '\\' => {
-                at_word_start = false;
-                current.push(c);
-                if let Some(&n) = chars.get(i + 1) {
-                    current.push(n);
-                }
-                i += 2;
-                continue;
-            }
-            '$' if chars.get(i + 1) == Some(&'\'') => {
-                at_word_start = false;
-                let end = ansi_c_close(&chars, i + 2);
-                current.extend(&chars[i..(end + 1).min(chars.len())]);
-                i = end + 1;
-                continue;
-            }
-            '\'' => {
-                at_word_start = false;
-                let end = find_char(&chars, i + 1, '\'');
-                current.extend(&chars[i..(end + 1).min(chars.len())]);
-                i = end + 1;
-                continue;
-            }
-            '"' => {
-                at_word_start = false;
-                let end = scan_double_quoted(&chars, i + 1, out);
-                current.extend(&chars[i..(end + 1).min(chars.len())]);
-                i = end + 1;
-                continue;
-            }
-            '`' => {
-                at_word_start = false;
-                let end = find_unescaped(&chars, i + 1, '`');
-                let inner: String = chars[i + 1..end.min(chars.len())].iter().collect();
-                split_into(&inner, out);
-                current.extend(&chars[i..(end + 1).min(chars.len())]);
-                i = end + 1;
-                continue;
-            }
-            '$' | '<' | '>' if chars.get(i + 1) == Some(&'(') => {
-                at_word_start = false;
-                let end = find_close_paren(&chars, i + 2);
-                let inner: String = chars[i + 2..end.min(chars.len())].iter().collect();
-                split_into(&inner, out);
-                current.extend(&chars[i..(end + 1).min(chars.len())]);
-                i = end + 1;
-                continue;
-            }
             '#' if at_word_start => {
                 while i < chars.len() && chars[i] != '\n' {
                     i += 1;
@@ -455,6 +413,36 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
         i += 1;
     }
     push_command(&current, out);
+}
+
+/// When `chars[i]` opens an escape, a quoted string or a substitution, scan
+/// it — splitting what runs inside into `out` — and return the index just
+/// past it.
+fn step_over_quoted(chars: &[char], i: usize, out: &mut Vec<Segment>) -> Option<usize> {
+    let next = chars.get(i + 1);
+    let end = match chars[i] {
+        '\\' => return Some(i + 2),
+        '$' if next == Some(&'\'') => ansi_c_close(chars, i + 2),
+        '\'' => find_char(chars, i + 1, '\''),
+        '"' => scan_double_quoted(chars, i + 1, out),
+        '`' => {
+            let end = find_unescaped(chars, i + 1, '`');
+            split_into_span(chars, i + 1, end, out);
+            end
+        }
+        '$' | '<' | '>' if next == Some(&'(') => {
+            let end = find_close_paren(chars, i + 2);
+            split_into_span(chars, i + 2, end, out);
+            end
+        }
+        _ => return None,
+    };
+    Some(end + 1)
+}
+
+fn split_into_span(chars: &[char], from: usize, end: usize, out: &mut Vec<Segment>) {
+    let inner: String = chars[from..end.min(chars.len())].iter().collect();
+    split_into(&inner, out);
 }
 
 /// Scan a double-quoted string starting just past its opening quote,
@@ -568,68 +556,7 @@ pub fn assignments(line: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Variables whose assignment changes how a later word runs or where a read
-/// lands: program lookup and loading, the configuration a reader takes its
-/// options from (git's `GIT_CONFIG_*`, `RIPGREP_CONFIG_PATH`, `MANOPT`, a
-/// `XDG_CONFIG_HOME` with a `git/config` in it), a pager, browser, editor or
-/// askpass helper it shells out to (`HOMEBREW_BROWSER`, `SSH_ASKPASS`), and
-/// the directories `cd` and `~` resolve against.
-const DANGEROUS_VARIABLE_NAMES: &[&str] = &[
-    "PATH",
-    "BASH_ENV",
-    "ENV",
-    "SHELLOPTS",
-    "BASHOPTS",
-    "PROMPT_COMMAND",
-    "IFS",
-    "LESSOPEN",
-    "LESSCLOSE",
-    "MANOPT",
-    "MANROFFOPT",
-    "MANROFFSEQ",
-    "VISUAL",
-    "KUBECONFIG",
-    "ACKRC",
-    "CDPATH",
-    "OLDPWD",
-    "HOME",
-    "PWD",
-];
-
-const DANGEROUS_VARIABLE_PREFIXES: &[&str] = &[
-    "GIT_",
-    "SSH_",
-    "LD_",
-    "DYLD_",
-    "XDG_",
-    "GROFF_",
-    "DOCKER_",
-    "HOMEBREW_",
-    "NPM_CONFIG_",
-    "PYTHON",
-    "PERL",
-    "RUBY",
-    "NODE_",
-    "BAT_",
-    "ACK_",
-];
-
-const DANGEROUS_VARIABLE_SUFFIXES: &[&str] =
-    &["PAGER", "BROWSER", "EDITOR", "_CONFIG_PATH", "_CONFIG_FILE"];
-
-/// Whether setting `name` in front of a command can make it run another
-/// program or read somewhere other than it says ([`DANGEROUS_VARIABLE_NAMES`]
-/// and the prefixes and suffixes beside it). Case is ignored.
-pub fn is_dangerous_variable(name: &str) -> bool {
-    let name = name.to_ascii_uppercase();
-    DANGEROUS_VARIABLE_NAMES.contains(&name.as_str())
-        || DANGEROUS_VARIABLE_PREFIXES
-            .iter()
-            .any(|p| name.starts_with(p))
-        || DANGEROUS_VARIABLE_SUFFIXES
-            .iter()
-            .any(|s| name.ends_with(s))
-}
+pub use crate::dangerous_variable::is_dangerous_variable;
 
 /// `line` cut at the operators that separate commands (`;`, newline, `|`,
 /// `&`, `&&`, `||`), keeping every piece — including one that is only an

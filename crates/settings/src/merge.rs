@@ -21,12 +21,35 @@ pub(crate) fn read_permission_rules(
     let mut kept = Vec::new();
     let mut unread = Vec::new();
     for (index, entry) in entries.into_iter().enumerate() {
-        match serde_json::from_value(entry) {
-            Ok(rule) => kept.push(rule),
+        match serde_json::from_value::<PermissionRuleEntry>(entry) {
+            Ok(rule) => match rule_text_problem(&rule.tool) {
+                None => kept.push(rule),
+                Some(problem) => unread.push((
+                    format!("permission_rules[{index}]"),
+                    format!("{:?}: {problem}", rule.tool),
+                )),
+            },
             Err(e) => unread.push((format!("permission_rules[{index}]"), e.to_string())),
         }
     }
     (kept, unread)
+}
+
+/// What keeps a rule string such as `Bash(rm:*` from being a rule, in the
+/// terms `permissions::rule::parse_rule_string` rejects it by.
+fn rule_text_problem(tool: &str) -> Option<&'static str> {
+    let tool = tool.trim();
+    if tool.is_empty() {
+        return Some("rule string is empty");
+    }
+    let open = tool.find('(')?;
+    if !tool.ends_with(')') {
+        return Some("rule has unbalanced parens");
+    }
+    tool[..open]
+        .trim()
+        .is_empty()
+        .then_some("rule names no tool before the parens")
 }
 
 /// Merge `over` into `merged` — a settings object that deserializes — one

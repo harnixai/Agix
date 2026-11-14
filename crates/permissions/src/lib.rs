@@ -1,6 +1,7 @@
 //! Permission engine — rule matching, mode dispatch, path safety.
 
 pub mod dangerous;
+mod dangerous_variable;
 pub mod error;
 pub mod invocation;
 pub mod path_rule;
