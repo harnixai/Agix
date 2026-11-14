@@ -209,18 +209,20 @@ async fn the_sandbox_section_reaches_the_tools() {
         !unlisted.to_string().contains("STUB-BODY-reached"),
         "a host the allowlist does not name was reached: {unlisted}"
     );
+    // A path `deny_read` names is a credential to the whole tool surface: the
+    // permission layer refuses the command before it runs, so the sandbox is
+    // the second line, not the first.
     let cat = answers(&model, "toolu_cat")
         .first()
         .cloned()
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string();
     assert!(
-        cat.to_string().contains("end"),
-        "the command did not run: {cat}"
+        !cat.contains("SANDBOX-SECRET-7c2"),
+        "a path `deny_read` names was readable to a command: {cat}"
     );
-    if tools::bash::sandbox_status().starts_with("available") {
-        assert!(
-            !cat.to_string().contains("SANDBOX-SECRET-7c2"),
-            "a path `deny_read` names was readable to a sandboxed command: {cat}"
-        );
-    }
+    assert!(
+        cat.contains("end") || cat.to_lowercase().contains("denied"),
+        "the command neither ran nor was refused: {cat}"
+    );
 }
