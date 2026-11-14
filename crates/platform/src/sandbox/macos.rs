@@ -3,7 +3,7 @@
 //! network, daemon fences), last match winning.
 
 use super::fence::{fenced_ports, fenced_secrets, fenced_sockets};
-use super::roots::{project_guard, Roots};
+use super::roots::{link_targets_outside, project_guard, Roots};
 use super::{
     multiplexer_paths, patterns, read_scope, sandbox_escape, CommandEnv, Confined, Enforcement,
     NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
@@ -175,6 +175,9 @@ fn read_rules(s: &mut String, policy: &SandboxPolicy, dirs: &read_scope::UserDir
     for p in policy.deny_read.iter().flat_map(|p| spellings(p)) {
         s.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quoted(&p)));
     }
+    for p in denied_link_targets(policy) {
+        s.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quoted(&p)));
+    }
     // Only an entry `deny_read` names is re-allowed, as on Linux: a parent
     // in `allow_read` written after the denies would win over every one of
     // them below it.
@@ -191,6 +194,21 @@ fn read_rules(s: &mut String, policy: &SandboxPolicy, dirs: &read_scope::UserDir
             quoted(&p)
         ));
     }
+}
+
+fn denied_link_targets(policy: &SandboxPolicy) -> Vec<PathBuf> {
+    let allowed: Vec<PathBuf> = policy
+        .allow_read
+        .iter()
+        .flat_map(|p| spellings(p))
+        .collect();
+    policy
+        .deny_read
+        .iter()
+        .flat_map(|p| spellings(p))
+        .filter(|p| !allowed.contains(p))
+        .flat_map(|p| link_targets_outside(&p))
+        .collect()
 }
 
 fn ipc_rules(s: &mut String, policy: &SandboxPolicy) {

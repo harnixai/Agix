@@ -4,8 +4,8 @@
 
 use super::fence::{fenced_secrets, fenced_sockets, is_socket};
 use super::roots::{
-    denied_for_write, git_configured, project_agix_dirs, subdirs, submodules_of,
-    write_denial_names, Roots,
+    denied_for_write, git_configured, link_targets_outside, project_agix_dirs, subdirs,
+    submodules_of, write_denial_names, Roots,
 };
 use super::{
     mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement, NetworkMode,
@@ -628,6 +628,9 @@ fn hide_denied_reads(args: &mut Vec<String>, policy: &SandboxPolicy) {
     for p in &policy.deny_read {
         if !allow_set.contains(p) {
             hide(args, p);
+            for target in link_targets_outside(p) {
+                hide(args, &target);
+            }
         }
     }
 }

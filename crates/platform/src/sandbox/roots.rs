@@ -149,6 +149,45 @@ pub(super) fn write_denial_names(denied: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// How deep below a denied directory its symbolic links are looked for, and
+/// the most entries looked at.
+const LINK_SEARCH_DEPTH: usize = 4;
+const LINK_SEARCH_ENTRIES: usize = 4096;
+
+/// Where the symbolic links inside the directory `dir` lead, when that is
+/// outside it: a denial of `dir` does not cover those, and the kernel
+/// resolves a link before it matches a path. Empty for anything that is not
+/// a directory.
+pub(super) fn link_targets_outside(dir: &Path) -> Vec<PathBuf> {
+    let real = base::path::resolve_physically(dir);
+    let mut found = Vec::new();
+    let mut pending = vec![(dir.to_path_buf(), 0)];
+    let mut looked_at = 0;
+    while let Some((at, depth)) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&at) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            looked_at += 1;
+            if looked_at > LINK_SEARCH_ENTRIES {
+                return found;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_symlink() {
+                let target = base::path::resolve_physically(&entry.path());
+                if !target.starts_with(&real) && !found.contains(&target) {
+                    found.push(target);
+                }
+            } else if kind.is_dir() && depth < LINK_SEARCH_DEPTH {
+                pending.push((entry.path(), depth + 1));
+            }
+        }
+    }
+    found
+}
+
 /// The real directories directly under `dir`.
 pub(super) fn subdirs(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {

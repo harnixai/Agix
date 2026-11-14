@@ -477,3 +477,32 @@ fn linux_deny_write_names_are_read_only_binds() {
     let other = root.join("secretsx").display().to_string();
     assert_eq!(at(["--ro-bind", &other, &other]), None, "{args:?}");
 }
+
+/// A link in a denied directory that leads outside it: its target is
+/// hidden too.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_denied_directorys_outside_link_targets_are_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let (denied, managed) = (root.join("aws"), root.join("dotfiles"));
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::create_dir_all(&managed).unwrap();
+    std::fs::write(managed.join("credentials"), "k").unwrap();
+    std::os::unix::fs::symlink(managed.join("credentials"), denied.join("credentials")).unwrap();
+    let project = root.join("project");
+    let mut o = opts("true", &project);
+    o.policy.deny_read = vec![denied];
+    let cmd = wrap(o);
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let target = managed.join("credentials").display().to_string();
+    let args = &cmd.spec.args;
+    assert!(
+        args.windows(3)
+            .any(|w| w == ["--ro-bind-try", "/dev/null", &target]),
+        "{args:?}"
+    );
+}

@@ -510,3 +510,26 @@ fn allow_read_naming_a_parent_does_not_reopen_a_denied_directory() {
         "exact allow was ignored"
     );
 }
+
+/// A symbolic link inside a denied directory leads outside it, and the
+/// kernel matches the path it resolves to: what it points at has to be
+/// denied as well, or the link reads through.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_link_in_a_denied_directory_does_not_read_through() {
+    let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
+    let denied = s.elsewhere.join("aws");
+    let managed = s.elsewhere.join("dotfiles/aws");
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::create_dir_all(&managed).unwrap();
+    std::fs::write(managed.join("credentials"), "key\n").unwrap();
+    std::os::unix::fs::symlink(managed.join("credentials"), denied.join("credentials")).unwrap();
+    let policy = SandboxPolicy {
+        deny_read: vec![denied.clone()],
+        ..Default::default()
+    };
+    for path in [denied.join("credentials"), managed.join("credentials")] {
+        let read = format!("cat '{}'", path.display());
+        assert!(!s.run_under(&read, policy.clone()), "{}", path.display());
+    }
+}
