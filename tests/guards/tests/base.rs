@@ -1,5 +1,5 @@
-//! What `base` — the contracts and kernel services every crate builds on —
-//! may link, read from `cargo metadata`: its normal dependencies, target
+//! What `base` — the contracts, the shared data and the pure decisions, and the
+//! small fs/clock/path/text tools every crate shares — may link, read from `cargo metadata`: its normal dependencies, target
 //! sections included, are exactly `BASE_MAY_DEPEND_ON`. A crate added there
 //! is linked into every host, so it needs a reason here first; one the code
 //! stopped using has to come off. Dev dependencies are not limited. That base
@@ -9,14 +9,19 @@
 //! `signal` or `net`, so `cargo check -p base` proves base starts no process
 //! and opens no socket through tokio — the workspace's tokio leaves those
 //! three to the crates that ask for them.
+//!
+//! base's production code only shrinks (a line ratchet), reaches the filesystem
+//! only in the files listed in `BASE_FS`, and calls no model: I/O and model
+//! calls belong to the crate that owns the decision.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use guards::allow::{self, Finding};
-use guards::{ws, Dep, Hit, Package};
+use guards::scan::{self, Callee};
+use guards::{par_flat_map, ratchet, ws, Dep, Hit, Package, SourceFile, TargetKind, View};
 
 const BASE_TOKIO_FEATURES: &[(&str, &str)] = &[
-    ("fs", "the kernel services' own files"),
+    ("fs", "the workspace default"),
     ("io-util", "the workspace default"),
     ("macros", "select! and the tests"),
     ("parking_lot", "the workspace default"),
@@ -27,19 +32,22 @@ const BASE_TOKIO_FEATURES: &[(&str, &str)] = &[
 ];
 
 const BASE_MAY_DEPEND_ON: &[(&str, &str)] = &[
-    ("tokio", "files, locks, timers and the runtime handle"),
+    ("tokio", "the dir lock, timers and the runtime handle"),
     ("tokio-util", "CancellationToken in the contracts"),
     ("futures", "the streaming contracts"),
     ("async-trait", "the contracts"),
     ("serde", "the shared data types"),
     ("serde_json", "the shared data types"),
-    ("schemars", "the settings schema"),
+    (
+        "schemars",
+        "JsonSchema on the shared types the settings schema names",
+    ),
     ("thiserror", "the error types"),
     ("anyhow", "error codes"),
     ("tracing", "logging"),
     ("uuid", "ids"),
     ("time", "the environment's clock and dates"),
-    ("globset", "project_trust patterns and URL rules"),
+    ("globset", "URL rules"),
     ("bs58", "ids"),
     ("url", "URL rules and the public-suffix check"),
     ("libc", "dir_lock's flock, unix only"),
@@ -109,5 +117,134 @@ fn base_builds_tokio_without_processes_signals_or_sockets() {
          (root Cargo.toml) counts too, since base inherits it.\n\
          The list is `BASE_TOKIO_FEATURES` in tests/guards/tests/base.rs.",
         extra.join("\n  ")
+    );
+}
+
+const BASE_LINES: &str = "ratchet/base.txt";
+
+/// Production files of base that reach the filesystem themselves, each with why.
+const BASE_FS: &[(&str, &str)] = &[
+    (
+        "crates/core/src/fs.rs",
+        "write_atomic: the one temp-and-rename every crate writes through",
+    ),
+    (
+        "crates/core/src/dir_lock.rs",
+        "flock on a settings or memory directory, shared by two K1 crates",
+    ),
+    (
+        "crates/core/src/path.rs",
+        "resolve_physically canonicalizes the prefix that exists",
+    ),
+    (
+        "crates/core/src/paths/mod.rs",
+        "ensure_local_data_gitignore beside a tier's local files",
+    ),
+    (
+        "crates/core/src/paths/sensitive.rs",
+        "PromptFiles: every instruction file is read through the sensitive-path check",
+    ),
+    (
+        "crates/core/src/context/session.rs",
+        "the read cache compares mtimes; leaves with ReadCache in 2-3",
+    ),
+    (
+        "crates/core/src/interface/exec/filesystem.rs",
+        "the Filesystem contract's provided methods call its own canonicalize and metadata",
+    ),
+    (
+        "crates/core/src/interface/exec/in_process/filesystem.rs",
+        "InProcessFilesystem: the in-process implementation of that contract",
+    ),
+    (
+        "crates/core/src/interface/instruction_provider.rs",
+        "the default rule provider lists .agix/rules",
+    ),
+];
+
+/// Production files of base that call a model, each with why.
+const BASE_MODEL_CALLS: &[(&str, &str)] = &[];
+
+const FS_METHODS: &[&str] = &[
+    "canonicalize",
+    "metadata",
+    "symlink_metadata",
+    "read_dir",
+    "read_link",
+    "try_exists",
+    "exists",
+    "is_file",
+    "is_dir",
+];
+
+fn base_files() -> impl Iterator<Item = &'static SourceFile> {
+    ws().production()
+        .filter(|f| f.package == "base" && f.target == TargetKind::Lib)
+}
+
+#[test]
+fn base_production_code_only_shrinks() {
+    let lines: usize = base_files().map(|f| f.production_lines()).sum();
+    allow::non_vacuous("base::lines", lines, 10_000);
+    ratchet::check(
+        BASE_LINES,
+        BTreeMap::from([("lines crates/core".to_string(), lines)]),
+        0,
+    );
+}
+
+#[test]
+fn base_reaches_the_filesystem_only_where_listed() {
+    let found = par_flat_map(base_files(), |f| {
+        let by_path = scan::paths(f, View::Prod)
+            .into_iter()
+            .filter(|(p, _)| {
+                let p: Vec<&str> = p
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|s| *s != "::")
+                    .collect();
+                matches!(p.as_slice(), ["std", "fs", ..] | ["tokio", "fs", ..])
+            })
+            .map(|(_, hit)| hit);
+        let by_method = scan::calls(f, View::Prod)
+            .into_iter()
+            .filter(|c| matches!(&c.callee, Callee::Method(m) if FS_METHODS.contains(&m.as_str())))
+            .map(|c| c.hit);
+        by_path
+            .chain(by_method)
+            .map(|hit| Finding {
+                key: f.rel.clone(),
+                hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "base::BASE_FS",
+        found,
+        BASE_FS,
+        "base holds contracts and data: do the I/O in the crate that owns it (settings, memory, \
+         skill-format, platform) or through `exec.filesystem`; or list the file with why",
+    );
+}
+
+#[test]
+fn base_calls_no_model() {
+    let found = par_flat_map(base_files(), |f| {
+        scan::calls(f, View::Prod)
+            .into_iter()
+            .filter(|c| matches!(&c.callee, Callee::Method(m) if m == "stream"))
+            .map(|c| Finding {
+                key: f.rel.clone(),
+                hit: c.hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "base::BASE_MODEL_CALLS",
+        found,
+        BASE_MODEL_CALLS,
+        "a model call is an implementation: put it in the crate that owns the decision (memory's \
+         select_memories_from is the example), or list the file with why",
     );
 }

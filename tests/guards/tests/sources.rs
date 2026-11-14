@@ -1,5 +1,6 @@
 //! Rules over what the source says, found in the syntax tree rather than in
-//! the text: no crate finds its own `$HOME` (SRC-1), a plugin's disclosure
+//! the text: only `base::paths::home_dir` reads the home variables, and only
+//! the listed files ask it for a home (SRC-1), a plugin's disclosure
 //! names no script engine (SRC-2), every `.rs` file in a package belongs to a
 //! target (SRC-3), and only the crates in `MAY_SPAWN` start a process
 //! themselves (SRC-4).
@@ -16,7 +17,7 @@
 //! opted out: it writes to the invoking user's home no matter what the
 //! instance was configured with, which breaks redirected deployments and
 //! leaves test runs writing to a real `~/.agix`. Two things earn a place in
-//! `HOME_READERS`: the entry point, and facts about the machine — the sandbox
+//! `HOME_READERS` (the files that call `home_dir`): the entry point, and facts about the machine — the sandbox
 //! has to know the real home to protect `~/.ssh`, and a system prompt
 //! describing the environment describes the user's. A storage root never
 //! qualifies; the answer there is to take the root as a parameter.
@@ -28,12 +29,13 @@ use guards::scan::{self, Callee};
 use guards::{fswalk, par_flat_map, ws, View};
 use syn::{Expr, Lit};
 
+const HOME_ENV_READERS: &[(&str, &str)] = &[(
+    "crates/core/src/paths/mod.rs",
+    "`home_dir()`, the one place this machine's home is looked up: HOME, \
+     else USERPROFILE. Tests that need a home call `home_dir()` too.",
+)];
+
 const HOME_READERS: &[(&str, &str)] = &[
-    (
-        "crates/core/src/paths/mod.rs",
-        "`home_dir()`, the one place this machine's home is looked up: HOME, \
-         else USERPROFILE.",
-    ),
     (
         "crates/assembly/src/config.rs",
         "the entry point: resolves AGIX_CONFIG_HOME (or $HOME/.agix) once, \
@@ -130,14 +132,19 @@ fn is_home_var_call(segments: &[String], args: &[Expr]) -> bool {
         )
 }
 
-fn home_lookups() -> Vec<Finding> {
-    par_flat_map(ws().files(), |f| {
+fn is_home_dir_call(segments: &[String]) -> bool {
+    segments.last().is_some_and(|s| s == "home_dir")
+}
+
+fn calls_matching<'a>(
+    files: impl IntoIterator<Item = &'a guards::SourceFile>,
+    wanted: fn(&[String], &[Expr]) -> bool,
+) -> Vec<Finding> {
+    par_flat_map(files, |f| {
         scan::calls(f, View::Full)
             .into_iter()
             .filter(|c| match &c.callee {
-                Callee::Path(p) => {
-                    is_home_var_call(p, &c.args) || p.last().is_some_and(|s| s == "home_dir")
-                }
+                Callee::Path(p) => wanted(p, &c.args),
                 Callee::Method(_) => false,
             })
             .map(|c| Finding {
@@ -149,10 +156,20 @@ fn home_lookups() -> Vec<Finding> {
 }
 
 #[test]
+fn only_home_dir_reads_the_home_variables() {
+    allow::check(
+        "sources::HOME_ENV_READERS",
+        calls_matching(ws().files(), |p, args| is_home_var_call(p, args)),
+        HOME_ENV_READERS,
+        "ask `base::paths::home_dir()` instead of reading HOME or USERPROFILE; tests too",
+    );
+}
+
+#[test]
 fn only_the_entry_point_and_environment_facts_resolve_a_home_directory() {
     allow::check(
         "sources::HOME_READERS",
-        home_lookups(),
+        calls_matching(ws().files(), |p, _| is_home_dir_call(p)),
         HOME_READERS,
         "take the state root as a parameter (see `base::paths::ConfigPaths`); if this really \
          is a fact about the machine rather than a place to store things, list the file with \
@@ -161,7 +178,7 @@ fn only_the_entry_point_and_environment_facts_resolve_a_home_directory() {
 }
 
 #[test]
-fn the_home_scan_recognises_every_way_of_asking() {
+fn the_home_scans_recognise_every_way_of_asking() {
     let src = r#"
         use std::env;
         fn a() {
@@ -173,17 +190,18 @@ fn the_home_scan_recognises_every_way_of_asking() {
         }
     "#;
     let f = guards::source::standalone("fixture.rs", src.to_string()).expect("parses");
-    let found: Vec<usize> = scan::calls(&f, View::Full)
-        .into_iter()
-        .filter(|c| match &c.callee {
-            Callee::Path(p) => {
-                is_home_var_call(p, &c.args) || p.last().is_some_and(|s| s == "home_dir")
-            }
-            Callee::Method(_) => false,
-        })
-        .map(|c| c.hit.line)
-        .collect();
-    assert_eq!(found, vec![4, 5, 6]);
+    let lines = |wanted: fn(&[String], &[Expr]) -> bool| -> Vec<usize> {
+        scan::calls(&f, View::Full)
+            .into_iter()
+            .filter(|c| match &c.callee {
+                Callee::Path(p) => wanted(p, &c.args),
+                Callee::Method(_) => false,
+            })
+            .map(|c| c.hit.line)
+            .collect()
+    };
+    assert_eq!(lines(|p, a| is_home_var_call(p, a)), vec![4, 5]);
+    assert_eq!(lines(|p, _| is_home_dir_call(p)), vec![6]);
     allow::non_vacuous("sources::home_lookups", ws().files().count(), 400);
 }
 
