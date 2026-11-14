@@ -128,6 +128,7 @@ mod tests {
             workspace: crate::paths::Workspace::project_of(&project.join(".agix")),
             local_data_dir: project.join(".agix"),
             scope: "code".into(),
+            project_untrusted: false,
         }
     }
 

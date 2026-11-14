@@ -229,13 +229,14 @@ impl LoadedSettings {
         values.project_trust = project_trust;
         guard_loaded_values(&mut values, &mcp_secret_vars);
 
-        let paths = PathSettings::new(
+        let mut paths = PathSettings::new(
             scene_dir,
             global_dir,
             local_dir.clone(),
             Workspace::project_of(&local_dir),
             scope.to_string(),
         );
+        paths.project_untrusted = withhold;
         let loaded = Self {
             values,
             paths,
@@ -271,6 +272,7 @@ impl LoadedSettings {
     /// These settings as if the loader had decided `layer` about the project
     /// tier.
     pub fn with_project_layer(mut self, layer: ProjectLayer) -> Self {
+        self.paths.project_untrusted = layer.trust.is_untrusted();
         self.project_layer = layer;
         self
     }

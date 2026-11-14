@@ -33,6 +33,7 @@ pub struct SkillDirectory {
     nested: bool,
     id: String,
     files: PromptFiles,
+    precedence: SkillPrecedence,
 }
 
 impl SkillDirectory {
@@ -47,7 +48,14 @@ impl SkillDirectory {
             nested: true,
             id,
             files: PromptFiles::unscoped(),
+            precedence: SkillPrecedence::Override,
         }
+    }
+
+    /// Only the names nothing loaded before it has.
+    pub fn deferring(mut self) -> Self {
+        self.precedence = SkillPrecedence::Fallback;
+        self
     }
 
     pub fn reading_with(mut self, files: PromptFiles) -> Self {
@@ -69,7 +77,7 @@ impl SkillProvider for SkillDirectory {
     }
 
     fn precedence(&self) -> SkillPrecedence {
-        SkillPrecedence::Override
+        self.precedence
     }
 
     fn skills(&self) -> Vec<SkillEntry> {

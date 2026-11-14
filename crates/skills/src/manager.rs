@@ -163,6 +163,7 @@ pub struct SkillManager {
     /// would otherwise answer for the one that won it.
     owners: RwLock<HashMap<String, usize>>,
     files: PromptFiles,
+    project_defers: bool,
 }
 
 impl SkillManager {
@@ -177,7 +178,29 @@ impl SkillManager {
             invocation_seq: std::sync::atomic::AtomicU64::new(0),
             providers: RwLock::new(Vec::new()),
             owners: RwLock::new(HashMap::new()),
+            project_defers: false,
         }
+    }
+
+    /// The project tier only adds names: it does not replace a skill another
+    /// tier or source already holds, on load or on reload.
+    pub fn with_project_deferring(mut self) -> Self {
+        self.project_defers = true;
+        self
+    }
+
+    /// Load the project tier at `dir` after everything else, so that with
+    /// [`Self::with_project_deferring`] it only fills names nobody holds.
+    pub fn load_project_tier(&self, dir: &Path) -> usize {
+        self.note_tier(dir, SkillSource::Project, true);
+        let tier = crate::sources::SkillDirectory::tier(dir, SkillSource::Project)
+            .reading_with(self.files.clone());
+        let tier = if self.project_defers {
+            tier.deferring()
+        } else {
+            tier
+        };
+        self.load_from(std::sync::Arc::new(tier))
     }
 
     /// Read skill files from disk through `files` rather than as found.
@@ -684,6 +707,9 @@ impl SkillManager {
                 (name, same_file.map_or(SkillSource::Project, |s| s.source))
             }
         };
+        if self.held_by_other(&name, path, source) {
+            return Ok(());
+        }
         let frozen_source = match source {
             SkillSource::User => FrozenSkillSource::User,
             SkillSource::Project => FrozenSkillSource::Project,
@@ -704,6 +730,15 @@ impl SkillManager {
             .remove(&name);
         skills.insert(name, SkillInfo::from(entry));
         Ok(())
+    }
+
+    fn held_by_other(&self, name: &str, path: &Path, source: SkillSource) -> bool {
+        self.project_defers
+            && source == SkillSource::Project
+            && self.get(name).is_some_and(|existing| {
+                base::path::resolve_physically(&existing.path)
+                    != base::path::resolve_physically(path)
+            })
     }
 
     /// Whether `name` is held by a different file from a tier after `tier`.

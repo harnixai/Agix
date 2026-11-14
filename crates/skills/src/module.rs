@@ -165,41 +165,53 @@ fn build_skill_manager(
     use crate::manager::SkillSource;
     use crate::sources::BundledSkills;
 
-    let skill_mgr = SkillManager::new().reading_with(prompt_files(settings));
+    let defers = settings.trust() == base::permission::ProjectTrust::Untrusted;
+    let mut skill_mgr = SkillManager::new().reading_with(prompt_files(settings));
+    if defers {
+        skill_mgr = skill_mgr.with_project_deferring();
+    }
     let project_skills_dir = settings
         .paths
         .project_root()
         .map(|project| project.join(".agents").join("skills"));
-    let mut tiers = vec![
-        (
-            settings.paths.global_data_dir.join("skills"),
-            SkillSource::User,
-        ),
-        (
-            settings.paths.user_data_dir.join("skills"),
-            SkillSource::User,
-        ),
+    let user_tiers = [
+        settings.paths.global_data_dir.join("skills"),
+        settings.paths.user_data_dir.join("skills"),
     ];
-    tiers.extend(
-        project_skills_dir
-            .iter()
-            .map(|dir| (dir.clone(), SkillSource::Project)),
-    );
-    let loaded_count: usize = tiers
+    let mut loaded_count: usize = user_tiers
         .iter()
-        .map(|(dir, source)| skill_mgr.load_dir_subdirs(dir, *source).unwrap_or(0))
+        .map(|dir| {
+            skill_mgr
+                .load_dir_subdirs(dir, SkillSource::User)
+                .unwrap_or(0)
+        })
         .sum();
+    // An untrusted project's skills load after everything else and only fill
+    // names nobody holds; a trusted project's load before the plugins and
+    // built-ins, which defer to it.
+    if !defers {
+        loaded_count += project_skills_dir
+            .iter()
+            .map(|dir| skill_mgr.load_project_tier(dir))
+            .sum::<usize>();
+    }
     for provider in plugins {
         skill_mgr.load_from(provider.clone());
     }
     // Built-ins come last and defer: a project that writes its own skill of
     // the same name means to replace the one in the binary.
     skill_mgr.load_from(Arc::new(BundledSkills));
+    if defers {
+        loaded_count += project_skills_dir
+            .iter()
+            .map(|dir| skill_mgr.load_project_tier(dir))
+            .sum::<usize>();
+    }
     let total_skills = skill_mgr.list().len();
     tracing::info!(loaded_count, total_skills, "skills loaded (incl. bundled)");
 
     if watch {
-        let watched: Vec<_> = tiers.into_iter().map(|(dir, _)| dir).collect();
+        let watched: Vec<_> = user_tiers.into_iter().chain(project_skills_dir).collect();
         if let Err(e) = skill_mgr.enable_watching(&watched) {
             tracing::warn!(error = %e, "failed to enable skill file watching; live skill reload disabled for this session");
         }
@@ -246,6 +258,59 @@ mod tests {
         assert_eq!(
             project_skills_requiring_trust(&settings),
             ["skills/grants", "skills/runs"]
+        );
+    }
+
+    fn settings_with_both_tiers(
+        trust: base::permission::ProjectTrust,
+    ) -> (tempfile::TempDir, LoadedSettings) {
+        let root = tempfile::tempdir().unwrap();
+        let write = |dir: std::path::PathBuf, name: &str, description: &str| {
+            let dir = dir.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {description}\n---\nbody\n"),
+            )
+            .unwrap();
+        };
+        let global = root.path().join("global");
+        let project = root.path().join("project");
+        write(global.join("skills"), "deploy", "the user's");
+        write(project.join(".agents/skills"), "deploy", "the repository's");
+        write(
+            project.join(".agents/skills"),
+            "extra",
+            "only the repository",
+        );
+        let mut settings = LoadedSettings::new(
+            settings::Settings::defaults_for("m"),
+            base::paths::PathSettings::default(),
+        )
+        .with_project_layer(settings::trust::ProjectLayer {
+            trust,
+            ..Default::default()
+        });
+        settings.paths.global_data_dir = global.clone();
+        settings.paths.user_data_dir = global.join("scenes/code");
+        settings.paths.local_data_dir = project.join(".agix");
+        settings.paths.workspace =
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
+        (root, settings)
+    }
+
+    #[test]
+    fn an_untrusted_projects_skill_adds_names_but_does_not_replace_the_users() {
+        let (_root, settings) = settings_with_both_tiers(base::permission::ProjectTrust::Untrusted);
+        let manager = build_skill_manager_with_plugins(&settings, &[]);
+        assert_eq!(manager.get("deploy").unwrap().description, "the user's");
+        assert!(manager.get("extra").is_some(), "its own names still load");
+
+        let (_root, settings) = settings_with_both_tiers(base::permission::ProjectTrust::Trusted);
+        let manager = build_skill_manager_with_plugins(&settings, &[]);
+        assert_eq!(
+            manager.get("deploy").unwrap().description,
+            "the repository's"
         );
     }
 

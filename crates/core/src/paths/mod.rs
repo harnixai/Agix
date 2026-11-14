@@ -99,6 +99,11 @@ pub struct PathSettings {
     /// to re-derive it from the path.
     #[serde(default = "default_scope")]
     pub scope: String,
+    /// The project is not trusted: what its tier holds under a name the user
+    /// tier also holds does not replace the user's.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub project_untrusted: bool,
 }
 
 /// Placeholder directories for settings that were not loaded from any — the
@@ -111,6 +116,7 @@ impl Default for PathSettings {
             local_data_dir: PathBuf::from("."),
             workspace: Workspace::Project(PathBuf::new()),
             scope: default_scope(),
+            project_untrusted: false,
         }
     }
 }
@@ -167,6 +173,7 @@ impl PathSettings {
             local_data_dir,
             workspace,
             scope,
+            project_untrusted: false,
         }
     }
 
@@ -239,6 +246,8 @@ pub struct ConfigPaths {
     /// The project, `None` for a session without one
     /// ([`crate::paths::PathSettings::project_root`]).
     pub project_root: Option<PathBuf>,
+    /// See [`PathSettings::project_untrusted`].
+    pub project_untrusted: bool,
 }
 
 impl ConfigPaths {
@@ -262,6 +271,7 @@ impl ConfigPaths {
             global_data_dir,
             local_data_dir,
             project_root,
+            project_untrusted: false,
         }
     }
 
@@ -274,6 +284,7 @@ impl ConfigPaths {
             global_data_dir: paths.global_data_dir.clone(),
             local_data_dir: paths.local_data_dir.clone(),
             project_root: paths.project_root().map(PathBuf::from),
+            project_untrusted: paths.project_untrusted,
         }
     }
 
@@ -356,6 +367,7 @@ mod tests {
             workspace: Workspace::project_of(&p.local_data_dir),
             local_data_dir: p.local_data_dir.clone(),
             scope: "code".into(),
+            project_untrusted: false,
         };
         let back = ConfigPaths::from_settings(&carried);
         assert_eq!(back.user_data_dir, p.user_data_dir);

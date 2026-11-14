@@ -18,40 +18,35 @@ pub fn load_output_style(
     if safe.is_empty() || safe.contains('/') || safe.contains('\\') || safe.starts_with('.') {
         return None;
     }
-    let project = project.map(|p| {
-        p.join(".agix")
+    let from_project = || {
+        let path = project?
+            .join(".agix")
             .join("output-styles")
-            .join(format!("{safe}.md"))
-    });
-    if let Some(Ok(content)) = project.as_deref().map(|path| files.read_to_string(path)) {
-        if !content.trim().is_empty() {
-            return Some(OutputStyle {
-                name: safe.to_string(),
-                source: OutputStyleSource::Project,
-                content: truncate_chars(content.trim(), 8_000, "\n... (output style truncated)"),
-            });
-        }
-    }
-    {
-        let user = paths
+            .join(format!("{safe}.md"));
+        let content = files.read_to_string(&path).ok()?;
+        style_of(safe, OutputStyleSource::Project, &content)
+    };
+    let from_user = || {
+        let path = paths
             .user_data_dir
             .join("output-styles")
             .join(format!("{safe}.md"));
-        if let Ok(content) = files.read_to_string(&user) {
-            if !content.trim().is_empty() {
-                return Some(OutputStyle {
-                    name: safe.to_string(),
-                    source: OutputStyleSource::User,
-                    content: truncate_chars(
-                        content.trim(),
-                        8_000,
-                        "\n... (output style truncated)",
-                    ),
-                });
-            }
-        }
+        let content = files.read_to_string(&path).ok()?;
+        style_of(safe, OutputStyleSource::User, &content)
+    };
+    if paths.project_untrusted {
+        from_user().or_else(from_project)
+    } else {
+        from_project().or_else(from_user)
     }
-    None
+}
+
+fn style_of(name: &str, source: OutputStyleSource, content: &str) -> Option<OutputStyle> {
+    (!content.trim().is_empty()).then(|| OutputStyle {
+        name: name.to_string(),
+        source,
+        content: truncate_chars(content.trim(), 8_000, "\n... (output style truncated)"),
+    })
 }
 
 #[cfg(test)]
@@ -84,6 +79,27 @@ mod tests {
         assert_eq!(style.name, "terse");
         assert_eq!(style.source, OutputStyleSource::Project);
         assert!(style.content.contains("PROJECT VERSION"));
+    }
+
+    #[test]
+    fn an_untrusted_projects_output_style_does_not_replace_the_users() {
+        let home = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let mut paths = test_paths(home.path());
+        paths.project_untrusted = true;
+        let user_dir = paths.user_data_dir.join("output-styles");
+        let proj_dir = cwd.path().join(".agix/output-styles");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::create_dir_all(&proj_dir).unwrap();
+        std::fs::write(user_dir.join("terse.md"), "USER VERSION").unwrap();
+        std::fs::write(proj_dir.join("terse.md"), "PROJECT VERSION").unwrap();
+        std::fs::write(proj_dir.join("extra.md"), "PROJECT ONLY").unwrap();
+
+        let files = PromptFiles::unscoped();
+        let terse = load_output_style(Some(cwd.path()), "terse", &paths, &files).unwrap();
+        assert_eq!(terse.source, OutputStyleSource::User);
+        let extra = load_output_style(Some(cwd.path()), "extra", &paths, &files).unwrap();
+        assert_eq!(extra.source, OutputStyleSource::Project);
     }
 
     #[test]

@@ -68,6 +68,7 @@ pub struct MemoryStore {
     user_dir: PathBuf,
     local_dir: PathBuf,
     state_root: Option<PathBuf>,
+    project_shadows: bool,
 }
 
 /// File name for the index.
@@ -79,15 +80,28 @@ impl MemoryStore {
             user_dir,
             local_dir,
             state_root: None,
+            project_shadows: true,
         }
+    }
+
+    /// A project's memory only adds names: one the global directory also
+    /// holds is read from the global one.
+    pub fn with_untrusted_project(mut self) -> Self {
+        self.project_shadows = false;
+        self
     }
 
     /// The store a session uses: the global memory directory and the
     /// project's, as `paths` names them.
     pub fn for_paths(paths: &ConfigPaths) -> Self {
-        Self {
+        let store = Self {
             state_root: Some(paths.global_data_dir.clone()),
             ..Self::new(paths.global_memory_dir(), paths.local_memory_dir())
+        };
+        if paths.project_untrusted {
+            store.with_untrusted_project()
+        } else {
+            store
         }
     }
 
@@ -124,7 +138,11 @@ impl MemoryStore {
     /// build on. `load_all` is the same thing with the directory dropped.
     fn load_all_with_home(&self) -> Vec<(PathBuf, DurableMemory)> {
         let mut out: Vec<(PathBuf, DurableMemory)> = Vec::new();
-        for dir in self.dirs() {
+        let mut dirs = self.dirs();
+        if !self.project_shadows {
+            dirs.reverse();
+        }
+        for dir in dirs {
             for mem in Self::load_from_dir(dir, &self.files_in(dir)) {
                 // First writer wins: `dirs()` yields local before user, so a
                 // project-local memory shadows a global one with the same name.
@@ -750,6 +768,44 @@ It can have multiple lines."#;
             "index lost the newer batch: {index:?}"
         );
         assert_eq!(store.load_all().len(), 2);
+    }
+
+    #[test]
+    fn an_untrusted_projects_memory_does_not_replace_the_users_of_the_same_name() {
+        let tmp = TempDir::new().unwrap();
+        let (store, user, local) = split_store(&tmp);
+        store
+            .persist_batch_scoped(vec![
+                ScopedMemory {
+                    memory: mem("role"),
+                    scope: MemoryScope::User,
+                },
+                ScopedMemory {
+                    memory: DurableMemory {
+                        content: "the repository's".into(),
+                        ..mem("role")
+                    },
+                    scope: MemoryScope::Local,
+                },
+                ScopedMemory {
+                    memory: mem("only-here"),
+                    scope: MemoryScope::Local,
+                },
+            ])
+            .unwrap();
+        let named = |store: &MemoryStore| -> Vec<String> {
+            let mut all = store.load_all();
+            all.sort_by(|a, b| a.name.cmp(&b.name));
+            all.iter()
+                .map(|m| format!("{}:{}", m.name, m.content))
+                .collect()
+        };
+        assert!(named(&store).contains(&"role:the repository's".to_string()));
+
+        let guarded = MemoryStore::new(user, local).with_untrusted_project();
+        let seen = named(&guarded);
+        assert!(seen.contains(&"role:body of role".to_string()), "{seen:?}");
+        assert!(seen.iter().any(|s| s.starts_with("only-here:")), "{seen:?}");
     }
 
     #[test]

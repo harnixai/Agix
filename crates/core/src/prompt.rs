@@ -404,6 +404,7 @@ mod tests {
                 )),
                 local_data_dir: "/tmp/agix/local".into(),
                 scope: "code".into(),
+                project_untrusted: false,
             },
         }
     }
