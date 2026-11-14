@@ -865,7 +865,7 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
     // Same estimator the compaction decisions use, so the breakdown reported
     // here adds up to the number that actually tripped compaction.
     let estimate = |s: &str| {
-        model::tokens::estimate_model_block_tokens(&ModelContentBlock::Text {
+        base::interface::token_counter::estimate_model_block_tokens(&ModelContentBlock::Text {
             text: s.to_string(),
         })
     };
@@ -904,7 +904,7 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
                     analysis.assistant_text_tokens += tokens;
                 }
                 ModelContentBlock::ToolResult { content, .. } => {
-                    let tokens = model::tokens::estimate_model_block_tokens(block);
+                    let tokens = base::interface::token_counter::estimate_model_block_tokens(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.tool_result_tokens += tokens;
                     // Check if cleared
@@ -913,7 +913,7 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
                     }
                 }
                 ModelContentBlock::ToolUse { name, .. } => {
-                    let tokens = model::tokens::estimate_model_block_tokens(block);
+                    let tokens = base::interface::token_counter::estimate_model_block_tokens(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.tool_use_tokens += tokens;
                     let entry = analysis.tool_usage.entry(name.clone()).or_insert((0, 0));
@@ -1812,7 +1812,7 @@ mod tests {
 
     #[test]
     fn compaction_and_the_model_layer_estimate_tokens_alike() {
-        // `estimate_tokens` is `model::tokens::estimate_message_tokens`, so a
+        // `estimate_tokens` is `base::interface::token_counter::estimate_message_tokens`, so a
         // divergence between the two has to be deliberate.
         let msgs = vec![
             text_user("hello world"),
@@ -1822,7 +1822,7 @@ mod tests {
         ];
         assert_eq!(
             estimate_tokens(&msgs),
-            model::tokens::estimate_message_tokens(&msgs)
+            base::interface::token_counter::estimate_message_tokens(&msgs)
         );
     }
 

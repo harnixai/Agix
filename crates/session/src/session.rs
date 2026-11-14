@@ -84,7 +84,7 @@ impl SessionManager {
             session_memory: None,
             parent_session_id,
             persisted_up_to: 0,
-            token_counter: model::tokens::default_counter(),
+            token_counter: base::interface::token_counter::default_counter(),
             turn_id: None,
             notes: std::collections::HashMap::new(),
             pending_marker: None,

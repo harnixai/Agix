@@ -9,9 +9,6 @@ description  = "Agix — context compaction (message grouping, cleanup, caching)
 
 [dependencies]
 base          = { workspace = true }
-# For the single shared token estimator (`model::tokens`).
-# `model` depends on `base` only, so this stays acyclic.
-model         = { workspace = true }
 tokio         = { workspace = true }
 tokio-util    = { workspace = true }
 async-trait   = { workspace = true }

@@ -82,7 +82,7 @@ fn finish_round(messages: &[ModelMessage], start: usize) -> ApiRound {
 /// Estimate tokens for a slice of messages.
 ///
 /// Delegates to the workspace's one estimator
-/// ([`model::tokens::estimate_message_tokens`]), the same one
+/// ([`base::interface::token_counter::estimate_message_tokens`]), the same one
 /// `session::SessionManager::token_count` falls back to, so the number that
 /// decides *whether* to compact and the number that decides *how much* to
 /// drop are the same number.
@@ -91,7 +91,7 @@ fn finish_round(messages: &[ModelMessage], start: usize) -> ApiRound {
 /// `DefaultCompactor::snip` relies on: the token cost of a concatenation of
 /// rounds equals the sum of the rounds' `estimated_tokens`.
 pub fn estimate_tokens(msgs: &[ModelMessage]) -> usize {
-    model::tokens::estimate_message_tokens(msgs)
+    base::interface::token_counter::estimate_message_tokens(msgs)
 }
 
 #[cfg(test)]
