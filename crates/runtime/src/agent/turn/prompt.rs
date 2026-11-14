@@ -595,12 +595,17 @@ impl Agent {
         );
         ctx.available_tools = tools_ref;
         let rules = self.prompt.rules.rules();
+        let values = &self.settings.values;
+        let memory_prompt: Option<String> = values
+            .memory_enabled
+            .then(|| base::memory::memory_prompt(self.memory.store()));
         let blocks = self.prompt.prompt_assembler.assemble(
             &base::interface::prompt_assembler::AssemblyRequest {
                 registry: self.prompt.registry().as_ref(),
                 scene: self.scene.as_ref(),
-                settings: &self.settings.values,
-                memory_store: self.memory.store(),
+                prompt_override: values.prompt_override.as_deref(),
+                prompt_append: values.prompt_append.as_deref(),
+                memory_prompt: memory_prompt.as_deref(),
                 ctx: &ctx,
                 rules: &rules,
                 skills_text: skills_ref,

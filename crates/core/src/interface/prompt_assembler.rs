@@ -12,24 +12,26 @@
 //!
 //! # The inputs are a value
 //!
-//! Assembly reads seven things. Passing them as a struct is not a style
+//! Assembly reads eight things. Passing them as a struct is not a style
 //! preference: an implementation that wants only two should not have to
 //! restate the other five, and a new input should not break every
 //! implementation that never asked for one.
 
 use crate::interface::prompt_registry::PromptRegistry;
 use crate::interface::scene::{ScenePromptContext, SceneSpec};
-use crate::memory::MemoryStore;
 use crate::prompt::{BlockRole, CacheStrategy, PromptBlock};
-use crate::settings::Settings;
 
 /// Everything one assembly reads.
 pub struct AssemblyRequest<'a> {
     /// What else asked to be in this prompt.
     pub registry: &'a dyn PromptRegistry,
     pub scene: &'a SceneSpec,
-    pub settings: &'a Settings,
-    pub memory_store: &'a MemoryStore,
+    /// `settings.prompt_override`: when set, it is the whole prompt.
+    pub prompt_override: Option<&'a str>,
+    /// `settings.prompt_append`.
+    pub prompt_append: Option<&'a str>,
+    /// The memory section, already rendered; `None` when memory is off.
+    pub memory_prompt: Option<&'a str>,
     pub ctx: &'a ScenePromptContext<'a>,
     /// The rule documents the model is told exist, already merged.
     pub rules: &'a [crate::rules::RuleEntry],

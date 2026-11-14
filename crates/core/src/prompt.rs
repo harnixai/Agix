@@ -1,11 +1,8 @@
 //! Prompt assembly — pure function that stitches together multi-source content.
 
-use crate::interface::instruction_provider::RuleProvider;
 use crate::interface::prompt_assembler::AssemblyRequest;
 use crate::interface::scene::{ScenePromptContext, SceneSpec};
-use crate::memory::{memory_prompt, MemoryStore};
 use crate::rules::render_rules_prompt;
-use crate::settings::LoadedSettings;
 use serde::{Deserialize, Serialize};
 
 /// Protocol-agnostic prompt block.
@@ -166,40 +163,7 @@ impl PromptBlock {
     }
 }
 
-/// Assemble the full system prompt from all sources.
-///
-/// Concatenation order:
-/// 1. Scene skeleton (SceneSpec::system_prompt)
-/// 2. Skills loaded from skills/ directories
-/// 3. Memory loaded from MemoryStore
-///    3b. Rules discovery index (filenames + first line only; see `crate::rules`)
-/// 4. Runtime state (plan, todos, current turn info)
-/// 5. settings.prompt_append
-/// 6. [if set] settings.prompt_override → replaces all of the above
-///
-/// Note: CLAUDE.md / instruction file is NOT in the system prompt — it is injected
-/// as a synthetic `<system-reminder>` user message.
-pub fn assemble_prompt(
-    scene: &SceneSpec,
-    settings: &LoadedSettings,
-    memory_store: &MemoryStore,
-    ctx: &ScenePromptContext,
-    skills_text: Option<&str>,
-    mcp_instructions: Option<&str>,
-) -> Vec<PromptBlock> {
-    assemble_prompt_with(&AssemblyRequest {
-        registry: &crate::interface::prompt_registry::NoRegistrations,
-        scene,
-        settings: &settings.values,
-        memory_store,
-        ctx,
-        rules: &crate::rules::RuleTiers::for_paths(&settings.paths).rules(),
-        skills_text,
-        mcp_instructions,
-    })
-}
-
-/// [`assemble_prompt`], merging in whatever else registered a contribution.
+/// Builds the system prompt, merging in whatever registered a contribution.
 ///
 /// The kernel's own stages are registrations too — they are placed at the
 /// orders in [`orders`](crate::interface::prompt_registry::orders) and sorted
@@ -214,8 +178,9 @@ pub fn assemble_prompt_with(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     let AssemblyRequest {
         registry,
         scene,
-        settings,
-        memory_store,
+        prompt_override,
+        prompt_append,
+        memory_prompt,
         ctx,
         rules,
         skills_text,
@@ -224,8 +189,8 @@ pub fn assemble_prompt_with(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     use crate::interface::prompt_registry::orders;
 
     // If override is set, return it as the sole system block.
-    if let Some(ref ov) = settings.prompt_override {
-        return vec![PromptBlock::system(ov.clone())
+    if let Some(ov) = prompt_override {
+        return vec![PromptBlock::system(ov.to_string())
             .named(names::CONFIG_PROMPT_OVERRIDE)
             .from_origin(BlockOrigin::Config)];
     }
@@ -245,10 +210,10 @@ pub fn assemble_prompt_with(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     }
 
     // 3. Memory — how to write memories, and the session store's index.
-    if settings.memory_enabled {
+    if let Some(text) = memory_prompt {
         kernel.push((
             orders::MEMORY_SESSION,
-            PromptBlock::system(memory_prompt(memory_store)).named(names::MEMORY_SESSION),
+            PromptBlock::system(text.to_string()).named(names::MEMORY_SESSION),
         ));
     }
 
@@ -271,10 +236,10 @@ pub fn assemble_prompt_with(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     }
 
     // 5. User append
-    if let Some(ref append) = settings.prompt_append {
+    if let Some(append) = prompt_append {
         kernel.push((
             orders::CONFIG_PROMPT_APPEND,
-            PromptBlock::system(append.clone())
+            PromptBlock::system(append.to_string())
                 .named(names::CONFIG_PROMPT_APPEND)
                 .from_origin(BlockOrigin::Config),
         ));
@@ -283,12 +248,11 @@ pub fn assemble_prompt_with(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     // Registered contributions join the kernel's stages and the whole lot
     // sorts together. Stable, so blocks sharing an order keep the sequence
     // they arrived in — which is what preserves a scene's own section order.
-    let mut merged: Vec<(i32, PromptBlock)> = kernel;
-    merged.extend(registered_blocks(registry, ctx));
-    merged.sort_by_key(|(order, _)| *order);
+    kernel.extend(registered_blocks(registry, ctx));
+    kernel.sort_by_key(|(order, _)| *order);
 
     let variables = registry.variables();
-    let assembled: Vec<PromptBlock> = merged
+    let assembled: Vec<PromptBlock> = kernel
         .into_iter()
         .map(|(_, mut b)| {
             b.content = crate::interface::prompt_registry::interpolate(&b.content, &variables, ctx);
@@ -376,13 +340,14 @@ fn registered_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interface::instruction_provider::RuleProvider;
     use crate::interface::model::ThinkingMode;
     use crate::interface::scene::{FixedPrompt, TokenBudget};
-    use crate::memory::MemoryStore;
+    use crate::memory::{memory_prompt, MemoryStore};
     use crate::paths::PathSettings;
     use crate::permission::PermissionMode;
     use crate::provider::ApiType;
-    use crate::settings::{ExecutionSettings, ModelSettings, Settings};
+    use crate::settings::{ExecutionSettings, LoadedSettings, ModelSettings, Settings};
     use std::borrow::Cow;
     use tempfile::TempDir;
 
@@ -434,6 +399,48 @@ mod tests {
                 local_data_dir: "/tmp/agix/local".into(),
                 scope: "code".into(),
             },
+        )
+    }
+
+    fn assemble_for_test(
+        registry: &dyn crate::interface::prompt_registry::PromptRegistry,
+        scene: &SceneSpec,
+        settings: &Settings,
+        store: &MemoryStore,
+        ctx: &ScenePromptContext,
+        rules: &[crate::rules::RuleEntry],
+        (skills_text, mcp_instructions): (Option<&str>, Option<&str>),
+    ) -> Vec<PromptBlock> {
+        let memory = settings.memory_enabled.then(|| memory_prompt(store));
+        assemble_prompt_with(&AssemblyRequest {
+            registry,
+            scene,
+            prompt_override: settings.prompt_override.as_deref(),
+            prompt_append: settings.prompt_append.as_deref(),
+            memory_prompt: memory.as_deref(),
+            ctx,
+            rules,
+            skills_text,
+            mcp_instructions,
+        })
+    }
+
+    fn assemble_prompt(
+        scene: &SceneSpec,
+        settings: &LoadedSettings,
+        store: &MemoryStore,
+        ctx: &ScenePromptContext,
+        skills_text: Option<&str>,
+        mcp_instructions: Option<&str>,
+    ) -> Vec<PromptBlock> {
+        assemble_for_test(
+            &crate::interface::prompt_registry::NoRegistrations,
+            scene,
+            &settings.values,
+            store,
+            ctx,
+            &crate::rules::RuleTiers::for_paths(&settings.paths).rules(),
+            (skills_text, mcp_instructions),
         )
     }
 
@@ -688,16 +695,15 @@ mod tests {
             Some("skills"),
             Some("mcp"),
         );
-        let through_registry = assemble_prompt_with(&AssemblyRequest {
-            registry: &NoRegistrations,
-            scene: &scene,
-            settings: &settings,
-            memory_store: &store,
-            ctx: &ctx,
-            rules: &[],
-            skills_text: Some("skills"),
-            mcp_instructions: Some("mcp"),
-        });
+        let through_registry = assemble_for_test(
+            &NoRegistrations,
+            &scene,
+            &settings,
+            &store,
+            &ctx,
+            &[],
+            (Some("skills"), Some("mcp")),
+        );
         assert_eq!(direct, through_registry);
     }
 
@@ -721,16 +727,15 @@ mod tests {
                 .from_origin(BlockOrigin::Plugin("example".into())),
         );
 
-        let blocks = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &scene,
-            settings: &settings,
-            memory_store: &store,
-            ctx: &ctx,
-            rules: &[],
-            skills_text: Some("skills inventory"),
-            mcp_instructions: None,
-        });
+        let blocks = assemble_for_test(
+            registry.as_ref(),
+            &scene,
+            &settings,
+            &store,
+            &ctx,
+            &[],
+            (Some("skills inventory"), None),
+        );
         let names: Vec<&str> = blocks.iter().filter_map(|b| b.name.as_deref()).collect();
         let mine = names.iter().position(|n| *n == "mine.preamble").unwrap();
         let skills = names
@@ -746,16 +751,15 @@ mod tests {
         );
 
         disposer.dispose();
-        let after = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &scene,
-            settings: &settings,
-            memory_store: &store,
-            ctx: &ctx,
-            rules: &[],
-            skills_text: Some("skills inventory"),
-            mcp_instructions: None,
-        });
+        let after = assemble_for_test(
+            registry.as_ref(),
+            &scene,
+            &settings,
+            &store,
+            &ctx,
+            &[],
+            (Some("skills inventory"), None),
+        );
         assert!(after
             .iter()
             .all(|b| b.name.as_deref() != Some("mine.preamble")));
@@ -773,16 +777,15 @@ mod tests {
         );
         let tmp = TempDir::new().unwrap();
         let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
-        let blocks = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &test_scene(),
-            settings: &test_settings(),
-            memory_store: &store,
-            ctx: &test_ctx(),
-            rules: &[],
-            skills_text: None,
-            mcp_instructions: None,
-        });
+        let blocks = assemble_for_test(
+            registry.as_ref(),
+            &test_scene(),
+            &test_settings(),
+            &store,
+            &test_ctx(),
+            &[],
+            (None, None),
+        );
         assert!(blocks
             .iter()
             .all(|b| b.name.as_deref() != Some("mine.sometimes")));
@@ -807,16 +810,15 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
-        let blocks = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &test_scene(),
-            settings: &test_settings(),
-            memory_store: &store,
-            ctx: &test_ctx(),
-            rules: &[],
-            skills_text: None,
-            mcp_instructions: None,
-        });
+        let blocks = assemble_for_test(
+            registry.as_ref(),
+            &test_scene(),
+            &test_settings(),
+            &store,
+            &test_ctx(),
+            &[],
+            (None, None),
+        );
         let mine = blocks
             .iter()
             .find(|b| b.name.as_deref() == Some("mine.greeting"))
@@ -856,16 +858,15 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
-        let blocks = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &test_scene(),
-            settings: &test_settings(),
-            memory_store: &store,
-            ctx: &test_ctx(),
-            rules: &[],
-            skills_text: Some("skills inventory"),
-            mcp_instructions: None,
-        });
+        let blocks = assemble_for_test(
+            registry.as_ref(),
+            &test_scene(),
+            &test_settings(),
+            &store,
+            &test_ctx(),
+            &[],
+            (Some("skills inventory"), None),
+        );
         let named: Vec<&str> = blocks.iter().filter_map(|b| b.name.as_deref()).collect();
         assert!(
             named.contains(&names::SKILLS_CATALOG),
@@ -903,16 +904,15 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
-        let blocks = assemble_prompt_with(&AssemblyRequest {
-            registry: registry.as_ref(),
-            scene: &test_scene(),
-            settings: &test_settings(),
-            memory_store: &store,
-            ctx: &test_ctx(),
-            rules: &[],
-            skills_text: Some("skills inventory"),
-            mcp_instructions: None,
-        });
+        let blocks = assemble_for_test(
+            registry.as_ref(),
+            &test_scene(),
+            &test_settings(),
+            &store,
+            &test_ctx(),
+            &[],
+            (Some("skills inventory"), None),
+        );
         let skills = blocks
             .iter()
             .find(|b| b.name.as_deref() == Some(names::SKILLS_CATALOG))

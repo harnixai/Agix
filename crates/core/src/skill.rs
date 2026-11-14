@@ -137,19 +137,6 @@ pub fn body_runs_commands(body: &str) -> bool {
     body.contains("!`") || body.contains("```!")
 }
 
-/// Expand skill variables in `body`. Equivalent to
-/// `expand_skill_vars_named(body, args, &[])` — no named-argument
-/// substitution, only positional/legacy forms. Kept as the simple entry
-/// point for the many call sites (and tests) that don't have a skill's
-/// `arguments` frontmatter list on hand.
-///
-/// Substitution rules (applied in order):
-/// 1. `$ARGUMENTS` -> full `args` string
-/// 2. `$1`..`$9` -> corresponding positional arg (whitespace-separated); missing
-///    positions become empty string
-/// 3. If none of 1-2 substituted **anything** and `args` is non-empty, append
-///    "\n\nUser arguments: {args}" at the end (legacy fallback).
-
 /// What `${AGIX_SKILL_DIR}` and `${AGIX_SESSION_ID}` stand for in one
 /// invocation.
 pub struct InvocationVars<'a> {
@@ -158,8 +145,8 @@ pub struct InvocationVars<'a> {
     pub session_id: Option<&'a str>,
 }
 
-/// Same as `expand_skill_vars`, plus named-argument substitution: for each
-/// name in `arg_names` (the skill's `arguments:` frontmatter list, in
+/// Expands the variables in a skill body: for each name in `arg_names`
+/// (the skill's `arguments:` frontmatter list, in
 /// order), `$name` in the body is replaced with the positional argument at
 /// that index (whitespace-separated, same splitting as `$1`..`$9`). A name
 /// with no corresponding argument expands to an empty string, unlike an
