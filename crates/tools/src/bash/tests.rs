@@ -1363,7 +1363,11 @@ fn input_schema_is_object_with_command_field() {
 
 #[test]
 fn a_hash_the_shell_does_not_read_as_a_comment_hides_nothing_from_classify() {
-    for cmd in ["echo \\ #; touch x", "echo a\u{a0}#; touch x"] {
+    for cmd in [
+        "echo \\ #; touch x",
+        "echo a\u{a0}#; touch x",
+        "echo $'\\''; touch x",
+    ] {
         assert!(!classify::classify(cmd).read_only, "{cmd}");
     }
 }

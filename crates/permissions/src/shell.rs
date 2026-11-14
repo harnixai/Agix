@@ -51,6 +51,21 @@ pub fn words(command: &str) -> Vec<String> {
     let mut chars = command.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
+            '$' if chars.peek() == Some(&'\'') => {
+                in_word = true;
+                chars.next();
+                word.push('$');
+                while let Some(q) = chars.next() {
+                    match q {
+                        '\'' => break,
+                        '\\' => {
+                            word.push(q);
+                            word.extend(chars.next());
+                        }
+                        _ => word.push(q),
+                    }
+                }
+            }
             '\'' => {
                 in_word = true;
                 for q in chars.by_ref() {
@@ -163,7 +178,16 @@ pub fn lex(command: &str) -> Vec<Word> {
                 started = true;
                 i = lex_escape(&chars, i, &mut word);
             }
-            '$' if matches!(chars.get(i + 1), Some('\'' | '"')) || expands_at(&chars, i + 1) => {
+            '$' if chars.get(i + 1) == Some(&'\'') => {
+                started = true;
+                word.quoted = true;
+                word.substitutes = true;
+                word.text.push('$');
+                let end = ansi_c_close(&chars, i + 2);
+                word.text.extend(&chars[i + 2..end.min(chars.len())]);
+                i = end;
+            }
+            '$' if chars.get(i + 1) == Some(&'"') || expands_at(&chars, i + 1) => {
                 started = true;
                 word.substitutes = true;
                 word.text.push('$');
@@ -362,6 +386,13 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                 i += 2;
                 continue;
             }
+            '$' if chars.get(i + 1) == Some(&'\'') => {
+                at_word_start = false;
+                let end = ansi_c_close(&chars, i + 2);
+                current.extend(&chars[i..(end + 1).min(chars.len())]);
+                i = end + 1;
+                continue;
+            }
             '\'' => {
                 at_word_start = false;
                 let end = find_char(&chars, i + 1, '\'');
@@ -452,6 +483,20 @@ fn scan_double_quoted(chars: &[char], mut i: usize, out: &mut Vec<Segment>) -> u
     chars.len()
 }
 
+/// Index of the `'` closing a `$'...'` whose body starts at `from`. Inside
+/// `$'...'` a backslash escapes the next character, `\'` included, unlike
+/// plain single quotes.
+fn ansi_c_close(chars: &[char], mut from: usize) -> usize {
+    while from < chars.len() {
+        match chars[from] {
+            '\\' => from += 2,
+            '\'' => return from,
+            _ => from += 1,
+        }
+    }
+    chars.len()
+}
+
 fn find_char(chars: &[char], from: usize, target: char) -> usize {
     (from..chars.len())
         .find(|&j| chars[j] == target)
@@ -475,6 +520,7 @@ fn find_close_paren(chars: &[char], mut i: usize) -> usize {
     while i < chars.len() {
         match chars[i] {
             '\\' => i += 1,
+            '$' if chars.get(i + 1) == Some(&'\'') => i = ansi_c_close(chars, i + 2),
             '\'' => i = find_char(chars, i + 1, '\''),
             '"' => i = find_unescaped(chars, i + 1, '"'),
             '(' => depth += 1,
@@ -618,6 +664,11 @@ fn raw_command_segments(line: &str) -> Vec<String> {
                 cur.extend(&chars[i..(end + 1).min(chars.len())]);
                 i = end;
             }
+            '$' if chars.get(i + 1) == Some(&'\'') => {
+                let end = ansi_c_close(&chars, i + 2);
+                cur.extend(&chars[i..(end + 1).min(chars.len())]);
+                i = end;
+            }
             '$' if chars.get(i + 1) == Some(&'(') => {
                 let end = find_close_paren(&chars, i + 2);
                 cur.extend(&chars[i..(end + 1).min(chars.len())]);
@@ -726,6 +777,15 @@ fn first_word_end(s: &str) -> usize {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
+            b'$' if bytes.get(i + 1) == Some(&b'\'') => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\'' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
             b'\'' => {
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'\'' {
@@ -792,6 +852,17 @@ mod tests {
         assert!(split("echo a#; rm x").contains(&"rm x".to_string()));
         assert_eq!(split("echo a # rm x"), vec!["echo a"]);
         assert_eq!(split("ls;# rm x"), vec!["ls"]);
+    }
+
+    #[test]
+    fn ansi_c_quotes_let_a_backslash_escape_the_quote() {
+        assert!(split("echo $'\\''; rm x").contains(&"rm x".to_string()));
+        assert!(split("echo $(echo $'\\''); rm x").contains(&"rm x".to_string()));
+        assert_eq!(split("echo $'a;b'"), vec!["echo $'a;b'"]);
+        assert_eq!(words("echo $'\\'' x"), vec!["echo", "$\\'", "x"]);
+        let lexed = lex("echo $'\\'' x");
+        assert_eq!(lexed.len(), 3);
+        assert!(lexed[1].substitutes);
     }
 
     #[test]

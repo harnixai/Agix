@@ -217,6 +217,12 @@ fn has_unsplit_construct(cmd: &str) -> bool {
         let next = chars.get(i + 1).copied();
         match c {
             '\\' if !in_single => i += 1,
+            '$' if !in_single && !in_double && next == Some('\'') => {
+                i += 2;
+                while i < chars.len() && chars[i] != '\'' {
+                    i += if chars[i] == '\\' { 2 } else { 1 };
+                }
+            }
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
             _ if in_single || in_double => {}

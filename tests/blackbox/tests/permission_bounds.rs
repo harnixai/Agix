@@ -475,6 +475,12 @@ async fn a_hash_after_an_escaped_space_is_not_a_comment_that_hides_the_rest() ->
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_backslashed_quote_in_ansi_c_quoting_does_not_hide_the_rest() -> anyhow::Result<()> {
+    runs_a_program_through_a_reader("echo $'\\''; touch ran.txt").await?;
+    denied_rm_spelled("echo $'\\''; rm victim.txt").await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_read_only_name_behind_a_wrappers_option_is_asked_about() -> anyhow::Result<()> {
     runs_a_program_through_a_reader("env -u ls sh x.sh").await?;
     runs_a_program_through_a_reader("exec -a ls sh x.sh").await?;

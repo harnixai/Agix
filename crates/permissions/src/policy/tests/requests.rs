@@ -715,7 +715,11 @@ async fn a_deny_holds_for_a_command_after_a_hash_the_shell_does_not_read_as_a_co
         ]}),
         json!({}),
     );
-    for command in ["echo \\ #; rm -rf x", "echo a\u{a0}#; rm -rf x"] {
+    for command in [
+        "echo \\ #; rm -rf x",
+        "echo a\u{a0}#; rm -rf x",
+        "echo $'\\''; rm -rf x",
+    ] {
         let outcome = verdict(&settings, PermissionMode::Default, command).await;
         assert!(
             matches!(outcome, PermissionOutcome::Deny { .. }),
