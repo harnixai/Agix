@@ -423,6 +423,117 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_resource_read_without_a_server_goes_only_to_the_server_that_lists_it(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let files = scratch.path().join("files");
+    std::fs::create_dir_all(&files)?;
+    std::fs::write(files.join("schema.txt"), "RIGHT-SCHEMA")?;
+    let files_arg = files.to_string_lossy().into_owned();
+    let servers = json!({
+        "left": McpToy::stdio_config(&["--name", "left", "--liar"])?,
+        "right": McpToy::stdio_config(&["--name", "right", "--resources", &files_arg])?,
+    });
+    let mut run = stubbed("read-unnamed", &stub)
+        .settings(json!({ "mcp_servers": servers }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls(
+            "r1",
+            "ReadMcpResource",
+            json!({ "uri": "toy://files/schema.txt" }),
+        ),
+        Reply::calls(
+            "r2",
+            "ReadMcpResource",
+            json!({ "uri": "toy://files/nobody-lists-this" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "read it").await?;
+    let results: Vec<&(String, String, bool)> = events
+        .tool_results
+        .iter()
+        .filter(|(name, _, _)| name == "ReadMcpResource")
+        .collect();
+    assert_eq!(results.len(), 2, "{events:?}");
+    assert!(
+        blackbox::inside_fence(&results[0].1).contains("RIGHT-SCHEMA") && !results[0].2,
+        "{:?}",
+        results[0]
+    );
+    assert!(
+        results[1].2 && !results[1].1.contains("LIAR"),
+        "a URI nobody lists is an error, not a liar's answer: {:?}",
+        results[1]
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_resource_tools_obey_a_deny_rule_written_for_their_server() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let servers = json!({
+        "corp": McpToy::stdio_config(&["--name", "corp"])?,
+        "other": McpToy::stdio_config(&["--name", "other"])?,
+    });
+    let mut run = stubbed("resource-deny", &stub)
+        .settings(json!({
+            "mcp_servers": servers,
+            "permission_rules": [{ "tool": "mcp__corp", "action": "deny" }]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls(
+            "d1",
+            "ReadMcpResource",
+            json!({ "server": "corp", "uri": "toy://notes/readme.md" }),
+        ),
+        Reply::calls("d2", "ListMcpResources", json!({ "server": "corp" })),
+        Reply::calls("d3", "MCP", json!({ "server": "corp" })),
+        Reply::calls(
+            "d4",
+            "ReadMcpResource",
+            json!({ "uri": "toy://notes/readme.md" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "use the resource tools").await?;
+    let results: Vec<_> = events
+        .tool_results
+        .iter()
+        .filter(|(name, _, _)| {
+            matches!(
+                name.as_str(),
+                "ReadMcpResource" | "ListMcpResources" | "MCP"
+            )
+        })
+        .collect();
+    assert_eq!(results.len(), 4, "{events:?}");
+    for denied in &results[..3] {
+        assert!(
+            denied.2 && !denied.1.contains("TOY-NOTES") && !denied.1.contains("readme"),
+            "a denied server answered: {denied:?}"
+        );
+    }
+    assert!(
+        results[3].2 && !results[3].1.contains("TOY-NOTES"),
+        "an unnamed read reached the denied server: {:?}",
+        results[3]
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn what_a_server_wrote_in_the_resource_and_tool_listings_reaches_the_model_fenced(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
@@ -1094,7 +1205,10 @@ async fn an_mcp_resource_is_fenced_as_the_servers_words() -> anyhow::Result<()> 
         .filter(|(name, _, _)| name == "ReadMcpResource")
         .collect();
     assert_eq!(read.len(), 2, "{:?}", events.tool_results);
-    for ((_, text, _), from) in read.iter().zip(["the MCP server `toy`", "an MCP server"]) {
+    for ((_, text, _), from) in read
+        .iter()
+        .zip(["the MCP server `toy`", "the MCP server `toy`"])
+    {
         assert!(text.starts_with("<external-content"), "{text}");
         assert_eq!(text.matches("</external-content>").count(), 1, "{text}");
         assert!(

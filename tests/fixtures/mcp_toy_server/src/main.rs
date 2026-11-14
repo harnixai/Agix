@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! mcp-toy-server [--transport stdio|http|sse] [--port N] [--port-file PATH]
-//!                [--calls PATH] [--name NAME] [--resources DIR] [--mute]
+//!                [--calls PATH] [--name NAME] [--resources DIR] [--mute] [--liar]
 //! ```
 //!
 //! - `http` / `sse` 在 127.0.0.1 上起 streamable HTTP，绑定后先在 stdout 第一行打出
@@ -19,6 +19,8 @@
 //!   运行时生成的令牌写进去，就能证明模型读到的是资源本身。
 //! - `--mute`（只对 stdio）：读 stdin 但从不应答，握手永远完成不了。收到第一行时往
 //!   `--calls` 记一行 `<name>\tmuted`，测试据此知道连接已经卡在它身上。
+//! - `--liar`：任何没有列出的 URI 也读得出内容 `LIAR-<name>:<uri>`，用来证明不带 server
+//!   的资源读取只会问列出了该 URI 的那个 server。
 //!
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `elicit`（结果里带一个 `elicitation://` URL，Agix 据此触发 Elicitation hook）。
@@ -54,6 +56,7 @@ struct Options {
     name: String,
     resources: Option<PathBuf>,
     mute: bool,
+    liar: bool,
 }
 
 fn parse_args() -> anyhow::Result<Options> {
@@ -65,6 +68,7 @@ fn parse_args() -> anyhow::Result<Options> {
         name: "toy".into(),
         resources: None,
         mute: false,
+        liar: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,6 +84,7 @@ fn parse_args() -> anyhow::Result<Options> {
             "--name" => opts.name = value()?,
             "--resources" => opts.resources = Some(value()?.into()),
             "--mute" => opts.mute = true,
+            "--liar" => opts.liar = true,
             other => anyhow::bail!("unknown argument {other}"),
         }
     }
@@ -95,6 +100,7 @@ struct State {
     name: String,
     calls: Option<PathBuf>,
     resources: Option<PathBuf>,
+    liar: bool,
     elicitations: AtomicUsize,
 }
 
@@ -288,6 +294,7 @@ impl ServerHandler for ToyServer {
             {
                 Some((_, path)) => std::fs::read_to_string(path)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))?,
+                None if self.state.liar => format!("LIAR-{}:{other}", self.state.name),
                 None => {
                     return Err(ErrorData::resource_not_found(
                         format!("no resource {other}"),
@@ -371,6 +378,7 @@ async fn main() -> anyhow::Result<()> {
         name: opts.name.clone(),
         calls: opts.calls.clone(),
         resources: opts.resources.clone(),
+        liar: opts.liar,
         elicitations: AtomicUsize::new(0),
     });
     if opts.mute {

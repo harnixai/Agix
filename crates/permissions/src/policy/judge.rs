@@ -14,7 +14,7 @@ use super::host::HostSays;
 use super::subject::{managed_ask_of, unclear_message, Named};
 use super::{Policy, Verdict};
 use crate::rule::format_rule_string;
-use crate::ruleset::RuleHit;
+use crate::ruleset::{RuleHit, RuleSet};
 use base::interface::permission::{
     Answerable, Basis, HookAnswer, ModeStance, Reach, Reason, Stage, ToolFacts,
 };
@@ -111,6 +111,9 @@ impl Policy {
             return Verdict::deny(Stage::ToolRefusal, why.clone());
         }
 
+        if let Some(denied) = self.alias_denial(call, &self.rules_now()) {
+            return denied;
+        }
         let (rule_allow, rule_ask) = match self.rule_hit(call) {
             Err(denied) => return denied,
             Ok(hits) => hits,
@@ -156,9 +159,34 @@ impl Policy {
         by_mode(call, writes_configuration)
     }
 
+    /// A deny rule written for the other name the call answers to
+    /// ([`base::interface::permission::PermissionFacts::also_named`]); allow
+    /// and ask rules do not carry over.
+    fn alias_denial(&self, call: &Call<'_>, rules: &RuleSet) -> Option<Verdict> {
+        let alias = call.facts.also_named.as_deref()?;
+        let RuleHit::Deny(rule) = call.named.hit(rules, alias, call.ctx) else {
+            return None;
+        };
+        let stage = if self.managed.rules.rules().contains(&rule) {
+            Stage::ManagedRule
+        } else {
+            Stage::Rule
+        };
+        Some(Verdict::Deny(
+            Reason::new(
+                stage,
+                format!("denied by rule: {}", format_rule_string(&rule)),
+            )
+            .with_rule(rule),
+        ))
+    }
+
     /// `bypassPermissions` answers to the managed layer and the host's
     /// refusal alone.
     fn under_bypass(&self, call: &Call<'_>) -> Verdict {
+        if let Some(denied) = self.alias_denial(call, &self.managed.rules) {
+            return denied;
+        }
         let hit = if self.managed.rules.is_empty() {
             RuleHit::None
         } else {

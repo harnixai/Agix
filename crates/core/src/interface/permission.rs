@@ -126,6 +126,9 @@ pub struct PermissionFacts {
     /// What to put to a person when the call is asked about.
     pub question: Option<String>,
     pub relays: Option<Relays>,
+    /// A second name the call answers to for deny rules: a tool that acts on
+    /// one MCP server's behalf is also `mcp__<server>`.
+    pub also_named: Option<String>,
 }
 
 impl PermissionFacts {
@@ -141,6 +144,7 @@ impl PermissionFacts {
             runs: None,
             question: None,
             relays: None,
+            also_named: None,
         }
     }
 
@@ -158,6 +162,11 @@ impl PermissionFacts {
         self.relays = Some(relays);
         self
     }
+
+    pub fn also_named(mut self, name: impl Into<String>) -> Self {
+        self.also_named = Some(name.into());
+        self
+    }
 }
 
 /// Everything the permission policy reads about one call: the tool's spec,
@@ -173,6 +182,7 @@ pub struct ToolFacts {
     pub runs: Option<Runs>,
     pub question: Option<String>,
     pub relays: Option<Relays>,
+    pub also_named: Option<String>,
 }
 
 impl ToolFacts {
@@ -190,6 +200,7 @@ impl ToolFacts {
             runs: facts.runs,
             question: facts.question,
             relays: facts.relays,
+            also_named: facts.also_named,
         }
     }
 
@@ -204,6 +215,7 @@ impl ToolFacts {
             runs: None,
             question: None,
             relays: None,
+            also_named: None,
         }
     }
 }

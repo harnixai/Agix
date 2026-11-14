@@ -908,3 +908,36 @@ async fn a_delegates_grants_answer_only_the_modes_question() {
         PermissionOutcome::Deny { .. }
     ));
 }
+
+#[tokio::test]
+async fn a_deny_rule_for_the_name_a_call_is_also_known_by_applies_but_an_allow_does_not() {
+    use base::interface::permission::Reach;
+    use base::permission::{RuleBehavior, RuleSource};
+    let rule = |behavior| PermissionRule {
+        source: RuleSource::UserSettings,
+        behavior,
+        tool_name: "mcp__corp".into(),
+        rule_content: None,
+    };
+    let tool: Arc<dyn Tool> = Arc::new(FakeTool::new("ReadMcpResource"));
+    let ctx = ctx_with_mode(PermissionMode::Default);
+    let mut facts = ToolFacts::gather(tool.as_ref(), &json!({}), &ctx).await;
+    facts.reach = Reach::Operator;
+    facts.also_named = Some("mcp__corp".into());
+    let input = json!({});
+    let request =
+        PermissionRequest::new(tool.name(), Some(&tool), &input, &facts, &ctx, &ctx.session);
+
+    let denying = Policy::new(RuleSet::new(vec![rule(RuleBehavior::Deny)]));
+    assert!(matches!(
+        denying.decide(&request).await,
+        PermissionOutcome::Deny { .. }
+    ));
+
+    let allowing = Policy::new(RuleSet::new(vec![rule(RuleBehavior::Allow)]));
+    let outcome = allowing.decide(&request).await;
+    assert!(
+        matches!(outcome, PermissionOutcome::Permit { ref basis, .. } if *basis == Basis::Contained),
+        "{outcome:?}"
+    );
+}

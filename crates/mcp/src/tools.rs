@@ -4,7 +4,8 @@
 //!
 //! 设计取舍：
 //! - **不绑定具体 server name**：列资源时枚举所有 connected server 并合并
-//! - **uri 是全局 key**：read 时直接按 uri 匹配；多 server 同名 uri → 第一个赢
+//! - **read 不带 server 时按列出来的 uri 找 server**：只有恰好一个 server 的资源列表里有这个
+//!   uri 才去读；没有或多于一个都报错，不广播给所有 server
 //! - **不缓存**：每次 list 实时调 server（list_resources 通常很快）
 
 use crate::client::{McpClientHandle, McpContent};
@@ -17,6 +18,21 @@ use base::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
+/// `facts` of a call that relays `server`'s words, and for a named server is
+/// also a call on `mcp__<server>`, so a deny rule for that server holds.
+fn named_for(facts: PermissionFacts, server: Option<String>) -> PermissionFacts {
+    let facts = match &server {
+        Some(server) => facts.also_named(rule_name_of(server)),
+        None => facts,
+    };
+    facts.relaying(Relays::McpServer(server))
+}
+
+/// The name a deny rule for `server` is written with (`mcp__<server>`).
+fn rule_name_of(server: &str) -> String {
+    format!("mcp__{}", crate::naming::server_segment(server))
+}
+
 #[derive(Debug, Deserialize, JsonSchema, Default)]
 pub struct ListMcpResourcesInput {
     /// Optional server name to filter by; None = all connected servers
@@ -66,7 +82,7 @@ impl Tool for ListMcpResourcesTool {
         let server = serde_json::from_value::<ListMcpResourcesInput>(input.clone())
             .ok()
             .and_then(|i| i.server);
-        PermissionFacts::new(Subject::None, Reach::Operator).relaying(Relays::McpServer(server))
+        named_for(PermissionFacts::new(Subject::None, Reach::Operator), server)
     }
     async fn call(
         &self,
@@ -126,7 +142,7 @@ impl Tool for ListMcpResourcesTool {
 pub struct ReadMcpResourceInput {
     /// Resource URI to read (from ListMcpResources output)
     pub uri: String,
-    /// Optional server name (defaults to first matching server)
+    /// Server name; without it the one server that lists this URI is used
     #[serde(default)]
     pub server: Option<String>,
 }
@@ -139,6 +155,46 @@ impl ReadMcpResourceTool {
     /// Construct a new instance.
     pub fn new(clients: Vec<McpClientHandle>) -> Self {
         Self { clients }
+    }
+
+    /// The server named in `input`, or else the one server whose resource
+    /// list holds the URI: a URI is never sent to a server that did not
+    /// declare it.
+    async fn target(&self, input: &ReadMcpResourceInput) -> Result<&McpClientHandle, String> {
+        if let Some(name) = &input.server {
+            return self
+                .clients
+                .iter()
+                .find(|c| c.server_name() == name)
+                .ok_or_else(|| format!("No matching MCP server (filter: {name:?})"));
+        }
+        let mut listing = Vec::new();
+        for client in &self.clients {
+            let lists_it = client
+                .list_resources()
+                .await
+                .is_ok_and(|resources| resources.iter().any(|r| r.uri == input.uri));
+            if lists_it {
+                listing.push(client);
+            }
+        }
+        match listing.as_slice() {
+            [only] => Ok(only),
+            [] => Err(format!(
+                "no connected MCP server lists the resource '{}'; ListMcpResources shows what \
+                 exists, and `server` names the one to ask",
+                input.uri
+            )),
+            several => Err(format!(
+                "the resource '{}' is listed by several MCP servers ({}); name one with `server`",
+                input.uri,
+                several
+                    .iter()
+                    .map(|c| c.server_name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
     }
 }
 
@@ -173,10 +229,15 @@ impl Tool for ReadMcpResourceTool {
     }
 
     async fn permission_facts(&self, input: &Value, _: &ToolContext) -> PermissionFacts {
-        let server = serde_json::from_value::<ReadMcpResourceInput>(input.clone())
-            .ok()
-            .and_then(|i| i.server);
-        PermissionFacts::new(Subject::None, Reach::Operator).relaying(Relays::McpServer(server))
+        let server = match serde_json::from_value::<ReadMcpResourceInput>(input.clone()) {
+            Ok(input) => self
+                .target(&input)
+                .await
+                .ok()
+                .map(|c| c.server_name().to_string()),
+            Err(_) => None,
+        };
+        named_for(PermissionFacts::new(Subject::None, Reach::Operator), server)
     }
     async fn call(
         &self,
@@ -185,55 +246,33 @@ impl Tool for ReadMcpResourceTool {
         _: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
         let input: ReadMcpResourceInput = serde_json::from_value(input)?;
-        // 找 client：指定 server 优先；否则第一个能 read 出来的
-        let candidates: Vec<&McpClientHandle> = self
-            .clients
-            .iter()
-            .filter(|c| {
-                input
-                    .server
-                    .as_ref()
-                    .map(|s| c.server_name() == s)
-                    .unwrap_or(true)
-            })
-            .collect();
-
-        if candidates.is_empty() {
-            return Ok(ToolResult::error_text(format!(
-                "No matching MCP server (filter: {:?})",
-                input.server
-            )));
-        }
-
-        let mut last_err = None;
-        for client in candidates {
-            match client.read_resource(&input.uri).await {
-                Ok(contents) => {
-                    let text = contents
-                        .iter()
-                        .filter_map(|c| match c {
-                            McpContent::Text(t) => Some(t.clone()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let body = if text.is_empty() {
-                        format!("[binary or empty resource: {} blocks]", contents.len())
-                    } else {
-                        text
-                    };
-                    return Ok(ToolResult::text(body).with_structured(
-                        json!({"server": client.server_name(), "uri": input.uri}),
-                    ));
-                }
-                Err(e) => last_err = Some(format!("{}", e)),
+        let client = match self.target(&input).await {
+            Ok(client) => client,
+            Err(message) => return Ok(ToolResult::error_text(message)),
+        };
+        match client.read_resource(&input.uri).await {
+            Ok(contents) => {
+                let text = contents
+                    .iter()
+                    .filter_map(|c| match c {
+                        McpContent::Text(t) => Some(t.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let body = if text.is_empty() {
+                    format!("[binary or empty resource: {} blocks]", contents.len())
+                } else {
+                    text
+                };
+                Ok(ToolResult::text(body)
+                    .with_structured(json!({"server": client.server_name(), "uri": input.uri})))
             }
+            Err(e) => Ok(ToolResult::error_text(format!(
+                "could not read resource '{}': {e}",
+                input.uri
+            ))),
         }
-        Ok(ToolResult::error_text(format!(
-            "could not read resource '{}': {}",
-            input.uri,
-            last_err.unwrap_or_else(|| "no client succeeded".into())
-        )))
     }
 }
 
@@ -303,7 +342,7 @@ impl Tool for DispatchMcpTool {
         let server = serde_json::from_value::<DispatchMcpInput>(input.clone())
             .ok()
             .and_then(|i| i.server);
-        PermissionFacts::new(Subject::None, Reach::Operator).relaying(Relays::McpServer(server))
+        named_for(PermissionFacts::new(Subject::None, Reach::Operator), server)
     }
     async fn call(
         &self,
@@ -503,6 +542,63 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error);
+    }
+
+    fn serving(name: &str, uri: &str, text: &str) -> Arc<dyn McpClient> {
+        Arc::new(MockClient {
+            name: name.into(),
+            resources: vec![McpResourceMeta {
+                uri: uri.into(),
+                name: "n".into(),
+                description: None,
+                mime_type: None,
+            }],
+            read_responses: std::sync::Mutex::new(
+                [(uri.to_string(), vec![McpContent::Text(text.into())])].into(),
+            ),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_read_without_a_server_goes_to_the_one_server_that_lists_the_uri() {
+        let tool = ReadMcpResourceTool::new(vec![
+            mk("liar", vec![]),
+            serving("honest", "db://schema", "REAL"),
+        ]);
+        let ctx = platform::tool_context_for_test("/tmp".into());
+        let input = json!({"uri": "db://schema"});
+        let facts = tool.permission_facts(&input, &ctx).await;
+        assert_eq!(facts.also_named.as_deref(), Some("mcp__honest"));
+        let r = tool
+            .call(input, ctx, ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        assert!(!r.is_error);
+        assert_eq!(r.structured_content.unwrap()["server"], "honest");
+    }
+
+    #[tokio::test]
+    async fn a_read_nobody_lists_or_several_list_needs_a_server() {
+        let tool = ReadMcpResourceTool::new(vec![
+            serving("a", "db://x", "A"),
+            serving("b", "db://x", "B"),
+        ]);
+        let ctx = platform::tool_context_for_test("/tmp".into());
+        for (uri, wanted) in [("db://x", "several"), ("db://y", "no connected MCP server")] {
+            let r = tool
+                .call(
+                    json!({ "uri": uri }),
+                    ctx.clone(),
+                    ProgressSender::noop("t"),
+                )
+                .await
+                .unwrap();
+            assert!(r.is_error, "{uri}");
+            let base::tool::ToolResultContent::Text(text) = r.content else {
+                panic!()
+            };
+            assert!(text.contains(wanted), "{text}");
+        }
     }
 
     #[tokio::test]
