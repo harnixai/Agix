@@ -339,6 +339,8 @@ pub struct SensitivePaths {
     /// files are the scene's under that name too. Those linked at
     /// construction.
     linked_scenes: Vec<PathBuf>,
+    read_denials: Vec<Spellings>,
+    read_exemptions: Vec<Spellings>,
 }
 
 impl SensitivePaths {
@@ -354,6 +356,36 @@ impl SensitivePaths {
             state_root,
             project: project.map(Spellings::of),
             linked_scenes,
+            read_denials: Vec::new(),
+            read_exemptions: Vec::new(),
+        }
+    }
+
+    /// Also treats as credentials what a sandboxed command may not read:
+    /// `denied` less what `allowed` re-allows, the more specific entry
+    /// winning, as the sandbox profile does.
+    pub fn with_read_denials(mut self, denied: &[PathBuf], allowed: &[PathBuf]) -> Self {
+        self.read_denials = denied.iter().map(|p| Spellings::of(p)).collect();
+        self.read_exemptions = allowed.iter().map(|p| Spellings::of(p)).collect();
+        self
+    }
+
+    fn read_denied(&self, components: &[String]) -> bool {
+        let depth_in = |roots: &[Spellings]| {
+            roots
+                .iter()
+                .flat_map(|root| &root.lowered)
+                .filter(|root| components.starts_with(root))
+                .map(Vec::len)
+                .max()
+        };
+        match (
+            depth_in(&self.read_denials),
+            depth_in(&self.read_exemptions),
+        ) {
+            (Some(denied), Some(allowed)) => denied > allowed,
+            (Some(_), None) => true,
+            _ => false,
         }
     }
 
@@ -378,9 +410,10 @@ impl SensitivePaths {
     /// `Settings.JSON` is the same file.
     pub fn is_credential(&self, abs: &Path) -> bool {
         let components = lowered_components(abs);
-        CREDENTIALS
-            .iter()
-            .any(|credential| self.holds(credential, &components))
+        self.read_denied(&components)
+            || CREDENTIALS
+                .iter()
+                .any(|credential| self.holds(credential, &components))
     }
 
     fn holds(&self, credential: &Credential, components: &[String]) -> bool {
@@ -823,6 +856,18 @@ mod tests {
         ] {
             assert!(scopes.contains(&scope), "no credential in {scope:?}");
         }
+    }
+
+    #[test]
+    fn a_read_denial_is_a_credential_unless_a_more_specific_allow_lifts_it() {
+        let paths = SensitivePaths::default().with_read_denials(
+            &[PathBuf::from("/h/.config/gh"), PathBuf::from("/h/.npmrc")],
+            &[PathBuf::from("/h/.config/gh/public"), PathBuf::from("/h")],
+        );
+        assert!(paths.is_credential(Path::new("/h/.config/gh/hosts.yml")));
+        assert!(!paths.is_credential(Path::new("/h/.config/gh/public/x")));
+        assert!(paths.is_credential(Path::new("/h/.npmrc")));
+        assert!(!paths.is_credential(Path::new("/h/notes")));
     }
 
     #[test]
