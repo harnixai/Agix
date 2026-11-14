@@ -30,6 +30,7 @@ mcp-oauth-mock = { workspace = true }
 # of "walk a directory into an archive and hash it".
 test-runner = { path = "../runner" }
 demo-rust-plugin = { workspace = true }
+hostile-plugins = { workspace = true }
 # For reading what `session.export` wrote.
 zip = { workspace = true }
 async-trait = { workspace = true }

@@ -13,6 +13,7 @@ mod four_project_pipeline;
 mod harness;
 mod hook_events;
 mod host_agents;
+mod hostile_plugins;
 mod mcp_boundaries;
 mod minimal_tier;
 mod package_trust;
