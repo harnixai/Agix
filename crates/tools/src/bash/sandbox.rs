@@ -53,6 +53,8 @@ pub(super) fn to_sandbox_policy(settings: &base::tool::SandboxSettings) -> sandb
 pub(super) fn sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
     let mut policy = to_sandbox_policy(&ctx.sandbox);
     policy.additional_writable = ctx
+        .session
+        .env()
         .additional_writable_dirs
         .iter()
         .cloned()

@@ -820,13 +820,3 @@ pub enum TodoStatus {
     InProgress,
     Completed,
 }
-
-/// 后台 agent 进度通知数据。AgentTool（`call_background`）在 drain
-/// 循环中通过 ToolContext.events_tx 发送，Engine 包装为 EngineEvent::BackgroundAgentProgress
-/// 供 CLI/TUI 实时显示。
-#[derive(Debug, Clone)]
-pub struct BackgroundAgentProgressData {
-    pub task_id: String,
-    pub text: String,
-    pub tool_name: Option<String>,
-}

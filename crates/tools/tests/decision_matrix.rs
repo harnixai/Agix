@@ -583,9 +583,7 @@ fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolCont
             .unattended_requires_network_policy,
     };
     ctx.session = session.clone();
-    ctx.permission_mode = session.permission_mode();
     let env = session.env();
-    ctx.additional_writable_dirs = env.additional_writable_dirs.clone();
     ctx.attendance = if env.unattended {
         Attendance::Unattended
     } else {

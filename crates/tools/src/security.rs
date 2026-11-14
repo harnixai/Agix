@@ -76,8 +76,9 @@ async fn resolve_physically(path: &Path, fs: &dyn FileSystem) -> PathBuf {
 pub async fn write_policy(ctx: &base::tool::ToolContext) -> permissions::path_safety::WritePolicy {
     let fs = &*ctx.exec.filesystem;
     let root = fs.canonicalize_best_effort(&ctx.cwd).await;
-    let mut additional = Vec::with_capacity(ctx.additional_writable_dirs.len());
-    for dir in &ctx.additional_writable_dirs {
+    let env = ctx.session.env();
+    let mut additional = Vec::with_capacity(env.additional_writable_dirs.len());
+    for dir in &env.additional_writable_dirs {
         additional.push(fs.canonicalize_best_effort(dir).await);
     }
     let mut allowed = Vec::with_capacity(ctx.sandbox.allow_write.len());
@@ -151,9 +152,10 @@ pub fn allowed_domains_name(url: &str, ctx: &base::tool::ToolContext) -> bool {
 /// Where the file tools may read without asking: the project, every
 /// directory they may write, and `sandbox.read_directories`.
 pub fn readable_roots(ctx: &base::tool::ToolContext) -> Vec<PathBuf> {
+    let env = ctx.session.env();
     std::iter::once(ctx.cwd.clone())
-        .chain(ctx.additional_writable_dirs.iter().cloned())
-        .chain(ctx.session.env().read_directories.iter().cloned())
+        .chain(env.additional_writable_dirs.iter().cloned())
+        .chain(env.read_directories.iter().cloned())
         .collect()
 }
 

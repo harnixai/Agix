@@ -15,8 +15,9 @@ use base::interface::tool::{Tool, ToolContext};
 use std::path::PathBuf;
 
 fn ctx_in(cwd: &std::path::Path) -> ToolContext {
-    let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
-    ctx.permission_mode = base::permission::PermissionMode::Default;
+    let ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    ctx.session
+        .set_permission_mode(base::permission::PermissionMode::Default);
     ctx
 }
 

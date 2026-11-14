@@ -6,8 +6,7 @@
 //!
 //! Returns structured content with `retrieval_status`, `task_id`, optional `output` and `status`.
 //!
-//! Uses `ToolContext.running_tasks` (RunningTasksCallback) to find the task and poll for
-//! completion via repeated `find()` calls.
+//! Finds the task among the session's and polls it for completion.
 
 use async_trait::async_trait;
 use base::context::RunningStatus;
@@ -115,11 +114,16 @@ impl TaskOutputTool {
         ctx: &ToolContext,
     ) -> Result<ToolResult, ToolError> {
         let find = || {
-            ctx.running_tasks
-                .as_ref()
-                .and_then(|rt| rt.find(&input.task_id))
+            ctx.session.find_running_task(&input.task_id).map(|task| {
+                let status = task
+                    .status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                (task.output_text(), status)
+            })
         };
-        let Some((output, _, status)) = find() else {
+        let Some((output, status)) = find() else {
             return Ok(not_found(&input.task_id, "task not found"));
         };
 
@@ -130,7 +134,7 @@ impl TaskOutputTool {
             while tokio::time::Instant::now() < deadline {
                 sleep(Duration::from_millis(500)).await;
 
-                let Some((new_output, _, new_status)) = find() else {
+                let Some((new_output, new_status)) = find() else {
                     return Ok(not_found(&input.task_id, "task disappeared during wait"));
                 };
                 current_output = new_output;
@@ -190,30 +194,25 @@ fn status_to_str(status: &RunningStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::tool::RunningTasksCallback;
+    use base::context::TaskType;
     use serde_json::json;
-    use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::Arc;
 
-    /// Mock RunningTasksCallback for testing
-    #[derive(Debug)]
-    struct MockTasks {
-        tasks: HashMap<String, (String, Vec<String>, RunningStatus)>,
-    }
-
-    impl RunningTasksCallback for MockTasks {
-        fn find(&self, tid: &str) -> Option<(String, Vec<String>, RunningStatus)> {
-            self.tasks.get(tid).cloned()
+    /// A context whose session runs `tasks` — id, output so far, status.
+    fn ctx_with_tasks(tasks: &[(&str, &str, RunningStatus)]) -> ToolContext {
+        let ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
+        for (id, output, status) in tasks {
+            let task = ctx.session.register_task(
+                *id,
+                TaskType::Code,
+                tokio_util::sync::CancellationToken::new(),
+                serde_json::Value::Null,
+            );
+            task.append_output(output);
+            if *status != RunningStatus::Running {
+                ctx.session.finish_task(id, status.clone());
+            }
         }
-        fn cancel(&self, _tid: &str) -> bool {
-            true
-        }
-    }
-
-    fn ctx_with_tasks(tasks: MockTasks) -> ToolContext {
-        let mut ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
-        ctx.running_tasks = Some(Arc::new(tasks) as Arc<dyn RunningTasksCallback>);
         ctx
     }
 
@@ -227,60 +226,41 @@ mod tests {
 
     #[tokio::test]
     async fn requires_task_id() {
-        let tool = TaskOutputTool;
-        let r = tool
-            .validate_input(
-                &json!({}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: HashMap::new(),
-                }),
-            )
+        let r = TaskOutputTool
+            .validate_input(&json!({}), &ctx_with_tasks(&[]))
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
     }
 
     #[tokio::test]
     async fn empty_task_id_rejected() {
-        let tool = TaskOutputTool;
-        let r = tool
-            .validate_input(
-                &json!({"task_id": ""}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: HashMap::new(),
-                }),
-            )
+        let r = TaskOutputTool
+            .validate_input(&json!({"task_id": ""}), &ctx_with_tasks(&[]))
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
     }
 
     #[tokio::test]
     async fn timeout_cap_enforced() {
-        let tool = TaskOutputTool;
-        let r = tool
+        let r = TaskOutputTool
             .validate_input(
                 &json!({"task_id": "t1", "timeout": 999999}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: HashMap::new(),
-                }),
+                &ctx_with_tasks(&[]),
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
     }
 
+    async fn output_of(ctx: ToolContext, input: Value) -> ToolResult {
+        TaskOutputTool
+            .call(input, ctx, ProgressSender::noop("t"))
+            .await
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn not_found_returns_error() {
-        let ctx = ctx_with_tasks(MockTasks {
-            tasks: HashMap::new(),
-        });
-        let tool = TaskOutputTool;
-        let r = tool
-            .call(
-                json!({"task_id": "nonexistent"}),
-                ctx,
-                ProgressSender::noop("t"),
-            )
-            .await
-            .unwrap();
+        let r = output_of(ctx_with_tasks(&[]), json!({"task_id": "nonexistent"})).await;
         assert!(r.is_error);
         let sc = r.structured_content.unwrap();
         assert_eq!(sc["retrieval_status"], "not_found");
@@ -289,21 +269,8 @@ mod tests {
 
     #[tokio::test]
     async fn completed_task_returns_output() {
-        let mut tasks = HashMap::new();
-        tasks.insert(
-            "ag-done".into(),
-            ("output text".into(), vec![], RunningStatus::Completed),
-        );
-        let ctx = ctx_with_tasks(MockTasks { tasks });
-        let tool = TaskOutputTool;
-        let r = tool
-            .call(
-                json!({"task_id": "ag-done", "block": false}),
-                ctx,
-                ProgressSender::noop("t"),
-            )
-            .await
-            .unwrap();
+        let ctx = ctx_with_tasks(&[("ag-done", "output text", RunningStatus::Completed)]);
+        let r = output_of(ctx, json!({"task_id": "ag-done", "block": false})).await;
         assert!(!r.is_error);
         let sc = r.structured_content.unwrap();
         assert_eq!(sc["retrieval_status"], "success");
@@ -313,21 +280,8 @@ mod tests {
 
     #[tokio::test]
     async fn running_task_without_block_returns_not_ready() {
-        let mut tasks = HashMap::new();
-        tasks.insert(
-            "ag-running".into(),
-            ("partial output".into(), vec![], RunningStatus::Running),
-        );
-        let ctx = ctx_with_tasks(MockTasks { tasks });
-        let tool = TaskOutputTool;
-        let r = tool
-            .call(
-                json!({"task_id": "ag-running", "block": false}),
-                ctx,
-                ProgressSender::noop("t"),
-            )
-            .await
-            .unwrap();
+        let ctx = ctx_with_tasks(&[("ag-running", "partial output", RunningStatus::Running)]);
+        let r = output_of(ctx, json!({"task_id": "ag-running", "block": false})).await;
         assert!(!r.is_error);
         let sc = r.structured_content.unwrap();
         assert_eq!(sc["retrieval_status"], "success");
@@ -337,25 +291,8 @@ mod tests {
 
     #[tokio::test]
     async fn failed_task_returns_status() {
-        let mut tasks = HashMap::new();
-        tasks.insert(
-            "ag-fail".into(),
-            (
-                "error log".into(),
-                vec![],
-                RunningStatus::Failed("oops".into()),
-            ),
-        );
-        let ctx = ctx_with_tasks(MockTasks { tasks });
-        let tool = TaskOutputTool;
-        let r = tool
-            .call(
-                json!({"task_id": "ag-fail", "block": false}),
-                ctx,
-                ProgressSender::noop("t"),
-            )
-            .await
-            .unwrap();
+        let ctx = ctx_with_tasks(&[("ag-fail", "error log", RunningStatus::Failed("oops".into()))]);
+        let r = output_of(ctx, json!({"task_id": "ag-fail", "block": false})).await;
         assert!(!r.is_error);
         let sc = r.structured_content.unwrap();
         assert_eq!(sc["retrieval_status"], "success");
@@ -365,66 +302,17 @@ mod tests {
 
     #[tokio::test]
     async fn running_with_block_waits_for_completion() {
-        // Simulate a task that starts running and then completes
-        let tasks = Arc::new(std::sync::Mutex::new(HashMap::new()));
-        {
-            let mut t = tasks.lock().unwrap();
-            t.insert(
-                "ag-blocking".into(),
-                ("initial output".into(), vec![], RunningStatus::Running),
-            );
-        }
+        let ctx = ctx_with_tasks(&[("ag-blocking", "initial output", RunningStatus::Running)]);
+        let session = ctx.session.clone();
+        let call = tokio::spawn(output_of(
+            ctx,
+            json!({"task_id": "ag-blocking", "block": true, "timeout": 10000}),
+        ));
+        let task = session.find_running_task("ag-blocking").unwrap();
+        task.append_output(" [final]");
+        session.finish_task("ag-blocking", RunningStatus::Completed);
 
-        struct BlockingMock {
-            #[allow(clippy::type_complexity)]
-            tasks: Arc<std::sync::Mutex<HashMap<String, (String, Vec<String>, RunningStatus)>>>,
-            poll_count: std::sync::atomic::AtomicU32,
-        }
-        impl std::fmt::Debug for BlockingMock {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "BlockingMock")
-            }
-        }
-        impl RunningTasksCallback for BlockingMock {
-            fn find(&self, tid: &str) -> Option<(String, Vec<String>, RunningStatus)> {
-                let prev = self
-                    .poll_count
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let t = self.tasks.lock().unwrap();
-                if prev >= 2 {
-                    // After 2+ polls, mark as completed
-                    if let Some((output, events, _)) = t.get(tid) {
-                        return Some((
-                            format!("{output} [final]"),
-                            events.clone(),
-                            RunningStatus::Completed,
-                        ));
-                    }
-                }
-                t.get(tid).cloned()
-            }
-            fn cancel(&self, _tid: &str) -> bool {
-                true
-            }
-        }
-
-        let mock = BlockingMock {
-            tasks: tasks.clone(),
-            poll_count: std::sync::atomic::AtomicU32::new(0),
-        };
-
-        let mut ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
-        ctx.running_tasks = Some(Arc::new(mock));
-
-        let tool = TaskOutputTool;
-        let r = tool
-            .call(
-                json!({"task_id": "ag-blocking", "block": true, "timeout": 10000}),
-                ctx,
-                ProgressSender::noop("t"),
-            )
-            .await
-            .unwrap();
+        let r = call.await.unwrap();
         assert!(!r.is_error);
         let sc = r.structured_content.unwrap();
         assert_eq!(sc["retrieval_status"], "success");

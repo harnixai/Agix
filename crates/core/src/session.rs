@@ -34,15 +34,6 @@ impl fmt::Display for SessionId {
     }
 }
 
-/// 子 agent 上下文。主线程 ToolContext 的 `agent` 字段在主 agent 时是 None。
-#[derive(Debug, Clone)]
-pub struct AgentContext {
-    pub agent_id: Id,
-    pub agent_type: String,
-    pub parent_session: SessionId,
-    pub depth: u32,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

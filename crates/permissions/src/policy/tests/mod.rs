@@ -35,8 +35,6 @@ async fn call_in(
     );
     ctx.session_id = "s1".into();
     ctx.session = session.clone();
-    ctx.permission_mode = session.permission_mode();
-    ctx.additional_writable_dirs = env.additional_writable_dirs.clone();
     let facts = match tool {
         Some(tool) => ToolFacts::gather(tool.as_ref(), input, &ctx).await,
         None => ToolFacts::unknown_tool(),

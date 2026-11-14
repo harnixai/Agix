@@ -113,10 +113,6 @@ impl Tool for FileWriteTool {
         )
         .await;
 
-        if let Some(snapshot) = &ctx.snapshot_file {
-            snapshot.record(&path, "Write");
-        }
-
         let result = run_with_cancel(
             &ctx.cancel,
             write_file(&*ctx.exec.filesystem, &path, &input.content),

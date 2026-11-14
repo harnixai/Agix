@@ -55,7 +55,7 @@ pub struct GoalUpdateInput {
 
 /// Who may act on the goal from this call: nobody below the root session.
 fn origin(ctx: &ToolContext) -> Result<TurnOrigin, ToolResult> {
-    if ctx.agent_depth > 0 {
+    if ctx.in_delegate() {
         return Err(ToolResult::error_text(
             "goals belong to the top-level session; a sub-agent cannot read or change them",
         ));

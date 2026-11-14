@@ -111,10 +111,6 @@ impl Tool for NotebookEditTool {
         .await;
         let path = target.as_path();
 
-        if let Some(snapshot) = &ctx.snapshot_file {
-            snapshot.record(path, "NotebookEdit");
-        }
-
         // 读 + 解析
         let content = ctx
             .exec

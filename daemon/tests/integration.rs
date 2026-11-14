@@ -23,6 +23,7 @@ mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;
 mod permission_pipeline;
+mod plan_mode_in_delegates;
 mod plugin_skills;
 mod plugin_tools_in_scene;
 mod project_trust;

@@ -61,7 +61,6 @@ async fn check(perm: &Judged, tool: &str, input: Value, cwd: &Path) -> Permissio
     let found = perm.tools.get(tool);
     let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
     ctx.session = session.clone();
-    ctx.permission_mode = perm.mode;
     ctx.sandbox = perm.sandbox.clone();
     let facts = match &found {
         Some(found) => ToolFacts::gather(found.as_ref(), &input, &ctx).await,

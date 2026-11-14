@@ -230,7 +230,6 @@ impl Tool for FakeTool {
 
 fn ctx_with_mode(mode: PermissionMode) -> base::tool::ToolContext {
     let mut ctx = ToolContext::for_test_with(PathBuf::from("/tmp"), ExecProviders::in_process());
-    ctx.permission_mode = mode;
     ctx.session =
         Arc::new(SessionState::for_tests(PathBuf::from("/tmp")).with_permission_mode(mode));
     ctx.tool_use_id = "test".into();

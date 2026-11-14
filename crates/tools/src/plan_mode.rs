@@ -83,9 +83,9 @@ impl Tool for EnterPlanModeTool {
         ctx: ToolContext,
         _progress: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
-        if ctx.agent.is_some() {
+        if ctx.in_delegate() {
             return Err(ToolError::Execution(anyhow::anyhow!(
-                "EnterPlanMode tool cannot be used in agent contexts"
+                "a sub-agent cannot enter plan mode: plan mode is the conversation's"
             )));
         }
 
@@ -232,7 +232,6 @@ mod tests {
 
     #[tokio::test]
     async fn enter_plan_mode_and_validate() {
-        // Combined: validate + call + agent context rejection.
         let tool = EnterPlanModeTool;
 
         // validate_input accepts empty input.
@@ -258,23 +257,20 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
 
-        // agent context rejected.
-        let mut c3 = session_ctx();
-        c3.agent = Some(base::session::AgentContext {
-            agent_id: base::id::Id::new(),
-            agent_type: "test".into(),
-            parent_session: base::session::SessionId::new(),
-            depth: 0,
-        });
-        let r = tool
-            .call(serde_json::json!({}), c3, ProgressSender::noop("t"))
+    #[tokio::test]
+    async fn a_delegate_cannot_enter_plan_mode() {
+        let mut c = session_ctx();
+        c.agent_depth = 1;
+        let r = EnterPlanModeTool
+            .call(serde_json::json!({}), c.clone(), ProgressSender::noop("t"))
             .await;
-        assert!(r.is_err());
-        match r.unwrap_err() {
-            ToolError::Execution(e) => assert!(e.to_string().contains("agent contexts")),
-            _ => panic!("expected ToolError::Execution"),
+        match r {
+            Err(ToolError::Execution(e)) => assert!(e.to_string().contains("sub-agent")),
+            other => panic!("a delegate entered plan mode: {other:?}"),
         }
+        assert_eq!(c.session.permission_mode(), PermissionMode::Default);
     }
 
     #[tokio::test]

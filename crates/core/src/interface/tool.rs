@@ -56,17 +56,6 @@ impl Default for PromptContext {
         }
     }
 }
-pub trait SnapshotFile: Send + Sync + std::fmt::Debug {
-    fn record(&self, p: &std::path::Path, n: &str);
-}
-pub trait EffectsCallback: Send + Sync + std::fmt::Debug {
-    fn append_system_message(&self, k: &str, c: &str);
-    fn os_notify(&self, _m: &str, _k: &str) {}
-}
-pub trait RunningTasksCallback: Send + Sync + std::fmt::Debug {
-    fn find(&self, tid: &str) -> Option<(String, Vec<String>, crate::context::RunningStatus)>;
-    fn cancel(&self, tid: &str) -> bool;
-}
 
 /// One progress report of a running tool call. `progress` and `total` are in
 /// whatever unit the tool counts (lines, bytes, steps); either may be absent.
@@ -292,21 +281,14 @@ pub struct ToolContext {
     pub turn_no: u32,
     pub sandbox: SandboxSettings,
     pub cancel: CancellationToken,
-    pub additional_writable_dirs: Vec<PathBuf>,
-    pub snapshot_file: Option<Arc<dyn SnapshotFile>>,
-    pub effects: Option<Arc<dyn EffectsCallback>>,
-    pub running_tasks: Option<Arc<dyn RunningTasksCallback>>,
-    pub max_file_read_bytes: usize,
-    pub permission_mode: PermissionMode,
     pub config: Arc<crate::context::EngineConfig>,
+    /// The session the call is made in: its live permission mode, the
+    /// directories it may write besides its own, its running tasks.
     pub session: Arc<crate::context::SessionState>,
     pub tool_use_id: String,
-    pub agent: Option<crate::session::AgentContext>,
-    pub parent_messages: Option<Vec<crate::message::Message>>,
+    /// How many delegations deep the calling session is; `0` for the
+    /// conversation the user talks to.
     pub agent_depth: u32,
-    pub events_tx: Option<
-        tokio::sync::mpsc::UnboundedSender<crate::context::task::BackgroundAgentProgressData>,
-    >,
     /// How a tool asks the user something — see
     /// [`crate::interface::elicitation::Elicitation`]. `None` where nothing
     /// can reach a person (a test context, a background run), which every
@@ -381,19 +363,10 @@ impl ToolContext {
             turn_no: 0,
             sandbox: SandboxSettings::default(),
             cancel,
-            additional_writable_dirs: vec![],
-            snapshot_file: None,
-            effects: None,
-            running_tasks: None,
-            max_file_read_bytes: config.file_limits.max_file_read_bytes as usize,
-            permission_mode: PermissionMode::default(),
             config,
             session,
             tool_use_id: String::new(),
-            agent: None,
-            parent_messages: None,
             agent_depth: 0,
-            events_tx: None,
             elicitation: None,
             exec,
             dispatch: None,
@@ -406,9 +379,16 @@ impl ToolContext {
         }
     }
 
+    /// Whether the call is a delegate's — a sub-agent's or a team member's —
+    /// rather than the conversation's own.
+    pub fn in_delegate(&self) -> bool {
+        self.agent_depth > 0
+    }
+
     pub fn for_test_with(cwd: PathBuf, exec: crate::interface::exec::ExecProviders) -> Self {
         let mut config = crate::context::EngineConfig::defaults_for("test");
         config.dangerously_disable_sandbox = true;
+        config.file_limits.max_file_read_bytes = 0;
         let session = Arc::new(crate::context::SessionState::for_tests(cwd.clone()));
         let mut ctx = Self::new(
             cwd,
@@ -418,7 +398,6 @@ impl ToolContext {
             session,
         );
         ctx.session_id = "test".into();
-        ctx.max_file_read_bytes = 0;
         ctx
     }
     pub fn from_engine_ctx_with(

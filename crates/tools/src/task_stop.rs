@@ -2,8 +2,8 @@
 //!
 //! Accepts `task_id` (required).
 //!
-//! Uses `ToolContext.running_tasks` (RunningTasksCallback) to find and cancel
-//! the task via its CancellationToken.
+//! Finds the task among the session's and cancels it via its
+//! CancellationToken.
 
 use async_trait::async_trait;
 use base::context::RunningStatus;
@@ -77,34 +77,26 @@ impl Tool for TaskStopTool {
         let input: TaskStopInput = serde_json::from_value(input)?;
         let id = input.task_id.unwrap_or_default();
 
-        // Locate the task via RunningTasksCallback
-        let running_task = ctx.running_tasks.as_ref().and_then(|rt| rt.find(&id));
-
-        match running_task {
-            Some((_, _, RunningStatus::Running)) => {
-                // Task exists and is running — cancel it
-                let cancelled = ctx
-                    .running_tasks
-                    .as_ref()
-                    .map(|rt| rt.cancel(&id))
-                    .unwrap_or(false);
-
-                if cancelled {
-                    Ok(ToolResult::text(format!("Successfully stopped task: {id}"))
-                        .with_structured(json!({"task_id": id})))
-                } else {
-                    Ok(ToolResult::error_text(format!("Failed to stop task: {id}")))
-                }
-            }
-            Some((_, _, status)) => {
-                // Task exists but is not running
-                Ok(ToolResult::error_text(format!(
-                    "Task {id} is not running (status: {status:?})"
-                )))
-            }
-            None => Ok(ToolResult::error_text(format!(
+        let Some(task) = ctx.session.find_running_task(&id) else {
+            return Ok(ToolResult::error_text(format!(
                 "No task found with ID: {id}"
-            ))),
+            )));
+        };
+        let status = task
+            .status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if status != RunningStatus::Running {
+            return Ok(ToolResult::error_text(format!(
+                "Task {id} is not running (status: {status:?})"
+            )));
+        }
+        if ctx.session.cancel_running_task(&id) {
+            Ok(ToolResult::text(format!("Successfully stopped task: {id}"))
+                .with_structured(json!({"task_id": id})))
+        } else {
+            Ok(ToolResult::error_text(format!("Failed to stop task: {id}")))
         }
     }
 }
@@ -112,29 +104,24 @@ impl Tool for TaskStopTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::tool::RunningTasksCallback;
+    use base::context::TaskType;
     use serde_json::json;
     use std::path::Path;
-    use std::sync::Arc;
 
-    /// Mock RunningTasksCallback for testing
-    #[derive(Debug)]
-    struct MockTasks {
-        tasks: std::collections::HashMap<String, (String, Vec<String>, RunningStatus)>,
-    }
-
-    impl RunningTasksCallback for MockTasks {
-        fn find(&self, tid: &str) -> Option<(String, Vec<String>, RunningStatus)> {
-            self.tasks.get(tid).cloned()
+    /// A context whose session runs `tasks`, each ended as its status says.
+    fn ctx_with_tasks(tasks: &[(&str, RunningStatus)]) -> ToolContext {
+        let ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
+        for (id, status) in tasks {
+            ctx.session.register_task(
+                *id,
+                TaskType::Code,
+                tokio_util::sync::CancellationToken::new(),
+                serde_json::Value::Null,
+            );
+            if *status != RunningStatus::Running {
+                ctx.session.finish_task(id, status.clone());
+            }
         }
-        fn cancel(&self, tid: &str) -> bool {
-            self.tasks.contains_key(tid)
-        }
-    }
-
-    fn ctx_with_tasks(tasks: MockTasks) -> ToolContext {
-        let mut ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
-        ctx.running_tasks = Some(Arc::new(tasks) as Arc<dyn RunningTasksCallback>);
         ctx
     }
 
@@ -149,14 +136,7 @@ mod tests {
     #[tokio::test]
     async fn requires_at_least_one_id() {
         let tool = TaskStopTool;
-        let r = tool
-            .validate_input(
-                &json!({}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: std::collections::HashMap::new(),
-                }),
-            )
-            .await;
+        let r = tool.validate_input(&json!({}), &ctx_with_tasks(&[])).await;
         assert!(!matches!(r, ValidationResult::Ok));
     }
 
@@ -164,24 +144,14 @@ mod tests {
     async fn empty_task_id_is_rejected() {
         let tool = TaskStopTool;
         let r = tool
-            .validate_input(
-                &json!({"task_id": ""}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: std::collections::HashMap::new(),
-                }),
-            )
+            .validate_input(&json!({"task_id": ""}), &ctx_with_tasks(&[]))
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
     }
 
     #[tokio::test]
     async fn stops_running_task() {
-        let mut tasks = std::collections::HashMap::new();
-        tasks.insert(
-            "ag-test".into(),
-            ("ag-test".into(), vec![], RunningStatus::Running),
-        );
-        let ctx = ctx_with_tasks(MockTasks { tasks });
+        let ctx = ctx_with_tasks(&[("ag-test", RunningStatus::Running)]);
         let tool = TaskStopTool;
         let r = tool
             .call(
@@ -202,9 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn errors_on_not_found() {
-        let ctx = ctx_with_tasks(MockTasks {
-            tasks: std::collections::HashMap::new(),
-        });
+        let ctx = ctx_with_tasks(&[]);
         let tool = TaskStopTool;
         let r = tool
             .call(
@@ -225,12 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn errors_on_not_running() {
-        let mut tasks = std::collections::HashMap::new();
-        tasks.insert(
-            "ag-completed".into(),
-            ("ag-completed".into(), vec![], RunningStatus::Completed),
-        );
-        let ctx = ctx_with_tasks(MockTasks { tasks });
+        let ctx = ctx_with_tasks(&[("ag-completed", RunningStatus::Completed)]);
         let tool = TaskStopTool;
         let r = tool
             .call(

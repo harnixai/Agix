@@ -136,7 +136,7 @@ impl Tool for FileReadTool {
         }
 
         // 全程包在 select! 里以 honor cancel
-        let max_bytes = ctx.max_file_read_bytes.max(1024 * 1024); // at least 1MB
+        let max_bytes = (ctx.config.file_limits.max_file_read_bytes as usize).max(1024 * 1024); // at least 1MB
         let result = tokio::select! {
         biased;
         _ = ctx.cancel.cancelled() => return Err(ToolError::Cancelled),
@@ -1114,7 +1114,9 @@ mod tests {
         bytes.resize(base::tool::MAX_IMAGE_BYTES as usize + 1, 0);
         tokio::fs::write(&p, &bytes).await.unwrap();
         let mut ctx = ctx_in(dir.path());
-        ctx.max_file_read_bytes = 10 * 1024 * 1024;
+        std::sync::Arc::make_mut(&mut ctx.config)
+            .file_limits
+            .max_file_read_bytes = 10 * 1024 * 1024;
 
         let err = FileReadTool
             .call(

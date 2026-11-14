@@ -413,7 +413,8 @@ async fn a_bypass_session_still_runs_bash_through_the_sandbox() {
     }
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.permission_mode = base::permission::PermissionMode::BypassPermissions;
+    ctx.session
+        .set_permission_mode(base::permission::PermissionMode::BypassPermissions);
     std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
     let counts = std::sync::Arc::new(Counts::default());
     ctx.exec.sandbox = counts.clone();
@@ -610,9 +611,9 @@ fn the_strict_policy_reads_the_sessions_roots_and_writes_only_its_tmpdir() {
     use base::interface::exec::{EnvScope, ReadScope};
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.additional_writable_dirs = vec![PathBuf::from("/elsewhere")];
     let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
         cache_directories: vec![PathBuf::from("/caches/cargo")],
+        additional_writable_dirs: vec![PathBuf::from("/elsewhere")],
         ..base::context::SessionEnv::new(dir.path().to_path_buf())
     });
     ctx.session = std::sync::Arc::new(session);

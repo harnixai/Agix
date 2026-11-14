@@ -813,14 +813,9 @@ impl SessionState {
         }
     }
 
-    /// 记录一次文件读取。`FileRead` 工具成功后调用。
-    /// 存入读取时的 mtime 与偏移范围，供后续去重（相同范围 + 不变 mtime）与
-    /// Edit/Write staleness 检测。
-    pub fn record_read(&self, path: &Path) {
-        self.record_read_with_range(path, None, None);
-    }
-
-    /// Record a file read with offset/limit for precise dedup; also stores the mtime.
+    /// Record that `Read` just read `path` over `offset`/`limit`, with its
+    /// mtime: a later read of the same range of an unchanged file is answered
+    /// from the cache, and `Edit`/`Write` know it was read and when.
     pub fn record_read_with_range(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
         if self.remember_file(path, offset, limit, false) {
             *self
@@ -970,28 +965,6 @@ impl SessionState {
         for name in names {
             set.insert(name);
         }
-    }
-}
-
-impl crate::interface::tool::RunningTasksCallback for SessionState {
-    fn find(&self, tid: &str) -> Option<(String, Vec<String>, RunningStatus)> {
-        let task = self.find_running_task(tid)?;
-        let output = task.output_text();
-        let log = task
-            .events_log
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let status = task
-            .status
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        Some((output, log, status))
-    }
-
-    fn cancel(&self, tid: &str) -> bool {
-        self.cancel_running_task(tid)
     }
 }
 

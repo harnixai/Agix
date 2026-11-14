@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 fn ctx_in(cwd: &Path, state: impl FnOnce(&mut SessionEnv)) -> ToolContext {
     let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
-    ctx.permission_mode = base::permission::PermissionMode::Default;
     let mut env = SessionEnv::new(cwd.to_path_buf());
     state(&mut env);
-    ctx.additional_writable_dirs = env.additional_writable_dirs.clone();
     ctx.session = Arc::new(SessionState::for_tests_in(env));
+    ctx.session
+        .set_permission_mode(base::permission::PermissionMode::Default);
     ctx
 }
 
@@ -25,7 +25,6 @@ async fn judged(
     ctx: &ToolContext,
 ) -> base::interface::permission::PermissionOutcome {
     use base::interface::permission::{PermissionPolicy, PermissionRequest, ToolFacts};
-    ctx.session.set_permission_mode(ctx.permission_mode);
     let facts = ToolFacts::gather(tool.as_ref(), input, ctx).await;
     permissions::policy::Policy::empty()
         .decide(&PermissionRequest::new(
@@ -292,8 +291,9 @@ async fn accept_edits_asks_before_reading_outside_the_readable_roots() {
     std::fs::write(project.path().join("notes.txt"), "x").unwrap();
     std::fs::write(elsewhere.path().join("notes.txt"), "x").unwrap();
     let accept_edits = |state: fn(&mut SessionEnv, &Path)| {
-        let mut ctx = ctx_in(project.path(), |s| state(s, elsewhere.path()));
-        ctx.permission_mode = base::permission::PermissionMode::AcceptEdits;
+        let ctx = ctx_in(project.path(), |s| state(s, elsewhere.path()));
+        ctx.session
+            .set_permission_mode(base::permission::PermissionMode::AcceptEdits);
         ctx
     };
 
@@ -323,8 +323,9 @@ async fn accept_edits_asks_before_reading_outside_the_readable_roots() {
 #[tokio::test]
 async fn accept_edits_asks_before_a_shell_read_of_the_home_directory() {
     let project = tempfile::tempdir().unwrap();
-    let mut ctx = ctx_in(project.path(), |_| {});
-    ctx.permission_mode = base::permission::PermissionMode::AcceptEdits;
+    let ctx = ctx_in(project.path(), |_| {});
+    ctx.session
+        .set_permission_mode(base::permission::PermissionMode::AcceptEdits);
     let decision = judged(
         Arc::new(tools::bash::BashTool),
         &serde_json::json!({ "command": "cat ~/.zshrc" }),

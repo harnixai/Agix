@@ -288,7 +288,6 @@ pub(super) fn tool_context_for(
     ctx: &ToolExecCtx,
     spec: Option<&base::tool::ToolSpec>,
 ) -> ToolContext {
-    let additional_writable_dirs = ctx.session_state.env().additional_writable_dirs.clone();
     let mut tool_ctx = ToolContext::new(
         ctx.cwd.clone(),
         ctx.cancel.clone(),
@@ -299,11 +298,6 @@ pub(super) fn tool_context_for(
     tool_ctx.session_id = ctx.session_id.clone();
     tool_ctx.turn_no = ctx.turn_no;
     tool_ctx.sandbox = sandbox_settings_from(&ctx.config);
-    tool_ctx.additional_writable_dirs = additional_writable_dirs;
-    tool_ctx.running_tasks = Some(ctx.session_state.clone());
-    // The *live* mode, not the session's opening value — plan mode is
-    // entered and left mid-session.
-    tool_ctx.permission_mode = ctx.session_state.permission_mode();
     tool_ctx.tool_use_id = ctx.tool_use_id.clone();
     tool_ctx.agent_depth = ctx.agent_depth;
     tool_ctx.elicitation = Some(Arc::clone(&ctx.elicitation));

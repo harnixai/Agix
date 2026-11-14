@@ -501,7 +501,6 @@ async fn audit_f4_an_mcp_servers_read_only_hint_skips_the_accept_edits_prompt() 
         );
         let mut ctx = platform::tool_context_for_test(cwd.clone());
         ctx.session = session.clone();
-        ctx.permission_mode = base::permission::PermissionMode::AcceptEdits;
         let input = json!({});
         let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
         Policy::empty()
