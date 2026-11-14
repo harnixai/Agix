@@ -3,15 +3,15 @@
 //! whose transcripts keep every line's id, timestamp and tags, so a
 //! compaction's references into earlier lines still resolve.
 //!
-//! What is rewritten, and nothing else: each line's `session_id`, a `Meta`
-//! line's `parent_session_id`, `cwd` and `project_root`, and the delegate
-//! attribution (`agent.session_id`) of an `agix.checkpoint` `pre` record. Text
+//! What is rewritten, and nothing else: each line's `session_id` and a `Meta`
+//! line's `parent_session_id`, `cwd` and `project_root`. Text
 //! in messages and tool results that names an old session id or path is left
 //! as it was written. Nothing is read from the archive outside its layout:
 //! `manifest.json`, `sessions/<id>/transcript.jsonl` and
 //! `sessions/<id>/session_memory.md`. The views (`history.json`,
 //! `entries.json`), `runtime.json`, attachments, recordings and checkpoint
-//! copies are not restored.
+//! copies are not restored, and the pool leaves out the checkpoint records and
+//! the recorded spec (`carried_by_an_import`).
 //!
 //! All blocking file I/O; the pool calls it on a blocking thread.
 
@@ -488,18 +488,6 @@ fn rewrite_entry(entry: LogEntry, ids: &BTreeMap<String, String>, target: &Targe
             session_kind,
             schema_version,
         },
-        LogEntry::Extension {
-            ns,
-            event,
-            mut payload,
-        } if ns == history::checkpoint::CHECKPOINT_NS => {
-            if let Some(agent) = payload.pointer_mut("/agent/session_id") {
-                if let Some(mapped) = agent.as_str().and_then(|s| ids.get(s)) {
-                    *agent = Value::String(mapped.clone());
-                }
-            }
-            LogEntry::Extension { ns, event, payload }
-        }
         other => other,
     }
 }

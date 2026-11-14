@@ -41,7 +41,10 @@ impl SessionPool {
             refuse_existing(store.as_ref(), ids.values().copied()).await?;
         }
         let mut warnings = Vec::new();
-        let written = rewrite(&archive, &ids, &target, &mut warnings);
+        let mut written = rewrite(&archive, &ids, &target, &mut warnings);
+        for (_, entries) in &mut written {
+            entries.retain(|env| carried_by_an_import(&env.entry));
+        }
         let old_of: HashMap<SessionId, SessionId> =
             ids.iter().map(|(old, new)| (*new, *old)).collect();
         warn_of_count_mismatch(&archive, &old_of, &written, store.as_ref(), &mut warnings);
@@ -117,6 +120,17 @@ impl SessionPool {
             project_root,
         })
     }
+}
+
+/// An archive is somebody's data, not this daemon's record of what it did.
+/// Its checkpoint records would have a rewind delete or put back whatever
+/// files they name, and its recorded spec would choose the imported session's
+/// prompt, permission rules and telemetry file on its first resume; neither
+/// is carried. The options of the call that resumes it apply instead.
+fn carried_by_an_import(entry: &LogEntry) -> bool {
+    let checkpoint = matches!(entry, LogEntry::Extension { ns, .. }
+        if ns == history::checkpoint::CHECKPOINT_NS);
+    !(checkpoint || crate::session_pool::parts::specs::is_spec(entry))
 }
 
 async fn refuse_existing(

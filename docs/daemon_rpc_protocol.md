@@ -1945,11 +1945,12 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 → `SESSION_EXISTS`,什么都不写)。转录的每一行**原样**写入,行 id、时间戳、`parent_id`、
 `is_sidechain`、`turn_id`、`origin` 都保留——压缩行靠这些 id 指向前面的行,所以投影出的
 `session.history` 与原会话一样长、一样的内容;只改结构化的几项:每行的 `session_id`、`Meta` 的
-`parent_session_id` / `cwd` / `project_root`(换成目标的;无项目会话的 `cwd` 是 daemon 的全局数据目录)、
-`agix.checkpoint` 记录里写这次修改的子 Agent 的会话 id。消息正文、工具结果里提到的旧 id、旧路径
-**不改**。会话记忆一并带上。不带:`runtime.json`、`history.json`、`entries.json`(它们是转录的派生
-视图)、附件文件(图片本来就在转录里)、录像、checkpoint 的写前内容——所以装进来的会话里,
-`session.rewind` 退不回归档之前写的文件。
+`parent_session_id` / `cwd` / `project_root`(换成目标的;无项目会话的 `cwd` 是 daemon 的全局数据目录)。
+消息正文、工具结果里提到的旧 id、旧路径**不改**。会话记忆一并带上。不带:`runtime.json`、`history.json`、
+`entries.json`(它们是转录的派生视图)、附件文件(图片本来就在转录里)、录像、checkpoint 的写前内容与
+`agix.checkpoint` 记录——所以装进来的会话里,`session.rewind` 碰不到归档之前写的文件;也不带会话的
+规格(`agix.session/spec`:建会话时的 `options`、`session.setPrompt` 等),归档决定不了装进来的会话用什么
+提示词、权限规则、遥测文件,第一次 `session.resume` 或 `session.run_turn` 带的 `options` 生效。
 
 **不起会话。** 和 `session.fork` 一样,装进来的会话只在磁盘上;之后对新 id 的 `session.resume` 或第一条
 消息把它载入。导入不改变目标项目的信任状态。写到一半失败会把已写的会话全部删掉。投影出的消息数与

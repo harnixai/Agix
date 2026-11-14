@@ -298,6 +298,12 @@ impl SpecStore {
 
 /// The spec `entries`, a session's log, recorded last; an empty one when they
 /// record none.
+/// Whether `entry` is a recorded spec.
+pub(in crate::session_pool) fn is_spec(entry: &history::entry::LogEntry) -> bool {
+    matches!(entry, history::entry::LogEntry::Extension { ns, event, .. }
+        if ns == SPEC_NS && event == SPEC_EVENT)
+}
+
 fn recorded_in(entries: &[history::entry::EnvelopedEntry]) -> SessionSpec {
     let recorded = entries
         .iter()
