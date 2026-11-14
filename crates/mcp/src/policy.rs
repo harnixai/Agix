@@ -482,6 +482,7 @@ mod tests {
             headers: HashMap::new(),
             oauth: None,
             timeouts: Default::default(),
+            tier: None,
         }
     }
 

@@ -4,9 +4,9 @@
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration size::
 file  crates/compaction/src/compact.rs                           -                                      1006
 file  crates/core/src/interface/catalog.rs                       -                                      831
-file  crates/mcp/src/connect.rs                                  -                                      1328
-file  crates/mcp/src/manager.rs                                  -                                      1274
-file  crates/mcp/src/oauth/mod.rs                                -                                      1104
+file  crates/mcp/src/connect.rs                                  -                                      1335
+file  crates/mcp/src/manager.rs                                  -                                      1275
+file  crates/mcp/src/oauth/mod.rs                                -                                      1131
 file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/transcript.rs                           -                                      880
 file  crates/telemetry/src/recorder/mod.rs                       -                                      942
@@ -29,7 +29,7 @@ fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::se
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  179
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   90
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
-fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          120
+fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     86
 fn    crates/compaction/src/budget.rs                            enforce_tool_result_budget             81
 fn    crates/compaction/src/llm_summary.rs                       LlmSummarizer::summarize               95
@@ -42,9 +42,9 @@ fn    crates/hooks/src/runner/executor.rs                        project_supplie
 fn    crates/hooks/src/runner/rewake.rs                          HookRunner::check_rewakes              81
 fn    crates/mcp/src/config.rs                                   McpServerConfig::confined_to_own_env   90
 fn    crates/mcp/src/manager.rs                                  McpManager::connect_all_within         106
-fn    crates/mcp/src/oauth/mod.rs                                McpAuth::transport_manager             88
+fn    crates/mcp/src/oauth/mod.rs                                McpAuth::transport_manager             90
 fn    crates/mcp/src/oauth/start.rs                              McpAuth::start                         91
-fn    crates/mcp/src/oauth/unattended.rs                         McpAuth::exchange_enterprise_identity  87
+fn    crates/mcp/src/oauth/unattended.rs                         McpAuth::exchange_enterprise_identity  95
 fn    crates/model/src/adapter.rs                                AnthropicModel::stream                 90
 fn    crates/model/src/openai/request.rs                         push_translated                        84
 fn    crates/model/src/types.rs                                  MessagesRequest::serialize             99

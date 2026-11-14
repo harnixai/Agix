@@ -13,8 +13,8 @@
 //! Servers no person signs in to — client credentials, enterprise-managed —
 //! are in [`unattended`].
 //!
-//! Records live in an [`McpCredentialStore`] keyed by the canonical server
-//! URL. Design and usage: `docs/mcp_auth.md`.
+//! Records live in an [`McpCredentialStore`] keyed by the server's identity
+//! ([`record_key`]). Design and usage: `docs/mcp_auth.md`.
 
 mod callback;
 pub mod http;
@@ -96,6 +96,7 @@ pub struct AuthStatus {
     pub error: Option<String>,
 }
 
+/// `url` in each variant is the record key ([`record_key`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthEvent {
     /// The server refuses its token, or has none: it is disconnected until a
@@ -177,6 +178,23 @@ pub fn canonical_server_url(raw: &str) -> Result<String, String> {
         s.pop();
     }
     Ok(s)
+}
+
+/// The key a server's stored sign-in is filed under: its canonical URL, then
+/// `#` (which a canonical URL never holds) and the tier and name it is
+/// declared under. Another server at the same URL is another identity, so it
+/// cannot use this one's tokens.
+pub fn record_key(server: &str, tier: Option<&str>, url: &str) -> Result<String, String> {
+    Ok(format!(
+        "{}#{}/{server}",
+        canonical_server_url(url)?,
+        tier.unwrap_or("global")
+    ))
+}
+
+/// The resource URL a record key was made from.
+fn resource_of(key: &str) -> &str {
+    key.split_once('#').map_or(key, |(url, _)| url)
 }
 
 /// The URL a server config connects to, environment variables expanded.
@@ -614,11 +632,11 @@ impl McpAuth {
     }
 
     /// `None` for a server whose token cannot come from OAuth.
-    pub fn status(&self, cfg: &McpServerConfig) -> Option<AuthStatus> {
+    pub fn status(&self, server: &str, cfg: &McpServerConfig) -> Option<AuthStatus> {
         if !cfg.oauth_capable() {
             return None;
         }
-        let key = canonical_server_url(&server_url(cfg)?).ok()?;
+        let key = record_key(server, cfg.tier(), &server_url(cfg)?).ok()?;
         let entry = self.shared.entry(&key);
         let expires_at = entry.expires_at.and_then(|at| {
             time::OffsetDateTime::from_unix_timestamp(at as i64)
@@ -657,7 +675,7 @@ impl McpAuth {
             )));
         }
         let url = server_url(cfg).unwrap_or_default();
-        let key = canonical_server_url(&url).map_err(AuthFlowError::Invalid)?;
+        let key = record_key(server, cfg.tier(), &url).map_err(AuthFlowError::Invalid)?;
         Ok((url, key, cfg.oauth().cloned().unwrap_or_default()))
     }
 
@@ -852,19 +870,21 @@ impl McpAuth {
         &self,
         server: &str,
         url: &str,
+        tier: Option<&str>,
         oauth: Option<&McpOAuthConfig>,
     ) -> Result<(AuthorizationManager, bool), McpError> {
         let connect_failed = |message: String| McpError::ConnectFailed {
             name: server.to_string(),
             source: anyhow::anyhow!(message),
         };
-        let key = canonical_server_url(url).map_err(connect_failed)?;
+        let key = record_key(server, tier, url).map_err(connect_failed)?;
         self.shared.with_entry(&key, |e| {
             e.names.insert(server.to_string());
         });
         let mut manager = self.new_manager(url, &key).await.map_err(connect_failed)?;
         if let Some(oauth) = oauth.filter(|o| o.grant.is_unattended()) {
-            self.renew_unattended(server, url, oauth, false).await?;
+            self.renew_unattended(server, url, tier, oauth, false)
+                .await?;
             manager.set_credential_store(store::ServerStore::new(&key, self.shared.clone(), true));
             // With a client configured, rmcp's attempt to refresh a token it
             // was refused ends in "authorization required" — no refresh
@@ -937,8 +957,8 @@ impl McpAuth {
         Ok((manager, true))
     }
 
-    pub(crate) fn connected(&self, server: &str, url: &str, with_tokens: bool) {
-        let Ok(key) = canonical_server_url(url) else {
+    pub(crate) fn connected(&self, server: &str, url: &str, tier: Option<&str>, with_tokens: bool) {
+        let Ok(key) = record_key(server, tier, url) else {
             return;
         };
         self.shared.with_entry(&key, |e| {
@@ -959,10 +979,11 @@ impl McpAuth {
         &self,
         server: &str,
         url: &str,
+        tier: Option<&str>,
         challenge: Option<&str>,
         sent_tokens: bool,
     ) {
-        let Ok(key) = canonical_server_url(url) else {
+        let Ok(key) = record_key(server, tier, url) else {
             return;
         };
         if sent_tokens {
@@ -992,8 +1013,14 @@ impl McpAuth {
 
     /// The server answered 403 `insufficient_scope`: the token works, but not
     /// for everything; a new sign-in asks for the union.
-    pub(crate) fn note_insufficient_scope(&self, server: &str, url: &str, challenge: &str) {
-        let Ok(key) = canonical_server_url(url) else {
+    pub(crate) fn note_insufficient_scope(
+        &self,
+        server: &str,
+        url: &str,
+        tier: Option<&str>,
+        challenge: &str,
+    ) {
+        let Ok(key) = record_key(server, tier, url) else {
             return;
         };
         let wanted = scopes_of(challenge);
@@ -1221,8 +1248,9 @@ mod tests {
         let seen = events.clone();
         auth.set_listener(Arc::new(move |e| seen.lock().unwrap().push(e)));
         let url = "https://mcp.example.com/mcp";
+        let key = record_key("docs", None, url).unwrap();
         auth.shared
-            .update(url, |r| {
+            .update(&key, |r| {
                 r.client = Some(McpClientRegistration {
                     client_id: "c".into(),
                     client_secret: None,
@@ -1241,26 +1269,26 @@ mod tests {
             .unwrap();
 
         let challenge = r#"Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource", scope="read""#;
-        auth.note_unauthorized("docs", url, Some(challenge), true)
+        auth.note_unauthorized("docs", url, None, Some(challenge), true)
             .await;
-        auth.note_unauthorized("docs", url, Some(challenge), false)
+        auth.note_unauthorized("docs", url, None, Some(challenge), false)
             .await;
 
-        let record = auth.store().load(url).await.unwrap().unwrap();
+        let record = auth.store().load(&key).await.unwrap().unwrap();
         assert!(record.tokens.is_none());
         assert_eq!(record.client.unwrap().client_id, "c");
         assert_eq!(
             events.lock().unwrap().as_slice(),
             &[AuthEvent::Required {
                 server: "docs".into(),
-                url: url.into(),
+                url: key.clone(),
                 scopes: vec!["read".into()],
             }]
         );
         let cfg: McpServerConfig =
             serde_json::from_value(serde_json::json!({"type": "streamable_http", "url": url}))
                 .unwrap();
-        let status = auth.status(&cfg).unwrap();
+        let status = auth.status("docs", &cfg).unwrap();
         assert_eq!(status.state, AuthState::Required);
         assert_eq!(status.scopes, vec!["read".to_string()]);
     }
@@ -1291,7 +1319,7 @@ mod tests {
         let start = auth.start("docs", &cfg, external(), None).await.unwrap();
         let location = mcp_oauth_mock::consent(&start.authorize_url).await;
         auth.complete(&start.flow_id, &location).await.unwrap();
-        let key = canonical_server_url(&mcp.url).unwrap();
+        let key = record_key("docs", None, &mcp.url).unwrap();
         (mcp, server_auth, cfg, key)
     }
 
@@ -1311,11 +1339,11 @@ mod tests {
             .await
             .unwrap();
         let (a, with_a) = first
-            .transport_manager("docs", &mcp.url, None)
+            .transport_manager("docs", &mcp.url, None, None)
             .await
             .unwrap();
         let (b, with_b) = second
-            .transport_manager("docs", &mcp.url, None)
+            .transport_manager("docs", &mcp.url, None, None)
             .await
             .unwrap();
         assert!(with_a && with_b);

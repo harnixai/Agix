@@ -241,15 +241,18 @@ MCP server 各登录一次,企业 IdP 决定谁能用哪个 server。
 
 ## 6. 凭据存储
 
-默认存在用户数据目录的 `mcp/oauth/` 下:每个 server 一个文件,文件名是规范化 server URL 的
+默认存在用户数据目录的 `mcp/oauth/` 下:每个 server 一个文件,文件名是记录键(见下)的
 SHA-256,权限 0600(目录 0700),写入走临时文件 + 原子改名。旁边的 `<哈希>.lock` 是刷新与
 登出时 `flock` 的那个文件(记录本身每次写都换一个 inode,锁不住)。存的是一条
 `mcp::oauth::McpCredentials`:server URL、客户端注册(动态注册得到的 `client_id` /
 `client_secret`、redirect URI、issuer)、令牌(访问令牌、刷新令牌、到期时间、scope、令牌所属的
 客户端)、issuer、授权服务器元数据(发现失败时退回它,登出时从中找吊销端点)。
 
-**以规范化 URL 为键**:去掉 fragment 与 userinfo,主机名小写、默认端口省略,只有主机时去掉
-末尾的 `/`。所以在 settings 里给 server 改名,登录还在。
+**以 server 身份为键**:规范化 URL(去掉 fragment 与 userinfo,主机名小写、默认端口省略,只有
+主机时去掉末尾的 `/`)加 `#<层级>/<名字>`,层级是 `global`、`project` 或 `plugin`。同一个 URL
+上换一个名字、换一层声明,就是另一个身份,用不了这条登录,也拿不到全局层 `client_credentials`
+或 `enterprise` 换来的令牌——所以项目层 server 不能靠抄一个 URL 借到 daemon 的身份。代价是
+给 server 改名后要重新登录一次。
 
 ### 自己的存储
 

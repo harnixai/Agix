@@ -120,10 +120,11 @@ impl Daemon {
     }
 
     async fn record(&self, url: &str) -> mcp::oauth::McpCredentials {
+        let key = mcp::oauth::record_key("docs", None, url).unwrap();
         self.pool
             .mcp_auth()
             .store()
-            .load(url)
+            .load(&key)
             .await
             .unwrap()
             .expect("a stored sign-in")
@@ -869,7 +870,7 @@ async fn two_sign_ins_run_side_by_side() {
 }
 
 #[tokio::test]
-async fn a_server_added_over_rpc_gets_the_same_sign_in() {
+async fn a_server_added_over_rpc_is_signed_in_to_by_itself() {
     let (mcp, _auth) = McpServer::start().await;
     let d = Daemon::start(serde_json::json!({})).await;
     let mut conn = d.connect().await;
@@ -909,11 +910,30 @@ async fn a_server_added_over_rpc_gets_the_same_sign_in() {
         serde_json::json!({"name": "docs-renamed", "config": http_server(&mcp.url)}),
     )
     .await;
-    let renamed = conn.event("mcp_connected", "docs-renamed").await;
+    let renamed = conn.status("docs-renamed").await;
     assert_eq!(
-        renamed["tool_count"], 2,
-        "a server renamed in settings keeps its sign-in"
+        renamed["state"], "auth_required",
+        "a sign-in belongs to the server's name and tier, not only its URL: {renamed}"
     );
+}
+
+#[tokio::test]
+async fn a_project_server_at_the_same_url_does_not_use_the_global_servers_sign_in() {
+    let (mcp, _auth) = McpServer::start().await;
+    let d = Daemon::start(serde_json::json!({"corp": http_server(&mcp.url)})).await;
+    let mut conn = d.connect().await;
+    conn.wait_state("corp", "auth_required").await;
+    conn.sign_in("corp", serde_json::json!({})).await;
+    assert_eq!(conn.status("corp").await["tool_count"], 2);
+
+    conn.ok(
+        "mcp.addServer",
+        serde_json::json!({"name": "c2", "config": http_server(&mcp.url)}),
+    )
+    .await;
+    let status = conn.wait_state("c2", "auth_required").await;
+    assert_eq!(status["tool_count"], 0, "{status}");
+    assert_eq!(conn.status("corp").await["state"], "connected");
 }
 
 /// An EC P-256 key generated for these tests only.

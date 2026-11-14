@@ -1,5 +1,5 @@
 //! Where an MCP server's authorization is kept between runs: one
-//! [`McpCredentials`] record per canonical server URL, behind the
+//! [`McpCredentials`] record per server identity, behind the
 //! [`McpCredentialStore`] trait an embedder can implement (a keychain, a
 //! vault). [`FileCredentialStore`] is the default, one 0600 file per server.
 //!
@@ -105,11 +105,11 @@ impl std::fmt::Debug for McpTokens {
     }
 }
 
-/// Persistence for [`McpCredentials`], keyed by the canonical server URL
-/// (`mcp::oauth::canonical_server_url`), so a server renamed in settings keeps
-/// its sign-in.
+/// Persistence for [`McpCredentials`], keyed by the server's identity
+/// (`mcp::oauth::record_key`: canonical URL, tier and name), so another
+/// server at the same URL has a sign-in of its own.
 ///
-/// `load` of a URL never saved is `Ok(None)`; `delete` of one is `Ok(())`.
+/// `load` of a key never saved is `Ok(None)`; `delete` of one is `Ok(())`.
 /// Report a backend that cannot be reached as an error rather than `None`:
 /// `None` means "signed out" and asks the user to sign in again.
 #[async_trait]

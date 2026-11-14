@@ -183,7 +183,7 @@ impl McpAuth {
                 signing_algorithm: signing_alg(&jwt.alg).map_err(failed)?,
                 token_endpoint_audience: None,
                 scopes: oauth.scopes.clone(),
-                resource: Some(key.to_string()),
+                resource: Some(super::resource_of(key).to_string()),
             },
             None => ClientCredentialsConfig::ClientSecret {
                 client_id,
@@ -192,7 +192,7 @@ impl McpAuth {
                     .map_err(|e| failed(e.to_string()))?
                     .ok_or_else(|| failed("oauth.client_secret_env is not set".into()))?,
                 scopes: oauth.scopes.clone(),
-                resource: Some(key.to_string()),
+                resource: Some(super::resource_of(key).to_string()),
             },
         };
         let (shared, url_owned, key_owned, discovered) = (
@@ -283,12 +283,20 @@ impl McpAuth {
             .map_err(failed)?;
         let refresh;
         let request = match &identity {
-            EnterpriseIdentity::IdToken(token) => {
-                EmaExchangeRequest::new_with_id_token(idp_server, resource_server, key, token)
-            }
+            EnterpriseIdentity::IdToken(token) => EmaExchangeRequest::new_with_id_token(
+                idp_server,
+                resource_server,
+                super::resource_of(key),
+                token,
+            ),
             EnterpriseIdentity::RefreshToken(token) => {
                 refresh = RefreshToken::new(token.clone());
-                EmaExchangeRequest::new(idp_server, resource_server, key, &refresh)
+                EmaExchangeRequest::new(
+                    idp_server,
+                    resource_server,
+                    super::resource_of(key),
+                    &refresh,
+                )
             }
         }
         .with_scopes(oauth.scopes.clone());
@@ -316,10 +324,11 @@ impl McpAuth {
         &self,
         server: &str,
         url: &str,
+        tier: Option<&str>,
         oauth: &McpOAuthConfig,
         renew: bool,
     ) -> Result<(), McpError> {
-        self.ensure_unattended(server, url, oauth, renew)
+        self.ensure_unattended(server, url, tier, oauth, renew)
             .await
             .map_err(|e| match e {
                 Unattended::NeedsIdentity(_) => McpError::AuthRequired {
@@ -339,10 +348,11 @@ impl McpAuth {
         &self,
         server: &str,
         url: &str,
+        tier: Option<&str>,
         oauth: &McpOAuthConfig,
         renew: bool,
     ) -> Result<(), Unattended> {
-        let key = super::canonical_server_url(url).map_err(Unattended::Failed)?;
+        let key = super::record_key(server, tier, url).map_err(Unattended::Failed)?;
         let fresh = |entry: &super::Entry| {
             entry.has_tokens
                 && entry
@@ -449,7 +459,7 @@ mod tests {
         };
         for _ in 0..2 {
             let waiting = auth
-                .ensure_unattended("docs", "https://mcp.example.com/mcp", &oauth, false)
+                .ensure_unattended("docs", "https://mcp.example.com/mcp", None, &oauth, false)
                 .await;
             assert!(matches!(waiting, Err(Unattended::NeedsIdentity(_))));
         }

@@ -151,9 +151,17 @@ impl SessionPool {
                     .and_then(|confined| self.admit_mcp(name, &confined).map(|()| confined));
                     match admitted_cfg {
                         Ok(confined) => {
+                            let tier = if plugin_servers.contains_key(name) {
+                                "plugin"
+                            } else if projects_own.contains(name) {
+                                "project"
+                            } else {
+                                "global"
+                            };
                             admitted.servers.insert(
                                 name.clone(),
-                                self.placed_mcp_server(settings, name, confined),
+                                self.placed_mcp_server(settings, name, confined)
+                                    .declared_in(tier),
                             );
                             continue;
                         }
@@ -516,7 +524,8 @@ impl SessionPool {
         let env = target_settings.values.sandbox.subprocess_env.clone();
         let cfg = &cfg
             .clone()
-            .run_in(target.0.as_deref().unwrap_or(self.cwd()));
+            .run_in(target.0.as_deref().unwrap_or(self.cwd()))
+            .declared_in("project");
         let slot = self.mcp.cache.slot(&target);
         let (statuses, entries, failure) = {
             let update = slot.update().await;

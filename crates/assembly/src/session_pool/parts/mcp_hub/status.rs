@@ -74,7 +74,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
     let auth = |name: &str| {
         manager
             .config_of(name)
-            .and_then(|cfg| manager.auth()?.status(cfg))
+            .and_then(|cfg| manager.auth()?.status(name, cfg))
             .map(api::McpAuthStatus::from)
             .unwrap_or_default()
     };

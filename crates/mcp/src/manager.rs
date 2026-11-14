@@ -677,8 +677,9 @@ impl McpManager {
         self.configs.get(name)
     }
 
-    /// The servers, connected or pending, whose URL canonicalizes to `url`.
-    pub fn servers_at(&self, url: &str) -> Vec<String> {
+    /// The servers, connected or pending, whose sign-in is filed under `key`
+    /// ([`crate::oauth::record_key`]).
+    pub fn servers_at(&self, key: &str) -> Vec<String> {
         let mut names: Vec<String> = self
             .configs
             .iter()
@@ -689,8 +690,8 @@ impl McpManager {
                         .iter()
                         .any(|c| c.server_name() == name.as_str()))
                     && crate::oauth::server_url(cfg)
-                        .and_then(|u| crate::oauth::canonical_server_url(&u).ok())
-                        .is_some_and(|u| u == url)
+                        .and_then(|u| crate::oauth::record_key(name, cfg.tier(), &u).ok())
+                        .is_some_and(|k| k == key)
             })
             .map(|(name, _)| name.clone())
             .collect();
@@ -1308,6 +1309,7 @@ mod tests {
                 headers: HashMap::new(),
                 oauth: None,
                 timeouts: Default::default(),
+                tier: None,
             },
         );
         let m = McpManager::connect_all(servers).await;

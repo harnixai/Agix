@@ -349,7 +349,7 @@ impl StdioMcpClient {
     async fn keep_token(&self, renew: bool) -> Result<(), McpError> {
         match self.unattended() {
             Some((auth, url, oauth)) => {
-                auth.renew_unattended(&self.server_name, &url, oauth, renew)
+                auth.renew_unattended(&self.server_name, &url, self.config.tier(), oauth, renew)
                     .await
             }
             None => Ok(()),
@@ -385,14 +385,18 @@ impl StdioMcpClient {
                     auth.note_unauthorized(
                         &self.server_name,
                         &url,
+                        self.config.tier(),
                         challenge.as_deref(),
                         self.authorized.load(Ordering::SeqCst),
                     )
                     .await
                 }
-                McpError::InsufficientScope { challenge, .. } => {
-                    auth.note_insufficient_scope(&self.server_name, &url, challenge)
-                }
+                McpError::InsufficientScope { challenge, .. } => auth.note_insufficient_scope(
+                    &self.server_name,
+                    &url,
+                    self.config.tier(),
+                    challenge,
+                ),
                 _ => {}
             }
         }
@@ -764,7 +768,7 @@ async fn spawn_service(
                 .collect();
             let auth = auth
                 .filter(|_| config.oauth_capable())
-                .map(|auth| (auth, config.oauth()));
+                .map(|auth| (auth, config.oauth(), config.tier()));
             spawn_streamable_http_service(server_name, &url, &headers, auth, sink).await
         }
         McpServerConfig::WebSocket { url, headers, .. } => {
@@ -911,6 +915,7 @@ async fn spawn_streamable_http_service(
     auth: Option<(
         &crate::oauth::McpAuth,
         Option<&crate::config::McpOAuthConfig>,
+        Option<&str>,
     )>,
     sink: Option<crate::notify::NotificationSink>,
 ) -> Result<Spawned, McpError> {
@@ -919,7 +924,7 @@ async fn spawn_streamable_http_service(
     let http = crate::oauth::http::transport_client(url);
     let transport_config = http_transport_config(server_name, url, headers);
     let handler = crate::notify::NotifyingHandler::new(server_name, sink);
-    let Some((auth, oauth)) = auth else {
+    let Some((auth, oauth, tier)) = auth else {
         let transport = StreamableHttpClientTransport::with_client(http, transport_config);
         return handler
             .serve(transport)
@@ -928,12 +933,14 @@ async fn spawn_streamable_http_service(
             .map_err(|e| init_error(server_name, e));
     };
 
-    let (manager, authorized) = auth.transport_manager(server_name, url, oauth).await?;
+    let (manager, authorized) = auth
+        .transport_manager(server_name, url, tier, oauth)
+        .await?;
     let client = rmcp::transport::AuthClient::new(http, manager);
     let transport = StreamableHttpClientTransport::with_client(client, transport_config);
     match handler.serve(transport).await {
         Ok(service) => {
-            auth.connected(server_name, url, authorized);
+            auth.connected(server_name, url, tier, authorized);
             Ok(Spawned {
                 service,
                 authorized,
@@ -943,11 +950,11 @@ async fn spawn_streamable_http_service(
             let e = init_error(server_name, e);
             match &e {
                 McpError::AuthRequired { challenge, .. } => {
-                    auth.note_unauthorized(server_name, url, challenge.as_deref(), authorized)
+                    auth.note_unauthorized(server_name, url, tier, challenge.as_deref(), authorized)
                         .await
                 }
                 McpError::InsufficientScope { challenge, .. } => {
-                    auth.note_insufficient_scope(server_name, url, challenge)
+                    auth.note_insufficient_scope(server_name, url, tier, challenge)
                 }
                 _ => {}
             }
@@ -1594,6 +1601,7 @@ done
             headers: HashMap::new(),
             oauth: None,
             timeouts: Default::default(),
+            tier: None,
         };
         let started = Instant::now();
         let manager = crate::manager::McpManager::connect_all(HashMap::from([
@@ -1781,6 +1789,7 @@ done
                 headers: HashMap::new(),
                 oauth: None,
                 timeouts: Default::default(),
+                tier: None,
             },
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
@@ -1806,6 +1815,7 @@ done
             headers,
             oauth: None,
             timeouts: Default::default(),
+            tier: None,
         };
         let client = StdioMcpClient {
             server_name: "static".into(),
@@ -1831,7 +1841,7 @@ done
         assert!(refused.is_err());
         let same_url_with_oauth = remote(HashMap::new());
         assert_eq!(
-            auth.status(&same_url_with_oauth).unwrap().state,
+            auth.status("static", &same_url_with_oauth).unwrap().state,
             crate::oauth::AuthState::None
         );
     }

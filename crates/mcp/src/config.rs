@@ -37,6 +37,11 @@ pub enum McpServerConfig {
         oauth: Option<McpOAuthConfig>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
+        /// Which settings tier declared this server; part of the identity
+        /// its stored sign-in is filed under. Set by the embedder
+        /// ([`McpServerConfig::declared_in`]), never by configuration.
+        #[serde(skip)]
+        tier: Option<String>,
     },
     /// Served by the streamable HTTP transport, which accepts the same servers.
     Sse {
@@ -47,6 +52,11 @@ pub enum McpServerConfig {
         oauth: Option<McpOAuthConfig>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
+        /// Which settings tier declared this server; part of the identity
+        /// its stored sign-in is filed under. Set by the embedder
+        /// ([`McpServerConfig::declared_in`]), never by configuration.
+        #[serde(skip)]
+        tier: Option<String>,
     },
     /// WebSocket transport: connect to an MCP server over WebSocket.
     #[serde(alias = "websocket")]
@@ -367,6 +377,27 @@ impl McpServerConfig {
             *working_dir = Some(dir.to_path_buf());
         }
         self
+    }
+
+    /// A remote server marked as declared in `tier` (`global`, `project`,
+    /// `plugin`): its stored sign-in is then only the one made under that
+    /// tier.
+    pub fn declared_in(mut self, declared: &str) -> Self {
+        if let McpServerConfig::StreamableHttp { tier, .. } | McpServerConfig::Sse { tier, .. } =
+            &mut self
+        {
+            *tier = Some(declared.to_string());
+        }
+        self
+    }
+
+    pub fn tier(&self) -> Option<&str> {
+        match self {
+            McpServerConfig::StreamableHttp { tier, .. } | McpServerConfig::Sse { tier, .. } => {
+                tier.as_deref()
+            }
+            _ => None,
+        }
     }
 
     /// The `oauth` block of a remote server.
@@ -777,6 +808,7 @@ mod tests {
             headers: HashMap::new(),
             oauth: None,
             timeouts: Default::default(),
+            tier: None,
         };
         assert_eq!(http.url(), Some("https://example.com"));
 

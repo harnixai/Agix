@@ -46,8 +46,8 @@ impl SessionPool {
         }
     }
 
-    /// Disconnect every server at `url` until someone signs in again.
-    pub(in crate::session_pool) async fn demote_mcp_servers(&self, url: &str) {
+    /// Disconnect every server signed in under `key` until someone signs in again.
+    pub(in crate::session_pool) async fn demote_mcp_servers(&self, record: &str) {
         let mut touched = Vec::new();
         for (key, slot) in self.mcp.cache.slots() {
             let update = slot.update().await;
@@ -55,7 +55,7 @@ impl SessionPool {
                 continue;
             };
             let names: Vec<String> = manager
-                .servers_at(url)
+                .servers_at(record)
                 .into_iter()
                 .filter(|n| manager.clients().iter().any(|c| c.server_name() == n))
                 .collect();
@@ -73,11 +73,11 @@ impl SessionPool {
         self.invalidate_mcp_keys(&touched).await;
     }
 
-    /// Connect again every server at `url` — and only those — wherever this
+    /// Connect again every server signed in under `key` — and only those — wherever this
     /// pool has it, connected or waiting for a sign-in. Each outcome is a
     /// `mcp_connected` / `mcp_connect_failed` event.
-    pub(in crate::session_pool) async fn reconnect_mcp_servers(&self, url: &str) -> Vec<String> {
-        self.reconnect_mcp_where(|manager| manager.servers_at(url))
+    pub(in crate::session_pool) async fn reconnect_mcp_servers(&self, key: &str) -> Vec<String> {
+        self.reconnect_mcp_where(|manager| manager.servers_at(key))
             .await
     }
 
@@ -312,10 +312,10 @@ impl SessionPool {
             .logout(name, &cfg)
             .await
             .map_err(PoolError::from)?;
-        if let Some(url) =
-            mcp::oauth::server_url(&cfg).and_then(|u| mcp::oauth::canonical_server_url(&u).ok())
+        if let Some(key) = mcp::oauth::server_url(&cfg)
+            .and_then(|u| mcp::oauth::record_key(name, cfg.tier(), &u).ok())
         {
-            self.demote_mcp_servers(&url).await;
+            self.demote_mcp_servers(&key).await;
         }
         Ok(api::McpServerRef {
             server: name.to_string(),
