@@ -299,6 +299,53 @@ fn linux_allowlist_network_falls_back_to_unshare_net() {
     assert!(cmd.spec.args.iter().any(|a| a == "--unshare-net"));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_proxy_mode_unshares_the_network_and_relays_after_the_tmp_tmpfs() {
+    let mut o = opts("ls", Path::new("/tmp/work"));
+    o.policy.network_mode = NetworkMode::Proxy;
+    o.policy.egress_proxy = Some(EgressProxy {
+        http: "127.0.0.1:3128".parse().unwrap(),
+        socks: None,
+        no_proxy: Vec::new(),
+    });
+    let cmd = wrap(o);
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let args = &cmd.spec.args;
+    assert!(args.iter().any(|a| a == "--unshare-net"));
+    let http_proxy = cmd
+        .spec
+        .env
+        .iter()
+        .find(|(name, _)| name == "http_proxy")
+        .map(|(_, value)| value.as_str());
+    assert_eq!(http_proxy, Some("http://127.0.0.1:3128"));
+    if find_trusted_bin("socat").is_none() {
+        assert_eq!(cmd.enforcement, Enforcement::Partial);
+        assert!(
+            cmd.unmet.iter().any(|u| u.contains("socat not found")),
+            "{:?}",
+            cmd.unmet
+        );
+        return;
+    }
+    assert_eq!(cmd.enforcement, Enforcement::Full, "{:?}", cmd.unmet);
+    let tmpfs = args
+        .windows(2)
+        .position(|w| w[0] == "--tmpfs" && w[1] == "/tmp")
+        .expect("a /tmp tmpfs");
+    let bind = args
+        .iter()
+        .position(|a| a == "/tmp/.agix-egress/http.sock")
+        .expect("the relay's socket bound in");
+    assert!(tmpfs < bind, "{args:?}");
+    assert!(args
+        .iter()
+        .any(|a| a.contains("TCP-LISTEN:3128,bind=127.0.0.1")));
+}
+
 /// A process an earlier command left running cannot read a credential the
 /// engine writes into the state root while a later command is confined.
 /// Binding over each file at wrap time would miss a file absent then, and

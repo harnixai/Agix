@@ -8,8 +8,8 @@ use super::roots::{
     submodules_of, write_denial_names, Roots,
 };
 use super::{
-    mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement, NetworkMode,
-    ProcessSpec, SandboxMode, SandboxPolicy,
+    egress, mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement,
+    NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
 };
 use base::paths::{
     ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
@@ -455,13 +455,16 @@ pub(super) fn bwrap_stdio_outside() -> String {
 /// writable entry on). Falls back to the bare name where none is found, so a
 /// deployment with its utilities elsewhere still runs, unhardened.
 pub(super) fn trusted_bin(name: &str) -> String {
-    for dir in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
-        let path = Path::new(dir).join(name);
-        if path.exists() {
-            return path.display().to_string();
-        }
-    }
-    name.to_string()
+    find_trusted_bin(name).unwrap_or_else(|| name.to_string())
+}
+
+/// [`trusted_bin`] without the fallback.
+pub(super) fn find_trusted_bin(name: &str) -> Option<String> {
+    ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        .iter()
+        .map(|dir| Path::new(dir).join(name))
+        .find(|path| path.exists())
+        .map(|path| path.display().to_string())
 }
 
 /// The inside half of [`BWRAP_STDIO_OUTSIDE`]: fds 3 and 4 back to 1 and 2,
@@ -493,15 +496,24 @@ pub(super) fn linux_wrap(
     hide_fenced(&mut args, &roots);
     hide_denied_reads(&mut args, policy);
     isolate_ipc(&mut args, policy);
-    network_args(&mut args, policy);
+    let proxy = network_args(&mut args, policy);
     args.push("--".into());
 
-    let unmet = if policy.network_mode == NetworkMode::Allowlist {
+    let mut unmet: Vec<String> = if policy.network_mode == NetworkMode::Allowlist {
         vec!["domain allowlist: bwrap can only cut the network entirely".into()]
     } else {
         Vec::new()
     };
-    args.extend(["sh", "-c", BWRAP_STDIO_INSIDE, "sh"].map(String::from));
+    let (inside, env) = match proxy {
+        Some(proxy) => {
+            unmet.extend(proxy.unmet);
+            (proxy.inside, proxy.env)
+        }
+        None => (None, Vec::new()),
+    };
+    args.extend(["sh".into(), "-c".into()]);
+    args.push(inside.unwrap_or_else(|| BWRAP_STDIO_INSIDE.to_string()));
+    args.push("sh".into());
     args.push(inner.program);
     args.extend(inner.args);
     let outside = [
@@ -517,7 +529,10 @@ pub(super) fn linux_wrap(
             Enforcement::Partial
         },
         unmet,
-        spec: ProcessSpec::new("sh", &inner.cwd).args(outside.into_iter().chain(args)),
+        spec: ProcessSpec {
+            env,
+            ..ProcessSpec::new("sh", &inner.cwd).args(outside.into_iter().chain(args))
+        },
         mode: SandboxMode::LinuxBwrap,
     }
 }
@@ -653,13 +668,27 @@ fn isolate_ipc(args: &mut Vec<String>, policy: &SandboxPolicy) {
     }
 }
 
-fn network_args(args: &mut Vec<String>, policy: &SandboxPolicy) {
+/// The proxy's relay, under `NetworkMode::Proxy`. The relay's binds land
+/// after the `/tmp` tmpfs, which would cover them otherwise.
+fn network_args(args: &mut Vec<String>, policy: &SandboxPolicy) -> Option<egress::Namespaced> {
     // bwrap's only network lever is `--unshare-net`. An allowlist it cannot
     // honour fails closed to no network rather than open to all of it; stricter
     // than asked for in one direction and not what was asked for in the other,
     // which is what `Partial` is for.
     match policy.network_mode {
         NetworkMode::Unrestricted => {}
+        NetworkMode::Proxy => {
+            args.push("--unshare-net".into());
+            let socat = find_trusted_bin("socat");
+            let programs = egress::Programs {
+                socat: socat.as_deref(),
+                grep: &trusted_bin("grep"),
+                sleep: &trusted_bin("sleep"),
+            };
+            let proxy = egress::namespaced(policy.egress_proxy.as_ref(), &programs, egress::relay);
+            args.extend(proxy.args.iter().cloned());
+            return Some(proxy);
+        }
         NetworkMode::DenyAll => {
             args.push("--unshare-net".into());
         }
@@ -673,6 +702,7 @@ fn network_args(args: &mut Vec<String>, policy: &SandboxPolicy) {
             args.push("--unshare-net".into());
         }
     }
+    None
 }
 
 pub(super) fn bwrap_available() -> bool {
