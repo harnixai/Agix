@@ -2515,6 +2515,13 @@
             "null"
           ]
         },
+        "limited": {
+          "description": "What the server's tool list was cut to keep to its limits\n(`max_tools`, `max_description_chars`, `max_schema_bytes`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
