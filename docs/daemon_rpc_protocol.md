@@ -229,7 +229,7 @@ daemon 拿不到就拒绝启动;退出时删掉它。
 
 ```
 Meta.scene
-  ├─ 缺失(老文件)  → 按当前 daemon 的场景恢复,响应带 "scene_inferred": true
+  ├─ 缺失          → 按当前 daemon 的场景恢复
   ├─ 与 daemon 的场景不符 → SCENE_MISMATCH,拒绝
   └─ 相符                 → 恢复
 ```
@@ -1354,7 +1354,7 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 { "session_id": "…",
   "last_seq": "…",             // 数字:transcript 水位,用于追赶(§5.6)
   "pending_prompts": [ ],      // 还没被回答的 kind:"prompt" 帧,原样重放
-  "resumed": false }           // 这次调用有没有替你恢复它;true 时另有 scene_inferred
+  "resumed": false }           // 这次调用有没有替你恢复它
 ```
 
 订阅之后该会话的 `session.event` 帧都推到这条连接上,直到 `session.unsubscribe`
@@ -1364,7 +1364,7 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 个永远不会有数据的订阅。
 
 **`resume: true` 表示"打开它,不管它在不在内存里"**:冷会话先恢复再订阅,响应带
-`"resumed": true` 与 `session.resume` 那边同样的 `scene_inferred`。这不是默认行为,
+`"resumed": true`。这不是默认行为,
 因为恢复要读一遍 transcript 并占掉会话池的一个名额 —— 一个画会话列表的宿主给每一行
 都订阅一次,默认恢复就等于替它把整页会话全恢复了,而它以为自己只是在看。
 
@@ -1686,8 +1686,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   "created_at": "…", "last_active": "…",
   "scene": "code",
   "project_trust": "trusted",   // trusted | untrusted | none,§3.6
-  "permission": { "mode": "default", "prompts": true, "prompt_timeout_secs": "…" },
-  "scene_inferred": false }
+  "permission": { "mode": "default", "prompts": true, "prompt_timeout_secs": "…" } }
 ```
 
 - 会话已经在内存里 → `already_active`,什么都不动,只报状态。
@@ -1698,8 +1697,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   `INTERNAL_ERROR`,消息含 "transcript could not be loaded" 和读盘错误;带不带
   `create_if_missing` 都一样,不起引擎,也不往那份转录写任何东西。崩溃截断、没有换行结尾的最后
   半行不算读不出来,读的时候丢掉。`session.run_turn` 指名这样的会话同样如此。
-- 场景不符 → `SCENE_MISMATCH`;老文件没记场景 → 按当前场景恢复,`scene_inferred`
-  为 `true`(§3.4)。
+- 场景不符 → `SCENE_MISMATCH`;没记场景 → 按当前场景恢复(§3.4)。
 - 目标是已终态的侧链 → `SIDECHAIN_TERMINAL`(§3.3)。
 - 会话正在共用同一状态目录的另一个 daemon 里 → `INTERNAL_ERROR`,消息含
   "being written by another process";不会换 id 新建。`session.run_turn` 指名这样的会话

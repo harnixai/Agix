@@ -143,8 +143,6 @@ pub struct SubscribeResult {
     /// Each unanswered `kind:"prompt"` `session.event` frame, as sent.
     pub pending_prompts: Vec<serde_json::Value>,
     pub resumed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scene_inferred: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

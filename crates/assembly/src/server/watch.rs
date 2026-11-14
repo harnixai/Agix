@@ -39,6 +39,5 @@ pub(super) fn subscribe_result(subscribed: Subscribed) -> SubscribeResult {
         last_seq: subscribed.last_seq,
         pending_prompts,
         resumed: subscribed.resumed,
-        scene_inferred: subscribed.scene_inferred,
     }
 }

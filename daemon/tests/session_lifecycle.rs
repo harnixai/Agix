@@ -1060,10 +1060,6 @@ async fn subscribing_with_resume_opens_a_session_that_left_memory() {
         opened["result"]["resumed"], true,
         "the caller is told a resume happened on its behalf: {opened}"
     );
-    assert_eq!(
-        opened["result"]["scene_inferred"], false,
-        "this transcript records its scene, so nothing was inferred: {opened}"
-    );
 
     // Already live now: the same call subscribes without resuming again.
     let again = rpc(
@@ -1884,47 +1880,6 @@ async fn session_resume_allows_a_non_terminal_sidechain() {
     )
     .await;
     assert!(resumed.get("error").is_none(), "{resumed}");
-
-    srv.stop().await;
-}
-
-/// A pre-v2 `Meta` (no `scene` field) must resume normally
-/// and report `scene_inferred: true` rather than being rejected.
-#[tokio::test]
-async fn session_resume_infers_scene_for_a_pre_v2_meta() {
-    let (srv, _seen) =
-        start_scripted_server(vec![text_round("x")], ask_settings(), Duration::ZERO).await;
-
-    let sid = base::session::SessionId::new();
-    srv.store
-        .append(
-            sid,
-            history::entry::LogEntry::Meta {
-                cwd: "/tmp".into(),
-                started_at: time::OffsetDateTime::now_utc(),
-                model: "claude-sonnet-4-6".into(),
-                permission_mode: "default".into(),
-                engine_version: "0.0.1".into(),
-                agix_version: "0.0.1".into(),
-                parent_session_id: None,
-                scene: None,
-                project_root: None,
-                session_kind: history::entry::SessionKind::Primary,
-                schema_version: 1,
-            },
-        )
-        .await
-        .unwrap();
-
-    let resumed = rpc(
-        &srv.sock,
-        &format!(
-            r#"{{"jsonrpc":"2.0","method":"session.resume","params":{{"session_id":"{sid}"}},"id":1}}"#
-        ),
-    )
-    .await;
-    assert_eq!(resumed["result"]["status"], "resumed", "{resumed}");
-    assert_eq!(resumed["result"]["scene_inferred"], true);
 
     srv.stop().await;
 }

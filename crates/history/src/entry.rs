@@ -138,11 +138,6 @@ impl EnvelopedEntry {
     }
 }
 
-/// `Meta.schema_version` default for files written before this field existed.
-fn default_meta_schema_version() -> u32 {
-    1
-}
-
 /// Current `Meta` payload version. Only newly-created sessions write this
 /// value; existing on-disk files keep whatever they were written with and
 /// are never rewritten.
@@ -176,8 +171,7 @@ pub enum LogEntry {
         /// Set when a sub-agent or forked conversation is created from an existing session.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
-        /// Scene id this session was created under. Missing on pre-v2 files —
-        /// callers infer it from the resume/fork request instead.
+        /// Scene id this session was created under.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scene: Option<String>,
         /// Absolute project root, or `None` for a no-project session.
@@ -186,7 +180,6 @@ pub enum LogEntry {
         project_root: Option<String>,
         #[serde(default)]
         session_kind: SessionKind,
-        #[serde(default = "default_meta_schema_version")]
         schema_version: u32,
     },
 
@@ -244,14 +237,6 @@ pub enum LogEntry {
         total_cache_read: u64,
         total_cost_usd: f64,
     },
-
-    /// The pre-`Blob` externalization form: a paste id and nothing else.
-    ///
-    /// Still read, never written. Without a store name there is no way to ask
-    /// whether the backend holding it is even mounted, which is why the shape
-    /// changed; a load resolves it against whatever store is mounted and
-    /// leaves it alone if that store does not have it.
-    PasteRef { paste_id: String },
 
     /// Content kept outside the log, with a pointer to where.
     ///
@@ -330,7 +315,6 @@ impl LogEntry {
             Self::System { .. } => "system",
             Self::Compact { .. } => "compact",
             Self::UsageSnapshot { .. } => "usage_snapshot",
-            Self::PasteRef { .. } => "paste_ref",
             Self::Blob { .. } => "blob",
             Self::SessionEnd { .. } => "session_end",
             Self::Extension { .. } => "extension",
@@ -398,9 +382,6 @@ mod tests {
                 total_cache_creation: 0,
                 total_cache_read: 0,
                 total_cost_usd: 0.0,
-            },
-            LogEntry::PasteRef {
-                paste_id: "p".into(),
             },
             LogEntry::SessionEnd {
                 state: SessionEndState::Completed,
@@ -493,45 +474,6 @@ mod tests {
         assert_eq!(v["session_kind"], "primary");
         assert_eq!(v["schema_version"], 2);
         assert!(v["v"].is_number());
-    }
-
-    /// A pre-v2 `Meta` line (no `scene`/`project_root`/`session_kind`/
-    /// `schema_version`) must still deserialize — these fields default to
-    /// "unknown" rather than failing the whole file to parse. Callers infer
-    /// the scene from the resume/fork request instead.
-    #[test]
-    fn meta_entry_missing_v2_fields_defaults_to_inferred() {
-        let session = SessionId::new();
-        let raw = json!({
-            "id": Id::new(),
-            "ts": "2026-05-04T00:00:00Z",
-            "session_id": session,
-            "kind": "meta",
-            "cwd": "/tmp",
-            "started_at": "2026-05-04T00:00:00Z",
-            "model": "claude-sonnet-4-6",
-            "permission_mode": "default",
-            "engine_version": "0.0.1",
-            "agix_version": "0.0.1",
-        });
-        let env: EnvelopedEntry = serde_json::from_value(raw).unwrap();
-        match env.entry {
-            LogEntry::Meta {
-                scene,
-                project_root,
-                session_kind,
-                schema_version,
-                parent_session_id,
-                ..
-            } => {
-                assert_eq!(scene, None);
-                assert_eq!(project_root, None);
-                assert_eq!(session_kind, SessionKind::Primary);
-                assert_eq!(schema_version, 1);
-                assert_eq!(parent_session_id, None);
-            }
-            other => panic!("expected LogEntry::Meta, got {other:?}"),
-        }
     }
 
     #[test]

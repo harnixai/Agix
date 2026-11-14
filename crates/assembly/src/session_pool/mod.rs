@@ -70,10 +70,6 @@ use pool_telemetry::*;
 /// is always this pool's *default* scene — that only reflects what a
 /// mismatch response echoes back, not what counts as a match.
 enum SceneCheck {
-    /// No `Meta` line, or one with no `scene` field (pre-v2 file, or a
-    /// session with no history at all) — nothing to compare against.
-    /// Callers proceed and report `scene_inferred: true`.
-    Inferred,
     /// Recorded scene matches — proceed normally.
     Matches,
     /// Recorded scene differs — callers should reject with

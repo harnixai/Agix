@@ -59,7 +59,6 @@ impl SessionPool {
             last_seq: self.transcript_len(session_id).await,
             pending,
             resumed: false,
-            scene_inferred: None,
         }
     }
 
@@ -74,7 +73,7 @@ impl SessionPool {
         session_id: &str,
         watcher: Arc<dyn SessionWatcher>,
     ) -> Result<Subscribed, PoolError> {
-        let scene_inferred = self.refuse_scene_mismatch(session_id).await?;
+        self.refuse_scene_mismatch(session_id).await?;
         if let Some(hub) = self.hub_of(session_id).await {
             return Ok(self.subscribe_to(&hub, session_id, watcher).await);
         }
@@ -86,7 +85,6 @@ impl SessionPool {
             last_seq: resumed.message_count,
             pending,
             resumed: true,
-            scene_inferred: Some(scene_inferred),
         })
     }
 

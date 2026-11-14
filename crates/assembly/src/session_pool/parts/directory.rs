@@ -229,8 +229,8 @@ pub(in crate::session_pool) fn find_meta(
 /// rebuilds it against *its own* project, not this pool's default one.
 /// `None` covers both "no `Meta` at all" (a session that predates this
 /// daemon writing one) and "pre-v2 `Meta`" (no `project_root` field
-/// existed yet) — both mean "nothing recorded, infer the pool default",
-/// same spirit as `SceneCheck::Inferred`. Distinguishing those from a
+/// existed yet) — both mean "nothing recorded, infer the pool default".
+/// Distinguishing those from a
 /// v2 `Meta` that explicitly recorded `project_root: null` (a genuine
 /// no-project session) is exactly why this returns the raw
 /// `schema_version` instead of collapsing straight to `Option<PathBuf>`.

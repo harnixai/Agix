@@ -5,7 +5,7 @@ use crate::session_pool::*;
 
 impl SessionPool {
     /// See [`SceneCheck`]. Safe to call unconditionally, including for a
-    /// session id with no on-disk history at all (degrades to `Inferred`).
+    /// session id with no on-disk history at all (nothing recorded counts as a match).
     ///
     /// Matches against any *currently active* scene (`SceneCatalog::is_active`),
     /// not just this pool's default — a session legitimately created via
@@ -15,7 +15,7 @@ impl SessionPool {
     /// all counts as a mismatch.
     pub(in crate::session_pool) async fn check_scene(&self, session_id: &str) -> SceneCheck {
         match self.directory.facts_of(session_id).await.scene {
-            None => SceneCheck::Inferred,
+            None => SceneCheck::Matches,
             Some(s) if self.scenes.is_active(&s) => SceneCheck::Matches,
             Some(s) => SceneCheck::Mismatch(s),
         }
@@ -23,15 +23,13 @@ impl SessionPool {
 
     /// Refuse to act on `session_id` across a scene boundary: a session
     /// recorded under a scene this daemon does not serve is not reattached,
-    /// closed, forked or written to here. `Ok(true)` when its scene could
-    /// only be inferred.
+    /// closed, forked or written to here.
     pub(in crate::session_pool) async fn refuse_scene_mismatch(
         &self,
         session_id: &str,
-    ) -> Result<bool, PoolError> {
+    ) -> Result<(), PoolError> {
         match self.check_scene(session_id).await {
-            SceneCheck::Inferred => Ok(true),
-            SceneCheck::Matches => Ok(false),
+            SceneCheck::Matches => Ok(()),
             SceneCheck::Mismatch(recorded) => Err(PoolError::SceneMismatch {
                 session_id: session_id.to_string(),
                 recorded,
@@ -80,24 +78,15 @@ impl SessionPool {
     /// `with_session_lock` or reading `sidechain_terminal_state`'s full
     /// transcript off disk — both only matter for an id this pool isn't
     /// already actively serving.
-    ///
-    /// The result says whether the session's scene was only inferred
-    /// (`scene_inferred`): a log too old to record one is resumed under this
-    /// daemon's.
     pub async fn resume_session(
         &self,
         session_id: &str,
         create_if_missing: bool,
         options: Option<&SessionOptions>,
     ) -> Result<api::ResumeReport, PoolError> {
-        let scene_inferred = self.refuse_scene_mismatch(session_id).await?;
-        let report = self
-            .resume_unchecked(session_id, create_if_missing, options)
-            .await?;
-        Ok(api::ResumeReport {
-            scene_inferred,
-            ..report
-        })
+        self.refuse_scene_mismatch(session_id).await?;
+        self.resume_unchecked(session_id, create_if_missing, options)
+            .await
     }
 
     pub(in crate::session_pool) async fn resume_unchecked(
@@ -305,7 +294,6 @@ impl SessionPool {
                 prompts: prompts_enabled,
                 prompt_timeout_secs: self.factory.permission_prompt_timeout_secs(&settings),
             },
-            scene_inferred: false,
         }
     }
 

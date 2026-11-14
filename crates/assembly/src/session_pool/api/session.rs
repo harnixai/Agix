@@ -118,8 +118,6 @@ pub struct ResumeReport {
     pub scene: String,
     pub project_trust: TrustState,
     pub permission: PermissionReport,
-    /// The log recorded no scene; the session runs under this daemon's.
-    pub scene_inferred: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
