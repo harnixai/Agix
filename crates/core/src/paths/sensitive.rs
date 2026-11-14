@@ -781,6 +781,20 @@ mod tests {
     }
 
     #[test]
+    fn saved_tool_results_are_outside_what_sandboxed_commands_may_write() {
+        let root = Path::new("/repo/.agix");
+        let saved = tool_results_dir(root, "s");
+        assert!(
+            !sensitive("/repo/.agix")
+                .state_working_dirs()
+                .iter()
+                .any(|w| saved.starts_with(w)),
+            "{}",
+            saved.display()
+        );
+    }
+
+    #[test]
     fn credentials_are_the_state_roots_keys_and_tokens_and_a_projects_keys() {
         let paths = sensitive("/state/home");
         for p in [

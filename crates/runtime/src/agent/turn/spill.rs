@@ -156,6 +156,19 @@ mod tests {
         assert_eq!(file_name_of("//"), "result.txt");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_spill_directory_replaced_by_a_symlink_is_not_written_through() {
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let dir = tmp.path().join("tool-results").join("s");
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &dir).unwrap();
+        assert!(write_spill(&dir, "toolu_1", "planted").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
     #[test]
     fn a_line_longer_than_read_shows_adds_the_hint() {
         let out = preview(&"x".repeat(5_000), Path::new("/s/t.txt"), 2_000);
