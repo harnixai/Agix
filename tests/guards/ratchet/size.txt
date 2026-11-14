@@ -31,8 +31,6 @@ fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
-fn    crates/compaction/src/budget.rs                            enforce_tool_result_budget             81
-fn    crates/compaction/src/llm_summary.rs                       LlmSummarizer::summarize               95
 fn    crates/core/src/prompt.rs                                  assemble_prompt_with                   94
 fn    crates/core/src/provider.rs                                resolve_task_models                    85
 fn    crates/history/src/transcript.rs                           apply_entry_to_messages                83
