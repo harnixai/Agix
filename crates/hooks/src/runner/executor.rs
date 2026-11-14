@@ -512,7 +512,9 @@ fn response_for_exit(
         Some(0) => match serde_json::from_str::<HookResponse>(stdout.trim()) {
             Ok(response) => (response, None),
             Err(e) => {
-                warn!(command, stdout = %stdout, error = %e, "hook stdout is not a JSON answer; it is ignored");
+                let shown =
+                    base::text::truncate_chars(&base::text::scrub_secrets(stdout.trim()), 200, "…");
+                warn!(command, stdout = %shown, error = %e, "hook stdout is not a JSON answer; it is ignored");
                 (
                     HookResponse::default(),
                     Some(format!(

@@ -41,3 +41,24 @@ fn handles_multibyte_chars_without_panicking() {
     let s = "sk-😀😀😀😀";
     assert_eq!(redact_secret(s), "***😀😀😀😀");
 }
+
+#[test]
+fn credentials_inside_urls_and_flag_arguments_are_redacted() {
+    let mut settings = serde_json::json!({
+        "mcp_servers": {
+            "remote": {"type": "http", "url": "https://x.test/mcp?token=queryleak9&v=2"},
+            "local": {"type": "stdio", "command": "srv",
+                      "args": ["--api-key", "argleak777", "--port", "80", "--secret=eqleak55"]}
+        },
+        "hooks_config": {"PreToolUse": [{"type": "http", "url": "https://h.test/?key=hookleak3"}]}
+    });
+    redact_settings_secrets(&mut settings);
+    let dumped = settings.to_string();
+    for leaked in ["queryleak9", "argleak777", "eqleak55", "hookleak3"] {
+        assert!(!dumped.contains(leaked), "{leaked} in {dumped}");
+    }
+    assert!(
+        dumped.contains("v=2") && dumped.contains("\"80\""),
+        "{dumped}"
+    );
+}

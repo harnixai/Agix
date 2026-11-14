@@ -2311,6 +2311,47 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_hook_stdout_that_is_not_json_is_logged_short_and_without_credentials() {
+        let logs = Captured::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let r = on_pre_tool_use(vec![HookConfig::Command {
+            command: "echo debug sk-abcdef''1234567890xyz; head -c 5000 /dev/zero | tr '\\0' 'a'"
+                .into(),
+            shell: None,
+            timeout: None,
+            if_pattern: None,
+            only_on_error: None,
+            once: None,
+            async_rewake: None,
+            on_error: OnError::Allow,
+        }]);
+        r.run(
+            HookEvent::PreToolUse,
+            &input_for_bash("ls"),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        let logged = String::from_utf8_lossy(
+            &logs
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_owned();
+        assert!(logged.contains("not a JSON answer"), "{logged}");
+        assert!(!logged.contains("abcdef1234567890xyz"), "{logged}");
+        assert!(logged.len() < 2000, "{} bytes", logged.len());
+    }
+
     struct Failing;
 
     #[async_trait::async_trait]

@@ -45,6 +45,45 @@ pub fn truncate_chars(s: &str, max: usize, marker: &str) -> String {
     }
 }
 
+/// `text` with the credentials a log line could carry masked: `sk-…` style
+/// keys, the word after `Bearer` / `Basic`, and the value of any `name=value`
+/// whose name says token, key, secret, password or auth (URL query strings
+/// and `--flag=value` arguments included).
+pub fn scrub_secrets(text: &str) -> String {
+    const MASK: &str = "***";
+    const SECRET_NAMES: &[&str] = &["token", "key", "secret", "passw", "auth", "credential"];
+    let is_boundary =
+        |c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '&' | '?' | ',' | ';');
+    let mut out = String::with_capacity(text.len());
+    let mut after_scheme = false;
+    let mut rest = text;
+    while !rest.is_empty() {
+        let end = rest.find(is_boundary).unwrap_or(rest.len());
+        let (word, tail) = rest.split_at(end);
+        let masked = if word.is_empty() {
+            None
+        } else if after_scheme {
+            Some(MASK.to_string())
+        } else if let Some((name, value)) = word.split_once('=') {
+            let lower = name.to_ascii_lowercase();
+            (!value.is_empty() && SECRET_NAMES.iter().any(|n| lower.contains(n)))
+                .then(|| format!("{name}={MASK}"))
+        } else if (word.starts_with("sk-") || word.starts_with("sk_")) && word.len() >= 10 {
+            Some(MASK.to_string())
+        } else {
+            None
+        };
+        if !word.is_empty() {
+            after_scheme = matches!(word, "Bearer" | "bearer" | "Basic" | "basic");
+        }
+        out.push_str(masked.as_deref().unwrap_or(word));
+        let sep_len = tail.chars().next().map_or(0, char::len_utf8);
+        out.push_str(&tail[..sep_len]);
+        rest = &tail[sep_len..];
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::truncate_at_char_boundary as t;
@@ -108,5 +147,20 @@ mod tests {
     fn truncate_short_string_is_passthrough() {
         let t = super::truncate_chars("hi", 10, "[truncated]");
         assert_eq!(t, "hi");
+    }
+
+    #[test]
+    fn scrub_secrets_masks_keys_bearers_and_secret_named_values() {
+        use super::scrub_secrets;
+        let line = "got sk-abcdef1234567890 and Authorization: Bearer abc.def \
+                    from https://x.test/cb?token=hunter2&page=2 --api-key=zzz";
+        let out = scrub_secrets(line);
+        for leaked in ["abcdef1234567890", "abc.def", "hunter2", "zzz"] {
+            assert!(!out.contains(leaked), "{leaked} in {out}");
+        }
+        assert!(
+            out.contains("page=2") && out.contains("https://x.test/cb"),
+            "{out}"
+        );
     }
 }

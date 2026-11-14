@@ -1283,3 +1283,11 @@ mod project_trust {
         );
     }
 }
+
+#[test]
+fn model_settings_debug_does_not_print_the_token() {
+    let mut settings = Settings::defaults_for("m");
+    settings.model.auth_token = "sk-secret-token-1234".into();
+    let dumped = format!("{:?} {:?}", settings.model, settings);
+    assert!(!dumped.contains("sk-secret-token-1234"), "{dumped}");
+}

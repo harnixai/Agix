@@ -220,7 +220,7 @@ pub struct IgnoredValue {
 pub const DEFAULT_MAX_TOKENS: u32 = 32_000;
 
 /// LLM model configuration for a single provider.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
 pub struct ModelSettings {
     pub api_type: ApiType,
@@ -237,6 +237,28 @@ pub struct ModelSettings {
     /// None = no fallback.
     #[serde(default)]
     pub fallback_model: Option<String>,
+}
+
+impl std::fmt::Debug for ModelSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelSettings")
+            .field("api_type", &self.api_type)
+            .field("base_url", &self.base_url)
+            .field(
+                "auth_token",
+                &if self.auth_token.is_empty() {
+                    ""
+                } else {
+                    "***"
+                },
+            )
+            .field("model_name", &self.model_name)
+            .field("max_tokens", &self.max_tokens)
+            .field("thinking_mode", &self.thinking_mode)
+            .field("effort", &self.effort)
+            .field("fallback_model", &self.fallback_model)
+            .finish()
+    }
 }
 
 /// Execution constraints.

@@ -24,17 +24,43 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
                             *v = serde_json::Value::String(redact_secret(s));
                         }
                     }
+                    serde_json::Value::String(s) if s.contains("://") => {
+                        *s = base::text::scrub_secrets(s);
+                    }
                     other => redact_settings_secrets(other),
                 }
             }
         }
         serde_json::Value::Array(items) => {
+            let mut secret_follows = false;
             for item in items {
-                redact_settings_secrets(item);
+                match item {
+                    serde_json::Value::String(s) if secret_follows => {
+                        *s = redact_secret(s);
+                        secret_follows = false;
+                    }
+                    serde_json::Value::String(s) if s.starts_with("--") => {
+                        secret_follows =
+                            !s.contains('=') && names_a_secret(&s.to_ascii_lowercase());
+                        if s.contains('=') || s.contains("://") {
+                            *s = base::text::scrub_secrets(s);
+                        }
+                    }
+                    other => {
+                        secret_follows = false;
+                        redact_settings_secrets(other);
+                    }
+                }
             }
         }
         _ => {}
     }
+}
+
+fn names_a_secret(lowercase_flag: &str) -> bool {
+    ["token", "key", "secret", "passw", "auth"]
+        .iter()
+        .any(|n| lowercase_flag.contains(n))
 }
 
 pub(in crate::session_pool) fn is_secret_key(lowercase_key: &str) -> bool {
