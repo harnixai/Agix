@@ -566,7 +566,7 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
         [sibling],
         "only the tool the rule does not name is asked about"
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

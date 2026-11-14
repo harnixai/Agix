@@ -54,11 +54,11 @@ pub struct GoalUpdateInput {
 }
 
 /// Who may act on the goal from this call: nobody below the root session.
-fn origin(ctx: &ToolContext) -> Result<TurnOrigin, ToolResult> {
+fn origin(ctx: &ToolContext) -> Result<TurnOrigin, Box<ToolResult>> {
     if ctx.in_delegate() {
-        return Err(ToolResult::error_text(
+        return Err(Box::new(ToolResult::error_text(
             "goals belong to the top-level session; a sub-agent cannot read or change them",
-        ));
+        )));
     }
     Ok(ctx.turn.origin)
 }
@@ -109,7 +109,7 @@ impl Tool for GoalCreateTool {
         let input: GoalCreateInput = serde_json::from_value(input)?;
         let origin = match origin(&ctx) {
             Ok(o) => o,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         Ok(
             match ctx
@@ -155,7 +155,7 @@ impl Tool for GoalGetTool {
         _: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
         if let Err(r) = origin(&ctx) {
-            return Ok(r);
+            return Ok(*r);
         }
         Ok(match ctx.session.goal_view() {
             None => ToolResult::text("This session has no goal."),
@@ -196,7 +196,7 @@ impl Tool for GoalUpdateTool {
         let input: GoalUpdateInput = serde_json::from_value(input)?;
         let origin = match origin(&ctx) {
             Ok(o) => o,
-            Err(r) => return Ok(r),
+            Err(r) => return Ok(*r),
         };
         let (action, note) = match input.action {
             GoalUpdateAction::Edit => (
