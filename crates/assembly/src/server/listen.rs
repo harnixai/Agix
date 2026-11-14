@@ -2,6 +2,8 @@
 //! the refusal of connections from processes this daemon started.
 
 use super::*;
+use std::time::Duration;
+use tracing::error;
 
 /// A unix listener [`DaemonServer::bind_unix`] bound, and the sandbox fence
 /// around its socket, which comes down when the listener does.
@@ -59,6 +61,50 @@ pub(super) async fn refuse_own_descendant(mut stream: tokio::net::UnixStream, pi
     }
 }
 
+const ACCEPT_BACKOFF_FIRST: Duration = Duration::from_millis(10);
+const ACCEPT_BACKOFF_CAP: Duration = Duration::from_secs(1);
+const ACCEPT_FAILURES_BEFORE_ERROR: u32 = 10;
+
+fn backoff_delay(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(16);
+    (ACCEPT_BACKOFF_FIRST * 2u32.pow(doublings)).min(ACCEPT_BACKOFF_CAP)
+}
+
+/// The next accepted connection, or `None` once `shutdown` fires. A failing
+/// `accept` (file descriptors exhausted, say, fails every call at once) is
+/// retried after a delay that doubles up to a second, not in a tight loop.
+async fn accept_backing_off<S, E, Fut>(
+    shutdown: &CancellationToken,
+    mut accept: impl FnMut() -> Fut,
+) -> Option<S>
+where
+    E: std::fmt::Display,
+    Fut: std::future::Future<Output = Result<S, E>>,
+{
+    let mut failures = 0u32;
+    loop {
+        let result = tokio::select! {
+            _ = shutdown.cancelled() => return None,
+            result = accept() => result,
+        };
+        match result {
+            Ok(accepted) => return Some(accepted),
+            Err(e) => {
+                failures = failures.saturating_add(1);
+                if failures == ACCEPT_FAILURES_BEFORE_ERROR {
+                    error!(error=%e, failures, "accept keeps failing; the listener is backing off");
+                } else {
+                    warn!(error=%e);
+                }
+                tokio::select! {
+                    _ = shutdown.cancelled() => return None,
+                    _ = tokio::time::sleep(backoff_delay(failures)) => {}
+                }
+            }
+        }
+    }
+}
+
 impl DaemonServer {
     /// Accept loop over an already-bound TCP listener — the caller binds
     /// the listener, so tests can use an ephemeral port (`127.0.0.1:0`).
@@ -74,27 +120,19 @@ impl DaemonServer {
             .local_addr()
             .ok()
             .map(platform::sandbox::fence_port);
-        loop {
-            tokio::select! {
-                _ = self.shutdown_token.cancelled() => break,
-                result = listener.accept() => {
-                    match result {
-                        Ok((stream, peer)) => {
-                            debug!(peer=%peer);
-                            let this = self.clone();
-                            tokio::spawn(async move {
-                                let (r, w) = stream.into_split();
-                                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
-                                let sink: Sink = Arc::new(LineSink(writer));
-                                if let Err(e) = this.handle_connection(Box::new(r), sink, true).await {
-                                    warn!(error=%e);
-                                }
-                            });
-                        }
-                        Err(e) => warn!(error=%e),
-                    }
+        while let Some((stream, peer)) =
+            accept_backing_off(&self.shutdown_token, || listener.accept()).await
+        {
+            debug!(peer=%peer);
+            let this = self.clone();
+            tokio::spawn(async move {
+                let (r, w) = stream.into_split();
+                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
+                let sink: Sink = Arc::new(LineSink(writer));
+                if let Err(e) = this.handle_connection(Box::new(r), sink, true).await {
+                    warn!(error=%e);
                 }
-            }
+            });
         }
         Ok(())
     }
@@ -141,37 +179,29 @@ impl DaemonServer {
     /// [`Self::require_unix_socket_auth`] such a process also needs the token.
     pub async fn serve_unix_listener(self: Arc<Self>, bound: UnixBinding) -> anyhow::Result<()> {
         let UnixBinding { listener, _fence } = bound;
-        loop {
-            tokio::select! {
-                _ = self.shutdown_token.cancelled() => break,
-                result = listener.accept() => {
-                    match result {
-                        Ok((stream, _addr)) => {
-                            let this = self.clone();
-                            tokio::spawn(async move {
-                                if from_another_user(&stream) {
-                                    warn!("refused a unix socket connection from another user");
-                                    return;
-                                }
-                                if let Some(pid) = started_by_this_daemon(&stream) {
-                                    refuse_own_descendant(stream, pid).await;
-                                    return;
-                                }
-                                let needs_auth = this
-                                    .unix_socket_auth
-                                    .load(std::sync::atomic::Ordering::SeqCst);
-                                let (r, w) = stream.into_split();
-                                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
-                                let sink: Sink = Arc::new(LineSink(writer));
-                                if let Err(e) = this.handle_connection(Box::new(r), sink, needs_auth).await {
-                                    warn!(error=%e);
-                                }
-                            });
-                        }
-                        Err(e) => warn!(error=%e),
-                    }
+        while let Some((stream, _addr)) =
+            accept_backing_off(&self.shutdown_token, || listener.accept()).await
+        {
+            let this = self.clone();
+            tokio::spawn(async move {
+                if from_another_user(&stream) {
+                    warn!("refused a unix socket connection from another user");
+                    return;
                 }
-            }
+                if let Some(pid) = started_by_this_daemon(&stream) {
+                    refuse_own_descendant(stream, pid).await;
+                    return;
+                }
+                let needs_auth = this
+                    .unix_socket_auth
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                let (r, w) = stream.into_split();
+                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
+                let sink: Sink = Arc::new(LineSink(writer));
+                if let Err(e) = this.handle_connection(Box::new(r), sink, needs_auth).await {
+                    warn!(error=%e);
+                }
+            });
         }
         Ok(())
     }
@@ -193,5 +223,31 @@ mod tests {
         let (a, b) = tokio::net::UnixStream::pair().unwrap();
         assert!(!from_another_user(&a));
         assert!(!from_another_user(&b));
+    }
+
+    #[tokio::test]
+    async fn a_failing_accept_backs_off_instead_of_spinning() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let stopper = shutdown.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            stopper.cancel();
+        });
+        let accepted: Option<()> = accept_backing_off(&shutdown, || {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Err::<(), _>(std::io::Error::other("too many open files")) }
+        })
+        .await;
+        assert!(accepted.is_none());
+        let n = attempts.load(std::sync::atomic::Ordering::SeqCst);
+        assert!((2..=8).contains(&n), "{n} attempts in 300ms");
+    }
+
+    #[test]
+    fn the_backoff_doubles_up_to_a_second() {
+        let ms = |n| backoff_delay(n).as_millis();
+        assert_eq!((ms(1), ms(2), ms(3)), (10, 20, 40));
+        assert_eq!((ms(8), ms(30), ms(u32::MAX)), (1000, 1000, 1000));
     }
 }
