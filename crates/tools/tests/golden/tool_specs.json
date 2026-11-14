@@ -2675,14 +2675,6 @@
       "absolute": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "shell_id": {
-            "default": null,
-            "description": "Deprecated: use task_id instead",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "task_id": {
             "default": null,
             "description": "The ID of the background task to stop",
@@ -2698,14 +2690,6 @@
       "workspace_relative": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "shell_id": {
-            "default": null,
-            "description": "Deprecated: use task_id instead",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "task_id": {
             "default": null,
             "description": "The ID of the background task to stop",

@@ -5,24 +5,14 @@ use base::interface::permission::{PermissionFacts, Reach, Subject};
 use permissions::path_rule::{is_within_root_resolved, normalize_path_lexically};
 use std::path::{Component, Path, PathBuf};
 
-/// Validate that a file path is within one of the allowed working directories.
-/// Returns Ok(()) if the path is safe, or Err with a description.
-pub fn validate_path_within_bounds(
-    target: &Path,
-    cwd: &Path,
-    additional_dirs: &[PathBuf],
-) -> Result<(), String> {
-    let inside = std::iter::once(cwd)
-        .chain(additional_dirs.iter().map(PathBuf::as_path))
-        .any(|root| is_within_root_resolved(target, root));
-    if inside {
-        return Ok(());
+/// A relative path resolved against `cwd`; an absolute one is returned as is.
+pub(crate) fn resolve_path(s: &str, cwd: &Path) -> PathBuf {
+    let p = PathBuf::from(s);
+    if p.is_absolute() {
+        p
+    } else {
+        cwd.join(p)
     }
-    Err(format!(
-        "Path {:?} is outside allowed working directories. \
-         Primary: {:?}",
-        target, cwd
-    ))
 }
 
 /// Detect path traversal attempts via `../` sequences.
@@ -240,13 +230,6 @@ pub fn within_readable_roots(path: &Path, ctx: &base::tool::ToolContext) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cwd_path_is_allowed() {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/tmp"));
-        let target = cwd.join("test.txt");
-        assert!(validate_path_within_bounds(&target, &cwd, &[]).is_ok());
-    }
 
     #[cfg(unix)]
     #[tokio::test]

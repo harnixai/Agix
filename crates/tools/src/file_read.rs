@@ -2,6 +2,7 @@
 //!
 //! 第一个具体工具。只读、并发安全、不需要用户确认。
 
+use crate::security::resolve_path;
 use async_trait::async_trait;
 use base::engine_exec::EngineExec;
 use base::error::ToolError;
@@ -14,7 +15,7 @@ use base::tool::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// `Read` 工具的输入 schema。
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -192,16 +193,6 @@ pub(crate) fn workspace_relative_file_path(
         }
     }
     schema
-}
-
-/// 把相对路径解到 cwd。绝对路径原样返回。
-fn resolve_path(s: &str, cwd: &Path) -> PathBuf {
-    let p = PathBuf::from(s);
-    if p.is_absolute() {
-        p
-    } else {
-        cwd.join(p)
-    }
 }
 
 async fn read_file_to_text(

@@ -5,6 +5,7 @@
 //! 在结果里点名。收集的行按排序保留最前面的、受行数与字节上限约束，所以
 //! 大目录树上内存不随匹配数增长；walk 每个文件前看一次 cancel。
 
+use crate::security::resolve_path;
 use async_trait::async_trait;
 use base::error::ToolError;
 use base::interface::exec::FileSystem;
@@ -307,15 +308,6 @@ impl Collected {
 fn is_binary(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(1024)];
     head.contains(&0)
-}
-
-fn resolve_path(s: &str, cwd: &Path) -> PathBuf {
-    let p = PathBuf::from(s);
-    if p.is_absolute() {
-        p
-    } else {
-        cwd.join(p)
-    }
 }
 
 fn compile_matchers(

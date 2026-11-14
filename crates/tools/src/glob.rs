@@ -3,6 +3,7 @@
 //! 用 `ignore::WalkBuilder`（gitignore 感知）扫指定 root，按 `globset::Glob`
 //! 模式过滤；按 mtime 倒序输出，硬上限 1000 条。
 
+use crate::security::resolve_path;
 use async_trait::async_trait;
 use base::error::ToolError;
 use base::interface::permission::{PermissionFacts, Reach, Subject};
@@ -238,15 +239,6 @@ impl GlobTool {
         serde_json::from_value::<GlobInput>(input.clone())
             .ok()
             .map(|i| i.path.unwrap_or_else(|| ".".into()))
-    }
-}
-
-fn resolve_path(s: &str, cwd: &Path) -> PathBuf {
-    let p = PathBuf::from(s);
-    if p.is_absolute() {
-        p
-    } else {
-        cwd.join(p)
     }
 }
 

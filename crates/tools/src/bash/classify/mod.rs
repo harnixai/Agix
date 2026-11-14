@@ -651,7 +651,3 @@ fn path_arg_hits_denied_read(token: &str) -> bool {
 pub fn is_read_only(cmd: &str) -> bool {
     classify(cmd).read_only
 }
-/// True if destructive.
-pub fn is_destructive(cmd: &str) -> bool {
-    classify(cmd).destructive
-}

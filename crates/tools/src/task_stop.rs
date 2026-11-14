@@ -1,7 +1,6 @@
 //! TaskStopTool — stop a running background task by ID.
 //!
-//! Accepts `task_id` (required) and `shell_id` (optional, deprecated alias for
-//! backward compatibility with the removed KillShell tool).
+//! Accepts `task_id` (required).
 //!
 //! Uses `ToolContext.running_tasks` (RunningTasksCallback) to find and cancel
 //! the task via its CancellationToken.
@@ -22,16 +21,11 @@ pub struct TaskStopInput {
     /// The ID of the background task to stop
     #[serde(default)]
     pub task_id: Option<String>,
-    /// Deprecated: use task_id instead
-    #[serde(default)]
-    pub shell_id: Option<String>,
 }
 
 /// Stop a running background task by ID.
 ///
-/// Resolves the effective task ID from `task_id ?? shell_id` (shell_id is a
-/// deprecated alias for KillShell backward compatibility). Checks that the
-/// task exists and is running before sending the cancel signal.
+/// Checks that the task exists and is running before sending the cancel signal.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TaskStopTool;
 
@@ -57,7 +51,7 @@ impl Tool for TaskStopTool {
         let parsed: Result<TaskStopInput, _> = serde_json::from_value(input.clone());
         match parsed {
             Ok(p) => {
-                let id = p.task_id.or(p.shell_id);
+                let id = p.task_id;
                 match id {
                     Some(id) if id.trim().is_empty() => {
                         ValidationResult::err("Missing required parameter: task_id", 1)
@@ -81,7 +75,7 @@ impl Tool for TaskStopTool {
         _: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
         let input: TaskStopInput = serde_json::from_value(input)?;
-        let id = input.task_id.or(input.shell_id).unwrap_or_default();
+        let id = input.task_id.unwrap_or_default();
 
         // Locate the task via RunningTasksCallback
         let running_task = ctx.running_tasks.as_ref().and_then(|rt| rt.find(&id));
@@ -178,20 +172,6 @@ mod tests {
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
-    }
-
-    #[tokio::test]
-    async fn shell_id_backward_compat() {
-        let tool = TaskStopTool;
-        let r = tool
-            .validate_input(
-                &json!({"shell_id": "sh-abc123"}),
-                &ctx_with_tasks(MockTasks {
-                    tasks: std::collections::HashMap::new(),
-                }),
-            )
-            .await;
-        assert!(matches!(r, ValidationResult::Ok));
     }
 
     #[tokio::test]
