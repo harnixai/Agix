@@ -5,11 +5,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::frozen::SkillEntry;
 use base::interface::permission::PermissionPolicy;
 use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::{SkillCatalog, SkillExpansion};
 use base::interface::tool::ToolOrigin;
+use base::skill::SkillEntry;
 use base::tool::ToolContext;
 
 use crate::manager::{SkillInfo, SkillManager, SkillSource};
@@ -22,9 +22,9 @@ pub fn to_entry(skill: &SkillInfo) -> SkillEntry {
         description: skill.description.clone(),
         when_to_use: skill.when_to_use.clone(),
         source: match skill.source {
-            SkillSource::User => base::frozen::SkillSource::User,
-            SkillSource::Project => base::frozen::SkillSource::Project,
-            SkillSource::Plugin => base::frozen::SkillSource::Plugin,
+            SkillSource::User => base::skill::SkillSource::User,
+            SkillSource::Project => base::skill::SkillSource::Project,
+            SkillSource::Plugin => base::skill::SkillSource::Plugin,
         },
         path: skill.path.clone(),
         argument_hint: skill.argument_hint.clone(),

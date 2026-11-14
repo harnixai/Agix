@@ -471,8 +471,8 @@ mod tests {
     use super::*;
     use crate::recorder::format::{now_ms, Header, Record, RecordedParams, FORMAT_VERSION};
     use crate::recorder::writer::RecordingWriter;
+    use base::interface::model::ThinkingMode;
     use base::provider::ApiType;
-    use base::settings::ThinkingMode;
 
     fn write_one_call(dir: &Path) {
         let writer = RecordingWriter::create(dir.parent().unwrap(), {

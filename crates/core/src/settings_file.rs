@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::dir_lock::DirLock;
-use crate::settings::SETTINGS_LOCAL_FILE;
+use crate::paths::SETTINGS_LOCAL_FILE;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -172,7 +172,7 @@ fn refuse_symlink(path: &Path) -> Result<(), SettingsFileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::SETTINGS_FILE;
+    use crate::paths::SETTINGS_FILE;
     use serde_json::json;
 
     fn obj(value: Value) -> Map<String, Value> {

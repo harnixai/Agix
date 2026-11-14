@@ -25,11 +25,13 @@ use base::event::AgentEvent;
 use base::id::Id;
 use base::interface::budget_policy::BudgetPolicy;
 use base::interface::model::Model;
+use base::interface::model::ThinkingMode;
 use base::interface::recovery_policy::RecoveryPolicy;
 use base::interface::scene::SceneSpec;
 use base::interface::tool::{InMemoryToolRegistry, Tool};
 use base::interface::turn_policy::TurnPolicy;
-use base::settings::{PermissionMode, Settings, ThinkingMode};
+use base::permission::PermissionMode;
+use base::settings::Settings;
 use history::store::HistoryStore as _;
 use runtime::agent::{Builder, InputMessage};
 use std::sync::Arc;
@@ -140,7 +142,7 @@ async fn trace(case: Case) -> String {
 
     let mut settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("golden-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     settings.values.model.model_name = "golden-model".into();
     settings.values.model.max_tokens = 1024;
@@ -148,7 +150,7 @@ async fn trace(case: Case) -> String {
     settings.values.model.fallback_model = case.fallback_model.clone();
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");
-    settings.paths.workspace = base::settings::Workspace::project_of(&root.join("local"));
+    settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
     settings.values.memory_enabled = false;

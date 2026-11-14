@@ -5,6 +5,7 @@ use crate::types::{
     BuiltinTool, CacheControl, MessageParam, MessagesRequest, SystemBlock, ThinkingConfig,
 };
 use async_trait::async_trait;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     MessageRole, Model, ModelContentBlock, ModelError, ModelEvent, ModelMessage, ModelStream,
     StreamParams, ToolDef, Usage,
@@ -12,7 +13,6 @@ use base::interface::model::{
 use base::message::{CacheEdit, ContentBlock, Role};
 use base::prompt::{CacheStrategy, PromptBlock};
 use base::provider::ApiType;
-use base::settings::ThinkingMode;
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;

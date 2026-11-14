@@ -180,7 +180,7 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
     let gate = permissions::policy::Policy::from_settings(
         &base::settings::LoadedSettings::new(
             base::settings::Settings::defaults_for("m"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         ),
         [],
     );

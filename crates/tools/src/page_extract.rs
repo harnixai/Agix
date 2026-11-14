@@ -4,12 +4,12 @@
 //! 的 `prompt` 交给那个模型，返回它的回答而不是整页。走的是 `dyn Model`，所以
 //! 照常进录像、用量统计，也跟着路由到任何提供方。
 
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     call_purpose, CallOrigin, MessageRole, Model, ModelContentBlock, ModelError, ModelEvent,
     ModelMessage, StreamParams,
 };
 use base::prompt::PromptBlock;
-use base::settings::ThinkingMode;
 use futures::stream::StreamExt;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;

@@ -101,9 +101,9 @@ pub enum TrustState {
     Untrusted,
 }
 
-impl From<base::project_trust::ProjectTrust> for TrustState {
-    fn from(trust: base::project_trust::ProjectTrust) -> Self {
-        use base::project_trust::ProjectTrust;
+impl From<base::permission::ProjectTrust> for TrustState {
+    fn from(trust: base::permission::ProjectTrust) -> Self {
+        use base::permission::ProjectTrust;
         match trust {
             ProjectTrust::NoProject => Self::None,
             ProjectTrust::Trusted => Self::Trusted,

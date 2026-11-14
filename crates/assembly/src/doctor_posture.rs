@@ -8,7 +8,8 @@
 use base::context::config::NetworkModeConfig;
 use base::interface::exec::{ConfinementReport, Enforcement, ProcessSpec, Sandbox, SandboxPolicy};
 use base::interface::health::{CheckResult, HealthCheck};
-use base::settings::{LoadedSettings, PermissionMode};
+use base::permission::PermissionMode;
+use base::settings::LoadedSettings;
 use hooks::{HookConfig, HookEvent, OnError};
 use std::sync::Arc;
 
@@ -291,10 +292,7 @@ mod tests {
     fn settings_with(f: impl FnOnce(&mut Settings)) -> Arc<LoadedSettings> {
         let mut s = Settings::defaults_for("m");
         f(&mut s);
-        Arc::new(LoadedSettings::new(
-            s,
-            base::settings::PathSettings::default(),
-        ))
+        Arc::new(LoadedSettings::new(s, base::paths::PathSettings::default()))
     }
 
     /// Holds the strict profile as `0` says, and every other policy fully.

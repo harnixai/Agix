@@ -36,10 +36,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     MessageRole, Model, ModelContentBlock, ModelEvent, ModelMessage, StreamParams,
 };
-use base::settings::ThinkingMode;
 use base::text::truncate_at_char_boundary;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;

@@ -222,7 +222,7 @@ impl Delegator {
                     .as_ref()
                     .and_then(|r| r.team_permission_mode(&seat.team))
             })
-            .unwrap_or(base::settings::PermissionMode::Plan);
+            .unwrap_or(base::permission::PermissionMode::Plan);
         if let Some(r) = &registry {
             r.set_team_permission_mode_if_absent(&seat.team, mode);
         }

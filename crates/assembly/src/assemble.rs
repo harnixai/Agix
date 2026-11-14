@@ -137,7 +137,7 @@ pub async fn pool(
     };
     if matches!(
         settings.values.permission_mode,
-        base::settings::PermissionMode::BypassPermissions
+        base::permission::PermissionMode::BypassPermissions
     ) {
         warn!(
             "settings.permission_mode = bypassPermissions — no permission rule is consulted for \
@@ -229,16 +229,13 @@ fn own_settings_on_disk(config: &DaemonConfig) -> base::settings::LoadedSettings
 /// which must exist, else the platform's — and what is in it. Settings that
 /// already carry a managed layer (an embedder's `Tier::Managed` source) keep
 /// it when there is no file.
-fn managed_settings(
-    config: &DaemonConfig,
-) -> (PathBuf, Option<base::managed_settings::ManagedSettings>) {
-    use base::managed_settings::{managed_settings_path, ManagedSettings};
+fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission::ManagedSettings>) {
+    use base::managed_settings::{managed_settings_path, read};
     let (path, required) = match &config.managed_settings_path {
         Some(path) => (path.clone(), true),
         None => (managed_settings_path(), false),
     };
-    let managed =
-        ManagedSettings::read(&path, required).or_else(|| config.settings.managed.clone());
+    let managed = read(&path, required).or_else(|| config.settings.managed.clone());
     (path, managed)
 }
 

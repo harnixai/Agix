@@ -12,8 +12,8 @@
 //! contract; this module owns the merge and the prompt block.
 
 use crate::interface::instruction_provider::{RuleDirectory, RuleProvider};
+use crate::paths::PathSettings;
 use crate::paths::PromptFiles;
-use crate::settings::PathSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -112,7 +112,7 @@ pub fn render_rules_prompt(entries: &[RuleEntry]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::interface::instruction_provider::StaticRules;
-    use crate::settings::PathSettings;
+    use crate::paths::PathSettings;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -125,7 +125,7 @@ mod tests {
         PathSettings {
             user_data_dir: scene.to_path_buf(),
             global_data_dir: global.to_path_buf(),
-            workspace: crate::settings::Workspace::project_of(&project.join(".agix")),
+            workspace: crate::paths::Workspace::project_of(&project.join(".agix")),
             local_data_dir: project.join(".agix"),
             scope: "code".into(),
         }

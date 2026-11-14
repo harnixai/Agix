@@ -16,6 +16,8 @@
 use std::sync::Arc;
 
 use base::event::AgentEvent;
+use base::interface::model::ThinkingMode;
+use base::paths::PathSettings;
 use base::settings::*;
 use base::tool::{InMemoryToolRegistry, Tool};
 use model::adapter::AnthropicModel;
@@ -38,7 +40,7 @@ fn settings(
     paths.user_data_dir = data_dir.clone();
     paths.global_data_dir = data_dir;
     // The project is the directory this lives in.
-    paths.workspace = base::settings::Workspace::project_of(&project.join(".agix"));
+    paths.workspace = base::paths::Workspace::project_of(&project.join(".agix"));
     paths.local_data_dir = project.join(".agix");
     base::settings::LoadedSettings::new(values, paths)
 }

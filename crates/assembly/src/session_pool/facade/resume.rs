@@ -199,7 +199,7 @@ impl SessionPool {
         &self,
         core: &SessionCore,
         status: api::ResumeStatus,
-        mode: base::settings::PermissionMode,
+        mode: base::permission::PermissionMode,
         watcher: Option<Arc<dyn SessionWatcher>>,
     ) -> (api::ResumeReport, Vec<api::PendingAsk>) {
         let pending = watcher.map(|w| core.hub().subscribe(w)).unwrap_or_default();
@@ -251,7 +251,7 @@ impl SessionPool {
         name: Option<String>,
         created_at: String,
         last_active: String,
-        mode: base::settings::PermissionMode,
+        mode: base::permission::PermissionMode,
     ) -> api::ResumeReport {
         let (mode, project) = match self.live.core_of(session_id).await {
             Some(core) => (
@@ -269,11 +269,11 @@ impl SessionPool {
                 (settings.trust(), settings)
             }
             None => (
-                base::project_trust::ProjectTrust::NoProject,
+                base::permission::ProjectTrust::NoProject,
                 self.bindings.pool_settings().await,
             ),
         };
-        let prompts_enabled = mode != base::settings::PermissionMode::BypassPermissions
+        let prompts_enabled = mode != base::permission::PermissionMode::BypassPermissions
             || settings
                 .managed
                 .as_ref()

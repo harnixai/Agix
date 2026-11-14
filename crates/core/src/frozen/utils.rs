@@ -3,16 +3,6 @@
 const MEMORY_ENTRYPOINT_MAX_LINES: usize = 200;
 const MEMORY_ENTRYPOINT_MAX_BYTES: usize = 25_000;
 
-/// Truncate a string at `max` chars, appending `marker` when truncated.
-pub(crate) fn truncate_chars(s: &str, max: usize, marker: &str) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(max).collect();
-        format!("{head}{marker}")
-    }
-}
-
 /// Truncate MEMORY.md content by line count and byte limit.
 pub(crate) fn truncate_memory_entrypoint(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -63,20 +53,6 @@ pub(crate) fn truncate_memory_entrypoint(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn truncate_long_string() {
-        let s: String = "x".repeat(3000);
-        let t = truncate_chars(&s, 100, "[truncated]");
-        assert_eq!(t.chars().count(), 100 + "[truncated]".chars().count());
-        assert!(t.ends_with("[truncated]"));
-    }
-
-    #[test]
-    fn truncate_short_string_is_passthrough() {
-        let t = truncate_chars("hi", 10, "[truncated]");
-        assert_eq!(t, "hi");
-    }
 
     #[test]
     fn memory_entrypoint_truncates_by_line_count() {

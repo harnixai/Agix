@@ -9,8 +9,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelContentBlock, ModelMessage};
 use base::interface::scene::SceneSpec;
+use base::paths::PathSettings;
 use base::settings::*;
 use mcp::manager::McpManager;
 use runtime::agent::Builder;
@@ -87,7 +89,7 @@ fn recall_test_settings(root: &std::path::Path) -> base::settings::LoadedSetting
     let mut paths = PathSettings::default();
     paths.user_data_dir = root.join("user-data");
     paths.global_data_dir = root.join("global-data");
-    paths.workspace = base::settings::Workspace::project_of(&root.join("local-data"));
+    paths.workspace = base::paths::Workspace::project_of(&root.join("local-data"));
     paths.local_data_dir = root.join("local-data");
     paths.scope = "code".into();
     base::settings::LoadedSettings::new(settings, paths)

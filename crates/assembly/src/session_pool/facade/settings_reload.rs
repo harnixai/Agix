@@ -268,7 +268,7 @@ impl SessionPool {
         scene_id: &str,
         patch: api::ProviderPatch,
     ) -> Result<api::ProviderSaved, PoolError> {
-        use base::settings::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
+        use base::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
         let api::ProviderPatch {
             provider_id,
             delete,
@@ -411,7 +411,7 @@ impl SessionPool {
         trusted: bool,
     ) -> Result<api::ProjectTrustSet, PoolError> {
         use crate::watch_hub::Tier;
-        use base::settings::SETTINGS_LOCAL_FILE;
+        use base::paths::SETTINGS_LOCAL_FILE;
         let root = project_root.unwrap_or(self.cwd()).to_path_buf();
         if !root.is_absolute() {
             return Err(PoolError::InvalidRequest(format!(

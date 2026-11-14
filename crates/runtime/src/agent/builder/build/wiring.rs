@@ -203,8 +203,8 @@ pub(super) fn session_env(
 
 /// A session without a project works in a directory of its own, which has to
 /// exist before its first command runs there.
-pub(super) fn prepare_working_dir(paths: &base::settings::PathSettings) {
-    if let base::settings::Workspace::Scratch(dir) = &paths.workspace {
+pub(super) fn prepare_working_dir(paths: &base::paths::PathSettings) {
+    if let base::paths::Workspace::Scratch(dir) = &paths.workspace {
         if dir.is_absolute() {
             let _ = std::fs::create_dir_all(dir);
         }

@@ -27,7 +27,7 @@ use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 /// found there: applied on top of every settings it loads.
 pub(in crate::session_pool) struct ManagedLayer {
     pub(in crate::session_pool) path: PathBuf,
-    pub(in crate::session_pool) settings: Option<base::managed_settings::ManagedSettings>,
+    pub(in crate::session_pool) settings: Option<base::permission::ManagedSettings>,
 }
 
 /// What [`BindingCache::cached`] found for a pair.
@@ -110,7 +110,7 @@ pub(in crate::session_pool) fn own_settings_in(
     host: Arc<LoadedSettings>,
     paths: &dyn crate::config::DaemonPaths,
     host_overrides: &HostOverrides,
-    managed: Option<base::managed_settings::ManagedSettings>,
+    managed: Option<base::permission::ManagedSettings>,
 ) -> Arc<LoadedSettings> {
     if host.paths.workspace.project_root() == Some(cwd) {
         return host;
@@ -409,10 +409,7 @@ impl BindingCache {
             }
         };
         for (tier, config_dir, skills_dir) in tiers {
-            for file in [
-                base::settings::SETTINGS_FILE,
-                base::settings::SETTINGS_LOCAL_FILE,
-            ] {
+            for file in [base::paths::SETTINGS_FILE, base::paths::SETTINGS_LOCAL_FILE] {
                 subscribe(&tier, WatchTarget::Settings, config_dir.join(file));
             }
             subscribe(&tier, WatchTarget::Skills, skills_dir);
@@ -543,7 +540,7 @@ impl BindingCache {
             .unwrap_or(&self.cwd)
             .to_path_buf()
             .join(".agix")
-            .join(base::settings::SETTINGS_FILE)
+            .join(base::paths::SETTINGS_FILE)
     }
 
     #[cfg(test)]

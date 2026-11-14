@@ -223,9 +223,9 @@ mod tests {
     use crate::recorder::blob::BlobId;
     use crate::recorder::format::{now_ms, ChunkRecord, Outcome, RecordedParams, FORMAT_VERSION};
     use crate::recorder::writer::RecordingWriter;
+    use base::interface::model::ThinkingMode;
     use base::interface::model::Usage;
     use base::provider::ApiType;
-    use base::settings::ThinkingMode;
 
     fn header() -> Header {
         Header {

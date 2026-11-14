@@ -7,10 +7,10 @@
 //! connected MCP server.
 
 use base::frozen::frontmatter::parse_skill_file;
-use base::frozen::skill::{SkillEntry, SkillSource as FrozenSkillSource};
 use base::interface::model::ToolDef;
 use base::interface::skill_provider::{SkillPrecedence, SkillProvider};
 use base::paths::PromptFiles;
+use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
 use std::path::{Path, PathBuf};
 
 use crate::manager::SkillSource;

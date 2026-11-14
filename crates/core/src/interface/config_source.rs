@@ -34,7 +34,7 @@
 //! over as [`InMemoryLayers`]. [`Chain`] is for the common shape of the second
 //! case: the files on disk, with what the control plane says layered on top.
 
-use crate::settings::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
+use crate::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

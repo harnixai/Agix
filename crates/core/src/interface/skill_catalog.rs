@@ -8,9 +8,9 @@ use std::path::PathBuf;
 
 use futures::future::BoxFuture;
 
-use crate::frozen::SkillEntry;
 use crate::interface::permission::PermissionPolicy;
 use crate::interface::tool::ToolContext;
+use crate::skill::SkillEntry;
 
 /// One invocation's worth of a skill: the text the conversation receives,
 /// and the `(tool, pattern)` grants its `allowed-tools` makes for the rest of
@@ -42,11 +42,11 @@ pub trait SkillCatalog: Send + Sync {
         Box::pin(async move {
             let entry = self.get(name)?;
             let body = self.body(name)?;
-            let text = crate::frozen::skill::expand_skill_vars_named(
+            let text = crate::skill::expand_skill_vars_named(
                 &body,
                 args,
                 entry.arguments.as_deref().unwrap_or(&[]),
-                Some(&crate::frozen::skill::InvocationVars {
+                Some(&crate::skill::InvocationVars {
                     skill_md: &entry.path,
                     session_id: Some(&ctx.session_id),
                 }),

@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::carrier::ScriptCarrier;
+use base::interface::model::ThinkingMode;
 use base::interface::model_interceptor::{ModelInterceptor, ModelRequestView};
 use base::interface::script::ScriptOutcome;
-use base::settings::ThinkingMode;
 
 /// A script bound to the model-request point.
 ///

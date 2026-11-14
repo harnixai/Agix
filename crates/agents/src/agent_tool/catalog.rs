@@ -134,7 +134,7 @@ pub fn load_agent_types_from_dir(
 /// whether the project is trusted. A session with no project tier of its own
 /// has no third.
 pub fn agent_type_dirs(settings: &LoadedSettings) -> Vec<(std::path::PathBuf, AgentTypeSource)> {
-    use base::project_trust::ProjectTrust;
+    use base::permission::ProjectTrust;
     let mut dirs = vec![
         (
             settings.paths.global_data_dir.join("agents"),
@@ -459,7 +459,7 @@ pub(super) fn describe_agent_types(
 /// Parse a single agent type definition from a markdown file with YAML
 /// frontmatter. Returns `None` if the file lacks a valid `description`.
 pub(super) fn parse_agent_type_file(content: &str, path: &Path) -> Option<AgentTypeDefinition> {
-    use base::frozen::frontmatter::{first_paragraph, parse_yaml_list, split_frontmatter};
+    use base::text::frontmatter::{first_paragraph, parse_yaml_list, split_frontmatter};
 
     let (front, body) = split_frontmatter(content);
     let body = body.trim();
@@ -473,7 +473,7 @@ pub(super) fn parse_agent_type_file(content: &str, path: &Path) -> Option<AgentT
     let mut allowed_tools: Vec<String> = Vec::new();
     let mut disallowed_tools: Vec<String> = Vec::new();
     let mut model: Option<String> = None;
-    let mut permission_mode: Option<base::settings::PermissionMode> = None;
+    let mut permission_mode: Option<base::permission::PermissionMode> = None;
     let mut effort: Option<String> = None;
     let mut max_turns: Option<u32> = None;
     let mut skills: Vec<String> = Vec::new();

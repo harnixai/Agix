@@ -33,7 +33,7 @@ async fn reparse_skill_entry(
     skill_path: &std::path::Path,
     fs: &dyn base::interface::exec::FileSystem,
     files: &base::paths::PromptFiles,
-) -> Option<base::frozen::skill::SkillEntry> {
+) -> Option<base::skill::SkillEntry> {
     let real_skill_path = fs.canonicalize(skill_path).await.ok()?;
     files.admit(skill_path, &real_skill_path).ok()?;
     let content = fs.read_to_string(&real_skill_path).await.ok()?;
@@ -46,7 +46,7 @@ async fn reparse_skill_entry(
         &content,
         dir_name,
         skill_path,
-        base::frozen::skill::SkillSource::Project,
+        base::skill::SkillSource::Project,
     )
 }
 

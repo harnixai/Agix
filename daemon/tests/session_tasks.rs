@@ -91,7 +91,7 @@ impl Daemon {
     /// given up on.
     async fn start_asking(model: Arc<dyn AnthropicClient>, prompt_timeout: Duration) -> Self {
         Self::start_configured(model, |settings, assembly| {
-            settings.permission_mode = base::settings::PermissionMode::Default;
+            settings.permission_mode = base::permission::PermissionMode::Default;
             assembly.permission_prompt_timeout = Some(prompt_timeout);
         })
         .await
@@ -113,7 +113,8 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = base::settings::PermissionMode::BypassPermissions;
+        config.settings.values.permission_mode =
+            base::permission::PermissionMode::BypassPermissions;
         let mut assembly = daemon::Assembly {
             cwd: Some(cwd),
             model_client: Some(model),

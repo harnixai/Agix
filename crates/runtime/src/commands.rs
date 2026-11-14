@@ -13,8 +13,8 @@
 //!   → content = expanded prompt → continue to run_user_turn()
 //! ```
 
-use base::frozen::SkillEntry;
 use base::interface::skill_catalog::{SkillCatalog, SkillExpansion};
+use base::skill::SkillEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -328,9 +328,9 @@ impl CommandRegistry {
                     description: entry.description.clone(),
                     kind: "prompt",
                     source: match entry.source {
-                        base::frozen::SkillSource::User => "user",
-                        base::frozen::SkillSource::Project => "project",
-                        base::frozen::SkillSource::Plugin => "plugin",
+                        base::skill::SkillSource::User => "user",
+                        base::skill::SkillSource::Project => "project",
+                        base::skill::SkillSource::Plugin => "plugin",
                     },
                 },
                 Command::McpPrompt { description, .. } => CommandInfo {
@@ -382,11 +382,11 @@ pub fn expand_skill_for_command(entry: &SkillEntry, body: Option<String>, args: 
     let body = body.unwrap_or_else(|| format!("# {}\n\n{}", entry.name, entry.description));
 
     // Expand variables: {args}, $ARGUMENTS, $name (named `arguments:`), etc.
-    let expanded = base::frozen::skill::expand_skill_vars_named(
+    let expanded = base::skill::expand_skill_vars_named(
         &body,
         args,
         entry.arguments.as_deref().unwrap_or(&[]),
-        Some(&base::frozen::skill::InvocationVars {
+        Some(&base::skill::InvocationVars {
             skill_md: &entry.path,
             session_id: None,
         }),
@@ -466,7 +466,7 @@ mod tests {
         registry.insert_prompt(SkillEntry {
             name: "review".into(),
             description: "Review a diff".into(),
-            source: base::frozen::SkillSource::Plugin,
+            source: base::skill::SkillSource::Plugin,
             path: std::path::PathBuf::from("(plugin:code-review:review)"),
             user_invocable: true,
             ..Default::default()
@@ -539,7 +539,7 @@ mod tests {
         let entry = SkillEntry {
             name: "test-skill".into(),
             description: "A test skill".into(),
-            source: base::frozen::SkillSource::User,
+            source: base::skill::SkillSource::User,
             path: std::path::PathBuf::from("(bundled:test-skill)"),
             ..Default::default()
         };

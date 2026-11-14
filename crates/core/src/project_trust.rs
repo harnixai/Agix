@@ -20,7 +20,7 @@ use serde_json::{Map, Value};
 
 use crate::context::config::NetworkModeConfig;
 use crate::interface::exec::env::SubprocessEnvMode;
-use crate::settings::PermissionMode;
+use crate::permission::{PermissionMode, ProjectTrust};
 
 /// What a project no `trusted` pattern names is.
 #[derive(
@@ -84,8 +84,8 @@ impl ProjectTrustSettings {
     /// the answer without loading a whole `Settings`.
     pub fn read_global(global_dir: &Path) -> Self {
         let layers: Vec<Value> = [
-            crate::settings::SETTINGS_FILE,
-            crate::settings::SETTINGS_LOCAL_FILE,
+            crate::paths::SETTINGS_FILE,
+            crate::paths::SETTINGS_LOCAL_FILE,
         ]
         .iter()
         .filter_map(|file| std::fs::read_to_string(global_dir.join(file)).ok())
@@ -104,31 +104,6 @@ impl ProjectTrustSettings {
             TrustLevel::Untrusted => ProjectTrust::Untrusted,
         };
         (trust, None)
-    }
-}
-
-/// Whether the project tier of a `LoadedSettings` is in effect as written.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ProjectTrust {
-    /// No project tier of its own: no project at all, or one whose `.agix`
-    /// is the global or scene directory.
-    #[default]
-    NoProject,
-    Trusted,
-    Untrusted,
-}
-
-impl ProjectTrust {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NoProject => "none",
-            Self::Trusted => "trusted",
-            Self::Untrusted => "untrusted",
-        }
-    }
-
-    pub fn is_untrusted(self) -> bool {
-        self == Self::Untrusted
     }
 }
 

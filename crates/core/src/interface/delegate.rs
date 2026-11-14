@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use super::permission::Grant;
 use super::tool::Tool;
 use super::tool_selector::ToolSelector;
+use crate::permission::PermissionMode;
 use crate::permission::PermissionRule;
-use crate::settings::PermissionMode;
 
 #[non_exhaustive]
 pub struct DelegateRequest {

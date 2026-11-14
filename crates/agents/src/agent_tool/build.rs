@@ -13,7 +13,7 @@ pub(crate) struct Spec {
     pub(crate) tools: ToolSelector,
     pub(crate) output_schema: Option<Value>,
     /// A mode the caller asked for (a team's), held to the parent's.
-    pub(crate) permission_mode: Option<base::settings::PermissionMode>,
+    pub(crate) permission_mode: Option<base::permission::PermissionMode>,
     pub(crate) seat: Option<TeamSeat>,
     pub(crate) cwd: std::path::PathBuf,
     pub(crate) called_from: Option<CallSite>,

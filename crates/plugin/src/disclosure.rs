@@ -160,7 +160,7 @@ impl Disclosure {
                 MAX_PROMPT_CHARS,
             )?;
         }
-        if base::frozen::skill::body_runs_commands(&skill.body) {
+        if base::skill::body_runs_commands(&skill.body) {
             self.capabilities.push(format!(
                 "skill `{name}` runs shell commands when it is expanded, each held to the \
                  session's permission rules"

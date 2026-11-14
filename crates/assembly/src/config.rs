@@ -16,7 +16,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::settings::{LoadedSettings, PathSettings, Settings};
+use base::paths::PathSettings;
+use base::settings::{LoadedSettings, Settings};
 use permissions::ruleset::RuleSet;
 
 /// Controls where the daemon reads its configuration and writes its runtime

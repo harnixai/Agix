@@ -14,7 +14,7 @@ use base::interface::model::{
 };
 use base::prompt::PromptBlock;
 use base::provider::ApiType;
-use base::settings::RecorderMode;
+use base::recorder::RecorderMode;
 use std::sync::Arc;
 use test_runner::api_runner::{self, AgentRunnerConfig};
 use test_runner::script::{self};

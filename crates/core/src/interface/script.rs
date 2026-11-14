@@ -33,12 +33,49 @@
 //! provide its own interruption — every serious one has a fuel or watchdog
 //! mechanism — and the carrier's timeout is the second line, not the first.
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::prompt::BlockOrigin;
+
+/// One script, bound to one extension point.
+///
+/// ```jsonc
+/// "scripts": [
+///   { "path": ".agix/scripts/prompt.js", "point": "prompt.assemble", "entry": "onAssemble" }
+/// ]
+/// ```
+///
+/// The point is a catalog id — see `base::interface::catalog` and
+/// `docs/extension_points.md`. A binding naming a point the engine does not
+/// have, or one scripts may not use, is refused at startup with a message
+/// saying which; it is not silently ignored, because a script that quietly
+/// never runs is worse than one that fails to load.
+///
+/// Authority follows the file's location, not the configuration: a script
+/// inside the project is the operator's own and may rewrite anything, while
+/// one that arrived with a plugin may add. Nothing in this struct can change
+/// that, which is deliberate — it would otherwise be a field a plugin could
+/// set for itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScriptBinding {
+    /// Path to the script, relative to the project root or absolute.
+    pub path: PathBuf,
+    /// Which extension point, by its catalog id.
+    pub point: String,
+    /// The function the script exports.
+    pub entry: String,
+    /// Wall clock for one call. Defaults to the carrier's own budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// How many times it may run in a turn. Defaults to the carrier's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calls_per_turn: Option<u32>,
+}
 
 /// A piece of code to run, and whose it is.
 #[derive(Debug, Clone)]

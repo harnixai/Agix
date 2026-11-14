@@ -7,7 +7,7 @@ use base::interface::environment::SystemEnvironment;
 use base::interface::exec::in_process::NoSandbox;
 use base::interface::exec::ExecProviders;
 use base::paths::ConfigPaths;
-use base::project_trust::ProjectTrust;
+use base::permission::ProjectTrust;
 use std::path::Path;
 use tempfile::TempDir;
 

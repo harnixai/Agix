@@ -10,8 +10,8 @@
 
 use base::context::config::NetworkModeConfig;
 use base::interface::exec::{Network, Origin};
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelErrorKind, StreamParams};
-use base::settings::ThinkingMode;
 use futures::StreamExt;
 use model::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
 use model::error::AnthropicError;

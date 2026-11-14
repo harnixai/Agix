@@ -2,7 +2,8 @@
 //! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置；`max_tokens` 兜底
 //! （`--max-tokens`）给每一对；宿主加的权限规则只回到守护进程自己那一对上。
 
-use base::settings::{LoadedRule, LoadedSettings, Settings};
+use base::permission::LoadedRule;
+use base::settings::{LoadedSettings, Settings};
 use serde_json::Value;
 
 /// What the host's settings hold that the same pair read from disk does not:
@@ -108,7 +109,7 @@ fn changed(from: &Value, to: &Value) -> Option<Value> {
 mod tests {
     use super::*;
     use base::interface::config_source::Tier;
-    use base::settings::PermissionRuleEntry;
+    use base::permission::PermissionRuleEntry;
 
     fn loaded(values: Settings) -> LoadedSettings {
         LoadedSettings::new(values, Default::default())

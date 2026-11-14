@@ -520,7 +520,7 @@ async fn a_project_grant_is_written_where_the_next_session_reads_it() {
     assert_eq!(rules[0].rule_content.as_deref(), Some("git status"));
     assert_eq!(rules[0].behavior, RuleBehavior::Allow);
     assert!(
-        !local.with_file_name(base::settings::SETTINGS_FILE).exists(),
+        !local.with_file_name(base::paths::SETTINGS_FILE).exists(),
         "must not touch the shared/committed settings.json tier"
     );
 }
@@ -560,7 +560,7 @@ async fn a_project_grant_without_a_project_is_kept_for_the_session() {
         !root
             .path()
             .join("global")
-            .join(base::settings::SETTINGS_LOCAL_FILE)
+            .join(base::paths::SETTINGS_LOCAL_FILE)
             .exists(),
         "a rule in the global tier would allow the call everywhere"
     );
@@ -576,7 +576,7 @@ async fn a_project_grant_writes_to_disk_off_the_async_thread() {
     let file = root
         .path()
         .join(".agix")
-        .join(base::settings::SETTINGS_LOCAL_FILE);
+        .join(base::paths::SETTINGS_LOCAL_FILE);
     let perm = Arc::new(empty().with_local_settings_file(Some(file.clone())));
 
     let dir = root.path().join(".agix");
@@ -621,7 +621,7 @@ async fn a_project_grant_with_nothing_to_scope_it_says_it_was_not_written() {
     let file = root
         .path()
         .join(".agix")
-        .join(base::settings::SETTINGS_LOCAL_FILE);
+        .join(base::paths::SETTINGS_LOCAL_FILE);
     let perm = empty().with_local_settings_file(Some(file.clone()));
 
     let kept = perm
@@ -700,9 +700,7 @@ fn with_managed(
         "code",
         "m",
     )
-    .with_managed(Some(base::managed_settings::ManagedSettings::from_value(
-        "it", managed,
-    )))
+    .with_managed(Some(base::managed_settings::from_value("it", managed)))
 }
 
 async fn verdict(
@@ -783,7 +781,7 @@ async fn disabling_bypass_judges_a_bypass_session_as_default() {
     );
     assert_eq!(
         settings.values.permission_mode,
-        base::settings::PermissionMode::Default
+        base::permission::PermissionMode::Default
     );
     let outcome = verdict(&settings, PermissionMode::BypassPermissions, "touch x").await;
     assert!(

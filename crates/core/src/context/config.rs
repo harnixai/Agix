@@ -81,7 +81,7 @@ pub struct EngineConfig {
     pub disable_skill_shell_execution: bool,
     /// Whether the project tier is in effect (`LoadedSettings::trust`); an
     /// untrusted project's skill `` !`cmd` `` is not run.
-    pub project_trust: crate::project_trust::ProjectTrust,
+    pub project_trust: crate::permission::ProjectTrust,
     /// How the engine reads the files it puts in front of the model.
     pub prompt_files: crate::paths::PromptFiles,
     /// Mirrors `Settings.sandbox.subprocess_env`.
@@ -299,7 +299,7 @@ impl EngineConfig {
             dangerously_disable_sandbox: false,
             sandbox_policy: SandboxPolicyConfig::default(),
             disable_skill_shell_execution: false,
-            project_trust: crate::project_trust::ProjectTrust::default(),
+            project_trust: crate::permission::ProjectTrust::default(),
             prompt_files: crate::paths::PromptFiles::unscoped(),
             subprocess_env: Default::default(),
 
@@ -331,10 +331,10 @@ impl EngineConfig {
         c.max_tokens = settings.model.max_tokens;
         c.fallback_model = settings.model.fallback_model.clone();
         c.thinking_mode = match settings.model.thinking_mode {
-            crate::settings::ThinkingMode::Auto => ThinkingModeConfig::Auto,
-            crate::settings::ThinkingMode::Off => ThinkingModeConfig::Off,
-            crate::settings::ThinkingMode::On => ThinkingModeConfig::On,
-            crate::settings::ThinkingMode::OnBudget(n) => ThinkingModeConfig::OnBudget(n),
+            crate::interface::model::ThinkingMode::Auto => ThinkingModeConfig::Auto,
+            crate::interface::model::ThinkingMode::Off => ThinkingModeConfig::Off,
+            crate::interface::model::ThinkingMode::On => ThinkingModeConfig::On,
+            crate::interface::model::ThinkingMode::OnBudget(n) => ThinkingModeConfig::OnBudget(n),
         };
 
         c.permission_prompt_timeout_secs = settings.execution.permission_prompt_timeout_secs;
@@ -414,7 +414,8 @@ pub fn infer_context_window_tokens(model: &str) -> usize {
 #[cfg(test)]
 mod sandbox_wiring_tests {
     use super::*;
-    use crate::settings::{LoadedSettings, PathSettings, Settings};
+    use crate::paths::PathSettings;
+    use crate::settings::{LoadedSettings, Settings};
 
     fn config_of(s: &Settings) -> EngineConfig {
         EngineConfig::from_loaded(&LoadedSettings::new(s.clone(), PathSettings::default()))

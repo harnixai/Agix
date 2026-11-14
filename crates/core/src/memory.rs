@@ -419,7 +419,7 @@ impl MemoryStore {
             }
         };
 
-        use crate::frozen::frontmatter::scalar;
+        use crate::text::frontmatter::scalar;
         let name = scalar(frontmatter, "name").filter(|n| !n.is_empty())?;
         let description = scalar(frontmatter, "description").unwrap_or_default();
         let memory_type = scalar(frontmatter, "type")
@@ -1013,8 +1013,8 @@ fn selection_request(
     Vec<crate::interface::model::ModelMessage>,
     crate::interface::model::StreamParams,
 ) {
+    use crate::interface::model::ThinkingMode;
     use crate::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
-    use crate::settings::ThinkingMode;
 
     let manifest: String = headers
         .iter()

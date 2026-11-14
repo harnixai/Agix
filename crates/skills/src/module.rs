@@ -120,7 +120,7 @@ pub fn build_skill_manager_with_plugins(
 /// the project to be trusted. As `skills/<name>`, for `project.status`.
 pub fn project_skills_requiring_trust(settings: &LoadedSettings) -> Vec<String> {
     use crate::manager::SkillSource;
-    if settings.trust() == base::project_trust::ProjectTrust::NoProject {
+    if settings.trust() == base::permission::ProjectTrust::NoProject {
         return Vec::new();
     }
     let Some(project) = settings.paths.project_root() else {
@@ -229,15 +229,15 @@ mod tests {
 
         let mut settings = LoadedSettings::new(
             base::settings::Settings::defaults_for("m"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         )
         .with_project_layer(base::project_trust::ProjectLayer {
-            trust: base::project_trust::ProjectTrust::Untrusted,
+            trust: base::permission::ProjectTrust::Untrusted,
             ..Default::default()
         });
         settings.paths.local_data_dir = project.path().join(".agix");
         settings.paths.workspace =
-            base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
 
         assert_eq!(
             project_skills_requiring_trust(&settings),
@@ -246,7 +246,7 @@ mod tests {
     }
 
     fn packaged(plugin: &str, name: &str, body: &str) -> Arc<dyn SkillProvider> {
-        let entry = base::frozen::skill::SkillEntry {
+        let entry = base::skill::SkillEntry {
             name: name.into(),
             description: format!("{plugin}'s {name}"),
             path: std::path::PathBuf::from(format!("/cache/{plugin}/skills/{name}/SKILL.md")),
@@ -267,13 +267,13 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let mut settings = LoadedSettings::new(
             base::settings::Settings::defaults_for("m"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = home.path().join("global");
         settings.paths.user_data_dir = home.path().join("scene");
         settings.paths.local_data_dir = home.path().join("project/.agix");
         settings.paths.workspace =
-            base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
         let disk = settings.paths.global_data_dir.join("skills/tour");
         std::fs::create_dir_all(&disk).unwrap();
         std::fs::write(

@@ -20,11 +20,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base::interface::model::Model;
+use base::interface::model::ThinkingMode;
 use base::interface::scene::SceneSpec;
+use base::interface::script::ScriptBinding;
 use base::interface::script::{ScriptLedger, ScriptOutcome, ScriptRecord};
 use base::interface::tool::{InMemoryToolRegistry, Tool};
 use base::memory::MemoryStore;
-use base::settings::{ScriptBinding, Settings, ThinkingMode};
+use base::settings::Settings;
 use runtime::agent::{Builder, InputMessage};
 use tokio_util::sync::CancellationToken;
 
@@ -292,7 +294,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
         ),
         None => base::settings::LoadedSettings::new(
             Settings::defaults_for("script-model"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         ),
     };
     settings.values.model.model_name = "script-model".into();
@@ -300,7 +302,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");
-    settings.paths.workspace = base::settings::Workspace::project_of(&root.join("local"));
+    settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
     settings.values.memory_enabled = session.memory.is_some();
@@ -308,9 +310,9 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     // here to answer a prompt, and a case that hung on one would look like a
     // case whose turn never finished.
     if !session.asking {
-        settings.values.permission_mode = base::settings::PermissionMode::BypassPermissions;
+        settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
     } else {
-        settings.values.permission_mode = base::settings::PermissionMode::Default;
+        settings.values.permission_mode = base::permission::PermissionMode::Default;
     }
     settings.values.scripts = session.bindings;
     settings.values.hooks_config = session.hooks;

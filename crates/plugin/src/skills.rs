@@ -8,8 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use base::frozen::frontmatter::{parse_skill_file, split_frontmatter, SKILL_FRONTMATTER_KEYS};
-use base::frozen::skill::{SkillEntry, SkillSource};
+use base::frozen::frontmatter::{parse_skill_file, SKILL_FRONTMATTER_KEYS};
+use base::skill::{SkillEntry, SkillSource};
+use base::text::frontmatter::split_frontmatter;
 
 use crate::manifest::{inside_package, Plugin, PluginError};
 

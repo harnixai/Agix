@@ -32,7 +32,7 @@ async fn test_pool() -> (Arc<SessionPool>, tempfile::TempDir) {
     let client: Arc<dyn AnthropicClient> = Arc::new(model::mock::MockAnthropicClient::new());
     let mut settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     settings.paths.user_data_dir = dir.path().join("user");
     settings.paths.global_data_dir = dir.path().join("global");

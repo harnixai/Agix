@@ -573,7 +573,7 @@ fn to_sandbox_policy_maps_each_network_mode_variant() {
 
 #[test]
 fn an_untrusted_projects_git_leaves_the_lane_unless_the_strict_profile_holds() {
-    use base::project_trust::ProjectTrust;
+    use base::permission::ProjectTrust;
     let dir = tempfile::tempdir().unwrap();
     let lane = |trust, strict| {
         let mut ctx = ctx_in(dir.path());

@@ -34,9 +34,10 @@ use base::interface::model::{
     ToolDef,
 };
 use base::interface::token_counter::TokenCounter;
+use base::paths::PathSettings;
 use base::prompt::PromptBlock;
 use base::rules::RuleEntry;
-use base::settings::{LoadedSettings, PathSettings, Settings};
+use base::settings::{LoadedSettings, Settings};
 use runtime::agent::{Builder, HostContracts, InputMessage};
 use runtime::module::{Module, ModuleError, SessionContext};
 use tokio_util::sync::CancellationToken;
@@ -348,7 +349,7 @@ fn settings(dir: &Path) -> LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.join("user");
     paths.global_data_dir = dir.join("global");
-    paths.workspace = base::settings::Workspace::project_of(dir);
+    paths.workspace = base::paths::Workspace::project_of(dir);
     paths.local_data_dir = dir.to_path_buf();
     LoadedSettings::new(values, paths)
 }

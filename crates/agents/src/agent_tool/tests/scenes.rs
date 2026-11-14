@@ -142,7 +142,7 @@ fn subagent_inherits_the_parent_instruction_file() {
 
     let mut parent = base::settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     parent.values.instruction_file = Some(std::path::PathBuf::from("/proj/AGENTS.md"));
     let agent_tool = TestParent {

@@ -17,7 +17,8 @@ use crate::session_pool::pool_telemetry::{otel_sink, recordings_root, session_cl
 use crate::session_pool::{CreateError, SessionCtx, SessionCustomizer};
 use base::interface::permission::PermissionPolicy;
 use base::interface::scene::SceneSpec;
-use base::settings::{Divergence, LoadedSettings, RecorderConfig, RecorderMode};
+use base::recorder::{Divergence, RecorderConfig, RecorderMode};
+use base::settings::LoadedSettings;
 use runtime::agent::{Agent, Builder, EventReceiver, InputSender};
 use std::path::Path;
 use std::sync::Arc;
@@ -271,8 +272,8 @@ impl EngineFactory {
             if let Some(name) = model_name {
                 snap.values.model.model_name = name.clone();
             }
-            if let base::settings::Workspace::Scratch(_) = snap.paths.workspace {
-                snap.paths.workspace = base::settings::Workspace::Scratch(
+            if let base::paths::Workspace::Scratch(_) = snap.paths.workspace {
+                snap.paths.workspace = base::paths::Workspace::Scratch(
                     base::paths::session_scratch_dir(&snap.paths.global_data_dir, session_id),
                 );
             }

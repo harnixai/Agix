@@ -69,8 +69,8 @@ pub struct ManagedLayer {
 
 /// A rule in the managed layer that does not parse makes the layer unreadable
 /// rather than dropping the rule.
-impl From<&Option<base::managed_settings::ManagedSettings>> for ManagedLayer {
-    fn from(managed: &Option<base::managed_settings::ManagedSettings>) -> Self {
+impl From<&Option<base::permission::ManagedSettings>> for ManagedLayer {
+    fn from(managed: &Option<base::permission::ManagedSettings>) -> Self {
         let Some(managed) = managed else {
             return Self::default();
         };

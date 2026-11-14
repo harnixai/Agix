@@ -42,7 +42,7 @@ use base::interface::model::{
 };
 use base::prompt::PromptBlock;
 use base::provider::ApiType;
-use base::settings::{Divergence, RecorderConfig, RecorderMode};
+use base::recorder::{Divergence, RecorderConfig, RecorderMode};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -944,9 +944,9 @@ impl Drop for RecordingStream {
 mod tests {
     use super::*;
     use base::interface::model::ModelErrorKind;
+    use base::interface::model::ThinkingMode;
     use base::interface::model::{call_purpose, CallOrigin};
     use base::prompt::BlockRole;
-    use base::settings::ThinkingMode;
     use futures::StreamExt;
 
     /// Replays a fixed script, or fails to open when `open_error` is set.

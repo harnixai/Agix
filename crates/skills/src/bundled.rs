@@ -29,7 +29,7 @@
 //! 一个 session 列出哪些由它的 scene 决定（`SceneSpec::bundled_skills`），还要
 //! [`required_tools`] 里的工具在这个 scene 都允许——见 `catalog::BundledAdmission`。
 
-use base::frozen::{SkillEntry, SkillSource};
+use base::skill::{SkillEntry, SkillSource};
 use std::path::PathBuf;
 
 /// 返回内置 skills（in-memory；不动 disk）。在 `load_session_skills` 之后

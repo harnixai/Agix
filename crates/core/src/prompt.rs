@@ -376,12 +376,13 @@ fn registered_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interface::model::ThinkingMode;
     use crate::interface::scene::{FixedPrompt, TokenBudget};
     use crate::memory::MemoryStore;
+    use crate::paths::PathSettings;
+    use crate::permission::PermissionMode;
     use crate::provider::ApiType;
-    use crate::settings::{
-        ExecutionSettings, ModelSettings, PathSettings, PermissionMode, Settings, ThinkingMode,
-    };
+    use crate::settings::{ExecutionSettings, ModelSettings, Settings};
     use std::borrow::Cow;
     use tempfile::TempDir;
 
@@ -427,7 +428,7 @@ mod tests {
             PathSettings {
                 user_data_dir: "/tmp/agix/scenes/code".into(),
                 global_data_dir: "/tmp/agix".into(),
-                workspace: crate::settings::Workspace::project_of(std::path::Path::new(
+                workspace: crate::paths::Workspace::project_of(std::path::Path::new(
                     "/tmp/agix/local",
                 )),
                 local_data_dir: "/tmp/agix/local".into(),

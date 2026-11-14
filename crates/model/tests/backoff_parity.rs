@@ -12,8 +12,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use base::interface::backoff::{Backoff, BackoffPolicy, FailedAttempt, NoBackoff, RequestFailure};
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelErrorKind, StreamParams};
-use base::settings::ThinkingMode;
 use futures::StreamExt;
 use model::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
 use model::types::MessagesRequest;

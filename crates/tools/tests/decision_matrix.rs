@@ -278,7 +278,7 @@ const RULES: [(&str, RuleCase); 5] = [
 fn permission(tool: &str, case: RuleCase) -> Policy {
     let mut settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     let mut extra = Vec::new();
     let user_rule = |behavior| PermissionRule {
@@ -293,10 +293,10 @@ fn permission(tool: &str, case: RuleCase) -> Policy {
         RuleCase::Ask => extra.push(user_rule(RuleBehavior::Ask)),
         RuleCase::Deny => extra.push(user_rule(RuleBehavior::Deny)),
         RuleCase::ManagedAsk => {
-            settings.managed = Some(base::managed_settings::ManagedSettings {
+            settings.managed = Some(base::permission::ManagedSettings {
                 origin: "matrix".into(),
                 error: None,
-                permission_rules: vec![base::settings::PermissionRuleEntry {
+                permission_rules: vec![base::permission::PermissionRuleEntry {
                     tool: tool.into(),
                     action: RuleBehavior::Ask,
                     matching: Default::default(),
@@ -558,7 +558,7 @@ async fn every_builtin_tool_is_decided_the_same_in_every_cell() {
 fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolContext {
     let settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     let mut ctx = ToolContext::from_engine_ctx_with(
         cwd.to_path_buf(),
@@ -744,9 +744,9 @@ async fn every_stage_of_the_policy_is_reached() {
 
     let mut unreadable = base::settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
-    unreadable.managed = Some(base::managed_settings::ManagedSettings {
+    unreadable.managed = Some(base::permission::ManagedSettings {
         origin: "matrix".into(),
         error: Some("not JSON".into()),
         permission_rules: Vec::new(),

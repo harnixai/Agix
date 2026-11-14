@@ -1,12 +1,12 @@
 //! `resolve_session_permission_tests` 原样搬来的用例。
 
 use super::*;
-use base::settings::Divergence;
+use base::recorder::Divergence;
 
 fn defaults() -> base::settings::LoadedSettings {
     base::settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     )
 }
 
@@ -92,12 +92,12 @@ fn a_session_clock_is_the_hosts_start_else_the_recordings_else_the_machines() {
 #[test]
 fn session_options_cannot_loosen_an_asking_settings_default() {
     let opts = SessionOptions {
-        permission_mode: Some(base::settings::PermissionMode::BypassPermissions),
+        permission_mode: Some(base::permission::PermissionMode::BypassPermissions),
         ..Default::default()
     };
     assert_eq!(
         effective_permission_mode(&defaults(), Some(&opts)),
-        base::settings::PermissionMode::Default,
+        base::permission::PermissionMode::Default,
         "the request should clamp down to the configured mode"
     );
 }
@@ -109,12 +109,12 @@ fn allow_client_permission_override_restores_client_wins() {
     let mut settings = defaults();
     settings.values.allow_client_permission_override = true;
     let opts = SessionOptions {
-        permission_mode: Some(base::settings::PermissionMode::BypassPermissions),
+        permission_mode: Some(base::permission::PermissionMode::BypassPermissions),
         ..Default::default()
     };
     assert_eq!(
         effective_permission_mode(&settings, Some(&opts)),
-        base::settings::PermissionMode::BypassPermissions
+        base::permission::PermissionMode::BypassPermissions
     );
 }
 
@@ -124,20 +124,20 @@ fn allow_client_permission_override_restores_client_wins() {
 #[test]
 fn a_client_may_always_tighten() {
     let mut settings = defaults();
-    settings.values.permission_mode = base::settings::PermissionMode::BypassPermissions;
+    settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
     let opts = SessionOptions {
-        permission_mode: Some(base::settings::PermissionMode::Plan),
+        permission_mode: Some(base::permission::PermissionMode::Plan),
         ..Default::default()
     };
     assert_eq!(
         effective_permission_mode(&settings, Some(&opts)),
-        base::settings::PermissionMode::Plan
+        base::permission::PermissionMode::Plan
     );
 }
 
 #[test]
 fn auto_and_yolo_in_session_options_clamp_and_resolve_as_bypass() {
-    use base::settings::PermissionMode;
+    use base::permission::PermissionMode;
     for spelling in ["auto", "yolo"] {
         let opts: SessionOptions =
             serde_json::from_value(serde_json::json!({ "permission_mode": spelling })).unwrap();
@@ -179,18 +179,18 @@ fn auto_and_yolo_in_session_options_clamp_and_resolve_as_bypass() {
 #[test]
 fn settings_ask_default_is_overridable_per_session_without_becoming_allow_all() {
     let opts = SessionOptions {
-        permission_mode: Some(base::settings::PermissionMode::DontAsk),
+        permission_mode: Some(base::permission::PermissionMode::DontAsk),
         ..Default::default()
     };
     assert_eq!(
         effective_permission_mode(&defaults(), Some(&opts)),
-        base::settings::PermissionMode::DontAsk
+        base::permission::PermissionMode::DontAsk
     );
 }
 
 #[test]
 fn effective_mode_prefers_session_options_then_settings_then_ask() {
-    use base::settings::PermissionMode;
+    use base::permission::PermissionMode;
     let mut settings = defaults();
     assert_eq!(
         effective_permission_mode(&settings, None),

@@ -615,8 +615,8 @@ async fn handing_the_blocks_back_in_another_order_rewrites_nothing() {
     );
 }
 
-fn binding(path: &str, point: &str, entry: &str) -> base::settings::ScriptBinding {
-    base::settings::ScriptBinding {
+fn binding(path: &str, point: &str, entry: &str) -> base::interface::script::ScriptBinding {
+    base::interface::script::ScriptBinding {
         path: path.into(),
         point: point.into(),
         entry: entry.into(),

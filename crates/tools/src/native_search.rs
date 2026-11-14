@@ -9,12 +9,12 @@ use crate::web_search::{
     SearchError, SearchOutput, SearchOutputItem, SearchProvider, SearchResult,
 };
 use async_trait::async_trait;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     call_purpose, CallOrigin, MessageRole, Model, ModelContentBlock, ModelEvent, ModelMessage,
     ProviderSearch, StreamParams,
 };
 use base::prompt::PromptBlock;
-use base::settings::ThinkingMode;
 use futures::stream::StreamExt;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;

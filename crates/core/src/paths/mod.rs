@@ -52,7 +52,142 @@ pub use sensitive::{
     STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+/// The shared, committed settings file present in every tier.
+pub const SETTINGS_FILE: &str = "settings.json";
+
+/// The gitignored per-machine overlay sitting beside `SETTINGS_FILE` in the
+/// same tier, overriding it.
+pub const SETTINGS_LOCAL_FILE: &str = "settings.local.json";
+
+/// Path configuration for data directories.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[non_exhaustive]
+pub struct PathSettings {
+    /// User-level, scene-specific override root (e.g. `~/.agix/scenes/<scope>/`).
+    pub user_data_dir: PathBuf,
+    /// User-level, cross-scene global root — flat, shared by every scene
+    /// (e.g. `~/.agix/`). Used by resources that don't have a scene tier
+    /// (`memory`/`sessions`/`recordings`/`mcp`) and as the base layer for resources
+    /// that do (`settings.json`/`skills`/`plugins`/`agents`/`rules`/`hooks`).
+    /// See `base::paths::ConfigPaths` module docs for the full breakdown.
+    #[serde(default)]
+    pub global_data_dir: PathBuf,
+    /// The project tier's root: `<project>/.agix/` in a project, the state
+    /// root itself (`global_data_dir`) in a session without one.
+    pub local_data_dir: PathBuf,
+    /// Where the session's tools work, and whether there is a project.
+    pub workspace: Workspace,
+    /// Which product instance's user-level state `user_data_dir` was built
+    /// for (see `base::paths::ConfigPaths`). Carried alongside the resolved
+    /// dirs so downstream code (e.g. `FrozenContext::collect`) doesn't have
+    /// to re-derive it from the path.
+    #[serde(default = "default_scope")]
+    pub scope: String,
+}
+
+/// Placeholder directories for settings that were not loaded from any — the
+/// ones [`LoadedSettings::new`] is commonly given in tests.
+impl Default for PathSettings {
+    fn default() -> Self {
+        Self {
+            user_data_dir: PathBuf::from("~/.agix/scenes/agent"),
+            global_data_dir: PathBuf::from("~/.agix"),
+            local_data_dir: PathBuf::from("."),
+            workspace: Workspace::Project(PathBuf::new()),
+            scope: default_scope(),
+        }
+    }
+}
+
+fn default_scope() -> String {
+    "code".to_string()
+}
+
+/// What a session works in (docs/ARCHITECTURE.md §3.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Workspace {
+    /// A project: the tools work in it, and its `.agix` is the project tier.
+    Project(PathBuf),
+    /// No project (`project_root: null`): no project tier, no git or
+    /// `AGENTS.md` context, and the tools work in this directory of the
+    /// session's own under the state root's scratchpad
+    /// ([`crate::paths::session_scratch_dir`]) — never in the state root's
+    /// parent, which for `~/.agix` is the user's home.
+    Scratch(PathBuf),
+}
+
+impl Workspace {
+    /// The project whose `.agix` is `local_data_dir`.
+    pub fn project_of(local_data_dir: &Path) -> Self {
+        Self::Project(
+            local_data_dir
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| local_data_dir.to_path_buf()),
+        )
+    }
+
+    /// The project, `None` without one.
+    pub fn project_root(&self) -> Option<&Path> {
+        match self {
+            Self::Project(root) => Some(root),
+            Self::Scratch(_) => None,
+        }
+    }
+}
+
+impl PathSettings {
+    pub fn new(
+        user_data_dir: PathBuf,
+        global_data_dir: PathBuf,
+        local_data_dir: PathBuf,
+        workspace: Workspace,
+        scope: String,
+    ) -> Self {
+        Self {
+            user_data_dir,
+            global_data_dir,
+            local_data_dir,
+            workspace,
+            scope,
+        }
+    }
+
+    /// The project, `None` in a session without one.
+    pub fn project_root(&self) -> Option<&Path> {
+        self.workspace.project_root()
+    }
+
+    /// The tools' working directory: the root a write needs no approval in,
+    /// a read none either, and a sandboxed command may write.
+    pub fn working_dir(&self) -> &Path {
+        match &self.workspace {
+            Workspace::Project(dir) | Workspace::Scratch(dir) => dir,
+        }
+    }
+
+    /// The project tier's `settings.local.json` — the file the interactive
+    /// permission prompt's "always allow, this project" writes to.
+    ///
+    /// Inside `local_data_dir` (`<project_root>/.agix/`), not beside it: the
+    /// Bash sandbox's deny-file-write rules (`tools::bash::sandbox`) protect
+    /// exactly this path to stop a sandboxed command from granting itself
+    /// permissions, and a copy written anywhere else would sit outside that
+    /// protection while still being loaded by `LoadedSettings::load`.
+    ///
+    /// `None` without a project: "this project" means nothing there, and its
+    /// `local_data_dir` is the state root, whose `settings.local.json` is the
+    /// global tier — a rule written there would allow the call everywhere.
+    pub fn local_settings_file(&self) -> Option<PathBuf> {
+        self.project_root()
+            .map(|_| self.local_data_dir.join(SETTINGS_LOCAL_FILE))
+    }
+}
 
 /// What a data directory's `.gitignore` keeps out of the repository the
 /// directory sits in: the files the engine writes keys into, and its
@@ -90,7 +225,7 @@ pub struct ConfigPaths {
     /// Local/project data root. Default `<cwd>/.agix/`.
     pub local_data_dir: PathBuf,
     /// The project, `None` for a session without one
-    /// ([`crate::settings::PathSettings::project_root`]).
+    /// ([`crate::paths::PathSettings::project_root`]).
     pub project_root: Option<PathBuf>,
 }
 
@@ -107,7 +242,7 @@ impl ConfigPaths {
     /// `scope` identifies the product instance whose scene-specific override
     /// tree lives under `global_data_dir/scenes/<scope>/`.
     pub fn new(global_data_dir: PathBuf, local_data_dir: PathBuf, scope: &str) -> Self {
-        let project_root = crate::settings::Workspace::project_of(&local_data_dir)
+        let project_root = Workspace::project_of(&local_data_dir)
             .project_root()
             .map(PathBuf::from);
         Self {
@@ -121,7 +256,7 @@ impl ConfigPaths {
     /// The same roots [`crate::settings::Settings`] already
     /// carries — for the call sites that hold `Settings` and want these
     /// accessors without re-deriving anything.
-    pub fn from_settings(paths: &crate::settings::PathSettings) -> Self {
+    pub fn from_settings(paths: &crate::paths::PathSettings) -> Self {
         Self {
             user_data_dir: paths.user_data_dir.clone(),
             global_data_dir: paths.global_data_dir.clone(),
@@ -203,10 +338,10 @@ mod tests {
     #[test]
     fn settings_roots_round_trip() {
         let p = paths();
-        let carried = crate::settings::PathSettings {
+        let carried = PathSettings {
             user_data_dir: p.user_data_dir.clone(),
             global_data_dir: p.global_data_dir.clone(),
-            workspace: crate::settings::Workspace::project_of(&p.local_data_dir),
+            workspace: Workspace::project_of(&p.local_data_dir),
             local_data_dir: p.local_data_dir.clone(),
             scope: "code".into(),
         };

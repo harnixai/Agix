@@ -26,7 +26,7 @@ pub struct SessionOptions {
     /// the settings'; a looser one is clamped unless the settings set
     /// `allow_client_permission_override`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<base::settings::PermissionMode>,
+    pub permission_mode: Option<base::permission::PermissionMode>,
     /// Allow/deny/ask rules for the `Policy` this session's
     /// `permission_mode` (if set) constructs. Ignored when `permission_mode`
     /// is `None`.

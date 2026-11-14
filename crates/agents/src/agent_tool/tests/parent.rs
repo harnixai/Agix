@@ -223,7 +223,7 @@ impl AgentTool {
         &self,
         prompt: &str,
         cancel: tokio_util::sync::CancellationToken,
-        permission_mode: Option<base::settings::PermissionMode>,
+        permission_mode: Option<base::permission::PermissionMode>,
         extra_tools: Vec<Arc<dyn base::tool::Tool>>,
     ) -> Result<String, base::error::ToolError> {
         let mode = DelegateMode::TeamMember {
@@ -252,7 +252,7 @@ impl AgentTool {
         agent_type: Option<String>,
         cwd: std::path::PathBuf,
         session: Arc<base::context::SessionState>,
-        permission_mode: Option<base::settings::PermissionMode>,
+        permission_mode: Option<base::permission::PermissionMode>,
     ) -> Result<String, base::error::ToolError> {
         self.assert_parent(&session);
         let mode = DelegateMode::TeamMember {
@@ -283,7 +283,7 @@ impl AgentTool {
         &self,
         cwd: std::path::PathBuf,
         agent_type: Option<&str>,
-        permission_mode: base::settings::PermissionMode,
+        permission_mode: base::permission::PermissionMode,
         seat: Option<TeamSeat>,
     ) -> Result<(Agent, EventReceiver, InputSender, SubagentPayload), base::error::ToolError> {
         let d = &self.delegator;

@@ -445,7 +445,7 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
     let def = AgentTypeDefinition {
         name: "db-reader".into(),
         description: "d".into(),
-        permission_mode: Some(base::settings::PermissionMode::Plan),
+        permission_mode: Some(base::permission::PermissionMode::Plan),
         effort: Some("max".into()),
         max_turns: Some(5),
         ..Default::default()
@@ -455,7 +455,7 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
     apply_agent_type_overrides(&mut settings, &def);
     assert_eq!(
         settings.permission_mode,
-        base::settings::PermissionMode::Plan
+        base::permission::PermissionMode::Plan
     );
     assert_eq!(settings.model.effort, Some(Effort::Max));
     assert_eq!(settings.execution.max_api_calls_per_turn, 5);
@@ -471,7 +471,7 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
 /// user's tokens at a rate they never agreed to.
 #[test]
 fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
-    use base::settings::PermissionMode as M;
+    use base::permission::PermissionMode as M;
     let def = AgentTypeDefinition {
         name: "greedy".into(),
         source: AgentTypeSource::Plugin,
@@ -502,7 +502,7 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
 /// should be able to declare.
 #[test]
 fn plugin_agent_type_may_still_tighten() {
-    use base::settings::PermissionMode as M;
+    use base::permission::PermissionMode as M;
     let def = AgentTypeDefinition {
         name: "careful".into(),
         source: AgentTypeSource::Plugin,
@@ -523,7 +523,7 @@ fn plugin_agent_type_may_still_tighten() {
 
 #[test]
 fn a_users_agent_type_may_raise_its_cap_and_loosen_its_mode() {
-    use base::settings::PermissionMode as M;
+    use base::permission::PermissionMode as M;
     let def = AgentTypeDefinition {
         name: "mine".into(),
         source: AgentTypeSource::User,
@@ -544,7 +544,7 @@ fn a_users_agent_type_may_raise_its_cap_and_loosen_its_mode() {
 
 #[test]
 fn a_planning_parent_holds_a_type_to_plan_and_a_bypassing_one_takes_it_along() {
-    use base::settings::PermissionMode as M;
+    use base::permission::PermissionMode as M;
     let typed = |mode| AgentTypeDefinition {
         name: "mine".into(),
         source: AgentTypeSource::User,
@@ -625,7 +625,7 @@ fn run_sub_applies_permission_mode_and_max_turns_override_end_to_end() {
     apply_agent_type_overrides(&mut settings.values, &def);
     assert_eq!(
         settings.values.permission_mode,
-        base::settings::PermissionMode::Plan
+        base::permission::PermissionMode::Plan
     );
     assert_eq!(settings.values.execution.max_api_calls_per_turn, 3);
 }

@@ -19,7 +19,7 @@ use crate::interface::exec::{
     capture, Captured, Enforcement, ExecError, ExecProviders, FileSystem, NetworkMode, ProcessSpec,
     SandboxPolicy,
 };
-use crate::project_trust::ProjectTrust;
+use crate::permission::ProjectTrust;
 
 /// Options every git the engine runs itself puts before its subcommand.
 ///

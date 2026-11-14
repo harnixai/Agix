@@ -119,7 +119,7 @@ async fn start_code(model: Arc<dyn AnthropicClient>) -> Harness {
 }
 
 fn bypass(settings: &mut Settings) {
-    settings.permission_mode = base::settings::PermissionMode::BypassPermissions;
+    settings.permission_mode = base::permission::PermissionMode::BypassPermissions;
 }
 
 struct Conn {
@@ -1959,7 +1959,7 @@ async fn documented_accept_edits_asks_about_reads_outside_the_project_and_a_nest
         ]),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        |settings| settings.permission_mode = base::settings::PermissionMode::AcceptEdits,
+        |settings| settings.permission_mode = base::permission::PermissionMode::AcceptEdits,
     )
     .await;
     std::fs::create_dir_all(h.project.join("nested/.git")).unwrap();

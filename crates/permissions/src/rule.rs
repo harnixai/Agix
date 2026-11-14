@@ -74,7 +74,7 @@ pub fn format_rule_string(r: &PermissionRule) -> String {
 /// 多数调用方要的是 [`rules_from`]——它按来源分别调用本函数，
 /// 直接用本函数意味着调用方自己决定 `source`。
 pub fn rules_from_settings(
-    rules: &[base::settings::PermissionRuleEntry],
+    rules: &[base::permission::PermissionRuleEntry],
     source: RuleSource,
 ) -> Vec<PermissionRule> {
     rules
@@ -147,11 +147,11 @@ pub fn exact_allows_from(loaded: &base::settings::LoadedSettings) -> Vec<Permiss
         .collect()
 }
 
-fn is_exact_allow(rule: &base::settings::PermissionRuleEntry) -> bool {
+fn is_exact_allow(rule: &base::permission::PermissionRuleEntry) -> bool {
     rule.action == base::permission::RuleBehavior::Allow && !rule.matching.is_pattern()
 }
 
-fn source_of(rule: &base::settings::LoadedRule) -> RuleSource {
+fn source_of(rule: &base::permission::LoadedRule) -> RuleSource {
     use base::interface::config_source::Tier;
     if rule.machine_local {
         return RuleSource::LocalSettings;
@@ -254,8 +254,8 @@ mod tests {
     fn settings_rule(
         tool: &str,
         action: base::permission::RuleBehavior,
-    ) -> base::settings::PermissionRuleEntry {
-        base::settings::PermissionRuleEntry {
+    ) -> base::permission::PermissionRuleEntry {
+        base::permission::PermissionRuleEntry {
             tool: tool.to_string(),
             action,
             matching: Default::default(),

@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use agents::AgentsModule;
 use async_trait::async_trait;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelMessage};
+use base::paths::PathSettings;
 use base::settings::*;
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::{Agent, Builder};
@@ -46,7 +48,7 @@ fn settings() -> base::settings::LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.clone();
     paths.global_data_dir = dir.clone();
-    paths.workspace = base::settings::Workspace::project_of(&dir);
+    paths.workspace = base::paths::Workspace::project_of(&dir);
     paths.local_data_dir = dir;
     paths.scope = "code".into();
     base::settings::LoadedSettings::new(settings, paths)

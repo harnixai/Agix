@@ -12,22 +12,18 @@ pub mod regex;
 pub mod skill;
 pub mod utils;
 
-pub use self::frontmatter::split_frontmatter;
 pub use self::import::{
     already_decided as import_already_decided, detect_import_sources, execute_import,
     mark_imported, mark_skipped, ImportError, ImportSource, ImportSourceKind, ImportSummary,
 };
 pub use self::memory::MemoryFileEntry;
-pub use self::skill::{
-    activate_conditional_skills, expand_skill_vars, load_session_skills,
-    load_session_skills_with_bundled, load_skill_from_path, try_expand_skill_command, SkillEntry,
-    SkillSource,
-};
+use self::skill::load_session_skills;
+use crate::skill::SkillEntry;
 
 use self::memory::collect_memory_files_with;
-use self::utils::truncate_chars;
 use crate::engine_exec::{read_head, EngineExec, EngineExecError, GitAccess};
 use crate::paths::ConfigPaths;
+use crate::text::truncate_chars;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use time::format_description::well_known::Iso8601;
@@ -638,7 +634,7 @@ mod tests {
         let engine = EngineExec::new(
             exec,
             crate::engine_exec::Confinement::Unconfined,
-            crate::project_trust::ProjectTrust::Untrusted,
+            crate::permission::ProjectTrust::Untrusted,
         );
         let mut ctx = FrozenContext::collect(
             dir.path().to_path_buf(),

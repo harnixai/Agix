@@ -201,7 +201,7 @@ use base::interface::permission::{
 fn settings_allowing(paths: Vec<PathBuf>) -> base::settings::LoadedSettings {
     let mut s = base::settings::Settings::defaults_for("test-model");
     s.sandbox.allow_write = paths;
-    base::settings::LoadedSettings::new(s, base::settings::PathSettings::default())
+    base::settings::LoadedSettings::new(s, base::paths::PathSettings::default())
 }
 
 async fn gate_decision(

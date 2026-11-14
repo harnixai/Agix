@@ -331,7 +331,7 @@ impl HealthCheck for MemoryCheck {
 /// which case every tool call is refused.
 pub struct ManagedSettingsCheck {
     path: PathBuf,
-    managed: Option<base::managed_settings::ManagedSettings>,
+    managed: Option<base::permission::ManagedSettings>,
     unreadable: Option<String>,
 }
 
@@ -611,7 +611,7 @@ mod tests {
         settings.memory_enabled = false;
         Arc::new(LoadedSettings::new(
             settings,
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         ))
     }
 
@@ -751,7 +751,7 @@ mod tests {
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
         let mut settings = base::settings::LoadedSettings::new(
             Settings::defaults_for("test-model"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         );
         settings.values.default_provider = Some("does-not-exist".into());
         settings.values.providers.insert(
@@ -825,13 +825,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut settings = base::settings::LoadedSettings::new(
             Settings::defaults_for("test-model"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = dir.path().join("global");
         settings.paths.user_data_dir = dir.path().join("global/scenes/code");
         settings.paths.local_data_dir = dir.path().join("project");
         settings.paths.workspace =
-            base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
         let settings = Arc::new(settings);
         let store = base::memory::MemoryStore::for_paths(&base::paths::ConfigPaths::from_settings(
             &settings.paths,
@@ -986,13 +986,13 @@ mod documented_shape_tests {
     fn report_the_example_describes(dir: &Path) -> serde_json::Value {
         let mut settings = base::settings::LoadedSettings::new(
             base::settings::Settings::defaults_for("claude-sonnet-4-6"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = dir.join("global");
         settings.paths.user_data_dir = dir.join("global/scenes/code");
         settings.paths.local_data_dir = dir.join("project");
         settings.paths.workspace =
-            base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
         serde_json::to_value(run_doctor(
             &StaticDaemonPaths::new(dir.to_path_buf()),
             "code",

@@ -6,7 +6,7 @@
 use base::engine_exec::{Confinement, EngineExec};
 use base::frozen::FrozenContext;
 use base::paths::ConfigPaths;
-use base::project_trust::ProjectTrust;
+use base::permission::ProjectTrust;
 use std::path::Path;
 use tempfile::TempDir;
 

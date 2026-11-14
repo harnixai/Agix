@@ -13,7 +13,7 @@
 use base::engine_exec::{Confinement, EngineExec};
 use base::frozen::FrozenContext;
 use base::interface::exec::{Process, ProcessSpec, Sandbox, SandboxPolicy};
-use base::project_trust::ProjectTrust;
+use base::permission::ProjectTrust;
 use futures::StreamExt;
 use platform::testing::{on_a_terminal_of_its_own, PROBE};
 use platform::{LocalProcess, PlatformSandbox};

@@ -14,11 +14,13 @@
 //! The usages here are deliberately different per call. Equal ones would let a
 //! sum and a last-value pass the same assertion.
 
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, Usage};
 use base::interface::tool::{
     InMemoryToolRegistry, PathStyle, ProgressSender, Tool, ToolContext, ToolResult,
 };
-use base::settings::{PermissionMode, Settings, ThinkingMode};
+use base::permission::PermissionMode;
+use base::settings::Settings;
 use runtime::agent::Builder;
 use std::sync::Arc;
 use test_runner::scripted_model::{Reply, ScriptedModel};
@@ -58,7 +60,7 @@ async fn one_turn_of_two_calls() -> Ran {
 
     let mut settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("accounting-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     settings.values.model.model_name = "accounting-model".into();
     settings.values.model.max_tokens = 1024;
@@ -67,7 +69,7 @@ async fn one_turn_of_two_calls() -> Ran {
     settings.values.permission_mode = PermissionMode::BypassPermissions;
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");
-    settings.paths.workspace = base::settings::Workspace::project_of(&root.join("local"));
+    settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
 

@@ -9,10 +9,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base::frozen::SkillEntry;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelMessage};
 use base::interface::scene::SceneSpec;
+use base::paths::PathSettings;
 use base::settings::*;
+use base::skill::SkillEntry;
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::Builder;
 use runtime::commands::{Command, CommandRegistry};
@@ -50,7 +52,7 @@ fn test_settings() -> base::settings::LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.clone();
     paths.global_data_dir = dir.clone();
-    paths.workspace = base::settings::Workspace::project_of(&dir);
+    paths.workspace = base::paths::Workspace::project_of(&dir);
     paths.local_data_dir = dir;
     paths.scope = "code".into();
     base::settings::LoadedSettings::new(settings, paths)
@@ -237,10 +239,10 @@ async fn build_uses_the_injected_skill_catalog_instead_of_scanning_disk() {
     let scene: Arc<SceneSpec> = Arc::new(scene::code::spec(scene::code::Interaction::Interactive));
 
     let catalog = skills::manager::SkillManager::new();
-    catalog.register_bundled(base::frozen::SkillEntry {
+    catalog.register_bundled(base::skill::SkillEntry {
         name: "p2-injected-only".into(),
         description: "only exists in the injected catalog".into(),
-        source: base::frozen::SkillSource::User,
+        source: base::skill::SkillSource::User,
         path: std::path::PathBuf::from("(test:p2-injected-only)"),
         ..Default::default()
     });
@@ -270,10 +272,10 @@ async fn a_host_can_register_a_fourth_skill_source() {
 
     let source = StaticSkills::new(
         "company-bundle",
-        vec![base::frozen::SkillEntry {
+        vec![base::skill::SkillEntry {
             name: "file-a-ticket".into(),
             description: "Open a ticket in the company tracker".into(),
-            source: base::frozen::SkillSource::Plugin,
+            source: base::skill::SkillSource::Plugin,
             // Deliberately not a readable path: the source owns the body.
             path: std::path::PathBuf::from("(company:file-a-ticket)"),
             ..Default::default()

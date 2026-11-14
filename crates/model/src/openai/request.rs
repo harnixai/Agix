@@ -5,10 +5,10 @@
 //! data + `Serialize`, no I/O, so the wire shape is directly assertable in
 //! unit tests without standing up an HTTP server.
 
+use base::interface::model::{Effort, ThinkingMode};
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage, ToolDef};
 use base::prompt::PromptBlock;
 use base::provider::ThinkingToggle;
-use base::settings::{Effort, ThinkingMode};
 use serde::Serialize;
 use serde_json::{Map, Value};
 

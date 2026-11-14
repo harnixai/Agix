@@ -123,6 +123,8 @@ fn test_scene(allowed: Vec<String>) -> Arc<SceneSpec> {
 }
 
 fn test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
+    use base::interface::model::ThinkingMode;
+    use base::paths::PathSettings;
     use base::settings::*;
     let mut values = Settings::defaults_for("test");
     values.model.max_tokens = 2000;
@@ -133,7 +135,7 @@ fn test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = root.to_path_buf();
     paths.global_data_dir = root.to_path_buf();
-    paths.workspace = base::settings::Workspace::project_of(root);
+    paths.workspace = base::paths::Workspace::project_of(root);
     paths.local_data_dir = root.to_path_buf();
     base::settings::LoadedSettings::new(values, paths)
 }
@@ -369,8 +371,7 @@ async fn parent_agents_md_reaches_the_prompt_with_nearest_last() {
     .await;
     let mut settings = test_settings(dir.path());
     settings.paths.local_data_dir = child.clone();
-    settings.paths.workspace =
-        base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+    settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let (agent, _rx, _tx) = crate::agent::Builder::new()
         .scene(test_scene(vec![]))
         .model(Arc::new(DummyModel))
@@ -424,8 +425,7 @@ async fn single_instruction_file_is_injected_verbatim() {
     .await;
     let mut settings = test_settings(dir.path());
     settings.paths.local_data_dir = root.clone();
-    settings.paths.workspace =
-        base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+    settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let (agent, _rx, _tx) = crate::agent::Builder::new()
         .scene(test_scene(vec![]))
         .model(Arc::new(DummyModel))
@@ -448,12 +448,12 @@ async fn rebuilt_prompt_still_carries_skills_and_scene_skeleton() {
     let dir = tempfile::tempdir().unwrap();
     let mut agent = agent_with(test_settings(dir.path()), vec![]);
 
-    struct OneSkill(base::frozen::SkillEntry);
+    struct OneSkill(base::skill::SkillEntry);
     impl base::interface::skill_catalog::SkillCatalog for OneSkill {
-        fn list(&self) -> Vec<base::frozen::SkillEntry> {
+        fn list(&self) -> Vec<base::skill::SkillEntry> {
             vec![self.0.clone()]
         }
-        fn get(&self, name: &str) -> Option<base::frozen::SkillEntry> {
+        fn get(&self, name: &str) -> Option<base::skill::SkillEntry> {
             (self.0.name == name).then(|| self.0.clone())
         }
         fn body(&self, _: &str) -> Option<String> {
@@ -462,10 +462,10 @@ async fn rebuilt_prompt_still_carries_skills_and_scene_skeleton() {
         fn reload_changed(&self) -> usize {
             0
         }
-        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
-        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
         fn invocation_count(&self, _: &str) -> u32 {
@@ -477,7 +477,7 @@ async fn rebuilt_prompt_still_carries_skills_and_scene_skeleton() {
     }
     agent
         .tooling
-        .set_skills(Arc::new(OneSkill(base::frozen::SkillEntry {
+        .set_skills(Arc::new(OneSkill(base::skill::SkillEntry {
             name: "release-checklist".into(),
             description: "Runs the pre-release checklist".into(),
             user_invocable: true,

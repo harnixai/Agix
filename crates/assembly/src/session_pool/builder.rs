@@ -14,7 +14,7 @@ pub(crate) struct SessionPoolBuilder {
     history_store: Option<Arc<dyn history::store::HistoryStore>>,
     paths: Arc<dyn crate::config::DaemonPaths>,
     credentials: Arc<dyn base::interface::credentials::CredentialSource>,
-    managed: Option<(PathBuf, Option<base::managed_settings::ManagedSettings>)>,
+    managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
     host_overrides: HostOverrides,
     permission_prompt_timeout: Option<Duration>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
@@ -72,7 +72,7 @@ impl SessionPoolBuilder {
     pub(crate) fn managed_settings(
         mut self,
         path: PathBuf,
-        managed: Option<base::managed_settings::ManagedSettings>,
+        managed: Option<base::permission::ManagedSettings>,
     ) -> Self {
         self.managed = Some((path, managed));
         self

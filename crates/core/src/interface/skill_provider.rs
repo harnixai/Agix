@@ -18,7 +18,7 @@
 //! are not files is a complete source rather than one that lists skills
 //! nobody can run.
 
-use crate::frozen::skill::SkillEntry;
+use crate::skill::SkillEntry;
 
 /// What a provider does about a name that is already loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

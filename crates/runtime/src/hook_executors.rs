@@ -11,12 +11,12 @@ use base::interface::delegate::{
     AskRoute, DelegateEnd, DelegateError, DelegateMode, DelegateRequest, Delegated, Delegator,
     StopsWith, Workdir,
 };
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     MessageRole, Model, ModelContentBlock, ModelEvent, ModelMessage, StreamParams,
 };
 use base::interface::tool_selector::{ToolPattern, ToolSelector};
 use base::prompt::PromptBlock;
-use base::settings::ThinkingMode;
 use hooks::payload::HookInput;
 use hooks::runner::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
 use std::sync::Arc;

@@ -1,13 +1,13 @@
 //! Skill manager — runtime loading, listing, and reloading of skills.
 //!
 //! v2: delegates YAML frontmatter parsing to `base::frozen::frontmatter::parse_skill_file`
-//! for full field coverage (all 15+ fields). Uses `base::frozen::skill::SkillEntry` as the canonical
+//! for full field coverage (all 15+ fields). Uses `base::skill::SkillEntry` as the canonical
 //! parsed type; `SkillInfo` is the runtime wrapper with cached description for prompt assembly.
 
 use base::frozen::frontmatter::parse_skill_file;
-use base::frozen::skill::{SkillEntry, SkillSource as FrozenSkillSource};
 use base::interface::skill_provider::{SkillPrecedence, SkillProvider};
 use base::paths::PromptFiles;
+use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock};
@@ -489,7 +489,7 @@ impl SkillManager {
         }
         let content = self.files.read_to_string(&info.path).ok()?;
         Some(
-            base::frozen::frontmatter::split_frontmatter(&content)
+            base::text::frontmatter::split_frontmatter(&content)
                 .1
                 .to_string(),
         )

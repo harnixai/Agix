@@ -150,7 +150,7 @@ For each memory, return a JSON object with:\n\
 Return only a JSON array of memories. If nothing is worth saving, return []."
     );
 
-    use base::settings::ThinkingMode;
+    use base::interface::model::ThinkingMode;
     let request_messages = vec![ModelMessage {
         role: MessageRole::User,
         content: vec![

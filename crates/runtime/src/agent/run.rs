@@ -552,7 +552,7 @@ impl Agent {
     }
 
     /// Recorder status — None when no recording is configured.
-    pub fn recorder(&self) -> Option<&base::settings::RecorderConfig> {
+    pub fn recorder(&self) -> Option<&base::recorder::RecorderConfig> {
         self.settings.values.recorder.as_ref()
     }
 

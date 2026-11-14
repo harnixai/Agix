@@ -4,6 +4,8 @@ use super::builder::build_hook_runner;
 use super::*;
 
 pub(super) fn test_settings() -> base::settings::LoadedSettings {
+    use base::interface::model::ThinkingMode;
+    use base::paths::PathSettings;
     use base::settings::*;
     let mut values = Settings::defaults_for("test");
     values.model.max_tokens = 2000;
@@ -13,7 +15,7 @@ pub(super) fn test_settings() -> base::settings::LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = "/tmp".into();
     paths.global_data_dir = "/tmp".into();
-    paths.workspace = base::settings::Workspace::project_of(std::path::Path::new("/tmp"));
+    paths.workspace = base::paths::Workspace::project_of(std::path::Path::new("/tmp"));
     paths.local_data_dir = "/tmp".into();
     base::settings::LoadedSettings::new(values, paths)
 }

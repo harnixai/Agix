@@ -9,11 +9,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{
     Model, ModelError, ModelEvent, ModelMessage, ModelStream, StreamParams, ToolDef,
 };
 use base::interface::prompt_registry::{InMemoryPromptRegistry, PromptRegistry};
 use base::interface::scene::SceneSpec;
+use base::paths::PathSettings;
 use base::prompt::PromptBlock;
 use base::settings::*;
 use base::tool::InMemoryToolRegistry;
@@ -67,7 +69,7 @@ fn settings(dir: &Path) -> base::settings::LoadedSettings {
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.to_path_buf();
     paths.global_data_dir = dir.to_path_buf();
-    paths.workspace = base::settings::Workspace::project_of(dir);
+    paths.workspace = base::paths::Workspace::project_of(dir);
     paths.local_data_dir = dir.to_path_buf();
     paths.scope = "review".into();
     base::settings::LoadedSettings::new(values, paths)

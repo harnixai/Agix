@@ -498,7 +498,7 @@ async fn touch_with_the_default_permission(
 ) -> (String, usize) {
     let dir = tempfile::tempdir().unwrap();
     let mut settings = test_settings();
-    settings.paths.workspace = base::settings::Workspace::Project(dir.path().to_path_buf());
+    settings.paths.workspace = base::paths::Workspace::Project(dir.path().to_path_buf());
     let template = Arc::new(InMemoryToolRegistry::new());
     tools::register_builtin_tools(&template);
     let model: Arc<dyn Model> = Arc::new(OneCallModel {

@@ -33,7 +33,7 @@ struct TurnLoopState {
 }
 
 type SkillDiscovery =
-    tokio_util::task::AbortOnDropHandle<(Vec<base::frozen::SkillEntry>, Vec<String>)>;
+    tokio_util::task::AbortOnDropHandle<(Vec<base::skill::SkillEntry>, Vec<String>)>;
 
 impl TurnLoopState {
     fn progress<'a>(&self, stop_reason: &'a str) -> base::interface::turn_policy::TurnProgress<'a> {

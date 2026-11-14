@@ -9,9 +9,9 @@
 //! response is stored as the model events themselves rather than a parallel
 //! representation, so there is no second shape that can drift from the first.
 
+use base::interface::model::{Effort, ThinkingMode};
 use base::interface::model::{InputMap, ModelError, ModelErrorKind, ModelEvent, Usage};
 use base::provider::ApiType;
-use base::settings::{Effort, ThinkingMode};
 use serde::{Deserialize, Serialize};
 
 use super::blob::BlobId;

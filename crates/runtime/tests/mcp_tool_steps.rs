@@ -123,11 +123,11 @@ async fn a_tool_step_does_not_relist_tools_without_an_announcement() {
     let dir = tempfile::tempdir().unwrap();
     let mut settings = base::settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     settings.paths.user_data_dir = dir.path().to_path_buf();
     settings.paths.global_data_dir = dir.path().to_path_buf();
-    settings.paths.workspace = base::settings::Workspace::project_of(dir.path());
+    settings.paths.workspace = base::paths::Workspace::project_of(dir.path());
     settings.paths.local_data_dir = dir.path().to_path_buf();
     settings.values.memory_enabled = false;
     settings.values.telemetry_enabled = false;

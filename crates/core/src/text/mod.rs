@@ -8,6 +8,8 @@
 //! is 3 bytes and a cut at an arbitrary byte offset lands mid-character with
 //! probability ~2/3.
 
+pub mod frontmatter;
+
 /// Truncate `s` to at most `max_bytes` bytes, cutting at a character boundary.
 ///
 /// Returns a prefix of `s` whose length is `<= max_bytes`. When `max_bytes`
@@ -31,6 +33,16 @@ pub fn truncate_at_char_boundary(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+/// Truncate a string at `max` chars, appending `marker` when truncated.
+pub fn truncate_chars(s: &str, max: usize, marker: &str) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(max).collect();
+        format!("{head}{marker}")
+    }
 }
 
 #[cfg(test)]
@@ -82,5 +94,19 @@ mod tests {
             let out = t(s, n);
             assert!(s.starts_with(out));
         }
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        let s: String = "x".repeat(3000);
+        let t = super::truncate_chars(&s, 100, "[truncated]");
+        assert_eq!(t.chars().count(), 100 + "[truncated]".chars().count());
+        assert!(t.ends_with("[truncated]"));
+    }
+
+    #[test]
+    fn truncate_short_string_is_passthrough() {
+        let t = super::truncate_chars("hi", 10, "[truncated]");
+        assert_eq!(t, "hi");
     }
 }

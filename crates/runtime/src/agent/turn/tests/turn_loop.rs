@@ -4,9 +4,9 @@ use super::support::{recall_test_settings, FixedUsageModel};
 use crate::agent::InputMessage;
 use crate::turn::prompt::build_prompt_context;
 use base::event::AgentEvent;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{ModelContentBlock, ModelMessage};
 use base::memory::{DurableMemory, MemoryStore, MemoryType};
-use base::settings::ThinkingMode;
 use base::tool::ToolContext;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,10 +20,10 @@ fn prompt_context_includes_os() {
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;
     values.telemetry_enabled = false;
-    let mut paths = base::settings::PathSettings::default();
+    let mut paths = base::paths::PathSettings::default();
     paths.user_data_dir = "/tmp/user".into();
     paths.global_data_dir = "/tmp/global".into();
-    paths.workspace = base::settings::Workspace::project_of(std::path::Path::new("/tmp/local"));
+    paths.workspace = base::paths::Workspace::project_of(std::path::Path::new("/tmp/local"));
     paths.local_data_dir = "/tmp/local".into();
     let settings = base::settings::LoadedSettings::new(values, paths);
     let ctx = build_prompt_context(
@@ -408,12 +408,12 @@ async fn recall_reaches_the_model_on_a_turn_with_no_tool_calls() {
 async fn a_skill_swapped_into_a_shared_catalog_is_announced() {
     struct Swappable(std::sync::Mutex<Vec<&'static str>>);
     impl base::interface::skill_catalog::SkillCatalog for Swappable {
-        fn list(&self) -> Vec<base::frozen::SkillEntry> {
+        fn list(&self) -> Vec<base::skill::SkillEntry> {
             self.0
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|n| base::frozen::SkillEntry {
+                .map(|n| base::skill::SkillEntry {
                     name: (*n).into(),
                     description: "d".into(),
                     user_invocable: true,
@@ -421,7 +421,7 @@ async fn a_skill_swapped_into_a_shared_catalog_is_announced() {
                 })
                 .collect()
         }
-        fn get(&self, name: &str) -> Option<base::frozen::SkillEntry> {
+        fn get(&self, name: &str) -> Option<base::skill::SkillEntry> {
             self.list().into_iter().find(|e| e.name == name)
         }
         fn body(&self, _: &str) -> Option<String> {
@@ -430,10 +430,10 @@ async fn a_skill_swapped_into_a_shared_catalog_is_announced() {
         fn reload_changed(&self) -> usize {
             0
         }
-        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
-        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
         fn invocation_count(&self, _: &str) -> u32 {
@@ -502,15 +502,15 @@ async fn a_skill_swapped_into_a_shared_catalog_is_announced() {
 async fn a_slash_command_expands_through_the_catalog_and_grants_for_its_turn() {
     struct Expanding;
     impl base::interface::skill_catalog::SkillCatalog for Expanding {
-        fn list(&self) -> Vec<base::frozen::SkillEntry> {
-            vec![base::frozen::SkillEntry {
+        fn list(&self) -> Vec<base::skill::SkillEntry> {
+            vec![base::skill::SkillEntry {
                 name: "build".into(),
                 description: "d".into(),
                 user_invocable: true,
                 ..Default::default()
             }]
         }
-        fn get(&self, name: &str) -> Option<base::frozen::SkillEntry> {
+        fn get(&self, name: &str) -> Option<base::skill::SkillEntry> {
             self.list().into_iter().find(|e| e.name == name)
         }
         fn body(&self, _: &str) -> Option<String> {
@@ -536,10 +536,10 @@ async fn a_slash_command_expands_through_the_catalog_and_grants_for_its_turn() {
         fn reload_changed(&self) -> usize {
             0
         }
-        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn discover_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
-        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::frozen::SkillEntry> {
+        fn activate_for_paths(&self, _: &[PathBuf]) -> Vec<base::skill::SkillEntry> {
             Vec::new()
         }
         fn invocation_count(&self, _: &str) -> u32 {

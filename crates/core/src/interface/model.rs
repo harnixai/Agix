@@ -2,11 +2,32 @@
 
 use crate::prompt::PromptBlock;
 use crate::provider::ApiType;
-use crate::settings::{Effort, ThinkingMode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
+
+/// Model thinking/reasoning mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    Auto,
+    Off,
+    On,
+    OnBudget(u32),
+}
+
+/// How much work the model puts into a reply. DeepSeek accepts `low`,
+/// `high` and `max`, folding `medium` and `xhigh` into `high`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
 
 /// Protocol-agnostic LLM client trait.
 ///

@@ -351,11 +351,11 @@ pub async fn expand_for_invocation(
     // Before the grants below take effect, on purpose: a skill's own
     // frontmatter does not get to approve its own commands.
     let body = expand_dynamic_context(&body, ctx, permission, info.source).await;
-    let expanded = base::frozen::skill::expand_skill_vars_named(
+    let expanded = base::skill::expand_skill_vars_named(
         &body,
         args,
         info.arguments.as_deref().unwrap_or(&[]),
-        Some(&base::frozen::skill::InvocationVars {
+        Some(&base::skill::InvocationVars {
             skill_md: &info.path,
             session_id: Some(&ctx.session_id),
         }),
@@ -462,7 +462,7 @@ fn split_allowed_tool_entry(entry: &str) -> (&str, Option<&str>) {
 
 /// Whether a skill body holds a command its expansion would run.
 pub(crate) fn runs_commands(body: &str) -> bool {
-    base::frozen::skill::body_runs_commands(body)
+    base::skill::body_runs_commands(body)
 }
 
 const DISABLED_PLACEHOLDER: &str = "[shell command execution disabled by policy]";
@@ -964,7 +964,7 @@ mod dynamic_context_tests {
         let (mut ctx, _tools) = bash_ctx(dir.path().to_path_buf());
         ctx.config = Arc::new({
             let mut c = base::context::EngineConfig::defaults_for("test-model");
-            c.project_trust = base::project_trust::ProjectTrust::Untrusted;
+            c.project_trust = base::permission::ProjectTrust::Untrusted;
             c
         });
         let body = "!`echo ran > ran.txt`";
@@ -1118,7 +1118,7 @@ mod dynamic_context_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::frozen::skill::{SkillEntry, SkillSource as FrozenSkillSource};
+    use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
 
     fn register_test_skill(
         mgr: &crate::manager::SkillManager,
@@ -1407,9 +1407,9 @@ mod tests {
             ctx.config = Arc::new({
                 let mut c = base::context::EngineConfig::defaults_for("test-model");
                 c.project_trust = if untrusted {
-                    base::project_trust::ProjectTrust::Untrusted
+                    base::permission::ProjectTrust::Untrusted
                 } else {
-                    base::project_trust::ProjectTrust::Trusted
+                    base::permission::ProjectTrust::Trusted
                 };
                 c
             });

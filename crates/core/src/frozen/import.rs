@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 use time::OffsetDateTime;
 
-use super::frontmatter::{extract_yaml_field, split_frontmatter};
+use crate::text::frontmatter::{extract_yaml_field, split_frontmatter};
 
 /// Which external tool a detected import source came from. Single-select by
 /// design — importing from more than one source at

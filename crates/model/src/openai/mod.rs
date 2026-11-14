@@ -450,7 +450,7 @@ mod tests {
                 StreamParams {
                     model: "m".into(),
                     max_tokens: 10,
-                    thinking_mode: base::settings::ThinkingMode::Off,
+                    thinking_mode: base::interface::model::ThinkingMode::Off,
                     effort: None,
                     fallback_model: None,
                     cache_edits: Vec::new(),

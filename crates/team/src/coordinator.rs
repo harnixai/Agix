@@ -9,9 +9,9 @@ use base::interface::delegate::{
     CallSite, DelegateEnd, DelegateMode, DelegateRequest, Delegated, Delegator, MemberLifetime,
     StopsWith, TeamSeat, Workdir,
 };
+use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelEvent, StreamParams};
 use base::prompt::{BlockRole, PromptBlock};
-use base::settings::ThinkingMode;
 use base::tool::ToolContext;
 use base::tool::ToolResult;
 use futures::stream::StreamExt;
@@ -49,7 +49,7 @@ pub struct OrchestrateRequest {
     /// a caller to think about permissions to get *something* better than
     /// unrestricted access, but is never silently more permissive than
     /// that without an explicit choice.
-    pub permission_mode: Option<base::settings::PermissionMode>,
+    pub permission_mode: Option<base::permission::PermissionMode>,
 }
 
 /// Lifecycle states for team members.
@@ -173,7 +173,7 @@ struct MemberCall {
     prompt: String,
     agent_type: Option<String>,
     extra_tools: Vec<Arc<dyn base::tool::Tool>>,
-    permission_mode: base::settings::PermissionMode,
+    permission_mode: base::permission::PermissionMode,
 }
 
 /// One stage member, delegated and waited on. It stops with the lead's call.
@@ -229,7 +229,7 @@ impl Coordinator for DefaultCoordinator {
             ctx,
             permission_mode,
         } = req;
-        let permission_mode = permission_mode.unwrap_or(base::settings::PermissionMode::Plan);
+        let permission_mode = permission_mode.unwrap_or(base::permission::PermissionMode::Plan);
 
         let all_labels: Vec<String> = stages
             .iter()

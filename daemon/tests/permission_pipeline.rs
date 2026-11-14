@@ -8,7 +8,7 @@ use base::interface::elicitation::{ElicitOutcome, ElicitRequest, Elicitation};
 use base::interface::permission::{
     PermissionOutcome, PermissionPolicy, PermissionRequest, PermissionSet,
 };
-use base::settings::PermissionMode;
+use base::permission::PermissionMode;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;

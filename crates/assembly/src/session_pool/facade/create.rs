@@ -447,7 +447,7 @@ impl SessionPool {
                     max_tokens: settings.values.model.max_tokens,
                     thinking_mode: !matches!(
                         settings.values.model.thinking_mode,
-                        base::settings::ThinkingMode::Off
+                        base::interface::model::ThinkingMode::Off
                     ),
                     sandbox_enabled: !settings.values.sandbox.dangerously_disable_sandbox,
                     resume_from: (restore != Restore::New).then(|| session_id.to_string()),

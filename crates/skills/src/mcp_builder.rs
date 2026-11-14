@@ -5,8 +5,8 @@
 //! slash command. The skill prompt explains how to use the MCP tool and
 //! includes its input schema.
 
-use base::frozen::{SkillEntry, SkillSource};
 use base::interface::model::ToolDef;
+use base::skill::{SkillEntry, SkillSource};
 use std::path::PathBuf;
 
 /// Build skill entries from a list of MCP tool definitions.

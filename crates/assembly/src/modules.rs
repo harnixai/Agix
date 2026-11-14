@@ -280,10 +280,10 @@ mod tests {
             skills: names
                 .iter()
                 .map(|name| {
-                    let entry = base::frozen::skill::SkillEntry {
+                    let entry = base::skill::SkillEntry {
                         name: (*name).into(),
                         description: format!("{plugin} {name}"),
-                        source: base::frozen::skill::SkillSource::Plugin,
+                        source: base::skill::SkillSource::Plugin,
                         path: format!("/cache/{plugin}/skills/{name}/SKILL.md").into(),
                         ..Default::default()
                     };
@@ -302,13 +302,13 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let mut settings = base::settings::LoadedSettings::new(
             Settings::defaults_for("test"),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = home.path().join("global");
         settings.paths.user_data_dir = home.path().join("scene");
         settings.paths.local_data_dir = home.path().join("project/.agix");
         settings.paths.workspace =
-            base::settings::Workspace::project_of(&settings.paths.local_data_dir);
+            base::paths::Workspace::project_of(&settings.paths.local_data_dir);
         let disk = home.path().join("project/.agents/skills/tour");
         std::fs::create_dir_all(&disk).unwrap();
         std::fs::write(

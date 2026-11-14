@@ -4,9 +4,11 @@
 
 use base::event::AgentEvent;
 use base::interface::model::Model;
+use base::interface::model::ThinkingMode;
 use base::interface::scene::SceneSpec;
+use base::permission::PermissionMode;
 use base::provider::ApiType;
-use base::settings::{PermissionMode, RecorderConfig, RecorderMode, ThinkingMode};
+use base::recorder::{RecorderConfig, RecorderMode};
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::{Builder, EventReceiver, InputMessage, InputSender};
 use std::path::PathBuf;
@@ -254,7 +256,7 @@ async fn build_agent(
     } else {
         base::settings::LoadedSettings::new(
             base::settings::Settings::defaults_for(&model_name),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         )
     };
     settings.values.model.api_type = ApiType::Anthropic;
@@ -268,7 +270,7 @@ async fn build_agent(
     if config.fixture_dir.is_none() {
         settings.paths.user_data_dir = tmp.join("user");
         settings.paths.global_data_dir = tmp.join("global");
-        settings.paths.workspace = base::settings::Workspace::project_of(&tmp.join("local"));
+        settings.paths.workspace = base::paths::Workspace::project_of(&tmp.join("local"));
         settings.paths.local_data_dir = tmp.join("local");
         settings.paths.scope = "code".into();
     }

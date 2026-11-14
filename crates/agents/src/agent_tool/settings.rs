@@ -118,7 +118,7 @@ pub(super) fn fallback_settings(
     let mut paths = PathSettings::default();
     paths.user_data_dir = local_data_dir.join("scenes").join("code");
     paths.global_data_dir = local_data_dir.clone();
-    paths.workspace = base::settings::Workspace::project_of(&local_data_dir);
+    paths.workspace = base::paths::Workspace::project_of(&local_data_dir);
     paths.local_data_dir = local_data_dir;
     paths.scope = "code".to_string();
     LoadedSettings::new(settings, paths)

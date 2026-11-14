@@ -9,20 +9,17 @@
 //! downstream (the AGENT itself, `Builder`) receives the already-merged
 //! result; it does not perform its own multi-layer config merging.
 
+use crate::interface::model::{Effort, ThinkingMode};
+use crate::interface::script::ScriptBinding;
+use crate::permission::{PermissionMode, PermissionRuleEntry};
 use crate::provider::{ApiType, ProviderConfig, TaskModelOverride};
+use crate::recorder::RecorderConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 mod loaded;
-pub use loaded::{LoadedRule, LoadedSettings};
-
-/// The shared, committed settings file present in every tier.
-pub const SETTINGS_FILE: &str = "settings.json";
-
-/// The gitignored per-machine overlay sitting beside `SETTINGS_FILE` in the
-/// same tier, overriding it.
-pub const SETTINGS_LOCAL_FILE: &str = "settings.local.json";
+pub use loaded::LoadedSettings;
 
 /// One settings.json file: the settings it overrides, and the permission rules
 /// it adds to every other tier's.
@@ -200,27 +197,6 @@ pub struct IgnoredValue {
     pub error: String,
 }
 
-pub use crate::permission::PermissionMode;
-use crate::permission::RuleBehavior;
-
-/// A single permission rule: allow/deny/ask a tool matching a pattern.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PermissionRuleEntry {
-    /// Tool name pattern (e.g. "Bash", "Bash(git push:*)", "FileWrite").
-    pub tool: String,
-    /// Action: "allow", "deny", or "ask".
-    pub action: RuleBehavior,
-    /// `"exact"`: the content in `tool` allows only a call whose content is
-    /// that same text, as "allow every time" records it. Read on allow rules
-    /// only; a deny or ask is always a pattern.
-    #[serde(
-        default,
-        rename = "match",
-        skip_serializing_if = "crate::interface::permission::GrantMatch::is_pattern"
-    )]
-    pub matching: crate::interface::permission::GrantMatch,
-}
-
 /// Output ceiling per model call when nothing configures one. Thinking counts
 /// against it, so a small ceiling cuts replies off mid-thought; 32K is within
 /// every current Claude model's limit.
@@ -244,116 +220,6 @@ pub struct ModelSettings {
     /// None = no fallback.
     #[serde(default)]
     pub fallback_model: Option<String>,
-}
-
-/// Path configuration for data directories.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[non_exhaustive]
-pub struct PathSettings {
-    /// User-level, scene-specific override root (e.g. `~/.agix/scenes/<scope>/`).
-    pub user_data_dir: PathBuf,
-    /// User-level, cross-scene global root — flat, shared by every scene
-    /// (e.g. `~/.agix/`). Used by resources that don't have a scene tier
-    /// (`memory`/`sessions`/`recordings`/`mcp`) and as the base layer for resources
-    /// that do (`settings.json`/`skills`/`plugins`/`agents`/`rules`/`hooks`).
-    /// See `base::paths::ConfigPaths` module docs for the full breakdown.
-    #[serde(default)]
-    pub global_data_dir: PathBuf,
-    /// The project tier's root: `<project>/.agix/` in a project, the state
-    /// root itself (`global_data_dir`) in a session without one.
-    pub local_data_dir: PathBuf,
-    /// Where the session's tools work, and whether there is a project.
-    pub workspace: Workspace,
-    /// Which product instance's user-level state `user_data_dir` was built
-    /// for (see `base::paths::ConfigPaths`). Carried alongside the resolved
-    /// dirs so downstream code (e.g. `FrozenContext::collect`) doesn't have
-    /// to re-derive it from the path.
-    #[serde(default = "default_scope")]
-    pub scope: String,
-}
-
-/// Placeholder directories for settings that were not loaded from any — the
-/// ones [`LoadedSettings::new`] is commonly given in tests.
-impl Default for PathSettings {
-    fn default() -> Self {
-        Self {
-            user_data_dir: PathBuf::from("~/.agix/scenes/agent"),
-            global_data_dir: PathBuf::from("~/.agix"),
-            local_data_dir: PathBuf::from("."),
-            workspace: Workspace::Project(PathBuf::new()),
-            scope: default_scope(),
-        }
-    }
-}
-
-fn default_scope() -> String {
-    "code".to_string()
-}
-
-/// What a session works in (docs/ARCHITECTURE.md §3.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Workspace {
-    /// A project: the tools work in it, and its `.agix` is the project tier.
-    Project(PathBuf),
-    /// No project (`project_root: null`): no project tier, no git or
-    /// `AGENTS.md` context, and the tools work in this directory of the
-    /// session's own under the state root's scratchpad
-    /// ([`crate::paths::session_scratch_dir`]) — never in the state root's
-    /// parent, which for `~/.agix` is the user's home.
-    Scratch(PathBuf),
-}
-
-impl Workspace {
-    /// The project whose `.agix` is `local_data_dir`.
-    pub fn project_of(local_data_dir: &Path) -> Self {
-        Self::Project(
-            local_data_dir
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| local_data_dir.to_path_buf()),
-        )
-    }
-
-    /// The project, `None` without one.
-    pub fn project_root(&self) -> Option<&Path> {
-        match self {
-            Self::Project(root) => Some(root),
-            Self::Scratch(_) => None,
-        }
-    }
-}
-
-impl PathSettings {
-    /// The project, `None` in a session without one.
-    pub fn project_root(&self) -> Option<&Path> {
-        self.workspace.project_root()
-    }
-
-    /// The tools' working directory: the root a write needs no approval in,
-    /// a read none either, and a sandboxed command may write.
-    pub fn working_dir(&self) -> &Path {
-        match &self.workspace {
-            Workspace::Project(dir) | Workspace::Scratch(dir) => dir,
-        }
-    }
-
-    /// The project tier's `settings.local.json` — the file the interactive
-    /// permission prompt's "always allow, this project" writes to.
-    ///
-    /// Inside `local_data_dir` (`<project_root>/.agix/`), not beside it: the
-    /// Bash sandbox's deny-file-write rules (`tools::bash::sandbox`) protect
-    /// exactly this path to stop a sandboxed command from granting itself
-    /// permissions, and a copy written anywhere else would sit outside that
-    /// protection while still being loaded by `LoadedSettings::load`.
-    ///
-    /// `None` without a project: "this project" means nothing there, and its
-    /// `local_data_dir` is the state root, whose `settings.local.json` is the
-    /// global tier — a rule written there would allow the call everywhere.
-    pub fn local_settings_file(&self) -> Option<PathBuf> {
-        self.project_root()
-            .map(|_| self.local_data_dir.join(SETTINGS_LOCAL_FILE))
-    }
 }
 
 /// Execution constraints.
@@ -785,113 +651,8 @@ impl CacheDirectories {
     }
 }
 
-/// One script, bound to one extension point.
-///
-/// ```jsonc
-/// "scripts": [
-///   { "path": ".agix/scripts/prompt.js", "point": "prompt.assemble", "entry": "onAssemble" }
-/// ]
-/// ```
-///
-/// The point is a catalog id — see `base::interface::catalog` and
-/// `docs/extension_points.md`. A binding naming a point the engine does not
-/// have, or one scripts may not use, is refused at startup with a message
-/// saying which; it is not silently ignored, because a script that quietly
-/// never runs is worse than one that fails to load.
-///
-/// Authority follows the file's location, not the configuration: a script
-/// inside the project is the operator's own and may rewrite anything, while
-/// one that arrived with a plugin may add. Nothing in this struct can change
-/// that, which is deliberate — it would otherwise be a field a plugin could
-/// set for itself.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ScriptBinding {
-    /// Path to the script, relative to the project root or absolute.
-    pub path: PathBuf,
-    /// Which extension point, by its catalog id.
-    pub point: String,
-    /// The function the script exports.
-    pub entry: String,
-    /// Wall clock for one call. Defaults to the carrier's own budget.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_ms: Option<u64>,
-    /// How many times it may run in a turn. Defaults to the carrier's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub calls_per_turn: Option<u32>,
-}
-
-/// Recorder (record/replay) configuration. `None` on [`Settings`] leaves the
-/// model wrapper a pass-through.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct RecorderConfig {
-    pub mode: RecorderMode,
-    /// Directory name for this recording under `root`. `None` uses the session
-    /// id, which is what production recording wants; tests name theirs so a
-    /// replay can find it again.
-    #[serde(default)]
-    pub name: Option<String>,
-    /// Where recordings live. Each one is a self-contained directory beneath
-    /// it, so a host retires a recording by deleting that directory.
-    pub root: PathBuf,
-    #[serde(default)]
-    pub on_divergence: Divergence,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RecorderMode {
-    Record,
-    Replay,
-    /// Re-issue a recording's requests against a real provider.
-    ///
-    /// The third mode exists because the other two cannot answer "what would
-    /// the model have said if the prompt were different". `Replay` never reads
-    /// a request's content — it compares blob *ids* and returns the recorded
-    /// response — so editing a blob changes nothing it observes. `Rerun` loads
-    /// the request back from the blobs (picking up any edit), sends it, and
-    /// reports how the new response differs from the recorded one.
-    Rerun,
-}
-
-/// What replay does when a live request differs from the one recorded at the
-/// same position.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Divergence {
-    /// Fail the call, naming the fields that differ. The default wherever a
-    /// divergence means a broken test.
-    #[default]
-    Strict,
-    /// Report the difference and play the recorded response anyway.
-    Warn,
-}
-
 fn default_true() -> bool {
     true
-}
-
-/// Model thinking/reasoning mode.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ThinkingMode {
-    Auto,
-    Off,
-    On,
-    OnBudget(u32),
-}
-
-/// How much work the model puts into a reply. DeepSeek accepts `low`,
-/// `high` and `max`, folding `medium` and `xhigh` into `high`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Effort {
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
 }
 
 impl Settings {
@@ -1166,6 +927,8 @@ pub fn merge_json_values(base: &mut serde_json::Value, over: serde_json::Value) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
+    use crate::permission::{LoadedRule, RuleBehavior};
 
     fn shared_rules(s: &LoadedSettings) -> Vec<&LoadedRule> {
         s.rules.iter().filter(|r| !r.machine_local).collect()
@@ -1957,7 +1720,7 @@ mod tests {
 
     mod project_trust {
         use super::*;
-        use crate::project_trust::ProjectTrust;
+        use crate::permission::ProjectTrust;
 
         struct Tiers {
             _root: tempfile::TempDir,

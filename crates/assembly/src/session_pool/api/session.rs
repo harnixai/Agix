@@ -142,7 +142,7 @@ impl ResumeStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PermissionReport {
-    pub mode: base::settings::PermissionMode,
+    pub mode: base::permission::PermissionMode,
     /// `false`: no `prompt_type:"permission"` frame will ever be raised.
     pub prompts: bool,
     pub prompt_timeout_secs: u64,

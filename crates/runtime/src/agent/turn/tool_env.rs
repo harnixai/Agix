@@ -41,7 +41,7 @@ pub(crate) fn engine_exec_from(
     config: &base::context::EngineConfig,
     exec: &base::interface::exec::ExecProviders,
     session_id: &str,
-    trust: base::project_trust::ProjectTrust,
+    trust: base::permission::ProjectTrust,
 ) -> base::engine_exec::EngineExec {
     tools::bash::engine_exec_for(
         &sandbox_settings_from(config),
@@ -55,7 +55,7 @@ pub(crate) fn engine_exec_from(
 /// The session's frozen environment snapshot, taken in its working directory
 /// — looked up in as a project only when it is one.
 pub(crate) async fn collect_frozen(
-    paths: &base::settings::PathSettings,
+    paths: &base::paths::PathSettings,
     environment: &dyn base::interface::environment::Environment,
     engine_git: &base::engine_exec::EngineExec,
 ) -> base::frozen::FrozenContext {

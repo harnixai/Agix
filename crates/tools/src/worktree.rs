@@ -542,7 +542,7 @@ mod tests {
     }
 
     use base::engine_exec::Confinement;
-    use base::project_trust::ProjectTrust;
+    use base::permission::ProjectTrust;
     use tokio_util::sync::CancellationToken;
 
     use base::interface::exec::{

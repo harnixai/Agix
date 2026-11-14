@@ -191,7 +191,7 @@ impl base::tool::Tool for AskingProbe {
 /// member is.
 #[tokio::test]
 async fn a_team_create_member_is_judged_in_its_mode_held_to_the_parents() {
-    use base::settings::PermissionMode;
+    use base::permission::PermissionMode;
     for (parent_mode, probe_runs) in [
         (PermissionMode::Default, 0),
         (PermissionMode::BypassPermissions, 1),
@@ -352,7 +352,7 @@ impl base::interface::delegate::Delegator for LateDelegator {
 async fn a_fail_closed_agent_hook_does_not_block_its_own_agents_tools() {
     let (mut parent, _tools, runs, dir) = wired_parent("code");
     if let Some(settings) = parent.settings.as_mut() {
-        settings.values.permission_mode = base::settings::PermissionMode::BypassPermissions;
+        settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
     }
     let late = Arc::new(LateDelegator::default());
     let guard: hooks::HookConfig = serde_json::from_value(serde_json::json!({
@@ -564,7 +564,7 @@ async fn a_delegate_is_assembled_on_its_parents_host_contracts() {
         .build_team_member_agent(
             std::env::temp_dir(),
             None,
-            base::settings::PermissionMode::Plan,
+            base::permission::PermissionMode::Plan,
             None,
         )
         .await

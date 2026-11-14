@@ -179,7 +179,7 @@ mod tests {
             telemetry: Some(TelemetryOptions {
                 output: "/tmp/t.jsonl".into(),
             }),
-            permission_mode: Some(base::settings::PermissionMode::Plan),
+            permission_mode: Some(base::permission::PermissionMode::Plan),
             permission_rules: vec![serde_json::from_value(serde_json::json!({
                 "source": "session", "behavior": "allow", "tool_name": "Read"
             }))

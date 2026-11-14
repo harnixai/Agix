@@ -17,11 +17,11 @@ pub(super) fn parent_settings_for_test(scope: &str) -> (LoadedSettings, std::pat
     std::fs::create_dir_all(&dir).unwrap();
     let mut s = base::settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
-        base::settings::PathSettings::default(),
+        base::paths::PathSettings::default(),
     );
     s.paths.user_data_dir = dir.clone();
     s.paths.global_data_dir = dir.clone();
-    s.paths.workspace = base::settings::Workspace::project_of(&dir);
+    s.paths.workspace = base::paths::Workspace::project_of(&dir);
     s.paths.local_data_dir = dir.clone();
     s.paths.scope = scope.to_string();
     // Keep the turn from making an extra post-turn extraction call.

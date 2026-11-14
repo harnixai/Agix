@@ -17,13 +17,16 @@ use async_trait::async_trait;
 #[cfg(test)]
 use base::context::EngineConfig;
 use base::event::AgentEvent;
+use base::interface::model::Effort;
 use base::interface::model::Model;
+#[cfg(test)]
+use base::interface::model::ThinkingMode;
 use base::interface::permission::{PermissionFacts, PermissionSet, Reach, Subject};
 use base::interface::scene::SceneSpec;
-use base::paths::PromptFiles;
-use base::settings::{Effort, LoadedSettings, Settings};
 #[cfg(test)]
-use base::settings::{PathSettings, ThinkingMode};
+use base::paths::PathSettings;
+use base::paths::PromptFiles;
+use base::settings::{LoadedSettings, Settings};
 use base::tool::ProgressSender;
 use base::tool::ToolContext;
 use base::tool::{PathStyle, ToolSpec};
@@ -102,7 +105,7 @@ pub struct AgentInput {
     // answer per-call prompts (see `AgentTool::build_team_member_agent`), and
     // `bubble` needs that lead.
     #[serde(default)]
-    pub permission_mode: Option<base::settings::PermissionMode>,
+    pub permission_mode: Option<base::permission::PermissionMode>,
 }
 
 pub struct AgentTool {
@@ -136,7 +139,7 @@ impl AgentTool {
         }
         if matches!(
             input.permission_mode,
-            Some(base::settings::PermissionMode::Bubble)
+            Some(base::permission::PermissionMode::Bubble)
         ) {
             return Err(base::error::ToolError::Validation(
                 "permission_mode: \"bubble\" is not valid here — it needs an available \

@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn appended_rules_round_trip_through_settings_load() {
         let dir = TempDir::new().unwrap();
-        let local = dir.path().join(base::settings::SETTINGS_LOCAL_FILE);
+        let local = dir.path().join(base::paths::SETTINGS_LOCAL_FILE);
         append_permission_rule(&local, AppendTarget::Allow, "Bash(git status)").unwrap();
         append_permission_rule(&local, AppendTarget::Deny, "Bash(rm -rf:*)").unwrap();
 
@@ -278,7 +278,7 @@ mod tests {
     fn the_local_settings_file_stays_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new().unwrap();
-        let p = dir.path().join(base::settings::SETTINGS_LOCAL_FILE);
+        let p = dir.path().join(base::paths::SETTINGS_LOCAL_FILE);
         fs::write(&p, r#"{"providers":{"x":{"api_key":"sk"}}}"#).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(0o600)).unwrap();
 
@@ -291,7 +291,7 @@ mod tests {
         let fresh = dir
             .path()
             .join("fresh")
-            .join(base::settings::SETTINGS_LOCAL_FILE);
+            .join(base::paths::SETTINGS_LOCAL_FILE);
         append_permission_rule(&fresh, AppendTarget::Allow, "Bash(ls)").unwrap();
         assert_eq!(
             fs::metadata(&fresh).unwrap().permissions().mode() & 0o777,

@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::session_pool::parts::factory::operator_script_bindings;
-use base::project_trust::ProjectTrust;
-use base::settings::ScriptBinding;
+use base::interface::script::ScriptBinding;
+use base::permission::ProjectTrust;
 
 #[test]
 fn a_relative_binding_does_not_reach_into_an_untrusted_project() {
@@ -19,7 +19,7 @@ fn a_relative_binding_does_not_reach_into_an_untrusted_project() {
     let paths = |trust: ProjectTrust| {
         let settings = base::settings::LoadedSettings::new(
             values.clone(),
-            base::settings::PathSettings::default(),
+            base::paths::PathSettings::default(),
         )
         .with_project_layer(base::project_trust::ProjectLayer {
             trust,

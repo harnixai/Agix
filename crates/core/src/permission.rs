@@ -1,6 +1,7 @@
 //! 权限模式与权限规则。一次调用的判定结果是
 //! `interface::permission::PermissionOutcome`。
 
+use crate::interface::config_source::Tier;
 use serde::{Deserialize, Serialize};
 
 /// Permission mode for tool execution.
@@ -154,6 +155,105 @@ pub enum RuleBehavior {
     Allow,
     Deny,
     Ask,
+}
+
+/// A single permission rule: allow/deny/ask a tool matching a pattern.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PermissionRuleEntry {
+    /// Tool name pattern (e.g. "Bash", "Bash(git push:*)", "FileWrite").
+    pub tool: String,
+    /// Action: "allow", "deny", or "ask".
+    pub action: RuleBehavior,
+    /// `"exact"`: the content in `tool` allows only a call whose content is
+    /// that same text, as "allow every time" records it. Read on allow rules
+    /// only; a deny or ask is always a pattern.
+    #[serde(
+        default,
+        rename = "match",
+        skip_serializing_if = "crate::interface::permission::GrantMatch::is_pattern"
+    )]
+    pub matching: crate::interface::permission::GrantMatch,
+}
+
+/// A permission rule as loaded: the rule, the tier whose file it came from,
+/// and whether that file was the tier's `settings.local.json`.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct LoadedRule {
+    pub rule: PermissionRuleEntry,
+    pub tier: Tier,
+    pub machine_local: bool,
+}
+
+impl LoadedRule {
+    pub fn new(rule: PermissionRuleEntry, tier: Tier, machine_local: bool) -> Self {
+        Self {
+            rule,
+            tier,
+            machine_local,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ManagedSettings {
+    /// The file (or other source) the layer came from.
+    pub origin: String,
+    /// Why the layer cannot be honoured. While set, every tool call is refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub permission_rules: Vec<PermissionRuleEntry>,
+    pub disable_bypass_permissions_mode: bool,
+}
+
+impl ManagedSettings {
+    /// Two managed layers as one: both sets of rules, either one's switch,
+    /// and broken if either is.
+    pub fn followed_by(mut self, later: Self) -> Self {
+        self.origin = format!("{}, {}", self.origin, later.origin);
+        self.error = self.error.or(later.error);
+        self.permission_rules.extend(later.permission_rules);
+        self.disable_bypass_permissions_mode |= later.disable_bypass_permissions_mode;
+        self
+    }
+
+    /// Whether a `bypassPermissions` session under this layer can still be
+    /// asked about a call: the layer takes bypass away, or holds an `ask` or
+    /// `deny` rule. A `deny` counts because a command it cannot read through
+    /// (`$CMD x`) is asked about rather than refused.
+    pub fn asks_under_bypass(&self) -> bool {
+        self.error.is_none()
+            && (self.disable_bypass_permissions_mode
+                || self
+                    .permission_rules
+                    .iter()
+                    .any(|r| r.action != RuleBehavior::Allow))
+    }
+}
+
+/// Whether the project tier of a `LoadedSettings` is in effect as written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProjectTrust {
+    /// No project tier of its own: no project at all, or one whose `.agix`
+    /// is the global or scene directory.
+    #[default]
+    NoProject,
+    Trusted,
+    Untrusted,
+}
+
+impl ProjectTrust {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoProject => "none",
+            Self::Trusted => "trusted",
+            Self::Untrusted => "untrusted",
+        }
+    }
+
+    pub fn is_untrusted(self) -> bool {
+        self == Self::Untrusted
+    }
 }
 
 #[cfg(test)]

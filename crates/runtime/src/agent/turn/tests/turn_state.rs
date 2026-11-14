@@ -6,9 +6,9 @@ use crate::turn::prompt::open_conversation_with_user_blocks;
 use crate::turn::request::ModelRequest;
 use crate::turn::TurnOutcome;
 use base::event::AgentEvent;
+use base::interface::model::ThinkingMode;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use base::prompt::PromptBlock;
-use base::settings::ThinkingMode;
 use std::path::PathBuf;
 use std::sync::Arc;
 

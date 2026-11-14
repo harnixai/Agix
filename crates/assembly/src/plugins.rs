@@ -50,14 +50,14 @@ pub const DISABLED_MESSAGE: &str = "plugins are not available in this build";
 pub struct PackageScripts {
     pub name: String,
     pub root: std::path::PathBuf,
-    pub bindings: Vec<base::settings::ScriptBinding>,
+    pub bindings: Vec<base::interface::script::ScriptBinding>,
 }
 
 /// One active package's skills, each with the body it expands to.
 #[derive(Clone)]
 pub struct PackageSkills {
     pub plugin: String,
-    pub skills: Vec<(base::frozen::skill::SkillEntry, String)>,
+    pub skills: Vec<(base::skill::SkillEntry, String)>,
 }
 
 /// What the active packages add to a project's catalogs.
@@ -171,7 +171,7 @@ mod packages {
                         .manifest
                         .script
                         .iter()
-                        .map(|s| base::settings::ScriptBinding {
+                        .map(|s| base::interface::script::ScriptBinding {
                             path: PathBuf::from(s.file()),
                             point: s.point.clone(),
                             entry: s.function().to_string(),

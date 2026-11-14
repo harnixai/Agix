@@ -280,7 +280,7 @@ pub fn engine_exec_for(
     exec: &base::interface::exec::ExecProviders,
     sandbox_disabled: bool,
     session_id: &str,
-    trust: base::project_trust::ProjectTrust,
+    trust: base::permission::ProjectTrust,
 ) -> base::engine_exec::EngineExec {
     use base::engine_exec::{Confinement, EngineExec};
     let confinement = if sandbox_disabled {

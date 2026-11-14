@@ -16,7 +16,6 @@ use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use base::context::{EngineConfig, SessionState};
-use base::frozen::SkillEntry;
 use base::interface::delegate::{
     DelegateError, DelegateRequest, Delegated, Delegator, LiveMember, TeamSeat,
 };
@@ -25,6 +24,7 @@ use base::interface::model::Model;
 use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::{NoSkills, SkillCatalog};
 use base::settings::LoadedSettings;
+use base::skill::SkillEntry;
 use base::tool::InMemoryToolRegistry;
 use tokio_util::sync::CancellationToken;
 

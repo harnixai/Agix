@@ -1,7 +1,7 @@
 //! 回合测试之间共用的夹具。
 
 use base::interface::model::ModelMessage;
-use base::settings::ThinkingMode;
+use base::interface::model::ThinkingMode;
 
 pub(super) fn recall_test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
     let mut values = base::settings::Settings::defaults_for("test-model");
@@ -11,10 +11,10 @@ pub(super) fn recall_test_settings(root: &std::path::Path) -> base::settings::Lo
     values.model.thinking_mode = ThinkingMode::Off;
     values.model.effort = None;
     values.telemetry_enabled = false;
-    let mut paths = base::settings::PathSettings::default();
+    let mut paths = base::paths::PathSettings::default();
     paths.user_data_dir = root.join("user-data");
     paths.global_data_dir = root.join("global-data");
-    paths.workspace = base::settings::Workspace::project_of(&root.join("local-data"));
+    paths.workspace = base::paths::Workspace::project_of(&root.join("local-data"));
     paths.local_data_dir = root.join("local-data");
     base::settings::LoadedSettings::new(values, paths)
 }

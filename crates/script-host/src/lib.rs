@@ -248,9 +248,9 @@ pub mod bindings {
     use crate::adapters::PromptAssemblyScript;
     use crate::carrier::ScriptCarrier;
     use base::interface::prompt_assembly::{AssemblyCapabilities, Authority};
+    use base::interface::script::ScriptBinding;
     use base::interface::script::{ScriptEngine, ScriptLimits, ScriptSource};
     use base::prompt::BlockOrigin;
-    use base::settings::ScriptBinding;
 
     /// Points a script may be bound to today.
     ///
@@ -709,9 +709,9 @@ mod binding_tests {
     use super::bindings::*;
     use super::QuickJsEngine;
     use base::interface::prompt_registry::{InMemoryPromptRegistry, PromptRegistry};
+    use base::interface::script::ScriptBinding;
     use base::interface::script::ScriptEngine;
     use base::prompt::{names, PromptBlock};
-    use base::settings::ScriptBinding;
     use std::sync::Arc;
 
     fn ctx() -> base::interface::scene::ScenePromptContext<'static> {
@@ -1262,7 +1262,7 @@ mod binding_tests {
             params: base::interface::model::StreamParams {
                 model: "claude-opus-5".into(),
                 max_tokens: 8192,
-                thinking_mode: base::settings::ThinkingMode::Auto,
+                thinking_mode: base::interface::model::ThinkingMode::Auto,
                 effort: None,
                 fallback_model: None,
                 cache_edits: Vec::new(),
@@ -1338,8 +1338,8 @@ mod binding_tests {
 #[cfg(all(test, feature = "quickjs"))]
 mod package_binding_tests {
     use super::bindings::*;
+    use base::interface::script::ScriptBinding;
     use base::prompt::BlockOrigin;
-    use base::settings::ScriptBinding;
     use std::path::{Path, PathBuf};
 
     fn tempdir() -> PathBuf {

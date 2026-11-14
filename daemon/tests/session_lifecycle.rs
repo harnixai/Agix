@@ -198,7 +198,7 @@ impl ScriptedServer {
 /// so the permission posture under test is explicit rather than ambient.
 /// What a scripted server starts from: the caller's settings, and the
 /// permission rules a settings file would have added.
-struct Seed(Settings, Vec<base::settings::PermissionRuleEntry>);
+struct Seed(Settings, Vec<base::permission::PermissionRuleEntry>);
 
 impl From<Settings> for Seed {
     fn from(settings: Settings) -> Self {
@@ -263,7 +263,7 @@ async fn start_scripted_server_holding(
     config.settings.rules = rules
         .into_iter()
         .map(|rule| {
-            base::settings::LoadedRule::new(
+            base::permission::LoadedRule::new(
                 rule,
                 base::interface::config_source::Tier::Project,
                 false,
@@ -4580,7 +4580,7 @@ async fn settings_permission_rules_finally_reach_the_daemon() {
     // finally has one: an Allow rule pre-empts the prompt.
     let settings = Seed(
         ask_settings(),
-        vec![base::settings::PermissionRuleEntry {
+        vec![base::permission::PermissionRuleEntry {
             tool: "Bash(touch ruled.txt)".into(),
             action: base::permission::RuleBehavior::Allow,
             matching: Default::default(),
@@ -6604,7 +6604,7 @@ fn background_name(test: &str) -> String {
 
 async fn start_server_running_a_background_sleep(reap: bool, name: &str) -> ScriptedServer {
     let mut settings = ask_settings_no_memory();
-    settings.permission_mode = base::settings::PermissionMode::BypassPermissions;
+    settings.permission_mode = base::permission::PermissionMode::BypassPermissions;
     settings.sandbox.reap_process_groups = reap;
     let (srv, _seen) = start_scripted_server(
         vec![

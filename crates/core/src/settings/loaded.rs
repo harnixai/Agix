@@ -13,34 +13,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use crate::interface::config_source::{ConfigSource, FileTiers, Tier};
-use crate::managed_settings::ManagedSettings;
-use crate::permission::RuleBehavior;
-use crate::project_trust::{ProjectLayer, ProjectTrust};
+use crate::paths::{PathSettings, Workspace};
+use crate::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
+use crate::project_trust::ProjectLayer;
 
 use super::{
     merge_fitting, merge_json_values, read_permission_rules, unknown_settings_keys, IgnoredValue,
-    PathSettings, PermissionMode, PermissionRuleEntry, Settings, Workspace,
+    Settings,
 };
-
-/// A permission rule as loaded: the rule, the tier whose file it came from,
-/// and whether that file was the tier's `settings.local.json`.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct LoadedRule {
-    pub rule: PermissionRuleEntry,
-    pub tier: Tier,
-    pub machine_local: bool,
-}
-
-impl LoadedRule {
-    pub fn new(rule: PermissionRuleEntry, tier: Tier, machine_local: bool) -> Self {
-        Self {
-            rule,
-            tier,
-            machine_local,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -367,7 +347,7 @@ impl LayerFold<'_> {
     fn apply(&mut self, layer: crate::interface::config_source::ConfigLayer) {
         use crate::project_trust::gate_layer;
         if layer.tier == Tier::Managed {
-            let this = ManagedSettings::from_value(layer.origin, layer.value);
+            let this = crate::managed_settings::from_value(layer.origin, layer.value);
             self.managed = Some(match self.managed.take() {
                 Some(earlier) => earlier.followed_by(this),
                 None => this,
