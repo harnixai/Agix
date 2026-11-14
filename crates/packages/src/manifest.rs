@@ -18,7 +18,15 @@ pub const SUPPORTED_API_VERSIONS: &[&str] = &["0.1"];
 
 /// Top-level sections this build understands, for the unknown-section
 /// warning in [`Plugin::load`].
-pub const KNOWN_SECTIONS: &[&str] = &["plugin", "mcp", "script", "scene", "agent", "skills"];
+pub const KNOWN_SECTIONS: &[&str] = &[
+    "plugin",
+    "dependencies",
+    "mcp",
+    "script",
+    "scene",
+    "agent",
+    "skills",
+];
 
 /// Top-level sections addressed to whoever embeds the engine, not to the
 /// engine.
@@ -36,6 +44,10 @@ pub const HOST_SECTION_PREFIX: &str = "x-";
 #[derive(Debug, Deserialize, Clone)]
 pub struct PluginManifest {
     pub plugin: PluginMeta,
+    /// Other packages this one needs installed, by name, each with the
+    /// versions that will do.
+    #[serde(default, deserialize_with = "dependency_requirements")]
+    pub dependencies: std::collections::BTreeMap<String, semver::VersionReq>,
     /// MCP server payloads.
     #[serde(default)]
     pub mcp: Vec<McpPayload>,
@@ -185,6 +197,12 @@ pub enum PluginError {
     Checksum(String),
     #[error("unsupported api_version `{found}` (this build supports {supported})")]
     ApiVersion { found: String, supported: String },
+    #[error("requires plugin `{name}` `{required}`, {found}")]
+    Dependency {
+        name: String,
+        required: semver::VersionReq,
+        found: String,
+    },
     #[error(
         "requires engine `{required}`, this is {} ({running})",
         release_of(running)
@@ -220,6 +238,49 @@ pub fn check_engine(required: &semver::VersionReq, running: &str) -> Result<(), 
             running: running.to_string(),
         })
     }
+}
+
+/// Whether `installed` (the versions of `name` in one cache) holds one that
+/// meets `required`.
+pub fn check_dependency(
+    name: &str,
+    required: &semver::VersionReq,
+    installed: &[String],
+) -> Result<(), PluginError> {
+    let meets = installed
+        .iter()
+        .filter_map(|v| semver::Version::parse(v).ok())
+        .any(|v| required.matches(&v));
+    if meets {
+        return Ok(());
+    }
+    let found = if installed.is_empty() {
+        "which is not installed".to_string()
+    } else {
+        format!("installed: {}", installed.join(", "))
+    };
+    Err(PluginError::Dependency {
+        name: name.to_string(),
+        required: required.clone(),
+        found,
+    })
+}
+
+fn dependency_requirements<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<String, semver::VersionReq>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let texts = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+    texts
+        .into_iter()
+        .map(|(name, text)| {
+            semver::VersionReq::parse(&text)
+                .map(|req| (name.clone(), req))
+                .map_err(|e| serde::de::Error::custom(format!("dependencies.{name} `{text}`: {e}")))
+        })
+        .collect()
 }
 
 fn version_requirement<'de, D>(deserializer: D) -> Result<Option<semver::VersionReq>, D::Error>
@@ -493,6 +554,35 @@ name = "p"
 version = "1.0.0"
 api_version = "0.1"
 "#;
+
+    #[test]
+    fn dependencies_take_semver_ranges() {
+        let manifest =
+            format!("{MINIMAL}\n[dependencies]\nbase-tools = \"^1.2\"\nother = \">=1, <2\"\n");
+        let m = load_str(&manifest).unwrap();
+        assert_eq!(m.dependencies.len(), 2);
+        assert!(m.dependencies["base-tools"].matches(&"1.9.0".parse().unwrap()));
+        assert!(!m.dependencies["base-tools"].matches(&"2.0.0".parse().unwrap()));
+        assert!(m.dependencies["other"].matches(&"1.0.0".parse().unwrap()));
+        assert!(unknown_sections(&manifest).is_empty());
+        let e = load_str(&format!("{MINIMAL}\n[dependencies]\nx = \"nope\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("dependencies.x `nope`"), "{e}");
+    }
+
+    #[test]
+    fn a_dependency_is_met_by_any_installed_version_in_range() {
+        let req = semver::VersionReq::parse("^1.2").unwrap();
+        let installed = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        check_dependency("base", &req, &installed(&["2.0.0", "1.3.0"])).unwrap();
+        let e = check_dependency("base", &req, &installed(&["1.0.0", "2.0.0"]))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(e, "requires plugin `base` `^1.2`, installed: 1.0.0, 2.0.0");
+        let e = check_dependency("base", &req, &[]).unwrap_err().to_string();
+        assert_eq!(e, "requires plugin `base` `^1.2`, which is not installed");
+    }
 
     /// A host section is not a typo, and the warning that calls it one is
     /// wrong about the only part of the manifest that host reads.

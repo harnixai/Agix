@@ -21,6 +21,11 @@ description = "GitHub tools"   # 会到达模型——安装时披露
 author = ""
 homepage = ""
 
+# ── 依赖 ──
+# 这个包要求同一层 cache 里已装的其他包;值是 semver 版本条件。
+[dependencies]
+base-tools = "^1.2"            # 也可以写 ">=1, <2"
+
 # ── 脚本 ──
 # 跑它的是进程里已有的 QuickJS 载体;包只发 JavaScript 并指名一个扩展点。
 [[script]]
@@ -90,6 +95,16 @@ panel = "ui/panel.js"
   `plugins.refused` 健康项,`reason` 里是上面那条消息。一个满足的都没有,这个包就不加载。
 
 Rust 插件编进二进制,版本由 Cargo 管,不用这个字段。
+
+### `[dependencies]`
+
+键是别的包的名字,值是 semver 版本条件(`"^1.2"`、`">=1, <2"`、`"=1.4.0"`),写法同
+`requires_engine`;条件写不合法,manifest 解析就失败,消息指到 `dependencies.<名字>`。
+
+装包时(`plugin.install`)在暂存包上检查:同一层 cache 里要有这个名字的某个已装版本满足条件,
+否则安装失败、缓存里什么都不写:``requires plugin `base-tools` `^1.2`, which is not installed``
+或 ``requires plugin `base-tools` `^1.2`, installed: 1.0.0``。不去自动装依赖,先装依赖再装它。
+这是装包时的门槛,不是运行时的依赖图:之后卸载依赖,引擎不会替依赖它的包拦着。
 
 manifest 里出现引擎不认识的顶级段,不拒,但打一条 WARN 说它"什么也不贡献"——`[[scripts]]`
 这种拼错,那是唯一的信号。有三类写法是**拒装**的,因为它们是写给已经移除的东西的:

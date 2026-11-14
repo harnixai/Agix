@@ -163,7 +163,7 @@ fn unpack_into(
     let staging = plugin_dir.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
     let dest = cache.version_dir(name, version);
     let placed = extract_zip(bytes, &staging, limits)
-        .and_then(|()| check_staged(&staging, name))
+        .and_then(|()| check_staged(&staging, name, cache))
         .and_then(|()| Ok(std::fs::write(staging.join(INSTALLED_MARKER), sha256)?))
         .and_then(|()| {
             if dest.exists() {
@@ -222,13 +222,16 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn check_staged(staging: &Path, name: &str) -> Result<(), PluginError> {
+fn check_staged(staging: &Path, name: &str, cache: &PluginCache) -> Result<(), PluginError> {
     let plugin = crate::manifest::Plugin::load(staging, &staging.join("plugin.toml"))?;
     if plugin.name() != name {
         return Err(PluginError::Schema(format!(
             "the package calls itself `{}`, not `{name}`",
             plugin.name()
         )));
+    }
+    for (dependency, required) in &plugin.manifest.dependencies {
+        crate::manifest::check_dependency(dependency, required, &cache.list_versions(dependency))?;
     }
     crate::Disclosure::from_plugin(&plugin).map(|_| ())
 }
@@ -615,6 +618,33 @@ mod tests {
         );
         assert!(!cache.version_dir("demo", "1.0.0").exists());
         assert!(walkdir_files(&tmp.path().join("cache").join("demo")).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dependency_outside_its_range_keeps_the_package_out() {
+        let tmp = TempDir::new().unwrap();
+        let cache = PluginCache::new(tmp.path().join("cache"));
+        let manifest = format!("{DEMO_MANIFEST}\n[dependencies]\nbase = \"^1.2\"\n");
+        let archive = zip_bytes(&[("plugin.toml", manifest.as_str())]);
+        let source = file_source(tmp.path(), &archive, None);
+
+        let e = install(&cache, "demo", &source)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(e, "requires plugin `base` `^1.2`, which is not installed");
+
+        std::fs::create_dir_all(cache.version_dir("base", "1.0.0")).unwrap();
+        let e = install(&cache, "demo", &source)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("installed: 1.0.0"), "{e}");
+        assert!(!cache.version_dir("demo", "1.0.0").exists());
+
+        std::fs::create_dir_all(cache.version_dir("base", "1.4.0")).unwrap();
+        install(&cache, "demo", &source).await.unwrap();
+        assert!(cache.version_dir("demo", "1.0.0").exists());
     }
 
     #[tokio::test]
