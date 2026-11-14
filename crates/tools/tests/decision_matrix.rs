@@ -22,10 +22,10 @@ use base::interface::permission::{
     PermissionRequest, Stage, ToolFacts,
 };
 use base::permission::{PermissionMode, PermissionRule, RuleBehavior, RuleSource};
-use base::settings::Settings;
 use base::tool::{InMemoryToolRegistry, SandboxSettings, Tool, ToolContext};
 use permissions::policy::Policy;
 use serde_json::{json, Value};
+use settings::Settings;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
@@ -276,7 +276,7 @@ const RULES: [(&str, RuleCase); 5] = [
 ];
 
 fn permission(tool: &str, case: RuleCase) -> Policy {
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
         base::paths::PathSettings::default(),
     );
@@ -305,7 +305,7 @@ fn permission(tool: &str, case: RuleCase) -> Policy {
             });
         }
     }
-    Policy::from_settings(&settings, extra)
+    Policy::from_settings(&settings.permission_settings(), extra)
 }
 
 fn word(outcome: &PermissionOutcome) -> &'static str {
@@ -556,7 +556,7 @@ async fn every_builtin_tool_is_decided_the_same_in_every_cell() {
 
 /// The context the runtime gives a call of `session`'s.
 fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolContext {
-    let settings = base::settings::LoadedSettings::new(
+    let settings = settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
         base::paths::PathSettings::default(),
     );
@@ -742,7 +742,7 @@ async fn every_stage_of_the_policy_is_reached() {
     let attended = Attendance::Attended;
     let no_hook = HookAnswer::None;
 
-    let mut unreadable = base::settings::LoadedSettings::new(
+    let mut unreadable = settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
         base::paths::PathSettings::default(),
     );
@@ -768,7 +768,7 @@ async fn every_stage_of_the_policy_is_reached() {
         (
             Stage::ManagedUnreadable,
             reached(
-                Policy::from_settings(&unreadable, []),
+                Policy::from_settings(&unreadable.permission_settings(), []),
                 "Bash",
                 bash("ls"),
                 Default,

@@ -9,8 +9,8 @@ use base::context::config::NetworkModeConfig;
 use base::interface::exec::{ConfinementReport, Enforcement, ProcessSpec, Sandbox, SandboxPolicy};
 use base::interface::health::{CheckResult, HealthCheck};
 use base::permission::PermissionMode;
-use base::settings::LoadedSettings;
 use hooks::{HookConfig, HookEvent, OnError};
+use settings::LoadedSettings;
 use std::sync::Arc;
 
 pub struct PermissionModeCheck(Arc<LoadedSettings>);
@@ -287,7 +287,7 @@ impl HealthCheck for PanicStrategyCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::settings::Settings;
+    use settings::Settings;
 
     fn settings_with(f: impl FnOnce(&mut Settings)) -> Arc<LoadedSettings> {
         let mut s = Settings::defaults_for("m");

@@ -3,8 +3,8 @@
 use super::*;
 use base::recorder::Divergence;
 
-fn defaults() -> base::settings::LoadedSettings {
-    base::settings::LoadedSettings::new(
+fn defaults() -> settings::LoadedSettings {
+    settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     )

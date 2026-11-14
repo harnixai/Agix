@@ -208,7 +208,7 @@ impl Cli {
             session_cap: 32,
             session_idle_timeout: 3600,
             model: "claude-sonnet-4-6".into(),
-            max_tokens: base::settings::DEFAULT_MAX_TOKENS,
+            max_tokens: settings::DEFAULT_MAX_TOKENS,
             listen: None,
             listen_ws: None,
             token: None,
@@ -524,10 +524,10 @@ fn unix_socket_auth_token(
 fn spawn_import_detection(pool: Arc<daemon::session_pool::SessionPool>) {
     let import_cwd = pool.cwd().to_path_buf();
     tokio::spawn(async move {
-        if base::frozen::import_already_decided(&import_cwd).await {
+        if settings::import::already_decided(&import_cwd).await {
             return;
         }
-        let sources = base::frozen::detect_import_sources(&import_cwd).await;
+        let sources = settings::import::detect_import_sources(&import_cwd).await;
         if sources.is_empty() {
             return;
         }
@@ -739,7 +739,7 @@ async fn shut_down_sessions(pool: &daemon::session_pool::SessionPool) {
 }
 
 fn import_detected(
-    sources: &[base::frozen::ImportSource],
+    sources: &[settings::import::ImportSource],
 ) -> daemon::session_pool::api::DaemonEvent {
     daemon::session_pool::api::DaemonEvent::ImportDetected {
         sources: sources

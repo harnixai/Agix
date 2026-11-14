@@ -10,3 +10,4 @@ pub mod plugin_fixture;
 pub mod script;
 pub mod script_session;
 pub mod scripted_model;
+pub mod sections;

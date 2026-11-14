@@ -707,7 +707,7 @@ alone. If it exists without markers, put the block at the top and the existing
 content below it.
 
 Match this format exactly. The automatic import path
-(`base::frozen::import`, used at daemon startup) writes the same markers, and
+(`settings::import`, used at daemon startup) writes the same markers, and
 the two must be able to re-run over each other's output.
 
 ## Per source

@@ -140,7 +140,7 @@ fn subagent_inherits_the_parent_instruction_file() {
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let config = Arc::new(EngineConfig::defaults_for("test-model"));
 
-    let mut parent = base::settings::LoadedSettings::new(
+    let mut parent = ::settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
         base::paths::PathSettings::default(),
     );

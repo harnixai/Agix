@@ -33,6 +33,13 @@ pub(super) struct TestParent {
     pub(super) depth: u32,
     pub(super) slots: SubagentSlots,
     pub(super) team_registry: Option<Arc<team::registry::TeamRegistry>>,
+    pub(super) team: crate::TeamSettings,
+}
+
+pub(super) fn team_with(adjust: impl FnOnce(&mut crate::TeamSettings)) -> crate::TeamSettings {
+    let mut team = crate::TeamSettings::default();
+    adjust(&mut team);
+    team
 }
 
 impl TestParent {
@@ -62,6 +69,7 @@ impl TestParent {
             depth: 0,
             slots: SubagentSlots::new(DEFAULT_MAX_CONCURRENT_SUBAGENTS),
             team_registry: None,
+            team: Default::default(),
         }
     }
 
@@ -124,8 +132,13 @@ impl TestParent {
                 &env.config.prompt_files,
             ),
         };
-        let limits =
-            crate::delegate::Limits::new(&env.config, env.depth, self.slots, Default::default());
+        let limits = crate::delegate::Limits::new(
+            &env.config,
+            &self.team,
+            env.depth,
+            self.slots,
+            Default::default(),
+        );
         let pool = crate::delegate::ToolPool::new(self.template, self.tools);
         let members = crate::delegate::PersistentMembers::new(self.team_registry);
         AgentTool::new(Delegator::new(env, catalog, pool, limits, members))

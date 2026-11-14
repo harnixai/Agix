@@ -22,7 +22,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use base::settings::Settings;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::rpc::codes;
 use daemon::DaemonServer;
@@ -30,6 +29,7 @@ use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
+use settings::Settings;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;

@@ -4,16 +4,18 @@
 //! A session assembled with [`AgentsModule`] can delegate: it gets the `Agent`
 //! tool (withheld at the depth limit), provides the session's delegator to
 //! `"agent"` hooks, forked skills and the host, and — when
-//! `execution.team_enabled` and the scene does teamwork — the team tools.
+//! `team.enabled` and the scene does teamwork — the team tools.
 //! Each delegate it spawns is assembled with the same modules as its parent.
 
 pub mod agent_tool;
 mod delegate;
+mod team_settings;
 mod type_watcher;
+
+pub use team_settings::TeamSettings;
 
 use std::sync::Arc;
 
-use base::context::EngineConfig;
 use runtime::module::{Module, ModuleError, SessionContext};
 
 use crate::agent_tool::{AgentCatalog, AgentTool, SharedAgentTypeMap};
@@ -88,7 +90,8 @@ impl Module for AgentsModule {
         // The setting is the operator's switch; the scene's capability is what
         // the scene is for. A scene that does no teamwork never shows the
         // model these tools, rather than showing and refusing them.
-        let team_registry = (settings.values.execution.team_enabled && cx.scene.supports_team)
+        let team_settings: TeamSettings = settings.values.section();
+        let team_registry = (team_settings.enabled && cx.scene.supports_team)
             .then(|| Arc::new(team::registry::TeamRegistry::new()));
 
         let hook_agents = self.hook_agents.clone().unwrap_or_default();
@@ -102,7 +105,7 @@ impl Module for AgentsModule {
                 &env.config.prompt_files,
             ),
         };
-        let limits = Limits::new(&env.config, env.depth, slots, hook_agents);
+        let limits = Limits::new(&env.config, &team_settings, env.depth, slots, hook_agents);
         let pool = ToolPool::new(template, cx.tools.clone());
         let members = PersistentMembers::new(team_registry.clone());
         let delegator = Delegator::new(env, catalog, pool, limits, members);
@@ -113,13 +116,14 @@ impl Module for AgentsModule {
 
         // Withheld at the depth limit, so the deepest agents are never even
         // offered it.
-        if cx.depth < EngineConfig::from_loaded(settings).max_agent_depth {
+        if cx.depth < settings.engine_config().max_agent_depth {
             cx.tools.register(tool.clone());
         }
 
         if let Some(registry) = team_registry {
             let coordinator =
                 team::coordinator::DefaultCoordinator::with_delegator(delegator.clone())
+                    .with_stage_concurrency(team_settings.stage_concurrency)
                     .with_registry(registry.clone())
                     .with_scene_id(cx.scene.id.clone())
                     .with_events(cx.events.unbounded_bridge())

@@ -76,6 +76,8 @@ enum MemberEnd {
     Cancelled,
 }
 
+const DEFAULT_STAGE_CONCURRENCY: usize = 6;
+
 /// Default coordinator implementation: its members are delegated through a
 /// [`Delegator`] from `base`, which `agents` implements — `team` sits below
 /// it and knows only the trait.
@@ -87,6 +89,7 @@ pub struct DefaultCoordinator {
     /// Stamped into `team.json`; `"unknown"` when not given. `team` does not
     /// depend on the `scene` crate, so whoever builds the coordinator says.
     scene_id: Option<String>,
+    stage_concurrency: usize,
 }
 
 impl DefaultCoordinator {
@@ -99,7 +102,13 @@ impl DefaultCoordinator {
             events: None,
             telemetry: None,
             scene_id: None,
+            stage_concurrency: DEFAULT_STAGE_CONCURRENCY,
         }
+    }
+
+    pub fn with_stage_concurrency(mut self, stage_concurrency: usize) -> Self {
+        self.stage_concurrency = stage_concurrency;
+        self
     }
 
     pub fn with_delegator(delegator: Arc<dyn Delegator>) -> Self {
@@ -403,9 +412,7 @@ impl Coordinator for DefaultCoordinator {
 
                 // `.max(1)`: a misconfigured `0` would make every `acquire_owned()`
                 // below block forever (a zero-permit semaphore never grants).
-                let permits = Arc::new(tokio::sync::Semaphore::new(
-                    config.team_stage_concurrency.max(1),
-                ));
+                let permits = Arc::new(tokio::sync::Semaphore::new(self.stage_concurrency.max(1)));
                 let later_stages: Vec<String> =
                     all_stage_names[(si + 1).min(stage_count)..].to_vec();
                 let memory_prompt = {
@@ -1950,13 +1957,9 @@ mod tests {
             agents: vec![member("first"), member("second")],
             aggregate: None,
         };
-        let mut config = EngineConfig::defaults_for("test");
-        config.team_stage_concurrency = 1;
-        let request = OrchestrateRequest {
-            config: Arc::new(config),
-            ..make_request(ctx, vec![stage])
-        };
+        let request = make_request(ctx, vec![stage]);
         let result = DefaultCoordinator::with_delegator(delegator.clone())
+            .with_stage_concurrency(1)
             .orchestrate(request)
             .await
             .expect("orchestrate returns a result");

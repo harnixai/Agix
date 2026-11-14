@@ -99,7 +99,7 @@ impl Daemon {
 
     async fn start_configured(
         model: Arc<dyn AnthropicClient>,
-        configure: impl FnOnce(&mut base::settings::Settings, &mut daemon::Assembly),
+        configure: impl FnOnce(&mut settings::Settings, &mut daemon::Assembly),
     ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let sock = dir.path().join("tasks.sock");
@@ -1386,7 +1386,9 @@ async fn a_session_with_an_idle_team_member_is_not_rebuilt_under_it() {
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
     let daemon = Daemon::start_configured(model.clone(), |settings, _| {
-        settings.execution.team_enabled = true;
+        let mut team = agents::TeamSettings::default();
+        team.enabled = true;
+        settings.set_section(&team);
     })
     .await;
     let session = daemon.ok("session.create", serde_json::json!({})).await["session_id"]
@@ -1478,8 +1480,10 @@ async fn a_team_member_idle_past_its_bound_no_longer_holds_off_a_rebuild() {
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
     let daemon = Daemon::start_configured(model.clone(), |settings, _| {
-        settings.execution.team_enabled = true;
-        settings.execution.team_member_idle_timeout_secs = 1;
+        let mut team = agents::TeamSettings::default();
+        team.enabled = true;
+        team.member_idle_timeout_secs = 1;
+        settings.set_section(&team);
     })
     .await;
     let session = daemon.ok("session.create", serde_json::json!({})).await["session_id"]
@@ -1513,7 +1517,9 @@ async fn a_live_team_member_is_one_of_its_sessions_tasks() {
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
     let daemon = Daemon::start_configured(model.clone(), |settings, _| {
-        settings.execution.team_enabled = true;
+        let mut team = agents::TeamSettings::default();
+        team.enabled = true;
+        settings.set_section(&team);
     })
     .await;
     let session = daemon.ok("session.create", serde_json::json!({})).await["session_id"]

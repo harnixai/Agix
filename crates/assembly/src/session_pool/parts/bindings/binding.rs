@@ -1,9 +1,9 @@
 //! 一个 `(project, scene)` 对解析出的一切：合并后的设置、对话模型与按任务的路由、
 //! skill/agent 类型/命令目录，以及它们来自哪些设置文件。
 
-use base::settings::{LoadedSettings, Settings};
 use model::adapter::AnthropicModel;
 use model::client::AnthropicClient;
+use settings::{LoadedSettings, Settings};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::warn;

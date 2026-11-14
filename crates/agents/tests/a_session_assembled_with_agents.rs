@@ -11,9 +11,9 @@ use async_trait::async_trait;
 use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelMessage};
 use base::paths::PathSettings;
-use base::settings::*;
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::{Agent, Builder};
+use settings::*;
 
 struct DummyModel;
 
@@ -36,7 +36,7 @@ impl Model for DummyModel {
     }
 }
 
-fn settings() -> base::settings::LoadedSettings {
+fn settings() -> settings::LoadedSettings {
     let dir = std::env::temp_dir().join("agix-agents-module-tests");
     let mut settings = Settings::defaults_for("test");
     settings.model.thinking_mode = ThinkingMode::Auto;
@@ -51,10 +51,10 @@ fn settings() -> base::settings::LoadedSettings {
     paths.workspace = base::paths::Workspace::project_of(&dir);
     paths.local_data_dir = dir;
     paths.scope = "code".into();
-    base::settings::LoadedSettings::new(settings, paths)
+    settings::LoadedSettings::new(settings, paths)
 }
 
-fn build(settings: base::settings::LoadedSettings, depth: u32, with_agents: bool) -> Agent {
+fn build(settings: settings::LoadedSettings, depth: u32, with_agents: bool) -> Agent {
     let mut builder = Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,
@@ -114,7 +114,9 @@ async fn the_agent_tool_is_withheld_at_the_delegation_depth_limit() {
 #[tokio::test]
 async fn team_tools_are_registered_only_when_the_operator_turns_them_on() {
     let mut on = settings();
-    on.values.execution.team_enabled = true;
+    let mut team = agents::TeamSettings::default();
+    team.enabled = true;
+    on.values.set_section(&team);
     let agent = build(on, 0, true);
     for name in ["TeamCreate", "TeamList", "TeamDelete"] {
         assert!(
@@ -127,7 +129,7 @@ async fn team_tools_are_registered_only_when_the_operator_turns_them_on() {
     for name in ["TeamCreate", "TeamList", "TeamDelete"] {
         assert!(
             agent.tools().get(name).is_none(),
-            "{name} must not be registered when team_enabled is false"
+            "{name} must not be registered when team.enabled is false"
         );
     }
 }
@@ -137,7 +139,9 @@ async fn team_tools_are_registered_only_when_the_operator_turns_them_on() {
 #[tokio::test]
 async fn the_agent_tool_goes_when_its_session_does() {
     let mut with_teams = settings();
-    with_teams.values.execution.team_enabled = true;
+    let mut team = agents::TeamSettings::default();
+    team.enabled = true;
+    with_teams.values.set_section(&team);
     with_teams.values.hooks_config = Some(serde_json::json!({
         "Stop": [{ "type": "agent", "prompt": "check" }]
     }));

@@ -8,7 +8,7 @@ async fn relative_local_data_dir_yields_a_noop_handle() {
     // `Settings::defaults_for` leaves `local_data_dir` at "." (relative)
     // — the same "don't scatter a telemetry/ dir into the working
     // directory" guard `create()`'s per-session path uses.
-    let settings = base::settings::LoadedSettings::new(
+    let settings = settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
@@ -38,7 +38,7 @@ async fn relative_local_data_dir_yields_a_noop_handle() {
 #[tokio::test]
 async fn telemetry_disabled_yields_a_noop_handle_even_with_an_absolute_dir() {
     let dir = tempfile::tempdir().unwrap();
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
@@ -52,7 +52,7 @@ async fn telemetry_disabled_yields_a_noop_handle_even_with_an_absolute_dir() {
 #[tokio::test]
 async fn absolute_dir_and_telemetry_enabled_persists_events_to_pool_jsonl() {
     let dir = tempfile::tempdir().unwrap();
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
@@ -105,7 +105,7 @@ async fn absolute_dir_and_telemetry_enabled_persists_events_to_pool_jsonl() {
 #[tokio::test]
 async fn recording_into_the_project_keeps_the_recordings_out_of_git() {
     let dir = tempfile::tempdir().unwrap();
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );

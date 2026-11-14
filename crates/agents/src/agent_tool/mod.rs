@@ -12,6 +12,7 @@
 //! type specifies a system prompt and an allowed tool set, which
 //! `delegate_selector()` holds a sub-agent's session to.
 
+use ::settings::{LoadedSettings, Settings};
 use anyhow::anyhow;
 use async_trait::async_trait;
 #[cfg(test)]
@@ -26,7 +27,6 @@ use base::interface::scene::SceneSpec;
 #[cfg(test)]
 use base::paths::PathSettings;
 use base::paths::PromptFiles;
-use base::settings::{LoadedSettings, Settings};
 use base::tool::ProgressSender;
 use base::tool::ToolContext;
 use base::tool::{PathStyle, ToolSpec};
@@ -53,6 +53,7 @@ mod task;
 mod tests;
 mod turn;
 
+use self::settings::*;
 use crate::delegate::{Admission, Delegator, HookAgentRunning, AGENT_TOOL_NAME};
 pub use crate::delegate::{SubagentSlots, DEFAULT_MAX_CONCURRENT_SUBAGENTS};
 use base::interface::delegate::Delegator as _;
@@ -64,7 +65,6 @@ use base::interface::tool_selector::{ToolPattern, ToolSelector};
 pub(crate) use build::*;
 pub use catalog::*;
 pub(crate) use permission::*;
-use settings::*;
 pub(crate) use spawn_meta::*;
 pub(crate) use task::*;
 pub(crate) use turn::*;
@@ -133,7 +133,7 @@ impl AgentTool {
         if self.delegator.members.registry.is_none() {
             return Err(base::error::ToolError::Validation(
                 "team_name/name require team coordination to be enabled for this \
-                 session (settings.execution.team_enabled)"
+                 session (team.enabled)"
                     .into(),
             ));
         }

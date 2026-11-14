@@ -18,7 +18,7 @@ pub(in crate::session_pool) struct DaemonEvents {
 }
 
 impl DaemonEvents {
-    pub(in crate::session_pool) fn new(settings: &base::settings::LoadedSettings) -> Self {
+    pub(in crate::session_pool) fn new(settings: &settings::LoadedSettings) -> Self {
         let (tx, _) = broadcast::channel(1024);
         Self {
             tx,
@@ -53,7 +53,7 @@ impl DaemonEvents {
 /// shared `<local_data_dir>/telemetry/pool.jsonl`. A no-op when telemetry is
 /// off or `local_data_dir` is not an absolute path.
 pub(in crate::session_pool) fn build_pool_telemetry(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
 ) -> telemetry::TelemetryHandle {
     #[cfg(feature = "otel")]
     for name in OTLP_HEADER_VARIABLES {

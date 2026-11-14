@@ -37,6 +37,7 @@ libc          = { workspace = true }
 
 [dev-dependencies]
 platform = { workspace = true, features = ["testing"] }
+settings = { workspace = true }
 scene = { workspace = true }
 hooks = { workspace = true }
 tempfile = { workspace = true }

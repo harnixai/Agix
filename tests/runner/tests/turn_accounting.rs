@@ -20,8 +20,8 @@ use base::interface::tool::{
     InMemoryToolRegistry, PathStyle, ProgressSender, Tool, ToolContext, ToolResult,
 };
 use base::permission::PermissionMode;
-use base::settings::Settings;
 use runtime::agent::Builder;
+use settings::Settings;
 use std::sync::Arc;
 use test_runner::scripted_model::{Reply, ScriptedModel};
 use tokio_util::sync::CancellationToken;
@@ -58,7 +58,7 @@ async fn one_turn_of_two_calls() -> Ran {
     .reporting_usage(PER_CALL);
     let model: Arc<dyn Model> = model_arc.clone();
 
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("accounting-model"),
         base::paths::PathSettings::default(),
     );

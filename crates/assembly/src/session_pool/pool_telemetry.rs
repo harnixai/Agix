@@ -9,7 +9,7 @@ use super::*;
 /// fixture directory; a host that simply wants recording on should not have to
 /// invent a path, so `settings.recorder` is consulted next.
 pub(super) fn recordings_root(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     requested: Option<&str>,
 ) -> PathBuf {
     if let Some(dir) = requested {

@@ -646,7 +646,9 @@ async fn a_team_started_by_a_sub_agent_holding_the_only_slot_is_refused_its_memb
             ),
     );
     let mut root = assembled_root(model.clone(), |s| {
-        s.execution.team_enabled = true;
+        let mut team = crate::TeamSettings::default();
+        team.enabled = true;
+        s.set_section(&team);
         s.execution.max_concurrent_subagents = 1;
     });
     root.turn("ROOT-MARK start the lead").await;
@@ -686,7 +688,9 @@ async fn a_root_sessions_team_waits_for_slots_and_every_member_runs() {
             ),
     );
     let mut root = assembled_root(model.clone(), |s| {
-        s.execution.team_enabled = true;
+        let mut team = crate::TeamSettings::default();
+        team.enabled = true;
+        s.set_section(&team);
         s.execution.max_concurrent_subagents = 2;
     });
     root.turn("ROOT-MARK run the team").await;

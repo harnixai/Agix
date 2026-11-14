@@ -1,6 +1,7 @@
 //! Phase 1 and the session itself: what the builder was given, and the session it opens.
 
 use super::*;
+use permissions::policy::Policy;
 
 const NO_HOST_TO_ASK: &str = "this session has no host to ask. Allow the call with a \
                               `permission_rules` allow rule in the settings, or choose a \
@@ -51,7 +52,7 @@ impl Builder {
             settings.values.model.model_name.clone(),
         ));
         let permission = self.host.permission.take().unwrap_or_else(|| {
-            let policy = permissions::policy::Policy::from_settings(&settings, Vec::new());
+            let policy = Policy::from_settings(&settings.permission_settings(), Vec::new());
             PermissionSet::of(Arc::new(if self.ext.elicitation.is_some() {
                 policy
             } else {

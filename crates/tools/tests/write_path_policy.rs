@@ -198,20 +198,20 @@ use base::interface::permission::{
     PermissionOutcome, PermissionPolicy, PermissionRequest, ToolFacts,
 };
 
-fn settings_allowing(paths: Vec<PathBuf>) -> base::settings::LoadedSettings {
-    let mut s = base::settings::Settings::defaults_for("test-model");
+fn settings_allowing(paths: Vec<PathBuf>) -> settings::LoadedSettings {
+    let mut s = settings::Settings::defaults_for("test-model");
     s.sandbox.allow_write = paths;
-    base::settings::LoadedSettings::new(s, base::paths::PathSettings::default())
+    settings::LoadedSettings::new(s, base::paths::PathSettings::default())
 }
 
 async fn gate_decision(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     cwd: &std::path::Path,
     path: &std::path::Path,
 ) -> PermissionOutcome {
     let write: std::sync::Arc<dyn base::interface::tool::Tool> =
         std::sync::Arc::new(tools::file_write::FileWriteTool);
-    let gate = permissions::policy::Policy::from_settings(settings, []);
+    let gate = permissions::policy::Policy::from_settings(&settings.permission_settings(), []);
     let session = std::sync::Arc::new(base::context::SessionState::for_tests(cwd.to_path_buf()));
     let mut ctx = ctx_in(cwd);
     ctx.session = session.clone();

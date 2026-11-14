@@ -10,7 +10,7 @@ use serde_json::json;
 async fn a_later_stage_works_from_what_an_earlier_stage_remembered() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "relay",
-        json!({ "execution": { "team_enabled": true } }),
+        json!({ "team": { "enabled": true } }),
         Mode::InProcess,
     )
     .await?;
@@ -92,7 +92,7 @@ async fn members_of_a_stage_pass_a_message_and_the_team_is_listed_then_deleted(
 ) -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "mail",
-        json!({ "execution": { "team_enabled": true } }),
+        json!({ "team": { "enabled": true } }),
         Mode::InProcess,
     )
     .await?;

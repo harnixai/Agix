@@ -15,7 +15,7 @@ pub(super) fn parent_settings_for_test(scope: &str) -> (LoadedSettings, std::pat
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut s = base::settings::LoadedSettings::new(
+    let mut s = ::settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
         base::paths::PathSettings::default(),
     );

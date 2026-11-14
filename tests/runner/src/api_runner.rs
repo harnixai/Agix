@@ -246,16 +246,17 @@ async fn build_agent(
         // 落在 workdir 本身，工具（Bash/Read/...)、skills/rules 发现都对着这份
         // 拷贝操作,不是手搭的空 Settings。
         let workdir = tmp.join("workdir");
-        base::settings::LoadedSettings::load(
+        settings::LoadedSettings::load(
             tmp.join("global_empty"),
             tmp.join("scene_empty"),
             workdir.join(".agix"),
             "code",
             &model_name,
+            &crate::sections::all(),
         )
     } else {
-        base::settings::LoadedSettings::new(
-            base::settings::Settings::defaults_for(&model_name),
+        settings::LoadedSettings::new(
+            settings::Settings::defaults_for(&model_name),
             base::paths::PathSettings::default(),
         )
     };
@@ -306,7 +307,10 @@ async fn build_agent(
     // harness would read a `scripts` block and quietly run without it — which
     // is the failure the carrier refuses to make anywhere else, and it would
     // make a case about a script pass by proving nothing.
-    match script_host::bindings::bind_quickjs(&settings.values.scripts, &tmp.join("workdir")) {
+    match script_host::bindings::bind_quickjs(
+        &crate::sections::ScriptBindings::of(&settings.values),
+        &tmp.join("workdir"),
+    ) {
         Ok(Some(bound)) => {
             builder = builder.plugin(std::sync::Arc::new(script_host::ScriptPlugin::new(bound)))
         }

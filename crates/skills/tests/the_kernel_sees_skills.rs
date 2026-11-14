@@ -13,11 +13,11 @@ use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelMessage};
 use base::interface::scene::SceneSpec;
 use base::paths::PathSettings;
-use base::settings::*;
 use base::skill::SkillEntry;
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::Builder;
 use runtime::commands::{Command, CommandRegistry};
+use settings::*;
 
 struct DummyModel;
 
@@ -40,7 +40,7 @@ impl Model for DummyModel {
     }
 }
 
-fn test_settings() -> base::settings::LoadedSettings {
+fn test_settings() -> settings::LoadedSettings {
     let dir = std::env::temp_dir().join("agix-skills-module-tests");
     let mut settings = Settings::defaults_for("test");
     settings.model.thinking_mode = ThinkingMode::Auto;
@@ -55,7 +55,7 @@ fn test_settings() -> base::settings::LoadedSettings {
     paths.workspace = base::paths::Workspace::project_of(&dir);
     paths.local_data_dir = dir;
     paths.scope = "code".into();
-    base::settings::LoadedSettings::new(settings, paths)
+    settings::LoadedSettings::new(settings, paths)
 }
 
 #[test]

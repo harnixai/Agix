@@ -265,7 +265,7 @@ async fn start_daemon() -> Daemon {
 
 async fn start_daemon_with(
     model_client: Arc<dyn AnthropicClient>,
-    configure: impl FnOnce(&mut base::settings::Settings),
+    configure: impl FnOnce(&mut settings::Settings),
 ) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let sock = dir.path().join("doc.sock");

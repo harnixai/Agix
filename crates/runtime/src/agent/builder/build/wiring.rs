@@ -51,7 +51,7 @@ impl Builder {
         scene: &SceneSpec,
     ) -> Arc<base::context::EngineConfig> {
         Arc::new({
-            let mut c = base::context::EngineConfig::from_loaded(settings);
+            let mut c = settings.engine_config();
             c.path_style = settings.values.path_style.unwrap_or(scene.path_style);
             c.deferred_tools = Arc::new(
                 scene

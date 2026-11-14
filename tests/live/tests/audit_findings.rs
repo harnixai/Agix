@@ -1262,7 +1262,7 @@ async fn a_member_stopped_with_a_queued_message_leaves_no_task_running() -> anyh
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("member-queue", &stub)
         .settings(json!({
-            "execution": { "team_enabled": true },
+            "team": { "enabled": true },
             "permission_rules": [
                 { "tool": "Agent", "action": "allow" },
                 { "tool": "TeamDelete", "action": "allow" }
@@ -1334,7 +1334,7 @@ fn team_dirs(project: &Path) -> Vec<PathBuf> {
 async fn an_interrupted_team_starts_no_later_stage_and_ends_cancelled() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("team-interrupted", &stub)
-        .settings(json!({ "execution": { "team_enabled": true } }))
+        .settings(json!({ "team": { "enabled": true } }))
         .start()
         .await?;
     let session = run.session().await?;

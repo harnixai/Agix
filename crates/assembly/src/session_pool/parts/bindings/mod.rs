@@ -16,8 +16,8 @@ pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
-use base::settings::LoadedSettings;
 use model::client::AnthropicClient;
+use settings::LoadedSettings;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -121,6 +121,7 @@ pub(in crate::session_pool) fn own_settings_in(
         cwd.join(".agix"),
         &host.paths.scope,
         &host.values.model.model_name,
+        &crate::settings_sections::all(),
     );
     Arc::new(host_overrides.apply_to_own(loaded).with_managed(managed))
 }
@@ -251,12 +252,14 @@ impl BindingCache {
                     root.join(".agix"),
                     &scene_id,
                     &default_model,
+                    &crate::settings_sections::all(),
                 ),
                 None => LoadedSettings::load_without_project(
                     global_root,
                     scene_root,
                     &scene_id,
                     &default_model,
+                    &crate::settings_sections::all(),
                 ),
             })
             .await;
@@ -501,7 +504,14 @@ impl BindingCache {
             scene.to_string(),
         );
         let loaded = off_the_runtime(move || {
-            LoadedSettings::load(global_root, config_root, local_dir, &scene, &default_model)
+            LoadedSettings::load(
+                global_root,
+                config_root,
+                local_dir,
+                &scene,
+                &default_model,
+                &crate::settings_sections::all(),
+            )
         })
         .await;
         let reloaded = Arc::new(

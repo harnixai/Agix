@@ -129,11 +129,7 @@ impl SessionPoolBuilder {
                 let settings = Arc::new((*self.settings).clone().with_managed(managed.clone()));
                 (path, managed, settings)
             }
-            None => (
-                base::managed_settings::managed_settings_path(),
-                None,
-                self.settings,
-            ),
+            None => (settings::managed::path(), None, self.settings),
         };
         let settings = parts::bindings::own_settings_in(
             &self.cwd,
@@ -149,7 +145,7 @@ impl SessionPoolBuilder {
         let paths = self.paths.clone();
         let plugins = Arc::new(crate::plugins::PluginSubsystem::new(
             paths.clone(),
-            settings.values.plugins.clone(),
+            settings.values.section(),
         ));
         let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
         tools::register_builtin_tools(&tools);

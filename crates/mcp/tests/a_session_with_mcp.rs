@@ -13,9 +13,9 @@ use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelContentBlock, ModelMessage};
 use base::interface::scene::SceneSpec;
 use base::paths::PathSettings;
-use base::settings::*;
 use mcp::manager::McpManager;
 use runtime::agent::Builder;
+use settings::*;
 
 struct DummyModel;
 
@@ -78,7 +78,7 @@ impl Model for RecordingAnswerModel {
     }
 }
 
-fn recall_test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
+fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     let mut settings = Settings::defaults_for("test-model");
     settings.model.base_url = "https://api.example.com".into();
     settings.model.auth_token = "test".into();
@@ -92,10 +92,10 @@ fn recall_test_settings(root: &std::path::Path) -> base::settings::LoadedSetting
     paths.workspace = base::paths::Workspace::project_of(&root.join("local-data"));
     paths.local_data_dir = root.join("local-data");
     paths.scope = "code".into();
-    base::settings::LoadedSettings::new(settings, paths)
+    settings::LoadedSettings::new(settings, paths)
 }
 
-fn test_settings() -> base::settings::LoadedSettings {
+fn test_settings() -> settings::LoadedSettings {
     recall_test_settings(&std::env::temp_dir().join("agix-mcp-module-tests"))
 }
 

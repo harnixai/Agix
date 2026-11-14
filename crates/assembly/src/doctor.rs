@@ -14,7 +14,7 @@
 use crate::config::DaemonPaths;
 use crate::doctor_posture;
 use base::interface::health::{CheckResult, HealthCheck, HealthChecks};
-use base::settings::LoadedSettings;
+use settings::LoadedSettings;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ struct TierStatus {
     unknown_keys: Vec<String>,
     /// Values in this tier's files that do not fit their setting, left out
     /// of the merge — see `LoadedSettings::ignored`.
-    ignored_values: Vec<base::settings::IgnoredValue>,
+    ignored_values: Vec<settings::IgnoredValue>,
 }
 
 fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
@@ -60,7 +60,10 @@ fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
                 exists: true,
                 parses: true,
                 error: None,
-                unknown_keys: base::settings::unknown_settings_keys(&value),
+                unknown_keys: settings::unknown_settings_keys(
+                    &value,
+                    &crate::settings_sections::all(),
+                ),
                 ignored_values: Vec::new(),
             },
             Err(e) => TierStatus {
@@ -93,7 +96,7 @@ pub struct SettingsTiersCheck {
     global: PathBuf,
     scenes: Vec<(String, PathBuf)>,
     project: PathBuf,
-    ignored: Vec<base::settings::IgnoredValue>,
+    ignored: Vec<settings::IgnoredValue>,
 }
 
 impl SettingsTiersCheck {
@@ -584,7 +587,7 @@ pub struct ModelReport {
 mod tests {
     use super::*;
     use crate::config::StaticDaemonPaths;
-    use base::settings::Settings;
+    use settings::Settings;
 
     fn run_doctor(
         paths: &dyn DaemonPaths,
@@ -712,6 +715,7 @@ mod tests {
             project.join(".agix"),
             "code",
             "m",
+            &crate::settings_sections::all(),
         );
         let paths = StaticDaemonPaths::with_project(global.join("scenes/code"), project)
             .with_global(global);
@@ -749,7 +753,7 @@ mod tests {
     fn reports_provider_routing_errors() {
         let dir = tempfile::tempdir().unwrap();
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
-        let mut settings = base::settings::LoadedSettings::new(
+        let mut settings = settings::LoadedSettings::new(
             Settings::defaults_for("test-model"),
             base::paths::PathSettings::default(),
         );
@@ -823,7 +827,7 @@ mod tests {
     #[test]
     fn a_full_memory_store_is_reported_degraded() {
         let dir = tempfile::tempdir().unwrap();
-        let mut settings = base::settings::LoadedSettings::new(
+        let mut settings = settings::LoadedSettings::new(
             Settings::defaults_for("test-model"),
             base::paths::PathSettings::default(),
         );
@@ -984,8 +988,8 @@ mod documented_shape_tests {
     /// The doc's example is written for a fresh install with no settings.json
     /// anywhere; `run_doctor` has to be called under exactly that to compare.
     fn report_the_example_describes(dir: &Path) -> serde_json::Value {
-        let mut settings = base::settings::LoadedSettings::new(
-            base::settings::Settings::defaults_for("claude-sonnet-4-6"),
+        let mut settings = settings::LoadedSettings::new(
+            settings::Settings::defaults_for("claude-sonnet-4-6"),
             base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = dir.join("global");

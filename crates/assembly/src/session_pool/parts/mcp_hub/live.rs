@@ -13,9 +13,9 @@ mod status;
 mod tests;
 
 use crate::session_pool::api::DaemonEvent;
-use base::settings::LoadedSettings;
 use cache::McpCache;
 use mcp::manager::McpManager;
+use settings::LoadedSettings;
 use status::*;
 use std::collections::HashMap;
 use std::path::Path;

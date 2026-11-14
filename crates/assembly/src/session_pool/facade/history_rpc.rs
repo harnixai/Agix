@@ -190,7 +190,7 @@ impl SessionPool {
     /// session ids are known.
     pub(in crate::session_pool) async fn measure_recordings(
         &self,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
         root_session: &str,
         lineage: &history::store::LineageSnapshot,
     ) -> Vec<crate::export::RecordingPart> {

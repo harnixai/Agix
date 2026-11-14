@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 #[test]
 fn prompt_context_includes_os() {
-    let mut values = base::settings::Settings::defaults_for("test-model");
+    let mut values = settings::Settings::defaults_for("test-model");
     values.model.base_url = "https://api.example.com".into();
     values.model.auth_token = "test".into();
     values.model.max_tokens = 4096;
@@ -25,7 +25,7 @@ fn prompt_context_includes_os() {
     paths.global_data_dir = "/tmp/global".into();
     paths.workspace = base::paths::Workspace::project_of(std::path::Path::new("/tmp/local"));
     paths.local_data_dir = "/tmp/local".into();
-    let settings = base::settings::LoadedSettings::new(values, paths);
+    let settings = settings::LoadedSettings::new(values, paths);
     let ctx = build_prompt_context(
         &settings,
         None,

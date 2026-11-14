@@ -170,7 +170,7 @@ impl Delegator {
         if self.limits.max_persistent_members == 0 {
             return Err(DelegateError::Limit(
                 "persistent team members are turned off in this session \
-                 (execution.team_max_persistent_members is 0). Call Agent without team_name \
+                 (team.max_persistent_members is 0). Call Agent without team_name \
                  and name to run a one-shot sub-agent instead, or do the work yourself."
                     .into(),
             ));
@@ -199,13 +199,13 @@ impl Delegator {
         if alive >= self.limits.max_persistent_members {
             let busy = if alive == 1 {
                 "1 persistent member is busy, the most this session keeps \
-                 (execution.team_max_persistent_members). Message it, wait for it to go idle, \
+                 (team.max_persistent_members). Message it, wait for it to go idle, \
                  or stop it with TaskStop or TeamDelete."
                     .to_string()
             } else {
                 format!(
                     "{alive} persistent members are busy, the most this session keeps \
-                     (execution.team_max_persistent_members). Message one of them, wait for \
+                     (team.max_persistent_members). Message one of them, wait for \
                      one to go idle, or stop one with TaskStop or TeamDelete."
                 )
             };
@@ -361,10 +361,10 @@ impl Delegator {
     }
 
     /// Stops the oldest idle members while there are more than
-    /// `team_max_persistent_members`, counting the member `protect` is about
+    /// `team.max_persistent_members`, counting the member `protect` is about
     /// to add. A running member is never stopped; `protect` itself never is.
     /// Run before a member is spawned; a member idle past
-    /// `team_member_idle_timeout_secs` leaves on its own.
+    /// `team.member_idle_timeout_secs` leaves on its own.
     pub(crate) fn reclaim_idle_members(&self, protect: Option<&(String, String)>) {
         let max_total = self.limits.max_persistent_members;
         let victims: Vec<(String, String)> = {

@@ -154,6 +154,7 @@ pub(crate) struct Limits {
 impl Limits {
     pub(crate) fn new(
         config: &base::context::EngineConfig,
+        team: &crate::TeamSettings,
         depth: u32,
         subagent_slots: SubagentSlots,
         hook_agents: HookAgents,
@@ -163,8 +164,8 @@ impl Limits {
             max_depth: config.max_agent_depth,
             slots: SlotRule::new(subagent_slots, depth),
             hook_agents,
-            max_persistent_members: config.team_max_persistent_members,
-            member_idle_timeout_secs: config.team_member_idle_timeout_secs,
+            max_persistent_members: team.max_persistent_members,
+            member_idle_timeout_secs: team.member_idle_timeout_secs,
         }
     }
 

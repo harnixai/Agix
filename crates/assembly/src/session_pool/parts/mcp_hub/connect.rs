@@ -102,7 +102,7 @@ impl SessionPool {
     /// directory, which may be some other project.
     pub(in crate::session_pool) fn placed_mcp_server(
         &self,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
         name: &str,
         cfg: mcp::config::McpServerConfig,
     ) -> mcp::config::McpServerConfig {
@@ -120,7 +120,7 @@ impl SessionPool {
     /// that will not be connected gets a `mcp_connect_failed` event here.
     pub(in crate::session_pool) fn admit_mcp_servers(
         &self,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
     ) -> AdmittedMcp {
         let plugin_servers = self.plugins.mcp_servers();
         let projects_own: std::collections::HashSet<String> = project_tier_mcp_servers(settings)
@@ -230,7 +230,7 @@ impl SessionPool {
     pub(in crate::session_pool) async fn first_mcp_connect(
         &self,
         key: ProjectSceneKey,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
     ) -> Arc<McpManager> {
         let slot = self.mcp.cache.slot(&key);
         let update = slot.update().await;
@@ -328,7 +328,7 @@ impl SessionPool {
         &self,
         project_root: Option<&Path>,
         scene_id: &str,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
     ) -> (Vec<String>, Vec<String>, Vec<String>) {
         let key = (project_root.map(Path::to_path_buf), scene_id.to_string());
         let slot = self.mcp.cache.slot(&key);

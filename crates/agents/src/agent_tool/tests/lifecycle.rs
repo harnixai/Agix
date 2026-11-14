@@ -11,10 +11,8 @@ pub(super) fn hanging_team_parent(
 ) {
     let started = Arc::new(tokio::sync::Notify::new());
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut config = EngineConfig::defaults_for("test-model");
-    config.team_max_persistent_members = cap;
     let parent = TestParent {
-        config: Arc::new(config),
+        team: team_with(|t| t.max_persistent_members = cap),
         ..TestParent::new(Arc::new(AnswersOnlyCancellation {
             started: started.clone(),
             dropped: dropped.clone(),
@@ -422,10 +420,8 @@ impl Model for ModelNameModel {
 #[tokio::test]
 async fn a_cap_of_zero_refuses_persistent_members_and_leaves_one_shot_delegates_alone() {
     let asked_for = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut config = EngineConfig::defaults_for("test-model");
-    config.team_max_persistent_members = 0;
     let agent_tool = TestParent {
-        config: Arc::new(config),
+        team: team_with(|t| t.max_persistent_members = 0),
         ..TestParent::new(Arc::new(ModelNameModel {
             asked_for: asked_for.clone(),
         }))

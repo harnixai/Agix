@@ -17,9 +17,9 @@ use base::interface::prompt_registry::{InMemoryPromptRegistry, PromptRegistry};
 use base::interface::scene::SceneSpec;
 use base::paths::PathSettings;
 use base::prompt::PromptBlock;
-use base::settings::*;
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::{Agent, Builder};
+use settings::*;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
@@ -58,7 +58,7 @@ impl Model for CapturingModel {
     }
 }
 
-fn settings(dir: &Path) -> base::settings::LoadedSettings {
+fn settings(dir: &Path) -> settings::LoadedSettings {
     let mut values = Settings::defaults_for("test-model");
     values.model.max_tokens = 2000;
     values.model.thinking_mode = ThinkingMode::Auto;
@@ -72,7 +72,7 @@ fn settings(dir: &Path) -> base::settings::LoadedSettings {
     paths.workspace = base::paths::Workspace::project_of(dir);
     paths.local_data_dir = dir.to_path_buf();
     paths.scope = "review".into();
-    base::settings::LoadedSettings::new(values, paths)
+    settings::LoadedSettings::new(values, paths)
 }
 
 fn write_scene(root: &Path, id: &str, scene_json: &str, prompt_md: &str) {
@@ -92,7 +92,7 @@ fn registry_with(root: &Path) -> scene::SceneRegistry {
 
 fn build(
     scene: Arc<SceneSpec>,
-    settings: base::settings::LoadedSettings,
+    settings: settings::LoadedSettings,
     model: Arc<dyn Model>,
 ) -> Agent {
     build_with(Builder::new(), scene, settings, model)
@@ -101,7 +101,7 @@ fn build(
 fn build_with(
     builder: Builder,
     scene: Arc<SceneSpec>,
-    settings: base::settings::LoadedSettings,
+    settings: settings::LoadedSettings,
     model: Arc<dyn Model>,
 ) -> Agent {
     builder

@@ -210,16 +210,17 @@ pub async fn pool(
 /// The daemon's own pair's settings as they are on disk, read the way
 /// `load_daemon_config` read them — `--max-tokens` fallback included — so
 /// what differs from `config.settings` is what the host changed afterwards.
-fn own_settings_on_disk(config: &DaemonConfig) -> base::settings::LoadedSettings {
+fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
     let paths = &config.paths;
-    let mut on_disk = base::settings::LoadedSettings::load(
+    let mut on_disk = settings::LoadedSettings::load(
         paths.global_root(),
         paths.config_root(),
         paths.project_root().join(".agix"),
         &config.settings.paths.scope,
         &config.settings.values.model.model_name,
+        &crate::settings_sections::all(),
     );
-    if on_disk.values.model.max_tokens == base::settings::DEFAULT_MAX_TOKENS {
+    if on_disk.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
         on_disk.values.model.max_tokens = config.max_tokens_fallback;
     }
     on_disk
@@ -230,10 +231,10 @@ fn own_settings_on_disk(config: &DaemonConfig) -> base::settings::LoadedSettings
 /// already carry a managed layer (an embedder's `Tier::Managed` source) keep
 /// it when there is no file.
 fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission::ManagedSettings>) {
-    use base::managed_settings::{managed_settings_path, read};
+    use settings::managed::read;
     let (path, required) = match &config.managed_settings_path {
         Some(path) => (path.clone(), true),
-        None => (managed_settings_path(), false),
+        None => (settings::managed::path(), false),
     };
     let managed = read(&path, required).or_else(|| config.settings.managed.clone());
     (path, managed)

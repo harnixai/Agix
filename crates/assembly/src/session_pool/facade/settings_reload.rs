@@ -60,7 +60,7 @@ impl SessionPool {
     /// `import` skill) does its own detection with the file tools.
     pub async fn list_import_sources(&self, project_root: Option<&Path>) -> Vec<api::ImportSource> {
         let project_root = project_root.unwrap_or(self.cwd());
-        base::frozen::detect_import_sources(project_root)
+        settings::import::detect_import_sources(project_root)
             .await
             .iter()
             .map(|s| api::ImportSource {
@@ -80,21 +80,21 @@ impl SessionPool {
     ) -> Result<api::ImportRun, PoolError> {
         let invalid = |message: String| PoolError::InvalidRequest(message);
         let project_root = project_root.unwrap_or(self.cwd());
-        let kind = base::frozen::ImportSourceKind::try_parse(source).ok_or_else(|| {
+        let kind = settings::import::ImportSourceKind::try_parse(source).ok_or_else(|| {
             invalid(format!(
                 "unknown source `{source}` — expected claude_code, codex, or cursor"
             ))
         })?;
-        let sources = base::frozen::detect_import_sources(project_root).await;
+        let sources = settings::import::detect_import_sources(project_root).await;
         let Some(matched) = sources.iter().find(|s| s.kind() == kind) else {
             return Err(invalid(format!(
                 "source `{source}` not currently detected in this project"
             )));
         };
-        let summary = base::frozen::execute_import(project_root, matched)
+        let summary = settings::import::execute_import(project_root, matched)
             .await
             .map_err(|e| invalid(e.to_string()))?;
-        base::frozen::mark_imported(project_root, &sources, kind)
+        settings::import::mark_imported(project_root, &sources, kind)
             .await
             .map_err(|e| invalid(e.to_string()))?;
         Ok(api::ImportRun {
@@ -219,7 +219,7 @@ impl SessionPool {
     ) -> Result<bool, PoolError> {
         let startup_scene = self.bindings.startup_scene().await;
         let written_to = self.bindings.settings_path_of(project_root);
-        if !base::project_trust::is_own_project_dir(
+        if !settings::trust::is_own_project_dir(
             written_to.parent().unwrap_or(&written_to),
             &self.bindings.paths().global_root(),
             &self.bindings.scene_root(scene_id, &startup_scene),
@@ -227,7 +227,7 @@ impl SessionPool {
             return Ok(false);
         }
         let target = project_root.unwrap_or(self.cwd());
-        let (trust, _) = base::project_trust::ProjectTrustSettings::read_global(
+        let (trust, _) = settings::trust::ProjectTrustSettings::read_global(
             &self.bindings.paths().global_root(),
         )
         .decide(target);
@@ -249,7 +249,7 @@ impl SessionPool {
     ///
     /// `config_patch`/`task_models_patch` are raw partial JSON objects
     /// merged key-by-key onto the existing project-tier file (see
-    /// `base::settings::merge_json_values`) — deliberately not
+    /// `settings::merge_json_values`) — deliberately not
     /// typed `ProviderConfig` structs, since deserializing a partial patch
     /// into a `#[serde(default)]` struct would silently null out every field
     /// the caller didn't mention, clobbering unrelated existing values.
@@ -327,7 +327,7 @@ impl SessionPool {
             } else if let Some(mut cfg) = config_patch {
                 let secrets = take_provider_secrets(&mut cfg);
                 let existing = provider_entry(obj, &provider_id);
-                base::settings::merge_json_values(existing, cfg);
+                settings::merge_json_values(existing, cfg);
                 let mut moved = take_provider_secrets(existing);
                 moved.extend(secrets);
                 if !moved.is_empty() {
@@ -352,7 +352,7 @@ impl SessionPool {
                 if !task_models.is_object() {
                     *task_models = serde_json::json!({});
                 }
-                base::settings::merge_json_values(task_models, tm);
+                settings::merge_json_values(task_models, tm);
             }
 
             // The key first: a failure after it leaves a key nothing uses yet,
@@ -429,7 +429,7 @@ impl SessionPool {
                 )))
             }
         };
-        let entry = base::project_trust::exact_pattern(&resolved);
+        let entry = settings::trust::exact_pattern(&resolved);
         let path = self
             .bindings
             .paths()
@@ -456,7 +456,7 @@ impl SessionPool {
                 v.as_str().is_some_and(|p| {
                     p == entry
                         || (!p.contains(['*', '?', '['])
-                            && base::project_trust::pattern_matches(p, &resolved))
+                            && settings::trust::pattern_matches(p, &resolved))
                 })
             };
             if trusted {
@@ -631,18 +631,18 @@ pub(in crate::session_pool) fn provider_entry<'a>(
 }
 
 /// Run `edit` holding the settings directory `settings_file` is in — see
-/// `base::settings_file` — on a blocking thread, since the lock can wait on
+/// `settings::file` — on a blocking thread, since the lock can wait on
 /// another process.
 pub(in crate::session_pool) async fn edit_settings_dir<R: Send + 'static>(
     settings_file: &Path,
-    edit: impl FnOnce(&base::settings_file::SettingsDir) -> Result<R, String> + Send + 'static,
+    edit: impl FnOnce(&settings::file::SettingsDir) -> Result<R, String> + Send + 'static,
 ) -> Result<R, String> {
     let dir = settings_file
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_default();
     tokio::task::spawn_blocking(move || {
-        let tier = base::settings_file::SettingsDir::lock(&dir).map_err(|e| e.to_string())?;
+        let tier = settings::file::SettingsDir::lock(&dir).map_err(|e| e.to_string())?;
         edit(&tier)
     })
     .await

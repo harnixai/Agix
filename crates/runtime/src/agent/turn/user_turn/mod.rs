@@ -45,7 +45,7 @@ impl TurnLoopState {
         }
     }
 
-    fn new(settings: &base::settings::LoadedSettings) -> Self {
+    fn new(settings: &settings::LoadedSettings) -> Self {
         Self {
             started: std::time::Instant::now(),
             model: settings.values.model.model_name.clone(),

@@ -679,7 +679,7 @@ async fn a_team_member_finishing_fires_task_completed_and_teammate_idle() -> any
     let ledger = Ledger::new()?;
     let mut run = stubbed("teamed", &stub)
         .settings(json!({
-            "execution": { "team_enabled": true },
+            "team": { "enabled": true },
             "hooks_config": {
                 "TaskCompleted": [ledger.hook()],
                 "TeammateIdle": [ledger.hook()]
@@ -736,7 +736,7 @@ async fn every_way_of_starting_a_sub_agent_is_bracketed_by_subagent_hooks() -> a
     let ledger = Ledger::new()?;
     let mut run = stubbed("bracketed", &stub)
         .settings(json!({
-            "execution": { "team_enabled": true },
+            "team": { "enabled": true },
             "permission_rules": [{ "tool": "Agent", "action": "allow" }],
             "hooks_config": {
                 "SubagentStart": [ledger.hook()],

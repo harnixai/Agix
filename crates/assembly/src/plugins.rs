@@ -8,6 +8,10 @@
 //! the feature the same API answers that there are no plugins, so the rest of
 //! the daemon needs no conditional compilation of its own.
 
+mod policy;
+
+pub use policy::PluginsConfig;
+
 use crate::config::DaemonPaths;
 use crate::session_pool::api::{
     PluginInfo, PluginInstalled, PluginRemoved, PluginScope, PluginToggled,
@@ -71,7 +75,7 @@ pub struct Contributions {
 /// Manifests, the cache, the enable state, and what a package declares.
 #[cfg(feature = "plugin-packages")]
 mod packages {
-    use super::{DaemonPaths, PackageScripts, PackageSkills};
+    use super::{DaemonPaths, PackageScripts, PackageSkills, PluginsConfig};
     use crate::session_pool::api::PluginInfo;
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -82,7 +86,7 @@ mod packages {
         /// The `settings.plugins` policy this pool started with. Held rather
         /// than re-read, so a refresh mid-session cannot quietly widen what
         /// is allowed to load.
-        policy: base::settings::PluginsConfig,
+        policy: PluginsConfig,
         enabled: bool,
         /// The permitted, enabled set. Rescanned by install/uninstall/enable/
         /// disable, so every reader — the MCP configs, the script bindings,
@@ -96,7 +100,7 @@ mod packages {
     }
 
     impl Packages {
-        pub fn new(paths: Arc<dyn DaemonPaths>, policy: base::settings::PluginsConfig) -> Self {
+        pub fn new(paths: Arc<dyn DaemonPaths>, policy: PluginsConfig) -> Self {
             let enabled = policy.enabled;
             let active = Arc::new(if enabled {
                 active_plugins(paths.as_ref(), &policy)
@@ -116,7 +120,7 @@ mod packages {
             self.enabled
         }
 
-        pub fn policy(&self) -> &base::settings::PluginsConfig {
+        pub fn policy(&self) -> &PluginsConfig {
             &self.policy
         }
 
@@ -364,7 +368,7 @@ mod packages {
 
     fn active_plugins(
         paths: &dyn DaemonPaths,
-        policy: &base::settings::PluginsConfig,
+        policy: &PluginsConfig,
     ) -> Vec<plugin::manifest::Plugin> {
         let (global, scene) = tier_dirs(paths);
         let global_state = plugin::state::EnableState::new(global.clone());
@@ -516,7 +520,7 @@ mod imp {
     }
 
     impl PluginSubsystem {
-        pub fn new(paths: Arc<dyn DaemonPaths>, policy: base::settings::PluginsConfig) -> Self {
+        pub fn new(paths: Arc<dyn DaemonPaths>, policy: PluginsConfig) -> Self {
             Self {
                 packages: super::packages::Packages::new(paths, policy),
             }
@@ -530,7 +534,7 @@ mod imp {
             }
         }
 
-        pub fn policy(&self) -> &base::settings::PluginsConfig {
+        pub fn policy(&self) -> &PluginsConfig {
             self.packages.policy()
         }
 
@@ -708,7 +712,7 @@ mod imp {
     pub struct PluginSubsystem;
 
     impl PluginSubsystem {
-        pub fn new(_paths: Arc<dyn DaemonPaths>, _policy: base::settings::PluginsConfig) -> Self {
+        pub fn new(_paths: Arc<dyn DaemonPaths>, _policy: PluginsConfig) -> Self {
             Self
         }
         pub fn status(&self) -> PluginStatus {

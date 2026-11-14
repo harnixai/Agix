@@ -129,7 +129,7 @@ pub struct ProjectStatus {
     /// The `project_trust.trusted` entry that matched; `null` when the
     /// default decided.
     pub matched: Option<String>,
-    pub default: base::project_trust::TrustLevel,
+    pub default: settings::trust::TrustLevel,
     /// What the project sets that takes effect only while it is trusted.
     pub requires_trust: Vec<String>,
 }

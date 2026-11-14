@@ -23,9 +23,9 @@ use base::interface::mcp_servers::McpServers;
 use base::interface::model::Model;
 use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::{NoSkills, SkillCatalog};
-use base::settings::LoadedSettings;
 use base::skill::SkillEntry;
 use base::tool::InMemoryToolRegistry;
+use settings::LoadedSettings;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{HostContracts, PendingPermissions};

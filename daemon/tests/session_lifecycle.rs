@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use base::settings::Settings;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::rpc::codes;
 use daemon::DaemonServer;
@@ -22,6 +21,7 @@ use model::stream::{
     BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage as WireUsage,
 };
 use model::types::MessagesRequest;
+use settings::Settings;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;

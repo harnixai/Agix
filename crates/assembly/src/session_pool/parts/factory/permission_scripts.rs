@@ -1,6 +1,7 @@
 //! 会话的有效权限模式、权限对象的解析，以及脚本绑定。
 
 use crate::session_pool::*;
+use crate::settings_sections::ScriptBindings;
 
 /// The permission mode a session will actually run under.
 ///
@@ -17,7 +18,7 @@ use crate::session_pool::*;
 /// — i.e. *ask*. Managed settings that disable bypass turn a
 /// `bypassPermissions` result, however it was reached, into `Default`.
 pub(in crate::session_pool) fn effective_permission_mode(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     options: Option<&SessionOptions>,
 ) -> base::permission::PermissionMode {
     let mode = requested_permission_mode(&settings.values, options);
@@ -63,7 +64,7 @@ fn requested_permission_mode(
 /// bug in their JavaScript.
 #[cfg(feature = "scripts")]
 pub(in crate::session_pool) fn bind_scripts(
-    settings: &Arc<base::settings::LoadedSettings>,
+    settings: &Arc<settings::LoadedSettings>,
     project_root: &std::path::Path,
     packages: &[crate::plugins::PackageScripts],
 ) -> (
@@ -72,7 +73,7 @@ pub(in crate::session_pool) fn bind_scripts(
 ) {
     use script_host::bindings::{bind_into, bind_lenient, BindingSource, BoundScripts};
 
-    if settings.values.scripts.is_empty() && packages.is_empty() {
+    if ScriptBindings::of(&settings.values).is_empty() && packages.is_empty() {
         return (None, Vec::new());
     }
 
@@ -132,14 +133,13 @@ pub(in crate::session_pool) fn bind_scripts(
 /// script inside the project.
 #[cfg_attr(not(feature = "scripts"), allow(dead_code))]
 pub(in crate::session_pool) fn operator_script_bindings(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
 ) -> Vec<base::interface::script::ScriptBinding> {
+    let bindings = ScriptBindings::of(&settings.values);
     if !settings.trust().is_untrusted() {
-        return settings.values.scripts.clone();
+        return bindings;
     }
-    settings
-        .values
-        .scripts
+    bindings
         .iter()
         .filter(|binding| {
             let absolute = binding.path.is_absolute();
@@ -161,15 +161,16 @@ pub(in crate::session_pool) fn operator_script_bindings(
 /// loudly rather than ignored — and so is a package that ships one.
 #[cfg(not(feature = "scripts"))]
 pub(in crate::session_pool) fn bind_scripts(
-    settings: &Arc<base::settings::LoadedSettings>,
+    settings: &Arc<settings::LoadedSettings>,
     _project_root: &std::path::Path,
     packages: &[crate::plugins::PackageScripts],
 ) -> (Option<()>, Vec<(String, String)>) {
     const NO_ENGINE: &str = "this build carries no script engine";
 
-    if !settings.values.scripts.is_empty() {
+    let scripts = ScriptBindings::of(&settings.values);
+    if !scripts.is_empty() {
         error!(
-            scripts = settings.values.scripts.len(),
+            scripts = scripts.len(),
             "this build carries no script engine, so a `scripts` section cannot be honored; \
              rebuild with the `scripts` feature or remove the section"
         );
@@ -196,13 +197,14 @@ pub(in crate::session_pool) fn bind_scripts(
 /// grants.
 pub(in crate::session_pool) fn resolve_session_permission(
     host: Option<&Arc<dyn PermissionPolicy>>,
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     options: Option<&SessionOptions>,
 ) -> PermissionSet {
     let extra = options
         .map(|o| o.permission_rules.clone())
         .unwrap_or_default();
     PermissionSet::of(Arc::new(
-        permissions::policy::Policy::from_settings(settings, extra).with_host(host.cloned()),
+        permissions::policy::Policy::from_settings(&settings.permission_settings(), extra)
+            .with_host(host.cloned()),
     ))
 }

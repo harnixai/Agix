@@ -564,7 +564,7 @@ async fn a_team_member_is_held_to_the_parents_deny_rules() -> anyhow::Result<()>
     let mut run = stubbed("team-rules", &stub)
         .settings(json!({
             "permission_mode": "acceptEdits",
-            "execution": { "team_enabled": true },
+            "team": { "enabled": true },
             "permission_rules": [{ "tool": "Write(**/locked/**)", "action": "deny" }]
         }))
         .start()
@@ -593,7 +593,7 @@ async fn a_team_member_is_no_freer_than_its_parent() -> anyhow::Result<()> {
     let mut run = stubbed("team-mode", &stub)
         .settings(json!({
             "permission_mode": "default",
-            "execution": { "team_enabled": true }
+            "team": { "enabled": true }
         }))
         .options(|o| o.prompt_timeout(Duration::from_secs(2)))
         .start()

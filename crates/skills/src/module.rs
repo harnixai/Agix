@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use base::interface::skill_provider::SkillProvider;
-use base::settings::LoadedSettings;
 use runtime::module::{Module, ModuleError, SessionContext};
+use settings::LoadedSettings;
 
 use crate::manager::SkillManager;
 
@@ -228,10 +228,10 @@ mod tests {
         skill("reads", "", "Just text.");
 
         let mut settings = LoadedSettings::new(
-            base::settings::Settings::defaults_for("m"),
+            settings::Settings::defaults_for("m"),
             base::paths::PathSettings::default(),
         )
-        .with_project_layer(base::project_trust::ProjectLayer {
+        .with_project_layer(settings::trust::ProjectLayer {
             trust: base::permission::ProjectTrust::Untrusted,
             ..Default::default()
         });
@@ -266,7 +266,7 @@ mod tests {
         use crate::manager::SkillSource;
         let home = tempfile::tempdir().unwrap();
         let mut settings = LoadedSettings::new(
-            base::settings::Settings::defaults_for("m"),
+            settings::Settings::defaults_for("m"),
             base::paths::PathSettings::default(),
         );
         settings.paths.global_data_dir = home.path().join("global");

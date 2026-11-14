@@ -31,9 +31,9 @@ use base::interface::scene::SceneSpec;
 use base::interface::tool::{InMemoryToolRegistry, Tool};
 use base::interface::turn_policy::TurnPolicy;
 use base::permission::PermissionMode;
-use base::settings::Settings;
 use history::store::HistoryStore as _;
 use runtime::agent::{Builder, InputMessage};
+use settings::Settings;
 use std::sync::Arc;
 use test_runner::scripted_model::{Reply, ScriptedModel};
 use tokio_util::sync::CancellationToken;
@@ -140,7 +140,7 @@ async fn trace(case: Case) -> String {
     };
     let model: Arc<dyn Model> = model_arc.clone();
 
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("golden-model"),
         base::paths::PathSettings::default(),
     );
@@ -184,7 +184,7 @@ async fn trace(case: Case) -> String {
     // policy has nobody to ask and refuses every call it would put to the
     // prompt channel, so a case about approval would never see a prompt.
     let permission = base::interface::permission::PermissionSet::of(Arc::new(
-        permissions::policy::Policy::from_settings(&settings, []),
+        permissions::policy::Policy::from_settings(&settings.permission_settings(), []),
     ));
 
     let scene: Arc<SceneSpec> = {

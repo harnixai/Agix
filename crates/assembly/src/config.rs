@@ -5,7 +5,7 @@
 //! `AGIX_CONFIG_HOME` at runtime.
 //!
 //! [`load_daemon_config`] delegates all settings.json parsing/merging to
-//! `base::settings::LoadedSettings::load()` — the single canonical
+//! `settings::LoadedSettings::load()` — the single canonical
 //! loader (global → scene → project, generic recursive JSON merge).
 //! `DaemonConfig` just wraps that one `Settings` plus the handful of fields
 //! that are genuinely daemon-process-level, not settings.json content
@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base::paths::PathSettings;
-use base::settings::{LoadedSettings, Settings};
 use permissions::ruleset::RuleSet;
+use settings::{LoadedSettings, Settings};
 
 /// Controls where the daemon reads its configuration and writes its runtime
 /// files (socket, lock, etc.).
@@ -182,7 +182,7 @@ pub struct DaemonConfig {
     /// Ignored when the host passes `Assembly::mcp`'s `policy`.
     pub mcp_policy_path: Option<PathBuf>,
     /// Where to read the deployment's managed settings instead of the
-    /// platform's path (`base::managed_settings::managed_settings_path`). A
+    /// platform's path (`settings::managed::path`). A
     /// file named here must exist.
     pub managed_settings_path: Option<PathBuf>,
     /// `--max-tokens`: the `model.max_tokens` of every project and scene
@@ -240,7 +240,7 @@ impl DaemonConfig {
             session_idle_timeout_secs: 3600,
             mcp_policy_path: None,
             managed_settings_path: None,
-            max_tokens_fallback: base::settings::DEFAULT_MAX_TOKENS,
+            max_tokens_fallback: settings::DEFAULT_MAX_TOKENS,
             settings: LoadedSettings::new(
                 Settings::defaults_for("claude-sonnet-4-6"),
                 PathSettings::default(),
@@ -270,11 +270,12 @@ pub fn load_daemon_config(
         project_root.join(".agix"),
         scope,
         cli_model,
+        &crate::settings_sections::all(),
     );
     // `--max-tokens` is a fallback (same tier as `LoadedSettings::load`'s
     // `default_model` param) — only takes effect when no settings.json
     // layer set it, which is what still holding the default means.
-    if settings.values.model.max_tokens == base::settings::DEFAULT_MAX_TOKENS {
+    if settings.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
         settings.values.model.max_tokens = cli_max_tokens;
     }
 

@@ -3,8 +3,8 @@
 //! （`--max-tokens`）给每一对；宿主加的权限规则只回到守护进程自己那一对上。
 
 use base::permission::LoadedRule;
-use base::settings::{LoadedSettings, Settings};
 use serde_json::Value;
+use settings::{LoadedSettings, Settings};
 
 /// What the host's settings hold that the same pair read from disk does not:
 /// the values it set in memory, as a JSON layer, and the rules it added. And
@@ -51,7 +51,7 @@ impl HostOverrides {
     /// the values this layer holds merged over its own.
     pub(in crate::session_pool) fn apply(&self, mut settings: LoadedSettings) -> LoadedSettings {
         if let Some(max_tokens) = self.max_tokens {
-            if settings.values.model.max_tokens == base::settings::DEFAULT_MAX_TOKENS {
+            if settings.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
                 settings.values.model.max_tokens = max_tokens;
             }
         }
@@ -61,7 +61,7 @@ impl HostOverrides {
         let Ok(mut merged) = serde_json::to_value(&settings.values) else {
             return settings;
         };
-        base::settings::merge_json_values(&mut merged, layer.clone());
+        settings::merge_json_values(&mut merged, layer.clone());
         match serde_json::from_value::<Settings>(merged) {
             Ok(values) => settings.values = values,
             Err(e) => tracing::warn!(error = %e, "the host's settings do not apply here; left out"),

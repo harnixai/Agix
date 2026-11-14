@@ -18,17 +18,17 @@ use std::sync::Arc;
 use base::event::AgentEvent;
 use base::interface::model::ThinkingMode;
 use base::paths::PathSettings;
-use base::settings::*;
 use base::tool::{InMemoryToolRegistry, Tool};
 use model::adapter::AnthropicModel;
 use model::client::{AuthMode, HttpAnthropicClient};
+use settings::*;
 use tokio_util::sync::CancellationToken;
 
 fn settings(
     model_name: String,
     data_dir: std::path::PathBuf,
     project: std::path::PathBuf,
-) -> base::settings::LoadedSettings {
+) -> settings::LoadedSettings {
     let mut values = Settings::defaults_for(&model_name);
     values.model.max_tokens = 8192;
     values.model.thinking_mode = ThinkingMode::Auto;
@@ -42,7 +42,7 @@ fn settings(
     // The project is the directory this lives in.
     paths.workspace = base::paths::Workspace::project_of(&project.join(".agix"));
     paths.local_data_dir = project.join(".agix");
-    base::settings::LoadedSettings::new(values, paths)
+    settings::LoadedSettings::new(values, paths)
 }
 
 #[tokio::main]

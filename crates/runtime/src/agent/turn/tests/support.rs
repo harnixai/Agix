@@ -3,8 +3,8 @@
 use base::interface::model::ModelMessage;
 use base::interface::model::ThinkingMode;
 
-pub(super) fn recall_test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
-    let mut values = base::settings::Settings::defaults_for("test-model");
+pub(super) fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSettings {
+    let mut values = settings::Settings::defaults_for("test-model");
     values.model.base_url = "https://api.example.com".into();
     values.model.auth_token = "test".into();
     values.model.max_tokens = 4096;
@@ -16,7 +16,7 @@ pub(super) fn recall_test_settings(root: &std::path::Path) -> base::settings::Lo
     paths.global_data_dir = root.join("global-data");
     paths.workspace = base::paths::Workspace::project_of(&root.join("local-data"));
     paths.local_data_dir = root.join("local-data");
-    base::settings::LoadedSettings::new(values, paths)
+    settings::LoadedSettings::new(values, paths)
 }
 
 /// Answers directly and reports a caller-controlled `Usage`, so budget

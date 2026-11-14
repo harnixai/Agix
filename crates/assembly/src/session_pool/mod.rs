@@ -11,11 +11,11 @@ use base::id::Id;
 use base::interface::permission::{PermissionPolicy, PermissionSet};
 use base::interface::scene::SceneSpec;
 use base::recorder::{RecorderConfig, RecorderMode};
-use base::settings::{LoadedSettings, Settings};
 use model::client::AnthropicClient;
 use runtime::agent::{
     Builder, EndReason, EngineCommand, EventReceiver, InputMessage, InputSender, StartSource,
 };
+use settings::{LoadedSettings, Settings};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

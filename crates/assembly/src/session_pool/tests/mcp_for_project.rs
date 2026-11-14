@@ -47,7 +47,7 @@ pub(in crate::session_pool) fn test_pool_builder(
         crate::config::StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     let client: Arc<dyn AnthropicClient> = Arc::new(model::mock::MockAnthropicClient::new());
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );

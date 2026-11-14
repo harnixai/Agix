@@ -193,7 +193,7 @@ impl Daemon {
         let socket = world.socket();
         let config = load_daemon_config(
             provider.model(),
-            base::settings::DEFAULT_MAX_TOKENS,
+            settings::DEFAULT_MAX_TOKENS,
             Some(&socket),
             &opts.scene,
             &paths,

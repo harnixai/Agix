@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 base          = { workspace = true }
+settings          = { workspace = true }
 runtime       = { workspace = true }
 agents        = { workspace = true }
 scene         = { workspace = true }
@@ -34,6 +35,7 @@ sha2          = { workspace = true }
 hex           = { workspace = true }
 time          = { workspace = true }
 script-host   = { workspace = true }
+schemars      = { workspace = true }
 
 [dev-dependencies]
 hooks         = { workspace = true }

@@ -11,8 +11,8 @@ use base::interface::model::Model;
 use base::interface::model::ThinkingMode;
 use base::interface::tool::InMemoryToolRegistry;
 use base::permission::PermissionMode;
-use base::settings::Settings;
 use runtime::agent::{Builder, InputMessage};
+use settings::Settings;
 use std::sync::Arc;
 use test_runner::scripted_model::{Reply, ScriptedModel};
 use tokio_util::sync::CancellationToken;
@@ -30,7 +30,7 @@ async fn run_and_read_log(root: &std::path::Path, fixed: bool) -> String {
         Reply::Text("done"),
     ]);
 
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("golden-model"),
         base::paths::PathSettings::default(),
     );

@@ -122,10 +122,10 @@ fn test_scene(allowed: Vec<String>) -> Arc<SceneSpec> {
     Arc::new(scene_with(allowed, 200))
 }
 
-fn test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
+fn test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     use base::interface::model::ThinkingMode;
     use base::paths::PathSettings;
-    use base::settings::*;
+    use settings::*;
     let mut values = Settings::defaults_for("test");
     values.model.max_tokens = 2000;
     values.model.thinking_mode = ThinkingMode::Auto;
@@ -137,13 +137,13 @@ fn test_settings(root: &std::path::Path) -> base::settings::LoadedSettings {
     paths.global_data_dir = root.to_path_buf();
     paths.workspace = base::paths::Workspace::project_of(root);
     paths.local_data_dir = root.to_path_buf();
-    base::settings::LoadedSettings::new(values, paths)
+    settings::LoadedSettings::new(values, paths)
 }
 
 /// An `Agent` wired with `GuidedTool`, `PlainTool` and the real
 /// `ToolSearch` and nothing else, so `build_tool_defs()` output is
 /// exactly these three and easy to assert on.
-fn agent_with(settings: base::settings::LoadedSettings, scene_allowed: Vec<String>) -> Agent {
+fn agent_with(settings: settings::LoadedSettings, scene_allowed: Vec<String>) -> Agent {
     let registry = Arc::new(InMemoryToolRegistry::new());
     registry.register(Arc::new(GuidedTool));
     registry.register(Arc::new(PlainTool));

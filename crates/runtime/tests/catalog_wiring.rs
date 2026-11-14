@@ -37,9 +37,9 @@ use base::interface::token_counter::TokenCounter;
 use base::paths::PathSettings;
 use base::prompt::PromptBlock;
 use base::rules::RuleEntry;
-use base::settings::{LoadedSettings, Settings};
 use runtime::agent::{Builder, HostContracts, InputMessage};
 use runtime::module::{Module, ModuleError, SessionContext};
+use settings::{LoadedSettings, Settings};
 use tokio_util::sync::CancellationToken;
 
 const MODEL_ENDPOINT: &str = "http://model.invalid/";

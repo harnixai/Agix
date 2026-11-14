@@ -3,10 +3,10 @@
 use super::builder::build_hook_runner;
 use super::*;
 
-pub(super) fn test_settings() -> base::settings::LoadedSettings {
+pub(super) fn test_settings() -> settings::LoadedSettings {
     use base::interface::model::ThinkingMode;
     use base::paths::PathSettings;
-    use base::settings::*;
+    use settings::*;
     let mut values = Settings::defaults_for("test");
     values.model.max_tokens = 2000;
     values.model.thinking_mode = ThinkingMode::Auto;
@@ -17,7 +17,7 @@ pub(super) fn test_settings() -> base::settings::LoadedSettings {
     paths.global_data_dir = "/tmp".into();
     paths.workspace = base::paths::Workspace::project_of(std::path::Path::new("/tmp"));
     paths.local_data_dir = "/tmp".into();
-    base::settings::LoadedSettings::new(values, paths)
+    settings::LoadedSettings::new(values, paths)
 }
 
 mod modules_and_session;

@@ -42,6 +42,7 @@ structured-output = ["dep:jsonschema"]
 [dev-dependencies]
 libc = { workspace = true }
 platform = { workspace = true, features = ["testing"] }
+settings = { workspace = true }
 tempfile = { workspace = true }
 tokio    = { workspace = true, features = ["net"] }
 

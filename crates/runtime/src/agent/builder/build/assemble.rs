@@ -110,12 +110,11 @@ impl Builder {
                     5,
                 ))
             });
-        let budget_policy: Arc<dyn base::interface::budget_policy::BudgetPolicy> =
-            self.ext.budget_policy.clone().unwrap_or_else(|| {
-                Arc::new(base::interface::budget_policy::EngineBudget::from_settings(
-                    &settings.values,
-                ))
-            });
+        let budget_policy: Arc<dyn base::interface::budget_policy::BudgetPolicy> = self
+            .ext
+            .budget_policy
+            .clone()
+            .unwrap_or_else(|| Arc::new(settings.values.engine_budget()));
         (recovery_policy, turn_policy, budget_policy)
     }
 

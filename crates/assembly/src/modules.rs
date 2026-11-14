@@ -12,9 +12,9 @@
 use std::sync::Arc;
 
 use base::agent_type::AgentTypeDefinition;
-use base::settings::Settings;
 use runtime::commands::CommandRegistry;
 use runtime::module::Module;
+use settings::Settings;
 
 /// The modules compiled into this build, in assembly order.
 pub fn compiled() -> Vec<&'static str> {
@@ -44,8 +44,13 @@ pub fn unassembled_settings(settings: &Settings) -> Vec<(&'static str, &'static 
     if !cfg!(feature = "mcp") && !settings.mcp_servers.is_empty() {
         out.push(("mcp_servers", "mcp"));
     }
-    if !cfg!(feature = "agents") && settings.execution.team_enabled {
-        out.push(("execution.team_enabled", "agents"));
+    let team_enabled = settings
+        .sections
+        .get("team")
+        .and_then(|team| team.get("enabled"))
+        .and_then(serde_json::Value::as_bool);
+    if !cfg!(feature = "agents") && team_enabled == Some(true) {
+        out.push(("team.enabled", "agents"));
     }
     out
 }
@@ -71,7 +76,7 @@ impl ProjectModules {
     /// redundant and — at one `notify` stream per catalog per project — the
     /// thing that runs a process out of them.
     pub(crate) fn build(
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
         plugins: &crate::plugins::Contributions,
     ) -> Self {
         let _ = (settings, plugins);
@@ -110,7 +115,7 @@ impl ProjectModules {
     /// Re-read the skill directories into the catalog the pair's sessions
     /// already share. A running session notices the difference at the start
     /// of its next turn.
-    pub(crate) fn reload_skills(&self, settings: &base::settings::LoadedSettings) {
+    pub(crate) fn reload_skills(&self, settings: &settings::LoadedSettings) {
         #[cfg(feature = "skills")]
         {
             let packages = self
@@ -128,7 +133,7 @@ impl ProjectModules {
     /// Take up what the active packages contribute now.
     pub(crate) fn refresh_plugins(
         &self,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
         plugins: &crate::plugins::Contributions,
     ) {
         self.refresh_agent_types(settings, &plugins.agent_types);
@@ -191,7 +196,7 @@ impl ProjectModules {
     /// Re-merge the agent types from the tiers and what plugins contribute.
     pub(crate) fn refresh_agent_types(
         &self,
-        settings: &base::settings::LoadedSettings,
+        settings: &settings::LoadedSettings,
         plugin_agent_types: &[AgentTypeDefinition],
     ) {
         #[cfg(feature = "agents")]
@@ -236,7 +241,7 @@ impl ProjectModules {
 
 #[cfg(feature = "skills")]
 fn skill_catalog(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     packages: &[crate::plugins::PackageSkills],
 ) -> skills::manager::SkillManager {
     let providers: Vec<Arc<dyn base::interface::skill_provider::SkillProvider>> = packages
@@ -261,14 +266,16 @@ mod tests {
         settings
             .mcp_servers
             .insert("x".into(), serde_json::json!({}));
-        settings.execution.team_enabled = true;
+        settings
+            .sections
+            .insert("team".into(), serde_json::json!({"enabled": true}));
         let named = unassembled_settings(&settings);
         assert_eq!(
             named.contains(&("mcp_servers", "mcp")),
             !cfg!(feature = "mcp")
         );
         assert_eq!(
-            named.contains(&("execution.team_enabled", "agents")),
+            named.contains(&("team.enabled", "agents")),
             !cfg!(feature = "agents")
         );
     }
@@ -300,7 +307,7 @@ mod tests {
     #[test]
     fn a_shadowed_package_skill_is_reported_with_what_shadows_it() {
         let home = tempfile::tempdir().unwrap();
-        let mut settings = base::settings::LoadedSettings::new(
+        let mut settings = settings::LoadedSettings::new(
             Settings::defaults_for("test"),
             base::paths::PathSettings::default(),
         );

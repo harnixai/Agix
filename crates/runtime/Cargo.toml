@@ -9,6 +9,7 @@ description  = "Agix — agent runtime (turn loop, Agent + Builder)"
 
 [dependencies]
 base          = { workspace = true }
+settings          = { workspace = true }
 platform      = { workspace = true }
 history       = { workspace = true }
 tools         = { workspace = true }

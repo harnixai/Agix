@@ -70,12 +70,13 @@ fn settings_load_resolves_project_root_and_config_from_fixture() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
-    let settings = base::settings::LoadedSettings::load(
+    let settings = settings::LoadedSettings::load(
         tmp.join("global_empty"),
         tmp.join("scene_empty"),
         fixture_dir().join(".agix"),
         "code",
         "claude-sonnet-4-6",
+        &test_runner::sections::all(),
     );
 
     assert_eq!(

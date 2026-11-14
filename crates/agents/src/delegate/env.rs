@@ -10,9 +10,9 @@ use base::interface::mcp_servers::McpServers;
 use base::interface::model::Model;
 use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::SkillCatalog;
-use base::settings::LoadedSettings;
 use runtime::agent::{EventSender, HostContracts, PendingPermissions};
 use runtime::module::SessionContext;
+use settings::LoadedSettings;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct DelegateEnv {
@@ -62,7 +62,7 @@ impl DelegateEnv {
             hooks: Arc::downgrade(cx.hooks),
             scene: cx.scene.clone(),
             settings: cx.settings.clone(),
-            config: Arc::new(EngineConfig::from_loaded(cx.settings)),
+            config: Arc::new(cx.settings.engine_config()),
             model: cx.model.clone(),
             mcp: cx.mcp_for_delegates(),
             skills: cx.skill_catalog(),

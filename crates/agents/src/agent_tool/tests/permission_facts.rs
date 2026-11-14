@@ -5,7 +5,7 @@ use serde_json::json;
 
 #[tokio::test]
 async fn the_agent_tool_delegates() {
-    let tool = agent_tool_with_config(EngineConfig::defaults_for("test"));
+    let tool = agent_tool_with_team(Default::default());
     let input = json!({ "description": "d", "prompt": "p" });
     let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
     assert_eq!(

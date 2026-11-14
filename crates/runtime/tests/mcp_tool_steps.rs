@@ -13,10 +13,10 @@ use base::interface::model::{
     Model, ModelError, ModelEvent, ModelMessage, ModelStream, StreamParams, ToolDef,
 };
 use base::prompt::PromptBlock;
-use base::settings::Settings;
 use base::tool::{InMemoryToolRegistry, Tool};
 use runtime::agent::Builder;
 use runtime::module::{Module, ModuleError, SessionContext};
+use settings::Settings;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
@@ -121,7 +121,7 @@ impl Model for TwoToolSteps {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_tool_step_does_not_relist_tools_without_an_announcement() {
     let dir = tempfile::tempdir().unwrap();
-    let mut settings = base::settings::LoadedSettings::new(
+    let mut settings = settings::LoadedSettings::new(
         Settings::defaults_for("test-model"),
         base::paths::PathSettings::default(),
     );

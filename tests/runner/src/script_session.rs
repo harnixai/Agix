@@ -26,8 +26,8 @@ use base::interface::script::ScriptBinding;
 use base::interface::script::{ScriptLedger, ScriptOutcome, ScriptRecord};
 use base::interface::tool::{InMemoryToolRegistry, Tool};
 use base::memory::MemoryStore;
-use base::settings::Settings;
 use runtime::agent::{Builder, InputMessage};
+use settings::Settings;
 use tokio_util::sync::CancellationToken;
 
 use crate::scripted_model::{Call, Reply, ScriptedModel};
@@ -285,14 +285,15 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     let model: Arc<dyn Model> = model_arc.clone();
 
     let mut settings = match &session.project {
-        Some(dir) => base::settings::LoadedSettings::load(
+        Some(dir) => settings::LoadedSettings::load(
             root.join("global_empty"),
             root.join("scene_empty"),
             dir.join(".agix"),
             "code",
             "script-model",
+            &crate::sections::all(),
         ),
-        None => base::settings::LoadedSettings::new(
+        None => settings::LoadedSettings::new(
             Settings::defaults_for("script-model"),
             base::paths::PathSettings::default(),
         ),
@@ -314,7 +315,9 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     } else {
         settings.values.permission_mode = base::permission::PermissionMode::Default;
     }
-    settings.values.scripts = session.bindings;
+    settings
+        .values
+        .set_section(&crate::sections::ScriptBindings(session.bindings));
     settings.values.hooks_config = session.hooks;
     let settings = Arc::new(settings);
 
@@ -333,7 +336,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     // one whose questions reach the prompt channel.
     let permission = session.asking.then(|| {
         base::interface::permission::PermissionSet::of(Arc::new(
-            permissions::policy::Policy::from_settings(&settings, Vec::new()),
+            permissions::policy::Policy::from_settings(&settings.permission_settings(), Vec::new()),
         ))
     });
     let mut builder = Builder::new()
@@ -377,17 +380,19 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
 
     // The same call the daemon makes. Installing the adapters is `Builder`'s
     // job precisely so a test cannot bind a point a session would not.
-    let ledger =
-        match script_host::bindings::bind_quickjs(&settings.values.scripts, &session.fixtures)
-            .unwrap_or_else(|e| panic!("a binding in this session is invalid: {e}"))
-        {
-            Some(bound) => {
-                let ledger = bound.ledger.clone();
-                builder = builder.plugin(Arc::new(script_host::ScriptPlugin::new(bound)));
-                ledger
-            }
-            None => Arc::new(ScriptLedger::new()),
-        };
+    let ledger = match script_host::bindings::bind_quickjs(
+        &crate::sections::ScriptBindings::of(&settings.values),
+        &session.fixtures,
+    )
+    .unwrap_or_else(|e| panic!("a binding in this session is invalid: {e}"))
+    {
+        Some(bound) => {
+            let ledger = bound.ledger.clone();
+            builder = builder.plugin(Arc::new(script_host::ScriptPlugin::new(bound)));
+            ledger
+        }
+        None => Arc::new(ScriptLedger::new()),
+    };
 
     if let Some(f) = rust {
         builder = f(builder);
