@@ -12,10 +12,9 @@ use base::interface::delegate::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::{Delegator, SlotRule};
+use super::{DelegateRun, Delegator, SlotRule, Start, StopReason};
 use crate::agent_tool::{
-    bg_task_id, conclude, mark_sidechain_terminal, open_inbox, run_one_turn, task_notification,
-    Delegate, SpawnTelemetry, Spec, SubagentPayload,
+    bg_task_id, conclude, open_inbox, run_one_turn, task_notification, Delegate, Spec,
 };
 
 /// A live member. Its agent and channels live inside its loop; `cancel` is
@@ -166,7 +165,6 @@ impl Delegator {
         spec: Spec,
         prompt: String,
     ) -> Result<Delegated, DelegateError> {
-        let me = self.me()?;
         if self.limits.max_persistent_members == 0 {
             return Err(DelegateError::Limit(
                 "persistent team members are turned off in this session \
@@ -231,14 +229,13 @@ impl Delegator {
             seat: Some(seat.clone()),
             ..spec
         };
-        self.spawn_member(me, key, seat, spec, prompt).await
+        self.spawn_member(key, seat, spec, prompt).await
     }
 
     /// A new member at `key`, its loop started on `prompt` under its type's
     /// prompt; later messages reach it as sent.
     async fn spawn_member(
         &self,
-        me: Arc<Delegator>,
         key: (String, String),
         seat: TeamSeat,
         spec: Spec,
@@ -260,21 +257,17 @@ impl Delegator {
                 base::error::ToolError::Execution(e) => DelegateError::Build(e.to_string()),
                 other => DelegateError::Build(other.to_string()),
             })?;
-        self.fire_subagent_hook(
-            hooks::HookEvent::SubagentStart,
-            &delegate.payload,
-            &self.env.parent.ended,
+        let run = DelegateRun::start(
+            self,
+            &delegate,
+            Start {
+                stops_with: &self.env.parent.ended,
+                called_from: None,
+                background: true,
+                stage: None,
+            },
         )
         .await;
-        let spawned = SpawnTelemetry::start(
-            self,
-            None,
-            &spec.session_id,
-            spec.agent_type.as_deref(),
-            &delegate.agent.settings().values.model.model_name,
-            true,
-            None,
-        );
 
         let prompt = self.opening_prompt(delegate.def.as_ref(), prompt);
         let id = format!("member-{}", bg_task_id());
@@ -312,9 +305,7 @@ impl Delegator {
             idle_bound: std::time::Duration::from_secs(self.limits.member_idle_timeout_secs),
             spawn_lock: self.members.spawn_lock.clone(),
             slots: self.limits.slots.clone(),
-            hooks: me.env.hooks.clone(),
-            session_ended: me.env.parent.ended.clone(),
-            spawned,
+            run,
         }));
         Ok(Delegated::Started(StartedAgent::new(
             task_id,
@@ -409,10 +400,7 @@ struct MemberLoop {
     /// The spawning session's: a member runs each message on a slot, taken
     /// as that session may take one, and holds none while idle.
     slots: SlotRule,
-    hooks: std::sync::Weak<hooks::HookRunner>,
-    /// What its `SubagentStop` stops with: `cancel` has fired by then.
-    session_ended: CancellationToken,
-    spawned: SpawnTelemetry,
+    run: DelegateRun,
 }
 
 impl MemberLoop {
@@ -509,21 +497,10 @@ async fn member_loop(mut m: MemberLoop) {
         drop(queued);
     }
     m.lifecycle(TeammateLifecycle::Shutdown, None);
-    let failed = matches!(last, DelegateEnd::Failed(_));
-    m.spawned.finish(failed);
-    let payload: SubagentPayload = m.delegate.payload.clone();
-    if let Some(runner) = m.hooks.upgrade() {
-        payload
-            .clone()
-            .stopped("shutdown")
-            .fire(&runner, hooks::HookEvent::SubagentStop, &m.session_ended)
-            .await;
-    }
-    let ended = if failed { last } else { DelegateEnd::Completed };
-    mark_sidechain_terminal(
-        m.delegate.history_store.as_ref(),
-        &payload.session_id,
-        &ended,
-    )
-    .await;
+    let ended = if matches!(last, DelegateEnd::Failed(_)) {
+        last
+    } else {
+        DelegateEnd::Completed
+    };
+    m.run.finish(&ended, StopReason::Shutdown).await;
 }

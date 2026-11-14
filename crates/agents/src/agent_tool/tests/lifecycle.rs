@@ -659,3 +659,66 @@ async fn the_session_cap_refuses_one_sub_agent_too_many_and_a_root_team_member_w
     drop(member);
     assert_eq!(slots.running(), 0, "an ended member gives its slot back");
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stopped_member_ends_once_for_the_hooks_and_the_telemetry() {
+    let log = std::env::temp_dir().join(format!("agix-stop-hook-{}", bg_task_id()));
+    let providers = platform::local_providers();
+    let runner = Arc::new(hooks::HookRunner::new(
+        std::collections::HashMap::from([(
+            hooks::HookEvent::SubagentStop,
+            vec![hooks::config::HookConfig::Command {
+                command: format!("cat >> '{}'", log.display()),
+                shell: None,
+                timeout: Some(10_000),
+                if_pattern: None,
+                only_on_error: None,
+                once: None,
+                async_rewake: None,
+                on_error: hooks::OnError::Allow,
+            }],
+        )]),
+        hooks::HookExec {
+            process: providers.process,
+            network: providers.network,
+        },
+    ));
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let agent_tool = TestParent {
+        hooks: Arc::downgrade(&runner),
+        host: Some(runtime::agent::HostContracts {
+            telemetry: TelemetryHandle::new(tx),
+            ..host_contracts()
+        }),
+        ..test_parent().with_team()
+    }
+    .agent_tool();
+    let session = agent_tool.parent_state();
+    message_member(&agent_tool, &session, "a").await.unwrap();
+    wait_until_idle(&agent_tool, &team_key("team", "a")).await;
+    agent_tool.stop_team_member("team", "a").await;
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut completed = 0;
+    while completed == 0 {
+        let event = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .expect("agent_completed within 10s")
+            .expect("the handle is still open");
+        completed += usize::from(event.kind() == "agent_completed");
+    }
+    let stops = loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        if !text.is_empty() || tokio::time::Instant::now() > deadline {
+            break text;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    let _ = std::fs::remove_file(&log);
+    assert_eq!(
+        stops.matches("\"stop_reason\":\"shutdown\"").count(),
+        1,
+        "{stops}"
+    );
+}

@@ -2,6 +2,7 @@
 //! comes through `Delegator::build_delegate` — and the one-shot run around it.
 
 use super::*;
+use crate::delegate::{DelegateRun, Start, StopReason};
 
 /// What a delegate is, as its request and mode decided it; everything else
 /// about it is decided in `build_delegate`.
@@ -166,41 +167,39 @@ impl Delegator {
             background,
             stage,
         } = shot;
-        let Delegate {
-            mut agent,
-            mut event_rx,
-            input_tx,
-            def,
-            settings,
-            payload,
-            history_store,
-            under_hook: _under_hook,
-        } = match self
+        let delegate = match self
             .build_delegate(&spec, depth, extra_tools, relay, false)
             .await
         {
             Ok(delegate) => delegate,
             Err(e) => return (String::new(), DelegateEnd::Failed(e.to_string())),
         };
+        let called_from = spec.called_from.as_ref();
+        let run = DelegateRun::start(
+            self,
+            &delegate,
+            Start {
+                stops_with: &cancel,
+                called_from,
+                background,
+                stage,
+            },
+        )
+        .await;
+        let Delegate {
+            mut agent,
+            mut event_rx,
+            input_tx,
+            def,
+            payload,
+            under_hook: _under_hook,
+            ..
+        } = delegate;
         let sid = payload.session_id.clone();
         let agent_type = spec.agent_type.as_deref();
         let prompt = self.opening_prompt(def.as_ref(), prompt);
-        let called_from = spec.called_from.as_ref();
         let tag = SubagentTag::new(self, &sid, agent_type, called_from).for_task(task.as_ref());
 
-        // `Stop` fires on both success and failure — a hook that cleans up
-        // after a sub-agent must not be skipped just because it errored.
-        self.fire_subagent_hook(hooks::HookEvent::SubagentStart, &payload, &cancel)
-            .await;
-        let spawned = SpawnTelemetry::start(
-            self,
-            called_from,
-            &sid,
-            agent_type,
-            &settings.values.model.model_name,
-            background,
-            stage,
-        );
         let (text, end) = if background {
             open_inbox(task.as_deref(), &agent);
             let ran = run_one_turn(
@@ -228,15 +227,7 @@ impl Delegator {
             )
             .await
         };
-        spawned.finish(matches!(end, DelegateEnd::Failed(_)));
-        let stopped = payload.stopped(stop_reason_of(&end));
-        // Not `cancel`: a delegate it stopped still reports stopping.
-        let ended = &self.env.parent.ended;
-        self.fire_subagent_hook(hooks::HookEvent::SubagentStop, &stopped, ended)
-            .await;
-        // Marked terminal on failure too, so a stale `session.resume` against
-        // it is rejected instead of silently continuing a "finished" sub-agent.
-        mark_sidechain_terminal(history_store.as_ref(), &sid, &end).await;
+        run.finish(&end, StopReason::OfTheEnd).await;
         (text, end)
     }
 }

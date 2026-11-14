@@ -40,6 +40,13 @@
 //! executors make no `CancellationToken` of their own outside a short list
 //! that says why nothing is cut loose there.
 
+//!
+//! DLG-9: a sub-agent run starts and ends in one place. `SubagentStart` and
+//! `SubagentStop` are fired, `SpawnTelemetry::start` is called and the
+//! sidechain is marked terminal only inside `DelegateRun::start` and
+//! `DelegateRun::finish`, so a one-shot delegate and a persistent member
+//! cannot end differently.
+
 use std::collections::BTreeSet;
 
 use guards::scan;
@@ -791,6 +798,82 @@ fn a_delegate_is_built_and_dispatched_in_one_place() {
         if !impls_seen.contains(&(*file, *ty)) {
             problems.push(format!(
                 "`impl Delegator for {ty}` in {file} is gone: take it off DELEGATOR_IMPLS"
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+}
+
+/// Functions allowed to name the start and end sequence of a run, with what
+/// each one is.
+const RUN_SEQUENCE_FNS: &[(&str, &str)] = &[
+    (
+        "DelegateRun::start",
+        "fires SubagentStart and the spawn telemetry",
+    ),
+    (
+        "DelegateRun::finish",
+        "fires SubagentStop, ends the telemetry and marks the sidechain",
+    ),
+    (
+        "SubagentPayload::fire",
+        "adds the stop reason to the payload a SubagentStop carries",
+    ),
+];
+
+fn names_a_run_sequence_step(segments: &[String]) -> bool {
+    matches!(
+        segments,
+        [.., ev, step] if ev == "HookEvent" && (step == "SubagentStart" || step == "SubagentStop")
+    ) || matches!(segments, [.., t, f] if t == "SpawnTelemetry" && f == "start")
+        || segments
+            .last()
+            .is_some_and(|s| s == "mark_sidechain_terminal")
+}
+
+fn run_sequence_steps(f: &guards::SourceFile) -> Vec<(String, guards::Hit)> {
+    let fns = scan::fns(f, View::Prod);
+    let mut steps: Vec<(Vec<String>, guards::Hit)> = scan::paths(f, View::Prod);
+    steps.retain(|(segments, _)| names_a_run_sequence_step(segments));
+    steps
+        .into_iter()
+        .map(|(_, hit)| {
+            let qual = enclosing_fn(&fns, hit.line)
+                .map(|s| s.qual.clone())
+                .unwrap_or_default();
+            (qual, hit)
+        })
+        .collect()
+}
+
+#[test]
+fn a_sub_agent_run_starts_and_ends_only_in_delegate_run() {
+    let mut problems = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut scanned = 0;
+    for f in ws().production().filter(|f| f.package == "agents") {
+        scanned += 1;
+        for (qual, hit) in run_sequence_steps(f) {
+            let is_import = qual.is_empty();
+            if is_import || qual == "mark_sidechain_terminal" || qual == "SpawnTelemetry::start" {
+                continue;
+            }
+            match RUN_SEQUENCE_FNS.iter().find(|(name, _)| *name == qual) {
+                Some((name, _)) => {
+                    seen.insert(*name);
+                }
+                None => problems.push(format!(
+                    "{hit}: a run's start or end step in `{qual}`; it belongs in \
+                     `DelegateRun::start` or `DelegateRun::finish`"
+                )),
+            }
+        }
+    }
+    guards::allow::non_vacuous("delegation::run_sequence_files", scanned, 10);
+    for (name, _) in RUN_SEQUENCE_FNS {
+        if !seen.contains(name) {
+            problems.push(format!(
+                "`{name}` no longer names a run's start or end step: take it off RUN_SEQUENCE_FNS"
             ));
         }
     }

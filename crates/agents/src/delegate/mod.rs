@@ -9,6 +9,7 @@
 
 mod admission;
 mod env;
+mod lifecycle;
 mod members;
 mod run;
 mod tools;
@@ -22,6 +23,7 @@ use base::interface::delegate::{
 pub(crate) use admission::{Admission, HookAgentRunning, HookAgents, Limits, SlotRule};
 pub use admission::{SubagentSlots, DEFAULT_MAX_CONCURRENT_SUBAGENTS};
 pub(crate) use env::*;
+pub(crate) use lifecycle::{DelegateRun, Start, StopReason};
 pub(crate) use members::*;
 pub(crate) use tools::*;
 

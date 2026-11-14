@@ -4,17 +4,6 @@
 use super::*;
 
 impl Delegator {
-    pub(crate) async fn fire_subagent_hook(
-        &self,
-        event: hooks::HookEvent,
-        sub: &SubagentPayload,
-        stop: &tokio_util::sync::CancellationToken,
-    ) {
-        if let Some(runner) = self.env.hooks() {
-            sub.fire(&runner, event, stop).await;
-        }
-    }
-
     /// The model instance a sub-agent spawn should use. Every spawn point is
     /// the same task type — `task_models` in settings.json is keyed by a
     /// small fixed taxonomy (`main`/`subagent`/`compact`/`memory`/
