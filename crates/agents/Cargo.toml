@@ -27,9 +27,9 @@ tracing       = { workspace = true }
 uuid          = { workspace = true }
 schemars      = { workspace = true }
 notify        = { workspace = true }
+futures       = { workspace = true }
 
 [dev-dependencies]
-futures       = { workspace = true }
 permissions = { workspace = true }
 platform = { workspace = true }
 skills   = { workspace = true }

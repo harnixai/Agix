@@ -14,8 +14,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{DelegateRun, Delegator, SlotRule, Start, StopReason};
 use crate::agent_tool::{
-    bg_task_id, conclude, open_inbox, run_one_turn, task_notification, Delegate, Spec,
+    bg_task_id, conclude, failed, open_inbox, panic_message, run_one_turn, task_notification,
+    Delegate, Spec,
 };
+use futures::FutureExt as _;
 
 /// A live member. Its agent and channels live inside its loop; `cancel` is
 /// enough to stop it.
@@ -479,6 +481,7 @@ async fn member_loop(mut m: MemberLoop) {
         m.lifecycle(TeammateLifecycle::Active, None);
 
         let task = lease.task().clone();
+        let mut panicked = false;
         let (text, end) = match m.slots.take(&task.cancel).await {
             Ok(slot) => {
                 let d = &mut m.delegate;
@@ -486,7 +489,7 @@ async fn member_loop(mut m: MemberLoop) {
                 // No `SubagentTag`: a member outlives any one parent turn, so
                 // there is no turn to attribute its events to; it shows
                 // through `TeamProgress` and `TeamList` instead.
-                let ran = run_one_turn(
+                let ran = std::panic::AssertUnwindSafe(run_one_turn(
                     &mut d.agent,
                     &mut d.event_rx,
                     &d.input_tx,
@@ -494,8 +497,16 @@ async fn member_loop(mut m: MemberLoop) {
                     task.cancel.clone(),
                     None,
                     Some(&task),
-                )
-                .await;
+                ))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|payload| {
+                    panicked = true;
+                    failed(anyhow::anyhow!(
+                        "team member panicked: {}",
+                        panic_message(payload)
+                    ))
+                });
                 drop(slot);
                 ran
             }
@@ -504,6 +515,10 @@ async fn member_loop(mut m: MemberLoop) {
         };
         conclude(lease, &text, &end, true);
         last = end;
+        // A turn that unwound may have left the agent half-way through it.
+        if panicked {
+            break;
+        }
         m.go_idle_unless_messaged().await;
     }
     m.messages.close();
@@ -511,6 +526,13 @@ async fn member_loop(mut m: MemberLoop) {
         drop(queued);
     }
     m.lifecycle(TeammateLifecycle::Shutdown, None);
+    {
+        let key = (m.seat.team.clone(), m.seat.member.clone());
+        let mut live = m.live.write().unwrap_or_else(|e| e.into_inner());
+        if live.get(&key).is_some_and(|member| member.id == m.id) {
+            live.remove(&key);
+        }
+    }
     let ended = if matches!(last, DelegateEnd::Failed(_)) {
         last
     } else {

@@ -1243,3 +1243,66 @@ async fn a_member_just_messaged_is_not_reclaimed_before_its_loop_wakes() {
         base::context::task::TaskStatus::Done
     );
 }
+
+/// Panics on the first model call of every turn.
+struct PanicsOnStream;
+
+#[async_trait]
+impl Model for PanicsOnStream {
+    fn api_type(&self) -> base::provider::ApiType {
+        base::provider::ApiType::Anthropic
+    }
+    async fn stream(
+        &self,
+        _prompt_blocks: Vec<base::prompt::PromptBlock>,
+        _tools: Vec<base::interface::model::ToolDef>,
+        _messages: Vec<ModelMessage>,
+        _params: base::interface::model::StreamParams,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<base::interface::model::ModelStream, base::interface::model::ModelError> {
+        panic!("the model client panicked");
+    }
+}
+
+/// A member whose turn panics outside any tool fails that message's task and
+/// leaves the pool, rather than staying there busy for good.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_member_whose_turn_panics_fails_its_task_and_leaves_the_pool() {
+    let agent_tool = TestParent::new(Arc::new(PanicsOnStream))
+        .with_team()
+        .agent_tool();
+    let session = agent_tool.parent_state();
+    let key = team_key("team", "worker");
+    let task_id = agent_tool
+        .spawn_or_message_team_member(
+            "team".into(),
+            "worker".into(),
+            "work".into(),
+            None,
+            std::env::temp_dir(),
+            session.clone(),
+            None,
+        )
+        .await
+        .expect("spawned");
+
+    assert_eq!(
+        ended_status(&agent_tool, &task_id).await,
+        base::context::task::TaskStatus::Failed
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while agent_tool
+        .delegator
+        .members
+        .live
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&key)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the panicked member stayed in the pool"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
