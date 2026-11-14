@@ -174,6 +174,12 @@ impl WatchHub {
         // against a non-canonical stored path would silently never match.
         let actual_path = std::fs::canonicalize(&requested).unwrap_or(requested);
 
+        // Held to the end: a second subscriber of a path must not return
+        // before the first one's `watch()` has, or it takes a write made in
+        // between for watched. FSEvents restarts its stream on every
+        // `watch()`, so that call alone can take a noticeable fraction of a
+        // second.
+        let mut watcher = self.inner.watcher.lock().unwrap();
         let mut watched = self.inner.watched_paths.lock().unwrap();
         let first_registration = !watched.contains_key(&actual_path);
         *watched.entry(actual_path.clone()).or_insert(0) += 1;
@@ -197,7 +203,7 @@ impl WatchHub {
         }
 
         if first_registration && actual_path.exists() {
-            if let Some(w) = self.inner.watcher.lock().unwrap().as_mut() {
+            if let Some(w) = watcher.as_mut() {
                 if let Err(e) = w.watch(&actual_path, RecursiveMode::Recursive) {
                     tracing::warn!(path = %actual_path.display(), error = %e, "WatchHub: failed to watch path");
                 }
@@ -228,6 +234,9 @@ impl WatchHub {
 
 impl Inner {
     fn release(&self, key: &WatchKey, actual_path: &Path) {
+        // Taken first, as in `subscribe`, so a subscription landing between
+        // the refcount reaching zero and `unwatch()` is not unwatched.
+        let mut watcher = self.watcher.lock().unwrap();
         if let Some(keys) = self.path_keys.lock().unwrap().get_mut(actual_path) {
             if let Some(pos) = keys.iter().position(|k| k == key) {
                 keys.remove(pos);
@@ -251,7 +260,7 @@ impl Inner {
         watched.remove(actual_path);
         drop(watched);
         self.path_keys.lock().unwrap().remove(actual_path);
-        if let Some(w) = self.watcher.lock().unwrap().as_mut() {
+        if let Some(w) = watcher.as_mut() {
             let _ = w.unwatch(actual_path);
         }
     }
@@ -428,6 +437,44 @@ mod tests {
             1,
             "second subscriber to the same path must not add a second notify registration"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_second_subscriber_returns_only_once_the_path_is_watched() {
+        let hub = Arc::new(WatchHub::new().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let key = WatchKey {
+            tier: Tier::Project(dir.path().to_path_buf()),
+            target: WatchTarget::Skills,
+        };
+        let mut rx = hub.changes();
+
+        let registering = hub.inner.watcher.lock().unwrap();
+        let (returned_tx, returned) = std::sync::mpsc::channel();
+        for _ in 0..2 {
+            let (hub, key, path, returned_tx) = (
+                hub.clone(),
+                key.clone(),
+                dir.path().to_path_buf(),
+                returned_tx.clone(),
+            );
+            std::thread::spawn(move || {
+                let _ = returned_tx.send(hub.subscribe(key, &path));
+            });
+        }
+        // Under load this wait can only miss a broken hub, never fail a sound one.
+        let early = returned.recv_timeout(Duration::from_millis(500));
+        drop(registering);
+        assert!(
+            early.is_err(),
+            "a subscription returned while its path was still being registered"
+        );
+        let _tokens = [returned.recv().unwrap(), returned.recv().unwrap()];
+
+        std::fs::create_dir(dir.path().join("late")).unwrap();
+        std::fs::write(dir.path().join("late/SKILL.md"), "late").unwrap();
+        let got = tokio::time::timeout(settle(), rx.recv()).await;
+        assert_eq!(got.unwrap().unwrap(), key);
     }
 
     #[tokio::test]
