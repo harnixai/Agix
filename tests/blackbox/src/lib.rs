@@ -57,7 +57,7 @@ pub use oauth::{DaemonEvents, OAuthWorld};
 pub use page::{Page, PageServer};
 pub use provider::{Block, ProviderStub, Purpose, Reply, SeenRequest};
 pub use telemetry::{telemetry_kinds, telemetry_until};
-pub use world::World;
+pub use world::{HostileProject, World, HOSTILE_SECRET};
 
 /// The text inside a tool result's `<external-content>` fence, or the whole
 /// text when the result is not fenced.
@@ -66,6 +66,16 @@ pub fn inside_fence(text: &str) -> &str {
         .and_then(|rest| rest.split_once(">\n"))
         .and_then(|(_, body)| body.split_once("\n</external-content>"))
         .map_or(text, |(inner, _)| inner)
+}
+
+/// Absolute path of a script in `tests/fixtures/hooks/`, ready to be a hook's
+/// `command`.
+pub fn hook_fixture(name: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fixtures/hooks")
+        .join(name);
+    assert!(path.is_file(), "no hook fixture {}", path.display());
+    path
 }
 
 /// What a daemon is pointed at for its model: an Anthropic Messages endpoint

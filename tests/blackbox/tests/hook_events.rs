@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use blackbox::{
-    Answer, LiveConfig, LiveRun, LiveRunBuilder, McpToy, Page, PageServer, ProviderStub, Reply,
+    hook_fixture, Answer, LiveConfig, LiveRun, LiveRunBuilder, McpToy, Page, PageServer,
+    ProviderStub, Reply,
 };
 use serde_json::{json, Value};
 
@@ -909,12 +910,7 @@ async fn every_payload_names_the_sessions_cwd_and_permission_mode() -> anyhow::R
 async fn a_pre_tool_use_hook_that_exits_2_blocks_the_call_whatever_it_printed() -> anyhow::Result<()>
 {
     let stub = ProviderStub::start().await?;
-    let ledger = Ledger::new()?;
-    let refuse = ledger.path("refuse.sh");
-    executable(
-        &refuse,
-        "#!/bin/sh\ncat > /dev/null\necho 'not json {{'\necho NO-BASH-TODAY >&2\nexit 2\n",
-    )?;
+    let refuse = hook_fixture("refuse_exit2.sh");
     let mut run = stubbed("exit-code", &stub)
         .settings(json!({ "hooks_config": { "PreToolUse": [command_hook(&refuse, 30_000)] } }))
         .start()
@@ -939,12 +935,7 @@ async fn a_pre_tool_use_hook_that_exits_2_blocks_the_call_whatever_it_printed() 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_if_on_a_file_path_matches_however_the_model_spells_the_path() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
-    let ledger = Ledger::new()?;
-    let refuse = ledger.path("refuse.sh");
-    executable(
-        &refuse,
-        "#!/bin/sh\ncat > /dev/null\necho GUARDED >&2\nexit 2\n",
-    )?;
+    let refuse = hook_fixture("refuse_guarded.sh");
     let mut run = stubbed("if-path", &stub)
         .settings(json!({
             "hooks_config": { "PreToolUse": [
@@ -986,11 +977,7 @@ async fn an_approval_does_not_cover_what_another_hook_rewrote_the_call_into() ->
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
     let outside = ledger.path("outside.txt");
-    let approve = ledger.path("approve.sh");
-    executable(
-        &approve,
-        "#!/bin/sh\ncat > /dev/null\necho '{\"decision\": \"approve\"}'\n",
-    )?;
+    let approve = hook_fixture("approve.sh");
     let rewrite = ledger.path("rewrite.sh");
     executable(
         &rewrite,
@@ -1032,15 +1019,9 @@ async fn an_approval_does_not_cover_what_another_hook_rewrote_the_call_into() ->
 async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
-    let garbage = ledger.path("garbage.sh");
-    executable(&garbage, "#!/bin/sh\ncat > /dev/null\necho 'not json {{'\n")?;
-    let failing = ledger.path("failing.sh");
-    executable(&failing, "#!/bin/sh\ncat > /dev/null\necho oops\nexit 1\n")?;
-    let silent = ledger.path("silent.sh");
-    executable(
-        &silent,
-        "#!/bin/sh\ncat > /dev/null\necho went-wrong >&2\nexit 3\n",
-    )?;
+    let garbage = hook_fixture("garbage.sh");
+    let failing = hook_fixture("failing.sh");
+    let silent = hook_fixture("exit3_silent.sh");
     let pid = ledger.path("hang.pid");
     let hang = ledger.path("hang.sh");
     executable(
@@ -1116,11 +1097,8 @@ async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failing_hook_with_on_error_block_blocks_the_call() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
-    let ledger = Ledger::new()?;
-    let hang = ledger.path("hang.sh");
-    executable(&hang, "#!/bin/sh\ncat > /dev/null\nexec sleep 30\n")?;
-    let failing = ledger.path("failing.sh");
-    executable(&failing, "#!/bin/sh\ncat > /dev/null\nexit 1\n")?;
+    let hang = hook_fixture("hang.sh");
+    let failing = hook_fixture("failing.sh");
     let mut hung = command_hook(&hang, 1000);
     hung["on_error"] = json!("block");
     hung["if"] = json!("Bash(echo one*)");
@@ -1172,11 +1150,7 @@ async fn every_hook_on_an_event_runs_the_first_rewrite_wins_and_a_block_wins_ove
     };
     let first = rewrite_to("first.sh", "first.txt")?;
     let second = rewrite_to("second.sh", "second.txt")?;
-    let block = ledger.path("block.sh");
-    executable(
-        &block,
-        "#!/bin/sh\ncat > /dev/null\necho '{\"decision\": \"block\", \"message\": \"BASH-BLOCKED\"}'\n",
-    )?;
+    let block = hook_fixture("block_bash.sh");
     let mut run = stubbed("many-hooks", &stub)
         .settings(json!({
             "hooks_config": {
@@ -1228,14 +1202,7 @@ async fn every_hook_on_an_event_runs_the_first_rewrite_wins_and_a_block_wins_ove
 async fn a_user_prompt_submit_hook_refuses_one_message_and_rewrites_another() -> anyhow::Result<()>
 {
     let stub = ProviderStub::start().await?;
-    let ledger = Ledger::new()?;
-    let screen = ledger.path("screen.sh");
-    executable(
-        &screen,
-        "#!/bin/sh\npayload=$(cat)\ncase \"$payload\" in\n  \
-         *FORBIDDEN*) echo '{\"decision\": \"block\", \"message\": \"REFUSED-BY-HOOK\"}' ;;\n  \
-         *) echo '{\"updated_input\": \"REWRITTEN-BY-HOOK\"}' ;;\nesac\n",
-    )?;
+    let screen = hook_fixture("screen_prompt.sh");
     let mut run = stubbed("prompt-screen", &stub)
         .settings(
             json!({ "hooks_config": { "UserPromptSubmit": [command_hook(&screen, 30_000)] } }),
@@ -1277,16 +1244,8 @@ async fn a_user_prompt_submit_hook_refuses_one_message_and_rewrites_another() ->
 async fn a_post_tool_use_hook_withholds_a_result_or_ends_the_turn() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
-    let withhold = ledger.path("withhold.sh");
-    executable(
-        &withhold,
-        "#!/bin/sh\ncat > /dev/null\necho '{\"decision\": \"block\", \"message\": \"RESULT-WITHHELD\"}'\n",
-    )?;
-    let end = ledger.path("end.sh");
-    executable(
-        &end,
-        "#!/bin/sh\ncat > /dev/null\necho '{\"continue\": false}'\n",
-    )?;
+    let withhold = hook_fixture("withhold_result.sh");
+    let end = hook_fixture("end_turn.sh");
     let mut run = stubbed("post-hooks", &stub)
         .settings(json!({
             "hooks_config": {
@@ -1730,6 +1689,86 @@ async fn a_hook_agent_gets_read_only_tools_and_no_one_to_ask() -> anyhow::Result
             .any(|c| c.messages_contain("OUTSIDE-SECRET-MARK")),
         "a read that needs approval is refused, not asked"
     );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hook_that_floods_stdout_does_not_stop_the_call_or_the_session() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("flood-hook", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("huge_stdout.sh"), 30_000)] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo ran > ran.txt" })),
+        Reply::text("carried on"),
+    ]);
+    let events = tokio::time::timeout(Duration::from_secs(60), run.turn(&session, "go")).await??;
+    assert!(events.text.contains("carried on") && events.turn_complete);
+    assert_eq!(
+        run.read_file("ran.txt").as_deref(),
+        Some("ran\n"),
+        "{:?}",
+        events.tool_results
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hook_that_leaves_a_background_process_behind_is_still_a_prompt_answer(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("fork-hook", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("fork_background.sh"), 30_000)] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo x > blocked.txt" })),
+        Reply::text("done"),
+    ]);
+    let started = Instant::now();
+    let events = run.turn(&session, "go").await?;
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "the turn waited for the hook's background process"
+    );
+    assert!(run.read_file("blocked.txt").is_none());
+    let (_, out, is_error) = &events.tool_results[0];
+    assert!(*is_error && out.contains("FORKED-AND-BLOCKED"), "{out}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hook_that_exits_before_reading_its_payload_changes_nothing() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("half-stdin-hook", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("half_stdin.sh"), 30_000)] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls(
+            "w1",
+            "Write",
+            json!({ "file_path": "big.txt", "content": "y".repeat(400_000) }),
+        ),
+        Reply::text("carried on"),
+    ]);
+    let events = run.turn(&session, "go").await?;
+    assert!(events.text.contains("carried on") && events.turn_complete);
+    assert_eq!(run.read_file("big.txt").map(|c| c.len()), Some(400_000));
     run.finish().await;
     Ok(())
 }
