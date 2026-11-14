@@ -109,14 +109,8 @@ pub fn sandbox_settings(
         // settings.json this session actually reads — not to whatever sits
         // under the invoking user's home.
         paths: std::sync::Arc::new(
-            base::paths::SensitivePaths::for_paths(paths).with_read_denials(
-                &if deny_read.is_empty() {
-                    base::interface::exec::default_deny_read()
-                } else {
-                    deny_read.clone()
-                },
-                allow_read,
-            ),
+            base::paths::SensitivePaths::for_paths(paths)
+                .with_read_denials(&base::interface::exec::default_deny_read(), allow_read),
         ),
         require_enforcement: *require_enforcement,
         unattended_requires_network_policy: *unattended_requires_network_policy,
