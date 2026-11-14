@@ -12,7 +12,8 @@
 //! not know or a missing required one is an error naming the file — never a
 //! default, and never a re-read under a running session.
 //!
-//! `prompt.md` may use the placeholders in [`PLACEHOLDERS`], which the scene
+//! `prompt.md` may use the placeholders `{{cwd}}`, `{{os}}`, `{{shell}}`, `{{home}}`,
+//! `{{date}}`, `{{model}}` and `{{environment}}`, which the scene
 //! fills per call. Any other `{{name}}` is left as written for the kernel's
 //! `prompt.variable` registrations to expand after assembly, so it cannot be
 //! refused here: whether it resolves depends on what the host registered.
@@ -34,9 +35,6 @@ pub const DEFAULT_COMPACT_THRESHOLD: usize = 150_000;
 pub const DEFAULT_COMPACT_KEEP_RECENT: usize = 20;
 
 const MAX_ID_LEN: usize = 64;
-
-/// The `{{name}}`s the scene fills itself, from the session's prompt context.
-pub const PLACEHOLDERS: &[&str] = &["cwd", "os", "shell", "home", "date", "model", "environment"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SceneLoadError {
@@ -189,7 +187,7 @@ impl Prompt {
     }
 }
 
-/// Every `{{name}}` whose name is in [`PLACEHOLDERS`] becomes a value; the
+/// Every `{{name}}` whose name is one of the scene's placeholders becomes a value; the
 /// rest of the text, other `{{...}}` included, stays as written.
 fn tokenize(raw: &str) -> Vec<(usize, Piece)> {
     let mut out = Vec::new();
