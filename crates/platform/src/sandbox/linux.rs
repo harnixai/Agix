@@ -113,6 +113,14 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
             bind(args, "--bind", &entry);
         }
     }
+    guard_project_skills(args, roots);
+    let agix = roots.cwd.join(".agix");
+    for worktree in subdirs(&agix.join(PROJECT_WORKTREES_DIR)) {
+        bind(args, "--ro-bind-try", &worktree.join(REPOSITORY_CONFIG_DIR));
+    }
+}
+
+fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
     for dir in PROJECT_ENGINE_CONFIG_DIRS {
         let path = roots.cwd.join(dir);
         let above: Vec<PathBuf> = Path::new(dir)
@@ -142,10 +150,6 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
             bind(args, "--bind", a);
         }
         read_only(args, &path);
-    }
-    let agix = roots.cwd.join(".agix");
-    for worktree in subdirs(&agix.join(PROJECT_WORKTREES_DIR)) {
-        bind(args, "--ro-bind-try", &worktree.join(REPOSITORY_CONFIG_DIR));
     }
 }
 
