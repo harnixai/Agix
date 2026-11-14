@@ -1,7 +1,7 @@
 //! `AskUserQuestionTool` —— 让模型主动向用户提问。
 //!
 //! 模型显式调用此工具以向用户提问。问题经会话的 `Elicitation` 送到宿主，
-//! 等待时长同权限提问（`permission_prompt_timeout_secs`，0 为不限）；
+//! 等待时长同权限提问（`permission_prompt_timeout_secs`，0 为不限），回合取消时撤回；
 //! 回答作为工具结果交还模型，没人回答也照实告诉模型。
 
 use async_trait::async_trait;
@@ -119,12 +119,17 @@ impl Tool for AskUserQuestionTool {
             None => None,
         };
         let outcome = match asked {
-            Some(ask) => ask.await.unwrap_or_else(|| {
-                ElicitOutcome::declined(format!(
-                    "the user did not answer within {}s",
-                    ctx.config.permission_prompt_timeout_secs
-                ))
-            }),
+            // Dropping the ask is what withdraws the question from the host.
+            Some(ask) => tokio::select! {
+                biased;
+                answer = ask => answer.unwrap_or_else(|| {
+                    ElicitOutcome::declined(format!(
+                        "the user did not answer within {}s",
+                        ctx.config.permission_prompt_timeout_secs
+                    ))
+                }),
+                _ = ctx.cancel.cancelled() => return Err(ToolError::Cancelled),
+            },
             None => ElicitOutcome::declined(
                 "this engine was built with no way to reach the user, so the question \
                  was not asked",
@@ -302,6 +307,24 @@ mod waiting_tests {
     async fn free_text_reaches_the_model_as_typed() {
         let asker = FixedElicitation::new(ElicitOutcome::answered(&"the dev branch".to_string()));
         assert_eq!(ask(ctx_with(asker, 300)).await, "the dev branch");
+    }
+
+    #[tokio::test]
+    async fn a_question_is_withdrawn_when_its_turn_is_cancelled() {
+        let ctx = ctx_with(Arc::new(NeverAnswers), 0);
+        let cancel = ctx.cancel.clone();
+        let asked = tokio::spawn(AskUserQuestionTool.call(
+            json!({"question": "which branch?"}),
+            ctx,
+            ProgressSender::noop("ask"),
+        ));
+        tokio::task::yield_now().await;
+        cancel.cancel();
+        let outcome = tokio::time::timeout(Duration::from_secs(10), asked)
+            .await
+            .expect("a cancelled turn's question must not wait for an answer")
+            .unwrap();
+        assert!(matches!(outcome, Err(ToolError::Cancelled)), "{outcome:?}");
     }
 
     #[tokio::test]

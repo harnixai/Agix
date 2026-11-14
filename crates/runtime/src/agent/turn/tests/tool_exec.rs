@@ -869,6 +869,7 @@ async fn post_tool_use_failure_runs_for_a_call_its_batch_abandoned() {
         },
         |_, _| true,
         tokio_util::sync::CancellationToken::new(),
+        std::time::Duration::from_secs(2),
         &[],
         None,
     )

@@ -146,7 +146,8 @@ fn lifecycle_input(ctx: &ToolExecCtx, event: hooks::HookEvent) -> hooks::HookInp
 }
 
 /// A call past its `PreToolUse` that is dropped before it ends — its batch
-/// abandons it when a sibling fails — still ends for the hooks: dropped
+/// abandons it when a sibling fails, or its cancelled turn stops waiting for
+/// it — still ends for the hooks: dropped
 /// armed, it fires `PostToolUseFailure` in the background with the error its
 /// tool_result carries.
 struct EndsForTheHooks {
@@ -182,7 +183,7 @@ impl Drop for EndsForTheHooks {
             return;
         };
         let reason = if self.turn.is_cancelled() {
-            "cancelled: the turn was stopped before the call finished"
+            crate::streaming::CANCELLED_WITH_THE_TURN
         } else {
             crate::streaming::ABANDONED_BY_SIBLING
         };

@@ -231,6 +231,7 @@ impl Agent {
             Err(error) => return Err((crate::streaming::StreamFailure::refused(error), false)),
         };
         let tools_for_safety = Arc::clone(&template.tools);
+        let cancel_grace = template.config.tool_cancel_grace;
         let template = template.clone();
         let execute_tool = move |tool_use_id: String, name: String, input: serde_json::Value| {
             let mut exec_ctx = template.clone();
@@ -251,6 +252,7 @@ impl Agent {
             execute_tool,
             is_concurrency_safe,
             cancel.clone(),
+            cancel_grace,
             self.llm.interceptors(),
             self.llm.model().provenance(),
         )

@@ -46,6 +46,7 @@ mod session_set_model;
 mod session_tasks;
 mod session_title_telemetry;
 mod tool_progress;
+mod turn_cancellation;
 mod two_pools_one_process;
 mod wiring_coverage;
 #[cfg(feature = "ws")]

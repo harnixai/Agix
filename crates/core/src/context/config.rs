@@ -13,6 +13,9 @@ pub struct EngineConfig {
     /// `0` = wait indefinitely. See
     /// `ExecutionSettings::permission_prompt_timeout_secs`.
     pub permission_prompt_timeout_secs: u64,
+    /// How long a tool call still running when its turn is cancelled is given
+    /// to stop on its own before it is dropped and answered as cancelled.
+    pub tool_cancel_grace: std::time::Duration,
     /// Maximum number of concurrency-safe tools to run in parallel
     /// within a single batch. 0 = unlimited. Default 10.
     pub max_parallelism: usize,
@@ -219,6 +222,7 @@ impl EngineConfig {
             model,
             max_tokens: 16384,
             permission_prompt_timeout_secs: 300,
+            tool_cancel_grace: std::time::Duration::from_secs(2),
             max_parallelism: 10,
             max_api_calls_per_turn: 25,
             strong_model: None,

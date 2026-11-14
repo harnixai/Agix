@@ -100,6 +100,7 @@ pub async fn execute_stream<F, Fut, G>(
     execute_tool: F,
     is_concurrency_safe: G,
     cancel: CancellationToken,
+    cancel_grace: std::time::Duration,
     interceptors: &[Arc<dyn base::interface::model_interceptor::ModelInterceptor>],
     provenance: Option<&str>,
 ) -> Result<StreamResult, StreamFailure>
@@ -115,6 +116,10 @@ where
         execute_tool,
         is_concurrency_safe,
         provenance,
+        Stop {
+            token: cancel.clone(),
+            grace: cancel_grace,
+        },
     );
     while let Some(event) = state.next_event(&cancel).await {
         state.on_event(event).await;
@@ -126,6 +131,47 @@ type ToolDone = (usize, String, base::interface::tool_middleware::ToolOutcome);
 
 /// The error a concurrent call stands on when a sibling's error abandons it.
 pub(crate) const ABANDONED_BY_SIBLING: &str = "cancelled by sibling error";
+
+/// The error a call stands on when its turn was cancelled before it finished.
+pub(crate) const CANCELLED_WITH_THE_TURN: &str =
+    "cancelled: the turn was stopped before the call finished";
+
+/// The turn's token, and how long a call still running when it fires is
+/// given to end on its own before it is dropped.
+#[derive(Clone)]
+struct Stop {
+    token: CancellationToken,
+    grace: std::time::Duration,
+}
+
+impl Stop {
+    async fn past_grace(&self) {
+        self.token.cancelled().await;
+        tokio::time::sleep(self.grace).await;
+    }
+
+    /// `call`'s outcome, or a cancellation once the grace has passed: a tool
+    /// that ignores its token cannot hold a cancelled turn open.
+    async fn bound<Fut>(&self, call: Fut) -> base::interface::tool_middleware::ToolOutcome
+    where
+        Fut: Future<Output = base::interface::tool_middleware::ToolOutcome>,
+    {
+        tokio::select! {
+            biased;
+            outcome = call => outcome,
+            _ = self.past_grace() => Err(CANCELLED_WITH_THE_TURN.to_string()),
+        }
+    }
+
+    fn abandoned(&self) -> String {
+        if self.token.is_cancelled() {
+            CANCELLED_WITH_THE_TURN
+        } else {
+            ABANDONED_BY_SIBLING
+        }
+        .to_string()
+    }
+}
 
 struct StreamState<'a, F, G> {
     stream: ModelStream,
@@ -158,6 +204,7 @@ struct StreamState<'a, F, G> {
     pending_result_blocks: Vec<(usize, ModelContentBlock)>,
     pending_new_msgs: Vec<Vec<serde_json::Value>>,
     read_ahead: ReadAhead,
+    stop: Stop,
 }
 
 impl<'a, F, Fut, G> StreamState<'a, F, G>
@@ -173,6 +220,7 @@ where
         execute_tool: F,
         is_concurrency_safe: G,
         provenance: Option<&'a str>,
+        stop: Stop,
     ) -> Self {
         Self {
             stream,
@@ -198,6 +246,7 @@ where
             pending_result_blocks: Vec::new(),
             pending_new_msgs: Vec::new(),
             read_ahead: ReadAhead::default(),
+            stop,
         }
     }
 
@@ -385,10 +434,11 @@ where
     fn start_concurrent(&mut self, idx: usize, id: String, name: String, input: serde_json::Value) {
         let exec = (self.execute_tool)(id.clone(), name, input);
         let abort = self.batch_abort.clone();
+        let stop = self.stop.clone();
         self.batch.push(Box::pin(async move {
             let result = tokio::select! {
-                _ = abort.cancelled() => Err(ABANDONED_BY_SIBLING.to_string()),
-                r = exec => r,
+                _ = abort.cancelled() => Err(stop.abandoned()),
+                r = stop.bound(exec) => r,
             };
             (idx, id, result)
         }));
@@ -409,6 +459,7 @@ where
         let pending_result_blocks = &mut self.pending_result_blocks;
         let pending_new_msgs = &mut self.pending_new_msgs;
         let execute_tool = &self.execute_tool;
+        let stop = &self.stop;
         let barrier = async {
             drain_batch(
                 batch,
@@ -420,7 +471,11 @@ where
                 pending_new_msgs,
             )
             .await;
-            execute_tool(id.clone(), name.clone(), input).await
+            if stop.token.is_cancelled() {
+                return Err(CANCELLED_WITH_THE_TURN.to_string());
+            }
+            stop.bound(execute_tool(id.clone(), name.clone(), input))
+                .await
         };
         let result = self.read_ahead.during(barrier, &mut self.stream).await;
         let (content, new_msgs, failed) = read_outcome(&result);
@@ -789,6 +844,8 @@ mod tests {
     use base::interface::model::{ModelError, ModelErrorKind, ModelEvent, Usage};
     use base::interface::tool_middleware::ToolAnswer;
 
+    const GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
     /// Thinking blocks must survive into the transcript, with their
     /// signatures, and must lead the assistant turn: on a
     /// `thinking + tool_use` turn the API requires the previous assistant
@@ -832,6 +889,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -904,6 +962,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -955,6 +1014,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             Some("deepseek"),
         )
@@ -1012,6 +1072,7 @@ mod tests {
             },
             |_name, _input| false,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1076,6 +1137,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1142,6 +1204,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |name, _input| name == "Glob", // Glob concurrency-safe, Bash is not
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1187,6 +1250,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1255,6 +1319,7 @@ mod tests {
             },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1328,6 +1393,7 @@ mod tests {
             },
             |_name, _input| true,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1393,6 +1459,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| false,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1470,6 +1537,7 @@ mod tests {
             |id, _name, _input| async move { Ok(ToolAnswer::text(format!("done {id}"))) },
             |name, _input| name == "Glob",
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1524,6 +1592,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("built")) },
             |_name, _input| false,
             CancellationToken::new(),
+            GRACE,
             &[],
             None,
         )
@@ -1554,6 +1623,7 @@ mod tests {
             |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
             |_name, _input| true,
             cancel,
+            GRACE,
             &[],
             None,
         )
@@ -1691,6 +1761,7 @@ mod tests {
                 },
                 |_name, _input| false,
                 CancellationToken::new(),
+                GRACE,
                 &[],
                 None,
             ),
@@ -1746,6 +1817,7 @@ mod tests {
                 },
                 |_name, _input| true,
                 CancellationToken::new(),
+                GRACE,
                 &[],
                 None,
             ),
@@ -1787,6 +1859,88 @@ mod tests {
             vec!["text:so far"],
             "what the host was shown stays"
         );
+    }
+
+    /// Cancels the turn once its one tool has started; the tool never returns
+    /// and never looks at its token. Paused time: the hang guard below is an
+    /// hour that passes as soon as nothing else can happen.
+    async fn cancel_a_tool_deaf_to_it(
+        concurrency_safe: bool,
+    ) -> (StreamResult, session::transcript::Transcript) {
+        use futures::StreamExt;
+        let started = Arc::new(tokio::sync::Notify::new());
+        let cancel = CancellationToken::new();
+        let (trigger, waits) = (cancel.clone(), Arc::clone(&started));
+        tokio::spawn(async move {
+            waits.notified().await;
+            trigger.cancel();
+        });
+        let head = futures::stream::iter(vec![Ok::<_, ModelError>(ModelEvent::ToolUse {
+            id: "deaf".into(),
+            name: "Deaf".into(),
+            input: serde_json::json!({}),
+        })]);
+        let stream: base::interface::model::ModelStream =
+            Box::new(head.chain(futures::stream::pending()));
+        let mut session = session::transcript::Transcript::in_memory(None);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let tx = crate::event_bus::EventBus::new(tx);
+        let done = tokio::time::timeout(
+            std::time::Duration::from_secs(3600),
+            execute_stream(
+                stream,
+                &mut session,
+                &tx,
+                "test-turn".into(),
+                move |_id, _name, _input| {
+                    let started = Arc::clone(&started);
+                    async move {
+                        started.notify_one();
+                        std::future::pending::<base::interface::tool_middleware::ToolOutcome>()
+                            .await
+                    }
+                },
+                move |_name, _input| concurrency_safe,
+                cancel,
+                GRACE,
+                &[],
+                None,
+            ),
+        )
+        .await
+        .expect("a tool deaf to its token held the cancelled turn open")
+        .expect("a cancelled call is not a failure");
+        (done, session)
+    }
+
+    fn assert_answered_as_cancelled(session: &session::transcript::Transcript) {
+        assert_adjacent_tool_pairing(session.messages());
+        match &session.messages()[1].content[..] {
+            [ModelContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            }] => {
+                assert_eq!(tool_use_id, "deaf");
+                assert_eq!(*is_error, Some(true));
+                assert!(content.contains("cancelled"), "{content}");
+            }
+            other => panic!("expected one tool_result, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cancelled_turn_drops_a_barrier_tool_that_ignores_it() {
+        let (done, session) = cancel_a_tool_deaf_to_it(false).await;
+        assert!(done.cancelled);
+        assert_answered_as_cancelled(&session);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cancelled_turn_drops_a_concurrent_tool_that_ignores_it() {
+        let (done, session) = cancel_a_tool_deaf_to_it(true).await;
+        assert!(done.cancelled);
+        assert_answered_as_cancelled(&session);
     }
 
     /// Every assistant message with ToolUse block(s) must be immediately
