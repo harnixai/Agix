@@ -15,6 +15,7 @@ mod extension_points_doc;
 mod hook_events_doc;
 mod host_scenes;
 mod managed_settings;
+mod max_tokens_fallback;
 mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;

@@ -15,6 +15,7 @@ pub(in crate::session_pool) use binding::{
 pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
+use crate::settings_source::read_pair;
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
 use model::client::AnthropicClient;
 use settings::LoadedSettings;
@@ -64,12 +65,30 @@ struct Cache {
 }
 
 /// What is laid over every settings this pool loads from disk, in order.
-struct Layers {
+pub(in crate::session_pool) struct Layers {
     /// What the host changed on this daemon's own pair's settings before
     /// handing them over. Every other pair, and this one reloaded from disk,
     /// would otherwise lose it.
     host: HostOverrides,
     managed: ManagedLayer,
+}
+
+impl Layers {
+    pub(in crate::session_pool) fn new(host: HostOverrides, managed: ManagedLayer) -> Self {
+        Self { host, managed }
+    }
+
+    /// `loaded` with what the host changed in memory, then the managed layer;
+    /// `own` also brings back the rules the host added to this daemon's own
+    /// pair.
+    fn over(&self, loaded: LoadedSettings, own: bool) -> LoadedSettings {
+        let hosted = if own {
+            self.host.apply_to_own(loaded)
+        } else {
+            self.host.apply(loaded)
+        };
+        hosted.with_managed(self.managed.settings.clone())
+    }
 }
 
 pub(in crate::session_pool) struct BindingCache {
@@ -78,6 +97,8 @@ pub(in crate::session_pool) struct BindingCache {
     /// were built with; everything not tied to a session reads this one.
     settings: AsyncRwLock<Arc<LoadedSettings>>,
     layers: Layers,
+    /// `--max-tokens`: a pair's `model.max_tokens` when no settings file sets it.
+    max_tokens_fallback: u32,
     cache: Cache,
     /// The last router each pair was successfully served by, kept across
     /// invalidation so a provider config that stops resolving — or stops
@@ -109,29 +130,29 @@ pub(in crate::session_pool) fn own_settings_in(
     cwd: &Path,
     host: Arc<LoadedSettings>,
     paths: &dyn crate::config::DaemonPaths,
-    host_overrides: &HostOverrides,
-    managed: Option<base::permission::ManagedSettings>,
+    layers: &Layers,
+    max_tokens_fallback: u32,
 ) -> Arc<LoadedSettings> {
     if host.paths.workspace.project_root() == Some(cwd) {
         return host;
     }
-    let loaded = LoadedSettings::load(
+    let loaded = read_pair(
         paths.global_root(),
         paths.config_root(),
-        cwd.join(".agix"),
+        Some(cwd),
         &host.paths.scope,
         &host.values.model.model_name,
-        &crate::settings_sections::all(),
+        max_tokens_fallback,
     );
-    Arc::new(host_overrides.apply_to_own(loaded).with_managed(managed))
+    Arc::new(layers.over(loaded, true))
 }
 
 impl BindingCache {
     #[allow(clippy::too_many_arguments)]
     pub(in crate::session_pool) fn new(
         settings: Arc<LoadedSettings>,
-        host_overrides: HostOverrides,
-        managed: ManagedLayer,
+        layers: Layers,
+        max_tokens_fallback: u32,
         watch: Option<WatchHub>,
         credentials: Arc<dyn base::interface::credentials::CredentialSource>,
         client: Arc<dyn AnthropicClient>,
@@ -141,10 +162,8 @@ impl BindingCache {
     ) -> Self {
         Self {
             settings: AsyncRwLock::new(settings),
-            layers: Layers {
-                host: host_overrides,
-                managed,
-            },
+            layers,
+            max_tokens_fallback,
             cache: Cache {
                 bindings: AsyncMutex::new(HashMap::new()),
                 epochs: std::sync::Mutex::new(HashMap::new()),
@@ -181,16 +200,39 @@ impl BindingCache {
         &self.layers.managed.path
     }
 
-    /// `settings` read from disk, with what the host changed in memory and
-    /// then this pool's managed layer on top.
-    pub(in crate::session_pool) fn with_host_layers(
+    /// The pair's settings read from disk through the one reader, with the
+    /// host's and the managed layers on top.
+    pub(in crate::session_pool) async fn load_pair(
         &self,
-        settings: LoadedSettings,
+        project: Option<&Path>,
+        scene: &str,
     ) -> LoadedSettings {
-        self.layers
-            .host
-            .apply(settings)
-            .with_managed(self.layers.managed.settings.clone())
+        let own = self.is_own_pair(project, scene).await;
+        self.load_pair_as(project, scene, own).await
+    }
+
+    async fn load_pair_as(&self, project: Option<&Path>, scene: &str, own: bool) -> LoadedSettings {
+        let startup_scene = self.startup_scene().await;
+        let default_model = self.settings.read().await.values.model.model_name.clone();
+        let (global_root, scene_root, scene, project, fallback) = (
+            self.paths.global_root(),
+            self.scene_root(scene, &startup_scene),
+            scene.to_string(),
+            project.map(Path::to_path_buf),
+            self.max_tokens_fallback,
+        );
+        let loaded = off_the_runtime(move || {
+            read_pair(
+                global_root,
+                scene_root,
+                project.as_deref(),
+                &scene,
+                &default_model,
+                fallback,
+            )
+        })
+        .await;
+        self.layers.over(loaded, own)
     }
 
     /// Whether `(project_root, scene_id)` is this daemon's own pair.
@@ -234,36 +276,10 @@ impl BindingCache {
             return existing.clone();
         }
         let stamp = self.begin_build(&key);
-        let startup_scene = self.startup_scene().await;
         let settings = if self.is_own_pair(project_root, scene_id).await {
             self.pool_settings().await
         } else {
-            let default_model = self.settings.read().await.values.model.model_name.clone();
-            let (global_root, scene_root, scene_id, project) = (
-                self.paths.global_root(),
-                self.scene_root(scene_id, &startup_scene),
-                scene_id.to_string(),
-                key.0.clone(),
-            );
-            let loaded = off_the_runtime(move || match project {
-                Some(root) => LoadedSettings::load(
-                    global_root,
-                    scene_root,
-                    root.join(".agix"),
-                    &scene_id,
-                    &default_model,
-                    &crate::settings_sections::all(),
-                ),
-                None => LoadedSettings::load_without_project(
-                    global_root,
-                    scene_root,
-                    &scene_id,
-                    &default_model,
-                    &crate::settings_sections::all(),
-                ),
-            })
-            .await;
-            Arc::new(self.with_host_layers(loaded))
+            Arc::new(self.load_pair(project_root, scene_id).await)
         };
 
         let (watch, unwatched_settings) = self.watch_tiers_of(&settings, &key);
@@ -496,30 +512,7 @@ impl BindingCache {
 
     /// Re-read this daemon's own pair's settings from disk and swap them in.
     pub(in crate::session_pool) async fn reload_own(&self, scene: &str) {
-        let default_model = self.settings.read().await.values.model.model_name.clone();
-        let (global_root, config_root, local_dir, scene) = (
-            self.paths.global_root(),
-            self.paths.config_root(),
-            self.cwd.join(".agix"),
-            scene.to_string(),
-        );
-        let loaded = off_the_runtime(move || {
-            LoadedSettings::load(
-                global_root,
-                config_root,
-                local_dir,
-                &scene,
-                &default_model,
-                &crate::settings_sections::all(),
-            )
-        })
-        .await;
-        let reloaded = Arc::new(
-            self.layers
-                .host
-                .apply_to_own(loaded)
-                .with_managed(self.layers.managed.settings.clone()),
-        );
+        let reloaded = Arc::new(self.load_pair_as(Some(&self.cwd), scene, true).await);
         *self.settings.write().await = reloaded;
     }
 

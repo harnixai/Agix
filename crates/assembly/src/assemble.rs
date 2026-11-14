@@ -212,18 +212,14 @@ pub async fn pool(
 /// what differs from `config.settings` is what the host changed afterwards.
 fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
     let paths = &config.paths;
-    let mut on_disk = settings::LoadedSettings::load(
+    crate::settings_source::read_pair(
         paths.global_root(),
         paths.config_root(),
-        paths.project_root().join(".agix"),
+        Some(&paths.project_root()),
         &config.settings.paths.scope,
         &config.settings.values.model.model_name,
-        &crate::settings_sections::all(),
-    );
-    if on_disk.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
-        on_disk.values.model.max_tokens = config.max_tokens_fallback;
-    }
-    on_disk
+        config.max_tokens_fallback,
+    )
 }
 
 /// The managed settings file this pool reads — the one the config names,

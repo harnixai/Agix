@@ -16,6 +16,7 @@ pub(crate) struct SessionPoolBuilder {
     credentials: Arc<dyn base::interface::credentials::CredentialSource>,
     managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
     host_overrides: HostOverrides,
+    max_tokens_fallback: u32,
     permission_prompt_timeout: Option<Duration>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
     customize: Option<SessionCustomizer>,
@@ -48,6 +49,7 @@ impl SessionPool {
             credentials: Arc::new(base::interface::credentials::ConfigCredentials),
             managed: None,
             host_overrides: HostOverrides::default(),
+            max_tokens_fallback: settings::DEFAULT_MAX_TOKENS,
             permission_prompt_timeout: None,
             rust_plugins: Vec::new(),
             customize: None,
@@ -90,8 +92,8 @@ impl SessionPoolBuilder {
         on_disk: &LoadedSettings,
         config: &crate::config::DaemonConfig,
     ) -> Self {
-        self.host_overrides =
-            HostOverrides::between(on_disk, &config.settings, config.max_tokens_fallback);
+        self.host_overrides = HostOverrides::between(on_disk, &config.settings);
+        self.max_tokens_fallback = config.max_tokens_fallback;
         self
     }
 
@@ -131,12 +133,19 @@ impl SessionPoolBuilder {
             }
             None => (settings::managed::path(), None, self.settings),
         };
+        let layers = parts::bindings::Layers::new(
+            self.host_overrides,
+            ManagedLayer {
+                path: managed_settings_path,
+                settings: managed_settings,
+            },
+        );
         let settings = parts::bindings::own_settings_in(
             &self.cwd,
             settings,
             self.paths.as_ref(),
-            &self.host_overrides,
-            managed_settings.clone(),
+            &layers,
+            self.max_tokens_fallback,
         );
         let mcp = McpHub::new(self.mcp, &settings.paths.user_data_dir);
         let _ = std::fs::create_dir_all(&settings.paths.user_data_dir);
@@ -171,11 +180,8 @@ impl SessionPoolBuilder {
         );
         let bindings = BindingCache::new(
             settings,
-            self.host_overrides,
-            ManagedLayer {
-                path: managed_settings_path,
-                settings: managed_settings,
-            },
+            layers,
+            self.max_tokens_fallback,
             watch,
             self.credentials,
             self.client,

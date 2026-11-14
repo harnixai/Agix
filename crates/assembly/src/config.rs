@@ -264,20 +264,14 @@ pub fn load_daemon_config(
     let project_root = paths.project_root();
     let global_root = paths.global_root();
 
-    let mut settings = LoadedSettings::load(
+    let settings = crate::settings_source::read_pair(
         global_root.clone(),
         config_root.clone(),
-        project_root.join(".agix"),
+        Some(&project_root),
         scope,
         cli_model,
-        &crate::settings_sections::all(),
+        cli_max_tokens,
     );
-    // `--max-tokens` is a fallback (same tier as `LoadedSettings::load`'s
-    // `default_model` param) — only takes effect when no settings.json
-    // layer set it, which is what still holding the default means.
-    if settings.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
-        settings.values.model.max_tokens = cli_max_tokens;
-    }
 
     let socket_path = cli_socket
         .map(PathBuf::from)

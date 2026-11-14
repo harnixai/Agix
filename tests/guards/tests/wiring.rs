@@ -410,3 +410,43 @@ fn a_model_from_the_task_router_is_accounted_where_it_is_fetched() {
          `Agent::model_for_task`; list the file only when `Builder::model` wraps it",
     );
 }
+
+/// WIR-5: the assembly reads a pair's settings from disk through
+/// `settings_source::read_pair` only, so what is layered on after (the
+/// `--max-tokens` fallback, the host's and the managed layers) is the same for
+/// every caller.
+#[test]
+fn the_assembly_reads_settings_from_disk_in_one_place() {
+    let mut found = Vec::new();
+    let mut scanned = 0;
+    for f in ws().production().filter(|f| f.package == "assembly") {
+        scanned += 1;
+        for c in scan::calls(f, View::Prod) {
+            let Callee::Path(p) = &c.callee else {
+                continue;
+            };
+            let loads = matches!(
+                p.as_slice(),
+                [.., t, n] if t == "LoadedSettings" && (n == "load" || n == "load_without_project")
+            );
+            if loads
+                && !c
+                    .hit
+                    .file
+                    .ends_with("crates/assembly/src/settings_source.rs")
+            {
+                found.push(Finding {
+                    key: c.hit.file.clone(),
+                    hit: c.hit.clone(),
+                });
+            }
+        }
+    }
+    allow::non_vacuous("wiring::settings_source", scanned, 10);
+    allow::check(
+        "wiring::SETTINGS_READS",
+        found,
+        &[],
+        "call `settings_source::read_pair` (or `BindingCache::load_pair` in the pool)",
+    );
+}

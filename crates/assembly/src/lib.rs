@@ -23,6 +23,7 @@ pub mod rpc;
 pub mod server;
 pub mod session_pool;
 pub mod settings_sections;
+mod settings_source;
 #[cfg(feature = "otel")]
 pub mod telemetry_otel;
 pub mod watch_hub;
