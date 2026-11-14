@@ -538,7 +538,7 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 
 `history::store::HistoryStore`。自带两个实现:`JsonlHistoryStore`(项目目录下的
 文件)和 `InMemoryHistoryStore`。契约的保证写在它的文档注释里;
-`store::contract_tests` 拿同样六条性质同时压这两个实现,第三个后端也该指到这里来。
+`store::tests::contract` 拿同样六条性质同时压这两个实现,第三个后端也该指到这里来。
 
 `append` 返回 `Ok` 是条目已进日志;持久要等 `sync`——引擎每一步、每一轮结束各调一次,
 不是每条都调。别的进程也能写到的后端实现 `claim`:返回的 `SessionClaim` 活着期间别的

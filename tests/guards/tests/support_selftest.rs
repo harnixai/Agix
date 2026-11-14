@@ -393,12 +393,28 @@ fn the_workspace_is_read_through_its_module_trees() {
 
 #[test]
 fn a_test_marker_early_in_a_file_hides_nothing_after_it() {
-    let ws = ws();
-    let store = ws.file("crates/history/src/store.rs");
+    let f = standalone(
+        "a.rs",
+        r#"
+#[cfg(test)]
+mod early {
+    fn only_in_tests() {}
+}
+
+fn after_the_marker() {
+    let a = 1;
+    let b = 2;
+    let c = a + b;
+    let _ = c;
+}
+"#
+        .into(),
+    )
+    .unwrap();
     assert!(
-        store.production_lines() > 1000,
-        "the code after store.rs's statement-level `#[cfg(test)]` is production: {}",
-        store.production_lines()
+        f.production_lines() >= 6,
+        "the code after an early `#[cfg(test)]` module is production: {}",
+        f.production_lines()
     );
 }
 
