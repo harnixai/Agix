@@ -54,6 +54,7 @@ fn answers(model: &MockAnthropicClient, id: &str) -> Vec<Value> {
 
 /// A forward proxy on 127.0.0.1 that takes an absolute-form `GET`, fetches
 /// it and hands the answer back marked `X-Via: agix-test`.
+#[cfg(target_os = "macos")]
 async fn marking_proxy() -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -91,6 +92,7 @@ async fn marking_proxy() -> u16 {
     port
 }
 
+#[cfg(target_os = "macos")]
 struct Daemon {
     _dir: tempfile::TempDir,
     sock: std::path::PathBuf,
@@ -98,6 +100,7 @@ struct Daemon {
 }
 
 /// A daemon over a global settings.json of `sandbox` with `Bash` allowed.
+#[cfg(target_os = "macos")]
 async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
@@ -143,6 +146,7 @@ async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
     }
 }
 
+#[cfg(target_os = "macos")]
 async fn doctor_check(sock: &std::path::Path, name: &str) -> Value {
     let doctor = call(sock, "daemon.doctor", json!({})).await;
     doctor["health"]["checks"]
