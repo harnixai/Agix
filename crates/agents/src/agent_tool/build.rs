@@ -102,6 +102,7 @@ impl Delegator {
         .permission(relay.permission)
         .elicitation(relay.elicitation)
         .checkpoints(self.delegate_checkpoints(spec, depth))
+        .tool_results_dir(self.env.tool_results_dir.clone())
         .host_tools(self.env.host_tools.clone())
         .host_calls(relay.host_calls);
         if let Some(schema) = &spec.output_schema {

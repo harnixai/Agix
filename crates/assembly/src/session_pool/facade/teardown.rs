@@ -163,6 +163,21 @@ impl SessionPool {
             .await)
     }
 
+    async fn remove_saved_tool_results(
+        &self,
+        session_id: &str,
+        facts: history::store::SessionFacts,
+    ) {
+        let scene = match facts.scene {
+            Some(scene) => scene,
+            None => self.bindings.startup_scene().await,
+        };
+        let project = facts.project_root.map(PathBuf::from);
+        let binding = self.binding_for(project.as_deref(), &scene).await;
+        let dir = base::paths::tool_results_dir(&binding.settings.paths.local_data_dir, session_id);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// `session.delete` — irreversibly deletes the parent's own transcript
     /// too (not just the runtime entity `session.close` destroys), cascading
     /// sidechains the same way. `dry_run: true` reports what *would* be
@@ -197,6 +212,7 @@ impl SessionPool {
         // critical section — see that method's doc comment for the resume
         // race this closes. The children are looked for only once the
         // parent's engine has stopped: until then it can still start one.
+        let facts = self.directory.facts_of(session_id).await;
         let (sidechains_deleted, sidechain_ids, delete_result) = self
             .live
             .with_session_lock(session_id, async {
@@ -212,6 +228,7 @@ impl SessionPool {
         let scratch =
             base::paths::session_scratch_dir(&self.bindings.paths().global_root(), session_id);
         let _ = std::fs::remove_dir_all(scratch);
+        self.remove_saved_tool_results(session_id, facts).await;
         self.scheduler.remove_session(session_id);
         self.emit_event(api::DaemonEvent::SessionDeleted {
             session_id: session_id.to_string(),

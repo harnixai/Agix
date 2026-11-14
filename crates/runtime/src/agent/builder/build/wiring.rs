@@ -51,9 +51,15 @@ impl Builder {
         &self,
         settings: &LoadedSettings,
         scene: &SceneSpec,
+        session_id: &str,
     ) -> Arc<base::context::EngineConfig> {
         Arc::new({
             let mut c = settings.engine_config();
+            let own_dir = &settings.paths.local_data_dir;
+            c.tool_results.dir = self.spec.tool_results_dir.clone().or_else(|| {
+                (self.spec.agent_depth == 0 && own_dir.is_absolute())
+                    .then(|| base::paths::tool_results_dir(own_dir, session_id))
+            });
             c.path_style = settings.values.path_style.unwrap_or(scene.path_style);
             c.deferred_tools = Arc::new(
                 scene
@@ -82,6 +88,7 @@ impl Builder {
         &self,
         settings: &LoadedSettings,
         scene: &SceneSpec,
+        session_id: &str,
     ) -> Result<
         (
             Arc<base::context::EngineConfig>,
@@ -89,7 +96,7 @@ impl Builder {
         ),
         EngineError,
     > {
-        let config = self.engine_config(settings, scene);
+        let config = self.engine_config(settings, scene, session_id);
         let exec = match (&self.host.exec, &self.spec.process_groups) {
             (Some(_), Some(_)) => Err(EngineError::Internal(
                 "Builder::exec and Builder::process_groups are both set; record groups in \

@@ -30,7 +30,8 @@ impl Builder {
             .unwrap_or_else(|| Arc::new(DefaultCompactor) as Arc<dyn Compactor>);
         let agent_depth = self.spec.agent_depth;
         let mut plugins = self.register_plugins(&session, &r.settings, &r.scene)?;
-        let (config, exec) = self.config_and_exec(&r.settings, &r.scene)?;
+        let (config, exec) =
+            self.config_and_exec(&r.settings, &r.scene, session.session_id_str())?;
         let mut hooks = self.wire_hooks(&r.settings, &r.model, &session, &exec);
         let skill_catalog = crate::module::LateSkillCatalog::default();
 

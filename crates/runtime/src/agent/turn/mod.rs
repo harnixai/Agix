@@ -16,6 +16,7 @@ mod reporting;
 mod request;
 mod rewind;
 mod round;
+mod spill;
 mod token_budget;
 mod tool_env;
 mod tool_exec;

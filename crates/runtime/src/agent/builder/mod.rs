@@ -480,6 +480,15 @@ impl Builder {
         self
     }
 
+    /// Where this session saves a tool result too long for the conversation.
+    /// A delegate is handed its root session's; left unset, a root session
+    /// (depth 0) uses its own under the project's scratchpad, and any other
+    /// session saves nothing.
+    pub fn tool_results_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.spec.tool_results_dir = dir;
+        self
+    }
+
     /// The team this agent is a member of, and its name there.
     pub fn team_seat(mut self, seat: base::interface::delegate::TeamSeat) -> Self {
         self.spec.team_seat = Some(seat);

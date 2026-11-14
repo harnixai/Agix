@@ -35,6 +35,8 @@ pub(crate) struct DelegateEnv {
     pub(crate) under_hook: bool,
     /// The root session's: a delegate's writes are recorded there.
     pub(crate) checkpoints: Option<Arc<runtime::checkpoint::Checkpoints>>,
+    /// The root session's: a delegate's long tool results are saved there.
+    pub(crate) tool_results_dir: Option<std::path::PathBuf>,
     /// The host tools the session declared for its delegates too, and how
     /// their calls reach the host.
     pub(crate) host_tools: Vec<base::interface::host_call::HostToolDecl>,
@@ -75,6 +77,7 @@ impl DelegateEnv {
             depth: cx.depth,
             under_hook: hook_agents.includes(cx.session_id),
             checkpoints: cx.checkpoints.cloned(),
+            tool_results_dir: cx.config.tool_results.dir.clone(),
             host_tools: cx
                 .host_tools
                 .iter()

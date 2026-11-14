@@ -5,7 +5,9 @@ use super::reporting::telemetry_error_text;
 use super::tool_env::tool_context_for;
 use super::tool_permission::{authorize, pre_tool_use};
 use super::tool_progress::{CloseOnDrop, GateHandle, ProgressGate};
-use super::tool_result::{fence_external, render_tool_result_content, PendingToolImage};
+use super::tool_result::{
+    fence_external, fence_saved_result, render_tool_result_content, PendingToolImage,
+};
 use base::event::AgentEvent;
 use std::sync::Arc;
 
@@ -321,6 +323,21 @@ pub(super) fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
         .unwrap_or("(non-string panic payload)")
 }
 
+fn fence_what_came_back(
+    ctx: &ToolExecCtx,
+    name: &str,
+    input: &serde_json::Value,
+    facts: &base::interface::permission::ToolFacts,
+    outcome: &mut base::interface::tool_middleware::ToolOutcome,
+) {
+    let from_code = ctx.caller == Caller::Code;
+    if !from_code && super::spill::reads_a_saved_result(ctx, name, input) {
+        fence_saved_result(name, outcome);
+    } else {
+        fence_external(name, facts, from_code, outcome);
+    }
+}
+
 pub(super) async fn execute_tool_inner(
     ctx: &ToolExecCtx,
     name: &str,
@@ -377,10 +394,11 @@ pub(super) async fn execute_tool_inner(
     }
 
     let (mut outcome, images) = answer_of(result);
-    fence_external(
+    fence_what_came_back(
+        ctx,
         name,
+        &input_for_post_hook,
         &authorized.facts,
-        ctx.caller == Caller::Code,
         &mut outcome,
     );
     if let Some(after) = owed {
@@ -398,21 +416,32 @@ pub(super) async fn execute_tool_inner(
     record_execution(ctx, name, &outcome, measured);
 
     ends.disarm();
-    deliver(ctx, name, &input_for_post_hook, outcome, images).await
+    deliver(
+        ctx,
+        name,
+        &input_for_post_hook,
+        outcome,
+        images,
+        tool.spec().pages_itself,
+    )
+    .await
 }
 
-/// The result on its way back: the post-call hooks, then the transformers;
-/// images go to the round's batch.
+/// The result on its way back: the post-call hooks, then the transformers,
+/// then a result too long for the conversation is saved to a file; images go
+/// to the round's batch.
 async fn deliver(
     ctx: &ToolExecCtx,
     name: &str,
     input: &serde_json::Value,
     mut outcome: base::interface::tool_middleware::ToolOutcome,
     images: Vec<PendingToolImage>,
+    pages_itself: bool,
 ) -> base::interface::tool_middleware::ToolOutcome {
     post_tool_use(ctx, name, input, &mut outcome).await;
     fire_tool_lifecycle(ctx, name, input, &outcome).await;
     let (outcome, images) = apply_result_transformers(ctx, name, input, outcome, images);
+    let outcome = super::spill::spill_oversized(ctx, name, pages_itself, outcome).await;
     if !images.is_empty() {
         ctx.images
             .lock()

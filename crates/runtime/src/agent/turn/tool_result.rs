@@ -111,3 +111,19 @@ pub(super) fn fence_external(
     };
     *text = tools::external_content::fence(&source, &from, text);
 }
+
+/// What `Read` or `Grep` found in a saved tool result: the original may have
+/// been a server's or a page's, and reading it back must not wash it into a
+/// project file.
+pub(super) fn fence_saved_result(
+    name: &str,
+    outcome: &mut base::interface::tool_middleware::ToolOutcome,
+) {
+    if let Ok(answer) = outcome {
+        answer.text = tools::external_content::fence(
+            name,
+            "an earlier tool result saved to file",
+            &answer.text,
+        );
+    }
+}

@@ -132,6 +132,8 @@ pub(super) struct SpecSetup {
     pub(super) checkpoints: Option<Option<Arc<crate::checkpoint::Checkpoints>>>,
     /// See [`Builder::host_tools`].
     pub(super) host_tools: Vec<base::interface::host_call::HostToolDecl>,
+    /// See [`Builder::tool_results_dir`].
+    pub(super) tool_results_dir: Option<PathBuf>,
 }
 
 impl SpecSetup {
@@ -163,6 +165,7 @@ impl SpecSetup {
             run_slots: None,
             checkpoints: None,
             host_tools: Vec::new(),
+            tool_results_dir: None,
         }
     }
 }

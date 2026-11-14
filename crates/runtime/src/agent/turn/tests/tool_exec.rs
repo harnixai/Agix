@@ -1984,3 +1984,81 @@ async fn a_transformer_sees_only_the_images_of_its_own_call() {
     );
     assert_eq!(images[0].media_type, "image/png");
 }
+
+struct LongOutputTool {
+    pages_itself: bool,
+}
+#[async_trait::async_trait]
+impl base::tool::Tool for LongOutputTool {
+    fn name(&self) -> &str {
+        "LongOutput"
+    }
+    fn spec(&self) -> base::tool::ToolSpec {
+        let spec = base::tool::ToolSpec::new();
+        if self.pages_itself {
+            spec.pages_itself()
+        } else {
+            spec
+        }
+    }
+    fn description(&self) -> &str {
+        "long output (test tool)"
+    }
+    fn input_schema(&self, _: base::tool::PathStyle) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: base::tool::ToolContext,
+        _progress: base::tool::ProgressSender,
+    ) -> Result<base::tool::ToolResult, base::error::ToolError> {
+        let line = "password: hunter2 and filler text to make the line long\n";
+        Ok(base::tool::ToolResult::text(line.repeat(1_000)))
+    }
+}
+
+fn spilling_ctx(dir: &std::path::Path, pages_itself: bool) -> ToolExecCtx {
+    let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
+    tools.register(Arc::new(LongOutputTool { pages_itself }));
+    let mut ctx = test_exec_ctx(
+        tools,
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
+    );
+    let mut config = (*ctx.config).clone();
+    config.tool_results.dir = Some(dir.join("tool-results/s"));
+    ctx.config = Arc::new(config);
+    ctx.result_transformers =
+        Arc::new(vec![
+            Arc::new(base::interface::tool_result::RedactLiterals::new([
+                "hunter2",
+            ])) as Arc<dyn base::interface::tool_result::ToolResultTransformer>,
+        ]);
+    ctx
+}
+
+#[tokio::test]
+async fn a_redacted_secret_is_not_in_the_saved_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = spilling_ctx(dir.path(), false);
+    let shown = execute_tool_with_telemetry(&ctx, "LongOutput", serde_json::json!({}))
+        .await
+        .unwrap()
+        .text;
+    let path = compaction::budget::spill_path_of(&shown).expect("saved");
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("filler text") && !saved.contains("hunter2"));
+    assert!(!shown.contains("hunter2") && shown.chars().count() < 4_000);
+}
+
+#[tokio::test]
+async fn a_tool_that_pages_itself_is_never_saved() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = spilling_ctx(dir.path(), true);
+    let shown = execute_tool_with_telemetry(&ctx, "LongOutput", serde_json::json!({}))
+        .await
+        .unwrap()
+        .text;
+    assert_eq!(shown.lines().count(), 1_000);
+    assert!(!dir.path().join("tool-results").exists());
+}

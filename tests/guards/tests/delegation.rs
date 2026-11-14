@@ -123,6 +123,10 @@ const OWN: &[(&str, &str)] = &[
         "checkpoints",
         "the root session's, signed with the delegate's name",
     ),
+    (
+        "tool_results_dir",
+        "the root session's: long results are saved there",
+    ),
     ("team_seat", "the team and name it works under"),
     (
         "host_tools",
