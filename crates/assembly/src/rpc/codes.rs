@@ -101,6 +101,14 @@ error_codes! {
     /// `mcp.addServer`/`mcp.updateServer` into a project that is not trusted:
     /// the server would never start, so nothing was written.
     ProjectUntrusted = -32022, PROJECT_UNTRUSTED;
+    /// `session.rewind`: files that cannot be restored as asked — changed
+    /// since the session wrote them, no longer kept, refused by the write
+    /// policy, behind a symlink. Nothing was changed; `data.issues` lists
+    /// them and what lets each through.
+    RewindPrecondition = -32023, REWIND_PRECONDITION;
+    /// `session.rewind` failed part way; what it had restored was put back
+    /// unless `data.partial` says otherwise.
+    RewindFailed = -32024, REWIND_FAILED;
 }
 
 #[cfg(test)]

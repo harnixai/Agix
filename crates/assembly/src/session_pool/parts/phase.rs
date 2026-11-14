@@ -42,6 +42,8 @@ pub(in crate::session_pool) enum SessionPhase {
 pub(in crate::session_pool) enum SessionOp {
     /// `session.inspectContext`, `session.dropMessages`, `session.editMessage`.
     Context,
+    /// `session.rewind`.
+    Rewind,
 }
 
 #[derive(Debug)]
@@ -267,6 +269,7 @@ impl TurnSlot {
             SessionPhase::Exclusive(SessionOp::Context) => {
                 Some(Busy::context_operation(session_id))
             }
+            SessionPhase::Exclusive(SessionOp::Rewind) => Some(Busy::rewinding(session_id)),
         }
     }
 }

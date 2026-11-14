@@ -13,6 +13,7 @@ mod listing;
 mod plugins;
 pub(super) mod providers;
 mod resume;
+mod rewind;
 mod scenes;
 mod session_ops;
 pub(super) mod settings_reload;

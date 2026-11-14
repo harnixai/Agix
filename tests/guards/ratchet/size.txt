@@ -17,12 +17,12 @@ fn    crates/agents/src/agent_tool/mod.rs                        AgentTool::call
 fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn                           92
 fn    crates/agents/src/delegate/mod.rs                          Delegator::delegate                    86
 fn    crates/assembly/src/assemble.rs                            pool                                   100
-fn    crates/assembly/src/export.rs                              pack                                   100
+fn    crates/assembly/src/export.rs                              pack                                   102
 fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        280
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              84
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    135
-fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            115
-fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              128
+fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            119
+fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              131
 fn    crates/assembly/src/session_pool/facade/listing.rs         SessionPool::list_all                  139
 fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::set_provider              117
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            89

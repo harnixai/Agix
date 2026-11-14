@@ -2017,6 +2017,30 @@
       }
     },
     {
+      "case": "rewound",
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "cut": {
+              "to_start": false,
+              "to_tool_use": null,
+              "to_turn": "t1"
+            },
+            "files_restored": 3,
+            "files_skipped": 0,
+            "kind": "rewound",
+            "rewind_id": "r1",
+            "scope": "both",
+            "seq": 6
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      }
+    },
+    {
       "case": "subscription_dropped",
       "frame": {
         "jsonrpc": "2.0",

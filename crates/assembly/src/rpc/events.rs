@@ -184,6 +184,7 @@ pub enum SessionEventPayload {
     ExtensionEntry {
         entry: Value,
     },
+    Rewound(crate::session_pool::api::Rewound),
     SubscriptionDropped {
         reason: DropReason,
     },
@@ -254,6 +255,7 @@ impl SessionEventPayload {
         "task_finished",
         "goal_changed",
         "extension_entry",
+        "rewound",
         "subscription_dropped",
     ];
 
@@ -276,6 +278,7 @@ impl SessionEventPayload {
             SessionEvent::ExtensionEntry(entry) => Some(Self::ExtensionEntry {
                 entry: entry.clone(),
             }),
+            SessionEvent::Rewound(rewound) => Some(Self::Rewound(rewound.clone())),
             SessionEvent::EngineStopped => Some(Self::error(
                 &TurnFailure::new(
                     FailureKind::EngineStopped,

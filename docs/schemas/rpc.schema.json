@@ -194,6 +194,101 @@
         }
       ]
     },
+    "CheckpointFile": {
+      "properties": {
+        "agent": {
+          "description": "The delegate session that wrote it, when one did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "CheckpointList": {
+      "description": "The rewind menu: the turns a host can go back to and what each wrote.",
+      "properties": {
+        "enabled": {
+          "description": "Whether this session keeps file checkpoints at all.",
+          "type": "boolean"
+        },
+        "interrupted_rewind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InterruptedRewind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A rewind that began and never finished."
+        },
+        "pruned_before_turn": {
+          "description": "Turns before it cannot have their files restored; `null` while every\none can.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/CheckpointTurn"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "turns",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "CheckpointTurn": {
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/CheckpointFile"
+          },
+          "type": "array"
+        },
+        "prompt": {
+          "description": "The start of the message the turn began with.",
+          "type": "string"
+        },
+        "restorable": {
+          "type": "boolean"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "started_at",
+        "prompt",
+        "files",
+        "restorable"
+      ],
+      "type": "object"
+    },
     "ClockOptions": {
       "properties": {
         "start": {
@@ -2191,6 +2286,21 @@
       ],
       "type": "object"
     },
+    "InterruptedRewind": {
+      "properties": {
+        "rewind_id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rewind_id",
+        "ts"
+      ],
+      "type": "object"
+    },
     "ListParams": {
       "properties": {
         "include_children": {
@@ -3511,6 +3621,25 @@
       ],
       "type": "object"
     },
+    "RemovedTurn": {
+      "properties": {
+        "prompt": {
+          "description": "What the turn was started with, for a host to offer again.",
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          },
+          "type": "array"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "prompt"
+      ],
+      "type": "object"
+    },
     "RenameParams": {
       "properties": {
         "name": {
@@ -3595,6 +3724,37 @@
       "required": [
         "session_id",
         "prompt_id"
+      ],
+      "type": "object"
+    },
+    "RestoredFile": {
+      "properties": {
+        "outside_project": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "description": "`file` or `absent`.",
+          "type": "string"
+        },
+        "unverified": {
+          "description": "The session's last write of it has no record of what it left, so it\nwas not checked for changes made since.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "to",
+        "outside_project",
+        "unverified"
       ],
       "type": "object"
     },
@@ -3698,6 +3858,253 @@
         "created"
       ],
       "type": "string"
+    },
+    "RewindCut": {
+      "description": "Where a rewind goes back to: exactly one of the three.",
+      "properties": {
+        "to_start": {
+          "default": false,
+          "description": "Back to before the first turn.",
+          "type": "boolean"
+        },
+        "to_tool_use": {
+          "default": null,
+          "description": "Back to just before this tool call — or a program's calls under it —\nwrote anything. Files only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_turn": {
+          "default": null,
+          "description": "Back to just after this turn ended.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RewindIssue": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "issue": {
+          "$ref": "#/$defs/RewindIssueKind"
+        },
+        "overridable_by": {
+          "description": "`force` or `allow_partial`.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "issue",
+        "detail",
+        "overridable_by"
+      ],
+      "type": "object"
+    },
+    "RewindIssueKind": {
+      "oneOf": [
+        {
+          "const": "modified",
+          "description": "Not what the session last wrote: someone else changed it since.",
+          "type": "string"
+        },
+        {
+          "const": "unavailable",
+          "description": "Its earlier contents were not kept, or no longer match their hash.",
+          "type": "string"
+        },
+        {
+          "const": "denied",
+          "description": "The write policy refuses it now.",
+          "type": "string"
+        },
+        {
+          "const": "symlink",
+          "description": "It, or a directory above it, is now a symbolic link.",
+          "type": "string"
+        },
+        {
+          "const": "worktree_removed",
+          "description": "It was in a worktree that has since been removed.",
+          "type": "string"
+        }
+      ]
+    },
+    "RewindOutcome": {
+      "properties": {
+        "conversation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RewoundConversation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` when the scope leaves the conversation alone."
+        },
+        "cut": {
+          "$ref": "#/$defs/RewindCut"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RewoundFiles"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` when the scope leaves the files alone."
+        },
+        "fork_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rewind_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/RewindScope"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "rewind_id",
+        "dry_run",
+        "scope",
+        "cut"
+      ],
+      "type": "object"
+    },
+    "RewindParams": {
+      "description": "Where a rewind goes back to: exactly one of the three.",
+      "properties": {
+        "allow_partial": {
+          "default": false,
+          "description": "Leave out files that cannot be restored instead of refusing.",
+          "type": "boolean"
+        },
+        "dry_run": {
+          "default": false,
+          "description": "Work out the plan and its problems; change nothing.",
+          "type": "boolean"
+        },
+        "force": {
+          "default": false,
+          "description": "Overwrite files changed since the session last wrote them.",
+          "type": "boolean"
+        },
+        "fork_first": {
+          "default": false,
+          "description": "Fork the whole session first, so the rewound part survives there.",
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/RewindScope"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "to_start": {
+          "default": false,
+          "description": "Back to before the first turn.",
+          "type": "boolean"
+        },
+        "to_tool_use": {
+          "default": null,
+          "description": "Back to just before this tool call — or a program's calls under it —\nwrote anything. Files only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_turn": {
+          "default": null,
+          "description": "Back to just after this turn ended.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "RewindScope": {
+      "enum": [
+        "files",
+        "conversation",
+        "both"
+      ],
+      "type": "string"
+    },
+    "RewoundConversation": {
+      "properties": {
+        "messages_after": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "messages_before": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed_turns": {
+          "items": {
+            "$ref": "#/$defs/RemovedTurn"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "messages_before",
+        "messages_after",
+        "removed_turns"
+      ],
+      "type": "object"
+    },
+    "RewoundFiles": {
+      "properties": {
+        "restored": {
+          "items": {
+            "$ref": "#/$defs/RestoredFile"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/$defs/RewindIssue"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "restored",
+        "skipped"
+      ],
+      "type": "object"
     },
     "RoutingStatus": {
       "description": "What reading the settings back and resolving provider routing found.",
@@ -5871,6 +6278,14 @@
     {
       "code": -32022,
       "name": "PROJECT_UNTRUSTED"
+    },
+    {
+      "code": -32023,
+      "name": "REWIND_PRECONDITION"
+    },
+    {
+      "code": -32024,
+      "name": "REWIND_FAILED"
     }
   ],
   "frames": {
@@ -6249,6 +6664,14 @@
         "$ref": "#/$defs/EntryView"
       }
     },
+    "session.checkpoints": {
+      "params": {
+        "$ref": "#/$defs/SessionRef"
+      },
+      "result": {
+        "$ref": "#/$defs/CheckpointList"
+      }
+    },
     "session.clear": {
       "params": {
         "$ref": "#/$defs/SessionRef"
@@ -6407,6 +6830,14 @@
       },
       "result": {
         "$ref": "#/$defs/ResumeReport"
+      }
+    },
+    "session.rewind": {
+      "params": {
+        "$ref": "#/$defs/RewindParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RewindOutcome"
       }
     },
     "session.run_turn": {
@@ -6924,6 +7355,18 @@
           "properties": {
             "kind": {
               "const": "prompt_resolved"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "rewound": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "rewound"
             }
           },
           "required": [

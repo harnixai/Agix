@@ -123,6 +123,7 @@ impl TestParent {
             skills: self.skills,
             depth: self.depth,
             under_hook: false,
+            checkpoints: None,
         };
         let catalog = match self.shared_types {
             Some(map) => AgentCatalog::shared(map, &self.session_agent_types),

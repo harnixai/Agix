@@ -1,11 +1,14 @@
 //! 跑一轮与上下文：`session.run_turn` / `compact` / `clear` / `respondToPrompt` /
-//! `inspectContext` / `dropMessages` / `editMessage`。
+//! `inspectContext` / `dropMessages` / `editMessage` / `rewind` / `checkpoints`。
 
 use super::*;
 use crate::rpc::methods::session::SessionRef;
 use crate::rpc::methods::turn::*;
 use crate::rpc::{read_options, RpcError};
-use crate::session_pool::api::{AskKind, ContextReport, Initiator, PoolError, TurnRequest};
+use crate::session_pool::api::{
+    AskKind, CheckpointList, ContextReport, Initiator, PoolError, RewindOutcome, RewindRequest,
+    TurnRequest,
+};
 use crate::session_pool::{OnBusy, PromptAnswer};
 use base::context::goal::TurnOrigin;
 
@@ -17,6 +20,8 @@ rpc_methods! {
     "session.inspectContext" => inspect_context(SessionRef) -> ContextReport;
     "session.dropMessages" => drop_messages(DropMessagesParams) -> Dropped;
     "session.editMessage" => edit_message(EditMessageParams) -> Edited;
+    "session.rewind" => rewind(RewindParams) -> RewindOutcome;
+    "session.checkpoints" => checkpoints(SessionRef) -> CheckpointList;
 }
 
 fn invalid(message: impl Into<String>) -> RpcError {
@@ -133,4 +138,26 @@ async fn edit_message(
         .edit_message(&p.session_id, p.at, p.text, p.total)
         .await?;
     Ok(Edited { edited })
+}
+
+async fn rewind(s: &DaemonServer, _: &Call, p: RewindParams) -> Result<RewindOutcome, PoolError> {
+    s.pool
+        .rewind_session(RewindRequest {
+            session_id: p.session_id,
+            cut: p.cut,
+            scope: p.scope,
+            force: p.force,
+            allow_partial: p.allow_partial,
+            dry_run: p.dry_run,
+            fork_first: p.fork_first,
+        })
+        .await
+}
+
+async fn checkpoints(
+    s: &DaemonServer,
+    _: &Call,
+    p: SessionRef,
+) -> Result<CheckpointList, PoolError> {
+    s.pool.session_checkpoints(&p.session_id).await
 }

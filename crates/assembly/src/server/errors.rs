@@ -56,6 +56,11 @@ impl From<PoolError> for RpcError {
             PoolError::ModuleNotCompiled { module, .. } => {
                 (codes::METHOD_NOT_FOUND, Some(json!({ "module": module })))
             }
+            PoolError::RewindPrecondition(issues) => (
+                codes::REWIND_PRECONDITION,
+                Some(json!({ "issues": issues })),
+            ),
+            PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
         RpcError {

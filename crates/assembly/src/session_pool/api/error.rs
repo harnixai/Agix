@@ -65,6 +65,11 @@ pub enum PoolError {
         method: String,
         module: &'static str,
     },
+    /// Files a rewind cannot restore as asked; nothing was changed.
+    #[error("{} file(s) cannot be restored as asked; nothing was changed", .0.len())]
+    RewindPrecondition(Vec<runtime::agent::RewindIssue>),
+    #[error("the rewind failed at {}: {}", .0.failed.path, .0.failed.error)]
+    RewindFailed(runtime::agent::RewindFailure),
     #[error("{0}")]
     Internal(String),
 }
@@ -123,6 +128,8 @@ pub enum BusyReason {
     PreviousEngine,
     /// A look at or a change to the session's context is under way.
     ContextOperation,
+    /// A rewind is under way.
+    Rewinding,
 }
 
 /// Why a session cannot take what was asked of it right now.
@@ -166,6 +173,10 @@ impl Busy {
             BusyReason::ContextOperation,
             Self::MESSAGE.into(),
         )
+    }
+
+    pub(crate) fn rewinding(session_id: &str) -> Self {
+        Self::new(session_id, BusyReason::Rewinding, Self::MESSAGE.into())
     }
 
     pub(crate) fn previous_engine(session_id: &str, message: impl Into<String>) -> Self {

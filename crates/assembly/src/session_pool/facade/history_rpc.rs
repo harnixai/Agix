@@ -172,6 +172,10 @@ impl SessionPool {
             sessions,
             forks: lineage.forks,
             recordings,
+            checkpoints: include
+                .checkpoints
+                .then(|| store.checkpoint_objects(root))
+                .flatten(),
             warnings,
         };
         tokio::task::spawn_blocking(move || crate::export::write(&request, snapshot))
@@ -259,13 +263,10 @@ impl SessionPool {
     /// That's what makes the two independent: writes to the fork append to a
     /// different jsonl file.
     ///
-    /// Two deliberate lossy points, both invisible to the projected view:
-    /// sidechain entries (sub-agent side conversations) are dropped, because
-    /// `HistoryStore::append` takes a `LogEntry` and can't carry the
-    /// envelope's `is_sidechain`/`parent_id` flags through; and the source's
-    /// `Meta` line is replaced with a fresh one recording
-    /// `parent_session_id`, which is what makes the lineage queryable via
-    /// `HistoryStore::child_sessions`.
+    /// What is not copied is listed at [`left_out_of_a_fork`]; none of it
+    /// changes the projected view. The source's `Meta` line is replaced with
+    /// a fresh one recording `parent_session_id`, which is what makes the
+    /// lineage queryable via `HistoryStore::child_sessions`.
     ///
     /// The fork records `session_kind: Primary`, and everything that walks
     /// the child list has to honour that. `parent_session_id` answers "where
@@ -358,16 +359,19 @@ impl SessionPool {
         // leaving it, and the id was minted here so nothing else can be
         // referencing it yet.
         let mut copied = 0usize;
+        let left_out = left_out_of_a_fork(&entries);
         if let Err(e) = store.append(new_sid, meta).await {
             let _ = store.delete(new_sid).await;
             return Err(PoolError::Internal(format!(
                 "failed to write forked session metadata: {e}"
             )));
         }
-        for env in entries.iter().take(cut) {
-            if env.is_sidechain || matches!(env.entry, history::entry::LogEntry::Meta { .. }) {
-                continue;
-            }
+        for (env, _) in entries
+            .iter()
+            .zip(&left_out)
+            .take(cut)
+            .filter(|(_, out)| !**out)
+        {
             let tags = history::entry::EntryTags {
                 turn_id: env.turn_id.clone(),
                 origin: env.origin,
@@ -399,6 +403,34 @@ impl SessionPool {
             active: false,
         })
     }
+}
+
+/// The lines a fork does not copy: sidechain lines (an append cannot carry
+/// the envelope's flags), the source's `Meta` (the fork writes its own),
+/// what a rewind took out of the conversation, and the checkpoints and
+/// rewinds themselves. A fork shares the source's working tree, so rewinding
+/// it to before the fork would put the source's files back; it starts with no
+/// write to roll back. Copying only the live lines keeps the view a rewind
+/// left, without the rewind entry whose references would not survive the
+/// copy's new line ids.
+fn left_out_of_a_fork(entries: &[history::entry::EnvelopedEntry]) -> Vec<bool> {
+    use history::checkpoint::{CHECKPOINT_NS, REWIND_NS};
+    let voided = history::transcript::voided(entries);
+    entries
+        .iter()
+        .zip(voided)
+        .map(|(env, voided)| {
+            voided
+                || env.is_sidechain
+                || match &env.entry {
+                    history::entry::LogEntry::Meta { .. } => true,
+                    history::entry::LogEntry::Extension { ns, .. } => {
+                        ns == CHECKPOINT_NS || ns == REWIND_NS
+                    }
+                    _ => false,
+                }
+        })
+        .collect()
 }
 
 /// One extension entry as `session.entries` and the `extension_entry` frame

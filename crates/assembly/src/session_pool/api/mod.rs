@@ -9,6 +9,7 @@ mod history;
 mod mcp;
 mod options;
 mod plugin;
+mod rewind;
 mod scene;
 mod session;
 mod settings;
@@ -34,6 +35,10 @@ pub use options::{ClockOptions, RecorderOptions, SessionOptions, TelemetryOption
 pub use plugin::{
     PluginDisclosure, PluginInfo, PluginInstalled, PluginRemoved, PluginScope, PluginToggled,
     SkillConflict, SkillOrigin, VisibleText,
+};
+pub use rewind::{
+    CheckpointFile, CheckpointList, CheckpointTurn, InterruptedRewind, RewindCut, RewindOutcome,
+    RewindRequest, RewindScope, Rewound,
 };
 pub use scene::{SceneCapabilities, SceneDescription, SceneReload, SceneSummary, SceneTools};
 pub use session::{

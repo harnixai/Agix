@@ -1,6 +1,6 @@
 //! 跑一轮与上下文方法（`session.run_turn` / `compact` / `clear` /
-//! `respondToPrompt` / `inspectContext` / `dropMessages` / `editMessage`）的参数
-//! 与线上回执。
+//! `respondToPrompt` / `inspectContext` / `dropMessages` / `editMessage` /
+//! `rewind`）的参数与线上回执。
 
 use super::lenient_vec;
 use crate::rpc::RawOptions;
@@ -148,4 +148,24 @@ pub struct EditMessageParams {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Edited {
     pub edited: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RewindParams {
+    pub session_id: String,
+    #[serde(flatten)]
+    pub cut: crate::session_pool::api::RewindCut,
+    pub scope: crate::session_pool::api::RewindScope,
+    /// Overwrite files changed since the session last wrote them.
+    #[serde(default)]
+    pub force: bool,
+    /// Leave out files that cannot be restored instead of refusing.
+    #[serde(default)]
+    pub allow_partial: bool,
+    /// Work out the plan and its problems; change nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Fork the whole session first, so the rewound part survives there.
+    #[serde(default)]
+    pub fork_first: bool,
 }

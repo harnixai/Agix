@@ -38,6 +38,8 @@ pub enum SessionEvent {
     GoalChanged(Option<base::context::goal::GoalView>),
     /// A host wrote an extension entry into the session's log.
     ExtensionEntry(serde_json::Value),
+    /// A host rewound the session.
+    Rewound(super::Rewound),
     /// The engine went away before the running turn completed.
     EngineStopped,
     /// `session.close` / `session.delete` cut the running turn off.

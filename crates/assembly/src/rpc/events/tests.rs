@@ -329,6 +329,23 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
             )),
         ),
         (
+            "rewound",
+            on_wire(&frame(
+                None,
+                SessionEvent::Rewound(crate::session_pool::api::Rewound {
+                    rewind_id: "r1".into(),
+                    scope: crate::session_pool::api::RewindScope::Both,
+                    cut: crate::session_pool::api::RewindCut {
+                        to_turn: Some("t1".into()),
+                        ..Default::default()
+                    },
+                    seq: 6,
+                    files_restored: 3,
+                    files_skipped: 0,
+                }),
+            )),
+        ),
+        (
             "subscription_dropped",
             json_of(&SessionEventNotification::subscription_dropped(SID)),
         ),
