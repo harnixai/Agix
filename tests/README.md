@@ -11,7 +11,7 @@
 | `tests/live/tests/*.rs` | 装配面：从 JSON-RPC 进去，模型那端是一个 HTTP 桩；同一批用例跑「本进程」和「另起一个 agixd」两遍 | `cargo test -p live`（跨进程那半在 `-- --ignored` 里） |
 | `tests/live/tests/live_*.rs` | LIVE 层：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p live --features real-model`，见下文「LIVE 层」 |
 | `tests/guards/tests/*.rs` | 架构守卫：读 `cargo metadata` 和各 target 的模块树，检查依赖方向、进程级状态这类代码结构上的不变量，不跑引擎 | `cargo test -p guards` |
-| `tests/scripts/*.sh` | 构建面的断言（无插件构建里没有插件依赖等） | `tests/scripts/locked_build.sh` |
+| `tests/scripts/*.sh` | 运维脚本（目前只有 `disk_report.sh`：报告 `target/` 占用）；构建面的断言（`full` 档不链 `packages` 与 `script-host` 等）在 `tests/guards/tests/deps.rs` | `bash tests/scripts/disk_report.sh` |
 
 一个 crate 的集成测试编成一个测试程序 `integration`：`tests/integration.rs` 把同目录的
 每个文件声明成一个模块（`autotests = false`），共用的辅助模块（如 `tests/runner/tests/support`）

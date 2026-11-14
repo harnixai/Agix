@@ -54,11 +54,11 @@ cat <<'TXT'
      the usual cause of a sudden double-digit jump — clean after a bump.
 
   2. Building a different feature combination. Each keeps its own set:
-       cargo build --workspace                      default, with the plugin compiler
-       cargo build -p daemon --no-default-features --features full  no plugin subsystem at all
-       cargo build -p daemon --features plugins     plugins without the compiler
-     (`locked_build.sh` builds the last two into a throwaway target dir of its
-     own for exactly this reason, so it leaves nothing behind here.)
+       cargo build --workspace                      default, with scripts and packages
+       cargo build -p daemon --no-default-features --features full  no extension machinery at all
+       cargo build -p daemon --features plugin-packages            packages without the script carrier
+     (build the narrow ones into a throwaway CARGO_TARGET_DIR so they leave
+     nothing behind here.)
 
   3. Changing a dependency version or the toolchain. Same story.
 

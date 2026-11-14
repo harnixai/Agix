@@ -63,6 +63,7 @@ pub struct Dep {
     pub target: Option<String>,
     pub optional: bool,
     pub features: Vec<String>,
+    pub default_features: bool,
     pub first_party: bool,
 }
 
@@ -237,6 +238,7 @@ fn packages(metadata: &Value, root: &Path) -> Result<Vec<Package>, String> {
                     target: d["target"].as_str().map(str::to_string),
                     optional: d["optional"].as_bool().unwrap_or(false),
                     features: strings(&d["features"]),
+                    default_features: d["uses_default_features"].as_bool().unwrap_or(true),
                     ident,
                     name: dep_name,
                 }

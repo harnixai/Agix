@@ -431,3 +431,94 @@ fn no_kernel_crate_declares_or_forwards_a_module_feature() {
         found.join("\n  ")
     );
 }
+
+/// The first-party crates a build of `root` links for its normal and build
+/// edges, with `features` on at the root: optional deps only when a feature
+/// turns them on, features forwarded the way cargo unifies them for this one
+/// package alone.
+fn linked_crates(root: &str, defaults: bool, features: &[&str]) -> BTreeSet<String> {
+    let mut on: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut queue: Vec<(String, Vec<String>, bool)> = vec![(
+        root.to_string(),
+        features.iter().map(|f| f.to_string()).collect(),
+        defaults,
+    )];
+    while let Some((name, requested, with_defaults)) = queue.pop() {
+        let p = ws().package(&name);
+        let known = on.entry(name.clone()).or_default();
+        let mut todo: Vec<String> = requested;
+        if with_defaults && p.features.contains_key("default") {
+            todo.push("default".into());
+        }
+        while let Some(f) = todo.pop() {
+            if !known.insert(f.clone()) {
+                continue;
+            }
+            for e in p.features.get(&f).into_iter().flatten() {
+                match e.split_once('/') {
+                    Some((dep, sub)) => {
+                        let dep = dep.trim_end_matches('?');
+                        let weak = e.contains("?/");
+                        if !weak {
+                            known.insert(format!("dep:{dep}"));
+                        }
+                        if !weak || known.contains(&format!("dep:{dep}")) {
+                            queue.push((dep.to_string(), vec![sub.to_string()], false));
+                        }
+                    }
+                    None => {
+                        if let Some(dep) = e.strip_prefix("dep:") {
+                            known.insert(format!("dep:{dep}"));
+                        } else {
+                            todo.push(e.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let enabled_deps: Vec<String> = known
+            .iter()
+            .filter_map(|f| f.strip_prefix("dep:").map(str::to_string))
+            .collect();
+        let implicit: BTreeSet<&str> = p
+            .features
+            .values()
+            .flatten()
+            .filter_map(|e| e.strip_prefix("dep:"))
+            .collect();
+        for d in p.normal_deps().filter(|d| d.first_party) {
+            let linked = !d.optional
+                || enabled_deps.contains(&d.ident)
+                || enabled_deps.contains(&d.name)
+                || (!implicit.contains(d.name.as_str()) && known.contains(&d.name));
+            if !linked {
+                continue;
+            }
+            queue.push((d.name.clone(), d.features.clone(), d.default_features));
+        }
+    }
+    on.into_keys().collect()
+}
+
+/// The locked build states that no extension execution path is in the binary,
+/// which is only true if the crates are absent from the graph.
+#[test]
+fn the_full_tier_links_neither_the_package_layer_nor_the_script_carrier() {
+    let full = linked_crates("daemon", false, &["full"]);
+    allow::non_vacuous("deps::full tier closure", full.len(), 15);
+    let leaked: Vec<&str> = ["packages", "script-host"]
+        .into_iter()
+        .filter(|c| full.contains(*c))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "`daemon --no-default-features --features full` links {leaked:?}; those crates enter \
+         only through the `scripts` and `plugin-packages` features"
+    );
+    let default = linked_crates("daemon", true, &[]);
+    assert!(
+        default.contains("packages") && default.contains("script-host"),
+        "the default daemon build must link `packages` and `script-host`, or this guard cannot \
+         tell a locked build from an ordinary one: {default:?}"
+    );
+}
