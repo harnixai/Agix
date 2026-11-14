@@ -45,8 +45,9 @@ const INSTRUCTION_TRUNCATION_NOTE: &str =
 
 /// Callback invoked when an MCP tool result contains an elicitation URL
 /// (e.g. `mcp://` or `elicitation://` protocol). The first argument is the
-/// server name, the second is the elicitation URL.
-pub type ElicitationCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+/// server name, the second is the elicitation URL, the third the number of the
+/// turn the result came in.
+pub type ElicitationCallback = Arc<dyn Fn(String, String, u32) + Send + Sync>;
 
 /// An MCP server prompt exposed as a slash command.
 ///
@@ -1431,7 +1432,7 @@ mod tests {
 
         let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_for_cb = seen.clone();
-        manager.set_elicitation_callback(Arc::new(move |server, url| {
+        manager.set_elicitation_callback(Arc::new(move |server, url, _turn| {
             seen_for_cb.lock().unwrap().push((server, url));
         }));
 

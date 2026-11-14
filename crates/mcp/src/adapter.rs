@@ -215,7 +215,7 @@ impl Tool for McpToolAdapter {
             .clone();
         if let Some(cb) = cb {
             if let Some(url) = find_elicitation_url(&result) {
-                cb(self.server_name.clone(), url);
+                cb(self.server_name.clone(), url, ctx.turn_no);
             }
         }
 

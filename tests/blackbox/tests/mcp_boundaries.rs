@@ -401,6 +401,56 @@ async fn two_packages_whose_mcp_servers_get_one_key_keep_the_first_and_report_th
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_puts_an_elicitation_url_in_every_result_fires_the_hook_once_a_turn(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let fired = scratch.path().join("fired.log");
+    let hook = format!("cat >/dev/null; echo fired >> {}", fired.display());
+    let servers = json!({ "demo": McpToy::stdio_config(&[])? });
+    let mut run = stubbed("elicit-once", &stub)
+        .settings(json!({
+            "mcp_servers": servers,
+            "permission_rules": [{ "tool": "mcp__demo", "action": "allow" }],
+            "hooks_config": { "Elicitation": [{ "type": "command", "command": hook }] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    let mut script: Vec<Reply> = (0..5)
+        .map(|i| Reply::calls(&format!("e{i}"), "mcp__demo__elicit", json!({})))
+        .collect();
+    script.push(Reply::text("done"));
+    stub.script(script);
+    run.turn(&session, "elicit five times").await?;
+    let lines = |path: &Path| {
+        std::fs::read_to_string(path)
+            .map(|t| t.lines().count())
+            .unwrap_or(0)
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while lines(&fired) == 0 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(lines(&fired), 1, "one hook run for five results in a turn");
+
+    stub.script([
+        Reply::calls("n1", "mcp__demo__elicit", json!({})),
+        Reply::text("done again"),
+    ]);
+    run.turn(&session, "elicit once more").await?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while lines(&fired) < 2 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(lines(&fired), 2, "the next turn fires it again");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_tool_listed_twice_by_one_server_is_offered_once() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let scratch = tempfile::tempdir()?;

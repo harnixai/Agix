@@ -96,7 +96,16 @@ impl Module for McpModule {
         let hooks = cx.hooks.clone();
         let ambient = cx.hook_ambient.clone();
         let session_ended = cx.session_ended();
-        manager.set_elicitation_callback(Arc::new(move |server_name, url| {
+        let last_turn: Arc<Mutex<std::collections::HashMap<String, u32>>> = Arc::default();
+        manager.set_elicitation_callback(Arc::new(move |server_name, url, turn| {
+            let first_this_turn = last_turn
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(server_name.clone(), turn)
+                != Some(turn);
+            if !first_this_turn {
+                return;
+            }
             let hooks = hooks.clone();
             let ambient = ambient.clone();
             let stop = session_ended.clone();
