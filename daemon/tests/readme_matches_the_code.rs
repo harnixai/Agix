@@ -9,14 +9,7 @@
 //! Source-text scanning where a runtime value is not reachable from `daemon`'s
 //! dependency graph, same as the sibling doc tests.
 
-use std::path::{Path, PathBuf};
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("daemon crate has a parent (repo root)")
-        .to_path_buf()
-}
+use crate::support::repo_root;
 
 fn read(rel: &str) -> String {
     let path = repo_root().join(rel);

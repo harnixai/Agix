@@ -1,9 +1,10 @@
 //! The daemon's integration tests, compiled into one test binary; each module
 //! is one file of this directory. One file alone:
-//! `cargo test -p daemon --test integration session_lifecycle::`.
+//! `cargo test -p daemon --test integration session_resume::`.
 
 mod accept_edits_reads;
 mod approval_gate;
+mod ask_user_question;
 mod assemble_defaults;
 mod bash_read_only_lane;
 mod compaction_and_trim;
@@ -25,10 +26,13 @@ mod max_tokens_recovery;
 mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;
+mod no_project_sessions;
+mod permission_loop;
 mod permission_pipeline;
 mod plan_mode_in_delegates;
 mod plugin_skills;
 mod plugin_tools_in_scene;
+mod project_binding;
 mod project_trust;
 mod project_trust_default;
 mod project_trust_symlink;
@@ -40,23 +44,29 @@ mod readme_matches_the_code;
 mod resume_recorder;
 mod rpc_smoke;
 mod sandbox_settings_reach_tools;
+mod scene_lifecycle;
 mod schedule;
 mod session_context;
 mod session_customizer;
+mod session_end_effects;
 mod session_event_compact;
 mod session_export;
 mod session_goal;
-mod session_lifecycle;
+mod session_history_fork;
+mod session_metadata;
 mod session_provider;
+mod session_resume;
 mod session_set_model;
 mod session_tasks;
 mod session_teardown;
 mod session_title_telemetry;
 mod session_unsubscribe;
 mod skill_inline_commands;
+mod support;
 mod tool_progress;
-mod trusting;
 mod turn_cancellation;
+mod turn_concurrency;
+mod turn_frames;
 mod two_pools_one_process;
 mod wiring_coverage;
 #[cfg(feature = "ws")]

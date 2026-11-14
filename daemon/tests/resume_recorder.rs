@@ -1,6 +1,7 @@
 //! `recorder` is never written to a session's log, so after the daemon
 //! restarts, the call that brings the session back is where it comes from.
 
+use crate::support::text_round;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,33 +10,9 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 /// One daemon process over `root`; a second one over the same root is a restart.
 async fn start(

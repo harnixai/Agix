@@ -3,6 +3,7 @@
 //! from the daemon's environment, the type of a number on the wire, a request
 //! with a mistyped field, and the scope of a remembered or skill-granted URL.
 
+use crate::support::{text_round, tool_round};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,59 +12,10 @@ use base::permission::PermissionMode;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-fn tool_round(id: &str, tool: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: tool.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
 
 struct Setup {
     mode: PermissionMode,
@@ -237,8 +189,8 @@ async fn a_url_shaped_deny_written_for_0_3_10_still_refuses_deeper_paths() {
         )
         .await;
         daemon.model.push_turn(tool_round(
-            "toolu_fetch",
             "WebFetch",
+            "toolu_fetch",
             json!({"url": "https://evil.example/a/b"}),
         ));
         daemon.model.push_turn(text_round("done"));
@@ -281,8 +233,8 @@ async fn an_mcp_oauth_client_secret_is_not_handed_to_commands() {
     )
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_env",
         "Bash",
+        "toolu_env",
         json!({"command": format!("printenv {VAR}; echo end")}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -315,7 +267,7 @@ async fn a_provider_key_env_is_not_handed_to_commands() {
         },
         |home, _| {
             other = home.parent().unwrap().join("other");
-            crate::trusting::trust_projects_under(home, &other);
+            crate::support::trust_projects_under(home, &other);
             std::fs::create_dir_all(other.join(".agix")).unwrap();
             std::fs::write(
                 other.join(".agix").join("settings.json"),
@@ -343,8 +295,8 @@ async fn a_provider_key_env_is_not_handed_to_commands() {
     assert!(reply.get("result").is_some(), "precondition: {reply}");
 
     daemon.model.push_turn(tool_round(
-        "toolu_env",
         "Bash",
+        "toolu_env",
         json!({"command": format!("printenv {VAR}; echo end")}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -373,8 +325,8 @@ async fn a_bash_line_count_goes_out_as_an_integer() {
     )
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_lines",
         "Bash",
+        "toolu_lines",
         json!({"command": "printf 'one\\ntwo\\n'"}),
     ));
     daemon.model.push_turn(text_round("done"));

@@ -6,6 +6,8 @@
 
 #![cfg(feature = "skills")]
 
+use crate::support::call;
+use crate::support::{text_round, tool_round};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +16,6 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -29,77 +30,6 @@ fn no_shell_scene() -> SceneSpec {
     s.tools = ToolSurface::allowing(&["Read", "Skill"]);
     s.token_budget = mini.token_budget;
     s
-}
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn tool_round(id: &str, name: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: name.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-async fn call(sock: &std::path::Path, method: &str, params: Value) -> Value {
-    let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    loop {
-        let mut line = String::new();
-        let n = tokio::time::timeout(Duration::from_secs(120), reader.read_line(&mut line))
-            .await
-            .expect("the call answered")
-            .unwrap();
-        assert!(n > 0, "{method}: connection closed before a response");
-        let frame: Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            assert!(frame.get("result").is_some(), "{method} failed: {frame}");
-            return frame["result"].clone();
-        }
-    }
 }
 
 /// Everything the model was sent after the first request.
@@ -165,7 +95,7 @@ async fn a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
         .as_str()
         .unwrap()
         .to_string();
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     model.push_turn(text_round("done"));
     call(
@@ -235,7 +165,7 @@ async fn bash_turn_in(dir: &std::path::Path, work: &std::path::Path, command: &s
         let _ = server.serve_unix_listener(listener).await;
     });
 
-    model.push_turn(tool_round("plant", "Bash", json!({ "command": command })));
+    model.push_turn(tool_round("Bash", "plant", json!({ "command": command })));
     model.push_turn(text_round("done"));
     let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
                          "params": {"message": "go"},"id":1});
@@ -415,7 +345,7 @@ async fn a_pre_tool_use_hook_blocks_a_skills_inline_command() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     let (_, result) = turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
@@ -492,7 +422,7 @@ async fn a_skills_inline_command_the_rules_refuse_fires_permission_denied() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
@@ -535,7 +465,7 @@ async fn a_pre_tool_use_hook_cannot_approve_a_skills_inline_command() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
@@ -569,7 +499,7 @@ async fn a_post_tool_use_hook_withholds_a_skills_inline_command_output() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
@@ -616,7 +546,7 @@ async fn a_repository_a_skills_inline_command_nests_is_reported_to_the_host() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     let (events, _) = turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
@@ -672,7 +602,7 @@ async fn a_skills_inline_command_that_fails_fires_post_tool_use_failure() {
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     model.push_turn(text_round("done"));
     turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -728,7 +658,7 @@ async fn a_post_tool_use_hook_discontinuing_a_skills_inline_command_ends_the_tur
     )
     .await;
 
-    model.push_turn(tool_round("call-skill", "Skill", json!({"skill": "probe"})));
+    model.push_turn(tool_round("Skill", "call-skill", json!({"skill": "probe"})));
     let (events, result) = turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let done: Vec<&Value> = events
         .iter()

@@ -4,6 +4,8 @@
 //! `allowed-tools` may grant, a hook's approval against a managed `ask`, an
 //! MCP tool's read-only hint, and what is read or written outside the project.
 
+use crate::support::call_frame;
+use crate::support::{text_round, tool_round};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,61 +14,12 @@ use base::permission::PermissionMode;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const SECRET: &str = "AUDIT-SECRET-7f3a";
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-fn tool_round(id: &str, tool: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: tool.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
 
 struct Setup {
     mode: PermissionMode,
@@ -273,16 +226,16 @@ async fn state_root_credentials_are_never_read() {
         for (id, path) in &reads {
             daemon
                 .model
-                .push_turn(tool_round(id, "Read", json!({"file_path": path})));
+                .push_turn(tool_round("Read", id, json!({"file_path": path})));
         }
         daemon.model.push_turn(tool_round(
-            "toolu_grep",
             "Grep",
+            "toolu_grep",
             json!({"pattern": "AUDIT-SECRET", "path": home, "output_mode": "content"}),
         ));
         daemon.model.push_turn(tool_round(
-            "toolu_glob",
             "Glob",
+            "toolu_glob",
             json!({"pattern": "**/*", "path": home}),
         ));
         daemon.model.push_turn(text_round("done"));
@@ -323,13 +276,13 @@ async fn writing_a_project_skill_is_asked_about() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     let work = daemon.work.display().to_string();
     daemon.model.push_turn(tool_round(
-        "toolu_agix",
         "Write",
+        "toolu_agix",
         json!({"file_path": format!("{work}/.agix/notes.md"), "content": "x"}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_skill",
         "Write",
+        "toolu_skill",
         json!({
             "file_path": format!("{work}/.agents/skills/x/SKILL.md"),
             "content": "---\nname: x\ndescription: planted\nallowed-tools: [\"Bash(*)\"]\n---\nbody",
@@ -340,8 +293,8 @@ async fn writing_a_project_skill_is_asked_about() {
         ("toolu_agents_md", "AGENTS.md"),
     ] {
         daemon.model.push_turn(tool_round(
-            id,
             "Write",
+            id,
             json!({"file_path": format!("{work}/{file}"), "content": "x"}),
         ));
     }
@@ -380,10 +333,10 @@ async fn skill_then_touch(allowed_tools: &'static str) -> (Vec<String>, bool) {
     let marker = daemon.work.join("marker");
     daemon
         .model
-        .push_turn(tool_round("toolu_skill", "Skill", json!({"skill": "grab"})));
+        .push_turn(tool_round("Skill", "toolu_skill", json!({"skill": "grab"})));
     daemon.model.push_turn(tool_round(
-        "toolu_touch",
         "Bash",
+        "toolu_touch",
         json!({"command": format!("touch {}", marker.display())}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -426,8 +379,8 @@ async fn a_hook_approval_overrides_a_managed_ask() {
     let touch = |daemon: &Daemon| {
         let marker = daemon.work.join("marker");
         daemon.model.push_turn(tool_round(
-            "toolu_touch",
             "Bash",
+            "toolu_touch",
             json!({"command": format!("touch {}", marker.display())}),
         ));
         daemon.model.push_turn(text_round("done"));
@@ -496,10 +449,10 @@ async fn skill_then_write_outside(allowed_tools: &'static str) -> (Vec<String>, 
     let outside = daemon.home.parent().unwrap().join("outside.txt");
     daemon
         .model
-        .push_turn(tool_round("toolu_skill", "Skill", json!({"skill": "grab"})));
+        .push_turn(tool_round("Skill", "toolu_skill", json!({"skill": "grab"})));
     daemon.model.push_turn(tool_round(
-        "toolu_write",
         "Write",
+        "toolu_write",
         json!({"file_path": outside.display().to_string(), "content": "x"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -535,13 +488,13 @@ async fn a_project_skill_linked_to_a_credential_reads_it_into_the_model() {
     })
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_read",
         "Read",
+        "toolu_read",
         json!({"file_path": ".agix/settings.local.json"}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_skill",
         "Skill",
+        "toolu_skill",
         json!({"skill": "notes"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -588,17 +541,6 @@ async fn a_linked_agents_md_reads_a_credential_into_the_prompt() {
     );
 }
 
-async fn call(sock: &Path, method: &str, params: Value) -> Value {
-    let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":7});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(conn).read_line(&mut line).await.unwrap();
-    serde_json::from_str(&line).unwrap()
-}
-
 /// A session with no project has no project to write in: beside the state
 /// root — the user's home, for `~/.agix` — is outside every root it may
 /// write without asking, so a `Write` there is asked about and, refused,
@@ -613,7 +555,7 @@ async fn a_no_project_session_writes_the_state_roots_parent_silently() {
         |_, _| {},
     )
     .await;
-    let created = call(
+    let created = call_frame(
         &daemon.sock,
         "session.create",
         json!({"scene": "harnix", "project_root": null}),
@@ -625,8 +567,8 @@ async fn a_no_project_session_writes_the_state_roots_parent_silently() {
         .to_string();
     let escaped = daemon.home.parent().unwrap().join("escaped.txt");
     daemon.model.push_turn(tool_round(
-        "toolu_write",
         "Write",
+        "toolu_write",
         json!({"file_path": escaped.display().to_string(), "content": "x"}),
     ));
     daemon.model.push_turn(text_round("done"));

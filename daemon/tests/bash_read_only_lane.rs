@@ -6,6 +6,7 @@
 //! helper program from the project — must reach the host as a prompt, and a
 //! denied prompt must mean the helper never ran.
 
+use crate::support::text_round;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,29 +19,6 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 fn bash_round(id: &str, command: &str) -> Vec<StreamEvent> {
     vec![

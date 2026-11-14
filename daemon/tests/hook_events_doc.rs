@@ -5,17 +5,10 @@
 //! Set `AGIX_UPDATE_DOCS=1` to rewrite the table from the catalog, and read
 //! the diff before committing it.
 
-use std::path::{Path, PathBuf};
+use crate::support::repo_root;
 
 const BEGIN: &str = "<!-- BEGIN GENERATED TABLE — see hooks::catalog::render_markdown -->";
 const END: &str = "<!-- END GENERATED TABLE -->";
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("daemon/ has a parent")
-        .to_path_buf()
-}
 
 #[test]
 fn the_event_table_matches_the_catalog() {

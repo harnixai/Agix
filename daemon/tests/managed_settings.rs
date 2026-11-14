@@ -3,6 +3,7 @@
 //! mode away, a file that cannot be honoured refuses every tool call, and
 //! `daemon.doctor` / `config.get` say where the layer came from.
 
+use crate::support::{stop, text_round};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -11,7 +12,7 @@ use base::permission::PermissionMode;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::{AnthropicClient, CountFuture, EventStream};
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
+use model::stream::{BlockDelta, ContentBlockStart, StreamEvent};
 use model::types::MessagesRequest;
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -38,33 +39,6 @@ impl AnthropicClient for Scripted {
     fn count_tokens<'a>(&'a self, _req: &'a MessagesRequest) -> CountFuture<'a> {
         Box::pin(async { Ok(0usize) })
     }
-}
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
 }
 
 /// The model runs `touch <marker>` once, then says it is done.

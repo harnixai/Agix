@@ -5,6 +5,7 @@
 //! sets it up — the one it was created on, one rebuilt for a new prompt, and
 //! one brought back after a close.
 
+use crate::support::call;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,8 +19,6 @@ use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use runtime::plugin::{Plugin, PluginSession, Registrar};
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const SCENE: &str = "read-only-host";
@@ -133,30 +132,6 @@ fn text_round(text: &str) -> Vec<StreamEvent> {
             usage: Some(Usage::default()),
         },
     ]
-}
-
-async fn call(
-    sock: &std::path::Path,
-    method: &str,
-    params: serde_json::Value,
-) -> serde_json::Value {
-    let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await.unwrap();
-        assert!(n > 0, "{method}: connection closed before a response");
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            assert!(frame.get("result").is_some(), "{method} failed: {frame}");
-            return frame["result"].clone();
-        }
-    }
 }
 
 /// The requests that carried a tool list: the turn's own rounds, not the

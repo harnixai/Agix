@@ -52,6 +52,7 @@ zip = { workspace = true }
 uuid = { workspace = true }
 mcp-oauth-mock = { workspace = true }
 guards = { workspace = true }
+rpc-client = { workspace = true }
 schemars = { workspace = true }
 
 [features]

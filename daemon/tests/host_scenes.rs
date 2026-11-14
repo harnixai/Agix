@@ -2,6 +2,7 @@
 //! `extra_scenes`, sessions can be created in it, and turning it off does not
 //! lose it.
 
+use crate::support::call_frame;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,8 +11,6 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const HOST_SCENE: &str = "host-review";
@@ -22,29 +21,6 @@ fn host_scene() -> SceneSpec {
     let mut s = SceneSpec::new(HOST_SCENE, "Review", code.prompt);
     s.token_budget = code.token_budget;
     s
-}
-
-async fn call(
-    sock: &std::path::Path,
-    method: &str,
-    params: serde_json::Value,
-) -> serde_json::Value {
-    let request = serde_json::json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await.unwrap();
-        assert!(n > 0, "{method}: connection closed before a response");
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            return frame;
-        }
-    }
 }
 
 #[tokio::test]
@@ -86,7 +62,7 @@ async fn a_host_scene_is_served_and_survives_being_turned_off() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let created = call(
+    let created = call_frame(
         &sock,
         "session.create",
         serde_json::json!({"scene": HOST_SCENE}),
@@ -94,7 +70,7 @@ async fn a_host_scene_is_served_and_survives_being_turned_off() {
     .await;
     assert_eq!(created["result"]["scene"], HOST_SCENE, "{created}");
     let sid = created["result"]["session_id"].clone();
-    let closed = call(
+    let closed = call_frame(
         &sock,
         "session.close",
         serde_json::json!({"session_id": sid}),
@@ -102,14 +78,14 @@ async fn a_host_scene_is_served_and_survives_being_turned_off() {
     .await;
     assert!(closed["result"].is_object(), "{closed}");
 
-    let off = call(
+    let off = call_frame(
         &sock,
         "scene.deactivate",
         serde_json::json!({"scene": HOST_SCENE}),
     )
     .await;
     assert!(off["result"].is_object(), "{off}");
-    let on = call(
+    let on = call_frame(
         &sock,
         "scene.activate",
         serde_json::json!({"scene": HOST_SCENE}),
@@ -169,14 +145,14 @@ async fn a_declarative_scene_under_the_state_root_is_served() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let on = call(
+    let on = call_frame(
         &sock,
         "scene.activate",
         serde_json::json!({"scene": "triage"}),
     )
     .await;
     assert_eq!(on["result"]["active"], true, "{on}");
-    let created = call(
+    let created = call_frame(
         &sock,
         "session.create",
         serde_json::json!({"scene": "triage"}),
@@ -226,7 +202,7 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let registered = call(
+    let registered = call_frame(
         &sock,
         "scene.register",
         serde_json::json!({
@@ -236,7 +212,7 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
     )
     .await;
     assert_eq!(registered["result"]["scene"], "triage", "{registered}");
-    let again = call(
+    let again = call_frame(
         &sock,
         "scene.register",
         serde_json::json!({"scene": {"id": "code", "name": "Mine"}, "prompt": "x"}),
@@ -247,13 +223,13 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
         "a built-in id must not be taken: {again}"
     );
 
-    call(
+    call_frame(
         &sock,
         "scene.activate",
         serde_json::json!({"scene": "triage"}),
     )
     .await;
-    let created = call(
+    let created = call_frame(
         &sock,
         "session.create",
         serde_json::json!({"scene": "triage"}),
@@ -261,27 +237,27 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
     .await;
     assert_eq!(created["result"]["scene"], "triage", "{created}");
     let sid = created["result"]["session_id"].clone();
-    let busy = call(
+    let busy = call_frame(
         &sock,
         "scene.unregister",
         serde_json::json!({"scene": "triage"}),
     )
     .await;
     assert_eq!(busy["error"]["code"], -32009, "{busy}");
-    call(
+    call_frame(
         &sock,
         "session.close",
         serde_json::json!({"session_id": sid}),
     )
     .await;
-    let gone = call(
+    let gone = call_frame(
         &sock,
         "scene.unregister",
         serde_json::json!({"scene": "triage"}),
     )
     .await;
     assert_eq!(gone["result"]["registered"], false, "{gone}");
-    let not_ours = call(
+    let not_ours = call_frame(
         &sock,
         "scene.unregister",
         serde_json::json!({"scene": "code"}),
@@ -293,13 +269,13 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
     std::fs::create_dir_all(&late).unwrap();
     std::fs::write(late.join("scene.json"), r#"{"id": "late", "name": "Late"}"#).unwrap();
     std::fs::write(late.join("prompt.md"), "Arrived after startup.").unwrap();
-    let reloaded = call(&sock, "scene.reload", serde_json::json!({})).await;
+    let reloaded = call_frame(&sock, "scene.reload", serde_json::json!({})).await;
     assert_eq!(
         reloaded["result"]["added"],
         serde_json::json!(["late"]),
         "{reloaded}"
     );
-    let on = call(
+    let on = call_frame(
         &sock,
         "scene.activate",
         serde_json::json!({"scene": "late"}),

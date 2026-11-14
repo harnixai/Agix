@@ -2,41 +2,18 @@
 //! `session.event` frames, and no other connection's: after it, a turn the
 //! session runs reaches the still-subscribed connection and not this one.
 
+use crate::support::text_round;
 use std::sync::Arc;
 use std::time::Duration;
 
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 struct Connection {
     reader: BufReader<OwnedReadHalf>,

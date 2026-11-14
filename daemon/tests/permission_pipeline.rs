@@ -1,5 +1,6 @@
 //! 权限管线里修过的缺陷，各自从宿主这一侧的 socket 或装配入口复现，作为回归用例。
 
+use crate::support::{text_round, tool_round};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,7 +13,6 @@ use base::permission::PermissionMode;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use runtime::agent::Builder;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -20,54 +20,6 @@ use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const SECRET: &str = "PIPELINE-SECRET-91c4";
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-fn tool_round(id: &str, tool: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: tool.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
 
 type Customize = Arc<dyn Fn(Builder) -> Builder + Send + Sync>;
 
@@ -264,14 +216,14 @@ fn deny() -> Option<Value> {
 async fn a_sub_agents_local_permit_always_is_written_to_the_project() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     daemon.model.push_turn(tool_round(
-        "toolu_agent",
         "Agent",
+        "toolu_agent",
         json!({"description": "touch a file", "prompt": "touch it",
                "subagent_type": "general-purpose"}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_touch",
         "Bash",
+        "toolu_touch",
         json!({"command": "touch sub-agent-grant.txt"}),
     ));
     daemon.model.push_turn(text_round("touched"));
@@ -304,8 +256,8 @@ async fn a_grandchild_agents_question_reaches_the_root_sessions_host() {
     .await;
     let delegate = |id: &str| {
         tool_round(
-            id,
             "Agent",
+            id,
             json!({"description": "go down", "prompt": "go down",
                    "subagent_type": "general-purpose"}),
         )
@@ -313,8 +265,8 @@ async fn a_grandchild_agents_question_reaches_the_root_sessions_host() {
     daemon.model.push_turn(delegate("toolu_child"));
     daemon.model.push_turn(delegate("toolu_grandchild"));
     daemon.model.push_turn(tool_round(
-        "toolu_touch",
         "Bash",
+        "toolu_touch",
         json!({"command": "touch grandchild.txt"}),
     ));
     daemon.model.push_turn(text_round("touched"));
@@ -407,8 +359,8 @@ async fn offered_answers(keeps_grants: bool) -> Vec<String> {
     )
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_touch",
         "Bash",
+        "toolu_touch",
         json!({"command": "touch no-grants.txt"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -429,13 +381,13 @@ async fn offered_answers(keeps_grants: bool) -> Vec<String> {
 async fn a_permanent_allow_of_a_command_with_a_star_allows_only_that_command() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     daemon.model.push_turn(tool_round(
-        "toolu_star",
         "Bash",
+        "toolu_star",
         json!({"command": "touch *.rs"}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_other",
         "Bash",
+        "toolu_other",
         json!({"command": "touch other.rs"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -464,8 +416,8 @@ async fn a_permanent_allow_of_a_command_with_a_star_allows_only_that_command() {
 async fn a_project_permanent_allow_is_written_and_read_back_exact() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     daemon.model.push_turn(tool_round(
-        "toolu_star",
         "Bash",
+        "toolu_star",
         json!({"command": "touch *.rs"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -475,7 +427,7 @@ async fn a_project_permanent_allow_is_written_and_read_back_exact() {
     assert_eq!(written["permission_rules"], json!([rule]), "{written}");
 
     let later = Daemon::start(Setup::default(), |home, work| {
-        crate::trusting::trust_projects_under(home, work);
+        crate::support::trust_projects_under(home, work);
         std::fs::write(
             work.join(".agix/settings.local.json"),
             json!({"permission_rules": [rule]}).to_string(),
@@ -484,13 +436,13 @@ async fn a_project_permanent_allow_is_written_and_read_back_exact() {
     })
     .await;
     later.model.push_turn(tool_round(
-        "toolu_same",
         "Bash",
+        "toolu_same",
         json!({"command": "touch *.rs"}),
     ));
     later.model.push_turn(tool_round(
-        "toolu_other",
         "Bash",
+        "toolu_other",
         json!({"command": "touch other.rs"}),
     ));
     later.model.push_turn(text_round("done"));
@@ -521,8 +473,8 @@ async fn a_linked_scenes_credentials_are_refused_under_their_real_path() {
         .unwrap()
         .join("dotfiles/scene/settings.json");
     daemon.model.push_turn(tool_round(
-        "toolu_real",
         "Read",
+        "toolu_real",
         json!({"file_path": real.display().to_string()}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -570,8 +522,8 @@ async fn a_hosts_refusal_stands_under_bypass() {
     )
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_touch",
         "Bash",
+        "toolu_touch",
         json!({"command": "touch host-refused.txt"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -601,13 +553,13 @@ async fn a_hosts_permit_is_an_allow_rule_a_deny_rule_still_overrides() {
     )
     .await;
     daemon.model.push_turn(tool_round(
-        "toolu_mkdir",
         "Bash",
+        "toolu_mkdir",
         json!({"command": "mkdir host-allowed"}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_rm",
         "Bash",
+        "toolu_rm",
         json!({"command": "rm kept.txt"}),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -666,8 +618,8 @@ async fn an_untrusted_project_cannot_turn_off_reaping_or_telemetry() {
 async fn a_durable_cron_job_is_asked_about() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     daemon.model.push_turn(tool_round(
-        "toolu_cron",
         "CronCreate",
+        "toolu_cron",
         json!({"cron": "0 9 * * *", "prompt": "report", "durable": true}),
     ));
     daemon.model.push_turn(text_round("done"));

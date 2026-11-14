@@ -1,65 +1,17 @@
 //! The file tools refuse every credential store a sandboxed command cannot
 //! read, not only `.ssh` / `.aws` / `.gnupg`, in every permission mode.
 
+use crate::support::{text_round, tool_round};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-fn tool_round(id: &str, tool: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: tool.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
 
 struct Daemon {
     sock: PathBuf,
@@ -141,13 +93,13 @@ async fn a_home_credential_store_is_refused_to_read_and_to_search() {
     let daemon = Daemon::start().await;
     let home = base::paths::home_dir().expect("a home directory");
     daemon.model.push_turn(tool_round(
-        "toolu_read",
         "Read",
+        "toolu_read",
         json!({"file_path": home.join(".git-credentials").display().to_string()}),
     ));
     daemon.model.push_turn(tool_round(
-        "toolu_grep",
         "Grep",
+        "toolu_grep",
         json!({"pattern": "x", "path": home.join(".kube").display().to_string()}),
     ));
     daemon.model.push_turn(text_round("done"));

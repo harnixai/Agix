@@ -4,6 +4,7 @@
 //! model. Also: a session brought back after a restart can be given its
 //! recorder again.
 
+use crate::support::text_round;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,36 +12,12 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const INVALID_PARAMS: i64 = -32602;
 const SESSION_NOT_FOUND: i64 = -32000;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 struct Daemon {
     sock: std::path::PathBuf,

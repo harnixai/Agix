@@ -4,6 +4,7 @@
 //! The turn under test is held open by an `AskUserQuestion` nobody answers,
 //! so the engine stops only once the question times out.
 
+use crate::support::text_round;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -61,29 +62,6 @@ fn ask_round() -> Vec<StreamEvent> {
         StreamEvent::MessageDelta {
             delta: MessageDeltaPayload {
                 stop_reason: Some(base::message::StopReason::ToolUse),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
                 stop_sequence: None,
             },
             usage: Some(Usage::default()),

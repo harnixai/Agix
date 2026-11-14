@@ -625,6 +625,7 @@ dependencies = [
  "model",
  "permissions",
  "platform",
+ "rpc-client",
  "runtime",
  "scene",
  "schemars",

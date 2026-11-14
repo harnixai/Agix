@@ -11,6 +11,7 @@
 //! are not readable either, and under a network allowlist the command runs
 //! with the network shut.
 
+use crate::support::text_round;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,29 +48,6 @@ except OSError:
     pass
 print("re" + "ply:", s.makefile().readline().strip())
 "#;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 fn bash_round(command: &str) -> Vec<StreamEvent> {
     vec![

@@ -14,14 +14,8 @@
 //! tables. It cannot check that a documented *shape* is right, only that both
 //! sides agree on what exists.
 
-use std::path::{Path, PathBuf};
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("daemon crate has a parent (repo root)")
-        .to_path_buf()
-}
+use crate::support::repo_root;
+use std::path::Path;
 
 /// Every method in the dispatch table.
 fn dispatched_methods() -> Vec<String> {

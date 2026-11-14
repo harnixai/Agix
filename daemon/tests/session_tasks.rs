@@ -6,6 +6,7 @@
 //! session's watchers as it starts, changes and ends, outside any turn — with
 //! what a command prints streamed to them as it runs.
 
+use crate::support::{text_round, tool_round};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
+use model::stream::{BlockDelta, ContentBlockStart, StreamEvent};
 use model::types::MessagesRequest;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -21,56 +22,6 @@ use tokio_util::sync::CancellationToken;
 
 const SESSION_NOT_FOUND: i64 = -32000;
 const TASK_NOT_FOUND: i64 = -32018;
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::EndTurn),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
-
-fn tool_round(tool: &str, id: &str, input: serde_json::Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.to_string(),
-                name: tool.to_string(),
-                input: serde_json::Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        StreamEvent::MessageDelta {
-            delta: MessageDeltaPayload {
-                stop_reason: Some(base::message::StopReason::ToolUse),
-                stop_sequence: None,
-            },
-            usage: Some(Usage::default()),
-        },
-    ]
-}
 
 struct Daemon {
     sock: std::path::PathBuf,

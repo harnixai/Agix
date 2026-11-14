@@ -2,14 +2,7 @@
 //! hook events, telemetry producers, composition-root calls, the delegate
 //! spawn site — are in `tests/guards/tests/wiring.rs`.
 
-use std::path::{Path, PathBuf};
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("daemon crate has a parent (repo root)")
-        .to_path_buf()
-}
+use crate::support::repo_root;
 
 /// What the scene's allow and deny lists say, in any of the forms code can
 /// read them in.

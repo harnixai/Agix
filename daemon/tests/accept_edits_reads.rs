@@ -2,6 +2,7 @@
 //! project, and nothing outside it that `sandbox.read_directories` does not
 //! name — the same as `default`.
 
+use crate::support::{text_round, tool_round};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,59 +10,10 @@ use std::time::Duration;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
-
-fn stop(reason: base::message::StopReason) -> StreamEvent {
-    StreamEvent::MessageDelta {
-        delta: MessageDeltaPayload {
-            stop_reason: Some(reason),
-            stop_sequence: None,
-        },
-        usage: Some(Usage::default()),
-    }
-}
-
-fn text_round(text: &str) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::Text {
-                text: String::new(),
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::TextDelta { text: text.into() },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::EndTurn),
-    ]
-}
-
-fn tool_round(id: &str, tool: &str, input: Value) -> Vec<StreamEvent> {
-    vec![
-        StreamEvent::ContentBlockStart {
-            index: 0,
-            content_block: ContentBlockStart::ToolUse {
-                id: id.into(),
-                name: tool.into(),
-                input: Value::Null,
-            },
-        },
-        StreamEvent::ContentBlockDelta {
-            index: 0,
-            delta: BlockDelta::InputJsonDelta {
-                partial_json: input.to_string(),
-            },
-        },
-        StreamEvent::ContentBlockStop { index: 0 },
-        stop(base::message::StopReason::ToolUse),
-    ]
-}
 
 struct Daemon {
     sock: PathBuf,
@@ -196,13 +148,13 @@ async fn reading_outside_the_project_is_asked_about_and_inside_it_is_not() {
 
     daemon
         .model
-        .push_turn(tool_round("toolu_inside", "Read", read(&inside)));
+        .push_turn(tool_round("Read", "toolu_inside", read(&inside)));
     daemon
         .model
-        .push_turn(tool_round("toolu_outside", "Read", read(&outside)));
+        .push_turn(tool_round("Read", "toolu_outside", read(&outside)));
     daemon.model.push_turn(tool_round(
-        "toolu_cat",
         "Bash",
+        "toolu_cat",
         json!({ "command": format!("cat {}", outside.display()) }),
     ));
     daemon.model.push_turn(text_round("done"));
@@ -229,7 +181,7 @@ async fn a_listed_read_directory_is_read_without_asking() {
 
     daemon
         .model
-        .push_turn(tool_round("toolu_listed", "Read", read(&outside)));
+        .push_turn(tool_round("Read", "toolu_listed", read(&outside)));
     daemon.model.push_turn(text_round("done"));
 
     let asked = daemon.turn_denying_prompts().await;
