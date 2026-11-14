@@ -277,22 +277,8 @@ impl Agent {
                             }
                             match processed {
                                 Ok(outcome) => {
-                                    if self.identity.drive_goals {
-                                        if let Some(round) = self.goal_round_after(&outcome.stop_reason).await {
-                                            if let Some(tx) = own_input.upgrade() {
-                                                hand_to_turn_loop(
-                                                    &tx,
-                                                    &self.channels.current_turn_cancel,
-                                                    cancel,
-                                                    InputMessage::User {
-                                                        content: round.message,
-                                                        attachments: vec![],
-                                                        turn_id: round.turn_id,
-                                                    },
-                                                );
-                                            }
-                                        }
-                                    }
+                                    self.queue_goal_round(&outcome.stop_reason, cancel, own_input)
+                                        .await;
                                 }
                                 Err(crate::turn::TurnError::Shutdown) => {
                                     exit_reason = "shutdown_command";
@@ -320,6 +306,32 @@ impl Agent {
             }
         }
         exit_reason
+    }
+
+    async fn queue_goal_round(
+        &mut self,
+        stop_reason: &str,
+        cancel: &CancellationToken,
+        own_input: &mpsc::WeakUnboundedSender<Forwarded>,
+    ) {
+        if !self.identity.drive_goals {
+            return;
+        }
+        let Some(round) = self.goal_round_after(stop_reason).await else {
+            return;
+        };
+        if let Some(tx) = own_input.upgrade() {
+            hand_to_turn_loop(
+                &tx,
+                &self.channels.current_turn_cancel,
+                cancel,
+                InputMessage::User {
+                    content: round.message,
+                    attachments: vec![],
+                    turn_id: round.turn_id,
+                },
+            );
+        }
     }
 
     async fn session_end(&mut self, run_started: std::time::Instant, exit_reason: &'static str) {

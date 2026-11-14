@@ -172,32 +172,10 @@ impl Delegator {
         let key = (seat.team.clone(), seat.member.clone());
         self.reclaim_idle_members(Some(&key));
 
-        let live = &self.members.live;
-        let existing = live
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&key)
-            .map(|m| {
-                (
-                    m.inbox.clone(),
-                    m.cancel.clone(),
-                    m.session_id.clone(),
-                    m.idle_since.clone(),
-                    m.idle_seq.clone(),
-                )
-            });
-        if let Some((inbox, cancel, session_id, idle_since, idle_seq)) = &existing {
-            if let Some(task_id) = inbox.deliver(self, &seat, cancel, prompt.clone()) {
-                idle_since.store(i64::MAX, Ordering::SeqCst);
-                idle_seq.store(u64::MAX, Ordering::SeqCst);
-                return Ok(Delegated::Started(StartedAgent::new(
-                    task_id,
-                    session_id.clone(),
-                )));
-            }
-            // Its loop has ended since; spawn afresh under the same key.
-            live.write().unwrap_or_else(|e| e.into_inner()).remove(&key);
+        if let Some(started) = self.message_live_member(&key, &seat, &prompt) {
+            return Ok(started);
         }
+        let live = &self.members.live;
         let alive = live.read().unwrap_or_else(|e| e.into_inner()).len();
         if alive >= self.limits.max_persistent_members {
             let busy = if alive == 1 {
@@ -235,6 +213,38 @@ impl Delegator {
             ..spec
         };
         self.spawn_member(key, seat, spec, prompt).await
+    }
+
+    /// `prompt` queued for the member alive at `key`, which counts as busy
+    /// from here on; `None` when there is none. Called under the spawn lock.
+    fn message_live_member(
+        &self,
+        key: &(String, String),
+        seat: &TeamSeat,
+        prompt: &str,
+    ) -> Option<Delegated> {
+        let live = &self.members.live;
+        let (inbox, cancel, session_id, idle_since, idle_seq) = live
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .map(|m| {
+                (
+                    m.inbox.clone(),
+                    m.cancel.clone(),
+                    m.session_id.clone(),
+                    m.idle_since.clone(),
+                    m.idle_seq.clone(),
+                )
+            })?;
+        let Some(task_id) = inbox.deliver(self, seat, &cancel, prompt.to_string()) else {
+            // Its loop has ended since; the caller spawns afresh under the same key.
+            live.write().unwrap_or_else(|e| e.into_inner()).remove(key);
+            return None;
+        };
+        idle_since.store(i64::MAX, Ordering::SeqCst);
+        idle_seq.store(u64::MAX, Ordering::SeqCst);
+        Some(Delegated::Started(StartedAgent::new(task_id, session_id)))
     }
 
     /// A new member at `key`, its loop started on `prompt` under its type's

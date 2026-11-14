@@ -8,6 +8,7 @@ mod frozen;
 mod gate;
 mod memory_extraction;
 mod obligations;
+mod output_limit;
 mod process;
 mod prompt;
 mod recall;

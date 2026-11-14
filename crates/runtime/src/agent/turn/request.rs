@@ -624,7 +624,7 @@ impl Agent {
                     .values
                     .model
                     .max_output_tokens
-                    .unwrap_or_else(|| base::context::config::infer_max_output_tokens(model));
+                    .unwrap_or_else(|| super::output_limit::max_output_tokens(model));
                 *effective_max_tokens = max_tokens.min(ceiling).max(*effective_max_tokens);
                 if let Some(nudge) = nudge {
                     self.session.push_message(ModelMessage {

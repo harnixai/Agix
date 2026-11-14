@@ -272,45 +272,6 @@ pub fn infer_context_window_tokens(model: &str) -> usize {
     }
 }
 
-/// The most `max_tokens` a model accepts: its family's documented limit, or
-/// [`UNKNOWN_MODEL_MAX_OUTPUT_TOKENS`] for a name no family matches. Prefixes
-/// are matched in order, so a family's exceptions come before the family.
-pub fn infer_max_output_tokens(model: &str) -> u32 {
-    const FAMILIES: &[(&str, u32)] = &[
-        ("claude-3-haiku", 4_096),
-        ("claude-3-opus", 4_096),
-        ("claude-3-sonnet", 4_096),
-        ("claude-3-5", 8_192),
-        ("claude-3-7", 64_000),
-        ("claude-opus-4-0", 32_000),
-        ("claude-opus-4-1", 32_000),
-        ("claude-opus-4-2025", 32_000),
-        ("claude-opus-4", 64_000),
-        ("claude-sonnet-4", 64_000),
-        ("claude-haiku-4", 64_000),
-        ("deepseek-chat", 8_192),
-        ("deepseek", 64_000),
-        ("gpt-4o", 16_384),
-        ("gpt-4.1", 32_768),
-        ("gpt-5", 128_000),
-        ("o1", 100_000),
-        ("o3", 100_000),
-        ("o4", 100_000),
-    ];
-    let lower = model.to_ascii_lowercase();
-    let name = lower.rsplit('/').next().unwrap_or(&lower);
-    let name = name
-        .strip_prefix("us.anthropic.")
-        .or_else(|| name.strip_prefix("anthropic."))
-        .unwrap_or(name);
-    FAMILIES
-        .iter()
-        .find(|(family, _)| name.starts_with(family))
-        .map_or(UNKNOWN_MODEL_MAX_OUTPUT_TOKENS, |(_, limit)| *limit)
-}
-
-pub const UNKNOWN_MODEL_MAX_OUTPUT_TOKENS: u32 = 32_000;
-
 #[cfg(test)]
 mod tests {
     use super::*;
