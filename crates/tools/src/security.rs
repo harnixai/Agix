@@ -173,6 +173,17 @@ pub fn read_allowed(path: &Path, ctx: &base::tool::ToolContext) -> bool {
         && (ctx.session.env().read_anywhere || within_readable_roots(path, ctx))
 }
 
+/// What a walk from `root` leaves out: the credentials under it, and what a
+/// permission rule denies the call.
+pub fn walk_exclusion(
+    ctx: &base::tool::ToolContext,
+    root: &Path,
+) -> impl Fn(&Path) -> bool + Send + Sync + 'static {
+    let credentials = credentials(ctx).excluded_from_walk(root);
+    let denied = ctx.path_denial.clone();
+    move |path| credentials(path) || denied.as_ref().is_some_and(|denied| denied(path))
+}
+
 /// Where this session's credentials are. The gate refuses a call naming
 /// one in every mode; the file tools also leave them out of what a search
 /// of a directory above one walks.

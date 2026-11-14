@@ -49,6 +49,9 @@ pub struct ToolContext {
     /// How a skill's `` !`cmd` `` expanded during this call runs; `None`
     /// where nothing runs them.
     pub inline_commands: Option<Arc<dyn crate::interface::inline_command::InlineCommands>>,
+    /// Paths this call must leave out of a directory walk, from the
+    /// permission rules in force; `None` where no rule names a path.
+    pub path_denial: Option<crate::interface::permission::PathDenial>,
 }
 
 /// What belongs to the one turn a call is made in, and ends with it.
@@ -112,6 +115,7 @@ impl ToolContext {
             approval: None,
             turn: Arc::default(),
             inline_commands: None,
+            path_denial: None,
         }
     }
 

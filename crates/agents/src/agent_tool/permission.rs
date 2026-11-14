@@ -7,7 +7,7 @@
 use super::*;
 use base::interface::elicitation::{ElicitKind, ElicitOutcome, ElicitRequest, Elicitation};
 use base::interface::permission::{
-    Attendance, Delegate, GrantError, GrantScope, PermissionGrants, PermissionOutcome,
+    Attendance, Delegate, GrantError, GrantScope, PathDenial, PermissionGrants, PermissionOutcome,
     PermissionPolicy, PermissionRequest,
 };
 
@@ -63,6 +63,16 @@ impl PermissionPolicy for DelegateRelay {
             }
         }
         self.parent.decide(&relayed).await
+    }
+
+    fn path_denial(
+        &self,
+        tool: &str,
+        cwd: &std::path::Path,
+        extra: &[base::permission::PermissionRule],
+    ) -> Option<PathDenial> {
+        self.parent
+            .path_denial(tool, cwd, &[extra, &self.rules].concat())
     }
 }
 

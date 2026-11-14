@@ -358,6 +358,23 @@ impl PermissionPolicy for Policy {
         let verdict = call.delegated.granting(self.judge(&call), &call);
         self.conclude(verdict, facts, ctx, hook, attendance)
     }
+
+    fn path_denial(
+        &self,
+        tool: &str,
+        cwd: &std::path::Path,
+        extra: &[PermissionRule],
+    ) -> Option<base::interface::permission::PathDenial> {
+        let rules: Vec<PermissionRule> = self
+            .rules_now()
+            .rules()
+            .iter()
+            .chain(self.managed.rules.rules())
+            .chain(extra)
+            .cloned()
+            .collect();
+        crate::ruleset::path_denial(rules, tool, cwd)
+    }
 }
 
 #[async_trait]

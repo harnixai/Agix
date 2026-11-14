@@ -511,7 +511,24 @@ impl<'a> Delegate<'a> {
 #[async_trait]
 pub trait PermissionPolicy: Send + Sync {
     async fn decide(&self, req: &PermissionRequest<'_>) -> PermissionOutcome;
+
+    /// The paths `tool` must leave out of what it walks on its own, because a
+    /// deny rule covers them: a search of a directory is judged on the
+    /// directory, so each file under it has to be judged as it is reached.
+    /// `extra` is the rules a delegation adds on top of the policy's own.
+    /// `None` when no rule does.
+    fn path_denial(
+        &self,
+        _tool: &str,
+        _cwd: &std::path::Path,
+        _extra: &[PermissionRule],
+    ) -> Option<PathDenial> {
+        None
+    }
 }
+
+/// Whether a deny rule covers this path.
+pub type PathDenial = Arc<dyn Fn(&std::path::Path) -> bool + Send + Sync>;
 
 /// How long a [`Grant`] lasts.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

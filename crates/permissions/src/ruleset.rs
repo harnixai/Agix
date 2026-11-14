@@ -838,3 +838,32 @@ mod tests {
         }
     }
 }
+
+/// What `rules` deny of the paths `tool` walks: the `Read` and `tool`-named
+/// deny rules that carry a path. `None` when there are none.
+pub fn path_denial(
+    rules: impl IntoIterator<Item = PermissionRule>,
+    tool: &str,
+    cwd: &Path,
+) -> Option<base::interface::permission::PathDenial> {
+    let denying: Vec<PermissionRule> = rules
+        .into_iter()
+        .filter(|r| {
+            r.behavior == RuleBehavior::Deny
+                && r.rule_content.is_some()
+                && (r.tool_name == "Read" || matches_tool_name(&r.tool_name, tool))
+        })
+        .collect();
+    if denying.is_empty() {
+        return None;
+    }
+    let set = RuleSet { rules: denying };
+    let (tool, cwd) = (tool.to_string(), cwd.to_path_buf());
+    Some(std::sync::Arc::new(move |path: &Path| {
+        let resolved = ResolvedPath::new(&path.to_string_lossy(), &cwd);
+        matches!(
+            set.evaluate_path(&tool, "Read", &resolved, &cwd),
+            RuleHit::Deny(_)
+        )
+    }))
+}

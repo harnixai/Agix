@@ -144,7 +144,7 @@ impl Tool for GrepTool {
         }
 
         let walk = Walk {
-            excluded: Box::new(crate::security::credentials(&ctx).excluded_from_walk(&root)),
+            excluded: Box::new(crate::security::walk_exclusion(&ctx, &root)),
             root,
             pattern: Arc::new(re),
             glob: Arc::new(glob_matcher),
