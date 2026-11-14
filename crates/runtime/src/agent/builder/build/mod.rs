@@ -23,11 +23,7 @@ impl Builder {
         let mut r = self.resolve()?;
         let session = self.open_session(&r.settings)?;
         let checkpoints = self.session_checkpoints(&r.settings, &session);
-        let compactor = self
-            .host
-            .compactor
-            .take()
-            .unwrap_or_else(|| Arc::new(DefaultCompactor) as Arc<dyn Compactor>);
+        let compactor = self.take_compactor();
         let agent_depth = self.spec.agent_depth;
         let mut plugins = self.register_plugins(&session, &r.settings, &r.scene)?;
         let (config, exec) =
@@ -122,6 +118,13 @@ impl Builder {
             chains,
             checkpoints,
         }))
+    }
+
+    fn take_compactor(&mut self) -> Arc<dyn Compactor> {
+        self.host
+            .compactor
+            .take()
+            .unwrap_or_else(|| Arc::new(DefaultCompactor) as Arc<dyn Compactor>)
     }
 
     fn session_checkpoints(
