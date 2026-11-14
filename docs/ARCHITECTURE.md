@@ -24,7 +24,8 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
            │                JSON-RPC 服务(Unix socket / TCP / WS)与实例发现
            │
  模块    agents(+team) · mcp · skills · script-host · packages
-           │                经 runtime::module::Module 进入会话
+           │                agents、mcp、skills 经 runtime::module::Module 进入会话;script-host 走
+           │                runtime::plugin::Plugin;packages 只被 assembly 用,team 只被 agents 用
  内核    runtime ────────── turn loop、提示词组装、工具调度、扩展点调度、Module 接口(K3)
            │
          hooks · tools · session · compaction ──────── K2
@@ -34,7 +35,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
            │
  本机    platform ───────── 执行层的本机实现(进程、文件、网络、OS 沙箱)、崩溃钩子、进程身份
            │
- 契约    core(包名 base)── 所有 trait、所有共享数据类型
+ 契约    core(包名 base)── 内核面向外的 trait、共享数据类型与纯判定
 ```
 
 **依赖方向**(`tests/guards/tests/deps.rs` 检查):
@@ -46,7 +47,8 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   `permissions`、`ptc`、`settings`、`memory`、`skill-format`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
   建在 K1 上,**K3**(`runtime`)建在两者之上。内核 crate **不依赖任何模块 crate**。
 - 级别不对的依赖只能登记在 `NOT_YET` 里,写明什么能去掉它;名单带陈旧检查,边没了条目就得删。
-- 模块依赖契约与内核;模块之间的依赖只经 `Module::requires` 与 `Module::after` 声明。
+- 模块依赖契约与内核;模块之间的依赖只经 `Module::requires`(硬依赖)与 `Module::after`(软顺序)声明,
+  现有三个模块只用了 `after`。
 - 只有装配层与外壳知道有哪些模块;模块 feature 的 `#[cfg]` 只出现在
   `assembly`(模块清单、会话池选哪份 `mcp_hub`、RPC 服务里个别方法)与 `daemon` 里。
   MCP 在 `assembly` 里只由两处决定:`modules.rs` 的模块清单,和 `session_pool/mod.rs`
@@ -81,7 +83,8 @@ tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大�
 不直接 spawn,经 `base::engine_exec::EngineExec` 交给会话的 `exec.process`(§5);排空输出、
 收齐退出状态的 `base::interface::exec::capture` 对任何 `Process` 都能用。生产代码里真正
 `spawn` 的是 `platform` 的 `LocalProcess` 与沙箱探测,和 MCP stdio 服务(经 process-wrap)。
-这是约定,不是守卫:没有一条测试禁止别处 `Command::new`。
+`tests/guards/tests/sources.rs` 的 SRC-4 守着它:生产代码里只有 `MAY_SPAWN` 登记的 crate(`platform`、`mcp`)
+可以起进程;本机的 `Process` 只在装配会话缺省 provider 的地方构建(SRC-5)。
 
 执行层的本机实现也不在 `core`:
 "本机"是 `platform` 对这些 trait 的一种回答,`in_process()` 是另一种。本机 HTTP 客户端
@@ -235,6 +238,16 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 不并发安全的是屏障,等前面那批跑完再单独跑;它跑的时候照样读流,读到的等它跑完再处理。所以第 6、7 步拦不住这一条回复要的工具——
 它们决定的是还走不走下一步。要在工具跑之前拦,用权限、`PreToolUse` hook 或
 `ToolMiddleware`。
+
+**一条工具管线。** 模型的每次工具调用(`tool_use`)、`RunCode` 程序里的子调用、skill 正文里的
+`` !`cmd` `` 内嵌命令,都走同一条:`PreToolUse` → 输入校验 → 权限 → 中间件 → 工具 → `tool_result`
+转换器 → `PostToolUse`,遥测、panic 兜底与外部内容围栏也各只接一处。后两类经 `SubCallDispatcher`
+(`runtime/src/agent/turn/tool_env.rs`)进来,算这个会话的一次 `Bash` 或工具调用,各有派生的
+tool-use id,不能向人询问,要批准的调用直接被拒;宿主看不到它们的 `tool_use` 帧。`tests/guards/tests/tool_pipeline.rs`
+守着没有第二条路径。
+
+**取消有宽限。** 一轮被取消时,还在跑的工具先得到 `tool_cancel_grace`(缺省 2 秒)自己停下,
+过了就丢弃、把这次调用答成已取消,不拖着整轮不收尾。
 
 **出错时什么都没留下,才交给 RecoveryPolicy。** 请求被拒(状态码、连不上),或者流在回复
 要工具之前断了(流里的 `error` 事件、没等到消息结尾就结束),这次调用的半截回复整个丢掉,
@@ -911,7 +924,7 @@ resume、轮数、durable state 的恢复与回滚后当场的视图是同一个
 4. **一个命令是它起的整个进程组。** 本机 provider 让每个子进程领一个会话(也就领了一个
    进程组,且没有控制终端——命令没法经 `/dev/tty` 用 `TIOCSTI` 往 daemon 的终端里塞输入,
    等沙箱外的 shell 去执行),停的时候整组停;前台进程退出后输出最多再等 `OUTPUT_GRACE_AFTER_EXIT`,还被后台进程占着就
-   连它们一起停。Bash、Monitor、command hook 经本机 provider 起,引擎自己跑的 git 与 `Read`
+   连它们一起停。Bash、Monitor 与 command hook 经会话的 `exec.process` 起(hook 的进程因此落在会话选的执行层和进程组台账上),引擎自己跑的 git 与 `Read`
    调的 `pdftotext` 经会话的 `exec.process` 起(`base::engine_exec`),都是这条规矩;MCP
    stdio server 经 process-wrap 起,同样领一个会话、停的时候整组停。
 5. **子进程的环境只在一处决定。** `base::interface::exec::SubprocessEnv`(策略与判定在 `base`,写进命令的 `platform::apply_subprocess_env` 在 `platform`):缺省
@@ -961,6 +974,11 @@ macOS 是 `(deny network*)` 后只放开 `localhost:<代理端口>`(覆盖 `127.
 `deny_all`(`proxy` 与 `allowlist` 不能互换)。`WebFetch` / `Ping` 不走代理,照第 2 条按
 `allowed_domains` 判——下游代理管不到工具自己的出网。`daemon.doctor` 的 `sandbox.egress_proxy`
 报沙箱兑现了多少。
+
+**沙箱配置只有三份类型,各管一段。** `settings::SandboxConfig` 是设置文件里 `sandbox` 一节的形状(含
+`deny_read` 的"没写"与"写了空表"两种);`base::interface::exec::SandboxSettings` 是装配后会话持有的
+那份(缺省已填);`SandboxPolicy` 是某一条命令此刻要约束的内容,由前者按这条命令的权限结论与会话约束
+推导。后端只认 `SandboxPolicy`,并报告兑现了多少(`Enforcement`)。
 
 沙箱是**轻量限制,不是安全隔离**。已知逃逸路径写在
 `crates/platform/src/sandbox/mod.rs` 的模块头里,五条;第 3 条对引擎自己的
