@@ -694,3 +694,151 @@ async fn run_code_delegates() {
         PermissionFacts::new(Subject::None, Reach::Delegates)
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_cannot_start_a_hundred_and_first_sub_agent() {
+    let (r, fake, _) = run_with(
+        "for (let i = 0; i < 101; i++) { await agent('task ' + i); } return 1;",
+        json!({}),
+        limits(),
+    )
+    .await;
+    assert!(r.is_error);
+    assert!(
+        text(&r).contains("more than 100 sub-agents"),
+        "{}",
+        text(&r)
+    );
+    let started = fake
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name == "Agent")
+        .count();
+    assert_eq!(started, 100);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_that_allocates_past_sixty_four_megabytes_is_stopped() {
+    let (r, _, _) = run_with(
+        "const keep = []; for (let i = 0; i < 200; i++) { keep.push(new Array(1000000).fill(i)); } \
+         return keep.length;",
+        json!({}),
+        limits(),
+    )
+    .await;
+    assert!(r.is_error, "{}", text(&r));
+    assert_ne!(r.structured_content, Some(json!(200)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_over_a_hundred_thousand_characters_is_refused_unrun() {
+    let limit = Limits::default().code_chars;
+    let (r, fake, _) = run_with(
+        &format!("return 1; // {}", "x".repeat(limit)),
+        json!({}),
+        limits(),
+    )
+    .await;
+    assert!(r.is_error);
+    assert!(
+        text(&r).contains("longer than 100000 characters"),
+        "{}",
+        text(&r)
+    );
+    assert!(fake.calls.lock().unwrap().is_empty());
+
+    let (r, _, _) = run_with(
+        &format!("return 1; //{}", "x".repeat(limit - "return 1; //".len())),
+        json!({}),
+        limits(),
+    )
+    .await;
+    assert!(
+        !r.is_error,
+        "a program of exactly the limit runs: {}",
+        text(&r)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_background_program_delivers_at_most_ten_notices() {
+    let fake = Arc::new(Fake::default());
+    let mut ctx = platform::tool_context_for_test("/tmp".into());
+    ctx.tool_use_id = "toolu_notices".into();
+    ctx.dispatch = Some(fake);
+    let session = ctx.session.clone();
+    let tool = RunCodeTool::new(&[], limits());
+    let started = tool
+        .call(
+            json!({"code": "for (let i = 0; i < 15; i++) notify('n' + i); return 1;",
+                   "background": true}),
+            ctx,
+            ProgressSender::noop("t"),
+        )
+        .await
+        .unwrap();
+    let task_id = text(&started)
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .to_string();
+    let task = session.find_running_task(&task_id).expect("registered");
+    tokio::time::timeout(Duration::from_secs(10), task.wait_ended())
+        .await
+        .expect("the run ends");
+    let delivered = session.take_notices();
+    let own = delivered
+        .iter()
+        .filter(|n| n.contains(&task_id) && n.contains("<task-update>"))
+        .count();
+    assert_eq!(own, 10, "{delivered:?}");
+}
+
+/// `docs/ptc.md`'s limits table and the `notify` row say what `Limits::default()` is.
+#[test]
+fn the_limits_table_in_the_doc_is_the_default_limits() {
+    let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/ptc.md"))
+        .expect("docs/ptc.md");
+    let table = doc
+        .split("### 限额")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("the limits section");
+    let d = Limits::default();
+    let group = |n: u64| -> String {
+        let digits = n.to_string();
+        let mut out = String::new();
+        for (i, c) in digits.chars().enumerate() {
+            if i > 0 && (digits.len() - i) % 3 == 0 {
+                out.push(',');
+            }
+            out.push(c);
+        }
+        out
+    };
+    let row = |label: &str| -> &str {
+        table
+            .lines()
+            .find(|l| l.starts_with(&format!("| {label}")))
+            .unwrap_or_else(|| panic!("no `{label}` row in the limits table"))
+    };
+    assert!(row("总时长").contains(&format!("{} 分钟", d.time.as_secs() / 60)));
+    assert!(row("总时长").contains(&format!("{} 分钟", d.time_with_agents.as_secs() / 60)));
+    assert!(row("子调用总数").contains(&format!("| {} |", group(d.calls.into()))));
+    assert!(row("`agent()` 次数").contains(&format!("| {} |", group(d.agents.into()))));
+    assert!(row("同时在跑的子调用").contains(&format!("| {} |", d.parallel)));
+    assert!(row("交回脚本的单个工具结果")
+        .contains(&format!("{} 字符", group(d.call_result_chars as u64))));
+    assert!(row("返回值").contains(&format!("{} 字符", group(d.result_chars as u64))));
+    assert!(row("脚本内存").contains(&format!("{} MB", d.memory_bytes / (1024 * 1024))));
+    assert!(row("代码长度").contains(&format!("{} 字符", group(d.code_chars as u64))));
+    assert!(
+        doc.contains(&format!("一次运行至多 {} 条", d.notices)),
+        "the notify row names the notice cap"
+    );
+    assert!(doc.contains(&format!("最后 {} 字符", group(d.log_chars as u64))));
+    assert_eq!(d.stop_grace, Duration::from_secs(10));
+    assert!(doc.contains("10 秒宽限"));
+}
