@@ -271,15 +271,19 @@ mod packages {
                     let skills: Vec<String> = ::packages::skills::declared_skills(p)
                         .map(|skills| skills.into_iter().map(|s| s.entry.name).collect())
                         .unwrap_or_default();
+                    let permitted = self.policy().permits(name);
                     PluginInfo {
                         name: name.clone(),
                         version: p.manifest.plugin.version.clone(),
                         description: p.manifest.plugin.description.clone(),
-                        enabled: ::packages::state::resolve_enabled(
-                            name,
-                            &global_state,
-                            &scene_state,
-                        ),
+                        enabled: permitted
+                            && ::packages::state::resolve_enabled(
+                                name,
+                                &global_state,
+                                &scene_state,
+                            ),
+                        disabled_reason: (!permitted)
+                            .then(|| "not permitted by settings.plugins.allow".to_string()),
                         // The unpacked directory. Without it a host that wants
                         // to read something out of the package — a UI bundle,
                         // an icon — has to rebuild this path itself, which

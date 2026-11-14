@@ -828,6 +828,9 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 (上面例子里的)在前,daemon 自己的会话池、插件包的检查随后,宿主注册的检查排在最后,都在同一个 `checks` 里。状态是三值而不是布尔 ——
 `degraded`("还能用,但有人该知道")与 `failing`("这块不能指望了")是两件事。
 
+引擎自带检查之外的每一项(会话池、插件包、宿主注册的)各有 5 秒:超时的那一项报 `degraded`、
+summary 为 `did not answer within 5s`,报告不再等它;panic 的检查同样报 `degraded`。
+
 `settings_tiers` / `providers` / `hooks` 是 `health.checks` 里同名检查 `details`
 的副本,放在顶层是因为现有客户端读的是它们。
 
@@ -1266,7 +1269,8 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 
 **`health`——这个会话的插件报的健康检查。** 形状与 `daemon.doctor` 的 `health` 相同
 (`status` 取最差的一项,`checks` 每项带 `name`/`status`/`summary`/`details`)。只有插件注册了
-检查(`Registrar::health_check`)的会话才有这个键。
+检查(`Registrar::health_check`)的会话才有这个键。每项检查最多 5 秒:超时的那一项报 `degraded`、
+summary 为 `did not answer within 5s`,`session.get` 不再等它。
 
 **`scripts`——这个会话的脚本都干了什么。** 只有绑了脚本的会话才有这个键;没绑的会话
 **没有这个键**,而不是一个空对象——「这儿没有脚本」和「脚本一次都没跑」是两个不同的
@@ -2543,6 +2547,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 // ← result
 { "plugins": [ ] }
 // 元素:{ "name":"…", "version":"…", "description":"…", "enabled": true,
+//        "disabled_reason": "…",             // 只在包被 settings.plugins.allow 挡在外面时有
 //        "root": "/…/plugins/cache/<name>/<version>",
 //        "script_faults": [],
 //        "skills": [ "tour" ],
@@ -2553,7 +2558,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 //     "plugin": "…" }                       // 只在 shadowed_by 为 plugin 时有
 ```
 
-列出磁盘上的全部插件及启用状态,包括已停用的。
+列出磁盘上的全部插件及启用状态,包括已停用的。`settings.plugins.allow` 非空时,不在名单里的包照常列出,
+但 `enabled` 恒为 `false` 并带 `disabled_reason`——它不会被加载,`plugin.enable` 也改变不了这一点。
 
 `root` 是解包后的目录。有它,宿主要读包里自己关心的东西(界面产物、图标)就不必自己
 拼 `<plugins-dir>/cache/{name}/{version}/`——那样会把 daemon 的磁盘布局变成它 API 的

@@ -132,7 +132,14 @@ async fn a_health_check_that_blocks_does_not_stall_other_sessions() -> anyhow::R
     .await?;
     let session = run.session().await?;
     let mut doctor = run.daemon.connect().await?;
-    let stuck = tokio::spawn(async move { doctor.call("daemon.doctor", json!({})).await });
+    let watched = session.clone();
+    let stuck = tokio::spawn(async move {
+        let started = Instant::now();
+        let report = doctor
+            .call("session.get", json!({ "session_id": watched }))
+            .await;
+        (report, started.elapsed())
+    });
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     stub.script([Reply::text("quick")]);
@@ -143,7 +150,20 @@ async fn a_health_check_that_blocks_does_not_stall_other_sessions() -> anyhow::R
         started.elapsed() < block,
         "a turn waited for another request's health check"
     );
-    let _ = stuck.await?;
+    let (report, took) = stuck.await?;
+    assert!(
+        took < block,
+        "session.get waited out the whole block: {took:?}"
+    );
+    let report = report?.result.expect("a session.get result");
+    let hung = report["health"]["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["name"] == "hostile.hang")
+        .cloned()
+        .expect("the hanging check is reported");
+    assert_eq!(hung["status"], "degraded", "{hung}");
     run.finish().await;
     Ok(())
 }

@@ -3036,6 +3036,13 @@
         "description": {
           "type": "string"
         },
+        "disabled_reason": {
+          "description": "Why a package that is installed is not loaded regardless of its enable\nstate: `settings.plugins.allow` does not name it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enabled": {
           "type": "boolean"
         },

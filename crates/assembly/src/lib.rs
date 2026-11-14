@@ -16,6 +16,7 @@ pub mod discovery;
 pub mod doctor;
 pub mod doctor_posture;
 pub mod export;
+pub mod health_bound;
 pub mod model_router;
 pub mod modules;
 pub mod plugins;

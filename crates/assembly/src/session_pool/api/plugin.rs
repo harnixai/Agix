@@ -52,6 +52,10 @@ pub struct PluginInfo {
     pub version: String,
     pub description: String,
     pub enabled: bool,
+    /// Why a package that is installed is not loaded regardless of its enable
+    /// state: `settings.plugins.allow` does not name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
     /// The unpacked directory.
     pub root: String,
     /// `[[script]]` bindings that could not be honoured, each with its reason.

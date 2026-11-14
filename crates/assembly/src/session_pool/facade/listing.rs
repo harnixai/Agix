@@ -183,14 +183,19 @@ impl SessionPool {
             })
             .await
             .map(|(turn_state, current_turn_id, context, health)| {
-                (
-                    turn_state,
-                    current_turn_id,
-                    context,
-                    (!health.is_empty()).then(|| health.report().to_json()),
-                )
+                (turn_state, current_turn_id, context, health)
             })
-            .unwrap_or((api::TurnState::Idle, None, None, None));
+            .unwrap_or_else(|| (api::TurnState::Idle, None, None, Default::default()));
+        let health = if health.is_empty() {
+            None
+        } else {
+            tokio::task::spawn_blocking(move || {
+                crate::health_bound::report_within(&health, std::time::Duration::from_secs(5))
+                    .to_json()
+            })
+            .await
+            .ok()
+        };
         Ok(api::SessionDetail {
             info,
             scene_active,

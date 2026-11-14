@@ -13,6 +13,7 @@
 
 use crate::config::DaemonPaths;
 use crate::doctor_posture;
+use crate::health_bound::TimeBounded;
 use base::interface::health::{CheckResult, HealthCheck, HealthChecks};
 use settings::LoadedSettings;
 use std::path::{Path, PathBuf};
@@ -448,6 +449,10 @@ impl HealthCheck for ProjectTrustCheck {
     }
 }
 
+/// How long a check wired in from outside the engine (a plugin's, the
+/// embedder's) may take before the report goes on without it.
+const EXTRA_CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Build the full diagnostic report as a JSON value (the RPC result body).
 ///
 /// `extra` is whatever the process wired in beside the engine's own checks —
@@ -489,7 +494,7 @@ pub fn run_doctor(
             Arc::new(platform::sandbox::PlatformSandbox),
         )));
     for check in extra.checks() {
-        checks = checks.with(check.clone());
+        checks = checks.with(Arc::new(TimeBounded::new(check.clone(), EXTRA_CHECK_LIMIT)));
     }
     let health = checks.report();
 

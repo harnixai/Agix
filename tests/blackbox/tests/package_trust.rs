@@ -225,6 +225,26 @@ async fn plugins_allow_lets_only_the_named_package_load() -> anyhow::Result<()> 
         !sent.system_contains("pkg-other-skill") && !sent.messages_contain("pkg-other-skill"),
         "a package outside the allow list reached the model"
     );
+    let list = run.client.call("plugin.list", json!({})).await?;
+    let listed = |name: &str| {
+        ok(&list)["plugins"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|p| p["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("{name} is listed"))
+    };
+    assert_eq!(listed("pkg-allowed")["enabled"], true);
+    assert!(listed("pkg-allowed").get("disabled_reason").is_none());
+    let other = listed("pkg-other");
+    assert_eq!(other["enabled"], false, "{other}");
+    assert!(
+        other["disabled_reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("plugins.allow")),
+        "{other}"
+    );
     run.finish().await;
     Ok(())
 }
