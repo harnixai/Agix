@@ -92,6 +92,7 @@ pub fn sandbox_settings(
         allow_write,
         allowed_domains,
         network_mode,
+        egress_proxy,
         dangerously_disable_sandbox,
         require_enforcement,
         unattended_requires_network_policy,
@@ -103,6 +104,7 @@ pub fn sandbox_settings(
         deny_read: deny_read.clone(),
         network_mode: *network_mode,
         allowed_domains: allowed_domains.clone(),
+        egress_proxy: egress_proxy.as_ref().map(|setting| setting.0.clone()),
         deny_write: deny_write.clone(),
         allow_write: allow_write.clone(),
         // The instance's own root, so the profile denies writes to the
@@ -181,6 +183,7 @@ mod tests {
         let s = settings_with_sandbox(|sb| {
             sb.network_mode = NetworkMode::Allowlist;
             sb.allowed_domains = vec!["api.example.com".into()];
+            sb.egress_proxy = serde_json::from_value(serde_json::json!("127.0.0.1:3128")).unwrap();
             sb.allow_read = vec![PathBuf::from("/tmp/ok")];
             sb.deny_read = vec![PathBuf::from("/tmp/secret")];
             sb.deny_write = vec![".secret".into()];
@@ -193,6 +196,10 @@ mod tests {
 
         assert_eq!(c.sandbox.network_mode, NetworkMode::Allowlist);
         assert_eq!(c.sandbox.allowed_domains, ["api.example.com"]);
+        assert_eq!(
+            c.sandbox.policy().egress_proxy.map(|p| p.http),
+            Some("127.0.0.1:3128".parse().unwrap())
+        );
         assert_eq!(c.sandbox.allow_read, [PathBuf::from("/tmp/ok")]);
         assert_eq!(c.sandbox.deny_read, [PathBuf::from("/tmp/secret")]);
         assert_eq!(c.sandbox.policy().deny_read, [PathBuf::from("/tmp/secret")]);
@@ -242,6 +249,7 @@ mod tests {
             (NetworkMode::Unrestricted, "unrestricted"),
             (NetworkMode::DenyAll, "deny_all"),
             (NetworkMode::Allowlist, "allowlist"),
+            (NetworkMode::Proxy, "proxy"),
         ] {
             assert_eq!(serde_json::to_value(mode).unwrap(), wire);
             assert_eq!(

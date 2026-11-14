@@ -11,6 +11,7 @@
 //! `sandbox.require_enforcement` — decides whether to refuse. A `warn!` nobody
 //! reads is not a decision.
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use super::env::EnvScope;
@@ -44,6 +45,9 @@ pub struct SandboxPolicy {
     /// [`NetworkMode::Allowlist`]. Ignored otherwise. What each backend makes
     /// of it is under [`NetworkMode::Allowlist`].
     pub allowed_domains: Vec<String>,
+    /// The only place outbound connections may go under
+    /// [`NetworkMode::Proxy`]. Ignored otherwise.
+    pub egress_proxy: Option<EgressProxy>,
     /// Paths outside `cwd` this command may still write to.
     ///
     /// Part of the policy rather than a separate argument because it answers
@@ -117,6 +121,7 @@ impl SandboxPolicy {
             deny_write: self.deny_write.clone(),
             network_mode: NetworkMode::DenyAll,
             allowed_domains: Vec::new(),
+            egress_proxy: None,
             read: ReadScope::Only(
                 readable
                     .into_iter()
@@ -148,17 +153,39 @@ pub enum NetworkMode {
     /// Unrestricted outbound (default; Bash often needs `curl` / `npm install`).
     #[default]
     Unrestricted,
-    /// No outbound network access at all (DNS resolution via the OS
-    /// resolver still works on macOS — it's IPC to `mDNSResponder`, not a
-    /// raw socket the sandbox profile's `network*` filter covers — but no
-    /// TCP/UDP connection actually reaching the network is permitted).
+    /// No outbound network access at all. On macOS 26 that includes name
+    /// resolution, which goes through `mDNSResponder`'s unix socket.
     DenyAll,
     /// Outbound restricted to `SandboxPolicy::allowed_domains`. Neither
     /// backend can filter by domain: macOS lets through localhost when the
     /// list names it and nothing else, Linux cuts the network entirely, and
-    /// both report the domains they could not allow as unmet. DNS resolution
-    /// still works on macOS (same rationale as `DenyAll`).
+    /// both report the domains they could not allow as unmet.
     Allowlist,
+    /// Outbound only to [`SandboxPolicy::egress_proxy`], with the command's
+    /// `*_PROXY` variables pointing at it; what the proxy lets through is the
+    /// proxy's business. Without an `egress_proxy` the network is cut, as
+    /// under `DenyAll`, and reported unmet.
+    Proxy,
+}
+
+/// `sandbox.egress_proxy`: the proxy a sandboxed command's traffic must go
+/// through. Addresses, never names, so that nothing has to be resolved to
+/// write the rule or the variables.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressProxy {
+    /// An HTTP proxy that takes `CONNECT`.
+    pub http: SocketAddr,
+    /// A SOCKS5 proxy, for `ALL_PROXY`.
+    pub socks: Option<SocketAddr>,
+    /// `NO_PROXY`. Empty overrides whatever the command would inherit, so
+    /// even `localhost` goes through the proxy.
+    pub no_proxy: Vec<String>,
+}
+
+impl EgressProxy {
+    pub fn addresses(&self) -> impl Iterator<Item = SocketAddr> + '_ {
+        std::iter::once(self.http).chain(self.socks)
+    }
 }
 
 /// The engine's sandbox settings for a session, as `settings.json`'s
@@ -173,6 +200,7 @@ pub struct SandboxSettings {
     pub deny_read: Vec<PathBuf>,
     pub network_mode: NetworkMode,
     pub allowed_domains: Vec<String>,
+    pub egress_proxy: Option<EgressProxy>,
     /// Filename segments no tool may write, on top of the built-in ones;
     /// sandboxed commands are held to them too ([`SandboxPolicy::deny_write`]).
     pub deny_write: Vec<String>,
@@ -203,6 +231,7 @@ impl SandboxSettings {
             deny_write: self.deny_write.clone(),
             network_mode: self.network_mode,
             allowed_domains: self.allowed_domains.clone(),
+            egress_proxy: self.egress_proxy.clone(),
             state_root: self.paths.state_root().map(Path::to_path_buf),
             additional_writable: Vec::new(),
             only_additional_writable: false,
@@ -468,6 +497,39 @@ mod settings_tests {
                 .join("|");
             assert!(joined.contains(".ssh") && joined.contains(".aws"));
         }
+    }
+
+    #[test]
+    fn a_proxy_restricts_the_network_and_the_strict_policy_drops_it() {
+        struct Holds;
+        impl Sandbox for Holds {
+            fn confine(&self, spec: ProcessSpec, _: &SandboxPolicy) -> Confined {
+                Confined {
+                    spec,
+                    mode: SandboxMode::MacOSSandboxExec,
+                    enforcement: Enforcement::Full,
+                    unmet: Vec::new(),
+                }
+            }
+        }
+        let settings = SandboxSettings {
+            network_mode: NetworkMode::Proxy,
+            egress_proxy: Some(EgressProxy {
+                http: "127.0.0.1:3128".parse().unwrap(),
+                socks: None,
+                no_proxy: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        let policy = settings.policy();
+        assert_eq!(policy.egress_proxy, settings.egress_proxy);
+        let strict = policy.strict(Vec::new(), None);
+        assert_eq!(strict.network_mode, NetworkMode::DenyAll);
+        assert!(strict.egress_proxy.is_none());
+        let probe = ProcessSpec::new("bash", Path::new("/work"));
+        let report = ConfinementReport::probe(&Holds, probe, &policy, false, true);
+        assert!(report.network_restricted);
+        assert!(report.holds_unattended());
     }
 
     #[test]

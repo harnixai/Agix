@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+mod egress;
+pub use egress::EgressProxySetting;
 mod engine;
 pub use engine::sandbox_settings;
 pub mod file;
@@ -452,9 +454,21 @@ pub struct SandboxConfig {
     /// network, which a model-directed request is otherwise refused — write
     /// `127.0.0.1` here to let `WebFetch` reach a local server.
     pub allowed_domains: Vec<String>,
-    /// Outbound network policy for sandboxed `Bash` commands.
+    /// Outbound network policy for sandboxed `Bash` commands. `proxy` lets a
+    /// command connect only to `egress_proxy`, which both OS backends hold;
+    /// filtering by domain is then the proxy's job. `WebFetch` and `Ping` do
+    /// not go through the proxy: they follow `allowed_domains`.
     #[serde(default)]
     pub network_mode: base::interface::exec::NetworkMode,
+    /// Under `network_mode: "proxy"`, the one address a sandboxed command may
+    /// connect to: `"127.0.0.1:3128"` for an HTTP proxy, or an object with
+    /// `http`, an optional `socks` and `no_proxy`. The command gets
+    /// `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)
+    /// pointing at it. Put the proxy on this machine: macOS can hold a proxy
+    /// elsewhere only to its port, and Linux needs `socat` to relay to it,
+    /// cutting the network entirely without one. Ignored in other modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress_proxy: Option<EgressProxySetting>,
     /// Bypass the sandbox entirely, in a build that has one.
     ///
     /// Default: false. The backend is behind the `sandbox` compile-time

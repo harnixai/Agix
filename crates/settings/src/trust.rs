@@ -309,7 +309,8 @@ pub enum Order {
     FalseTighter,
     /// `PermissionMode::permissiveness`.
     Mode,
-    /// `deny_all` < `allowlist` < `unrestricted`.
+    /// `deny_all` < `allowlist`, `proxy` < `unrestricted`; `allowlist` and
+    /// `proxy` cannot replace each other.
     NetworkMode,
     /// `allowlist` < `inherit`.
     EnvMode,
@@ -386,6 +387,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("sandbox.dangerously_disable_sandbox", Tighten(FalseTighter)),
         ("sandbox.deny_read", Tighten(DenyRead)),
         ("sandbox.deny_write", Tighten(Superset)),
+        ("sandbox.egress_proxy", Withheld),
         ("sandbox.network_mode", Tighten(NetworkMode)),
         ("sandbox.read_anywhere", Tighten(FalseTighter)),
         ("sandbox.read_directories", Tighten(Subset)),
@@ -634,17 +636,15 @@ impl Order {
                 parse(value).is_none_or(|m| m.permissiveness() <= below.permissiveness())
             }
             Self::NetworkMode => {
-                let rank = |v: &Value| {
-                    serde_json::from_value::<NetworkMode>(v.clone())
-                        .ok()
-                        .map(|m| match m {
-                            NetworkMode::DenyAll => 0,
-                            NetworkMode::Allowlist => 1,
-                            NetworkMode::Unrestricted => 2,
-                        })
-                };
-                let below = rank(below).unwrap_or(2);
-                rank(value).is_none_or(|r| r <= below)
+                let parse = |v: &Value| serde_json::from_value::<NetworkMode>(v.clone()).ok();
+                let below = parse(below).unwrap_or_default();
+                // `proxy` and `allowlist` are each narrower than `unrestricted`
+                // and wider than `deny_all`, but not than each other.
+                parse(value).is_none_or(|mode| {
+                    mode == below
+                        || mode == NetworkMode::DenyAll
+                        || below == NetworkMode::Unrestricted
+                })
             }
             Self::EnvMode => {
                 let parse = |v: &Value| serde_json::from_value::<SubprocessEnvMode>(v.clone()).ok();
@@ -806,6 +806,36 @@ mod tests {
                 "cache_directories": {"python": []},
                 "subprocess_env": {"mode": "allowlist"},
             }})
+        );
+    }
+
+    #[test]
+    fn a_project_cannot_name_the_proxy_nor_trade_it_for_an_allowlist() {
+        let over_proxy = |layer: Value| {
+            let mut lower = lower();
+            lower["sandbox"] = json!({"network_mode": "proxy", "egress_proxy": "127.0.0.1:3128"});
+            let mut layer = layer.as_object().unwrap().clone();
+            let found = gate_layer(&mut layer, &lower, true, &sections());
+            (Value::Object(layer), found)
+        };
+        let (left, found) = over_proxy(json!({"sandbox": {
+            "egress_proxy": "127.0.0.1:4444",
+            "network_mode": "allowlist",
+        }}));
+        assert_eq!(
+            found,
+            ["sandbox.egress_proxy", "sandbox.network_mode"].map(String::from)
+        );
+        assert_eq!(left, json!({"sandbox": {}}));
+        let (left, found) = over_proxy(json!({"sandbox": {"network_mode": "deny_all"}}));
+        assert!(found.is_empty(), "{found:?}");
+        assert_eq!(left, json!({"sandbox": {"network_mode": "deny_all"}}));
+        let (_, found) = over_proxy(json!({"sandbox": {"network_mode": "proxy"}}));
+        assert!(found.is_empty(), "{found:?}");
+        let (_, found) = gate(json!({"sandbox": {"network_mode": "proxy"}}), true);
+        assert!(
+            found.is_empty(),
+            "proxy is narrower than unrestricted: {found:?}"
         );
     }
 

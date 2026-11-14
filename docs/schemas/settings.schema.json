@@ -76,6 +76,44 @@
       ],
       "type": "string"
     },
+    "EgressProxy": {
+      "anyOf": [
+        {
+          "description": "The HTTP proxy's `ip:port` or `localhost:port`.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/EgressProxyObject"
+        }
+      ],
+      "description": "`\"127.0.0.1:3128\"` is `{\"http\": \"127.0.0.1:3128\"}`."
+    },
+    "EgressProxyObject": {
+      "properties": {
+        "http": {
+          "description": "An HTTP proxy that takes `CONNECT`, as `ip:port` or `localhost:port`.",
+          "type": "string"
+        },
+        "no_proxy": {
+          "description": "`NO_PROXY` for the command. Empty — the default — is set as empty, so\neven `localhost` goes through the proxy; the sandbox lets nothing past\nit either way.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "socks": {
+          "description": "A SOCKS5 proxy for `ALL_PROXY`, written the same way; its port must\ndiffer from `http`'s.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "http"
+      ],
+      "type": "object"
+    },
     "ExecutionSettings": {
       "additionalProperties": false,
       "description": "Execution constraints.",
@@ -205,12 +243,17 @@
         },
         {
           "const": "deny_all",
-          "description": "No outbound network access at all (DNS resolution via the OS\nresolver still works on macOS — it's IPC to `mDNSResponder`, not a\nraw socket the sandbox profile's `network*` filter covers — but no\nTCP/UDP connection actually reaching the network is permitted).",
+          "description": "No outbound network access at all. On macOS 26 that includes name\nresolution, which goes through `mDNSResponder`'s unix socket.",
           "type": "string"
         },
         {
           "const": "allowlist",
-          "description": "Outbound restricted to `SandboxPolicy::allowed_domains`. Neither\nbackend can filter by domain: macOS lets through localhost when the\nlist names it and nothing else, Linux cuts the network entirely, and\nboth report the domains they could not allow as unmet. DNS resolution\nstill works on macOS (same rationale as `DenyAll`).",
+          "description": "Outbound restricted to `SandboxPolicy::allowed_domains`. Neither\nbackend can filter by domain: macOS lets through localhost when the\nlist names it and nothing else, Linux cuts the network entirely, and\nboth report the domains they could not allow as unmet.",
+          "type": "string"
+        },
+        {
+          "const": "proxy",
+          "description": "Outbound only to [`SandboxPolicy::egress_proxy`], with the command's\n`*_PROXY` variables pointing at it; what the proxy lets through is the\nproxy's business. Without an `egress_proxy` the network is cut, as\nunder `DenyAll`, and reported unmet.",
           "type": "string"
         }
       ]
@@ -544,10 +587,21 @@
           },
           "type": "array"
         },
+        "egress_proxy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EgressProxy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Under `network_mode: \"proxy\"`, the one address a sandboxed command may\nconnect to: `\"127.0.0.1:3128\"` for an HTTP proxy, or an object with\n`http`, an optional `socks` and `no_proxy`. The command gets\n`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)\npointing at it. Put the proxy on this machine: macOS can hold a proxy\nelsewhere only to its port, and Linux needs `socat` to relay to it,\ncutting the network entirely without one. Ignored in other modes."
+        },
         "network_mode": {
           "$ref": "#/$defs/NetworkMode",
           "default": "unrestricted",
-          "description": "Outbound network policy for sandboxed `Bash` commands."
+          "description": "Outbound network policy for sandboxed `Bash` commands. `proxy` lets a\ncommand connect only to `egress_proxy`, which both OS backends hold;\nfiltering by domain is then the proxy's job. `WebFetch` and `Ping` do\nnot go through the proxy: they follow `allowed_domains`."
         },
         "read_anywhere": {
           "default": false,

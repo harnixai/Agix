@@ -67,10 +67,14 @@ impl LocalNetwork {
     ///
     /// Under `Unrestricted` the domain list restricts nothing, but a host it
     /// names may still be reached at an internal address — the one thing the
-    /// list says in that mode is "these are mine".
+    /// list says in that mode is "these are mine". `Proxy` binds a sandboxed
+    /// command, not the model's own requests, which are read as under
+    /// `Unrestricted`.
     pub fn for_agent_policy(mode: NetworkMode, allowed_domains: Vec<String>) -> Self {
         match mode {
-            NetworkMode::Unrestricted => Self::with(Vec::new(), allowed_domains, false),
+            NetworkMode::Unrestricted | NetworkMode::Proxy => {
+                Self::with(Vec::new(), allowed_domains, false)
+            }
             NetworkMode::DenyAll => Self::new(Vec::new(), true),
             // An empty allowlist under this mode names nothing reachable, the
             // same reading the sandbox backends give it.
