@@ -13,6 +13,7 @@ mod harness;
 mod hook_events;
 mod host_agents;
 mod hostile_plugins;
+mod large_tool_results;
 mod mcp_boundaries;
 mod minimal_tier;
 mod package_trust;

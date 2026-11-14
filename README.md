@@ -543,7 +543,11 @@ names a provider does that provider's model read the page and answer the call's
   system prompt and tool definitions. Opt-in in the `compaction` settings: a
   predictive pass with a circuit breaker (`reactive`), and hourly clearing that
   emits cache edits so the prompt cache is not thrown away
-  (`cached_microcompact`).
+  (`cached_microcompact`). A tool result over 30,000 characters (except those of
+  `Read`, `WebFetch` and `TaskOutput`, which page themselves) is saved whole to the
+  session's scratchpad; the model gets a head and tail preview with the path and
+  reads on with `Read` `offset`. The limit is
+  `compaction.tool_result_inline_chars` (`0` turns it off).
 - **Telemetry**: 21 structured event types (`EventPayload` (21)) with
   OpenTelemetry export, four token counts per call, and the calls no turn asked
   for — compaction, memory, hooks, search — counted too.

@@ -128,6 +128,7 @@ impl TestParent {
             depth: self.depth,
             under_hook: false,
             checkpoints: None,
+            tool_results_dir: None,
             host_tools: Vec::new(),
             host_calls,
         };

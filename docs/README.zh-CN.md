@@ -439,7 +439,7 @@ let pool = daemon::assemble::pool(
 任务键 `main`、`subagent`、`compact`、`memory`、`web_search`、`web_fetch` 各自路由一类
 调用;会话也能选自己的 provider。`WebSearch` 默认经会话自己的模型让提供方搜索,
 `task_models.web_search` 可以换一个提供方。`WebFetch` 默认返回页面转成的纯文本(超过
-50,000 字符截断);只有 `task_models.web_fetch` 配了 provider 时,才由那个模型读页面、按调用
+50,000 字符分段,用 `offset` / `limit` 续读,续读会再抓一次页面);只有 `task_models.web_fetch` 配了 provider 时,才由那个模型读页面、按调用
 的 `prompt` 作答。它不会退回到会话自己的模型。
 
 ### 上下文、遥测、录制
@@ -447,7 +447,9 @@ let pool = daemon::assemble::pool(
 - **压缩**:先让 LLM 写摘要,不行再退到更便宜的办法(截断、微压缩、折叠),压到阈值减去
   系统提示词与工具定义之后剩下的大小。`compaction` 设置里可以打开两项:带熔断的预测式
   提前清理(`reactive`),以及每小时一次、以 cache edit 下发、不白扔已付过钱的提示缓存的
-  清理(`cached_microcompact`)。
+  清理(`cached_microcompact`)。超过 30,000 字符的工具结果(`Read`、`WebFetch`、`TaskOutput`
+  自己分页的除外)整个存进会话的 scratchpad,模型拿到头尾预览和路径,用 `Read` 的 `offset`
+  读后续;阈值是 `compaction.tool_result_inline_chars`(`0` 关闭)。
 - **遥测**:21 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
   一轮的调用——压缩、记忆、hooks、搜索——也算进去。
 - **录制**:把任意 `Model` 包一层,一个会话就成了自包含的目录;回放逐字节一致、不用联网。
