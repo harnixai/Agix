@@ -20,7 +20,7 @@ pub(crate) async fn collect(
     let project = (!opts.outside_project).then_some(ctx.cwd.clone());
     if let Some(project) = &project {
         ctx.memory_blocks =
-            skill_format::collect_agents_md(project, opts.walk_up_claude_md, &files).await;
+            skill_format::collect_agents_md(project, opts.walk_up_claude_md, paths, &files).await;
     }
     ctx.memory_index = memory::index_for_prompt(paths).await;
     ctx.output_style = match opts.output_style.as_deref() {
@@ -112,6 +112,9 @@ mod tests {
         let parent = dir.path().join("p");
         let child = parent.join("c");
         tokio::fs::create_dir_all(&child).await.unwrap();
+        tokio::fs::create_dir_all(parent.join(".git"))
+            .await
+            .unwrap();
         tokio::fs::write(parent.join("AGENTS.md"), "PARENT")
             .await
             .unwrap();

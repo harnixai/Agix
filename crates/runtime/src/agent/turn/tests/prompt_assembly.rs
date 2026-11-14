@@ -355,6 +355,7 @@ async fn parent_agents_md_reaches_the_prompt_with_nearest_last() {
     let parent = dir.path().join("repo");
     let child = parent.join("packages").join("api");
     std::fs::create_dir_all(&child).unwrap();
+    std::fs::create_dir_all(parent.join(".git")).unwrap();
     std::fs::write(parent.join("AGENTS.md"), "ROOT-CONVENTION: use tabs").unwrap();
     std::fs::write(child.join("AGENTS.md"), "PACKAGE-CONVENTION: use spaces").unwrap();
 

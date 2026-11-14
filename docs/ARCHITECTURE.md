@@ -99,7 +99,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
 | `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
 | `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
-| `skill-format` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、自工作目录向上收集的 `AGENTS.md`、输出风格 |
+| `skill-format` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格 |
 | `team` | 模块 | 团队协调器(`Coordinator`)、邮箱与 `TeamTool`;`agents` 的团队工具驱动它 |
 | `agents` | 模块 | 子 agent(`Agent` 工具)、agent 类型目录、团队工具;依赖 `team` |
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |
@@ -341,7 +341,7 @@ serde 的 `Option<Option<T>>` 免费区分前两者,但 `null` 与字符串的�
 | 不用询问就能读 | 上一行,加状态目录、`read_directories` | 同左 |
 | 沙箱可写 | 项目根,加上一行其余几处、会话的 `TMPDIR`、`cache_directories` | 工作目录,加同样几处;状态目录的其余部分仍不可写,其中的 socket 仍连不上 |
 | git 上下文、引擎跑的 git | 项目根 | 没有 |
-| `AGENTS.md` | 从项目根向上找 | 不找 |
+| `AGENTS.md` | 全局层，加从项目向上到 git 根 | 不找 |
 | 项目层设置、skills、agents、rules、hooks、output style | `<项目>/.agix`、`<项目>/.agents/skills` | 没有这一层 |
 | 引擎读进提示词的文件(`PromptFiles`)限定的根 | 项目根 | 没有(只读用户层的东西,仍过凭据名单) |
 | `permit_always` 的 `local` | 写进 `<项目>/.agix/settings.local.json` | 同 `session`:只在本会话生效,不写盘 |
