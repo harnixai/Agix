@@ -71,11 +71,21 @@ pub(in crate::session_pool) struct Layers {
     /// would otherwise lose it.
     host: HostOverrides,
     managed: ManagedLayer,
+    /// `--max-tokens`: a pair's `model.max_tokens` when no settings file sets it.
+    max_tokens_fallback: u32,
 }
 
 impl Layers {
-    pub(in crate::session_pool) fn new(host: HostOverrides, managed: ManagedLayer) -> Self {
-        Self { host, managed }
+    pub(in crate::session_pool) fn new(
+        host: HostOverrides,
+        managed: ManagedLayer,
+        max_tokens_fallback: u32,
+    ) -> Self {
+        Self {
+            host,
+            managed,
+            max_tokens_fallback,
+        }
     }
 
     /// `loaded` with what the host changed in memory, then the managed layer;
@@ -97,8 +107,6 @@ pub(in crate::session_pool) struct BindingCache {
     /// were built with; everything not tied to a session reads this one.
     settings: AsyncRwLock<Arc<LoadedSettings>>,
     layers: Layers,
-    /// `--max-tokens`: a pair's `model.max_tokens` when no settings file sets it.
-    max_tokens_fallback: u32,
     cache: Cache,
     /// The last router each pair was successfully served by, kept across
     /// invalidation so a provider config that stops resolving — or stops
@@ -131,7 +139,6 @@ pub(in crate::session_pool) fn own_settings_in(
     host: Arc<LoadedSettings>,
     paths: &dyn crate::config::DaemonPaths,
     layers: &Layers,
-    max_tokens_fallback: u32,
 ) -> Arc<LoadedSettings> {
     if host.paths.workspace.project_root() == Some(cwd) {
         return host;
@@ -142,7 +149,7 @@ pub(in crate::session_pool) fn own_settings_in(
         Some(cwd),
         &host.paths.scope,
         &host.values.model.model_name,
-        max_tokens_fallback,
+        layers.max_tokens_fallback,
     );
     Arc::new(layers.over(loaded, true))
 }
@@ -152,7 +159,6 @@ impl BindingCache {
     pub(in crate::session_pool) fn new(
         settings: Arc<LoadedSettings>,
         layers: Layers,
-        max_tokens_fallback: u32,
         watch: Option<WatchHub>,
         credentials: Arc<dyn base::interface::credentials::CredentialSource>,
         client: Arc<dyn AnthropicClient>,
@@ -163,7 +169,6 @@ impl BindingCache {
         Self {
             settings: AsyncRwLock::new(settings),
             layers,
-            max_tokens_fallback,
             cache: Cache {
                 bindings: AsyncMutex::new(HashMap::new()),
                 epochs: std::sync::Mutex::new(HashMap::new()),
@@ -219,7 +224,7 @@ impl BindingCache {
             self.scene_root(scene, &startup_scene),
             scene.to_string(),
             project.map(Path::to_path_buf),
-            self.max_tokens_fallback,
+            self.layers.max_tokens_fallback,
         );
         let loaded = off_the_runtime(move || {
             read_pair(

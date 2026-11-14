@@ -139,14 +139,10 @@ impl SessionPoolBuilder {
                 path: managed_settings_path,
                 settings: managed_settings,
             },
-        );
-        let settings = parts::bindings::own_settings_in(
-            &self.cwd,
-            settings,
-            self.paths.as_ref(),
-            &layers,
             self.max_tokens_fallback,
         );
+        let settings =
+            parts::bindings::own_settings_in(&self.cwd, settings, self.paths.as_ref(), &layers);
         let mcp = McpHub::new(self.mcp, &settings.paths.user_data_dir);
         let _ = std::fs::create_dir_all(&settings.paths.user_data_dir);
         let scheduler = Scheduler::load(settings.paths.user_data_dir.join("scheduled_tasks.json"));
@@ -181,7 +177,6 @@ impl SessionPoolBuilder {
         let bindings = BindingCache::new(
             settings,
             layers,
-            self.max_tokens_fallback,
             watch,
             self.credentials,
             self.client,
