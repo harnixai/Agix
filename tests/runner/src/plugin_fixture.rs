@@ -82,3 +82,56 @@ fn add_dir_to_zip<W: std::io::Write + std::io::Seek>(
 pub fn file_url(path: &Path) -> String {
     format!("file://{}", path.display())
 }
+
+/// 一个 zip 条目：普通文件、或指向 `target` 的符号链接。
+pub enum Entry<'a> {
+    File(&'a str, Vec<u8>),
+    Symlink { name: &'a str, target: &'a str },
+}
+
+/// 用 `entries` 逐条打成 `out_dir/<name>-<n>.zip`，条目名原样写入（`../escape`、
+/// `/abs/path` 都不会被规整），返回 `(zip 路径, sha256 hex)`。给恶意包用例造
+/// 解包器必须自己拦下的输入。
+pub fn zip_with_entries(
+    out_dir: &Path,
+    name: &str,
+    entries: &[Entry<'_>],
+) -> anyhow::Result<(PathBuf, String)> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    let mut buf = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let opts: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for entry in entries {
+            match entry {
+                Entry::File(entry_name, bytes) => {
+                    writer.start_file(*entry_name, opts)?;
+                    std::io::Write::write_all(&mut writer, bytes)?;
+                }
+                Entry::Symlink { name, target } => writer.add_symlink(*name, *target, opts)?,
+            }
+        }
+        writer.finish()?;
+    }
+
+    std::fs::create_dir_all(out_dir)?;
+    let zip_path = out_dir.join(format!("{name}-{n}.zip"));
+    std::fs::write(&zip_path, &buf)?;
+
+    use sha2::{Digest, Sha256};
+    Ok((zip_path, hex::encode(Sha256::digest(&buf))))
+}
+
+/// 最小的合法清单，恶意条目就加在它旁边。
+pub fn minimal_manifest(name: &str) -> Vec<u8> {
+    format!("[plugin]\nname = \"{name}\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n")
+        .into_bytes()
+}
+
+/// `bytes` 个零：压缩后只有几十 KB，解开是 zip bomb。
+pub fn bomb_payload(bytes: usize) -> Vec<u8> {
+    vec![0u8; bytes]
+}
