@@ -285,9 +285,9 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 <!-- BEGIN GENERATED TABLE — see hooks::catalog::render_markdown -->
 | 事件 | 何时触发 | payload(四个公共字段之外) | 回答能做什么 |
 |---|---|---|---|
-| `PreToolUse` | 每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 按一次 `Bash` 调用算(没有 `tool_use_id`) | `tool_name`、`tool_input`、`tool_use_id` | `decision: "block"`(或 exit 2):这次调用不执行,模型收到 `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;`decision: "approve"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;`prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判) |
-| `PostToolUse` | 工具真正跑完之后(成功或失败);被 PreToolUse、权限拦下的调用不发;skill 正文里的 `` !`cmd` `` 跑完也发,按一次 `Bash` 调用算(没有 `tool_use_id`) | `tool_name`、`tool_input`、`tool_use_id`、`tool_result`(结果文本)、`is_error` | `decision: "block"`:结果换成 `Denied by PostToolUse hook: <message>`,同一批并发的其他调用被取消(skill 的内联命令:正文里换成 "[`cmd` output withheld: Denied by PostToolUse hook: <message>]");`continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,不起作用,展开出的那一轮照常跑) |
-| `PostToolUseFailure` | 工具调用以错误结束(工具返回错误或 panic,或同批的另一个调用出错时被中途放弃)时,在 PostToolUse 之前;工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` 按一次 `Bash` 调用算(`turn_id` 在 `/name` 展开时没有) | `tool_name`、`tool_input`、`reason`(错误文本)、`turn_id` | 只通知,回答被丢弃 |
+| `PreToolUse` | 每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用(`tool_use_id` 由展开它的 `Skill` 调用派生为 `<id>.<n>`,`/name` 展开时为 `slash-<turn_id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id` | `decision: "block"`(或 exit 2):这次调用不执行,模型收到 `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;`decision: "approve"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;`prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判) |
+| `PostToolUse` | 工具真正跑完之后(成功或失败);被 PreToolUse、权限拦下的调用不发;skill 正文里的 `` !`cmd` `` 跑完也发,是这个会话的一次 `Bash` 调用(`tool_use_id` 为派生的 `<id>.<n>`) | `tool_name`、`tool_input`、`tool_use_id`、`tool_result`(结果文本)、`is_error` | `decision: "block"`:结果换成 `Denied by PostToolUse hook: <message>`,同一批并发的其他调用被取消(skill 的内联命令:正文里换成 "[`cmd` failed: Denied by PostToolUse hook: <message>]");`continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,不起作用,展开出的那一轮照常跑) |
+| `PostToolUseFailure` | 工具调用以错误结束(工具返回错误或 panic,或同批的另一个调用出错时被中途放弃)时,在 PostToolUse 之前;工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`(错误文本)、`turn_id` | 只通知,回答被丢弃 |
 | `TurnStart` | 一轮开始,UserPromptSubmit 放行之后、第一次调模型之前 | `turn_id` | 只通知,回答被丢弃 |
 | `TurnComplete` | 一轮正常走完(模型不再要工具,Stop hook 也放行了) | `turn_id`、`stop_reason` | 只通知,回答被丢弃 |
 | `SessionStart` | 会话开始运行,紧接在 `Setup` 之后 | `source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带 | 只通知,回答被丢弃 |
@@ -298,7 +298,7 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 | `PreCompact` | 每次压缩之前(按阈值自动压、`/compact`、请求因体积被拒后的压缩)。修剪不算压缩,不触发它 | `tool_input`:`messages_before`、`token_count`、`threshold`、`trigger`(`auto` / `manual`) | `decision: "block"` 或 `continue: false`:这次不压缩 |
 | `PostCompact` | 压缩完成之后;修剪之后不发 | `tool_input`:`strategy`、`messages_before`、`messages_after`、`tokens_before`、`tokens_after` | 只通知,回答被丢弃 |
 | `PermissionRequested` | 权限检查判为"询问"、开始等宿主回答之前(无人值守会话不问,直接按拒绝处理) | `tool_name`、`tool_input`、`reason`(询问的文字)、`turn_id` | 只通知,回答被丢弃 |
-| `PermissionDenied` | 一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,按一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`、`turn_id` | 只通知,回答被丢弃 |
+| `PermissionDenied` | 一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,它是这个会话的一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`、`turn_id` | 只通知,回答被丢弃 |
 | `Setup` | 会话开始运行,早于 `SessionStart` | `reason`(`scene=<id> model=<模型>`) | 只通知,回答被丢弃 |
 | `Notification` | 需要人注意时:一个权限询问在等回答;模型调了 `PushNotification` | `tool_name`、`tool_input`(被询问的调用,或 `PushNotification` 的入参)、`reason`、`turn_id` | 只通知,回答被丢弃 |
 | `SubagentStop` | 子 Agent 跑完(成功、出错、被取消);常驻团队成员在被停下时 | `session_id` 是子 Agent 的;`agent_type`、`stop_reason`(`end_turn` / `error` / `cancelled` / `shutdown`) | 只通知,回答被丢弃 |
@@ -319,6 +319,10 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 
 几处补充:
 
+- **skill 的内联命令。** skill 正文里的 `` !`cmd` `` 和模型的 `Bash` 调用走同一条分发:
+  中间件(`tool.around`)、结果变换(`tool.result`)、遥测、外部内容围栏都照常经过,只是没人
+  可问——要询问的不跑,hook 的批准不算替人答应。没跑成的,正文里换成
+  `` [`cmd` failed: <原因>] ``。
 - **`Stop` 的送回。** 被 `block` 时,`message`(为空时用一句默认的话)以
   `<system-reminder>` 交给模型,这一轮接着跑;下一次要结束时 `Stop` 再问一遍,payload 的
   `stop_hook_active` 为 `true`。一个无条件拦的 hook 应当看这个字段放行;不看的,由每轮的

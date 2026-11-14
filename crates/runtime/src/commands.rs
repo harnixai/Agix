@@ -226,8 +226,8 @@ impl CommandRegistry {
     }
 
     /// A prompt command as the turn runs it: a skill in the catalog expands
-    /// the way the `Skill` tool expands it — `!cmd` output under
-    /// `permission`, the body cap, its `files:` — and comes back with the
+    /// the way the `Skill` tool expands it — `!cmd` output through
+    /// `ctx.inline_commands`, the body cap, its `files:` — and comes back with the
     /// grants its `allowed-tools` makes. Anything else expands as
     /// [`Self::handle_prompt_command`] does, granting nothing.
     pub async fn run_prompt_command(
@@ -235,10 +235,9 @@ impl CommandRegistry {
         entry: &SkillEntry,
         cmd: &SlashCommand,
         ctx: &base::tool::ToolContext,
-        permission: &dyn base::interface::permission::PermissionPolicy,
     ) -> SkillExpansion {
         let expanded = match self.skills.as_ref() {
-            Some(skills) => skills.expand(&entry.name, &cmd.args, ctx, permission).await,
+            Some(skills) => skills.expand(&entry.name, &cmd.args, ctx).await,
             None => None,
         };
         match expanded {

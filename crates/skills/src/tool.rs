@@ -14,8 +14,7 @@ use base::interface::permission::{Grant, GrantScope, PermissionFacts, Reach, Sub
 use base::interface::skill_catalog::SkillExpansion;
 use base::interface::tool_selector::ToolSelector;
 use base::tool::{
-    PathStyle, ProgressSender, PromptContext, Tool, ToolContext, ToolResult, ToolResultContent,
-    ToolSpec,
+    PathStyle, ProgressSender, PromptContext, Tool, ToolContext, ToolResult, ToolSpec,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -40,15 +39,9 @@ pub struct SkillTool {
     /// What a `context: fork` skill is delegated through; without one it
     /// runs inline.
     delegator: Option<Arc<dyn Delegator>>,
-    /// The session's permission — held here (not read off `ToolContext`,
-    /// which has no `permission` field and would mean threading it through
-    /// all ~30 other `ToolContext` construction sites workspace-wide for a
-    /// field only this one tool needs): its policy judges a body's inline
-    /// commands, its grants keep `allowed_tools` for the turn. `None` when
-    /// not wired up (mirrors `delegator`'s `None` default) — no inline command
-    /// runs and `allowed_tools` grants nothing, same as `context: fork`
-    /// silently staying inline without a delegator.
-    permission: Option<base::interface::permission::PermissionSet>,
+    /// Where the grants a skill's `allowed-tools` makes for the turn are
+    /// kept; `None` when not wired up, and they grant nothing.
+    grants: Option<Arc<dyn base::interface::permission::PermissionGrants>>,
     /// Per-session set of already-injected `(skill_name, rendered content)`
     /// hashes — when a re-invocation's rendered content exactly matches one
     /// already in this session, a short note is returned instead of a
@@ -66,7 +59,7 @@ impl SkillTool {
             skill_manager,
             admission: Default::default(),
             delegator: None,
-            permission: None,
+            grants: None,
             already_injected: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
@@ -81,11 +74,11 @@ impl SkillTool {
         self
     }
 
-    pub fn with_permission(
+    pub fn with_grants(
         mut self,
-        permission: base::interface::permission::PermissionSet,
+        grants: Arc<dyn base::interface::permission::PermissionGrants>,
     ) -> Self {
-        self.permission = Some(permission);
+        self.grants = Some(grants);
         self
     }
 }
@@ -151,15 +144,7 @@ impl Tool for SkillTool {
             )));
         }
 
-        let expansion = match expand_for_invocation(
-            &self.skill_manager,
-            &info,
-            args,
-            &ctx,
-            self.permission.as_ref().map(|p| p.policy.as_ref()),
-        )
-        .await
-        {
+        let expansion = match expand_for_invocation(&self.skill_manager, &info, args, &ctx).await {
             Ok(expansion) => expansion,
             Err(ExpandError::NotFound) => return Err(not_found()),
             Err(ExpandError::Rejected(msg)) => {
@@ -211,7 +196,7 @@ impl Tool for SkillTool {
 
 impl SkillTool {
     async fn grant_for_turn(&self, grants: &[(String, Option<String>)]) {
-        let Some(store) = self.permission.as_ref().and_then(|p| p.grants.as_ref()) else {
+        let Some(store) = &self.grants else {
             return;
         };
         for (tool_name, rule_content) in grants {
@@ -335,7 +320,6 @@ pub async fn expand_for_invocation(
     info: &crate::manager::SkillInfo,
     args: &str,
     ctx: &ToolContext,
-    permission: Option<&dyn base::interface::permission::PermissionPolicy>,
 ) -> Result<SkillExpansion, ExpandError> {
     let bundled_files_text = build_bundled_files_injection(
         &info.path,
@@ -350,7 +334,7 @@ pub async fn expand_for_invocation(
         .ok_or(ExpandError::NotFound)?;
     // Before the grants below take effect, on purpose: a skill's own
     // frontmatter does not get to approve its own commands.
-    let body = expand_dynamic_context(&body, ctx, permission, info.source).await;
+    let body = expand_dynamic_context(&body, ctx, info.source).await;
     let expanded = base::skill::expand_skill_vars_named(
         &body,
         args,
@@ -476,29 +460,14 @@ const UNTRUSTED_PLACEHOLDER: &str = "[shell command not run: this project is not
 /// placeholders, so a command's own output can't trigger a second round of
 /// injection.
 ///
-/// Security posture: a skill body is untrusted input the same way a
-/// model-generated Bash command is — a project skill is whatever the
-/// repository says — so each command is held to what a model's `Bash` call
-/// with that command would be: the session's `PreToolUse` hooks
-/// (`ctx.inline_commands`) and permission policy decide first,
-/// then it runs through the session's own `Bash` with this invocation's
-/// `ToolContext` (same sandbox, cwd, cancellation). A session whose tools
-/// leave `Bash` out runs none. A deny rule refuses it, and so does a hook's
-/// block; a call that would need the user's approval is refused too, because
-/// preprocessing has no one to ask, and a hook's approval does not stand in
-/// for theirs — the command is the repository's text, put to the hook with no
-/// model in between. Only what the rules allow, or what `Bash` itself lets
-/// through silently (a read-only command inside the project), runs; a command
-/// a hook rewrites is judged the same way. The skill's own `allowed-tools`
-/// are not applied yet at this point. With no permission wired nothing runs.
-/// What the permit owes once the command has run is settled as for a call
-/// nobody can be asked about: a dangerous repository it nested in the project
-/// is moved aside, and the host is told as for a `Bash` call. Its output then
-/// goes past the `PostToolUse` hooks, and one that blocks it keeps it out of
-/// the expansion; one answering `continue: false` ends the turn of the
-/// `Skill` call it ran in, and does nothing while a `/name` command expands,
-/// before there is a turn. A command `Bash` fails to run at all goes past the
-/// `PostToolUseFailure` hooks first.
+/// Each command is a `Bash` call of the session (`ctx.inline_commands`),
+/// dispatched as the model's own: the session's hooks, rules, middleware,
+/// result transformers and telemetry all see it. A skill body is untrusted
+/// input — a project skill is whatever the repository says — so nobody is
+/// asked about it: what would need the user's approval does not run, and a
+/// hook's approval does not stand in for theirs. The skill's own
+/// `allowed-tools` are not applied yet at this point. A command that does not
+/// produce an answer is replaced by why.
 ///
 /// Respects `ctx.config.disable_skill_shell_execution` — when set, every
 /// placeholder is replaced with a fixed disabled-notice string instead of
@@ -507,7 +476,6 @@ const UNTRUSTED_PLACEHOLDER: &str = "[shell command not run: this project is not
 async fn expand_dynamic_context(
     body: &str,
     ctx: &ToolContext,
-    permission: Option<&dyn base::interface::permission::PermissionPolicy>,
     source: crate::manager::SkillSource,
 ) -> String {
     if !runs_commands(body) {
@@ -541,7 +509,7 @@ async fn expand_dynamic_context(
         let Some(m) = caps.get(0) else { continue };
         out.push_str(&body[last_end..m.start()]);
         let command = caps.get(1).map_or("", |c| c.as_str());
-        out.push_str(&run_skill_shell_command(command, ctx, refusal, permission).await);
+        out.push_str(&run_skill_shell_command(command, ctx, refusal).await);
         last_end = m.end();
     }
     out.push_str(&body[last_end..]);
@@ -557,172 +525,35 @@ async fn expand_dynamic_context(
         out.push_str(&body[last_end..m.start()]);
         out.push_str(caps.get(1).map_or("", |c| c.as_str())); // preserve the leading space/tab (or nothing at line start)
         let command = caps.get(2).map_or("", |c| c.as_str());
-        out.push_str(&run_skill_shell_command(command, ctx, refusal, permission).await);
+        out.push_str(&run_skill_shell_command(command, ctx, refusal).await);
         last_end = m.end();
     }
     out.push_str(&body[last_end..]);
     out
 }
 
-/// Why a skill's inline command did not get to run: its input does not
-/// check, or the policy refused it.
-enum NotRun {
-    Invalid(String),
-    Denied(String),
-}
-
-/// What the policy lets a skill's inline command run on and what it owes
-/// once it has run, or why it will not let it run. Nobody can be asked about
-/// one, so its input is checked and it is judged as a call nobody can
-/// approve; a hook may refuse it, not approve it.
-async fn inline_command_approval(
-    permission: Option<&dyn base::interface::permission::PermissionPolicy>,
-    bash: &Arc<dyn base::tool::Tool>,
-    input: &serde_json::Value,
-    hook: &base::interface::permission::HookAnswer,
-    ctx: &ToolContext,
-) -> Result<
-    (
-        base::interface::permission::Approval,
-        base::interface::permission::Obligations,
-    ),
-    NotRun,
-> {
-    use base::interface::permission::{
-        Approval, Attendance, HookAnswer, PermissionOutcome, ToolFacts,
-    };
-    let hook = match hook {
-        HookAnswer::Approve { .. } => &HookAnswer::None,
-        refused_or_none => refused_or_none,
-    };
-    let Some(permission) = permission else {
-        return Err(NotRun::Denied(
-            "no permission check is wired for this skill".to_string(),
-        ));
-    };
-    if let base::tool::ValidationResult::Err(message, _) = bash.validate_input(input, ctx).await {
-        return Err(NotRun::Invalid(message));
-    }
-    let attendance = match ctx.attendance {
-        Attendance::Attended => Attendance::NoOneToAsk(
-            "it needs the user's approval, which a skill's inline command cannot ask for; run \
-             it with the Bash tool instead",
-        ),
-        nobody => nobody,
-    };
-    let facts = ToolFacts::gather(bash.as_ref(), input, ctx).await;
-    let request = base::interface::permission::PermissionRequest::new(
-        "Bash",
-        Some(bash),
-        input,
-        &facts,
-        ctx,
-        &ctx.session,
-    )
-    .with_hook(hook)
-    .with_attendance(attendance);
-    match permission.decide(&request).await {
-        PermissionOutcome::Permit {
-            basis,
-            profile,
-            obligations,
-        } => Ok((Approval::new(basis, profile), obligations)),
-        PermissionOutcome::Deny { reason } => Err(NotRun::Denied(reason.message)),
-        PermissionOutcome::Prompt { message, .. } => Err(NotRun::Denied(message)),
-    }
-}
-
 async fn run_skill_shell_command(
     command: &str,
     ctx: &ToolContext,
     refusal: Option<&str>,
-    permission: Option<&dyn base::interface::permission::PermissionPolicy>,
 ) -> String {
     if let Some(refusal) = refusal {
         return refusal.to_string();
     }
-    let input = serde_json::json!({"command": command});
-    let Some(bash) = ctx.session.tool("Bash") else {
-        tracing::warn!(command = %command, "skill inline command not run: the session has no Bash");
-        return format!("[`{command}` not run: this session has no Bash tool]");
+    let Some(commands) = &ctx.inline_commands else {
+        return format!("[`{command}` not run: nothing in this session runs inline commands]");
     };
-    let (input, hook) = match &ctx.inline_commands {
-        Some(hooks) => hooks.pre_tool_use(input, &ctx.cancel).await,
-        None => (input, base::interface::permission::HookAnswer::None),
-    };
-    let mut ctx = ctx.clone();
-    let obligations = match inline_command_approval(permission, &bash, &input, &hook, &ctx).await {
-        Ok((approval, obligations)) => {
-            ctx.approval = Some(approval);
-            obligations
-        }
-        Err(NotRun::Invalid(reason)) => {
-            tracing::warn!(command = %command, reason = %reason, "skill inline command not run");
-            return format!("[`{command}` not run: {reason}]");
-        }
-        Err(NotRun::Denied(reason)) => {
-            tracing::warn!(command = %command, reason = %reason, "skill inline command not run");
-            if let Some(hooks) = &ctx.inline_commands {
-                hooks.denied(&input, &reason, &ctx.cancel).await;
-            }
-            return format!("[`{command}` not run: {reason}]");
-        }
-    };
-    let after = obligations.scan_nested_repos.then(|| ctx.clone());
-    let hooks = ctx.inline_commands.clone();
-    let (mut out, is_error) = bash_output(&bash, &input, ctx, command).await;
-    if let Some(after) = after {
-        for line in tools::nested_repos::settle_unasked(&after).await {
-            // Only a repository it moved aside, or could not, is reported in
-            // brackets; one only worth mentioning is not the host's business.
-            if line.starts_with('[') {
-                if let Some(hooks) = &after.inline_commands {
-                    hooks.notify(&input, &line, &after.cancel).await;
-                }
-            }
-            out.push_str("\n\n");
-            out.push_str(&line);
-        }
-    }
-    if let Some(hooks) = &hooks {
-        if let Some(reason) = hooks.post_tool_use(&input, &out, is_error).await {
-            tracing::warn!(command = %command, reason = %reason, "skill inline command output withheld");
-            return format!("[`{command}` output withheld: Denied by PostToolUse hook: {reason}]");
-        }
-    }
-    out
-}
-
-/// What `Bash` printed for a skill's inline command, and whether it failed;
-/// one it could not run at all goes past the `PostToolUseFailure` hooks.
-async fn bash_output(
-    bash: &Arc<dyn base::tool::Tool>,
-    input: &serde_json::Value,
-    ctx: ToolContext,
-    command: &str,
-) -> (String, bool) {
-    let hooks = ctx.inline_commands.clone();
-    let cancel = ctx.cancel.clone();
-    match bash
-        .call(input.clone(), ctx, ProgressSender::noop(""))
-        .await
-    {
-        // Trim exactly one trailing newline, matching shell `$(...)` command
-        // substitution semantics — without this, every inline placeholder
-        // splice leaves a stray blank line/line-break before whatever
-        // follows it in the skill body, since `echo`-style commands always
-        // end their output in `\n`.
-        Ok(r) => match r.content {
-            ToolResultContent::Text(t) => {
-                (t.strip_suffix('\n').unwrap_or(&t).to_string(), r.is_error)
-            }
-            ToolResultContent::Blocks(_) => (String::new(), r.is_error),
-        },
-        Err(e) => {
-            if let Some(hooks) = &hooks {
-                hooks.failed(input, &e.to_string(), &cancel).await;
-            }
-            (format!("[error running `{command}`: {e}]"), true)
+    match commands.run_bash(command, ctx.cancel.clone()).await {
+        // One trailing newline goes, as shell `$(...)` drops it: otherwise
+        // every splice leaves a stray line break before what follows it.
+        Ok(answer) => answer
+            .text
+            .strip_suffix('\n')
+            .unwrap_or(&answer.text)
+            .to_string(),
+        Err(reason) => {
+            tracing::warn!(command = %command, reason = %reason, "skill inline command failed");
+            format!("[`{command}` failed: {reason}]")
         }
     }
 }
@@ -733,13 +564,14 @@ pub fn register(
     m: std::sync::Arc<crate::manager::SkillManager>,
     admission: crate::catalog::BundledAdmission,
     delegator: Option<Arc<dyn Delegator>>,
-    permission: base::interface::permission::PermissionSet,
+    grants: Option<Arc<dyn base::interface::permission::PermissionGrants>>,
 ) {
-    let mut tool = SkillTool::new(m)
-        .with_admission(admission)
-        .with_permission(permission);
+    let mut tool = SkillTool::new(m).with_admission(admission);
     if let Some(delegator) = delegator {
         tool = tool.with_delegator(delegator);
+    }
+    if let Some(grants) = grants {
+        tool = tool.with_grants(grants);
     }
     r.register(std::sync::Arc::new(tool));
 }
@@ -747,170 +579,88 @@ pub fn register(
 #[cfg(test)]
 mod dynamic_context_tests {
     use super::*;
-    use base::interface::permission::{PermissionOutcome, PermissionPolicy};
+    use base::interface::inline_command::InlineCommands;
+    use base::interface::tool_dispatch::SubCallAnswer;
 
-    struct Permits;
+    /// Runs each command with `sh` in `cwd`, as the session's `Bash` would
+    /// once it let it through, and remembers what it was asked to run.
+    struct Shell {
+        cwd: std::path::PathBuf,
+        ran: std::sync::Mutex<Vec<String>>,
+    }
 
     #[async_trait]
-    impl PermissionPolicy for Permits {
-        async fn decide(
+    impl InlineCommands for Shell {
+        async fn run_bash(
             &self,
-            _req: &base::interface::permission::PermissionRequest<'_>,
-        ) -> PermissionOutcome {
-            PermissionOutcome::Permit {
-                basis: base::interface::permission::Basis::Bypass,
-                profile: Default::default(),
-                obligations: Default::default(),
-            }
+            command: &str,
+            _: tokio_util::sync::CancellationToken,
+        ) -> Result<SubCallAnswer, String> {
+            self.ran.lock().unwrap().push(command.to_string());
+            let out = std::process::Command::new("sh")
+                .args(["-c", command])
+                .current_dir(&self.cwd)
+                .output()
+                .map_err(|e| e.to_string())?;
+            Ok(SubCallAnswer {
+                text: String::from_utf8_lossy(&out.stdout).into_owned(),
+                structured: None,
+                reported_failure: !out.status.success(),
+            })
         }
     }
 
-    /// A tool context whose session dispatches `Bash` to the real tool; the
-    /// session holds its registry weakly, so the registry is returned to keep.
-    fn bash_ctx(cwd: std::path::PathBuf) -> (ToolContext, Arc<dyn base::tool::ToolRegistry>) {
-        let ctx = platform::tool_context_for_test(cwd);
-        let tools = base::tool::InMemoryToolRegistry::new();
-        tools.register(Arc::new(tools::bash::BashTool));
-        let tools: Arc<dyn base::tool::ToolRegistry> = Arc::new(tools);
-        ctx.session.attach(
-            base::context::EngineAttachment::new((*ctx.session.env()).clone(), ctx.exec.clone(), 1)
-                .with_tools(&tools),
-        );
-        (ctx, tools)
+    /// Refuses every command, as the session's dispatch refuses one.
+    struct Refuses;
+
+    #[async_trait]
+    impl InlineCommands for Refuses {
+        async fn run_bash(
+            &self,
+            _: &str,
+            _: tokio_util::sync::CancellationToken,
+        ) -> Result<SubCallAnswer, String> {
+            Err("Denied by permission: denied by rule".into())
+        }
+    }
+
+    fn shell_ctx(cwd: std::path::PathBuf) -> (ToolContext, Arc<Shell>) {
+        let mut ctx = platform::tool_context_for_test(cwd.clone());
+        let shell = Arc::new(Shell {
+            cwd,
+            ran: Default::default(),
+        });
+        ctx.inline_commands = Some(shell.clone());
+        (ctx, shell)
     }
 
     async fn expand(body: &str, ctx: &ToolContext) -> String {
-        expand_dynamic_context(body, ctx, Some(&Permits), crate::manager::SkillSource::User).await
-    }
-
-    /// The session's real gate over the real `Bash`, under `rules`.
-    fn gate(rules: Vec<base::permission::PermissionRule>) -> permissions::policy::Policy {
-        permissions::policy::Policy::new(permissions::ruleset::RuleSet::new(rules))
-    }
-
-    fn bash_rule(
-        behavior: base::permission::RuleBehavior,
-        content: Option<&str>,
-    ) -> base::permission::PermissionRule {
-        base::permission::PermissionRule {
-            source: base::permission::RuleSource::ProjectSettings,
-            behavior,
-            tool_name: "Bash".into(),
-            rule_content: content.map(Into::into),
-        }
+        expand_dynamic_context(body, ctx, crate::manager::SkillSource::User).await
     }
 
     #[tokio::test]
-    async fn an_inline_command_is_held_to_the_rules_a_bash_call_would_be() {
-        use base::permission::RuleBehavior;
-        let dir = tempfile::tempdir().unwrap();
-        let (ctx, _tools) = bash_ctx(dir.path().to_path_buf());
-        let body = "!`echo stamped > stamp.txt`";
-
-        let denied = gate(vec![bash_rule(RuleBehavior::Deny, None)]);
-        let out =
-            expand_dynamic_context(body, &ctx, Some(&denied), crate::manager::SkillSource::User)
-                .await;
-        assert!(
-            out.contains("not run") && out.contains("denied by rule"),
-            "{out}"
+    async fn a_command_the_session_does_not_answer_is_replaced_by_why() {
+        let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+        ctx.inline_commands = Some(Arc::new(Refuses));
+        assert_eq!(
+            expand("Value: !`echo 42`.", &ctx).await,
+            "Value: [`echo 42` failed: Denied by permission: denied by rule]."
         );
-        assert!(!dir.path().join("stamp.txt").exists());
-
-        let asks = gate(vec![]);
-        let out =
-            expand_dynamic_context(body, &ctx, Some(&asks), crate::manager::SkillSource::User)
-                .await;
-        assert!(out.contains("needs the user's approval"), "{out}");
-        assert!(!dir.path().join("stamp.txt").exists());
-
-        let out = expand_dynamic_context(body, &ctx, None, crate::manager::SkillSource::User).await;
-        assert!(out.contains("not run"), "{out}");
-        assert!(!dir.path().join("stamp.txt").exists());
-
-        let allowed = gate(vec![bash_rule(RuleBehavior::Allow, Some("echo:*"))]);
-        expand_dynamic_context(
-            body,
-            &ctx,
-            Some(&allowed),
-            crate::manager::SkillSource::User,
-        )
-        .await;
-        assert!(dir.path().join("stamp.txt").exists());
     }
 
     #[tokio::test]
-    async fn an_inline_command_is_not_run_in_a_session_without_bash() {
-        let dir = tempfile::tempdir().unwrap();
-        let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
-        let out = expand("!`echo ran > ran.txt`", &ctx).await;
-        assert!(out.contains("not run") && out.contains("no Bash"), "{out}");
-        assert!(!dir.path().join("ran.txt").exists());
-    }
-
-    #[tokio::test]
-    async fn a_read_only_inline_command_runs_as_a_bash_call_would() {
-        let dir = tempfile::tempdir().unwrap();
-        let (ctx, _tools) = bash_ctx(dir.path().to_path_buf());
-        let asks = gate(vec![]);
-        let out = expand_dynamic_context(
-            "!`echo hello`",
-            &ctx,
-            Some(&asks),
-            crate::manager::SkillSource::User,
-        )
-        .await;
-        assert_eq!(out, "hello");
-    }
-
-    /// An inline command is a command like a `Bash` call's: a repository it
-    /// nests in the project with configuration that names a program is moved
-    /// aside before the user's own `git` can enter it, and the skill's
-    /// expansion says so.
-    #[tokio::test]
-    async fn a_repository_an_inline_command_nests_in_the_project_is_moved_aside() {
-        use base::permission::RuleBehavior;
-        let dir = tempfile::tempdir().unwrap();
-        let project = dir.path().canonicalize().unwrap();
-        let git = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(["-c", "user.email=t@example.com", "-c", "user.name=T"])
-                .args(args)
-                .current_dir(&project)
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "{out:?}");
-        };
-        git(&["init", "-q"]);
-        std::fs::write(project.join("a"), "a").unwrap();
-        git(&["add", "a"]);
-        git(&["commit", "-qm", "first"]);
-        let (ctx, _tools) = bash_ctx(project.clone());
-        let body = "!`mkdir sub && cd sub && git init -q && touch f && git add f && \
-                    git -c user.email=t@example.com -c user.name=T commit -q -m s && \
-                    git config core.fsmonitor ./x.sh && cd .. && git add sub && echo planted`";
-
-        let allowed = gate(vec![bash_rule(RuleBehavior::Allow, None)]);
-        let out = expand_dynamic_context(
-            body,
-            &ctx,
-            Some(&allowed),
-            crate::manager::SkillSource::User,
-        )
-        .await;
-
-        assert!(out.starts_with("planted"), "{out}");
-        assert!(
-            out.contains("core.fsmonitor") && out.contains("Moved aside"),
-            "{out}"
+    async fn nothing_runs_where_the_session_runs_no_inline_commands() {
+        let ctx = platform::tool_context_for_test(std::env::temp_dir());
+        assert_eq!(
+            expand("!`echo 42`", &ctx).await,
+            "[`echo 42` not run: nothing in this session runs inline commands]"
         );
-        assert!(!project.join("sub/.git").exists(), "{out}");
     }
 
     #[tokio::test]
     async fn inline_placeholder_at_line_start_is_substituted() {
         let body = "## Info\n!`echo hello-world`\n\nDone.";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert!(out.contains("hello-world"));
         assert!(!out.contains("!`echo"));
@@ -919,7 +669,7 @@ mod dynamic_context_tests {
     #[tokio::test]
     async fn inline_placeholder_after_whitespace_is_substituted() {
         let body = "Value: !`echo 42`.";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert!(out.contains("Value: 42."));
     }
@@ -929,15 +679,16 @@ mod dynamic_context_tests {
         // `!` must be at line start or after whitespace — `KEY=!\`cmd\`` has
         // no separator, so it's untouched.
         let body = "KEY=!`echo should-not-run`";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, shell) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert_eq!(out, body);
+        assert!(shell.ran.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn fenced_block_is_substituted() {
         let body = "## Environment\n```!\necho line-one\necho line-two\n```\n";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert!(out.contains("line-one"));
         assert!(out.contains("line-two"));
@@ -946,7 +697,7 @@ mod dynamic_context_tests {
 
     #[tokio::test]
     async fn disable_skill_shell_execution_replaces_with_fixed_placeholder_not_running_anything() {
-        let (mut ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (mut ctx, shell) = shell_ctx(std::env::temp_dir());
         ctx.config = Arc::new({
             let mut c = base::context::EngineConfig::defaults_for("test-model");
             c.disable_skill_shell_execution = true;
@@ -955,20 +706,20 @@ mod dynamic_context_tests {
         let body = "!`echo should-not-run`";
         let out = expand(body, &ctx).await;
         assert_eq!(out, DISABLED_PLACEHOLDER);
-        assert!(!out.contains("should-not-run"));
+        assert!(shell.ran.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn project_skill_commands_wait_for_trust() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut ctx, _tools) = bash_ctx(dir.path().to_path_buf());
+        let (mut ctx, _) = shell_ctx(dir.path().to_path_buf());
         ctx.config = Arc::new({
             let mut c = base::context::EngineConfig::defaults_for("test-model");
             c.project_trust = base::permission::ProjectTrust::Untrusted;
             c
         });
         let body = "!`echo ran > ran.txt`";
-        let expand_from = |source| expand_dynamic_context(body, &ctx, Some(&Permits), source);
+        let expand_from = |source| expand_dynamic_context(body, &ctx, source);
 
         assert_eq!(
             expand_from(crate::manager::SkillSource::Project).await,
@@ -986,7 +737,7 @@ mod dynamic_context_tests {
     #[tokio::test]
     async fn body_with_no_placeholders_is_returned_unchanged() {
         let body = "Just plain instructions, no shell syntax here.";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert_eq!(out, body);
     }
@@ -1001,7 +752,7 @@ mod dynamic_context_tests {
         // command that needs to *produce* a backtick has to build it this
         // way rather than embed one directly.
         let body = "!`printf '!\\140echo nested\\140'`";
-        let (ctx, _tools) = bash_ctx(std::env::temp_dir());
+        let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert_eq!(out, "!`echo nested`", "output was: {out}");
     }
@@ -1067,13 +818,9 @@ mod dynamic_context_tests {
         let mgr = Arc::new(crate::manager::SkillManager::new());
         mgr.load_dir_subdirs(dir.path(), crate::manager::SkillSource::User)
             .unwrap();
-        let (ctx, _tools) = bash_ctx(dir.path().to_path_buf());
+        let (ctx, _) = shell_ctx(dir.path().to_path_buf());
         let forks = Arc::new(Forks::default());
-        let tool = SkillTool::new(mgr.clone())
-            .with_permission(base::interface::permission::PermissionSet::without_grants(
-                Arc::new(Permits),
-            ))
-            .with_delegator(forks.clone());
+        let tool = SkillTool::new(mgr.clone()).with_delegator(forks.clone());
 
         let inline = tool
             .call(
@@ -1098,13 +845,11 @@ mod dynamic_context_tests {
         .await
         .unwrap();
         let forked = forks.0.lock().unwrap()[0].clone();
-        let slash = base::interface::skill_catalog::SkillCatalog::expand(
-            &*mgr, "ship", "v1", &ctx, &Permits,
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .text;
+        let slash = base::interface::skill_catalog::SkillCatalog::expand(&*mgr, "ship", "v1", &ctx)
+            .await
+            .unwrap()
+            .unwrap()
+            .text;
 
         assert!(
             inline.starts_with("Ship v1.\nstamped\nxxx") && inline.ends_with("...[truncated]"),
@@ -1119,6 +864,7 @@ mod dynamic_context_tests {
 mod tests {
     use super::*;
     use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
+    use base::tool::ToolResultContent;
 
     fn register_test_skill(
         mgr: &crate::manager::SkillManager,
@@ -1250,7 +996,7 @@ mod tests {
     /// `project_skill_blanket_allowed_tools_grant_is_refused` below.
     #[tokio::test]
     async fn allowed_tools_injects_a_real_temporary_allow_rule() {
-        use base::interface::permission::{PermissionOutcome, PermissionSet};
+        use base::interface::permission::PermissionOutcome;
         use permissions::policy::Policy;
 
         let mgr = Arc::new(crate::manager::SkillManager::new());
@@ -1314,7 +1060,7 @@ mod tests {
             "sanity: Bash should Ask before the skill runs, got {sanity:?}"
         );
 
-        let tool = SkillTool::new(mgr).with_permission(PermissionSet::of(real_permission.clone()));
+        let tool = SkillTool::new(mgr).with_grants(real_permission.clone());
         let result = tool
             .call(
                 serde_json::json!({"skill": "uses-bash"}),
@@ -1372,7 +1118,7 @@ mod tests {
         let mut ctx = platform::tool_context_for_test(dir.path().to_path_buf());
         ctx.session_id = "session-of-the-invoker".into();
 
-        let text = expand_for_invocation(&mgr, &info, "", &ctx, None)
+        let text = expand_for_invocation(&mgr, &info, "", &ctx)
             .await
             .unwrap()
             .text;
@@ -1413,7 +1159,7 @@ mod tests {
                 };
                 c
             });
-            expand_for_invocation(&mgr, &info, "", &ctx, None)
+            expand_for_invocation(&mgr, &info, "", &ctx)
                 .await
                 .unwrap()
                 .grants
@@ -1460,7 +1206,7 @@ mod tests {
             });
             let info = mgr.list().into_iter().find(|s| s.name == "wild").unwrap();
             let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
-            expand_for_invocation(&mgr, &info, "", &ctx, None)
+            expand_for_invocation(&mgr, &info, "", &ctx)
                 .await
                 .unwrap()
                 .grants
@@ -1547,9 +1293,7 @@ mod tests {
         let bash: Arc<dyn Tool> = Arc::new(AskingBash);
         let permission = Arc::new(Policy::empty());
 
-        let tool = SkillTool::new(mgr).with_permission(
-            base::interface::permission::PermissionSet::of(permission.clone()),
-        );
+        let tool = SkillTool::new(mgr).with_grants(permission.clone());
         let result = tool
             .call(
                 serde_json::json!({"skill": "grabby"}),

@@ -16,6 +16,7 @@ mod extension_points_doc;
 mod hook_events_doc;
 mod hooks_on_the_session_exec;
 mod host_scenes;
+mod inline_command_pipeline;
 mod managed_settings;
 mod max_tokens_fallback;
 mod mcp_oauth;

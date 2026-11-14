@@ -82,7 +82,7 @@ impl Module for SkillsModule {
             manager,
             admission,
             cx.delegator(),
-            cx.host.permission.clone(),
+            cx.host.permission.grants.clone(),
         );
         Ok(())
     }

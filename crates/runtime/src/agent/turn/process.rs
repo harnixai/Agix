@@ -203,6 +203,11 @@ impl Agent {
         self.emit(AgentEvent::TurnStart {
             turn_id: self.current_turn_id.clone(),
         });
+        // A script's budget is per turn; without this reset the counter only
+        // climbs and a script bound to a per-tool-call point goes silent
+        // mid-session. Before a `/name` command expands: its inline commands
+        // are this turn's calls.
+        self.gate.run_turn_starts();
         if let Some(sc) = crate::commands::parse_slash_command(&content) {
             if let Some(outcome) = self.run_slash_command(&sc, &mut attachments, &cancel).await {
                 return outcome;
@@ -256,16 +261,12 @@ impl Agent {
         if let Some(cmd) = self.tooling.commands().resolve(&sc.name) {
             match cmd {
                 crate::commands::Command::Prompt { entry } => {
-                    let ctx = self.skill_invocation_context(cancel.clone());
+                    let ctx = self
+                        .context_outside_a_call(cancel, format!("slash-{}", self.current_turn_id));
                     let expansion = self
                         .tooling
                         .commands()
-                        .run_prompt_command(
-                            &entry,
-                            sc,
-                            &ctx,
-                            self.gate.permission().policy.as_ref(),
-                        )
+                        .run_prompt_command(&entry, sc, &ctx)
                         .await;
                     self.gate.set_slash_grants(expansion.grants);
                     return Some(

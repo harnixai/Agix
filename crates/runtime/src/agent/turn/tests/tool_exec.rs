@@ -167,7 +167,7 @@ fn test_exec_ctx_with_permission(
         tool_middleware: Arc::new(Vec::new()),
         result_transformers: Arc::new(Vec::new()),
         images: Arc::new(std::sync::Mutex::new(Vec::new())),
-        from_code: false,
+        caller: crate::turn::tool_exec::Caller::Model,
         events: None,
         turn: Default::default(),
     }

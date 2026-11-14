@@ -522,7 +522,6 @@ async fn a_slash_command_expands_through_the_catalog_and_grants_for_its_turn() {
             _: &'a str,
             args: &'a str,
             _: &'a ToolContext,
-            _: &'a dyn base::interface::permission::PermissionPolicy,
         ) -> futures::future::BoxFuture<
             'a,
             Option<Result<base::interface::skill_catalog::SkillExpansion, String>>,

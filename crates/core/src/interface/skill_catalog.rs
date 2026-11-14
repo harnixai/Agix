@@ -8,7 +8,6 @@ use std::path::PathBuf;
 
 use futures::future::BoxFuture;
 
-use crate::interface::permission::PermissionPolicy;
 use crate::interface::tool::ToolContext;
 use crate::skill::SkillEntry;
 
@@ -28,7 +27,7 @@ pub trait SkillCatalog: Send + Sync {
     /// The body a skill expands to when invoked.
     fn body(&self, name: &str) -> Option<String>;
     /// Expand `name` for an invocation with `args`, running what its body
-    /// asks to run under `ctx` and `permission`. `None` when the catalog does
+    /// asks to run through `ctx.inline_commands`. `None` when the catalog does
     /// not hold it; `Err` is a message for the model, such as a bundled file
     /// that escapes the skill's folder.
     fn expand<'a>(
@@ -36,9 +35,7 @@ pub trait SkillCatalog: Send + Sync {
         name: &'a str,
         args: &'a str,
         ctx: &'a ToolContext,
-        permission: &'a dyn PermissionPolicy,
     ) -> BoxFuture<'a, Option<Result<SkillExpansion, String>>> {
-        let _ = permission;
         Box::pin(async move {
             let entry = self.get(name)?;
             let body = self.body(name)?;

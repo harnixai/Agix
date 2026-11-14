@@ -30,16 +30,36 @@ fn toy_mcp_server() -> anyhow::Result<PathBuf> {
         .canonicalize()?)
 }
 
+/// A project skill is found and followed, and the `` !`cmd` `` in its body
+/// is a `Bash` call of the session: the `PostToolUse` hooks see it under an
+/// id derived from the `Skill` call that expanded it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_skill_is_found_and_followed() -> anyhow::Result<()> {
-    let mut run = LiveRun::start("skilled", json!({}), Mode::InProcess).await?;
+    let world_hook = std::env::temp_dir().join(format!("agix-live-hook-{}", nonce()));
+    std::fs::create_dir_all(&world_hook)?;
+    let hook_log = world_hook.join("post.jsonl");
+    let mut run = LiveRun::start(
+        "skilled",
+        json!({
+            "hooks_config": {
+                "PostToolUse": [{
+                    "type": "command",
+                    "command": format!("cat >> '{}'; echo >> '{}'", hook_log.display(), hook_log.display()),
+                    "timeout": 5000
+                }]
+            }
+        }),
+        Mode::InProcess,
+    )
+    .await?;
     let greeting = format!("HELLO-{}", nonce());
+    let inline = format!("INLINE-{}", nonce());
     run.write_file(
         ".agents/skills/greeter/SKILL.md",
         &format!(
             "---\nname: greeter\ndescription: Writes this project's greeting file\n---\n\
              Write the file greeting.txt in the project root containing exactly \
-             {greeting} and nothing else.\n"
+             {greeting} and nothing else.\nStamp: !`echo {inline}`\n"
         ),
     )?;
     let session = run.session().await?;
@@ -56,6 +76,25 @@ async fn a_project_skill_is_found_and_followed() -> anyhow::Result<()> {
         Some(greeting),
         "the greeting is only in the skill's body"
     );
+    let posted: Vec<Value> = std::fs::read_to_string(&hook_log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let skill_call = posted
+        .iter()
+        .find(|p| p["tool_name"] == "Skill")
+        .and_then(|p| p["tool_use_id"].as_str())
+        .expect("PostToolUse saw the Skill call");
+    assert!(
+        posted.iter().any(|p| p["tool_name"] == "Bash"
+            && p["tool_input"]["command"] == format!("echo {inline}")
+            && p["tool_use_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(&format!("{skill_call}.")))),
+        "the skill's inline command was not a Bash call of the session: {posted:?}"
+    );
+    let _ = std::fs::remove_dir_all(&world_hook);
     run.finish().await;
     Ok(())
 }

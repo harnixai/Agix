@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::interface::permission::PermissionPolicy;
 use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::{SkillCatalog, SkillExpansion};
 use base::interface::tool::ToolOrigin;
@@ -66,12 +65,10 @@ impl SkillCatalog for SkillManager {
         name: &'a str,
         args: &'a str,
         ctx: &'a ToolContext,
-        permission: &'a dyn PermissionPolicy,
     ) -> BoxFuture<'a, Option<Result<SkillExpansion, String>>> {
         Box::pin(async move {
             let info = SkillManager::get(self, name)?;
-            match crate::tool::expand_for_invocation(self, &info, args, ctx, Some(permission)).await
-            {
+            match crate::tool::expand_for_invocation(self, &info, args, ctx).await {
                 Ok(expansion) => {
                     self.record_invocation(name);
                     Some(Ok(expansion))
@@ -169,11 +166,10 @@ impl SkillCatalog for SceneSkills {
         name: &'a str,
         args: &'a str,
         ctx: &'a ToolContext,
-        permission: &'a dyn PermissionPolicy,
     ) -> BoxFuture<'a, Option<Result<SkillExpansion, String>>> {
         Box::pin(async move {
             SkillCatalog::get(self, name)?;
-            self.manager.expand(name, args, ctx, permission).await
+            self.manager.expand(name, args, ctx).await
         })
     }
     fn reload_changed(&self) -> usize {

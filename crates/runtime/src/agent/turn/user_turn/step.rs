@@ -234,10 +234,8 @@ impl Agent {
         let tools_for_safety = Arc::clone(&template.tools);
         let template = template.clone();
         let execute_tool = move |tool_use_id: String, name: String, input: serde_json::Value| {
-            let exec_ctx = ToolExecCtx {
-                tool_use_id,
-                ..template.clone()
-            };
+            let mut exec_ctx = template.clone();
+            exec_ctx.tool_use_id = tool_use_id;
             async move { execute_tool_with_telemetry(&exec_ctx, &name, input).await }
         };
         let is_concurrency_safe = move |name: &str, input: &serde_json::Value| {
@@ -259,38 +257,6 @@ impl Agent {
         )
         .await
         .map_err(|failure| (failure, true))
-    }
-
-    fn tool_exec_ctx(
-        &self,
-        cancel: &CancellationToken,
-        discontinued: &Arc<std::sync::atomic::AtomicBool>,
-        images: &Arc<std::sync::Mutex<Vec<PendingToolImage>>>,
-    ) -> ToolExecCtx {
-        ToolExecCtx {
-            tool_use_id: String::new(),
-            tools: Arc::clone(self.tooling.tools()),
-            cwd: self.settings.paths.working_dir().to_path_buf(),
-            session_id: self.session.session_id.clone(),
-            turn_no: self.session.turn_count,
-            agent_depth: self.identity.agent_depth(),
-            telemetry_handle: self.telemetry.handle().clone(),
-            turn_id: self.current_turn_id.clone(),
-            cancel: cancel.clone(),
-            hooks: Arc::clone(self.gate.hooks()),
-            config: Arc::clone(&self.config),
-            exec: self.exec.clone(),
-            permission: self.gate.permission().clone(),
-            session_state: Arc::clone(&self.session_state),
-            elicitation: Arc::clone(self.gate.elicitation()),
-            tool_middleware: Arc::clone(self.tooling.tool_middleware()),
-            result_transformers: Arc::clone(self.tooling.result_transformers()),
-            discontinued: Arc::clone(discontinued),
-            images: Arc::clone(images),
-            from_code: false,
-            events: Some(self.channels.event_tx.clone()),
-            turn: Arc::clone(&self.turn.scope),
-        }
     }
 
     async fn account_call(&mut self, state: &mut TurnLoopState, call: &ModelCall) {

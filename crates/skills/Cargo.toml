@@ -13,7 +13,6 @@ settings          = { workspace = true }
 skill-format = { workspace = true }
 runtime       = { workspace = true }
 permissions   = { workspace = true }
-tools         = { workspace = true }
 async-trait   = { workspace = true }
 regex         = { workspace = true }
 serde_json    = { workspace = true }
@@ -22,6 +21,7 @@ notify        = { workspace = true }
 globset       = { workspace = true }
 
 [dev-dependencies]
+tools         = { workspace = true }
 tokio         = { workspace = true }
 platform = { workspace = true }
 scene      = { workspace = true }

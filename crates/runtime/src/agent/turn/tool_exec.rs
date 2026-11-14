@@ -67,13 +67,22 @@ pub(crate) struct ToolExecCtx {
     /// completion order, which is fine — images trail all `tool_result` blocks
     /// either way, and the text of each result names its own image.
     pub images: Arc<std::sync::Mutex<Vec<PendingToolImage>>>,
-    /// Set on the calls a `RunCode` program makes — see
-    /// `ToolContext::from_code`.
-    pub from_code: bool,
+    pub caller: Caller,
     /// The session's event stream, for what dispatch reports on a tool's
     /// behalf (a `PushNotification`). `None` where nobody is listening.
     pub events: Option<crate::agent::EventSender>,
     pub turn: Arc<base::tool::TurnScope>,
+}
+
+/// Who made a call: what can be asked about it, whether the host hears its
+/// progress, and how its result is fenced follow from this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Caller {
+    Model,
+    /// A `RunCode` program — see `ToolContext::from_code`.
+    Code,
+    /// A skill's `` !`cmd` ``, expanded by a `Skill` call or a `/name` command.
+    InlineCommand,
 }
 
 /// Deliver a host's answer to the `execute_tool_inner` call awaiting it.
@@ -315,8 +324,19 @@ pub(super) async fn execute_tool_inner(
 
     // The hook may rewrite the input, and permission judges what will run.
     let (input, hook) = pre_tool_use(ctx, name, input).await;
+    // A skill's command is the repository's text put to the hook with no
+    // model in between: the hook may refuse it, but its approval does not
+    // stand in for the user's.
+    let hook = match hook {
+        base::interface::permission::HookAnswer::Approve { .. }
+            if ctx.caller == Caller::InlineCommand =>
+        {
+            base::interface::permission::HookAnswer::None
+        }
+        hook => hook,
+    };
     let ends = EndsForTheHooks::arm(ctx, name, &input);
-    let mut tool_ctx = tool_context_for(ctx, &tool);
+    let mut tool_ctx = tool_context_for(ctx, Some(&tool.spec()));
     if let base::tool::ValidationResult::Err(message, _) =
         tool.validate_input(&input, &tool_ctx).await
     {
@@ -347,7 +367,12 @@ pub(super) async fn execute_tool_inner(
         call_tool(ctx, name, &tool, input, tool_ctx, deferred).await;
 
     let mut outcome = answer_of(ctx, result);
-    fence_external(name, &authorized.facts, ctx.from_code, &mut outcome);
+    fence_external(
+        name,
+        &authorized.facts,
+        ctx.caller == Caller::Code,
+        &mut outcome,
+    );
     if let Some(after) = owed {
         super::obligations::fulfil(
             ctx,
@@ -399,8 +424,8 @@ async fn call_tool(
             },
         ));
     let tool_start = std::time::Instant::now();
-    let (progress, gate) = match &ctx.events {
-        Some(events) => {
+    let (progress, gate) = match (&ctx.events, ctx.caller) {
+        (Some(events), Caller::Model) => {
             let gate = ProgressGate::new(&ctx.tool_use_id, name, &ctx.turn_id, events.clone());
             let sender = base::tool::ProgressSender::with_callback(
                 ctx.tool_use_id.clone(),
@@ -408,7 +433,7 @@ async fn call_tool(
             );
             (sender, Some(CloseOnDrop(gate)))
         }
-        None => (
+        _ => (
             base::tool::ProgressSender::noop(ctx.tool_use_id.clone()),
             None,
         ),

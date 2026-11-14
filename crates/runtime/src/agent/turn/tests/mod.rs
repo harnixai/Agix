@@ -4,6 +4,7 @@ mod attachments;
 mod budget_directive;
 mod dangling_tool_use;
 mod extract_memories;
+mod inline_commands;
 mod model_failure;
 mod prompt_assembly;
 mod recovery;

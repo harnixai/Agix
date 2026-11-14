@@ -17,5 +17,6 @@ mod size;
 mod sources;
 mod support_selftest;
 mod transcript_writers;
+mod tool_pipeline;
 mod unused_deps;
 mod wiring;

@@ -331,9 +331,9 @@ pub struct ToolContext {
     /// What the policy let this call through on; `None` when nothing judged it.
     pub approval: Option<crate::interface::permission::Approval>,
     pub turn: Arc<TurnScope>,
-    /// What a shell command this call runs outside a tool call of its own
-    /// answers to; `None` where nothing is wired to hear it.
-    pub inline_commands: Option<Arc<dyn crate::interface::inline_command::InlineCommandHooks>>,
+    /// How a skill's `` !`cmd` `` expanded during this call runs; `None`
+    /// where nothing runs them.
+    pub inline_commands: Option<Arc<dyn crate::interface::inline_command::InlineCommands>>,
 }
 
 /// What belongs to the one turn a call is made in, and ends with it.

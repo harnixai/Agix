@@ -179,7 +179,7 @@ async fn audit3_a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
 
     let later = later_requests(&model);
     assert!(
-        later.contains("not run"),
+        later.contains("failed: Tool not found: Bash"),
         "the skill's inline command was not refused: {later}"
     );
     assert!(
@@ -537,7 +537,7 @@ async fn a_pre_tool_use_hook_cannot_approve_a_skills_inline_command() {
     turn_events(&sock, json!({"message": "use the probe skill"})).await;
     let later = later_requests(&model);
     assert!(
-        later.contains("not run"),
+        later.contains("needs the user's approval"),
         "the command was not refused: {later}"
     );
     assert!(!outside.exists(), "the skill's command ran");

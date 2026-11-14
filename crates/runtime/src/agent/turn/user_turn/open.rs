@@ -22,11 +22,6 @@ impl Agent {
         attachments: &[crate::agent::Attachment],
         cancel: &CancellationToken,
     ) -> ControlFlow<TurnOutcome, String> {
-        // A script's budget is per turn; without this reset the counter only
-        // climbs and a script bound to a per-tool-call point goes silent
-        // mid-session.
-        self.gate.run_turn_starts();
-
         // UserPromptSubmit runs before any turn setup has touched anything. A
         // hook that errors or times out counts as having said nothing.
         match self
@@ -51,7 +46,8 @@ impl Agent {
         .await;
         // Here rather than only before the first tool runs: taking it there
         // puts a `git` call between a stream's concurrent tool starts.
-        tools::nested_repos::take_baseline(&self.skill_invocation_context(cancel.clone())).await;
+        tools::nested_repos::take_baseline(&self.context_outside_a_call(cancel, String::new()))
+            .await;
 
         // `turn_count` is incremented only at the end of the turn, so this
         // is the turn_no every later `turn_complete` carries.

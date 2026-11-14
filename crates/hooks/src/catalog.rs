@@ -74,7 +74,7 @@ impl HookEvent {
         use Answer::{Acts, Ignored};
         let (fires, payload, answer) = match self {
             HookEvent::PreToolUse => (
-                "每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 按一次 `Bash` 调用算(没有 `tool_use_id`)",
+                "每次工具调用分发之前,在输入校验与权限检查之前;子 Agent 的调用也算,skill 正文里的 `` !`cmd` `` 是这个会话的一次 `Bash` 调用(`tool_use_id` 由展开它的 `Skill` 调用派生为 `<id>.<n>`,`/name` 展开时为 `slash-<turn_id>.<n>`)",
                 "`tool_name`、`tool_input`、`tool_use_id`",
                 Acts(
                     "`decision: \"block\"`(或 exit 2):这次调用不执行,模型收到 \
@@ -86,12 +86,12 @@ impl HookEvent {
             ),
             HookEvent::PostToolUse => (
                 "工具真正跑完之后(成功或失败);被 PreToolUse、权限拦下的调用不发;skill 正文里的 \
-                 `` !`cmd` `` 跑完也发,按一次 `Bash` 调用算(没有 `tool_use_id`)",
+                 `` !`cmd` `` 跑完也发,是这个会话的一次 `Bash` 调用(`tool_use_id` 为派生的 `<id>.<n>`)",
                 "`tool_name`、`tool_input`、`tool_use_id`、`tool_result`(结果文本)、`is_error`",
                 Acts(
                     "`decision: \"block\"`:结果换成 `Denied by PostToolUse hook: <message>`,同一批并发的\
                      其他调用被取消(skill 的内联命令:正文里换成 \
-                     \"[`cmd` output withheld: Denied by PostToolUse hook: <message>]\");\
+                     \"[`cmd` failed: Denied by PostToolUse hook: <message>]\");\
                      `continue: false`:这一批工具跑完后结束这一轮(`stopped_by_hook`;skill 的内联命令:\
                      模型调 `Skill` 时同样结束这次调用所在的一轮,用户打 `/name` 展开时还没有一轮,\
                      不起作用,展开出的那一轮照常跑)",
@@ -100,7 +100,7 @@ impl HookEvent {
             HookEvent::PostToolUseFailure => (
                 "工具调用以错误结束(工具返回错误或 panic,或同批的另一个调用出错时被中途放弃)时,在 PostToolUse 之前;\
                  工具自己报告失败的结果(如 Bash 非零退出)不算;skill 正文里的 `` !`cmd` `` \
-                 按一次 `Bash` 调用算(`turn_id` 在 `/name` 展开时没有)",
+                 是这个会话的一次 `Bash` 调用",
                 "`tool_name`、`tool_input`、`reason`(错误文本)、`turn_id`",
                 Ignored,
             ),
@@ -161,7 +161,7 @@ impl HookEvent {
                 Ignored,
             ),
             HookEvent::PermissionDenied => (
-                "一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,按一次 `Bash` 调用",
+                "一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,它是这个会话的一次 `Bash` 调用",
                 "`tool_name`、`tool_input`、`reason`、`turn_id`",
                 Ignored,
             ),

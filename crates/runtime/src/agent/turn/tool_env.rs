@@ -1,7 +1,7 @@
-//! 工具运行环境：沙箱、出口、引擎 git 的装配，工具上下文，子调用分发与技能调用上下文。
+//! 工具运行环境：沙箱、出口、引擎 git 的装配，工具调用上下文的唯一构造点，子调用与内联命令的分发。
 
-use super::inline_commands::SessionInlineCommands;
-use super::tool_exec::{execute_tool_with_telemetry, ToolExecCtx};
+use super::tool_exec::{execute_tool_with_telemetry, Caller, ToolExecCtx};
+use super::tool_result::PendingToolImage;
 use crate::agent::Agent;
 use base::tool::ToolContext;
 use std::sync::Arc;
@@ -91,27 +91,46 @@ pub(crate) fn exec_providers_from(
     )))
 }
 
-/// Sub-calls a tool makes (`RunCode`), through the same dispatch as the
-/// model's own calls. Each runs under its own tool-use id derived from the
-/// caller's, cannot ask a person anything, and leaves the round's batch alone:
-/// a hook ending the turn or an image a sub-call returned are the caller's to
-/// report, not the round's. Nor does it report progress: the host never saw
-/// a `tool_use` under a sub-call's id, and the program's own progress reaches
-/// it as its task's.
+/// Calls a tool makes on its session's behalf, through the same dispatch as
+/// the model's own calls: a `RunCode` program's sub-calls, and a skill's
+/// `` !`cmd` ``. Each runs under its own tool-use id derived from the
+/// caller's and cannot ask a person anything. Neither reports progress: the
+/// host never saw a `tool_use` under a derived id.
 pub(super) struct SubCallDispatcher {
     ctx: ToolExecCtx,
+    prefix: String,
     next: std::sync::atomic::AtomicU64,
 }
 
 impl SubCallDispatcher {
-    fn new(ctx: &ToolExecCtx) -> Self {
+    /// A program's sub-calls leave the round's batch alone: a hook ending
+    /// the turn or an image a sub-call returned are the caller's to report,
+    /// not the round's; and the program's own progress reaches the host as
+    /// its task's.
+    fn for_code(ctx: &ToolExecCtx) -> Self {
         let mut ctx = ctx.clone();
         ctx.elicitation = Arc::new(NoAsking);
         ctx.discontinued = Arc::new(std::sync::atomic::AtomicBool::new(false));
         ctx.images = Arc::default();
-        ctx.from_code = true;
+        ctx.caller = Caller::Code;
         ctx.events = None;
+        Self::new(ctx)
+    }
+
+    /// A skill's inline command ends the turn of the `Skill` call it runs in
+    /// when a `PostToolUse` hook says so, and the host hears what it left
+    /// behind; the images it returns are not the round's.
+    fn for_inline_commands(ctx: &ToolExecCtx) -> Self {
+        let mut ctx = ctx.clone();
+        ctx.elicitation = Arc::new(NoAsking);
+        ctx.images = Arc::default();
+        ctx.caller = Caller::InlineCommand;
+        Self::new(ctx)
+    }
+
+    fn new(ctx: ToolExecCtx) -> Self {
         Self {
+            prefix: ctx.tool_use_id.clone(),
             ctx,
             next: std::sync::atomic::AtomicU64::new(1),
         }
@@ -122,6 +141,25 @@ impl SubCallDispatcher {
             .tools
             .get(name)
             .filter(|t| t.spec().callable_from_code)
+    }
+
+    async fn dispatch(
+        &self,
+        name: &str,
+        input: serde_json::Value,
+        cancel: CancellationToken,
+    ) -> Result<base::interface::tool_dispatch::SubCallAnswer, String> {
+        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut ctx = self.ctx.clone();
+        ctx.tool_use_id = format!("{}.{n}", self.prefix);
+        ctx.cancel = cancel;
+        execute_tool_with_telemetry(&ctx, name, input)
+            .await
+            .map(|a| base::interface::tool_dispatch::SubCallAnswer {
+                text: a.text,
+                structured: a.structured,
+                reported_failure: a.reported_failure,
+            })
     }
 }
 
@@ -161,22 +199,24 @@ impl base::interface::tool_dispatch::ToolDispatch for SubCallDispatcher {
         &self,
         name: &str,
         input: serde_json::Value,
-        cancel: tokio_util::sync::CancellationToken,
+        cancel: CancellationToken,
     ) -> Result<base::interface::tool_dispatch::SubCallAnswer, String> {
         if self.callable_tool(name).is_none() {
             return Err(format!("{name} cannot be called from code in this session"));
         }
-        let n = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut ctx = self.ctx.clone();
-        ctx.tool_use_id = format!("{}.{n}", self.ctx.tool_use_id);
-        ctx.cancel = cancel;
-        execute_tool_with_telemetry(&ctx, name, input)
+        self.dispatch(name, input, cancel).await
+    }
+}
+
+#[async_trait::async_trait]
+impl base::interface::inline_command::InlineCommands for SubCallDispatcher {
+    async fn run_bash(
+        &self,
+        command: &str,
+        cancel: CancellationToken,
+    ) -> Result<base::interface::tool_dispatch::SubCallAnswer, String> {
+        self.dispatch("Bash", serde_json::json!({ "command": command }), cancel)
             .await
-            .map(|a| base::interface::tool_dispatch::SubCallAnswer {
-                text: a.text,
-                structured: a.structured,
-                reported_failure: a.reported_failure,
-            })
     }
 }
 
@@ -201,18 +241,22 @@ impl base::interface::elicitation::Elicitation for NoAsking {
 /// that reads `unattended` to decide it.
 pub(crate) fn attendance_of(
     session: &base::context::SessionState,
-    from_code: bool,
+    caller: Caller,
 ) -> base::interface::permission::Attendance {
     use base::interface::permission::Attendance;
     if session.env().unattended {
-        Attendance::Unattended
-    } else if from_code {
-        Attendance::NoOneToAsk(
+        return Attendance::Unattended;
+    }
+    match caller {
+        Caller::Model => Attendance::Attended,
+        Caller::Code => Attendance::NoOneToAsk(
             "this call needs the user's approval, which a program cannot ask for — make this \
              call directly instead of from code",
-        )
-    } else {
-        Attendance::Attended
+        ),
+        Caller::InlineCommand => Attendance::NoOneToAsk(
+            "it needs the user's approval, which a skill's inline command cannot ask for; run \
+             it with the Bash tool instead",
+        ),
     }
 }
 
@@ -236,9 +280,14 @@ fn confinement_of(
     })
 }
 
-/// The context a call to `tool` runs with: the same for validating its input
-/// and for judging it as for running it.
-pub(super) fn tool_context_for(ctx: &ToolExecCtx, tool: &Arc<dyn base::tool::Tool>) -> ToolContext {
+/// The context a call runs with: the same for validating its input and for
+/// judging it as for running it. `spec` is the called tool's; `None` where
+/// no tool is called, only something of the session's run under a call's
+/// context (a `/name` command's expansion, the turn's baseline).
+pub(super) fn tool_context_for(
+    ctx: &ToolExecCtx,
+    spec: Option<&base::tool::ToolSpec>,
+) -> ToolContext {
     let additional_writable_dirs = ctx.session_state.env().additional_writable_dirs.clone();
     let mut tool_ctx = ToolContext::new(
         ctx.cwd.clone(),
@@ -258,11 +307,11 @@ pub(super) fn tool_context_for(ctx: &ToolExecCtx, tool: &Arc<dyn base::tool::Too
     tool_ctx.tool_use_id = ctx.tool_use_id.clone();
     tool_ctx.agent_depth = ctx.agent_depth;
     tool_ctx.elicitation = Some(Arc::clone(&ctx.elicitation));
-    tool_ctx.dispatch = tool.spec().needs_dispatch.then(|| {
-        Arc::new(SubCallDispatcher::new(ctx))
+    tool_ctx.dispatch = spec.is_some_and(|s| s.needs_dispatch).then(|| {
+        Arc::new(SubCallDispatcher::for_code(ctx))
             as Arc<dyn base::interface::tool_dispatch::ToolDispatch>
     });
-    tool_ctx.from_code = ctx.from_code;
+    tool_ctx.from_code = ctx.caller == Caller::Code;
     tool_ctx.confinement = confinement_of(
         &ctx.session_state,
         &ctx.config,
@@ -270,57 +319,57 @@ pub(super) fn tool_context_for(ctx: &ToolExecCtx, tool: &Arc<dyn base::tool::Too
         &ctx.cwd,
         &ctx.session_id,
     );
-    tool_ctx.attendance = attendance_of(&ctx.session_state, ctx.from_code);
+    tool_ctx.attendance = attendance_of(&ctx.session_state, ctx.caller);
     tool_ctx.turn = ctx.turn.clone();
-    tool_ctx.inline_commands = Some(Arc::new(SessionInlineCommands {
-        hooks: ctx.hooks.clone(),
-        session_id: ctx.session_id.clone(),
-        cwd: ctx.cwd.clone(),
-        session_state: ctx.session_state.clone(),
-        events: ctx.events.clone(),
-        turn_id: Some(ctx.turn_id.clone()),
-        discontinued: Some(ctx.discontinued.clone()),
-    }));
+    tool_ctx.inline_commands = Some(Arc::new(SubCallDispatcher::for_inline_commands(ctx)));
     tool_ctx
 }
 
 impl Agent {
-    /// What a skill's `` !`cmd` `` runs with when a `/name` command expands
-    /// it outside any tool call: the context a `Bash` call this turn would get.
-    pub(super) fn skill_invocation_context(&self, cancel: CancellationToken) -> ToolContext {
-        let mut ctx = ToolContext::new(
-            self.settings.paths.working_dir().to_path_buf(),
-            cancel,
-            self.exec.clone(),
-            self.config.clone(),
-            self.session_state.clone(),
-        );
-        ctx.session_id = self.session.session_id.clone();
-        ctx.turn_no = self.session.turn_count;
-        ctx.sandbox = sandbox_settings_from(&self.config);
-        ctx.additional_writable_dirs = self.session_state.env().additional_writable_dirs.clone();
-        ctx.running_tasks = Some(self.session_state.clone());
-        ctx.permission_mode = self.session_state.permission_mode();
-        ctx.agent_depth = self.identity.agent_depth();
-        ctx.elicitation = Some(Arc::clone(self.gate.elicitation()));
-        ctx.confinement = confinement_of(
-            &self.session_state,
-            &self.config,
-            &self.exec,
-            self.settings.paths.working_dir(),
-            &self.session.session_id,
-        );
-        ctx.attendance = attendance_of(&self.session_state, false);
-        ctx.turn = self.turn.scope.clone();
-        ctx.inline_commands = Some(Arc::new(SessionInlineCommands {
-            hooks: self.gate.hooks().clone(),
-            session_id: self.session.session_id.clone(),
+    /// What this turn's calls run with, before any one call's id is set.
+    pub(super) fn tool_exec_ctx(
+        &self,
+        cancel: &CancellationToken,
+        discontinued: &Arc<std::sync::atomic::AtomicBool>,
+        images: &Arc<std::sync::Mutex<Vec<PendingToolImage>>>,
+    ) -> ToolExecCtx {
+        ToolExecCtx {
+            tool_use_id: String::new(),
+            tools: Arc::clone(self.tooling.tools()),
             cwd: self.settings.paths.working_dir().to_path_buf(),
-            session_state: self.session_state.clone(),
+            session_id: self.session.session_id.clone(),
+            turn_no: self.session.turn_count,
+            agent_depth: self.identity.agent_depth(),
+            telemetry_handle: self.telemetry.handle().clone(),
+            turn_id: self.current_turn_id.clone(),
+            cancel: cancel.clone(),
+            hooks: Arc::clone(self.gate.hooks()),
+            config: Arc::clone(&self.config),
+            exec: self.exec.clone(),
+            permission: self.gate.permission().clone(),
+            session_state: Arc::clone(&self.session_state),
+            elicitation: Arc::clone(self.gate.elicitation()),
+            tool_middleware: Arc::clone(self.tooling.tool_middleware()),
+            result_transformers: Arc::clone(self.tooling.result_transformers()),
+            discontinued: Arc::clone(discontinued),
+            images: Arc::clone(images),
+            caller: Caller::Model,
             events: Some(self.channels.event_tx.clone()),
-            turn_id: None,
-            discontinued: None,
-        }));
-        ctx
+            turn: Arc::clone(&self.turn.scope),
+        }
+    }
+
+    /// The context of something the turn runs outside any tool call: a
+    /// `/name` command's expansion, whose inline commands' ids derive from
+    /// `tool_use_id`, or the turn's nested-repository baseline. There is no
+    /// round yet, so a `PostToolUse` hook's `continue: false` has none to end.
+    pub(super) fn context_outside_a_call(
+        &self,
+        cancel: &CancellationToken,
+        tool_use_id: String,
+    ) -> ToolContext {
+        let mut ctx = self.tool_exec_ctx(cancel, &Arc::default(), &Arc::default());
+        ctx.tool_use_id = tool_use_id;
+        tool_context_for(&ctx, None)
     }
 }
