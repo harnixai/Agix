@@ -2399,6 +2399,30 @@
       ],
       "type": "object"
     },
+    "ImportParams": {
+      "properties": {
+        "keep_ids": {
+          "default": false,
+          "description": "Keep the archive's session ids instead of minting new ones.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Absolute, on the daemon's machine: a zip written by `session.export`,\nor the directory of a `format: \"dir\"` export.",
+          "type": "string"
+        },
+        "project_root": {
+          "description": "Omitted: the root session's own; `null`: no project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "ImportRun": {
       "properties": {
         "actions": {
