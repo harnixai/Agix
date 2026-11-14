@@ -338,6 +338,68 @@ async fn a_server_past_the_metadata_limits_is_cut_and_status_says_so() -> anyhow
     Ok(())
 }
 
+/// A package under the world's global plugin tier declaring one MCP server.
+fn install_plugin_server(
+    world: &blackbox::World,
+    plugin: &str,
+    server: &str,
+    config: &Value,
+) -> anyhow::Result<()> {
+    let dir = world
+        .global_root()
+        .join("plugins")
+        .join("cache")
+        .join(plugin)
+        .join("1.0.0");
+    std::fs::create_dir_all(dir.join("mcp"))?;
+    std::fs::write(dir.join("mcp").join("server.json"), config.to_string())?;
+    std::fs::write(
+        dir.join("plugin.toml"),
+        format!(
+            "[plugin]\nname = \"{plugin}\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n\
+             description = \"declares an MCP server\"\n\n\
+             [[mcp]]\nname = \"{server}\"\nkind = \"native\"\nconfig = \"mcp/server.json\"\n"
+        ),
+    )?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_packages_whose_mcp_servers_get_one_key_keep_the_first_and_report_the_other(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let toy = McpToy::stdio_config(&[])?;
+    let mut run = stubbed("plugin-key-clash", &stub)
+        .before_start(move |world, _| {
+            install_plugin_server(world, "a", "mcp-b", &toy)?;
+            install_plugin_server(world, "a-mcp", "b", &toy)
+        })
+        .start()
+        .await?;
+    let status = mcp_status_until(&mut run, "both entries of the clashing key", |s| {
+        s.iter().filter(|s| s["name"] == "a-mcp-mcp-b").count() == 2
+    })
+    .await?;
+    let mut states: Vec<&str> = status
+        .iter()
+        .filter(|s| s["name"] == "a-mcp-mcp-b")
+        .filter_map(|s| s["state"].as_str())
+        .collect();
+    states.sort();
+    assert_eq!(states, ["connected", "failed"], "{status:?}");
+    let refused = status
+        .iter()
+        .find(|s| s["name"] == "a-mcp-mcp-b" && s["state"] == "failed")
+        .unwrap();
+    let error = refused["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("a-mcp-mcp-b") && error.contains("only"),
+        "{error}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_tool_listed_twice_by_one_server_is_offered_once() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;

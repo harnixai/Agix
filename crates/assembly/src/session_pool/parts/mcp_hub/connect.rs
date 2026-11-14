@@ -115,6 +115,24 @@ impl SessionPool {
         cfg.run_in(&home)
     }
 
+    fn refuse_clashing_plugin_servers(&self, admitted: &mut AdmittedMcp) {
+        for (key, kept, refused) in self.plugins.mcp_key_clashes() {
+            let error = format!(
+                "package `{refused}` declares an MCP server that would also be `{key}`, which \
+                 package `{kept}` already has; only `{kept}`'s is started"
+            );
+            self.emit_event(api::DaemonEvent::McpConnectFailed {
+                server: key.clone(),
+                error: error.clone(),
+            });
+            admitted.invalid.push(mcp::manager::FailedServer {
+                name: key,
+                transport: "unknown",
+                error,
+            });
+        }
+    }
+
     /// Parse the servers `settings` configure and pass each through
     /// `admit_mcp`, a project's own after `confined_to_own_env`. Every entry
     /// that will not be connected gets a `mcp_connect_failed` event here.
@@ -128,6 +146,7 @@ impl SessionPool {
             .filter(|name| !plugin_servers.contains_key(name))
             .collect();
         let mut admitted = AdmittedMcp::default();
+        self.refuse_clashing_plugin_servers(&mut admitted);
         for (name, v) in &self.configured_mcp_servers(&settings.values) {
             let refusal = match serde_json::from_value::<mcp::config::McpServerConfig>(v.clone()) {
                 Err(e) => {

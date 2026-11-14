@@ -143,21 +143,49 @@ mod packages {
             self.active().len()
         }
 
+        /// Every active package's declared MCP servers by key. A key two
+        /// packages both produce goes to the one met first; the other's is in
+        /// [`Self::mcp_key_clashes`].
         pub fn mcp_servers(&self) -> HashMap<String, serde_json::Value> {
-            self.active()
-                .iter()
-                .flat_map(::packages::mcp::servers_for)
-                .collect()
+            let mut out = HashMap::new();
+            for (_, key, config, _) in self.keyed_mcp_servers() {
+                out.entry(key).or_insert(config);
+            }
+            out
         }
 
         /// The package root each of [`Self::mcp_servers`] comes from.
         pub fn mcp_server_dirs(&self) -> HashMap<String, PathBuf> {
+            let mut out = HashMap::new();
+            for (_, key, _, root) in self.keyed_mcp_servers() {
+                out.entry(key).or_insert(root);
+            }
+            out
+        }
+
+        /// `(key, package kept, package refused)` for each MCP server key a
+        /// later package produced after an earlier one had it.
+        pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
+            let mut owners: HashMap<String, String> = HashMap::new();
+            let mut clashes = Vec::new();
+            for (plugin, key, _, _) in self.keyed_mcp_servers() {
+                match owners.get(&key) {
+                    Some(kept) => clashes.push((key, kept.clone(), plugin)),
+                    None => {
+                        owners.insert(key, plugin);
+                    }
+                }
+            }
+            clashes
+        }
+
+        fn keyed_mcp_servers(&self) -> Vec<(String, String, serde_json::Value, PathBuf)> {
             self.active()
                 .iter()
                 .flat_map(|p| {
                     ::packages::mcp::servers_for(p)
                         .into_iter()
-                        .map(|(name, _)| (name, p.root.clone()))
+                        .map(|(key, config)| (p.name().to_string(), key, config, p.root.clone()))
                 })
                 .collect()
         }
@@ -567,6 +595,10 @@ mod imp {
             self.packages.mcp_server_dirs()
         }
 
+        pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
+            self.packages.mcp_key_clashes()
+        }
+
         pub fn script_bindings(&self) -> Vec<PackageScripts> {
             self.packages.script_bindings()
         }
@@ -738,6 +770,9 @@ mod imp {
         }
         pub fn mcp_server_dirs(&self) -> HashMap<String, std::path::PathBuf> {
             HashMap::new()
+        }
+        pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
+            Vec::new()
         }
         pub fn script_bindings(&self) -> Vec<PackageScripts> {
             Vec::new()
