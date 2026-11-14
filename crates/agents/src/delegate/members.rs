@@ -137,13 +137,6 @@ impl PersistentMembers {
     }
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 pub(crate) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -283,7 +276,7 @@ impl Delegator {
                 session_id: spec.session_id.clone(),
                 inbox: inbox.clone(),
                 cancel: cancel.clone(),
-                started_ms: now_ms(),
+                started_ms: base::clock::unix_ms(),
                 idle_since: idle_since.clone(),
                 idle_seq: idle_seq.clone(),
             },
