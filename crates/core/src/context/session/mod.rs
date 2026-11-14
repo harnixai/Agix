@@ -361,6 +361,20 @@ impl SessionState {
         self.read_cache.record_write(path)
     }
 
+    /// Forget that `paths` were read — every file when `None` — so the next
+    /// `Edit` or `Write` of one asks for a `Read` first: what the model saw of
+    /// it is no longer what is there, or no longer in its context.
+    pub fn forget_reads(&self, paths: Option<&[std::path::PathBuf]>) {
+        self.read_cache.forget(paths)
+    }
+
+    /// Put back the durable state a rewind returned the log to: the todos
+    /// and plan mode as they were then, or none of them when the log had
+    /// recorded nothing yet. Outside plan mode the mode stays as it is.
+    pub fn restore_rewound_state(&self, durable: Option<DurableState>) {
+        self.restore_durable_state(durable.unwrap_or_default());
+    }
+
     /// 检查文件是否已读且未过期。
     ///
     /// - 文件不存在于磁盘 → 跳过检查（返回 None）

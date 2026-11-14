@@ -472,6 +472,14 @@ impl Builder {
         self
     }
 
+    /// Where this session's file tools record what they overwrite, or
+    /// `None` for no checkpoints. Left unset, a root session (depth 0) keeps
+    /// its own in its history store, and any other session keeps none.
+    pub fn checkpoints(mut self, checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>) -> Self {
+        self.spec.checkpoints = Some(checkpoints);
+        self
+    }
+
     /// The team this agent is a member of, and its name there.
     pub fn team_seat(mut self, seat: base::interface::delegate::TeamSeat) -> Self {
         self.spec.team_seat = Some(seat);

@@ -33,6 +33,8 @@ pub(crate) struct DelegateEnv {
     /// The session is an agent hook's agent or one of its descendants: what
     /// it delegates is entered in `HookAgents` too.
     pub(crate) under_hook: bool,
+    /// The root session's: a delegate's writes are recorded there.
+    pub(crate) checkpoints: Option<Arc<runtime::checkpoint::Checkpoints>>,
 }
 
 pub(crate) struct ParentSession {
@@ -68,6 +70,7 @@ impl DelegateEnv {
             skills: cx.skill_catalog(),
             depth: cx.depth,
             under_hook: hook_agents.includes(cx.session_id),
+            checkpoints: cx.checkpoints.cloned(),
         }
     }
 

@@ -128,6 +128,8 @@ pub(super) struct SpecSetup {
     /// See [`Builder::run_slots`].
     #[cfg_attr(not(feature = "ptc"), allow(dead_code))]
     pub(super) run_slots: Option<Arc<tokio::sync::Semaphore>>,
+    /// See [`Builder::checkpoints`]; `None` is not decided.
+    pub(super) checkpoints: Option<Option<Arc<crate::checkpoint::Checkpoints>>>,
 }
 
 impl SpecSetup {
@@ -157,6 +159,7 @@ impl SpecSetup {
             session_state: None,
             steering: None,
             run_slots: None,
+            checkpoints: None,
         }
     }
 }

@@ -19,6 +19,7 @@ pub(super) struct ModuleInputs<'a> {
     pub(super) exec: &'a base::interface::exec::ExecProviders,
     pub(super) host_layers: HostLayers,
     pub(super) mcp: Option<Box<dyn base::interface::mcp_servers::McpServers>>,
+    pub(super) checkpoints: Option<&'a Arc<crate::checkpoint::Checkpoints>>,
 }
 
 impl Builder {
@@ -43,6 +44,7 @@ impl Builder {
             exec,
             host_layers,
             mcp: mut mcp_slot,
+            checkpoints,
         } = inputs;
         let Resolved {
             tools,
@@ -105,6 +107,7 @@ impl Builder {
                 delegator,
                 skill_catalog,
                 session_ended,
+                checkpoints,
             };
             for module in modules {
                 module

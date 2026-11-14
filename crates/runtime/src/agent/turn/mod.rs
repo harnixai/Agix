@@ -14,6 +14,7 @@ mod prompt;
 mod recall;
 mod reporting;
 mod request;
+mod rewind;
 mod round;
 mod token_budget;
 mod tool_env;

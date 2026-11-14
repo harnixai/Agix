@@ -2,6 +2,7 @@
 
 mod attachments;
 mod budget_directive;
+mod checkpoints;
 mod dangling_tool_use;
 mod extract_memories;
 mod inline_commands;

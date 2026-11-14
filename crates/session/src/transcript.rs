@@ -520,6 +520,10 @@ impl Transcript {
             .map_err(|e| SessionError::Store(e.to_string()))
     }
 
+    pub fn history_store(&self) -> Option<&Arc<dyn HistoryStore>> {
+        self.history_store.as_ref()
+    }
+
     /// Access the session ID (read-only).
     pub fn session_id_str(&self) -> &str {
         &self.session_id

@@ -16,6 +16,7 @@ pub(crate) struct Tooling {
     /// not warn on every request.
     mcp_shadow_warned: HashSet<String>,
     tool_policy: Arc<crate::tool_policy::ToolPolicy>,
+    checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
 }
 
 impl Tooling {
@@ -29,6 +30,7 @@ impl Tooling {
         tool_middleware: Vec<Arc<dyn base::interface::tool_middleware::ToolMiddleware>>,
         result_transformers: Vec<Arc<dyn base::interface::tool_result::ToolResultTransformer>>,
         tool_policy: Arc<crate::tool_policy::ToolPolicy>,
+        checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
     ) -> Self {
         Self {
             tools,
@@ -40,7 +42,12 @@ impl Tooling {
             result_transformers: Arc::new(result_transformers),
             mcp_shadow_warned: HashSet::new(),
             tool_policy,
+            checkpoints,
         }
+    }
+
+    pub(crate) fn checkpoints(&self) -> Option<&Arc<crate::checkpoint::Checkpoints>> {
+        self.checkpoints.as_ref()
     }
 
     pub(crate) fn tools(&self) -> &Arc<dyn base::tool::ToolRegistry> {

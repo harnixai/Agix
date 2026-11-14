@@ -95,6 +95,9 @@ pub struct SessionContext<'a> {
     pub host: &'a HostContracts,
     /// Agent types the session's plugins declare.
     pub plugin_agent_types: &'a [base::agent_type::AgentTypeDefinition],
+    /// Where the session's file writes are recorded: a delegate records its
+    /// own in the same place, under its own name.
+    pub checkpoints: Option<&'a Arc<crate::checkpoint::Checkpoints>>,
     pub(crate) mcp: &'a mut Option<Box<dyn McpServers>>,
     pub(crate) delegator: &'a LateDelegator,
     pub(crate) skill_catalog: &'a LateSkillCatalog,

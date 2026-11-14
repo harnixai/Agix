@@ -117,7 +117,7 @@ impl base::interface::permission::PermissionPolicy for DenyingPermission {
     }
 }
 
-struct AllowAllTestPermission;
+pub(super) struct AllowAllTestPermission;
 #[async_trait::async_trait]
 impl base::interface::permission::PermissionPolicy for AllowAllTestPermission {
     async fn decide(
@@ -139,7 +139,7 @@ fn test_exec_ctx(
     test_exec_ctx_with_permission(tools, hooks, Arc::new(AllowAllTestPermission))
 }
 
-fn test_exec_ctx_with_permission(
+pub(super) fn test_exec_ctx_with_permission(
     tools: Arc<base::tool::InMemoryToolRegistry>,
     hooks: Arc<hooks::HookRunner>,
     permission: Arc<dyn base::interface::permission::PermissionPolicy>,
@@ -171,6 +171,7 @@ fn test_exec_ctx_with_permission(
         caller: crate::turn::tool_exec::Caller::Model,
         events: None,
         turn: Default::default(),
+        checkpoints: None,
     }
 }
 
@@ -1093,7 +1094,7 @@ async fn post_tool_use_hook_block_denies_only_this_result() {
     );
 }
 
-struct DenyAllTestPermission;
+pub(super) struct DenyAllTestPermission;
 #[async_trait::async_trait]
 impl base::interface::permission::PermissionPolicy for DenyAllTestPermission {
     async fn decide(
@@ -1835,7 +1836,7 @@ async fn a_file_from_outside_the_project_reaches_the_model_fenced() {
     assert!(read(cwd.join("ours.md")).await.starts_with("     1\tours"));
 }
 
-fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
+pub(super) fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
     let providers = platform::local_providers();
     hooks::HookRunner::new(
         settings,

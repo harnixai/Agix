@@ -75,6 +75,9 @@ pub(crate) struct ToolExecCtx {
     /// behalf (a `PushNotification`). `None` where nobody is listening.
     pub events: Option<crate::agent::EventSender>,
     pub turn: Arc<base::tool::TurnScope>,
+    /// Where a file tool's write is recorded before it happens; `None` when
+    /// the session keeps no checkpoints.
+    pub checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
 }
 
 /// Who made a call: what can be asked about it, whether the host hears its
@@ -354,10 +357,21 @@ pub(super) async fn execute_tool_inner(
         .scan_nested_repos
         .then(|| tool_ctx.clone());
     tools::nested_repos::take_baseline(&tool_ctx).await;
+    let checkpoint = match checkpoint_before(ctx, name, &authorized.facts.subject, &tool_ctx).await
+    {
+        Ok(pending) => pending,
+        Err(refused) => {
+            ends.disarm();
+            return Err(refused);
+        }
+    };
 
     let input_for_post_hook = input.clone();
     let (result, latency_ms, input_json_size) =
         call_tool(ctx, name, &tool, input, tool_ctx, deferred).await;
+    if let Some(pending) = checkpoint {
+        pending.finish(result.is_ok()).await;
+    }
 
     let (mut outcome, images) = answer_of(result);
     fence_external(
@@ -381,11 +395,21 @@ pub(super) async fn execute_tool_inner(
     record_execution(ctx, name, &outcome, measured);
 
     ends.disarm();
-    post_tool_use(ctx, name, &input_for_post_hook, &mut outcome).await;
-    fire_tool_lifecycle(ctx, name, &input_for_post_hook, &outcome).await;
+    deliver(ctx, name, &input_for_post_hook, outcome, images).await
+}
 
-    let (outcome, images) =
-        apply_result_transformers(ctx, name, &input_for_post_hook, outcome, images);
+/// The result on its way back: the post-call hooks, then the transformers;
+/// images go to the round's batch.
+async fn deliver(
+    ctx: &ToolExecCtx,
+    name: &str,
+    input: &serde_json::Value,
+    mut outcome: base::interface::tool_middleware::ToolOutcome,
+    images: Vec<PendingToolImage>,
+) -> base::interface::tool_middleware::ToolOutcome {
+    post_tool_use(ctx, name, input, &mut outcome).await;
+    fire_tool_lifecycle(ctx, name, input, &outcome).await;
+    let (outcome, images) = apply_result_transformers(ctx, name, input, outcome, images);
     if !images.is_empty() {
         ctx.images
             .lock()
@@ -393,6 +417,24 @@ pub(super) async fn execute_tool_inner(
             .extend(images);
     }
     outcome
+}
+
+async fn checkpoint_before(
+    ctx: &ToolExecCtx,
+    name: &str,
+    subject: &base::interface::permission::Subject,
+    tool_ctx: &base::tool::ToolContext,
+) -> Result<Option<crate::checkpoint::PendingWrite>, String> {
+    let Some(checkpoints) = &ctx.checkpoints else {
+        return Ok(None);
+    };
+    let by = crate::checkpoint::WriteBy {
+        tool: name,
+        tool_use_id: Some(ctx.tool_use_id.clone()),
+        rewind_id: None,
+        turn_id: Some(ctx.turn_id.clone()).filter(|t| !t.is_empty()),
+    };
+    checkpoints.before_call(subject, by, tool_ctx).await
 }
 
 async fn call_tool(

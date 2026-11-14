@@ -22,6 +22,7 @@ impl Builder {
         let questions_answered = self.questions_answered();
         let mut r = self.resolve()?;
         let session = self.open_session(&r.settings)?;
+        let checkpoints = self.session_checkpoints(&r.settings, &session);
         let compactor = self
             .host
             .compactor
@@ -64,6 +65,7 @@ impl Builder {
             exec: &state.exec,
             host_layers,
             mcp: mcp_slot,
+            checkpoints: checkpoints.as_ref(),
         })?;
         let command_registry = self.command_registry(&skill_catalog, mcp.as_ref());
 
@@ -115,6 +117,30 @@ impl Builder {
             compactor,
             agent_depth,
             chains,
+            checkpoints,
         }))
+    }
+
+    fn session_checkpoints(
+        &mut self,
+        settings: &LoadedSettings,
+        session: &Transcript,
+    ) -> Option<Arc<crate::checkpoint::Checkpoints>> {
+        match self.spec.checkpoints.take() {
+            Some(decided) => decided,
+            None if self.spec.agent_depth == 0 => {
+                let store = self.host.history_store.clone()?;
+                let project_root = settings
+                    .paths
+                    .project_root()
+                    .map(permissions::path_rule::canonicalize_best_effort);
+                crate::checkpoint::Checkpoints::for_root(
+                    store,
+                    session.session_id_str(),
+                    project_root,
+                )
+            }
+            None => None,
+        }
     }
 }

@@ -52,6 +52,7 @@ impl Builder {
                 chains.tool_middleware,
                 chains.result_transformers,
                 w.tool_policy,
+                w.checkpoints,
             ),
             gate,
             prompt: self.prompt_context(

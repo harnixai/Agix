@@ -154,6 +154,10 @@ impl Agent {
                 let _ = reply.send(self.flush_log().await);
                 Ok(TurnOutcome::default())
             }
+            InputMessage::Rewind { request, reply } => {
+                let _ = reply.send(self.rewind(request).await);
+                Ok(TurnOutcome::default())
+            }
             InputMessage::System { kind, content } => {
                 self.process_system_command(kind, content, &cancel).await
             }

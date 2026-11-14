@@ -76,6 +76,12 @@ impl FileSystem for LocalFileSystem {
         })
     }
 
+    async fn remove_file(&self, path: &Path) -> Result<(), ExecError> {
+        tokio::fs::remove_file(path)
+            .await
+            .map_err(|e| failed(path, e))
+    }
+
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), ExecError> {
         tokio::fs::rename(from, to)
             .await
@@ -103,6 +109,19 @@ mod tests {
         assert_eq!(fs.read_to_string(&f).await.unwrap(), "hello");
         assert!(fs.metadata(&f).await.unwrap().is_file);
         assert_eq!(fs.read_dir(f.parent().unwrap()).await.unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn removing_a_symlink_removes_the_link_and_not_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        let link = dir.path().join("link.txt");
+        std::fs::write(&target, "kept").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        LocalFileSystem.remove_file(&link).await.unwrap();
+        assert!(std::fs::symlink_metadata(&link).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "kept");
     }
 
     #[tokio::test]

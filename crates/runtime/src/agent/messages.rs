@@ -47,6 +47,140 @@ pub enum InputMessage {
     Flush {
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    /// Put files, the conversation or both back to where the session was at
+    /// an earlier point, between turns (`session.rewind`).
+    Rewind {
+        request: RewindRequest,
+        reply: tokio::sync::oneshot::Sender<Result<RewindReport, RewindError>>,
+    },
+}
+
+/// What a host asks a rewind to do (`InputMessage::Rewind`).
+#[derive(Debug, Clone)]
+pub struct RewindRequest {
+    pub target: history::checkpoint::RewindTarget,
+    pub scope: history::checkpoint::RewindScope,
+    /// Overwrite files changed since the session last wrote them.
+    pub force: bool,
+    /// Leave out the files that cannot be restored, instead of refusing.
+    pub allow_partial: bool,
+    /// Work out what would happen and change nothing.
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RewindIssueKind {
+    /// Not what the session last wrote: someone else changed it since.
+    Modified,
+    /// Its earlier contents were not kept, or no longer match their hash.
+    Unavailable,
+    /// The write policy refuses it now.
+    Denied,
+    /// It, or a directory above it, is now a symbolic link.
+    Symlink,
+    /// It was in a worktree that has since been removed.
+    WorktreeRemoved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct RewindIssue {
+    pub path: String,
+    pub issue: RewindIssueKind,
+    pub detail: String,
+    /// `force` or `allow_partial`.
+    pub overridable_by: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct RestoredFile {
+    pub path: String,
+    /// `file` or `absent`.
+    pub to: String,
+    pub sha256: Option<String>,
+    pub outside_project: bool,
+    /// The session's last write of it has no record of what it left, so it
+    /// was not checked for changes made since.
+    pub unverified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct RemovedTurn {
+    pub turn_id: String,
+    /// What the turn was started with, for a host to offer again.
+    pub prompt: Vec<base::message::ContentBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct RewoundConversation {
+    pub messages_before: usize,
+    pub messages_after: usize,
+    pub removed_turns: Vec<RemovedTurn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct RewoundFiles {
+    pub restored: Vec<RestoredFile>,
+    pub skipped: Vec<RewindIssue>,
+}
+
+/// What a rewind did, or with `dry_run` would do.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct RewindReport {
+    pub rewind_id: String,
+    pub dry_run: bool,
+    /// `None` when the conversation was not part of it.
+    pub conversation: Option<RewoundConversation>,
+    /// `None` when the files were not part of it.
+    pub files: Option<RewoundFiles>,
+}
+
+/// Why a rewind changed nothing, or not everything.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RewindError {
+    /// The request does not fit this session.
+    Invalid(String),
+    /// Files that cannot be restored as asked; nothing was changed.
+    Precondition(Vec<RewindIssue>),
+    Failed(RewindFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct RewindFailure {
+    pub rewind_id: String,
+    pub failed: FailedPath,
+    /// Restored, then put back as they were before the rewind.
+    pub rolled_back: Vec<String>,
+    /// Restored and could not be put back.
+    pub not_rolled_back: Vec<String>,
+    /// Some files are left changed: `not_rolled_back` is not empty.
+    pub partial: bool,
+    pub commit_not_recorded: bool,
+    pub conversation_changed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+pub struct FailedPath {
+    pub path: String,
+    pub error: String,
+}
+
+impl std::fmt::Display for RewindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(why) => f.write_str(why),
+            Self::Precondition(issues) => write!(
+                f,
+                "{} file(s) cannot be restored as asked; nothing was changed",
+                issues.len()
+            ),
+            Self::Failed(failure) => write!(
+                f,
+                "the rewind failed at {}: {}",
+                failure.failed.path, failure.failed.error
+            ),
+        }
+    }
 }
 
 /// Why a [`ContextRequest`] was not answered as asked.

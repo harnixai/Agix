@@ -56,6 +56,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         caller: Caller::Model,
         events: None,
         turn: Default::default(),
+        checkpoints: None,
     }
 }
 

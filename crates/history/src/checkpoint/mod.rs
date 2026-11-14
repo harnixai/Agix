@@ -105,7 +105,6 @@ pub struct DelegateAttribution {
     pub session_id: String,
     pub turn_id: Option<String>,
     pub parent_tool_use_id: Option<String>,
-    pub parent_turn_id: Option<String>,
     pub depth: u32,
 }
 

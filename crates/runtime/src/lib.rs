@@ -1,6 +1,7 @@
 //! Agix — agent runtime: turn loop, streaming, tool dispatch, agent lifecycle.
 
 pub mod agent;
+pub mod checkpoint;
 pub mod commands;
 pub mod elicitation;
 pub mod event_bus;

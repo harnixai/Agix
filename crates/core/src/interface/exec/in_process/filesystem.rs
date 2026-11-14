@@ -181,6 +181,16 @@ impl FileSystem for InMemoryFileSystem {
         Err(missing(path))
     }
 
+    async fn remove_file(&self, path: &Path) -> Result<(), ExecError> {
+        let p = crate::path::normalize_lexically(path);
+        self.files
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&p)
+            .map(|_| ())
+            .ok_or_else(|| missing(path))
+    }
+
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), ExecError> {
         let (from_n, to_n) = (
             crate::path::normalize_lexically(from),

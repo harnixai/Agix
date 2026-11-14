@@ -100,7 +100,8 @@ impl Delegator {
         .agent_depth(depth)
         .memory_extraction(extracts_memories)
         .permission(relay.permission)
-        .elicitation(relay.elicitation);
+        .elicitation(relay.elicitation)
+        .checkpoints(self.delegate_checkpoints(spec, depth));
         if let Some(schema) = &spec.output_schema {
             builder = builder.output_schema(schema.clone());
         }
@@ -142,6 +143,20 @@ impl Delegator {
             history_store,
             under_hook,
         })
+    }
+
+    /// The root session's checkpoints, signed with this delegate's name.
+    fn delegate_checkpoints(
+        &self,
+        spec: &Spec,
+        depth: u32,
+    ) -> Option<Arc<runtime::checkpoint::Checkpoints>> {
+        let seat = runtime::checkpoint::DelegateSeat {
+            session_id: spec.session_id.clone(),
+            parent_tool_use_id: spec.called_from.as_ref().map(|c| c.tool_use_id.clone()),
+            depth,
+        };
+        Some(self.env.checkpoints.as_ref()?.for_delegate(seat))
     }
 
     /// Build a one-shot delegate, run its turn between `SubagentStart` and

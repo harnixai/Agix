@@ -119,6 +119,10 @@ const OWN: &[(&str, &str)] = &[
         "off for a one-shot delegate dropped as its turn returns",
     ),
     ("agent_depth", "its parent's plus one"),
+    (
+        "checkpoints",
+        "the root session's, signed with the delegate's name",
+    ),
     ("team_seat", "the team and name it works under"),
 ];
 

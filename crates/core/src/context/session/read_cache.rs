@@ -106,6 +106,25 @@ impl ReadCache {
         })
     }
 
+    pub(super) fn forget(&self, paths: Option<&[PathBuf]>) {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = self.last_path.lock().unwrap_or_else(|e| e.into_inner());
+        match paths {
+            None => {
+                entries.clear();
+                *last = None;
+            }
+            Some(paths) => {
+                for path in paths {
+                    entries.remove(path);
+                    if last.as_deref() == Some(path.as_path()) {
+                        *last = None;
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn is_consecutive(&self, path: &Path) -> bool {
         let last = self.last_path.lock().unwrap_or_else(|e| e.into_inner());
         last.as_ref().is_some_and(|p| p == path)

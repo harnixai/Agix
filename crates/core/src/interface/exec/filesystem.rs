@@ -56,6 +56,15 @@ pub trait FileSystem: Send + Sync {
         )))
     }
 
+    /// Remove the file at `path` — a symlink itself, never what it points
+    /// at. Provided, for a provider that cannot: it fails and removes nothing.
+    async fn remove_file(&self, path: &Path) -> Result<(), ExecError> {
+        Err(ExecError::failed(format!(
+            "{}: this filesystem does not remove files",
+            path.display()
+        )))
+    }
+
     /// What most callers actually want. Provided, so an implementor writes
     /// `read` and gets this.
     async fn read_to_string(&self, path: &Path) -> Result<String, ExecError> {

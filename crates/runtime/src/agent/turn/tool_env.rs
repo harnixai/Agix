@@ -265,6 +265,7 @@ impl Agent {
             caller: Caller::Model,
             events: Some(self.channels.event_tx.clone()),
             turn: Arc::clone(&self.turn.scope),
+            checkpoints: self.tooling.checkpoints().cloned(),
         }
     }
 
