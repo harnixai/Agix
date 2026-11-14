@@ -264,7 +264,7 @@ fn every_stream_event_is_documented_and_every_documented_one_is_sent() {
 /// Whether this test file talks to a running daemon at all.
 ///
 /// The check runs in the sound direction only: a file containing none of
-/// these — the assembly, a raw socket, the typed client, the scenario harness
+/// these — the assembly or the support starters over it, a raw socket, the typed client, the scenario harness
 /// — cannot have sent anything, whatever names it contains. A file that
 /// matches one still might not, and that is fine; the floor is meant to
 /// exclude `rpc_smoke.rs`, whose own header says "pure data tests; no real
@@ -276,6 +276,8 @@ fn starts_a_daemon(src: &str) -> bool {
         "DaemonRpcClient::connect",
         "blackbox::",
         "serve_unix",
+        "start_server",
+        "start_scripted_server",
     ];
     MARKERS.iter().any(|marker| src.contains(marker))
 }

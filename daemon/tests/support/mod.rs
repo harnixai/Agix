@@ -8,12 +8,14 @@ use std::time::Duration;
 
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
-use model::client::{AnthropicClient, CountFuture, EventStream};
+use model::client::{AnthropicClient, AuthMode, CountFuture, EventStream, HttpAnthropicClient};
 use model::stream::{
     BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage as WireUsage,
 };
 use model::types::MessagesRequest;
 use settings::Settings;
+#[cfg(feature = "plugin-packages")]
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
@@ -711,4 +713,249 @@ pub async fn permit(sock: &std::path::Path, sid: &str, prompt_id: &str) {
 pub fn transcript_dir(global_root: &Path, project: Option<&Path>) -> PathBuf {
     let canonical = project.map(|p| std::fs::canonicalize(p).unwrap());
     history::path::project_dir_for(&global_root.join("projects"), canonical.as_deref())
+}
+
+/// Build a zip archive (in memory) around one `plugin.toml`, write it to
+/// `dir`, and return `(archive_path, sha256_hex)`.
+#[cfg(feature = "plugin-packages")]
+pub fn build_plugin_zip(
+    dir: &std::path::Path,
+    plugin_name: &str,
+    manifest: &str,
+) -> (PathBuf, String) {
+    let mut buf = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+        writer.start_file("plugin.toml", opts).unwrap();
+        use std::io::Write;
+        write!(writer, "{manifest}").unwrap();
+        writer.finish().unwrap();
+    }
+    let archive_path = dir.join(format!("{plugin_name}.zip"));
+    std::fs::write(&archive_path, &buf).unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(&buf);
+    let checksum = hex::encode(hasher.finalize());
+    (archive_path, checksum)
+}
+
+/// A minimal package that declares nothing.
+#[cfg(feature = "plugin-packages")]
+pub fn build_demo_plugin_zip(dir: &std::path::Path, plugin_name: &str) -> (PathBuf, String) {
+    build_plugin_zip(
+        dir,
+        plugin_name,
+        &format!(
+            "[plugin]\nname = \"{plugin_name}\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\ndescription = \"demo plugin\"\n"
+        ),
+    )
+}
+
+/// Always-allow permission for tests.
+pub struct AllowAllPermission;
+
+#[async_trait::async_trait]
+impl base::interface::permission::PermissionPolicy for AllowAllPermission {
+    async fn decide(
+        &self,
+        _req: &base::interface::permission::PermissionRequest<'_>,
+    ) -> base::interface::permission::PermissionOutcome {
+        base::interface::permission::PermissionOutcome::Permit {
+            basis: base::interface::permission::Basis::Bypass,
+            profile: Default::default(),
+            obligations: Default::default(),
+        }
+    }
+}
+
+/// Bind a test server and return (server, socket_path, _tempdir, join_handle).
+pub async fn start_server() -> (
+    Arc<DaemonServer>,
+    PathBuf,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+) {
+    start_server_in(tempfile::tempdir().unwrap()).await
+}
+
+/// Same server, but rooted at a directory the caller prepared — so a test
+/// can install a plugin before the daemon discovers it.
+pub async fn start_server_in(
+    dir: tempfile::TempDir,
+) -> (
+    Arc<DaemonServer>,
+    PathBuf,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+) {
+    start_server_serving(
+        dir,
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+    )
+    .await
+}
+
+/// Same server, serving `scene` instead of the interactive code scene.
+pub async fn start_server_serving(
+    dir: tempfile::TempDir,
+    scene: Arc<base::interface::scene::SceneSpec>,
+) -> (
+    Arc<DaemonServer>,
+    PathBuf,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+) {
+    let sock = dir.path().join("test.sock");
+    crate::support::trust_projects_under(dir.path(), dir.path());
+
+    // 使用 dummy client（不真正调 LLM）
+    let client: Arc<dyn AnthropicClient> =
+        Arc::new(HttpAnthropicClient::new(AuthMode::ApiKey("test-key".into())).unwrap());
+
+    let config = load_daemon_config(
+        "claude-sonnet-4-6",
+        2000,
+        Some(&sock),
+        "code",
+        &StaticDaemonPaths::new(dir.path().to_path_buf()),
+    );
+
+    // Through `daemon::assemble` for the same reason `main.rs` is — including
+    // the startup steps a test would otherwise have to remember one at a
+    // time, which is how "no session here has any plugin tool" hid once
+    // before. `Nowhere` keeps this file's long-standing shape: these cases
+    // are about the RPC surface, not about transcripts.
+    let pool = daemon::assemble::pool(
+        &config,
+        scene,
+        daemon::Assembly {
+            cwd: Some(dir.path().to_path_buf()),
+            model_client: Some(client),
+            transcripts: daemon::Transcripts::Nowhere,
+            host_policy: Some(Arc::new(AllowAllPermission)),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the daemon assembles");
+
+    let cancel = CancellationToken::new();
+    let server = Arc::new(DaemonServer::new(pool, cancel));
+    let server2 = server.clone();
+    let sock2 = sock.clone();
+    let handle = tokio::spawn(async move {
+        let _ = server2.serve_unix(&sock2).await;
+    });
+
+    for _ in 0..20 {
+        if sock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(sock.exists(), "socket never bound");
+    (server, sock, dir, handle)
+}
+
+pub async fn rpc_call(sock: &std::path::Path, msg: &str) -> String {
+    let mut client = UnixStream::connect(sock).await.unwrap();
+    client.write_all(msg.as_bytes()).await.unwrap();
+    client.write_all(b"\n").await.unwrap();
+    let (r, _) = client.split();
+    let mut br = BufReader::new(r);
+    // A turn streams `session.event` frames ahead of its response.
+    loop {
+        let mut buf = String::new();
+        br.read_line(&mut buf).await.unwrap();
+        let is_frame = serde_json::from_str::<serde_json::Value>(&buf)
+            .is_ok_and(|v| v["method"] == "session.event");
+        if !is_frame {
+            return buf;
+        }
+    }
+}
+
+// A malformed session id reaches `SessionPool::resume_or_create`'s parsing
+// only when a real `HistoryStore` is configured; `start_server()` uses
+// `history_store: None`, so these tests need their own server variant.
+
+pub async fn start_server_with_history(
+    cap: usize,
+) -> (
+    Arc<DaemonServer>,
+    PathBuf,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("test.sock");
+
+    let client: Arc<dyn AnthropicClient> =
+        Arc::new(HttpAnthropicClient::new(AuthMode::ApiKey("test-key".into())).unwrap());
+
+    let store: Arc<dyn history::store::HistoryStore> = Arc::new(
+        history::store::JsonlHistoryStore::with_roots(
+            dir.path(),
+            history::path::HistoryRoots::under(dir.path()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let mut config = load_daemon_config(
+        "claude-sonnet-4-6",
+        2000,
+        None,
+        "code",
+        &StaticDaemonPaths::new(dir.path().to_path_buf()),
+    );
+    config.session_cap = cap;
+
+    let pool = daemon::assemble::pool(
+        &config,
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+        daemon::Assembly {
+            cwd: Some(dir.path().to_path_buf()),
+            model_client: Some(client),
+            transcripts: daemon::Transcripts::In(store),
+            host_policy: Some(Arc::new(AllowAllPermission)),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the daemon assembles");
+
+    let cancel = CancellationToken::new();
+    let server = Arc::new(DaemonServer::new(pool, cancel));
+    let server2 = server.clone();
+    let sock2 = sock.clone();
+    let handle = tokio::spawn(async move {
+        let _ = server2.serve_unix(&sock2).await;
+    });
+
+    for _ in 0..20 {
+        if sock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(sock.exists(), "socket never bound");
+    (server, sock, dir, handle)
+}
+
+/// Allow `tools` (rule patterns such as `Bash` or `Bash(touch:*)`) the way a
+/// settings file would, for cases that run tools but are not about the gate.
+pub fn allow_tools(config: &mut daemon::config::DaemonConfig, tools: &[&str]) {
+    config.settings.rules.extend(tools.iter().map(|tool| {
+        base::permission::LoadedRule::new(
+            base::permission::PermissionRuleEntry {
+                tool: (*tool).into(),
+                action: base::permission::RuleBehavior::Allow,
+                matching: Default::default(),
+            },
+            base::interface::config_source::Tier::Project,
+            false,
+        )
+    }));
 }
