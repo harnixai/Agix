@@ -1,9 +1,16 @@
-//! YAML frontmatter parsing for SKILL.md files.
+//! The markdown instruction files the engine reads: `SKILL.md` frontmatter,
+//! `AGENTS.md` collected from the working directory upward, and output styles.
+
+mod agents_md;
+mod output_style;
+
+pub use agents_md::collect_agents_md;
+pub use output_style::load_output_style;
 
 use std::path::Path;
 
-use crate::skill::{SkillEntry, SkillSource};
-use crate::text::frontmatter::{first_paragraph, parse_yaml_list, split_frontmatter, strip_quotes};
+use base::skill::{SkillEntry, SkillSource};
+use base::text::frontmatter::{first_paragraph, parse_yaml_list, split_frontmatter, strip_quotes};
 
 /// The frontmatter keys [`parse_skill_file`] reads, aliases included. Kept
 /// beside its `match` so the two change together: a checker that refuses

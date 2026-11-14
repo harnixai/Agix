@@ -83,7 +83,7 @@ pub struct PathSettings {
     pub workspace: Workspace,
     /// Which product instance's user-level state `user_data_dir` was built
     /// for (see `base::paths::ConfigPaths`). Carried alongside the resolved
-    /// dirs so downstream code (e.g. `FrozenContext::collect`) doesn't have
+    /// dirs so downstream code (e.g. `FrozenContext::collect_environment`) doesn't have
     /// to re-derive it from the path.
     #[serde(default = "default_scope")]
     pub scope: String,

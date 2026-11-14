@@ -1,16 +1,11 @@
-//! Memory file management, cross-session memory search, and AGIX.md loading/migration.
+//! `AGENTS.md` collection: the instruction files from the working directory up.
 
+use base::frozen::MemoryFileEntry;
+use base::paths::PromptFiles;
 use std::path::{Path, PathBuf};
 
-/// AGIX.md total length cap.
-const MAX_CLAUDE_MD_CHARS: usize = 20_000;
-
-/// 一段 AGIX.md 文件（路径 + 内容）。多条按"远到近"顺序排列。
-#[derive(Debug, Clone)]
-pub struct MemoryFileEntry {
-    pub path: PathBuf,
-    pub content: String,
-}
+/// AGENTS.md total length cap.
+const MAX_AGENTS_MD_CHARS: usize = 20_000;
 
 /// 简版 AGENTS.md 加载：从 cwd 向上找到 git root（或 $HOME），每一层看
 /// `AGENTS.md`。顺序：repo root -> 子目录 -> cwd（远到近）。去重 by canonical path。
@@ -20,10 +15,10 @@ pub struct MemoryFileEntry {
 /// 子目录想隔离父级上下文用。
 ///
 /// `AGENTS.md` 是唯一权威指令文件，**不读** `.agix/AGIX.md`。
-pub(crate) async fn collect_memory_files_with(
+pub async fn collect_agents_md(
     cwd: &Path,
     do_walk_up: bool,
-    files: &crate::paths::PromptFiles,
+    files: &PromptFiles,
 ) -> Vec<MemoryFileEntry> {
     let mut visited = std::collections::HashSet::new();
     let mut walk_up: Vec<PathBuf> = Vec::new();
@@ -70,7 +65,7 @@ pub(crate) async fn collect_memory_files_with(
         }
         let block_len = content.len();
         // 总长达上限 -> 不再 push 后续段；保最近的（向后截留更近的内容）
-        if total_len + block_len > MAX_CLAUDE_MD_CHARS {
+        if total_len + block_len > MAX_AGENTS_MD_CHARS {
             break;
         }
         total_len += block_len;
@@ -103,16 +98,14 @@ mod tests {
             .unwrap();
 
         // walk_up = true（默认）-- parent 应该出现
-        let with_walk =
-            collect_memory_files_with(&child, true, &crate::paths::PromptFiles::unscoped()).await;
+        let with_walk = collect_agents_md(&child, true, &PromptFiles::unscoped()).await;
         assert!(with_walk
             .iter()
             .any(|e| e.content.contains("PARENT-MONOREPO")));
         assert!(with_walk.iter().any(|e| e.content.contains("CHILD-LOCAL")));
 
         // walk_up = false -- 只 child
-        let no_walk =
-            collect_memory_files_with(&child, false, &crate::paths::PromptFiles::unscoped()).await;
+        let no_walk = collect_agents_md(&child, false, &PromptFiles::unscoped()).await;
         assert!(!no_walk
             .iter()
             .any(|e| e.content.contains("PARENT-MONOREPO")));

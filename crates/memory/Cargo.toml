@@ -1,0 +1,29 @@
+[package]
+name = "memory"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+publish      = false
+description  = "Agix — file-based durable memory: store, secret scan, prompt, LLM selection"
+
+[dependencies]
+base        = { workspace = true }
+serde_json  = { workspace = true }
+regex       = { workspace = true }
+futures     = { workspace = true }
+async-trait = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio    = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = { workspace = true }
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

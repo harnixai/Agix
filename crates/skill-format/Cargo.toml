@@ -1,0 +1,19 @@
+[package]
+name = "skill-format"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+publish      = false
+description  = "Agix — markdown instruction files the engine reads: SKILL.md, AGENTS.md, output styles"
+
+[dependencies]
+base  = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

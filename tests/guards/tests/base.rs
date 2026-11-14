@@ -39,7 +39,6 @@ const BASE_MAY_DEPEND_ON: &[(&str, &str)] = &[
     ("tracing", "logging"),
     ("uuid", "ids"),
     ("time", "the environment's clock and dates"),
-    ("regex", "memory and skill parsing"),
     ("globset", "project_trust patterns and URL rules"),
     ("bs58", "ids"),
     ("url", "URL rules and the public-suffix check"),

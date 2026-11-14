@@ -26,7 +26,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "settings",
  "skills",
  "team",
  "telemetry",
@@ -105,9 +104,9 @@ dependencies = [
  "hex",
  "history",
  "hooks",
- "jsonschema",
  "libc",
  "mcp",
+ "memory",
  "model",
  "notify",
  "opentelemetry",
@@ -125,7 +124,6 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
- "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -278,8 +276,8 @@ dependencies = [
  "bs58",
  "futures",
  "globset",
+ "jsonschema",
  "libc",
- "regex",
  "schemars",
  "serde",
  "serde_json",
@@ -603,7 +601,6 @@ dependencies = [
  "schemars",
  "script-host",
  "serde_json",
- "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -1765,7 +1762,6 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
- "settings",
  "tempfile",
  "test-runner",
  "tokio",
@@ -1848,7 +1844,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "settings",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
@@ -1893,6 +1888,22 @@ name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
+
+[[package]]
+name = "memory"
+version = "0.3.12-2026111402"
+dependencies = [
+ "async-trait",
+ "base",
+ "futures",
+ "libc",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "micromap"
@@ -2273,7 +2284,6 @@ dependencies = [
  "base",
  "globset",
  "serde_json",
- "settings",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2406,6 +2416,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "skill-format",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2867,6 +2878,7 @@ dependencies = [
  "futures",
  "history",
  "hooks",
+ "memory",
  "model",
  "permissions",
  "platform",
@@ -2876,7 +2888,7 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
- "settings",
+ "skill-format",
  "telemetry",
  "tempfile",
  "thiserror 2.0.18",
@@ -3203,22 +3215,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "settings"
-version = "0.3.12-2026111402"
-dependencies = [
- "base",
- "globset",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3338,6 +3334,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
+name = "skill-format"
+version = "0.3.12-2026111402"
+dependencies = [
+ "base",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "skills"
 version = "0.3.12-2026111402"
 dependencies = [
@@ -3351,7 +3356,7 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
- "settings",
+ "skill-format",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -3529,6 +3534,7 @@ dependencies = [
  "async-trait",
  "base",
  "futures",
+ "memory",
  "platform",
  "schemars",
  "serde",
@@ -3600,15 +3606,14 @@ dependencies = [
  "history",
  "hooks",
  "mcp",
+ "memory",
  "permissions",
  "platform",
  "runtime",
  "scene",
- "schemars",
  "script-host",
  "serde",
  "serde_json",
- "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -3896,7 +3901,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "settings",
  "similar",
  "tempfile",
  "thiserror 2.0.18",

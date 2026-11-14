@@ -342,10 +342,8 @@ mod tests {
     use super::*;
     use crate::interface::instruction_provider::RuleProvider;
     use crate::interface::scene::{FixedPrompt, TokenBudget};
-    use crate::memory::{memory_prompt, MemoryStore};
     use crate::paths::PathSettings;
     use std::borrow::Cow;
-    use tempfile::TempDir;
 
     #[derive(Clone)]
     struct TestSettings {
@@ -414,18 +412,17 @@ mod tests {
         registry: &dyn crate::interface::prompt_registry::PromptRegistry,
         scene: &SceneSpec,
         settings: &TestSettings,
-        store: &MemoryStore,
         ctx: &ScenePromptContext,
         rules: &[crate::rules::RuleEntry],
         (skills_text, mcp_instructions): (Option<&str>, Option<&str>),
     ) -> Vec<PromptBlock> {
-        let memory = settings.memory_enabled.then(|| memory_prompt(store));
+        let memory = settings.memory_enabled.then_some("memory instructions");
         assemble_prompt_with(&AssemblyRequest {
             registry,
             scene,
             prompt_override: settings.prompt_override.as_deref(),
             prompt_append: settings.prompt_append.as_deref(),
-            memory_prompt: memory.as_deref(),
+            memory_prompt: memory,
             ctx,
             rules,
             skills_text,
@@ -436,7 +433,6 @@ mod tests {
     fn assemble_prompt(
         scene: &SceneSpec,
         settings: &TestLoaded,
-        store: &MemoryStore,
         ctx: &ScenePromptContext,
         skills_text: Option<&str>,
         mcp_instructions: Option<&str>,
@@ -445,7 +441,6 @@ mod tests {
             &crate::interface::prompt_registry::NoRegistrations,
             scene,
             &settings.values,
-            store,
             ctx,
             &crate::rules::RuleTiers::for_paths(&settings.paths).rules(),
             (skills_text, mcp_instructions),
@@ -464,8 +459,6 @@ mod tests {
     fn assemble_basic_prompt() {
         let scene = test_scene();
         let settings = test_settings();
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let ctx = ScenePromptContext {
             cwd: Cow::Borrowed("/tmp"),
             os: Cow::Borrowed("linux"),
@@ -488,7 +481,7 @@ mod tests {
             tool_results_ever_cleared: false,
         };
 
-        let blocks = assemble_prompt(&scene, &test_loaded(settings), &store, &ctx, None, None);
+        let blocks = assemble_prompt(&scene, &test_loaded(settings), &ctx, None, None);
         assert!(!blocks.is_empty());
         assert_eq!(blocks[0].role, BlockRole::System);
     }
@@ -498,8 +491,6 @@ mod tests {
         let scene = test_scene();
         let mut settings = test_settings();
         settings.prompt_override = Some("OVERRIDE".into());
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let ctx = ScenePromptContext {
             cwd: Cow::Borrowed("/tmp"),
             os: Cow::Borrowed("linux"),
@@ -522,7 +513,7 @@ mod tests {
             tool_results_ever_cleared: false,
         };
 
-        let blocks = assemble_prompt(&scene, &test_loaded(settings), &store, &ctx, None, None);
+        let blocks = assemble_prompt(&scene, &test_loaded(settings), &ctx, None, None);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].content, "OVERRIDE");
     }
@@ -550,14 +541,11 @@ mod tests {
         let mut settings = test_settings();
         settings.prompt_append = Some("appended".into());
         settings.memory_enabled = true;
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let ctx = test_ctx();
 
         let blocks = assemble_prompt(
             &scene,
             &test_loaded(settings),
-            &store,
             &ctx,
             Some("skills inventory"),
             Some("mcp says hello"),
@@ -604,12 +592,9 @@ mod tests {
         ]);
 
         let settings = test_settings();
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let blocks = assemble_prompt(
             &three_sections,
             &test_loaded(settings),
-            &store,
             &test_ctx(),
             None,
             None,
@@ -636,16 +621,7 @@ mod tests {
         ]);
 
         let settings = test_settings();
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
-        let blocks = assemble_prompt(
-            &sectioned,
-            &test_loaded(settings),
-            &store,
-            &test_ctx(),
-            None,
-            None,
-        );
+        let blocks = assemble_prompt(&sectioned, &test_loaded(settings), &test_ctx(), None, None);
 
         assert_eq!(blocks[0].name.as_deref(), Some("scene.identity"));
         assert_eq!(blocks[1].name.as_deref(), Some("scene.tools"));
@@ -661,14 +637,11 @@ mod tests {
         let scene = test_scene();
         let mut settings = test_settings();
         settings.prompt_append = Some("appended".into());
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let ctx = test_ctx();
 
         let direct = assemble_prompt(
             &scene,
             &test_loaded(settings.clone()),
-            &store,
             &ctx,
             Some("skills"),
             Some("mcp"),
@@ -677,7 +650,6 @@ mod tests {
             &NoRegistrations,
             &scene,
             &settings,
-            &store,
             &ctx,
             &[],
             (Some("skills"), Some("mcp")),
@@ -693,8 +665,6 @@ mod tests {
 
         let scene = test_scene();
         let settings = test_settings();
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let ctx = test_ctx();
         let registry = InMemoryPromptRegistry::new();
 
@@ -709,7 +679,6 @@ mod tests {
             registry.as_ref(),
             &scene,
             &settings,
-            &store,
             &ctx,
             &[],
             (Some("skills inventory"), None),
@@ -733,7 +702,6 @@ mod tests {
             registry.as_ref(),
             &scene,
             &settings,
-            &store,
             &ctx,
             &[],
             (Some("skills inventory"), None),
@@ -753,13 +721,10 @@ mod tests {
             50,
             std::sync::Arc::new(|_: &ScenePromptContext<'_>| None),
         );
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let blocks = assemble_for_test(
             registry.as_ref(),
             &test_scene(),
             &test_settings(),
-            &store,
             &test_ctx(),
             &[],
             (None, None),
@@ -786,13 +751,10 @@ mod tests {
             }),
         );
 
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let blocks = assemble_for_test(
             registry.as_ref(),
             &test_scene(),
             &test_settings(),
-            &store,
             &test_ctx(),
             &[],
             (None, None),
@@ -834,13 +796,10 @@ mod tests {
             Authority::plugin("example", AssemblyCapabilities::default()),
         );
 
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let blocks = assemble_for_test(
             registry.as_ref(),
             &test_scene(),
             &test_settings(),
-            &store,
             &test_ctx(),
             &[],
             (Some("skills inventory"), None),
@@ -880,13 +839,10 @@ mod tests {
             Authority::local(BlockOrigin::Script("./.agix/scripts/prompt.js".into())),
         );
 
-        let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path().join("user"), tmp.path().join("local"));
         let blocks = assemble_for_test(
             registry.as_ref(),
             &test_scene(),
             &test_settings(),
-            &store,
             &test_ctx(),
             &[],
             (Some("skills inventory"), None),

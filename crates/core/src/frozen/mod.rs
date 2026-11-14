@@ -5,19 +5,19 @@
 //! related field. **Not refreshed during a session** —
 //! mid-session git commits are not updated.
 
-pub mod frontmatter;
-pub mod memory;
-pub mod utils;
-
-pub use self::memory::MemoryFileEntry;
-
-use self::memory::collect_memory_files_with;
 use crate::engine_exec::{read_head, EngineExec, EngineExecError, GitAccess};
 use crate::paths::ConfigPaths;
 use crate::text::truncate_chars;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use time::format_description::well_known::Iso8601;
+
+/// 一段 AGENTS.md 文件（路径 + 内容）。多条按"远到近"顺序排列。
+#[derive(Debug, Clone)]
+pub struct MemoryFileEntry {
+    pub path: PathBuf,
+    pub content: String,
+}
 
 /// Git status output character limit.
 const MAX_GIT_STATUS_CHARS: usize = 2000;
@@ -105,8 +105,7 @@ impl CollectOptions {
 
 /// The git-derived subset of `FrozenContext` — factored out so
 /// `FrozenContext::refresh_git` can re-run just this part instead of the
-/// full `collect_with_options` (which also does memory/skills/output-style
-/// I/O that a git-status refresh has no business repeating).
+/// whole `collect_environment`, which also reads the platform and the date.
 struct GitFields {
     is_git: bool,
     is_worktree: bool,
@@ -296,71 +295,22 @@ async fn collect_git_fields(engine_git: &EngineExec, cwd: &Path) -> GitFields {
 }
 
 impl FrozenContext {
-    /// 收集环境快照。所有 IO 错误都吞掉转 None / 默认值；这个函数不该 panic、
-    /// 不该 fail -- 让上层 build_system_prompt 总能拿到一份合理的快照。
-    ///
-    /// `paths` 是这个实例的根目录集合——引擎层不去环境里找，调用方（daemon）
-    /// 决定这个实例的状态放在哪。`engine_git` 是这个会话起 git 的途径。
-    pub async fn collect(
+    /// 收集环境快照里不依赖指令文件、记忆库的那部分：git、平台、home、日期、
+    /// 邮箱、记忆目录。AGENTS.md、记忆索引、output style 由 runtime 填。
+    /// 所有 IO 错误都吞掉转 None / 默认值；这个函数不该 panic、不该 fail。
+    pub async fn collect_environment(
         cwd: PathBuf,
+        opts: &CollectOptions,
         paths: &ConfigPaths,
         environment: &dyn crate::interface::environment::Environment,
         engine_git: &EngineExec,
     ) -> Self {
-        Self::collect_with_options(
-            cwd,
-            CollectOptions::defaults(),
-            paths,
-            environment,
-            engine_git,
-        )
-        .await
-    }
-
-    /// [`collect`](Self::collect) for a session without a project: `cwd` is
-    /// the session's own scratch directory, not a project, so nothing is
-    /// looked up from it — no git, no `AGENTS.md`, no project skills.
-    pub async fn collect_without_project(
-        cwd: PathBuf,
-        paths: &ConfigPaths,
-        environment: &dyn crate::interface::environment::Environment,
-        engine_git: &EngineExec,
-    ) -> Self {
-        Self::collect_with_options(
-            cwd,
-            CollectOptions {
-                outside_project: true,
-                ..CollectOptions::defaults()
-            },
-            paths,
-            environment,
-            engine_git,
-        )
-        .await
-    }
-
-    /// 带 options 的收集 -- `` 加 `walk_up_claude_md` 控制 monorepo 父级
-    /// 上下文是否进 system prompt。
-    pub async fn collect_with_options(
-        cwd: PathBuf,
-        opts: CollectOptions,
-        paths: &ConfigPaths,
-        environment: &dyn crate::interface::environment::Environment,
-        engine_git: &EngineExec,
-    ) -> Self {
-        let cwd_clone = cwd.clone();
-
-        // git 相关命令并发跑，每条独立超时 — 同一段逻辑也被 `refresh_git` 复用
-        // （见下），所以拆成了独立的 `collect_git_fields`。
         let project = (!opts.outside_project).then_some(cwd.as_path());
         let git = match project {
             Some(project) => collect_git_fields(engine_git, project).await,
             None => GitFields::none(),
         };
-        let is_git = git.is_git;
-        let is_worktree = git.is_worktree;
 
-        let platform = std::env::consts::OS.to_string();
         let (home_dir, shell) = home_and_shell();
 
         let today = environment
@@ -368,61 +318,30 @@ impl FrozenContext {
             .format(&Iso8601::DATE)
             .unwrap_or_else(|_| "unknown".to_string());
 
-        // user email 仅在已是 git repo 时尝试 git config
-        let user_email = if is_git {
-            run_git_text(engine_git, &cwd_clone, &["config", "user.email"]).await
+        let user_email = if git.is_git {
+            run_git_text(engine_git, &cwd, &["config", "user.email"]).await
         } else {
             None
         };
 
-        let prompt_files = crate::paths::PromptFiles::for_project(paths);
-        let memory_blocks = match project {
-            Some(project) => {
-                collect_memory_files_with(project, opts.walk_up_claude_md, &prompt_files).await
-            }
-            None => Vec::new(),
-        };
-        let memory_dir = paths.global_memory_dir();
-        let memory_index = load_memory_index(paths).await;
-
-        // Output style -- load by name from project then user dir.
-        let output_style = match opts.output_style.as_deref() {
-            Some(name) if !name.trim().is_empty() => {
-                collect_output_style(project, name, paths, &prompt_files).await
-            }
-            _ => None,
-        };
-
         Self {
-            cwd,
-            is_git,
-            is_worktree,
+            is_git: git.is_git,
+            is_worktree: git.is_worktree,
             git_branch: git.git_branch,
             git_main_branch: git.git_main_branch,
             git_user_name: git.git_user_name,
             git_status: git.git_status,
             git_log: git.git_log,
-            platform,
+            platform: std::env::consts::OS.to_string(),
             shell,
             home_dir,
             today,
-            memory_blocks,
             user_email,
-            memory_dir,
-            memory_index,
-            already_surfaced: std::collections::HashSet::new(),
-            output_style,
+            memory_dir: paths.global_memory_dir(),
+            cwd,
+            ..Self::default()
         }
     }
-}
-
-async fn load_memory_index(paths: &ConfigPaths) -> Option<String> {
-    let paths = paths.clone();
-    tokio::task::spawn_blocking(move || crate::memory::MemoryStore::for_paths(&paths).load_index())
-        .await
-        .ok()
-        .filter(|index| !index.trim().is_empty())
-        .map(|index| utils::truncate_memory_entrypoint(&index))
 }
 
 impl FrozenContext {
@@ -434,7 +353,7 @@ impl FrozenContext {
     /// git-mutating command in the turn just completed (see
     /// `runtime::turn`'s caller), not on every turn: a git status/log/branch
     /// re-derivation is real subprocess I/O (bounded by the same 1.5s
-    /// per-subcommand timeout `collect_with_options` uses), not free.
+    /// per-subcommand timeout `collect_environment` uses), not free.
     pub async fn refresh_git(&mut self, engine_git: &EngineExec) {
         let git = collect_git_fields(engine_git, &self.cwd).await;
         self.is_git = git.is_git;
@@ -480,55 +399,6 @@ impl FrozenContext {
         .await
         .map(|s| truncate_chars(&s, MAX_GIT_STATUS_CHARS, "\n... (truncated)"));
     }
-}
-
-/// Load `<project>/.agix/output-styles/<name>.md` if present,
-/// else `~/.agix/scenes/<scope>/output-styles/<name>.md`. Trims whitespace and caps body
-/// at 8KB. Returns None if neither file is present or readable.
-async fn collect_output_style(
-    project: Option<&Path>,
-    name: &str,
-    paths: &ConfigPaths,
-    files: &crate::paths::PromptFiles,
-) -> Option<OutputStyle> {
-    let safe = name.trim();
-    if safe.is_empty() || safe.contains('/') || safe.contains('\\') || safe.starts_with('.') {
-        return None;
-    }
-    let project = project.map(|p| {
-        p.join(".agix")
-            .join("output-styles")
-            .join(format!("{safe}.md"))
-    });
-    if let Some(Ok(content)) = project.as_deref().map(|path| files.read_to_string(path)) {
-        if !content.trim().is_empty() {
-            return Some(OutputStyle {
-                name: safe.to_string(),
-                source: OutputStyleSource::Project,
-                content: truncate_chars(content.trim(), 8_000, "\n... (output style truncated)"),
-            });
-        }
-    }
-    {
-        let user = paths
-            .user_data_dir
-            .join("output-styles")
-            .join(format!("{safe}.md"));
-        if let Ok(content) = files.read_to_string(&user) {
-            if !content.trim().is_empty() {
-                return Some(OutputStyle {
-                    name: safe.to_string(),
-                    source: OutputStyleSource::User,
-                    content: truncate_chars(
-                        content.trim(),
-                        8_000,
-                        "\n... (output style truncated)",
-                    ),
-                });
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -579,8 +449,9 @@ mod tests {
             ),
             ..crate::interface::exec::ExecProviders::in_process()
         };
-        let ctx = FrozenContext::collect(
+        let ctx = FrozenContext::collect_environment(
             dir.path().to_path_buf(),
+            &CollectOptions::defaults(),
             &test_paths(dir.path()),
             &crate::interface::environment::SystemEnvironment,
             &EngineExec::new(exec, Default::default(), Default::default()),
@@ -613,8 +484,9 @@ mod tests {
             crate::engine_exec::Confinement::Unconfined,
             crate::permission::ProjectTrust::Untrusted,
         );
-        let mut ctx = FrozenContext::collect(
+        let mut ctx = FrozenContext::collect_environment(
             dir.path().to_path_buf(),
+            &CollectOptions::defaults(),
             &test_paths(dir.path()),
             &crate::interface::environment::SystemEnvironment,
             &engine,
@@ -631,8 +503,9 @@ mod tests {
     #[tokio::test]
     async fn collects_basic_fields_for_arbitrary_dir() {
         let dir = TempDir::new().unwrap();
-        let ctx = FrozenContext::collect(
+        let ctx = FrozenContext::collect_environment(
             dir.path().to_path_buf(),
+            &CollectOptions::defaults(),
             &test_paths(dir.path()),
             &crate::interface::environment::SystemEnvironment,
             &no_git(),
@@ -650,8 +523,9 @@ mod tests {
     #[tokio::test]
     async fn refresh_git_status_is_a_noop_outside_a_repo() {
         let dir = TempDir::new().unwrap();
-        let mut ctx = FrozenContext::collect(
+        let mut ctx = FrozenContext::collect_environment(
             dir.path().to_path_buf(),
+            &CollectOptions::defaults(),
             &test_paths(dir.path()),
             &crate::interface::environment::SystemEnvironment,
             &no_git(),
@@ -661,174 +535,5 @@ mod tests {
         ctx.refresh_git_status(&no_git()).await;
         assert!(ctx.git_status.is_none());
         assert!(ctx.git_branch.is_none());
-    }
-
-    #[tokio::test]
-    async fn the_memory_index_comes_from_the_sessions_store() {
-        let dir = TempDir::new().unwrap();
-        let paths = test_paths(dir.path());
-        crate::memory::MemoryStore::for_paths(&paths)
-            .persist_batch_scoped(vec![crate::memory::ScopedMemory {
-                memory: crate::memory::DurableMemory {
-                    name: "deploy-day".into(),
-                    description: "deploys go out on Tuesdays".into(),
-                    memory_type: crate::memory::MemoryType::Project,
-                    content: String::new(),
-                    source_session_id: String::new(),
-                    confidence: 0.9,
-                    last_seen: String::new(),
-                    recall_count: 0,
-                },
-                scope: crate::memory::MemoryScope::Local,
-            }])
-            .unwrap();
-        let ctx = FrozenContext::collect(
-            dir.path().to_path_buf(),
-            &paths,
-            &crate::interface::environment::SystemEnvironment,
-            &no_git(),
-        )
-        .await;
-        assert_eq!(ctx.memory_dir, paths.global_memory_dir());
-        assert!(ctx
-            .memory_index
-            .is_some_and(|index| index.contains("deploy-day")));
-        assert!(
-            ctx.memory_blocks.is_empty(),
-            "memories are not instructions"
-        );
-    }
-
-    #[tokio::test]
-    async fn loads_claude_md_from_cwd() {
-        let dir = TempDir::new().unwrap();
-        let p = dir.path().join("AGENTS.md");
-        tokio::fs::write(&p, "# Test instructions\nbe concise.")
-            .await
-            .unwrap();
-        let ctx = FrozenContext::collect(
-            dir.path().to_path_buf(),
-            &test_paths(dir.path()),
-            &crate::interface::environment::SystemEnvironment,
-            &no_git(),
-        )
-        .await;
-        assert_eq!(ctx.memory_blocks.len(), 1, "expected one AGENTS.md");
-        assert!(ctx.memory_blocks[0].content.contains("be concise"));
-    }
-
-    #[tokio::test]
-    async fn loads_nested_claude_md_in_walk_up_order() {
-        let dir = TempDir::new().unwrap();
-        let parent = dir.path().join("p");
-        let child = parent.join("c");
-        tokio::fs::create_dir_all(&child).await.unwrap();
-        tokio::fs::write(parent.join("AGENTS.md"), "PARENT")
-            .await
-            .unwrap();
-        tokio::fs::write(child.join("AGENTS.md"), "CHILD")
-            .await
-            .unwrap();
-
-        let ctx = FrozenContext::collect(
-            child,
-            &test_paths(dir.path()),
-            &crate::interface::environment::SystemEnvironment,
-            &no_git(),
-        )
-        .await;
-        // 应该顺序：parent 在前，child 在后（远到近）
-        assert!(ctx.memory_blocks.len() >= 2);
-        let parent_idx = ctx
-            .memory_blocks
-            .iter()
-            .position(|e| e.content == "PARENT")
-            .unwrap();
-        let child_idx = ctx
-            .memory_blocks
-            .iter()
-            .position(|e| e.content == "CHILD")
-            .unwrap();
-        assert!(parent_idx < child_idx, "parent must come before child");
-    }
-
-    #[tokio::test]
-    async fn output_style_project_takes_precedence_over_user() {
-        let home = TempDir::new().unwrap();
-        let cwd = TempDir::new().unwrap();
-        let user_dir = test_paths(home.path()).user_data_dir.join("output-styles");
-        let proj_dir = cwd.path().join(".agix/output-styles");
-        tokio::fs::create_dir_all(&user_dir).await.unwrap();
-        tokio::fs::create_dir_all(&proj_dir).await.unwrap();
-        tokio::fs::write(user_dir.join("terse.md"), "USER VERSION")
-            .await
-            .unwrap();
-        tokio::fs::write(proj_dir.join("terse.md"), "PROJECT VERSION")
-            .await
-            .unwrap();
-
-        let style = collect_output_style(
-            Some(cwd.path()),
-            "terse",
-            &test_paths(home.path()),
-            &crate::paths::PromptFiles::unscoped(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(style.name, "terse");
-        assert_eq!(style.source, OutputStyleSource::Project);
-        assert!(style.content.contains("PROJECT VERSION"));
-    }
-
-    #[tokio::test]
-    async fn output_style_falls_back_to_user_when_no_project() {
-        let home = TempDir::new().unwrap();
-        let cwd = TempDir::new().unwrap();
-        let user_dir = test_paths(home.path()).user_data_dir.join("output-styles");
-        tokio::fs::create_dir_all(&user_dir).await.unwrap();
-        tokio::fs::write(user_dir.join("verbose.md"), "explain everything")
-            .await
-            .unwrap();
-
-        let style = collect_output_style(
-            Some(cwd.path()),
-            "verbose",
-            &test_paths(home.path()),
-            &crate::paths::PromptFiles::unscoped(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(style.source, OutputStyleSource::User);
-        assert!(style.content.contains("explain everything"));
-    }
-
-    #[tokio::test]
-    async fn output_style_returns_none_for_path_traversal_attempt() {
-        let cwd = TempDir::new().unwrap();
-        // names with slashes / leading dot must not load anything
-        assert!(collect_output_style(
-            Some(cwd.path()),
-            "../etc/passwd",
-            &test_paths(cwd.path()),
-            &crate::paths::PromptFiles::unscoped()
-        )
-        .await
-        .is_none());
-        assert!(collect_output_style(
-            Some(cwd.path()),
-            ".hidden",
-            &test_paths(cwd.path()),
-            &crate::paths::PromptFiles::unscoped()
-        )
-        .await
-        .is_none());
-        assert!(collect_output_style(
-            Some(cwd.path()),
-            "",
-            &test_paths(cwd.path()),
-            &crate::paths::PromptFiles::unscoped()
-        )
-        .await
-        .is_none());
     }
 }

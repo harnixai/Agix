@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/settings",
+    "crates/memory",
+    "crates/skill-format",
     "crates/platform",
     "crates/model",
     "crates/hooks",
@@ -110,6 +112,8 @@ settings = { path = "crates/settings" }
 platform = { path = "crates/platform" }
 demo-rust-plugin = { path = "examples/plugins/rust" }
 model    = { path = "crates/model" }
+memory   = { path = "crates/memory" }
+skill-format = { path = "crates/skill-format" }
 hooks    = { path = "crates/hooks" }
 plugin   = { path = "crates/plugin" }
 script-host = { path = "crates/script-host" }

@@ -17,15 +17,15 @@
 //!
 //! # The defaults
 //!
-//! `MemoryStore` implements the storage trait over the session's memory
-//! directories, and the shipped retriever is an LLM selection call. A session
-//! that registers nothing gets those two.
+//! The `memory` crate's `MemoryStore` implements the storage trait over the
+//! session's memory directories, and its `LlmRetriever` is an LLM selection
+//! call. A session that registers nothing gets those two.
 
 use std::collections::HashSet;
 
 use async_trait::async_trait;
 
-use crate::memory::{DurableMemory, MemoryError, MemoryStore};
+use crate::memory::{DurableMemory, MemoryError};
 
 /// Where durable memories are kept.
 ///
@@ -47,24 +47,6 @@ pub trait MemoryStorage: Send + Sync {
 
     /// Forget one by name; `false` if it was not there.
     fn remove(&self, name: &str) -> Result<bool, MemoryError>;
-}
-
-impl MemoryStorage for MemoryStore {
-    fn load_all(&self) -> Vec<DurableMemory> {
-        MemoryStore::load_all(self)
-    }
-
-    fn search(&self, query: &str) -> Vec<DurableMemory> {
-        MemoryStore::search(self, query)
-    }
-
-    fn persist_batch(&self, memories: Vec<DurableMemory>) -> Result<usize, MemoryError> {
-        MemoryStore::persist_batch(self, memories)
-    }
-
-    fn remove(&self, name: &str) -> Result<bool, MemoryError> {
-        MemoryStore::remove(self, name)
-    }
 }
 
 /// Memories held in memory. The second implementation, and what a test that
@@ -149,36 +131,6 @@ pub trait MemoryRetriever: Send + Sync {
     ) -> Vec<String>;
 }
 
-/// The engine's own retriever: ask the model which memories are relevant.
-///
-/// The default because it is what the engine has always done, and it is
-/// genuinely good at the job — relevance here is a judgement about meaning,
-/// which is the thing a model is for. It costs a model call, which is why the
-/// seam exists.
-pub struct LlmRetriever;
-
-#[async_trait]
-impl MemoryRetriever for LlmRetriever {
-    async fn retrieve(
-        &self,
-        storage: &dyn MemoryStorage,
-        model: &dyn crate::interface::model::Model,
-        request: &RetrievalRequest,
-    ) -> Vec<String> {
-        crate::memory::select_memories_from(
-            &storage.load_all(),
-            &request.query,
-            model,
-            request.limit,
-            &request.already_surfaced,
-            &request.recent_tools,
-            &request.model_name,
-            request.session_id.as_deref(),
-        )
-        .await
-    }
-}
-
 /// Matches on substrings and spends nothing.
 ///
 /// The second implementation, and the one a test wants: recall that is a pure
@@ -254,15 +206,6 @@ pub async fn retrieve_with_hooks(
 pub trait ExtractionPolicy: Send + Sync {
     /// The instructions that go into the system prompt.
     fn instructions(&self, memory_dir: &std::path::Path) -> String;
-}
-
-/// The engine's own instructions.
-pub struct DefaultExtraction;
-
-impl ExtractionPolicy for DefaultExtraction {
-    fn instructions(&self, memory_dir: &std::path::Path) -> String {
-        crate::memory::build_memory_prompt(memory_dir)
-    }
 }
 
 /// Says nothing, so the model is never told to write memories down.
@@ -433,12 +376,5 @@ mod tests {
         assert_eq!(s.load_all()[0].content, "y");
         assert!(s.remove("a").unwrap());
         assert!(!s.remove("a").unwrap(), "forgetting twice is not an error");
-    }
-
-    #[test]
-    fn a_deployment_can_stop_the_model_being_told_to_write_memories() {
-        let dir = std::path::Path::new("/tmp/memories");
-        assert!(!DefaultExtraction.instructions(dir).is_empty());
-        assert!(NoExtraction.instructions(dir).is_empty());
     }
 }

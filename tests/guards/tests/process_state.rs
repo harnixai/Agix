@@ -42,7 +42,7 @@ use Kind::*;
 const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/model/src/tokens.rs", "C", Constant, "the default counter: a stateless estimator"),
     ("crates/scene/src/code.rs", "SECTION_CACHE", SharedCache, "prompt sections keyed by a fingerprint of their inputs"),
-    ("crates/core/src/memory.rs", "PATTERNS", Constant, "compiled regexes"),
+    ("crates/memory/src/secrets.rs", "PATTERNS", Constant, "compiled regexes"),
     ("crates/core/src/dir_lock.rs", "LOCKS", OsResource, "serialises the holders of a settings or memory directory within this process, which every session of every pool may share; flock covers other processes"),
     ("crates/tools/src/bash/classify/mod.rs", "SUFFIXES", Constant, "a constant table"),
     ("crates/platform/src/network.rs", "PROXIED", SharedCache, "an HTTP client; it reads the process environment's proxy, which every pool shares anyway"),

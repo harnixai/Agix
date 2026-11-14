@@ -6,7 +6,6 @@ file  crates/compaction/src/compact.rs                            -             
 file  crates/core/src/context/session.rs                          -                                      1121
 file  crates/core/src/interface/catalog.rs                        -                                      831
 file  crates/core/src/interface/tool.rs                           -                                      1037
-file  crates/core/src/memory.rs                                   -                                      1085
 file  crates/history/src/store.rs                                 -                                      1925
 file  crates/mcp/src/connect.rs                                   -                                      1328
 file  crates/mcp/src/manager.rs                                   -                                      1274
@@ -41,7 +40,7 @@ fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs   SessionPool::w
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs    mcp_status_entries                     86
 fn    crates/compaction/src/budget.rs                             enforce_tool_result_budget             81
 fn    crates/compaction/src/llm_summary.rs                        LlmSummarizer::summarize               95
-fn    crates/core/src/frozen/frontmatter.rs                       parse_skill_file                       85
+fn    crates/skill-format/src/lib.rs                              parse_skill_file                       85
 fn    crates/core/src/prompt.rs                                   assemble_prompt_with                   94
 fn    crates/core/src/provider.rs                                 resolve_task_models                    85
 fn    crates/settings/src/loaded.rs                               LoadedSettings::load_from              98
