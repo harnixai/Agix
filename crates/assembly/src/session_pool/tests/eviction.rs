@@ -3,7 +3,6 @@
 use super::*;
 use crate::session_pool::parts::live::{evict_lru, idle_session_ids, EngineSlot, Naming};
 use crate::session_pool::parts::phase::Generations;
-use model::adapter::AnthropicModel;
 use runtime::agent::InputSender;
 
 /// A `LiveSession` with no real agent behind it — only `last_active`
@@ -26,14 +25,7 @@ fn dummy_live_session(last_active: Instant) -> LiveSession {
             cancel: CancellationToken::new(),
             end_reason: Default::default(),
             exited: CancellationToken::new(),
-            namer: SessionNamer::of(
-                "dummy",
-                None,
-                &(Arc::new(AnthropicModel::new(Arc::new(
-                    model::mock::MockAnthropicClient::new(),
-                ))) as Arc<dyn base::interface::model::Model>),
-                "claude-sonnet-4-6",
-            ),
+            namer: SessionNamer::inert("dummy"),
             binding: crate::session_pool::parts::bindings::BindingStamp {
                 key: (None, String::new()),
                 epoch: 0,

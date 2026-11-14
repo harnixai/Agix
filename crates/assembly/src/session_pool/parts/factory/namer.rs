@@ -6,8 +6,9 @@ use tokio_util::sync::CancellationToken;
 /// Where a session's first-turn naming call goes: the session's own `title`
 /// route when its project has one, else its conversation model.
 ///
-/// Taken from the clients the session was built with, so a recorded session
-/// records the call and a replayed one is answered from the recording.
+/// Taken from the built agent, so the call is accounted to the session's
+/// telemetry, a recorded session records it and a replayed one is answered
+/// from the recording.
 #[derive(Clone)]
 pub(in crate::session_pool) struct SessionNamer {
     session_id: String,
@@ -16,24 +17,23 @@ pub(in crate::session_pool) struct SessionNamer {
 }
 
 impl SessionNamer {
-    pub(in crate::session_pool) fn of(
-        session_id: &str,
-        task_router: Option<&base::provider::TaskRouter>,
-        model: &Arc<dyn base::interface::model::Model>,
-        model_name: &str,
-    ) -> Self {
-        let title = base::interface::model::call_purpose::TITLE;
-        let routed = task_router.and_then(|router| {
-            Some((
-                router.model_for(title),
-                router.model_name_for(title)?.to_string(),
-            ))
-        });
-        let (model, model_name) = routed.unwrap_or_else(|| (model.clone(), model_name.to_string()));
+    pub(in crate::session_pool) fn of(session_id: &str, agent: &runtime::agent::Agent) -> Self {
+        let (model, model_name) = agent.model_for_task(base::interface::model::call_purpose::TITLE);
         Self {
             session_id: session_id.to_string(),
             model,
             model_name,
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::session_pool) fn inert(session_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            model: Arc::new(model::adapter::AnthropicModel::new(Arc::new(
+                model::mock::MockAnthropicClient::new(),
+            ))),
+            model_name: "claude-sonnet-4-6".to_string(),
         }
     }
 

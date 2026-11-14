@@ -157,12 +157,6 @@ impl EngineFactory {
         let (model, task_router, model_name, clock) = models(session_id, binding, spec)?;
         let settings_snapshot =
             self.snapshot(&binding.settings, options, model_name.as_ref(), session_id);
-        let namer = SessionNamer::of(
-            session_id,
-            task_router.as_deref(),
-            &model,
-            &settings_snapshot.values.model.model_name,
-        );
         let permission =
             resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot, options);
 
@@ -232,6 +226,7 @@ impl EngineFactory {
             .goal_rounds_from_owner()
             .build()
             .map_err(|e| format!("build agent: {e}"))?;
+        let namer = SessionNamer::of(session_id, &agent);
         Ok(BuiltEngine {
             agent,
             event_rx,

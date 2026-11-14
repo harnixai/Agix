@@ -22,7 +22,7 @@
 //! built with. A model fetched from somewhere else — the task router hands
 //! out pool-level ones, shared and built before any session existed — is
 //! outside that wrapping and has to be wrapped by whoever fetched it. There
-//! is one such fetcher, `runtime::turn::Turn::accounted`.
+//! is one such fetcher, `runtime::agent::Agent::model_for_task`.
 
 use std::sync::Arc;
 use std::time::Instant;

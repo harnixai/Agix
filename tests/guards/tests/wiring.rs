@@ -338,3 +338,75 @@ fn a_fire_call_is_told_from_a_question_about_the_event() {
         ]
     );
 }
+
+/// File, why a `model_for(..)` result there needs no wrapping of its own.
+const UNWRAPPED_MODEL_FOR: &[(&str, &str)] = &[
+    (
+        "crates/agents/src/agent_tool/resolve.rs",
+        "handed to the child session's `Builder::model`, which `build()` wraps",
+    ),
+    (
+        "crates/assembly/src/session_pool/parts/bindings/binding.rs",
+        "the session's main model, handed to `Builder::model`, which `build()` wraps",
+    ),
+];
+
+#[derive(Default)]
+struct ModelForLines(Vec<usize>);
+
+impl<'ast> Visit<'ast> for ModelForLines {
+    fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        if m.method == "model_for" {
+            self.0.push(m.method.span().start().line);
+        }
+        syn::visit::visit_expr_method_call(self, m);
+    }
+}
+
+fn is_accounting_call(c: &Call) -> bool {
+    match &c.callee {
+        Callee::Method(m) => m == "accounted",
+        Callee::Path(p) => {
+            p.last().is_some_and(|s| s == "accounted")
+                || matches!(p.as_slice(), [.., t, n] if t == "TelemetryModel" && n == "new")
+        }
+    }
+}
+
+/// WIR-4: a model fetched from the task router is outside the wrapping
+/// `build()` gives the session's own, so whoever fetches one counts its calls.
+#[test]
+fn a_model_from_the_task_router_is_accounted_where_it_is_fetched() {
+    let mut found = Vec::new();
+    let mut fetched = 0;
+    for f in ws().production().filter(not_test_support) {
+        let calls = scan::calls(f, View::Prod);
+        let mut wrapped = BTreeSet::new();
+        for c in calls.iter().filter(|c| is_accounting_call(c)) {
+            let mut lines = ModelForLines::default();
+            for arg in &c.args {
+                lines.visit_expr(arg);
+            }
+            wrapped.extend(lines.0);
+        }
+        for c in &calls {
+            if matches!(&c.callee, Callee::Method(m) if m == "model_for") {
+                fetched += 1;
+                if !wrapped.contains(&c.hit.line) {
+                    found.push(Finding {
+                        key: c.hit.file.clone(),
+                        hit: c.hit.clone(),
+                    });
+                }
+            }
+        }
+    }
+    allow::non_vacuous("wiring::model_for", fetched, 5);
+    allow::check(
+        "wiring::UNWRAPPED_MODEL_FOR",
+        found,
+        UNWRAPPED_MODEL_FOR,
+        "wrap the model in `TelemetryModel::new`, or fetch it through \
+         `Agent::model_for_task`; list the file only when `Builder::model` wraps it",
+    );
+}

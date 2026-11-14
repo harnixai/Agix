@@ -298,11 +298,9 @@ impl Agent {
     }
 
     /// The model a background `task` is routed to, and its name; the
-    /// conversation's own without a router.
-    pub(super) fn model_for_task(
-        &self,
-        task: &str,
-    ) -> (Arc<dyn base::interface::model::Model>, String) {
+    /// conversation's own without a router. Always accounted to this
+    /// session's telemetry.
+    pub fn model_for_task(&self, task: &str) -> (Arc<dyn base::interface::model::Model>, String) {
         match &self.llm.task_router {
             Some(router) => (
                 self.accounted(router.model_for(task)),
