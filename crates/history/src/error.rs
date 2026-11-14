@@ -29,4 +29,8 @@ pub enum HistoryError {
     /// A line other than `Meta` for a session this store deleted.
     #[error("session {0} was deleted")]
     SessionDeleted(String),
+
+    /// The backend cannot do what was asked.
+    #[error("this history store does not support {0}")]
+    Unsupported(&'static str),
 }

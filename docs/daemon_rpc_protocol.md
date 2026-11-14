@@ -766,6 +766,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
+| `session_import` | 有 `session.import`,把 `session.export` 的归档装成新会话(§6.3) |
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
@@ -1894,7 +1895,51 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
 体积也可能远大于转录,所以缺省不带。
 
 `include` 里有不认识的项、`format` 不是 `zip` / `dir`、路径不合上面的规则 → `INVALID_PARAMS`;
-会话不存在 → `SESSION_NOT_FOUND`;写盘失败 → `INTERNAL_ERROR`。
+会话不存在 → `SESSION_NOT_FOUND`;写盘失败 → `INTERNAL_ERROR`。归档装回一个 daemon 用 `session.import`。
+
+#### `session.import`
+
+`session.export` 的逆:把一个归档(zip,或 `format: "dir"` 导出的目录)装成**新**会话。
+
+```jsonc
+// → params
+{ "path": "/abs/dir/S1.agix.zip",   // daemon 所在机器上的绝对路径:zip 文件或导出的目录
+  "project_root": "/Users/x/proj",  // 可选;省略 = 清单里根会话的 project_root,null = 无项目会话
+  "keep_ids": false }               // 可选;true 时沿用归档里的会话 id
+// ← result
+{ "root_session_id": "…",
+  "id_map": { "<归档里的 id>": "<新 id>" },
+  "sessions": [ { "session_id": "…", "kind": "primary", "parent_session_id": null, "entry_count": 12 } ],
+  "warnings": [ ] }
+```
+
+**什么都在写之前查完。** 路径必须是绝对路径、是普通文件或目录(符号链接不行),且不在会话历史目录
+(`projects/`、`sessions/`)之下。归档只读它的布局里认得的几项:`manifest.json`、
+`sessions/<id>/transcript.jsonl`、`sessions/<id>/session_memory.md`;条目名带 `..`、绝对路径或是
+符号链接的 zip、目录里有符号链接的目录一律拒绝,条目数上限 100,000、解开后总量上限 2 GiB、单个
+文件 512 MiB。清单要 `format` 是 `agix.session-export`、`format_version` 不高于这个 daemon 读得懂的
+(更高的是更新的 Agix 写的)、`importable` 为 `true`(没带附件导出的有损归档不能装);每个会话的
+`transcript.jsonl` 要与清单里的 `transcript_sha256` 一致、第一行是 `Meta`、`Meta.schema_version`
+与每一行的 `v` 不高于这个 daemon 的、每一行读得成日志行;每个侧链的父会话都在归档里、根是
+primary、不成环;根会话的场景要在这个 daemon 上可用;`project_root`(传的或清单的)要存在且是目录
+——不存在时请传一个。任何一条不满足都是 `INVALID_PARAMS`,什么都没写。
+
+**写什么。** 每个会话得到一个新 id(`keep_ids: true` 时沿用,其中任何一个在这个 daemon 上已经有了
+→ `SESSION_EXISTS`,什么都不写)。转录的每一行**原样**写入,行 id、时间戳、`parent_id`、
+`is_sidechain`、`turn_id`、`origin` 都保留——压缩行靠这些 id 指向前面的行,所以投影出的
+`session.history` 与原会话一样长、一样的内容;只改结构化的几项:每行的 `session_id`、`Meta` 的
+`parent_session_id` / `cwd` / `project_root`(换成目标的;无项目会话的 `cwd` 是 daemon 的全局数据目录)、
+`agix.checkpoint` 记录里写这次修改的子 Agent 的会话 id。消息正文、工具结果里提到的旧 id、旧路径
+**不改**。会话记忆一并带上。不带:`runtime.json`、`history.json`、`entries.json`(它们是转录的派生
+视图)、附件文件(图片本来就在转录里)、录像、checkpoint 的写前内容——所以装进来的会话里,
+`session.rewind` 退不回归档之前写的文件。
+
+**不起会话。** 和 `session.fork` 一样,装进来的会话只在磁盘上;之后对新 id 的 `session.resume` 或第一条
+消息把它载入。导入不改变目标项目的信任状态。写到一半失败会把已写的会话全部删掉。投影出的消息数与
+清单记的 `message_count` 不一致时,`warnings` 里记一条。
+
+场景不可用、归档不合上面的规则、`project_root` 不存在 → `INVALID_PARAMS`;`keep_ids` 的 id 已存在 →
+`SESSION_EXISTS`(`data.session_id` 是那个会话);写盘失败 → `INTERNAL_ERROR`。
 
 #### `session.close`
 
@@ -2774,9 +2819,6 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 `session.taskOutput` / `session.messageTask` / `session.stopTask`(§6.3);要看一个子 Agent 干了什么,走它的侧链会话:`session.list
 {parent_session_id}` 拿 id,再 `session.history`。
 
-`session.import` 还没有:`session.export` 的归档带着版本化的清单,是将来导入要读的格式,但目前
-没有方法能把它装回一个 daemon。
-
 ### 6.7 `schedule.*`
 
 定时任务:到点时把一段 `prompt` 作为某个会话的一轮发给它。由 daemon 自己的调度器
@@ -3221,12 +3263,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`:目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
+| -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写(§9.1) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 
 ### 9.1 `error.data` 的形状
 
-**只有八个错误码带结构化 `data`**,客户端可以依赖:
+**只有九个错误码带结构化 `data`**,客户端可以依赖:
 
 ```jsonc
 // ENGINE_ERROR
@@ -3251,6 +3294,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // REWIND_PRECONDITION
 { "issues": [ { "path": "a.txt", "issue": "modified", "detail": "…", "overridable_by": "force" } ] }
+
+// SESSION_EXISTS
+{ "session_id": "S1" }
 
 // REWIND_FAILED
 { "rewind_id": "…", "failed": { "path": "b/b.txt", "error": "…" }, "rolled_back": [ "a.txt" ],

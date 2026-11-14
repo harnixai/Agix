@@ -25,7 +25,7 @@ pub use events::{
 };
 pub use history::{
     ArchiveFormat, EntryList, EntryView, ExportSummary, ExportedSession, HistoryItem,
-    HistoryOrigin, HistoryPage, HistoryUsage, SessionKindName,
+    HistoryOrigin, HistoryPage, HistoryUsage, ImportSummary, ImportedSession, SessionKindName,
 };
 pub use mcp::{
     McpAuthDone, McpAuthStarted, McpAuthState, McpAuthStatus, McpIdentity, McpReconnected,

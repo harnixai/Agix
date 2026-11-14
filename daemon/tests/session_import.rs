@@ -1,0 +1,603 @@
+//! `session.import` over a real socket: an exported session comes back as a
+//! new session with the same history and its sidechains, and an archive that
+//! is newer, lossy, altered or malformed is refused before anything is
+//! written.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use daemon::config::{load_daemon_config, StaticDaemonPaths};
+use daemon::rpc::codes;
+use daemon::DaemonServer;
+use model::client::{AnthropicClient, CountFuture, EventStream};
+use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
+use model::types::MessagesRequest;
+use sha2::Digest;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
+use tokio_util::sync::CancellationToken;
+
+const PNG_BASE64: &str = "iVBORw0KGgo=";
+
+fn reply(text: &str) -> Vec<StreamEvent> {
+    vec![
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlockStart::Text {
+                text: String::new(),
+            },
+        },
+        StreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: BlockDelta::TextDelta {
+                text: text.to_string(),
+            },
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            delta: MessageDeltaPayload {
+                stop_reason: Some(base::message::StopReason::EndTurn),
+                stop_sequence: None,
+            },
+            usage: Some(Usage::default()),
+        },
+    ]
+}
+
+/// Answers every call with a short reply and keeps what it was asked.
+#[derive(Default)]
+struct Recording {
+    requests: Mutex<Vec<String>>,
+}
+
+impl AnthropicClient for Recording {
+    fn stream_messages(&self, req: MessagesRequest) -> EventStream {
+        let mut seen = self.requests.lock().unwrap();
+        seen.push(serde_json::to_string(&req.messages).unwrap_or_default());
+        let events = reply(&format!("reply {}", seen.len()));
+        Box::pin(futures::stream::iter(events.into_iter().map(Ok)))
+    }
+
+    fn count_tokens<'a>(&'a self, _req: &'a MessagesRequest) -> CountFuture<'a> {
+        Box::pin(async { Ok(0usize) })
+    }
+}
+
+struct PermitAll;
+
+#[async_trait::async_trait]
+impl base::interface::permission::PermissionPolicy for PermitAll {
+    async fn decide(
+        &self,
+        _req: &base::interface::permission::PermissionRequest<'_>,
+    ) -> base::interface::permission::PermissionOutcome {
+        base::interface::permission::PermissionOutcome::Permit {
+            basis: base::interface::permission::Basis::Bypass,
+            profile: Default::default(),
+            obligations: Default::default(),
+        }
+    }
+}
+
+struct Daemon {
+    sock: PathBuf,
+    work: PathBuf,
+    out: tempfile::TempDir,
+    store: Arc<dyn history::store::HistoryStore>,
+    model: Arc<Recording>,
+    _dir: tempfile::TempDir,
+    _handle: tokio::task::JoinHandle<()>,
+}
+
+async fn start_daemon() -> Daemon {
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("import.sock");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let mut config = load_daemon_config(
+        "claude-sonnet-4-6",
+        2000,
+        Some(&sock),
+        "code",
+        &StaticDaemonPaths::new(dir.path().to_path_buf()),
+    );
+    config.session_cap = 8;
+    config.settings.values.memory_enabled = false;
+    let store: Arc<dyn history::store::HistoryStore> = Arc::new(
+        history::store::JsonlHistoryStore::with_roots(
+            &work,
+            history::path::HistoryRoots::under(&config.settings.paths.global_data_dir),
+        )
+        .await
+        .unwrap(),
+    );
+    let model = Arc::new(Recording::default());
+    let pool = daemon::assemble::pool(
+        &config,
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+        daemon::Assembly {
+            cwd: Some(work.clone()),
+            model_client: Some(model.clone()),
+            transcripts: daemon::Transcripts::In(store.clone()),
+            host_policy: Some(Arc::new(PermitAll)),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the daemon assembles");
+    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
+    let serving = server.clone();
+    let bind = sock.clone();
+    let handle = tokio::spawn(async move {
+        let _ = serving.serve_unix(&bind).await;
+    });
+    for _ in 0..80 {
+        if sock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(sock.exists(), "socket never bound");
+    Daemon {
+        sock,
+        work,
+        out: tempfile::tempdir().unwrap(),
+        store,
+        model,
+        _dir: dir,
+        _handle: handle,
+    }
+}
+
+impl Daemon {
+    async fn raw(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "method": method, "params": params, "id": 1
+        });
+        let mut client = UnixStream::connect(&self.sock).await.unwrap();
+        client
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        let (r, _w) = client.split();
+        let mut reader = BufReader::new(r);
+        loop {
+            let mut line = String::new();
+            let n = reader.read_line(&mut line).await.unwrap();
+            assert!(n > 0, "{method}: connection closed before a response");
+            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if frame.get("id").is_some() {
+                return frame;
+            }
+        }
+    }
+
+    async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let response = self.raw(method, params).await;
+        assert!(
+            response.get("result").is_some(),
+            "{method} failed: {response}"
+        );
+        response["result"].clone()
+    }
+
+    async fn turn(&self, sid: &str, message: &str) {
+        self.call(
+            "session.run_turn",
+            serde_json::json!({"session_id": sid, "message": message}),
+        )
+        .await;
+    }
+
+    async fn session_with_history(&self) -> String {
+        let sid = self.call("session.create", serde_json::json!({})).await["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        self.call(
+            "session.run_turn",
+            serde_json::json!({
+                "session_id": sid,
+                "message": "what is in this picture?",
+                "attachments": [{"kind": "image", "media_type": "image/png", "data": PNG_BASE64}],
+            }),
+        )
+        .await;
+        self.turn(&sid, "and a second question").await;
+        sid
+    }
+
+    fn target(&self, name: &str) -> PathBuf {
+        self.out.path().join(name)
+    }
+
+    async fn export(&self, sid: &str, name: &str, format: &str) -> PathBuf {
+        let path = self.target(name);
+        self.call(
+            "session.export",
+            serde_json::json!({"session_id": sid, "path": path, "format": format}),
+        )
+        .await;
+        path
+    }
+
+    async fn import(&self, params: serde_json::Value) -> serde_json::Value {
+        self.raw("session.import", params).await
+    }
+
+    async fn imported(&self, path: &Path) -> serde_json::Value {
+        self.call("session.import", serde_json::json!({"path": path}))
+            .await
+    }
+
+    async fn messages(&self, sid: &str) -> Vec<serde_json::Value> {
+        self.call(
+            "session.history",
+            serde_json::json!({"session_id": sid, "limit": 500}),
+        )
+        .await["messages"]
+            .as_array()
+            .cloned()
+            .unwrap()
+    }
+
+    async fn session_count(&self) -> usize {
+        self.call(
+            "session.list",
+            serde_json::json!({"include_children": true}),
+        )
+        .await["sessions"]
+            .as_array()
+            .unwrap()
+            .len()
+    }
+
+    async fn sidechain_of(&self, parent: &str) -> String {
+        let child = base::session::SessionId::new();
+        self.store
+            .append(
+                child,
+                history::entry::LogEntry::Meta {
+                    cwd: "/tmp".into(),
+                    started_at: time::OffsetDateTime::now_utc(),
+                    model: "claude-sonnet-4-6".into(),
+                    permission_mode: "default".into(),
+                    engine_version: "0.0.1".into(),
+                    agix_version: "0.0.1".into(),
+                    parent_session_id: Some(parent.to_string()),
+                    scene: Some("code".into()),
+                    project_root: None,
+                    session_kind: history::entry::SessionKind::Sidechain,
+                    schema_version: history::entry::CURRENT_META_SCHEMA_VERSION,
+                },
+            )
+            .await
+            .unwrap();
+        self.store
+            .append(
+                child,
+                history::entry::LogEntry::User {
+                    content: vec![base::message::ContentBlock::Text {
+                        text: "look around".into(),
+                        cache_control: None,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        child.to_string()
+    }
+}
+
+fn rewrite_json(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    change(&mut value);
+    std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+}
+
+fn root_of(manifest: &serde_json::Value) -> String {
+    manifest["root_session_id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn an_exported_session_imports_as_a_new_session_with_the_same_history() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let zip = daemon.export(&sid, "S1.agix.zip", "zip").await;
+    let summary = daemon.imported(&zip).await;
+    let new = summary["root_session_id"].as_str().unwrap();
+    assert_ne!(new, sid);
+    assert_eq!(summary["id_map"][&sid], new);
+    assert_eq!(summary["warnings"], serde_json::json!([]), "{summary}");
+    let (before, after) = (daemon.messages(&sid).await, daemon.messages(new).await);
+    assert!(before.len() >= 4, "{before:?}");
+    assert_eq!(before, after);
+    assert!(
+        serde_json::to_string(&after).unwrap().contains(PNG_BASE64),
+        "the image came back inline"
+    );
+}
+
+#[tokio::test]
+async fn an_imported_sessions_sidechains_are_listed_under_it() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let child = daemon.sidechain_of(&sid).await;
+    let zip = daemon.export(&sid, "tree.zip", "zip").await;
+    let summary = daemon.imported(&zip).await;
+    let (new_root, new_child) = (
+        summary["root_session_id"].as_str().unwrap(),
+        summary["id_map"][&child].as_str().unwrap(),
+    );
+    let listed = daemon
+        .call(
+            "session.list",
+            serde_json::json!({"parent_session_id": new_root}),
+        )
+        .await;
+    let ids: Vec<&str> = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["session_id"].as_str())
+        .collect();
+    assert_eq!(ids, [new_child]);
+    assert_eq!(daemon.messages(new_child).await.len(), 1);
+    assert_eq!(
+        summary["sessions"].as_array().unwrap().len(),
+        2,
+        "{summary}"
+    );
+}
+
+#[tokio::test]
+async fn an_imported_session_resumes_and_runs_a_turn() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let zip = daemon.export(&sid, "resume.zip", "zip").await;
+    let new = daemon.imported(&zip).await["root_session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    daemon
+        .call("session.resume", serde_json::json!({"session_id": new}))
+        .await;
+    daemon.turn(&new, "a question after the import").await;
+    let last = daemon
+        .model
+        .requests
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .unwrap();
+    assert!(last.contains("and a second question"), "{last}");
+    assert!(last.contains("a question after the import"), "{last}");
+}
+
+#[tokio::test]
+async fn a_compacted_session_imports_with_its_summary_in_place() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    daemon
+        .call("session.compact", serde_json::json!({"session_id": sid}))
+        .await;
+    daemon.turn(&sid, "after the compaction").await;
+    let log = daemon
+        .store
+        .load(base::session::SessionId::parse(&sid).unwrap())
+        .await
+        .unwrap();
+    assert!(
+        log.iter()
+            .any(|e| matches!(e.entry, history::entry::LogEntry::Compact { .. })),
+        "the session was compacted"
+    );
+    let zip = daemon.export(&sid, "compact.zip", "zip").await;
+    let new = daemon.imported(&zip).await["root_session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(daemon.messages(&sid).await, daemon.messages(&new).await);
+}
+
+#[tokio::test]
+async fn importing_twice_gives_two_sessions_and_keep_ids_refuses_when_one_exists() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let zip = daemon.export(&sid, "twice.zip", "zip").await;
+    let first = daemon.imported(&zip).await["root_session_id"].clone();
+    let second = daemon.imported(&zip).await["root_session_id"].clone();
+    assert_ne!(first, second);
+    let before = daemon.session_count().await;
+    let refused = daemon
+        .import(serde_json::json!({"path": zip, "keep_ids": true}))
+        .await;
+    assert_eq!(refused["error"]["code"], codes::SESSION_EXISTS, "{refused}");
+    assert_eq!(refused["error"]["data"]["session_id"], sid.as_str());
+    assert_eq!(daemon.session_count().await, before);
+}
+
+#[tokio::test]
+async fn a_dir_export_imports_like_a_zip() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let dir = daemon.export(&sid, "as-dir", "dir").await;
+    let new = daemon.imported(&dir).await["root_session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(daemon.messages(&sid).await, daemon.messages(&new).await);
+}
+
+#[tokio::test]
+async fn an_archive_from_a_newer_format_a_lossy_export_or_a_changed_transcript_is_refused() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let before = daemon.session_count().await;
+
+    let newer = daemon.export(&sid, "newer", "dir").await;
+    rewrite_json(&newer.join("manifest.json"), |m| {
+        m["format_version"] = 2.into()
+    });
+
+    let lossy = daemon.target("lossy.zip");
+    daemon
+        .call(
+            "session.export",
+            serde_json::json!({"session_id": sid, "path": lossy, "include": ["sidechains"]}),
+        )
+        .await;
+
+    let altered = daemon.export(&sid, "altered", "dir").await;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(altered.join("manifest.json")).unwrap()).unwrap();
+    let transcript = altered
+        .join("sessions")
+        .join(root_of(&manifest))
+        .join("transcript.jsonl");
+    let mut bytes = std::fs::read(&transcript).unwrap();
+    let at = bytes.iter().position(|b| *b == b'q').unwrap();
+    bytes[at] = b'Q';
+    std::fs::write(&transcript, bytes).unwrap();
+
+    for path in [&newer, &lossy, &altered] {
+        let response = daemon.import(serde_json::json!({"path": path})).await;
+        assert_eq!(
+            response["error"]["code"],
+            codes::INVALID_PARAMS,
+            "{path:?} -> {response}"
+        );
+    }
+    assert_eq!(daemon.session_count().await, before);
+}
+
+fn zip_with(path: &Path, extra: impl FnOnce(&mut zip::ZipWriter<std::fs::File>)) {
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let options = zip::write::SimpleFileOptions::default();
+    writer.start_file("manifest.json", options).unwrap();
+    writer
+        .write_all(
+            serde_json::json!({
+                "format": "agix.session-export", "format_version": 1, "importable": true,
+                "root_session_id": base::session::SessionId::new().to_string(), "sessions": [],
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+    extra(&mut writer);
+    writer.finish().unwrap();
+}
+
+#[tokio::test]
+async fn an_archive_with_entries_outside_its_layout_is_refused() {
+    let daemon = start_daemon().await;
+    let before = daemon.session_count().await;
+    let options = zip::write::SimpleFileOptions::default();
+
+    let escaping = daemon.target("escaping.zip");
+    zip_with(&escaping, |w| {
+        w.start_file("../outside.txt", options).unwrap();
+        w.write_all(b"x").unwrap();
+    });
+    let absolute = daemon.target("absolute.zip");
+    zip_with(&absolute, |w| {
+        w.start_file("/etc/outside.txt", options).unwrap();
+        w.write_all(b"x").unwrap();
+    });
+    let linked = daemon.target("linked.zip");
+    zip_with(&linked, |w| {
+        w.add_symlink("sessions/link", "/etc/passwd", options)
+            .unwrap();
+    });
+
+    let sid = daemon.session_with_history().await;
+    let with_link = daemon.export(&sid, "with-link", "dir").await;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc/passwd", with_link.join("sessions").join("link")).unwrap();
+
+    for path in [escaping, absolute, linked, with_link] {
+        let response = daemon.import(serde_json::json!({"path": path})).await;
+        assert_eq!(
+            response["error"]["code"],
+            codes::INVALID_PARAMS,
+            "{path:?} -> {response}"
+        );
+    }
+    assert_eq!(daemon.session_count().await, before + 1);
+    assert_eq!(
+        daemon.store.list_sessions().await.unwrap().len(),
+        before + 1
+    );
+}
+
+#[tokio::test]
+async fn import_under_another_project_root_rewrites_cwd_and_project() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let zip = daemon.export(&sid, "moved.zip", "zip").await;
+    let elsewhere = daemon.target("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let new = daemon
+        .call(
+            "session.import",
+            serde_json::json!({"path": zip, "project_root": elsewhere}),
+        )
+        .await["root_session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let entries = daemon
+        .store
+        .load(base::session::SessionId::parse(&new).unwrap())
+        .await
+        .unwrap();
+    match &entries[0].entry {
+        history::entry::LogEntry::Meta {
+            cwd, project_root, ..
+        } => {
+            let expected = elsewhere.display().to_string();
+            assert_eq!(cwd, &expected);
+            assert_eq!(project_root.as_deref(), Some(expected.as_str()));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(daemon.messages(&sid).await, daemon.messages(&new).await);
+    let missing = daemon
+        .import(serde_json::json!({"path": zip, "project_root": daemon.target("nowhere")}))
+        .await;
+    assert_eq!(missing["error"]["code"], codes::INVALID_PARAMS, "{missing}");
+    assert!(daemon.work.is_dir());
+}
+
+#[tokio::test]
+async fn an_archive_whose_scene_is_not_on_this_daemon_is_refused() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let dir = daemon.export(&sid, "scene", "dir").await;
+    let manifest_path = dir.join("manifest.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    let root = root_of(&manifest);
+    let transcript = dir.join("sessions").join(&root).join("transcript.jsonl");
+    let text = std::fs::read_to_string(&transcript)
+        .unwrap()
+        .replace("\"scene\":\"code\"", "\"scene\":\"no-such-scene\"");
+    std::fs::write(&transcript, &text).unwrap();
+    let digest = hex::encode(sha2::Sha256::digest(text.as_bytes()));
+    rewrite_json(&manifest_path, |m| {
+        m["sessions"][0]["transcript_sha256"] = digest.into()
+    });
+    let before = daemon.session_count().await;
+    let response = daemon.import(serde_json::json!({"path": dir})).await;
+    assert_eq!(
+        response["error"]["code"],
+        codes::INVALID_PARAMS,
+        "{response}"
+    );
+    assert_eq!(daemon.session_count().await, before);
+}

@@ -254,6 +254,7 @@ pub const CAPABILITIES: &[&str] = &[
     "goals",
     "question_prompts",
     "session_export",
+    "session_import",
     "checkpoints",
 ];
 

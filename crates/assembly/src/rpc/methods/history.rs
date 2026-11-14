@@ -1,6 +1,7 @@
 //! 会话日志方法（`session.history` / `appendEntry` / `entries` / `export`）的
 //! params。
 
+use super::session::ProjectRootParam;
 use crate::session_pool::api::ArchiveFormat;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -30,6 +31,20 @@ pub struct EntriesParams {
     /// Only these namespaces; all of the host's when omitted.
     #[serde(default)]
     pub namespaces: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ImportParams {
+    /// Absolute, on the daemon's machine: a zip written by `session.export`,
+    /// or the directory of a `format: "dir"` export.
+    pub path: PathBuf,
+    /// Omitted: the root session's own; `null`: no project.
+    #[serde(default, deserialize_with = "ProjectRootParam::present")]
+    #[schemars(with = "Option<PathBuf>")]
+    pub project_root: ProjectRootParam,
+    /// Keep the archive's session ids instead of minting new ones.
+    #[serde(default)]
+    pub keep_ids: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]

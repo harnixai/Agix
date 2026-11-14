@@ -2473,6 +2473,67 @@
       ],
       "type": "object"
     },
+    "ImportSummary": {
+      "description": "What `session.import` wrote.",
+      "properties": {
+        "id_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The archive's session ids to the new ones.",
+          "type": "object"
+        },
+        "root_session_id": {
+          "type": "string"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/ImportedSession"
+          },
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "root_session_id",
+        "id_map",
+        "sessions",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "ImportedSession": {
+      "properties": {
+        "entry_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionKindName"
+        },
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "kind",
+        "entry_count"
+      ],
+      "type": "object"
+    },
     "Initiator": {
       "description": "Who asked for a turn. A client's turn crosses no scene boundary; the\ndaemon's own turns go to sessions it already serves.",
       "enum": [
@@ -6567,6 +6628,10 @@
     {
       "code": -32024,
       "name": "REWIND_FAILED"
+    },
+    {
+      "code": -32025,
+      "name": "SESSION_EXISTS"
     }
   ],
   "frames": {
@@ -7055,6 +7120,14 @@
       },
       "result": {
         "$ref": "#/$defs/HistoryPage"
+      }
+    },
+    "session.import": {
+      "params": {
+        "$ref": "#/$defs/ImportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ImportSummary"
       }
     },
     "session.inspectContext": {

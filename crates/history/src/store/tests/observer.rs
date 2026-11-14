@@ -176,3 +176,18 @@ async fn every_other_operation_is_the_inner_store() {
         HistoryError::SessionNotFound(_)
     ));
 }
+
+#[tokio::test]
+async fn append_enveloped_reaches_the_inner_store() {
+    let inner: Arc<dyn HistoryStore> = Arc::new(InMemoryHistoryStore::new());
+    let observer = Arc::new(Recording::default());
+    let watched = ObservedHistoryStore::new(inner.clone(), vec![observer.clone()]);
+    let session = SessionId::new();
+    let line = EnvelopedEntry::new(session, user("imported"));
+    let id = line.id.clone();
+    watched.append_enveloped(session, vec![line]).await.unwrap();
+    let stored = inner.load(session).await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].id, id);
+    assert_eq!(*observer.seen.lock().unwrap(), vec!["imported".to_string()]);
+}

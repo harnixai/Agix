@@ -654,6 +654,11 @@ async fn the_documented_shutdown_result_is_real() {
 /// and why.
 const NOT_COMPARED: &[(&str, &str)] = &[
     (
+        "session.import",
+        "`id_map` is keyed by the archive's own session ids, which an example cannot name; \
+         daemon/tests/session_import.rs holds the shape",
+    ),
+    (
         "session.goal",
         "the example is a goal two automatic rounds in; rounds start on their own, so how \
          many have when the call lands is timing",

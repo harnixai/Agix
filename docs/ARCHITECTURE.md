@@ -863,8 +863,9 @@ resume、轮数、durable state 的恢复与回滚后当场的视图是同一个
 里,那一行不算。一个 append 慢的会话不会挡住另一个会话的快照。走的是 `Meta` 里的父子关系,只沿 `session_kind: sidechain`
 往下走,分叉只记 id。默认实现一个接一个地 `load`,不是同一时刻,自己实现 store 的要覆盖它。
 `session.export` 就站在这上面:快照加上图片本体、两种 RPC 视图和一份带版本的清单写成
-一个归档,这份布局也是将来 `session.import` 要读的格式(`daemon_rpc_protocol.md` 的
-`session.export`)。
+一个归档;`session.import` 读同一份布局,用 `HistoryStore::append_enveloped` 把转录连同行 id、
+时间戳与标签原样写成新会话,压缩行对前面行 id 的引用才不会断(`daemon_rpc_protocol.md` 的
+`session.export`、`session.import`)。包装 store 的类型要转发它,默认实现拒绝而不是退成 `append_tagged`。
 
 **留存的时间戳与标识符走 `Environment` 契约**,所以在 `FixedEnvironment` 下同一段对话
 能重放出逐位相同的日志。daemon 不用它:会话的时钟是 `ShiftedEnvironment`(从

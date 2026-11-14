@@ -139,6 +139,24 @@ pub struct ExportSummary {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ImportedSession {
+    pub session_id: String,
+    pub kind: SessionKindName,
+    pub parent_session_id: Option<String>,
+    pub entry_count: usize,
+}
+
+/// What `session.import` wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ImportSummary {
+    pub root_session_id: String,
+    /// The archive's session ids to the new ones.
+    pub id_map: std::collections::BTreeMap<String, String>,
+    pub sessions: Vec<ImportedSession>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]

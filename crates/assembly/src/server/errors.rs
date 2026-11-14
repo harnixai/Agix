@@ -65,6 +65,10 @@ impl From<PoolError> for RpcError {
                 Some(json!({ "issues": issues })),
             ),
             PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
+            PoolError::SessionExists { session_id } => (
+                codes::SESSION_EXISTS,
+                Some(json!({ "session_id": session_id })),
+            ),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
         RpcError {

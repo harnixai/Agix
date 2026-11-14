@@ -109,6 +109,9 @@ error_codes! {
     /// `session.rewind` failed part way; what it had restored was put back
     /// unless `data.partial` says otherwise.
     RewindFailed = -32024, REWIND_FAILED;
+    /// `session.import` with `keep_ids`: a session of the archive already
+    /// exists on this daemon; nothing was written. `data.session_id` names it.
+    SessionExists = -32025, SESSION_EXISTS;
 }
 
 #[cfg(test)]

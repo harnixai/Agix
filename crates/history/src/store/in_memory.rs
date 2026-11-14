@@ -64,6 +64,30 @@ impl HistoryStore for InMemoryHistoryStore {
         Ok(())
     }
 
+    async fn append_enveloped(
+        &self,
+        session: SessionId,
+        entries: Vec<EnvelopedEntry>,
+    ) -> Result<(), HistoryError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.deleted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&session);
+        self.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(session)
+            .or_default()
+            .extend(entries.into_iter().map(|mut e| {
+                e.session_id = session;
+                e
+            }));
+        Ok(())
+    }
+
     async fn load(&self, session: SessionId) -> Result<Vec<EnvelopedEntry>, HistoryError> {
         self.sessions
             .lock()

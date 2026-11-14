@@ -442,6 +442,20 @@ impl DaemonRpcClient {
         self.call("session.export", params).await
     }
 
+    /// 把 `session.export` 的归档装成新会话；`project_root` 为 `None` 时用清单里的。
+    pub async fn session_import(
+        &mut self,
+        path: &Path,
+        project_root: Option<&Path>,
+        keep_ids: bool,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "path": path, "keep_ids": keep_ids });
+        if let Some(root) = project_root {
+            params["project_root"] = serde_json::json!(root);
+        }
+        self.call("session.import", params).await
+    }
+
     /// 给会话起名字；`None` 清除。
     pub async fn session_rename(
         &mut self,

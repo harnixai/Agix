@@ -73,6 +73,21 @@ impl HistoryStore for ObservedHistoryStore {
         Ok(())
     }
 
+    async fn append_enveloped(
+        &self,
+        session: SessionId,
+        entries: Vec<EnvelopedEntry>,
+    ) -> Result<(), HistoryError> {
+        let written: Vec<LogEntry> = entries.iter().map(|e| e.entry.clone()).collect();
+        self.inner.append_enveloped(session, entries).await?;
+        for entry in &written {
+            for observer in &self.observers {
+                observer.observed(session, entry);
+            }
+        }
+        Ok(())
+    }
+
     async fn sync(&self, session: SessionId) -> Result<(), HistoryError> {
         self.inner.sync(session).await
     }

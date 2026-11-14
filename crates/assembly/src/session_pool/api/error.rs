@@ -74,6 +74,10 @@ pub enum PoolError {
     RewindPrecondition(Vec<runtime::agent::RewindIssue>),
     #[error("the rewind failed at {}: {}", .0.failed.path, .0.failed.error)]
     RewindFailed(runtime::agent::RewindFailure),
+    /// `session.import` with `keep_ids`: a session of the archive already
+    /// exists here.
+    #[error("session `{session_id}` already exists; nothing was imported")]
+    SessionExists { session_id: String },
     #[error("{0}")]
     Internal(String),
 }

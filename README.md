@@ -148,7 +148,7 @@ monitors and structured output ([table below](#tools--45-built-in)).
   [ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.6).
 
 **Host control**
-- Seventy-three RPC methods: create, resume, fork, rebuild, rewind and export sessions;
+- Seventy-three RPC methods: create, resume, fork, rebuild, rewind, export and import sessions;
   read history and the exact context of the next model call; answer
   permission and question prompts.
 - Start, message, stop and follow tasks, reading their output by byte offset.

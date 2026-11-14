@@ -168,6 +168,22 @@ pub trait HistoryStore: Send + Sync {
         self.append(session, entry).await
     }
 
+    /// Write `entries` to `session` as they are, envelope and all, as an
+    /// import does: the line ids, timestamps and `parent_id` / `turn_id` /
+    /// `origin` tags are kept, because a compaction line refers to other lines
+    /// by id. Only `session_id` is the caller's to have set; it is made the
+    /// session's own. A backend that cannot keep envelopes refuses rather than
+    /// fall back to [`append_tagged`](Self::append_tagged), which would
+    /// quietly give every line a new id.
+    async fn append_enveloped(
+        &self,
+        session: SessionId,
+        entries: Vec<EnvelopedEntry>,
+    ) -> Result<(), HistoryError> {
+        let _ = (session, entries);
+        Err(HistoryError::Unsupported("append_enveloped"))
+    }
+
     /// Make everything appended to `session` so far durable.
     ///
     /// Separate from `append` because durability costs a disk flush: the

@@ -53,63 +53,41 @@ impl HistoryStore for JsonlHistoryStore {
         entry: LogEntry,
         tags: crate::entry::EntryTags,
     ) -> Result<(), HistoryError> {
-        self.refuse_if_deleted(session, &entry)?;
-        let writer = self.writer_lock(session).await?;
-        let mut log = self.log_of(session).lock_owned().await;
-        // Checked again under the locks: a delete that ran while this append
-        // waited for them has already removed what taking the writer lock
-        // just made again.
-        if let Err(refused) = self.refuse_if_deleted(session, &entry) {
-            drop(log);
-            let sidecar = session_sidecar_dir(&self.sessions_root, &session);
-            let _ =
-                blocking(move || writer.remove_sidecar(&sidecar).map_err(HistoryError::Io)).await;
-            return Err(refused);
-        }
-
-        let home = self.home_recorded_by(session, &entry).await?;
-        let project_history_dir = project_dir_for(&self.projects_root, home.as_deref());
-        let path = session_file(&project_history_dir, &session);
-
-        // Read before the entry can be externalized: an assistant message big
-        // enough to move out to a blob would take its usage with it, and the
-        // totals would quietly stop counting anything over the threshold.
-        let counters = crate::project::CounterDelta::of(&entry);
-
-        let entry = match self.blobs.clone() {
-            Some(blobs) => blocking(move || externalize_if_bulky(entry, blobs.as_ref())).await?,
-            None => entry,
-        };
-
-        let enveloped = EnvelopedEntry::new_in(self.environment(), session, entry).with_tags(tags);
-        let mut line = serde_json::to_vec(&enveloped)?;
-        line.push(b'\n');
-
-        // The locks go into the write and come back out of it: a caller that
-        // gives up while the line is going down drops only this future, and
-        // the next append must not get in before the line is whole.
-        let (_writer, _log) = blocking(move || {
-            let known_len = log.len_after_last_append.take();
-            log.len_after_last_append = Some(write_line(&path, &line, known_len)?);
-            Ok((writer, log))
+        self.write_line_of(session, entry, |entry| {
+            EnvelopedEntry::new_in(self.environment(), session, entry).with_tags(tags)
         })
-        .await?;
-
-        // After the log, and never in front of it. The transcript is the
-        // record; these are a convenience computed from it, so a sidecar that
-        // cannot be written costs a count and not the entry — still under
-        // this session's log lock, which is what keeps two appends from
-        // reading the same total and writing back the same sum.
-        if let Err(e) = crate::project::add_counters_in(
-            &self.sessions_root,
-            home.as_deref().unwrap_or_else(|| Path::new("")),
-            &project_history_dir,
-            session,
-            counters,
-        )
         .await
-        {
-            tracing::warn!(error = %e, %session, "could not update this session's counters");
+    }
+
+    async fn append_enveloped(
+        &self,
+        session: SessionId,
+        entries: Vec<EnvelopedEntry>,
+    ) -> Result<(), HistoryError> {
+        for envelope in entries {
+            let EnvelopedEntry {
+                v,
+                id,
+                ts,
+                parent_id,
+                is_sidechain,
+                turn_id,
+                origin,
+                entry,
+                ..
+            } = envelope;
+            let keep = move |entry| EnvelopedEntry {
+                v,
+                id,
+                ts,
+                session_id: session,
+                parent_id,
+                is_sidechain,
+                turn_id,
+                origin,
+                entry,
+            };
+            self.write_line_of(session, entry, keep).await?;
         }
         Ok(())
     }
@@ -303,5 +281,74 @@ impl HistoryStore for JsonlHistoryStore {
                 .await
             }
         }
+    }
+}
+
+impl JsonlHistoryStore {
+    async fn write_line_of(
+        &self,
+        session: SessionId,
+        entry: LogEntry,
+        envelope: impl FnOnce(LogEntry) -> EnvelopedEntry + Send,
+    ) -> Result<(), HistoryError> {
+        self.refuse_if_deleted(session, &entry)?;
+        let writer = self.writer_lock(session).await?;
+        let mut log = self.log_of(session).lock_owned().await;
+        // Checked again under the locks: a delete that ran while this append
+        // waited for them has already removed what taking the writer lock
+        // just made again.
+        if let Err(refused) = self.refuse_if_deleted(session, &entry) {
+            drop(log);
+            let sidecar = session_sidecar_dir(&self.sessions_root, &session);
+            let _ =
+                blocking(move || writer.remove_sidecar(&sidecar).map_err(HistoryError::Io)).await;
+            return Err(refused);
+        }
+
+        let home = self.home_recorded_by(session, &entry).await?;
+        let project_history_dir = project_dir_for(&self.projects_root, home.as_deref());
+        let path = session_file(&project_history_dir, &session);
+
+        // Read before the entry can be externalized: an assistant message big
+        // enough to move out to a blob would take its usage with it, and the
+        // totals would quietly stop counting anything over the threshold.
+        let counters = crate::project::CounterDelta::of(&entry);
+
+        let entry = match self.blobs.clone() {
+            Some(blobs) => blocking(move || externalize_if_bulky(entry, blobs.as_ref())).await?,
+            None => entry,
+        };
+
+        let enveloped = envelope(entry);
+        let mut line = serde_json::to_vec(&enveloped)?;
+        line.push(b'\n');
+
+        // The locks go into the write and come back out of it: a caller that
+        // gives up while the line is going down drops only this future, and
+        // the next append must not get in before the line is whole.
+        let (_writer, _log) = blocking(move || {
+            let known_len = log.len_after_last_append.take();
+            log.len_after_last_append = Some(write_line(&path, &line, known_len)?);
+            Ok((writer, log))
+        })
+        .await?;
+
+        // After the log, and never in front of it. The transcript is the
+        // record; these are a convenience computed from it, so a sidecar that
+        // cannot be written costs a count and not the entry — still under
+        // this session's log lock, which is what keeps two appends from
+        // reading the same total and writing back the same sum.
+        if let Err(e) = crate::project::add_counters_in(
+            &self.sessions_root,
+            home.as_deref().unwrap_or_else(|| Path::new("")),
+            &project_history_dir,
+            session,
+            counters,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, %session, "could not update this session's counters");
+        }
+        Ok(())
     }
 }

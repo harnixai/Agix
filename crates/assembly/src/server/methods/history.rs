@@ -1,14 +1,17 @@
 //! 会话日志：`session.history` / `appendEntry` / `entries` / `export`。
 
 use super::*;
-use crate::rpc::methods::history::{AppendEntryParams, EntriesParams, ExportParams, HistoryParams};
-use crate::session_pool::api::{EntryList, EntryView, ExportSummary, HistoryPage};
+use crate::rpc::methods::history::{
+    AppendEntryParams, EntriesParams, ExportParams, HistoryParams, ImportParams,
+};
+use crate::session_pool::api::{EntryList, EntryView, ExportSummary, HistoryPage, ImportSummary};
 
 rpc_methods! {
     "session.history" => history(HistoryParams) -> HistoryPage;
     "session.appendEntry" => append_entry(AppendEntryParams) -> EntryView;
     "session.entries" => entries(EntriesParams) -> EntryList;
     "session.export" => export(ExportParams) -> ExportSummary;
+    "session.import" => import(ImportParams) -> ImportSummary;
 }
 
 /// Page size when the caller does not say: big enough for a typical
@@ -75,6 +78,20 @@ async fn export(
             path: params.path,
             format: params.format,
             include,
+        })
+        .await
+}
+
+async fn import(
+    s: &DaemonServer,
+    _: &Call,
+    params: ImportParams,
+) -> Result<ImportSummary, PoolError> {
+    s.pool
+        .import_session(crate::import::ImportRequest {
+            path: params.path,
+            project_root: params.project_root,
+            keep_ids: params.keep_ids,
         })
         .await
 }

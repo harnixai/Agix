@@ -150,6 +150,29 @@ for_each_store!(listing_finds_every_written_session, |store| {
     assert_eq!(listed, want);
 });
 
+for_each_store!(append_enveloped_keeps_ids_and_timestamps, |store| {
+    let from = SessionId::new();
+    let to = SessionId::new();
+    let first = EnvelopedEntry::new(from, meta(None));
+    let mut second = EnvelopedEntry::new(from, user("kept"));
+    second.parent_id = Some(first.id.clone());
+    second.is_sidechain = true;
+    second.turn_id = Some("turn-1".into());
+    store
+        .append_enveloped(to, vec![first.clone(), second.clone()])
+        .await
+        .unwrap();
+    let back = store.load(to).await.unwrap();
+    assert_eq!(back.len(), 2);
+    assert_eq!(back[0].id, first.id);
+    assert_eq!(back[1].id, second.id);
+    assert_eq!(back[1].ts, second.ts);
+    assert_eq!(back[1].parent_id, Some(first.id.clone()));
+    assert!(back[1].is_sidechain);
+    assert_eq!(back[1].turn_id.as_deref(), Some("turn-1"));
+    assert!(back.iter().all(|e| e.session_id == to));
+});
+
 for_each_store!(deleting_forgets_the_session_and_is_idempotent, |store| {
     let s = SessionId::new();
     store.append(s, user("hi")).await.unwrap();
@@ -495,6 +518,17 @@ impl HistoryStore for OnlyTheRequired {
     async fn delete(&self, session: SessionId) -> Result<(), HistoryError> {
         self.0.delete(session).await
     }
+}
+
+#[tokio::test]
+async fn a_backend_that_cannot_keep_envelopes_refuses_to_import_them() {
+    let store = OnlyTheRequired(InMemoryHistoryStore::new());
+    let session = SessionId::new();
+    let refused = store
+        .append_enveloped(session, vec![EnvelopedEntry::new(session, user("x"))])
+        .await;
+    assert!(matches!(refused, Err(HistoryError::Unsupported(_))));
+    assert!(store.load(session).await.is_err());
 }
 
 #[tokio::test]

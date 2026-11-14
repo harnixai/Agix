@@ -63,6 +63,7 @@ mod session_export;
 mod session_goal;
 mod session_history_fork;
 mod session_metadata;
+mod session_import;
 mod session_provider;
 mod session_resume;
 mod session_set_model;

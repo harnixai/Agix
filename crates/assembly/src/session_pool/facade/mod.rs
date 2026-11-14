@@ -15,6 +15,7 @@ pub(super) mod providers;
 mod resume;
 mod rewind;
 mod scenes;
+mod session_import;
 mod session_ops;
 pub(super) mod settings_reload;
 mod subscribers;
