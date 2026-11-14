@@ -1,5 +1,8 @@
-//! 0.3.12 发布前对抗式审查（信任边界与权限）核实过的缺陷，每条都从宿主一侧的
-//! socket 看外部结果。修好之前标 ignore，修好之后留作回归用例。
+//! A skill's inline commands against the trust boundaries around them, each
+//! seen from the host's socket: they do not run in a scene without Bash, a
+//! hook can block, but not approve, one, the rules' refusal fires
+//! `PermissionDenied`, a failure fires `PostToolUseFailure`, and a repository
+//! one nests is reported to the host or moved aside.
 
 #![cfg(feature = "skills")]
 
@@ -17,7 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
-const NO_SHELL: &str = "audit3-no-shell";
+const NO_SHELL: &str = "no-shell";
 
 /// A scene whose whitelist leaves Bash out.
 fn no_shell_scene() -> SceneSpec {
@@ -111,7 +114,7 @@ fn later_requests(model: &MockAnthropicClient) -> String {
 /// 场景的工具白名单把 `Bash` 拿掉了，skill 正文里的 `` !`cmd` `` 也就不跑：
 /// 文档说它"按一次 `Bash` 调用判"，而这个会话里没有 `Bash` 可调。
 #[tokio::test]
-async fn audit3_a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
+async fn a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
     let dir = tempfile::tempdir().unwrap();
     let global = dir.path().join("agix");
     let scene_root = global.join("code");
@@ -276,7 +279,7 @@ async fn bash_turn_in(dir: &std::path::Path, work: &std::path::Path, command: &s
 /// is over, the user's own `git status` in the project — outside any sandbox,
 /// where it enters gitlinks of gitlinks — does not run it.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit3_a_dangerous_repository_two_gitlinks_deep_is_moved_aside() {
+async fn a_dangerous_repository_two_gitlinks_deep_is_moved_aside() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path().canonicalize().unwrap();
     let work = dir.join("work");

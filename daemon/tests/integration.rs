@@ -3,10 +3,8 @@
 //! `cargo test -p daemon --test integration session_lifecycle::`.
 
 mod accept_edits_reads;
+mod approval_gate;
 mod assemble_defaults;
-mod audit2_doc_findings;
-mod audit3_trust_boundaries;
-mod audit_security_findings;
 mod bash_read_only_lane;
 mod compaction_and_trim;
 mod credentials_in_file_tools;
@@ -17,6 +15,7 @@ mod extension_entries;
 mod extension_points_doc;
 mod hook_events_doc;
 mod hooks_on_the_session_exec;
+mod host_contracts;
 mod host_scenes;
 mod inline_command_pipeline;
 mod instruction_files;
@@ -54,6 +53,7 @@ mod session_tasks;
 mod session_teardown;
 mod session_title_telemetry;
 mod session_unsubscribe;
+mod skill_inline_commands;
 mod tool_progress;
 mod trusting;
 mod turn_cancellation;

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use blackbox::{
     hook_fixture, Answer, LiveConfig, LiveRun, LiveRunBuilder, McpToy, Page, PageServer,
-    ProviderStub, Reply,
+    ProviderStub, Purpose, Reply, SeenRequest,
 };
 use serde_json::{json, Value};
 
@@ -1769,6 +1769,92 @@ async fn a_hook_that_exits_before_reading_its_payload_changes_nothing() -> anyho
     let events = run.turn(&session, "go").await?;
     assert!(events.text.contains("carried on") && events.turn_complete);
     assert_eq!(run.read_file("big.txt").map(|c| c.len()), Some(400_000));
+    run.finish().await;
+    Ok(())
+}
+
+fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest> {
+    stub.calls()
+        .into_iter()
+        .filter(|c| c.purpose() == Purpose::Turn)
+        .filter(|c| c.messages_contain(mark) && not.iter().all(|n| !c.messages_contain(n)))
+        .collect()
+}
+
+/// A `PreToolUse` agent hook is a guard, not a sub-agent the model asked
+/// for: the model filling `max_concurrent_subagents` with background agents
+/// does not stop the guard from being asked about the next call.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_hook_still_judges_when_the_model_holds_every_sub_agent_slot() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("hook-slots", &stub)
+        .settings(json!({
+            "execution": { "max_concurrent_subagents": 1 },
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "Bash", "action": "allow" }
+            ],
+            "hooks_config": {
+                "PreToolUse": [{
+                    "type": "agent",
+                    "prompt": "GUARD-MARK: may this call run? answer {\"ok\": bool, \"reason\": str}.",
+                    "timeout": 30000
+                }]
+            }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a-bg",
+                "Agent",
+                json!({ "prompt": "BG-MARK wait", "description": "bg", "background": true }),
+            ),
+            Reply::calls("b-1", "Bash", json!({ "command": "echo x > guarded.txt" })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "GUARD-MARK",
+        [
+            Reply::text("{\"ok\": true, \"reason\": \"fine\"}"),
+            Reply::text("{\"ok\": false, \"reason\": \"GUARD-SAYS-NO\"}"),
+        ],
+    );
+    stub.script_when(
+        "BG-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("bg done"),
+        )],
+    );
+    let events = run
+        .turn(&session, "PARENT-MARK start a helper, then run the command")
+        .await?;
+
+    let guard_asks = turns_with(&stub, "GUARD-MARK", &[]).len();
+    let bash = events
+        .tool_results
+        .iter()
+        .find(|(name, _, _)| name == "Bash")
+        .cloned();
+    let mut problems = Vec::new();
+    if run.read_file("guarded.txt").is_some() {
+        problems.push(format!(
+            "the command ran without its guard's verdict (guard asked {guard_asks} time(s)); \
+             Bash result {bash:?}"
+        ));
+    }
+    if guard_asks < 2 {
+        problems.push(format!(
+            "the guard was asked {guard_asks} time(s), not once per call"
+        ));
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
     run.finish().await;
     Ok(())
 }

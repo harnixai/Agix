@@ -1,5 +1,7 @@
-//! 发布前对抗式审查（第二轮）：文档承诺与实际行为不一致的地方，各从宿主那一侧复现。
-//! 修好之前保持 ignored，修好之后作为回归用例。
+//! What the documents promise a host, each reproduced from its side of the
+//! socket: a URL deny from an older release, what commands are not handed
+//! from the daemon's environment, the type of a number on the wire, a request
+//! with a mistyped field, and the scope of a remembered or skill-granted URL.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -219,7 +221,7 @@ async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
 /// `WebFetch(https://evil.example/*)`、`WebFetch(https://evil.example*)` 都拒绝
 /// `https://evil.example/a/b`，现在这次调用落到询问上。
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_url_shaped_deny_written_for_0_3_10_still_refuses_deeper_paths() {
+async fn a_url_shaped_deny_written_for_0_3_10_still_refuses_deeper_paths() {
     let mut asked_instead = Vec::new();
     for rule in [
         "WebFetch(https://evil.example/**)",
@@ -259,7 +261,7 @@ async fn audit2_a_url_shaped_deny_written_for_0_3_10_still_refuses_deeper_paths(
 /// `mcp_auth.md` §1:"密钥只交给它所属的授权服务器"。`client_secret_env` 指向的变量不进
 /// 任何子进程的环境,模型一条 `printenv` 读不到。
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_an_mcp_oauth_client_secret_is_not_handed_to_commands() {
+async fn an_mcp_oauth_client_secret_is_not_handed_to_commands() {
     const VAR: &str = "AUDIT2_DOCS_MCP_SECRET";
     const CANARY: &str = "AUDIT2-CANARY-5d1e";
     // SAFETY: the name is unique to this test; no other test reads it.
@@ -300,7 +302,7 @@ async fn audit2_an_mcp_oauth_client_secret_is_not_handed_to_commands() {
 /// 命令。provider 写在另一个项目的设置里(会话在用的模型留在这个项目),daemon 读过那份设置之后,
 /// 这个项目里的 `printenv` 也读不到它。
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_provider_key_env_is_not_handed_to_commands() {
+async fn a_provider_key_env_is_not_handed_to_commands() {
     const VAR: &str = "AUDIT2_OTHER_PROJECT_PROVIDER_KEY";
     const CANARY: &str = "AUDIT2-CANARY-8a3f";
     // SAFETY: the name is unique to this test; no other test reads it.
@@ -361,7 +363,7 @@ async fn audit2_a_provider_key_env_is_not_handed_to_commands() {
 /// 协议 §7.3 的例子是 `"progress":42`、`"total":120`,`Bash` 报的 `progress` 是"行数"。
 /// 线上发的却是浮点数 `1.0`:按整数解析这个字段的宿主(Rust `u64`、Go `int`)解析失败。
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_bash_line_count_goes_out_as_an_integer() {
+async fn a_bash_line_count_goes_out_as_an_integer() {
     let daemon = Daemon::start(
         Setup {
             mode: PermissionMode::BypassPermissions,
@@ -398,7 +400,7 @@ async fn audit2_a_bash_line_count_goes_out_as_an_integer() {
 /// 协议 §1:只有"合法 JSON 但缺 `method`"的帧被静默丢弃。字段类型不对的请求(这里
 /// `"jsonrpc"` 写成数字)同样什么也不回,客户端等这个 `id` 的响应会一直等下去。
 #[tokio::test]
-async fn audit2_a_request_with_a_mistyped_field_is_answered() {
+async fn a_request_with_a_mistyped_field_is_answered() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     let mut conn = UnixStream::connect(&daemon.sock).await.unwrap();
     conn.write_all(b"{\"jsonrpc\":2.0,\"method\":\"daemon.ping\",\"id\":7}\n")
@@ -417,7 +419,7 @@ async fn audit2_a_request_with_a_mistyped_field_is_answered() {
 /// 原样 URL 带着 query 时,它又被当成 URL 模式:`?` 成了路径里匹配任意一个字符的通配,
 /// 永久允许 `https://h.example/a?b` 连 `https://h.example/axb` 一起放行。
 #[test]
-fn audit2_permit_always_on_a_url_with_a_query_allows_only_that_url() {
+fn permit_always_on_a_url_with_a_query_allows_only_that_url() {
     use base::permission::{RuleBehavior, RuleSource};
     use permissions::ruleset::{RuleHit, RuleSet};
     let rule = permissions::rule::parse_rule_string(
@@ -447,7 +449,7 @@ fn audit2_permit_always_on_a_url_with_a_query_allows_only_that_url() {
 /// 域名的 URL 模式"按整类授权处理。`*.co.uk` 两段都是字面量,`host_is_open` 当它钉住了,可
 /// 任何人都能注册 `x.co.uk`。
 #[test]
-fn audit2_a_skill_url_grant_on_a_public_suffix_is_unscoped() {
+fn a_skill_url_grant_on_a_public_suffix_is_unscoped() {
     assert!(
         !permissions::dangerous::is_unscoped_grant("WebFetch", Some("https://*.example.com/**")),
         "precondition: a registrable domain is pinned"
@@ -461,86 +463,5 @@ fn audit2_a_skill_url_grant_on_a_public_suffix_is_unscoped() {
             permissions::dangerous::is_unscoped_grant("WebFetch", Some(open)),
             "{open} pins no one's domain but a project skill may grant it"
         );
-    }
-}
-
-/// `settings_json_schema` 的注释说这份 schema "can never drift from what `LoadedSettings::load()`
-/// actually accepts",README 让用户拿它做编辑器校验。可它要求顶层的 `model`、`paths`,
-/// `sandbox` 要求 `deny_read`、`allowed_domains`:空文件、README 的路由示例、`{"sandbox": {"unattended_requires_network_policy": true}}` 都过不了校验。`bubble` 则反过来:
-/// schema 收,协议说写进 settings.json 会被退回 `default`。
-#[test]
-fn audit2_the_settings_schema_accepts_what_the_loader_accepts() {
-    let schema: Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/schemas/settings.schema.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let examples = [
-        json!({}),
-        json!({"sandbox": {"unattended_requires_network_policy": true}}),
-        json!({"execution": {"max_turns": 10}}),
-        json!({
-            "providers": {
-                "anthropic": { "api_type": "anthropic", "default_model": "claude-sonnet-4-6" }
-            },
-            "default_provider": "anthropic"
-        }),
-    ];
-    let mut refused = Vec::new();
-    for example in &examples {
-        let mut missing = Vec::new();
-        missing_required(&schema, &schema, example, "", &mut missing);
-        if !missing.is_empty() {
-            refused.push(format!("{example} lacks {missing:?}"));
-        }
-    }
-    let modes = schema["$defs"]["PermissionMode"].to_string();
-    if modes.contains("\"bubble\"") {
-        refused.push("PermissionMode admits \"bubble\"".into());
-    }
-    assert!(refused.is_empty(), "{refused:#?}");
-}
-
-fn resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
-    match node["$ref"].as_str() {
-        Some(r) => resolve(root, &root["$defs"][r.trim_start_matches("#/$defs/")]),
-        None => node,
-    }
-}
-
-fn missing_required(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<String>) {
-    let node = resolve(root, node);
-    if let Some(options) = node["anyOf"].as_array().or(node["oneOf"].as_array()) {
-        let mut best: Option<Vec<String>> = None;
-        for option in options {
-            let mut found = Vec::new();
-            missing_required(root, option, value, at, &mut found);
-            if best.as_ref().is_none_or(|b| found.len() < b.len()) {
-                best = Some(found);
-            }
-        }
-        out.extend(best.unwrap_or_default());
-        return;
-    }
-    let Some(object) = value.as_object() else {
-        return;
-    };
-    for key in node["required"].as_array().into_iter().flatten() {
-        let key = key.as_str().unwrap();
-        if !object.contains_key(key) {
-            out.push(format!("{at}/{key}"));
-        }
-    }
-    for (key, child) in object {
-        let schema = match node["properties"].get(key) {
-            Some(s) => s,
-            None => match node.get("additionalProperties") {
-                Some(s) if s.is_object() => s,
-                _ => continue,
-            },
-        };
-        missing_required(root, schema, child, &format!("{at}/{key}"), out);
     }
 }

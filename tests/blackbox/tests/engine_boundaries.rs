@@ -730,3 +730,57 @@ async fn a_reactive_compaction_says_so_on_the_wire() -> anyhow::Result<()> {
     run.finish().await;
     Ok(())
 }
+
+/// `tool_progress` from a tool a program calls names a `tool_use` the host
+/// was shown — the program's own, or one emitted for the sub-call.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_programs_sub_call_progress_names_a_tool_use_the_host_saw() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("program-progress", &stub)
+        .settings(json!({
+            "permission_rules": [
+                { "tool": "Bash", "action": "allow" },
+                { "tool": "RunCode", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run.watch(&session, true).await?;
+    let lines = "printf 'one\\ntwo\\nthree\\n'";
+    stub.script([
+        Reply::calls("direct-bash", "Bash", json!({ "command": lines })),
+        Reply::calls(
+            "program",
+            "RunCode",
+            json!({
+                "description": "print lines",
+                "code": format!("return await tools.Bash({{command: {}}});", json!(lines))
+            }),
+        ),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "print some lines").await?;
+    let frames = watcher.frames();
+    let ids_of = |kind: &str, key: &str| -> Vec<String> {
+        frames
+            .iter()
+            .filter(|f| f["event"]["kind"] == kind)
+            .filter_map(|f| f["event"][key].as_str().map(str::to_string))
+            .collect()
+    };
+    let used = ids_of("tool_use", "id");
+    let progress = ids_of("tool_progress", "tool_use_id");
+    assert!(
+        progress.iter().any(|id| id == "direct-bash"),
+        "even the direct Bash call reported no progress: {progress:?}"
+    );
+    let orphans: Vec<&String> = progress.iter().filter(|id| !used.contains(id)).collect();
+    assert!(
+        orphans.is_empty(),
+        "tool_progress for ids no tool_use announced: {orphans:?} (tool_use ids {used:?})"
+    );
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}

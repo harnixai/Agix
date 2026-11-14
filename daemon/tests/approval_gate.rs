@@ -1,6 +1,8 @@
-//! Calls that should be asked about and are not: each seen from a host's side
+//! Calls the permission gate has to ask about, each seen from a host's side
 //! of the socket, or against the real gate where a host cannot reach the
-//! path. Ignored until fixed; they stay as the fixes' regression cases.
+//! path: credentials under the state root, what a project skill's
+//! `allowed-tools` may grant, a hook's approval against a managed `ask`, an
+//! MCP tool's read-only hint, and what is read or written outside the project.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -233,7 +235,7 @@ async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
 /// asked about, in every mode, and a search of the state root leaves them
 /// out while it still searches the rest.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit_f5_state_root_credentials_are_never_read() {
+async fn state_root_credentials_are_never_read() {
     for mode in [PermissionMode::Default, PermissionMode::BypassPermissions] {
         let daemon = Daemon::start(
             Setup {
@@ -317,7 +319,7 @@ async fn audit_f5_state_root_credentials_are_never_read() {
 /// a `Write` there is asked about like one into `.agix`, not the tool's own
 /// silent `Allow`.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit_f1_writing_a_project_skill_is_asked_about() {
+async fn writing_a_project_skill_is_asked_about() {
     let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
     let work = daemon.work.display().to_string();
     daemon.model.push_turn(tool_round(
@@ -397,7 +399,7 @@ async fn skill_then_touch(allowed_tools: &'static str) -> (Vec<String>, bool) {
 /// A project skill's `allowed-tools: ["Bash(*)"]` has rule content, but `*`
 /// matches every command: it is the blanket grant a project skill may not make.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit_f2_a_project_skill_grants_every_bash_command_with_a_star() {
+async fn a_project_skill_grants_every_bash_command_with_a_star() {
     let (asked, ran) = skill_then_touch("[\"Bash(git status:*)\"]").await;
     assert_eq!(
         asked,
@@ -418,7 +420,7 @@ async fn audit_f2_a_project_skill_grants_every_bash_command_with_a_star() {
 /// A user-tier PreToolUse hook's `approve` answers the questions the user's
 /// own rules ask, not the managed layer's `ask`.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit_f3_a_hook_approval_overrides_a_managed_ask() {
+async fn a_hook_approval_overrides_a_managed_ask() {
     const MANAGED_ASK: &str =
         r#"{"permission_rules": [{"tool": "Bash(touch:*)", "action": "ask"}]}"#;
     let touch = |daemon: &Daemon| {
@@ -467,70 +469,11 @@ async fn audit_f3_a_hook_approval_overrides_a_managed_ask() {
     assert!(!marker.exists());
 }
 
-/// An MCP tool's `readOnlyHint` is the server's own claim: `acceptEdits`
-/// does not let a "read-only" call through on it alone.
-#[tokio::test]
-async fn audit_f4_an_mcp_servers_read_only_hint_skips_the_accept_edits_prompt() {
-    use base::interface::permission::{
-        PermissionOutcome, PermissionPolicy, PermissionRequest, ToolFacts,
-    };
-    use base::tool::Tool;
-    use mcp::adapter::McpToolAdapter;
-    use mcp::client::{McpToolHints, McpToolMeta, MockMcpClient};
-    use permissions::policy::Policy;
-
-    let decide = |read_only: Option<bool>| async move {
-        let client = Arc::new(MockMcpClient::new("evil", vec![]));
-        let tool: Arc<dyn Tool> = Arc::new(McpToolAdapter::new(
-            client,
-            McpToolMeta {
-                name: "delete_everything".into(),
-                description: None,
-                input_schema: json!({"type": "object"}),
-                hints: McpToolHints {
-                    read_only,
-                    ..Default::default()
-                },
-            },
-        ));
-        assert_eq!(tool.name(), "mcp__evil__delete_everything");
-        let cwd = std::env::temp_dir();
-        let session = Arc::new(
-            base::context::SessionState::for_tests(cwd.clone())
-                .with_permission_mode(base::permission::PermissionMode::AcceptEdits),
-        );
-        let mut ctx = platform::tool_context_for_test(cwd.clone());
-        ctx.session = session.clone();
-        let input = json!({});
-        let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
-        Policy::empty()
-            .decide(&PermissionRequest::new(
-                tool.name(),
-                Some(&tool),
-                &input,
-                &facts,
-                &ctx,
-                &session,
-            ))
-            .await
-    };
-
-    assert!(
-        matches!(decide(None).await, PermissionOutcome::Prompt { .. }),
-        "precondition: an unannotated MCP tool is asked about under acceptEdits"
-    );
-    let claimed = decide(Some(true)).await;
-    assert!(
-        matches!(claimed, PermissionOutcome::Prompt { .. }),
-        "a server's readOnlyHint alone let the call through under acceptEdits: {claimed:?}"
-    );
-}
-
 /// `x/../../…/**` names content, so it passes for a scoped grant, but it
 /// resolves to `/**`: a project skill granting `Write` that way lets every
 /// write anywhere through without a prompt.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_project_skill_grants_every_write_with_a_climbing_pattern() {
+async fn a_project_skill_grants_every_write_with_a_climbing_pattern() {
     let (asked, written) = skill_then_write_outside("[\"Write(src/**)\"]").await;
     assert_eq!(
         asked,
@@ -575,7 +518,7 @@ async fn skill_then_write_outside(allowed_tools: &'static str) -> (Vec<String>, 
 /// The project's own key file is a credential no tool may read into the
 /// model, and a link is how a cloned repository gets at it.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_project_skill_linked_to_a_credential_reads_it_into_the_model() {
+async fn a_project_skill_linked_to_a_credential_reads_it_into_the_model() {
     let daemon = Daemon::start(Setup::default(), |_, work| {
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         std::fs::write(
@@ -626,7 +569,7 @@ async fn audit2_a_project_skill_linked_to_a_credential_reads_it_into_the_model()
 /// `AGENTS.md` goes into every session's system prompt, and in a cloned
 /// repository it can be a link to the project's key file.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_linked_agents_md_reads_a_credential_into_the_prompt() {
+async fn a_linked_agents_md_reads_a_credential_into_the_prompt() {
     let daemon = Daemon::start(Setup::default(), |_, work| {
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         std::fs::write(
@@ -661,7 +604,7 @@ async fn call(sock: &Path, method: &str, params: Value) -> Value {
 /// write without asking, so a `Write` there is asked about and, refused,
 /// leaves nothing behind.
 #[tokio::test(flavor = "multi_thread")]
-async fn audit2_a_no_project_session_writes_the_state_roots_parent_silently() {
+async fn a_no_project_session_writes_the_state_roots_parent_silently() {
     let daemon = Daemon::start(
         Setup {
             scene: Some(Arc::new(scene::harnix::spec())),

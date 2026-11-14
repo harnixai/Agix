@@ -2,10 +2,11 @@
 //! under a name already in use does, what deleting one stops, and what a
 //! stage reports about its members.
 
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply, SeenRequest};
-use serde_json::json;
+use serde_json::{json, Value};
 
 const LEAD: &str = "LEAD-MARK";
 
@@ -187,6 +188,174 @@ async fn a_merged_stage_still_reports_its_failed_member() -> anyhow::Result<()> 
     assert!(
         !stage_completed.is_empty() && stage_completed.iter().all(|l| l.contains(r#""bad""#)),
         "{log}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest> {
+    stub.calls()
+        .into_iter()
+        .filter(|c| c.purpose() == Purpose::Turn)
+        .filter(|c| c.messages_contain(mark) && not.iter().all(|n| !c.messages_contain(n)))
+        .collect()
+}
+
+async fn wait_until(what: &str, timeout: Duration, done: impl Fn() -> bool) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while !done() {
+        anyhow::ensure!(Instant::now() < deadline, "{what} never happened");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(())
+}
+
+async fn interrupt(run: &mut LiveRun, session: &str) -> anyhow::Result<Value> {
+    let resp = run
+        .client
+        .call("session.interrupt", json!({ "session_id": session }))
+        .await?;
+    Ok(resp.result.unwrap_or_default())
+}
+
+fn team_dirs(project: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(project.join(".agix/teams"))
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default()
+}
+
+/// A persistent member stopped with a message still queued for it ends that
+/// message's task too, so nothing is left running to hold off a rebuild.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_stopped_with_a_queued_message_leaves_no_task_running() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("member-queue", &stub)
+        .settings(json!({
+            "team": { "enabled": true },
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "TeamDelete", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let member = |id: &str, prompt: &str| {
+        Reply::calls(
+            id,
+            "Agent",
+            json!({ "prompt": prompt, "description": "member", "team_name": "crew", "name": "worker" }),
+        )
+    };
+    stub.script_when(
+        "LEAD-MARK",
+        [
+            member("a-1", "FIRST-MESSAGE-MARK work"),
+            member("a-2", "SECOND-MESSAGE-MARK then this"),
+            Reply::text("queued"),
+        ],
+    );
+    stub.script_when(
+        "FIRST-MESSAGE-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("first done"),
+        )],
+    );
+    run.turn(&session, "LEAD-MARK give the worker two messages")
+        .await?;
+    wait_until("the member's first turn", Duration::from_secs(30), || {
+        !turns_with(&stub, "FIRST-MESSAGE-MARK", &["LEAD-MARK"]).is_empty()
+    })
+    .await?;
+    stub.script_when(
+        "STOP-MARK",
+        [
+            Reply::calls("d-1", "TeamDelete", json!({ "name": "crew" })),
+            Reply::text("stopped"),
+        ],
+    );
+    run.turn(&session, "STOP-MARK stop the team").await?;
+    run.wait_tasks_settled(&session, Duration::from_secs(30))
+        .await?;
+    let set = run
+        .client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": session, "append": "AFTER-THE-TEAM" }),
+        )
+        .await?;
+    assert!(set.error.is_none(), "{set:?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// The lead is interrupted while its first stage's member is still waiting
+/// on the model: the team ends there, as cancelled, and its second stage is
+/// never started.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_team_starts_no_later_stage_and_ends_cancelled() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("team-interrupted", &stub)
+        .settings(json!({ "team": { "enabled": true } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script_when(
+        "LEAD-MARK",
+        [
+            Reply::calls(
+                "t1",
+                "TeamCreate",
+                json!({ "name": "crew", "stages": [
+                    { "name": "one", "agents": [{ "label": "first", "prompt": "STAGE-ONE-MARK work" }] },
+                    { "name": "two", "agents": [{ "label": "second", "prompt": "STAGE-TWO-MARK work" }] }
+                ] }),
+            ),
+            Reply::text("LEAD-DONE"),
+        ],
+    );
+    stub.script_when(
+        "STAGE-ONE-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("one done"),
+        )],
+    );
+    stub.script_when("STAGE-TWO-MARK", [Reply::text("two done")]);
+    let handle = run
+        .spawn_turn(&session, "LEAD-MARK run the team", json!({}))
+        .await?;
+    wait_until(
+        "the first stage's member calling the model",
+        Duration::from_secs(30),
+        || !turns_with(&stub, "STAGE-ONE-MARK", &["LEAD-MARK"]).is_empty(),
+    )
+    .await?;
+    let interrupted = interrupt(&mut run, &session).await?;
+    assert_eq!(interrupted["interrupted"], json!(true), "{interrupted}");
+    let events = tokio::time::timeout(Duration::from_secs(60), handle).await???;
+    let stop = events
+        .turn_complete_event
+        .as_ref()
+        .map(|e| e["stop_reason"].clone())
+        .unwrap_or_default();
+    assert_eq!(stop, "cancelled", "{:?}", events.events);
+
+    let team = team_dirs(&run.project)
+        .into_iter()
+        .next()
+        .expect("the team's directory");
+    let state: Value = serde_json::from_str(&std::fs::read_to_string(team.join("state.json"))?)?;
+    assert_eq!(state["status"], "cancelled", "{state}");
+    let log = std::fs::read_to_string(team.join("events.jsonl"))?;
+    let later_stage = log
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|e| e["kind"] == "stage_started" && e["index"] == 1);
+    assert!(
+        later_stage.is_none(),
+        "the second stage was started: {later_stage:?}"
     );
     run.finish().await;
     Ok(())

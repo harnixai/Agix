@@ -11,10 +11,13 @@
 //! The live tier cannot ask for any of these on demand; here the model's side
 //! is held fixed so the product's side is all that varies.
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use blackbox::{Block, LiveConfig, LiveRun, LiveRunBuilder, Mode, ProviderStub, Purpose, Reply};
+use blackbox::{
+    Block, LiveConfig, LiveRun, LiveRunBuilder, Mode, ProviderStub, Purpose, Reply, SeenRequest,
+};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -726,6 +729,753 @@ async fn a_closed_session_resumes_while_its_session_start_hook_still_runs() -> a
         "{resumed:?}"
     );
     std::fs::write(&release, "")?;
+    run.finish().await;
+    Ok(())
+}
+
+const SUMMARY: &str = "You are compacting an AI coding agent's conversation";
+
+const TOO_LONG: &str = r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 212034 tokens > 200000 maximum"}}"#;
+
+fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest> {
+    stub.calls()
+        .into_iter()
+        .filter(|c| c.purpose() == Purpose::Turn)
+        .filter(|c| c.messages_contain(mark) && not.iter().all(|n| !c.messages_contain(n)))
+        .collect()
+}
+
+fn executable(dir: &Path, name: &str, body: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(&path, body)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(path)
+}
+
+async fn wait_until(what: &str, timeout: Duration, done: impl Fn() -> bool) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while !done() {
+        anyhow::ensure!(Instant::now() < deadline, "{what} never happened");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(())
+}
+
+async fn interrupt(run: &mut LiveRun, session: &str) -> anyhow::Result<Value> {
+    let resp = run
+        .client
+        .call("session.interrupt", json!({ "session_id": session }))
+        .await?;
+    Ok(resp.result.unwrap_or_default())
+}
+
+async fn runtime_of(run: &mut LiveRun, session: &str, name: &str) -> anyhow::Result<Value> {
+    let archive = run.world.root().join(format!("export-{name}"));
+    let exported = run
+        .client
+        .session_export(session, &archive, Some("dir"), None)
+        .await?;
+    anyhow::ensure!(exported.error.is_none(), "{exported:?}");
+    Ok(serde_json::from_str(&std::fs::read_to_string(
+        archive.join("sessions").join(session).join("runtime.json"),
+    )?)?)
+}
+
+/// `rounds` rounds of file reads, so a compaction has something to summarize.
+async fn a_few_rounds(
+    run: &mut LiveRun,
+    stub: &ProviderStub,
+    session: &str,
+    rounds: usize,
+) -> anyhow::Result<()> {
+    let mut script = Vec::new();
+    for i in 0..rounds {
+        let body: String = (0..200)
+            .map(|l| format!("file {i} line {l} of filler\n"))
+            .collect();
+        let path = run.write_file(&format!("f{i}.txt"), &body)?;
+        script.push(Reply::calls(
+            &format!("r{i}"),
+            "Read",
+            json!({ "file_path": path.to_string_lossy() }),
+        ));
+    }
+    script.push(Reply::text("read them"));
+    stub.script(script);
+    run.turn(session, "read the files").await?;
+    Ok(())
+}
+
+const WAIT_FOR_GO: &str = "touch waiting; while [ ! -e go ]; do sleep 0.05; done; echo released";
+
+/// The first task of `kind` in `session.tasks`.
+async fn task_of_kind(run: &mut LiveRun, session: &str, kind: &str) -> anyhow::Result<Value> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(task) = run
+            .tasks(session)
+            .await?
+            .into_iter()
+            .find(|t| t["kind"] == kind)
+        {
+            return Ok(task);
+        }
+        anyhow::ensure!(Instant::now() < deadline, "no {kind} task appeared");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// A turn submitted while the engine is still between turns (here: re-running
+/// an async-rewake hook) and interrupted before it starts is the turn that
+/// gets interrupted — not the finished one before it, nor the background
+/// command that one started.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupt_sent_between_turns_reaches_the_turn_it_was_sent_for() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let (go, stalled, release) = (
+        scratch.path().join("go"),
+        scratch.path().join("stalled"),
+        scratch.path().join("release"),
+    );
+    let hook = executable(
+        scratch.path(),
+        "rewake.sh",
+        &format!(
+            "#!/bin/sh\ninput=$(cat)\necho \"$input\" >> '{log}'\ncase \"$input\" in\n  *WakeEvent*)\n    touch '{stalled}'\n    \
+             while [ ! -e '{release}' ]; do sleep 0.05; done\n    echo '{{}}' ;;\n  *)\n    \
+             echo '{{\"rewake\":true}}' ;;\nesac\n",
+            stalled = stalled.display(),
+            release = release.display(),
+            log = scratch.path().join("stalled.log").display(),
+        ),
+    )?;
+    let mut run = stubbed("rewake-interrupt", &stub)
+        .settings(json!({
+            "hooks_config": { "SessionStart": [{
+                "type": "command", "command": hook, "async_rewake": true, "timeout": 120_000
+            }], "TaskCreated": [{ "type": "command", "command": hook }] },
+            "permission_rules": [{ "tool": "Monitor", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::Blocks(vec![
+            blackbox::Block::tool(
+                "m-quick",
+                "Monitor",
+                json!({
+                    "command": format!(
+                        "while [ ! -e '{}' ]; do sleep 0.05; done; echo finished",
+                        go.display()
+                    ),
+                    "description": "quick"
+                }),
+            ),
+            blackbox::Block::tool(
+                "m-long",
+                "Monitor",
+                json!({ "command": "sleep 600", "description": "long" }),
+            ),
+        ]),
+        Reply::text("t1 done"),
+    ]);
+    run.turn(&session, "start two monitors").await?;
+    let task_of = |tasks: &[Value], description: &str| {
+        tasks
+            .iter()
+            .find(|t| t.to_string().contains(description))
+            .cloned()
+    };
+    let tasks = run.tasks(&session).await?;
+    anyhow::ensure!(
+        task_of(&tasks, "long").is_some() && task_of(&tasks, "quick").is_some(),
+        "the monitors did not start: {tasks:?}"
+    );
+    let log = scratch.path().join("stalled.log");
+    wait_until(
+        "the quick monitor announced",
+        Duration::from_secs(20),
+        || {
+            std::fs::read_to_string(&log)
+                .unwrap_or_default()
+                .lines()
+                .any(|l| l.contains("TaskCreated") && l.contains("quick"))
+        },
+    )
+    .await?;
+    std::fs::write(&go, "")?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let tasks = run.tasks(&session).await?;
+        if task_of(&tasks, "quick").is_some_and(|t| t["status"] != "running") {
+            break;
+        }
+        anyhow::ensure!(Instant::now() < deadline, "the quick monitor never ended");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    stub.script([Reply::text("T2-ANSWER")]);
+    let second = run
+        .spawn_turn(&session, "T2-MARK filler", json!({}))
+        .await?;
+    wait_until("the rewake hook stalling", Duration::from_secs(20), || {
+        stalled.exists()
+    })
+    .await?;
+    let (handle, mark) = if turns_with(&stub, "T2-MARK", &[]).is_empty() {
+        (second, "T2-MARK")
+    } else {
+        second.await??;
+        stub.script([Reply::text("T3-ANSWER")]);
+        (
+            run.spawn_turn(&session, "T3-MARK the turn to interrupt", json!({}))
+                .await?,
+            "T3-MARK",
+        )
+    };
+    run.wait_turn_state(&session, "running", Duration::from_secs(10))
+        .await?;
+    let interrupted = interrupt(&mut run, &session).await?;
+    assert_eq!(interrupted["interrupted"], json!(true), "{interrupted}");
+    std::fs::write(&release, "")?;
+    let events = handle.await??;
+
+    let mut problems = Vec::new();
+    let stop = events
+        .turn_complete_event
+        .as_ref()
+        .map(|e| e["stop_reason"].clone())
+        .unwrap_or_default();
+    if !turns_with(&stub, mark, &[]).is_empty() && stop == "end_turn" {
+        problems.push(format!(
+            "the interrupted turn ({mark}) still reached the model and ended {stop}: {:?}",
+            events.text
+        ));
+    }
+    let long = task_of(&run.tasks(&session).await?, "long");
+    if long.as_ref().is_none_or(|t| t["status"] != "running") {
+        problems.push(format!(
+            "the previous turn's monitor was stopped by this interrupt: {long:?}"
+        ));
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// A size refusal sets off a compaction before the retry; a host interrupt
+/// while its summary is being written ends the turn the way any interrupt
+/// does, not with an engine error.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupt_during_the_compaction_for_a_size_refusal_is_not_an_engine_error(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("retry-interrupt", &stub).start().await?;
+    let session = run.session().await?;
+    a_few_rounds(&mut run, &stub, &session, 12).await?;
+    stub.script_when(
+        SUMMARY,
+        [Reply::delayed(
+            Duration::from_secs(60),
+            Reply::text("SUMMARY-TOO-LATE"),
+        )],
+    );
+    stub.inject_failures(1, Reply::status(400, TOO_LONG));
+    stub.script([Reply::text("ANSWERED-AFTER-COMPACTING")]);
+    let handle = run.spawn_turn(&session, "and now?", json!({})).await?;
+    wait_until("a summary request", Duration::from_secs(30), || {
+        stub.calls().iter().any(|c| c.purpose() == Purpose::Compact)
+    })
+    .await?;
+    let interrupted = interrupt(&mut run, &session).await?;
+    assert_eq!(interrupted["interrupted"], json!(true), "{interrupted}");
+    let events = handle.await??;
+    let error = events.response.as_ref().and_then(|r| r.error.as_ref());
+    assert!(
+        error.is_none(),
+        "the interrupted turn failed: {error:?}; turn_complete {:?}",
+        events.turn_complete_event
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// `session.compact` is a turn of its own; an interrupt while its summary is
+/// being written ends it, and the late summary is never applied.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupt_stops_session_compact_while_its_summary_is_written() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("compact-interrupt", &stub).start().await?;
+    let session = run.session().await?;
+    a_few_rounds(&mut run, &stub, &session, 4).await?;
+    stub.script_when(
+        SUMMARY,
+        [Reply::delayed(
+            Duration::from_secs(8),
+            Reply::text("SUMMARY-WRITTEN-LATE"),
+        )],
+    );
+    let mut compactor = run.daemon.connect().await?;
+    let id = session.clone();
+    let compacting = tokio::spawn(async move {
+        compactor
+            .call("session.compact", json!({ "session_id": id }))
+            .await
+    });
+    wait_until("a summary request", Duration::from_secs(30), || {
+        stub.calls().iter().any(|c| c.purpose() == Purpose::Compact)
+    })
+    .await?;
+    let interrupted = interrupt(&mut run, &session).await?;
+    assert_eq!(interrupted["interrupted"], json!(true), "{interrupted}");
+    let compacted = compacting.await??;
+    let history = run
+        .client
+        .call(
+            "session.history",
+            json!({ "session_id": session, "limit": 100 }),
+        )
+        .await?
+        .result
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !history.contains("SUMMARY-WRITTEN-LATE"),
+        "the summary written after the interrupt was applied; session.compact answered {:?}",
+        compacted
+            .result
+            .or(compacted.error.map(|e| json!(e.message)))
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// A transcript that exists but fails to load is a failed resume, not a
+/// session with no history: the turn is refused, the model is never asked,
+/// and the log is left exactly as it was — no second `Meta`, no new turn.
+/// Two ways to break one: a whole line that is not UTF-8 (a newline-ended
+/// line was written in full, so it is not a torn tail the reader may drop),
+/// and a file this process may write but not read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transcript_that_fails_to_load_is_not_resumed_as_an_empty_session() -> anyhow::Result<()>
+{
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt as _;
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("unloadable", &stub).start().await?;
+    let breakages: [(&str, &[u8], bool); 2] = [
+        ("a line that is not UTF-8", b"\xff\xfe\n", false),
+        ("a write-only file", b"", true),
+    ];
+    for (n, (how, appended, write_only)) in breakages.into_iter().enumerate() {
+        let session = run.session().await?;
+        stub.script([Reply::text("first answer")]);
+        run.turn(&session, &format!("FIRST-MARK-{n} hello")).await?;
+        let closed = run.client.session_close(&session).await?;
+        anyhow::ensure!(closed.error.is_none(), "{closed:?}");
+        let transcript = run
+            .world
+            .transcript_dir(&run.project)
+            .join(format!("{session}.jsonl"));
+        anyhow::ensure!(
+            transcript.exists(),
+            "no transcript at {}",
+            transcript.display()
+        );
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)?
+            .write_all(appended)?;
+        let broken = std::fs::read(&transcript)?;
+        if write_only {
+            std::fs::set_permissions(&transcript, std::fs::Permissions::from_mode(0o200))?;
+            if std::fs::read(&transcript).is_ok() {
+                eprintln!("skipping {how}: this process reads files it has no read permission on");
+                std::fs::set_permissions(&transcript, std::fs::Permissions::from_mode(0o600))?;
+                continue;
+            }
+        }
+
+        stub.script([Reply::text("second answer")]);
+        let second_mark = format!("SECOND-MARK-{n}");
+        let resumed = run
+            .client
+            .run_turn_with(
+                json!({ "session_id": session, "message": format!("{second_mark} again") }),
+            )
+            .await?;
+        if write_only {
+            std::fs::set_permissions(&transcript, std::fs::Permissions::from_mode(0o600))?;
+        }
+
+        let error = resumed.response.as_ref().and_then(|r| r.error.as_ref());
+        assert!(
+            error.is_some_and(|e| e.message.contains("could not be loaded")),
+            "{how}: the turn on a transcript that does not load was not refused: {:?}",
+            resumed.response
+        );
+        assert!(
+            turns_with(&stub, &second_mark, &[]).is_empty(),
+            "{how}: the model was asked to go on from a transcript that did not load"
+        );
+        assert!(
+            std::fs::read(&transcript)? == broken,
+            "{how}: the refused resume wrote to the transcript"
+        );
+    }
+    run.finish().await;
+    Ok(())
+}
+
+/// A settings change rebuilds an idle session's engine before its next turn;
+/// what the session was in — plan mode, its todo list, the deferred tools it
+/// loaded — is still what it is in afterwards.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuilt_session_keeps_plan_mode_todos_and_loaded_tools() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let builds = scratch.path().join("builds.log");
+    let hook = executable(
+        scratch.path(),
+        "start.sh",
+        &format!(
+            "#!/bin/sh\ncat >/dev/null\necho started >> '{}'\necho '{{}}'\n",
+            builds.display()
+        ),
+    )?;
+    let mut run = stubbed("rebuilt", &stub)
+        .settings(json!({
+            "hooks_config": { "SessionStart": [{ "type": "command", "command": hook }] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls("ts-1", "ToolSearch", json!({ "query": "select:TodoWrite" })),
+        Reply::calls(
+            "td-1",
+            "TodoWrite",
+            json!({ "todos": [{ "content": "step one", "status": "pending", "active_form": "doing step one" }] }),
+        ),
+        Reply::calls("pm-1", "EnterPlanMode", json!({})),
+        Reply::text("planned"),
+    ]);
+    run.turn(&session, "plan it").await?;
+    let before = runtime_of(&mut run, &session, "before").await?;
+    anyhow::ensure!(
+        before["permission_mode"] == "plan"
+            && before["todos"].as_array().is_some_and(|t| t.len() == 1),
+        "the session never got into the state this case checks: {before}"
+    );
+    let starts = || {
+        std::fs::read_to_string(&builds)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let starts_before = starts();
+
+    let reloaded = run.client.config_reload(&rpc_client::Target::own()).await?;
+    anyhow::ensure!(reloaded.error.is_none(), "{reloaded:?}");
+    stub.script([Reply::text("after the reload")]);
+    run.turn(&session, "carry on").await?;
+    anyhow::ensure!(
+        starts() > starts_before,
+        "the session was not rebuilt ({starts_before} -> {} starts)",
+        starts()
+    );
+    let after = runtime_of(&mut run, &session, "after").await?;
+
+    stub.script_when(SUMMARY, [Reply::text("1. User intent — plan it.")]);
+    let compacted = run
+        .client
+        .call("session.compact", json!({ "session_id": session }))
+        .await?;
+    anyhow::ensure!(compacted.error.is_none(), "{compacted:?}");
+    stub.script([Reply::text("after the compaction")]);
+    run.turn(&session, "LAST-MARK and now").await?;
+    let last = turns_with(&stub, "LAST-MARK", &[]);
+    let loaded = last.last().is_some_and(|c| {
+        c.messages_contain("These deferred tools were loaded earlier")
+            && c.messages_contain("TodoWrite")
+    });
+
+    let mut problems = Vec::new();
+    if after["permission_mode"] != before["permission_mode"] {
+        problems.push(format!(
+            "permission_mode {} -> {}",
+            before["permission_mode"], after["permission_mode"]
+        ));
+    }
+    if after["todos"] != before["todos"] {
+        problems.push(format!("todos {} -> {}", before["todos"], after["todos"]));
+    }
+    if !loaded {
+        problems
+            .push("the compaction after the rebuild no longer lists TodoWrite as loaded".into());
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// A session the pool evicts at its cap comes back from its log on the next
+/// turn. One the model put in plan mode is still in plan mode then: leaving
+/// it is `ExitPlanMode`'s question to the user, not the pool's to answer by
+/// dropping the engine.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_evicted_at_the_cap_comes_back_still_in_plan_mode() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("evicted-plan", &stub)
+        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .options(|o| o.session_cap(1))
+        .start()
+        .await?;
+    let planner = run.session().await?;
+    stub.script([
+        Reply::calls("pm-1", "EnterPlanMode", json!({})),
+        Reply::text("planned"),
+    ]);
+    run.turn(&planner, "plan it").await?;
+    let before = runtime_of(&mut run, &planner, "before").await?;
+    anyhow::ensure!(
+        before["permission_mode"] == "plan",
+        "the session never got into plan mode: {before}"
+    );
+
+    let other = run.session().await?;
+    stub.script([Reply::text("other answer")]);
+    run.turn(&other, "something else").await?;
+
+    let target = run.project.join("written-after-eviction.txt");
+    stub.script([
+        Reply::calls(
+            "w-1",
+            "Write",
+            json!({ "file_path": target.to_string_lossy(), "content": "x" }),
+        ),
+        Reply::text("wrote it"),
+    ]);
+    run.turn(&planner, "BACK-MARK write the file now").await?;
+    let after = runtime_of(&mut run, &planner, "after").await?;
+
+    let mut problems = Vec::new();
+    if after["permission_mode"] != "plan" {
+        problems.push(format!(
+            "permission_mode plan -> {} after the eviction",
+            after["permission_mode"]
+        ));
+    }
+    if target.exists() {
+        problems.push("Write ran in a session that was in plan mode".to_string());
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// An interrupt stops the background agents its turn started; their tasks
+/// end `stopped`, not `done` (protocol `session.interrupt`, `session.tasks`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_background_agent_stopped_by_an_interrupt_ends_stopped() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("bg-agent-interrupt", &stub)
+        .settings(json!({
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "Bash", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a-bg",
+                "Agent",
+                json!({ "prompt": "BG-MARK work", "description": "bg", "background": true }),
+            ),
+            Reply::calls("b-1", "Bash", json!({ "command": WAIT_FOR_GO })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "BG-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("bg done"),
+        )],
+    );
+    let handle = run
+        .spawn_turn(&session, "PARENT-MARK start a helper, then wait", json!({}))
+        .await?;
+    let waiting = run.project.join("waiting");
+    wait_until(
+        "the parent's command waiting",
+        Duration::from_secs(30),
+        || waiting.exists(),
+    )
+    .await?;
+    task_of_kind(&mut run, &session, "agent").await?;
+    let interrupted = interrupt(&mut run, &session).await?;
+    assert_eq!(interrupted["interrupted"], json!(true), "{interrupted}");
+    std::fs::write(run.project.join("go"), "")?;
+    handle.await??;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let task = loop {
+        let task = task_of_kind(&mut run, &session, "agent").await?;
+        if task["status"] != "running" && task["status"] != "waiting" {
+            break task;
+        }
+        anyhow::ensure!(Instant::now() < deadline, "the agent never ended: {task}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(task["status"], json!("stopped"), "{task}");
+    run.finish().await;
+    Ok(())
+}
+
+/// `session.setPrompt` rebuilds an idle session. A `SessionEnd` hook that takes
+/// its time runs on in the background rather than holding the old engine up:
+/// the rebuild goes through and the next turn is served.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuild_whose_old_engine_is_slow_to_stop_does_not_swallow_the_next_turn(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let go = scratch.path().join("go");
+    let hook = executable(
+        scratch.path(),
+        "end.sh",
+        &format!(
+            "#!/bin/sh\ncat >/dev/null\nwhile [ ! -e '{}' ]; do sleep 0.05; done\necho '{{}}'\n",
+            go.display()
+        ),
+    )?;
+    let mut run = stubbed("slow-stop", &stub)
+        .settings(json!({
+            "hooks_config": { "SessionEnd": [{
+                "type": "command", "command": hook, "timeout": 120_000
+            }] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("one")]);
+    run.turn(&session, "ONE-MARK hello").await?;
+    let set = run
+        .client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": session, "append": "Answer briefly." }),
+        )
+        .await?;
+    stub.script([Reply::text("two answered")]);
+    let second = run
+        .spawn_turn(&session, "TWO-MARK again", json!({}))
+        .await?;
+    std::fs::write(&go, "")?;
+    let set_answer = set
+        .result
+        .clone()
+        .or(set.error.clone().map(|e| json!(e.message)));
+    let Ok(events) = tokio::time::timeout(Duration::from_secs(30), second).await else {
+        panic!(
+            "the turn after the rebuild never ended once the old engine could stop; \
+             setPrompt answered {set_answer:?}"
+        );
+    };
+    let events = events??;
+    assert!(set.error.is_none(), "setPrompt answered {set_answer:?}");
+    let history = run
+        .client
+        .call(
+            "session.history",
+            json!({ "session_id": session, "limit": 100 }),
+        )
+        .await?
+        .result
+        .unwrap_or_default()
+        .to_string();
+    let error = events.response.as_ref().and_then(|r| r.error.clone());
+    assert!(
+        error.is_none() && history.contains("TWO-MARK"),
+        "setPrompt answered {:?}; the next turn answered {error:?} and the history has it: {}",
+        set.result.or(set.error.map(|e| json!(e.message))),
+        history.contains("TWO-MARK")
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// A turn cut off by `session.close` still ends for every subscriber with a
+/// terminal frame (§5.5): a tab watching it is not left waiting.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_cut_off_by_close_ends_with_a_terminal_frame_for_its_watchers() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let (holding, release) = (
+        scratch.path().join("holding"),
+        scratch.path().join("release"),
+    );
+    let hook = executable(
+        scratch.path(),
+        "hold.sh",
+        &format!(
+            "#!/bin/sh\ncat >/dev/null\ntouch '{holding}'\n\
+             while [ ! -e '{release}' ]; do sleep 0.05; done\necho '{{}}'\n",
+            holding = holding.display(),
+            release = release.display(),
+        ),
+    )?;
+    let mut run = stubbed("close-mid-turn", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
+            "hooks_config": { "PreToolUse": [{
+                "type": "command", "command": hook, "timeout": 120_000
+            }] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run.watch(&session, false).await?;
+    stub.script([
+        Reply::calls("b-1", "Bash", json!({ "command": "echo hi" })),
+        Reply::text("done"),
+    ]);
+    let handle = run.spawn_turn(&session, "run it", json!({})).await?;
+    wait_until("the hook holding the call", Duration::from_secs(30), || {
+        holding.exists()
+    })
+    .await?;
+    let turn_id = watcher
+        .wait_for("the tool_use frame", Duration::from_secs(30), |e| {
+            e["kind"] == "tool_use"
+        })
+        .await?["turn_id"]
+        .clone();
+    let closed = run.client.session_close(&session).await?;
+    anyhow::ensure!(closed.error.is_none(), "{closed:?}");
+    std::fs::write(&release, "")?;
+    let initiator = handle.await?;
+    let terminal = watcher
+        .wait_for("a terminal frame", Duration::from_secs(10), |e| {
+            e["kind"] == "turn_complete" || e["kind"] == "error"
+        })
+        .await;
+    assert!(
+        terminal.is_ok(),
+        "the watcher got no turn_complete or error for turn {turn_id}; the initiator got {:?}",
+        initiator.map(|e| e.response)
+    );
+    drop(watcher);
     run.finish().await;
     Ok(())
 }

@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply, SeenRequest};
-use serde_json::json;
+use serde_json::{json, Value};
 
 fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
     LiveRun::builder(name)
@@ -248,6 +248,318 @@ async fn a_forked_skills_allowed_tools_are_granted_in_the_fork_only() -> anyhow:
         "the managed ask in the fork, then the parent's own call, and nothing else: {asked:?}"
     );
     assert!(run.read_file("managed.txt").is_none());
+    run.finish().await;
+    Ok(())
+}
+
+fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest> {
+    stub.calls()
+        .into_iter()
+        .filter(|c| c.purpose() == Purpose::Turn)
+        .filter(|c| c.messages_contain(mark) && not.iter().all(|n| !c.messages_contain(n)))
+        .collect()
+}
+
+fn tool_result_in(calls: &[SeenRequest], tool_use_id: &str) -> Option<Value> {
+    calls.iter().find_map(|c| {
+        c.body["messages"]
+            .as_array()?
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .find(|b| b["type"] == "tool_result" && b["tool_use_id"] == tool_use_id)
+            .cloned()
+    })
+}
+
+async fn wait_until(what: &str, timeout: Duration, done: impl Fn() -> bool) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    while !done() {
+        anyhow::ensure!(Instant::now() < deadline, "{what} never happened");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Ok(())
+}
+
+const WAIT_FOR_GO: &str = "touch waiting; while [ ! -e go ]; do sleep 0.05; done; echo released";
+
+/// The first task of `kind` in `session.tasks`.
+async fn task_of_kind(run: &mut LiveRun, session: &str, kind: &str) -> anyhow::Result<Value> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(task) = run
+            .tasks(session)
+            .await?
+            .into_iter()
+            .find(|t| t["kind"] == kind)
+        {
+            return Ok(task);
+        }
+        anyhow::ensure!(Instant::now() < deadline, "no {kind} task appeared");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// A `context: fork` skill with `agent: explore` runs on the explore type's
+/// read-only tools, and at the depth limit has no `Agent` — not the parent's,
+/// either, which would count the grandchild against the parent's depth.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forked_skill_gets_its_agent_types_tools_and_no_parents_agent() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("fork-explore", &stub)
+        .settings(json!({
+            "execution": { "max_agent_depth": 1 },
+            "permission_rules": [
+                { "tool": "Skill", "action": "allow" },
+                { "tool": "Agent", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    run.write_file(
+        ".agents/skills/looker/SKILL.md",
+        "---\nname: looker\ndescription: looks around\ncontext: fork\nagent: explore\n---\n\
+         FORK-MARK look around the project\n",
+    )?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls("s-1", "Skill", json!({ "skill": "looker" })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "FORK-MARK",
+        [
+            Reply::calls(
+                "f-1",
+                "Agent",
+                json!({ "prompt": "GRANDCHILD-MARK go deeper", "description": "deeper" }),
+            ),
+            Reply::text("fork done"),
+        ],
+    );
+    stub.script_when("GRANDCHILD-MARK", [Reply::text("grandchild done")]);
+    run.turn(&session, "PARENT-MARK use the looker skill")
+        .await?;
+
+    let fork = turns_with(&stub, "FORK-MARK", &["PARENT-MARK"]);
+    assert!(!fork.is_empty(), "the skill never forked");
+    let names = fork[0].tool_names();
+    let mut problems = Vec::new();
+    let writers: Vec<&String> = names
+        .iter()
+        .filter(|n| ["Write", "Edit", "Bash"].contains(&n.as_str()))
+        .collect();
+    if !writers.is_empty() {
+        problems.push(format!("the explore fork was offered {writers:?}"));
+    }
+    if names.iter().any(|n| n == "Agent") {
+        problems.push("the fork at the depth limit was offered Agent".to_string());
+    }
+    let grandchild = turns_with(&stub, "GRANDCHILD-MARK", &["FORK-MARK"]);
+    if !grandchild.is_empty() {
+        problems.push(format!(
+            "the fork's Agent call spawned a grandchild past max_agent_depth 1 ({} request(s)); \
+             its result: {:?}",
+            grandchild.len(),
+            tool_result_in(&fork, "f-1")
+        ));
+    }
+    assert!(problems.is_empty(), "{problems:#?}\nfork tools: {names:?}");
+    run.finish().await;
+    Ok(())
+}
+
+/// `ARCHITECTURE.md` §3.4: a sub-agent's tools are narrowed by the caller's
+/// lists, a skill's `allowed-tools` among them. A `context: fork` skill that
+/// lists only `Read` forks a sub-agent that is offered `Read`, not `Write`,
+/// `Edit` or `Bash`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forked_skill_is_narrowed_to_its_allowed_tools() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("fork-allowed", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    run.write_file(
+        ".agents/skills/reader/SKILL.md",
+        "---\nname: reader\ndescription: reads a file\ncontext: fork\nallowed-tools: Read\n---\n\
+         FORK-MARK read the readme\n",
+    )?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls("s-1", "Skill", json!({ "skill": "reader" })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when("FORK-MARK", [Reply::text("fork done")]);
+    run.turn(&session, "PARENT-MARK use the reader skill")
+        .await?;
+
+    let fork = turns_with(&stub, "FORK-MARK", &["PARENT-MARK"]);
+    anyhow::ensure!(!fork.is_empty(), "the skill never forked");
+    let names = fork[0].tool_names();
+    anyhow::ensure!(
+        names.iter().any(|n| n == "Read"),
+        "the fork has no Read at all: {names:?}"
+    );
+    let beyond: Vec<&String> = names
+        .iter()
+        .filter(|n| ["Write", "Edit", "Bash"].contains(&n.as_str()))
+        .collect();
+    assert!(
+        beyond.is_empty(),
+        "a fork of a skill with `allowed-tools: Read` was offered {beyond:?}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// `session.stopTask` on a background `context: fork` skill stops that
+/// sub-agent; the turn that forked it goes on, as it does for any stopped
+/// task (protocol `session.stopTask`).
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_background_forked_skill_leaves_the_turn_running() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("bg-fork-stop", &stub)
+        .settings(json!({
+            "permission_rules": [
+                { "tool": "Skill", "action": "allow" },
+                { "tool": "Bash", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    run.write_file(
+        ".agents/skills/bgfork/SKILL.md",
+        "---\nname: bgfork\ndescription: works in the background\ncontext: fork\nbackground: true\n---\n\
+         FORK-MARK work for a while\n",
+    )?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls("s-1", "Skill", json!({ "skill": "bgfork" })),
+            Reply::calls("b-1", "Bash", json!({ "command": WAIT_FOR_GO })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "FORK-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("fork done"),
+        )],
+    );
+    let handle = run
+        .spawn_turn(&session, "PARENT-MARK fork it, then wait", json!({}))
+        .await?;
+    let waiting = run.project.join("waiting");
+    wait_until(
+        "the parent's command waiting",
+        Duration::from_secs(30),
+        || waiting.exists(),
+    )
+    .await?;
+    let fork = task_of_kind(&mut run, &session, "agent").await?;
+    let stopped = run
+        .client
+        .call(
+            "session.stopTask",
+            json!({ "session_id": session, "task_id": fork["task_id"] }),
+        )
+        .await?;
+    anyhow::ensure!(stopped.error.is_none(), "{stopped:?}");
+    std::fs::write(run.project.join("go"), "")?;
+    let events = handle.await??;
+    let stop = events
+        .turn_complete_event
+        .as_ref()
+        .map(|e| e["stop_reason"].clone())
+        .unwrap_or_default();
+    assert_eq!(
+        stop,
+        json!("end_turn"),
+        "stopping the forked skill's task ended the turn that forked it; Bash said {:?}",
+        events.tool_results
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// A `context: fork` skill the turn waits on is a task of the session while it
+/// runs: `session.tasks` lists it, and stopping it hands the turn back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waited_on_forked_skill_is_a_task_the_host_can_stop() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("fork-task", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    run.write_file(
+        ".agents/skills/slowfork/SKILL.md",
+        "---\nname: slowfork\ndescription: takes its time\ncontext: fork\n---\n\
+         FORK-MARK work for a while\n",
+    )?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls("s-1", "Skill", json!({ "skill": "slowfork" })),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "FORK-MARK",
+        [Reply::delayed(
+            Duration::from_secs(120),
+            Reply::text("fork done"),
+        )],
+    );
+    let handle = run
+        .spawn_turn(&session, "PARENT-MARK fork it", json!({}))
+        .await?;
+    wait_until(
+        "the fork calling the model",
+        Duration::from_secs(30),
+        || !turns_with(&stub, "FORK-MARK", &["PARENT-MARK"]).is_empty(),
+    )
+    .await?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let fork = loop {
+        let tasks = run.tasks(&session).await?;
+        if let Some(task) = tasks.into_iter().find(|t| t["kind"] == "agent") {
+            break task;
+        }
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the running fork is not among the session's tasks"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let stopped = run
+        .client
+        .call(
+            "session.stopTask",
+            json!({ "session_id": session, "task_id": fork["task_id"] }),
+        )
+        .await?;
+    anyhow::ensure!(stopped.error.is_none(), "{stopped:?}");
+    let events = tokio::time::timeout(Duration::from_secs(60), handle).await???;
+    let stop = events
+        .turn_complete_event
+        .as_ref()
+        .map(|e| e["stop_reason"].clone())
+        .unwrap_or_default();
+    assert_eq!(stop, json!("end_turn"), "{:?}", events.tool_results);
     run.finish().await;
     Ok(())
 }

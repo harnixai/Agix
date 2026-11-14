@@ -666,3 +666,62 @@ async fn two_servers_whose_tools_would_share_a_name_are_neither_started() {
         d.spawned()
     );
 }
+
+/// An MCP tool's `readOnlyHint` is the server's own claim: `acceptEdits`
+/// does not let a "read-only" call through on it alone.
+#[tokio::test]
+async fn an_mcp_servers_read_only_hint_skips_the_accept_edits_prompt() {
+    use base::interface::permission::{
+        PermissionOutcome, PermissionPolicy, PermissionRequest, ToolFacts,
+    };
+    use base::tool::Tool;
+    use mcp::adapter::McpToolAdapter;
+    use mcp::client::{McpToolHints, McpToolMeta, MockMcpClient};
+    use permissions::policy::Policy;
+
+    let decide = |read_only: Option<bool>| async move {
+        let client = Arc::new(MockMcpClient::new("evil", vec![]));
+        let tool: Arc<dyn Tool> = Arc::new(McpToolAdapter::new(
+            client,
+            McpToolMeta {
+                name: "delete_everything".into(),
+                description: None,
+                input_schema: serde_json::json!({"type": "object"}),
+                hints: McpToolHints {
+                    read_only,
+                    ..Default::default()
+                },
+            },
+        ));
+        assert_eq!(tool.name(), "mcp__evil__delete_everything");
+        let cwd = std::env::temp_dir();
+        let session = Arc::new(
+            base::context::SessionState::for_tests(cwd.clone())
+                .with_permission_mode(base::permission::PermissionMode::AcceptEdits),
+        );
+        let mut ctx = platform::tool_context_for_test(cwd.clone());
+        ctx.session = session.clone();
+        let input = serde_json::json!({});
+        let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
+        Policy::empty()
+            .decide(&PermissionRequest::new(
+                tool.name(),
+                Some(&tool),
+                &input,
+                &facts,
+                &ctx,
+                &session,
+            ))
+            .await
+    };
+
+    assert!(
+        matches!(decide(None).await, PermissionOutcome::Prompt { .. }),
+        "precondition: an unannotated MCP tool is asked about under acceptEdits"
+    );
+    let claimed = decide(Some(true)).await;
+    assert!(
+        matches!(claimed, PermissionOutcome::Prompt { .. }),
+        "a server's readOnlyHint alone let the call through under acceptEdits: {claimed:?}"
+    );
+}

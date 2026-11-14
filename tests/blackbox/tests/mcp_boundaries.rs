@@ -13,7 +13,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use blackbox::{
-    LiveConfig, LiveRun, LiveRunBuilder, McpToy, Mode, Page, PageServer, ProviderStub, Reply,
+    LiveConfig, LiveRun, LiveRunBuilder, McpToy, Mode, Page, PageServer, ProviderStub, Purpose,
+    Reply, SeenRequest,
 };
 use serde_json::{json, Value};
 
@@ -1403,6 +1404,105 @@ async fn a_web_search_result_is_fenced_as_the_web() -> anyhow::Result<()> {
     assert!(
         blackbox::inside_fence(text).contains("SNIPPET-MARK"),
         "{text}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest> {
+    stub.calls()
+        .into_iter()
+        .filter(|c| c.purpose() == Purpose::Turn)
+        .filter(|c| c.messages_contain(mark) && not.iter().all(|n| !c.messages_contain(n)))
+        .collect()
+}
+
+fn tool_result_in(calls: &[SeenRequest], tool_use_id: &str) -> Option<Value> {
+    calls.iter().find_map(|c| {
+        c.body["messages"]
+            .as_array()?
+            .iter()
+            .filter_map(|m| m["content"].as_array())
+            .flatten()
+            .find(|b| b["type"] == "tool_result" && b["tool_use_id"] == tool_use_id)
+            .cloned()
+    })
+}
+
+/// An agent type's `mcp_servers` grant: the sub-agent is advertised the
+/// granted server's tools from its first request on, and can call them in
+/// every round, not only the first.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sub_agent_granted_an_mcp_server_is_shown_and_keeps_its_tools() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let log = scratch.path().join("calls.log");
+    let mut run = stubbed("mcp-grant", &stub)
+        .settings(json!({
+            "mcp_servers": { "toy": McpToy::stdio_config(&["--calls", &log.to_string_lossy()])? },
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "mcp__toy__ping", "action": "allow" }
+            ]
+        }))
+        .before_start(|world, _| {
+            world.write_project_file(
+                "mcp-grant",
+                ".agix/agents/pinger.md",
+                "---\ndescription: pings the toy server\nmcp_servers: [toy]\n---\nYou ping.\n",
+            )?;
+            Ok(())
+        })
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a-1",
+                "Agent",
+                json!({
+                    "prompt": "CHILD-MARK ping the toy server twice",
+                    "description": "ping",
+                    "subagent_type": "pinger"
+                }),
+            ),
+            Reply::text("parent done"),
+        ],
+    );
+    stub.script_when(
+        "CHILD-MARK",
+        [
+            Reply::calls("c-ping-1", "mcp__toy__ping", json!({ "message": "first" })),
+            Reply::calls("c-ping-2", "mcp__toy__ping", json!({ "message": "second" })),
+            Reply::text("child done"),
+        ],
+    );
+    run.turn(&session, "PARENT-MARK delegate the pings").await?;
+
+    let parent = turns_with(&stub, "PARENT-MARK", &[]);
+    assert!(
+        parent[0].tool_names().iter().any(|n| n == "mcp__toy__ping"),
+        "the parent itself has no toy tools, so this case proves nothing: {:?}",
+        parent[0].tool_names()
+    );
+    let child = turns_with(&stub, "CHILD-MARK", &["PARENT-MARK"]);
+    assert!(child.len() >= 3, "the child made {} requests", child.len());
+    let advertised: Vec<String> = child[0]
+        .tool_names()
+        .into_iter()
+        .filter(|n| n.starts_with("mcp__toy__"))
+        .collect();
+    let pings = McpToy::calls(&log)
+        .into_iter()
+        .filter(|(_, tool)| tool == "ping")
+        .count();
+    let second = tool_result_in(&child, "c-ping-2");
+    assert!(
+        !advertised.is_empty() && pings == 2,
+        "the child's first request advertised toy tools {advertised:?}; the toy server saw \
+         {pings} ping(s); the second ping answered {second:?}"
     );
     run.finish().await;
     Ok(())

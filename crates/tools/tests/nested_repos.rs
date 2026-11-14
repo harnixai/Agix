@@ -1,9 +1,8 @@
 //! A repository a command nests in the project is found once the command has
 //! run, and moved aside, so the user's own `git` in the project afterwards —
 //! outside any sandbox — does not run what its configuration names. The
-//! attack is the one `platform`'s ignored
-//! `audit2_a_sandboxed_command_cannot_plant_an_embedded_repositorys_configuration`
-//! records the backends cannot stop.
+//! attack is the one `platform`'s macOS live sandbox cases
+//! (`sandbox/tests/macos_live.rs`) record the backends cannot stop.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
