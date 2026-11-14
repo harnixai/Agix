@@ -490,7 +490,7 @@ pub(super) fn linux_wrap(
     namespace_args(&mut args);
     // After the `/tmp` tmpfs, or a project under `/tmp` is hidden by it.
     read.scope_mounts(&mut args);
-    bind_writable_roots(&mut args, &roots);
+    bind_writable_roots(&mut args, &roots, &read);
     protect_denied_writes(&mut args, &roots, &policy.deny_write);
     hide_project_and_state(&mut args, &roots, &read);
     hide_fenced(&mut args, &roots);
@@ -561,9 +561,15 @@ fn namespace_args(args: &mut Vec<String>) {
     );
 }
 
-fn bind_writable_roots(args: &mut Vec<String>, roots: &Roots) {
+fn bind_writable_roots(
+    args: &mut Vec<String>,
+    roots: &Roots,
+    read: &read_scope::LinuxReadScope<'_>,
+) {
     if !roots.only_additional {
         bind(args, "--bind", &roots.cwd);
+    } else if roots.cwd.starts_with("/tmp") && read.shows(&roots.cwd) {
+        bind(args, "--ro-bind-try", &roots.cwd);
     }
     for p in &roots.writable {
         bind(args, "--bind-try", p);
