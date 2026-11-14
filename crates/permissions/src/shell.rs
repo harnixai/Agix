@@ -153,47 +153,15 @@ pub fn lex(command: &str) -> Vec<Word> {
             c if c.is_whitespace() => end_word(&mut out, &mut word, &mut started),
             '\'' => {
                 started = true;
-                word.quoted = true;
-                i += 1;
-                while i < chars.len() && chars[i] != '\'' {
-                    word.text.push(chars[i]);
-                    i += 1;
-                }
+                i = lex_single_quoted(&chars, i, &mut word);
             }
             '"' => {
                 started = true;
-                word.quoted = true;
-                i += 1;
-                while i < chars.len() && chars[i] != '"' {
-                    match chars[i] {
-                        '\\' if matches!(chars.get(i + 1), Some('$' | '`' | '"' | '\\' | '\n')) => {
-                            i += 1;
-                            if chars[i] != '\n' {
-                                word.text.push(chars[i]);
-                            }
-                        }
-                        '$' if expands_at(&chars, i + 1) => {
-                            word.substitutes = true;
-                            word.text.push('$');
-                        }
-                        '`' => {
-                            word.substitutes = true;
-                            word.text.push('`');
-                        }
-                        q => word.text.push(q),
-                    }
-                    i += 1;
-                }
+                i = lex_double_quoted(&chars, i, &mut word);
             }
             '\\' => {
                 started = true;
-                word.quoted = true;
-                if let Some(&n) = chars.get(i + 1) {
-                    if n != '\n' {
-                        word.text.push(n);
-                    }
-                    i += 1;
-                }
+                i = lex_escape(&chars, i, &mut word);
             }
             '$' if matches!(chars.get(i + 1), Some('\'' | '"')) || expands_at(&chars, i + 1) => {
                 started = true;
@@ -206,38 +174,11 @@ pub fn lex(command: &str) -> Vec<Word> {
                 word.text.push('`');
             }
             '<' | '>' => {
-                let fd = started
-                    && !word.quoted
-                    && !word.text.is_empty()
-                    && word.text.chars().all(|d| d.is_ascii_digit());
-                let mut op = if fd {
-                    started = false;
-                    std::mem::take(&mut word).text
-                } else {
-                    end_word(&mut out, &mut word, &mut started);
-                    String::new()
-                };
-                op.push(c);
-                i = take_operator_tail(&chars, i, &mut op);
-                out.push(Word {
-                    text: op,
-                    redirect: true,
-                    ..Word::default()
-                });
+                i = lex_redirect(&chars, i, &mut out, &mut word, &mut started);
             }
             '&' if chars.get(i + 1) == Some(&'>') => {
                 end_word(&mut out, &mut word, &mut started);
-                let mut op = String::from("&>");
-                i += 1;
-                if chars.get(i + 1) == Some(&'>') {
-                    op.push('>');
-                    i += 1;
-                }
-                out.push(Word {
-                    text: op,
-                    redirect: true,
-                    ..Word::default()
-                });
+                i = lex_amp_redirect(&chars, i, &mut out);
             }
             '~' if !started => {
                 started = true;
@@ -246,19 +187,115 @@ pub fn lex(command: &str) -> Vec<Word> {
             }
             c => {
                 started = true;
-                match c {
-                    '*' | '?' | '[' => word.globs = true,
-                    '{' | '}' => word.braces = true,
-                    '(' | ')' => word.parens = true,
-                    _ => {}
-                }
-                word.text.push(c);
+                push_plain(c, &mut word);
             }
         }
         i += 1;
     }
     end_word(&mut out, &mut word, &mut started);
     out
+}
+
+/// Each `lex_*` helper takes the index of the character that opened the
+/// construct and returns the index of the last character it consumed.
+fn lex_single_quoted(chars: &[char], mut i: usize, word: &mut Word) -> usize {
+    word.quoted = true;
+    i += 1;
+    while i < chars.len() && chars[i] != '\'' {
+        word.text.push(chars[i]);
+        i += 1;
+    }
+    i
+}
+
+fn lex_double_quoted(chars: &[char], mut i: usize, word: &mut Word) -> usize {
+    word.quoted = true;
+    i += 1;
+    while i < chars.len() && chars[i] != '"' {
+        match chars[i] {
+            '\\' if matches!(chars.get(i + 1), Some('$' | '`' | '"' | '\\' | '\n')) => {
+                i += 1;
+                if chars[i] != '\n' {
+                    word.text.push(chars[i]);
+                }
+            }
+            '$' if expands_at(chars, i + 1) => {
+                word.substitutes = true;
+                word.text.push('$');
+            }
+            '`' => {
+                word.substitutes = true;
+                word.text.push('`');
+            }
+            q => word.text.push(q),
+        }
+        i += 1;
+    }
+    i
+}
+
+fn lex_escape(chars: &[char], mut i: usize, word: &mut Word) -> usize {
+    word.quoted = true;
+    if let Some(&n) = chars.get(i + 1) {
+        if n != '\n' {
+            word.text.push(n);
+        }
+        i += 1;
+    }
+    i
+}
+
+fn lex_redirect(
+    chars: &[char],
+    i: usize,
+    out: &mut Vec<Word>,
+    word: &mut Word,
+    started: &mut bool,
+) -> usize {
+    let fd = *started
+        && !word.quoted
+        && !word.text.is_empty()
+        && word.text.chars().all(|d| d.is_ascii_digit());
+    let mut op = if fd {
+        *started = false;
+        std::mem::take(word).text
+    } else {
+        end_word(out, word, started);
+        String::new()
+    };
+    op.push(chars[i]);
+    let i = take_operator_tail(chars, i, &mut op);
+    out.push(Word {
+        text: op,
+        redirect: true,
+        ..Word::default()
+    });
+    i
+}
+
+fn lex_amp_redirect(chars: &[char], mut i: usize, out: &mut Vec<Word>) -> usize {
+    let mut op = String::from("&>");
+    i += 1;
+    if chars.get(i + 1) == Some(&'>') {
+        op.push('>');
+        i += 1;
+    }
+    out.push(Word {
+        text: op,
+        redirect: true,
+        ..Word::default()
+    });
+    i
+}
+
+fn push_plain(c: char, word: &mut Word) {
+    match c {
+        '*' | '?' | '[' => word.globs = true,
+        '{' | '}' => word.braces = true,
+        '(' | ')' => word.parens = true,
+        _ => {}
+    }
+    word.text.push(c);
 }
 
 fn end_word(out: &mut Vec<Word>, word: &mut Word, started: &mut bool) {

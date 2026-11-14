@@ -116,29 +116,21 @@ fn without_redirections(words: Vec<Word>) -> Vec<Word> {
     out
 }
 
+enum Step {
+    Retry,
+    Done,
+    Resolved,
+}
+
 fn resolve_command(mut argv: Vec<Word>, mut trail: Trail, depth: usize, out: &mut Vec<Traced>) {
     for _ in 0..16 {
-        let Some(first) = argv.first() else {
-            return;
-        };
-        if first.substitutes || first.globs || first.parens {
-            out.push(trail.found(Invocation::Unknown));
-            return;
+        match prepare_head(&mut argv, &trail, out) {
+            Step::Retry => continue,
+            Step::Done => return,
+            Step::Resolved => {}
         }
-        if first.braces {
-            match expand_braces(first) {
-                Some(expanded) => {
-                    argv.splice(0..1, expanded);
-                    continue;
-                }
-                None => {
-                    out.push(trail.found(Invocation::Unknown));
-                    return;
-                }
-            }
-        }
+        let first = &argv[0];
         let name = program_name(&first.text).to_string();
-        let args = &argv[1..];
 
         // A shell keyword that opens a block: what runs inside it (a `case`
         // branch, a function body) is not this word, and the scanner does not
@@ -150,88 +142,136 @@ fn resolve_command(mut argv: Vec<Word>, mut trail: Trail, depth: usize, out: &mu
         }
 
         if let Some(wrapper) = WRAPPERS.iter().find(|w| w.names.contains(&name.as_str())) {
-            match wrapper.command_in(args) {
-                Wrapped::At(n) => {
-                    let taken: Vec<String> = argv.drain(..=n).map(|w| w.text).collect();
-                    if wrapper.assignments {
-                        trail.assignments.extend(
-                            taken[1..]
-                                .iter()
-                                .filter(|w| passes_on_assignment(w))
-                                .cloned(),
-                        );
-                    }
-                    trail.wrappers.push(taken);
-                    continue;
-                }
-                Wrapped::Nothing => {}
-                Wrapped::Unreadable => {
-                    out.push(trail.found(Invocation::Unknown));
-                    return;
-                }
+            match peel_wrapper(wrapper, &mut argv, &mut trail, out) {
+                Step::Retry => continue,
+                Step::Done => return,
+                Step::Resolved => {}
             }
-        } else if SHELLS.contains(&name.as_str()) {
-            match shell_target(args) {
-                ShellTarget::Command(Some(script)) if script.is_literal() => {
-                    resolve_line(&script.text, depth, out);
-                }
-                // A `-c` whose string the line builds, or a shell that reads
-                // its script from stdin / a here-string: what it runs cannot be
-                // told from the text, so a deny must not be waved past it.
-                ShellTarget::Command(_) | ShellTarget::Stdin => {
-                    out.push(trail.found(Invocation::Unknown));
-                }
-                // A script file argument — recorded as the shell itself below,
-                // the same as a program whose source this cannot read.
-                ShellTarget::File => {}
-            }
-        } else if matches!(name.as_str(), "su" | "runuser") {
-            match dash_c_command(args) {
-                Some(Some(script)) if script.is_literal() => {
-                    resolve_line(&script.text, depth, out);
-                }
-                Some(_) => out.push(trail.found(Invocation::Unknown)),
-                None => match after_double_dash(args) {
-                    Some(command) => resolve_command(command, Trail::default(), depth, out),
-                    None => out.push(trail.found(Invocation::Unknown)),
-                },
-            }
-        } else if name == "watch" {
-            match watch_command(args) {
-                Some(line) => resolve_line(&line, depth, out),
-                None => out.push(trail.found(Invocation::Unknown)),
-            }
-        } else if name == "script" {
-            match dash_c_command(args) {
-                Some(Some(script)) if script.is_literal() => {
-                    resolve_line(&script.text, depth, out);
-                }
-                Some(_) => out.push(trail.found(Invocation::Unknown)),
-                // No `-c`: `script file` records an interactive shell, not a
-                // command given here — kept as `script` itself below.
-                None => {}
-            }
-        } else if name == "parallel" {
-            match parallel_command(args) {
-                Some(line) => resolve_line(&line, depth, out),
-                None => out.push(trail.found(Invocation::Unknown)),
-            }
-        } else if name == "eval" {
-            if args.iter().all(Word::is_literal) {
-                let script: Vec<&str> = args.iter().map(|w| w.text.as_str()).collect();
-                resolve_line(&script.join(" "), depth, out);
-            } else {
-                out.push(trail.found(Invocation::Unknown));
-            }
-        } else if matches!(name.as_str(), "find" | "gfind") {
-            for command in find_exec_commands(args) {
-                resolve_command(command, Trail::default(), depth, out);
-            }
+        } else {
+            follow_nested_commands(&name, &argv[1..], &trail, depth, out);
         }
         out.push(trail.found(Invocation::Runs(argv.into_iter().map(|w| w.text).collect())));
         return;
     }
     out.push(trail.found(Invocation::Unknown));
+}
+
+fn prepare_head(argv: &mut Vec<Word>, trail: &Trail, out: &mut Vec<Traced>) -> Step {
+    let Some(first) = argv.first() else {
+        return Step::Done;
+    };
+    if first.substitutes || first.globs || first.parens {
+        out.push(trail.found(Invocation::Unknown));
+        return Step::Done;
+    }
+    if first.braces {
+        return match expand_braces(first) {
+            Some(expanded) => {
+                argv.splice(0..1, expanded);
+                Step::Retry
+            }
+            None => {
+                out.push(trail.found(Invocation::Unknown));
+                Step::Done
+            }
+        };
+    }
+    Step::Resolved
+}
+
+fn peel_wrapper(
+    wrapper: &Wrapper,
+    argv: &mut Vec<Word>,
+    trail: &mut Trail,
+    out: &mut Vec<Traced>,
+) -> Step {
+    match wrapper.command_in(&argv[1..]) {
+        Wrapped::At(n) => {
+            let taken: Vec<String> = argv.drain(..=n).map(|w| w.text).collect();
+            if wrapper.assignments {
+                trail.assignments.extend(
+                    taken[1..]
+                        .iter()
+                        .filter(|w| passes_on_assignment(w))
+                        .cloned(),
+                );
+            }
+            trail.wrappers.push(taken);
+            Step::Retry
+        }
+        Wrapped::Nothing => Step::Resolved,
+        Wrapped::Unreadable => {
+            out.push(trail.found(Invocation::Unknown));
+            Step::Done
+        }
+    }
+}
+
+fn follow_nested_commands(
+    name: &str,
+    args: &[Word],
+    trail: &Trail,
+    depth: usize,
+    out: &mut Vec<Traced>,
+) {
+    if SHELLS.contains(&name) {
+        match shell_target(args) {
+            ShellTarget::Command(Some(script)) if script.is_literal() => {
+                resolve_line(&script.text, depth, out);
+            }
+            // A `-c` whose string the line builds, or a shell that reads
+            // its script from stdin / a here-string: what it runs cannot be
+            // told from the text, so a deny must not be waved past it.
+            ShellTarget::Command(_) | ShellTarget::Stdin => {
+                out.push(trail.found(Invocation::Unknown));
+            }
+            // A script file argument — recorded as the shell itself by the
+            // caller, the same as a program whose source this cannot read.
+            ShellTarget::File => {}
+        }
+    } else if matches!(name, "su" | "runuser") {
+        match dash_c_command(args) {
+            Some(Some(script)) if script.is_literal() => {
+                resolve_line(&script.text, depth, out);
+            }
+            Some(_) => out.push(trail.found(Invocation::Unknown)),
+            None => match after_double_dash(args) {
+                Some(command) => resolve_command(command, Trail::default(), depth, out),
+                None => out.push(trail.found(Invocation::Unknown)),
+            },
+        }
+    } else if name == "watch" {
+        match watch_command(args) {
+            Some(line) => resolve_line(&line, depth, out),
+            None => out.push(trail.found(Invocation::Unknown)),
+        }
+    } else if name == "script" {
+        match dash_c_command(args) {
+            Some(Some(script)) if script.is_literal() => {
+                resolve_line(&script.text, depth, out);
+            }
+            Some(_) => out.push(trail.found(Invocation::Unknown)),
+            // No `-c`: `script file` records an interactive shell, not a
+            // command given here — kept as `script` itself by the caller.
+            None => {}
+        }
+    } else if name == "parallel" {
+        match parallel_command(args) {
+            Some(line) => resolve_line(&line, depth, out),
+            None => out.push(trail.found(Invocation::Unknown)),
+        }
+    } else if name == "eval" {
+        if args.iter().all(Word::is_literal) {
+            let script: Vec<&str> = args.iter().map(|w| w.text.as_str()).collect();
+            resolve_line(&script.join(" "), depth, out);
+        } else {
+            out.push(trail.found(Invocation::Unknown));
+        }
+    } else if matches!(name, "find" | "gfind") {
+        for command in find_exec_commands(args) {
+            resolve_command(command, Trail::default(), depth, out);
+        }
+    }
 }
 
 fn resolve_line(line: &str, depth: usize, out: &mut Vec<Traced>) {

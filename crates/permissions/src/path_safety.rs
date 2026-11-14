@@ -235,81 +235,89 @@ pub fn check_write_for(
     // Before the absolute-path check: `~/foo` and `\\host\share` are not
     // absolute here, and refusing them as such would hide what is wrong.
     check_requested_path(requested)?;
-
-    // 3. Unicode normalization attack detection (NFC round-trip check)
-    {
-        let path_str = requested.to_string_lossy();
-        let nfc_normalized: String = path_str.chars().nfc().collect();
-        if nfc_normalized != path_str.as_ref() {
-            return Err(PathSafetyError::UnicodeNormalizationAttack {
-                path: requested.to_path_buf(),
-                normalized: PathBuf::from(nfc_normalized),
-            });
-        }
-    }
-
-    // 4. 绝对路径
-    if !target.is_absolute() {
-        return Err(PathSafetyError::UnresolvedTraversal(target.to_path_buf()));
-    }
-
-    // 4. 不接受未规范化（含 `..`）的路径
-    for c in target.components() {
-        if matches!(c, Component::ParentDir) {
-            return Err(PathSafetyError::UnresolvedTraversal(target.to_path_buf()));
-        }
-    }
-
-    // Steps 6 and 7 are the ones a deployment can carve exceptions out of.
-    // Root containment below is not: an exception says "this sensitive name
-    // is fine here", never "this path may be outside the project".
+    check_nfc_normalized(requested)?;
+    check_target_is_clean(target)?;
     if !policy
         .allow
         .iter()
         .any(|a| is_within_root_lexical(target, a))
     {
-        // 6. 系统目录硬黑名单
-        for prefix in ABSOLUTE_DENY_PREFIXES {
-            if target.starts_with(prefix) {
-                return Err(PathSafetyError::SystemPathDenied(target.to_path_buf()));
-            }
-        }
+        check_denied_locations(target, policy)?;
+    }
+    let roots = check_within_roots(target, policy)?;
+    check_intermediate_symlinks(target, &roots, policy)
+}
 
-        // 7a. The engine's own settings, by name and location — not by
-        // directory: `.agix` also holds a sub-agent's worktree, and the
-        // configuration directories in it are asked about rather than refused
-        // (the gate's `.agix` confirmation), since a person can say yes there.
-        if SensitivePaths::is_engine_settings_file(target) {
-            let name = target.file_name().unwrap_or_default().to_string_lossy();
-            return Err(PathSafetyError::BlacklistedFilename {
-                path: target.to_path_buf(),
-                matched: format!("{name} under an engine settings directory"),
-            });
-        }
+fn check_nfc_normalized(requested: &Path) -> Result<(), PathSafetyError> {
+    let path_str = requested.to_string_lossy();
+    let nfc_normalized: String = path_str.chars().nfc().collect();
+    if nfc_normalized != path_str.as_ref() {
+        return Err(PathSafetyError::UnicodeNormalizationAttack {
+            path: requested.to_path_buf(),
+            normalized: PathBuf::from(nfc_normalized),
+        });
+    }
+    Ok(())
+}
 
-        // 7b. 文件名黑名单（任意 component 命中即拒）
-        for c in target.components() {
-            if let Component::Normal(name) = c {
-                let s = name.to_string_lossy();
-                let hit = SECRET_FILE_NAMES
-                    .iter()
-                    .copied()
-                    .chain(credential_dir_names())
-                    .chain(GUARDED_FILENAMES.iter().copied())
-                    .map(|b| b.to_string())
-                    .chain(policy.extra_blacklist.iter().cloned())
-                    .find(|b| s == *b || s.starts_with(&format!("{b}.")));
-                if let Some(matched) = hit {
-                    return Err(PathSafetyError::BlacklistedFilename {
-                        path: target.to_path_buf(),
-                        matched,
-                    });
-                }
-            }
+fn check_target_is_clean(target: &Path) -> Result<(), PathSafetyError> {
+    if !target.is_absolute() {
+        return Err(PathSafetyError::UnresolvedTraversal(target.to_path_buf()));
+    }
+    for c in target.components() {
+        if matches!(c, Component::ParentDir) {
+            return Err(PathSafetyError::UnresolvedTraversal(target.to_path_buf()));
+        }
+    }
+    Ok(())
+}
+
+/// A deployment's `allow` can carve exceptions out of this step only; root
+/// containment is not negotiable.
+fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), PathSafetyError> {
+    for prefix in ABSOLUTE_DENY_PREFIXES {
+        if target.starts_with(prefix) {
+            return Err(PathSafetyError::SystemPathDenied(target.to_path_buf()));
         }
     }
 
-    // 8. root 隶属：path 必须在 primary_root 或某个 additional_root 子树下
+    // The engine's own settings, by name and location — not by directory:
+    // `.agix` also holds a sub-agent's worktree, and the configuration
+    // directories in it are asked about rather than refused.
+    if SensitivePaths::is_engine_settings_file(target) {
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        return Err(PathSafetyError::BlacklistedFilename {
+            path: target.to_path_buf(),
+            matched: format!("{name} under an engine settings directory"),
+        });
+    }
+
+    for c in target.components() {
+        if let Component::Normal(name) = c {
+            let s = name.to_string_lossy();
+            let hit = SECRET_FILE_NAMES
+                .iter()
+                .copied()
+                .chain(credential_dir_names())
+                .chain(GUARDED_FILENAMES.iter().copied())
+                .map(|b| b.to_string())
+                .chain(policy.extra_blacklist.iter().cloned())
+                .find(|b| s == *b || s.starts_with(&format!("{b}.")));
+            if let Some(matched) = hit {
+                return Err(PathSafetyError::BlacklistedFilename {
+                    path: target.to_path_buf(),
+                    matched,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_within_roots(
+    target: &Path,
+    policy: &WritePolicy,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
     let mut roots = vec![policy.primary_root.clone()];
     roots.extend(policy.additional_roots.iter().cloned());
 
@@ -320,57 +328,47 @@ pub fn check_write_for(
             additional: policy.additional_roots.clone(),
         });
     }
+    Ok(roots)
+}
 
-    // 9. Intermediate symlink escape detection: resolve each parent
-    //    directory component that lies WITHIN the allowed root and verify
-    //    it does not escape via symlink.
-    //
-    //    We only check components that are children of the root.  Components
-    //    above the root (e.g. /tmp → /private/tmp on macOS) are irrelevant
-    //    because a symlink there doesn't allow escape — only symlinks that
-    //    are *inside* the root tree can redirect a write outside of it.
-    {
-        // Pre-compute canonical forms of the roots so we can compare
-        // canonicalised resolved paths against the same canonical base
-        // (handles e.g. /tmp → /private/tmp on macOS).  Empty when the
-        // root doesn't exist yet — in that case the check below won't
-        // find any components within the root, so it's safe to skip.
-        let canonical_roots: Vec<PathBuf> = roots
-            .iter()
-            .filter_map(|r| std::fs::canonicalize(r).ok())
-            .collect();
+/// Only components inside a root are resolved: a symlink above the root
+/// (`/tmp` -> `/private/tmp`) cannot redirect a write out of it, one inside
+/// can.
+fn check_intermediate_symlinks(
+    target: &Path,
+    roots: &[PathBuf],
+    policy: &WritePolicy,
+) -> Result<(), PathSafetyError> {
+    // Canonical roots let resolved paths be compared on the same base; empty
+    // when a root does not exist yet, in which case nothing lies within it.
+    let canonical_roots: Vec<PathBuf> = roots
+        .iter()
+        .filter_map(|r| std::fs::canonicalize(r).ok())
+        .collect();
 
-        let ancestors: Vec<_> = target.ancestors().collect();
-        // ancestors[0] = target itself, ancestors[last] = root "/"
-        // Check all intermediate directory components, from root toward
-        // target, but only those that are WITHIN a root.
-        for component in ancestors[1..ancestors.len().saturating_sub(1)].iter().rev() {
-            // Skip components that ARE one of the roots
-            // (root-level symlinks are not our concern here)
-            if roots.iter().any(|r| r == *component) {
-                continue;
-            }
-            // Only check components that are INSIDE the allowed root tree
-            if !roots.iter().any(|r| is_within_root_lexical(component, r)) {
-                continue;
-            }
-            if let Ok(real_path) = std::fs::canonicalize(component) {
-                if real_path != *component
-                    && !roots.iter().any(|r| is_within_root_lexical(&real_path, r))
-                    && !canonical_roots
-                        .iter()
-                        .any(|r| is_within_root_lexical(&real_path, r))
-                {
-                    return Err(PathSafetyError::SymlinkEscape {
-                        symlink_path: component.to_path_buf(),
-                        real_path,
-                        primary: policy.primary_root.clone(),
-                    });
-                }
+    let ancestors: Vec<_> = target.ancestors().collect();
+    for component in ancestors[1..ancestors.len().saturating_sub(1)].iter().rev() {
+        if roots.iter().any(|r| r == *component) {
+            continue;
+        }
+        if !roots.iter().any(|r| is_within_root_lexical(component, r)) {
+            continue;
+        }
+        if let Ok(real_path) = std::fs::canonicalize(component) {
+            if real_path != *component
+                && !roots.iter().any(|r| is_within_root_lexical(&real_path, r))
+                && !canonical_roots
+                    .iter()
+                    .any(|r| is_within_root_lexical(&real_path, r))
+            {
+                return Err(PathSafetyError::SymlinkEscape {
+                    symlink_path: component.to_path_buf(),
+                    real_path,
+                    primary: policy.primary_root.clone(),
+                });
             }
         }
     }
-
     Ok(())
 }
 
