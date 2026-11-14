@@ -23,11 +23,7 @@ fn invalid(message: impl Into<String>) -> RpcError {
     PoolError::InvalidRequest(message.into()).into()
 }
 
-async fn run_turn(
-    s: &DaemonServer,
-    cx: &Call,
-    p: RunTurnParams,
-) -> Result<TurnReply, RpcError> {
+async fn run_turn(s: &DaemonServer, cx: &Call, p: RunTurnParams) -> Result<TurnReply, RpcError> {
     let turn_id = p.turn_id.unwrap_or_else(|| Id::new().to_string());
     // A turn's origin is read from its id, so a client may not use the
     // form of a goal round or a scheduled job, which the daemon starts itself.

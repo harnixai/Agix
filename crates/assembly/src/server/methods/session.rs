@@ -31,11 +31,7 @@ fn invalid(message: impl Into<String>) -> RpcError {
     PoolError::InvalidRequest(message.into()).into()
 }
 
-async fn create(
-    s: &DaemonServer,
-    _: &Call,
-    p: CreateParams,
-) -> Result<SessionCreated, RpcError> {
+async fn create(s: &DaemonServer, _: &Call, p: CreateParams) -> Result<SessionCreated, RpcError> {
     let options = read_options(p.options.as_ref())?;
     Ok(s.pool
         .create_session(p.scene.as_deref(), p.project_root.into(), options.as_ref())
@@ -70,11 +66,7 @@ async fn fork(s: &DaemonServer, _: &Call, p: ForkParams) -> Result<ForkReport, P
     s.pool.fork_session(&p.session_id, p.at_message).await
 }
 
-async fn resume(
-    s: &DaemonServer,
-    _: &Call,
-    p: ResumeParams,
-) -> Result<ResumeReport, RpcError> {
+async fn resume(s: &DaemonServer, _: &Call, p: ResumeParams) -> Result<ResumeReport, RpcError> {
     let options = read_options(p.options.as_ref())?;
     Ok(s.pool
         .resume_session(&p.session_id, p.create_if_missing, options.as_ref())
