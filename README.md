@@ -64,7 +64,7 @@ when no one is watching.
    six engineering tasks, against another open agent harness on the same
    model, that came to **34% less wall time and 13% fewer prompt tokens, with
    every run correct** (the other harness's wall time includes its process
-   start, while the Agix daemon is already running; [how it was measured](tests/live/tests/compare_dsh.rs)).
+   start, while the Agix daemon is already running; [how it was measured](tests/blackbox/tests/compare_dsh.rs)).
 5. **Your product stays in charge.** Every session, task, sub-agent, goal and
    prompt is visible, stoppable and editable over one JSON-RPC protocol.
    45 extension points let you replace or intercept any subsystem from Rust
@@ -608,12 +608,12 @@ Rust 1.88+. The test suite needs no network and no key.
 ```sh
 cargo build --workspace
 cargo test  --workspace                                      # everything offline
-cargo test  -p live --features real-model --test real_model  # the live tier, against a real model
+cargo test  -p blackbox --features real-model --test real_model  # the live tier, against a real model
 ```
 
 Six layers, from unit tests to the assembled product: crate tests, a behavior
 net that runs a real `Agent` against written-down model answers, `daemon/tests`
-over a real socket, and `tests/live` — the product driven over JSON-RPC, once
+over a real socket, and `tests/blackbox` — the product driven over JSON-RPC, once
 against a scripted model server and once against a real model behind a
 recording proxy, from the host's side as well as the model's. How each layer
 works and how to run it: [`tests/README.md`](tests/README.md).

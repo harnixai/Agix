@@ -26,7 +26,7 @@ members = [
     "crates/assembly",
     "daemon",
     "tests/rpc_client",
-    "tests/live",
+    "tests/blackbox",
     "tests/runner",
     "tests/guards",
     "tests/fixtures/mcp_toy_server",
@@ -150,7 +150,7 @@ debug = false
 # embedded boards. `opt-level = "s"` with fat LTO gives an 11 MB `agixd`;
 # `opt-level = 3` doubles that, almost all of it generic code (std, tokio,
 # serde) inlined at every use, for about a tenth less of the daemon's own time
-# per turn (`tests/live/tests/turn_throughput.rs`) — milliseconds against a
+# per turn (`tests/blackbox/tests/turn_throughput.rs`) — milliseconds against a
 # model call's seconds. `"z"` is a third smaller again and about two thirds
 # slower. `lto` is `fat` because the crates share most of their generic
 # instantiations and only whole-program optimisation folds the copies.

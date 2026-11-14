@@ -156,7 +156,7 @@ ToolWithdrawn(name)   绑上时请求不再提供这个工具，不绑时提供
 
 **曾经不在这张网里的那一条**：没有载体的构建拿一个 `scripts` 段怎么办。一个「带着
 载体」的构建跑出来的测试观测不到「不带载体」的那个构建——除非被测的 daemon 是另一
-个进程。`tests/live` 就是干这个的：同一个项目、同一份 settings，分别喂给
+个进程。`tests/blackbox` 就是干这个的：同一个项目、同一份 settings，分别喂给
 默认构建和 `--no-default-features` 构建，前者痕迹到达提示词且 `session.get` 有账本，
 后者两样都没有。
 
@@ -209,12 +209,12 @@ sidecar 只会让「这一组为什么这么绑」离断言更远。
 | C | `tests/runner/tests/script_boundaries.rs` |
 | D | `tests/runner/tests/script_task_profiles.rs` |
 | daemon 那条路 | `daemon/tests/session_lifecycle.rs` |
-| 装配好的那条路 | `tests/live/tests/daemon_surface.rs` |
+| 装配好的那条路 | `tests/blackbox/tests/daemon_surface.rs` |
 
 daemon 的两条单独在那边：从 `.agix/settings.json` 到装到会话上的这一段全是 daemon
 的活——解析、按项目根解析路径、每个会话绑一次——驱动 `Builder` 的用例问不到它。
 
-`tests/live` 那几条又低一层：进去是 JSON-RPC，出来是一个说 Anthropic SSE 的
+`tests/blackbox` 那几条又低一层：进去是 JSON-RPC，出来是一个说 Anthropic SSE 的
 HTTP 桩，所以「脚本改的东西到没到模型」是从**桩收到的那个请求**里读出来的，不是从
 引擎内部的某个中间值。每条跑两遍，本进程和另起一个 `agixd`。
 
@@ -254,5 +254,5 @@ C 档里「项目外的脚本只能新增」问的是同一条规则，但那是
 接好的 Rust trait，脚本没有注册入口，不属于这张网要回答的问题。
 
 **Rust 插件**是编译期接进来的 trait 实现，由各自 crate 的单元测试和 `runtime` 的构建测试覆盖，不走脚本载体。
-包里声明 `[[wasm]]` 的安装会被拒绝，这一条在 `tests/live/tests/daemon_surface.rs` 的
+包里声明 `[[wasm]]` 的安装会被拒绝，这一条在 `tests/blackbox/tests/daemon_surface.rs` 的
 `a_package_with_a_wasm_component_is_refused`。

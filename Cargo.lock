@@ -333,6 +333,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
+name = "blackbox"
+version = "0.3.12-2026111402"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base",
+ "daemon",
+ "demo-rust-plugin",
+ "history",
+ "mcp-oauth-mock",
+ "model",
+ "platform",
+ "reqwest",
+ "rpc-client",
+ "runtime",
+ "scene",
+ "serde_json",
+ "settings",
+ "tempfile",
+ "test-runner",
+ "tokio",
+ "tokio-util",
+ "url",
+ "zip",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1745,33 +1772,6 @@ name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
-
-[[package]]
-name = "live"
-version = "0.3.12-2026111402"
-dependencies = [
- "anyhow",
- "async-trait",
- "base",
- "daemon",
- "demo-rust-plugin",
- "history",
- "mcp-oauth-mock",
- "model",
- "platform",
- "reqwest",
- "rpc-client",
- "runtime",
- "scene",
- "serde_json",
- "settings",
- "tempfile",
- "test-runner",
- "tokio",
- "tokio-util",
- "url",
- "zip",
-]
 
 [[package]]
 name = "lock_api"

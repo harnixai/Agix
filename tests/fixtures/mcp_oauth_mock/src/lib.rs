@@ -8,8 +8,8 @@
 //! connection; everything they saw and issued is in shared state the tests
 //! read and steer.
 //!
-//! `daemon/tests` drives it with a scripted model, `tests/live` (as
-//! `live::OAuthWorld`) with a real one.
+//! `daemon/tests` drives it with a scripted model, `tests/blackbox` (as
+//! `blackbox::OAuthWorld`) with a real one.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

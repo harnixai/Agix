@@ -8,8 +8,8 @@
 | `crates/*/tests/*.rs` | crate 验收：从公开的缝进去，这个 crate 的承诺还成立吗 | `cargo test` |
 | `daemon/tests/*.rs` | daemon 的 e2e：真的起一个 server，走真的 socket 收发 JSON-RPC | `cargo test -p daemon` |
 | `tests/runner/tests/*.rs` | 引擎行为网：真的驱动 Agent，模型那端是写死的脚本 | `cargo test -p test-runner` |
-| `tests/live/tests/*.rs` | 装配面：从 JSON-RPC 进去，模型那端是一个 HTTP 桩；同一批用例跑「本进程」和「另起一个 agixd」两遍 | `cargo test -p live`（跨进程那半在 `-- --ignored` 里） |
-| `tests/live/tests/live_*.rs` | LIVE 层：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p live --features real-model`，见下文「LIVE 层」 |
+| `tests/blackbox/tests/*.rs` | 黑盒层（桩模型）：从 JSON-RPC 进去，模型那端是一个 HTTP 桩；同一批用例跑「本进程」和「另起一个 agixd」两遍 | `cargo test -p blackbox`（跨进程那半在 `-- --ignored` 里） |
+| `tests/blackbox/tests/live_*.rs` | LIVE 层（真实模型，`live_*` 前缀 + `real-model` feature）：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p blackbox --features real-model`，见下文「LIVE 层」 |
 | `tests/guards/tests/*.rs` | 架构守卫：读 `cargo metadata` 和各 target 的模块树，检查依赖方向、进程级状态这类代码结构上的不变量，不跑引擎 | `cargo test -p guards` |
 | `tests/scripts/*.sh` | 运维脚本（目前只有 `disk_report.sh`：报告 `target/` 占用）；构建面的断言（`full` 档不链 `packages` 与 `script-host` 等）在 `tests/guards/tests/deps.rs` | `bash tests/scripts/disk_report.sh` |
 
@@ -24,7 +24,7 @@
 
 有几条要的不是同一个 daemon：「没有脚本引擎的构建拿到 `scripts` 段怎么办」只能由
 另一个构建回答。用例会说清楚怎么建、往哪个环境变量里塞：`AGIX_TEST_DAEMON_BIN_NO_CARRIER`
-（以及最小档的 `AGIX_TEST_DAEMON_BIN_MINIMAL`）。CI 都建。`tests/live` 跨进程那半起的
+（以及最小档的 `AGIX_TEST_DAEMON_BIN_MINIMAL`）。CI 都建。`tests/blackbox` 跨进程那半起的
 `agixd` 缺省是测试程序旁边那一个，`AGIX_TEST_DAEMON_BIN` 指向别的二进制时改用它——
 载体矩阵就是这么换被测构建的。
 
@@ -50,7 +50,7 @@ bubblewrap、设上这个变量，跑 `platform` 的 `--features sandbox` 与 da
 ## LIVE 层
 
 桩层证明的是「模型这样回答时，产品做对了」；它答不了「真实模型拿到这套工具、提示词
-和协议，能不能把事做成」。LIVE 层答后一个问题：`tests/live` 同一套 `World` /
+和协议，能不能把事做成」。LIVE 层答后一个问题：`tests/blackbox` 同一套 `World` /
 `Daemon` / RPC 客户端，模型那端从 `ProviderStub` 换成 `LiveProvider`。用例只经
 JSON-RPC 与盘上的文件跟产品打交道，和下游二次开发的用法相同。
 
@@ -81,12 +81,12 @@ JSON-RPC 与盘上的文件跟产品打交道，和下游二次开发的用法�
 ```sh
 cargo build -p daemon                       # 另起进程的那条用例要 target/debug/agixd
 AGIX_LIVE_MODELS=deepseek-flash,deepseek-v4-flash,claude-haiku-4-5 \
-  cargo test -p live --features real-model --test real_model -- --nocapture
+  cargo test -p blackbox --features real-model --test real_model -- --nocapture
 ```
 
 `--nocapture` 会打出每一轮的耗时、用到的工具、模型的回答，以及每个用例的调用次数和
-token 用量。改了 `tests/live` 后 lint 也要带上 feature：
-`cargo clippy -p live --features real-model --all-targets -- -D warnings`。
+token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
+`cargo clippy -p blackbox --features real-model --all-targets -- -D warnings`。
 
 | 用例 | 用一遍什么 |
 |---|---|
@@ -147,7 +147,7 @@ prompt`）——一条用例「过了」却在这里有记录，说明它要验�
 ```sh
 npm i --prefix /some/dir @deepseek-ai/dsh
 AGIX_DSH_BIN=/some/dir/node_modules/.bin/dsh \
-  cargo test -p live --features real-model --test compare_dsh -- --nocapture
+  cargo test -p blackbox --features real-model --test compare_dsh -- --nocapture
 ```
 
 `AGIX_COMPARE_CASES=stats,biglog` 只跑其中几项；`AGIX_COMPARE_REPEAT=3` 每项跑三遍，表里
@@ -244,7 +244,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 
 ## 四个项目那条流水线
 
-`tests/live/tests/four_project_pipeline.rs` 是唯一一条**把各层放到一起
+`tests/blackbox/tests/four_project_pipeline.rs` 是唯一一条**把各层放到一起
 互相为难**的用例：一个 daemon 同时服务四个项目（A 产出数据 → 人工评审提交 → B/C
 并行消费 → D 判定 → 打回重跑），每个项目有自己的 settings、skill、子代理类型，D 还
 跑在另一个场景上。
@@ -264,7 +264,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 **一个特性以黑盒用例跑通为完成。** 单元测试证明零件对，证明不了零件接上了：桩模型按测试
 期望的方式报错、测试直接调 `call()` 绕过权限闸门、直接构造 `McpManager` 绕过建会话的路径，
 都出过"测试绿着、从 RPC 进去是坏的"。所以一个特性要有一条从 JSON-RPC 进去、只看外部结果的
-用例跑通（`tests/live` 桩层；用法依赖模型的，再加一条 `live_*`），才算做完。只有单元测试的
+用例跑通（`tests/blackbox` 桩层；用法依赖模型的，再加一条 `live_*`），才算做完。只有单元测试的
 特性算"写了"，不算"接通了"。
 
 **模型那一端总是假的，但假法有四种，各答一个问题。**
@@ -278,7 +278,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
   （运维者可以录自己的会话拿去排查），不再是测试基础设施：本仓库不再录制、也不再
   提交任何录像。用它的方式见 `docs/ARCHITECTURE.md` 与 `settings.json` 的
   `recorder` 段。
-- `live::ProviderStub` —— 一个说 Anthropic SSE 的 HTTP 服务器。它扎得
+- `blackbox::ProviderStub` —— 一个说 Anthropic SSE 的 HTTP 服务器。它扎得
   最深：请求序列化、SSE 解码、退避重试全都真的在跑，而这三样在前三种假法里都被跳
   过了。它也是**唯一能给另一个进程用的**假法——`Arc<dyn AnthropicClient>` 递不进
   子进程，`ANTHROPIC_BASE_URL` 可以。桩记下收到的每个请求，「脚本/插件改了发出去

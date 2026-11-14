@@ -3,7 +3,7 @@ name = "mcp-toy-server"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "MCP server used only as a test fixture: stdio or streamable HTTP, tools, resources and prompts (tests/fixtures/template_project and tests/live point at it)"
+description = "MCP server used only as a test fixture: stdio or streamable HTTP, tools, resources and prompts (tests/fixtures/template_project and tests/blackbox point at it)"
 
 [[bin]]
 name = "mcp-toy-server"

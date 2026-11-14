@@ -3,7 +3,7 @@ name = "mcp-oauth-mock"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "Test fixture: a mock OAuth authorization server (also an enterprise IdP), a streamable-HTTP MCP server that only answers with its tokens, and the user's browser — for daemon/tests and tests/live"
+description = "Test fixture: a mock OAuth authorization server (also an enterprise IdP), a streamable-HTTP MCP server that only answers with its tokens, and the user's browser — for daemon/tests and tests/blackbox"
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }

@@ -59,7 +59,7 @@ pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("assembly", Assembly),
     ("daemon", Shell),
     ("rpc-client", TestSupport),
-    ("live", TestSupport),
+    ("blackbox", TestSupport),
     ("test-runner", TestSupport),
     ("mcp-toy-server", TestSupport),
     ("mcp-oauth-mock", TestSupport),
@@ -116,8 +116,8 @@ pub(crate) const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
         "the crash hook and reaping a previous run's commands",
     ),
     (
-        "live",
-        "tests/live",
+        "blackbox",
+        "tests/blackbox",
         "installs the TLS provider for its own clients",
     ),
 ];
