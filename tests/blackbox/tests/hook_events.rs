@@ -937,6 +937,50 @@ async fn a_pre_tool_use_hook_that_exits_2_blocks_the_call_whatever_it_printed() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_if_on_a_file_path_matches_however_the_model_spells_the_path() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let ledger = Ledger::new()?;
+    let refuse = ledger.path("refuse.sh");
+    executable(
+        &refuse,
+        "#!/bin/sh\ncat > /dev/null\necho GUARDED >&2\nexit 2\n",
+    )?;
+    let mut run = stubbed("if-path", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [
+                { "type": "command", "command": refuse, "if": "Write(/**/x.txt)" }
+            ] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls(
+            "w1",
+            "Write",
+            json!({ "file_path": "./x.txt", "content": "dot" }),
+        ),
+        Reply::calls(
+            "w2",
+            "Write",
+            json!({ "file_path": "sub/../x.txt", "content": "dotdot" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "go").await?;
+    assert!(
+        run.read_file("x.txt").is_none(),
+        "{:?}",
+        events.tool_results
+    );
+    for (_, out, is_error) in &events.tool_results {
+        assert!(*is_error && out.contains("GUARDED"), "{out}");
+    }
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;

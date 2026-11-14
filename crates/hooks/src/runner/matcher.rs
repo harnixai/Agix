@@ -65,24 +65,46 @@ fn alternative_matches(pat: &str, input: &HookInput) -> bool {
     let Some(rc) = rule_content else {
         return true;
     };
-    // 取 input 中的"匹配内容"：Bash 用 command；Read/Edit/Write 用 file_path
-    let content = input
-        .tool_input
-        .as_ref()
-        .and_then(|v| {
-            v.get("command")
-                .or_else(|| v.get("file_path"))
-                .or_else(|| v.get("path"))
-                .or_else(|| v.get("url"))
-        })
-        .and_then(|v| v.as_str());
-    let Some(content) = content else {
+    let Some(input_value) = input.tool_input.as_ref() else {
         return false;
     };
-    if SHELL_TOOLS.contains(&tool_name) {
-        return shell_matches(&rc, content);
+    let field = |key: &str| input_value.get(key).and_then(|v| v.as_str());
+    if let Some(command) = field("command") {
+        if SHELL_TOOLS.contains(&tool_name) {
+            return shell_matches(&rc, command);
+        }
+        return match_content(&rc, command);
     }
-    match_content(&rc, content)
+    if let Some(path) = PATH_FIELDS.iter().find_map(|key| field(key)) {
+        return path_candidates(path, &input.cwd)
+            .iter()
+            .any(|candidate| match_content(&rc, candidate));
+    }
+    field("url").is_some_and(|url| match_content(&rc, url))
+}
+
+const PATH_FIELDS: &[&str] = &["file_path", "path", "notebook_path"];
+
+/// The spellings a path argument can be matched as: the absolute path with
+/// `.` and `..` folded away, where it lands on disk, and the same relative to
+/// the session's cwd. A pattern written in any of those forms catches the call
+/// however the model spelled the path.
+fn path_candidates(raw: &str, cwd: &str) -> Vec<String> {
+    use base::path::{normalize_lexically, resolve_physically};
+    use std::path::Path;
+    let joined = Path::new(cwd).join(raw);
+    let lexical = normalize_lexically(&joined);
+    let physical = resolve_physically(&joined);
+    let mut out = vec![raw.to_string()];
+    for abs in [&lexical, &physical] {
+        out.push(abs.to_string_lossy().into_owned());
+        if let Ok(rel) = abs.strip_prefix(normalize_lexically(Path::new(cwd))) {
+            out.push(rel.to_string_lossy().into_owned());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Tools whose content is a shell command line.
@@ -308,5 +330,38 @@ mod tests {
             &make_input("Bash", Some("ls"))
         ));
         assert!(!if_matches("Bash(ls | wc -l)", &make_input("wc -l)", None)));
+    }
+
+    #[test]
+    fn a_path_matches_however_it_is_spelled() {
+        let write = |path: &str, key: &str| {
+            let mut input = make_input("Write", None);
+            input.cwd = "/work/proj".into();
+            input.tool_input = Some(json!({ key: path }));
+            input
+        };
+        for spelled in [
+            "/work/proj/src/a.rs",
+            "src/a.rs",
+            "./src/a.rs",
+            "src/../src/a.rs",
+            "lib/../../proj/src/a.rs",
+        ] {
+            for pattern in ["Write(/work/proj/src/a.rs)", "Write(src/a.rs)"] {
+                assert!(
+                    if_matches(pattern, &write(spelled, "file_path")),
+                    "{pattern} vs {spelled}"
+                );
+            }
+        }
+        assert!(!if_matches(
+            "Write(/work/proj/src/a.rs)",
+            &write("src/b.rs", "file_path")
+        ));
+        assert!(if_matches("NotebookEdit(/work/proj/n.ipynb)", &{
+            let mut i = write("./n.ipynb", "notebook_path");
+            i.tool_name = Some("NotebookEdit".into());
+            i
+        }));
     }
 }

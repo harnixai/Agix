@@ -170,11 +170,11 @@ prompt / http hook 对它照旧跑。它读的是模型写的 payload,所以只�
 | `""`、`*`(或不写) | 一切,包括不带工具的事件 |
 | `Bash` | `tool_name` 等于 `Bash` |
 | `Bash(git push:*)` | 工具名相同,且命令启动的程序是 `git push` 或以 `git push ` 开头(见下) |
-| `Write(*.rs)` | 内容匹配这个 glob(`*` 跨目录;`file_path` 是绝对路径) |
+| `Write(*.rs)` | 内容匹配这个 glob(`*` 跨目录;文件路径的比法见下) |
 | `mcp__github` | 这个 MCP server 的所有工具(`mcp__github__…`) |
 | `Edit\|Write`、`Bash(git push:*)\|Write` | 任一个;括号里的 `\|` 属于内容 |
 
-"内容"依次取 `tool_input` 的 `command`、`file_path`、`path`、`url`。除 `""` / `*` 之外的
+"内容"依次取 `tool_input` 的 `command`、`file_path`、`path`、`notebook_path`、`url`。除 `""` / `*` 之外的
 写法都要求 payload 有 `tool_name`——表里哪些事件带它,写在 payload 一列。
 
 **`Bash` 与 `Monitor` 的内容按 `Bash(...)` deny 规则的读法比**(`ARCHITECTURE.md` §6.1,
@@ -184,7 +184,10 @@ prompt / http hook 对它照旧跑。它读的是模型写的 payload,所以只�
 跑。所以 `Bash(rm:*)` 对 `cd . && rm -rf x`、`"rm" x`、`\rm x`、`/bin/rm x`、`env rm x`、
 `bash -c 'rm x'` 都命中;`echo rm`、`git rm x` 不命中。**程序名读不出来的命令一律命中**
 (`$CMD x`、命令名是通配或替换的),和 deny 规则在这种时候改为询问是同一个道理:守着某条命令的
-hook 不能被换个写法绕过去,宁可多跑一次。其他工具的内容仍按原文比。
+hook 不能被换个写法绕过去,宁可多跑一次。**文件路径(`file_path`、`path`、`notebook_path`)** 先按 payload 的 `cwd` 解析成去掉 `.` 与 `..` 的
+绝对路径,再连同它在磁盘上的实际落点、相对 `cwd` 的写法一起比,任一个命中就跑。所以守着
+`/proj/src/billing/x.rs` 的 `Write(/proj/src/billing/**)` 或 `Write(src/billing/**)`,对模型写的
+`./src/billing/x.rs`、`src/../src/billing/x.rs`、绝对路径都命中。`url` 与其他工具的内容按原文比。
 
 ---
 
