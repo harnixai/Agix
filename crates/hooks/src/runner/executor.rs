@@ -564,14 +564,34 @@ fn response_for_exit(
 
 const READY_AFTER_STOP: usize = 256;
 
+const MAX_STREAM_BYTES: usize = 1024 * 1024;
+const TRUNCATED_MARK: &str = "\n[output truncated]";
+
+fn append_capped(into: &mut Vec<u8>, bytes: &[u8], truncated: &mut bool) {
+    let room = MAX_STREAM_BYTES.saturating_sub(into.len());
+    if bytes.len() > room {
+        *truncated = true;
+    }
+    into.extend_from_slice(&bytes[..bytes.len().min(room)]);
+}
+
+fn text_of(bytes: &[u8], truncated: bool) -> String {
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    if truncated {
+        text.push_str(TRUNCATED_MARK);
+    }
+    text
+}
+
 async fn collect_output(
     mut output: futures::stream::BoxStream<'static, Result<OutputChunk, ExecError>>,
     stop: CancellationToken,
 ) -> (String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
+    let (mut out_cut, mut err_cut) = (false, false);
     let mut keep = |chunk: OutputChunk| match chunk.stream {
-        OutputStream::Stdout => out.extend(chunk.bytes),
-        OutputStream::Stderr => err.extend(chunk.bytes),
+        OutputStream::Stdout => append_capped(&mut out, &chunk.bytes, &mut out_cut),
+        OutputStream::Stderr => append_capped(&mut err, &chunk.bytes, &mut err_cut),
     };
     loop {
         let next = tokio::select! {
@@ -595,10 +615,7 @@ async fn collect_output(
             }
         }
     }
-    (
-        String::from_utf8_lossy(&out).into_owned(),
-        String::from_utf8_lossy(&err).into_owned(),
-    )
+    (text_of(&out, out_cut), text_of(&err, err_cut))
 }
 
 /// 解析 hook 响应文本为 HookResponse。模型可能 wrap 在 ``` ```json``` 里；

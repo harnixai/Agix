@@ -2352,6 +2352,42 @@ mod tests {
         assert!(logged.len() < 2000, "{} bytes", logged.len());
     }
 
+    #[tokio::test]
+    async fn a_hook_cannot_fill_memory_with_its_output() {
+        let r = on_pre_tool_use(vec![HookConfig::Command {
+            command: "yes | head -c 5000000; yes | head -c 5000000 >&2".into(),
+            shell: None,
+            timeout: None,
+            if_pattern: None,
+            only_on_error: None,
+            once: None,
+            async_rewake: None,
+            on_error: OnError::Allow,
+        }]);
+        let result = r
+            .run(
+                HookEvent::PreToolUse,
+                &input_for_bash("ls"),
+                &CancellationToken::new(),
+            )
+            .await;
+        let HookOutcome::Ran { stdout, stderr, .. } = &result.outcomes[0] else {
+            panic!("{:?}", result.outcomes[0]);
+        };
+        let cap = 1024 * 1024 + 64;
+        assert!(
+            stdout.len() <= cap && stderr.len() <= cap,
+            "{} {}",
+            stdout.len(),
+            stderr.len()
+        );
+        assert!(
+            stdout.ends_with("[output truncated]"),
+            "{}",
+            &stdout[stdout.len() - 40..]
+        );
+    }
+
     struct Failing;
 
     #[async_trait::async_trait]
