@@ -30,8 +30,114 @@ pub struct ToolResultBudget {
 pub const TOOL_IMAGE_CHARS: usize = base::interface::model::IMAGE_TOKEN_ESTIMATE * 4;
 
 const CLEARED_RESULT: &str = "[Old tool result content cleared]";
+const CLEARED_PREFIX: &str = "[Old tool result content cleared";
 const CLEARED_IMAGE: &str = "[Old tool result image cleared]";
 const PRESERVED_HEAD_CHARS: usize = 1000;
+
+/// First words of the line a saved tool result opens with.
+pub const SPILL_MARKER_PREFIX: &str = "[Output too long for one result: ";
+const SPILL_SAVED_TO: &str = " Saved in full to ";
+const SPILL_MARKER_SUFFIX: &str =
+    " \u{2014} read the rest with Read (offset/limit are lines) or search it with Grep.]";
+
+/// The line that opens a result saved to a file: how big it was and where it
+/// is. [`spill_path_of`] reads the path back out of it.
+pub fn spill_marker(chars: usize, lines: usize, path: &str) -> String {
+    format!(
+        "{SPILL_MARKER_PREFIX}{} characters, {lines} lines.{SPILL_SAVED_TO}{path}{SPILL_MARKER_SUFFIX}",
+        group_thousands(chars)
+    )
+}
+
+/// The file a result was saved to, when `content` opens with the marker.
+pub fn spill_path_of(content: &str) -> Option<&str> {
+    let line = content.strip_prefix(SPILL_MARKER_PREFIX)?.lines().next()?;
+    let (_, rest) = line.split_once(SPILL_SAVED_TO)?;
+    let path = rest
+        .strip_suffix(SPILL_MARKER_SUFFIX)
+        .or_else(|| rest.split_once(SPILL_MARKER_SUFFIX).map(|(path, _)| path))?;
+    Some(path)
+}
+
+fn clearable_positions(messages: &[ModelMessage]) -> Vec<(usize, usize)> {
+    let mut positions: Vec<(usize, usize)> = Vec::new();
+    for (mi, msg) in messages.iter().enumerate() {
+        let answers_tools = msg
+            .content
+            .iter()
+            .any(|b| matches!(b, ModelContentBlock::ToolResult { .. }));
+        for (bi, block) in msg.content.iter().enumerate() {
+            match block {
+                ModelContentBlock::ToolResult { content, .. }
+                    if !content.starts_with(CLEARED_PREFIX) =>
+                {
+                    positions.push((mi, bi))
+                }
+                ModelContentBlock::Image { .. } if answers_tools => positions.push((mi, bi)),
+                _ => {}
+            }
+        }
+    }
+    positions
+}
+
+fn cleared_text(content: &str) -> String {
+    match spill_path_of(content) {
+        Some(path) => format!("[Old tool result content cleared; full output still at {path}]"),
+        None => CLEARED_RESULT.to_string(),
+    }
+}
+
+fn group_thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `content` with its middle replaced by a note: the first `head` and last
+/// `tail` characters stay. A result fenced as external content keeps its
+/// opening tag, and the closing tag with the reminder after it, so what is
+/// left is still marked as data.
+pub fn cut_keeping_fence(content: &str, head: usize, tail: usize) -> String {
+    let chars = content.chars().count();
+    if chars <= head + tail {
+        return content.to_string();
+    }
+    let omit = |inner: &str| {
+        let inner_chars = inner.chars().count();
+        if inner_chars <= head + tail {
+            return inner.to_string();
+        }
+        let kept_tail: String = inner.chars().skip(inner_chars - tail).collect();
+        format!(
+            "{}\n\u{2026} [{} characters omitted] \u{2026}\n{kept_tail}",
+            head_chars(inner, head),
+            group_thousands(inner_chars - head - tail)
+        )
+    };
+    match fence_of(content) {
+        Some((open, close)) => format!(
+            "{open}\n{}{}",
+            omit(&content[open.len() + 1..close]),
+            &content[close..]
+        ),
+        None => omit(content),
+    }
+}
+
+fn fence_of(content: &str) -> Option<(&str, usize)> {
+    let (open, _) = content
+        .strip_prefix("<external-content")
+        .and(content.split_once('\n'))?;
+    let close = content.rfind("\n</external-content>\n")?;
+    (open.len() < close).then_some((open, close))
+}
 
 impl Default for ToolResultBudget {
     fn default() -> Self {
@@ -88,22 +194,7 @@ pub fn enforce_tool_result_budget(
     // Index order *is* chronological order: the transcript is append-only and
     // compaction removes from the front without reordering.
     if total_size > max_total {
-        let mut positions: Vec<(usize, usize)> = Vec::new();
-        for (mi, msg) in messages.iter().enumerate() {
-            let answers_tools = msg
-                .content
-                .iter()
-                .any(|b| matches!(b, ModelContentBlock::ToolResult { .. }));
-            for (bi, block) in msg.content.iter().enumerate() {
-                match block {
-                    ModelContentBlock::ToolResult { content, .. } if content != CLEARED_RESULT => {
-                        positions.push((mi, bi))
-                    }
-                    ModelContentBlock::Image { .. } if answers_tools => positions.push((mi, bi)),
-                    _ => {}
-                }
-            }
-        }
+        let positions = clearable_positions(messages);
         for (mi, bi) in positions {
             if total_size <= max_total {
                 break;
@@ -111,12 +202,12 @@ pub fn enforce_tool_result_budget(
             let block = &mut messages[mi].content[bi];
             match block {
                 ModelContentBlock::ToolResult { content, .. } => {
-                    if content.len() <= CLEARED_RESULT.len() {
+                    let cleared = cleared_text(content);
+                    if content.len() <= cleared.len() {
                         continue;
                     }
-                    total_size =
-                        total_size.saturating_sub(content.chars().count()) + CLEARED_RESULT.len();
-                    *content = CLEARED_RESULT.to_string();
+                    total_size = total_size.saturating_sub(content.chars().count()) + cleared.len();
+                    *content = cleared;
                 }
                 _ => {
                     total_size = total_size.saturating_sub(TOOL_IMAGE_CHARS);
@@ -139,12 +230,8 @@ fn truncated_result(content: &str, chars: usize, max_per_result: usize) -> Strin
         "[Tool result truncated: {chars} characters > {max_per_result} max; \
          first {PRESERVED_HEAD_CHARS} characters preserved]"
     );
-    let fenced = content
-        .strip_prefix("<external-content")
-        .and(content.split_once('\n'))
-        .zip(content.rfind("\n</external-content>\n"));
-    match fenced {
-        Some(((open, _), close)) if open.len() < close => format!(
+    match fence_of(content) {
+        Some((open, close)) => format!(
             "{note}\n{open}\n{}...{}",
             head_chars(&content[open.len() + 1..close], PRESERVED_HEAD_CHARS),
             &content[close..]
@@ -340,6 +427,57 @@ mod tests {
         assert_eq!(
             enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default()),
             0
+        );
+    }
+
+    #[test]
+    fn clearing_a_spilled_result_keeps_its_path() {
+        let path = "/p/.agix/scratchpad/tool-results/s/toolu_1.txt";
+        let preview = format!(
+            "{}\nhead\n\u{2026} [9 characters omitted] \u{2026}\ntail",
+            spill_marker(184_233, 4_102, path)
+        );
+        let mut msgs = vec![
+            tool_result("t1", &preview),
+            tool_result("t2", &"x".repeat(40_000)),
+            tool_result("t3", &"y".repeat(40_000)),
+        ];
+        let budget = ToolResultBudget {
+            max_per_result: 50_000,
+            max_total: 50_000,
+        };
+        enforce_tool_result_budget(&mut msgs, &budget);
+        let bodies = result_bodies(&msgs);
+        assert_eq!(
+            bodies[0],
+            format!("[Old tool result content cleared; full output still at {path}]")
+        );
+        assert_eq!(bodies[1], CLEARED_RESULT);
+        assert_eq!(enforce_tool_result_budget(&mut msgs, &budget), 0);
+    }
+
+    #[test]
+    fn the_marker_names_its_path_even_when_the_path_has_spaces() {
+        let marker = spill_marker(31_000, 2, "/a b/c.txt");
+        assert!(marker.contains("31,000 characters"));
+        assert_eq!(
+            spill_path_of(&format!("{marker}\nrest")),
+            Some("/a b/c.txt")
+        );
+        assert_eq!(spill_path_of("plain output"), None);
+    }
+
+    #[test]
+    fn a_cut_keeps_the_fence_around_head_and_tail() {
+        let body = format!("{}{}", "h".repeat(100), "t".repeat(100));
+        let fenced =
+            format!("<external-content source=\"x\">\n{body}\n</external-content>\nReminder.\n");
+        let cut = cut_keeping_fence(&fenced, 10, 5);
+        assert!(cut.starts_with("<external-content source=\"x\">\nhhhhhhhhhh"));
+        assert!(cut.contains("[185 characters omitted]"));
+        assert!(
+            cut.ends_with("ttttt\n</external-content>\nReminder.\n"),
+            "{cut}"
         );
     }
 }

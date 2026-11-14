@@ -1,6 +1,6 @@
 - Fetches content from a specified URL and returns it as plain text
 - HTML pages are converted to text; other content types are returned as text decoded from UTF-8
-- The whole result is at most 50,000 characters; a longer page is cut, and the result says how long it was
+- The whole result is at most 50,000 characters; a longer page comes back in parts: the result says which characters it holds and, when more remain, the `offset` to pass to read on (`limit` shortens a part)
 - The `prompt` input is not acted on: no model processes the page, so read the returned text yourself
 - Use this tool when you need to retrieve web content
 

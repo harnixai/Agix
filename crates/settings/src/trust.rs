@@ -346,6 +346,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("compaction.keep_recent", Free),
         ("compaction.reactive", Free),
         ("compaction.threshold_tokens", Free),
+        ("compaction.tool_result_inline_chars", Free),
         ("default_provider", Tighten(ProviderDefinedBelow)),
         ("disable_skill_shell_execution", Tighten(TrueTighter)),
         ("execution.max_agent_depth", Tighten(Lower)),

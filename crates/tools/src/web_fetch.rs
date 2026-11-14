@@ -8,6 +8,9 @@
 //! 答空时退回页面文本，结果头里写明。调用触及主机（`Reach::Host`），runtime 把整个
 //! 结果放进 external-content 定界块；定界之后至多 50_000 字符，与工具结果预算的单条
 //! 上限相同。
+//!
+//! 页面文本（html2text 之后）按字符窗口取：`offset` / `limit` 选窗口，结果头写窗口在整页里
+//! 的位置，窗口之后还有内容时尾部给出下一次调用的 `offset`。续读会再请求一次页面。
 
 use crate::cancel::run_with_cancel;
 use crate::page_extract::PageExtractor;
@@ -39,6 +42,15 @@ pub struct WebFetchInput {
     /// text is returned, the whole result at most 50,000 characters.
     #[serde(default)]
     pub prompt: Option<String>,
+
+    /// Character offset in the page text to start from; the previous result
+    /// says where to go on. A later call fetches the page again.
+    #[serde(default)]
+    pub offset: Option<usize>,
+
+    /// At most this many characters of the page text (default and cap 50,000).
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -95,6 +107,7 @@ impl WebFetchTool {
 impl Tool for WebFetchTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::new()
+            .pages_itself()
             .callable_from_code(true)
             .concurrency_safe(true)
             .read_only(true)
@@ -160,16 +173,32 @@ impl Tool for WebFetchTool {
         };
         match result {
             Ok((status, text)) => {
-                let (mode, body) = self.body_for(input.prompt.as_deref(), &text, &ctx).await?;
+                let total = text.chars().count();
+                let start = input.offset.unwrap_or(0).min(total);
+                let want = input
+                    .limit
+                    .unwrap_or(MAX_OUTPUT_CHARS)
+                    .clamp(1, MAX_OUTPUT_CHARS);
+                let window = slice_chars(&text, start, want);
+                let span = Span {
+                    start,
+                    end: start + window.chars().count(),
+                    total,
+                };
+                let (mode, body) = self.body_for(input.prompt.as_deref(), window, &ctx).await?;
+                let body_is_window = body == window;
                 let prompt = match &input.prompt {
                     Some(p) => format!(" | prompt was: {p}"),
                     None => String::new(),
                 };
-                let header = format!(
-                    "[HTTP {status} | url={}{prompt} | mode={mode}]\n\n",
-                    input.url
-                );
-                Ok(ToolResult::text(within_cap(&header, &input.url, &body)))
+                let opening = format!("[HTTP {status} | url={}{prompt} | mode={mode}]", input.url);
+                Ok(ToolResult::text(within_cap(
+                    &opening,
+                    &input.url,
+                    span,
+                    &body,
+                    body_is_window,
+                )))
             }
             Err(FetchError::HttpStatus { status, body }) => Ok(ToolResult::error_text(format!(
                 "HTTP {status}\n{}",
@@ -191,32 +220,80 @@ impl WebFetchTool {
     }
 }
 
-/// `header`, then `body`, cut so the whole stays within [`MAX_OUTPUT_CHARS`]
+fn slice_chars(text: &str, start: usize, len: usize) -> &str {
+    let mut at = text.char_indices().map(|(i, _)| i).skip(start);
+    let Some(from) = at.next() else { return "" };
+    match at.nth(len.saturating_sub(1)) {
+        Some(to) => &text[from..to],
+        None => &text[from..],
+    }
+}
+
+/// Where the window sits in the page text, in characters.
+struct Span {
+    start: usize,
+    end: usize,
+    total: usize,
+}
+
+fn frame(opening: &str, span: &Span, body: &str) -> String {
+    let range = if span.start > 0 || span.end < span.total {
+        format!(
+            "[characters {}\u{2013}{} of {}]\n",
+            span.start, span.end, span.total
+        )
+    } else {
+        String::new()
+    };
+    let rest = span.total - span.end;
+    let tail = if rest > 0 {
+        format!(
+            "\n\n[{rest} characters remain; call WebFetch again with offset={}]",
+            span.end
+        )
+    } else {
+        String::new()
+    };
+    format!("{opening}\n{range}\n{body}{tail}")
+}
+
+/// The framed window, cut so the whole stays within [`MAX_OUTPUT_CHARS`]
 /// once the runtime has fenced it as content from the web (the result of a
-/// call that reaches a host is).
-fn within_cap(header: &str, url: &str, body: &str) -> String {
-    let render = |body: &str| format!("{header}{body}");
+/// call that reaches a host is). A page-text window that is cut ends where
+/// the cut falls, so the continuation offset is exact; a model's answer is
+/// cut at its end.
+fn within_cap(
+    opening: &str,
+    url: &str,
+    mut span: Span,
+    body: &str,
+    body_is_window: bool,
+) -> String {
     let fenced_chars = |text: &str| {
         crate::external_content::fence(url, "the web", text)
             .chars()
             .count()
     };
-    let whole = render(body);
-    let total = fenced_chars(&whole);
-    if total <= MAX_OUTPUT_CHARS {
+    let whole = frame(opening, &span, body);
+    let mut excess = fenced_chars(&whole).saturating_sub(MAX_OUTPUT_CHARS);
+    if excess == 0 {
         return whole;
     }
-    let body_chars = body.chars().count();
-    let note = format!("\n\n[truncated: the page is {body_chars} characters]");
-    let mut room = MAX_OUTPUT_CHARS.saturating_sub(total - body_chars + note.chars().count());
+    let window_start = span.start;
+    let mut room = body.chars().count();
     loop {
+        room = room.saturating_sub(excess);
         let kept: String = body.chars().take(room).collect();
-        let out = render(&format!("{kept}{note}"));
-        let excess = fenced_chars(&out).saturating_sub(MAX_OUTPUT_CHARS);
+        let out = if body_is_window {
+            span.end = window_start + room;
+            frame(opening, &span, &kept)
+        } else {
+            frame(opening, &span, &format!("{kept}\u{2026}[truncated]"))
+        };
+        excess = fenced_chars(&out).saturating_sub(MAX_OUTPUT_CHARS);
         if excess == 0 || room == 0 {
             return out;
         }
-        room = room.saturating_sub(excess);
     }
 }
 
@@ -751,27 +828,56 @@ not found";
         }
     }
 
-    const HEADER: &str = "[HTTP 200 | url=https://x.test/ | mode=page text]\n\n";
+    const OPENING: &str = "[HTTP 200 | url=https://x.test/ | mode=page text]";
 
-    /// The whole result — header, the runtime's fence and all — stays within
-    /// the 50 000 characters the tool-result budget lets one result have.
+    fn whole_page(total: usize) -> Span {
+        Span {
+            start: 0,
+            end: total,
+            total,
+        }
+    }
+
     #[test]
-    fn a_capped_page_fits_the_tool_result_budget() {
+    fn a_capped_window_fits_the_tool_result_budget_and_names_where_to_go_on() {
         let page = format!("{}EDGE{}PAST", "a".repeat(49_000), "b".repeat(2_000));
-        let out = within_cap(HEADER, "https://x.test/", &page);
+        let total = page.chars().count();
+        let window = slice_chars(&page, 0, MAX_OUTPUT_CHARS);
+        let span = Span {
+            start: 0,
+            end: MAX_OUTPUT_CHARS,
+            total,
+        };
+        let out = within_cap(OPENING, "https://x.test/", span, window, true);
         let fenced = crate::external_content::fence("https://x.test/", "the web", &out);
-        assert_eq!(fenced.chars().count(), MAX_OUTPUT_CHARS);
-        assert!(out.starts_with(HEADER));
+        assert!(fenced.chars().count() <= MAX_OUTPUT_CHARS);
+        assert!(out.starts_with(OPENING));
         assert!(out.contains("EDGE") && !out.contains("PAST"));
-        assert!(out.contains("[truncated: the page is 51008 characters]"));
+        let next: usize = out
+            .rsplit("offset=")
+            .next()
+            .unwrap()
+            .trim_end_matches(']')
+            .parse()
+            .unwrap();
+        assert!(out.contains(&format!("of {total}]")));
+        assert!((49_000..MAX_OUTPUT_CHARS).contains(&next), "{next}");
     }
 
     #[test]
     fn a_short_page_in_wide_characters_is_kept_whole() {
-        let page = format!("{}END", "中".repeat(20_000));
-        let out = within_cap(HEADER, "https://x.test/", &page);
+        let page = format!("{}END", "\u{4e2d}".repeat(20_000));
+        let total = page.chars().count();
+        let out = within_cap(OPENING, "https://x.test/", whole_page(total), &page, true);
         assert!(out.contains(&page));
-        assert!(!out.contains("[truncated"));
+        assert!(!out.contains("remain"));
+    }
+
+    #[test]
+    fn slicing_by_characters_never_splits_one() {
+        assert_eq!(slice_chars("\u{4e2d}\u{6587}abc", 1, 2), "\u{6587}a");
+        assert_eq!(slice_chars("abc", 3, 5), "");
+        assert_eq!(slice_chars("abc", 1, 99), "bc");
     }
 
     #[tokio::test]

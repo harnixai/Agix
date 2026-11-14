@@ -3102,13 +3102,33 @@
     "code_result": null,
     "description": "Fetch a URL and return the page as plain text.",
     "guide": {
-      "bytes": 1278,
-      "fnv1a": "b4984e0b11228992"
+      "bytes": 1378,
+      "fnv1a": "ff2eb7c7cdeeee1c"
     },
     "input_schema": {
       "absolute": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "limit": {
+            "default": null,
+            "description": "At most this many characters of the page text (default and cap 50,000).",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "default": null,
+            "description": "Character offset in the page text to start from; the previous result\nsays where to go on. A later call fetches the page again.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "prompt": {
             "default": null,
             "description": "What you want from the page. When page extraction is enabled a model\nanswers this from the page; otherwise it is not acted on and the page\ntext is returned, the whole result at most 50,000 characters.",
@@ -3131,6 +3151,26 @@
       "workspace_relative": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
+          "limit": {
+            "default": null,
+            "description": "At most this many characters of the page text (default and cap 50,000).",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "default": null,
+            "description": "Character offset in the page text to start from; the previous result\nsays where to go on. A later call fetches the page again.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "prompt": {
             "default": null,
             "description": "What you want from the page. When page extraction is enabled a model\nanswers this from the page; otherwise it is not acted on and the page\ntext is returned, the whole result at most 50,000 characters.",

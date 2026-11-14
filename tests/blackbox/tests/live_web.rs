@@ -152,7 +152,7 @@ async fn webfetch_cuts_a_huge_page_at_fifty_thousand_characters() -> anyhow::Res
     );
     assert!(!text.contains(&past), "past the cut");
     assert!(
-        text.contains("[truncated: the page is 70000 characters]"),
+        text.contains("characters remain; call WebFetch again with offset="),
         "the cut is marked"
     );
     assert!(

@@ -153,6 +153,9 @@ pub struct ToolSpec {
     pub needs_dispatch: bool,
     /// How the permission modes treat this tool's calls.
     pub stance: ModeStance,
+    /// The tool lets the model read a long result in parts (an offset), so
+    /// the engine does not save a long result to a file for it.
+    pub pages_itself: bool,
 }
 
 impl ToolSpec {
@@ -189,6 +192,10 @@ impl ToolSpec {
     }
     pub fn code_result(mut self, shape: &'static str) -> Self {
         self.code_result = Some(shape);
+        self
+    }
+    pub fn pages_itself(mut self) -> Self {
+        self.pages_itself = true;
         self
     }
     pub fn needs_dispatch(mut self, yes: bool) -> Self {

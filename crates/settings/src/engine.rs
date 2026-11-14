@@ -52,6 +52,10 @@ impl LoadedSettings {
         c.path_style = settings.path_style.unwrap_or_default();
         c.subprocess_env = settings.sandbox.subprocess_env.clone();
 
+        if let Some(chars) = settings.compaction.tool_result_inline_chars {
+            c.tool_results.inline_chars = chars;
+        }
+
         c.system_prompt = base::context::config::SystemPromptSettings {
             append: settings.prompt_append.clone(),
             override_text: settings.prompt_override.clone(),

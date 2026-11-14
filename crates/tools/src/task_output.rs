@@ -63,7 +63,10 @@ impl Tool for TaskOutputTool {
     }
 
     fn spec(&self) -> ToolSpec {
-        ToolSpec::new().concurrency_safe(true).read_only(true)
+        ToolSpec::new()
+            .pages_itself()
+            .concurrency_safe(true)
+            .read_only(true)
     }
 
     async fn validate_input(&self, input: &Value, _: &ToolContext) -> ValidationResult {

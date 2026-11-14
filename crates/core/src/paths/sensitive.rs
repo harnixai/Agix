@@ -610,6 +610,15 @@ pub fn session_scratch_dir(state_root: &Path, session_id: &str) -> PathBuf {
         .join(session_dir_name(session_id))
 }
 
+/// Where a session's oversized tool results are saved:
+/// `<state root>/scratchpad/tool-results/<root session id>`.
+pub fn tool_results_dir(state_root: &Path, session_id: &str) -> PathBuf {
+    state_root
+        .join(STATE_ROOT_SCRATCHPAD)
+        .join("tool-results")
+        .join(session_dir_name(session_id))
+}
+
 fn session_dir_name(session_id: &str) -> String {
     session_id
         .chars()

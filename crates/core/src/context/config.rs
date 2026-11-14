@@ -97,6 +97,33 @@ pub struct EngineConfig {
     /// of the session rather than of the tool, so an MCP tool that arrives
     /// mid-session is deferred like one that was there from the start.
     pub deferred_tools: std::sync::Arc<std::collections::HashSet<String>>,
+    /// Where a tool result too long for the conversation is kept.
+    pub tool_results: ToolResultLimits,
+}
+
+/// How long a tool result may be before it is saved to a file and the model
+/// is given a preview. A session's delegates write into the root session's
+/// directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolResultLimits {
+    /// Characters; `0` keeps every result in the conversation.
+    pub inline_chars: usize,
+    /// `None` when there is nowhere to write: results are then cut by the
+    /// per-result budget instead.
+    pub dir: Option<std::path::PathBuf>,
+}
+
+impl ToolResultLimits {
+    pub const DEFAULT_INLINE_CHARS: usize = 30_000;
+}
+
+impl Default for ToolResultLimits {
+    fn default() -> Self {
+        Self {
+            inline_chars: Self::DEFAULT_INLINE_CHARS,
+            dir: None,
+        }
+    }
 }
 
 /// File-op limits sub-config: the "tuning the FileRead/Write envelope"
@@ -251,6 +278,7 @@ impl EngineConfig {
             verbose_tool_results: false,
             path_style: PathStyle::default(),
             deferred_tools: Default::default(),
+            tool_results: ToolResultLimits::default(),
         }
     }
 }

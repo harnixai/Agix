@@ -46,6 +46,15 @@
             "integer",
             "null"
           ]
+        },
+        "tool_result_inline_chars": {
+          "description": "A tool result longer than this many characters is saved to a file in\nthe session's scratchpad and the model gets its head, its tail and the\npath (default 30,000; `0` keeps every result in the conversation).\n`Read`, `WebFetch` and `TaskOutput` page their own results and are\nnever saved.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"

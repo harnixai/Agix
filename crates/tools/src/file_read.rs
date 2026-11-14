@@ -47,6 +47,7 @@ pub struct FileReadTool;
 impl Tool for FileReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::new()
+            .pages_itself()
             .callable_from_code(true)
             .code_result("text, each line prefixed with its number and a tab")
             .concurrency_safe(true)
