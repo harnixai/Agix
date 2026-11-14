@@ -200,8 +200,6 @@ impl EngineFactory {
         if let Some(module) = req.mcp_module {
             builder = builder.module(module);
         }
-        // After MCP, so the `Agent` tool sees the servers it may grant a
-        // delegate; skills after agents, so forked skills can fork.
         builder = builder.modules(binding.modules.session_modules());
 
         if let Some(handle) = session_telemetry(&settings_snapshot, options, session_id) {

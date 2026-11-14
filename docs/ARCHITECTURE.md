@@ -46,7 +46,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   `permissions`、`ptc`、`settings`、`memory`、`skill-format`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
   建在 K1 上,**K3**(`runtime`)建在两者之上。内核 crate **不依赖任何模块 crate**。
 - 级别不对的依赖只能登记在 `NOT_YET` 里,写明什么能去掉它;名单带陈旧检查,边没了条目就得删。
-- 模块依赖契约与内核;模块之间的依赖只经 `Module::requires` 声明的顺序。
+- 模块依赖契约与内核;模块之间的依赖只经 `Module::requires` 与 `Module::after` 声明。
 - 只有装配层与外壳知道有哪些模块;模块 feature 的 `#[cfg]` 只出现在
   `assembly`(模块清单、会话池选哪份 `mcp_hub`、RPC 服务里个别方法)与 `daemon` 里。
   MCP 在 `assembly` 里只由两处决定:`modules.rs` 的模块清单,和 `session_pool/mod.rs`
@@ -112,7 +112,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 ### 1.1 模块怎么进入会话
 
 `runtime::agent::Builder::module(..)` 按顺序装入模块。`build()` 先按场景收窄
-(§3.6)、再检查 `requires`(缺失、排在后面、重复都拒绝),在会话的工具表、事件总线、
+(§3.6)、再检查 `requires` 与 `after`(缺失、排在后面、违反软顺序、重复都拒绝),在会话的工具表、事件总线、
 权限、hooks 都建好之后、场景的工具策略生效之前,依次调用 `on_session`——模块注册的
 工具和内建工具受同一套场景约束。
 
@@ -134,7 +134,8 @@ MCP 连接由 mcp 模块交给会话独占(`provide_mcp`),和原先会话独占 
 工具与 prompt 的名字由 `mcp::naming` 从 server 名与工具名造出,保证符合模型 API 的
 `^[a-zA-Z0-9_-]{1,64}$`,权限规则按这个名字写。
 
-装配顺序是 **mcp → agents → skills**:agents 要看到它可以授予子 agent 的 MCP 服务器,
+装配顺序由各模块的 `Module::after` 声明、`build()` 校验,顺序反了直接报错:agents 排在
+mcp 之后,因为它要看到可以授予子 agent 的 MCP 服务器;skills 排在 agents 之后,因为
 fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父会话(收窄后)的模块
 清单装配,所以嵌套委派照旧;MCP 连接只给第一个装配它的会话。agent 类型写了
 `mcp_servers` 的,子会话拿到父会话连接按 server 收窄出的一份 `McpServers`

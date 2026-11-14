@@ -127,6 +127,51 @@ fn a_module_whose_requirement_comes_later_is_refused() {
     assert!(err.contains("assembled twice"), "{err}");
 }
 
+struct SoftOrdered {
+    id: &'static str,
+    after: &'static [&'static str],
+}
+
+impl crate::module::Module for SoftOrdered {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn after(&self) -> &'static [&'static str] {
+        self.after
+    }
+    fn on_session(
+        &self,
+        _: &mut crate::module::SessionContext<'_>,
+    ) -> Result<(), crate::module::ModuleError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_module_declared_after_another_is_refused_ahead_of_it_and_free_without_it() {
+    let agents = || {
+        Arc::new(SoftOrdered {
+            id: "agents",
+            after: &["mcp"],
+        }) as Arc<dyn crate::module::Module>
+    };
+    let mcp = || crate::module::fakes::mcp_module(Vec::new());
+    let err = match probe_builder(vec![agents(), mcp()]).build() {
+        Ok(_) => panic!("agents ahead of mcp was accepted"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        err.contains("agents") && err.contains("must come after `mcp`"),
+        "{err}"
+    );
+    probe_builder(vec![mcp(), agents()])
+        .build()
+        .expect("mcp first is the declared order");
+    probe_builder(vec![agents()])
+        .build()
+        .expect("a soft order says nothing when the other module is not assembled");
+}
+
 /// A scene with an empty prompt and every tool, named `id`.
 pub(super) fn bare_scene(id: &str) -> SceneSpec {
     SceneSpec::new(

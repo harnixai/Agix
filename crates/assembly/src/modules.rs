@@ -6,8 +6,7 @@
 //! across that pair's sessions (the skill catalog, the agent-type catalog,
 //! and what installed packages contribute to both);
 //! per session, [`ProjectModules::session_modules`] hands the builder the
-//! modules in the order they depend on each other: MCP (added by the pool,
-//! which owns the connections) first, then agents, then skills.
+//! modules; `build()` checks their order against each module's `Module::after`.
 
 use std::sync::Arc;
 

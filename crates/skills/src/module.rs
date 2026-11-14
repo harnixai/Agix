@@ -58,6 +58,10 @@ impl Module for SkillsModule {
         MODULE_ID
     }
 
+    fn after(&self) -> &'static [&'static str] {
+        &["agents"]
+    }
+
     fn on_session(&self, cx: &mut SessionContext<'_>) -> Result<(), ModuleError> {
         let manager = match &self.shared {
             Some(shared) => shared.clone(),

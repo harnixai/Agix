@@ -256,6 +256,56 @@ pub fn trait_fn_returns(f: &SourceFile, v: View, trait_name: &str, fn_name: &str
     impls.out
 }
 
+/// The string literals in the body of each `fn <fn_name>` of an
+/// `impl <trait_name> for` block, one list per impl.
+pub fn trait_fn_strings(
+    f: &SourceFile,
+    v: View,
+    trait_name: &str,
+    fn_name: &str,
+) -> Vec<Vec<String>> {
+    #[derive(Default)]
+    struct Strings(Vec<String>);
+    impl<'ast> Visit<'ast> for Strings {
+        fn visit_lit_str(&mut self, s: &'ast syn::LitStr) {
+            self.0.push(s.value());
+        }
+    }
+    struct Impls<'a> {
+        trait_name: &'a str,
+        fn_name: &'a str,
+        out: Vec<Vec<String>>,
+    }
+    impl<'ast> Visit<'ast> for Impls<'_> {
+        fn visit_item_impl(&mut self, imp: &'ast syn::ItemImpl) {
+            let is_trait = imp
+                .trait_
+                .as_ref()
+                .and_then(|(_, path, _)| path.segments.last())
+                .is_some_and(|s| s.ident == self.trait_name);
+            if is_trait {
+                for item in &imp.items {
+                    if let syn::ImplItem::Fn(func) = item {
+                        if func.sig.ident == self.fn_name {
+                            let mut strings = Strings::default();
+                            strings.visit_block(&func.block);
+                            self.out.push(strings.0);
+                        }
+                    }
+                }
+            }
+            visit::visit_item_impl(self, imp);
+        }
+    }
+    let mut impls = Impls {
+        trait_name,
+        fn_name,
+        out: Vec::new(),
+    };
+    impls.visit_file(&f.tree(v));
+    impls.out
+}
+
 /// Every `const NAME: &str = "..."` in the file, at any depth.
 pub fn str_consts(f: &SourceFile, v: View) -> Vec<(String, String)> {
     #[derive(Default)]

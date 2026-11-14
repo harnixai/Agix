@@ -39,6 +39,12 @@ pub trait Module: Send + Sync {
         &[]
     }
 
+    /// Modules that, when assembled at all, must come earlier in the list:
+    /// what this one reads from them at `on_session` is there only then.
+    fn after(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     fn on_session(&self, cx: &mut SessionContext<'_>) -> Result<(), ModuleError>;
 }
 
@@ -265,7 +271,8 @@ pub(crate) fn permitted_by(
     Ok(kept)
 }
 
-/// Refuses a module list whose `requires` cannot be met in order.
+/// Refuses a module list whose `requires` cannot be met in order, or that
+/// puts a module before one it declares `after`.
 pub(crate) fn check_order(modules: &[Arc<dyn Module>]) -> Result<(), ModuleError> {
     for (i, m) in modules.iter().enumerate() {
         if modules[..i].iter().any(|earlier| earlier.id() == m.id()) {
@@ -276,6 +283,14 @@ pub(crate) fn check_order(modules: &[Arc<dyn Module>]) -> Result<(), ModuleError
                 return Err(ModuleError::new(
                     m.id(),
                     format!("requires `{needed}`, which is not assembled before it"),
+                ));
+            }
+        }
+        for later in &modules[i + 1..] {
+            if m.after().contains(&later.id()) {
+                return Err(ModuleError::new(
+                    m.id(),
+                    format!("must come after `{}`, which is assembled later", later.id()),
                 ));
             }
         }

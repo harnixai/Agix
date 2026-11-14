@@ -78,6 +78,10 @@ impl Module for AgentsModule {
         MODULE_ID
     }
 
+    fn after(&self) -> &'static [&'static str] {
+        &["mcp"]
+    }
+
     fn on_session(&self, cx: &mut SessionContext<'_>) -> Result<(), ModuleError> {
         let settings = cx.settings;
         let template = Arc::new(base::tool::InMemoryToolRegistry::new());

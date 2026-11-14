@@ -8,6 +8,7 @@ mod decorators;
 mod delegation;
 mod deps;
 mod layering;
+mod module_order;
 mod permissions;
 mod process_state;
 mod session_state;
