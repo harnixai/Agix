@@ -988,7 +988,7 @@ async fn run_agix(case: Case, seed: u64) -> anyhow::Result<Outcome> {
         Some(e) => outcome.note = e,
     }
     outcome.failures = case.verify(&run.project, seed);
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(outcome)
 }
 

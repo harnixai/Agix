@@ -844,6 +844,6 @@ async fn an_agent_types_stricter_mode_asks_and_its_question_waits_only_the_sessi
         "the sub-agent's unanswered question waited {:?}",
         started.elapsed()
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }

@@ -193,7 +193,7 @@ async fn an_unanswered_prompt_times_out_into_a_refusal_and_the_turn_goes_on() ->
     assert!(events.turn_complete);
     assert!(started.elapsed() >= Duration::from_secs(3));
     assert!(!watcher.asked().is_empty());
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

@@ -103,6 +103,6 @@ async fn title_and_compact_calls_go_to_the_models_task_models_names() -> anyhow:
         !turns.is_empty() && turns.iter().all(|m| *m == main),
         "turns: {turns:?}"
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }

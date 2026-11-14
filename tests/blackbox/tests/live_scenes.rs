@@ -151,6 +151,6 @@ async fn a_scene_registered_at_runtime_shapes_its_sessions_and_holds_while_used(
         resumed.error.is_some(),
         "a session of an unregistered scene resumed: {resumed:?}"
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }

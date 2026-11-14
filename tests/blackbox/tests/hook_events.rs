@@ -1011,7 +1011,7 @@ async fn an_approval_does_not_cover_what_another_hook_rewrote_the_call_into() ->
         "one hook's approval answered for another's rewrite: {:?}",
         events.tool_results
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

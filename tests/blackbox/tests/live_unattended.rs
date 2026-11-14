@@ -101,7 +101,7 @@ async fn an_unattended_session_works_inside_its_roots_and_is_refused_outside() -
         }
     }
     drop(watcher);
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 
@@ -154,6 +154,6 @@ async fn a_shell_command_writing_outside_the_roots_is_refused_unattended() -> an
         "nobody is there to ask, so nothing was asked"
     );
     drop(watcher);
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }

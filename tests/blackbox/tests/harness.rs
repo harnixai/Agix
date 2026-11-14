@@ -223,7 +223,7 @@ async fn a_watcher_denies_permits_always_answers_questions_and_can_stay_silent(
         last.messages_contain("BETA-OPTION"),
         "the chosen option reached the model"
     );
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

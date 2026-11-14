@@ -999,19 +999,32 @@ impl LiveRun {
     }
 
     pub async fn finish(self) {
+        let name = self.name.clone();
+        let unanswered = self.close().await;
+        assert!(
+            unanswered.is_empty(),
+            "[live {name}] tool calls refused because nobody answered the permission prompt: {unanswered:?}; \
+             watch the session, grant them by rule, or end the case with finish_allowing_refusals()"
+        );
+    }
+
+    pub async fn finish_allowing_refusals(self) {
+        let name = self.name.clone();
+        let unanswered = self.close().await;
+        if !unanswered.is_empty() {
+            eprintln!("[live {name}] refused, nobody answered the prompt: {unanswered:?}");
+        }
+    }
+
+    async fn close(self) -> Vec<String> {
         let (calls, input, output) = self.provider.spend();
         eprintln!(
             "[live {}] {calls} model calls, {input} input tokens, {output} output tokens",
             self.name
         );
         let unanswered = self.provider.unanswered_prompts();
-        if !unanswered.is_empty() {
-            eprintln!(
-                "[live {}] refused, nobody answered the prompt: {unanswered:?}",
-                self.name
-            );
-        }
         self.daemon.stop().await;
+        unanswered
     }
 }
 
