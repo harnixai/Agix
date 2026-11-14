@@ -118,11 +118,21 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
             .filter(|a| !a.as_os_str().is_empty())
             .map(|a| roots.cwd.join(a))
             .collect();
-        // Held only where the directory above it exists, as `.claude` is.
+        if !roots.opens(&path) {
+            continue;
+        }
+        // Where a directory above it is missing, the topmost missing one is
+        // shut under an empty read-only tmpfs, as macOS refuses to create it:
+        // otherwise a command makes `.agents/skills/<name>` in a project that
+        // has no `.agents` yet.
+        if let Some(missing) = above.iter().rev().find(|a| a.symlink_metadata().is_err()) {
+            read_only(args, missing);
+            continue;
+        }
         let held = above
             .iter()
             .all(|a| a.symlink_metadata().is_ok_and(|m| m.is_dir()));
-        if !held || !roots.opens(&path) {
+        if !held {
             continue;
         }
         for a in above.iter().rev() {

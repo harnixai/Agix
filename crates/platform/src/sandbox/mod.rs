@@ -52,7 +52,8 @@
 //! read-only either way. On Linux `.agix`, and `.claude` where it exists, is read-only as
 //! a whole and its existing working entries are opened again, so a new entry
 //! directly in it cannot be created either; `.agents/skills/` is read-only
-//! where `.agents` exists.
+//! where `.agents` exists, and `.agents` itself is shut under an empty read-only
+//! tmpfs where it does not, leaving an empty mount point.
 //!
 //! A policy with `only_additional_writable` leaves out the working directory,
 //! the state root's working entries and `DARWIN_USER_TEMP_DIR`: only

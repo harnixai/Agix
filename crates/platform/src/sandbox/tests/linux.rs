@@ -421,3 +421,24 @@ fn linux_the_hooks_path_and_included_config_are_read_only() {
         "{args:?}"
     );
 }
+
+/// A project with no `.agents` yet: the project skills directory must not
+/// be creatable, which on Linux means `.agents` itself is held read-only.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_project_skill_cannot_be_planted_where_agents_is_absent() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let cmd = wrap(opts("true", &root));
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
+    let args = &cmd.spec.args[..end];
+    let agents = root.join(".agents").display().to_string();
+    let at = |pair: [&str; 2]| args.windows(2).position(|w| w == pair);
+    let tmpfs = at(["--tmpfs", &agents]).unwrap_or_else(|| panic!("{args:?}"));
+    let shut = at(["--remount-ro", &agents]).unwrap_or_else(|| panic!("{args:?}"));
+    assert!(tmpfs < shut, "{args:?}");
+}
