@@ -605,6 +605,7 @@ pub struct LiveRunBuilder {
     config: Option<LiveConfig>,
     options: Option<OptionsFn>,
     before_start: Vec<BeforeStart>,
+    trust: bool,
 }
 
 impl LiveRunBuilder {
@@ -656,6 +657,13 @@ impl LiveRunBuilder {
         self
     }
 
+    /// Leave the project as a host that has not been asked about it finds it:
+    /// untrusted, so its own configuration can only tighten.
+    pub fn untrusted(mut self) -> Self {
+        self.trust = false;
+        self
+    }
+
     /// The project is trusted, as its host would have trusted it: the runs
     /// are about what the engine does with a project's configuration.
     pub async fn start(self) -> anyhow::Result<LiveRun> {
@@ -679,7 +687,9 @@ impl LiveRunBuilder {
             }
         }
         world.write_project_settings(&self.name, &merged)?;
-        world.trust_project(&project)?;
+        if self.trust {
+            world.trust_project(&project)?;
+        }
         for hook in self.before_start {
             hook(&world, &project)?;
         }
@@ -741,6 +751,7 @@ impl LiveRun {
             config: None,
             options: None,
             before_start: Vec::new(),
+            trust: true,
         }
     }
 
