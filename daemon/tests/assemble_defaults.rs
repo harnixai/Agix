@@ -15,7 +15,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::session::SessionId;
 use daemon::config::{load_daemon_config, DaemonConfig, StaticDaemonPaths};
 use model::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
 
@@ -39,12 +38,6 @@ fn assembly() -> daemon::Assembly {
         model_client: Some(offline_client()),
         ..Default::default()
     }
-}
-
-/// A session id-shaped directory name, so the migration's own rule for
-/// telling sidecars from transcript directories applies to it.
-fn sidecar_name() -> String {
-    SessionId::new().to_string()
 }
 
 #[tokio::test]
@@ -85,59 +78,6 @@ async fn the_default_assembly_puts_transcripts_under_the_configured_root() {
         transcripts_under(&projects) > 0,
         "no transcript under {}",
         projects.display()
-    );
-}
-
-/// Sessions written under the pre-0.1.5 layout are where the store looks for
-/// them, because the relocation runs before the store is opened. Getting that
-/// order wrong does not corrupt anything — it orphans every existing session,
-/// which is worse for being invisible.
-#[tokio::test]
-async fn the_default_assembly_relocates_an_older_layout_first() {
-    let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path().join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let config = config_in(dir.path());
-    let global = config.settings.paths.global_data_dir.clone();
-
-    // The old layout: transcripts under `sessions/<sanitized-cwd>/`, sidecars
-    // under `code/sessions/<session-id>/`.
-    let project_dir = "-Users-someone-repo";
-    let legacy_transcripts = global.join("sessions").join(project_dir);
-    std::fs::create_dir_all(&legacy_transcripts).unwrap();
-    std::fs::write(legacy_transcripts.join("old.jsonl"), "{}\n").unwrap();
-
-    let sidecar = sidecar_name();
-    let legacy_sidecar = global.join("code").join("sessions").join(&sidecar);
-    std::fs::create_dir_all(&legacy_sidecar).unwrap();
-    std::fs::write(legacy_sidecar.join("metadata.json"), "{}").unwrap();
-
-    daemon::assemble::pool(
-        &config,
-        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
-        daemon::Assembly {
-            cwd: Some(cwd),
-            ..assembly()
-        },
-    )
-    .await
-    .expect("the daemon assembles");
-
-    assert!(
-        global
-            .join("projects")
-            .join(project_dir)
-            .join("old.jsonl")
-            .exists(),
-        "the transcript is still in the old place; nothing would ever look for it again"
-    );
-    assert!(
-        global
-            .join("sessions")
-            .join(&sidecar)
-            .join("metadata.json")
-            .exists(),
-        "the sidecar is still under the old `code/` root"
     );
 }
 

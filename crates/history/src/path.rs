@@ -1,23 +1,10 @@
-//! 路径工具：`sanitize_path`、`canonicalize_cwd`、配置目录定位。
+//! 路径工具：`canonicalize_cwd`、配置目录定位。
 //!
 //! 同一 cwd 产生同一项目目录名，jsonl 文件名也一致。
 
 use crate::error::HistoryError;
 use base::session::SessionId;
 use std::path::{Path, PathBuf};
-
-/// Delegate to shared implementation in `agix-core`.
-///
-/// 把任意字符串变成跨平台安全的目录 / 文件名。
-///
-/// 规则：
-/// 1. 把 `[^a-zA-Z0-9]` 全部替换成 `-`
-/// 2. 长度 > 200 时，截到 200 + `-` + djb2(原串) 的 36 进制
-///
-/// > 注：使用 djb2 而非 wyhash；普通路径一致，超长路径不同。
-pub fn sanitize_path(name: &str) -> String {
-    base::path::sanitize_for_fs(name)
-}
 
 /// 会话状态的两个根，都从同一个全局根派生。
 ///
@@ -98,7 +85,7 @@ pub async fn canonicalize_cwd(p: &Path) -> Result<PathBuf, HistoryError> {
 
 /// 给定 projects_root 与 canonical cwd，返回该项目的会话目录。
 pub fn project_dir(projects_root: &Path, canonical_cwd: &Path) -> PathBuf {
-    let name = sanitize_path(&canonical_cwd.to_string_lossy());
+    let name = base::path::sanitize_for_fs(&canonical_cwd.to_string_lossy());
     projects_root.join(name)
 }
 
@@ -146,36 +133,6 @@ pub(crate) fn temp_sibling(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sanitize_simple_path() {
-        assert_eq!(
-            sanitize_path("/Users/foo/my-project"),
-            "-Users-foo-my-project"
-        );
-        assert_eq!(sanitize_path("a"), "a");
-        assert_eq!(sanitize_path(""), "");
-    }
-
-    #[test]
-    fn sanitize_replaces_non_ascii_alnum() {
-        assert_eq!(sanitize_path("a/b\\c:d e_f"), "a-b-c-d-e-f");
-        // unicode 字符也变成 -
-        assert_eq!(sanitize_path("héllo"), "h-llo");
-    }
-
-    #[test]
-    fn sanitize_handles_overlong_with_hash() {
-        let long = "/".repeat(300);
-        let s = sanitize_path(&long);
-        // Our sanitize_for_fs keeps total length exactly at MAX_SANITIZED_LENGTH
-        // by truncating the prefix before appending the hash suffix.
-        assert_eq!(s.len(), base::path::MAX_SANITIZED_LENGTH);
-        // Contains the hash separator.
-        let dash_pos = s.rfind('-').unwrap();
-        // Suffix after the last dash is the radix-36 hash (non-empty).
-        assert!(!s[dash_pos + 1..].is_empty());
-    }
 
     #[test]
     fn project_dir_layout() {

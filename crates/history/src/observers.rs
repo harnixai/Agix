@@ -61,11 +61,6 @@ impl AppendCounts {
             .unwrap_or(0)
     }
 
-    /// The whole breakdown for one session, by kind.
-    pub fn by_kind(&self, session: SessionId) -> BTreeMap<&'static str, u64> {
-        self.locked().get(&session).cloned().unwrap_or_default()
-    }
-
     /// The sessions written to so far.
     pub fn sessions(&self) -> Vec<SessionId> {
         self.locked().keys().copied().collect()
@@ -197,10 +192,6 @@ mod tests {
         assert_eq!(counts.of_kind(a, "user"), 2);
         assert_eq!(counts.of_kind(a, "system"), 1);
         assert_eq!(counts.of_kind(a, "assistant"), 0);
-        assert_eq!(
-            counts.by_kind(a).into_iter().collect::<Vec<_>>(),
-            vec![("system", 1), ("user", 2)]
-        );
 
         let mut seen = counts.sessions();
         seen.sort_by_key(|s| s.0.to_string());

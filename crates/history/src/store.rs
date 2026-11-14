@@ -694,64 +694,6 @@ impl JsonlHistoryStore {
         Ok(LineageSnapshot { sessions, forks })
     }
 
-    /// 列出当前 project 目录下最近 N 个 session 的 (id, last_modified) 元组。
-    /// 按修改时间倒序（最新先）。给 `/resume` slash 列最近会话用。
-    pub async fn list_recent_sessions(
-        &self,
-        max: usize,
-    ) -> Result<Vec<(SessionId, String)>, HistoryError> {
-        Ok(self
-            .session_files_by_mtime(&self.project_dir_path(), max)
-            .await?
-            .into_iter()
-            .map(|(id, _, mtime)| (id, format_mtime(mtime)))
-            .collect())
-    }
-
-    /// The `max` most-recently-modified session summaries for the current
-    /// project directory, newest first.
-    pub async fn list_recent_session_summaries(
-        &self,
-        max: usize,
-    ) -> Result<Vec<SessionSummary>, HistoryError> {
-        self.find_sessions(&SessionQuery::recent(max)).await
-    }
-
-    /// Search the current project directory by session ID and message
-    /// content. An empty query lists the most recent instead.
-    pub async fn search_session_summaries(
-        &self,
-        query: &str,
-        max: usize,
-    ) -> Result<Vec<SessionSummary>, HistoryError> {
-        self.find_sessions(&SessionQuery::matching(query, max))
-            .await
-    }
-
-    /// Search **all** project directories under the history root. Used by
-    /// `/resume @all <query>`.
-    pub async fn search_all_project_session_summaries(
-        &self,
-        query: &str,
-        max: usize,
-    ) -> Result<Vec<SessionSummary>, HistoryError> {
-        self.find_sessions(&SessionQuery::matching(query, max).within(SessionScope::AllProjects))
-            .await
-    }
-
-    /// Search project directories that share the same git repository as the
-    /// current working directory — a monorepo with per-subdirectory history.
-    /// Used by `/resume @repo <query>`.
-    pub async fn search_same_repo_session_summaries(
-        &self,
-        query: &str,
-        max: usize,
-    ) -> Result<Vec<SessionSummary>, HistoryError> {
-        let root = repo_root_or_cwd(&self.canonical_cwd);
-        self.find_sessions(&SessionQuery::matching(query, max).within(SessionScope::Under(root)))
-            .await
-    }
-
     async fn recent_summaries(
         &self,
         dir: &Path,
@@ -1037,17 +979,6 @@ async fn session_ids_in(dir: &Path) -> Result<Vec<SessionId>, HistoryError> {
         }
     }
     Ok(out)
-}
-
-/// The nearest directory at or above `cwd` holding a `.git` entry — the work
-/// tree's top, found by looking rather than by running git, which would read
-/// the repository's configuration on behalf of a query that has no session
-/// and so no sandbox to run it in.
-fn repo_root_or_cwd(cwd: &Path) -> PathBuf {
-    cwd.ancestors()
-        .find(|dir| dir.join(".git").symlink_metadata().is_ok())
-        .unwrap_or(cwd)
-        .to_path_buf()
 }
 
 async fn collect_session_files(
@@ -1835,7 +1766,6 @@ fn serialized_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
 fn hydrate(env: &mut EnvelopedEntry, blobs: &dyn BlobStore) {
     let id = match &env.entry {
         LogEntry::Blob { blob } if blob.store == blobs.name() => &blob.id,
-        LogEntry::PasteRef { paste_id } => paste_id,
         _ => return,
     };
     let fetched = match blobs.get(id) {
@@ -2019,7 +1949,7 @@ mod tests {
             .await
             .unwrap();
 
-        let summaries = store.list_recent_session_summaries(5).await.unwrap();
+        let summaries = store.find_sessions(&SessionQuery::recent(5)).await.unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].session_id, s);
         assert_eq!(summaries[0].entry_count, 2);
@@ -2137,12 +2067,18 @@ mod tests {
             .await
             .unwrap();
 
-        let by_text = store.search_session_summaries("needle", 10).await.unwrap();
+        let by_text = store
+            .find_sessions(&SessionQuery::matching("needle", 10))
+            .await
+            .unwrap();
         assert_eq!(by_text.len(), 1);
         assert_eq!(by_text[0].session_id, matching);
 
         let id_prefix = &other.to_string()[..8];
-        let by_id = store.search_session_summaries(id_prefix, 10).await.unwrap();
+        let by_id = store
+            .find_sessions(&SessionQuery::matching(id_prefix, 10))
+            .await
+            .unwrap();
         assert_eq!(by_id.len(), 1);
         assert_eq!(by_id[0].session_id, other);
     }
@@ -2175,7 +2111,7 @@ mod tests {
             .unwrap();
 
         let found = store_a
-            .search_all_project_session_summaries("needle", 10)
+            .find_sessions(&SessionQuery::matching("needle", 10).within(SessionScope::AllProjects))
             .await
             .unwrap();
 
@@ -2357,7 +2293,7 @@ mod tests {
             .unwrap();
 
         let found = store_a
-            .search_all_project_session_summaries("needle", 10)
+            .find_sessions(&SessionQuery::matching("needle", 10).within(SessionScope::AllProjects))
             .await
             .unwrap();
 
@@ -2385,7 +2321,10 @@ mod tests {
                 .unwrap();
         }
 
-        let results = store.search_session_summaries("", 10).await.unwrap();
+        let results = store
+            .find_sessions(&SessionQuery::matching("", 10))
+            .await
+            .unwrap();
 
         assert_eq!(results.len(), 2);
         let mut ids: Vec<_> = results.iter().map(|s| s.session_id).collect();
@@ -2486,7 +2425,9 @@ mod tests {
 
         // Search from repo store with empty query to find all matching filter
         let found = repo_store
-            .search_same_repo_session_summaries("", 10)
+            .find_sessions(
+                &SessionQuery::matching("", 10).within(SessionScope::Under(canonical_repo.clone())),
+            )
             .await
             .unwrap();
 
@@ -2972,52 +2913,6 @@ mod tests {
             ),
             "a store that was not named must leave the reference alone"
         );
-    }
-
-    /// The pre-`Blob` form is still read, and a missing paste does not take
-    /// the session down with it.
-    #[tokio::test]
-    async fn an_old_paste_ref_line_still_hydrates_and_survives_its_paste_going_missing() {
-        let cwd = TempDir::new().unwrap();
-        let projects = TempDir::new().unwrap();
-        let paste_base = TempDir::new().unwrap();
-        let pastes = PasteStore::new(paste_base.path());
-        let s = SessionId::new();
-
-        let original = LogEntry::User {
-            content: vec![text_block("what the paste held")],
-        };
-        let paste_id = pastes
-            .store(&serde_json::to_string(&original).unwrap())
-            .unwrap();
-        let store = JsonlHistoryStore::with_roots(cwd.path(), HistoryRoots::under(projects.path()))
-            .await
-            .unwrap()
-            .with_paste_store(pastes);
-        store
-            .append(
-                s,
-                LogEntry::PasteRef {
-                    paste_id: paste_id.clone(),
-                },
-            )
-            .await
-            .unwrap();
-
-        match &store.load(s).await.unwrap()[0].entry {
-            LogEntry::User { content } => match &content[0] {
-                ContentBlock::Text { text, .. } => assert_eq!(text, "what the paste held"),
-                other => panic!("expected Text block, got {other:?}"),
-            },
-            other => panic!("expected the hydrated User entry, got {other:?}"),
-        }
-
-        std::fs::remove_file(paste_base.path().join("pastes").join(&paste_id)).unwrap();
-        let loaded = store
-            .load(s)
-            .await
-            .expect("a missing paste is a gap, not a broken session");
-        assert!(matches!(loaded[0].entry, LogEntry::PasteRef { .. }));
     }
 }
 
@@ -4222,9 +4117,12 @@ mod crash_tests {
             Err(HistoryError::Parse { .. })
         ));
 
-        let here = store.search_session_summaries("needle", 10).await.unwrap();
+        let here = store
+            .find_sessions(&SessionQuery::matching("needle", 10))
+            .await
+            .unwrap();
         let everywhere = store
-            .search_all_project_session_summaries("needle", 10)
+            .find_sessions(&SessionQuery::matching("needle", 10).within(SessionScope::AllProjects))
             .await
             .unwrap();
         for found in [here, everywhere] {

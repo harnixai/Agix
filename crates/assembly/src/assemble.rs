@@ -3,7 +3,7 @@
 //! The order these pieces go together in, and what they default to, is the
 //! engine's knowledge rather than its embedder's: read the settings, resolve
 //! the provider routing, build the credentials and the client, place the
-//! history roots, migrate an old layout, build the [`SessionPool`], then run
+//! history roots, build the [`SessionPool`], then run
 //! the startup steps a session silently misses without — plugin components,
 //! MCP connection, the janitor. A step nobody performs is no compile error, so
 //! this is the one place that knows: `main.rs` is a command line and a set of
@@ -85,8 +85,7 @@ pub struct Assembly {
 /// by hand — which is the thing this module exists to stop.
 #[derive(Default)]
 pub enum Transcripts {
-    /// Under the config's own global root, migrating a pre-0.1.5 layout
-    /// first.
+    /// Under the config's own global root.
     #[default]
     UnderGlobalRoot,
     /// This store, wherever the caller put it.
@@ -315,7 +314,7 @@ fn default_anthropic_client(
     })
 }
 
-/// Transcripts under `global_dir`, with a pre-0.1.5 layout relocated first.
+/// Transcripts under `global_dir`.
 ///
 /// `None` — logged, not fatal — when the store cannot be opened: a daemon
 /// that runs without persistence is degraded, and one that refuses to start
@@ -324,20 +323,6 @@ async fn default_history_store(
     global_dir: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Option<Arc<dyn history::store::HistoryStore>> {
-    // Before the store is built against the new layout, not after — otherwise
-    // a returning user's existing sessions are simply not where anything
-    // looks for them. Idempotent and move-only; a clean tree is a no-op.
-    let migration = history::migrate::migrate_layout(global_dir);
-    if !migration.did_nothing() {
-        info!(
-            transcripts = migration.transcripts_moved,
-            sidecars = migration.sidecars_moved,
-            skipped = migration.skipped_existing,
-            failed = migration.failed,
-            "migrated session state to the projects/ + sessions/ layout"
-        );
-    }
-
     let roots = history::path::HistoryRoots::under(global_dir);
     match history::store::JsonlHistoryStore::with_roots(cwd, roots).await {
         Ok(store) => Some(Arc::new(store)),

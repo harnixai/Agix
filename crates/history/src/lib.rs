@@ -8,7 +8,6 @@ pub mod blob;
 pub mod entry;
 pub mod error;
 mod lock;
-pub mod migrate;
 pub mod observers;
 pub mod path;
 pub mod project;

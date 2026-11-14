@@ -62,7 +62,7 @@ pub trait TranscriptProjection: Send + Sync {
 ///
 /// - `Meta`, `System`, `UsageSnapshot`, `SessionEnd` are metadata and never
 ///   reach the model;
-/// - `PasteRef` and `Blob` are references the store hydrates before this ever
+/// - `Blob` is a reference the store hydrates before this ever
 ///   runs;
 /// - `Extension` is skipped, which is what makes an entry from an uninstalled
 ///   plugin inert rather than fatal;
@@ -431,7 +431,6 @@ fn apply_entry_to_messages(entry: &LogEntry, messages: &mut Vec<Message>) {
         LogEntry::Meta { .. }
         | LogEntry::System { .. }
         | LogEntry::UsageSnapshot { .. }
-        | LogEntry::PasteRef { .. }
         | LogEntry::Blob { .. }
         | LogEntry::SessionEnd { .. } => {} // externalized content is hydrated by store::load()
         LogEntry::Extension { ns, event, payload } if ns == CONTEXT_NS => {

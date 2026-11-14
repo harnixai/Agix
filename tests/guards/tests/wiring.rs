@@ -61,7 +61,6 @@ const WIRING_CHECKS: &[(&str, &str)] = &[
     ("mcp", "set_elicitation_callback"),
     ("script-host", "bind_into"),
     ("script-host", "bind_lenient"),
-    ("history", "migrate_layout"),
 ];
 
 /// Functions that are for external embedders of the library rather than this
