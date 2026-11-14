@@ -41,7 +41,7 @@ Agix 是 agent 产品底下的那台引擎:它运行一个**会话**——装配
    分发给子 Agent 并按 JSON Schema 校验结果——只把结果带回对话。目标模式让会话一轮接一轮干到
    完成为止。固定前缀约 5.8K token,跨会话共享厂商的前缀缓存;长会话自己压缩、接着干。在六个
    工程任务上,与另一个开源 agent 框架用同一个模型对比:**总耗时少 34%,提示 token 少 13%,
-   每次都做对**(对方的耗时含进程启动,Agix 的 daemon 是常驻的;[测法](../tests/live/tests/compare_dsh.rs))。
+   每次都做对**(对方的耗时含进程启动,Agix 的 daemon 是常驻的;[测法](../tests/blackbox/tests/compare_dsh.rs))。
 5. **主导权在你的产品手里。** 每个会话、任务、子 Agent、目标和询问,都能通过同一套 JSON-RPC
    看到、叫停、修改。46 个扩展点,用 Rust 或 QuickJS 脚本替换或拦截任何子系统,不用
    fork。每个会话都是只追加的日志,可以恢复、分叉、导出,也能不联网逐字节回放。
@@ -135,121 +135,28 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 
 ## 架构
 
-### 分层
-
-一个分五层的 Rust 工作区。依赖只向下指,反过来的依赖会让
+一个分层的 Rust 工作区。依赖只向下指,反过来的依赖会让
 `tests/guards/tests/deps.rs` 失败。
 
 ```
- 外壳      daemon ─────────── agixd:命令行、进程生命周期(锁、信号、崩溃收尾)
-             │
- 装配      assembly ───────── 会话池、(项目, 场景) 绑定、provider 路由、插件包、模块清单;
+ 外壳      daemon ─────────── agixd:命令行、进程生命周期
+ 装配      assembly ───────── 会话池、(项目, 场景) 绑定、provider 路由、模块清单;
              │                JSON-RPC 服务与实例发现
-             │
- 模块      agents(+team) · mcp · skills · script-host · plugin
-             │                经 runtime::module::Module 进入会话
- 内核      runtime ────────── turn loop、提示词装配、工具调度、Module 接口(K3)
-             │
-           hooks · tools · session · compaction ─────────────────────────────────────────── (K2)
-             │
-           model · scene · history · telemetry · permissions · ptc ──────────────────────── (K1)
-             │
- 本机      platform ───────── 执行层的本机实现、崩溃钩子、进程身份
-             │
- 契约      core(包名 `base`)── 所有 trait 与所有共享数据类型
+ 模块      agents(+team) · mcp · skills · script-host · packages
+ 内核      runtime(K3)→ hooks · tools · session · compaction(K2)
+             → model · scene · history · telemetry · permissions · ptc ·
+               settings · memory · skill-format(K1)
+ 本机      platform ───────── 本机的进程、文件、网络与 OS 沙箱
+ 契约      core(包名 `base`)── trait、共享数据类型与纯判定
 ```
 
-- **契约。** `core` 定义 trait(`Model`、`ScenePrompt`、`PermissionPolicy`、`Tool`、`HistoryStore`、
-  `Compactor` ……)与数据类型,不依赖工作区里任何别的 crate。换掉一个子系统就是实现
-  `core` 里的一个 trait,永远不用伸手进别的 crate 的内部。
-- **内核。** 一个会话跑一轮所需的一切:turn loop(`runtime`)、模型适配(Anthropic
-  Messages 与 OpenAI 兼容的 Chat Completions)、内建工具、场景、历史日志、上下文压缩、
-  权限、hooks、遥测。内核 crate 从不依赖模块 crate。
-- **模块。** 构建会话时插进去的可选能力:子 Agent 与团队、MCP、skills、脚本载体与插件
-  包。只有装配层与外壳知道有哪些模块。
-- **装配。** 把配置变成运行中的会话:合并各层设置、解析 provider 路由、把每个会话绑到
-  它的项目和场景、管理会话池、经 JSON-RPC 对外服务。想把 daemon 的引擎放进自己进程的
-  宿主,调用的是和 `agixd` 同一个入口。
-- **外壳。** `agixd` 本身:参数、实例锁、信号、崩溃后的收尾。
-
-### 一个会话怎么建起来
-
-```rust
-let (mut agent, events, input) = runtime::agent::Builder::new()
-    .scene(scene)          // 提示词、工具白名单、预算 —— Arc<SceneSpec>
-    .model(model)          // 任意后端 —— Arc<dyn Model>
-    .settings(settings)
-    .module(Arc::new(mcp::McpModule::new(manager)))   // 可选,按这个顺序:
-    .module(Arc::new(agents::AgentsModule::new()))    //   mcp → agents → skills
-    .module(Arc::new(skills::SkillsModule::new()))
-    .build()?;
-```
-
-`build()` 先按场景收窄模块清单、检查每个模块声明的依赖,再建好这个会话自己的工具表、
-事件总线、权限与 hooks,然后让各模块贡献自己的东西(`on_session`)。模块注册的工具和
-内建工具受同一个场景白名单约束。有两样东西是**晚绑定**的,因为读它们的东西比提供它们的
-先建好:delegator(由 `agents` 提供,给 agent 型 hook、fork 型 skill 与宿主的 `startAgent` 用)和 skill
-目录(由 `skills` 提供)。子 Agent 用父会话收窄后的模块清单装配,所以每一层嵌套都一样。
-
-### 一轮是什么
-
-`crates/runtime/src/agent/turn/` 是主循环。**步骤顺序是骨架,写死;每一步上的决策开放。**
-
-```
-用户消息 ─ UserPromptSubmit hook · 斜杠命令 · 记忆召回 · 待读的通知
-循环:
-  1. 停不停          TurnPolicy::before_model_call
-  2. 压不压          Compactor::should_compact
-  3. 硬顶            ContextBudget::hard_cap
-  4. 提示词          PromptAssembler · 注册的块 · 装配拦截
-  5. 调模型          Model + ModelInterceptor + BackoffPolicy
-                     ├─ 工具边流边跑:Permission → ToolMiddleware → Tool → ToolResultTransformer
-                     └─ 出错:RecoveryPolicy —— 换模型 / 压缩重试 / 原样重发 / 失败
-  6. 复查            TurnPolicy::after_model_call
-  7. 记账            BudgetPolicy::on_usage
-  8. 有工具调用      送达这一步期间到的消息与通知,再来一轮
-  9. 没有            RecoveryPolicy::on_early_stop —— 抬 max_tokens / 续上 pause_turn;
-                     BudgetPolicy::on_output_target 决定是否续写
-出口:finish_turn —— 先落盘,再宣布 TurnComplete
-```
-
-一轮只有一个出口:无论是 hook、预算、取消还是错误结束了它,transcript 都在同一处写盘、
-`TurnComplete` 在同一处宣布,所以宿主可以把 `TurnComplete` 读作"空闲了,而且已经在盘
-上"。一轮在跑时到的消息在步骤边界送达,永远不会落在一对 `tool_use` / `tool_result`
-中间。
-
-### 会话、场景、历史
-
-- **场景**是数据加一份提示词:工具黑白名单、延迟加载的工具、预算、允许哪些模块(`SceneSpec`),
-  以及系统提示词(`ScenePrompt`)。
-  一个进程同时服务多个场景;每个会话选一个,按 `(项目, 场景)` 解析设置。场景可以用 Rust
-  写,也可以是声明式的(`scene.json` + `prompt.md`)。
-- **历史是日志。** 会话的状态是一份只追加的 JSONL transcript,由投影变成模型看到的
-  消息。扩展把自己的条目写进同一条时间线;不认识的跳过,所以卸载插件不会让旧会话打不开。
-  会话可以恢复、分叉,重启后照日志重建。
-- **子 Agent 跑在侧链会话里**,挂在父会话下,经同一套 API 列出和读取。
-
-### 并发
-
-每个 agent——会话自己的、每个前台或后台子 Agent、每个团队成员——都是多线程 tokio
-运行时上的一个独立任务。Agent 之间不共享可变状态,只经通道说话:
-
-| 方向 | 通道 |
-|---|---|
-| 父 → 子 | 子 Agent 的收件箱,在它下一个步骤边界读到(`TaskMessage`、`session.messageTask`) |
-| 子 → 父 | 结束时投一条 `<task-notification>`,父 Agent 下一个步骤边界读到 |
-| 父等子 | `TaskWait`、`TaskOutput` |
-| 成员之间 | 团队 mailbox 与团队共享记忆 |
-
-上限各在一处:委派深度、每棵会话树同时在跑的子 Agent(默认 6)、团队每阶段并发。超了
-就以模型看得见的错误拒绝,不排队。
-
-### 执行与安全
-
-工具经四个契约碰到机器——`Process`、`FileSystem`、`Network`、`Sandbox`——默认是本机
-实现,测试用进程内实现。每条命令领一个进程组,停的时候整组停。权限按固定顺序裁决:先拒凭据,
-然后工具自己的判定,然后规则(**deny 永远优先**,不管来自哪一层),路径安全,最后是权限模式。
-子 Agent 的询问经父会话到达宿主。
+内核 crate 从不依赖模块 crate,只有 `assembly` 与 `daemon` 知道有哪些模块。一轮是固定的步骤
+骨架,每一步上的决策是开放的;一轮只有一个出口,所以 `TurnComplete` 的意思是"空闲,且已落盘"。
+每次工具调用——模型发起的、`RunCode` 的子调用、skill 内嵌命令——走同一条管线。历史是只追加的
+日志,投影成模型看到的消息。每个 agent 是一个独立任务,之间只经通道通信,不共享可变状态。
+工具经四个契约(`Process`、`FileSystem`、`Network`、`Sandbox`)碰到机器,权限按固定次序裁决,
+deny 永远优先。设计全文——一轮、会话与场景、历史日志、执行层、权限与信任、锁、磁盘布局——
+在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ### 扩展面
 
@@ -282,26 +189,26 @@ let (mut agent, events, input) = runtime::agent::Builder::new()
 
 | 层 | crate | 职责 |
 |---|---|---|
-| 契约 | `core`(`base`) | trait、设置、消息、提示词类型、扩展点清单 |
+| 契约 | `core`(`base`) | trait、消息、提示词类型、扩展点清单、纯判定 |
 | 本机 | `platform` | 执行层契约背后的本机进程、文件系统、网络与 OS 沙箱 |
 | 内核 | `runtime` | turn loop、流式工具执行、`Builder`、`Module` |
-| 内核 | `model` | Anthropic 与 OpenAI 兼容适配,重试与退避 |
+| 内核 | `model` | Anthropic Messages、OpenAI Chat Completions 与 Responses 适配,重试与退避 |
 | 内核 | `tools` | 内建工具(`web`、`structured-output` 两组是 feature) |
 | 内核 | `scene` | 内建场景、`SceneRegistry`、声明式场景 |
 | 内核 | `history` · `session` · `compaction` | transcript 日志、会话状态、上下文压缩 |
 | 内核 | `permissions` · `hooks` · `telemetry` | 规则引擎、生命周期 hooks、遥测与录制 |
+| 内核 | `settings` · `memory` · `skill-format` | 设置分层与项目信任、文件式记忆、`SKILL.md` 与 `AGENTS.md` 读取 |
+| 内核 | `ptc` | `RunCode`:模型写的程序,在内嵌的 QuickJS 里跑([`ptc.md`](ptc.md)) |
 | 模块 | `agents` · `team` | `Agent` 工具、agent 类型、团队 |
 | 模块 | `mcp` | MCP 客户端与工具适配、MCP OAuth 授权 |
 | 模块 | `skills` | skill 目录与 `Skill` 工具 |
 | 模块 | `script-host` | QuickJS 载体 |
-| 内核 | `ptc` | `RunCode`:模型写的程序,在内嵌的 QuickJS 里跑([`ptc.md`](ptc.md)) |
 | 模块 | `packages` | 插件包:manifest、安装、缓存、披露 |
 | 装配 | `assembly` | 会话池、配置、provider 路由、JSON-RPC 服务 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 
 `crates/` 下 23 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
-工作区共 32 个成员。完整的
-图景——会话与场景、历史日志、执行层、锁、磁盘布局——在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+工作区共 32 个成员。
 
 ---
 
@@ -509,13 +416,13 @@ Rust 1.88+。测试不需要网络,也不需要 key。
 ```sh
 cargo build --workspace
 cargo test  --workspace                                      # 全部离线
-cargo test  -p live --features real-model --test real_model  # LIVE 层,对真实模型
+cargo test  -p blackbox --features real-model --test real_model  # LIVE 层,对真实模型
 ```
 
-六层,从单元测试到组装好的产品:各 crate 的测试;一张行为网,让真实的 `Agent` 对着写好的
-模型回答跑;`daemon/tests`,走真实 socket;`tests/live`,经 JSON-RPC 驱动整个产品——一次
-对脚本化的模型服务器,一次对录制代理后面的真实模型,既从模型那侧也从宿主那侧用。每层怎么
-工作、怎么跑:[`tests/README.md`](../tests/README.md)。
+从单元测试到组装好的产品:各 crate 的测试;一张行为网,让真实的 `Agent` 对着写好的
+模型回答跑;`daemon/tests`,走真实 socket;架构守卫,查工作区的结构;`tests/blackbox`,经
+JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`live_*` 用例)对录制代理后面的真实
+模型。每层怎么工作、怎么跑:[`tests/README.md`](../tests/README.md)。
 
 ---
 

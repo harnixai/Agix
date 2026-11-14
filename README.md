@@ -193,141 +193,33 @@ monitors and structured output ([table below](#tools--45-built-in)).
 
 ## Architecture
 
-### Layers
-
-A Rust workspace in five layers. Dependencies point downward only, and a test
-(`tests/guards/tests/deps.rs`) fails the build if one points the
-other way.
+A Rust workspace in layers. Dependencies point downward only, and a test
+(`tests/guards/tests/deps.rs`) fails the build if one points the other way.
 
 ```
- shell      daemon ─────────── agixd: command line, process lifecycle (lock, signals, crash cleanup)
-              │
+ shell      daemon ─────────── agixd: command line, process lifecycle
  assembly   assembly ───────── session pool, (project, scene) bindings, provider routing,
-              │                plugin packages, the module list; the JSON-RPC server and discovery
-              │
- modules    agents (+team) · mcp · skills · script-host · plugin
-              │                enter a session through runtime::module::Module
- kernel     runtime ────────── turn loop, prompt assembly, tool dispatch, the Module interface (K3)
-              │
-            hooks · tools · session · compaction ─────────────────────────────────────────── (K2)
-              │
-            model · scene · history · telemetry · permissions · ptc ──────────────────────── (K1)
-              │
- machine    platform ───────── this machine's execution providers, crash hook, process identity
-              │
- contract   core (crate `base`) — every trait and every shared data type
+              │                the module list; the JSON-RPC server and discovery
+ modules    agents (+team) · mcp · skills · script-host · packages
+ kernel     runtime (K3) → hooks · tools · session · compaction (K2)
+              → model · scene · history · telemetry · permissions · ptc ·
+                settings · memory · skill-format (K1)
+ machine    platform ───────── this machine's process, filesystem, network and OS sandbox
+ contract   core (crate `base`) — the traits, shared data types and pure decisions
 ```
 
-- **Contract.** `core` defines the traits (`Model`, `ScenePrompt`, `PermissionPolicy`, `Tool`,
-  `HistoryStore`, `Compactor`, …) and the data types, and depends on no other
-  crate in the workspace. Replacing a subsystem means implementing a trait from
-  `core`, never reaching into another crate's internals.
-- **Kernel.** Everything a session needs to run a turn: the turn loop
-  (`runtime`), the model adapters (Anthropic Messages and OpenAI-compatible Chat
-  Completions), the built-in tools, scenes, the history log, compaction,
-  permissions, hooks, telemetry. Kernel crates never depend on a module crate.
-- **Modules.** Optional capabilities that plug into a session at build time:
-  sub-agents and teams, MCP, skills, the script carrier and plugin packages. Only the
-  assembly layer and the shell know which modules exist.
-- **Assembly.** Turns configuration into running sessions: merges the settings
-  tiers, resolves provider routing, binds each session to its project and scene,
-  pools sessions, and serves them over JSON-RPC. A host that wants the daemon's
-  engine in its own process calls the same entry point `agixd` does.
-- **Shell.** `agixd` itself: arguments, the instance lock, signals, and cleaning
-  up after a crash.
-
-### How a session is built
-
-```rust
-let (mut agent, events, input) = runtime::agent::Builder::new()
-    .scene(scene)          // prompt, tool whitelist, budgets — Arc<SceneSpec>
-    .model(model)          // any backend — Arc<dyn Model>
-    .settings(settings)
-    .module(Arc::new(mcp::McpModule::new(manager)))   // optional, in this order:
-    .module(Arc::new(agents::AgentsModule::new()))    //   mcp → agents → skills
-    .module(Arc::new(skills::SkillsModule::new()))
-    .build()?;
-```
-
-`build()` narrows the module list by the scene, checks each module's declared
-requirements, builds the session's own tool registry, event bus, permissions
-and hooks, then lets each module contribute (`on_session`). Module tools are
-subject to the same scene whitelist as built-in ones. Two things are
-*late-bound* because what reads them is built before what provides them: the
-delegator (provided by `agents`, used by agent-type hooks, forked skills and a
-host's `startAgent`) and the skill catalog (provided by `skills`). A sub-agent
-is assembled from its parent's narrowed module list, so nesting works the same
-at every depth.
-
-### What a turn is
-
-`crates/runtime/src/agent/turn/` is the main loop. **The order of the steps is the
-skeleton and is fixed; the decision at each step is open.**
-
-```
-user message ─ UserPromptSubmit hook · slash commands · memory recall · pending notices
-loop:
-  1. stop?           TurnPolicy::before_model_call
-  2. compact?        Compactor::should_compact
-  3. hard cap        ContextBudget::hard_cap
-  4. prompt          PromptAssembler · registered blocks · assembly interceptors
-  5. model call      Model + ModelInterceptor + BackoffPolicy
-                     ├─ tools run as the reply streams: Permission → ToolMiddleware → Tool → ToolResultTransformer
-                     └─ on error: RecoveryPolicy — switch model / compact and retry / resend / fail
-  6. review          TurnPolicy::after_model_call
-  7. account         BudgetPolicy::on_usage
-  8. tool calls      deliver messages and notices that arrived during the step, then loop
-  9. otherwise       RecoveryPolicy::on_early_stop — raise max_tokens / continue a pause_turn;
-                     BudgetPolicy::on_output_target decides whether to continue
-exit: finish_turn — persist, then announce TurnComplete
-```
-
-A turn has exactly one exit: whatever ended it — a hook, a budget, a
-cancellation, an error — the transcript is written and `TurnComplete` announced
-in one place, so a host can treat `TurnComplete` as "idle, and on disk".
-Messages that arrive while a turn runs are delivered at step boundaries, never
-between a `tool_use` and its `tool_result`.
-
-### Sessions, scenes, history
-
-- **Scenes** are data plus a prompt: tool allow and deny lists, deferred
-  tools, budgets, which modules may run (`SceneSpec`), and the system prompt
-  (`ScenePrompt`). One process serves several; each
-  session picks one and resolves its settings by `(project, scene)`. A scene can
-  be Rust or declarative (`scene.json` + `prompt.md`).
-- **History is a log.** A session's state is an append-only JSONL transcript
-  that a projection turns into the messages the model sees. Extensions append
-  their own entries to the same timeline; unknown ones are skipped, so
-  uninstalling a plugin never breaks an old session. A session can be resumed,
-  forked, or rebuilt from its log after a restart.
-- **Sub-agents run in sidechain sessions** linked to their parent, listed under
-  it and readable through the same API.
-
-### Concurrency
-
-Every agent — the session's own, each foreground or background sub-agent, each
-team member — is its own task on a multi-threaded tokio runtime. Agents never
-share mutable state; they talk through channels:
-
-| Direction | Channel |
-|---|---|
-| parent → child | the child's inbox, read at its next step boundary (`TaskMessage`, `session.messageTask`) |
-| child → parent | a `<task-notification>` posted when it ends, read at the parent's next step boundary |
-| parent waits | `TaskWait`, `TaskOutput` |
-| between members | team mailbox and shared team memory |
-
-Limits live in one place each: delegation depth, concurrent sub-agents per
-session tree (default 6), team stage concurrency. Exceeding one is refused with
-an error the model can see, never queued.
-
-### Execution and safety
-
-Tools reach the machine through four contracts — `Process`, `FileSystem`,
-`Network`, `Sandbox` — with a local provider by default and an in-process one
-for tests. Every command leads its own process group and is stopped as a group.
-Permissions run in a fixed order: the tool's own verdict, then rules (**a deny
-always wins**, whichever tier it came from), path safety, then the permission
-mode. A sub-agent's question reaches the host on its parent's session.
+Kernel crates never depend on a module crate, and only `assembly` and `daemon`
+know which modules exist. A turn is a fixed skeleton of steps with an open
+decision at each one; a turn has exactly one exit, so `TurnComplete` means
+"idle, and on disk". Every tool call, whether the model's, a `RunCode`
+sub-call or a skill's inline command, goes through one pipeline. History is an
+append-only log that projects into the messages the model sees. Every agent is
+its own task and they talk through channels, never shared state. Tools reach
+the machine through four contracts (`Process`, `FileSystem`, `Network`,
+`Sandbox`), and permissions run in a fixed order in which a deny always wins.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the design: the turn, sessions
+and scenes, the history log, execution, permissions and trust, locks, disk
+layout.
 
 ### The extension surface
 
@@ -363,27 +255,26 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 
 | Layer | Crate | Responsibility |
 |---|---|---|
-| contract | `core` (`base`) | traits, settings, messages, prompt types, the extension catalog |
+| contract | `core` (`base`) | traits, messages, prompt types, the extension catalog, pure decisions |
 | machine | `platform` | the local process, filesystem, network and OS sandbox behind the execution contracts |
 | kernel | `runtime` | turn loop, streaming tool executor, `Builder`, `Module` |
-| kernel | `model` | Anthropic and OpenAI-compatible adapters, retry and backoff |
+| kernel | `model` | Anthropic Messages, OpenAI Chat Completions and Responses adapters, retry and backoff |
 | kernel | `tools` | built-in tools (`web` and `structured-output` are features) |
 | kernel | `scene` | built-in scenes, `SceneRegistry`, declarative scenes |
 | kernel | `history` · `session` · `compaction` | transcript log, session state, context compaction |
 | kernel | `permissions` · `hooks` · `telemetry` | rule engine, lifecycle hooks, telemetry and the recorder |
+| kernel | `settings` · `memory` · `skill-format` | settings tiers and project trust, file-based memory, `SKILL.md` and `AGENTS.md` readers |
+| kernel | `ptc` | `RunCode`: the model's programs, run in an embedded QuickJS ([`docs/ptc.md`](docs/ptc.md)) |
 | module | `agents` · `team` | the `Agent` tool, agent types, teams |
 | module | `mcp` | MCP client and tool adapters, MCP OAuth authorization |
 | module | `skills` | skill catalog and the `Skill` tool |
 | module | `script-host` | the QuickJS carrier |
-| kernel | `ptc` | `RunCode`: the model's programs, run in an embedded QuickJS ([`docs/ptc.md`](docs/ptc.md)) |
 | module | `packages` | plugin packages: manifest, install, cache, disclosure |
 | assembly | `assembly` | session pool, configuration, provider routing, the JSON-RPC server |
 | shell | `daemon` | the `agixd` binary |
 
 23 crates under `crates/`, plus `daemon/`, the seven test members and the
-example plugin in `examples/plugins/rust` — 32 workspace members in total. The full picture — sessions and scenes, the history
-log, execution, locks, disk layout — is in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+example plugin in `examples/plugins/rust` — 32 workspace members in total.
 
 ---
 
@@ -620,12 +511,13 @@ cargo test  --workspace                                      # everything offlin
 cargo test  -p blackbox --features real-model --test real_model  # the live tier, against a real model
 ```
 
-Six layers, from unit tests to the assembled product: crate tests, a behavior
-net that runs a real `Agent` against written-down model answers, `daemon/tests`
-over a real socket, and `tests/blackbox` — the product driven over JSON-RPC, once
-against a scripted model server and once against a real model behind a
-recording proxy, from the host's side as well as the model's. How each layer
-works and how to run it: [`tests/README.md`](tests/README.md).
+From unit tests to the assembled product: crate tests, a behavior net that
+runs a real `Agent` against written-down model answers, `daemon/tests` over a
+real socket, architecture guards over the workspace's structure, and
+`tests/blackbox` — the product driven over JSON-RPC, once against a scripted
+model server and once (the `live_*` cases) against a real model behind a
+recording proxy. How each layer works and how to run it:
+[`tests/README.md`](tests/README.md).
 
 ---
 
