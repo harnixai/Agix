@@ -42,7 +42,7 @@ impl WriterLock {
     /// process still has them: a hold taken out on the cached open file of a
     /// lock file that is gone would lock nothing, and another process could
     /// then start writing alongside it.
-    pub(crate) fn remove_sidecar(self, sidecar_dir: &Path) -> std::io::Result<()> {
+    pub(crate) fn remove_sidecar(mut self, sidecar_dir: &Path) -> std::io::Result<()> {
         for entry in std::fs::read_dir(sidecar_dir)? {
             let entry = entry?;
             if entry.file_name() == LOCK_FILE {
@@ -54,26 +54,38 @@ impl WriterLock {
                 std::fs::remove_file(entry.path())?;
             }
         }
-        let held = held();
-        if held.get(&self.path).is_some_and(|entry| entry.holders == 1) {
-            std::fs::remove_file(&self.path)?;
+        // The hold is given up under the same guard that removes the file:
+        // released any later, a `hold` in between would join it on a file
+        // already unlinked.
+        let mut held = held();
+        let path = std::mem::take(&mut self.path);
+        let last = held.get(&path).is_some_and(|entry| entry.holders == 1);
+        let removed = if last {
+            std::fs::remove_file(&path)
+        } else {
+            Ok(())
+        };
+        if last && removed.is_ok() {
             if let Err(error) = std::fs::remove_dir(sidecar_dir) {
                 tracing::warn!(dir = %sidecar_dir.display(), %error, "the session's sidecar directory was not removed");
             }
         }
-        drop(held);
-        Ok(())
+        release(&mut held, &path);
+        removed
     }
 }
 
 impl Drop for WriterLock {
     fn drop(&mut self) {
-        let mut held = held();
-        if let Some(entry) = held.get_mut(&self.path) {
-            entry.holders -= 1;
-            if entry.holders == 0 {
-                held.remove(&self.path);
-            }
+        release(&mut held(), &self.path);
+    }
+}
+
+fn release(held: &mut HashMap<PathBuf, Held>, path: &Path) {
+    if let Some(entry) = held.get_mut(path) {
+        entry.holders -= 1;
+        if entry.holders == 0 {
+            held.remove(path);
         }
     }
 }
@@ -142,6 +154,40 @@ mod tests {
 
         let other = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         try_lock_exclusive(&other).expect("released once the last holder is gone");
+    }
+
+    /// While anyone in this process holds the lock, its file is on disk: a
+    /// hold taken as another holder removes the sidecar never shares an open
+    /// file whose name is gone, which would lock nothing.
+    #[test]
+    fn a_hold_taken_while_the_sidecar_is_removed_never_shares_an_unlinked_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sidecar = dir.path().join("s");
+        std::fs::create_dir_all(&sidecar).unwrap();
+        let path = std::fs::canonicalize(&sidecar).unwrap().join(LOCK_FILE);
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let remover = {
+            let (sidecar, stop) = (sidecar.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Ok(lock) = hold(&sidecar, "s") {
+                        let _ = lock.remove_sidecar(&sidecar);
+                    }
+                }
+            })
+        };
+        let mut unlinked = 0;
+        for _ in 0..20_000 {
+            if let Ok(lock) = hold(&sidecar, "s") {
+                if !path.exists() {
+                    unlinked += 1;
+                }
+                drop(lock);
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        remover.join().unwrap();
+        assert_eq!(unlinked, 0, "holds that shared a lock file already removed");
     }
 
     #[cfg(unix)]
