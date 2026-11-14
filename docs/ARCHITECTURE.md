@@ -748,8 +748,8 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
    只留给需要线程亲和的东西(`notify` 的 watcher 那类)。
 4. 资源上限都在一处可配:委派深度 `execution.max_agent_depth`(§3.4);同时在跑的子 Agent
    `execution.max_concurrent_subagents`(默认 6,整棵会话树共用一份);`TeamCreate`
-   每阶段 `team_stage_concurrency`;常驻成员 `team_max_persistent_members`(满了先回收最久
-   空闲的,全在忙就拒绝新成员;0 即不要常驻成员),空闲超过 `team_member_idle_timeout_secs` 的成员自己停下。
+   每阶段 `team.stage_concurrency`;常驻成员 `team.max_persistent_members`(满了先回收最久
+   空闲的,全在忙就拒绝新成员;0 即不要常驻成员),空闲超过 `team.member_idle_timeout_secs` 的成员自己停下。
    常驻成员的取消令牌是父会话结束令牌的子令牌:会话结束时,空闲的和正在跑一轮的成员都停下。
 
 **名额只有一条规则:持名额者不等。** 规则是 `agents::delegate::SlotRule`:子 Agent 自己跑在
@@ -763,7 +763,7 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
   知道;`Wait` 而 `AskRoute::Refuse` 的(`RunCode` 程序里的 `agent()`,以及程序里触发的 skill
   fork)走 `SlotRule::take`:根会话里排队等空位(`docs/ptc.md` §5)。
 - `TeamMember` 的阶段成员走 `SlotRule::take`:lead 是根会话时排队等,lead 是子 Agent 时拿不到
-  就记为失败,团队如实报出;每阶段另受 `team_stage_concurrency` 约束。
+  就记为失败,团队如实报出;每阶段另受 `team.stage_concurrency` 约束。
 - 常驻成员只在处理一条消息的那一轮占名额,空闲时归还;按起它的会话的规则申请,根会话的成员
   排队等,子 Agent 的成员拿不到时这条消息的任务以失败结束。
 - `Hook`(agent hook 起的子 Agent)不占名额:名额是模型的,模型占得满的守卫不是守卫;它们靠
@@ -1148,7 +1148,7 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 
 **用户规则与部署方规则。** 上面的规则都是用户自己写的(或项目、插件、客户端替用户写的),
 bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值守的托管方——要的是另一回事:
-一层用户改不了、用户选的模式也绕不过的规则。这就是 managed 层(`base::managed_settings`):
+一层用户改不了、用户选的模式也绕不过的规则。这就是 managed 层(`settings::managed`):
 
 - **来源。** 系统路径上的一个文件:macOS `/Library/Application Support/Agix/managed-settings.json`,
   Linux 等 `/etc/agix/managed-settings.json`,Windows `%ProgramData%\Agix\managed-settings.json`。
@@ -1687,13 +1687,15 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 **未信任的项目层按插件级信任处理**——复用插件包已有的那条"网上来的东西只能新增、只能收紧"
 的规则(`plugin_packages.md` §信任),不另造一套权限体系。
 
-**这是白名单,不是扣一份名单。** `base::project_trust::PROJECT_TIER` 登记项目层设置文件里的每一个键,
+**这是白名单,不是扣一份名单。** `settings::trust::PROJECT_TIER` 登记项目层设置文件里的每一个键,
 每条是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合出来的值一样紧或更紧时保留,次序
 按键的类型:布尔取真或取假为紧、数值取小为紧、列表取子集或超集为紧、模式与网络模式按宽松度排……)、
 `Withheld`(整个扣下)。项目层的每个叶子路径取最长匹配的条目;**没有条目的键一律扣下**,并记入
-`requires_trust`;比它管的键还短的条目只能是 `Withheld`。新加一个设置字段忘了归类,
-`base` 里那条从 `settings_json_schema()` 枚举叶子路径的测试(`every_settings_key_has_an_entry`)就编不过——
-白名单因此由构造保证,而不是靠人记得。`permission_rules` 在表里是 `Free`,因为 `allow` 由加载器自己丢弃。
+`requires_trust`;比它管的键还短的条目只能是 `Withheld`。模块自己的设置段(`team`、`plugins`、
+`scripts`)由定义它的 crate 在 `Section::PROJECT_TIER` 里声明条目,加载时并进同一张表;没有登记的段
+没有条目,按 `Withheld` 处理。新加一个设置字段忘了归类,`settings` 与 `assembly` 里从
+`settings_json_schema()` 枚举叶子路径的测试(`every_settings_key_has_an_entry`、
+`every_settings_key_has_a_project_tier_entry`)就过不了——白名单因此由构造保证,而不是靠人记得。`permission_rules` 在表里是 `Free`,因为 `allow` 由加载器自己丢弃。
 
 | 项目层内容 | 未信任时 |
 |---|---|
@@ -1711,7 +1713,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `telemetry_enabled: false` | 丢弃:项目不能关掉审计记录 |
 | `telemetry_url`、`recorder` | 丢弃:一个把遥测送到项目指定的地址,一个把宿主请求的录像写到项目指定的目录 |
 | `prompt_override` | 丢弃:它整个替换系统提示词(追加用的 `prompt_append` 照常) |
-| `execution`:各项上限(`max_agent_depth`、`max_budget_tokens`、`max_parallelism`、`max_concurrent_subagents`……) | 只能比下面几层更小;`permission_prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team_enabled` 只能设为假 |
+| `execution`:各项上限(`max_agent_depth`、`max_budget_tokens`、`max_parallelism`、`max_concurrent_subagents`……) | 只能比下面几层更小;`permission_prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
 | `instruction_file` | 丢弃:它按路径直接读进系统提示词,不过沙箱也不过 Read 的 `deny_read` |
 | `plugins` | `enabled: true`(下面几层是 `false`)、`enable_on_install: true` 丢弃;`allow` 放进下面几层没有的名字、或清空下面几层的清单,丢弃;只收窄的保留 |
 | `.agix/agents/*.md` | 来源是 `AgentTypeSource::Project { trusted: false }`:`permission_mode` / `max_turns` 只能收紧,与内建、插件、用户层同名的不替换它们 |
@@ -1772,7 +1774,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 **计划在后续 0.3.x 把缺省改成 `untrusted`(具体版本发布说明另行通知)**。
 
 引擎自己改设置文件的地方——`project.trust`、`config.setProvider`、`mcp.addServer` /
-`updateServer`、权限询问里的"永久允许"——都走 `base::settings_file`:读改写期间锁住那一层
+`updateServer`、权限询问里的"永久允许"——都走 `settings::file`:读改写期间锁住那一层
 的目录(进程内一把锁,unix 上跨进程靠目录上的 `flock`),写进同目录的临时文件、落盘之后改名替换,
 读的一方只会看到旧文件或新文件。`settings.local.json` 每次写都是 0600,别的文件保留原来的
 权限。设置文件是符号链接的,读写都拒绝:项目层里的链接是仓库内容,顺着它写等于让仓库挑一个

@@ -588,8 +588,8 @@ A few switches whose effect the rest of this README does not mention:
 | `instruction_file` | none | one more instruction file, read when the session is built and given to the model like `AGENTS.md` |
 | `hooks_config` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |
 | `disable_skill_shell_execution` | `false` | a skill body's `` !`cmd` `` is replaced by a notice instead of run |
-| `execution.team_enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |
-| `execution.team_member_idle_timeout_secs` | `1800` | a team member idle this long is stopped |
+| `team.enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |
+| `team.member_idle_timeout_secs` | `1800` | a team member idle this long is stopped |
 | `sandbox.network_mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, or `allowlist` (`sandbox.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux) |
 
 | Variable | Purpose |

@@ -77,6 +77,7 @@
       "type": "string"
     },
     "ExecutionSettings": {
+      "additionalProperties": false,
       "description": "Execution constraints.",
       "properties": {
         "max_agent_depth": {
@@ -103,7 +104,7 @@
         },
         "max_concurrent_subagents": {
           "default": 6,
-          "description": "Sub-agents the model may have running at once anywhere under one\nsession — foreground, background and resumed ones, at every depth.\nA spawn beyond it is refused with a message telling the model to wait\nor do the work itself. `TeamCreate` members and persistent team\nmembers have their own limits above and do not count.",
+          "description": "Sub-agents the model may have running at once anywhere under one\nsession — foreground, background and resumed ones, at every depth.\nA spawn beyond it is refused with a message telling the model to wait\nor do the work itself. `TeamCreate` members and persistent team\nmembers have their own limits (`team.*`) and do not count.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -117,32 +118,6 @@
           "default": 300,
           "description": "How long a tool call waits for a host to answer a permission prompt\nbefore the call is denied. `0` waits indefinitely (only session\ncancellation interrupts it).\n\nThe wait itself lives in the engine (`execute_tool_inner`), so the\nbound has to be reachable from `EngineConfig`, not only from a\ndaemon-side flag — a host driving the engine directly needs it too.\n\nFailing closed (deny, not permit) on expiry is deliberate: a prompt\nthat went unanswered is not consent.",
           "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "team_enabled": {
-          "default": false,
-          "description": "Gates whether `TeamCreate`/`TeamList`/`TeamDelete` are registered at\nall for a session (`agents::AgentsModule`), and only in a scene whose\n`SceneSpec::supports_team` is true. Default `false`: most\ndeployments never use multi-agent team coordination, and an\nalways-registered tool means its `tool.prompt.md` \"When to Use\"\nsection is always in the system prompt and its `team`/`name` input\nfields are always in the `Agent` tool's schema, whether or not the\noperator ever intends to allow it. Flipping this only affects\nsessions built *after* the change (existing sessions keep whatever\ntool set they were built with — same as every other setting here);\nthere is no separate restart requirement.",
-          "type": "boolean"
-        },
-        "team_max_persistent_members": {
-          "default": 20,
-          "description": "Reclaim policy for persistent team members (`Agent` tool's\n`team_name`+`name` mode): total pool size across a session. Past it the\noldest-idle members are stopped (never an `Active` one), just enough to\nbe back at the cap. `0` turns persistent members off: such a call is\nrefused; one-shot sub-agents are not affected.",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "team_member_idle_timeout_secs": {
-          "default": 1800,
-          "description": "Reclaim policy for persistent team members: how long a member may\nsit idle (no message since its last turn finished) before it's\nstopped on its own, independent of the total-count cap above. Either\ncondition triggers a reclaim sweep; they're independent, not\ncombined.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "team_stage_concurrency": {
-          "default": 6,
-          "description": "Maximum number of `TeamCreate` sub-agents dispatched concurrently\nwithin a single stage.",
-          "format": "uint",
           "minimum": 0,
           "type": "integer"
         }
@@ -688,6 +663,37 @@
       ],
       "description": "A `task_models.<task>` entry. Accepts either the shorthand `\"provider_id\"`\nstring form or the detailed `{ \"provider\": ..., \"model\": ... }` object form."
     },
+    "TeamSettings": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Gates whether `TeamCreate`/`TeamList`/`TeamDelete` are registered at\nall for a session, and only in a scene whose `SceneSpec::supports_team`\nis true. Default `false`: an always-registered tool puts its\n`tool.prompt.md` \"When to Use\" section in every system prompt and its\n`team`/`name` input fields in every `Agent` tool schema, whether or not\nthe operator ever intends to allow it. Flipping this only affects\nsessions built after the change.",
+          "type": "boolean"
+        },
+        "max_persistent_members": {
+          "default": 20,
+          "description": "Reclaim policy for persistent team members (`Agent` tool's\n`team_name`+`name` mode): total pool size across a session. Past it the\noldest-idle members are stopped (never an `Active` one), just enough to\nbe back at the cap. `0` turns persistent members off: such a call is\nrefused; one-shot sub-agents are not affected.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "member_idle_timeout_secs": {
+          "default": 1800,
+          "description": "Reclaim policy for persistent team members: how long a member may sit\nidle (no message since its last turn finished) before it is stopped on\nits own, independent of the total-count cap above.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stage_concurrency": {
+          "default": 6,
+          "description": "Maximum number of `TeamCreate` sub-agents dispatched concurrently\nwithin a single stage.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ThinkingMode": {
       "description": "Model thinking/reasoning mode.",
       "oneOf": [
@@ -776,11 +782,7 @@
         "max_budget_tokens": null,
         "max_concurrent_subagents": 6,
         "max_parallelism": 10,
-        "permission_prompt_timeout_secs": 300,
-        "team_enabled": false,
-        "team_max_persistent_members": 20,
-        "team_member_idle_timeout_secs": 1800,
-        "team_stage_concurrency": 6
+        "permission_prompt_timeout_secs": 300
       }
     },
     "hooks_config": {
@@ -849,7 +851,7 @@
       "default": {
         "default": "trusted"
       },
-      "description": "Which projects' own configuration takes effect as written — see\n[`crate::project_trust`]. Read from the global tier only."
+      "description": "Which projects' own configuration takes effect as written — see\n`settings::trust`. Read from the global tier only."
     },
     "prompt_append": {
       "default": null,
@@ -950,6 +952,7 @@
       }
     },
     "scripts": {
+      "default": [],
       "description": "Scripts bound to extension points — see [`ScriptBinding`]. Empty by\ndefault, and inert in a build without a script engine.",
       "items": {
         "$ref": "#/$defs/ScriptBinding"
@@ -962,6 +965,15 @@
       },
       "description": "Per-task-type provider/model routing — see `base::provider::resolve_task_models`.\n\nKeys: `main`, `subagent`, `compact`, `memory`, `title`, `web_search`,\n`web_fetch`. `web_fetch` alone has no default: `WebFetch` has a model\nread the page only when this names one, and otherwise returns the page\ntext.",
       "type": "object"
+    },
+    "team": {
+      "$ref": "#/$defs/TeamSettings",
+      "default": {
+        "enabled": false,
+        "max_persistent_members": 20,
+        "member_idle_timeout_secs": 1800,
+        "stage_concurrency": 6
+      }
     },
     "telemetry_enabled": {
       "default": true,

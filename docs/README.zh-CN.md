@@ -483,8 +483,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `instruction_file` | 无 | 再加一份指令文件,会话构建时读入,与 `AGENTS.md` 一样交给模型 |
 | `hooks_config` | 无 | 生命周期 hook:事件名 → hook 列表([extension_points.md](extension_points.md)) |
 | `disable_skill_shell_execution` | `false` | skill 正文里的 `` !`cmd` `` 换成一行说明,不执行 |
-| `execution.team_enabled` | `false` | 给场景支持团队(`code`、`harnix`)的会话注册 `TeamCreate` / `TeamList` / `TeamDelete` |
-| `execution.team_member_idle_timeout_secs` | `1800` | 团队成员空闲这么久就停掉 |
+| `team.enabled` | `false` | 给场景支持团队(`code`、`harnix`)的会话注册 `TeamCreate` / `TeamList` / `TeamDelete` |
+| `team.member_idle_timeout_secs` | `1800` | 团队成员空闲这么久就停掉 |
 | `sandbox.network_mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all` 或 `allowlist`(`sandbox.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网) |
 
 | 变量 | 作用 |

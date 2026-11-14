@@ -3819,7 +3819,7 @@
         },
         {
           "const": "policySettings",
-          "description": "部署方的 managed settings（`base::managed_settings`）",
+          "description": "部署方的 managed settings（`settings::managed`）",
           "type": "string"
         },
         {

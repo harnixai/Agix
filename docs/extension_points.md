@@ -53,7 +53,7 @@
 | `model.request` | 拦截 | `Builder::model_interceptor`、`Registrar::model_interceptor`、脚本绑定 | 每次模型调用之前的最后一刻 | 请求里的一切 | 每次模型调用(10⁰–10¹ 量级) | 完全 | 完全 | 需声明能力 |
 | `model.message` | 拦截 | `Builder::model_interceptor`、`Registrar::model_interceptor`、脚本绑定 | 承载它的那段流结束之后 | 消息内容 | 每次模型调用(10⁰–10¹ 量级) | 完全 | 完全 | 需声明能力 |
 | `credentials` | 契约 | 进程级:`base::interface::model_factory::ModelFactoryRegistry::with_credentials` | 启动时,读 provider 配置的那一刻 | 凭据本身 | 每进程(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
-| `config.source` | 契约 | 进程级:`base::settings::LoadedSettings::load_from` | 进程启动,任何东西被构建之前 | 有哪些层、每层里是什么 JSON;合并本身动不了 | 每进程(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
+| `config.source` | 契约 | 进程级:`settings::LoadedSettings::load_from` | 进程启动,任何东西被构建之前 | 有哪些层、每层里是什么 JSON;合并本身动不了 | 每进程(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
 | `token.count` | 契约 | `Builder::token_counter` | 每次预算检查 | 压缩据以触发的那个数字 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.store` | 契约 | `Builder::history_store` | 每次追加,以及恢复时 | 日志怎么持久化、存到哪 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.query` | 契约 | 随 `history.store`:`HistoryStore::find_sessions` | 每当有人要的是若干会话而不是某一个会话 | 返回哪些会话、按什么顺序、怎么算匹配 | 每会话(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
