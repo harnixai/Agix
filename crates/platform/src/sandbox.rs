@@ -2511,8 +2511,7 @@ mod tests {
         let Some(home) = base::paths::home_dir() else {
             return;
         };
-        let home_settings =
-            base::path::resolve_physically(&PathBuf::from(home).join(".agix/settings.json"));
+        let home_settings = base::path::resolve_physically(&home.join(".agix/settings.json"));
         let fallback = build_macos_profile(
             Path::new("/work/project"),
             &[],

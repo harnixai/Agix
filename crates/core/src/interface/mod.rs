@@ -3,14 +3,14 @@
 //!
 //! The entry requirement is narrow on purpose: **every module here defines at
 //! least one trait the engine holds as a `dyn` object.** Data types,
-//! configuration and concrete stores live at the crate root instead
-//! (`base::settings`, `base::event`, `base::prompt`, `base::memory`,
-//! `base::rules`).
+//! configuration and the shared data live at the crate root instead
+//! (`base::event`, `base::prompt`, `base::memory`, `base::permission`);
+//! the settings file model is the `settings` crate's.
 //!
 //! # What is reachable from here, and what is not
 //!
-//! This crate has **no internal dependencies** — that is what keeps it at the
-//! bottom of the graph. So this directory can only host contracts defined in
+//! This crate depends on no other crate of this workspace — that is what keeps
+//! it at the bottom of the graph. So this directory can only host contracts defined in
 //! `base` itself:
 //!
 //! | Contract | Replaces |

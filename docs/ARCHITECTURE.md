@@ -29,7 +29,8 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
            │
          hooks · tools · session · compaction ──────── K2
            │
-         model · scene · history · telemetry · permissions · ptc ── K1
+         model · scene · history · telemetry · permissions · ptc ·
+         settings · memory · skill-format ─────────────────────── K1
            │
  本机    platform ───────── 执行层的本机实现(进程、文件、网络、OS 沙箱)、崩溃钩子、进程身份
            │
@@ -42,7 +43,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   每个工作区成员在 `CRATES` 一张表里有一个级别,没登记的 crate 过不了。第一方的 normal / build
   边只能向下指,dev 边不限。
 - 内核分三级,同级之间不互相依赖:**K1**(`model`、`history`、`telemetry`、`scene`、
-  `permissions`、`ptc`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
+  `permissions`、`ptc`、`settings`、`memory`、`skill-format`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
   建在 K1 上,**K3**(`runtime`)建在两者之上。内核 crate **不依赖任何模块 crate**。
 - 级别不对的依赖只能登记在 `NOT_YET` 里,写明什么能去掉它;名单带陈旧检查,边没了条目就得删。
 - 模块依赖契约与内核;模块之间的依赖只经 `Module::requires` 声明的顺序。
@@ -52,9 +53,9 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   在 `parts/mcp_hub/live.rs` 与签名相同的桩 `off.rs` 之间二选一;其余代码(server 的
   `mcp.*` 在内)只写一份,`feature = "mcp"` 不超过 6 处(`tests/guards/tests/layering.rs`)。
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
-  `model`、`hooks`、`permissions`、`mcp`、`plugin`、`assembly`、`daemon`,清单与
+  `model`、`hooks`、`mcp`、`plugin`、`assembly`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
-  `telemetry`、`ptc`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
+  `telemetry`、`ptc`、`permissions`、`settings`、`memory`、`skill-format`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
 - 内核与模块不能带模块命名的 feature,也不转发模块 feature;模块开关只在 `assembly`
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
@@ -67,11 +68,14 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 RPC 服务和会话池在同一个 crate 里是体积上的取舍:两者共用大量泛型实例(serde_json、
 tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大约 2.8 MB。
 
-**`core` 里没有任何第一方依赖。** 它定义 trait 与数据类型,别的 crate 实现它们。
+**`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定,
+并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
+`resolve_physically`、`truncate_chars` 等);别的 crate 实现它的 trait。
 这条约束是整个扩展面成立的前提:一个宿主要替换某个子系统时,面对的是 `core` 里的
-一个 trait,而不是某个具体 crate 的内部结构。
+一个 trait,而不是某个具体 crate 的内部结构。`tests/guards/tests/base.rs` 守着它:
+生产行数只降不升,直接碰文件系统的文件有白名单,不调用模型。
 
-**`base` 只有契约、数据、策略与判定,不起进程。** 子进程环境的策略与判定
+**`base` 只有契约、共享数据、策略与判定,以及上述小工具,不起进程。** 子进程环境的策略与判定
 (`SubprocessEnv::resolve` 给出 `EnvPlan`)在 `base`,把它写进一个 `tokio::process::Command`
 的 `platform::apply_subprocess_env` 在 `platform`。引擎自己要起的进程(`git`、`pdftotext`)
 不直接 spawn,经 `base::engine_exec::EngineExec` 交给会话的 `exec.process`(§5);排空输出、
@@ -86,13 +90,16 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 
 | crate | 层 | 职责 |
 |---|---|---|
-| `core`(包名 `base`) | 契约 | 所有 `trait`、`Settings`、消息与提示词类型、扩展点清单、`SkillCatalog` / `McpServers` 等内核面向模块的接口 |
+| `core`(包名 `base`) | 契约 | trait、共享数据、纯判定,以及 fs/clock/path/text 小工具;消息与提示词类型、扩展点清单、`SkillCatalog` / `McpServers` 等内核面向模块的接口 |
 | `platform` | 本机 | 执行层四个契约的本机实现(`LocalProcess`、`LocalFileSystem`、`LocalNetwork`、`PlatformSandbox`)与 `local_providers*`;进程组台账与孤儿收尾、崩溃钩子、进程身份 |
 | `runtime` | 内核 | 轮次循环、流式解析、工具调度、`Module` / `SessionContext` |
 | `model` | 内核 | 模型协议适配(Anthropic Messages / OpenAI Chat Completions),重试与退避 |
 | `tools` | 内核 | 内建工具;`web`、`structured-output` 两组是 feature |
 | `scene` | 内核 | 内建场景、`SceneRegistry`、声明式场景(§3.7) |
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
+| `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
+| `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
+| `skill-format` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、自工作目录向上收集的 `AGENTS.md`、输出风格 |
 | `agents` | 模块 | 子 agent(`Agent` 工具)、agent 类型目录、团队工具;依赖 `team` |
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |
 | `skills` | 模块 | skill 目录与 `Skill` 工具 |

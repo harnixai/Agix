@@ -321,17 +321,17 @@ OpenAI 兼容端点的推理没有标准字段,两项按厂商条目配置:
 
 ### 配置从哪来 — `config.source`
 
-`LoadedSettings::load` 读六个文件:全局、scene、项目三个层级,每级一个 `settings.json`
+`settings::LoadedSettings::load` 读六个文件:全局、scene、项目三个层级,每级一个 `settings.json`
 和一个进了 gitignore 的 `settings.local.json` 覆盖层。配置存在配置服务、
 ConfigMap 或者数据库里的部署,实现
-`base::interface::config_source::ConfigSource`,改调 `LoadedSettings::load_from`:
+`base::interface::config_source::ConfigSource`,改调 `LoadedSettings::load_from`(都在 `settings` crate):
 
 ```rust
 let source = config_source::Chain(vec![
-    Arc::new(config_source::FileTiers::new(global.clone(), scene.clone(), project.clone())),
+    Arc::new(settings::FileTiers::new(global.clone(), scene.clone(), project.clone())),
     Arc::new(control_plane.fetch_layers()?),   // an `InMemoryLayers`
 ]);
-let settings = LoadedSettings::load_from(&source, global, scene, project, "code", "opus");
+let settings = LoadedSettings::load_from(&source, global, scene, project, "code", "opus", &sections);
 ```
 
 一个 source 只决定有哪些层、顺序如何、每层里是什么 JSON。合并两边是同一套——每层

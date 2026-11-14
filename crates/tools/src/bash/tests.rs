@@ -278,7 +278,7 @@ fn a_sandboxed_command_may_write_the_cache_directories() {
     let writable = sandbox_policy(&ctx).additional_writable;
     assert!(writable.contains(&std::path::PathBuf::from("/opt/cache")));
     if let Some(home) = base::paths::home_dir() {
-        assert!(writable.contains(&std::path::PathBuf::from(home).join(".npm")));
+        assert!(writable.contains(&home.join(".npm")));
     }
     assert!(!writable.iter().any(|p| p.starts_with("~")));
 }

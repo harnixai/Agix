@@ -159,7 +159,7 @@ fn calls_matching<'a>(
 fn only_home_dir_reads_the_home_variables() {
     allow::check(
         "sources::HOME_ENV_READERS",
-        calls_matching(ws().files(), |p, args| is_home_var_call(p, args)),
+        calls_matching(ws().files(), is_home_var_call),
         HOME_ENV_READERS,
         "ask `base::paths::home_dir()` instead of reading HOME or USERPROFILE; tests too",
     );
@@ -200,7 +200,7 @@ fn the_home_scans_recognise_every_way_of_asking() {
             .map(|c| c.hit.line)
             .collect()
     };
-    assert_eq!(lines(|p, a| is_home_var_call(p, a)), vec![4, 5]);
+    assert_eq!(lines(is_home_var_call), vec![4, 5]);
     assert_eq!(lines(|p, _| is_home_dir_call(p)), vec![6]);
     allow::non_vacuous("sources::home_lookups", ws().files().count(), 400);
 }

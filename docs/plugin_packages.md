@@ -137,7 +137,7 @@ my-plugin/
 - `SKILL.md` 必须以 `---` 包起来的 frontmatter 开头,`description` 必填,正文不能为空。
 - frontmatter 每行一个 `key: value`:不能缩进(不支持嵌套映射和多行值),不能是 `|` / `>`
   块,值不能为空,同一个键(含 `allowed_tools` / `allowed-tools` 这类别名)不能写两次,键必须
-  是引擎读的那些(`base::frozen::frontmatter::SKILL_FRONTMATTER_KEYS`)——拼错的键在磁盘上
+  是引擎读的那些(`skill_format::SKILL_FRONTMATTER_KEYS`)——拼错的键在磁盘上
   的 skill 里是悄悄不生效,在包里是拒装。
 - `name` 可以不写;写了就必须等于目录名。`context` 只能是 `inline` / `fork`;`background`、
   `disable_model_invocation`、`user_invocable` 只能是 `true` / `false`(或 `yes` / `no`、`1` / `0`)。
