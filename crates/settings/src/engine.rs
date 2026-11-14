@@ -109,8 +109,13 @@ pub fn sandbox_settings(
         // settings.json this session actually reads — not to whatever sits
         // under the invoking user's home.
         paths: std::sync::Arc::new(
-            base::paths::SensitivePaths::for_paths(paths)
-                .with_read_denials(&base::interface::exec::default_deny_read(), allow_read),
+            base::paths::SensitivePaths::for_paths(paths).with_read_denials(
+                &base::interface::exec::default_deny_read()
+                    .into_iter()
+                    .chain(deny_read.iter().cloned())
+                    .collect::<Vec<_>>(),
+                allow_read,
+            ),
         ),
         require_enforcement: *require_enforcement,
         unattended_requires_network_policy: *unattended_requires_network_policy,
@@ -210,6 +215,23 @@ mod tests {
             c.sandbox.policy().deny_read,
             base::interface::exec::default_deny_read()
         );
+    }
+
+    /// The file tools refuse what `deny_read` names too, not only the
+    /// built-in credential list.
+    #[test]
+    fn a_configured_deny_read_is_a_credential_to_the_file_tools() {
+        let c = config_of(&settings_with_sandbox(|sb| {
+            sb.deny_read = vec![PathBuf::from("/tmp/agix-deny-read-case")];
+        }));
+        assert!(c
+            .sandbox
+            .paths
+            .is_credential(std::path::Path::new("/tmp/agix-deny-read-case/key.txt")));
+        assert!(!c
+            .sandbox
+            .paths
+            .is_credential(std::path::Path::new("/tmp/agix-elsewhere/key.txt")));
     }
 
     /// The setting file says `"network_mode": "deny_all"`; that is what the
