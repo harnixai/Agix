@@ -39,6 +39,7 @@ impl SpawnTelemetry {
                 model: (!model.is_empty()).then(|| model.to_string()),
                 stage_name,
                 background,
+                parent_tool_use_id: called_from.map(|c| c.tool_use_id.clone()),
             },
         ));
         Self {

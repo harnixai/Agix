@@ -25,11 +25,11 @@ pub use config::{TelemetryConfig, TelemetryMode};
 pub use events::{
     AgentCompletedPayload, AgentSpawnedPayload, ApiErrorPayload, ApiRequestPayload,
     BudgetEnforcedAction, BudgetEnforcedPayload, CompactActionPayload, CompactKind, EventPayload,
-    McpConnectionErrorPayload, McpServerConnectedPayload, PermissionDecisionOutcome,
-    PermissionDecisionPayload, ResumeActionPayload, ResumeOutcome, SessionEndPayload,
-    SessionStartPayload, SlashCommandUsedPayload, StartupTimingPayload, TeamStageCompletePayload,
-    TelemetryEvent, ToolCancelledPayload, ToolExecutionPayload, ToolOutcome, ToolStartPayload,
-    TurnCompletePayload, TurnStartPayload, UserPromptSubmitPayload,
+    HookRunPayload, McpConnectionErrorPayload, McpServerConnectedPayload,
+    PermissionDecisionOutcome, PermissionDecisionPayload, ResumeActionPayload, ResumeOutcome,
+    SessionEndPayload, SessionStartPayload, SlashCommandUsedPayload, StartupTimingPayload,
+    TeamStageCompletePayload, TelemetryEvent, ToolCancelledPayload, ToolExecutionPayload,
+    ToolOutcome, ToolStartPayload, TurnCompletePayload, TurnStartPayload, UserPromptSubmitPayload,
 };
 pub use file_recorder::FileRecorder;
 pub use handle::{

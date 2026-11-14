@@ -5,6 +5,7 @@ use serde::Serialize;
 /// Session 开始事件的载荷。
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct SessionStartPayload {
+    pub scene: String,
     pub permission_mode: String,
     pub model: String,
     pub max_tokens: u32,
@@ -57,6 +58,7 @@ mod tests {
             1,
             None,
             SessionStartPayload {
+                scene: "default".into(),
                 permission_mode: "default".into(),
                 model: "claude".into(),
                 max_tokens: 4096,

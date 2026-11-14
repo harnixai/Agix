@@ -94,6 +94,26 @@ pub(in crate::agent) fn build_hook_runner(
         .with_agent_executor(agent_executor)
 }
 
+pub(in crate::agent) fn hook_run_recorder(
+    telemetry: TelemetryHandle,
+) -> Arc<dyn Fn(hooks::HookRunReport) + Send + Sync> {
+    Arc::new(move |run| {
+        let _ = telemetry.record(telemetry::TelemetryEvent::hook_run(
+            &run.session_id,
+            0,
+            run.turn_id,
+            telemetry::HookRunPayload {
+                event: format!("{:?}", run.event),
+                hook_count: run.hooks,
+                duration_ms: run.duration.as_millis() as u64,
+                blocked: run.blocked,
+                errors: run.errors,
+                tool_use_id: run.tool_use_id,
+            },
+        ));
+    })
+}
+
 /// The session's id, cwd and permission mode, read each time a payload is
 /// built. Holds the state weakly: the closure lives in tasks and watchers that
 /// must not keep the session alive.

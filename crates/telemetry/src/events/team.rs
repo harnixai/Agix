@@ -17,6 +17,9 @@ pub struct AgentSpawnedPayload {
     pub stage_name: Option<String>,
     /// Whether it runs in the background (`run_in_background`).
     pub background: bool,
+    /// The parent's tool call that started it, when one did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_tool_use_id: Option<String>,
 }
 
 /// A sub-agent finished.
@@ -55,6 +58,7 @@ mod tests {
                 model: Some("claude-sonnet-4-6".into()),
                 stage_name: Some("research".into()),
                 background: false,
+                parent_tool_use_id: None,
             },
         );
         assert_eq!(event.kind(), "agent_spawned");

@@ -7,7 +7,7 @@ mod fields;
 mod hook_runner;
 mod host;
 use fields::{ExtSetup, HostSetup, SpecSetup};
-pub(in crate::agent) use hook_runner::{build_hook_runner, hook_ambient};
+pub(in crate::agent) use hook_runner::{build_hook_runner, hook_ambient, hook_run_recorder};
 pub use host::{HostContracts, HostLayers};
 
 pub struct Builder {

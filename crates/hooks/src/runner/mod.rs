@@ -12,11 +12,13 @@ mod context;
 mod contracts;
 pub mod executor;
 pub mod matcher;
+mod report;
 mod rewake;
 
 pub use background::BackgroundHooks;
 pub use context::{CONTEXT_BLOCK_CAP, CONTEXT_EVENT_CAP};
 pub use contracts::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
+pub use report::HookRunReport;
 
 use crate::config::{HookConfig, HookEvent, HooksSettings, OnError};
 use crate::payload::{HookDecision, HookInput, HookResponse};
@@ -209,6 +211,7 @@ pub struct HookRunner {
     process: Arc<dyn base::interface::exec::Process>,
     background: BackgroundHooks,
     context_warned: Arc<std::sync::Mutex<Vec<HookEvent>>>,
+    observer: Option<Arc<dyn Fn(HookRunReport) + Send + Sync>>,
 }
 
 impl HookRunner {
@@ -230,6 +233,7 @@ impl HookRunner {
             process: exec.process,
             background: BackgroundHooks::new(),
             context_warned: Default::default(),
+            observer: None,
         }
     }
 
@@ -492,6 +496,7 @@ impl HookRunner {
             process: self.process.clone(),
             background: self.background.clone(),
             context_warned: self.context_warned.clone(),
+            observer: self.observer.clone(),
         }
     }
 
@@ -565,6 +570,9 @@ impl HookRunner {
             hooks,
         };
         self.warn_of_unread_context(event, &result);
+        if !pending.is_empty() {
+            self.report(event, input, pending.len(), started.elapsed(), &result);
+        }
         result
     }
 

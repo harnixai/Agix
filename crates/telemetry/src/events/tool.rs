@@ -12,6 +12,9 @@ pub struct ToolStartPayload {
     pub input_json_size: u64,
     pub destructive: bool,
     pub deferred: bool,
+    /// An MCP server's or a plugin's tool, not one of the engine's own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub extension: bool,
 }
 
 /// 工具执行事件的载荷。
@@ -213,6 +216,7 @@ mod tests {
                 input_json_size: 128,
                 destructive: true,
                 deferred: false,
+                extension: false,
             },
         );
         assert_eq!(event.kind(), "tool_start");

@@ -514,6 +514,7 @@ async fn call_tool(
                 input_json_size,
                 destructive: tool.call_traits(&input).destructive,
                 deferred,
+                extension: tool.spec().origin != base::tool::ToolOrigin::Builtin,
             },
         ));
     let tool_start = std::time::Instant::now();

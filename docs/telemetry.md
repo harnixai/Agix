@@ -29,10 +29,41 @@
 ### OpenTelemetry
 
 daemon 用 `--features otel` 编译、配了 `telemetry_url`(或环境变量
-`OTEL_EXPORTER_OTLP_ENDPOINT`)时,同样的事件流再送一份到 OTLP 端点。只有三种有对应的
-指标:`turn_complete`(一轮的耗时)、`tool_execution`(按工具、按成败计数)、
-`api_request`(延迟与四项 token,按模型)。其余只在 JSONL 里。没编 `otel` 却配了端点的,
-启动时记一条 warn。
+`OTEL_EXPORTER_OTLP_ENDPOINT`)时,同样的事件流再送一份到 OTLP 端点:一份指标,一份 trace。
+没编 `otel` 却配了端点的,启动时记一条 warn。
+
+**指标**有对应的只有三种事件:`turn_complete`(一轮的耗时)、`tool_execution`(按工具、按成败计数)、
+`api_request`(延迟与四项 token,按模型)。
+
+**trace** 从事件流派生,一轮是一棵树的根:
+
+```
+invoke_agent <scene>              一轮(turn_start → turn_complete)
+├─ chat <model>                   一次模型调用(api_request / api_error)
+├─ execute_tool <tool>            一次工具调用(tool_start → tool_execution)
+│   └─ invoke_agent <agent_type>  子 Agent(agent_spawned → agent_completed)
+│       └─ invoke_agent <agent_type>   子 Agent 的每一轮,同样的结构
+├─ hook <event>                   一次事件的 hooks(hook_run)
+└─ compact <strategy>             一次压缩或修剪(compact_action)
+```
+
+- 属性用 OpenTelemetry GenAI 语义约定:`gen_ai.operation.name`(`invoke_agent` / `chat` /
+  `execute_tool`)、`gen_ai.request.model`、`gen_ai.usage.input_tokens` / `output_tokens` /
+  `cache_read.input_tokens` / `cache_write.input_tokens`、`gen_ai.response.finish_reasons`、
+  `gen_ai.tool.name` / `call.id` / `type`、`gen_ai.agent.name` / `id`;所有 span 带
+  `gen_ai.conversation.id`(会话 id)、`agix.turn_id`、`agix.turn_no`。引擎自己的属性以 `agix.`
+  开头(`agix.stop_reason`、`agix.purpose`、`agix.hook.*`、`agix.compact.*` ……)。失败的模型调用、
+  失败的工具、`stop_reason` 为 `error` 的一轮,状态是 Error。
+- **没有会话 span。** 一个会话在 daemon 里活几小时到几天,span 结束前不导出;同一会话的 trace 靠
+  `gen_ai.conversation.id` 属性聚合。
+- **不带内容**,和 JSONL 一样:不发 `gen_ai.input.messages`、`gen_ai.output.messages`、
+  `gen_ai.tool.call.arguments` / `result`、`gen_ai.system_instructions`。
+- 只在 `telemetry_enabled` 为 true 时有(事件流关着就没有源)。
+- 不在一轮里的模型调用(`purpose` 为 `title`、`memory` 之类)是根 span。
+- 开着的 span 合计最多 4,096 个,超出时最旧的被结束并带 `agix.abandoned=true`;会话结束时它还开着的
+  span 同样结束并标出。
+- 后台子 Agent 可以活得比起它的那次工具调用、那一轮更久,它的 span 晚于父结束是正常的,父子关系
+  不变。
 
 端口是 4317 的走 gRPC,其余走 HTTP/protobuf。HTTP 时端点写 collector 的根地址(如
 `http://collector:4318`),trace 发到 `<端点>/v1/traces`、指标发到 `<端点>/v1/metrics`,与
@@ -95,7 +126,7 @@ handle 和一个后台 future,事件过滤、脱敏之后交给你给的每个 `
 <!-- BEGIN GENERATED TABLE — see telemetry::events::inventory::render_markdown -->
 | `type` | 何时发 | 记在哪 | 字段(信封之外) |
 |---|---|---|---|
-| `session_start` | daemon 建好一个会话之后、它的第一轮之前;新建与按 id 重建都算。 | 会话 | `auth_modes`、`max_tokens`、`mcp_server_count`、`model`、`output_format`、`permission_mode`、`plugin_count`、`resume_from?`、`sandbox_enabled`、`skill_count`、`started_at_ms`、`thinking_mode` |
+| `session_start` | daemon 建好一个会话之后、它的第一轮之前;新建与按 id 重建都算。 | 会话 | `auth_modes`、`max_tokens`、`mcp_server_count`、`model`、`output_format`、`permission_mode`、`plugin_count`、`resume_from?`、`sandbox_enabled`、`scene`、`skill_count`、`started_at_ms`、`thinking_mode` |
 | `session_end` | 会话的主循环退出(关闭、输入通道关闭、被取消);合计是这次载入以来的。 | 会话 | `duration_ms`、`stop_reason`、`total_api_calls`、`total_cache_creation`、`total_cache_read`、`total_input_tokens`、`total_output_tokens`、`total_permission_denials`、`total_tool_calls`、`total_turns` |
 | `startup_timing` | daemon 启动完成、开始接请求时,一次。 | 池 | `config_load_ms`、`pool_build_ms`、`total_startup_ms` |
 | `api_request` | 每次模型调用完成。一轮里的调用不带 `purpose`;辅助调用带:`compact`、`memory`、`title`、`hook`、`team_judge`、`web_search`、`web_fetch`。 | 会话 | `cache_creation_tokens`、`cache_read_tokens`、`default_model`、`input_message_count`、`input_tokens`、`latency_ms`、`model`、`output_tokens`、`purpose?`、`stop_reason`、`tool_count`、`truncated?` |
@@ -110,10 +141,11 @@ handle 和一个后台 future,事件过滤、脱敏之后交给你给的每个 `
 | `turn_complete` | 一轮结束,`stop_reason` 说怎么结束的。 | 会话 | `api_calls`、`last_tool_name?`、`last_tool_was_error`、`permission_denials`、`stop_reason`、`tool_calls`、`turn_duration_ms` |
 | `budget_enforced` | 会话 token 预算到 90% 注入收尾提醒,或到 100% 中止这一轮。 | 会话 | `action`(`warning_injected` / `turn_stopped`)、`budget`、`total_tokens_used` |
 | `compact_action` | 一次压缩完成或失败,或一次修剪(`kind` 为 `trim`:只清旧工具结果,不改写历史)。 | 会话 | `after_message_count`、`after_tokens`、`before_message_count`、`before_tokens`、`kind`(`compact` / `trim`)、`latency_ms`、`strategy`、`success` |
+| `hook_run` | 一个事件的 hooks 跑完一次;没配 hook 的事件不记。`turn_no` 恒为 0,按 `turn_id` 关联。 | 会话 | `blocked`、`duration_ms`、`errors`、`event`、`hook_count`、`tool_use_id?` |
 | `resume_action` | 会话从日志重建(会话文件);恢复请求落到已在内存里、找不到、已结束的侧链会话上(池文件);团队从 scratchpad 接上(会话文件)。 | 会话 / 池 | `compact_boundary_count`、`entry_count`、`latency_ms`、`outcome`(`succeeded` / `partial` / `degraded` / `failed`)、`projected_message_count`、`sidechain_entry_count`、`source`、`warning_kind?` |
 | `mcp_server_connected` | 一个 MCP server 连上:启动时、重载时、新增时。 | 池 | `server_name`、`tool_count`、`transport` |
 | `mcp_connection_error` | 一个要连的 MCP server 没连上:起不来、握手失败或超时、配置被拒。 | 池 | `error_message`、`server_name` |
-| `agent_spawned` | 子 Agent 开始:`Agent` 工具起的(前台、后台)、常驻团队成员、`TeamCreate` 流水线的成员。 | 会话 | `agent_id`、`background`、`model?`、`role`、`stage_name?` |
+| `agent_spawned` | 子 Agent 开始:`Agent` 工具起的(前台、后台)、常驻团队成员、`TeamCreate` 流水线的成员。 | 会话 | `agent_id`、`background`、`model?`、`parent_tool_use_id?`、`role`、`stage_name?` |
 | `agent_completed` | 子 Agent 结束;常驻团队成员在被停下时。 | 会话 | `agent_id`、`duration_ms`、`had_error`、`role` |
 | `team_stage_complete` | `TeamCreate` 流水线的一个阶段跑完。 | 会话 | `agent_count`、`agents_with_errors`、`duration_ms`、`stage_name`、`success` |
 <!-- END GENERATED TABLE -->

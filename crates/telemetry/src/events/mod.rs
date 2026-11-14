@@ -7,6 +7,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+mod hook;
 pub mod inventory;
 mod mcp;
 mod model;
@@ -14,6 +15,7 @@ mod session;
 mod team;
 mod tool;
 
+pub use hook::HookRunPayload;
 pub use mcp::{McpConnectionErrorPayload, McpServerConnectedPayload};
 pub use model::{ApiErrorPayload, ApiRequestPayload, BudgetEnforcedAction, BudgetEnforcedPayload};
 pub use session::{SessionEndPayload, SessionStartPayload, StartupTimingPayload};
@@ -132,6 +134,8 @@ event_kinds! {
     budget_enforced => BudgetEnforced(BudgetEnforcedPayload) in Session;
     /// 一次压缩完成或失败,或一次修剪(`kind` 为 `trim`:只清旧工具结果,不改写历史)。
     compact_action => CompactAction(CompactActionPayload) in Session;
+    /// 一个事件的 hooks 跑完一次;没配 hook 的事件不记。`turn_no` 恒为 0,按 `turn_id` 关联。
+    hook_run => HookRun(HookRunPayload) in Session;
     /// 会话从日志重建(会话文件);恢复请求落到已在内存里、找不到、已结束的侧链会话上(池文件);团队从 scratchpad 接上(会话文件)。
     resume_action => ResumeAction(ResumeActionPayload) in Both;
     /// 一个 MCP server 连上:启动时、重载时、新增时。

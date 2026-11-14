@@ -390,6 +390,7 @@ impl SessionPool {
         generation: Generation,
     ) -> Result<BuiltEngine, CreateError> {
         let session_id = core.id();
+        let scene_id = scene.id.clone();
         let (mcp_server_count, mcp_module) =
             self.mcp_session_module(core.project(), &scene.id).await;
         // A project's scripts belong to that project: the paths in its
@@ -444,6 +445,7 @@ impl SessionPool {
                 0,
                 None,
                 telemetry::SessionStartPayload {
+                    scene: scene_id,
                     permission_mode: mode_name,
                     model: settings.values.model.model_name.clone(),
                     max_tokens: settings.values.model.max_tokens,

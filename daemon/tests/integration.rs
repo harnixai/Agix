@@ -30,6 +30,8 @@ mod mcp_policy;
 mod model_rate_limit;
 mod no_project_sessions;
 mod permission_loop;
+#[cfg(feature = "otel")]
+mod otel_traces;
 mod permission_pipeline;
 mod plan_mode_in_delegates;
 mod plugin_install;

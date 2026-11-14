@@ -9,6 +9,7 @@ impl Builder {
         model: &Arc<dyn Model>,
         session: &Transcript,
         exec: &base::interface::exec::ExecProviders,
+        telemetry: &TelemetryHandle,
     ) -> HookWiring {
         let delegator = crate::module::LateDelegator::default();
         let session_ended = CancellationToken::new();
@@ -22,7 +23,11 @@ impl Builder {
                 Some(session.session_id_str().to_string()),
                 hook_exec(exec, self.host.exec.is_some()),
             );
-            Arc::new(runner.with_background(background))
+            Arc::new(
+                runner
+                    .with_background(background)
+                    .with_observer(hook_run_recorder(telemetry.clone())),
+            )
         });
         // A runner handed in belongs to a session above this one, which wired
         // its wake channel already; taking it over would move every rewake of

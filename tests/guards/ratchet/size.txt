@@ -18,7 +18,7 @@ fn    crates/agents/src/delegate/mod.rs                          Delegator::dele
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   102
 fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        308
-fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              84
+fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              86
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    135
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            119
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              131

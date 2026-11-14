@@ -32,7 +32,8 @@ impl Builder {
         let mut plugins = self.register_plugins(&session, &r.settings, &r.scene)?;
         let (config, exec) =
             self.config_and_exec(&r.settings, &r.scene, session.session_id_str())?;
-        let mut hooks = self.wire_hooks(&r.settings, &r.model, &session, &exec);
+        let mut hooks =
+            self.wire_hooks(&r.settings, &r.model, &session, &exec, &r.telemetry_handle);
         let skill_catalog = crate::module::LateSkillCatalog::default();
 
         let state = self.wire_session_state(

@@ -47,7 +47,7 @@ base64        = { workspace = true }
 
 # Optional: OpenTelemetry OTLP export (gated by "otel" feature). Lives here,
 # not in `telemetry`, because that crate never talks to the network itself —
-# see `telemetry_otel.rs`.
+# see `telemetry_otel/`.
 opentelemetry      = { version = "0.27", default-features = false, features = ["trace", "metrics"], optional = true }
 opentelemetry_sdk  = { version = "0.27", default-features = false, features = ["trace", "metrics", "rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.27", default-features = false, features = ["trace", "metrics", "grpc-tonic", "http-proto"], optional = true }

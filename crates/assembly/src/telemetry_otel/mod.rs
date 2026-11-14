@@ -19,6 +19,10 @@
 //! - API call latency histogram (`agix.api.latency`)
 //! - Token usage histogram (`agix.token.usage`)
 
+mod spans;
+#[cfg(test)]
+mod spans_tests;
+
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
@@ -111,6 +115,7 @@ pub enum OtelError {
 pub struct OtelExporter {
     meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
     tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    spans: spans::SpanTree,
 }
 
 impl OtelExporter {
@@ -162,6 +167,7 @@ impl telemetry::TelemetryRecorder for OtelExporter {
         event: telemetry::TelemetryEvent,
     ) -> Result<(), telemetry::TelemetryHandleError> {
         use telemetry::EventPayload;
+        self.spans.observe(&event);
         match event.payload {
             EventPayload::TurnComplete(p) => {
                 record_turn_duration(p.turn_duration_ms as f64);
@@ -378,9 +384,12 @@ pub fn start_otel(endpoint: &str) -> Result<OtelExporter, OtelError> {
 
     register_instruments();
 
+    use opentelemetry::trace::TracerProvider as _;
+    let spans = spans::SpanTree::new(tracer_provider.tracer("agix"));
     Ok(OtelExporter {
         meter_provider: Some(meter_provider),
         tracer_provider: Some(tracer_provider),
+        spans,
     })
 }
 
