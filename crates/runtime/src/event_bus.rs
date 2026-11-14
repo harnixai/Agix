@@ -171,33 +171,47 @@ mod tests {
         }
     }
 
+    /// A sink that does not return from `emit` until its gate is opened.
+    struct Stuck {
+        gate: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        seen: Arc<AtomicU64>,
+    }
+
+    impl EventSink for Stuck {
+        fn emit(&self, _event: &AgentEvent) {
+            let _ = self.gate.lock().unwrap().recv();
+            self.seen.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_slow_sink_costs_the_sender_nothing() {
         let (primary, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (open_gate, gate) = std::sync::mpsc::channel();
         let seen = Arc::new(AtomicU64::new(0));
         let bus = EventBus::with_sinks(
             primary,
-            vec![Arc::new(Molasses {
-                per_event: Duration::from_millis(500),
+            vec![Arc::new(Stuck {
+                gate: std::sync::Mutex::new(gate),
                 seen: seen.clone(),
             })],
         );
 
-        let started = Instant::now();
-        for i in 0..5 {
-            bus.send(text(&i.to_string())).unwrap();
-        }
-        let elapsed = started.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(100),
-            "sending past a sink that takes 500ms per event must not wait for it, took {elapsed:?}"
+        let sending = tokio::task::spawn_blocking(move || {
+            for i in 0..5 {
+                bus.send(text(&i.to_string())).unwrap();
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(30), sending)
+            .await
+            .expect("the sender waited for a sink that has not returned")
+            .unwrap();
+        assert_eq!(
+            seen.load(Ordering::Relaxed),
+            0,
+            "the sink was held shut the whole time the sender sent"
         );
-        assert!(
-            seen.load(Ordering::Relaxed) < 5,
-            "the sink should still be working through its queue — if it had \
-             finished, the sender was waiting for it"
-        );
+        drop(open_gate);
     }
 
     #[tokio::test(flavor = "multi_thread")]

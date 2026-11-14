@@ -1603,7 +1603,7 @@ done
         ));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_command_that_is_not_there_or_a_url_that_does_not_parse_is_not_retried() {
         let missing = McpServerConfig::Stdio {
             command: "/nonexistent/agix-mcp-server".into(),
@@ -1619,16 +1619,16 @@ done
             timeouts: Default::default(),
             tier: None,
         };
-        let started = Instant::now();
+        let started = tokio::time::Instant::now();
         let manager = crate::manager::McpManager::connect_all(HashMap::from([
             ("missing".to_string(), missing),
             ("bad_url".to_string(), bad_url),
         ]))
         .await;
-        assert!(
-            started.elapsed() < Duration::from_millis(900),
-            "retried: took {:?}",
-            started.elapsed()
+        assert_eq!(
+            started.elapsed(),
+            Duration::ZERO,
+            "a retry sleeps its backoff, which a paused clock counts"
         );
         let mut failed: Vec<&str> = manager.failed().iter().map(|f| f.name.as_str()).collect();
         failed.sort();

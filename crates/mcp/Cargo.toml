@@ -42,6 +42,7 @@ scene = { workspace = true }
 hooks = { workspace = true }
 tempfile = { workspace = true }
 mcp-oauth-mock = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints.clippy]
 field_reassign_with_default = "allow"

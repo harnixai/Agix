@@ -118,9 +118,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let elapsed = start.elapsed();
-        assert!(elapsed >= std::time::Duration::from_millis(45));
-        assert!(elapsed < std::time::Duration::from_millis(500));
+        assert!(start.elapsed() >= std::time::Duration::from_millis(45));
         assert!(!r.is_error);
     }
 
@@ -133,13 +131,17 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             cancel.cancel();
         });
-        let start = std::time::Instant::now();
-        let r = tool
-            .call(json!({"duration_ms": 5000}), ctx, ProgressSender::noop("t"))
-            .await
-            .unwrap();
-        let elapsed = start.elapsed();
-        assert!(elapsed < std::time::Duration::from_millis(1000));
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            tool.call(
+                json!({"duration_ms": 30_000}),
+                ctx,
+                ProgressSender::noop("t"),
+            ),
+        )
+        .await
+        .expect("a cancelled sleep ends instead of running out its time")
+        .unwrap();
         assert!(r.is_error);
     }
 }

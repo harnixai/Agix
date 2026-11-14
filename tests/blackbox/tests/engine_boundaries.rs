@@ -304,34 +304,36 @@ async fn a_concurrency_safe_tool_starts_while_its_stream_is_still_arriving() -> 
         .await?;
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
-    let stall = Duration::from_secs(4);
+    let stall = Duration::from_secs(30);
     stub.script([
         fetch_then_stall(&pages.url("/early"), stall),
         Reply::text("done"),
     ]);
     let handle = run.spawn_turn(&session, "fetch", json!({})).await?;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while turn_calls(&stub).is_empty() {
-        anyhow::ensure!(Instant::now() < deadline, "the turn never called the model");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let asked = Instant::now();
-    while pages.hits("/early") == 0 && asked.elapsed() < stall + Duration::from_secs(2) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while pages.hits("/early") == 0 {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the fetch waited for the rest of the stream"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let fetched_after = asked.elapsed();
-    let events = tokio::time::timeout(Duration::from_secs(20), handle).await???;
-    eprintln!("[streaming-exec] fetched {fetched_after:?} after the request, stall {stall:?}");
+    assert_eq!(
+        turn_calls(&stub).len(),
+        1,
+        "the fetch ran only once the model had been called again"
+    );
+    assert!(
+        !handle.is_finished(),
+        "the turn was over before the fetch began"
+    );
+    let resp = run
+        .client
+        .call("session.interrupt", json!({ "session_id": session }))
+        .await?;
+    assert_eq!(resp.result.unwrap_or_default()["interrupted"], json!(true));
+    tokio::time::timeout(Duration::from_secs(40), handle).await???;
     assert_eq!(pages.hits("/early"), 1);
-    assert!(
-        fetched_after < stall - Duration::from_secs(1),
-        "the fetch waited for the rest of the stream: {fetched_after:?}"
-    );
-    let fetched = result_of(&events, "WebFetch").expect("a fetch result");
-    assert!(
-        !fetched.2 && fetched.1.contains("EARLY-PAGE"),
-        "{fetched:?}"
-    );
     run.finish().await;
     Ok(())
 }

@@ -694,18 +694,14 @@ mod tests {
     async fn it_returns_at_once_and_its_lines_arrive_as_notifications() {
         let dir = TempDir::new().unwrap();
         let (ctx, session) = session_in(dir.path());
-        let started = std::time::Instant::now();
         let result = start(
             ctx,
             json!({"command": "echo first; sleep 0.6; echo second; sleep 30",
                    "description": "two events", "persistent": true}),
         )
         .await;
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the call waited for the script"
-        );
         let task = monitor_task(&session);
+        assert!(!task.has_ended(), "the call waited for the script to end");
         assert!(format!("{:?}", result.content).contains(&task.task_id));
 
         let seen = notices(&session, 2, Duration::from_secs(10)).await;
