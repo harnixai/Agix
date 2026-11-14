@@ -2518,7 +2518,7 @@ async fn plugin_rpcs_report_plugins_disabled_when_compiled_out() {
 }
 
 /// Install a plugin that owns a scene directly into the global tier's
-/// versioned cache — the layout `plugin::discovery` reads.
+/// versioned cache — the layout `packages::discovery` reads.
 #[cfg(feature = "plugin-packages")]
 fn install_scene_plugin(root: &std::path::Path, name: &str) {
     let dir = root.join("plugins").join("cache").join(name).join("1.0.0");

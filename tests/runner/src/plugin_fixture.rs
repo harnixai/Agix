@@ -77,7 +77,7 @@ fn add_dir_to_zip<W: std::io::Write + std::io::Seek>(
 }
 
 /// `file://` URL for `plugin.install`'s `download_url` param. This scheme
-/// doesn't require a checksum (`crates/plugin/src/install.rs`), but the
+/// doesn't require a checksum (`crates/packages/src/install.rs`), but the
 /// packers compute one anyway and a real install sends one.
 pub fn file_url(path: &Path) -> String {
     format!("file://{}", path.display())

@@ -21,7 +21,7 @@ libc          = { workspace = true }
 scene         = { workspace = true }
 history       = { workspace = true }
 hooks         = { workspace = true }
-plugin        = { workspace = true, optional = true }
+packages      = { workspace = true, optional = true }
 script-host   = { workspace = true, optional = true }
 skills        = { workspace = true, optional = true }
 tools         = { workspace = true }
@@ -91,7 +91,7 @@ scripts = ["dep:script-host"]
 # disclosure, enable state. It runs nothing itself: a package's `[[mcp]]`
 # servers, `[[script]]` bindings, scene directory and agent types are honored
 # through the parts of the engine that already exist.
-plugin-packages = ["dep:plugin"]
+plugin-packages = ["dep:packages"]
 
 # ── Everything else ─────────────────────────────────────────────────────
 

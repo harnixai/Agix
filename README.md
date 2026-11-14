@@ -373,7 +373,7 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | module | `skills` | skill catalog and the `Skill` tool |
 | module | `script-host` | the QuickJS carrier |
 | kernel | `ptc` | `RunCode`: the model's programs, run in an embedded QuickJS ([`docs/ptc.md`](docs/ptc.md)) |
-| module | `plugin` | plugin packages: manifest, install, cache, disclosure |
+| module | `packages` | plugin packages: manifest, install, cache, disclosure |
 | assembly | `assembly` | session pool, configuration, provider routing, the JSON-RPC server |
 | shell | `daemon` | the `agixd` binary |
 

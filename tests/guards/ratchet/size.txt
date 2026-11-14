@@ -51,10 +51,10 @@ fn    crates/mcp/src/oauth/unattended.rs                         McpAuth::exchan
 fn    crates/model/src/adapter.rs                                AnthropicModel::stream                 90
 fn    crates/model/src/openai/request.rs                         push_translated                        84
 fn    crates/model/src/types.rs                                  MessagesRequest::serialize             99
+fn    crates/packages/src/manifest.rs                            validate                               95
 fn    crates/platform/src/process.rs                             LocalProcess::spawn                    82
 fn    crates/platform/src/sandbox.rs                             build_macos_profile                    157
 fn    crates/platform/src/sandbox.rs                             linux_wrap                             132
-fn    crates/plugin/src/manifest.rs                              validate                               95
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96

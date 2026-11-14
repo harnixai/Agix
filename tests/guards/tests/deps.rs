@@ -50,7 +50,7 @@ const CRATES: &[(&str, Tier)] = &[
     ("compaction", K2),
     ("runtime", K3),
     ("team", Module),
-    ("plugin", Module),
+    ("packages", Module),
     ("script-host", Module),
     ("mcp", Module),
     ("skills", Module),
@@ -101,8 +101,8 @@ const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
         "stdio servers are local processes; OAuth is a local HTTP client",
     ),
     (
-        "plugin",
-        "crates/plugin",
+        "packages",
+        "crates/packages",
         "fetches packages over this machine's network",
     ),
     (

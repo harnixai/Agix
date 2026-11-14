@@ -293,7 +293,7 @@ let (mut agent, events, input) = runtime::agent::Builder::new()
 | 模块 | `skills` | skill 目录与 `Skill` 工具 |
 | 模块 | `script-host` | QuickJS 载体 |
 | 内核 | `ptc` | `RunCode`:模型写的程序,在内嵌的 QuickJS 里跑([`ptc.md`](ptc.md)) |
-| 模块 | `plugin` | 插件包:manifest、安装、缓存、披露 |
+| 模块 | `packages` | 插件包:manifest、安装、缓存、披露 |
 | 装配 | `assembly` | 会话池、配置、provider 路由、JSON-RPC 服务 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 

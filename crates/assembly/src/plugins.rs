@@ -92,7 +92,7 @@ mod packages {
         /// disable, so every reader — the MCP configs, the script bindings,
         /// the scenes, the agent types — is looking at one answer rather than each
         /// walking the directory at a different moment.
-        active: RwLock<Arc<Vec<plugin::manifest::Plugin>>>,
+        active: RwLock<Arc<Vec<::packages::manifest::Plugin>>>,
         /// Why a package's script binding could not be honored, by package.
         /// A fault here costs that binding and nothing else, so it has to be
         /// reported somewhere the person who installed the package will look.
@@ -124,7 +124,7 @@ mod packages {
             &self.policy
         }
 
-        pub fn active(&self) -> Arc<Vec<plugin::manifest::Plugin>> {
+        pub fn active(&self) -> Arc<Vec<::packages::manifest::Plugin>> {
             self.active
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
@@ -146,7 +146,7 @@ mod packages {
         pub fn mcp_servers(&self) -> HashMap<String, serde_json::Value> {
             self.active()
                 .iter()
-                .flat_map(plugin::mcp::servers_for)
+                .flat_map(::packages::mcp::servers_for)
                 .collect()
         }
 
@@ -155,7 +155,7 @@ mod packages {
             self.active()
                 .iter()
                 .flat_map(|p| {
-                    plugin::mcp::servers_for(p)
+                    ::packages::mcp::servers_for(p)
                         .into_iter()
                         .map(|(name, _)| (name, p.root.clone()))
                 })
@@ -190,7 +190,7 @@ mod packages {
         pub fn agent_types(&self) -> Vec<base::agent_type::AgentTypeDefinition> {
             self.active()
                 .iter()
-                .flat_map(plugin::agents::agent_types)
+                .flat_map(::packages::agents::agent_types)
                 .collect()
         }
 
@@ -200,7 +200,7 @@ mod packages {
             self.active()
                 .iter()
                 .filter(|p| p.manifest.skills.is_some())
-                .filter_map(|p| match plugin::skills::declared_skills(p) {
+                .filter_map(|p| match ::packages::skills::declared_skills(p) {
                     Ok(skills) => Some(PackageSkills {
                         plugin: p.name().to_string(),
                         skills: skills.into_iter().map(|s| (s.entry, s.body)).collect(),
@@ -233,21 +233,25 @@ mod packages {
         /// them back on.
         pub fn list(&self) -> Vec<PluginInfo> {
             let (global, scene) = self.tier_dirs();
-            let global_state = plugin::state::EnableState::new(global.clone());
-            let scene_state = plugin::state::EnableState::new(scene.clone());
+            let global_state = ::packages::state::EnableState::new(global.clone());
+            let scene_state = ::packages::state::EnableState::new(scene.clone());
             let script_faults = self.script_faults.read().unwrap_or_else(|e| e.into_inner());
-            plugin::discover_plugins(&global, &scene)
+            ::packages::discover_plugins(&global, &scene)
                 .iter()
                 .map(|p| {
                     let name = &p.manifest.plugin.name;
-                    let skills: Vec<String> = plugin::skills::declared_skills(p)
+                    let skills: Vec<String> = ::packages::skills::declared_skills(p)
                         .map(|skills| skills.into_iter().map(|s| s.entry.name).collect())
                         .unwrap_or_default();
                     PluginInfo {
                         name: name.clone(),
                         version: p.manifest.plugin.version.clone(),
                         description: p.manifest.plugin.description.clone(),
-                        enabled: plugin::state::resolve_enabled(name, &global_state, &scene_state),
+                        enabled: ::packages::state::resolve_enabled(
+                            name,
+                            &global_state,
+                            &scene_state,
+                        ),
                         // The unpacked directory. Without it a host that wants
                         // to read something out of the package — a UI bundle,
                         // an icon — has to rebuild this path itself, which
@@ -296,13 +300,13 @@ mod packages {
             name: &str,
             version: &str,
             scope: &str,
-        ) -> Result<plugin::Disclosure, String> {
-            let cache = plugin::cache::PluginCache::new(self.tier_root(scope)?.join("cache"));
+        ) -> Result<::packages::Disclosure, String> {
+            let cache = ::packages::cache::PluginCache::new(self.tier_root(scope)?.join("cache"));
             let manifest = cache
                 .cached_manifest(name, version)
                 .ok_or_else(|| format!("no plugin.toml in the installed package `{name}`"))?;
             let loaded =
-                plugin::manifest::Plugin::load(&cache.version_dir(name, version), &manifest)
+                ::packages::manifest::Plugin::load(&cache.version_dir(name, version), &manifest)
                     .map_err(|e| e.to_string())?;
             if loaded.manifest.plugin.name != name {
                 return Err(format!(
@@ -310,17 +314,17 @@ mod packages {
                     loaded.manifest.plugin.name
                 ));
             }
-            plugin::Disclosure::from_plugin(&loaded).map_err(|e| e.to_string())
+            ::packages::Disclosure::from_plugin(&loaded).map_err(|e| e.to_string())
         }
 
-        pub fn cache_for(&self, scope: &str) -> Result<plugin::cache::PluginCache, String> {
-            Ok(plugin::cache::PluginCache::new(
+        pub fn cache_for(&self, scope: &str) -> Result<::packages::cache::PluginCache, String> {
+            Ok(::packages::cache::PluginCache::new(
                 self.tier_root(scope)?.join("cache"),
             ))
         }
 
         pub fn set_enabled(&self, name: &str, enabled: bool, scope: &str) -> Result<(), String> {
-            plugin::state::EnableState::new(self.tier_root(scope)?)
+            ::packages::state::EnableState::new(self.tier_root(scope)?)
                 .set_enabled(name, enabled)
                 .map_err(|e| e.to_string())
         }
@@ -332,7 +336,7 @@ mod packages {
         /// [`release_hold`](Self::release_hold) takes back if the install
         /// fails. A name the tier already has an entry for keeps it.
         pub fn hold_disabled(&self, name: &str, scope: &str) -> Result<bool, String> {
-            let state = plugin::state::EnableState::new(self.tier_root(scope)?);
+            let state = ::packages::state::EnableState::new(self.tier_root(scope)?);
             if state.get(name).is_some() {
                 return Ok(false);
             }
@@ -342,22 +346,22 @@ mod packages {
 
         pub fn release_hold(&self, name: &str, scope: &str) {
             if let Ok(root) = self.tier_root(scope) {
-                let _ = plugin::state::EnableState::new(root).clear(name);
+                let _ = ::packages::state::EnableState::new(root).clear(name);
             }
         }
 
         pub fn resolved_enabled(&self, name: &str) -> bool {
             let (global, scene) = self.tier_dirs();
-            plugin::state::resolve_enabled(
+            ::packages::state::resolve_enabled(
                 name,
-                &plugin::state::EnableState::new(global),
-                &plugin::state::EnableState::new(scene),
+                &::packages::state::EnableState::new(global),
+                &::packages::state::EnableState::new(scene),
             )
         }
     }
 
     /// The two plugin-tier roots (plain `plugins/`, not `plugins/cache/` —
-    /// see `plugin::cache`): global, shared across scenes, and this daemon's
+    /// see `packages::cache`): global, shared across scenes, and this daemon's
     /// own scene.
     fn tier_dirs(paths: &dyn DaemonPaths) -> (PathBuf, PathBuf) {
         (
@@ -369,22 +373,24 @@ mod packages {
     fn active_plugins(
         paths: &dyn DaemonPaths,
         policy: &PluginsConfig,
-    ) -> Vec<plugin::manifest::Plugin> {
+    ) -> Vec<::packages::manifest::Plugin> {
         let (global, scene) = tier_dirs(paths);
-        let global_state = plugin::state::EnableState::new(global.clone());
-        let scene_state = plugin::state::EnableState::new(scene.clone());
-        let active: Vec<plugin::manifest::Plugin> = plugin::discover_plugins(&global, &scene)
-            .into_iter()
-            .filter(|p| {
-                let name = &p.manifest.plugin.name;
-                if !policy.permits(name) {
-                    tracing::info!(plugin = %name, "not permitted by settings.plugins; skipping");
-                    return false;
-                }
-                plugin::state::resolve_enabled(name, &global_state, &scene_state)
-            })
-            .collect();
-        for (_, server) in active.iter().flat_map(plugin::mcp::servers_for) {
+        let global_state = ::packages::state::EnableState::new(global.clone());
+        let scene_state = ::packages::state::EnableState::new(scene.clone());
+        let active: Vec<::packages::manifest::Plugin> = ::packages::discover_plugins(
+            &global, &scene,
+        )
+        .into_iter()
+        .filter(|p| {
+            let name = &p.manifest.plugin.name;
+            if !policy.permits(name) {
+                tracing::info!(plugin = %name, "not permitted by settings.plugins; skipping");
+                return false;
+            }
+            ::packages::state::resolve_enabled(name, &global_state, &scene_state)
+        })
+        .collect();
+        for (_, server) in active.iter().flat_map(::packages::mcp::servers_for) {
             base::interface::exec::env::hold_back_what_an_mcp_server_reads(&server);
         }
         active
@@ -392,7 +398,7 @@ mod packages {
 }
 
 #[cfg(feature = "plugin-packages")]
-fn disclosure_of(d: &plugin::Disclosure) -> crate::session_pool::api::PluginDisclosure {
+fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::PluginDisclosure {
     use crate::session_pool::api::{PluginDisclosure, VisibleText};
     PluginDisclosure {
         plugin: d.plugin.clone(),
@@ -434,7 +440,7 @@ mod imp {
             let faults: Vec<serde_json::Value> = [("global", global), ("scene", scene)]
                 .into_iter()
                 .filter_map(|(tier, root)| {
-                    plugin::state::EnableState::new(root.clone())
+                    ::packages::state::EnableState::new(root.clone())
                         .fault()
                         .map(|fault| serde_json::json!({"tier": tier, "fault": fault}))
                 })
@@ -462,7 +468,7 @@ mod imp {
 
         fn check(&self) -> CheckResult {
             let (global, scene) = &self.0;
-            let refused = plugin::scan_plugins(global, scene).refused;
+            let refused = ::packages::scan_plugins(global, scene).refused;
             if refused.is_empty() {
                 return CheckResult::ok("every installed plugin loads");
             }
@@ -550,7 +556,7 @@ mod imp {
         }
 
         pub fn scenes(&self) -> Vec<Arc<base::interface::scene::SceneSpec>> {
-            plugin::scenes::declared_scenes(&self.packages.active())
+            ::packages::scenes::declared_scenes(&self.packages.active())
         }
 
         pub fn mcp_servers(&self) -> HashMap<String, serde_json::Value> {
@@ -622,39 +628,39 @@ mod imp {
 
         async fn install_and_load_back(
             &self,
-            cache: &plugin::cache::PluginCache,
+            cache: &::packages::cache::PluginCache,
             name: &str,
             version: &str,
             download_url: &str,
             checksum: Option<&str>,
             scope: &str,
-        ) -> Result<(String, plugin::Disclosure), String> {
-            let source = plugin::install::PluginSource {
+        ) -> Result<(String, ::packages::Disclosure), String> {
+            let source = ::packages::install::PluginSource {
                 download_url: download_url.to_string(),
                 checksum: checksum.map(str::to_string),
                 version: version.to_string(),
             };
-            let installed = plugin::install::install(cache, name, &source)
+            let installed = ::packages::install::install(cache, name, &source)
                 .await
                 .map_err(|e| e.to_string())?;
             let loaded = self.packages.load_back(name, version, scope);
             let (message, disclosure) = match (installed, loaded) {
-                (plugin::install::Installed::AlreadyPresent, Ok(d)) => (
+                (::packages::install::Installed::AlreadyPresent, Ok(d)) => (
                     format!("plugin '{name}' v{version} is already installed"),
                     d,
                 ),
-                (plugin::install::Installed::AlreadyPresent, Err(e)) => {
+                (::packages::install::Installed::AlreadyPresent, Err(e)) => {
                     return Err(format!(
                         "plugin '{name}' v{version} is already installed but is refused on \
                          loading it back: {e}; uninstall it before installing it again"
                     ));
                 }
-                (plugin::install::Installed::Into(_), Ok(d)) => (
+                (::packages::install::Installed::Into(_), Ok(d)) => (
                     format!("installed plugin '{name}' v{version} from {download_url}"),
                     d,
                 ),
-                (plugin::install::Installed::Into(_), Err(e)) => {
-                    let _ = plugin::install::uninstall(cache, name, Some(version));
+                (::packages::install::Installed::Into(_), Err(e)) => {
+                    let _ = ::packages::install::uninstall(cache, name, Some(version));
                     return Err(format!(
                         "installed but refused on loading it back, so it was removed: {e}"
                     ));
@@ -671,7 +677,7 @@ mod imp {
         ) -> Result<PluginRemoved, String> {
             let cache = self.packages.cache_for(scope.as_str())?;
             let removed =
-                plugin::install::uninstall(&cache, name, version).map_err(|e| e.to_string())?;
+                ::packages::install::uninstall(&cache, name, version).map_err(|e| e.to_string())?;
             let message = match version {
                 Some(version) => format!("removed plugin '{name}' v{version}"),
                 None => format!("removed plugin '{name}' ({removed} versions)"),

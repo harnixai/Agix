@@ -121,7 +121,7 @@ const NOT_YET: &[(&str, &str)] = &[];
 const ENGINE_MODULES: &[&str] = &["rquickjs", "script_host"];
 const ENGINE_TYPES: &[&str] = &["ScriptEngine"];
 
-const DISCLOSURE: &str = "crates/plugin/src/disclosure.rs";
+const DISCLOSURE: &str = "crates/packages/src/disclosure.rs";
 
 const NOT_IN_A_TARGET: &[(&str, &str)] = &[];
 

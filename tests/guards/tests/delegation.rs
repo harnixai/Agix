@@ -387,7 +387,7 @@ const MCP_PREFIX_RATCHET: &[(&str, &str)] = &[
         "a hook matcher's `mcp__<server>`; to move to `ToolPattern` (D1)",
     ),
     (
-        "crates/plugin/src/skills.rs",
+        "crates/packages/src/skills.rs",
         "refuses a skill directory named like an MCP tool; a name check, not a match",
     ),
 ];

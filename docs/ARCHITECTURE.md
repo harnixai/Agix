@@ -23,7 +23,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
  装配    assembly ───────── 会话池、(项目, 场景) 绑定与失效、provider 路由、插件包、模块清单;
            │                JSON-RPC 服务(Unix socket / TCP / WS)与实例发现
            │
- 模块    agents(+team) · mcp · skills · script-host · plugin
+ 模块    agents(+team) · mcp · skills · script-host · packages
            │                经 runtime::module::Module 进入会话
  内核    runtime ────────── turn loop、提示词组装、工具调度、扩展点调度、Module 接口(K3)
            │
@@ -53,7 +53,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   在 `parts/mcp_hub/live.rs` 与签名相同的桩 `off.rs` 之间二选一;其余代码(server 的
   `mcp.*` 在内)只写一份,`feature = "mcp"` 不超过 6 处(`tests/guards/tests/layering.rs`)。
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
-  `model`、`hooks`、`mcp`、`plugin`、`assembly`、`daemon`,清单与
+  `model`、`hooks`、`mcp`、`packages`、`assembly`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
   `telemetry`、`ptc`、`permissions`、`settings`、`memory`、`skill-format`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
@@ -105,7 +105,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `skills` | 模块 | skill 目录与 `Skill` 工具 |
 | `script-host` | 模块 | 脚本载体:配额与账本(`ScriptCarrier`)、九个点的适配器、QuickJS 引擎 |
 | `ptc` | 内核 | `RunCode`:模型写的一次性程序,在内嵌的 QuickJS 里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
-| `plugin` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
+| `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
 | `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务与实例发现 |
 | `daemon` | 外壳 | `agixd` 二进制:参数、锁、信号;库部分按旧路径重新导出 assembly |
 
