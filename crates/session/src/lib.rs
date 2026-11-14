@@ -1,4 +1,4 @@
-//! In-memory session state management — SessionManager, SessionSummary, SessionMemory.
+//! In-memory session state management — Transcript, SessionSummary, SessionMemory.
 
-pub mod session;
 pub mod session_memory;
+pub mod transcript;

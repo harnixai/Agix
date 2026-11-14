@@ -1,4 +1,4 @@
-//! Only a few places may rewrite the conversation held by `SessionManager`
+//! Only a few places may rewrite the conversation held by `Transcript`
 //! (G11). `messages` is private to the session crate, so the rewrites are the
 //! methods named in `REWRITERS`, and each of them is called from the files
 //! listed here and nowhere else: the compaction step in the runtime (the trim
@@ -31,7 +31,7 @@ const ALLOWED: &[(&str, &str)] = &[
         "`run_compaction`, the one path that drops history and records a compact marker",
     ),
     (
-        "replace_messages_after_compact @ crates/session/src/session.rs",
+        "replace_messages_after_compact @ crates/session/src/transcript.rs",
         "`clear`, which is a compaction to nothing",
     ),
     (

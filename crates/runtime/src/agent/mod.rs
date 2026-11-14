@@ -8,8 +8,8 @@ use base::tool::InMemoryToolRegistry;
 use compaction::compact::{Compactor, DefaultCompactor};
 use hooks::{HookEvent, HookRunner};
 use memory::MemoryStore;
-use session::session::SessionManager;
 use session::session_memory::SessionMemory;
+use session::transcript::Transcript;
 use settings::LoadedSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -76,8 +76,8 @@ pub struct Agent {
     /// clone of this, so tools see the configured sandbox/permission/shell
     /// settings rather than defaults.
     config: Arc<base::context::EngineConfig>,
-    session: SessionManager,
-    /// Distinct from `session`: `SessionManager` owns the *transcript*, this
+    session: Transcript,
+    /// Distinct from `session`: `Transcript` owns the *transcript*, this
     /// owns everything tools read and write across calls. One instance for the
     /// whole session, handed to every `ToolContext` — see `Builder::build()`.
     session_state: Arc<base::context::SessionState>,

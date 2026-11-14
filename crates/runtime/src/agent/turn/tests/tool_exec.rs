@@ -851,7 +851,7 @@ async fn post_tool_use_failure_runs_for_a_call_its_batch_abandoned() {
             usage: Default::default(),
         }),
     ];
-    let mut session = session::session::SessionManager::in_memory(None);
+    let mut session = session::transcript::Transcript::in_memory(None);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let tx = crate::event_bus::EventBus::new(tx);
 

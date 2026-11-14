@@ -79,7 +79,7 @@ pub(super) struct Chains {
 pub(super) struct Wired {
     pub(super) resolved: Resolved,
     pub(super) config: Arc<base::context::EngineConfig>,
-    pub(super) session: SessionManager,
+    pub(super) session: Transcript,
     pub(super) session_state: Arc<base::context::SessionState>,
     pub(super) exec: base::interface::exec::ExecProviders,
     pub(super) engine_git: Arc<base::engine_exec::EngineExec>,

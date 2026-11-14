@@ -65,7 +65,7 @@ pub(super) fn estimate_request_overhead(
         });
     }
     // The session's own counter, so this number is identical in kind to
-    // `SessionManager::token_count()`: the two get added together.
+    // `Transcript::token_count()`: the two get added together.
     counter.count_messages(&[ModelMessage {
         role: MessageRole::User,
         content: blocks,
@@ -453,7 +453,7 @@ impl Agent {
     /// Total tokens this session is currently sending per API call: the
     /// conversation plus the fixed per-request overhead.
     ///
-    /// `SessionManager::token_count()` counts message content only. That is
+    /// `Transcript::token_count()` counts message content only. That is
     /// the right number for "how much of the context is conversation", and
     /// the wrong one for "are we near the context limit" — the assembled
     /// system prompt (scene blocks, skills inventory, MCP instructions) and

@@ -1,4 +1,4 @@
-//! SessionManager — in-memory conversation state backed by history crate for persistence.
+//! Transcript — in-memory conversation state backed by history crate for persistence.
 //!
 //! Owns the active message buffer and turn counter. Persistence (JSONL append/load,
 //! session listing) is delegated to `history::store::HistoryStore`.
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// Session manager. Owns the conversation state; delegates persistence to `HistoryStore`.
-pub struct SessionManager {
+pub struct Transcript {
     messages: Vec<ModelMessage>,
     /// Per-message wall-clock timestamps (parallel to `messages`).
     /// Used by time-based micro-compaction to determine message age.
@@ -36,7 +36,7 @@ pub struct SessionManager {
     /// re-append the same messages.
     persisted_up_to: usize,
     /// How this session judges its own size — see
-    /// [`SessionManager::with_token_counter`].
+    /// [`Transcript::with_token_counter`].
     token_counter: Arc<dyn base::interface::token_counter::TokenCounter>,
     /// The turn new lines belong to; recorded on each line `persist()` writes.
     turn_id: Option<String>,
@@ -62,7 +62,7 @@ struct MessageNote {
     usage: Option<base::interface::model::Usage>,
 }
 
-impl SessionManager {
+impl Transcript {
     /// Create a new session manager.
     /// `history_store`: backing store for persistence. None = no persistence.
     /// `session_id`: optional pre-set ID; if None, a fresh [`SessionId`] is
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn new_session_starts_empty() {
-        let mgr = SessionManager::in_memory(None);
+        let mgr = Transcript::in_memory(None);
         assert_eq!(mgr.messages.len(), 0);
         assert_eq!(mgr.turn_count, 0);
         assert!(!mgr.session_id.is_empty());
@@ -899,13 +899,13 @@ mod tests {
 
     #[test]
     fn new_with_session_id_preserves_it() {
-        let mgr = SessionManager::in_memory(Some("test-session-1".into()));
+        let mgr = Transcript::in_memory(Some("test-session-1".into()));
         assert_eq!(mgr.session_id, "test-session-1");
     }
 
     #[test]
     fn push_message_appends() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         mgr.push_message(make_text_msg("hello"));
         assert_eq!(mgr.messages.len(), 1);
         mgr.push_message(make_text_msg("world"));
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn messages_method_returns_all() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         mgr.push_message(make_text_msg("a"));
         mgr.push_message(make_text_msg("b"));
         assert_eq!(mgr.messages().len(), 2);
@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn increment_turn_monotonic() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         assert_eq!(mgr.turn_count, 0);
         mgr.increment_turn();
         assert_eq!(mgr.turn_count, 1);
@@ -932,13 +932,13 @@ mod tests {
 
     #[test]
     fn token_count_empty_is_zero() {
-        let mgr = SessionManager::in_memory(None);
+        let mgr = Transcript::in_memory(None);
         assert_eq!(mgr.token_count(), 0);
     }
 
     #[test]
     fn token_count_approximates_text_length() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         // 40 chars → 40/4 = 10 tokens
         mgr.push_message(make_text_msg("hello world this is a test message here"));
         assert!(mgr.token_count() > 0);
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn summary_reflects_state() {
-        let mut mgr = SessionManager::in_memory(Some("summary-test".into()));
+        let mut mgr = Transcript::in_memory(Some("summary-test".into()));
         mgr.push_message(make_text_msg("hi"));
         let s = mgr.summary();
         assert_eq!(s.entry_count, 1);
@@ -955,21 +955,21 @@ mod tests {
 
     #[test]
     fn set_session_id_updates() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         mgr.set_session_id("new-id".into());
         assert_eq!(mgr.session_id_str(), "new-id");
     }
 
     #[tokio::test]
     async fn persist_without_store_is_noop() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         let r = mgr.persist().await;
         assert!(r.is_ok());
     }
 
     #[tokio::test]
     async fn resume_without_store_returns_not_found() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         let r = mgr.resume("nonexistent").await;
         assert!(r.is_err());
         match r {
@@ -980,7 +980,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_without_store_returns_empty() {
-        let mgr = SessionManager::in_memory(None);
+        let mgr = Transcript::in_memory(None);
         let sessions = mgr.list_sessions().await.unwrap();
         assert!(sessions.is_empty());
     }
@@ -990,7 +990,7 @@ mod tests {
     #[tokio::test]
     async fn default_session_id_is_one_persist_accepts() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut mgr = SessionManager::new(Some(real_store(tmp.path()).await), None, None);
+        let mut mgr = Transcript::new(Some(real_store(tmp.path()).await), None, None);
         SessionId::parse(&mgr.session_id).expect("the generated default must be a valid SessionId");
 
         mgr.push_message(make_text_msg("hello"));
@@ -1094,7 +1094,7 @@ mod tests {
         use std::sync::atomic::Ordering::SeqCst;
         let store = Arc::new(CountingSyncStore::default());
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
         mgr.push_message(make_text_msg("a"));
         mgr.push_message(make_text_msg("b"));
         mgr.persist().await.unwrap();
@@ -1116,7 +1116,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
 
         // 5 messages, all persisted (persisted_up_to == 5).
         for i in 0..5 {
@@ -1182,7 +1182,7 @@ mod tests {
         let sid = SessionId::new();
 
         {
-            let mut writer = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+            let mut writer = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
             for i in 0..5 {
                 writer.push_message(make_text_msg(&format!("original msg {i}")));
             }
@@ -1199,7 +1199,7 @@ mod tests {
             writer.persist().await.unwrap();
         }
 
-        let mut reader = SessionManager::new(Some(store.clone()), None, None);
+        let mut reader = Transcript::new(Some(store.clone()), None, None);
         reader.resume(&sid.to_string()).await.unwrap();
 
         // Only the compacted summary + the post-compaction message should
@@ -1224,7 +1224,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_messages_after_compact_without_store_still_resets_in_memory_state() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         mgr.push_message(make_text_msg("a"));
         mgr.push_message(make_text_msg("b"));
         mgr.persist().await.unwrap();
@@ -1247,7 +1247,7 @@ mod tests {
     }
 
     async fn resumed_texts(store: &Arc<dyn HistoryStore>, sid: SessionId) -> Vec<String> {
-        let mut reader = SessionManager::new(Some(store.clone()), None, None);
+        let mut reader = Transcript::new(Some(store.clone()), None, None);
         reader.resume(&sid.to_string()).await.unwrap();
         reader
             .messages()
@@ -1271,7 +1271,7 @@ mod tests {
             fail_appends: std::sync::atomic::AtomicBool::new(false),
         });
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(
+        let mut mgr = Transcript::new(
             Some(flaky.clone() as Arc<dyn HistoryStore>),
             Some(sid.to_string()),
             None,
@@ -1359,7 +1359,7 @@ mod tests {
             fail_next_sync: std::sync::atomic::AtomicBool::new(false),
         });
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(
+        let mut mgr = Transcript::new(
             Some(flaky.clone() as Arc<dyn HistoryStore>),
             Some(sid.to_string()),
             None,
@@ -1387,7 +1387,7 @@ mod tests {
     /// put in front of it is new.
     #[tokio::test]
     async fn the_messages_a_compaction_keeps_keep_their_age() {
-        let mut mgr = SessionManager::in_memory(None);
+        let mut mgr = Transcript::in_memory(None);
         let mut old = Vec::new();
         for i in 0..6 {
             mgr.push_message(make_text_msg(&format!("m{i}")));
@@ -1421,7 +1421,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
         let sid = SessionId::new();
-        let mut writer = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut writer = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
         writer.push_message_from(make_text_msg("first"), MessageOrigin::User);
         writer.push_message(make_text_msg("<system-reminder>recalled</system-reminder>"));
         writer.push_message(ModelMessage {
@@ -1440,7 +1440,7 @@ mod tests {
         });
         writer.persist().await.unwrap();
 
-        let mut reader = SessionManager::new(Some(store.clone()), None, None);
+        let mut reader = Transcript::new(Some(store.clone()), None, None);
         reader.resume(&sid.to_string()).await.unwrap();
         assert_eq!(reader.turn_count, 2);
     }
@@ -1454,7 +1454,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
 
         for i in 0..5 {
             mgr.push_message(make_text_msg(&format!("msg {i}")));
@@ -1506,7 +1506,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
 
         mgr.push_message(make_text_msg("hello"));
         mgr.persist().await.unwrap();
@@ -1540,7 +1540,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
         let sid = SessionId::new();
-        let mut mgr = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
         mgr.set_turn_id(Some("turn-1".into()));
 
         mgr.push_message_from(make_text_msg("hello"), MessageOrigin::User);
@@ -1600,13 +1600,13 @@ mod tests {
 
         // Write a session with one writer...
         {
-            let mut writer = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+            let mut writer = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
             writer.push_message(make_text_msg("first"));
             writer.persist().await.unwrap();
         }
 
-        // ...and reconstruct it with a fresh SessionManager via resume().
-        let mut reader = SessionManager::new(Some(store.clone()), None, None);
+        // ...and reconstruct it with a fresh Transcript via resume().
+        let mut reader = Transcript::new(Some(store.clone()), None, None);
         reader.resume(&sid.to_string()).await.unwrap();
         assert_eq!(reader.messages().len(), 1);
         match &reader.messages()[0].content[0] {
@@ -1662,13 +1662,13 @@ mod tests {
             }],
         };
         {
-            let mut writer = SessionManager::new(Some(store.clone()), Some(sid.to_string()), None);
+            let mut writer = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
             writer.push_message(user.clone());
             writer.push_message(assistant.clone());
             writer.persist().await.unwrap();
         }
 
-        let mut reader = SessionManager::new(Some(store.clone()), None, None);
+        let mut reader = Transcript::new(Some(store.clone()), None, None);
         reader.resume(&sid.to_string()).await.unwrap();
         let contents: Vec<_> = reader.messages().iter().map(|m| &m.content).collect();
         assert_eq!(contents, [&user.content, &assistant.content]);
@@ -1678,7 +1678,7 @@ mod tests {
     async fn resume_missing_session_returns_not_found() {
         let tmp = tempfile::tempdir().unwrap();
         let store = real_store(tmp.path()).await;
-        let mut mgr = SessionManager::new(Some(store), None, None);
+        let mut mgr = Transcript::new(Some(store), None, None);
         let err = mgr.resume(&SessionId::new().to_string()).await.unwrap_err();
         assert!(matches!(err, SessionError::NotFound(_)));
     }
@@ -1701,7 +1701,7 @@ mod token_counter_tests {
     /// on, which is the reason the seam is worth having.
     #[test]
     fn a_substituted_counter_is_what_the_session_reports() {
-        let mut session = SessionManager::in_memory(None);
+        let mut session = Transcript::in_memory(None);
         session.messages.push(say("a conversation of some length"));
 
         let default_estimate = session.token_count();

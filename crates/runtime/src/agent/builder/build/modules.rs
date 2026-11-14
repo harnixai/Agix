@@ -9,7 +9,7 @@ pub(super) struct ModuleInputs<'a> {
     pub(super) hooks: &'a Arc<HookRunner>,
     pub(super) ambient: &'a hooks::payload::Ambient,
     pub(super) events: &'a crate::event_bus::EventBus,
-    pub(super) session: &'a SessionManager,
+    pub(super) session: &'a Transcript,
     pub(super) session_state: &'a Arc<base::context::SessionState>,
     pub(super) depth: u32,
     pub(super) plugin_agent_types: &'a [base::agent_type::AgentTypeDefinition],

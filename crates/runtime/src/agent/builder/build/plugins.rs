@@ -5,7 +5,7 @@ use super::*;
 impl Builder {
     pub(super) fn register_plugins(
         &self,
-        session: &SessionManager,
+        session: &Transcript,
         settings: &LoadedSettings,
         scene: &SceneSpec,
     ) -> Result<PluginLayers, EngineError> {

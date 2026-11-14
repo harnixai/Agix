@@ -414,7 +414,7 @@ impl Agent {
         &mut self,
         id: &str,
         entries: &[history::entry::EnvelopedEntry],
-    ) -> Result<(), session::session::SessionError> {
+    ) -> Result<(), session::transcript::SessionError> {
         self.session.resume_from(id, entries)?;
         self.refresh_engine_git();
         self.prompt
@@ -427,13 +427,13 @@ impl Agent {
     /// Only for a state no engine has run the session on since it was
     /// created; a state kept across engines already holds all of it.
     pub fn restore_state_from_log(&self, entries: &[history::entry::EnvelopedEntry]) {
-        let goal = session::session::latest_extension(
+        let goal = session::transcript::latest_extension(
             entries,
             base::context::goal::GOAL_NS,
             base::context::goal::GOAL_EVENT,
         )
         .and_then(|payload| serde_json::from_value(payload["goal"].clone()).ok());
-        let durable = session::session::latest_extension(
+        let durable = session::transcript::latest_extension(
             entries,
             base::context::SESSION_STATE_NS,
             base::context::SESSION_STATE_EVENT,

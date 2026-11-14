@@ -519,7 +519,7 @@ impl Builder {
     }
     /// Inject a backing store for session transcript persistence. When set,
     /// the session's messages are incrementally appended to disk once per
-    /// turn (see `session::session::SessionManager::persist`); `None` (the
+    /// turn (see `session::transcript::Transcript::persist`); `None` (the
     /// default) keeps sessions purely in-memory.
     ///
     /// Requires the session id to be a valid `base::session::SessionId` —

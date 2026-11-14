@@ -7,7 +7,7 @@ impl Builder {
         &mut self,
         settings: &LoadedSettings,
         model: &Arc<dyn Model>,
-        session: &SessionManager,
+        session: &Transcript,
         exec: &base::interface::exec::ExecProviders,
     ) -> HookWiring {
         let delegator = crate::module::LateDelegator::default();
@@ -100,7 +100,7 @@ impl Builder {
         settings: &LoadedSettings,
         config: &Arc<base::context::EngineConfig>,
         scene: &SceneSpec,
-        session: &SessionManager,
+        session: &Transcript,
         hooks: &Arc<HookRunner>,
         instruction_file: Option<&PathBuf>,
         exec: base::interface::exec::ExecProviders,

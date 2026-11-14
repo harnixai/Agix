@@ -492,7 +492,7 @@ fn apply_entry_to_messages(entry: &LogEntry, messages: &mut Vec<Message>) {
             if let Some(replacement_history) = replacement_history {
                 *messages = replacement_history.clone();
                 // Note: stale usage zeroing is handled at the session level via
-                // SessionManager, not at the message projection level.
+                // Transcript, not at the message projection level.
             } else if let Some(summary) = summary {
                 messages.clear();
                 if !summary.is_empty() {

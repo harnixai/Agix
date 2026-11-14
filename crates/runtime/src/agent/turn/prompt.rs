@@ -120,7 +120,7 @@ impl PromptContext {
 /// schema.
 ///
 /// Both are re-sent on every API call, so they are part of the context
-/// budget even though `SessionManager::token_count()` — which counts message
+/// budget even though `Transcript::token_count()` — which counts message
 /// content only — cannot see them. Measured with the same tokenizer as
 /// everything else by wrapping each piece of text in a `Text` block, so this
 /// number is directly comparable to the message total rather than being a

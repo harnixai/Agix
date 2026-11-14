@@ -134,7 +134,7 @@ impl SessionPool {
         // First `Meta` line for a genuinely new primary session — resumed
         // sessions already have one from when they were first created, and
         // must not get a second (that would break the "Meta is always
-        // entries[0]" assumption `SessionManager::resume`/`session.resume`
+        // entries[0]" assumption `Transcript::resume`/`session.resume`
         // rely on). Best-effort: a write failure here doesn't fail session
         // creation — the session still works, it's just not identifiable by
         // scene/project on a later resume (falls back to inference, same as

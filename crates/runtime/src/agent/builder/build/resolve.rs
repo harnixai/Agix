@@ -139,8 +139,8 @@ impl Builder {
     pub(super) fn open_session(
         &self,
         settings: &LoadedSettings,
-    ) -> Result<SessionManager, EngineError> {
-        let mut session = SessionManager::new(
+    ) -> Result<Transcript, EngineError> {
+        let mut session = Transcript::new(
             self.host.history_store.clone(),
             self.spec.session_id.clone(),
             self.spec.parent_session_id.clone(),

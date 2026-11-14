@@ -14,7 +14,7 @@ use super::*;
 ///
 /// Best-effort: a failure here does not fail the spawn. The sub-agent still
 /// runs and its `User`/`Assistant` entries still persist via
-/// `SessionManager::persist` — it just isn't linkable back to its parent.
+/// `Transcript::persist` — it just isn't linkable back to its parent.
 pub(crate) async fn write_sidechain_meta(
     store: &Arc<dyn HistoryStore>,
     session_id: &str,

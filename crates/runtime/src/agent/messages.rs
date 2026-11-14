@@ -78,7 +78,7 @@ impl std::fmt::Display for ContextError {
 pub enum ContextRequest {
     /// What the next model call would carry, without making it.
     Inspect,
-    /// Blank out user messages or tool results (see `SessionManager::drop_message`).
+    /// Blank out user messages or tool results (see `Transcript::drop_message`).
     Drop {
         at: Vec<usize>,
         total: Option<usize>,

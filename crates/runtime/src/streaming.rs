@@ -94,7 +94,7 @@ impl StreamFailure {
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_stream<F, Fut, G>(
     stream: ModelStream,
-    session: &mut session::session::SessionManager,
+    session: &mut session::transcript::Transcript,
     event_tx: &EventSender,
     turn_id: String,
     execute_tool: F,
@@ -480,7 +480,7 @@ where
 
     async fn finish(
         mut self,
-        session: &mut session::session::SessionManager,
+        session: &mut session::transcript::Transcript,
         interceptors: &[Arc<dyn base::interface::model_interceptor::ModelInterceptor>],
     ) -> Result<StreamResult, StreamFailure> {
         match (&self.failure, &self.ended) {
@@ -727,7 +727,7 @@ fn close_text(pending: &mut String, reply: &mut Vec<ModelContentBlock>) {
 }
 
 fn write_reply(
-    session: &mut session::session::SessionManager,
+    session: &mut session::transcript::Transcript,
     reply: Vec<ModelContentBlock>,
     usage: Usage,
     mut results: Vec<(usize, ModelContentBlock)>,
@@ -764,7 +764,7 @@ fn write_reply(
 
 /// The model sees these as new instructions, not as tool output.
 fn inject_new_messages(
-    session: &mut session::session::SessionManager,
+    session: &mut session::transcript::Transcript,
     messages: &[serde_json::Value],
 ) {
     for msg in messages {
@@ -820,7 +820,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -892,7 +892,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -943,7 +943,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -995,7 +995,7 @@ mod tests {
             }),
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
         let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1064,7 +1064,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1130,7 +1130,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1175,7 +1175,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1230,7 +1230,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1306,7 +1306,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1381,7 +1381,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1458,7 +1458,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1512,7 +1512,7 @@ mod tests {
         ];
         let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
 
@@ -1541,7 +1541,7 @@ mod tests {
 
     async fn run_plain(
         stream: base::interface::model::ModelStream,
-        session: &mut session::session::SessionManager,
+        session: &mut session::transcript::Transcript,
         cancel: CancellationToken,
     ) -> Result<StreamResult, StreamFailure> {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1570,7 +1570,7 @@ mod tests {
             }),
             Err(ModelError::overloaded()),
         ];
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let failure = run_plain(
             Box::new(futures::stream::iter(events)),
             &mut session,
@@ -1587,7 +1587,7 @@ mod tests {
     /// fragment, with no stop reason and no usage, not an answer.
     #[tokio::test]
     async fn a_stream_that_ends_before_its_message_does_is_a_failure() {
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let failure = run_plain(
             Box::new(futures::stream::iter(vec![Ok(ModelEvent::TextDelta {
                 text: "NEVER-WHOLE".into(),
@@ -1636,7 +1636,7 @@ mod tests {
             }),
             Err(ModelError::stream_interrupted("stream interrupted")),
         ];
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let done = run_plain(
             Box::new(futures::stream::iter(events)),
             &mut session,
@@ -1672,7 +1672,7 @@ mod tests {
         })]));
         let stream: base::interface::model::ModelStream = Box::new(Box::pin(head.chain(tail)));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
         let done = tokio::time::timeout(
@@ -1727,7 +1727,7 @@ mod tests {
         });
         let stream: base::interface::model::ModelStream = Box::new(Box::pin(head.chain(tail)));
 
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let tx = crate::event_bus::EventBus::new(tx);
         let done = tokio::time::timeout(
@@ -1773,7 +1773,7 @@ mod tests {
         })]);
         let stream: base::interface::model::ModelStream =
             Box::new(head.chain(futures::stream::pending()));
-        let mut session = session::session::SessionManager::in_memory(None);
+        let mut session = session::transcript::Transcript::in_memory(None);
         let done = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             run_plain(stream, &mut session, cancel),

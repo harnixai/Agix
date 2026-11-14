@@ -21,7 +21,7 @@ fn png_b64() -> String {
 /// carrying the rendered text, plus whatever images were lifted out.
 fn tool_result_message(content: ToolResultContent) -> ModelMessage {
     let (text, images) = render_tool_result_content(content);
-    let mut session = session::session::SessionManager::in_memory(None);
+    let mut session = session::transcript::Transcript::in_memory(None);
     session.push_message(ModelMessage {
         role: MessageRole::User,
         content: vec![ModelContentBlock::ToolResult {
@@ -36,7 +36,7 @@ fn tool_result_message(content: ToolResultContent) -> ModelMessage {
     session.messages()[0].clone()
 }
 
-fn attach_images(session: &mut session::session::SessionManager, images: Vec<PendingToolImage>) {
+fn attach_images(session: &mut session::transcript::Transcript, images: Vec<PendingToolImage>) {
     session.attach_to_tool_results(
         images
             .into_iter()
@@ -131,7 +131,7 @@ fn image_only_result_gets_a_placeholder_text() {
 /// images are appended after *all* of them — never interleaved.
 #[test]
 fn images_are_appended_after_every_tool_result_block() {
-    let mut session = session::session::SessionManager::in_memory(None);
+    let mut session = session::transcript::Transcript::in_memory(None);
     session.push_message(ModelMessage {
         role: MessageRole::User,
         content: vec![
@@ -166,7 +166,7 @@ fn images_are_appended_after_every_tool_result_block() {
 /// `new_messages` pushed something after it.
 #[test]
 fn images_skip_past_later_injected_messages() {
-    let mut session = session::session::SessionManager::in_memory(None);
+    let mut session = session::transcript::Transcript::in_memory(None);
     session.push_message(ModelMessage {
         role: MessageRole::User,
         content: vec![ModelContentBlock::ToolResult {
