@@ -25,6 +25,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
     let mut config = base::context::EngineConfig::defaults_for("test");
     config.dangerously_disable_sandbox = true;
     let policy = permissions::policy::Policy::new(permissions::ruleset::RuleSet::new(rules));
+    let exec = crate::turn::exec_providers_from(&config, None);
     ToolExecCtx {
         tool_use_id: "toolu_skill".into(),
         tools: Arc::new(tools),
@@ -35,9 +36,15 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         telemetry_handle: telemetry::TelemetryHandle::noop(),
         turn_id: "test-turn".into(),
         cancel: tokio_util::sync::CancellationToken::new(),
-        hooks: Arc::new(hooks::HookRunner::new(Default::default())),
+        hooks: Arc::new(hooks::HookRunner::new(
+            Default::default(),
+            hooks::HookExec {
+                process: exec.process.clone(),
+                network: exec.network.clone(),
+            },
+        )),
         discontinued: Arc::default(),
-        exec: crate::turn::exec_providers_from(&config, None),
+        exec,
         config: Arc::new(config),
         permission: base::interface::permission::PermissionSet::without_grants(Arc::new(policy)),
         session_state: Arc::new(base::context::SessionState::for_tests(cwd.to_path_buf())),
