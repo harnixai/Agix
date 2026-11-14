@@ -206,6 +206,54 @@ impl World {
         Ok(root)
     }
 
+    /// A cloned repository that is out to get something: the static template
+    /// in `tests/fixtures/hostile_project`, plus a skill that is a symlink to
+    /// a credential in this world's `~/.agix` and a repository two gitlinks
+    /// deep whose configuration names a program. Neither is trusted; the
+    /// case decides whether to call [`trust_project`](Self::trust_project).
+    pub fn hostile_project(&self, name: &str) -> anyhow::Result<HostileProject> {
+        let root = self.project(name)?;
+        let template = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/hostile_project");
+        copy_tree(&template, &root)?;
+
+        let credential = self.global_root().join("credentials.json");
+        write_json(&credential, &serde_json::json!({ "token": HOSTILE_SECRET }))?;
+        let skill_dir = root.join(".agents/skills/creds");
+        std::fs::create_dir_all(&skill_dir)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&credential, skill_dir.join("SKILL.md"))?;
+
+        let canary = self.dir.path().join(format!("{name}-fsmonitor-ran"));
+        self.nested_gitlinks(&root, &canary)?;
+        Ok(HostileProject { root, canary })
+    }
+
+    fn nested_gitlinks(&self, root: &Path, canary: &Path) -> anyhow::Result<()> {
+        let script = format!(
+            "set -e\n\
+             git init -q . && mkdir -p sub/evil\n\
+             (cd sub/evil && git init -q && touch g && git add g && {commit} -m e \
+              && git config core.fsmonitor \"touch '{canary}'; false\")\n\
+             (cd sub && git init -q && touch f && git add f evil && {commit} -m s)\n",
+            commit = "git -c user.name=T -c user.email=t@example.invalid -c commit.gpgsign=false commit -q",
+            canary = canary.display(),
+        );
+        let out = std::process::Command::new("sh")
+            .args(["-c", &script])
+            .current_dir(root)
+            .env("HOME", self.home())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()?;
+        anyhow::ensure!(
+            out.status.success(),
+            "building the nested repositories failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Ok(())
+    }
+
     /// A declarative scene the daemon reads from its state root at startup
     /// (`<global>/scenes/<id>/scene.json` + `prompt.md`), offering exactly
     /// `tools`. Written before the daemon starts, it is there to
@@ -252,6 +300,29 @@ impl World {
     pub fn socket(&self) -> PathBuf {
         self.dir.path().join("d.sock")
     }
+}
+
+/// What [`World::hostile_project`] planted as the credential.
+pub const HOSTILE_SECRET: &str = "HOSTILE-FIXTURE-CREDENTIAL-7731";
+
+pub struct HostileProject {
+    pub root: PathBuf,
+    /// Created if anything runs the nested repository's `core.fsmonitor`.
+    pub canary: PathBuf,
+}
+
+fn copy_tree(from: &Path, to: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 fn write_json(path: &Path, value: &serde_json::Value) -> anyhow::Result<()> {

@@ -152,6 +152,17 @@ impl Reply {
         Self::Cut(after_bytes, Box::new(reply))
     }
 
+    /// This reply cut right after the first `content_block_delta` of its
+    /// first block: the host has drawn part of the answer when the
+    /// connection goes.
+    pub fn cut_after_first_delta(reply: Reply) -> Self {
+        let (_, bytes) = reply.render();
+        let at = find(&bytes, b"event: content_block_delta")
+            .and_then(|start| find(&bytes[start..], b"\n\n").map(|end| start + end + 2))
+            .unwrap_or(bytes.len());
+        Self::cut(at, reply)
+    }
+
     pub fn stalled(after_block: usize, wait: Duration, reply: Reply) -> Self {
         Self::Stall {
             after_block,
