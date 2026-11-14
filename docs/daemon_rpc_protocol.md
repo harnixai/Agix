@@ -805,6 +805,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
         "details": { "permission_mode":"default" } },
       { "name":"settings.hooks_fail_open",  "status":"ok", "summary":"no hooks configured" },
       { "name":"sandbox.network_allowlist", "status":"ok", "summary":"sandbox.network_mode is not allowlist" },
+      { "name":"sandbox.egress_proxy",      "status":"ok", "summary":"sandbox.network_mode is not proxy" },
       { "name":"build.panic",               "status":"ok", "summary":"…",
         "details": { "panic":"…" } },
       { "name":"sandbox.strict_profile",    "status":"…",  "summary":"…" } ] },
@@ -956,6 +957,13 @@ daemon 自己的会话池还有一项 `sandbox.unattended_network`:这个 daemon
 `ARCHITECTURE.md` §6.3);`sandbox.require_enforcement` 开着时 `summary` 另外说明每条沙箱命令都会
 被拒。其余情况是 `ok`。`details` 是 `{"unreachable_from_the_sandbox": [...], "require_enforcement": false}`,
 不是 `allowlist` 时 `details` 为 `null`。
+
+`sandbox.egress_proxy`:`sandbox.network_mode` 是 `proxy` 时,用一条探测命令问会话的沙箱能否把命令
+只限到代理上:能是 `ok`;只能部分做到(macOS 上代理不在本机、只能按端口限;Linux 上找不到 `socat`、
+中继起不来而整个断网;代理端口就是 daemon 自己的端口)是 `degraded`,`summary` 与 `details.unmet`
+列出原因;`egress_proxy` 缺失或读不出(命令整个断网)是 `failing`。设了 `egress_proxy` 而模式不是
+`proxy` 也是 `degraded`(地址被忽略)。`details` 是 `{"network_mode", "http", "socks", "enforcement",
+"unmet"}`(后两项只在探测过时有);两者都没设时 `details` 为 `null`。
 
 `sandbox.strict_profile`:自动放行的命令(只读通道)跑在严格 profile 里——断网、只能写会话的
 `TMPDIR`、只能读可读根和系统目录、只带最小环境变量。这台机器的沙箱兑现不了它(没有后端、Linux 上没有

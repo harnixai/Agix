@@ -908,6 +908,22 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
    给它的就是这个值),继承来的环境里没有别的 server、provider 的密钥。一个 server 要用的密钥
    写进它自己的 `env`,不要靠继承。
 
+**沙箱里的命令出网只经宿主指定的代理(`network_mode: proxy`)。** 按域名过滤、凭据掩码、TLS
+终止都是下游代理的事,内核只守一条两个后端都兑现得了的边界:命令只能连到 `sandbox.egress_proxy`
+的端口,并拿到指向它的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`(大小写各一份,由
+`PlatformSandbox::confine` 加在命令自己的 `ProcessSpec.env` 之后,所以盖过继承来的同名变量,也不受
+`subprocess_env` 的 `allowlist` 剔除)。变量只是方便,`unset` 掉直连照样连不出去。
+macOS 是 `(deny network*)` 后只放开 `localhost:<代理端口>`(覆盖 `127.0.0.1` 与 `::1`);代理不在
+回环上时 profile 只能写 `*:<端口>`,报 `Partial`。Linux 是 `--unshare-net`,再把一个 unix socket
+绑进命令的 `/tmp`:socket 由 daemon 进程里的中继(`platform::sandbox::egress::relay`,按代理地址
+惰性起一个、随进程存活)转发到代理,命名空间里用 `socat` 把它还原成 `127.0.0.1:<代理端口>`;
+系统目录里没有 `socat`、中继起不来时照 `deny_all` 断网,报 `Partial`。代理端口是 daemon 自己的端口
+时两边都拒(中继每个连接都再查一次围栏表)。没配 `egress_proxy` 时断网,`unmet` 写明;配了而模式
+不是 `proxy` 时地址被忽略。项目层设置不能写 `egress_proxy`,`network_mode` 只能收紧到
+`deny_all`(`proxy` 与 `allowlist` 不能互换)。`WebFetch` / `Ping` 不走代理,照第 2 条按
+`allowed_domains` 判——下游代理管不到工具自己的出网。`daemon.doctor` 的 `sandbox.egress_proxy`
+报沙箱兑现了多少。
+
 沙箱是**轻量限制,不是安全隔离**。已知逃逸路径写在
 `crates/platform/src/sandbox/mod.rs` 的模块头里,五条;第 3 条对引擎自己的
 git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git;第 4 条(让别的进程替命令
@@ -1496,8 +1512,8 @@ TCP / WebSocket 靠 token:子进程环境里没有 `AGIX_DAEMON_TOKEN`,但 `--to
 原语,所以 `fence_port` 在 Linux 上什么也不做:网络开着(`network_mode: unrestricted`,缺省)时,
 沙箱里的命令连得上 daemon 的 TCP / WebSocket 端口,也连得上本机任何监听回环的服务。挡住它的只有
 token——子进程环境里没有 `AGIX_DAEMON_TOKEN`。要在 Linux 上把这条路也断掉,用
-`network_mode: deny_all` 或 `allowlist`(两者在 bwrap 上都是整个断网),或者不开 TCP /
-WebSocket、只用 unix socket。
+`network_mode: deny_all`、`allowlist` 或 `proxy`(三者在 bwrap 上都是整个断网,`proxy` 只经中继
+连到代理),或者不开 TCP / WebSocket、只用 unix socket。
 
 **沙箱不按域名放行。** `network_mode: allowlist` 对 `WebFetch` / `Ping` 是"只去
 `sandbox.allowed_domains` 列出的主机",对沙箱里的 `Bash` / `Monitor` 命令则两个后端都做不到:
@@ -1507,7 +1523,8 @@ sandbox-exec 的 profile 里远端主机只能写 `*` 或 `localhost`,写了别�
 除外);Linux 上整个断网,命令只有自己网络命名空间里的回环。名单里的域名两边都连不上,后端报
 `Partial`,`unmet` 里列出这些域名:`sandbox.require_enforcement` 打开时每条沙箱命令都被拒,
 无人值守的自动放行要求 `Full`,也不放行。`daemon.doctor` 的 `sandbox.network_allowlist` 在名单里
-有回环以外的条目时报 degraded。按域名放行得另起一个本机代理,现在没有。
+有回环以外的条目时报 degraded。按域名放行用 `network_mode: proxy`(§5):命令只能连宿主起的
+代理,域名由代理过滤。
 
 命令没有控制终端:本机 provider 让它领一个新会话(§5 第 4 条),所以它打不开 `/dev/tty`,
 也就没法用 `TIOCSTI` 往 daemon 所在的终端里塞按键(CVE-2017-5226 那一类)。引擎自己跑的 git

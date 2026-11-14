@@ -2,8 +2,8 @@
 //! facts that are legitimate but that an operator should have seen written
 //! down — a permission mode that never asks, hooks that fail open, unattended
 //! commands with an open network, a network allowlist the OS sandbox cannot
-//! honour, a strict profile the sandbox cannot hold, a build whose panics
-//! end the process.
+//! honour, an egress proxy it holds only in part, a strict profile the
+//! sandbox cannot hold, a build whose panics end the process.
 
 use base::interface::exec::NetworkMode;
 use base::interface::exec::{ConfinementReport, Enforcement, ProcessSpec, Sandbox, SandboxPolicy};
@@ -197,6 +197,74 @@ impl HealthCheck for NetworkAllowlistCheck {
     }
 }
 
+/// `network_mode: proxy` is a promise both backends can keep, but not
+/// everywhere: a proxy off this machine (macOS), no `socat` (Linux), no
+/// proxy configured at all. What the session's sandbox makes of it is what
+/// this reports.
+pub struct EgressProxyCheck {
+    settings: Arc<LoadedSettings>,
+    sandbox: Arc<dyn Sandbox>,
+}
+
+impl EgressProxyCheck {
+    pub fn new(settings: Arc<LoadedSettings>, sandbox: Arc<dyn Sandbox>) -> Self {
+        Self { settings, sandbox }
+    }
+}
+
+impl HealthCheck for EgressProxyCheck {
+    fn name(&self) -> &str {
+        "sandbox.egress_proxy"
+    }
+
+    fn check(&self) -> CheckResult {
+        let config = &self.settings.values.sandbox;
+        let proxy = config.egress_proxy.as_ref().map(|p| &p.0);
+        let mut details = serde_json::json!({
+            "network_mode": config.network_mode,
+            "http": proxy.map(|p| p.http.to_string()),
+            "socks": proxy.and_then(|p| p.socks).map(|s| s.to_string()),
+        });
+        if config.network_mode != NetworkMode::Proxy {
+            return match proxy {
+                Some(_) => CheckResult::degraded(
+                    "sandbox.egress_proxy is set but sandbox.network_mode is not proxy, so it \
+                     is ignored",
+                )
+                .with_details(details),
+                None => CheckResult::ok("sandbox.network_mode is not proxy"),
+            };
+        }
+        if proxy.is_none() {
+            return CheckResult::failing(
+                "sandbox.network_mode is proxy but sandbox.egress_proxy is missing or did not \
+                 read: sandboxed commands run with the network cut",
+            )
+            .with_details(details);
+        }
+        if config.dangerously_disable_sandbox {
+            return CheckResult::degraded(
+                "sandbox.dangerously_disable_sandbox is on: nothing holds commands to the proxy",
+            )
+            .with_details(details);
+        }
+        let policy = self.settings.engine_config().sandbox.policy();
+        let probe = ProcessSpec::new("bash", std::env::temp_dir()).args(["-c", "true"]);
+        let report = ConfinementReport::probe(&*self.sandbox, probe, &policy, false, false);
+        details["enforcement"] = format!("{:?}", report.session).to_lowercase().into();
+        details["unmet"] = report.session_unmet.clone().into();
+        if report.session == Enforcement::Full {
+            return CheckResult::ok("sandboxed commands reach only the egress proxy")
+                .with_details(details);
+        }
+        CheckResult::degraded(format!(
+            "the OS sandbox holds sandboxed commands to the egress proxy only in part: {}",
+            report.session_unmet.join("; ")
+        ))
+        .with_details(details)
+    }
+}
+
 /// A command let through without asking — the read-only lane — runs under the
 /// strict profile: no network, nothing writable but the session's `TMPDIR`,
 /// little readable. Where the sandbox cannot hold that profile the lane stays
@@ -313,6 +381,54 @@ mod tests {
                 unmet: Vec::new(),
             }
         }
+    }
+
+    struct HoldsProxy(Enforcement);
+
+    impl Sandbox for HoldsProxy {
+        fn confine(
+            &self,
+            spec: ProcessSpec,
+            policy: &SandboxPolicy,
+        ) -> base::interface::exec::Confined {
+            let proxied =
+                policy.network_mode == NetworkMode::Proxy && policy.egress_proxy.is_some();
+            let enforcement = if proxied { self.0 } else { Enforcement::Full };
+            base::interface::exec::Confined {
+                spec,
+                mode: base::interface::exec::SandboxMode::LinuxBwrap,
+                enforcement,
+                unmet: match enforcement {
+                    Enforcement::Full => Vec::new(),
+                    _ => vec!["egress proxy: socat not found".into()],
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn the_egress_proxy_check_reports_what_the_sandbox_makes_of_it() {
+        let check = |mode: NetworkMode, proxy: Option<&str>, held: Enforcement| {
+            let settings = settings_with(|s| {
+                s.sandbox.network_mode = mode;
+                s.sandbox.egress_proxy = proxy.map(|p| serde_json::from_value(p.into()).unwrap());
+            });
+            EgressProxyCheck::new(settings, Arc::new(HoldsProxy(held))).check()
+        };
+        let proxy = Some("127.0.0.1:3128");
+        let unrestricted = check(NetworkMode::Unrestricted, None, Enforcement::Full);
+        assert_eq!(unrestricted.status.label(), "ok");
+        let missing = check(NetworkMode::Proxy, None, Enforcement::Full);
+        assert_eq!(missing.status.label(), "failing", "{missing:?}");
+        let held = check(NetworkMode::Proxy, proxy, Enforcement::Full);
+        assert_eq!(held.status.label(), "ok", "{held:?}");
+        let partial = check(NetworkMode::Proxy, proxy, Enforcement::Partial);
+        assert_eq!(partial.status.label(), "degraded");
+        assert!(partial.summary.contains("socat not found"), "{partial:?}");
+        assert_eq!(partial.details["unmet"][0], "egress proxy: socat not found");
+        let ignored = check(NetworkMode::DenyAll, proxy, Enforcement::Full);
+        assert_eq!(ignored.status.label(), "degraded");
+        assert!(ignored.summary.contains("ignored"), "{ignored:?}");
     }
 
     #[test]

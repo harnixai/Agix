@@ -486,7 +486,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `disable_skill_shell_execution` | `false` | skill 正文里的 `` !`cmd` `` 换成一行说明,不执行 |
 | `team.enabled` | `false` | 给场景支持团队(`code`、`harnix`)的会话注册 `TeamCreate` / `TeamList` / `TeamDelete` |
 | `team.member_idle_timeout_secs` | `1800` | 团队成员空闲这么久就停掉 |
-| `sandbox.network_mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all` 或 `allowlist`(`sandbox.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网) |
+| `sandbox.network_mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all`、`allowlist`(`sandbox.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网)或 `proxy`——要按域名过滤,在前面放一个代理 |
+| `sandbox.egress_proxy` | 无 | `proxy` 模式下沙箱里的命令唯一能连的地址(`"127.0.0.1:3128"`,或 `{"http", "socks", "no_proxy"}`),经 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 告诉命令;代理不在本机时 macOS 只能按端口限,Linux 要 `socat`,没有就整个断网 |
 
 | 变量 | 作用 |
 |---|---|

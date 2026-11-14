@@ -591,7 +591,8 @@ A few switches whose effect the rest of this README does not mention:
 | `disable_skill_shell_execution` | `false` | a skill body's `` !`cmd` `` is replaced by a notice instead of run |
 | `team.enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |
 | `team.member_idle_timeout_secs` | `1800` | a team member idle this long is stopped |
-| `sandbox.network_mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, or `allowlist` (`sandbox.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux) |
+| `sandbox.network_mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, `allowlist` (`sandbox.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux), or `proxy` — to filter by domain, put a proxy in front |
+| `sandbox.egress_proxy` | none | under `proxy`, the only address a sandboxed command may connect to (`"127.0.0.1:3128"`, or `{"http", "socks", "no_proxy"}`), named to it in `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; macOS holds a proxy off this machine only to its port, Linux needs `socat` and cuts the network without it |
 
 | Variable | Purpose |
 |---|---|
