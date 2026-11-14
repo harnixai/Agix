@@ -375,6 +375,19 @@ MCP）、`.agents/skills/`、`AGENTS.md`。用例跑之前会整个拷贝到临�
 这份原件。`tests/fixtures/scripts/` 是脚本载体九个点各自的 fixture，
 `tests/fixtures/scripts_outside/` 那一个故意放在项目根之外，用来验出身判定。
 
+对抗输入的 fixture：
+
+- `tests/fixtures/hooks/`：行为各异的 command hook 脚本（拒绝、乱码、超时、巨大 stdout、
+  留后台进程、只读一半 stdin），用例经 `blackbox::hook_fixture(name)` 取路径，清单见目录里的 README。
+- `tests/fixtures/hostile_project/`：恶意仓库的静态部分（注入式 `AGENTS.md`、想放宽授权的
+  skill、想比会话更宽的 agent 类型）；`World::hostile_project` 拷贝它，再补指向全局凭据的符号链接
+  skill 和两层深的嵌套仓库。`LiveRunBuilder::untrusted()` 让项目保持未信任。
+- `tests/fixtures/hostile_plugins/`：`register` 里 panic、工具 panic、`health_check` 阻塞、
+  与内建同名的 Rust 插件，经 `Host { plugins }` 装进本进程 daemon。
+- `plugin_fixture::zip_with_entries`：按条目名原样打 zip，造 `../escape`、绝对路径、符号链接、
+  高压缩比条目。
+- `Reply::cut_after_first_delta`：流在第一个文本增量之后断开，宿主已经画出了一部分。
+
 ## 磁盘
 
 一次干净构建 **~13 GB**，这不是浪费：每个集成测试文件都是一个独立二进制，静态链接
