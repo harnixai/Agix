@@ -6,7 +6,7 @@ file  crates/assembly/src/plugins.rs                             -              
 file  crates/compaction/src/compact.rs                           -                                      1006
 file  crates/core/src/interface/catalog.rs                       -                                      842
 file  crates/mcp/src/connect.rs                                  -                                      1371
-file  crates/mcp/src/manager.rs                                  -                                      1280
+file  crates/mcp/src/manager.rs                                  -                                      1237
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
 file  crates/session/src/transcript.rs                           -                                      924
 file  crates/telemetry/src/recorder/mod.rs                       -                                      943
@@ -39,7 +39,7 @@ fn    crates/hooks/src/runner/executor.rs                        HookRunner::exe
 fn    crates/hooks/src/runner/executor.rs                        project_supplied                       90
 fn    crates/hooks/src/runner/rewake.rs                          HookRunner::check_rewakes              81
 fn    crates/mcp/src/config.rs                                   McpServerConfig::confined_to_own_env   90
-fn    crates/mcp/src/manager.rs                                  McpManager::connect_all_within         106
+fn    crates/mcp/src/manager.rs                                  McpManager::connect_all_within         103
 fn    crates/mcp/src/oauth/mod.rs                                McpAuth::transport_manager             90
 fn    crates/mcp/src/oauth/start.rs                              McpAuth::start                         91
 fn    crates/mcp/src/oauth/unattended.rs                         McpAuth::exchange_enterprise_identity  95
@@ -51,9 +51,9 @@ fn    crates/platform/src/process.rs                             LocalProcess::s
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
-fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      87
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         102
-fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   97
+fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      86
+fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         101
+fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   96
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       84
 fn    crates/runtime/src/agent/turn/attachments.rs               resolve_attachments                    94

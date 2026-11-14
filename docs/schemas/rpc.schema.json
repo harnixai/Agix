@@ -87,7 +87,7 @@
       "description": "Something the user attached to their message — a pasted screenshot, a\ndragged-in file, an editor selection.\n\nThe variants below are the three shapes hosts actually have, so that a host\ncan hand over whichever it already holds instead of being forced to pre-read\n(or pre-decode) on the runtime's behalf.",
       "oneOf": [
         {
-          "description": "A path the runtime should read. Images (by extension) become\n[`ModelContentBlock::Image`]; anything else is inlined as text.\nUse this when the host only has a path — e.g. a drag-and-drop.",
+          "description": "A path the runtime should read. Images (by extension) become\n[`ModelContentBlock::Image`], `.pdf` into [`ModelContentBlock::Document`];\nanything else is inlined as text.\nUse this when the host only has a path — e.g. a drag-and-drop.",
           "properties": {
             "kind": {
               "const": "file",
@@ -136,6 +136,34 @@
             },
             "media_type": {
               "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "media_type",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A PDF the host already encoded. `data` is base64 without a data-URI\nprefix; `name` is the label the model and the provider see.",
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "document",
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -650,6 +678,28 @@
             },
             "type": {
               "const": "image",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/ImageSource"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "document",
               "type": "string"
             }
           },
