@@ -186,13 +186,24 @@
       },
       "type": "object"
     },
-    "NetworkModeConfig": {
-      "enum": [
-        "unrestricted",
-        "deny_all",
-        "allowlist"
-      ],
-      "type": "string"
+    "NetworkMode": {
+      "oneOf": [
+        {
+          "const": "unrestricted",
+          "description": "Unrestricted outbound (default; Bash often needs `curl` / `npm install`).",
+          "type": "string"
+        },
+        {
+          "const": "deny_all",
+          "description": "No outbound network access at all (DNS resolution via the OS\nresolver still works on macOS — it's IPC to `mDNSResponder`, not a\nraw socket the sandbox profile's `network*` filter covers — but no\nTCP/UDP connection actually reaching the network is permitted).",
+          "type": "string"
+        },
+        {
+          "const": "allowlist",
+          "description": "Outbound restricted to `SandboxPolicy::allowed_domains`. Neither\nbackend can filter by domain: macOS lets through localhost when the\nlist names it and nothing else, Linux cuts the network entirely, and\nboth report the domains they could not allow as unmet. DNS resolution\nstill works on macOS (same rationale as `DenyAll`).",
+          "type": "string"
+        }
+      ]
     },
     "PathStyle": {
       "description": "How file tools word the paths the model reads: in tool descriptions and in\nthe paths Grep, Glob, Write and Edit print. Resolving a path the model\npasses in is the same in both styles (relative against the working\ndirectory, absolute as is).",
@@ -524,7 +535,7 @@
           "type": "array"
         },
         "network_mode": {
-          "$ref": "#/$defs/NetworkModeConfig",
+          "$ref": "#/$defs/NetworkMode",
           "default": "unrestricted",
           "description": "Outbound network policy for sandboxed `Bash` commands."
         },
