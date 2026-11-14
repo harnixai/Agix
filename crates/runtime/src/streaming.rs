@@ -24,6 +24,10 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+mod stop;
+use stop::Stop;
+pub(crate) use stop::{ABANDONED_BY_SIBLING, CANCELLED_WITH_THE_TURN};
+
 /// What a stream that ended without its message's end is reported as.
 pub const INCOMPLETE_STREAM: &str = "the response ended before the model finished it";
 
@@ -128,50 +132,6 @@ where
 }
 
 type ToolDone = (usize, String, base::interface::tool_middleware::ToolOutcome);
-
-/// The error a concurrent call stands on when a sibling's error abandons it.
-pub(crate) const ABANDONED_BY_SIBLING: &str = "cancelled by sibling error";
-
-/// The error a call stands on when its turn was cancelled before it finished.
-pub(crate) const CANCELLED_WITH_THE_TURN: &str =
-    "cancelled: the turn was stopped before the call finished";
-
-/// The turn's token, and how long a call still running when it fires is
-/// given to end on its own before it is dropped.
-#[derive(Clone)]
-struct Stop {
-    token: CancellationToken,
-    grace: std::time::Duration,
-}
-
-impl Stop {
-    async fn past_grace(&self) {
-        self.token.cancelled().await;
-        tokio::time::sleep(self.grace).await;
-    }
-
-    /// `call`'s outcome, or a cancellation once the grace has passed: a tool
-    /// that ignores its token cannot hold a cancelled turn open.
-    async fn bound<Fut>(&self, call: Fut) -> base::interface::tool_middleware::ToolOutcome
-    where
-        Fut: Future<Output = base::interface::tool_middleware::ToolOutcome>,
-    {
-        tokio::select! {
-            biased;
-            outcome = call => outcome,
-            _ = self.past_grace() => Err(CANCELLED_WITH_THE_TURN.to_string()),
-        }
-    }
-
-    fn abandoned(&self) -> String {
-        if self.token.is_cancelled() {
-            CANCELLED_WITH_THE_TURN
-        } else {
-            ABANDONED_BY_SIBLING
-        }
-        .to_string()
-    }
-}
 
 struct StreamState<'a, F, G> {
     stream: ModelStream,

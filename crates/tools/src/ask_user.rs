@@ -90,10 +90,8 @@ impl Tool for AskUserQuestionTool {
             "options": input.options.iter().map(|o| json!({"key": o.key, "label": o.label})).collect::<Vec<_>>(),
         });
 
-        let within = match ctx.config.permission_prompt_timeout_secs {
-            0 => None,
-            secs => Some(Duration::from_secs(secs)),
-        };
+        let secs = ctx.config.permission_prompt_timeout_secs;
+        let within = (secs > 0).then(|| Duration::from_secs(secs));
         let asked = match &ctx.elicitation {
             Some(asker) => Some(
                 asker.ask_within(
