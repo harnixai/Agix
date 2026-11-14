@@ -69,8 +69,8 @@ impl DefaultDaemonPaths {
     pub fn from_env(scope: &str) -> Self {
         let global_root = if let Ok(p) = std::env::var("AGIX_CONFIG_HOME") {
             PathBuf::from(p)
-        } else if let Some(home) = std::env::var_os("HOME") {
-            PathBuf::from(home).join(".agix")
+        } else if let Some(home) = base::paths::home_dir() {
+            home.join(".agix")
         } else {
             PathBuf::from("/tmp/agix")
         };

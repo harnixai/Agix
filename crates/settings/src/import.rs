@@ -14,8 +14,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Iso8601;
-use time::OffsetDateTime;
 
 use base::text::frontmatter::{extract_yaml_field, split_frontmatter};
 
@@ -243,12 +241,6 @@ pub async fn already_decided(cwd: &Path) -> bool {
     )
 }
 
-fn now_iso() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Iso8601::DEFAULT)
-        .unwrap_or_else(|_| "unknown".to_string())
-}
-
 /// Record that `chosen` was imported. Called after a successful
 /// `execute_import()`.
 pub async fn mark_imported(
@@ -257,7 +249,7 @@ pub async fn mark_imported(
     chosen: ImportSourceKind,
 ) -> std::io::Result<()> {
     let marker = ImportedMarker {
-        decided_at: Some(now_iso()),
+        decided_at: Some(base::clock::now_rfc3339()),
         decision: Some("imported".to_string()),
         source: Some(chosen.as_str().to_string()),
         sources_seen: sources_seen
@@ -278,7 +270,7 @@ pub async fn mark_skipped(
     reason: Option<String>,
 ) -> std::io::Result<()> {
     let marker = ImportedMarker {
-        decided_at: Some(now_iso()),
+        decided_at: Some(base::clock::now_rfc3339()),
         decision: Some("skipped".to_string()),
         source: None,
         sources_seen: sources_seen
@@ -398,7 +390,7 @@ async fn merge_into_agents_md(
 /// Parameterized by `tag` so different import sources don't collide with each other's
 /// sections in the same `AGENTS.md`.
 fn merge_marked_section(existing: &str, new_content: &str, tag: &str) -> String {
-    let ts = now_iso();
+    let ts = base::clock::now_rfc3339();
     let begin = format!("<!-- IMPORTED_FROM_{tag}_BEGIN -->");
     let end = format!("<!-- IMPORTED_FROM_{tag}_END -->");
     let header = format!("<!-- IMPORTED_FROM_{tag}_AT: {ts} -->\n{begin}\n{new_content}");

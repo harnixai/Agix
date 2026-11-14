@@ -10,8 +10,6 @@ use base::session::SessionId;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub use base::clock::now_rfc3339;
-
 const PROJECT_SESSION_SCHEMA_VERSION: u32 = 1;
 const SESSION_METADATA_SCHEMA_VERSION: u32 = 1;
 

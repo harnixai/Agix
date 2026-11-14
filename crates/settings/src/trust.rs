@@ -192,13 +192,9 @@ pub fn exact_pattern(root: &Path) -> String {
         .collect()
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "`~/` in a trust pattern means this machine's home, the same `~` permission rules expand"
-)]
 fn expand_home(pattern: &str) -> String {
-    match (pattern.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => Path::new(&home).join(rest).display().to_string(),
+    match (pattern.strip_prefix("~/"), base::paths::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest).display().to_string(),
         _ => pattern.to_string(),
     }
 }

@@ -466,19 +466,9 @@ fn lock_dir(dir: &Path) -> Result<base::dir_lock::DirLock, MemoryError> {
         .map_err(|e| MemoryError::Io(format!("{}: {e}", dir.display())))
 }
 
-/// Write `contents` to `path` so a reader sees the old file or the new one,
-/// never a truncated one. The temporary name does not end in `.md`, so a
-/// directory scan never mistakes it for a memory.
 fn write_replacing(path: &Path, contents: &str) -> Result<(), MemoryError> {
-    let io = |e: std::io::Error| MemoryError::Io(e.to_string());
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(".tmp-{}", std::process::id()));
-    let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, contents).map_err(io)?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        io(e)
-    })
+    base::fs::write_atomic(path, contents.as_bytes(), base::fs::WriteOpts::DURABLE)
+        .map_err(|e| MemoryError::Io(e.to_string()))
 }
 
 impl MemoryStorage for MemoryStore {
@@ -948,7 +938,7 @@ It can have multiple lines."#;
         let stray: Vec<_> = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
-            .filter(|e| e.file_name().to_string_lossy().contains(".tmp-"))
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(stray.is_empty(), "{stray:?}");
     }

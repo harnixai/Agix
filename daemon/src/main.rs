@@ -670,7 +670,7 @@ fn instance_entry(
         token_file: token_file.map(|f| f.path().to_path_buf()),
         scenes,
         protocol_version: daemon::discovery::INSTANCE_PROTOCOL_VERSION,
-        started_at: history::project::now_rfc3339(),
+        started_at: base::clock::now_rfc3339(),
     }
 }
 

@@ -299,14 +299,14 @@ impl SkillManager {
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .push(Tier {
-                root: canonicalize_lossy(dir),
+                root: base::path::resolve_physically(dir),
                 source,
                 nested,
             });
     }
 
     fn locate(&self, path: &Path) -> Located {
-        let path = canonicalize_lossy(path);
+        let path = base::path::resolve_physically(path);
         let tiers = self.tiers.read().unwrap_or_else(PoisonError::into_inner);
         let mut inside = false;
         for (index, tier) in tiers.iter().enumerate().rev() {
@@ -655,11 +655,11 @@ impl SkillManager {
     /// tier's non-skill files (a skill's own `reference.md`) are ignored.
     pub fn reload_skill(&self, path: &Path) -> Result<(), String> {
         if !path.exists() {
-            let target = canonicalize_lossy(path);
+            let target = base::path::resolve_physically(path);
             let mut skills = self.skills.write().unwrap_or_else(PoisonError::into_inner);
             let mut owners = self.owners.write().unwrap_or_else(PoisonError::into_inner);
             skills.retain(|name, info| {
-                let keep = canonicalize_lossy(&info.path) != target;
+                let keep = base::path::resolve_physically(&info.path) != target;
                 if !keep {
                     owners.remove(name);
                 }
@@ -678,9 +678,9 @@ impl SkillManager {
             }
             Located::Elsewhere => {
                 let name = name_from_layout(path)?;
-                let same_file = self
-                    .get(&name)
-                    .filter(|s| canonicalize_lossy(&s.path) == canonicalize_lossy(path));
+                let same_file = self.get(&name).filter(|s| {
+                    base::path::resolve_physically(&s.path) == base::path::resolve_physically(path)
+                });
                 (name, same_file.map_or(SkillSource::Project, |s| s.source))
             }
         };
@@ -711,7 +711,7 @@ impl SkillManager {
         let Some(existing) = self.get(name) else {
             return false;
         };
-        if canonicalize_lossy(&existing.path) == canonicalize_lossy(path) {
+        if base::path::resolve_physically(&existing.path) == base::path::resolve_physically(path) {
             return false;
         }
         matches!(self.locate(&existing.path), Located::Skill { tier: held, .. } if held > tier)
@@ -731,41 +731,6 @@ fn name_from_layout(path: &Path) -> Result<String, String> {
         .and_then(|s| s.to_str())
         .map(str::to_string)
         .ok_or_else(|| format!("Cannot determine skill name: {}", path.display()))
-}
-
-/// Resolve `p` to a comparable canonical form even when `p` itself no longer
-/// exists on disk (the delete case: `fs::canonicalize` requires the full
-/// path to exist). Walks up to the nearest existing ancestor, canonicalizes
-/// that, then reattaches the (possibly-gone) suffix. Falls back to `p`
-/// unchanged if no ancestor exists (e.g. already deleted down to the root).
-///
-/// Needed because on macOS `/tmp` is a symlink to `/private/tmp`, and the
-/// `notify` crate's FSEvents backend reports delete events using the
-/// resolved `/private/tmp/...` form regardless of which form was passed to
-/// `watch()` — while the initial directory scan (`load_dir`/
-/// `load_dir_subdirs`) stores whatever unresolved form the caller's project
-/// root was built from. Without normalizing both sides, a deleted skill's
-/// watcher event never string-matches its stored `SkillInfo::path`, so
-/// `reload_skill`'s "file's gone, evict it" branch silently no-ops.
-fn canonicalize_lossy(p: &Path) -> PathBuf {
-    let mut suffix: Vec<std::ffi::OsString> = Vec::new();
-    let mut cur = p;
-    loop {
-        if let Ok(canon) = cur.canonicalize() {
-            let mut result = canon;
-            for part in suffix.iter().rev() {
-                result.push(part);
-            }
-            return result;
-        }
-        match (cur.file_name(), cur.parent()) {
-            (Some(name), Some(parent)) => {
-                suffix.push(name.to_os_string());
-                cur = parent;
-            }
-            _ => return p.to_path_buf(),
-        }
-    }
 }
 
 impl Default for SkillManager {

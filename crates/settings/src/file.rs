@@ -100,14 +100,11 @@ impl SettingsDir {
                 path: path.clone(),
                 source,
             })?;
-        let tmp = self
-            .lock
-            .dir()
-            .join(format!(".{file}.{}.tmp", std::process::id()));
-        let written = write_new(&tmp, body.as_bytes(), mode_for(file, &path))
-            .and_then(|()| std::fs::rename(&tmp, &path));
-        if let Err(source) = written {
-            let _ = std::fs::remove_file(&tmp);
+        let opts = base::fs::WriteOpts {
+            mode: mode_for(file, &path),
+            fsync: true,
+        };
+        if let Err(source) = base::fs::write_atomic(&path, body.as_bytes(), opts) {
             return Err(SettingsFileError::Io { path, source });
         }
         self.lock.sync();
@@ -135,30 +132,6 @@ fn mode_for(file: &str, path: &Path) -> Option<u32> {
         let _ = path;
         None
     }
-}
-
-fn write_new(tmp: &Path, body: &[u8], mode: Option<u32>) -> std::io::Result<()> {
-    use std::io::Write;
-    let _ = std::fs::remove_file(tmp);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        if let Some(mode) = mode {
-            options.mode(mode);
-        }
-    }
-    let mut file = options.open(tmp)?;
-    #[cfg(unix)]
-    if let Some(mode) = mode {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(mode))?;
-    }
-    #[cfg(not(unix))]
-    let _ = mode;
-    file.write_all(body)?;
-    file.sync_all()
 }
 
 fn refuse_symlink(path: &Path) -> Result<(), SettingsFileError> {

@@ -234,10 +234,10 @@ async fn detect_main_branch(engine: &EngineExec, cwd: &Path) -> Option<String> {
 /// The user's home directory and shell name on this machine.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the home directory and the shell are facts about the machine the prompt describes"
+    reason = "the shell is a fact about the machine the prompt describes"
 )]
 fn home_and_shell() -> (Option<String>, Option<String>) {
-    let home_dir = std::env::var("HOME").ok();
+    let home_dir = crate::paths::home_dir().map(|h| h.display().to_string());
     let shell = std::env::var("SHELL").ok().map(|p| {
         Path::new(&p)
             .file_name()
