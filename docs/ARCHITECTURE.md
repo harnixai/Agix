@@ -627,6 +627,9 @@ recorder 不落盘:同一进程里的重建共用同一个 recorder,回放接着
   授予的 server 视同列在其中。`mcp__<server>` 按工具的 `ToolOrigin::Mcp` 比对配置里的
   server 名,不从工具名里解析(`DLG-5`)。
 - **子 Agent 没有定时任务**:子会话不注册 `Cron*`,也不起调度。
+- **宿主工具只给声明了 `subagents` 的**:它们不是模板里的内建工具,`build_delegate` 显式把父会话
+  `subagents:true` 的那几个交给子会话,再受子会话的 `ToolPolicy` 收窄;子会话的调用经
+  `DelegateHostCalls` 走父会话的通道,带上它的任务与侧链会话。
 
 `build()` 结束时检查工具表没有重名(重名时分发只认第一个):测试与 debug 构建里断言失败,
 release 构建记一条 error。
@@ -657,6 +660,7 @@ release 构建记一条 error。
 | `tools.allow` / `tools.deny` | 白名单与黑名单,与注册表取交集——**只能减** |
 | `extra_tools` | 贡献注册表里没有的工具——**只能加** |
 | `tools.deferred` | 哪些工具只报名字不带 schema |
+| `options.host_tools`(会话的,不是场景的) | 宿主自己实现的工具——**只能加**,与 `extra_tools` 同一个重名检查 |
 
 `allow` 与 `deny` 就是一层 `ToolSelector`,与智能体类型、调用方的名单同一套匹配:黑名单
 始终生效,白名单为 `None` 时放行黑名单以外的全部;`X*` 按前缀匹配,`mcp__*`、`mcp__<server>`
@@ -671,7 +675,7 @@ release 构建记一条 error。
 
 **Tool 接口是 9 个方法**:`name`、`description`、`spec`、`input_schema(style)`、`guide`、
 `call_traits(input)`、`permission_facts`、`validate_input`、`call`。与调用输入无关的事实写在 `spec()`
-返回的 `ToolSpec` 里:`origin`(`Builtin` / `Mcp { server }` / `Plugin { name }`,来源不再靠 `source`
+返回的 `ToolSpec` 里:`origin`(`Builtin` / `Mcp { server }` / `Plugin { name }` / `Host`,来源不再靠 `source`
 字符串的前缀)、`traits`(只读、并发安全、破坏性)、`stance`(`ModeStance`:普通、协调类原语、退出
 plan 模式的那一次调用)、`short_description`、`callable_from_code`、`code_result`、`needs_dispatch`;
 看输入才知道的(`Bash` 与 `Monitor` 的只读)覆写 `call_traits`。**权限面只有 `permission_facts`**:
@@ -680,6 +684,14 @@ plan 模式的那一次调用)、`short_description`、`callable_from_code`、`c
 `ToolFacts::gather` 汇集的那一份,没有第二套能力方法。`ToolSpec`、`CallTraits`、`ToolOrigin`、
 `PermissionFacts`、`ToolFacts` 是 `#[non_exhaustive]`,加字段不破坏实现方。
 工具没有"我是延迟的""我被谁包过"这样的属性,见下面第 3 条。
+
+宿主声明的工具(`Builder::host_tools`,daemon 上是 `session.create` 的 `options.host_tools`)是
+同一种 `Tool`:origin 为 `ToolOrigin::Host`,在场景 `extra_tools` 之后、插件工具之前注册,
+和插件登记的工具一样过场景白名单、受 `tools.deny` 约束,`deferred` 的并进会话的延迟名单;
+宣告、`ToolSearch`、权限、hooks、中间件、结果转换器、遥测都不另开一条路。它的 `call` 只是把
+调用交给 `HostCalls`(`base::interface::host_call`),引擎自带的实现发 `AgentEvent::HostToolCall`、
+等 `InputMessage::HostToolResponse`,超时、取消、宿主不在都有确定的结局,一轮总能收尾。挂在会话
+而不挂在场景上:场景是 daemon 上所有连接共享的,工具是某个宿主连接的能力。
 
 三条硬约束:
 
@@ -1916,6 +1928,11 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 QuickJS 后(包裹时在外),与交给 `Builder` 的先后无关(`extension_points.md`「叠加顺序」)。脚本和 `RunCode`
 跑在同一套内嵌 QuickJS 里,限额限的是开销,不是对恶意代码的隔离,所以脚本能做什么按它
 从哪来定。引擎不带 WebAssembly 运行时;需要的上层在 Rust 接口上自己做。
+
+宿主不写 Rust 也有一条加工具的路:在 `session.create` 里声明 `options.host_tools`,调用经
+`session.event` 的 `host_tool_call` 帧交给宿主、由 `session.respondToolCall` 回答(契约
+`host_calls.call`,`daemon_rpc_protocol.md` §7.4)。不必另起一个 MCP server,也不进设置文件;
+工具只活在这一个会话里。
 
 完整清单、各自的触发时机与信任级别在 **`extension_points.md`**——那张表是从
 `base::interface::catalog` 生成的,有测试保证它和代码一致。

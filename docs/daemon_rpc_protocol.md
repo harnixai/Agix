@@ -3,7 +3,7 @@
 daemon(`agixd`)把一个多会话 Agent 引擎池暴露成 JSON-RPC 2.0 服务。
 本文回答"怎么用它":怎么连上、有哪些方法、事件怎么读、错误怎么分辨。
 
-**协议版本:3**(`daemon.auth`、`daemon.ping`、`daemon.status` 的 `protocol_version`,以及发现文件里的同名字段)。
+**协议版本:4**(`daemon.auth`、`daemon.ping`、`daemon.status` 的 `protocol_version`,以及发现文件里的同名字段)。
 
 机器可读的接口描述:[`schemas/rpc.schema.json`](schemas/rpc.schema.json)(每个方法的 params 和 result,可选模块的方法带 `module` 字段;`daemon.event` 每个 `kind` 的字段;`session.event` 的 `kind` 名字,其字段只标注"未类型化",以 §7 为准;错误码),由 `cargo test -p assembly write_rpc_schema -- --ignored` 生成。
 
@@ -115,7 +115,7 @@ read-modify-write 同一个索引文件而丢更新。读取方 `read_dir` 汇�
   "unix_socket_auth": true,             // 仅在 --unix-socket-auth 时出现:socket 也要先 daemon.auth
   "token_file": "/Users/x/.agix/daemon/auth/desktop.token", // 仅在 daemon 自己生成了 token 时出现
   "scenes": ["code", "harnix", "mini"],
-  "protocol_version": 3,
+  "protocol_version": 4,
   "started_at": "2026-08-11T10:00:00Z" }
 ```
 
@@ -535,7 +535,7 @@ TCP 与 WebSocket 需要(开了 `--unix-socket-auth` 时 unix socket 也要),都
 ```jsonc
 { "jsonrpc":"2.0", "method":"daemon.auth", "params":{"token":"…"}, "id":0 }
 ← { "jsonrpc":"2.0", "id":0, "result":{"authenticated":true,
-      "version":"…", "protocol_version":3, "capabilities":["…"]} }
+      "version":"…", "protocol_version":4, "capabilities":["…"]} }
 ```
 
 `version` 是 daemon 二进制的版本,`protocol_version` 是本文描述的协议版本,
@@ -674,6 +674,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | 每个 `tool_result` 必有先行的同 `id` `tool_use` | 反之不然:被取消的工具可能没有 result |
 | `turn_complete` 是本 turn 最后一个事件 | 其后只有 `run_turn` 的最终响应 |
 | 每个开始了的 turn 都有且只有一个 `turn_complete`(出错时发起者收到 `run_turn` 的错误响应,其他订阅者收到 `error` 帧) | 被 hook 拦下、被中断、被预算或策略截停的 turn 同样以它结束;被 `session.close` / `session.delete` 截断的,其他订阅者收到 `code` 为 `session_closed` 的 `error` 帧,发起者收到 `ENGINE_ERROR`(`message` 以 `session_closed:` 开头) |
+| 一个 `host_tool_call` 在它的 `tool_use` 之后、`tool_result` 之前;它的 `host_tool_call_resolved` 在那个 `tool_result` 之前 | 子 Agent 发起的调用经父会话发出,相对于 `subagent_progress` 里镜像的那次 `tool_use` 不保证先后,按 `task_id` 归属 |
 | 收到 `persisted` 为 `true` 的 `turn_complete` 时本轮已写进 transcript | 此刻读 `session.history` 能看到这一轮;`persisted` 为 `false` 时见 §7.2 |
 
 > **⚠️ 按 `id` 配对,不要按位置配对。** 并发安全的工具是并行执行的,谁先跑完谁先发
@@ -731,7 +732,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 
 ```jsonc
 // ← result
-{ "pong": true, "version": "…", "protocol_version": 3,
+{ "pong": true, "version": "…", "protocol_version": 4,
   "capabilities": ["on_busy_steer", "subscription_dropped_notice", "…"],
   "modules": ["mcp", "agents", "skills", "scripts", "plugin-packages"] }
 ```
@@ -775,7 +776,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 ```jsonc
 // ← result
 { "version": "…",         // daemon 二进制版本
-  "protocol_version": 3,
+  "protocol_version": 4,
   "capabilities": ["…"],  // 同 daemon.ping
   "modules": ["…"],       // 同 daemon.ping
   "uptime_secs": "…",     // 数字,秒
@@ -1128,7 +1129,8 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
-    "prompt_types": ["permission", "question"] } }  // 可选,宿主能回答的提问,默认只有 permission
+    "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
+    "host_tools": [ ] } }                 // 可选,宿主自己实现的工具,见下
 // ← result
 { "session_id": "…", "scene": "code", "session_kind": "primary",
   "project_root": "…",
@@ -1149,7 +1151,7 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 
 `options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
 会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)、`options`
-本身不是对象。`permission_rules`、`prompt_types` 这两个列表字段逐条读,`field` 写成
+本身不是对象。`permission_rules`、`prompt_types`、`host_tools` 这几个列表字段逐条读,`field` 写成
 `permission_rules[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
 `options` 读不出来。`session.create`、`session.run_turn`、`session.resume` 都这样。
 
@@ -1198,6 +1200,37 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 `AskUserQuestion`,模型的提问推成 `prompt_type:"question"` 的帧等宿主回答;没列时这个
 会话根本没有 `AskUserQuestion` —— 一个只会被拒绝的工具不该给模型看。不认识的取值被忽略,
 不会让整份 `options` 作废。
+
+`host_tools` 声明宿主自己实现的工具。它们和会话自己的工具一样宣告给模型,经过同样的权限、
+hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(§7.4),用
+`session.respondToolCall` 回答,回答就是模型读到的结果:
+
+```jsonc
+"host_tools": [
+  { "name": "HostEcho",                       // ^[A-Za-z][A-Za-z0-9_]{0,63}$,不以 mcp__ 开头
+    "description": "Echo text back from the host.",   // ≤ 8 KiB
+    "input_schema": { "type": "object",       // type:object、能编译的 JSON Schema,≤ 64 KiB
+                      "properties": { "text": { "type": "string" } },
+                      "required": ["text"] },
+    "read_only": true,                        // 可选,默认 false;plan 模式只放行 read_only 的
+    "destructive": false,                     // 可选,默认 false
+    "concurrency_safe": true,                 // 可选,默认同 read_only
+    "timeout_ms": 120000,                     // 可选,默认 120000,范围 1000..=600000
+    "deferred": false,                        // 可选,true 时只报名字,schema 经 ToolSearch 取
+    "subagents": false } ]                    // 可选,true 时子 Agent 也拿得到,见 §7.4
+```
+
+一个会话至多 64 个。读不出来的逐项进 `invalid_options`,`field` 带下标与字段名,如
+`host_tools[1].input_schema`、`host_tools[0].name`(重名也报在 `name` 上);与会话已有的工具
+重名(`Read`、场景或插件的工具)要等引擎建起来才知道,报在 `host_tools` 上。两种都是
+`INVALID_PARAMS`,不建会话。宿主工具只是加法,与场景的 `extra_tools` 同一个重名检查,场景的
+`tools.deny` 写名字即可拒掉它。它们随 `options` 记在会话日志里,重建、恢复、`session.fork`
+都照原样再挂上。
+
+权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`),宿主想
+免问就在 `permission_rules` 里给 `{"source":"session","behavior":"allow","tool_name":"HostEcho"}`;
+deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `input`,不符合的调用以校验错误
+退回给模型,不发帧。
 
 `provider` 让这个会话的对话走 `providers` 里那个厂商的 client,而不是设置里
 `task_models.main` 路由到的那个;子 Agent、压缩等其他路由任务仍按设置走。`model`
@@ -1355,6 +1388,7 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 { "session_id": "…",
   "last_seq": "…",             // 数字:transcript 水位,用于追赶(§5.6)
   "pending_prompts": [ ],      // 还没被回答的 kind:"prompt" 帧,原样重放
+  "pending_host_calls": [ ],   // 还悬着的 kind:"host_tool_call" 帧,原样重放
   "resumed": false }           // 这次调用有没有替你恢复它
 ```
 
@@ -1377,6 +1411,8 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 `pending_prompts` 里的帧带**原来的 `prompt_id`**,所以中途打开的 tab 可以直接答那个
 还悬着的提问(权限提问与模型的提问都在里面)。提问在引擎推出它的 `prompt_resolved`(§7)时清掉;
 一轮自己的提问最晚在这一轮结束时清掉,后台子 Agent 的提问不属于哪一轮,留到被回答或它的任务结束。
+宿主工具的调用(§7.4)不在 `pending_prompts` 里,单列在 `pending_host_calls`:它不是问人的,
+画提问列表的客户端不该看到它。
 
 #### `session.unsubscribe`
 
@@ -1813,7 +1849,7 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
 
 ```jsonc
 { "format": "agix.session-export", "format_version": 1,
-  "engine_version": "…", "protocol_version": 3,
+  "engine_version": "…", "protocol_version": 4,
   "cut_at": "…", "root_session_id": "…",
   "include": ["sidechains", "attachments"],
   "importable": true,
@@ -2236,12 +2272,41 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 先到的,之后的回答静默丢弃。
 
 会话不在内存里 → `SESSION_NOT_FOUND`(这个和 `session.close` 不一样:答一个没在跑
-的会话的提问不可能是"已经完成了")。
+的会话的提问不可能是"已经完成了")。`prompt_type` 为 `host_tool_call` → `INVALID_PARAMS`:
+宿主工具的调用用 `session.respondToolCall` 回答。
 
 未在 `--permission-prompt-timeout`(没给时取设置 `execution.permission_prompt_timeout_secs`,
 默认 300 秒)内回答的提问**失败关闭**:权限提问按拒绝
 处理,turn 带着一条 error `tool_result` 继续;模型的提问以"用户没有回答"作为
 `AskUserQuestion` 的结果交还模型。都不会挂死。
+
+#### `session.respondToolCall`
+
+回答一帧 `host_tool_call`(§7.4)。`result` 与 `error` 恰好给一个:
+
+```jsonc
+// → params
+{ "session_id": "…", "call_id": "…",
+  "result": { "content": "echo: ping",       // 字符串,或 [ContentBlock](§4.1 的 text / image)
+              "is_error": false } }          // 可选;true = 工具跑了、报告失败
+// ← result
+{ "call_id": "…" }
+```
+
+```jsonc
+// → params
+{ "session_id": "…", "call_id": "…",
+  "error": { "message": "buffer not open" } }   // 宿主没能执行它
+```
+
+两种在模型那里都是 `is_error` 的结果,差别同内建工具:`result.is_error:true` 是"工具跑了、
+说自己失败",不影响同批并发的工具;`error` 是工具没能执行,和别的工具执行失败一样取消同批
+还在跑的调用,模型读到 `` host tool `HostEcho` failed: <message> ``。回答受 §1 的单帧上限约束,
+进模型前照常经过工具结果的预算与外置。
+
+两个都给、都不给、`content` 形状不对 → `INVALID_PARAMS`;`call_id` 是一帧还悬着的 `prompt`
+的 `prompt_id` → `INVALID_PARAMS`。**先答者生效**,`call_id` 未知(已答、超时、被取消)时
+**静默成功**,同 `session.respondToPrompt`。会话不在内存里 → `SESSION_NOT_FOUND`。
 
 ### 6.4 `config.*`
 
@@ -2836,9 +2901,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `tool_args_delta` | `{id,partial_json}` | 这次调用参数的原始片段,按到达顺序拼起来就是 `tool_use.input` 的 JSON 文本(高频) |
 | `tool_use` | `{id,name,input}` | 模型发起工具调用,参数已完整。参数不是完整 JSON 的(多半被输出上限截断)`input` 为 `{}`,不执行,随后的 `tool_result` 是说明这一点的错误 |
 | `tool_progress` | `{tool_use_id,name,message,progress?,total?,dropped}` | 运行中的工具调用报的进度,`tool_use_id` 是那次 `tool_use` 的 `id`;每次调用每秒至多一帧,`dropped` 是上一帧以来合并掉的条数。不进 transcript,不保证送达(§7.3) |
-| `tool_result` | `{id,name,content,is_error}` | 工具返回 |
+| `tool_result` | `{id,name,content,is_error,file_changes?}` | 工具返回。`Write` / `Edit` / `NotebookEdit` 带 `file_changes`(§7.5),其余没有这个键 |
 | `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答 |
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
+| `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
+| `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者 |
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的)。缓存了 `commands.list` 的客户端该重取 |
@@ -2858,7 +2925,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
 | `subscription_dropped` | `{reason}` | 这条连接对该会话的订阅被取消了(`reason` 目前只有 `"overflow"`,§5.4);不属于任何一轮,`turn_id` 为 `null`。重新 `session.subscribe` 并追平 |
 
-`prompt`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:
+`prompt`、`host_tool_call`、`host_tool_call_resolved`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:
 后台子 Agent 在父会话空闲时照样会问、会推进度。这时它们不属于任何一轮,`turn_id` 为 `null`。
 
 **这张表是白名单。** 引擎内部还有其它事件,但只有上面这些会被转成帧发出来。特别地:
@@ -3004,6 +3071,82 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 子 Agent 里的工具报的进度不单独成帧,包在 `subagent_progress` 里:`event` 是
 `{kind:"tool_progress",tool_use_id,name,message,progress?,total?,dropped,turn_id}`,
 `turn_id` 是子 Agent 自己的一轮,`parent_tool_use_id` 是父会话里那次 `Agent` 调用。
+
+### 7.4 `host_tool_call`
+
+```jsonc
+{ "kind":"host_tool_call",
+  "call_id":"hc_01J…",          // 回答用它
+  "tool_use_id":"toolu_01…",    // 引出它的那次 tool_use(子 Agent 的是子会话里的 id)
+  "name":"HostEcho",
+  "input":{ "text":"ping" },
+  "timeout_ms":120000,
+  "task_id":null,               // 子 Agent 发起时为它的任务
+  "agent_session_id":null }     // 子 Agent 发起时为它的侧链会话
+
+{ "kind":"host_tool_call_resolved", "call_id":"hc_01J…",
+  "resolution":"withdrawn", "reason":"timed_out" }
+```
+
+键是 `call_id` 而不是 `tool_use_id`:厂商的 `tool_use_id` 只在一条回复里唯一,OpenAI 兼容厂商
+的 id 形如 `call_0`,父会话与子 Agent 完全可能同号,而子 Agent 的调用也落在父会话的流上。
+
+每个调用有且只有一种结局,一轮永远能收尾:
+
+| 结局 | 模型读到的 `tool_result` | `host_tool_call_resolved` |
+|---|---|---|
+| 回答了 `result` | 宿主给的内容,`is_error` 照宿主 | `answered` |
+| 回答了 `error` | `` host tool `HostEcho` failed: <message> ``,错误 | `answered` |
+| `timeout_ms` 到了没人答 | `` the host did not answer `HostEcho` within 120s ``,错误 | `withdrawn` / `timed_out` |
+| 发起时该会话一个订阅者都没有 | `` no host is connected to answer `HostEcho` ``,错误 | `withdrawn` / `no_host` |
+| 订阅者在回答之前走光了(`session.unsubscribe`、断开、慢连接被摘掉) | 同上 | `withdrawn` / `host_gone` |
+| 这一轮被中断 | 同别的工具被取消 | `withdrawn` / `cancelled` |
+
+没人连着的轮次(定时任务、目标的自动轮)里的调用因此立刻失败,不会每次都等满超时。只有旁观
+的连接还在、真正实现工具的宿主崩了时,调用才要等到超时。取消当下就返回,不等工具的取消
+宽限;宿主看到 `cancelled` 应自行停手,它之后的回答静默成功、不生效。
+
+**多个订阅者**:帧广播给全部订阅者,任何一条连接都能答,先到引擎的算数,随后的
+`host_tool_call_resolved{answered}` 推给所有人。约定是**只有实现了这个工具的宿主去执行它**,
+旁观者只画"等待宿主"。两个都实现了的宿主会都去执行;看到 `resolved` 而自己没被采纳的一方
+撤销副作用,或者一开始就只在自己创建的会话里执行。daemon 不仲裁。中途订阅的连接从
+`session.subscribe` 的 `pending_host_calls` 拿到还悬着的帧,照样能答。
+
+**子 Agent**:声明了 `subagents:true` 的工具,子 Agent(含团队成员)也拿得到,再受它的 agent
+类型的工具列表收窄;没声明的子 Agent 看不到。子 Agent 的调用经父会话的通道发出,帧带
+`task_id` 与 `agent_session_id`,用父会话的 `session_id` 回答。父会话空闲时后台子 Agent 照样能
+调,这时帧的 `turn_id` 为 `null`。
+
+### 7.5 `file_changes`
+
+`Write`、`Edit`、`NotebookEdit` 的 `tool_result` 帧带它们写了什么,模型收到的文字不受影响:
+
+```jsonc
+"file_changes":[
+  { "path":"/Users/x/repo/src/lib.rs",    // 绝对路径,已解析的写入目标
+    "op":"modify",                        // create | modify
+    "before_hash":"sha256:9f86…",         // create 时为 null
+    "after_hash":"sha256:60303…",
+    "before_bytes":1824,                  // create 时为 null
+    "after_bytes":1851,
+    "added":3, "removed":1,               // 变更行数;没有 diff 时为 0
+    "unified_diff":"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -10,4 +10,6 @@\n…",
+    "truncated":false,
+    "omitted":null } ]                    // null | too_large | binary | redacted
+```
+
+- `unified_diff` 是标准的 unified diff,3 行上下文:路径在会话工作目录里时写
+  `a/<相对路径>` / `b/<相对路径>`,不在时两边都是绝对路径;新建文件的旧侧是 `/dev/null`。
+- 哈希只对 ≤ 16 MiB 的内容算,更大的为 `null`。diff 只在前后都 ≤ 1 MiB 且都是 UTF-8 时生成,
+  否则 `unified_diff` 为 `null`、`omitted` 写 `too_large` 或 `binary`,哈希照给。diff 超过
+  256 KiB 或 2000 个变更行时截在 hunk 边界,`truncated:true`;`added` / `removed` 仍是整个变更的。
+  这些上限与模型那边 diff 文字的 100 行各算各的。
+- 结果转换器(`docs/extension_points.md`「一个工具结果能长什么样」)改过这次调用的文字时,diff
+  里可能正是被它去掉的内容:帧上只留路径、`op`、哈希与字节数,`unified_diff` 为 `null`、
+  `omitted:"redacted"`。
+- **不进 transcript。** `session.history` 里仍是文字;断线漏掉的 diff 拿不回来,要核对就用哈希
+  对盘。`subagent_progress` 里嵌套的 `tool_result` 同样带它。`Bash` 改了哪些文件不知道,不报;
+  MCP 与宿主工具也不报。
 
 ---
 
@@ -3355,4 +3498,5 @@ TCP / WebSocket 上,第一件事是 `call("daemon.auth", {token})`。
 - [ ] `stop_reason` / `usage` 从 `turn_complete` 事件取,不是从 `run_turn` 的响应取
 - [ ] 断线重连按 subscribe → history → 补帧的顺序,不颠倒(§5.6)
 - [ ] 权限提问超时后 UI 能显示"已拒绝",不会一直转圈(§10)
+- [ ] 实现了宿主工具的,只在自己声明过的会话里执行 `host_tool_call`,看到 `host_tool_call_resolved` 就撤下(§7.4)
 - [ ] 关闭对话前想清楚要不要保留子 Agent 侧链记录 —— `session.close` 会删掉它们(§3.3)

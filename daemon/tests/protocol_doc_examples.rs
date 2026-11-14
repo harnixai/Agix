@@ -552,6 +552,14 @@ async fn documented_session_results_are_real() {
                            "decision": {"type": "permit"}}),
     )
     .await;
+    verify(
+        &doc,
+        &daemon,
+        "session.respondToolCall",
+        serde_json::json!({"session_id": sid, "call_id": "hc-none",
+                           "result": {"content": "late"}}),
+    )
+    .await;
     // Still in memory, so `status` is the documented `already_active`.
     verify(
         &doc,

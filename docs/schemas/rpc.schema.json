@@ -53,11 +53,20 @@
       "type": "string"
     },
     "AskKind": {
-      "enum": [
-        "permission",
-        "question"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "permission",
+            "question"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "host_tool_call",
+          "description": "A call to a tool the host declared; answered with\n`session.respondToolCall`, never `session.respondToPrompt`.",
+          "type": "string"
+        }
+      ]
     },
     "Attachment": {
       "description": "Something the user attached to their message — a pasted screenshot, a\ndragged-in file, an editor selection.\n\nThe variants below are the three shapes hosts actually have, so that a host\ncan hand over whichever it already holds instead of being forced to pre-read\n(or pre-decode) on the runtime's behalf.",
@@ -2147,6 +2156,137 @@
       ],
       "type": "object"
     },
+    "HostContentBlock": {
+      "description": "The `text` and `image` blocks of §4.1.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/ImageSource2"
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HostToolContent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/HostContentBlock"
+          },
+          "type": "array"
+        }
+      ]
+    },
+    "HostToolError": {
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "HostToolOption": {
+      "additionalProperties": false,
+      "description": "One entry of `options.host_tools`.",
+      "properties": {
+        "concurrency_safe": {
+          "description": "Omitted: `read_only`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "deferred": {
+          "default": false,
+          "description": "Offered by name only; the schema comes from `ToolSearch`.",
+          "type": "boolean"
+        },
+        "description": {
+          "description": "At most 8 KiB.",
+          "type": "string"
+        },
+        "destructive": {
+          "default": false,
+          "type": "boolean"
+        },
+        "input_schema": {
+          "description": "A `type: object` JSON Schema, at most 64 KiB; the host only ever gets\ninput that matches it."
+        },
+        "name": {
+          "description": "`^[A-Za-z][A-Za-z0-9_]{0,63}$`, not starting `mcp__`, not taken.",
+          "type": "string"
+        },
+        "read_only": {
+          "default": false,
+          "type": "boolean"
+        },
+        "subagents": {
+          "default": false,
+          "description": "The session's sub-agents are offered it too.",
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "default": 120000,
+          "description": "1000..=600000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "input_schema"
+      ],
+      "type": "object"
+    },
+    "HostToolResult": {
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/HostToolContent"
+        },
+        "is_error": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "type": "object"
+    },
     "ImageSource": {
       "oneOf": [
         {
@@ -2186,6 +2326,26 @@
           "type": "object"
         }
       ]
+    },
+    "ImageSource2": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type": {
+          "description": "Always `base64`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "media_type",
+        "data"
+      ],
+      "type": "object"
     },
     "ImportRun": {
       "properties": {
@@ -3734,6 +3894,44 @@
       ],
       "type": "object"
     },
+    "RespondToolCallParams": {
+      "description": "Exactly one of `result` and `error`.",
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The host could not run the call."
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The host ran the call; `is_error` when it reports a failure."
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "call_id"
+      ],
+      "type": "object"
+    },
     "RestoredFile": {
       "properties": {
         "outside_project": {
@@ -5148,6 +5346,13 @@
           ],
           "description": "Where this session's kept time starts (the date in its prompt, its log's timestamps).\nOmitted: the machine's clock — except in replay, where it starts when the recording did."
         },
+        "host_tools": {
+          "description": "Tools this session's host runs itself, offered to the model as the\nsession's own; a call to one is a `host_tool_call` frame, answered\nwith `session.respondToolCall`.",
+          "items": {
+            "$ref": "#/$defs/HostToolOption"
+          },
+          "type": "array"
+        },
         "model": {
           "description": "The conversation's model. `None` takes the provider's `default_model`\nwhen `provider` is given, the settings' model otherwise.",
           "type": [
@@ -5632,6 +5837,11 @@
           "minimum": 0,
           "type": "integer"
         },
+        "pending_host_calls": {
+          "description": "Each unanswered `kind:\"host_tool_call\"` `session.event` frame, as sent.",
+          "items": true,
+          "type": "array"
+        },
         "pending_prompts": {
           "description": "Each unanswered `kind:\"prompt\"` `session.event` frame, as sent.",
           "items": true,
@@ -5648,6 +5858,7 @@
         "session_id",
         "last_seq",
         "pending_prompts",
+        "pending_host_calls",
         "resumed"
       ],
       "type": "object"
@@ -5903,6 +6114,17 @@
       },
       "required": [
         "output"
+      ],
+      "type": "object"
+    },
+    "ToolCallAnswered": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id"
       ],
       "type": "object"
     },
@@ -6831,6 +7053,14 @@
         "$ref": "#/$defs/PromptAnswered"
       }
     },
+    "session.respondToolCall": {
+      "params": {
+        "$ref": "#/$defs/RespondToolCallParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ToolCallAnswered"
+      }
+    },
     "session.resume": {
       "params": {
         "$ref": "#/$defs/ResumeParams"
@@ -7314,6 +7544,30 @@
           "properties": {
             "kind": {
               "const": "goal_changed"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "host_tool_call": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "host_tool_call"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "host_tool_call_resolved": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "host_tool_call_resolved"
             }
           },
           "required": [

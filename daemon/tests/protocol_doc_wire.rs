@@ -1529,6 +1529,51 @@ async fn a_question_to_the_user(obs: &mut Observed) {
     obs.pushed(&conn.pushed);
 }
 
+async fn a_tool_the_host_runs(obs: &mut Observed) {
+    let h = start_code(scripted(vec![
+        tool_round("HostEcho", "tool-1", json!({"text": "ping"})),
+        text_round("echoed"),
+    ]))
+    .await;
+    let mut conn = Conn::open(&h.sock).await;
+    let id = conn
+        .send(
+            "session.run_turn",
+            json!({"message": "echo", "options": {
+                "permission_mode": "default",
+                "permission_rules": [
+                    {"source": "session", "behavior": "allow", "tool_name": "HostEcho"},
+                ],
+                "host_tools": [{
+                    "name": "HostEcho",
+                    "description": "Echo text back from the host.",
+                    "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}},
+                }],
+            }}),
+        )
+        .await;
+    let response = loop {
+        let frame = conn.read().await;
+        if frame.get("id") == Some(&json!(id)) {
+            break frame;
+        }
+        let event = &frame["params"]["event"];
+        if event["kind"] == "host_tool_call" {
+            let answered = call(
+                &h.sock,
+                "session.respondToolCall",
+                json!({"session_id": frame["params"]["session_id"], "call_id": event["call_id"],
+                       "result": {"content": "ping"}}),
+            )
+            .await;
+            assert!(answered.get("result").is_some(), "{answered}");
+        }
+        conn.pushed.push(frame);
+    };
+    assert!(response.get("result").is_some(), "{response}");
+    obs.pushed(&conn.pushed);
+}
+
 async fn a_turn_that_fails_for_a_watcher(obs: &mut Observed) {
     let model = Arc::new(MockAnthropicClient::new());
     model.push_turn_with_errors(vec![Err(model::error::AnthropicError::Auth(
@@ -1774,6 +1819,7 @@ async fn observe_session_events() -> Observed {
     a_steered_message_handed_back(&mut obs).await;
     a_steered_message_a_hook_refuses(&mut obs).await;
     a_question_to_the_user(&mut obs).await;
+    a_tool_the_host_runs(&mut obs).await;
     a_turn_that_fails_for_a_watcher(&mut obs).await;
     a_stream_that_breaks_off_and_is_sent_again(&mut obs).await;
     a_compacted_turn(&mut obs).await;
