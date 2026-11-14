@@ -1571,14 +1571,22 @@ fn a_redacting_transformer_also_takes_the_structured_result_away() {
         "Read",
         &serde_json::json!({}),
         answer("password: hunter2"),
+        Vec::new(),
     )
+    .0
     .unwrap();
     assert!(!redacted.text.contains("hunter2"), "{}", redacted.text);
     assert_eq!(redacted.structured, None);
 
-    let untouched =
-        apply_result_transformers(&ctx, "Read", &serde_json::json!({}), answer("nothing here"))
-            .unwrap();
+    let untouched = apply_result_transformers(
+        &ctx,
+        "Read",
+        &serde_json::json!({}),
+        answer("nothing here"),
+        Vec::new(),
+    )
+    .0
+    .unwrap();
     assert_eq!(
         untouched.structured,
         Some(serde_json::json!({"password": "nothing here"}))
@@ -1834,4 +1842,83 @@ fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
             network: providers.network,
         },
     )
+}
+
+/// Returns one image and no text.
+struct Screenshot;
+#[async_trait::async_trait]
+impl base::tool::Tool for Screenshot {
+    fn name(&self) -> &str {
+        "Screenshot"
+    }
+    fn spec(&self) -> base::tool::ToolSpec {
+        base::tool::ToolSpec::new()
+    }
+    fn description(&self) -> &str {
+        "returns an image (test tool)"
+    }
+    fn input_schema(&self, _: base::tool::PathStyle) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: base::tool::ToolContext,
+        _progress: base::tool::ProgressSender,
+    ) -> Result<base::tool::ToolResult, base::error::ToolError> {
+        let mut result = base::tool::ToolResult::text("");
+        result.content =
+            base::tool::ToolResultContent::Blocks(vec![base::tool::ToolResultBlock::image(
+                "image/png",
+                "iVBORw0KGgo=",
+            )]);
+        Ok(result)
+    }
+}
+
+/// Drops every image of a call to `Probe`.
+struct NoImagesFromProbe;
+impl base::interface::tool_result::ToolResultTransformer for NoImagesFromProbe {
+    fn transform(
+        &self,
+        call: &base::interface::tool_middleware::ToolCall,
+        draft: &mut base::interface::tool_result::ToolResultDraft,
+    ) {
+        if call.name == "Probe" {
+            draft.images.clear();
+        }
+    }
+}
+
+/// A transformer is handed the images of the call it transforms, not those
+/// of the calls before it in the same reply.
+#[tokio::test]
+async fn a_transformer_sees_only_the_images_of_its_own_call() {
+    let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
+    tools.register(Arc::new(Screenshot));
+    tools.register(Arc::new(ProbeTool {
+        called: Default::default(),
+    }));
+    let mut ctx = test_exec_ctx(
+        tools,
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
+    );
+    ctx.result_transformers =
+        Arc::new(vec![Arc::new(NoImagesFromProbe)
+            as Arc<dyn base::interface::tool_result::ToolResultTransformer>]);
+
+    execute_tool_with_telemetry(&ctx, "Screenshot", serde_json::json!({}))
+        .await
+        .unwrap();
+    execute_tool_with_telemetry(&ctx, "Probe", serde_json::json!({}))
+        .await
+        .unwrap();
+
+    let images = ctx.images.lock().unwrap();
+    assert_eq!(
+        images.len(),
+        1,
+        "the screenshot's image was taken by the transformer of the call after it"
+    );
+    assert_eq!(images[0].media_type, "image/png");
 }

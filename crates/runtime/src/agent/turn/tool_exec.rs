@@ -62,8 +62,9 @@ pub(crate) struct ToolExecCtx {
     /// and deferred `new_messages` — and `streaming::buffer_result` turns that
     /// String into the `ToolResult` block. There is no room in that channel for
     /// binary content, and widening it would mean changing the executor
-    /// signature and every call site in `streaming.rs`. Instead each call
-    /// deposits its images here (shared across the round's whole batch), and
+    /// signature and every call site in `streaming.rs`. Instead each call,
+    /// once its own transformers have seen them, deposits its images here
+    /// (shared across the round's whole batch), and
     /// `attach_tool_result_images` appends them to the tool-result message once
     /// `execute_stream` returns. Order within the message follows tool
     /// completion order, which is fine — images trail all `tool_result` blocks
@@ -358,7 +359,7 @@ pub(super) async fn execute_tool_inner(
     let (result, latency_ms, input_json_size) =
         call_tool(ctx, name, &tool, input, tool_ctx, deferred).await;
 
-    let mut outcome = answer_of(ctx, result);
+    let (mut outcome, images) = answer_of(result);
     fence_external(
         name,
         &authorized.facts,
@@ -383,7 +384,15 @@ pub(super) async fn execute_tool_inner(
     post_tool_use(ctx, name, &input_for_post_hook, &mut outcome).await;
     fire_tool_lifecycle(ctx, name, &input_for_post_hook, &outcome).await;
 
-    apply_result_transformers(ctx, name, &input_for_post_hook, outcome)
+    let (outcome, images) =
+        apply_result_transformers(ctx, name, &input_for_post_hook, outcome, images);
+    if !images.is_empty() {
+        ctx.images
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(images);
+    }
+    outcome
 }
 
 async fn call_tool(
@@ -559,29 +568,26 @@ async fn fire_tool_lifecycle(
     }
 }
 
-/// What a tool's result becomes for the model: its text, with the images it
-/// returned set aside for the round.
+/// What a tool's result becomes for the model: its text, and the images it
+/// returned, which ride beside the round's results rather than in them.
 fn answer_of(
-    ctx: &ToolExecCtx,
     result: Result<base::tool::ToolResult, base::error::ToolError>,
-) -> base::interface::tool_middleware::ToolOutcome {
+) -> (
+    base::interface::tool_middleware::ToolOutcome,
+    Vec<PendingToolImage>,
+) {
     match result {
         Ok(r) => {
             let (text, images) = render_tool_result_content(r.content);
-            if !images.is_empty() {
-                ctx.images
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .extend(images);
-            }
-            Ok(base::interface::tool_middleware::ToolAnswer {
+            let answer = base::interface::tool_middleware::ToolAnswer {
                 text,
                 new_messages: r.new_messages,
                 reported_failure: r.is_error,
                 structured: r.structured_content,
-            })
+            };
+            (Ok(answer), images)
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => (Err(e.to_string()), Vec::new()),
     }
 }
 
@@ -629,26 +635,25 @@ fn record_execution(
         ));
 }
 
-/// Run the registered transformers over this call's outcome.
+/// Run the registered transformers over this call's outcome and the images
+/// it returned.
 ///
-/// Deliberately the last thing that touches it — after every hook, after the
-/// lifecycle events, immediately before the caller gets it. That ordering is
-/// what makes a redacting transformer a guarantee: nothing downstream can put
-/// back what it removed.
-///
-/// The images a tool returned were deposited in `ctx.images` on the way
-/// through, so a transformer that drops one has to reach in there rather than
-/// hand back a value. They are pulled out, offered, and put back — the
-/// side-channel exists because the dispatch signature has no room for binary
-/// content, not because images are supposed to be untouchable.
+/// Deliberately the last thing that touches them — after every hook, after
+/// the lifecycle events, immediately before the caller gets them. That
+/// ordering is what makes a redacting transformer a guarantee: nothing
+/// downstream can put back what it removed.
 pub(super) fn apply_result_transformers(
     ctx: &ToolExecCtx,
     name: &str,
     input: &serde_json::Value,
     outcome: base::interface::tool_middleware::ToolOutcome,
-) -> base::interface::tool_middleware::ToolOutcome {
+    images: Vec<PendingToolImage>,
+) -> (
+    base::interface::tool_middleware::ToolOutcome,
+    Vec<PendingToolImage>,
+) {
     if ctx.result_transformers.is_empty() {
-        return outcome;
+        return (outcome, images);
     }
     let call = base::interface::tool_middleware::ToolCall {
         name: name.to_string(),
@@ -665,7 +670,6 @@ pub(super) fn apply_result_transformers(
         Err(e) => (e, true, None, None),
     };
     let original = (text.clone(), is_error);
-    let images = std::mem::take(&mut *ctx.images.lock().unwrap_or_else(|e| e.into_inner()));
     let mut draft = base::interface::tool_result::ToolResultDraft {
         text,
         images: images
@@ -684,7 +688,7 @@ pub(super) fn apply_result_transformers(
     let structured =
         structured.filter(|_| (&draft.text, draft.is_error) == (&original.0, original.1));
 
-    *ctx.images.lock().unwrap_or_else(|e| e.into_inner()) = draft
+    let images = draft
         .images
         .into_iter()
         .map(|i| PendingToolImage {
@@ -693,7 +697,7 @@ pub(super) fn apply_result_transformers(
         })
         .collect();
 
-    if draft.is_error && !was_reported_failure {
+    let outcome = if draft.is_error && !was_reported_failure {
         Err(draft.text)
     } else {
         Ok(base::interface::tool_middleware::ToolAnswer {
@@ -702,5 +706,6 @@ pub(super) fn apply_result_transformers(
             reported_failure: draft.is_error,
             structured,
         })
-    }
+    };
+    (outcome, images)
 }
