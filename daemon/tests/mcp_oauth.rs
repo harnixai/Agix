@@ -58,8 +58,7 @@ impl Daemon {
             &StaticDaemonPaths::new(root.clone()),
         );
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode =
-            base::permission::PermissionMode::BypassPermissions;
+        crate::support::allow_tools(&mut config, &["mcp__docs__echo", "mcp__docs__write"]);
         let model = Arc::new(MockAnthropicClient::new());
         let pool = daemon::assemble::pool(
             &config,

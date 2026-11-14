@@ -29,7 +29,6 @@ use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
-use settings::Settings;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
@@ -48,7 +47,7 @@ async fn start(
     model: Arc<dyn AnthropicClient>,
     scene: Arc<base::interface::scene::SceneSpec>,
     session_cap: usize,
-    configure: impl FnOnce(&mut Settings),
+    configure: impl FnOnce(&mut daemon::config::DaemonConfig),
 ) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let sock = dir.path().join("wire.sock");
@@ -64,7 +63,7 @@ async fn start(
     );
     config.session_cap = session_cap;
     config.settings.values.memory_enabled = false;
-    configure(&mut config.settings.values);
+    configure(&mut config);
 
     let store: Arc<dyn history::store::HistoryStore> = Arc::new(
         history::store::JsonlHistoryStore::with_roots(
@@ -118,8 +117,8 @@ async fn start_code(model: Arc<dyn AnthropicClient>) -> Harness {
     .await
 }
 
-fn bypass(settings: &mut Settings) {
-    settings.permission_mode = base::permission::PermissionMode::BypassPermissions;
+fn allow_agents_and_shell(config: &mut daemon::config::DaemonConfig) {
+    crate::support::allow_tools(config, &["Agent", "Bash", "PushNotification"]);
 }
 
 struct Conn {
@@ -576,7 +575,8 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
         Arc::new(OneTurnClient),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        |settings| {
+        |config| {
+            let settings = &mut config.settings.values;
             settings.default_provider = Some("anthropic".into());
             for (id, model) in [
                 ("deepseek", "deepseek-chat"),
@@ -1495,7 +1495,8 @@ async fn a_steered_message_a_hook_refuses(obs: &mut Observed) {
         scripted(vec![thinking_then_a_bash_call(), text_round("done")]),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        |settings| {
+        |config| {
+            let settings = &mut config.settings.values;
             settings.hooks_config = Some(json!({
                 "UserPromptSubmit": [{"type": "command", "command": hook}]
             }));
@@ -1589,7 +1590,7 @@ async fn a_sub_agent_inside_a_turn(obs: &mut Observed) {
         ]),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        bypass,
+        allow_agents_and_shell,
     )
     .await;
     let (frames, response) = run_turn(&h.sock, json!({"message": "delegate"})).await;
@@ -1602,7 +1603,7 @@ async fn a_sub_agent_the_host_starts(obs: &mut Observed) {
         Arc::new(OneTurnClient),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        bypass,
+        allow_agents_and_shell,
     )
     .await;
     let session = new_session(&h).await;
@@ -1629,7 +1630,7 @@ async fn a_shell_command_that_runs_on(obs: &mut Observed) {
         ]),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        bypass,
+        allow_agents_and_shell,
     )
     .await;
     let session = new_session(&h).await;
@@ -1759,7 +1760,7 @@ async fn a_notification_from_the_model(obs: &mut Observed) {
         ]),
         TunedScene::notifying(),
         8,
-        bypass,
+        allow_agents_and_shell,
     )
     .await;
     let (frames, response) = run_turn(&h.sock, json!({"message": "tell me"})).await;
@@ -1999,7 +2000,9 @@ async fn documented_accept_edits_asks_about_reads_outside_the_project_and_a_nest
         ]),
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
-        |settings| settings.permission_mode = base::permission::PermissionMode::AcceptEdits,
+        |config| {
+            config.settings.values.permission_mode = base::permission::PermissionMode::AcceptEdits
+        },
     )
     .await;
     std::fs::create_dir_all(h.project.join("nested/.git")).unwrap();

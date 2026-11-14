@@ -28,20 +28,22 @@ struct Daemon {
     dir: tempfile::TempDir,
 }
 
+const TOOLS_RUN_UNASKED: &[&str] = &["Bash", "Monitor", "RunCode", "Agent"];
+
 impl Daemon {
     async fn start(model: Arc<MockAnthropicClient>) -> Self {
         Self::start_with(model).await
     }
 
     async fn start_with(model: Arc<dyn AnthropicClient>) -> Self {
-        Self::start_configured(model, |_, _| {}).await
+        Self::start_configured(model, TOOLS_RUN_UNASKED, |_, _| {}).await
     }
 
     /// Permission prompts are on, and go unanswered for `prompt_timeout`
     /// (`--permission-prompt-timeout`, zero for no limit) before they are
     /// given up on.
     async fn start_asking(model: Arc<dyn AnthropicClient>, prompt_timeout: Duration) -> Self {
-        Self::start_configured(model, |settings, assembly| {
+        Self::start_configured(model, &[], |settings, assembly| {
             settings.permission_mode = base::permission::PermissionMode::Default;
             assembly.permission_prompt_timeout = Some(prompt_timeout);
         })
@@ -50,6 +52,7 @@ impl Daemon {
 
     async fn start_configured(
         model: Arc<dyn AnthropicClient>,
+        allowed: &[&str],
         configure: impl FnOnce(&mut settings::Settings, &mut daemon::Assembly),
     ) -> Self {
         let dir = tempfile::tempdir().unwrap();
@@ -64,8 +67,7 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode =
-            base::permission::PermissionMode::BypassPermissions;
+        crate::support::allow_tools(&mut config, allowed);
         let mut assembly = daemon::Assembly {
             cwd: Some(cwd),
             model_client: Some(model),
@@ -1336,7 +1338,7 @@ async fn a_session_with_an_idle_team_member_is_not_rebuilt_under_it() {
     model.push_turn(ask_member("a1", "remember PELICAN"));
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
-    let daemon = Daemon::start_configured(model.clone(), |settings, _| {
+    let daemon = Daemon::start_configured(model.clone(), TOOLS_RUN_UNASKED, |settings, _| {
         let mut team = agents::TeamSettings::default();
         team.enabled = true;
         settings.set_section(&team);
@@ -1430,7 +1432,7 @@ async fn a_team_member_idle_past_its_bound_no_longer_holds_off_a_rebuild() {
     model.push_turn(ask_member("a1", "remember PELICAN"));
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
-    let daemon = Daemon::start_configured(model.clone(), |settings, _| {
+    let daemon = Daemon::start_configured(model.clone(), TOOLS_RUN_UNASKED, |settings, _| {
         let mut team = agents::TeamSettings::default();
         team.enabled = true;
         team.member_idle_timeout_secs = 1;
@@ -1467,7 +1469,7 @@ async fn a_live_team_member_is_one_of_its_sessions_tasks() {
     model.push_turn(ask_member("a1", "remember PELICAN"));
     model.push_turn(text_round("noted"));
     model.push_turn(text_round("asked"));
-    let daemon = Daemon::start_configured(model.clone(), |settings, _| {
+    let daemon = Daemon::start_configured(model.clone(), TOOLS_RUN_UNASKED, |settings, _| {
         let mut team = agents::TeamSettings::default();
         team.enabled = true;
         settings.set_section(&team);

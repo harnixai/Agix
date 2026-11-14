@@ -41,8 +41,7 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode =
-            base::permission::PermissionMode::BypassPermissions;
+        crate::support::allow_tools(&mut config, &[]);
         let pool = daemon::assemble::pool(
             &config,
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),

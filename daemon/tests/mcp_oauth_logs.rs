@@ -98,6 +98,11 @@ async fn no_token_is_ever_logged() {
             .to_string(),
     )
     .unwrap();
+    std::fs::write(
+        root.join("settings.local.json"),
+        serde_json::json!({"project_trust": {"trusted": [root, root.join("**")]}}).to_string(),
+    )
+    .unwrap();
     let sock = root.join("d.sock");
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
@@ -107,7 +112,18 @@ async fn no_token_is_ever_logged() {
         &StaticDaemonPaths::new(root.clone()),
     );
     config.settings.values.memory_enabled = false;
-    config.settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
+    config
+        .settings
+        .rules
+        .push(base::permission::LoadedRule::new(
+            base::permission::PermissionRuleEntry {
+                tool: "mcp__docs__echo".into(),
+                action: base::permission::RuleBehavior::Allow,
+                matching: Default::default(),
+            },
+            base::interface::config_source::Tier::Project,
+            false,
+        ));
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
