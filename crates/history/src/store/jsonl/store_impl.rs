@@ -57,30 +57,7 @@ impl HistoryStore for JsonlHistoryStore {
             return Err(refused);
         }
 
-        // A `Meta` line is where a session says which project it belongs to,
-        // so it is also where that gets recorded — in the map for this
-        // process and in the sidecar for every later one. The sidecar is
-        // written *before* the log line, which is the opposite order from the
-        // counters below and for the opposite reason: the counters are a
-        // convenience computed from a log that already exists, while this is
-        // the index that says where the log is. A crash between the two
-        // leaves an empty index entry, which is recoverable; the other order
-        // leaves a transcript nothing can find.
-        let home = match self.home_from_meta(&entry).await {
-            Some(home) => {
-                let dir = project_dir_for(&self.projects_root, home.as_deref());
-                crate::project::ensure_session_sidecar_in(
-                    &self.sessions_root,
-                    home.as_deref().unwrap_or_else(|| Path::new("")),
-                    &dir,
-                    session,
-                )
-                .await?;
-                self.homes.lock().await.insert(session, home.clone());
-                home
-            }
-            None => self.home_of(session).await,
-        };
+        let home = self.home_recorded_by(session, &entry).await?;
         let project_history_dir = project_dir_for(&self.projects_root, home.as_deref());
         let path = session_file(&project_history_dir, &session);
 

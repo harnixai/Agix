@@ -268,6 +268,35 @@ impl JsonlHistoryStore {
         }
     }
 
+    /// The project `session` writes into, recording it first when `entry`
+    /// is the `Meta` that says.
+    ///
+    /// The sidecar is written *before* the log line, which is the opposite
+    /// order from the counters an append updates after it and for the
+    /// opposite reason: the counters are a convenience computed from a log
+    /// that already exists, while this is the index that says where the log
+    /// is. A crash between the two leaves an empty index entry, which is
+    /// recoverable; the other order leaves a transcript nothing can find.
+    async fn home_recorded_by(
+        &self,
+        session: SessionId,
+        entry: &LogEntry,
+    ) -> Result<Option<PathBuf>, HistoryError> {
+        let Some(home) = self.home_from_meta(entry).await else {
+            return Ok(self.home_of(session).await);
+        };
+        let dir = project_dir_for(&self.projects_root, home.as_deref());
+        crate::project::ensure_session_sidecar_in(
+            &self.sessions_root,
+            home.as_deref().unwrap_or_else(|| Path::new("")),
+            &dir,
+            session,
+        )
+        .await?;
+        self.homes.lock().await.insert(session, home.clone());
+        Ok(home)
+    }
+
     pub fn canonical_cwd(&self) -> &Path {
         &self.canonical_cwd
     }
