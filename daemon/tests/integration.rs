@@ -53,6 +53,7 @@ mod session_set_model;
 mod session_tasks;
 mod session_teardown;
 mod session_title_telemetry;
+mod session_unsubscribe;
 mod tool_progress;
 mod trusting;
 mod turn_cancellation;

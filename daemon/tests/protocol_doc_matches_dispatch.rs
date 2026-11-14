@@ -172,9 +172,15 @@ fn the_documented_error_codes_are_the_declared_ones() {
 /// this corpus scan source text for a living. Naming a method in a source
 /// scan is not sending it.
 ///
+/// The two files that only compare the document's shapes with the wire
+/// (`SHAPE_ONLY_FILES`) do not count: sending a method to check its example
+/// is not a test of what it does.
+///
 /// `daemon.auth` is checked here even though it never reaches `dispatch` —
 /// it is the first message on every network connection, so a client that
 /// cannot send it cannot send anything else either.
+const SHAPE_ONLY_FILES: &[&str] = &["protocol_doc_examples.rs", "protocol_doc_wire.rs"];
+
 #[test]
 fn every_method_a_client_can_send_is_driven_by_a_test() {
     let root = repo_root();
@@ -184,6 +190,7 @@ fn every_method_a_client_can_send_is_driven_by_a_test() {
     let wrappers = client_wrappers(&root);
     let corpus: Vec<(String, String)> = test_sources(&root)
         .into_iter()
+        .filter(|(path, _)| !SHAPE_ONLY_FILES.iter().any(|f| path.ends_with(f)))
         .filter(|(_, src)| starts_a_daemon(src))
         .collect();
     assert!(
