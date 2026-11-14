@@ -175,9 +175,19 @@ impl Delegator {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .get(&key)
-            .map(|m| (m.inbox.clone(), m.cancel.clone(), m.session_id.clone()));
-        if let Some((inbox, cancel, session_id)) = &existing {
+            .map(|m| {
+                (
+                    m.inbox.clone(),
+                    m.cancel.clone(),
+                    m.session_id.clone(),
+                    m.idle_since.clone(),
+                    m.idle_seq.clone(),
+                )
+            });
+        if let Some((inbox, cancel, session_id, idle_since, idle_seq)) = &existing {
             if let Some(task_id) = inbox.deliver(self, &seat, cancel, prompt.clone()) {
+                idle_since.store(i64::MAX, Ordering::SeqCst);
+                idle_seq.store(u64::MAX, Ordering::SeqCst);
                 return Ok(Delegated::Started(StartedAgent::new(
                     task_id,
                     session_id.clone(),
@@ -412,6 +422,24 @@ impl MemberLoop {
         }
     }
 
+    /// Idle once its turn is done, unless a message came in meanwhile: a
+    /// delivery marks the member busy under the spawn lock, and going idle
+    /// under it too keeps that mark from being overwritten before the loop
+    /// takes the message.
+    async fn go_idle_unless_messaged(&self) {
+        let _delivering = self.spawn_lock.lock().await;
+        if !self.messages.is_empty() {
+            return;
+        }
+        let now = now_secs();
+        self.idle_since.store(now, Ordering::SeqCst);
+        self.idle_seq.store(
+            self.idle_seq_counter.fetch_add(1, Ordering::SeqCst),
+            Ordering::SeqCst,
+        );
+        self.lifecycle(team::coordinator::TeammateLifecycle::Idle, Some(now as u64));
+    }
+
     /// Past its idle bound: leave the pool as a stop would, unless a message
     /// came in meanwhile. Taken under the spawn lock, which every delivery
     /// holds, so nothing is queued for this member once it has left.
@@ -476,14 +504,7 @@ async fn member_loop(mut m: MemberLoop) {
         };
         conclude(lease, &text, &end, true);
         last = end;
-
-        let now = now_secs();
-        m.idle_since.store(now, Ordering::SeqCst);
-        m.idle_seq.store(
-            m.idle_seq_counter.fetch_add(1, Ordering::SeqCst),
-            Ordering::SeqCst,
-        );
-        m.lifecycle(TeammateLifecycle::Idle, Some(now as u64));
+        m.go_idle_unless_messaged().await;
     }
     m.messages.close();
     while let Ok(queued) = m.messages.try_recv() {

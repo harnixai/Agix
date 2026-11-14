@@ -1186,3 +1186,60 @@ async fn a_deleted_teams_late_turn_does_not_bring_the_team_back() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
+
+/// A member just messaged is busy from the moment the message is queued, not
+/// from when its loop wakes for it: a spawn right behind that message
+/// reclaims another idle member instead, and the message still runs.
+#[tokio::test]
+async fn a_member_just_messaged_is_not_reclaimed_before_its_loop_wakes() {
+    let agent_tool = TestParent {
+        team: team_with(|t| {
+            t.max_persistent_members = 2;
+            t.member_idle_timeout_secs = 1_000_000;
+        }),
+        ..TestParent::new(Arc::new(HoldsUntilCancelled {
+            mark: "NOTHING-IS-HELD",
+            held: Default::default(),
+        }))
+    }
+    .with_team()
+    .agent_tool();
+    let session = agent_tool.parent_state();
+    let send = |name: &str, prompt: &str| {
+        agent_tool.spawn_or_message_team_member(
+            "team".into(),
+            name.into(),
+            prompt.into(),
+            None,
+            std::path::PathBuf::from("/tmp"),
+            session.clone(),
+            None,
+        )
+    };
+    for name in ["a", "c"] {
+        send(name, "hi").await.unwrap();
+        wait_until_idle(&agent_tool, &team_key("team", name)).await;
+    }
+
+    let for_a = send("a", "do x").await.unwrap();
+    send("b", "hi").await.unwrap();
+
+    {
+        let members = agent_tool
+            .delegator
+            .members
+            .live
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            members.contains_key(&team_key("team", "a")),
+            "the member messaged a moment ago was reclaimed: {:?}",
+            members.keys().collect::<Vec<_>>()
+        );
+        assert!(!members.contains_key(&team_key("team", "c")));
+    }
+    assert_eq!(
+        ended_status(&agent_tool, &for_a).await,
+        base::context::task::TaskStatus::Done
+    );
+}
