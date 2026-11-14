@@ -223,7 +223,7 @@ pub async fn ensure_session_sidecar_in(
     session: SessionId,
 ) -> Result<SessionSidecarPaths, HistoryError> {
     let paths = session_sidecar_paths_in(sessions_root, &session);
-    tokio::fs::create_dir_all(&paths.dir).await?;
+    create_dir_durably(&paths.dir).await?;
 
     let mut metadata = match tokio::fs::read_to_string(&paths.metadata).await {
         Ok(content) => serde_json::from_str::<SessionMetadata>(&content)
@@ -354,6 +354,31 @@ pub async fn session_stats_in(
         title: metadata.title,
         compact_count: metadata.compact_count,
     })
+}
+
+/// `metadata.json` is written durably, but a sidecar directory created for it
+/// is only an entry in its parent until that parent is synced too; lost, it
+/// takes the one index that finds a session outside the daemon's cwd.
+async fn create_dir_durably(dir: &Path) -> Result<(), HistoryError> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let created: Vec<PathBuf> = dir
+            .ancestors()
+            .take_while(|d| !d.as_os_str().is_empty() && !d.exists())
+            .map(Path::to_path_buf)
+            .collect();
+        std::fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        for parent in created.iter().filter_map(|d| d.parent()) {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        drop(created);
+        Ok::<_, std::io::Error>(())
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    Ok(())
 }
 
 async fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), HistoryError> {
