@@ -375,10 +375,21 @@ fn map_block_start(
 ) -> Mapped {
     use crate::stream::ContentBlockStart;
     match content_block {
-        ContentBlockStart::Text { text } => vec![Ok(ModelEvent::ContentBlockStart {
-            index: index as usize,
-            block: ModelContentBlock::Text { text },
-        })],
+        // Like thinking below: a provider may front-load the text, and the
+        // engine builds the reply from deltas alone.
+        ContentBlockStart::Text { text } => {
+            let start = Ok(ModelEvent::ContentBlockStart {
+                index: index as usize,
+                block: ModelContentBlock::Text {
+                    text: String::new(),
+                },
+            });
+            if text.is_empty() {
+                vec![start]
+            } else {
+                vec![start, Ok(ModelEvent::TextDelta { text })]
+            }
+        }
         // The provider runs its own search and answers it inside the call;
         // there is nothing for the engine to run.
         ContentBlockStart::ServerToolUse { .. } => vec![],
@@ -1104,8 +1115,8 @@ mod map_stream_event_tests {
     }
 
     /// Some providers send whole text blocks as `ContentBlockStart { Text }`
-    /// instead of via deltas, so this emission must survive the tool_use
-    /// accumulation.
+    /// instead of via deltas. The engine builds a reply from its deltas, so
+    /// the text goes out as one; the start still marks the block.
     #[test]
     fn content_block_start_with_text_is_still_emitted() {
         let events = vec![StreamEvent::ContentBlockStart {
@@ -1116,18 +1127,19 @@ mod map_stream_event_tests {
         }];
 
         let out = run(events);
-        match &out[0] {
-            ModelEvent::ContentBlockStart { index, block } => {
-                assert_eq!(*index, 2);
-                assert_eq!(
-                    block,
-                    &ModelContentBlock::Text {
-                        text: "whole block text".into()
-                    }
-                );
-            }
-            other => panic!("expected ContentBlockStart, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                &out[..],
+                [
+                    ModelEvent::ContentBlockStart {
+                        index: 2,
+                        block: ModelContentBlock::Text { text: start },
+                    },
+                    ModelEvent::TextDelta { text },
+                ] if start.is_empty() && text == "whole block text"
+            ),
+            "{out:?}"
+        );
     }
 
     /// Unparseable accumulated JSON is reported as a malformed call, not
