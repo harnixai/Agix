@@ -3,8 +3,7 @@
 //! 不写盘、不需要用户设置；每 session 自动注入到 skill 列表。用户在
 //! `~/.agix/skills/<name>/SKILL.md`（全局默认）、`~/.agix/scenes/<scene>/skills/<name>/SKILL.md`
 //! （scene 覆盖）或 `<cwd>/.agents/skills/<name>/SKILL.md`（项目级）创建同名 skill 即覆盖
-//! （disk 优先，因为 collect_skills 把 disk 后入但 dedup 不存在；同名时 `/<name>` slash 命中
-//! 第一个 —— 即用户的）。
+//! （disk 优先：同名时 `/<name>` slash 命中第一个 —— 即用户的）。
 //!
 //! # 技能列表
 //!
@@ -32,8 +31,8 @@
 use base::skill::{SkillEntry, SkillSource};
 use std::path::PathBuf;
 
-/// 返回内置 skills（in-memory；不动 disk）。在 `load_session_skills` 之后
-/// 追加，所以用户的同名 disk skill 仍然在前。
+/// 返回内置 skills（in-memory；不动 disk）。排在 disk skill 之后，
+/// 所以用户的同名 disk skill 仍然在前。
 pub fn bundled_skills() -> Vec<SkillEntry> {
     vec![
         SkillEntry {
@@ -183,8 +182,7 @@ pub fn required_tools(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// 把 `(bundled:<name>)` 路径形式解析回 prompt body。`SkillEntry::read_body` 在
-/// 看到这种路径时调这里而不是读盘。
+/// 把 `(bundled:<name>)` 路径形式解析回 prompt body，不读盘。
 pub fn bundled_body(name: &str) -> Option<String> {
     let body = match name {
         "simplify" => SIMPLIFY,

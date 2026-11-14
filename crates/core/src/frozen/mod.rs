@@ -8,8 +8,6 @@
 pub mod frontmatter;
 pub mod import;
 pub mod memory;
-pub mod regex;
-pub mod skill;
 pub mod utils;
 
 pub use self::import::{
@@ -17,8 +15,6 @@ pub use self::import::{
     mark_imported, mark_skipped, ImportError, ImportSource, ImportSourceKind, ImportSummary,
 };
 pub use self::memory::MemoryFileEntry;
-use self::skill::load_session_skills;
-use crate::skill::SkillEntry;
 
 use self::memory::collect_memory_files_with;
 use crate::engine_exec::{read_head, EngineExec, EngineExecError, GitAccess};
@@ -55,13 +51,6 @@ pub struct FrozenContext {
     pub today: String,
     pub memory_blocks: Vec<MemoryFileEntry>,
     pub user_email: Option<String>,
-    /// `~/.agix/scenes/<scope>/skills/<name>/SKILL.md` + `<cwd>/.agents/skills/<name>/SKILL.md`
-    /// 的 metadata 索引（项目级技能挪到了 `.agents/skills/`——外部事实标准，Codex
-    /// 也扫描这个路径；用户级技能仍在 Agix 私有的 `.agix/scenes/<scope>/` 下，因为
-    /// 用户主目录不存在"被别的工具扫描"的场景）。只入 frontmatter
-    /// （name/description/when_to_use）+ 不嵌入 body / 不做参数代换 / 不做 slash
-    /// 调用。模型能"知道"skills 存在 + 在合适时主动引用。
-    pub skills: Vec<SkillEntry>,
     /// 模型写记忆的目录，即 [`crate::memory::MemoryStore::for_paths`] 的全局一层。
     pub memory_dir: PathBuf,
     /// 全局与项目两层 `MEMORY.md` 合起来的索引（截到 8 KB），场景的 `memory`
@@ -398,12 +387,6 @@ impl FrozenContext {
             }
             None => Vec::new(),
         };
-        // 用 load_session_skills 而非 collect_skills -- 前者把 bundled
-        // skills (simplify/verify/debug/batch/stuck) 也并入。否则
-        // disk 没装 SKILL.md 时 system prompt 不暴露 bundled，模型不知道有这些
-        // skill，/stuck /simplify 等 case 失败。
-        let skills = load_session_skills(project, paths).await;
-
         let memory_dir = paths.global_memory_dir();
         let memory_index = load_memory_index(paths).await;
 
@@ -430,7 +413,6 @@ impl FrozenContext {
             today,
             memory_blocks,
             user_email,
-            skills,
             memory_dir,
             memory_index,
             already_surfaced: std::collections::HashSet::new(),
