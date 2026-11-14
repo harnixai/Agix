@@ -634,7 +634,6 @@ works and how to run it: [`tests/README.md`](tests/README.md).
 | [docs/plugin_packages.md](docs/plugin_packages.md) | the plugin package format, install and trust |
 | [docs/ptc.md](docs/ptc.md) | `RunCode`: what a model's program can call, its permissions, limits and prompt |
 | [docs/mcp_auth.md](docs/mcp_auth.md) | OAuth for remote MCP servers: configuration, sign-in flows, RPCs and events, credential storage, security |
-| [docs/migrating_to_0.3.md](docs/migrating_to_0.3.md) | upgrading an embedder or client from 0.2.x |
 | [docs/schemas/settings.schema.json](docs/schemas/settings.schema.json) | the generated schema of `settings.json` |
 | [tests/README.md](tests/README.md) | the test layers and the live tier |
 

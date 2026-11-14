@@ -12,7 +12,6 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 - `extension_points.md` —— 能扩展什么(总揽)
 - `extending_quickjs.md` —— 怎么用脚本扩展;`extension_points.md` —— 全部扩展点
 - `plugin_development.md` —— 怎么写 Rust 插件与 QuickJS 插件,样例在 `examples/plugins/`
-- `migrating_to_0.3.md` —— 从 0.2.x 迁移
 
 ---
 

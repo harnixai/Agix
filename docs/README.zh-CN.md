@@ -527,7 +527,6 @@ cargo test  -p live --features real-model --test real_model  # LIVE 层,对真�
 | [plugin_packages.md](plugin_packages.md) | 插件包的格式、安装与信任 |
 | [ptc.md](ptc.md) | `RunCode`:模型写的程序能调什么、权限、限额与提示词 |
 | [mcp_auth.md](mcp_auth.md) | 远端 MCP server 的 OAuth:配置、登录流程、RPC 与通知、凭据存储、安全 |
-| [migrating_to_0.3.md](migrating_to_0.3.md) | 嵌入方与客户端从 0.2.x 升级 |
 | [schemas/settings.schema.json](schemas/settings.schema.json) | 生成的 `settings.json` schema |
 | [tests/README.md](../tests/README.md) | 测试分层与 LIVE 层 |
 

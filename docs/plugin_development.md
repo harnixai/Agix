@@ -205,41 +205,7 @@ examples/plugins/quickjs/
 
 ### 打包与安装
 
-```sh
-cd examples/plugins/quickjs && zip -r ../demo-quickjs.zip . && shasum -a 256 ../demo-quickjs.zip
-```
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"plugin.install",
- "params":{"name":"demo-quickjs","version":"1.0.0",
-           "download_url":"file:///abs/path/demo-quickjs.zip","checksum":"<sha256>"}}
-```
-
-返回的 `disclosure` 列出九条脚本能力,以及每一段会到达模型的文本(agent 提示词、场景提示词、
-描述)。之后新建的会话就带上这些脚本。场景要显式进入:
-`session.create {"scene": "plugin:demo-quickjs"}`。manifest 的完整格式、校验规则和信任模型在
-`plugin_packages.md`。
-
-### 包里带 skill
-
-教模型何时、怎样用包里工具的那几段说明,写成 skill 跟包一起发,不要让宿主拷进实例的 skill
-目录——那样停用、卸载时它们不会跟着走,也不在披露里。在 `plugin.toml` 里写
-
-```toml
-[skills]
-dir = "skills"
-```
-
-再把 skill 放成 `skills/<名字>/SKILL.md`,写法与磁盘上的 skill 相同,但校验严得多:
-frontmatter 拼错一个键、`name` 与目录名不一致、少了 `description`,整个包都装不上,
-错误里写明是哪个 skill、哪一项。动手前先在本地装一遍,看 `plugin.install` 的报错和 `disclosure`
-里列出的正文。
-
-裸名,不加命名空间:用户磁盘上有同名 skill 时用的是用户那份,包照常装上,`plugin.list` 的
-`skill_conflicts` 会报出来。所以给 skill 取一个不容易与别人撞的名字。`allowed-tools` 只写
-`Tool(内容)` 形式、且内容真正收窄的才生效——路径在项目之内、命令以一个完整的程序名开头、URL
-钉住一个可注册的域名(`Bash(cargo test:*)`、`Write(src/**)` 生效,`Bash(*)`、`Bash(b*)`、
-`Write(../**)`、`WebFetch(https://*.github.io/**)` 不生效)。完整规则见 `plugin_packages.md`「包里的 skill」。
+打包、`plugin.install`、披露内容、场景进入方式和包里带 skill 的写法与校验,见 `plugin_packages.md`。
 
 ### 调试
 
@@ -261,7 +227,7 @@ frontmatter 拼错一个键、`name` 与目录名不一致、少了 `description
 
 ## 稳定性
 
-`Plugin`、`PluginSession`、`Registrar` 的方法,九个脚本点的 JSON 形状,脚本绑定的字段,以及 `plugin.toml` 的写法(`api_version = "0.1"`),原则上只做增量,不改已有的含义;但 `api_version` 还是 `0.1`,这条原则不是保证。破坏兼容的改动不会静默发生,每次都列在发布对应的迁移文档(`migrating_to_0.3.md`)里,升级前先读那一节。
+`Plugin`、`PluginSession`、`Registrar` 的方法,九个脚本点的 JSON 形状,脚本绑定的字段,以及 `plugin.toml` 的写法(`api_version = "0.1"`),原则上只做增量,不改已有的含义;但 `api_version` 还是 `0.1`,这条原则不是保证。
 
 包用到了某个版本之后才有的东西(新的脚本点、新的绑定字段),在 `[plugin]` 里写 `requires_engine = ">=0.3.12"`:更早的引擎装它时直接拒,报出要求的版本和自己的版本,而不是装上之后那一处静默不生效。比较只看引擎版本的 `x.y.z`,不看日期序号;装了几个版本时用满足条件的最高版本。规则见 `plugin_packages.md`「`api_version` 与 `requires_engine`」。Rust 插件编进二进制,不用写。
 

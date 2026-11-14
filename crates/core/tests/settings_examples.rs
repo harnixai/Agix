@@ -168,7 +168,7 @@ fn every_documented_settings_example_is_valid_and_loads_whole() {
         .collect();
     let validator = jsonschema::validator_for(&schema).unwrap();
     let examples = examples(&keys);
-    for expected in ["README.md", "docs/migrating_to_0.3.md", "docs/hooks.md"] {
+    for expected in ["README.md", "docs/hooks.md"] {
         assert!(
             examples.iter().any(|e| e.at.starts_with(expected)),
             "no settings example found in {expected}; the extraction is broken"

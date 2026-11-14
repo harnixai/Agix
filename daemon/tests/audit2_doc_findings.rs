@@ -213,7 +213,7 @@ async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
     assert_eq!(reply["result"]["prompt_id"], prompt_id, "{reply}");
 }
 
-/// 迁移指南说 URL 规则改成按部分匹配后"deny / ask 照旧按整串 glob 拦"，`RuleSet` 的注释也说
+/// URL 规则改成按部分匹配后"deny / ask 照旧按整串 glob 拦"，`RuleSet` 的注释也说
 /// 以前写下的拒绝不能失效。但只有写不成 `scheme://host[/path]` 的才照旧：形状对的 deny
 /// 换成了路径 `*` 不跨 `/`、不写路径只认 `/` 的新语义。0.3.10 里
 /// `WebFetch(https://evil.example/*)`、`WebFetch(https://evil.example*)` 都拒绝
@@ -442,7 +442,7 @@ fn audit2_permit_always_on_a_url_with_a_query_allows_only_that_url() {
     );
 }
 
-/// `ARCHITECTURE.md` §6.1 第 5 条与迁移指南:项目或插件 skill 的 `allowed-tools` 里"主机钉不住
+/// `ARCHITECTURE.md` §6.1 第 5 条:项目或插件 skill 的 `allowed-tools` 里"主机钉不住
 /// 域名的 URL 模式"按整类授权处理。`*.co.uk` 两段都是字面量,`host_is_open` 当它钉住了,可
 /// 任何人都能注册 `x.co.uk`。
 #[test]
@@ -465,8 +465,7 @@ fn audit2_a_skill_url_grant_on_a_public_suffix_is_unscoped() {
 
 /// `settings_json_schema` 的注释说这份 schema "can never drift from what `LoadedSettings::load()`
 /// actually accepts",README 让用户拿它做编辑器校验。可它要求顶层的 `model`、`paths`,
-/// `sandbox` 要求 `deny_read`、`allowed_domains`:空文件、README 的路由示例、迁移指南让写的
-/// `{"sandbox": {"unattended_requires_network_policy": true}}` 都过不了校验。`bubble` 则反过来:
+/// `sandbox` 要求 `deny_read`、`allowed_domains`:空文件、README 的路由示例、`{"sandbox": {"unattended_requires_network_policy": true}}` 都过不了校验。`bubble` 则反过来:
 /// schema 收,协议说写进 settings.json 会被退回 `default`。
 #[test]
 fn audit2_the_settings_schema_accepts_what_the_loader_accepts() {
