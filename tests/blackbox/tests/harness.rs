@@ -454,9 +454,8 @@ async fn the_toy_mcp_server_answers_over_stdio_and_http() -> anyhow::Result<()> 
             "mcp__local__big",
             json!({ "bytes": 5000, "tail": "BIG-TAIL" }),
         ),
-        Reply::calls("m4", "mcp__local__elicit", json!({})),
-        Reply::calls("m5", "mcp__web__ping", json!({ "message": "over-http" })),
-        Reply::calls("m6", "mcp__legacy__ping", json!({ "message": "over-sse" })),
+        Reply::calls("m4", "mcp__web__ping", json!({ "message": "over-http" })),
+        Reply::calls("m5", "mcp__legacy__ping", json!({ "message": "over-sse" })),
         Reply::text("done"),
     ]);
     let events = run.turn(&session, "use the toy").await?;
@@ -473,13 +472,8 @@ async fn the_toy_mcp_server_answers_over_stdio_and_http() -> anyhow::Result<()> 
         content(1)
     );
     assert!(content(2).1.contains("BIG-TAIL"), "{:?}", content(2));
-    assert!(
-        content(3).1.contains("elicitation://toy/"),
-        "{:?}",
-        content(3)
-    );
-    assert!(content(4).1.contains("toy: over-http"), "{:?}", content(4));
-    assert!(content(5).1.contains("toy: over-sse"), "{:?}", content(5));
+    assert!(content(3).1.contains("toy: over-http"), "{:?}", content(3));
+    assert!(content(4).1.contains("toy: over-sse"), "{:?}", content(4));
     let logged = McpToy::calls(&calls);
     for (server, tool) in [("local", "echo"), ("local", "big"), ("web", "ping")] {
         assert!(

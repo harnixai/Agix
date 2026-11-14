@@ -1066,6 +1066,19 @@ impl Answer {
         json!({ "type": "decline", "reason": reason })
     }
 
+    /// An MCP server's question accepted, with what a form asked for.
+    pub fn accept(content: Option<Value>) -> Value {
+        match content {
+            Some(content) => json!({ "type": "accept", "content": content }),
+            None => json!({ "type": "accept" }),
+        }
+    }
+
+    /// An MCP server's question refused (`decline`) or left (`cancel`).
+    pub fn mcp(action: &str) -> Value {
+        json!({ "type": action })
+    }
+
     /// The responder [`Watcher::start`] uses when told to approve: permit
     /// every permission prompt, leave questions unanswered.
     pub fn permit_all(event: &Value) -> Option<Value> {
@@ -1144,10 +1157,10 @@ impl Watcher {
                     continue;
                 };
                 let prompt_type = event["prompt_type"].as_str().unwrap_or("permission");
-                let key = if prompt_type == "question" {
-                    "answer"
-                } else {
+                let key = if prompt_type == "permission" {
                     "decision"
+                } else {
+                    "answer"
                 };
                 let mut params = json!({
                     "session_id": session,

@@ -274,7 +274,7 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
             Reply::calls("b1", "Bash", json!({ "command": "echo made > made.txt" })),
             Reply::calls("r1", "Read", json!({ "file_path": "forbidden.txt" })),
             Reply::calls("r2", "Read", json!({ "file_path": "a-directory" })),
-            Reply::calls("e1", "mcp__demo__elicit", json!({ "reason": "ledger" })),
+            Reply::calls("e1", "mcp__demo__ask", json!({ "mode": "form" })),
             Reply::calls(
                 "a1",
                 "Agent",
@@ -286,7 +286,7 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     stub.script([Reply::text("SUB-DONE")]);
     run.turn(&session, "PARENT-MARK turn one").await?;
     ledger
-        .wait_for("Elicitation", Duration::from_secs(60))
+        .wait_for("ElicitationResult", Duration::from_secs(60))
         .await?;
     let tasked = ledger
         .wait_until(
@@ -378,13 +378,18 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
         .find(|e| e["hook_event_name"] == "Elicitation")
         .cloned()
         .unwrap_or_default();
-    assert!(
-        elicited["tool_input"]["url"]
-            .as_str()
-            .is_some_and(|u| u.starts_with("elicitation://toy/")),
-        "{elicited}"
+    assert_eq!(elicited["tool_input"]["server_name"], "demo", "{elicited}");
+    assert_eq!(elicited["tool_input"]["mode"], "form", "{elicited}");
+    assert_eq!(elicited["tool_use_id"], "e1", "{elicited}");
+    let answered = turn_one
+        .iter()
+        .find(|e| e["hook_event_name"] == "ElicitationResult")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        answered["tool_input"]["action"], "cancel",
+        "a host that answers no MCP questions: {answered}"
     );
-    assert_eq!(elicited["tool_input"]["server_name"], "demo");
 
     let task: Value = serde_json::from_str(tasked["reason"].as_str().unwrap_or("null"))?;
     assert_eq!(task["kind"], "agent", "{tasked}");
@@ -478,12 +483,6 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
         .await?;
     assert_eq!(end["session_id"], session.as_str());
 
-    let fired = ledger.names();
-    let unwired = "ElicitationResult";
-    assert!(
-        !fired.iter().any(|n| n == unwired),
-        "{unwired} is listed as never fired: {fired:?}"
-    );
     run.finish().await;
     Ok(())
 }

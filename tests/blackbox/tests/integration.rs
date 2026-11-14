@@ -15,6 +15,7 @@ mod host_agents;
 mod hostile_plugins;
 mod large_tool_results;
 mod mcp_boundaries;
+mod mcp_elicitation;
 mod minimal_tier;
 mod package_trust;
 mod permission_bounds;

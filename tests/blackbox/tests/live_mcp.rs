@@ -3,13 +3,13 @@
 //! budget, resources read by tool and by `@` reference, a prompt run as a
 //! slash command, a server added and then changed at runtime, the HTTP and
 //! SSE transports, the enterprise policy (with a plugin's server among the
-//! denied), a plugin's server across `config.reload`, and an elicitation URL
-//! reaching its hook.
+//! denied), a plugin's server across `config.reload`, and a tool whose server
+//! asks the user something.
 
 use std::path::Path;
 use std::time::Duration;
 
-use blackbox::{LiveRun, McpToy, Mode, World};
+use blackbox::{Answer, LiveRun, McpToy, Mode, World};
 use serde_json::{json, Value};
 
 const TOY_UNICODE: &str =
@@ -740,67 +740,49 @@ async fn a_plugins_mcp_server_survives_a_config_reload() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_elicitation_url_in_a_tool_result_reaches_the_elicitation_hook() -> anyhow::Result<()> {
+async fn live_model_uses_an_mcp_tool_that_asks_the_user() -> anyhow::Result<()> {
     let scratch = tempfile::tempdir()?;
-    let log = scratch.path().join("elicitation.jsonl");
-    let hook = scratch.path().join("elicit.sh");
-    std::fs::write(
-        &hook,
-        format!(
-            "#!/bin/sh\ncat >> '{log}'\necho >> '{log}'\necho '{{\"continue\": true}}'\n",
-            log = log.display()
-        ),
-    )?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
-    }
-    let reason = format!("R-{}", nonce());
-    let mut run = LiveRun::builder("mcp-elicit")
-        .settings(json!({
-            "mcp_servers": { "toy": McpToy::stdio_config(&[])? },
-            "hooks_config": {
-                "Elicitation": [ { "type": "command", "command": hook, "timeout": 5000 } ]
-            }
-        }))
+    let calls = scratch.path().join("calls.log");
+    let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?;
+    let mut run = LiveRun::builder("mcp-ask")
+        .settings(json!({ "mcp_servers": { "toy": toy } }))
         .start()
         .await?;
-    let session = run.session().await?;
-    let _host = run.watch(&session, true).await?;
+    let session = run
+        .session_with(json!({ "options": { "prompt_types": ["permission", "mcp_elicitation"] } }))
+        .await?;
+    let host = run
+        .watch_with(&session, |event| match event["prompt_type"].as_str() {
+            Some("permission") => Some(Answer::permit()),
+            Some("mcp_elicitation") => Some(Answer::accept(Some(json!({ "color": "blue" })))),
+            _ => None,
+        })
+        .await?;
     let events = run
         .turn(
             &session,
-            &format!(
-                "Call mcp__toy__elicit once with reason {reason}. Do not open the URL it \
-                 returns; reply WAITING."
-            ),
+            "Call mcp__toy__ask once with mode form, then tell me in one word which color \
+             the user picked.",
         )
         .await?;
+    let asked = host.events("prompt");
     assert!(
-        results_of(&events, "mcp__toy__elicit")
-            .iter()
-            .any(|(_, t, _)| t.contains(&reason) && t.contains("elicitation://toy/confirm")),
-        "{:?}",
-        events.tool_results
+        asked.iter().any(
+            |f| f["event"]["prompt_type"] == "mcp_elicitation" && f["event"]["server"] == "toy"
+        ),
+        "the server's question never reached the host: {asked:?}"
     );
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    let mut seen = String::new();
-    while std::time::Instant::now() < deadline {
-        seen = std::fs::read_to_string(&log).unwrap_or_default();
-        if !seen.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let payload: Value = serde_json::from_str(seen.lines().next().unwrap_or("null"))?;
-    assert_eq!(payload["hook_event_name"], "Elicitation", "{seen}");
-    assert_eq!(payload["tool_input"]["server_name"], "toy", "{seen}");
     assert!(
-        payload["tool_input"]["url"]
-            .as_str()
-            .is_some_and(|u| u.starts_with("elicitation://toy/confirm?call=")),
-        "{seen}"
+        McpToy::calls(&calls)
+            .iter()
+            .any(|(_, what)| what.starts_with("ask ") && what.contains("blue")),
+        "the server never got the answer: {:?}",
+        McpToy::calls(&calls)
+    );
+    assert!(
+        events.text.to_lowercase().contains("blue"),
+        "the model did not pass the answer on: {}",
+        events.text
     );
     run.finish().await;
     Ok(())
