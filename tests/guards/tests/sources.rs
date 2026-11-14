@@ -59,7 +59,7 @@ const HOME_READERS: &[(&str, &str)] = &[
          `SandboxPolicy::state_root` first.",
     ),
     (
-        "crates/core/src/project_trust.rs",
+        "crates/settings/src/trust.rs",
         "expands a leading `~/` in `project_trust.trusted` patterns, the same \
          `~` permission rules expand — the home the user means by \
          `~/work/**`. A fact about the machine, never a place Agix writes.",

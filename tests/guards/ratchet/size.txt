@@ -7,7 +7,6 @@ file  crates/core/src/context/session.rs                          -             
 file  crates/core/src/interface/catalog.rs                        -                                      831
 file  crates/core/src/interface/tool.rs                           -                                      1037
 file  crates/core/src/memory.rs                                   -                                      1085
-file  crates/core/src/settings.rs                                 -                                      1166
 file  crates/history/src/store.rs                                 -                                      1925
 file  crates/mcp/src/connect.rs                                   -                                      1328
 file  crates/mcp/src/manager.rs                                   -                                      1274
@@ -15,7 +14,7 @@ file  crates/mcp/src/oauth/mod.rs                                 -             
 file  crates/platform/src/sandbox.rs                              -                                      1651
 file  crates/runtime/src/agent/turn/compact/mod.rs                -                                      861
 file  crates/session/src/session.rs                               -                                      850
-file  crates/team/src/coordinator.rs                              -                                      905
+file  crates/team/src/coordinator.rs                              -                                      912
 file  crates/telemetry/src/recorder/mod.rs                        -                                      942
 fn    crates/agents/src/agent_tool/build.rs                       Delegator::build_delegate              92
 fn    crates/agents/src/agent_tool/build.rs                       Delegator::run_delegate                89
@@ -45,7 +44,7 @@ fn    crates/compaction/src/llm_summary.rs                        LlmSummarizer:
 fn    crates/core/src/frozen/frontmatter.rs                       parse_skill_file                       85
 fn    crates/core/src/prompt.rs                                   assemble_prompt_with                   94
 fn    crates/core/src/provider.rs                                 resolve_task_models                    85
-fn    crates/core/src/settings/loaded.rs                          LoadedSettings::load_from              98
+fn    crates/settings/src/loaded.rs                               LoadedSettings::load_from              98
 fn    crates/history/src/transcript.rs                            apply_entry_to_messages                83
 fn    crates/hooks/src/catalog.rs                                 HookEvent::spec                        190
 fn    crates/hooks/src/runner/executor.rs                         HookRunner::exec_command               93

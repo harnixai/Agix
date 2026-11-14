@@ -244,7 +244,7 @@ fn the_contracts_keep_no_per_thread_state() {
 }
 
 const FILE_SHAPED: &[&str] = &["Settings", "SettingsFile"];
-const SETTINGS_FILE: &str = "crates/core/src/settings.rs";
+const SETTINGS_FILE: &str = "crates/settings/src/lib.rs";
 
 fn deprecated_attrs(f: &SourceFile) -> Vec<Hit> {
     struct Find<'a> {
@@ -501,7 +501,7 @@ fn every_public_enum_is_non_exhaustive_or_closed_for_a_reason() {
     let in_scope: Vec<&SourceFile> = ws()
         .production()
         .filter(|f| {
-            (f.package == "base" && f.target == TargetKind::Lib)
+            (matches!(f.package.as_str(), "base" | "settings") && f.target == TargetKind::Lib)
                 || f.rel.starts_with("crates/assembly/src/session_pool/api/")
         })
         .collect();
@@ -545,14 +545,14 @@ fn every_public_enum_is_non_exhaustive_or_closed_for_a_reason() {
 const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("AgentDef", "crates/plugin/src/manifest.rs"),
     ("CallTraits", "crates/core/src/interface/tool.rs"),
-    ("CompactionConfig", "crates/core/src/settings.rs"),
+    ("CompactionConfig", "crates/settings/src/lib.rs"),
     ("ExecutionParams", "crates/core/src/interface/scene.rs"),
-    ("ExecutionSettings", "crates/core/src/settings.rs"),
+    ("ExecutionSettings", "crates/settings/src/lib.rs"),
     ("Grant", "crates/core/src/interface/permission.rs"),
     ("LoadedRule", "crates/core/src/permission.rs"),
-    ("LoadedSettings", "crates/core/src/settings/loaded.rs"),
+    ("LoadedSettings", "crates/settings/src/loaded.rs"),
     ("McpPayload", "crates/plugin/src/manifest.rs"),
-    ("ModelSettings", "crates/core/src/settings.rs"),
+    ("ModelSettings", "crates/settings/src/lib.rs"),
     ("ModuleSurface", "crates/core/src/interface/scene.rs"),
     ("PathSettings", "crates/core/src/paths/mod.rs"),
     (
@@ -560,18 +560,19 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
         "crates/core/src/interface/permission.rs",
     ),
     ("PluginMeta", "crates/plugin/src/manifest.rs"),
-    ("PluginsConfig", "crates/core/src/settings.rs"),
+    ("PluginsConfig", "crates/assembly/src/plugins/policy.rs"),
     ("ProgressUpdate", "crates/core/src/interface/tool.rs"),
     ("PromptContext", "crates/core/src/interface/tool.rs"),
     ("ReminderContext", "crates/core/src/interface/scene.rs"),
-    ("SandboxConfig", "crates/core/src/settings.rs"),
+    ("SandboxConfig", "crates/settings/src/lib.rs"),
     ("SceneSection", "crates/plugin/src/manifest.rs"),
     ("SceneSpec", "crates/core/src/interface/scene.rs"),
     ("ScenePromptContext", "crates/core/src/interface/scene.rs"),
     ("ScriptPayload", "crates/plugin/src/manifest.rs"),
-    ("Settings", "crates/core/src/settings.rs"),
+    ("Settings", "crates/settings/src/lib.rs"),
     ("SkillsSection", "crates/plugin/src/manifest.rs"),
     ("StartedAgent", "crates/core/src/interface/delegate.rs"),
+    ("TeamSettings", "crates/agents/src/team_settings.rs"),
     ("TokenBudget", "crates/core/src/interface/scene.rs"),
     ("ToolContext", "crates/core/src/interface/tool.rs"),
     ("ToolDef", "crates/core/src/interface/model.rs"),
@@ -580,7 +581,7 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("ToolSurface", "crates/core/src/interface/scene.rs"),
 ];
 
-const NON_EXHAUSTIVE_STRUCTS_AT_LEAST: usize = 32;
+const NON_EXHAUSTIVE_STRUCTS_AT_LEAST: usize = 33;
 
 #[test]
 fn the_structs_an_embedder_builds_are_non_exhaustive() {
