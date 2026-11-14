@@ -335,6 +335,8 @@ pub fn normalize_events(events: &[AgentEvent]) -> String {
             }
             // How the ask ended already shows in the `ToolResult` it led to.
             AgentEvent::PromptResolved { .. } => continue,
+            AgentEvent::HostToolCall { name, .. } => format!("HostToolCall {name}"),
+            AgentEvent::HostToolCallResolved { .. } => continue,
             AgentEvent::TurnStart { .. } => "TurnStart".to_string(),
             AgentEvent::StepStart { step, .. } => format!("StepStart step={step}"),
             AgentEvent::ModelRetry {
