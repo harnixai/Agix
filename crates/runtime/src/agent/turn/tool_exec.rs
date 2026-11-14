@@ -324,17 +324,6 @@ pub(super) async fn execute_tool_inner(
 
     // The hook may rewrite the input, and permission judges what will run.
     let (input, hook) = pre_tool_use(ctx, name, input).await;
-    // A skill's command is the repository's text put to the hook with no
-    // model in between: the hook may refuse it, but its approval does not
-    // stand in for the user's.
-    let hook = match hook {
-        base::interface::permission::HookAnswer::Approve { .. }
-            if ctx.caller == Caller::InlineCommand =>
-        {
-            base::interface::permission::HookAnswer::None
-        }
-        hook => hook,
-    };
     let ends = EndsForTheHooks::arm(ctx, name, &input);
     let mut tool_ctx = tool_context_for(ctx, Some(&tool.spec()));
     if let base::tool::ValidationResult::Err(message, _) =

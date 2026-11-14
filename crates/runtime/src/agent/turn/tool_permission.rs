@@ -4,11 +4,15 @@
 
 use super::process::hook_permission_mode;
 use super::reporting::record_permission_decision;
-use super::tool_exec::{fire_ctx_lifecycle_hook, ToolExecCtx};
+use super::tool_exec::{fire_ctx_lifecycle_hook, Caller, ToolExecCtx};
 use std::sync::Arc;
 
 /// `PreToolUse`: the input the call goes on with, and what the hook answered
 /// about it in advance. A block keeps the input as the model wrote it.
+///
+/// A skill's inline command is the repository's text put to the hook with no
+/// model in between: the hook may refuse it, but its approval does not stand
+/// in for the user's.
 pub(super) async fn pre_tool_use(
     ctx: &ToolExecCtx,
     name: &str,
@@ -31,11 +35,16 @@ pub(super) async fn pre_tool_use(
         user_prompt: None,
         ..Default::default()
     };
-    answer_of_pre_tool_use(&ctx.hooks, &pre_input, input, &ctx.cancel).await
+    match answer_of_pre_tool_use(&ctx.hooks, &pre_input, input, &ctx.cancel).await {
+        (input, HookAnswer::Approve { .. }) if ctx.caller == Caller::InlineCommand => {
+            (input, HookAnswer::None)
+        }
+        answered => answered,
+    }
 }
 
 /// Run the `PreToolUse` hooks on `pre_input`, about a call with `input`.
-pub(super) async fn answer_of_pre_tool_use(
+async fn answer_of_pre_tool_use(
     hooks: &hooks::HookRunner,
     pre_input: &hooks::HookInput,
     input: serde_json::Value,
