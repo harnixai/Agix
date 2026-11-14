@@ -41,7 +41,7 @@ fn place(f: &SourceFile, hit: &Hit) -> String {
     }
 }
 
-const TOOL_TRAIT: &str = "crates/core/src/interface/tool.rs";
+const TOOL_TRAIT: &str = "crates/core/src/interface/tool/mod.rs";
 
 const TOOL_METHODS: &[&str] = &[
     "name",

@@ -546,7 +546,7 @@ fn every_public_enum_is_non_exhaustive_or_closed_for_a_reason() {
 /// struct's removal.
 const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("AgentDef", "crates/packages/src/manifest.rs"),
-    ("CallTraits", "crates/core/src/interface/tool.rs"),
+    ("CallTraits", "crates/core/src/interface/tool/mod.rs"),
     ("CompactionConfig", "crates/settings/src/lib.rs"),
     ("ExecutionParams", "crates/core/src/interface/scene.rs"),
     ("ExecutionSettings", "crates/settings/src/lib.rs"),
@@ -563,8 +563,8 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ),
     ("PluginMeta", "crates/packages/src/manifest.rs"),
     ("PluginsConfig", "crates/assembly/src/plugins/policy.rs"),
-    ("ProgressUpdate", "crates/core/src/interface/tool.rs"),
-    ("PromptContext", "crates/core/src/interface/tool.rs"),
+    ("ProgressUpdate", "crates/core/src/interface/tool/result.rs"),
+    ("PromptContext", "crates/core/src/interface/tool/mod.rs"),
     ("ReminderContext", "crates/core/src/interface/scene.rs"),
     ("SandboxConfig", "crates/settings/src/lib.rs"),
     ("SceneSection", "crates/packages/src/manifest.rs"),
@@ -576,10 +576,10 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("StartedAgent", "crates/core/src/interface/delegate.rs"),
     ("TeamSettings", "crates/agents/src/team_settings.rs"),
     ("TokenBudget", "crates/core/src/interface/scene.rs"),
-    ("ToolContext", "crates/core/src/interface/tool.rs"),
+    ("ToolContext", "crates/core/src/interface/tool/context.rs"),
     ("ToolDef", "crates/core/src/interface/model.rs"),
-    ("ToolResult", "crates/core/src/interface/tool.rs"),
-    ("ToolSpec", "crates/core/src/interface/tool.rs"),
+    ("ToolResult", "crates/core/src/interface/tool/result.rs"),
+    ("ToolSpec", "crates/core/src/interface/tool/mod.rs"),
     ("ToolSurface", "crates/core/src/interface/scene.rs"),
 ];
 

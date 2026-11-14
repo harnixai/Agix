@@ -61,7 +61,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/runtime/src/exec.rs", "ONCE", OnceFlag, "sweeps stale session temp directories once per process"),
     ("crates/platform/src/network.rs", "ONCE", OnceFlag, "installs the process-wide TLS provider reqwest needs"),
     ("crates/assembly/src/telemetry_otel.rs", "TOLD", OnceFlag, "says once that a later OpenTelemetry endpoint is ignored"),
-    ("crates/core/src/interface/tool.rs", "NEXT", IdCounter, "registration ids, unique across every registry in the process"),
+    ("crates/core/src/interface/tool/registry.rs", "NEXT", IdCounter, "registration ids, unique across every registry in the process"),
     ("crates/core/src/fs.rs", "NEXT", IdCounter, "temporary sibling names, distinct for every writer in the process"),
     ("crates/platform/src/sandbox.rs", "NEXT_FENCE", IdCounter, "the keys of SERVED's entries"),
     ("crates/core/src/interface/catalog.rs", "POINTS", Constant, "the table of extension points"),

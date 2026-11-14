@@ -128,7 +128,7 @@ fn only_the_dispatch_and_the_relay_ask_the_policy() {
     );
 }
 
-const TOOL_CONTEXT: &str = "crates/core/src/interface/tool.rs";
+const TOOL_CONTEXT: &str = "crates/core/src/interface/tool/context.rs";
 const CONSTRUCTOR: &str = "crates/runtime/src/agent/turn/tool_env.rs";
 
 /// The public fields of `ToolContext`, with whether each is an `Option`.
