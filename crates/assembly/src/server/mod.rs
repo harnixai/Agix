@@ -44,7 +44,6 @@ use crate::session_pool::SessionPool;
 use crate::session_pool::TaskOutputRead;
 use base::context::RunningTask;
 use base::id::Id;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -137,13 +136,7 @@ impl DaemonServer {
         self.pool.shutdown_all().await;
     }
 
-    /// Dispatch one request. Public so a transport in another module can
-    /// reuse it — the whole point of a transport is framing, not semantics.
-    pub async fn dispatch_public(&self, req: RpcRequest, client: Arc<Client>) -> RpcResponse {
-        self.dispatch(req, client).await
-    }
-
-    /// [`Self::check_auth`], for the same reason — including the lint.
+    /// Public wrapper over [`Self::check_auth`], including the lint.
     #[allow(clippy::result_large_err)]
     pub async fn check_auth_public(&self, req: &RpcRequest) -> Result<RpcResponse, RpcResponse> {
         self.check_auth(req).await

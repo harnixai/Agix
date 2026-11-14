@@ -69,23 +69,6 @@ impl RpcResponse {
             }),
         }
     }
-
-    /// Like [`err`](Self::err), but attaches a structured `data` payload —
-    /// for error codes where `docs/daemon_rpc_protocol.md` §9.1 documents the shape
-    /// as part of the contract (clients are meant to read fields off it, not
-    /// just display `message`).
-    pub fn err_with_data(id: Value, code: i32, message: impl Into<String>, data: Value) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            result: None,
-            error: Some(RpcError {
-                code,
-                message: message.into(),
-                data: Some(data),
-            }),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]

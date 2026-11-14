@@ -459,16 +459,6 @@ impl Agent {
         tracing::debug!("Startup warmup complete");
     }
 
-    pub async fn list_sessions(
-        &self,
-    ) -> Result<Vec<session::session::SessionSummary>, session::session::SessionError> {
-        self.session.list_sessions().await
-    }
-
-    pub async fn delete_session(&self, id: &str) -> Result<(), session::session::SessionError> {
-        self.session.delete_session(id).await
-    }
-
     /// Load a persisted session's messages from `entries`, its log as read
     /// from the `HistoryStore`, into this agent's in-memory conversation
     /// state. Call before `run()` starts processing turns — it's a plain

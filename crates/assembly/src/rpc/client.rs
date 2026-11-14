@@ -161,26 +161,8 @@ impl Client {
         queued && written.await.is_ok()
     }
 
-    /// Enqueue without waiting. `false` means the connection is gone or has
-    /// fallen [`OUTBOUND_QUEUE_DEPTH`] frames behind, and the caller should
-    /// stop pushing to it. Used for broadcast, where waiting on one slow
-    /// client would stall every other reader of the same session.
-    pub fn try_send_json(&self, json: String) -> bool {
-        let queued = self
-            .tx
-            .try_send(Outgoing {
-                json,
-                written: None,
-            })
-            .is_ok();
-        if queued {
-            self.enqueued
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-        queued
-    }
-
-    /// [`Self::try_send_json`] for a frame of `session_id`'s broadcast. When
+    /// Enqueue a frame of `session_id`'s broadcast without waiting; `false`
+    /// means the connection is gone or the queue is full. When
     /// the queue is full the caller drops this connection's subscription, and
     /// this arranges for the connection to be told — a `subscription_dropped`
     /// event, written once everything already queued has gone out — so it can

@@ -200,13 +200,6 @@ impl SessionPool {
         ids
     }
 
-    /// Add a diagnostic of the host's own to what `daemon.doctor` reports.
-    pub fn register_health_check(&self, check: Arc<dyn base::interface::health::HealthCheck>) {
-        let mut health = self.health.write().unwrap_or_else(|e| e.into_inner());
-        let existing = std::mem::take(&mut *health);
-        *health = existing.with(check);
-    }
-
     /// The currently-active settings snapshot (for config-inspection RPCs).
     pub async fn settings(&self) -> Arc<LoadedSettings> {
         self.bindings.pool_settings().await

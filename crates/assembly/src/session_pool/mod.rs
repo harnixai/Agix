@@ -206,15 +206,6 @@ pub struct SessionPool {
     health: std::sync::RwLock<base::interface::health::HealthChecks>,
 }
 
-/// Default ceiling on an unanswered `kind:"prompt"` permission ask.
-///
-/// Five minutes: long enough that a human being asked "allow Bash?" in an
-/// IDE has time to read it and switch windows, short enough that a client
-/// which simply doesn't implement `session.respondToPrompt` fails visibly
-/// (one denied tool call, turn continues) instead of hanging its RPC
-/// forever. Fail *closed* — the timeout denies, it never auto-approves.
-pub const DEFAULT_PERMISSION_PROMPT_TIMEOUT: Duration = Duration::from_secs(300);
-
 /// session.list 返回的单条记录。
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub struct SessionInfo {

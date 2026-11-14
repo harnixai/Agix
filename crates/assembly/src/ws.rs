@@ -31,7 +31,6 @@
 use crate::rpc::{send_frame, Client, FrameSink, RpcRequest, RpcResponse, Sink};
 use crate::server::DaemonServer;
 use futures::{SinkExt, StreamExt};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as AsyncMutex;
@@ -40,7 +39,7 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// One frame per WebSocket text message.
 ///
@@ -98,25 +97,12 @@ fn origin_is_local(origin: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
-/// Serve WebSocket connections on `addr`.
+/// Serve WebSocket connections on a listener the caller bound.
 ///
 /// Refuses to start without a token: this transport is reachable by any
 /// process on the machine and by any page the user's browser loads, so an
 /// unauthenticated one would be an open door. The Unix socket needs no token
 /// because file permissions are its handshake.
-pub async fn serve_ws(server: Arc<DaemonServer>, addr: SocketAddr) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    info!(addr = %listener.local_addr()?, "WebSocket transport listening");
-    serve_ws_listener(server, listener).await
-}
-
-/// As [`serve_ws`], against a listener the caller bound — so a caller who
-/// already has one (a test on port 0, socket activation) can drive the accept
-/// loop directly.
-///
-/// Checks the token here rather than only in [`serve_ws`], because this is the
-/// entry point such a caller reaches, and a missing token would otherwise
-/// surface as every connection being refused forever.
 pub async fn serve_ws_listener(
     server: Arc<DaemonServer>,
     listener: TcpListener,

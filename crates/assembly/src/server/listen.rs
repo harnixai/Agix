@@ -60,27 +60,12 @@ pub(super) async fn refuse_own_descendant(mut stream: tokio::net::UnixStream, pi
 }
 
 impl DaemonServer {
-    pub async fn serve_tcp(self: Arc<Self>, addr: SocketAddr) -> anyhow::Result<()> {
-        if self.tcp_token.read().await.is_none() {
-            anyhow::bail!("TCP requires token");
-        }
-        let listener = TcpListener::bind(addr).await?;
-        info!(addr=%addr, "TCP listener bound");
-        self.serve_tcp_listener(listener).await
-    }
-
-    /// Accept loop over an already-bound TCP listener — split out from
-    /// [`Self::serve_tcp`] so tests can bind an ephemeral port (`127.0.0.1:0`),
-    /// read the OS-assigned port via `listener.local_addr()`, and drive this
-    /// loop directly instead of guessing a fixed port.
+    /// Accept loop over an already-bound TCP listener — the caller binds
+    /// the listener, so tests can use an ephemeral port (`127.0.0.1:0`).
     ///
-    /// Re-checks (doesn't just trust `serve_tcp`'s check) that a token is
-    /// configured — this is a `pub` method, so a caller could reach it
-    /// without going through `serve_tcp` at all (e.g. binding the listener
-    /// itself for socket-activation setups) and forgetting `set_tcp_token`
-    /// first. Without this, that mistake wouldn't fail loudly — every
-    /// connection would just silently get rejected by `authenticate_tcp`
-    /// forever, which is safe but confusing to debug.
+    /// Fails without a configured token: forgetting `set_tcp_token` would
+    /// otherwise not fail loudly — every connection would just be rejected
+    /// by `authenticate_tcp` forever.
     pub async fn serve_tcp_listener(self: Arc<Self>, listener: TcpListener) -> anyhow::Result<()> {
         if self.tcp_token.read().await.is_none() {
             anyhow::bail!("TCP requires token");
