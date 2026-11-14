@@ -59,6 +59,13 @@ impl Roots {
     }
 
     /// Whether a write to `path` falls inside one of the writable roots.
+    pub(super) fn write_roots(&self) -> impl Iterator<Item = &Path> {
+        (!self.only_additional)
+            .then_some(self.cwd.as_path())
+            .into_iter()
+            .chain(self.writable.iter().map(PathBuf::as_path))
+    }
+
     pub(super) fn opens(&self, path: &Path) -> bool {
         (!self.only_additional && path.starts_with(&self.cwd))
             || self.writable.iter().any(|root| path.starts_with(root))
@@ -119,6 +126,27 @@ impl Roots {
                 .iter()
                 .any(|dir| self.cwd.starts_with(state_root.join(dir)))
     }
+}
+
+/// Whether a path component `name` is one `deny_write` refuses: equal to one
+/// of `denied`, or beginning with it and a dot.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(super) fn denied_for_write(name: &str, denied: &[String]) -> bool {
+    denied.iter().any(|d| {
+        name == d
+            || name
+                .strip_prefix(d.as_str())
+                .is_some_and(|r| r.starts_with('.'))
+    })
+}
+
+/// The `deny_write` names a path component can be: not empty, no separator.
+pub(super) fn write_denial_names(denied: &[String]) -> Vec<String> {
+    denied
+        .iter()
+        .filter(|d| !d.is_empty() && !d.contains('/'))
+        .cloned()
+        .collect()
 }
 
 /// The real directories directly under `dir`.

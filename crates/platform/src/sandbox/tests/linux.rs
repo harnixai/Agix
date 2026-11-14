@@ -442,3 +442,38 @@ fn linux_a_project_skill_cannot_be_planted_where_agents_is_absent() {
     let shut = at(["--remount-ro", &agents]).unwrap_or_else(|| panic!("{args:?}"));
     assert!(tmpfs < shut, "{args:?}");
 }
+
+/// `sandbox.deny_write` reaches bwrap as read-only binds of the entries it
+/// names, at any depth below a writable root, laid after the root's own
+/// writable bind.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_deny_write_names_are_read_only_binds() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("secrets")).unwrap();
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub/.env.production"), "").unwrap();
+    std::fs::write(root.join("secretsx"), "").unwrap();
+    let mut o = opts("true", &root);
+    o.policy.deny_write = vec!["secrets".into(), ".env".into()];
+    let cmd = wrap(o);
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
+    let args = &cmd.spec.args[..end];
+    let at = |triple: [&str; 3]| args.windows(3).position(|w| w == triple);
+    let dir = root.display().to_string();
+    let bound = at(["--bind", &dir, &dir]).unwrap();
+    for denied in ["secrets", "sub/.env.production"] {
+        let path = root.join(denied).display().to_string();
+        assert!(
+            at(["--ro-bind", &path, &path]).is_some_and(|i| i > bound),
+            "{denied}: {args:?}"
+        );
+    }
+    let other = root.join("secretsx").display().to_string();
+    assert_eq!(at(["--ro-bind", &other, &other]), None, "{args:?}");
+}

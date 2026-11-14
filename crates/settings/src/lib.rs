@@ -395,7 +395,9 @@ pub struct SandboxConfig {
     /// Extra filename segments a tool may never write, on top of the built-in
     /// credential defaults (`.env`, `id_rsa`, `.ssh`, `.npmrc`, ...). A path is
     /// refused if *any* of its components matches one, or begins with one
-    /// followed by a dot — so `.env` also covers `.env.production`.
+    /// followed by a dot — so `.env` also covers `.env.production`. A
+    /// sandboxed `Bash` / `Monitor` command is held to the same names inside
+    /// its writable roots (on Linux only for entries that already exist).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deny_write: Vec<String>,
     /// Paths to re-allow writing, on top of the built-in deny defaults. Most

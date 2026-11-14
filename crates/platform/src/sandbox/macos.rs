@@ -93,6 +93,7 @@ pub(super) fn build_macos_profile(
 
     write_rules(&mut s, &roots);
     fence_state_root(&mut s, &roots);
+    s.push_str(&patterns::deny_write_rules(&roots, &policy.deny_write));
     guard_project_files(&mut s, &roots);
     s.push_str(&patterns::scene_file_write_rules(&roots));
 

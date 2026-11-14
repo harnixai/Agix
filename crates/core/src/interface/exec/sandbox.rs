@@ -31,6 +31,12 @@ pub struct SandboxPolicy {
     /// Absolute paths the sandbox is **denied** read access to. Defaults
     /// include common credential stores (see [`default_deny_read`]).
     pub deny_read: Vec<PathBuf>,
+    /// Filename segments no command may write inside a writable root: a path
+    /// is refused when a component under the root equals one or begins with
+    /// it followed by a dot. macOS refuses new and existing paths alike;
+    /// Linux can only mount over the entries that exist when the command
+    /// starts.
+    pub deny_write: Vec<String>,
     /// Network policy — see [`NetworkMode`].
     pub network_mode: NetworkMode,
     /// Domains allowed to make outbound connections when `network_mode` is
@@ -107,6 +113,7 @@ impl SandboxPolicy {
         Self {
             allow_read: self.allow_read.clone(),
             deny_read: self.deny_read.clone(),
+            deny_write: self.deny_write.clone(),
             network_mode: NetworkMode::DenyAll,
             allowed_domains: Vec::new(),
             read: ReadScope::Only(
@@ -165,7 +172,8 @@ pub struct SandboxSettings {
     pub deny_read: Vec<PathBuf>,
     pub network_mode: NetworkMode,
     pub allowed_domains: Vec<String>,
-    /// Filename segments no tool may write, on top of the built-in ones.
+    /// Filename segments no tool may write, on top of the built-in ones;
+    /// sandboxed commands are held to them too ([`SandboxPolicy::deny_write`]).
     pub deny_write: Vec<String>,
     /// Paths exempt from the write deny rules.
     pub allow_write: Vec<PathBuf>,
@@ -191,6 +199,7 @@ impl SandboxSettings {
         SandboxPolicy {
             allow_read: self.allow_read.clone(),
             deny_read,
+            deny_write: self.deny_write.clone(),
             network_mode: self.network_mode,
             allowed_domains: self.allowed_domains.clone(),
             state_root: self.paths.state_root().map(Path::to_path_buf),

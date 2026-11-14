@@ -3,7 +3,10 @@
 //! tmpfs or `/dev/null` laid over the path it guards.
 
 use super::fence::{fenced_secrets, fenced_sockets, is_socket};
-use super::roots::{git_configured, project_agix_dirs, subdirs, submodules_of, Roots};
+use super::roots::{
+    denied_for_write, git_configured, project_agix_dirs, subdirs, submodules_of,
+    write_denial_names, Roots,
+};
 use super::{
     mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement, NetworkMode,
     ProcessSpec, SandboxMode, SandboxPolicy,
@@ -481,6 +484,7 @@ pub(super) fn linux_wrap(
     // After the `/tmp` tmpfs, or a project under `/tmp` is hidden by it.
     read.scope_mounts(&mut args);
     bind_writable_roots(&mut args, &roots);
+    protect_denied_writes(&mut args, &roots, &policy.deny_write);
     hide_project_and_state(&mut args, &roots, &read);
     hide_fenced(&mut args, &roots);
     hide_denied_reads(&mut args, policy);
@@ -544,6 +548,49 @@ fn bind_writable_roots(args: &mut Vec<String>, roots: &Roots) {
     }
     for p in &roots.writable {
         bind(args, "--bind-try", p);
+    }
+}
+
+/// The deepest a `deny_write` name is looked for below a writable root, and
+/// the most entries looked at: a bound on what wrapping a command costs.
+const DENY_WRITE_DEPTH: usize = 8;
+const DENY_WRITE_ENTRIES: usize = 50_000;
+
+/// Each existing entry of a writable root that a `deny_write` name matches
+/// is bound read-only. bwrap can only mount over what is there, so a match
+/// created after the command starts is not covered. Laid right after the
+/// writable roots, so that the masks and tmpfs of the project guard, which
+/// come later, still cover whatever lies below a matched entry.
+fn protect_denied_writes(args: &mut Vec<String>, roots: &Roots, denied: &[String]) {
+    let denied = write_denial_names(denied);
+    if denied.is_empty() {
+        return;
+    }
+    let mut looked_at = 0;
+    for root in roots.write_roots() {
+        let mut pending = vec![(root.to_path_buf(), 0)];
+        while let Some((dir, depth)) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                looked_at += 1;
+                if looked_at > DENY_WRITE_ENTRIES {
+                    return;
+                }
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                let name = entry.file_name();
+                if name.to_str().is_some_and(|n| denied_for_write(n, &denied)) {
+                    if !kind.is_symlink() {
+                        bind(args, "--ro-bind", &entry.path());
+                    }
+                } else if kind.is_dir() && depth < DENY_WRITE_DEPTH && name != ".git" {
+                    pending.push((entry.path(), depth + 1));
+                }
+            }
+        }
     }
 }
 

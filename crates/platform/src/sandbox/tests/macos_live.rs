@@ -453,3 +453,34 @@ fn unattended_a_command_cannot_reach_the_keychain_or_a_multiplexer() {
     assert!(attended_reached, "the multiplexer socket is not reachable");
     assert!(!unattended_reached, "an unattended command reached tmux");
 }
+
+/// `sandbox.deny_write` names are filename segments, as for the file tools:
+/// a command may not write a path with a component that equals one or
+/// begins with it and a dot, in the project or deeper, new or existing.
+#[cfg(target_os = "macos")]
+#[test]
+fn deny_write_names_hold_for_a_sandboxed_command() {
+    let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
+    std::fs::create_dir_all(s.project.join("secrets")).unwrap();
+    let policy = || SandboxPolicy {
+        deny_write: vec!["secrets".into(), ".env".into()],
+        ..Default::default()
+    };
+    for command in [
+        "echo x > secrets/a",
+        "mkdir -p sub/secrets",
+        "echo x > sub/.env.production",
+        "echo x > .env",
+    ] {
+        assert!(!s.run_under(command, policy()), "`{command}` was allowed");
+    }
+    assert!(!s.project.join("secrets/a").exists());
+    assert!(!s.project.join("sub/secrets").exists());
+    for command in [
+        "echo x > secretsx",
+        "echo x > notes.md",
+        "mkdir -p sub/environment",
+    ] {
+        assert!(s.run_under(command, policy()), "`{command}` was refused");
+    }
+}

@@ -3,7 +3,7 @@
 //! engine's credentials and the scene files of the state root, in every scene
 //! directory including one created later or linked in from elsewhere.
 
-use super::roots::{project_agix_dirs, Roots};
+use super::roots::{project_agix_dirs, write_denial_names, Roots};
 use super::sandbox_escape;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +15,29 @@ pub(super) fn scene_file_write_rules(roots: &Roots) -> String {
     state_root_scene_files_regexes(state_root, roots.paths.linked_scene_dirs_resolved())
         .iter()
         .map(|regex| format!("(deny file-write* (regex \"{}\"))\n", sandbox_escape(regex)))
+        .collect()
+}
+
+/// Denies writing the paths under a writable root that have a component
+/// `deny_write` names, wherever they are and whether or not they exist yet.
+pub(super) fn deny_write_rules(roots: &Roots, denied: &[String]) -> String {
+    let names = write_denial_names(denied);
+    if names.is_empty() {
+        return String::new();
+    }
+    let names = alternatives(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    roots
+        .write_roots()
+        .map(|root| {
+            let regex = format!(
+                r"^{}/(.*/)?({names})(\.[^/]*)?(/|$)",
+                regex_escape(&root.display().to_string())
+            );
+            format!(
+                "(deny file-write* (regex \"{}\"))\n",
+                sandbox_escape(&regex)
+            )
+        })
         .collect()
 }
 

@@ -528,7 +528,7 @@
           "type": "array"
         },
         "deny_write": {
-          "description": "Extra filename segments a tool may never write, on top of the built-in\ncredential defaults (`.env`, `id_rsa`, `.ssh`, `.npmrc`, ...). A path is\nrefused if *any* of its components matches one, or begins with one\nfollowed by a dot — so `.env` also covers `.env.production`.",
+          "description": "Extra filename segments a tool may never write, on top of the built-in\ncredential defaults (`.env`, `id_rsa`, `.ssh`, `.npmrc`, ...). A path is\nrefused if *any* of its components matches one, or begins with one\nfollowed by a dot — so `.env` also covers `.env.production`. A\nsandboxed `Bash` / `Monitor` command is held to the same names inside\nits writable roots (on Linux only for entries that already exist).",
           "items": {
             "type": "string"
           },
