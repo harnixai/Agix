@@ -25,9 +25,18 @@ struct Staged {
 }
 
 async fn stage(name: &str) -> anyhow::Result<Staged> {
+    stage_with(name, json!({ "memory_enabled": false }), |_, _| Ok(())).await
+}
+
+async fn stage_with(
+    name: &str,
+    settings: Value,
+    prepare: impl FnOnce(&World, &Path) -> anyhow::Result<()>,
+) -> anyhow::Result<Staged> {
     let world = World::new()?;
     let project = world.project(name)?;
-    world.write_project_settings(name, &json!({ "memory_enabled": false }))?;
+    world.write_project_settings(name, &settings)?;
+    prepare(&world, &project)?;
     world.write_project_file(
         name,
         "notes.txt",
@@ -369,6 +378,72 @@ async fn the_packages_scene_hosts_a_session() -> anyhow::Result<()> {
             .iter()
             .any(|t| t == "Write" || t == "Edit" || t == "Bash"),
         "the scene's tool list was not applied: {tools:?}"
+    );
+    staged.daemon.stop().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_retrieval_hook_filters_what_recall_selected() -> anyhow::Result<()> {
+    let staged = stage_with(
+        "demo-recall",
+        json!({ "memory_enabled": true }),
+        |world, project| {
+            let dir = world.memory_dir(project);
+            std::fs::create_dir_all(&dir)?;
+            let mut index = String::new();
+            for (name, body) in [
+                ("keeper-note", "KEEPER-BODY-MARK"),
+                ("scratch-draft", "SCRATCH-BODY-MARK"),
+                ("calendar", "The calendar lives in the wiki."),
+                ("oncall", "On-call rotation is in the wiki."),
+                ("style", "Reviews are lists of findings."),
+                ("staging", "Staging runs on staging.internal."),
+                ("deploys", "Deploys happen on Tuesdays."),
+            ] {
+                std::fs::write(
+                    dir.join(format!("{name}.md")),
+                    format!("---\nname: {name}\ndescription: {name} notes\ntype: project\n---\n\n{body}\n"),
+                )?;
+                index.push_str(&format!("- [{name}]({name}.md) - {name} notes\n"));
+            }
+            std::fs::write(dir.join("MEMORY.md"), index)?;
+            Ok(())
+        },
+    )
+    .await?;
+    staged.provider.script_when(
+        "You are selecting memories",
+        [Reply::text(
+            json!({ "selected_memories": ["scratch-draft", "keeper-note"] }).to_string(),
+        )],
+    );
+    staged.provider.script([Reply::text("ok")]);
+    let mut client = staged.daemon.connect().await?;
+    let session = client
+        .session_create(json!({ "project_root": staged.project.to_string_lossy() }))
+        .await?;
+    client
+        .session_run_turn(&session, "what do we know?", "t1", None)
+        .await?;
+
+    let recall = staged
+        .provider
+        .calls()
+        .into_iter()
+        .find(|c| c.purpose() == blackbox::Purpose::MemoryRecall);
+    assert!(
+        recall.is_some(),
+        "recall never went through a selection call"
+    );
+    let turn = turn_calls(&staged.provider).remove(0);
+    assert!(
+        turn.messages_contain("KEEPER-BODY-MARK"),
+        "the memory the hook leaves in never reached the model"
+    );
+    assert!(
+        !turn.messages_contain("SCRATCH-BODY-MARK"),
+        "the retrieval hook did not filter the `scratch-` memory"
     );
     staged.daemon.stop().await;
     Ok(())
