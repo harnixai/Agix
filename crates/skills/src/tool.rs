@@ -483,13 +483,10 @@ async fn expand_dynamic_context(
     }
 
     #[allow(clippy::unwrap_used)]
-    static FENCED: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)```!\n(.*?)\n```").unwrap());
-    #[allow(clippy::unwrap_used)]
-    static INLINE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    static PLACEHOLDER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         // `!` at start-of-line or preceded by a space/tab only —
         // `KEY=!\`cmd\`` (no separating whitespace) is left as literal text.
-        regex::Regex::new(r"(?m)(^|[ \t])!`([^`]*)`").unwrap()
+        regex::Regex::new(r"(?s:```!\n(.*?)\n```)|(?m:(^|[ \t])!`([^`]*)`)").unwrap()
     });
 
     let refusal = if ctx.config.disable_skill_shell_execution {
@@ -502,30 +499,18 @@ async fn expand_dynamic_context(
         None
     };
 
-    // Pass 1: fenced multi-line blocks.
     let mut out = String::with_capacity(body.len());
     let mut last_end = 0;
-    for caps in FENCED.captures_iter(body) {
+    for caps in PLACEHOLDER.captures_iter(body) {
         let Some(m) = caps.get(0) else { continue };
         out.push_str(&body[last_end..m.start()]);
-        let command = caps.get(1).map_or("", |c| c.as_str());
-        out.push_str(&run_skill_shell_command(command, ctx, refusal).await);
-        last_end = m.end();
-    }
-    out.push_str(&body[last_end..]);
-    let body = out;
-
-    // Pass 2: inline `` !`cmd` `` — operates on pass 1's output, so an
-    // inline placeholder that happened to be embedded in a fenced block's
-    // *output* isn't re-expanded (single pass, per the doc comment above).
-    let mut out = String::with_capacity(body.len());
-    let mut last_end = 0;
-    for caps in INLINE.captures_iter(&body) {
-        let Some(m) = caps.get(0) else { continue };
-        out.push_str(&body[last_end..m.start()]);
-        out.push_str(caps.get(1).map_or("", |c| c.as_str())); // preserve the leading space/tab (or nothing at line start)
-        let command = caps.get(2).map_or("", |c| c.as_str());
-        out.push_str(&run_skill_shell_command(command, ctx, refusal).await);
+        if let Some(fenced) = caps.get(1) {
+            out.push_str(&run_skill_shell_command(fenced.as_str(), ctx, refusal).await);
+        } else {
+            out.push_str(caps.get(2).map_or("", |c| c.as_str()));
+            let command = caps.get(3).map_or("", |c| c.as_str());
+            out.push_str(&run_skill_shell_command(command, ctx, refusal).await);
+        }
         last_end = m.end();
     }
     out.push_str(&body[last_end..]);
@@ -755,6 +740,19 @@ mod dynamic_context_tests {
         let (ctx, _) = shell_ctx(std::env::temp_dir());
         let out = expand(body, &ctx).await;
         assert_eq!(out, "!`echo nested`", "output was: {out}");
+    }
+
+    #[tokio::test]
+    async fn a_fenced_blocks_output_is_not_run_as_an_inline_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = "```!\nprintf '!\\140touch marker\\140'\n```";
+        let (ctx, _) = shell_ctx(dir.path().to_path_buf());
+        let out = expand(body, &ctx).await;
+        assert_eq!(out, "!`touch marker`", "output was: {out}");
+        assert!(
+            !dir.path().join("marker").exists(),
+            "the output of a fenced block was executed"
+        );
     }
 
     #[derive(Default)]
