@@ -35,6 +35,10 @@ pub(crate) struct DelegateEnv {
     pub(crate) under_hook: bool,
     /// The root session's: a delegate's writes are recorded there.
     pub(crate) checkpoints: Option<Arc<runtime::checkpoint::Checkpoints>>,
+    /// The host tools the session declared for its delegates too, and how
+    /// their calls reach the host.
+    pub(crate) host_tools: Vec<base::interface::host_call::HostToolDecl>,
+    pub(crate) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 
 pub(crate) struct ParentSession {
@@ -71,6 +75,13 @@ impl DelegateEnv {
             depth: cx.depth,
             under_hook: hook_agents.includes(cx.session_id),
             checkpoints: cx.checkpoints.cloned(),
+            host_tools: cx
+                .host_tools
+                .iter()
+                .filter(|decl| decl.subagents)
+                .cloned()
+                .collect(),
+            host_calls: cx.host_calls.clone(),
         }
     }
 

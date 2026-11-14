@@ -91,7 +91,8 @@ impl Builder {
         questions_answered: bool,
     ) -> Result<SessionTools, EngineError> {
         let tools = &registry;
-        admit_extra_tools(tools, scene, plugin_tools)?;
+        let host_tools = crate::host_tools::declared_tools(&self.spec.host_tools)?;
+        admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
         let tool_policy = Arc::new(crate::tool_policy::ToolPolicy::new(
             scene,
@@ -99,7 +100,8 @@ impl Builder {
             plugin_tool_owners
                 .iter()
                 .filter(|(_, owner)| owner.admitted)
-                .map(|(name, _)| name.clone()),
+                .map(|(name, _)| name.clone())
+                .chain(self.spec.host_tools.iter().map(|d| d.name.clone())),
         ));
 
         let host_schema = self.spec.output_schema.clone();
@@ -161,6 +163,7 @@ impl Builder {
 pub(super) fn admit_extra_tools(
     tools: &InMemoryToolRegistry,
     scene: &SceneSpec,
+    host_tools: Vec<Arc<dyn base::tool::Tool>>,
     plugin_tools: Vec<Arc<dyn base::tool::Tool>>,
 ) -> Result<(), EngineError> {
     // Scene-contributed tools (`SceneSpec::extra_tools`, default empty).
@@ -178,6 +181,16 @@ pub(super) fn admit_extra_tools(
                 "scene {:?} contributes a tool named {:?}, which is already \
                      registered; rename the scene's tool",
                 scene.id,
+                t.name()
+            )));
+        }
+        tools.register(t);
+    }
+
+    for t in host_tools {
+        if tools.get(t.name()).is_some() {
+            return Err(EngineError::HostTools(format!(
+                "the host declares a tool named {:?}, which is already registered",
                 t.name()
             )));
         }

@@ -211,7 +211,7 @@ pub fn all() -> &'static [ExtensionPoint] {
     &POINTS
 }
 
-static POINTS: [ExtensionPoint; 45] = [
+static POINTS: [ExtensionPoint; 46] = [
     ExtensionPoint {
         id: "tool.registry",
         kind: Kind::Contract,
@@ -374,6 +374,17 @@ static POINTS: [ExtensionPoint; 45] = [
         trust: Trust::host_only(),
         defined_in: "base::interface::elicitation::Elicitation",
         wired_by: &[Wiring::Builder("elicitation")],
+    },
+    ExtensionPoint {
+        id: "host_calls.call",
+        kind: Kind::Contract,
+        summary: "宿主声明的工具怎么交给宿主去跑、等它答",
+        timing: "模型调用一个宿主声明的工具时",
+        rewrites: "这次调用的结果",
+        frequency: Frequency::PerToolCall,
+        trust: Trust::host_only(),
+        defined_in: "base::interface::host_call::HostCalls",
+        wired_by: &[Wiring::Builder("host_calls")],
     },
     ExtensionPoint {
         id: "permission.check",

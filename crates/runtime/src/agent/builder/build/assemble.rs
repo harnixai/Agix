@@ -84,6 +84,8 @@ impl Builder {
                 event_tx: w.events.tx,
                 current_turn_cancel: Default::default(),
                 steering: self.spec.steering.take().map(|s| s.0).unwrap_or_default(),
+                pending_host_calls: w.events.pending_host_calls,
+                host_calls: w.events.host_calls,
             },
         };
         (agent, w.events.rx, w.input_tx)

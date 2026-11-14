@@ -166,6 +166,10 @@ pub(crate) struct Channels {
     /// holds no `&mut self`.
     pub(crate) current_turn_cancel: Arc<std::sync::Mutex<TurnCancel>>,
     pub(crate) steering: crate::steering::SharedSteerQueue,
+    /// Host calls awaiting the host's answer, which the input
+    /// demultiplexer resolves.
+    pub(crate) pending_host_calls: crate::host_tools::PendingHostCalls,
+    pub(crate) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 
 /// Which turn `EngineCommand::CancelTurn` lands on: the one running, else
@@ -254,6 +258,10 @@ pub enum EngineError {
     Shutdown,
     #[error("{0}")]
     Internal(String),
+    /// The host tools given to [`Builder::host_tools`] cannot be declared as
+    /// they are: one is malformed, or its name is taken.
+    #[error("{0}")]
+    HostTools(String),
 }
 
 impl Default for Builder {

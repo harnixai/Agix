@@ -63,6 +63,8 @@ pub enum ToolOrigin {
     Plugin {
         name: String,
     },
+    /// Declared by the host for one session; calling it goes to the host.
+    Host,
 }
 
 impl ToolOrigin {
@@ -79,7 +81,7 @@ impl ToolOrigin {
     pub fn mcp_server(&self) -> Option<&str> {
         match self {
             Self::Mcp { server } => Some(server),
-            Self::Builtin | Self::Plugin { .. } => None,
+            Self::Builtin | Self::Plugin { .. } | Self::Host => None,
         }
     }
 
@@ -87,12 +89,13 @@ impl ToolOrigin {
         self.mcp_server().is_some()
     }
 
-    /// `builtin`, `mcp:<server>` or `plugin:<name>`.
+    /// `builtin`, `mcp:<server>`, `plugin:<name>` or `host`.
     pub fn wire(&self) -> String {
         match self {
             Self::Builtin => "builtin".to_string(),
             Self::Mcp { server } => format!("mcp:{server}"),
             Self::Plugin { name } => format!("plugin:{name}"),
+            Self::Host => "host".to_string(),
         }
     }
 }

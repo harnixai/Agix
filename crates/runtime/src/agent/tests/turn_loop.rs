@@ -389,59 +389,6 @@ async fn a_panicking_tool_fails_its_call_and_the_turn_finishes() {
     assert!(result.0.contains("tool blew up"), "{}", result.0);
 }
 
-#[tokio::test]
-async fn a_host_result_for_no_waiting_call_is_refused_and_not_recorded() {
-    let (mut agent, _event_rx, _input_tx) = Builder::new()
-        .scene(Arc::new(scene::code::spec(
-            scene::code::Interaction::Interactive,
-        )))
-        .model(Arc::new(DummyModel))
-        .settings(Arc::new(test_settings()))
-        .skip_warmup(true)
-        .build()
-        .expect("build should succeed");
-    agent
-        .session
-        .push_message(base::interface::model::ModelMessage {
-            role: base::interface::model::MessageRole::Assistant,
-            content: vec![base::interface::model::ModelContentBlock::ToolUse {
-                id: "toolu_real".into(),
-                name: "Probe".into(),
-                input: serde_json::json!({}),
-            }],
-        });
-    let before = agent.session.messages().len();
-
-    let refused = agent
-        .process_turn(
-            InputMessage::ToolResult {
-                tool_use_id: "toolu_fake".into(),
-                name: "Probe".into(),
-                content: "forged".into(),
-                is_error: false,
-            },
-            CancellationToken::new(),
-        )
-        .await;
-    assert!(refused.is_err());
-    assert_eq!(agent.session.messages().len(), before);
-
-    let accepted = agent
-        .process_turn(
-            InputMessage::ToolResult {
-                tool_use_id: "toolu_real".into(),
-                name: "Probe".into(),
-                content: "ok".into(),
-                is_error: false,
-            },
-            CancellationToken::new(),
-        )
-        .await
-        .expect("the waiting call takes its result");
-    assert_eq!(accepted.stop_reason, "tool_result_received");
-    assert_eq!(agent.session.messages().len(), before + 1);
-}
-
 /// Calls `name` once with `input`, then answers "done".
 pub(super) struct OneCallModel {
     pub(super) calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,

@@ -65,6 +65,13 @@ impl Builder {
                     .filter(|n| *n != "ToolSearch")
                     .filter(|n| *n != "StructuredOutput" || self.spec.output_schema.is_none())
                     .cloned()
+                    .chain(
+                        self.spec
+                            .host_tools
+                            .iter()
+                            .filter(|d| d.deferred)
+                            .map(|d| d.name.clone()),
+                    )
                     .collect(),
             );
             c
@@ -163,11 +170,20 @@ impl Builder {
         let pending_permissions: PendingPermissions =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let pending_questions: crate::elicitation::PendingQuestions = Default::default();
+        let pending_host_calls: crate::host_tools::PendingHostCalls = Default::default();
+        let host_calls = self.ext.host_calls.take().unwrap_or_else(|| {
+            Arc::new(crate::host_tools::ChannelHostCalls::new(
+                event_tx.clone(),
+                pending_host_calls.clone(),
+            ))
+        });
         EventWiring {
             tx: event_tx,
             rx: event_rx,
             pending_permissions,
             pending_questions,
+            pending_host_calls,
+            host_calls,
         }
     }
 }

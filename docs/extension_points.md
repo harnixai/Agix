@@ -45,6 +45,7 @@
 | `event.sink` | 契约 | `Builder::event_sink` | 每次发射,在 sink 自己的 task 上 | 什么都改不了——只能观察 | 每个流式分片(10³–10⁴ 量级) | 不开放 | 不开放 | 不开放 |
 | `health.check` | 注册 | `Builder::health_check`、`Registrar::health_check` | 每当有人要一份健康报告 | 什么都改不了——检查只汇报,不修复 | 每进程(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
 | `elicitation.ask` | 契约 | `Builder::elicitation` | 每当一个决定需要人来做 | 答案 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
+| `host_calls.call` | 契约 | `Builder::host_calls` | 模型调用一个宿主声明的工具时 | 这次调用的结果 | 每次工具调用(10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `permission.check` | 契约 | `Builder::permission` | 每次工具调用之前 | 放行、拒绝,或者问人 | 每次工具调用(10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `permission.grants` | 契约 | `Builder::permission` | skill 的 allowed-tools 生效、人答"总是允许"时 | 本轮、本会话、本项目的放行 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `scene` | 契约 | `Builder::scene` | 会话构建时 | 一个 agent 怎么呈现自己,全部 | 每会话(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
@@ -611,6 +612,26 @@ Builder::new().elicitation(Arc::new(MyDialogs))
 `elicitation` 也没打开 `question_prompts` 时不注册 `AskUserQuestion`:一个只会被拒绝的
 工具不该给模型看。daemon 上对应的是 `session.create` 的 `options.prompt_types`
 (`daemon_rpc_protocol.md` §6.3)。
+
+### 宿主声明的工具 — `host_calls.call`
+
+宿主自己能做、引擎做不了的事(编辑器里的缓冲区、IDE 的诊断、宿主界面上的一个选择),
+可以作为工具声明给会话:
+
+```rust
+Builder::new()
+    .host_tools(vec![HostToolDecl::new("HostEcho", "Echo text back.", schema)])
+    .host_calls(Arc::new(MyHost))   // 可选
+```
+
+声明出来的是会话注册表里一个普通的 `Tool`(来源 `ToolOrigin::Host`),宣告、`ToolSearch`、
+权限、hooks、中间件、结果转换器、遥测都照常经过;只有 `call` 交给 `HostCalls::call`,
+等宿主答一次。不注册 `host_calls` 时引擎自带的实现走事件/输入通道:发
+`AgentEvent::HostToolCall`,等 `InputMessage::HostToolResponse`,超时、取消、宿主不在都有
+确定的结局(`HostCallEnd`)。名字与已注册的工具重名、schema 不是能编译的 `type: object`
+时 `build` 以 `EngineError::HostTools` 失败。声明了 `subagents` 的那几个,子 Agent 也拿得到,
+调用经父会话的通道发出。daemon 上对应的是 `session.create` 的 `options.host_tools` 与
+`session.respondToolCall`(`daemon_rpc_protocol.md` §6.3、§7.4)。
 
 ### 事件去哪 — `event.sink`
 

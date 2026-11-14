@@ -9,12 +9,6 @@ pub enum InputMessage {
         attachments: Vec<Attachment>,
         turn_id: String,
     },
-    ToolResult {
-        tool_use_id: String,
-        name: String,
-        content: String,
-        is_error: bool,
-    },
     PermissionResponse {
         prompt_id: String,
         decision: PermissionDecision,
@@ -23,6 +17,12 @@ pub enum InputMessage {
     QuestionResponse {
         prompt_id: String,
         answer: QuestionAnswer,
+    },
+    /// How the host call `call_id` (`AgentEvent::HostToolCall`) ended on the
+    /// host's side: its answer, or that no host is there to give one.
+    HostToolResponse {
+        call_id: String,
+        end: base::interface::host_call::HostCallEnd,
     },
     System {
         kind: EngineCommand,

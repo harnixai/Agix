@@ -1,7 +1,5 @@
 //! 主循环每一轮用到的小工具：工具结果收尾、本回合/本步消息切片、重复调用提示、对工具调用的扫描。
 
-use super::request::awaits_result;
-use super::{TurnError, TurnOutcome};
 use crate::agent::Agent;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use std::path::PathBuf;
@@ -22,28 +20,6 @@ pub(super) fn count_structured_output_calls(
 }
 
 impl Agent {
-    pub(super) async fn handle_tool_result(
-        &mut self,
-        tool_use_id: String,
-        content: String,
-        is_error: bool,
-    ) -> Result<TurnOutcome, TurnError> {
-        if !awaits_result(self.session.messages(), &tool_use_id) {
-            return Err(TurnError::Internal(format!(
-                "no tool call {tool_use_id} is waiting for a result"
-            )));
-        }
-        self.session.push_message(ModelMessage {
-            role: MessageRole::User,
-            content: vec![ModelContentBlock::ToolResult {
-                tool_use_id,
-                content,
-                is_error: Some(is_error),
-            }],
-        });
-        Ok(TurnOutcome::stopped("tool_result_received"))
-    }
-
     /// The messages pushed since this turn's user message, that message
     /// included; the whole transcript before any turn has started.
     pub(super) fn messages_this_turn(&self) -> &[ModelMessage] {

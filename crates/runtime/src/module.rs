@@ -102,6 +102,11 @@ pub struct SessionContext<'a> {
     pub(crate) delegator: &'a LateDelegator,
     pub(crate) skill_catalog: &'a LateSkillCatalog,
     pub(crate) session_ended: &'a CancellationToken,
+    /// How this session's host tools reach the host — the way a delegate's
+    /// must go too.
+    pub host_calls: &'a Arc<dyn base::interface::host_call::HostCalls>,
+    /// The tools the host declared for this session.
+    pub host_tools: &'a [base::interface::host_call::HostToolDecl],
 }
 
 impl SessionContext<'_> {

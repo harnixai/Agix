@@ -66,6 +66,7 @@ impl Builder {
             host_layers,
             mcp: mcp_slot,
             checkpoints: checkpoints.as_ref(),
+            host_calls: &events.host_calls,
         })?;
         let command_registry = self.command_registry(&skill_catalog, mcp.as_ref());
 

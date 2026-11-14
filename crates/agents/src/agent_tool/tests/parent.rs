@@ -104,6 +104,10 @@ impl TestParent {
             let (tx, _) = tokio::sync::mpsc::unbounded_channel();
             runtime::event_bus::EventBus::new(tx)
         });
+        let host_calls = Arc::new(runtime::host_tools::ChannelHostCalls::new(
+            events.clone(),
+            Default::default(),
+        ));
         let env = crate::delegate::DelegateEnv {
             host,
             parent: crate::delegate::ParentSession {
@@ -124,6 +128,8 @@ impl TestParent {
             depth: self.depth,
             under_hook: false,
             checkpoints: None,
+            host_tools: Vec::new(),
+            host_calls,
         };
         let catalog = match self.shared_types {
             Some(map) => AgentCatalog::shared(map, &self.session_agent_types),

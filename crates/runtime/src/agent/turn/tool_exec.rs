@@ -49,6 +49,9 @@ pub(crate) struct ToolExecCtx {
     /// what to do with the answer — hooks, telemetry, the deadline — and this
     /// decides how the question reaches a human at all.
     pub elicitation: Arc<dyn base::interface::elicitation::Elicitation>,
+    /// How a host-declared tool reaches the host; `None` for a program's
+    /// calls, which cannot hand one over.
+    pub host_calls: Option<Arc<dyn base::interface::host_call::HostCalls>>,
     /// Rings around every tool call — see
     /// [`base::interface::tool_middleware`]. Empty in every session that
     /// registered none, which is the case dispatch short-circuits.

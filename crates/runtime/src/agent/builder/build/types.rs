@@ -54,6 +54,8 @@ pub(super) struct EventWiring {
     pub(super) rx: EventReceiver,
     pub(super) pending_permissions: PendingPermissions,
     pub(super) pending_questions: crate::elicitation::PendingQuestions,
+    pub(super) pending_host_calls: crate::host_tools::PendingHostCalls,
+    pub(super) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 
 /// Not `ToolSurface`: that name is the scene's allow/deny lists in `base`.

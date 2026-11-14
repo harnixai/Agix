@@ -180,6 +180,25 @@ pub struct OpenPrompt<T> {
     pending: Waiting<T>,
     events: EventSender,
     announced: bool,
+    announce: Announce,
+}
+
+/// The event that says how an ask ended, given its id and, when it was
+/// withdrawn, why.
+pub type Announce = fn(String, Option<base::event::WithdrawalReason>) -> base::event::AgentEvent;
+
+fn prompt_resolved(
+    prompt_id: String,
+    withdrawn: Option<base::event::WithdrawalReason>,
+) -> base::event::AgentEvent {
+    base::event::AgentEvent::PromptResolved {
+        prompt_id,
+        resolution: match withdrawn {
+            Some(_) => base::event::PromptResolution::Withdrawn,
+            None => base::event::PromptResolution::Answered,
+        },
+        reason: withdrawn,
+    }
 }
 
 impl<T> OpenPrompt<T> {
@@ -198,7 +217,21 @@ impl<T> OpenPrompt<T> {
             pending: pending.clone(),
             events,
             announced: false,
+            announce: prompt_resolved,
         }
+    }
+
+    /// Say how the ask ended with `announce` rather than `PromptResolved`.
+    pub fn announcing(mut self, announce: Announce) -> Self {
+        self.announce = announce;
+        self
+    }
+
+    /// Say how the ask ended with `event`, in place of what dropping it would
+    /// say: for an answer that is itself a withdrawal.
+    pub fn announce_with(&mut self, event: base::event::AgentEvent) {
+        self.announced = true;
+        let _ = self.events.send(event);
     }
 
     /// Wait on `rx`, the receiving end of what was registered, for the
@@ -239,14 +272,9 @@ impl<T> OpenPrompt<T> {
 
     fn announce(&mut self, withdrawn: Option<base::event::WithdrawalReason>) {
         self.announced = true;
-        let _ = self.events.send(base::event::AgentEvent::PromptResolved {
-            prompt_id: std::mem::take(&mut self.id),
-            resolution: match withdrawn {
-                Some(_) => base::event::PromptResolution::Withdrawn,
-                None => base::event::PromptResolution::Answered,
-            },
-            reason: withdrawn,
-        });
+        let _ = self
+            .events
+            .send((self.announce)(std::mem::take(&mut self.id), withdrawn));
     }
 }
 

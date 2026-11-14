@@ -124,6 +124,14 @@ const OWN: &[(&str, &str)] = &[
         "the root session's, signed with the delegate's name",
     ),
     ("team_seat", "the team and name it works under"),
+    (
+        "host_tools",
+        "those its parent's host declared for sub-agents too",
+    ),
+    (
+        "host_calls",
+        "its parent's, marked with its task and session",
+    ),
 ];
 
 /// Not given to a delegate.
@@ -380,6 +388,10 @@ const MCP_PREFIX_HOMES: &[(&str, &str)] = &[
     (
         "crates/core/src/interface/tool_selector.rs",
         "parses a written pattern once; matches the server on the tool's origin",
+    ),
+    (
+        "crates/runtime/src/host_tools.rs",
+        "keeps the `mcp__` names for MCP servers when a host declares a tool",
     ),
 ];
 

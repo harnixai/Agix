@@ -146,6 +146,31 @@ pub enum AgentEvent {
         reason: Option<WithdrawalReason>,
     },
 
+    /// A tool the host declared was called: the host runs it and answers
+    /// with `call_id`. Comes after the call's `ToolUse` and before its
+    /// `ToolResult`.
+    HostToolCall {
+        call_id: String,
+        tool_use_id: String,
+        name: String,
+        input: Value,
+        timeout_ms: u64,
+        /// As `PermissionPrompt::task_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        /// The sub-agent's session, when a sub-agent made the call.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_session_id: Option<String>,
+    },
+
+    /// The host call `call_id` is no longer open. Emitted once per call.
+    HostToolCallResolved {
+        call_id: String,
+        resolution: PromptResolution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<HostCallWithdrawal>,
+    },
+
     /// A turn has started. Every `TurnStart` is followed by exactly one
     /// `TurnComplete` or `Error` with the same `turn_id`.
     TurnStart { turn_id: String },
@@ -420,6 +445,28 @@ pub enum WithdrawalReason {
     TimedOut,
     /// The turn asking it was cancelled or ended, or the session is closing.
     Cancelled,
+}
+
+/// Why the engine stopped waiting on a host call with no answer.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostCallWithdrawal {
+    TimedOut,
+    Cancelled,
+    /// Nobody watched the session when the call was made.
+    NoHost,
+    /// Everyone watching the session went away before anyone answered.
+    HostGone,
+}
+
+impl From<WithdrawalReason> for HostCallWithdrawal {
+    fn from(reason: WithdrawalReason) -> Self {
+        match reason {
+            WithdrawalReason::TimedOut => Self::TimedOut,
+            WithdrawalReason::Cancelled => Self::Cancelled,
+        }
+    }
 }
 
 fn logged() -> bool {

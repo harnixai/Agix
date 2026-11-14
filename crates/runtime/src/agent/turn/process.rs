@@ -123,15 +123,6 @@ impl Agent {
                 self.process_user_message(content, attachments, turn_id, cancel)
                     .await
             }
-            InputMessage::ToolResult {
-                tool_use_id,
-                content,
-                is_error,
-                ..
-            } => {
-                self.handle_tool_result(tool_use_id, content, is_error)
-                    .await
-            }
             InputMessage::PermissionResponse {
                 prompt_id,
                 decision,
@@ -143,6 +134,14 @@ impl Agent {
             }
             InputMessage::QuestionResponse { prompt_id, answer } => {
                 self.gate.resolve_question(&prompt_id, answer);
+                Ok(TurnOutcome::default())
+            }
+            InputMessage::HostToolResponse { call_id, end } => {
+                crate::host_tools::resolve_host_call(
+                    &self.channels.pending_host_calls,
+                    &call_id,
+                    end,
+                );
                 Ok(TurnOutcome::default())
             }
             InputMessage::Steer { .. } => Ok(TurnOutcome::default()),

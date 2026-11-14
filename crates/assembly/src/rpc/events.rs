@@ -516,7 +516,9 @@ impl SessionEventPayload {
                 agent_id: _,
                 outcome: _,
                 turn_id: _,
-            } => return None,
+            }
+            | AgentEvent::HostToolCall { .. }
+            | AgentEvent::HostToolCallResolved { .. } => return None,
             AgentEvent::CompactAction {
                 strategy,
                 messages_before,

@@ -43,6 +43,7 @@ impl SubCallDispatcher {
     fn for_code(ctx: &ToolExecCtx) -> Self {
         let mut ctx = ctx.clone();
         ctx.elicitation = Arc::new(NoAsking);
+        ctx.host_calls = None;
         ctx.discontinued = Arc::new(std::sync::atomic::AtomicBool::new(false));
         ctx.images = Arc::default();
         ctx.caller = Caller::Code;
@@ -213,6 +214,7 @@ pub(super) fn tool_context_for(
     tool_ctx.tool_use_id = ctx.tool_use_id.clone();
     tool_ctx.agent_depth = ctx.agent_depth;
     tool_ctx.elicitation = Some(Arc::clone(&ctx.elicitation));
+    tool_ctx.host_calls = ctx.host_calls.clone();
     tool_ctx.dispatch = spec.is_some_and(|s| s.needs_dispatch).then(|| {
         Arc::new(SubCallDispatcher::for_code(ctx))
             as Arc<dyn base::interface::tool_dispatch::ToolDispatch>
@@ -258,6 +260,7 @@ impl Agent {
             permission: self.gate.permission().clone(),
             session_state: Arc::clone(&self.session_state),
             elicitation: Arc::clone(self.gate.elicitation()),
+            host_calls: Some(Arc::clone(&self.channels.host_calls)),
             tool_middleware: Arc::clone(self.tooling.tool_middleware()),
             result_transformers: Arc::clone(self.tooling.result_transformers()),
             discontinued: Arc::clone(discontinued),

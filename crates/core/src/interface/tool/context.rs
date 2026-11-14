@@ -25,6 +25,9 @@ pub struct ToolContext {
     /// asking tool must read as a refusal rather than as permission to make
     /// the answer up.
     pub elicitation: Option<Arc<dyn crate::interface::elicitation::Elicitation>>,
+    /// How a host-declared tool reaches the host; `None` where no host can
+    /// answer, which such a tool reads as failing at once.
+    pub host_calls: Option<Arc<dyn crate::interface::host_call::HostCalls>>,
     /// How this tool reaches the machine — see
     /// [`crate::interface::exec`]. In production this machine's
     /// (`platform`); a deployment executing somewhere else replaces the set
@@ -106,6 +109,7 @@ impl ToolContext {
             tool_use_id: String::new(),
             agent_depth: 0,
             elicitation: None,
+            host_calls: None,
             exec,
             dispatch: None,
             from_code: false,

@@ -110,28 +110,6 @@ pub(super) fn model_failure(
         .with_retry_after(e.retry_after)
 }
 
-/// Whether `id` is a `tool_use` of the last reply that nothing after it has
-/// answered yet.
-pub(super) fn awaits_result(messages: &[ModelMessage], id: &str) -> bool {
-    let Some(last_reply) = messages
-        .iter()
-        .rposition(|m| m.role == MessageRole::Assistant)
-    else {
-        return false;
-    };
-    let used = messages[last_reply]
-        .content
-        .iter()
-        .any(|b| matches!(b, ModelContentBlock::ToolUse { id: used, .. } if used == id));
-    let answered = messages[last_reply + 1..]
-        .iter()
-        .flat_map(|m| &m.content)
-        .any(
-            |b| matches!(b, ModelContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id),
-        );
-    used && !answered
-}
-
 /// Gives every `tool_use` a `tool_result` in the message right after it, and
 /// drops every `tool_result` that answers no `tool_use` there.
 ///

@@ -589,6 +589,24 @@ impl Builder {
         self
     }
 
+    /// Tools the host runs itself, offered to the model as the session's
+    /// own: registered after the scene's, under the same check that no name
+    /// is taken twice, and held to the scene's deny list. Calling one goes to
+    /// [`Builder::host_calls`]. `build` fails with
+    /// [`EngineError::HostTools`] on a declaration that cannot stand.
+    pub fn host_tools(mut self, decls: Vec<base::interface::host_call::HostToolDecl>) -> Self {
+        self.spec.host_tools = decls;
+        self
+    }
+
+    /// Replaces how a call to a host tool reaches the host — by default an
+    /// `AgentEvent::HostToolCall` on the event stream, answered with
+    /// `InputMessage::HostToolResponse`.
+    pub fn host_calls(mut self, host: Arc<dyn base::interface::host_call::HostCalls>) -> Self {
+        self.ext.host_calls = Some(host);
+        self
+    }
+
     /// Narrows every tool this session would have to what `selector` admits,
     /// on top of its scene: the ones it is handed, the engine's and modules',
     /// the scene's and plugins', and its MCP servers', those connected later

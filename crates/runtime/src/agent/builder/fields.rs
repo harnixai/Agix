@@ -130,6 +130,8 @@ pub(super) struct SpecSetup {
     pub(super) run_slots: Option<Arc<tokio::sync::Semaphore>>,
     /// See [`Builder::checkpoints`]; `None` is not decided.
     pub(super) checkpoints: Option<Option<Arc<crate::checkpoint::Checkpoints>>>,
+    /// See [`Builder::host_tools`].
+    pub(super) host_tools: Vec<base::interface::host_call::HostToolDecl>,
 }
 
 impl SpecSetup {
@@ -160,6 +162,7 @@ impl SpecSetup {
             steering: None,
             run_slots: None,
             checkpoints: None,
+            host_tools: Vec::new(),
         }
     }
 }
@@ -177,6 +180,8 @@ pub(super) struct ExtSetup {
     /// Replaces the built-in way of asking a person something — see
     /// [`Builder::elicitation`].
     pub(super) elicitation: Option<Arc<dyn base::interface::elicitation::Elicitation>>,
+    /// See [`Builder::host_calls`].
+    pub(super) host_calls: Option<Arc<dyn base::interface::host_call::HostCalls>>,
     /// Contributions to the system prompt — see [`Builder::prompt_registry`].
     pub(super) prompt_registry: Option<Arc<dyn base::interface::prompt_registry::PromptRegistry>>,
     /// Replaces prompt assembly itself — see [`Builder::prompt_assembler`].
@@ -202,6 +207,7 @@ impl ExtSetup {
             wake_rx: None,
             commands_override: None,
             elicitation: None,
+            host_calls: None,
             prompt_registry: None,
             prompt_assembler: None,
             turn_policy: None,

@@ -165,6 +165,7 @@ pub(super) fn test_exec_ctx_with_permission(
         permission: base::interface::permission::PermissionSet::without_grants(permission),
         session_state: Arc::new(base::context::SessionState::for_tests(std::env::temp_dir())),
         elicitation: Arc::new(base::interface::elicitation::DeclineAll),
+        host_calls: None,
         tool_middleware: Arc::new(Vec::new()),
         result_transformers: Arc::new(Vec::new()),
         images: Arc::new(std::sync::Mutex::new(Vec::new())),

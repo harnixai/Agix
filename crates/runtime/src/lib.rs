@@ -7,6 +7,7 @@ pub mod elicitation;
 pub mod event_bus;
 mod exec;
 pub mod hook_executors;
+pub mod host_tools;
 pub mod module;
 pub mod plugin;
 mod repeat_guard;

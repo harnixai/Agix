@@ -1,6 +1,6 @@
 //! 悬空 tool_use 的配对修复。
 
-use crate::turn::request::{awaits_result, pair_dangling_tool_uses};
+use crate::turn::request::pair_dangling_tool_uses;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 
 fn msg(role: MessageRole, content: Vec<ModelContentBlock>) -> ModelMessage {
@@ -89,20 +89,6 @@ fn results_in_later_user_messages_join_the_first() {
     ]);
     assert_eq!(out.len(), 2);
     assert_eq!(result_ids(&out[1]), ["a", "b"]);
-}
-
-#[test]
-fn a_result_is_awaited_only_for_an_unanswered_call_of_the_last_reply() {
-    let transcript = vec![
-        msg(MessageRole::Assistant, vec![tool_use("old")]),
-        msg(MessageRole::User, vec![tool_result("old")]),
-        msg(MessageRole::Assistant, vec![tool_use("a"), tool_use("b")]),
-        msg(MessageRole::User, vec![tool_result("a")]),
-    ];
-    assert!(awaits_result(&transcript, "b"));
-    assert!(!awaits_result(&transcript, "a"));
-    assert!(!awaits_result(&transcript, "old"));
-    assert!(!awaits_result(&transcript, "made-up"));
 }
 
 #[test]

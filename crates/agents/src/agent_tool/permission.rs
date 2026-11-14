@@ -15,6 +15,7 @@ use base::interface::permission::{
 pub(crate) struct Relay {
     pub(crate) permission: PermissionSet,
     pub(crate) elicitation: Arc<dyn Elicitation>,
+    pub(crate) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 
 /// A delegate's policy: its calls judged by the parent's policy, against the

@@ -81,8 +81,13 @@ impl Delegator {
                         pending: env.parent.pending_permissions.clone(),
                     },
                 },
-                task,
+                task: task.clone(),
             }),
+            host_calls: Arc::new(runtime::host_tools::DelegateHostCalls::new(
+                env.host_calls.clone(),
+                task.map(|task| task.task_id.clone()),
+                delegate_id,
+            )),
         }
     }
 
