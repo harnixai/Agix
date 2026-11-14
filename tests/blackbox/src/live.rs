@@ -656,6 +656,8 @@ impl LiveRunBuilder {
         self
     }
 
+    /// The project is trusted, as its host would have trusted it: the runs
+    /// are about what the engine does with a project's configuration.
     pub async fn start(self) -> anyhow::Result<LiveRun> {
         let config = match self.config {
             Some(config) => config,
@@ -677,6 +679,7 @@ impl LiveRunBuilder {
             }
         }
         world.write_project_settings(&self.name, &merged)?;
+        world.trust_project(&project)?;
         for hook in self.before_start {
             hook(&world, &project)?;
         }

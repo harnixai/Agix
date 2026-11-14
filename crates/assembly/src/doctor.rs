@@ -392,10 +392,10 @@ impl HealthCheck for ManagedSettingsCheck {
 /// Whether a project is trusted, and what of its own configuration that
 /// decides — `project.status`'s answer for it, as a verdict.
 ///
-/// `degraded` when something is set aside: the project is not trusted and
-/// has configuration that only a trusted one gets, or it is trusted only by
-/// `project_trust.default` — which a later 0.3.x release is planned to turn to `untrusted` — and has such
-/// configuration that would then stop taking effect.
+/// `degraded` when something is decided only by `project_trust.default`:
+/// nobody has trusted the project and it has configuration that is withheld
+/// until somebody does, or `default: trusted` lets such configuration through
+/// without anybody having looked at it. Either way the summary lists the keys.
 pub struct ProjectTrustCheck(serde_json::Value);
 
 impl ProjectTrustCheck {
@@ -417,24 +417,29 @@ impl HealthCheck for ProjectTrustCheck {
             .flatten()
             .filter_map(|v| v.as_str())
             .collect();
-        let by_list = !status["matched"].is_null();
+        let by_default = status["trust_source"] == "default";
         let result = match (status["trust"].as_str(), gated.is_empty()) {
             (Some("untrusted"), true) => {
                 CheckResult::ok("project not trusted; nothing in it needs trust")
             }
+            (Some("untrusted"), false) if by_default => CheckResult::degraded(format!(
+                "project not trusted yet (only project_trust.default decided); \
+                 withheld until the host trusts it (project.trust): {}",
+                gated.join(", ")
+            )),
             (Some("untrusted"), false) => CheckResult::degraded(format!(
                 "project not trusted; withheld until it is: {}",
                 gated.join(", ")
             )),
-            (Some("trusted"), _) if by_list => {
+            (Some("trusted"), _) if !by_default => {
                 CheckResult::ok("project trusted by project_trust.trusted")
             }
             (Some("trusted"), true) => CheckResult::ok(
                 "project trusted by project_trust.default; nothing in it needs trust",
             ),
             (Some("trusted"), false) => CheckResult::degraded(format!(
-                "project trusted only by project_trust.default, which is planned to turn to untrusted in a later 0.3.x release; \
-                 these would then stop taking effect: {}",
+                "project trusted only by project_trust.default: trusted, without anybody trusting it; \
+                 in effect because of that: {}",
                 gated.join(", ")
             )),
             _ => CheckResult::ok("no project tier"),

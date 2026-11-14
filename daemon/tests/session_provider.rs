@@ -80,6 +80,7 @@ async fn start_daemon() -> Daemon {
     let sock = dir.path().join("provider.sock");
     let cwd = dir.path().join("work");
     std::fs::create_dir_all(&cwd).unwrap();
+    crate::trusting::trust_projects_under(dir.path(), dir.path());
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",

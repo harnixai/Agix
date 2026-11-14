@@ -297,8 +297,8 @@
       "properties": {
         "default": {
           "$ref": "#/$defs/TrustLevel",
-          "default": "trusted",
-          "description": "A project that no `trusted` pattern matches. `trusted` in 0.3.x;\nA later 0.3.x release is planned to make it `untrusted`."
+          "default": "untrusted",
+          "description": "A project that no `trusted` pattern matches."
         },
         "trusted": {
           "description": "Trusted project roots: absolute paths, or globs where `*` stays within\none path segment and `**` crosses them. A leading `~/` is the home\ndirectory. The global `settings.json` and `settings.local.json` lists\nadd up rather than one replacing the other; `project.trust` writes to\nthe second.",
@@ -860,7 +860,7 @@
     "project_trust": {
       "$ref": "#/$defs/ProjectTrustSettings",
       "default": {
-        "default": "trusted"
+        "default": "untrusted"
       },
       "description": "Which projects' own configuration takes effect as written — see\n`settings::trust`. Read from the global tier only."
     },

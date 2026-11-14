@@ -486,6 +486,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
          both are converted variant by variant",
     ),
     ("TrustLevel", TRUST),
+    ("TrustSource", TRUST),
     ("TurnStep", HOST_ANSWER),
     ("ValidationResult", HOST_ANSWER),
     ("Workdir", DELEGATE_ASK),

@@ -3192,6 +3192,17 @@
         },
         "trust": {
           "$ref": "#/$defs/TrustState"
+        },
+        "trust_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What decided `trust`: the default, a `trusted` pattern in the global\n`settings.json` (`user`), or one `project.trust` recorded (`host`);\n`null` with no project tier."
         }
       },
       "required": [
@@ -3252,6 +3263,17 @@
         },
         "trust": {
           "$ref": "#/$defs/TrustState"
+        },
+        "trust_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What decided `trust`: the default, a `trusted` pattern in the global\n`settings.json` (`user`), or one `project.trust` recorded (`host`);\n`null` with no project tier."
         },
         "written_to": {
           "type": "string"
@@ -3635,6 +3657,17 @@
         },
         "status": {
           "$ref": "#/$defs/ResumeStatus"
+        },
+        "trust_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What decided `project_trust`; `null` with no project tier."
         }
       },
       "required": [
@@ -4445,6 +4478,17 @@
         },
         "session_kind": {
           "$ref": "#/$defs/SessionKindName"
+        },
+        "trust_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrustSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What decided `project_trust`; `null` with no project tier."
         }
       },
       "required": [
@@ -5491,6 +5535,26 @@
         "untrusted"
       ],
       "type": "string"
+    },
+    "TrustSource": {
+      "description": "What decided that a project is trusted or not.",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "`project_trust.default`: nobody has said anything about this project.",
+          "type": "string"
+        },
+        {
+          "const": "user",
+          "description": "A `trusted` pattern in the global `settings.json`.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "A `trusted` pattern in the global `settings.local.json`, where\n`project.trust` records the host's answer.",
+          "type": "string"
+        }
+      ]
     },
     "TrustState": {
       "oneOf": [

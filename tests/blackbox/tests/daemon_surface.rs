@@ -522,6 +522,7 @@ fn a_project_with_a_script(world: &World) -> anyhow::Result<std::path::PathBuf> 
             ]
         }),
     )?;
+    world.trust_project(&project)?;
     Ok(project)
 }
 
@@ -905,6 +906,7 @@ async fn a_failing_tool_says_so_everywhere(mode: Mode) -> anyhow::Result<()> {
             "permission_rules": [{ "tool": "Bash", "action": "allow" }]
         }),
     )?;
+    world.trust_project(&project)?;
     let provider = ProviderStub::start().await?;
     let daemon = Daemon::start(
         &world,

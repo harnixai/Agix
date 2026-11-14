@@ -67,6 +67,26 @@ impl World {
         write_json(&root.join(".agix").join("settings.json"), settings)
     }
 
+    /// Trust the project at `root` the way `project.trust` does: an entry in
+    /// the global `settings.local.json`, beside whatever else is there.
+    pub fn trust_project(&self, root: &Path) -> anyhow::Result<()> {
+        let path = self.global_root().join("settings.local.json");
+        let mut local: serde_json::Value = match std::fs::read_to_string(&path) {
+            Ok(text) => serde_json::from_str(&text)?,
+            Err(_) => serde_json::json!({}),
+        };
+        let entry = serde_json::json!(std::fs::canonicalize(root)?);
+        let mut trusted = local["project_trust"]["trusted"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !trusted.contains(&entry) {
+            trusted.push(entry);
+        }
+        local["project_trust"]["trusted"] = serde_json::Value::Array(trusted);
+        write_json(&path, &local)
+    }
+
     /// Put a file inside a project — a script, a skill, whatever the case
     /// needs the daemon to find where a real one would.
     pub fn write_project_file(

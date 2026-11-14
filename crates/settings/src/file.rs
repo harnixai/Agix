@@ -472,6 +472,12 @@ mod tests {
         append_permission_rule(&local, AppendTarget::Deny, "Bash(rm -rf:*)").unwrap();
 
         let empty = TempDir::new().unwrap();
+        let root = dir.path().parent().unwrap().display().to_string();
+        std::fs::write(
+            empty.path().join(base::paths::SETTINGS_FILE),
+            serde_json::json!({"project_trust": {"trusted": [root]}}).to_string(),
+        )
+        .unwrap();
         let settings = crate::LoadedSettings::load(
             empty.path().to_path_buf(),
             empty.path().to_path_buf(),

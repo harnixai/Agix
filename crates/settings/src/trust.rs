@@ -30,9 +30,22 @@ use crate::section::Sections;
 )]
 #[serde(rename_all = "lowercase")]
 pub enum TrustLevel {
-    #[default]
     Trusted,
+    #[default]
     Untrusted,
+}
+
+/// What decided that a project is trusted or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TrustSource {
+    /// `project_trust.default`: nobody has said anything about this project.
+    Default,
+    /// A `trusted` pattern in the global `settings.json`.
+    User,
+    /// A `trusted` pattern in the global `settings.local.json`, where
+    /// `project.trust` records the host's answer.
+    Host,
 }
 
 /// `project_trust` in settings.json. Read from the global tier only; a scene
@@ -40,8 +53,7 @@ pub enum TrustLevel {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ProjectTrustSettings {
-    /// A project that no `trusted` pattern matches. `trusted` in 0.3.x;
-    /// A later 0.3.x release is planned to make it `untrusted`.
+    /// A project that no `trusted` pattern matches.
     pub default: TrustLevel,
     /// Trusted project roots: absolute paths, or globs where `*` stays within
     /// one path segment and `**` crosses them. A leading `~/` is the home
@@ -50,14 +62,22 @@ pub struct ProjectTrustSettings {
     /// the second.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub trusted: Vec<String>,
+    /// The `trusted` patterns that only a `settings.local.json` holds.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub recorded_by_host: Vec<String>,
 }
 
 impl ProjectTrustSettings {
-    /// The `project_trust` sections of `layers`, lowest first: the last
-    /// `default` wins, the `trusted` lists are concatenated.
-    pub fn from_layers<'a>(layers: impl IntoIterator<Item = &'a Value>) -> Self {
+    /// The `project_trust` sections of `layers`, lowest first, each with
+    /// whether it is a `settings.local.json`: the last `default` wins, the
+    /// `trusted` lists are concatenated.
+    pub fn from_layers<'a>(layers: impl IntoIterator<Item = (&'a Value, bool)>) -> Self {
         let mut out = Self::default();
-        for section in layers.into_iter().filter_map(|v| v.get("project_trust")) {
+        for (section, machine_local) in layers
+            .into_iter()
+            .filter_map(|(v, local)| Some((v.get("project_trust")?, local)))
+        {
             if let Some(default) = section.get("default") {
                 match serde_json::from_value(default.clone()) {
                     Ok(level) => out.default = level,
@@ -75,6 +95,9 @@ impl ProjectTrustSettings {
             {
                 if !out.trusted.iter().any(|p| p == pattern) {
                     out.trusted.push(pattern.to_string());
+                    if machine_local {
+                        out.recorded_by_host.push(pattern.to_string());
+                    }
                 }
             }
         }
@@ -85,34 +108,81 @@ impl ProjectTrustSettings {
     /// `settings.json` and `settings.local.json` — for a caller that needs
     /// the answer without loading a whole `Settings`.
     pub fn read_global(global_dir: &Path) -> Self {
-        let layers: Vec<Value> = [base::paths::SETTINGS_FILE, base::paths::SETTINGS_LOCAL_FILE]
-            .iter()
-            .filter_map(|file| std::fs::read_to_string(global_dir.join(file)).ok())
-            .filter_map(|text| serde_json::from_str(&text).ok())
-            .collect();
-        Self::from_layers(&layers)
+        let layers: Vec<(Value, bool)> = [
+            (base::paths::SETTINGS_FILE, false),
+            (base::paths::SETTINGS_LOCAL_FILE, true),
+        ]
+        .iter()
+        .filter_map(|(file, local)| {
+            let text = std::fs::read_to_string(global_dir.join(file)).ok()?;
+            Some((serde_json::from_str(&text).ok()?, *local))
+        })
+        .collect();
+        Self::from_layers(layers.iter().map(|(v, local)| (v, *local)))
     }
 
-    /// Whether `root` is trusted, and the pattern that said so.
-    pub fn decide(&self, root: &Path) -> (ProjectTrust, Option<String>) {
+    /// Whether `root` is trusted, the pattern that said so, and where that
+    /// pattern was written.
+    pub fn decide(&self, root: &Path) -> TrustDecision {
         self.decide_with_default(root, self.default)
     }
 
-    /// [`decide`](Self::decide) with `default` for a root no pattern names.
-    pub fn decide_with_default(
+    /// The project tier at `project` (a `.agix` directory) as the loader
+    /// starts it: who trusts it, before any of its keys are gated.
+    pub fn decide_tier(
         &self,
-        root: &Path,
-        default: TrustLevel,
-    ) -> (ProjectTrust, Option<String>) {
+        own_project: bool,
+        project: &Path,
+        global: &Path,
+        scene: &Path,
+    ) -> ProjectLayer {
+        let root = project.parent().unwrap_or(project);
+        let decided = if own_project {
+            self.decide(root)
+        } else if borrows_a_tier(project, global, scene) {
+            self.decide_with_default(root, TrustLevel::Untrusted)
+        } else {
+            return ProjectLayer::default();
+        };
+        ProjectLayer {
+            trust: decided.trust,
+            matched: decided.matched,
+            source: Some(decided.source),
+            ..Default::default()
+        }
+    }
+
+    /// [`decide`](Self::decide) with `default` for a root no pattern names.
+    pub fn decide_with_default(&self, root: &Path, default: TrustLevel) -> TrustDecision {
         if let Some(pattern) = self.trusted.iter().find(|p| pattern_matches(p, root)) {
-            return (ProjectTrust::Trusted, Some(pattern.clone()));
+            let source = if self.recorded_by_host.contains(pattern) {
+                TrustSource::Host
+            } else {
+                TrustSource::User
+            };
+            return TrustDecision {
+                trust: ProjectTrust::Trusted,
+                matched: Some(pattern.clone()),
+                source,
+            };
         }
         let trust = match default {
             TrustLevel::Trusted => ProjectTrust::Trusted,
             TrustLevel::Untrusted => ProjectTrust::Untrusted,
         };
-        (trust, None)
+        TrustDecision {
+            trust,
+            matched: None,
+            source: TrustSource::Default,
+        }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustDecision {
+    pub trust: ProjectTrust,
+    pub matched: Option<String>,
+    pub source: TrustSource,
 }
 
 /// What `LoadedSettings::load_from` found in the project tier.
@@ -122,6 +192,8 @@ pub struct ProjectLayer {
     /// The `project_trust.trusted` pattern that matched the root; `None`
     /// when the default decided.
     pub matched: Option<String>,
+    /// `None` when there is no project tier.
+    pub source: Option<TrustSource>,
     /// The project-tier settings that take effect only while the project is
     /// trusted, as dotted keys (`hooks_config`, `mcp_servers.github`,
     /// `permission_rules.allow(Bash)`). Withheld while it is not.
@@ -975,18 +1047,26 @@ mod tests {
 
     #[test]
     fn the_trusted_lists_add_up_and_the_last_default_wins() {
-        let file = json!({"project_trust": {"default": "untrusted", "trusted": ["/a"]}});
-        let local = json!({"project_trust": {"trusted": ["/b", "/a"]}});
-        let settings = ProjectTrustSettings::from_layers([&file, &local]);
+        let file = json!({"project_trust": {"default": "trusted", "trusted": ["/a"]}});
+        let local = json!({"project_trust": {"default": "untrusted", "trusted": ["/b", "/a"]}});
+        let settings = ProjectTrustSettings::from_layers([(&file, false), (&local, true)]);
         assert_eq!(settings.default, TrustLevel::Untrusted);
         assert_eq!(settings.trusted, ["/a", "/b"]);
+        let decided = |root: &str| {
+            let d = settings.decide(Path::new(root));
+            (d.trust, d.matched, d.source)
+        };
         assert_eq!(
-            settings.decide(Path::new("/b")),
-            (ProjectTrust::Trusted, Some("/b".into()))
+            decided("/a"),
+            (ProjectTrust::Trusted, Some("/a".into()), TrustSource::User)
         );
         assert_eq!(
-            settings.decide(Path::new("/c")),
-            (ProjectTrust::Untrusted, None)
+            decided("/b"),
+            (ProjectTrust::Trusted, Some("/b".into()), TrustSource::Host)
+        );
+        assert_eq!(
+            decided("/c"),
+            (ProjectTrust::Untrusted, None, TrustSource::Default)
         );
     }
 }

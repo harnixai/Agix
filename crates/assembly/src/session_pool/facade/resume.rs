@@ -263,13 +263,14 @@ impl SessionPool {
             ),
             None => (mode, None),
         };
-        let (project_trust, settings) = match project {
+        let (project_trust, trust_source, settings) = match project {
             Some((project, scene)) => {
                 let settings = self.settings_for_project(project.as_deref(), &scene).await;
-                (settings.trust(), settings)
+                (settings.trust(), settings.trust_source(), settings)
             }
             None => (
                 base::permission::ProjectTrust::NoProject,
+                None,
                 self.bindings.pool_settings().await,
             ),
         };
@@ -289,6 +290,7 @@ impl SessionPool {
             last_active,
             scene: self.scenes.default_id().to_string(),
             project_trust: project_trust.into(),
+            trust_source,
             permission: api::PermissionReport {
                 mode,
                 prompts: prompts_enabled,

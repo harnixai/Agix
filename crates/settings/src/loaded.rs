@@ -178,17 +178,11 @@ impl LoadedSettings {
             layers
                 .iter()
                 .filter(|l| tiers.is_global(l.tier))
-                .map(|l| &l.value),
+                .map(|l| (&l.value, l.machine_local)),
         );
-        let root = local_dir.parent().unwrap_or(&local_dir);
-        let (trust, matched) = if own_project {
-            project_trust.decide(root)
-        } else if trust::borrows_a_tier(&local_dir, &global_dir, &scene_dir) {
-            project_trust.decide_with_default(root, trust::TrustLevel::Untrusted)
-        } else {
-            (ProjectTrust::NoProject, None)
-        };
-        let withhold = trust.is_untrusted();
+        let project_layer =
+            project_trust.decide_tier(own_project, &local_dir, &global_dir, &scene_dir);
+        let withhold = project_layer.trust.is_untrusted();
         let mut fold = LayerFold {
             sections,
             tiers,
@@ -198,11 +192,7 @@ impl LoadedSettings {
             local_dir: &local_dir,
             merged_json,
             loaded_rules: Vec::new(),
-            project_layer: ProjectLayer {
-                trust,
-                matched,
-                ..Default::default()
-            },
+            project_layer,
             ignored: Vec::new(),
             managed: None,
             mcp_server_dirs: HashMap::new(),
@@ -289,6 +279,12 @@ impl LoadedSettings {
     /// `None` when the default decided, or there is no project tier.
     pub fn trust_pattern(&self) -> Option<&str> {
         self.project_layer.matched.as_deref()
+    }
+
+    /// What decided [`trust`](Self::trust); `None` when there is no project
+    /// tier.
+    pub fn trust_source(&self) -> Option<trust::TrustSource> {
+        self.project_layer.source
     }
 
     /// The project-tier settings that take effect only while the project is

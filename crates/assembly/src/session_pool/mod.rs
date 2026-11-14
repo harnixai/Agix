@@ -265,6 +265,7 @@ fn project_trust_report(
         project_root: root.to_path_buf(),
         trust: settings.trust().into(),
         matched: settings.trust_pattern().map(str::to_string),
+        trust_source: settings.trust_source(),
         default: settings.values.project_trust.default,
         requires_trust,
     }

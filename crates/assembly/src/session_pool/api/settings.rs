@@ -129,6 +129,10 @@ pub struct ProjectStatus {
     /// The `project_trust.trusted` entry that matched; `null` when the
     /// default decided.
     pub matched: Option<String>,
+    /// What decided `trust`: the default, a `trusted` pattern in the global
+    /// `settings.json` (`user`), or one `project.trust` recorded (`host`);
+    /// `null` with no project tier.
+    pub trust_source: Option<settings::trust::TrustSource>,
     pub default: settings::trust::TrustLevel,
     /// What the project sets that takes effect only while it is trusted.
     pub requires_trust: Vec<String>,

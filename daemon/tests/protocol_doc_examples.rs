@@ -950,6 +950,14 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
     // Last: no turn runs after it. The section documents the result as
     // config.reload's plus `written_to`, and config.reload's example is one
     // particular state of the routing, so only its shape is claimed here.
+    // A provider written into the project's own settings needs the project
+    // trusted first, which is what a host does.
+    daemon
+        .call(
+            "project.trust",
+            serde_json::json!({"project_root": project, "trusted": true}),
+        )
+        .await;
     let written = daemon
         .call(
             "config.setProvider",

@@ -48,6 +48,7 @@ impl Daemon {
             serde_json::json!({ "mcp_servers": servers }).to_string(),
         )
         .unwrap();
+        crate::trusting::trust_projects_under(&root, &root);
         let sock = root.join("d.sock");
         let mut config = load_daemon_config(
             "claude-sonnet-4-6",

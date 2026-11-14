@@ -1,8 +1,7 @@
 //! Workspace trust over the wire: what an untrusted project's own settings,
 //! hooks and MCP servers do (nothing that loosens), `project.trust` /
 //! `project.status`, the `project_trust_changed` event, and what
-//! `daemon.doctor` says — including that the 0.3.x default keeps today's
-//! behavior.
+//! `daemon.doctor` says — including about a global `default: trusted`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -210,9 +209,9 @@ fn untrusted_by_default() -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn by_default_a_project_is_trusted_and_the_doctor_says_what_that_lets_through() {
+async fn a_default_of_trusted_lets_a_project_through_and_the_doctor_says_what() {
     let daemon = Daemon::start(
-        json!({}),
+        json!({"project_trust": {"default": "trusted"}}),
         json!({
             "permission_mode": "bypassPermissions",
             "hooks_config": {"Stop": [{"type": "command", "command": "true"}]},
@@ -240,6 +239,7 @@ async fn by_default_a_project_is_trusted_and_the_doctor_says_what_that_lets_thro
     let status = daemon.status().await;
     assert_eq!(status["trust"], "trusted", "{status}");
     assert_eq!(status["default"], "trusted");
+    assert_eq!(status["trust_source"], "default");
     assert!(status["matched"].is_null());
     let gated = strings(&status["requires_trust"]);
     assert!(gated.contains(&"permission_mode"), "{status}");
@@ -259,7 +259,9 @@ async fn by_default_a_project_is_trusted_and_the_doctor_says_what_that_lets_thro
     assert_eq!(check["status"], "degraded", "{check}");
     let summary = check["summary"].as_str().unwrap();
     assert!(
-        summary.contains("project_trust.default") && summary.contains("later 0.3.x"),
+        summary.contains("project_trust.default")
+            && summary.contains("permission_mode")
+            && summary.contains("hooks_config"),
         "{check}"
     );
     assert_eq!(check["details"]["trust"], "trusted");
@@ -744,7 +746,7 @@ async fn a_projects_own_mcp_servers_wait_for_trust() {
 #[tokio::test]
 async fn a_projects_server_refused_for_the_enterprise_identity_is_listed_as_denied() {
     let daemon = Daemon::start(
-        json!({}),
+        json!({"project_trust": {"trusted": ["/**"]}}),
         json!({"mcp_servers": {"ema": {"type": "streamable_http", "url": "https://mcp.example/mcp",
                                        "oauth": {"grant": "enterprise", "client_id": "c"}}}}),
     )
@@ -891,7 +893,7 @@ async fn each_mcp_server_starts_in_the_directory_that_declared_it() {
         json!({ "mcp_servers": {
             "users_by_arg": {"type": "stdio", "command": "/bin/sh", "args": ["mcp.sh"]},
             "users_by_command": {"type": "stdio", "command": "./mcp.sh"},
-        }})
+        }, "project_trust": {"trusted": [other]}})
         .to_string(),
     )
     .unwrap();

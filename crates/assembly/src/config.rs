@@ -321,6 +321,15 @@ mod tests {
         std::fs::write(dir.join("settings.json"), content).unwrap();
     }
 
+    /// Trust `project` from the global tier in `global`.
+    fn trust_project(global: &Path, project: &Path) {
+        std::fs::write(
+            global.join("settings.local.json"),
+            serde_json::json!({"project_trust": {"trusted": [project]}}).to_string(),
+        )
+        .unwrap();
+    }
+
     fn write_project_settings(project: &Path, content: &str) {
         let agix_dir = project.join(".agix");
         std::fs::create_dir_all(&agix_dir).unwrap();
@@ -508,6 +517,7 @@ mod tests {
             project_dir.path(),
             r#"{ "providers": { "deepseek": { "api_key": "project-key" } } }"#,
         );
+        trust_project(config_dir.path(), project_dir.path());
         let paths = StaticDaemonPaths::with_project(
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),
@@ -551,6 +561,7 @@ mod tests {
                 }
             }"#,
         );
+        trust_project(config_dir.path(), project_dir.path());
         let paths = StaticDaemonPaths::with_project(
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),

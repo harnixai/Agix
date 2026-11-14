@@ -106,6 +106,7 @@ async fn start_server_serving(
     tokio::task::JoinHandle<()>,
 ) {
     let sock = dir.path().join("test.sock");
+    crate::trusting::trust_projects_under(dir.path(), dir.path());
 
     // 使用 dummy client（不真正调 LLM）
     let client: Arc<dyn AnthropicClient> =

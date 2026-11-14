@@ -66,6 +66,7 @@ impl SessionPool {
 
         let scene_id_for_result = scene.id.clone();
         let project_trust = binding.settings.trust();
+        let trust_source = binding.settings.trust_source();
         let sid = Id::new().to_string();
         let core = self
             .create(
@@ -84,6 +85,7 @@ impl SessionPool {
             session_kind: api::SessionKindName::Primary,
             project_root: project_root_for_meta.map(|p| p.display().to_string()),
             project_trust: project_trust.into(),
+            trust_source,
             created_at: format_instant(core.created_at()),
         })
     }

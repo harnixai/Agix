@@ -474,7 +474,8 @@ async fn a_project_permanent_allow_is_written_and_read_back_exact() {
     let rule = json!({"tool": "Bash(touch *.rs)", "action": "allow", "match": "exact"});
     assert_eq!(written["permission_rules"], json!([rule]), "{written}");
 
-    let later = Daemon::start(Setup::default(), |_, work| {
+    let later = Daemon::start(Setup::default(), |home, work| {
+        crate::trusting::trust_projects_under(home, work);
         std::fs::write(
             work.join(".agix/settings.local.json"),
             json!({"permission_rules": [rule]}).to_string(),

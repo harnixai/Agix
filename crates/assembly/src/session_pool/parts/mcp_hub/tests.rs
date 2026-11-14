@@ -133,6 +133,11 @@ async fn a_pair_stuck_connecting_holds_up_no_other_pairs_connect() {
         .to_string(),
     )
     .unwrap();
+    std::fs::write(
+        dir.path().join("settings.local.json"),
+        serde_json::json!({"project_trust": {"trusted": [stuck]}}).to_string(),
+    )
+    .unwrap();
     let other = dir.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
 

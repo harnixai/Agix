@@ -288,10 +288,18 @@ glob 清单),项目自己写的忽略。三态:
 | `untrusted` | 项目层按上面收紧 |
 | `none` | 没有自己的项目层(无项目会话,或项目根就是放全局目录的那个目录,如 `$HOME`)。项目的 `.agix` 是链到全局 / 场景目录的符号链接时不算,按 `untrusted` |
 
-**0.3.x 缺省 `default: "trusted"`**,行为与之前完全一样;**计划在后续 0.3.x 改为 `untrusted`(具体版本发布说明另行通知)**。
+**缺省 `default: "untrusted"`**:一个谁都没确认过的项目,项目层按上面收紧。
 宿主用 `project.status`(§6.8)拿到状态和"信任之后才生效的东西"来画确认对话框,用
 `project.trust` 记下用户的选择;无人值守的部署在全局设置里写 `trusted` glob 预先信任。
-`session.create` / `session.resume` 的结果里有 `project_trust`(同上表的三个值)。
+`session.create` / `session.resume` 的结果里有 `project_trust`(同上表的三个值)与
+`trust_source`——是谁定的:
+
+| `trust_source` | 意思 |
+|---|---|
+| `default` | 没有 `trusted` 条目命中,由 `project_trust.default` 决定 |
+| `user` | 全局 `settings.json` 里的一条 `trusted` 命中 |
+| `host` | 全局 `settings.local.json` 里的一条命中——`project.trust` 写在这里 |
+| `null` | 没有自己的项目层(`project_trust` 是 `none`) |
 
 ---
 
@@ -868,14 +876,14 @@ daemon 自己的项目的 `project.status` 结果(§6.8):
 
 ```jsonc
 { "name":"project.trust", "status":"degraded",
-  "summary":"project trusted only by project_trust.default, which is planned to turn to untrusted in a later 0.3.x release; these would then stop taking effect: hooks_config, mcp_servers.github",
-  "details": { "project_root":"/Users/x/repo", "trust":"trusted", "matched":null,
-               "default":"trusted", "requires_trust":["hooks_config", "mcp_servers.github"] } }
+  "summary":"project not trusted yet (only project_trust.default decided); withheld until the host trusts it (project.trust): hooks_config, mcp_servers.github",
+  "details": { "project_root":"/Users/x/repo", "trust":"untrusted", "matched":null,
+               "trust_source":"default", "default":"untrusted",
+               "requires_trust":["hooks_config", "mcp_servers.github"] } }
 ```
 
-没有东西要信任才生效、或项目由 `trusted` 清单明确信任时是 `ok`;项目未被信任而有东西被扣下
-(`summary` 列出它们),或只靠 `default: "trusted"` 信任而有这样的东西(缺省翻转后它们会停用)时
-是 `degraded`。
+没有东西要信任才生效、或项目由 `trusted` 清单明确信任时是 `ok`;项目未被信任而有东西被扣下,
+或只靠 `default: "trusted"` 信任而有这样的东西时是 `degraded`,`summary` 列出这些键。
 
 daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,说明部署方的 managed
 设置(`ARCHITECTURE.md` §6.1"用户规则与部署方规则")在哪里找、找到了什么:
@@ -1112,7 +1120,8 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 // ← result
 { "session_id": "…", "scene": "code", "session_kind": "primary",
   "project_root": "…",
-  "project_trust": "trusted",           // trusted | untrusted | none,§3.6
+  "project_trust": "untrusted",         // trusted | untrusted | none,§3.6
+  "trust_source": "default",            // default | user | host | null,§3.6
   "created_at": "…" }
 ```
 
@@ -1664,7 +1673,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   "name": null,
   "created_at": "…", "last_active": "…",
   "scene": "code",
-  "project_trust": "trusted",   // trusted | untrusted | none,§3.6
+  "project_trust": "untrusted", // trusted | untrusted | none,§3.6
+  "trust_source": "default",    // default | user | host | null,§3.6
   "permission": { "mode": "default", "prompts": true, "prompt_timeout_secs": "…" } }
 ```
 
@@ -2631,9 +2641,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "project_root": "/Users/x/repo-b", "scene": "code" }
 // ← result
 { "project_root": "…/work",
-  "trust": "trusted",          // trusted | untrusted | none
+  "trust": "untrusted",        // trusted | untrusted | none
   "matched": null,             // 命中的 project_trust.trusted 条目;null = 由 default 决定
-  "default": "trusted",        // project_trust.default
+  "trust_source": "default",   // default | user | host | null,§3.6
+  "default": "untrusted",      // project_trust.default
   "requires_trust": [ ] }      // 见下
 ```
 
@@ -2663,7 +2674,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
   "trusted": true }                     // 必填
 // ← result
 { "project_root": "…/work", "trust": "trusted", "matched": "…/work",
-  "default": "trusted", "requires_trust": [ ],
+  "trust_source": "host", "default": "untrusted", "requires_trust": [ ],
   "written_to": "…/settings.local.json" }
 ```
 

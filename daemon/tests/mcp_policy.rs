@@ -97,6 +97,7 @@ impl Daemon {
     }
 
     fn config(&self) -> DaemonConfig {
+        crate::trusting::trust_projects_under(self.root(), self.root());
         load_daemon_config(
             "claude-sonnet-4-6",
             2000,

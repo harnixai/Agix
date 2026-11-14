@@ -30,6 +30,7 @@ mod plan_mode_in_delegates;
 mod plugin_skills;
 mod plugin_tools_in_scene;
 mod project_trust;
+mod project_trust_default;
 mod project_trust_symlink;
 mod protocol_doc_examples;
 mod protocol_doc_matches_dispatch;
@@ -53,6 +54,7 @@ mod session_teardown;
 mod session_title_telemetry;
 mod tool_progress;
 mod turn_cancellation;
+mod trusting;
 mod two_pools_one_process;
 mod wiring_coverage;
 #[cfg(feature = "ws")]

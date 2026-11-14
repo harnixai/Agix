@@ -2811,6 +2811,7 @@ async fn a_projects_own_script_reaches_the_prompt_the_daemon_sends() {
     .await;
 
     let project = srv._dir.path().join("scripted-project");
+    crate::trusting::trust_projects_under(srv._dir.path(), &project);
     std::fs::create_dir_all(project.join(".agix").join("scripts")).unwrap();
     std::fs::write(
         project.join(".agix").join("scripts").join("house.js"),
@@ -2901,6 +2902,7 @@ async fn session_get_reports_what_the_scripts_did() {
     .await;
 
     let project = srv._dir.path().join("reported-project");
+    crate::trusting::trust_projects_under(srv._dir.path(), &project);
     std::fs::create_dir_all(project.join(".agix").join("scripts")).unwrap();
     std::fs::write(
         project.join(".agix").join("scripts").join("broken.js"),

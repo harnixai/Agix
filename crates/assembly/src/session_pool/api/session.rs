@@ -11,6 +11,8 @@ pub struct SessionCreated {
     pub session_kind: SessionKindName,
     pub project_root: Option<String>,
     pub project_trust: TrustState,
+    /// What decided `project_trust`; `null` with no project tier.
+    pub trust_source: Option<settings::trust::TrustSource>,
     pub created_at: String,
 }
 
@@ -117,6 +119,8 @@ pub struct ResumeReport {
     pub last_active: String,
     pub scene: String,
     pub project_trust: TrustState,
+    /// What decided `project_trust`; `null` with no project tier.
+    pub trust_source: Option<settings::trust::TrustSource>,
     pub permission: PermissionReport,
 }
 

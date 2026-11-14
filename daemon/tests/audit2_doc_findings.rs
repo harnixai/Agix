@@ -313,6 +313,7 @@ async fn audit2_a_provider_key_env_is_not_handed_to_commands() {
         },
         |home, _| {
             other = home.parent().unwrap().join("other");
+            crate::trusting::trust_projects_under(home, &other);
             std::fs::create_dir_all(other.join(".agix")).unwrap();
             std::fs::write(
                 other.join(".agix").join("settings.json"),

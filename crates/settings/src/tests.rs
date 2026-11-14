@@ -74,6 +74,7 @@ fn auto_and_yolo_in_settings_json_mean_bypass() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
         write_settings(&project, &format!(r#"{{"permission_mode": "{spelling}"}}"#));
+        trust_project(&root.path().join("global"), &project);
         let settings = LoadedSettings::load(
             root.path().join("global"),
             root.path().join("scene"),
@@ -162,6 +163,19 @@ fn write_local_settings(dir: &std::path::Path, content: &str) {
     std::fs::write(dir.join(SETTINGS_LOCAL_FILE), content).unwrap();
 }
 
+/// Have the global tier in `global` trust the project whose `.agix` is
+/// `project`, keeping whatever else that tier's `settings.json` says.
+fn trust_project(global: &std::path::Path, project: &std::path::Path) {
+    let path = global.join(SETTINGS_FILE);
+    let mut settings: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let root = project.parent().unwrap().display().to_string();
+    settings["project_trust"]["trusted"] = serde_json::json!([root]);
+    write_settings(global, &settings.to_string());
+}
+
 #[test]
 fn local_overlay_outranks_the_settings_json_beside_it() {
     let root = tempfile::tempdir().unwrap();
@@ -196,6 +210,7 @@ fn local_overlay_permission_rules_add_to_rather_than_replace_the_committed_ones(
         &project,
         r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
     );
+    trust_project(&root.path().join("global"), &project);
 
     let settings = LoadedSettings::load(
         root.path().join("global"),
@@ -235,6 +250,7 @@ fn local_overlay_is_read_from_every_tier() {
         &project,
         r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
     );
+    trust_project(&global, &project);
 
     let settings = LoadedSettings::load(
         global,
@@ -272,6 +288,7 @@ fn committed_tiers_contribute_rules_side_by_side_each_tagged_with_its_tier() {
         &project,
         r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
     );
+    trust_project(&global, &project);
 
     let settings = LoadedSettings::load(global, scene, project, "code", "m", &Sections::none());
     assert_eq!(
@@ -425,7 +442,8 @@ fn a_managed_layer_with_a_key_it_may_not_set_merges_nothing() {
 fn an_in_memory_source_replaces_the_files_entirely() {
     use base::interface::config_source::{InMemoryLayers, Tier};
 
-    let global = r#"{"model": {"model_name": "global-model", "max_tokens": 111}}"#;
+    let global = r#"{"model": {"model_name": "global-model", "max_tokens": 111},
+                     "project_trust": {"trusted": ["/**"]}}"#;
     let scene = r#"{"model": {"model_name": "scene-model"}}"#;
     let project = r#"{"paths": {"scope": "hijacked"},
                       "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#;
@@ -531,6 +549,7 @@ fn load_lets_project_override_just_one_provider_field() {
         &project,
         r#"{"providers": {"deepseek": {"api_key": "project-key"}}}"#,
     );
+    trust_project(&global, &project);
 
     let settings = LoadedSettings::load(
         global,
@@ -554,6 +573,7 @@ fn a_provider_key_variable_is_held_back_from_child_processes_once_loaded() {
         &project,
         r#"{"providers": {"deepseek": {"api_key_env": "AGIX_SETTINGS_TEST_DEEPSEEK_KEY"}}}"#,
     );
+    trust_project(&root.path().join("global"), &project);
     let name = std::ffi::OsStr::new("AGIX_SETTINGS_TEST_DEEPSEEK_KEY");
     assert!(!is_engine_credential(name));
     LoadedSettings::load(
@@ -858,6 +878,7 @@ mod project_trust {
                 "retuned": {"env": {"LEVEL": "2"}}
             }}"#,
         );
+        trust_project(&tiers.global, &tiers.project.join(".agix"));
 
         let dirs = tiers.load().mcp_server_dirs;
 
@@ -940,31 +961,6 @@ mod project_trust {
     }
 
     #[test]
-    fn by_default_a_project_is_trusted_and_nothing_changes() {
-        let tiers = Tiers::new();
-        tiers.project_writes(LOOSENING);
-
-        let settings = tiers.load();
-
-        assert_eq!(settings.trust(), ProjectTrust::Trusted);
-        assert_eq!(settings.trust_pattern(), None);
-        assert_eq!(
-            settings.values.permission_mode,
-            PermissionMode::BypassPermissions
-        );
-        assert_eq!(shared_rules(&settings).len(), 2);
-        assert!(settings.values.hooks_config.is_some());
-        assert!(settings.values.mcp_servers.contains_key("fs"));
-        assert!(settings.values.sandbox.read_anywhere);
-        assert!(
-            settings
-                .requires_trust()
-                .contains(&"hooks_config".to_string()),
-            "what trust governs is reported even while it is granted"
-        );
-    }
-
-    #[test]
     fn a_trusted_pattern_trusts_the_project_under_an_untrusted_default() {
         let tiers = Tiers::new();
         write_settings(
@@ -1016,7 +1012,7 @@ mod project_trust {
             settings.values.project_trust,
             crate::trust::ProjectTrustSettings {
                 default: crate::trust::TrustLevel::Untrusted,
-                trusted: Vec::new(),
+                ..Default::default()
             }
         );
     }

@@ -25,11 +25,11 @@ impl SessionPool {
             return Ok(false);
         }
         let target = project_root.unwrap_or(self.cwd());
-        let (trust, _) = settings::trust::ProjectTrustSettings::read_global(
+        let decided = settings::trust::ProjectTrustSettings::read_global(
             &self.bindings.paths().global_root(),
         )
         .decide(target);
-        if trust.is_untrusted() {
+        if decided.trust.is_untrusted() {
             return Err(PoolError::ProjectUntrusted(format!(
                 "{} is not trusted, so {what}; trust it first (project.trust) or {instead}",
                 target.display()

@@ -482,6 +482,10 @@ async fn a_provider_can_be_configured_for_one_project_only(mode: Mode) -> anyhow
     let p = Pipeline::start(mode).await?;
     let mut client = p.daemon.connect().await?;
     let c = p.root("c-right");
+    let trusted = client
+        .call("project.trust", json!({"project_root": c, "trusted": true}))
+        .await?;
+    assert!(trusted.error.is_none(), "project.trust: {trusted:?}");
 
     let written = client
         .config_set_provider(
