@@ -106,6 +106,14 @@ impl TeamRegistry {
         teams
     }
 
+    pub fn get(&self, name: &str) -> Option<TeamInfo> {
+        self.teams
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(name)
+            .cloned()
+    }
+
     /// Remove and return a team's state by name, if it exists.
     pub fn remove(&self, name: &str) -> Option<TeamInfo> {
         self.teams

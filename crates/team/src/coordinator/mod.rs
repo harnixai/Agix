@@ -190,13 +190,15 @@ impl Coordinator for DefaultCoordinator {
         run::orchestrate(self, req).await
     }
 
-    /// Removes the team from the registry and disk and stops its members; no
-    /// registry wired is a no-op success, an unknown name is an error.
+    /// Stops the team's members, then removes it from the registry and disk;
+    /// no registry wired is a no-op success, an unknown name is an error.
+    /// Stopping first: a member still running until its turn is stopped
+    /// records its lifecycle, which would bring back a team removed already.
     async fn cleanup_team(&self, name: &str) -> Result<(), String> {
         let Some(registry) = &self.registry else {
             return Ok(());
         };
-        let Some(info) = registry.remove(name) else {
+        let Some(info) = registry.get(name) else {
             return Err(format!(
                 "no such team: '{name}' — nothing was created under this name \
                  (or it was already deleted). Use TeamList to see active teams."
@@ -222,6 +224,7 @@ impl Coordinator for DefaultCoordinator {
                     .await;
             }
         }
+        let info = registry.remove(name).unwrap_or(info);
         if !info.team_dir.as_os_str().is_empty() {
             if let Err(e) = tokio::fs::remove_dir_all(&info.team_dir).await {
                 if e.kind() != std::io::ErrorKind::NotFound {

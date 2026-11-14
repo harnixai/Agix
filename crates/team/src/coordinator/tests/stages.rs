@@ -448,3 +448,62 @@ async fn orchestrate_writes_team_json_state_json_and_events_jsonl() {
         ]
     );
 }
+
+/// A member that records a lifecycle while `TeamDelete` is still stopping
+/// the team's other members does not bring the deleted team back.
+#[tokio::test]
+async fn a_lifecycle_recorded_while_the_team_is_stopped_does_not_bring_it_back() {
+    use crate::registry::{TeamInfo, TeamMemberInfo, TeamRegistry};
+
+    struct AnotherTurnsActive {
+        registry: Arc<TeamRegistry>,
+    }
+
+    #[async_trait]
+    impl Delegator for AnotherTurnsActive {
+        async fn stop_member(&self, seat: &TeamSeat) {
+            if seat.member == "first" {
+                self.registry.update_member_lifecycle(
+                    &seat.team,
+                    "second",
+                    TeammateLifecycle::Active,
+                    None,
+                );
+            }
+        }
+
+        fn live_members(&self) -> Vec<base::interface::delegate::LiveMember> {
+            Vec::new()
+        }
+
+        async fn delegate(&self, _: DelegateRequest) -> Result<Delegated, DelegateError> {
+            finished("unused")
+        }
+    }
+
+    let registry = Arc::new(TeamRegistry::new());
+    let idle = |label: &str| TeamMemberInfo {
+        label: label.into(),
+        lifecycle: TeammateLifecycle::Idle,
+        idle_since_secs: Some(0),
+    };
+    registry.upsert(TeamInfo {
+        team_id: "crew".into(),
+        name: "crew".into(),
+        created_at_secs: 0,
+        team_dir: std::path::PathBuf::new(),
+        members: vec![idle("first"), idle("second")],
+        permission_mode: None,
+    });
+    let coordinator = DefaultCoordinator::with_delegator(Arc::new(AnotherTurnsActive {
+        registry: registry.clone(),
+    }))
+    .with_registry(registry.clone());
+
+    coordinator.cleanup_team("crew").await.unwrap();
+    assert!(
+        registry.list().is_empty(),
+        "the deleted team came back: {:?}",
+        registry.list()
+    );
+}
