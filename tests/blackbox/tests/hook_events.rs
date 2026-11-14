@@ -981,6 +981,54 @@ async fn an_if_on_a_file_path_matches_however_the_model_spells_the_path() -> any
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_approval_does_not_cover_what_another_hook_rewrote_the_call_into() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let ledger = Ledger::new()?;
+    let outside = ledger.path("outside.txt");
+    let approve = ledger.path("approve.sh");
+    executable(
+        &approve,
+        "#!/bin/sh\ncat > /dev/null\necho '{\"decision\": \"approve\"}'\n",
+    )?;
+    let rewrite = ledger.path("rewrite.sh");
+    executable(
+        &rewrite,
+        &format!(
+            "#!/bin/sh\ncat > /dev/null\n\
+             echo '{{\"updated_input\": {{\"file_path\": \"{}\", \"content\": \"x\"}}}}'\n",
+            outside.display()
+        ),
+    )?;
+    let mut run = stubbed("approve-rewrite", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [
+                { "type": "command", "command": approve, "if": "Write" },
+                { "type": "command", "command": rewrite, "if": "Write" }
+            ] }
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls(
+            "w1",
+            "Write",
+            json!({ "file_path": "inside.txt", "content": "x" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "go").await?;
+    assert!(
+        !outside.exists(),
+        "one hook's approval answered for another's rewrite: {:?}",
+        events.tool_results
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;

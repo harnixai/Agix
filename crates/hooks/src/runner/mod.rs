@@ -123,11 +123,16 @@ impl HookRunResult {
             _ => None,
         })
     }
-    /// 任意 hook 决议 approve（取第一条）
+    /// 第一条 approve；若有 hook 改写了入参，只认给出生效改写的那条 hook 自己的 approve——
+    /// 别的 hook 批准的是它看到的原入参，不能替改写后的入参答应询问
     pub fn approved(&self) -> Option<&HookResponse> {
-        self.outcomes.iter().find_map(|o| match o {
+        let rewrite_at = self.outcomes.iter().position(
+            |o| matches!(o, HookOutcome::Ran { response, .. } if response.updated_input.is_some()),
+        );
+        self.outcomes.iter().enumerate().find_map(|(i, o)| match o {
             HookOutcome::Ran { response, .. }
-                if response.decision == Some(HookDecision::Approve) =>
+                if response.decision == Some(HookDecision::Approve)
+                    && rewrite_at.is_none_or(|at| at == i) =>
             {
                 Some(response)
             }
@@ -149,12 +154,21 @@ impl HookRunResult {
             _ => None,
         })
     }
-    /// 第一个改写 input 的 hook 给出的新 input（按出现顺序）
+    /// 第一个改写 input 的 hook 给出的新 input（按出现顺序）；多个 hook 都改写时后面的不看，记 warn
     pub fn updated_input(&self) -> Option<&serde_json::Value> {
-        self.outcomes.iter().find_map(|o| match o {
+        let mut rewrites = self.outcomes.iter().filter_map(|o| match o {
             HookOutcome::Ran { response, .. } => response.updated_input.as_ref(),
             _ => None,
-        })
+        });
+        let first = rewrites.next()?;
+        let ignored = rewrites.count();
+        if ignored > 0 {
+            tracing::warn!(
+                ignored,
+                "several hooks rewrote the same input; only the first in configuration order applies"
+            );
+        }
+        Some(first)
     }
 }
 
@@ -408,7 +422,8 @@ impl HookRunner {
     /// - any hook with `continue: false` → engine aborts the turn
     /// - first hook (in registration order) with `updated_input` wins for
     ///   input rewriting; conflicting modifications from later hooks are
-    ///   ignored deterministically
+    ///   ignored deterministically, and an `approve` only counts from the
+    ///   hook whose rewrite applies, or from any hook when none rewrote
     ///
     /// Outcomes are collected in **registration order** (not completion order)
     /// so `updated_input()` is deterministic.
@@ -957,6 +972,42 @@ mod tests {
             }
             other => panic!("unexpected outcomes: {other:?}"),
         }
+    }
+
+    fn ran(decision: Option<HookDecision>, rewrite: Option<serde_json::Value>) -> HookOutcome {
+        HookOutcome::Ran {
+            response: HookResponse {
+                decision,
+                updated_input: rewrite,
+                ..Default::default()
+            },
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: Some(0),
+            failure: None,
+        }
+    }
+
+    #[test]
+    fn an_approval_only_counts_from_the_hook_whose_rewrite_applies() {
+        let approve = || ran(Some(HookDecision::Approve), None);
+        let rewrite = |n: i32| ran(None, Some(serde_json::json!({ "n": n })));
+        let result = |outcomes| HookRunResult { outcomes };
+        assert!(result(vec![approve(), rewrite(1)]).approved().is_none());
+        assert!(result(vec![rewrite(1), approve()]).approved().is_none());
+        assert!(result(vec![approve()]).approved().is_some());
+        let both = ran(
+            Some(HookDecision::Approve),
+            Some(serde_json::json!({ "n": 2 })),
+        );
+        assert!(result(vec![approve(), both]).approved().is_some());
+        let both = ran(
+            Some(HookDecision::Approve),
+            Some(serde_json::json!({ "n": 2 })),
+        );
+        let r = result(vec![both, rewrite(3)]);
+        assert!(r.approved().is_some());
+        assert_eq!(r.updated_input(), Some(&serde_json::json!({ "n": 2 })));
     }
 
     #[tokio::test]
