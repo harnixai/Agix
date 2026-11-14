@@ -411,7 +411,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("ModelContentBlock", PROTOCOL),
     ("ModelEvent", PROTOCOL),
     ("NetworkMode", SANDBOX),
-    ("NetworkModeConfig", SETTING),
     ("Order", TRUST),
     (
         "Origin",

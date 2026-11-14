@@ -14,6 +14,11 @@
 //! `base` and that one constructor, and every `Option` field is given a value
 //! somewhere — so a field nothing reads, or one read but never given, cannot
 //! sit on the context looking like something a host can inject.
+//! PIPE-4: the sandbox has three types — the settings file's
+//! `SandboxConfig`, the engine's `SandboxSettings`, and the `SandboxPolicy`
+//! one command runs under, derived from it — and no fourth copy grows back.
+//! That one maps onto the other field for field is the compiler's to check:
+//! `settings::sandbox_settings` names every field of `SandboxConfig`.
 
 use std::collections::BTreeSet;
 
@@ -311,5 +316,54 @@ fn every_field_of_a_calls_context_is_read_and_given() {
         unread.is_empty() && never_given.is_empty(),
         "[tool_pipeline::PIPE-3] `ToolContext` fields no production code reads: {unread:?}; \
          optional ones nothing ever gives a value: {never_given:?}. Wire them up or delete them."
+    );
+}
+
+const SANDBOX_FIELDS: &[&str] = &["allow_read", "deny_read", "allowed_domains", "network_mode"];
+
+const SANDBOX_TYPES: &[(&str, &str)] = &[
+    (
+        "crates/settings/src/lib.rs::SandboxConfig",
+        "the `sandbox` section of a settings file",
+    ),
+    (
+        "crates/core/src/interface/exec/sandbox.rs::SandboxSettings",
+        "the engine's sandbox settings for a session",
+    ),
+    (
+        "crates/core/src/interface/exec/sandbox.rs::SandboxPolicy",
+        "what one command is held to, derived from the settings",
+    ),
+];
+
+#[test]
+fn the_sandbox_has_one_type_per_layer() {
+    let found = par_flat_map(ws().production(), |f| {
+        scan::structs(f, View::Prod)
+            .into_iter()
+            .filter(|st| {
+                st.fields
+                    .iter()
+                    .filter(|field| {
+                        field
+                            .name
+                            .as_deref()
+                            .is_some_and(|n| SANDBOX_FIELDS.contains(&n))
+                    })
+                    .count()
+                    >= 3
+            })
+            .map(|st| Finding {
+                key: format!("{}::{}", f.rel, st.name),
+                hit: st.hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "tool_pipeline::SANDBOX_TYPES",
+        found,
+        SANDBOX_TYPES,
+        "read `EngineConfig::sandbox`, or derive a `SandboxPolicy` from it; a copy of its \
+         fields is one more place a setting can be dropped",
     );
 }

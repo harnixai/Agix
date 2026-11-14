@@ -1,4 +1,4 @@
-use super::sandbox::{sandbox_policy, to_sandbox_policy};
+use super::sandbox::sandbox_policy;
 use platform::sandbox;
 
 use base::interface::exec::{Confined, Enforcement, ProcessSpec, Sandbox, SandboxMode};
@@ -28,16 +28,13 @@ impl Sandbox for Reports {
 /// does not demand it hold every command fully.
 fn enforcing(dir: &std::path::Path, backend: impl Sandbox + 'static, require: bool) -> ToolContext {
     let mut ctx = ctx_in(dir);
-    ctx.sandbox.require_enforcement = require;
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.sandbox_mut().require_enforcement = require;
+    ctx.sandbox_mut().disabled = false;
     ctx.exec.sandbox = std::sync::Arc::new(backend);
-    ctx.confinement = super::sandbox::confinement_report(
-        &ctx.sandbox,
-        &ctx.exec,
-        ctx.config.dangerously_disable_sandbox,
-        &ctx.cwd,
-        &ctx.session_id,
-    );
+    ctx.confinement = ctx
+        .config
+        .sandbox
+        .confinement(&ctx.exec, &ctx.cwd, &ctx.session_id);
     ctx
 }
 
@@ -158,7 +155,7 @@ async fn a_sandbox_that_was_switched_off_is_not_a_failure_to_enforce() {
         Reports(Enforcement::None, SandboxMode::Unavailable),
         true,
     );
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = true;
+    ctx.sandbox_mut().disabled = true;
     let outcome = decided(&ctx, "cargo build", PermissionMode::Default).await;
     assert_eq!(stage(&outcome), Some(Stage::ModeDefault), "{outcome:?}");
 }
@@ -229,7 +226,7 @@ fn a_command_is_confined_by_the_profile_its_approval_names() {
     let dir = tempfile::tempdir().unwrap();
     let records = std::sync::Arc::new(Records::default());
     let mut ctx = ctx_in(dir.path());
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.sandbox_mut().disabled = false;
     ctx.exec.sandbox = records.clone();
     let mut confined_as = |approval: Option<Approval>| {
         ctx.approval = approval;
@@ -285,7 +282,7 @@ fn a_sandboxed_command_may_write_the_cache_directories() {
 
 fn unattended_in_a_holding_sandbox(
     cwd: &std::path::Path,
-    network: base::context::config::NetworkModeConfig,
+    network: base::interface::exec::NetworkMode,
 ) -> ToolContext {
     let mut ctx = ctx_in(cwd);
     let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
@@ -293,51 +290,47 @@ fn unattended_in_a_holding_sandbox(
         ..base::context::SessionEnv::new(cwd.to_path_buf())
     });
     ctx.session = std::sync::Arc::new(session);
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
-    ctx.sandbox.network_mode = network;
+    ctx.sandbox_mut().disabled = false;
+    ctx.sandbox_mut().network_mode = network;
     ctx.exec.sandbox =
         std::sync::Arc::new(Reports(Enforcement::Full, SandboxMode::MacOSSandboxExec));
     ctx
 }
 
 fn report(ctx: &ToolContext) -> base::interface::exec::ConfinementReport {
-    super::sandbox::confinement_report(
-        &ctx.sandbox,
-        &ctx.exec,
-        ctx.config.dangerously_disable_sandbox,
-        &ctx.cwd,
-        &ctx.session_id,
-    )
+    ctx.config
+        .sandbox
+        .confinement(&ctx.exec, &ctx.cwd, &ctx.session_id)
 }
 
 #[test]
 fn a_holding_sandbox_holds_an_unattended_command_whatever_the_network_by_default() {
-    use base::context::config::NetworkModeConfig;
+    use base::interface::exec::NetworkMode;
     let dir = tempfile::tempdir().unwrap();
     for network in [
-        NetworkModeConfig::Unrestricted,
-        NetworkModeConfig::DenyAll,
-        NetworkModeConfig::Allowlist,
+        NetworkMode::Unrestricted,
+        NetworkMode::DenyAll,
+        NetworkMode::Allowlist,
     ] {
         let ctx = unattended_in_a_holding_sandbox(dir.path(), network);
         assert!(report(&ctx).holds_unattended(), "{network:?}");
     }
-    let mut off = unattended_in_a_holding_sandbox(dir.path(), NetworkModeConfig::DenyAll);
-    std::sync::Arc::make_mut(&mut off.config).dangerously_disable_sandbox = true;
+    let mut off = unattended_in_a_holding_sandbox(dir.path(), NetworkMode::DenyAll);
+    off.sandbox_mut().disabled = true;
     assert!(!report(&off).holds_unattended());
 }
 
 #[test]
 fn an_open_network_is_not_held_when_the_setting_says_so() {
-    use base::context::config::NetworkModeConfig;
+    use base::interface::exec::NetworkMode;
     let dir = tempfile::tempdir().unwrap();
     let requiring = |network| {
         let mut ctx = unattended_in_a_holding_sandbox(dir.path(), network);
-        ctx.sandbox.unattended_requires_network_policy = true;
+        ctx.sandbox_mut().unattended_requires_network_policy = true;
         ctx
     };
-    assert!(!report(&requiring(NetworkModeConfig::Unrestricted)).holds_unattended());
-    for closed in [NetworkModeConfig::DenyAll, NetworkModeConfig::Allowlist] {
+    assert!(!report(&requiring(NetworkMode::Unrestricted)).holds_unattended());
+    for closed in [NetworkMode::DenyAll, NetworkMode::Allowlist] {
         assert!(report(&requiring(closed)).holds_unattended(), "{closed:?}");
     }
 }
@@ -370,7 +363,7 @@ async fn any_other_command_runs_without_the_tool_vouching_for_it() {
             "sh build.sh",
             unattended_in_a_holding_sandbox(
                 dir.path(),
-                base::context::config::NetworkModeConfig::DenyAll,
+                base::interface::exec::NetworkMode::DenyAll,
             ),
         ),
     ] {
@@ -415,7 +408,7 @@ async fn a_bypass_session_still_runs_bash_through_the_sandbox() {
     let mut ctx = ctx_in(dir.path());
     ctx.session
         .set_permission_mode(base::permission::PermissionMode::BypassPermissions);
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.sandbox_mut().disabled = false;
     let counts = std::sync::Arc::new(Counts::default());
     ctx.exec.sandbox = counts.clone();
     BashTool
@@ -432,56 +425,62 @@ fn tmpdir_of(spec: &ProcessSpec) -> Option<PathBuf> {
         .map(|(_, v)| PathBuf::from(v))
 }
 
+/// A confined command's `TMPDIR` is the session's, the one the runtime made
+/// and handed every call with its engine git; the policy lets it write there.
 #[test]
 fn a_confined_command_gets_the_sessions_own_writable_tmpdir() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.session_id = uuid::Uuid::new_v4().to_string();
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.session_id = "session-a".into();
+    ctx.sandbox_mut().disabled = false;
     ctx.exec.sandbox =
         std::sync::Arc::new(Reports(Enforcement::Full, SandboxMode::MacOSSandboxExec));
-    let spec = confine_shell("Bash", "true", &ctx);
-    let tmp = tmpdir_of(&spec).expect("TMPDIR is set");
-    assert!(tmp.is_dir());
-    assert_ne!(tmp, std::env::temp_dir());
+    assert_eq!(
+        tmpdir_of(&confine_shell("Bash", "true", &ctx)),
+        None,
+        "no TMPDIR before the session has one"
+    );
+    let tmp = ctx.config.sandbox.session_tmp_dir(&ctx.session_id);
+    ctx.engine_git = std::sync::Arc::new(ctx.config.sandbox.engine_git(
+        &ctx.exec,
+        ctx.config.project_trust,
+        Some(tmp.clone()),
+    ));
+    assert_eq!(
+        tmpdir_of(&confine_shell("Bash", "true", &ctx)),
+        Some(tmp.clone())
+    );
     assert!(sandbox_policy(&ctx).additional_writable.contains(&tmp));
-    std::fs::remove_dir_all(&tmp).unwrap();
 }
 
 #[test]
 fn each_session_gets_its_own_tmpdir_under_the_state_root() {
     let dir = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let tmpdir_for = |session: &str| {
-        let mut ctx = ctx_in(dir.path());
-        ctx.session_id = session.to_string();
-        ctx.sandbox.paths =
-            std::sync::Arc::new(base::paths::SensitivePaths::new(Some(state.path()), None));
-        std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
-        ctx.exec.sandbox =
-            std::sync::Arc::new(Reports(Enforcement::Full, SandboxMode::MacOSSandboxExec));
-        let tmp = tmpdir_of(&confine_shell("Bash", "true", &ctx)).unwrap();
-        let writable = sandbox_policy(&ctx).additional_writable;
-        (tmp, writable)
-    };
-    let (a, writable_a) = tmpdir_for("session-a");
-    let (b, _) = tmpdir_for("session-b");
+    let mut ctx = ctx_in(dir.path());
+    ctx.sandbox_mut().paths =
+        std::sync::Arc::new(base::paths::SensitivePaths::new(Some(state.path()), None));
     let root = state.path().join(base::paths::STATE_ROOT_SESSION_TMP);
+    let a = ctx.config.sandbox.session_tmp_dir("session-a");
     assert_eq!(a, root.join("session-a"));
-    assert_eq!(b, root.join("session-b"));
-    assert!(a.is_dir() && b.is_dir());
-    assert!(writable_a.contains(&a));
-    assert!(!writable_a.contains(&b) && !writable_a.contains(&root));
+    assert_eq!(
+        ctx.config.sandbox.session_tmp_dir("session-b"),
+        root.join("session-b")
+    );
+    ctx.session_id = "session-a".into();
+    let writable = sandbox_policy(&ctx).additional_writable;
+    assert!(writable.contains(&a));
+    assert!(!writable.contains(&root.join("session-b")) && !writable.contains(&root));
 }
 
 #[test]
 fn a_command_nothing_confines_keeps_the_callers_tmpdir() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.sandbox_mut().disabled = false;
     ctx.exec.sandbox = std::sync::Arc::new(Reports(Enforcement::None, SandboxMode::Unavailable));
     assert_eq!(tmpdir_of(&confine_shell("Bash", "true", &ctx)), None);
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = true;
+    ctx.sandbox_mut().disabled = true;
     assert_eq!(tmpdir_of(&confine_shell("Bash", "true", &ctx)), None);
 }
 
@@ -519,12 +518,19 @@ async fn the_engines_git_is_sandboxed_exactly_when_the_sessions_commands_are() {
     );
     ctx.exec.process = std::sync::Arc::new(process.clone());
 
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = true;
-    assert!(!engine_exec(&ctx).is_sandboxed());
+    let tmp = dir.path().join("session-tmp");
+    std::fs::create_dir(&tmp).unwrap();
+    let engine_git = |ctx: &ToolContext| {
+        ctx.config
+            .sandbox
+            .engine_git(&ctx.exec, ctx.config.project_trust, Some(tmp.clone()))
+    };
+    ctx.sandbox_mut().disabled = true;
+    assert!(!engine_git(&ctx).is_sandboxed());
 
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+    ctx.sandbox_mut().disabled = false;
     let bookkeeping = dir.path().join(".git");
-    engine_exec(&ctx)
+    engine_git(&ctx)
         .git(
             dir.path(),
             base::engine_exec::GitAccess::Writes(std::slice::from_ref(&bookkeeping)),
@@ -536,39 +542,10 @@ async fn the_engines_git_is_sandboxed_exactly_when_the_sessions_commands_are() {
     assert_eq!(process.seen(), ["wrapper git"]);
     let policy = records.0.lock().unwrap().clone().unwrap();
     assert!(policy.only_additional_writable);
-    let tmp = policy.additional_writable[0].clone();
-    assert!(tmp.is_dir(), "the session's TMPDIR is prepared");
     assert_eq!(policy.additional_writable, vec![tmp.clone(), bookkeeping]);
     assert_eq!(
         policy.network_mode,
         base::interface::exec::NetworkMode::DenyAll
-    );
-    std::fs::remove_dir_all(&tmp).unwrap();
-}
-
-#[test]
-fn to_sandbox_policy_maps_each_network_mode_variant() {
-    use base::context::config::NetworkModeConfig;
-
-    let mut settings = base::tool::SandboxSettings {
-        network_mode: NetworkModeConfig::Unrestricted,
-        ..Default::default()
-    };
-    assert_eq!(
-        to_sandbox_policy(&settings).network_mode,
-        sandbox::NetworkMode::Unrestricted
-    );
-
-    settings.network_mode = NetworkModeConfig::DenyAll;
-    assert_eq!(
-        to_sandbox_policy(&settings).network_mode,
-        sandbox::NetworkMode::DenyAll
-    );
-
-    settings.network_mode = NetworkModeConfig::Allowlist;
-    assert_eq!(
-        to_sandbox_policy(&settings).network_mode,
-        sandbox::NetworkMode::Allowlist
     );
 }
 
@@ -617,8 +594,8 @@ fn the_strict_policy_reads_the_sessions_roots_and_writes_only_its_tmpdir() {
         ..base::context::SessionEnv::new(dir.path().to_path_buf())
     });
     ctx.session = std::sync::Arc::new(session);
-    ctx.sandbox.network_mode = base::context::config::NetworkModeConfig::Unrestricted;
-    ctx.sandbox.allowed_domains = vec!["example.com".into()];
+    ctx.sandbox_mut().network_mode = base::interface::exec::NetworkMode::Unrestricted;
+    ctx.sandbox_mut().allowed_domains = vec!["example.com".into()];
 
     let policy = super::sandbox::strict_sandbox_policy(&ctx);
     let tmp = super::sandbox::sandbox_policy(&ctx)
@@ -648,55 +625,6 @@ fn the_strict_policy_reads_the_sessions_roots_and_writes_only_its_tmpdir() {
         );
     }
     assert!(!policy.deny_read.is_empty(), "the credential defaults stay");
-}
-
-#[test]
-fn to_sandbox_policy_carries_deny_read_and_allowed_domains_through() {
-    let settings = base::tool::SandboxSettings {
-        allow_read: Vec::new(),
-        deny_read: vec![PathBuf::from("/tmp/secret")],
-        allowed_domains: vec!["api.example.com".to_string()],
-        network_mode: base::context::config::NetworkModeConfig::Allowlist,
-        paths: Default::default(),
-        require_enforcement: false,
-        unattended_requires_network_policy: false,
-        deny_write: Vec::new(),
-        allow_write: Vec::new(),
-    };
-    let policy = to_sandbox_policy(&settings);
-    assert_eq!(policy.deny_read, vec![PathBuf::from("/tmp/secret")]);
-    assert_eq!(policy.allowed_domains, vec!["api.example.com".to_string()]);
-    assert!(
-        policy.allow_read.is_empty(),
-        "an empty `allow_read` must stay empty — it is not defaulted like `deny_read`"
-    );
-}
-
-/// 空 `deny_read` 必须回落到内置默认名单，而不是"什么都不拦"。
-#[test]
-fn to_sandbox_policy_empty_deny_read_falls_back_to_defaults() {
-    let Some(_home) = base::paths::home_dir() else {
-        return; // default_deny_read() 依赖 HOME；没有就没什么可断言的
-    };
-    let settings = base::tool::SandboxSettings::default();
-    assert!(
-        settings.deny_read.is_empty(),
-        "sanity: the default SandboxSettings must have an empty deny_read"
-    );
-    let policy = to_sandbox_policy(&settings);
-    assert!(
-        !policy.deny_read.is_empty(),
-        "empty deny_read must fall back to the built-in credential defaults"
-    );
-    assert_eq!(policy.deny_read, sandbox::default_deny_read());
-    let joined = policy
-        .deny_read
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join("|");
-    assert!(joined.contains(".ssh"));
-    assert!(joined.contains(".aws"));
 }
 
 fn read_only(cmd: &str) -> bool {

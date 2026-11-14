@@ -81,13 +81,13 @@ pub async fn write_policy(ctx: &base::tool::ToolContext) -> permissions::path_sa
     for dir in &env.additional_writable_dirs {
         additional.push(fs.canonicalize_best_effort(dir).await);
     }
-    let mut allowed = Vec::with_capacity(ctx.sandbox.allow_write.len());
-    for path in &ctx.sandbox.allow_write {
+    let mut allowed = Vec::with_capacity(ctx.config.sandbox.allow_write.len());
+    for path in &ctx.config.sandbox.allow_write {
         allowed.push(fs.canonicalize_best_effort(path).await);
     }
     permissions::path_safety::WritePolicy::new(root)
         .with_additional_roots(additional)
-        .with_extra_blacklist(ctx.sandbox.deny_write.clone())
+        .with_extra_blacklist(ctx.config.sandbox.deny_write.clone())
         .with_allowed(allowed)
 }
 
@@ -145,7 +145,7 @@ pub fn read_facts(
 /// asking only to a host the settings vouch for.
 pub fn allowed_domains_name(url: &str, ctx: &base::tool::ToolContext) -> bool {
     base::url_rule::NormalizedUrl::parse(url).is_some_and(|url| {
-        base::interface::exec::domains_name_host(&ctx.sandbox.allowed_domains, url.host())
+        base::interface::exec::domains_name_host(&ctx.config.sandbox.allowed_domains, url.host())
     })
 }
 
@@ -177,7 +177,7 @@ pub fn read_allowed(path: &Path, ctx: &base::tool::ToolContext) -> bool {
 /// one in every mode; the file tools also leave them out of what a search
 /// of a directory above one walks.
 pub fn credentials(ctx: &base::tool::ToolContext) -> SessionCredentials {
-    SessionCredentials(ctx.sandbox.paths.clone())
+    SessionCredentials(ctx.config.sandbox.paths.clone())
 }
 
 /// [`base::paths::SensitivePaths::is_credential`], judged on both the
@@ -284,7 +284,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (proj, state) = (dir.path().join("proj"), dir.path().join("state"));
         let mut ctx = platform::tool_context_for_test(proj.clone());
-        ctx.sandbox.paths =
+        ctx.sandbox_mut().paths =
             std::sync::Arc::new(base::paths::SensitivePaths::new(Some(&state), None));
         let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
             read_anywhere: true,

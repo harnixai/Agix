@@ -1,6 +1,5 @@
 //! Tool trait. All tools implement this single trait.
 
-use crate::context::config::NetworkModeConfig;
 use crate::error::ToolError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -9,26 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-/// Cross-crate, data-only view of the sandbox policy a tool should apply.
-/// Mirrors `context::config::SandboxPolicyConfig` field-for-field; `tools`
-/// converts it into its own `bash::sandbox::SandboxPolicy` at the call site.
-#[derive(Debug, Clone, Default)]
-pub struct SandboxSettings {
-    pub allow_read: Vec<PathBuf>,
-    pub deny_read: Vec<PathBuf>,
-    pub allowed_domains: Vec<String>,
-    pub network_mode: NetworkModeConfig,
-    /// See `settings::SandboxConfig::deny_write`.
-    pub deny_write: Vec<String>,
-    /// See `settings::SandboxConfig::allow_write`.
-    pub allow_write: Vec<PathBuf>,
-    /// See `base::context::config::SandboxPolicyConfig::paths`.
-    pub paths: Arc<crate::paths::SensitivePaths>,
-    /// See `settings::SandboxConfig::require_enforcement`.
-    pub require_enforcement: bool,
-    /// See `settings::SandboxConfig::unattended_requires_network_policy`.
-    pub unattended_requires_network_policy: bool,
-}
 pub use crate::context::config::PathStyle;
 use crate::interface::permission::{ModeStance, PermissionFacts};
 pub use crate::permission::PermissionMode;
@@ -279,8 +258,9 @@ pub struct ToolContext {
     pub cwd: PathBuf,
     pub session_id: String,
     pub turn_no: u32,
-    pub sandbox: SandboxSettings,
     pub cancel: CancellationToken,
+    /// The engine's configuration; the session's sandbox settings are its
+    /// `sandbox`.
     pub config: Arc<crate::context::EngineConfig>,
     /// The session the call is made in: its live permission mode, the
     /// directories it may write besides its own, its running tasks.
@@ -308,6 +288,9 @@ pub struct ToolContext {
     pub from_code: bool,
     /// What the session's sandbox holds a command to.
     pub confinement: crate::interface::exec::ConfinementReport,
+    /// How the engine runs its own git and helpers for the session — see
+    /// [`crate::interface::exec::SandboxSettings::engine_git`].
+    pub engine_git: Arc<crate::engine_exec::EngineExec>,
     /// Whether someone can be asked about what this call does.
     pub attendance: crate::interface::permission::Attendance,
     /// What the policy let this call through on; `None` when nothing judged it.
@@ -357,11 +340,13 @@ impl ToolContext {
         config: Arc<crate::context::EngineConfig>,
         session: Arc<crate::context::SessionState>,
     ) -> Self {
+        // Without the session's TMPDIR: the runtime gives every call the
+        // engine git it made, with the TMPDIR, once for the session.
+        let engine_git = Arc::new(config.sandbox.engine_git(&exec, config.project_trust, None));
         Self {
             cwd,
             session_id: String::new(),
             turn_no: 0,
-            sandbox: SandboxSettings::default(),
             cancel,
             config,
             session,
@@ -372,11 +357,18 @@ impl ToolContext {
             dispatch: None,
             from_code: false,
             confinement: Default::default(),
+            engine_git,
             attendance: crate::interface::permission::Attendance::Attended,
             approval: None,
             turn: Arc::default(),
             inline_commands: None,
         }
+    }
+
+    /// This context's own sandbox settings, to change for it alone: the
+    /// session's stay as they are.
+    pub fn sandbox_mut(&mut self) -> &mut crate::interface::exec::SandboxSettings {
+        Arc::make_mut(&mut Arc::make_mut(&mut self.config).sandbox)
     }
 
     /// Whether the call is a delegate's — a sub-agent's or a team member's —
@@ -387,7 +379,10 @@ impl ToolContext {
 
     pub fn for_test_with(cwd: PathBuf, exec: crate::interface::exec::ExecProviders) -> Self {
         let mut config = crate::context::EngineConfig::defaults_for("test");
-        config.dangerously_disable_sandbox = true;
+        config.sandbox = Arc::new(crate::interface::exec::SandboxSettings {
+            disabled: true,
+            ..Default::default()
+        });
         config.file_limits.max_file_read_bytes = 0;
         let session = Arc::new(crate::context::SessionState::for_tests(cwd.clone()));
         let mut ctx = Self::new(

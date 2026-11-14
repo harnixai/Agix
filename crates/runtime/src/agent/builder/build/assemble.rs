@@ -30,6 +30,7 @@ impl Builder {
         let agent = Agent {
             scene: w.resolved.scene,
             exec: w.exec,
+            engine_git: w.engine_git,
             config: w.config,
             session: w.session,
             session_state: w.session_state,

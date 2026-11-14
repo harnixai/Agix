@@ -402,7 +402,8 @@ async fn credentials_are_refused_in_every_mode() {
             .matches(&content);
         let tool = if shell { tool.shell() } else { tool };
         let mut ctx = ctx_with_mode(mode);
-        ctx.sandbox.paths = std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
+        ctx.sandbox_mut().paths =
+            std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
         let d = Policy::empty()
             .check_with(&tool, &json!({}), &ctx)
             .await
@@ -425,7 +426,7 @@ async fn the_rest_of_the_state_root_is_not_a_credential() {
         .contained()
         .matches(&state.path().join("skills/x/SKILL.md").display().to_string());
     let mut ctx = ctx_with_mode(PermissionMode::Default);
-    ctx.sandbox.paths = std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
+    ctx.sandbox_mut().paths = std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
     let d = Policy::empty()
         .check_with(&tool, &json!({}), &ctx)
         .await

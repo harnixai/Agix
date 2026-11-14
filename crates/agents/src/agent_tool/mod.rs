@@ -294,7 +294,7 @@ impl base::tool::Tool for AgentTool {
         req.prompt = inp.prompt;
         let worktree = match &inp.worktree {
             Some(slug) => {
-                let git = tools::bash::engine_exec(&ctx);
+                let git = ctx.engine_git.clone();
                 match create_worktree(&ctx.exec, &git, &ctx.session.env().cwd, slug).await {
                     Ok(h) => Some(h),
                     Err(e) => {

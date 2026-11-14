@@ -26,6 +26,7 @@ pub(super) struct SessionWiring {
     pub(super) injected: bool,
     pub(super) env: base::context::SessionEnv,
     pub(super) exec: base::interface::exec::ExecProviders,
+    pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
     pub(super) ambient: hooks::payload::Ambient,
 }
 
@@ -81,6 +82,7 @@ pub(super) struct Wired {
     pub(super) session: SessionManager,
     pub(super) session_state: Arc<base::context::SessionState>,
     pub(super) exec: base::interface::exec::ExecProviders,
+    pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
     pub(super) attachment: base::context::EngineAttachment,
     pub(super) hooks: HookWiring,
     pub(super) events: EventWiring,

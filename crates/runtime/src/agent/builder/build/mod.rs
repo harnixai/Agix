@@ -102,6 +102,7 @@ impl Builder {
             session,
             session_state: state.state,
             exec: state.exec,
+            engine_git: state.engine_git,
             attachment,
             hooks,
             events,

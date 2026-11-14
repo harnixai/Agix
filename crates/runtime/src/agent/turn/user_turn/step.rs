@@ -5,7 +5,6 @@ use super::TurnLoopState;
 use crate::agent::Agent;
 use crate::turn::request::ModelRequest;
 use crate::turn::round::count_structured_output_calls;
-use crate::turn::tool_env::engine_exec_from;
 use crate::turn::tool_exec::execute_tool_with_telemetry;
 use crate::turn::tool_exec::ToolExecCtx;
 use crate::turn::tool_result::PendingToolImage;
@@ -344,14 +343,7 @@ impl Agent {
             && Self::included_git_mutating_bash_call(self.this_step())
         {
             if let Some(frozen) = self.prompt.frozen_mut() {
-                frozen
-                    .refresh_git(&engine_exec_from(
-                        &self.config,
-                        &self.exec,
-                        &self.session.session_id,
-                        self.settings.trust(),
-                    ))
-                    .await;
+                frozen.refresh_git(&self.engine_git).await;
             }
         }
         if has_tool_uses {

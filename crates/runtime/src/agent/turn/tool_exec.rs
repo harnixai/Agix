@@ -35,6 +35,8 @@ pub(crate) struct ToolExecCtx {
     pub config: Arc<base::context::EngineConfig>,
     /// The session's providers — see `Agent.exec`.
     pub exec: base::interface::exec::ExecProviders,
+    /// The engine's git for the session — see `Agent.engine_git`.
+    pub engine_git: Arc<base::engine_exec::EngineExec>,
     /// Consulted once per tool call in `execute_tool_inner`, after the
     /// `PreToolUse` hook step; an "always allow" answer is granted to it.
     pub permission: base::interface::permission::PermissionSet,

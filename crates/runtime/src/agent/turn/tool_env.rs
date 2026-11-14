@@ -1,4 +1,4 @@
-//! 工具运行环境：沙箱、出口、引擎 git 的装配，工具调用上下文的唯一构造点，子调用与内联命令的分发。
+//! 工具调用上下文的唯一构造点，子调用与内联命令的分发，会话快照的采集。
 
 use super::tool_exec::{execute_tool_with_telemetry, Caller, ToolExecCtx};
 use super::tool_result::PendingToolImage;
@@ -6,51 +6,6 @@ use crate::agent::Agent;
 use base::tool::ToolContext;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Lower `EngineConfig`'s sandbox policy into the cross-crate view a tool
-/// receives.
-///
-/// `deny_read`'s `None` means "use the built-in credential deny defaults",
-/// and `SandboxSettings` has no way to say that — it carries a plain `Vec`,
-/// with the same empty-means-defaults convention that
-/// `tools::bash::to_sandbox_policy` reads on the other side. So `None` and
-/// `Some(vec![])` both flatten to an empty vec here, and the distinction is
-/// preserved where it is actually decided (`EngineConfig::from_loaded`).
-pub(super) fn sandbox_settings_from(
-    config: &base::context::EngineConfig,
-) -> base::tool::SandboxSettings {
-    base::tool::SandboxSettings {
-        allow_read: config.sandbox_policy.allow_read.clone(),
-        deny_read: config.sandbox_policy.deny_read.clone().unwrap_or_default(),
-        allowed_domains: config.sandbox_policy.allowed_domains.clone(),
-        network_mode: config.sandbox_policy.network_mode,
-        deny_write: config.sandbox_policy.deny_write.clone(),
-        allow_write: config.sandbox_policy.allow_write.clone(),
-        paths: config.sandbox_policy.paths.clone(),
-        require_enforcement: config.sandbox_policy.require_enforcement,
-        unattended_requires_network_policy: config
-            .sandbox_policy
-            .unattended_requires_network_policy,
-    }
-}
-
-/// How the engine starts its own git and helpers for this session: through
-/// its providers, in the sandbox its tool calls run in whenever it confines
-/// them.
-pub(crate) fn engine_exec_from(
-    config: &base::context::EngineConfig,
-    exec: &base::interface::exec::ExecProviders,
-    session_id: &str,
-    trust: base::permission::ProjectTrust,
-) -> base::engine_exec::EngineExec {
-    tools::bash::engine_exec_for(
-        &sandbox_settings_from(config),
-        exec,
-        config.dangerously_disable_sandbox,
-        session_id,
-        trust,
-    )
-}
 
 /// The session's frozen environment snapshot, taken in its working directory
 /// — looked up in as a project only when it is one.
@@ -67,28 +22,6 @@ pub(crate) async fn collect_frozen(
         ..CollectOptions::defaults()
     };
     super::frozen::collect(cwd, opts, &config_paths, environment, engine_git).await
-}
-
-/// The execution providers a session's tool calls reach the machine through,
-/// with every process group a command starts recorded in `process_groups`.
-///
-/// Only the egress is configured from `EngineConfig`; the other three are
-/// this machine either way. `sandbox.network_mode` is a statement about where
-/// the *model* may reach, which is as true of a `WebFetch` as it is of a
-/// `curl` inside a sandboxed command.
-pub(crate) fn exec_providers_from(
-    config: &base::context::EngineConfig,
-    process_groups: Option<&Arc<platform::GroupLedger>>,
-) -> base::interface::exec::ExecProviders {
-    let env = config.subprocess_env.clone();
-    match process_groups {
-        Some(ledger) => platform::local_providers_with_ledger(env, ledger.clone()),
-        None => platform::local_providers_with(env),
-    }
-    .with_network(Arc::new(platform::LocalNetwork::for_agent_policy(
-        config.sandbox_policy.network_mode,
-        config.sandbox_policy.allowed_domains.clone(),
-    )))
 }
 
 /// Calls a tool makes on its session's behalf, through the same dispatch as
@@ -260,26 +193,6 @@ pub(crate) fn attendance_of(
     }
 }
 
-/// What the session's sandbox holds a command to, probed the first time a
-/// call of the session asks.
-fn confinement_of(
-    session: &base::context::SessionState,
-    config: &base::context::EngineConfig,
-    exec: &base::interface::exec::ExecProviders,
-    cwd: &std::path::Path,
-    session_id: &str,
-) -> base::interface::exec::ConfinementReport {
-    session.confinement(|| {
-        tools::bash::confinement_report(
-            &sandbox_settings_from(config),
-            exec,
-            config.dangerously_disable_sandbox,
-            cwd,
-            session_id,
-        )
-    })
-}
-
 /// The context a call runs with: the same for validating its input and for
 /// judging it as for running it. `spec` is the called tool's; `None` where
 /// no tool is called, only something of the session's run under a call's
@@ -297,7 +210,6 @@ pub(super) fn tool_context_for(
     );
     tool_ctx.session_id = ctx.session_id.clone();
     tool_ctx.turn_no = ctx.turn_no;
-    tool_ctx.sandbox = sandbox_settings_from(&ctx.config);
     tool_ctx.tool_use_id = ctx.tool_use_id.clone();
     tool_ctx.agent_depth = ctx.agent_depth;
     tool_ctx.elicitation = Some(Arc::clone(&ctx.elicitation));
@@ -306,13 +218,14 @@ pub(super) fn tool_context_for(
             as Arc<dyn base::interface::tool_dispatch::ToolDispatch>
     });
     tool_ctx.from_code = ctx.caller == Caller::Code;
-    tool_ctx.confinement = confinement_of(
+    tool_ctx.confinement = crate::exec::confinement_of(
         &ctx.session_state,
         &ctx.config,
         &ctx.exec,
         &ctx.cwd,
         &ctx.session_id,
     );
+    tool_ctx.engine_git = Arc::clone(&ctx.engine_git);
     tool_ctx.attendance = attendance_of(&ctx.session_state, ctx.caller);
     tool_ctx.turn = ctx.turn.clone();
     tool_ctx.inline_commands = Some(Arc::new(SubCallDispatcher::for_inline_commands(ctx)));
@@ -340,6 +253,7 @@ impl Agent {
             hooks: Arc::clone(self.gate.hooks()),
             config: Arc::clone(&self.config),
             exec: self.exec.clone(),
+            engine_git: Arc::clone(&self.engine_git),
             permission: self.gate.permission().clone(),
             session_state: Arc::clone(&self.session_state),
             elicitation: Arc::clone(self.gate.elicitation()),

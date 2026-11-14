@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use base::context::config::NetworkModeConfig;
 use base::interface::exec::env::SubprocessEnvMode;
+use base::interface::exec::NetworkMode;
 use base::permission::{PermissionMode, ProjectTrust};
 
 use crate::section::Sections;
@@ -540,12 +540,12 @@ impl Order {
             }
             Self::NetworkMode => {
                 let rank = |v: &Value| {
-                    serde_json::from_value::<NetworkModeConfig>(v.clone())
+                    serde_json::from_value::<NetworkMode>(v.clone())
                         .ok()
                         .map(|m| match m {
-                            NetworkModeConfig::DenyAll => 0,
-                            NetworkModeConfig::Allowlist => 1,
-                            NetworkModeConfig::Unrestricted => 2,
+                            NetworkMode::DenyAll => 0,
+                            NetworkMode::Allowlist => 1,
+                            NetworkMode::Unrestricted => 2,
                         })
                 };
                 let below = rank(below).unwrap_or(2);

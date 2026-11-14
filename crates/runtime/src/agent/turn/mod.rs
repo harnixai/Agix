@@ -32,7 +32,7 @@ pub(crate) use process::hook_permission_mode;
 pub(crate) use prompt::PromptContext;
 pub(crate) use recall::Memory;
 pub(crate) use request::ModelRoute;
-pub(crate) use tool_env::{collect_frozen, engine_exec_from, exec_providers_from};
+pub(crate) use tool_env::collect_frozen;
 pub(crate) use tool_exec::resolve_permission_response;
 
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage, Usage};

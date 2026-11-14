@@ -90,7 +90,7 @@ impl Builder {
                     .into(),
             )),
             (Some(exec), None) => Ok(exec.clone()),
-            (None, groups) => Ok(crate::turn::exec_providers_from(&config, groups.as_ref())),
+            (None, groups) => Ok(crate::exec::providers_for(&config, groups.as_ref())),
         }?;
         Ok((config, exec))
     }
@@ -140,6 +140,11 @@ impl Builder {
             generation,
             injected: injected_state,
             env: session_env,
+            engine_git: Arc::new(crate::exec::engine_git_for(
+                config,
+                &exec,
+                session.session_id_str(),
+            )),
             exec,
             ambient: hook_ambient,
         })
@@ -212,7 +217,7 @@ pub(super) fn session_env(
             .additional_directories
             .iter()
             .map(resolve)
-            .chain(config.sandbox_policy.paths.state_working_dirs())
+            .chain(config.sandbox.paths.state_working_dirs())
             .collect(),
         read_directories: settings
             .values
@@ -220,7 +225,7 @@ pub(super) fn session_env(
             .read_directories
             .iter()
             .map(resolve)
-            .chain(config.sandbox_policy.paths.readable_state_root())
+            .chain(config.sandbox.paths.readable_state_root())
             .collect(),
         read_anywhere: settings.values.sandbox.read_anywhere,
         cache_directories: settings.values.sandbox.cache_directories.paths(&cwd),

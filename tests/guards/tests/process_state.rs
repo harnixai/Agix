@@ -58,7 +58,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/settings/src/schema.rs", "KNOWN", Constant, "the settings keys, derived once from the schema"),
     ("crates/core/src/public_suffix.rs", "RULES", Constant, "the public suffix list compiled into the binary, parsed once"),
     ("crates/core/src/engine_exec.rs", "WARNED", OnceFlag, "says once per process that the engine's subprocesses run unconfined"),
-    ("crates/tools/src/bash/sandbox.rs", "ONCE", OnceFlag, "sweeps stale session temp directories once per process"),
+    ("crates/runtime/src/exec.rs", "ONCE", OnceFlag, "sweeps stale session temp directories once per process"),
     ("crates/platform/src/network.rs", "ONCE", OnceFlag, "installs the process-wide TLS provider reqwest needs"),
     ("crates/assembly/src/telemetry_otel.rs", "TOLD", OnceFlag, "says once that a later OpenTelemetry endpoint is ignored"),
     ("crates/core/src/interface/tool.rs", "NEXT", IdCounter, "registration ids, unique across every registry in the process"),

@@ -5,7 +5,7 @@
 //! honour, a strict profile the sandbox cannot hold, a build whose panics
 //! end the process.
 
-use base::context::config::NetworkModeConfig;
+use base::interface::exec::NetworkMode;
 use base::interface::exec::{ConfinementReport, Enforcement, ProcessSpec, Sandbox, SandboxPolicy};
 use base::interface::health::{CheckResult, HealthCheck};
 use base::permission::PermissionMode;
@@ -127,7 +127,7 @@ impl HealthCheck for UnattendedNetworkCheck {
             "network_mode": sandbox.network_mode,
             "unattended_requires_network_policy": sandbox.unattended_requires_network_policy,
         });
-        let open = sandbox.network_mode == NetworkModeConfig::Unrestricted
+        let open = sandbox.network_mode == NetworkMode::Unrestricted
             && !sandbox.unattended_requires_network_policy;
         if self.unattended_scenes.is_empty() {
             CheckResult::ok("no unattended scene is served")
@@ -165,7 +165,7 @@ impl HealthCheck for NetworkAllowlistCheck {
 
     fn check(&self) -> CheckResult {
         let sandbox = &self.0.values.sandbox;
-        if sandbox.network_mode != NetworkModeConfig::Allowlist {
+        if sandbox.network_mode != NetworkMode::Allowlist {
             return CheckResult::ok("sandbox.network_mode is not allowlist");
         }
         let unreachable: Vec<&str> = sandbox
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(status(settings_with(|_| {}), Vec::new()), "ok");
         assert_eq!(
             status(
-                settings_with(|s| s.sandbox.network_mode = NetworkModeConfig::Allowlist),
+                settings_with(|s| s.sandbox.network_mode = NetworkMode::Allowlist),
                 unattended()
             ),
             "ok"
@@ -363,7 +363,7 @@ mod tests {
     fn an_allowlist_of_domains_is_flagged_as_unreachable_from_the_sandbox() {
         let allowlist = |domains: &[&str], require: bool| {
             NetworkAllowlistCheck::new(settings_with(|s| {
-                s.sandbox.network_mode = NetworkModeConfig::Allowlist;
+                s.sandbox.network_mode = NetworkMode::Allowlist;
                 s.sandbox.allowed_domains = domains.iter().map(|d| d.to_string()).collect();
                 s.sandbox.require_enforcement = require;
             }))

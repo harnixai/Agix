@@ -110,13 +110,10 @@ async fn runs_unattended(ctx: &ToolContext) -> bool {
     use base::interface::permission::{Attendance, PermissionPolicy, PermissionRequest, ToolFacts};
     let mut ctx = ctx.clone();
     ctx.attendance = Attendance::Unattended;
-    ctx.confinement = tools::bash::confinement_report(
-        &ctx.sandbox,
-        &ctx.exec,
-        ctx.config.dangerously_disable_sandbox,
-        &ctx.cwd,
-        &ctx.session_id,
-    );
+    ctx.confinement = ctx
+        .config
+        .sandbox
+        .confinement(&ctx.exec, &ctx.cwd, &ctx.session_id);
     let tool: Arc<dyn Tool> = Arc::new(tools::bash::BashTool);
     let input = serde_json::json!({ "command": "python3 build.py" });
     let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
@@ -149,19 +146,19 @@ async fn an_unattended_command_runs_only_inside_the_sandbox() {
     );
 
     let mut unconfined = ctx_in(project.path(), |s| s.unattended = true);
-    std::sync::Arc::make_mut(&mut unconfined.config).dangerously_disable_sandbox = true;
+    unconfined.sandbox_mut().disabled = true;
     assert!(!runs_unattended(&unconfined).await);
 
     let mut unattended = ctx_in(project.path(), |s| s.unattended = true);
-    std::sync::Arc::make_mut(&mut unattended.config).dangerously_disable_sandbox = false;
+    unattended.sandbox_mut().disabled = false;
     let holds = tools::bash::sandbox_status().starts_with("available");
     assert_eq!(runs_unattended(&unattended).await, holds);
 
     // Asked to, the network has to be closed as well: the sandbox holds
     // writes, not the network.
-    unattended.sandbox.unattended_requires_network_policy = true;
+    unattended.sandbox_mut().unattended_requires_network_policy = true;
     assert!(!runs_unattended(&unattended).await);
-    unattended.sandbox.network_mode = base::context::config::NetworkModeConfig::DenyAll;
+    unattended.sandbox_mut().network_mode = base::interface::exec::NetworkMode::DenyAll;
     assert_eq!(runs_unattended(&unattended).await, holds);
 }
 

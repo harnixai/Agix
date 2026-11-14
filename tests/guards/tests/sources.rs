@@ -110,7 +110,7 @@ const MAY_SPAWN: &[(&str, &str)] = &[
 ];
 
 const MAY_BUILD_LOCAL_PROCESS: &[(&str, &str)] = &[(
-    "crates/runtime/src/agent/turn/tool_env.rs",
+    "crates/runtime/src/exec.rs",
     "the session's default providers when the host gives none; everything else, hooks \
      included, runs on the providers that session ended up with",
 )];

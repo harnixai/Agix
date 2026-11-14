@@ -8,7 +8,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use base::context::config::NetworkModeConfig;
+use base::interface::exec::NetworkMode;
 use base::interface::exec::{Network, Origin};
 use base::interface::model::ThinkingMode;
 use base::interface::model::{Model, ModelErrorKind, StreamParams};
@@ -50,10 +50,8 @@ served-and-denied";
 /// An egress whose allowlist deliberately excludes the host the test server
 /// runs on.
 fn allowlist_excluding_loopback() -> Arc<dyn Network> {
-    let net = LocalNetwork::for_agent_policy(
-        NetworkModeConfig::Allowlist,
-        vec!["nothing-here.test".into()],
-    );
+    let net =
+        LocalNetwork::for_agent_policy(NetworkMode::Allowlist, vec!["nothing-here.test".into()]);
     assert!(
         !net.permits("127.0.0.1", Origin::Agent),
         "this whole file is vacuous unless the test server's host really is \

@@ -76,7 +76,7 @@ async fn an_ordinary_file_inside_the_project_is_allowed() {
 async fn a_deployment_can_permit_one_of_the_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.sandbox.allow_write = vec![dir.path().join(".env.example")];
+    ctx.sandbox_mut().allow_write = vec![dir.path().join(".env.example")];
 
     assert!(
         matches!(
@@ -96,7 +96,7 @@ async fn a_deployment_can_permit_one_of_the_defaults() {
 async fn a_deployment_can_add_a_name_of_its_own() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.sandbox.deny_write = vec!["secrets".into()];
+    ctx.sandbox_mut().deny_write = vec!["secrets".into()];
     assert!(denied(
         &write_decision(&ctx, &dir.path().join("secrets")).await
     ));
@@ -126,7 +126,7 @@ async fn an_exemption_does_not_open_a_path_outside_the_project() {
     let dir = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.sandbox.allow_write = vec![elsewhere.path().to_path_buf()];
+    ctx.sandbox_mut().allow_write = vec![elsewhere.path().to_path_buf()];
     let d = write_decision(&ctx, &elsewhere.path().join(".env")).await;
     assert!(
         matches!(d, Reach::Outside),
@@ -216,8 +216,8 @@ async fn gate_decision(
     let session = std::sync::Arc::new(base::context::SessionState::for_tests(cwd.to_path_buf()));
     let mut ctx = ctx_in(cwd);
     ctx.session = session.clone();
-    ctx.sandbox.allow_write = settings.values.sandbox.allow_write.clone();
-    ctx.sandbox.deny_write = settings.values.sandbox.deny_write.clone();
+    ctx.sandbox_mut().allow_write = settings.values.sandbox.allow_write.clone();
+    ctx.sandbox_mut().deny_write = settings.values.sandbox.deny_write.clone();
     let input = serde_json::json!({ "file_path": path.display().to_string(), "content": "x" });
     let facts = ToolFacts::gather(write.as_ref(), &input, &ctx).await;
     gate.decide(&PermissionRequest::new(

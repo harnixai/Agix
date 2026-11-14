@@ -37,7 +37,7 @@ impl Call<'_> {
     /// demands it be held fully.
     fn runs_in_sandbox(&self) -> bool {
         self.facts.runs.is_some()
-            && !self.ctx.config.dangerously_disable_sandbox
+            && !self.ctx.config.sandbox.disabled
             && self.ctx.confinement.require_enforcement
     }
 
@@ -85,7 +85,7 @@ impl Asked {
 
 impl Policy {
     pub(super) fn judge(&self, call: &Call<'_>) -> Verdict {
-        if let Some(path) = call.named.credential(call.ctx, &self.sandbox.paths) {
+        if let Some(path) = call.named.credential(call.ctx) {
             return Verdict::deny(
                 Stage::Credentials,
                 format!(

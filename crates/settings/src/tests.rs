@@ -908,7 +908,7 @@ mod project_trust {
         assert_eq!(settings.values.permission_mode, PermissionMode::Plan);
         assert_eq!(
             settings.values.sandbox.network_mode,
-            base::context::config::NetworkModeConfig::DenyAll
+            base::interface::exec::NetworkMode::DenyAll
         );
         assert!(settings.requires_trust().is_empty());
     }
@@ -1022,7 +1022,7 @@ mod project_trust {
             assert!(settings.values.hooks_config.is_some(), "{trust}");
             assert_eq!(
                 settings.values.sandbox.network_mode,
-                base::context::config::NetworkModeConfig::DenyAll,
+                base::interface::exec::NetworkMode::DenyAll,
                 "{trust}"
             );
             assert!(settings.values.sandbox.require_enforcement, "{trust}");

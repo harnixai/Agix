@@ -8,7 +8,6 @@ mod inline_commands;
 mod model_failure;
 mod prompt_assembly;
 mod recovery;
-mod sandbox_settings;
 mod skills_text;
 mod support;
 mod tool_defs_golden;

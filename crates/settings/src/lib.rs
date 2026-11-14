@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 mod engine;
+pub use engine::sandbox_settings;
 pub mod file;
 pub mod import;
 mod loaded;
@@ -423,7 +424,7 @@ pub struct SandboxConfig {
     pub allowed_domains: Vec<String>,
     /// Outbound network policy for sandboxed `Bash` commands.
     #[serde(default)]
-    pub network_mode: base::context::config::NetworkModeConfig,
+    pub network_mode: base::interface::exec::NetworkMode,
     /// Bypass the sandbox entirely, in a build that has one.
     ///
     /// Default: false. The backend is behind the `sandbox` compile-time

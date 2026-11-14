@@ -1,7 +1,6 @@
 //! 引擎只读配置 + 模型窗口推断。
 
 use crate::permission::PermissionMode;
-use std::path::PathBuf;
 
 /// 引擎只读配置。从 settings.json + CLI flags 合并出来后，整个会话不再变。
 #[derive(Debug, Clone)]
@@ -55,15 +54,9 @@ pub struct EngineConfig {
     pub thinking_mode: ThinkingModeConfig,
 
     pub permission_mode: PermissionMode,
-    /// Mirrors `Settings.sandbox.dangerously_disable_sandbox`: commands run
-    /// outside the OS sandbox.
-    pub dangerously_disable_sandbox: bool,
-    /// Bash sandbox extended policy. Default:
-    /// `default_deny_read` baked-in (~/.ssh, ~/.aws, etc), network unrestricted.
-    /// Settings.json `sandbox.{deny_read,allow_read,allowed_domains,network_mode}`
-    /// overrides any field. Tool layer (`agix-tools::bash::sandbox`) reads
-    /// these fields to build its platform-specific profile.
-    pub sandbox_policy: SandboxPolicyConfig,
+    /// The session's sandbox settings; every policy a command runs under is
+    /// derived from these.
+    pub sandbox: std::sync::Arc<crate::interface::exec::SandboxSettings>,
     /// Mirrors `Settings.disable_skill_shell_execution` — read by the skill
     /// expansion's `` !`cmd` `` step via `ToolContext.config`.
     pub disable_skill_shell_execution: bool,
@@ -177,53 +170,6 @@ pub enum ThinkingModeConfig {
     OnBudget(u32),
 }
 
-/// Data-only sandbox policy in core (so `EngineConfig` doesn't need to
-/// depend on the tools crate). Lifted to a real `SandboxPolicy`
-/// inside `agix-tools::bash::sandbox` at call-site.
-#[derive(Debug, Clone, Default)]
-pub struct SandboxPolicyConfig {
-    pub allow_read: Vec<PathBuf>,
-    /// `None` = the built-in defaults; `Some(list)` = exactly this list.
-    pub deny_read: Option<Vec<PathBuf>>,
-    pub network_mode: NetworkModeConfig,
-    pub allowed_domains: Vec<String>,
-    /// Extra filename segments no tool may write. See
-    /// `settings::SandboxConfig::deny_write`.
-    pub deny_write: Vec<String>,
-    /// Paths exempt from the write deny rules. See
-    /// `settings::SandboxConfig::allow_write`.
-    pub allow_write: Vec<PathBuf>,
-    /// This instance's sensitive paths: its state root, so the profile can
-    /// protect the settings.json files that actually govern it, and the
-    /// credentials the gate and the file tools refuse. Without a state root
-    /// the sandbox falls back to `$HOME/.agix` — which is only right when the
-    /// instance happens to live there.
-    pub paths: std::sync::Arc<crate::paths::SensitivePaths>,
-    /// See `settings::SandboxConfig::require_enforcement`.
-    pub require_enforcement: bool,
-    /// See `settings::SandboxConfig::unattended_requires_network_policy`.
-    pub unattended_requires_network_policy: bool,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum NetworkModeConfig {
-    #[default]
-    Unrestricted,
-    DenyAll,
-    Allowlist,
-}
-
 /// How file tools word the paths the model reads: in tool descriptions and in
 /// the paths Grep, Glob, Write and Edit print. Resolving a path the model
 /// passes in is the same in both styles (relative against the working
@@ -281,8 +227,7 @@ impl EngineConfig {
 
             // permission / sandbox
             permission_mode: PermissionMode::Default,
-            dangerously_disable_sandbox: false,
-            sandbox_policy: SandboxPolicyConfig::default(),
+            sandbox: Default::default(),
             disable_skill_shell_execution: false,
             project_trust: crate::permission::ProjectTrust::default(),
             prompt_files: crate::paths::PromptFiles::unscoped(),

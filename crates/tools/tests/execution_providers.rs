@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 fn ctx_with(providers: ExecProviders, require_enforcement: bool) -> ToolContext {
     let mut ctx = platform::tool_context_for_test(std::path::PathBuf::from("/work"));
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
-    ctx.sandbox.require_enforcement = require_enforcement;
+    ctx.sandbox_mut().disabled = false;
+    ctx.sandbox_mut().require_enforcement = require_enforcement;
     ctx.exec = providers;
     ctx
 }
@@ -72,7 +72,7 @@ async fn the_local_set_is_the_same_construction() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_with(platform::local_providers(), false);
     ctx.cwd = dir.path().to_path_buf();
-    std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = true;
+    ctx.sandbox_mut().disabled = true;
     let result = run(ctx, "echo from-the-machine").await;
     assert!(format!("{:?}", result.content).contains("from-the-machine"));
 }
@@ -92,8 +92,10 @@ async fn the_second_provider_does_not_pretend_to_be_a_sandbox() {
         PermissionOutcome, PermissionPolicy, PermissionRequest, Stage, ToolFacts,
     };
     let mut ctx = ctx_with(providers, true);
-    ctx.confinement =
-        tools::bash::confinement_report(&ctx.sandbox, &ctx.exec, false, &ctx.cwd, "acceptance");
+    ctx.confinement = ctx
+        .config
+        .sandbox
+        .confinement(&ctx.exec, &ctx.cwd, "acceptance");
     assert_eq!(
         ctx.confinement.session,
         base::interface::exec::Enforcement::None

@@ -124,7 +124,18 @@ impl SandboxPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum NetworkMode {
     /// Unrestricted outbound (default; Bash often needs `curl` / `npm install`).
     #[default]
@@ -142,12 +153,128 @@ pub enum NetworkMode {
     Allowlist,
 }
 
+/// The engine's sandbox settings for a session, as `settings.json`'s
+/// `sandbox` section gave them: what a command is held to, before any one
+/// call narrows it. Every [`SandboxPolicy`] a command or the engine's own git
+/// runs under is derived from this, here.
+#[derive(Debug, Clone, Default)]
+pub struct SandboxSettings {
+    pub allow_read: Vec<PathBuf>,
+    /// Empty means the built-in credential list ([`default_deny_read`]); a
+    /// list replaces it whole.
+    pub deny_read: Vec<PathBuf>,
+    pub network_mode: NetworkMode,
+    pub allowed_domains: Vec<String>,
+    /// Filename segments no tool may write, on top of the built-in ones.
+    pub deny_write: Vec<String>,
+    /// Paths exempt from the write deny rules.
+    pub allow_write: Vec<PathBuf>,
+    /// This instance's sensitive paths: its state root, so the profile
+    /// protects the settings files that actually govern it, and the
+    /// credentials the gate and the file tools refuse.
+    pub paths: std::sync::Arc<crate::paths::SensitivePaths>,
+    pub require_enforcement: bool,
+    pub unattended_requires_network_policy: bool,
+    /// `dangerously_disable_sandbox`: commands run outside the OS sandbox.
+    pub disabled: bool,
+}
+
+impl SandboxSettings {
+    /// The policy a session's command runs under before its call adds what
+    /// it may write.
+    pub fn policy(&self) -> SandboxPolicy {
+        let deny_read = if self.deny_read.is_empty() {
+            default_deny_read()
+        } else {
+            self.deny_read.clone()
+        };
+        SandboxPolicy {
+            allow_read: self.allow_read.clone(),
+            deny_read,
+            network_mode: self.network_mode,
+            allowed_domains: self.allowed_domains.clone(),
+            state_root: self.paths.state_root().map(Path::to_path_buf),
+            additional_writable: Vec::new(),
+            only_additional_writable: false,
+            deny_ipc_escapes: false,
+            read: ReadScope::Everything,
+            env: EnvScope::Session,
+        }
+    }
+
+    /// The session's own temporary directory: a sandboxed command's `TMPDIR`,
+    /// and the only temporary directory it may write besides the one macOS
+    /// `mktemp` insists on. Not created here.
+    ///
+    /// Under the state root rather than in the system temporary directory: on
+    /// macOS that is the per-user `DARWIN_USER_TEMP_DIR` every sandboxed
+    /// command may write, so one session's commands could reach into
+    /// another's.
+    pub fn session_tmp_dir(&self, session_id: &str) -> PathBuf {
+        self.paths.session_tmp_dir(session_id).unwrap_or_else(|| {
+            let id: String = session_id
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .collect();
+            std::env::temp_dir().join(format!("agix-{id}"))
+        })
+    }
+
+    /// What the session's sandbox holds a command to, for the permission
+    /// policy to read: one probe command confined the way a command nobody
+    /// attends is, since that is the command the answer lets run. Only
+    /// `exec.sandbox` is asked; nothing runs.
+    pub fn confinement(
+        &self,
+        exec: &super::ExecProviders,
+        cwd: &Path,
+        session_id: &str,
+    ) -> ConfinementReport {
+        let (require, network) = (
+            self.require_enforcement,
+            self.unattended_requires_network_policy,
+        );
+        if self.disabled {
+            return ConfinementReport::disabled(require, network);
+        }
+        let mut policy = self.policy();
+        policy.additional_writable = vec![self.session_tmp_dir(session_id)];
+        policy.deny_ipc_escapes = true;
+        let probe = ProcessSpec::new("bash", cwd).args(["-c", "true"]);
+        ConfinementReport::probe(&*exec.sandbox, probe, &policy, require, network)
+    }
+
+    /// How the engine starts its own git and helpers: through the session's
+    /// providers, and inside its sandbox whenever the session's shell
+    /// commands are, so what a repository such a command configured makes
+    /// git run is held to the same roots. `tmpdir` is the session's, made
+    /// ready.
+    pub fn engine_git(
+        &self,
+        exec: &super::ExecProviders,
+        trust: crate::permission::ProjectTrust,
+        tmpdir: Option<PathBuf>,
+    ) -> crate::engine_exec::EngineExec {
+        use crate::engine_exec::{Confinement, EngineExec};
+        let confinement = if self.disabled {
+            Confinement::Unconfined
+        } else {
+            Confinement::Sandboxed {
+                policy: self.policy(),
+                require_enforcement: self.require_enforcement,
+                tmpdir,
+            }
+        };
+        EngineExec::new(exec.clone(), confinement, trust)
+    }
+}
+
 /// Default deny-read paths — credential stores that almost never want to be
 /// inside an LLM tool result. User can override via `sandbox.allow_read` in
 /// settings.json. Returned absolute (`HOME` resolved).
 ///
 /// 两个生产调用点：
-/// - `bash::to_sandbox_policy` —— 空 `deny_read` 回落到这里，作为真正的沙盒 profile；
+/// - `SandboxSettings::policy` —— 空 `deny_read` 回落到这里，作为真正的沙盒 profile；
 /// - `bash::classify` —— 命令分类时用同一份名单判断某个参数是不是在读凭据，
 ///   避免 `cat ~/.ssh/id_rsa` 被当成"只读命令"静默放行。
 ///   两处共用一份定义，是为了不让"沙盒挡得住"和"分类器放得过"两套标准打架。
@@ -292,5 +419,57 @@ impl ConfinementReport {
     pub fn holds_unattended(&self) -> bool {
         self.session == Enforcement::Full
             && (!self.unattended_requires_network_policy || self.network_restricted)
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn the_policy_carries_the_settings_through() {
+        let settings = SandboxSettings {
+            allow_read: vec![PathBuf::from("/home/u/.npmrc")],
+            deny_read: vec![PathBuf::from("/tmp/secret")],
+            allowed_domains: vec!["api.example.com".to_string()],
+            network_mode: NetworkMode::Allowlist,
+            ..Default::default()
+        };
+        let policy = settings.policy();
+        assert_eq!(policy.allow_read, [PathBuf::from("/home/u/.npmrc")]);
+        assert_eq!(policy.deny_read, [PathBuf::from("/tmp/secret")]);
+        assert_eq!(policy.allowed_domains, ["api.example.com"]);
+        assert_eq!(policy.network_mode, NetworkMode::Allowlist);
+    }
+
+    /// An empty `deny_read` is the built-in credential list, not "deny
+    /// nothing"; `allow_read` re-allows on top of it and is not defaulted.
+    #[test]
+    fn an_empty_deny_read_is_the_credential_defaults() {
+        let policy = SandboxSettings::default().policy();
+        assert_eq!(policy.deny_read, default_deny_read());
+        assert!(policy.allow_read.is_empty());
+        if crate::paths::home_dir().is_some() {
+            let joined = policy
+                .deny_read
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("|");
+            assert!(joined.contains(".ssh") && joined.contains(".aws"));
+        }
+    }
+
+    #[test]
+    fn a_disabled_sandbox_confines_neither_commands_nor_the_engines_git() {
+        let settings = SandboxSettings {
+            disabled: true,
+            ..Default::default()
+        };
+        let exec = super::super::ExecProviders::in_process();
+        let report = settings.confinement(&exec, Path::new("/work"), "s");
+        assert_eq!(report, ConfinementReport::disabled(false, false));
+        let git = settings.engine_git(&exec, crate::permission::ProjectTrust::Trusted, None);
+        assert!(!git.is_sandboxed());
     }
 }

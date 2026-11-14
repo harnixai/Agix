@@ -174,6 +174,7 @@ impl Agent {
             }
             EngineCommand::SetSessionId => {
                 self.session.set_session_id(content);
+                self.refresh_engine_git();
                 self.emit(AgentEvent::SessionChanged {
                     session_id: self.session.session_id.clone(),
                 });

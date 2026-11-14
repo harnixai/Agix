@@ -9,7 +9,7 @@ file  crates/core/src/interface/tool.rs                          -              
 file  crates/mcp/src/connect.rs                                  -                                      1328
 file  crates/mcp/src/manager.rs                                  -                                      1274
 file  crates/mcp/src/oauth/mod.rs                                -                                      1104
-file  crates/platform/src/sandbox.rs                             -                                      1633
+file  crates/platform/src/sandbox.rs                              -                                      1651
 file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/session.rs                              -                                      880
 file  crates/telemetry/src/recorder/mod.rs                       -                                      942
@@ -30,7 +30,7 @@ fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::se
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            89
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  179
-fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   90
+fn    crates/assembly/src/session_pool/parts/factory/mod.rs       EngineFactory::build                   97
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          120
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     86
@@ -58,8 +58,8 @@ fn    crates/platform/src/sandbox.rs                             linux_wrap     
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
-fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      83
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         99
+fn    crates/runtime/src/agent/builder/build/assemble.rs          Builder::assemble                      84
+fn    crates/runtime/src/agent/builder/build/mod.rs               Builder::build                         100
 fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   92
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       84
@@ -82,3 +82,13 @@ fn    crates/tools/src/monitor.rs                                Watch::run     
 fn    crates/tools/src/tool_search.rs                            ToolSearchTool::call                   100
 fn    crates/tools/src/tool_search.rs                            render                                 92
 fn    daemon/src/main.rs                                         serve                                  96
+file  crates/history/src/store.rs                                 -                                      1925
+file  crates/team/src/coordinator.rs                              -                                      912
+fn    crates/agents/src/agent_tool/build.rs                       Delegator::run_delegate                89
+fn    crates/agents/src/delegate/members.rs                       Delegator::spawn_member                85
+fn    crates/model/src/adapter.rs                                 map_stream_event                       173
+fn    crates/permissions/src/invocation.rs                        resolve_command                        117
+fn    crates/permissions/src/path_safety.rs                       check_write_for                        146
+fn    crates/permissions/src/shell.rs                             lex                                    119
+fn    crates/plugin/src/manifest.rs                               validate                               95
+fn    crates/team/src/coordinator.rs                              DefaultCoordinator::orchestrate        445

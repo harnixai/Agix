@@ -238,7 +238,7 @@ async fn read_file_to_text(
     // PDF handling
     if ext == "pdf" {
         return read_pdf_text(
-            &crate::bash::engine_exec(ctx),
+            &ctx.engine_git,
             path,
             &metadata,
             max_bytes,
@@ -1213,6 +1213,11 @@ mod tests {
             body: "%PDF-1.4\n",
         });
         ctx.exec.process = Arc::new(process.clone());
+        ctx.engine_git = Arc::new(ctx.config.sandbox.engine_git(
+            &ctx.exec,
+            ctx.config.project_trust,
+            None,
+        ));
 
         let r = FileReadTool
             .call(

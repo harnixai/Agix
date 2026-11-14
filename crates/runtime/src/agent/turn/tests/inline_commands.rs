@@ -23,9 +23,9 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         tools.register(Arc::new(tools::bash::BashTool));
     }
     let mut config = base::context::EngineConfig::defaults_for("test");
-    config.dangerously_disable_sandbox = true;
+    std::sync::Arc::make_mut(&mut config.sandbox).disabled = true;
     let policy = permissions::policy::Policy::new(permissions::ruleset::RuleSet::new(rules));
-    let exec = crate::turn::exec_providers_from(&config, None);
+    let exec = crate::exec::providers_for(&config, None);
     ToolExecCtx {
         tool_use_id: "toolu_skill".into(),
         tools: Arc::new(tools),
@@ -44,6 +44,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
             },
         )),
         discontinued: Arc::default(),
+        engine_git: Arc::new(config.sandbox.engine_git(&exec, config.project_trust, None)),
         exec,
         config: Arc::new(config),
         permission: base::interface::permission::PermissionSet::without_grants(Arc::new(policy)),

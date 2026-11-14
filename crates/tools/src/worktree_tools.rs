@@ -127,13 +127,8 @@ impl Tool for EnterWorktreeTool {
             )
             .with_new_messages(vec![]));
         }
-        match crate::worktree::create_worktree(
-            &ctx.exec,
-            &crate::bash::engine_exec(&ctx),
-            &ctx.cwd,
-            &input.slug,
-        )
-        .await
+        match crate::worktree::create_worktree(&ctx.exec, &ctx.engine_git, &ctx.cwd, &input.slug)
+            .await
         {
             Ok(handle) => {
                 let path = handle.path().to_path_buf();
@@ -294,7 +289,7 @@ impl ExitWorktreeTool {
 /// caller's only use for the answer is whether to refuse a removal the user
 /// asked for, and refusing on an unanswerable question strands the worktree.
 async fn unsaved_work(ctx: &ToolContext, path: &std::path::Path, branch: &str) -> Vec<String> {
-    let git = crate::bash::engine_exec(ctx);
+    let git = (*ctx.engine_git).clone();
     let run = |args: Vec<String>| {
         let git = git.clone();
         async move {

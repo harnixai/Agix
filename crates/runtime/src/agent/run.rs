@@ -420,12 +420,7 @@ impl Agent {
         let base_url = self.settings.values.model.base_url.clone();
         let session_memory = self.session.session_memory.clone();
         let network = self.exec.network.clone();
-        let engine_git = crate::turn::engine_exec_from(
-            &self.config,
-            &self.exec,
-            &self.session.session_id,
-            self.settings.trust(),
-        );
+        let engine_git = Arc::clone(&self.engine_git);
 
         let (frozen, _, _) = tokio::join!(
             crate::turn::collect_frozen(
@@ -459,6 +454,16 @@ impl Agent {
         tracing::debug!("Startup warmup complete");
     }
 
+    /// The engine's git follows the session's id: its temporary directory is
+    /// the session's.
+    pub(crate) fn refresh_engine_git(&mut self) {
+        self.engine_git = Arc::new(crate::exec::engine_git_for(
+            &self.config,
+            &self.exec,
+            &self.session.session_id,
+        ));
+    }
+
     /// Load a persisted session's messages from `entries`, its log as read
     /// from the `HistoryStore`, into this agent's in-memory conversation
     /// state. Call before `run()` starts processing turns — it's a plain
@@ -469,6 +474,7 @@ impl Agent {
         entries: &[history::entry::EnvelopedEntry],
     ) -> Result<(), session::session::SessionError> {
         self.session.resume_from(id, entries)?;
+        self.refresh_engine_git();
         self.prompt
             .set_context_injected(crate::turn::holds_session_context(self.session.messages()));
         Ok(())

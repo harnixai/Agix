@@ -195,7 +195,7 @@ pub(super) async fn fetch_once(agent: &Agent, url: &str) -> String {
     let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
     ctx.exec = platform::local_providers().with_network(Arc::new(
         platform::LocalNetwork::for_agent_policy(
-            base::context::config::NetworkModeConfig::Unrestricted,
+            base::interface::exec::NetworkMode::Unrestricted,
             vec!["127.0.0.1".into()],
         ),
     ));

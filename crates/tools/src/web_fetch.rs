@@ -286,7 +286,7 @@ mod tests {
         let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
         ctx.exec = platform::local_providers().with_network(Arc::new(
             platform::LocalNetwork::for_agent_policy(
-                base::context::config::NetworkModeConfig::Unrestricted,
+                base::interface::exec::NetworkMode::Unrestricted,
                 vec!["127.0.0.1".into()],
             ),
         ));
@@ -453,11 +453,11 @@ hello";
     }
 
     fn ctx_under(cwd: &Path, domains: &[&str]) -> ToolContext {
-        use base::context::config::NetworkModeConfig;
+        use base::interface::exec::NetworkMode;
         let mut ctx = ctx_in(cwd);
         ctx.exec = platform::local_providers().with_network(Arc::new(
             platform::LocalNetwork::for_agent_policy(
-                NetworkModeConfig::Allowlist,
+                NetworkMode::Allowlist,
                 domains.iter().map(|d| d.to_string()).collect(),
             ),
         ));
@@ -777,7 +777,7 @@ not found";
     #[tokio::test]
     async fn the_host_is_listed_when_allowed_domains_names_it() {
         let mut ctx = ctx_in(Path::new("/tmp"));
-        ctx.sandbox.allowed_domains = vec!["listed.test".into()];
+        ctx.sandbox_mut().allowed_domains = vec!["listed.test".into()];
         for (url, reach) in [
             ("https://listed.test/a", Reach::Host { listed: true }),
             ("https://other.test/a", Reach::Host { listed: false }),

@@ -326,7 +326,8 @@ async fn top_level(ctx: &ToolContext) -> Option<PathBuf> {
 /// it: what the engine's own git, in the session's sandbox, lists with mode
 /// 160000.
 async fn gitlinks(ctx: &ToolContext, worktree: &Path) -> Vec<PathBuf> {
-    let listed = crate::bash::engine_exec(ctx)
+    let listed = ctx
+        .engine_git
         .git(
             worktree,
             base::engine_exec::GitAccess::ReadOnly,

@@ -84,6 +84,9 @@ pub struct Agent {
     /// `config` and the builder's process-group ledger, and bound to
     /// `session_state` for the permission that judges those calls.
     exec: base::interface::exec::ExecProviders,
+    /// How the engine runs its own git and helpers for this session, with
+    /// the session's temporary directory: made once, at build.
+    engine_git: Arc<base::engine_exec::EngineExec>,
     /// Outlives the turn it names: what is announced between turns (a
     /// `/compact`, a turn error) carries the last turn's id.
     current_turn_id: String,

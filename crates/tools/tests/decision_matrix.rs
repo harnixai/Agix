@@ -22,7 +22,7 @@ use base::interface::permission::{
     PermissionRequest, Stage, ToolFacts,
 };
 use base::permission::{PermissionMode, PermissionRule, RuleBehavior, RuleSource};
-use base::tool::{InMemoryToolRegistry, SandboxSettings, Tool, ToolContext};
+use base::tool::{InMemoryToolRegistry, Tool, ToolContext};
 use permissions::policy::Policy;
 use serde_json::{json, Value};
 use settings::Settings;
@@ -514,14 +514,11 @@ impl Setup {
     fn context(&self, session: &Arc<SessionState>, cwd: &Path) -> ToolContext {
         let mut ctx = context_like_the_runtime(session, cwd);
         if let Sandboxing::HoldsPartlyAsDemanded = self.sandboxing {
-            ctx.sandbox.require_enforcement = true;
-            ctx.confinement = tools::bash::confinement_report(
-                &ctx.sandbox,
-                &ctx.exec,
-                ctx.config.dangerously_disable_sandbox,
-                cwd,
-                &ctx.session_id,
-            );
+            ctx.sandbox_mut().require_enforcement = true;
+            ctx.confinement = ctx
+                .config
+                .sandbox
+                .confinement(&ctx.exec, cwd, &ctx.session_id);
         }
         ctx
     }
@@ -566,22 +563,10 @@ fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolCont
         session.exec().unwrap(),
     );
     ctx.session_id = "matrix".into();
-    ctx.sandbox = SandboxSettings {
-        allow_read: settings.values.sandbox.allow_read.clone(),
-        deny_read: settings.values.sandbox.deny_read.clone(),
-        allowed_domains: settings.values.sandbox.allowed_domains.clone(),
-        network_mode: settings.values.sandbox.network_mode,
-        deny_write: settings.values.sandbox.deny_write.clone(),
-        allow_write: settings.values.sandbox.allow_write.clone(),
-        paths: Arc::new(base::paths::SensitivePaths::for_paths(
-            &base::paths::ConfigPaths::from_settings(&settings.paths),
-        )),
-        require_enforcement: settings.values.sandbox.require_enforcement,
-        unattended_requires_network_policy: settings
-            .values
-            .sandbox
-            .unattended_requires_network_policy,
-    };
+    *ctx.sandbox_mut() = settings::sandbox_settings(
+        &settings.values.sandbox,
+        &base::paths::ConfigPaths::from_settings(&settings.paths),
+    );
     ctx.session = session.clone();
     let env = session.env();
     ctx.attendance = if env.unattended {
@@ -589,13 +574,10 @@ fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolCont
     } else {
         Attendance::Attended
     };
-    ctx.confinement = tools::bash::confinement_report(
-        &ctx.sandbox,
-        &ctx.exec,
-        ctx.config.dangerously_disable_sandbox,
-        cwd,
-        &ctx.session_id,
-    );
+    ctx.confinement = ctx
+        .config
+        .sandbox
+        .confinement(&ctx.exec, cwd, &ctx.session_id);
     ctx
 }
 

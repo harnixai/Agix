@@ -478,7 +478,7 @@ mod tests {
             ..base::context::SessionEnv::new(dir.path().to_path_buf())
         });
         unattended.session = Arc::new(session);
-        std::sync::Arc::make_mut(&mut unattended.config).dangerously_disable_sandbox = false;
+        unattended.sandbox_mut().disabled = false;
         unattended.exec.sandbox = Arc::new(Holds);
         for (command, reach) in [
             ("tail -f log.txt", Reach::Inside),
@@ -504,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn unattended_monitor_runs_when_the_sandbox_holds() {
-        use base::context::config::NetworkModeConfig;
+        use base::interface::exec::NetworkMode;
         use base::interface::permission::{
             Attendance, PermissionPolicy, PermissionRequest, ToolFacts,
         };
@@ -513,18 +513,15 @@ mod tests {
         let tool: Arc<dyn Tool> = Arc::new(MonitorTool);
         let decide = |network, requires_network_policy, attendance| {
             let mut ctx = ctx_in(dir.path());
-            std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
-            ctx.sandbox.network_mode = network;
-            ctx.sandbox.unattended_requires_network_policy = requires_network_policy;
+            ctx.sandbox_mut().disabled = false;
+            ctx.sandbox_mut().network_mode = network;
+            ctx.sandbox_mut().unattended_requires_network_policy = requires_network_policy;
             ctx.exec.sandbox = Arc::new(Holds);
             ctx.attendance = attendance;
-            ctx.confinement = crate::bash::confinement_report(
-                &ctx.sandbox,
-                &ctx.exec,
-                false,
-                &ctx.cwd,
-                &ctx.session_id,
-            );
+            ctx.confinement = ctx
+                .config
+                .sandbox
+                .confinement(&ctx.exec, &ctx.cwd, &ctx.session_id);
             let (tool, input) = (&tool, &input);
             async move {
                 let facts = ToolFacts::gather(tool.as_ref(), input, &ctx).await;
@@ -544,10 +541,10 @@ mod tests {
             }
         };
         for (network, requires, allowed) in [
-            (NetworkModeConfig::Unrestricted, false, true),
-            (NetworkModeConfig::DenyAll, false, true),
-            (NetworkModeConfig::Unrestricted, true, false),
-            (NetworkModeConfig::DenyAll, true, true),
+            (NetworkMode::Unrestricted, false, true),
+            (NetworkMode::DenyAll, false, true),
+            (NetworkMode::Unrestricted, true, false),
+            (NetworkMode::DenyAll, true, true),
         ] {
             let d = decide(network, requires, Attendance::Unattended).await;
             assert_eq!(
@@ -556,7 +553,7 @@ mod tests {
                 "{network:?}, requires_network_policy={requires}: {d:?}"
             );
         }
-        let attended = decide(NetworkModeConfig::DenyAll, false, Attendance::Attended).await;
+        let attended = decide(NetworkMode::DenyAll, false, Attendance::Attended).await;
         assert!(
             matches!(
                 attended,
@@ -805,7 +802,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (mut ctx, session) = session_in(dir.path());
         ctx.exec.sandbox = Arc::new(Confines(Enforcement::Full));
-        std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
+        ctx.sandbox_mut().disabled = false;
         start(
             ctx,
             json!({"command": "echo outside", "description": "where"}),
@@ -826,15 +823,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (mut ctx, _session) = session_in(dir.path());
         ctx.exec.sandbox = Arc::new(Confines(Enforcement::Partial));
-        std::sync::Arc::make_mut(&mut ctx.config).dangerously_disable_sandbox = false;
-        ctx.sandbox.require_enforcement = true;
-        ctx.confinement = crate::bash::confinement_report(
-            &ctx.sandbox,
-            &ctx.exec,
-            false,
-            &ctx.cwd,
-            &ctx.session_id,
-        );
+        ctx.sandbox_mut().disabled = false;
+        ctx.sandbox_mut().require_enforcement = true;
+        ctx.confinement = ctx
+            .config
+            .sandbox
+            .confinement(&ctx.exec, &ctx.cwd, &ctx.session_id);
         let tool: Arc<dyn Tool> = Arc::new(MonitorTool);
         let input = json!({"command": "echo hi", "description": "refused"});
         let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;

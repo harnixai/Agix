@@ -144,6 +144,9 @@ fn test_exec_ctx_with_permission(
     hooks: Arc<hooks::HookRunner>,
     permission: Arc<dyn base::interface::permission::PermissionPolicy>,
 ) -> ToolExecCtx {
+    let config = base::context::EngineConfig::defaults_for("test");
+    let exec = crate::exec::providers_for(&config, None);
+    let engine_git = Arc::new(config.sandbox.engine_git(&exec, config.project_trust, None));
     ToolExecCtx {
         tool_use_id: "toolu_test".into(),
         tools,
@@ -156,11 +159,9 @@ fn test_exec_ctx_with_permission(
         cancel: tokio_util::sync::CancellationToken::new(),
         hooks,
         discontinued: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        config: Arc::new(base::context::EngineConfig::defaults_for("test")),
-        exec: crate::turn::exec_providers_from(
-            &base::context::EngineConfig::defaults_for("test"),
-            None,
-        ),
+        config: Arc::new(config),
+        exec,
+        engine_git,
         permission: base::interface::permission::PermissionSet::without_grants(permission),
         session_state: Arc::new(base::context::SessionState::for_tests(std::env::temp_dir())),
         elicitation: Arc::new(base::interface::elicitation::DeclineAll),
@@ -1640,7 +1641,7 @@ fn scanning_session(
         Arc::new(ScanningPermission(profile)),
     );
     let mut config = base::context::EngineConfig::defaults_for("test");
-    config.dangerously_disable_sandbox = true;
+    std::sync::Arc::make_mut(&mut config.sandbox).disabled = true;
     ctx.config = Arc::new(config);
     ctx.cwd = cwd.clone();
     ctx.session_state = Arc::new(base::context::SessionState::for_tests_in(

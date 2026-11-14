@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 
-use base::context::config::NetworkModeConfig;
 use base::interface::exec::network::domain_key;
+use base::interface::exec::NetworkMode;
 use base::interface::exec::{
     domains_name_host, is_internal_address, ExecError, HttpRequest, HttpResponse, HttpStream,
     Network, Origin,
@@ -68,16 +68,14 @@ impl LocalNetwork {
     /// Under `Unrestricted` the domain list restricts nothing, but a host it
     /// names may still be reached at an internal address — the one thing the
     /// list says in that mode is "these are mine".
-    pub fn for_agent_policy(mode: NetworkModeConfig, allowed_domains: Vec<String>) -> Self {
+    pub fn for_agent_policy(mode: NetworkMode, allowed_domains: Vec<String>) -> Self {
         match mode {
-            NetworkModeConfig::Unrestricted => Self::with(Vec::new(), allowed_domains, false),
-            NetworkModeConfig::DenyAll => Self::new(Vec::new(), true),
+            NetworkMode::Unrestricted => Self::with(Vec::new(), allowed_domains, false),
+            NetworkMode::DenyAll => Self::new(Vec::new(), true),
             // An empty allowlist under this mode names nothing reachable, the
             // same reading the sandbox backends give it.
-            NetworkModeConfig::Allowlist if allowed_domains.is_empty() => {
-                Self::new(Vec::new(), true)
-            }
-            NetworkModeConfig::Allowlist => Self::new(allowed_domains, false),
+            NetworkMode::Allowlist if allowed_domains.is_empty() => Self::new(Vec::new(), true),
+            NetworkMode::Allowlist => Self::new(allowed_domains, false),
         }
     }
 
@@ -577,7 +575,7 @@ mod tests {
     #[test]
     fn the_allowlist_is_not_case_sensitive() {
         let n = LocalNetwork::for_agent_policy(
-            base::context::config::NetworkModeConfig::Allowlist,
+            base::interface::exec::NetworkMode::Allowlist,
             vec!["Example.COM".into()],
         );
         assert!(n.permits("example.com", Origin::Agent));
@@ -615,27 +613,23 @@ mod tests {
 
     #[test]
     fn the_sandbox_network_mode_is_what_binds_the_model() {
-        let unrestricted = LocalNetwork::for_agent_policy(
-            NetworkModeConfig::Unrestricted,
-            vec!["example.com".into()],
-        );
+        let unrestricted =
+            LocalNetwork::for_agent_policy(NetworkMode::Unrestricted, vec!["example.com".into()]);
         assert!(
             unrestricted.permits("evil.test", Origin::Agent),
             "a domain list without the mode that reads it restricts nothing, \
              exactly as it does not restrict a sandboxed subprocess"
         );
 
-        let listed = LocalNetwork::for_agent_policy(
-            NetworkModeConfig::Allowlist,
-            vec!["example.com".into()],
-        );
+        let listed =
+            LocalNetwork::for_agent_policy(NetworkMode::Allowlist, vec!["example.com".into()]);
         assert!(listed.permits("example.com", Origin::Agent));
         assert!(!listed.permits("evil.test", Origin::Agent));
 
-        let empty_list = LocalNetwork::for_agent_policy(NetworkModeConfig::Allowlist, Vec::new());
+        let empty_list = LocalNetwork::for_agent_policy(NetworkMode::Allowlist, Vec::new());
         assert!(!empty_list.permits("example.com", Origin::Agent));
 
-        let denied = LocalNetwork::for_agent_policy(NetworkModeConfig::DenyAll, Vec::new());
+        let denied = LocalNetwork::for_agent_policy(NetworkMode::DenyAll, Vec::new());
         assert!(!denied.permits("example.com", Origin::Agent));
         assert!(denied.permits("api.anthropic.com", Origin::Operator));
     }
@@ -730,11 +724,8 @@ mod tests {
     async fn a_host_the_deployment_named_is_reachable_at_an_internal_address() {
         let (port, hits) = a_counting_server(ok_response).await;
         for n in [
-            LocalNetwork::for_agent_policy(
-                NetworkModeConfig::Unrestricted,
-                vec!["127.0.0.1".into()],
-            ),
-            LocalNetwork::for_agent_policy(NetworkModeConfig::Allowlist, vec!["127.0.0.1".into()]),
+            LocalNetwork::for_agent_policy(NetworkMode::Unrestricted, vec!["127.0.0.1".into()]),
+            LocalNetwork::for_agent_policy(NetworkMode::Allowlist, vec!["127.0.0.1".into()]),
         ] {
             let r = n
                 .send(
@@ -759,10 +750,7 @@ mod tests {
             )
         })
         .await;
-        let n = LocalNetwork::for_agent_policy(
-            NetworkModeConfig::Unrestricted,
-            vec!["127.0.0.1".into()],
-        );
+        let n = LocalNetwork::for_agent_policy(NetworkMode::Unrestricted, vec!["127.0.0.1".into()]);
         let err = n
             .send(
                 HttpRequest::get(format!("http://127.0.0.1:{outer_port}/")),

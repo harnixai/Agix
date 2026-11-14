@@ -219,7 +219,7 @@ mod tests {
         let mut ctx = ctx_in(Path::new("/tmp"));
         ctx.exec = platform::local_providers().with_network(std::sync::Arc::new(
             platform::LocalNetwork::for_agent_policy(
-                base::context::config::NetworkModeConfig::Unrestricted,
+                base::interface::exec::NetworkMode::Unrestricted,
                 vec!["127.0.0.1".into()],
             ),
         ));
@@ -274,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn the_host_is_listed_when_allowed_domains_names_it() {
         let mut ctx = ctx_in(Path::new("/tmp"));
-        ctx.sandbox.allowed_domains = vec!["listed.test".into()];
+        ctx.sandbox_mut().allowed_domains = vec!["listed.test".into()];
         for (url, reach) in [
             ("https://listed.test/a", Reach::Host { listed: true }),
             ("https://other.test/a", Reach::Host { listed: false }),

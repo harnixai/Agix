@@ -33,6 +33,7 @@ mod protocol_doc_wire;
 mod readme_matches_the_code;
 mod resume_recorder;
 mod rpc_smoke;
+mod sandbox_settings_reach_tools;
 mod schedule;
 mod session_context;
 mod session_customizer;

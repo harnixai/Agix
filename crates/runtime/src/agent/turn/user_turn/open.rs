@@ -5,7 +5,6 @@ use crate::agent::Agent;
 use crate::turn::attachments::resolve_attachments;
 use crate::turn::process::PromptScreen;
 use crate::turn::prompt::user_text_fingerprint;
-use crate::turn::tool_env::engine_exec_from;
 use crate::turn::TurnOutcome;
 use base::event::AgentEvent;
 use base::interface::model::MessageRole;
@@ -145,12 +144,7 @@ impl Agent {
 
     async fn refresh_frozen_context(&mut self) {
         let collected_this_turn = self.prompt.frozen().is_none();
-        let engine_git = engine_exec_from(
-            &self.config,
-            &self.exec,
-            &self.session.session_id,
-            self.settings.trust(),
-        );
+        let engine_git = std::sync::Arc::clone(&self.engine_git);
         if collected_this_turn {
             self.prompt.set_frozen(
                 crate::turn::collect_frozen(

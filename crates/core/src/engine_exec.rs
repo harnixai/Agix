@@ -196,6 +196,15 @@ impl EngineExec {
         matches!(self.confinement, Confinement::Sandboxed { .. })
     }
 
+    /// The session's own temporary directory, when the engine's processes
+    /// are sandboxed and it has been made.
+    pub fn tmpdir(&self) -> Option<&Path> {
+        match &self.confinement {
+            Confinement::Sandboxed { tmpdir, .. } => tmpdir.as_deref(),
+            Confinement::Unconfined => None,
+        }
+    }
+
     /// `git <options> <args>` in `cwd`, never asking for credentials on a
     /// terminal. The only way the engine starts git.
     pub async fn git(

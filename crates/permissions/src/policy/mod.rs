@@ -35,7 +35,6 @@ use base::interface::permission::{
 use base::permission::{
     PermissionMode, PermissionRule, PermissionSettings, RuleBehavior, RuleSource,
 };
-use base::tool::SandboxSettings;
 use delegated::Delegated;
 use host::HostSays;
 use std::sync::{Arc, RwLock};
@@ -45,9 +44,6 @@ pub struct Policy {
     /// Allows matched by their content's exact text.
     exact: RwLock<Vec<PermissionRule>>,
     managed: ManagedLayer,
-    /// What the context of a call made without one is given, and where its
-    /// credential locations are named.
-    sandbox: SandboxSettings,
     /// Where a [`GrantScope::Project`] grant is written. `None` — a session
     /// with no project — keeps it for the session only: the state root's
     /// `settings.local.json` is the global tier, and a rule written there would
@@ -139,7 +135,6 @@ impl Policy {
             rules: RwLock::new(rules),
             exact: RwLock::default(),
             managed: ManagedLayer::default(),
-            sandbox: SandboxSettings::default(),
             project_rules: None,
             host: None,
             no_one_to_ask: None,
@@ -166,17 +161,11 @@ impl Policy {
         policy.exact = RwLock::new(crate::rule::exact_allows_from(settings));
         policy
             .with_managed(ManagedLayer::from(&settings.managed))
-            .with_sandbox(settings.sandbox.clone())
             .with_project_rules(settings.project_rules.clone())
     }
 
     pub fn with_managed(mut self, managed: ManagedLayer) -> Self {
         self.managed = managed;
-        self
-    }
-
-    pub fn with_sandbox(mut self, sandbox: SandboxSettings) -> Self {
-        self.sandbox = sandbox;
         self
     }
 

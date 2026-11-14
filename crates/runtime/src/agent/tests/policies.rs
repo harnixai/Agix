@@ -758,7 +758,7 @@ async fn the_egress_policy_reaches_the_tool_that_has_to_obey_it() {
     }
 
     let mut settings = test_settings();
-    settings.values.sandbox.network_mode = base::context::config::NetworkModeConfig::Allowlist;
+    settings.values.sandbox.network_mode = base::interface::exec::NetworkMode::Allowlist;
     settings.values.sandbox.allowed_domains = vec!["allowed.test".into()];
 
     let model: Arc<dyn Model> = Arc::new(ToolThenStopModel {

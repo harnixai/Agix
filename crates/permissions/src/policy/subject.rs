@@ -50,7 +50,7 @@ impl Named {
     /// The first string of the call that names a credential location, each
     /// taken as a path from the session's cwd, as is the value of a
     /// `--flag=value`.
-    pub(super) fn credential(&self, ctx: &ToolContext, also: &SensitivePaths) -> Option<&str> {
+    pub(super) fn credential(&self, ctx: &ToolContext) -> Option<&str> {
         self.content()?;
         self.candidates
             .iter()
@@ -61,7 +61,7 @@ impl Named {
                     .any(|word| {
                         ResolvedPath::new(word, &ctx.cwd)
                             .all()
-                            .any(|p| ctx.sandbox.paths.is_credential(p) || also.is_credential(p))
+                            .any(|p| ctx.config.sandbox.paths.is_credential(p))
                     })
             })
             .map(String::as_str)

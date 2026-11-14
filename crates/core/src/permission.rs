@@ -232,13 +232,12 @@ impl ManagedSettings {
 }
 
 /// What the permission engine reads of the loaded settings: every tier's
-/// rules, the managed layer, the sandbox's view, and where a project-scoped
-/// grant is written.
+/// rules, the managed layer, and where a project-scoped grant is written. The
+/// sandbox it reads off the call's `ToolContext::config`.
 #[derive(Debug, Clone, Default)]
 pub struct PermissionSettings {
     pub rules: Vec<LoadedRule>,
     pub managed: Option<ManagedSettings>,
-    pub sandbox: crate::interface::tool::SandboxSettings,
     /// `None` for a session with no project: a grant lasts the session only.
     pub project_rules: Option<std::sync::Arc<dyn crate::interface::permission::RuleFile>>,
 }

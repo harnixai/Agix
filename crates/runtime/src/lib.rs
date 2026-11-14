@@ -4,6 +4,7 @@ pub mod agent;
 pub mod commands;
 pub mod elicitation;
 pub mod event_bus;
+mod exec;
 pub mod hook_executors;
 pub mod module;
 pub mod plugin;
