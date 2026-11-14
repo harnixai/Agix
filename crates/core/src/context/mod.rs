@@ -32,6 +32,28 @@ mod tests {
         assert_eq!(infer_context_window_tokens("gpt-5.2-codex"), 400_000);
     }
 
+    #[test]
+    fn an_output_limit_exception_wins_over_its_family() {
+        assert_eq!(infer_max_output_tokens("claude-opus-4-1-20250805"), 32_000);
+        assert_eq!(infer_max_output_tokens("claude-opus-4-5"), 64_000);
+        assert_eq!(infer_max_output_tokens("deepseek-chat"), 8_192);
+        assert_eq!(infer_max_output_tokens("deepseek-v4-flash"), 64_000);
+    }
+
+    #[test]
+    fn an_output_limit_looks_through_a_provider_prefix() {
+        assert_eq!(infer_max_output_tokens("anthropic/claude-3-5-haiku"), 8_192);
+        assert_eq!(
+            infer_max_output_tokens("us.anthropic.claude-sonnet-4-5"),
+            64_000
+        );
+        assert_eq!(infer_max_output_tokens("openai/GPT-4o-mini"), 16_384);
+        assert_eq!(
+            infer_max_output_tokens("llama-3.3-70b"),
+            UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
+        );
+    }
+
     fn task_events(rx: &mut tokio::sync::broadcast::Receiver<TaskEvent>) -> Vec<serde_json::Value> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .map(|e| serde_json::to_value(e).unwrap())

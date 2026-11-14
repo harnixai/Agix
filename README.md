@@ -582,6 +582,7 @@ A few switches whose effect the rest of this README does not mention:
 | Setting | Default | Effect |
 |---|---|---|
 | `model.fallback_model` | none | the model a call is retried on when the main one stays overloaded (529) |
+| `model.max_output_tokens` | by model name | the most `max_tokens` a reply cut off at its limit is retried with |
 | `memory_enabled` | `true` | file-based memory: the memory prompt, the index in each turn's reminder, recall |
 | `telemetry_enabled` | `true` | one telemetry JSONL file per session under the state directory's `telemetry/` |
 | `telemetry_url` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |

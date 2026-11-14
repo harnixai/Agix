@@ -22,6 +22,7 @@ mod inline_command_pipeline;
 mod instruction_files;
 mod managed_settings;
 mod max_tokens_fallback;
+mod max_tokens_recovery;
 mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;

@@ -366,6 +366,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("model.base_url", Withheld),
         ("model.effort", Free),
         ("model.fallback_model", Free),
+        ("model.max_output_tokens", Free),
         ("model.max_tokens", Free),
         ("model.model_name", Free),
         ("model.thinking_mode", Free),

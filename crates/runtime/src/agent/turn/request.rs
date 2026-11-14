@@ -586,13 +586,16 @@ impl Agent {
     /// act on the answer.
     ///
     /// Returns true when the caller should run another round. The ladder
-    /// itself — 64K first, 8K after, three attempts, the nudge — is
-    /// `DefaultRecovery`'s; what stays here is applying the answer to the
-    /// loop's own state, which is the part that has to happen in this order.
+    /// itself is `DefaultRecovery`'s; what stays here is applying the answer
+    /// to the loop's own state, which is the part that has to happen in this
+    /// order, and holding a raised limit to what `model` accepts — a policy
+    /// knows no model names, and a request past the model's limit is refused
+    /// before it starts. A raise never lowers the limit already in force.
     /// A continuation adds nothing: the stopped reply is already the
     /// conversation's last message, which is what the provider continues from.
     pub(super) fn handle_early_stop(
         &mut self,
+        model: &str,
         stop_reason: &str,
         max_tokens_recovery: &mut u32,
         effective_max_tokens: &mut u32,
@@ -616,7 +619,13 @@ impl Agent {
             }
             StopRecovery::RaiseOutputLimit { max_tokens, nudge } => {
                 *max_tokens_recovery += 1;
-                *effective_max_tokens = max_tokens;
+                let ceiling = self
+                    .settings
+                    .values
+                    .model
+                    .max_output_tokens
+                    .unwrap_or_else(|| base::context::config::infer_max_output_tokens(model));
+                *effective_max_tokens = max_tokens.min(ceiling).max(*effective_max_tokens);
                 if let Some(nudge) = nudge {
                     self.session.push_message(ModelMessage {
                         role: MessageRole::User,

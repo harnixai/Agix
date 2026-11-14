@@ -20,6 +20,7 @@ impl Agent {
     ) -> ControlFlow<StopReason> {
         let stop_reason = result.stop_reason;
         if self.handle_early_stop(
+            &state.model,
             &stop_reason,
             &mut state.output_limit_escalations,
             &mut state.max_tokens,

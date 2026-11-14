@@ -171,6 +171,16 @@
             "null"
           ]
         },
+        "max_output_tokens": {
+          "default": null,
+          "description": "The most `max_tokens` a reply cut off at its limit is retried with.\nUnset, the model's documented limit, looked up by its name.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "max_tokens": {
           "format": "uint32",
           "minimum": 0,

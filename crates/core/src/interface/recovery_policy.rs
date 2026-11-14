@@ -10,8 +10,9 @@
 //! ([`LadderBackoff::MAX_SERVER_HINT`]), which fails instead. Anything else
 //! fails. A response cut off at the
 //! output limit escalates the limit — to 64K the first time, 8K after that,
-//! three attempts, with a fixed nudge appended. A response the provider paused
-//! is sent back to be continued.
+//! three attempts, each time with a user message saying the reply was cut off
+//! and asking it to go on; the engine holds the raised limit to what the model
+//! accepts. A response the provider paused is sent back to be continued.
 //!
 //! Every one of those is a reasonable answer and none of them is the only
 //! one. A deployment on a single model has no fallback to switch to and would
@@ -138,11 +139,12 @@ pub enum StopRecovery {
     Continue,
     /// Raise the output limit and ask again.
     RaiseOutputLimit {
+        /// Held to the model's own output limit by the engine.
         max_tokens: u32,
-        /// Text to append as a user message before retrying, if any. The
-        /// engine's default appends a nudge telling the model to resume
-        /// mid-thought rather than apologize and recap — which is worth
-        /// keeping and worth being able to reword.
+        /// Text to append as a user message before retrying, if any. Without
+        /// one the retry ends on the cut-off reply, which the provider takes
+        /// as a prefill to continue — and several refuse: Anthropic with
+        /// thinking on, or when the reply ends in whitespace.
         nudge: Option<String>,
     },
 }
@@ -187,14 +189,15 @@ pub struct DefaultRecovery {
 impl DefaultRecovery {
     /// First escalation goes straight to 64K on the theory that a response cut
     /// off once will be cut off again at a smaller bump; later ones settle at
-    /// 8K and lean on the nudge instead.
+    /// 8K. The engine holds either to the model's own limit.
     pub const FIRST_ESCALATION: u32 = 64_000;
     pub const LATER_ESCALATION: u32 = 8_000;
 
-    pub const NUDGE: &'static str = "Output token limit hit. Resume directly — no apology, no \
-                                     recap of what you were doing. Pick up mid-thought if that \
-                                     is where the cut happened. Break remaining work into \
-                                     smaller pieces.";
+    pub const NUDGE: &'static str = "Your previous reply was cut off at the output token \
+                                     limit. Continue from exactly where it stopped — no \
+                                     apology, no recap of what you were doing. Pick up \
+                                     mid-thought if that is where the cut happened. Break \
+                                     remaining work into smaller pieces.";
 
     /// How long to wait before each [`Recovery::RetrySame`] when the provider
     /// named no delay. Its length is the budget.
@@ -246,19 +249,13 @@ impl RecoveryPolicy for DefaultRecovery {
         {
             return StopRecovery::Accept;
         }
-        // The first escalation is a limit change and nothing else; later ones
-        // also nudge, because by then the model has been cut off twice and the
-        // limit is evidently not the whole problem.
-        if attempt.output_limit_escalations == 0
-            && attempt.current_max_tokens < Self::FIRST_ESCALATION
-        {
-            return StopRecovery::RaiseOutputLimit {
-                max_tokens: Self::FIRST_ESCALATION,
-                nudge: None,
-            };
-        }
+        let max_tokens = if attempt.output_limit_escalations == 0 {
+            attempt.current_max_tokens.max(Self::FIRST_ESCALATION)
+        } else {
+            attempt.current_max_tokens.max(Self::LATER_ESCALATION)
+        };
         StopRecovery::RaiseOutputLimit {
-            max_tokens: attempt.current_max_tokens.max(Self::LATER_ESCALATION),
+            max_tokens,
             nudge: Some(Self::NUDGE.to_string()),
         }
     }
@@ -465,14 +462,15 @@ mod tests {
     /// The escalation ladder, which is three numbers and an ordering that a
     /// reader has no way to check against intent — so it is checked here.
     #[test]
-    fn the_escalation_ladder_is_64k_then_8k_with_a_nudge() {
+    fn the_escalation_ladder_is_64k_then_8k_each_with_a_nudge() {
         let p = DefaultRecovery::new(None);
         assert_eq!(
             p.on_early_stop("max_tokens", &attempt(0, 2000)),
             StopRecovery::RaiseOutputLimit {
                 max_tokens: 64_000,
-                nudge: None
-            }
+                nudge: Some(DefaultRecovery::NUDGE.to_string())
+            },
+            "the first retry must not end on the cut-off reply"
         );
         assert_eq!(
             p.on_early_stop("max_tokens", &attempt(1, 64_000)),

@@ -237,6 +237,10 @@ pub struct ModelSettings {
     /// None = no fallback.
     #[serde(default)]
     pub fallback_model: Option<String>,
+    /// The most `max_tokens` a reply cut off at its limit is retried with.
+    /// Unset, the model's documented limit, looked up by its name.
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
 }
 
 impl std::fmt::Debug for ModelSettings {
@@ -636,6 +640,7 @@ impl Settings {
                 thinking_mode: ThinkingMode::On,
                 effort: Some(Effort::High),
                 fallback_model: None,
+                max_output_tokens: None,
             },
             execution: ExecutionSettings::default(),
             compaction: CompactionConfig::default(),

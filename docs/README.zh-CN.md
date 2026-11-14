@@ -477,6 +477,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | 设置 | 缺省 | 作用 |
 |---|---|---|
 | `model.fallback_model` | 无 | 主模型一直过载(529)时改用这个模型重试 |
+| `model.max_output_tokens` | 按模型名查 | 回复在 `max_tokens` 处被截断后,重试时 `max_tokens` 最多抬到多少 |
 | `memory_enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
 | `telemetry_enabled` | `true` | 每个会话在状态目录的 `telemetry/` 下写一份遥测 JSONL |
 | `telemetry_url` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |

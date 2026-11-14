@@ -406,7 +406,8 @@ impl Builder {
     /// The default is what the engine has always done: an overload switches to
     /// the configured `fallback_model` or fails, a request refused for size is
     /// compacted and retried once, and a response cut off at the output limit
-    /// escalates to 64K then 8K, three times, with a nudge.
+    /// escalates to 64K then 8K, three times, each with a nudge; the engine
+    /// holds a raised limit to the model's own (`model.max_output_tokens`).
     ///
     /// The policy chooses; the turn still performs. Compacting, rebuilding a
     /// request and sending it are things only the loop can sequence, so they
