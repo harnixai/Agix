@@ -11,6 +11,7 @@ mod bash_read_only_lane;
 mod compaction_and_trim;
 mod credentials_in_file_tools;
 mod daemon_e2e;
+mod daemon_shutdown_reply;
 mod daemon_socket_from_a_command;
 mod extension_entries;
 mod extension_points_doc;
