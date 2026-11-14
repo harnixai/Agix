@@ -3,7 +3,7 @@
 use super::memory_extraction::{extract_memories_after_turn, finish_within};
 use base::interface::memory_contracts::{MemoryRetriever, RetrievalHook};
 use base::interface::model::{Model, ModelMessage};
-use base::memory::MemoryStore;
+use memory::MemoryStore;
 use std::collections::HashSet;
 use std::sync::Arc;
 

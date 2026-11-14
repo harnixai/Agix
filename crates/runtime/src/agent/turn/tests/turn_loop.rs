@@ -6,8 +6,9 @@ use crate::turn::prompt::build_prompt_context;
 use base::event::AgentEvent;
 use base::interface::model::ThinkingMode;
 use base::interface::model::{ModelContentBlock, ModelMessage};
-use base::memory::{DurableMemory, MemoryStore, MemoryType};
+use base::memory::{DurableMemory, MemoryType};
 use base::tool::ToolContext;
+use memory::MemoryStore;
 use std::path::PathBuf;
 use std::sync::Arc;
 

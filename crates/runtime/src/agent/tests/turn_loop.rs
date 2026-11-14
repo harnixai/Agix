@@ -1063,7 +1063,7 @@ async fn turn_without_tool_use_does_not_wait_on_a_slow_memory_prefetch() {
     // prefetch branch — see its own "headers.len() <= max_results"
     // early return.
     let tmp = tempfile::tempdir().unwrap();
-    let memory_store = Arc::new(base::memory::MemoryStore::new(
+    let memory_store = Arc::new(memory::MemoryStore::new(
         tmp.path().join("user"),
         tmp.path().join("local"),
     ));

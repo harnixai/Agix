@@ -59,16 +59,14 @@ pub(crate) async fn collect_frozen(
     environment: &dyn base::interface::environment::Environment,
     engine_git: &base::engine_exec::EngineExec,
 ) -> base::frozen::FrozenContext {
-    use base::frozen::FrozenContext;
+    use base::frozen::CollectOptions;
     let config_paths = base::paths::ConfigPaths::from_settings(paths);
     let cwd = paths.working_dir().to_path_buf();
-    match paths.project_root() {
-        Some(_) => FrozenContext::collect(cwd, &config_paths, environment, engine_git).await,
-        None => {
-            FrozenContext::collect_without_project(cwd, &config_paths, environment, engine_git)
-                .await
-        }
-    }
+    let opts = CollectOptions {
+        outside_project: paths.project_root().is_none(),
+        ..CollectOptions::defaults()
+    };
+    super::frozen::collect(cwd, opts, &config_paths, environment, engine_git).await
 }
 
 /// The execution providers a session's tool calls reach the machine through,

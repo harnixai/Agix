@@ -189,7 +189,7 @@ impl Builder {
             self.host
                 .memory_retriever
                 .take()
-                .unwrap_or_else(|| Arc::new(base::interface::memory_contracts::LlmRetriever)),
+                .unwrap_or_else(|| Arc::new(memory::LlmRetriever)),
             retrieval_hooks,
             self.spec.memory_extraction,
         )

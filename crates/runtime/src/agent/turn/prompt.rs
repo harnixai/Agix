@@ -225,7 +225,7 @@ pub(super) fn build_prompt_context<'a>(
     let mut ctx = ScenePromptContext::default();
     ctx.cwd = Cow::Owned(settings.paths.working_dir().display().to_string());
     ctx.os = Cow::Borrowed(std::env::consts::OS);
-    // `FrozenContext::collect` always sets `shell` (falls back to
+    // `FrozenContext::collect_environment` always sets `shell` (falls back to
     // `/bin/bash` itself when `$SHELL` is unset), so this fallback only
     // matters before the first turn's collection has happened.
     ctx.shell = Cow::Owned(shell.unwrap_or_else(|| "/bin/bash".to_string()));
@@ -421,9 +421,9 @@ impl Agent {
     /// Build the instruction-file context injected once per session as a
     /// `<system-reminder>` (the `# claudeMd` block).
     ///
-    /// `FrozenContext::collect` walks the directory tree upward and gathers
+    /// The frozen collection walks the directory tree upward and gathers
     /// every `AGENTS.md` it finds into `memory_blocks`
-    /// (`collect_memory_files_with`), so a session rooted in a sub-package of
+    /// (`skill_format::collect_agents_md`), so a session rooted in a sub-package of
     /// a monorepo also sees the repository-root conventions.
     ///
     /// **Precedence: root-first, nearest-last, nearest wins.** Files are
@@ -598,7 +598,7 @@ impl Agent {
         let values = &self.settings.values;
         let memory_prompt: Option<String> = values
             .memory_enabled
-            .then(|| base::memory::memory_prompt(self.memory.store()));
+            .then(|| memory::memory_prompt(self.memory.store()));
         let blocks = self.prompt.prompt_assembler.assemble(
             &base::interface::prompt_assembler::AssemblyRequest {
                 registry: self.prompt.registry().as_ref(),

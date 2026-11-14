@@ -4,6 +4,7 @@
 
 mod attachments;
 mod compact;
+mod frozen;
 mod gate;
 mod inline_commands;
 mod memory_extraction;

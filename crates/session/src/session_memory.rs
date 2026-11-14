@@ -125,14 +125,9 @@ impl SessionMemory {
         let path = &self.inner.path;
         let content = tokio::fs::read_to_string(path).await.unwrap_or_default();
 
-        let (frontmatter, body) = if let Some(rest) = content.strip_prefix("---") {
-            if let Some((fm, rest)) = rest.split_once("\n---") {
-                (fm.trim().to_string(), rest.trim_start().to_string())
-            } else {
-                (String::new(), content.clone())
-            }
-        } else {
-            (String::new(), content.clone())
+        let (frontmatter, body) = match base::text::frontmatter::split_frontmatter(&content) {
+            (Some(fm), body) => (fm.trim().to_string(), body.trim_start().to_string()),
+            (None, _) => (String::new(), content.clone()),
         };
 
         // Rebuild frontmatter: update matching line or append.

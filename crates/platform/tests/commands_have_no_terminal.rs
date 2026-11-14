@@ -78,8 +78,9 @@ fn a_filter_the_engines_git_runs_cannot_reach_the_terminal() {
                 );
                 let project = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
                 repository_with_a_terminal_probing_filter(project.path());
-                let ctx = runtime.block_on(FrozenContext::collect(
+                let ctx = runtime.block_on(FrozenContext::collect_environment(
                     project.path().to_path_buf(),
+                    &base::frozen::CollectOptions::defaults(),
                     &base::paths::ConfigPaths::new(
                         state.path().join(".agix"),
                         state.path().join(".agix"),

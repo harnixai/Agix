@@ -99,8 +99,9 @@ async fn a_filter_the_repository_names_runs_inside_the_sessions_sandbox() {
         ProjectTrust::Trusted,
     )
     .with_min_deadline(std::time::Duration::from_secs(60));
-    let mut ctx = FrozenContext::collect(
+    let mut ctx = FrozenContext::collect_environment(
         project.to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(state_root),
         &base::interface::environment::SystemEnvironment,
         &sandboxed,

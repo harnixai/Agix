@@ -10,6 +10,7 @@ description  = "Agix — the assembly: modules into sessions, sessions into a po
 [dependencies]
 base          = { workspace = true }
 settings          = { workspace = true }
+memory = { workspace = true }
 platform      = { workspace = true }
 runtime       = { workspace = true }
 agents        = { workspace = true, optional = true }

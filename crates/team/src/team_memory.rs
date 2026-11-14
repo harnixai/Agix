@@ -12,12 +12,13 @@
 use async_trait::async_trait;
 use base::error::ToolError;
 use base::interface::permission::{PermissionFacts, Reach, Subject};
-pub use base::memory::{scan_for_secrets, SecretPattern};
-use base::memory::{DurableMemory, MemoryError, MemoryStore, MemoryType};
+use base::memory::{DurableMemory, MemoryError, MemoryType};
 use base::tool::{
     PathStyle, ProgressSender, PromptContext, Tool, ToolContext, ToolResult, ToolSpec,
     ValidationResult,
 };
+use memory::scan_for_secrets;
+use memory::MemoryStore;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

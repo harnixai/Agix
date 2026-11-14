@@ -101,7 +101,7 @@ pub(super) struct SpecSetup {
     pub(super) tool_selector: base::interface::tool_selector::ToolSelector,
     /// Pre-built FrozenContext — skips lazy collection on first turn.
     /// When set, the Agent uses this snapshot instead of calling
-    /// `FrozenContext::collect()`. Essential for deterministic replay.
+    /// `runtime`'s frozen `collect()`. Essential for deterministic replay.
     pub(super) frozen: Option<base::frozen::FrozenContext>,
     /// See [`Builder::question_prompts`].
     pub(super) question_prompts: bool,

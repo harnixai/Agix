@@ -33,8 +33,8 @@
 
 use base::interface::script::ScriptOutcome;
 use base::interface::tool::InMemoryToolRegistry;
-use base::memory::MemoryStore;
 use base::memory::{DurableMemory, MemoryType};
+use memory::MemoryStore;
 use std::path::Path;
 use std::sync::Arc;
 use test_runner::script_session::{drive, Ran, Session};

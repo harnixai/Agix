@@ -32,7 +32,8 @@
 
 use base::interface::script::ScriptOutcome;
 use base::interface::tool::{PathStyle, ProgressSender, Tool, ToolContext, ToolResult};
-use base::memory::{DurableMemory, MemoryStore, MemoryType};
+use base::memory::{DurableMemory, MemoryType};
+use memory::MemoryStore;
 use std::sync::Arc;
 use test_runner::script_session::{drive, Ran, Session};
 use test_runner::scripted_model::Reply;

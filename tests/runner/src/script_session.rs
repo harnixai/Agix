@@ -25,7 +25,7 @@ use base::interface::scene::SceneSpec;
 use base::interface::script::ScriptBinding;
 use base::interface::script::{ScriptLedger, ScriptOutcome, ScriptRecord};
 use base::interface::tool::{InMemoryToolRegistry, Tool};
-use base::memory::MemoryStore;
+use memory::MemoryStore;
 use runtime::agent::{Builder, InputMessage};
 use settings::Settings;
 use tokio_util::sync::CancellationToken;

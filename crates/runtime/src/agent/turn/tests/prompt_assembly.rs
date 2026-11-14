@@ -358,8 +358,9 @@ async fn parent_agents_md_reaches_the_prompt_with_nearest_last() {
     std::fs::write(parent.join("AGENTS.md"), "ROOT-CONVENTION: use tabs").unwrap();
     std::fs::write(child.join("AGENTS.md"), "PACKAGE-CONVENTION: use spaces").unwrap();
 
-    let frozen = base::frozen::FrozenContext::collect(
+    let frozen = super::super::frozen::collect(
         child.clone(),
+        base::frozen::CollectOptions::defaults(),
         &base::paths::ConfigPaths::new(child.join(".state"), child.join(".agix"), "code"),
         &base::interface::environment::SystemEnvironment,
         &base::engine_exec::EngineExec::new(
@@ -412,8 +413,9 @@ async fn single_instruction_file_is_injected_verbatim() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("AGENTS.md"), "ONLY-CONVENTION").unwrap();
 
-    let frozen = base::frozen::FrozenContext::collect(
+    let frozen = super::super::frozen::collect(
         root.clone(),
+        base::frozen::CollectOptions::defaults(),
         &base::paths::ConfigPaths::new(root.join(".state"), root.join(".agix"), "code"),
         &base::interface::environment::SystemEnvironment,
         &base::engine_exec::EngineExec::new(

@@ -307,14 +307,13 @@ impl HealthCheck for MemoryCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let cap = base::memory::MAX_MEMORIES;
+        let cap = memory::MAX_MEMORIES;
         if !self.0.values.memory_enabled {
             return CheckResult::ok("memory is off")
                 .with_details(serde_json::json!({ "enabled": false, "cap": cap }));
         }
-        let store = base::memory::MemoryStore::for_paths(&base::paths::ConfigPaths::from_settings(
-            &self.0.paths,
-        ));
+        let store =
+            memory::MemoryStore::for_paths(&base::paths::ConfigPaths::from_settings(&self.0.paths));
         let count = store.count();
         let details = serde_json::json!({ "enabled": true, "count": count, "cap": cap });
         if count >= cap {
@@ -837,7 +836,7 @@ mod tests {
         settings.paths.workspace =
             base::paths::Workspace::project_of(&settings.paths.local_data_dir);
         let settings = Arc::new(settings);
-        let store = base::memory::MemoryStore::for_paths(&base::paths::ConfigPaths::from_settings(
+        let store = memory::MemoryStore::for_paths(&base::paths::ConfigPaths::from_settings(
             &settings.paths,
         ));
         let fill = |from: usize, to: usize| {
@@ -858,7 +857,7 @@ mod tests {
                 )
                 .unwrap();
         };
-        let cap = base::memory::MAX_MEMORIES;
+        let cap = memory::MAX_MEMORIES;
         let memory_check = |settings: &Arc<LoadedSettings>| {
             let report = run_doctor(
                 &StaticDaemonPaths::new(dir.path().to_path_buf()),

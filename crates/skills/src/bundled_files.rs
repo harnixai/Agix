@@ -42,7 +42,7 @@ async fn reparse_skill_entry(
         .and_then(|p| p.file_name())
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    base::frozen::frontmatter::parse_skill_file(
+    skill_format::parse_skill_file(
         &content,
         dir_name,
         skill_path,

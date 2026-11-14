@@ -28,8 +28,9 @@ fn direct() -> EngineExec {
 async fn detects_git_repo_in_a_real_repo() {
     // 当前 cwd 是 agix 仓库本身，已经初始化了 git
     let pwd = std::env::current_dir().unwrap();
-    let ctx = FrozenContext::collect(
+    let ctx = FrozenContext::collect_environment(
         pwd.clone(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(&pwd),
         &SystemEnvironment,
         &direct(),
@@ -83,8 +84,9 @@ async fn the_engines_git_does_not_run_the_repositorys_fsmonitor() {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     run(&["config", "core.fsmonitor", script.to_str().unwrap()]);
 
-    let mut ctx = FrozenContext::collect(
+    let mut ctx = FrozenContext::collect_environment(
         dir.path().to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(dir.path()),
         &SystemEnvironment,
         &direct(),
@@ -123,8 +125,9 @@ async fn a_git_the_sandbox_cannot_hold_is_not_run_when_the_host_requires_one() {
                 },
                 ProjectTrust::Trusted,
             );
-            FrozenContext::collect(
+            FrozenContext::collect_environment(
                 pwd.clone(),
+                &base::frozen::CollectOptions::defaults(),
                 &test_paths(&pwd),
                 &SystemEnvironment,
                 &engine_git,
@@ -154,8 +157,9 @@ async fn without_origin_head_the_main_branch_is_the_local_main_or_master() {
     run(&["branch", "-M", "master"]);
     run(&["checkout", "-q", "-b", "feature"]);
 
-    let ctx = FrozenContext::collect(
+    let ctx = FrozenContext::collect_environment(
         dir.path().to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(dir.path()),
         &SystemEnvironment,
         &direct(),
@@ -178,8 +182,9 @@ async fn refresh_git_picks_up_a_branch_change() {
     run(&["commit", "--allow-empty", "-q", "-m", "init"]);
     run(&["checkout", "-q", "-b", "original-branch"]);
 
-    let mut ctx = FrozenContext::collect(
+    let mut ctx = FrozenContext::collect_environment(
         dir.path().to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(dir.path()),
         &SystemEnvironment,
         &direct(),
@@ -218,8 +223,9 @@ async fn refresh_git_status_picks_up_a_commit_made_mid_session() {
         .unwrap();
     run(&["add", "dirty.txt"]);
 
-    let mut ctx = FrozenContext::collect(
+    let mut ctx = FrozenContext::collect_environment(
         dir.path().to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(dir.path()),
         &SystemEnvironment,
         &direct(),
@@ -276,8 +282,9 @@ async fn an_untrusted_repository_outside_a_sandbox_gives_only_its_branch() {
         Confinement::Unconfined,
         ProjectTrust::Untrusted,
     );
-    let ctx = FrozenContext::collect(
+    let ctx = FrozenContext::collect_environment(
         repo.to_path_buf(),
+        &base::frozen::CollectOptions::defaults(),
         &test_paths(repo),
         &SystemEnvironment,
         &engine_git,

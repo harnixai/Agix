@@ -10,6 +10,7 @@ description  = "Agix — skill manager + bundled skills"
 [dependencies]
 base          = { workspace = true }
 settings          = { workspace = true }
+skill-format = { workspace = true }
 runtime       = { workspace = true }
 permissions   = { workspace = true }
 tools         = { workspace = true }

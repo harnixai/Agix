@@ -1,10 +1,11 @@
 //! 回合结束后的持久记忆抽取。
 
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
-use base::memory::{DurableMemory, MemoryStore, MemoryType};
+use base::memory::{DurableMemory, MemoryType};
+use memory::MemoryStore;
 use std::sync::Arc;
 
-const CAP: usize = base::memory::MAX_MEMORIES;
+const CAP: usize = memory::MAX_MEMORIES;
 
 /// How long a stopping session waits for its memory extractions. Under the
 /// daemon's grace for a stopping engine, so a session brought back right away
@@ -85,7 +86,7 @@ pub(crate) async fn extract_memories_after_turn(
     let memories: Vec<DurableMemory> = memories
         .into_iter()
         .filter(|memory| {
-            let found = base::memory::scan_for_secrets(memory);
+            let found = memory::scan_for_secrets(memory);
             if !found.is_empty() {
                 let kinds: Vec<&str> = found.iter().map(|f| f.kind).collect();
                 tracing::warn!(memory = %memory.name, ?kinds, "not saving an extracted memory that holds a secret");
@@ -251,14 +252,14 @@ async fn persist_memories(store: Arc<MemoryStore>, memories: Vec<DurableMemory>)
     // user or external resources and is global. Persisting the whole batch
     // globally — which is what the unscoped `persist_batch` does for new
     // names — leaked one project's context into every other project.
-    let scoped: Vec<base::memory::ScopedMemory> = memories
+    let scoped: Vec<memory::ScopedMemory> = memories
         .into_iter()
         .map(|memory| {
             let scope = match memory.memory_type {
-                MemoryType::Project => base::memory::MemoryScope::Local,
-                _ => base::memory::MemoryScope::User,
+                MemoryType::Project => memory::MemoryScope::Local,
+                _ => memory::MemoryScope::User,
             };
-            base::memory::ScopedMemory { memory, scope }
+            memory::ScopedMemory { memory, scope }
         })
         .collect();
     let persisted = tokio::task::spawn_blocking(move || {
