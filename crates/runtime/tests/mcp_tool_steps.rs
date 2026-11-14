@@ -57,6 +57,9 @@ impl McpServers for CountingMcp {
             is_error: true,
         }
     }
+    fn granted(&self, _: Option<&[String]>) -> Box<dyn McpServers> {
+        Box::new(base::interface::mcp_servers::NoMcpServers)
+    }
 }
 
 struct CountingModule(Mutex<Option<CountingMcp>>);

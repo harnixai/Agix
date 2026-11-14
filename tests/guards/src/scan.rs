@@ -99,6 +99,8 @@ pub struct TraitInfo {
     pub attrs: Vec<String>,
     pub supertraits: Vec<String>,
     pub items: Vec<String>,
+    /// The methods that have a default body.
+    pub defaulted: Vec<String>,
     pub hit: Hit,
 }
 
@@ -108,6 +110,9 @@ pub struct ImplInfo {
     pub self_ty: String,
     pub attrs: Vec<String>,
     pub items: Vec<String>,
+    /// The last segment of every trait bound on the impl's type parameters,
+    /// in the angle brackets and in the `where` clause.
+    pub param_bounds: Vec<String>,
     pub hit: Hit,
 }
 
@@ -982,11 +987,32 @@ impl<'ast> Visit<'ast> for Collector<'_> {
                     _ => None,
                 })
                 .collect();
+            let mut param_bounds = Vec::new();
+            let preds = item.generics.where_clause.iter().flat_map(|w| {
+                w.predicates.iter().filter_map(|p| match p {
+                    syn::WherePredicate::Type(t) => Some(&t.bounds),
+                    _ => None,
+                })
+            });
+            let inline = item.generics.params.iter().filter_map(|p| match p {
+                syn::GenericParam::Type(t) => Some(&t.bounds),
+                _ => None,
+            });
+            for bounds in inline.chain(preds) {
+                for b in bounds {
+                    if let syn::TypeParamBound::Trait(t) = b {
+                        if let Some(seg) = t.path.segments.last() {
+                            param_bounds.push(seg.ident.to_string());
+                        }
+                    }
+                }
+            }
             self.found.impls.push(ImplInfo {
                 trait_path: item.trait_.as_ref().map(|(_, p, _)| segments(p)),
                 self_ty: self_ty.clone(),
                 attrs: self.attrs(&item.attrs),
                 items,
+                param_bounds,
                 hit: self.f.hit(item.impl_token.span),
             });
         }
@@ -1007,6 +1033,14 @@ impl<'ast> Visit<'ast> for Collector<'_> {
                     _ => None,
                 })
                 .collect();
+            let defaulted = item
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    syn::TraitItem::Fn(f) if f.default.is_some() => Some(f.sig.ident.to_string()),
+                    _ => None,
+                })
+                .collect();
             self.found.traits.push(TraitInfo {
                 name: item.ident.to_string(),
                 vis: vis(&item.vis),
@@ -1017,6 +1051,7 @@ impl<'ast> Visit<'ast> for Collector<'_> {
                     .map(|b| b.to_token_stream().to_string())
                     .collect(),
                 items,
+                defaulted,
                 hit: self.f.hit(item.ident.span()),
             });
         }

@@ -4,6 +4,7 @@
 
 mod api_surface;
 mod base;
+mod decorators;
 mod delegation;
 mod deps;
 mod layering;

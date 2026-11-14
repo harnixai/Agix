@@ -360,6 +360,9 @@ pub(crate) mod fakes {
                 is_error: true,
             }
         }
+        fn granted(&self, _: Option<&[String]>) -> Box<dyn McpServers> {
+            Box::new(base::interface::mcp_servers::NoMcpServers)
+        }
     }
 
     pub(crate) struct FakeMcpModule(Mutex<Option<FakeMcp>>);

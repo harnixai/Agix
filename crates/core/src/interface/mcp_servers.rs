@@ -34,10 +34,7 @@ pub trait McpServers: Send + Sync {
     /// The same connections, as servers another session can own — what a
     /// delegate is granted: only `servers`, or every one when `None`. A named
     /// server not connected here is left out.
-    fn granted(&self, servers: Option<&[String]>) -> Box<dyn McpServers> {
-        let _ = servers;
-        Box::new(NoMcpServers)
-    }
+    fn granted(&self, servers: Option<&[String]>) -> Box<dyn McpServers>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,5 +78,8 @@ impl McpServers for NoMcpServers {
             text: format!("no MCP server provides `/{command}`"),
             is_error: true,
         }
+    }
+    fn granted(&self, _: Option<&[String]>) -> Box<dyn McpServers> {
+        Box::new(NoMcpServers)
     }
 }
