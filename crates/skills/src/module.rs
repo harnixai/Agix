@@ -100,23 +100,11 @@ impl Module for SkillsModule {
 /// Also starts this manager's own live-reload watcher (`notify` setup
 /// failing degrades to no live reload, logged, not a hard error — every
 /// other watcher in this codebase handles it the same way).
-///
-/// A host that already watches these directories wants
-/// [`build_skill_manager_unwatched`] instead: one watcher per manager is
-/// fine for one manager, and a `notify` backend has a per-process ceiling
-/// that a host building one of these per project will reach.
 pub fn build_default_skill_manager(settings: &LoadedSettings) -> SkillManager {
     build_skill_manager(settings, &[], true)
 }
 
-/// [`build_default_skill_manager`] without the watcher — the same catalog,
-/// reloaded by whoever is already watching rather than by a `notify` thread
-/// of its own.
-pub fn build_skill_manager_unwatched(settings: &LoadedSettings) -> SkillManager {
-    build_skill_manager(settings, &[], false)
-}
-
-/// [`build_skill_manager_unwatched`] with what installed plugin packages ship,
+/// The default skill manager (without a watcher) with what installed plugin packages ship,
 /// between the tiers and the built-ins: a skill on disk wins over a package's
 /// of the same name, and a package's over a built-in, the order agent types
 /// are merged in.
