@@ -146,12 +146,12 @@ impl HookEvent {
                 ),
             ),
             HookEvent::PreCompact => (
-                "每次压缩之前(按阈值自动压、`/compact`、恢复策略要求的压缩)",
+                "每次压缩之前(按阈值自动压、`/compact`、请求因体积被拒后的压缩)。修剪不算压缩,不触发它",
                 "`tool_input`:`messages_before`、`token_count`、`threshold`、`trigger`(`auto` / `manual`)",
                 Acts("`decision: \"block\"` 或 `continue: false`:这次不压缩"),
             ),
             HookEvent::PostCompact => (
-                "压缩完成之后",
+                "压缩完成之后;修剪之后不发",
                 "`tool_input`:`strategy`、`messages_before`、`messages_after`、`tokens_before`、`tokens_after`",
                 Ignored,
             ),

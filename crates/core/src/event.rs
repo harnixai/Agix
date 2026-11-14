@@ -252,7 +252,7 @@ pub enum AgentEvent {
     /// System notification.
     System { message: String },
 
-    /// Context compaction occurred.
+    /// The history was compacted or trimmed.
     CompactAction {
         strategy: String,
         messages_before: usize,
@@ -269,6 +269,10 @@ pub enum AgentEvent {
         tokens_before: usize,
         #[serde(default)]
         tokens_after: usize,
+        /// The history was trimmed (old tool results blanked), not compacted:
+        /// no message was dropped and no `PreCompact`/`PostCompact` ran.
+        #[serde(default)]
+        trim: bool,
     },
 
     /// Session was changed (via set_session_id).

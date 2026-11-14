@@ -2710,7 +2710,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的)。缓存了 `commands.list` 的客户端该重取 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
-| `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?}` | 上下文被压缩了(§7.1) |
+| `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
 | `user_message_refused` | `{message_id,content,message}` | 运行中送来的消息被 `UserPromptSubmit` 拒收,不在 transcript 里;`message` 是 hook 给的理由,可为 `null` |
 | `user_messages_returned` | `{messages:[{message_id,content}]}` | 运行中送来、但本轮结束前没读到的消息,不在 transcript 里,交还客户端 |
@@ -2765,7 +2765,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
   "messages_before":84, "messages_after":22,
   "tokens_before":152000, "tokens_after":41000,   // 引擎对历史大小的估算
   "dropped_rounds":9, "dropped_messages":61,      // 可选,压缩策略给不出就不出现
-  "estimated_tokens_saved":31200 }                // 同上
+  "estimated_tokens_saved":31200,                 // 同上
+  "trim":true }                                   // 可选,只在修剪时出现
 ```
 
 `strategy` 是引擎选中的那一档:`Snip`(丢最旧的轮次)、`MicroCompact`(清空旧工具结
@@ -2777,12 +2778,14 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 答它。压缩发生在轮次中间,所以它**不是终止帧**,后面照常有 `text_delta` 与
 `turn_complete`。
 
-每一次真正改了对话的压缩都发这一帧:上下文过了阈值、`/compact`、请求因体积被厂商拒绝
-后的压缩重发,开了 `compaction.reactive` 时轮中提前清掉旧工具结果的那一趟,以及按时间清掉
-旧工具结果的那一趟(会话不少于 100 条消息时,15 分钟以前的;两者都是 `MicroCompact`,
-消息条数不变,`tokens_after` 变小)。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多
-时,什么都不改,也不发这一帧。`tokens_after` 算的是压缩后的整段对话,包括补回来的
-恢复消息(压缩前读过的文件、调用过的 skill、计划模式与后台任务的提醒)。
+每一次真正改了对话的压缩或修剪都发这一帧。**压缩**改写历史、丢消息:上下文过了阈值、
+`/compact`、请求因体积被厂商拒绝后的压缩重发;它触发 `PreCompact`/`PostCompact`,帧里没有
+`trim`。**修剪**只把旧工具结果的正文换成占位:开了 `compaction.reactive` 时轮中提前清掉旧
+工具结果的那一趟,以及按时间清掉旧工具结果的那一趟(会话不少于 100 条消息时,15 分钟以前的);
+两者都是 `MicroCompact`,消息条数不变,`tokens_after` 变小,帧上带 `"trim": true`,不触发
+hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多时,什么都不改,也不发这一帧。
+压缩的 `tokens_after` 算的是压缩后的整段对话,包括补回来的恢复消息(压缩前读过的文件、
+调用过的 skill、计划模式与后台任务的提醒)。
 
 后三项是策略相关的:给不出的策略就不带这三个键,不是带 `null`。
 

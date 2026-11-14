@@ -470,7 +470,7 @@ impl Agent {
     ) -> Result<(), session::session::SessionError> {
         self.session.resume_from(id, entries)?;
         self.prompt
-            .set_context_injected(crate::turn::holds_session_context(&self.session.messages));
+            .set_context_injected(crate::turn::holds_session_context(self.session.messages()));
         Ok(())
     }
 

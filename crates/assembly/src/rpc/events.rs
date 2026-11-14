@@ -123,6 +123,8 @@ pub enum SessionEventPayload {
         dropped_messages: Option<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         estimated_tokens_saved: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        trim: bool,
     },
     UserMessageDelivered {
         message_id: String,
@@ -517,6 +519,7 @@ impl SessionEventPayload {
                 estimated_tokens_saved,
                 tokens_before,
                 tokens_after,
+                trim,
             } => Self::Compact {
                 strategy: strategy.clone(),
                 messages_before: *messages_before,
@@ -526,6 +529,7 @@ impl SessionEventPayload {
                 dropped_rounds: *dropped_rounds,
                 dropped_messages: *dropped_messages,
                 estimated_tokens_saved: *estimated_tokens_saved,
+                trim: *trim,
             },
             AgentEvent::SkillsChanged {
                 added,

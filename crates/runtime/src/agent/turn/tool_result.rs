@@ -1,6 +1,5 @@
 //! 工具结果进入对话：内容渲染成文本、带外图片的收集与追加。
 
-use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use base::tool::ToolResultContent;
 
 /// A base64 image a tool returned, waiting to be attached to this round's
@@ -111,48 +110,4 @@ pub(super) fn fence_external(
         Err(_) => return,
     };
     *text = tools::external_content::fence(&source, &from, text);
-}
-
-/// Attach `images` to the tool-result message `execute_stream` just pushed.
-///
-/// **Shape, and why it is API-valid:** the images become
-/// `ModelContentBlock::Image` blocks appended *after* every `ToolResult` block in
-/// the same user message. `model::adapter::to_content_block` already maps that
-/// variant to `base::message::ContentBlock::Image { source: ImageSource::Base64 }`,
-/// so no new wire mapping is involved, and a user message's content array is a
-/// heterogeneous list that accepts `image` blocks alongside `tool_result` ones.
-/// Appending (never inserting) is the load-bearing detail: the API requires a
-/// user turn's `tool_result` blocks to come first, so images must trail them.
-///
-/// This is deliberately *not* done by rewriting `ModelContentBlock::ToolResult`
-/// to hold structured content. That variant has ~32 construction sites and ~116
-/// match sites across 17 files; widening it to carry images would be a
-/// workspace-wide refactor to express something the sibling-block form already
-/// expresses correctly.
-pub(super) fn attach_tool_result_images(
-    messages: &mut [ModelMessage],
-    images: Vec<PendingToolImage>,
-) {
-    let target = messages.iter_mut().rev().find(|m| {
-        m.role == MessageRole::User
-            && m.content
-                .iter()
-                .any(|b| matches!(b, ModelContentBlock::ToolResult { .. }))
-    });
-    let Some(msg) = target else {
-        // No tool-result message to hang them on (the round produced no tool
-        // results at all). Dropping is correct: an orphan image block with no
-        // surrounding context is noise, and we must not fabricate a user turn.
-        tracing::debug!(
-            count = images.len(),
-            "tool returned images but no tool_result message was pushed; dropping"
-        );
-        return;
-    };
-    for image in images {
-        msg.content.push(ModelContentBlock::Image {
-            media_type: image.media_type,
-            data: image.data,
-        });
-    }
 }

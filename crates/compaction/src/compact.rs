@@ -22,9 +22,9 @@ use async_trait::async_trait;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use base::text::truncate_at_char_boundary;
 
-use crate::aging::{Aging, AgingInput};
 pub use crate::budget::{enforce_tool_result_budget, ToolResultBudget, TOOL_IMAGE_CHARS};
 use crate::grouping::{estimate_tokens, group_by_api_round, ApiRound};
+use crate::trim::{StaleTrim, StaleTrimInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactStrategy {
@@ -96,8 +96,8 @@ pub enum CompactError {
     Cancelled,
 }
 
-/// What the predictive pass may look at.
-pub struct ReactiveInput {
+/// What the early trim may look at.
+pub struct EarlyTrimInput {
     pub context_tokens: usize,
     /// The effective context window. `0` disables the pass.
     pub context_limit: usize,
@@ -109,12 +109,12 @@ pub struct ReactiveInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReactiveOutcome {
+pub enum EarlyTrimOutcome {
     /// The pass is off, the circuit is open, or the prediction said there is
     /// still room.
     NotTriggered,
     /// It ran and the history is cheaper for it.
-    Compacted,
+    Trimmed,
     /// It ran and bought nothing.
     NoEffect,
 }
@@ -131,13 +131,12 @@ pub struct BudgetState {
 
 /// Compaction: when it happens, and what it does.
 ///
-/// `compact` is the transformation. The four methods around it are the
-/// judgements about *when* — two aging passes that run before the budget is
-/// consulted, a predictive pass that fires before the budget is reached, and
-/// the threshold that forces the transformation. All four were inline in the
-/// turn loop, which meant swapping the compactor changed how history was
-/// rewritten but not when, and three of the four paths never reached the
-/// compactor at all.
+/// `compact` is the transformation, the only thing that rewrites history.
+/// The methods around it are the judgements about *when*, and the trims:
+/// `trim_stale` clears tool results that grew old, `trim_early` clears them
+/// before the budget is reached, `trim_tool_results` brings them inside their
+/// budget — none of the three drops a message — and `should_compact` is the
+/// threshold that forces the transformation.
 ///
 /// Every judgement has a default that is the engine's own, so an implementor
 /// who only cares about the transformation writes `compact` and nothing else.
@@ -152,9 +151,9 @@ pub trait Compactor: Send + Sync {
         keep_rounds: usize,
     ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError>;
 
-    /// Clear what has gone stale, before anyone looks at the budget.
-    fn age(&self, messages: &mut [ModelMessage], input: &AgingInput<'_>) -> Aging {
-        let mut out = Aging::default();
+    /// Trim what has gone stale, before anyone looks at the budget.
+    fn trim_stale(&self, messages: &mut [ModelMessage], input: &StaleTrimInput<'_>) -> StaleTrim {
+        let mut out = StaleTrim::default();
         if input.time_based.max_age.is_some() {
             out.time_based = crate::time_based_mc::apply_time_based_mc(
                 messages,
@@ -171,24 +170,28 @@ pub trait Compactor: Send + Sync {
         out
     }
 
-    /// Compact early, before the budget forces a bigger one.
+    /// Trim early, before the budget forces a compaction.
     ///
     /// Adopts the result only if it made the history cheaper. The obvious
     /// criterion — fewer messages — is the wrong one here: `micro_compact`
     /// blanks tool-result bodies in place and never drops a message, so
     /// counting messages meant the result was discarded every time and this
     /// whole path had no consequence.
-    fn reactive(&self, messages: &mut Vec<ModelMessage>, input: &ReactiveInput) -> ReactiveOutcome {
+    fn trim_early(
+        &self,
+        messages: &mut Vec<ModelMessage>,
+        input: &EarlyTrimInput,
+    ) -> EarlyTrimOutcome {
         if !input.enabled || input.context_limit == 0 || input.circuit_open {
-            return ReactiveOutcome::NotTriggered;
+            return EarlyTrimOutcome::NotTriggered;
         }
-        let velocity = crate::reactive::estimate_token_velocity(messages);
-        if !crate::reactive::should_compact_reactively(
+        let velocity = crate::early_trim::estimate_token_velocity(messages);
+        if !crate::early_trim::should_trim_early(
             input.context_tokens,
             input.context_limit,
             velocity,
         ) {
-            return ReactiveOutcome::NotTriggered;
+            return EarlyTrimOutcome::NotTriggered;
         }
         let keep = input.keep_recent.max(5);
         if group_by_api_round(messages).len() <= keep {
@@ -197,15 +200,15 @@ pub trait Compactor: Send + Sync {
             // not helping, and a session with nothing old enough to clear is
             // not that. Counting it as one opens the circuit within the first
             // few rounds of every session and the pass never runs again.
-            return ReactiveOutcome::NotTriggered;
+            return EarlyTrimOutcome::NotTriggered;
         }
         let before = estimate_tokens(messages);
         let (compacted, _) = DefaultCompactor.micro_compact(messages.clone(), keep);
         if estimate_tokens(&compacted) >= before {
-            return ReactiveOutcome::NoEffect;
+            return EarlyTrimOutcome::NoEffect;
         }
         *messages = compacted;
-        ReactiveOutcome::Compacted
+        EarlyTrimOutcome::Trimmed
     }
 
     /// Tell the model compaction is coming, while there is still room to react
@@ -271,7 +274,7 @@ pub trait Compactor: Send + Sync {
 /// Compaction only when the budget forces it.
 ///
 /// A deployment that wants its transcript left alone until it genuinely has
-/// to be rewritten: no aging passes, no early compaction, no warning. Wraps
+/// to be rewritten: no stale or early trim, no warning. Wraps
 /// any compactor rather than replacing it, so "stop touching my history
 /// early" does not also mean "reimplement compaction".
 pub struct OnlyAtThreshold<C>(pub C);
@@ -287,20 +290,41 @@ impl<C: Compactor> Compactor for OnlyAtThreshold<C> {
         self.0.compact(messages, max_tokens, keep_rounds).await
     }
 
-    fn age(&self, _messages: &mut [ModelMessage], _input: &AgingInput<'_>) -> Aging {
-        Aging::default()
+    fn trim_stale(&self, _messages: &mut [ModelMessage], _input: &StaleTrimInput<'_>) -> StaleTrim {
+        StaleTrim::default()
     }
 
-    fn reactive(
+    fn trim_early(
         &self,
         _messages: &mut Vec<ModelMessage>,
-        _input: &ReactiveInput,
-    ) -> ReactiveOutcome {
-        ReactiveOutcome::NotTriggered
+        _input: &EarlyTrimInput,
+    ) -> EarlyTrimOutcome {
+        EarlyTrimOutcome::NotTriggered
     }
 
     fn context_warning(&self, _state: &BudgetState) -> Option<String> {
         None
+    }
+
+    fn should_compact(&self, state: &BudgetState) -> bool {
+        self.0.should_compact(state)
+    }
+
+    fn tool_result_budget(&self) -> ToolResultBudget {
+        self.0.tool_result_budget()
+    }
+
+    fn trim_tool_results(&self, messages: &mut [ModelMessage]) -> usize {
+        self.0.trim_tool_results(messages)
+    }
+
+    fn wants_llm_summary(
+        &self,
+        messages: &[ModelMessage],
+        max_tokens: usize,
+        keep_rounds: usize,
+    ) -> bool {
+        self.0.wants_llm_summary(messages, max_tokens, keep_rounds)
     }
 }
 
@@ -1047,8 +1071,8 @@ mod tests {
             .collect()
     }
 
-    fn reactive_input() -> ReactiveInput {
-        ReactiveInput {
+    fn early_trim_input() -> EarlyTrimInput {
+        EarlyTrimInput {
             context_tokens: 1_000,
             context_limit: 20_000,
             keep_recent: 2,
@@ -1058,11 +1082,11 @@ mod tests {
     }
 
     #[test]
-    fn the_reactive_pass_adopts_a_rewrite_that_never_drops_a_message() {
+    fn the_early_trim_adopts_a_rewrite_that_never_drops_a_message() {
         let mut messages = read_rounds(8);
         let before = estimate_tokens(&messages);
-        let outcome = DefaultCompactor.reactive(&mut messages, &reactive_input());
-        assert_eq!(outcome, ReactiveOutcome::Compacted);
+        let outcome = DefaultCompactor.trim_early(&mut messages, &early_trim_input());
+        assert_eq!(outcome, EarlyTrimOutcome::Trimmed);
         assert_eq!(
             messages.len(),
             16,
@@ -1080,8 +1104,8 @@ mod tests {
     fn having_nothing_old_enough_to_clear_is_not_a_failed_pass() {
         let mut messages = read_rounds(3);
         assert_eq!(
-            DefaultCompactor.reactive(&mut messages, &reactive_input()),
-            ReactiveOutcome::NotTriggered
+            DefaultCompactor.trim_early(&mut messages, &early_trim_input()),
+            EarlyTrimOutcome::NotTriggered
         );
     }
 
@@ -1095,21 +1119,21 @@ mod tests {
             messages.push(tool_result(&format!("t{i}"), &"r".repeat(1_000)));
         }
         assert_eq!(
-            DefaultCompactor.reactive(&mut messages, &reactive_input()),
-            ReactiveOutcome::NoEffect
+            DefaultCompactor.trim_early(&mut messages, &early_trim_input()),
+            EarlyTrimOutcome::NoEffect
         );
     }
 
     #[test]
     fn an_open_circuit_stops_the_pass_running_at_all() {
         let mut messages = read_rounds(8);
-        let input = ReactiveInput {
+        let input = EarlyTrimInput {
             circuit_open: true,
-            ..reactive_input()
+            ..early_trim_input()
         };
         assert_eq!(
-            DefaultCompactor.reactive(&mut messages, &input),
-            ReactiveOutcome::NotTriggered
+            DefaultCompactor.trim_early(&mut messages, &input),
+            EarlyTrimOutcome::NotTriggered
         );
         assert_eq!(
             result_bodies(&messages),
@@ -1169,20 +1193,20 @@ mod tests {
         let untouched = messages.clone();
 
         assert_eq!(
-            c.reactive(&mut messages, &reactive_input()),
-            ReactiveOutcome::NotTriggered
+            c.trim_early(&mut messages, &early_trim_input()),
+            EarlyTrimOutcome::NotTriggered
         );
-        let aging = c.age(
+        let stale = c.trim_stale(
             &mut messages,
-            &AgingInput {
+            &StaleTrimInput {
                 message_ages: &[],
                 time_based: &TimeBasedMcConfig::default(),
                 cached_due: true,
                 cached_keep_recent: 0,
             },
         );
-        assert_eq!(aging.cleared(), 0);
-        assert!(aging.cache_edits.is_none());
+        assert_eq!(stale.cleared(), 0);
+        assert!(stale.cache_edits.is_none());
         assert_eq!(result_bodies(&messages), result_bodies(&untouched));
         assert!(c
             .context_warning(&BudgetState {
@@ -1202,6 +1226,53 @@ mod tests {
         let (out, result) = c.compact(messages, 500, 2).await.expect("compacts");
         assert_ne!(result.strategy, CompactStrategy::NoOp);
         assert!(estimate_tokens(&out) < estimate_tokens(&untouched));
+    }
+
+    #[tokio::test]
+    async fn only_at_threshold_hands_the_judgements_it_keeps_to_what_it_wraps() {
+        struct Custom;
+
+        #[async_trait]
+        impl Compactor for Custom {
+            async fn compact(
+                &self,
+                messages: Vec<ModelMessage>,
+                _max_tokens: usize,
+                _keep_rounds: usize,
+            ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
+                DefaultCompactor.compact(messages, 1, 1).await
+            }
+
+            fn should_compact(&self, _state: &BudgetState) -> bool {
+                true
+            }
+
+            fn wants_llm_summary(&self, _: &[ModelMessage], _: usize, _: usize) -> bool {
+                true
+            }
+
+            fn tool_result_budget(&self) -> ToolResultBudget {
+                ToolResultBudget {
+                    max_per_result: 7,
+                    max_total: 7,
+                }
+            }
+
+            fn trim_tool_results(&self, _: &mut [ModelMessage]) -> usize {
+                42
+            }
+        }
+
+        let wrapped = OnlyAtThreshold(Custom);
+        let state = BudgetState {
+            context_tokens: 1,
+            threshold: 10_000,
+            warned_already: false,
+        };
+        assert!(wrapped.should_compact(&state));
+        assert!(wrapped.wants_llm_summary(&[], 1, 1));
+        assert_eq!(wrapped.trim_tool_results(&mut []), 42);
+        assert_eq!(wrapped.tool_result_budget().max_per_result, 7);
     }
 
     /// Changing the numbers is one method; the algorithm stays the engine's.
@@ -1240,23 +1311,23 @@ mod tests {
         assert!(result_bodies(&messages)[0].starts_with("[Tool result truncated:"));
     }
 
-    /// Both aging passes run, and the cached one hands back the ids the next
+    /// Both stale-trim passes run, and the cached one hands back the ids the next
     /// request needs.
     #[test]
     fn the_cached_pass_reports_what_it_blanked() {
         let mut messages = read_rounds(4);
-        let aging = DefaultCompactor.age(
+        let stale = DefaultCompactor.trim_stale(
             &mut messages,
-            &AgingInput {
+            &StaleTrimInput {
                 message_ages: &[],
                 time_based: &TimeBasedMcConfig::disabled(),
                 cached_due: true,
                 cached_keep_recent: 1,
             },
         );
-        assert_eq!(aging.cached_cleared, 3);
+        assert_eq!(stale.cached_cleared, 3);
         assert_eq!(
-            aging.cache_edits.as_deref(),
+            stale.cache_edits.as_deref(),
             Some(["t2", "t1", "t0"].map(String::from).as_slice()),
             "newest first, and only the ones that were blanked"
         );

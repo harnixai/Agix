@@ -109,7 +109,7 @@ handle 和一个后台 future,事件过滤、脱敏之后交给你给的每个 `
 | `turn_start` | 一轮开始,UserPromptSubmit hook 放行之后。 | 会话 | `is_retry`、`resumed` |
 | `turn_complete` | 一轮结束,`stop_reason` 说怎么结束的。 | 会话 | `api_calls`、`last_tool_name?`、`last_tool_was_error`、`permission_denials`、`stop_reason`、`tool_calls`、`turn_duration_ms` |
 | `budget_enforced` | 会话 token 预算到 90% 注入收尾提醒,或到 100% 中止这一轮。 | 会话 | `action`(`warning_injected` / `turn_stopped`)、`budget`、`total_tokens_used` |
-| `compact_action` | 一次压缩完成或失败。 | 会话 | `after_message_count`、`after_tokens`、`before_message_count`、`before_tokens`、`latency_ms`、`strategy`、`success` |
+| `compact_action` | 一次压缩完成或失败,或一次修剪(`kind` 为 `trim`:只清旧工具结果,不改写历史)。 | 会话 | `after_message_count`、`after_tokens`、`before_message_count`、`before_tokens`、`kind`(`compact` / `trim`)、`latency_ms`、`strategy`、`success` |
 | `resume_action` | 会话从日志重建(会话文件);恢复请求落到已在内存里、找不到、已结束的侧链会话上(池文件);团队从 scratchpad 接上(会话文件)。 | 会话 / 池 | `compact_boundary_count`、`entry_count`、`latency_ms`、`outcome`(`succeeded` / `partial` / `degraded` / `failed`)、`projected_message_count`、`sidechain_entry_count`、`source`、`warning_kind?` |
 | `mcp_server_connected` | 一个 MCP server 连上:启动时、重载时、新增时。 | 池 | `server_name`、`tool_count`、`transport` |
 | `mcp_connection_error` | 一个要连的 MCP server 没连上:起不来、握手失败或超时、配置被拒。 | 池 | `error_message`、`server_name` |

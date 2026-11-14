@@ -8,7 +8,6 @@ use crate::turn::round::count_structured_output_calls;
 use crate::turn::tool_env::engine_exec_from;
 use crate::turn::tool_exec::execute_tool_with_telemetry;
 use crate::turn::tool_exec::ToolExecCtx;
-use crate::turn::tool_result::attach_tool_result_images;
 use crate::turn::tool_result::PendingToolImage;
 use crate::turn::TurnError;
 use base::event::AgentEvent;
@@ -48,7 +47,7 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
 
-        self.compact_if_needed(cancel).await;
+        self.fit_context(cancel).await;
         if cancel.is_cancelled() {
             return Ok(ControlFlow::Continue(()));
         }
@@ -73,7 +72,7 @@ impl Agent {
 
         state.structured_output_calls += self
             .session
-            .messages
+            .messages()
             .get(call.messages_before_step..)
             .map_or(0, count_structured_output_calls);
         if let base::interface::turn_policy::TurnStep::Stop { reason } = self
@@ -169,7 +168,7 @@ impl Agent {
         let template = self.tool_exec_ctx(cancel, &discontinued, &tool_images);
         let mut recovering = crate::turn::request::RecoveringCall::after(state.had_tool_uses);
         let (result, messages_before_step) = loop {
-            let messages_before_step = self.session.messages.len();
+            let messages_before_step = self.session.messages().len();
             let sent = request.clone();
             let attempt = self.stream_once(request, &template, cancel).await;
             let (failure, after_first_byte) = match attempt {
@@ -300,7 +299,15 @@ impl Agent {
         let pending_images =
             std::mem::take(&mut *call.images.lock().unwrap_or_else(|e| e.into_inner()));
         if !pending_images.is_empty() {
-            attach_tool_result_images(&mut self.session.messages, pending_images);
+            self.session.attach_to_tool_results(
+                pending_images
+                    .into_iter()
+                    .map(|image| base::interface::model::ModelContentBlock::Image {
+                        media_type: image.media_type,
+                        data: image.data,
+                    })
+                    .collect(),
+            );
         }
 
         let stream_result = &call.result;
@@ -320,7 +327,7 @@ impl Agent {
             usage,
             tool_calls: stream_result.tool_calls,
             turn_id: self.current_turn_id.clone(),
-            seq: self.session.messages.len() as u64,
+            seq: self.session.messages().len() as u64,
         });
 
         // The only per-call figure: a cost can be computed from it, and it

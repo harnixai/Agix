@@ -24,7 +24,7 @@ pub mod spawn;
 pub use config::{TelemetryConfig, TelemetryMode};
 pub use events::{
     AgentCompletedPayload, AgentSpawnedPayload, ApiErrorPayload, ApiRequestPayload,
-    BudgetEnforcedAction, BudgetEnforcedPayload, CompactActionPayload, EventPayload,
+    BudgetEnforcedAction, BudgetEnforcedPayload, CompactActionPayload, CompactKind, EventPayload,
     McpConnectionErrorPayload, McpServerConnectedPayload, PermissionDecisionOutcome,
     PermissionDecisionPayload, ResumeActionPayload, ResumeOutcome, SessionEndPayload,
     SessionStartPayload, SlashCommandUsedPayload, StartupTimingPayload, TeamStageCompletePayload,

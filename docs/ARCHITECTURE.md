@@ -208,7 +208,7 @@ systemd(`Restart=on-failure`)。systemd 下要设 `KillMode=process`:`daemon.shu
 循环(step):
   ├─ 0. 落盘        checkpoint:上一步写进内存的消息先落盘
   ├─ 1. 停止判断    TurnPolicy::before_model_call   ← 这一轮还该不该继续
-  ├─ 2. 压缩        compact_if_needed · Compactor::should_compact  ← 该不该压、压什么
+  ├─ 2. 修剪与压缩  fit_context · Compactor::trim_* / should_compact  ← 清哪些旧结果、该不该压
   ├─ 3. 硬顶        over_hard_cap · ContextBudget::hard_cap
   ├─ 4. 装配提示词  PromptAssembler / 注册的块 / 装配钩子
   ├─ 5. 调模型      call_model · Model + ModelInterceptor + BackoffPolicy
@@ -241,12 +241,19 @@ transcript 不变,恢复策略重发的就是失败的那个请求;每次调用�
 流已经开始之后的失败(首字节之前的已经由 client 的退避阶梯重试过)。工具已经跑过的,
 回复连同结果照写,这一轮以错误结束——再发一遍会让工具再跑一遍。
 
-**压缩只有一条路径。** 阈值逼出来的(第 2 步)、`/compact` 要的、请求因体积被拒后
+**压缩只有一条路径**(改写历史的那种)。阈值逼出来的(第 2 步)、`/compact` 要的、请求因体积被拒后
 恢复策略要的(第 5 步),都走 `run_compaction`:`PreCompact` hook、需要时先让模型写摘要、
 否则走 compactor 的级联、把丢掉的读文件结果与 skill / 计划模式 / 后台任务的提醒补回前面、
 写 transcript 标记、发 `compact` 帧、`PostCompact`,并让下一轮重新注入被压掉的开场上下文
 (AGENTS.md 等)和召回过的记忆。阈值量的是整个请求,所以自动压缩把对话压到阈值减去系统
 提示词与工具定义、再减去必然补回的提醒之后剩下的大小;压完比压之前还大的不生效。
+
+**修剪不是压缩。** 压缩之前,同一步里先做三种修剪:按时间或缓存命中清旧工具结果的正文、
+把工具结果截到预算之内、开了 `compaction.reactive` 时按增长速度提前清。修剪只把旧
+`tool_result` 的正文换成占位,不丢消息、不写压缩标记、不触发 `PreCompact`/`PostCompact`,
+改了对话的发一帧带 `trim: true` 的 `compact`。修剪与随后的压缩是同一个事务:压缩被取消或
+失败,修剪一起退回。允许改写 `session.messages` 的地方只有这两条路径、`/clear` 和宿主的
+上下文编辑(`session.context` 的 drop/edit),守卫 G11 列着。
 
 **一轮只有一个出口。** 循环里有十几处提前结束(hook 截停、预算耗尽、取消、出错),
 落盘和宣布结束都只在 `finish_turn` 做一次,所以哪条路都跳不过。顺序本身是契约:宿主

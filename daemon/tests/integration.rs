@@ -8,6 +8,7 @@ mod audit2_doc_findings;
 mod audit3_trust_boundaries;
 mod audit_security_findings;
 mod bash_read_only_lane;
+mod compaction_and_trim;
 mod daemon_e2e;
 mod daemon_socket_from_a_command;
 mod extension_entries;

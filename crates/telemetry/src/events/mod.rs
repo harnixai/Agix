@@ -130,7 +130,7 @@ event_kinds! {
     turn_complete => TurnComplete(TurnCompletePayload) in Session;
     /// 会话 token 预算到 90% 注入收尾提醒,或到 100% 中止这一轮。
     budget_enforced => BudgetEnforced(BudgetEnforcedPayload) in Session;
-    /// 一次压缩完成或失败。
+    /// 一次压缩完成或失败,或一次修剪(`kind` 为 `trim`:只清旧工具结果,不改写历史)。
     compact_action => CompactAction(CompactActionPayload) in Session;
     /// 会话从日志重建(会话文件);恢复请求落到已在内存里、找不到、已结束的侧链会话上(池文件);团队从 scratchpad 接上(会话文件)。
     resume_action => ResumeAction(ResumeActionPayload) in Both;
@@ -174,9 +174,18 @@ pub struct TurnCompletePayload {
     pub turn_duration_ms: u64,
 }
 
+/// 改写历史的压缩，还是只清旧工具结果的修剪。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactKind {
+    Compact,
+    Trim,
+}
+
 /// 压缩行为事件的载荷。
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct CompactActionPayload {
+    pub kind: CompactKind,
     pub strategy: String,
     pub before_tokens: u64,
     pub after_tokens: u64,
@@ -403,6 +412,7 @@ mod tests {
             5,
             None,
             CompactActionPayload {
+                kind: CompactKind::Compact,
                 strategy: "auto".into(),
                 before_tokens: 1000,
                 after_tokens: 200,

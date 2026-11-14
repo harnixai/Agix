@@ -295,8 +295,8 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 | `Stop` | 模型这一步不再要工具、这一轮要结束时;每次要结束都问一遍 | `stop_hook_active`(这一轮已经被 Stop hook 送回去过) | `continue: false`:结束这一轮(`stopped_by_hook`,随后发 `StopFailure`);`decision: "block"`(或 exit 2):不让结束,`message` 作为提醒交给模型接着做 |
 | `StopFailure` | 一轮被 Stop hook 的 `continue: false` 截停时 | `reason` | 只通知,回答被丢弃 |
 | `UserPromptSubmit` | 用户消息进转录之前:开一轮的那条,以及运行中 steer 进来的每一条 | `user_prompt`、`delivery`(`turn` / `steer`) | `decision: "block"`:这条消息不处理——开一轮的直接以 `stopped_by_hook` 结束、不调模型,steer 的不进转录;`updated_input`(JSON 字符串):换掉消息文本 |
-| `PreCompact` | 每次压缩之前(按阈值自动压、`/compact`、恢复策略要求的压缩) | `tool_input`:`messages_before`、`token_count`、`threshold`、`trigger`(`auto` / `manual`) | `decision: "block"` 或 `continue: false`:这次不压缩 |
-| `PostCompact` | 压缩完成之后 | `tool_input`:`strategy`、`messages_before`、`messages_after`、`tokens_before`、`tokens_after` | 只通知,回答被丢弃 |
+| `PreCompact` | 每次压缩之前(按阈值自动压、`/compact`、请求因体积被拒后的压缩)。修剪不算压缩,不触发它 | `tool_input`:`messages_before`、`token_count`、`threshold`、`trigger`(`auto` / `manual`) | `decision: "block"` 或 `continue: false`:这次不压缩 |
+| `PostCompact` | 压缩完成之后;修剪之后不发 | `tool_input`:`strategy`、`messages_before`、`messages_after`、`tokens_before`、`tokens_after` | 只通知,回答被丢弃 |
 | `PermissionRequested` | 权限检查判为"询问"、开始等宿主回答之前(无人值守会话不问,直接按拒绝处理) | `tool_name`、`tool_input`、`reason`(询问的文字)、`turn_id` | 只通知,回答被丢弃 |
 | `PermissionDenied` | 一次工具调用被拒:规则拒绝、`PreToolUse` 拦下、没人可问时的询问、宿主答拒绝或没给出决定、询问超时;skill 的内联命令被拒也算,按一次 `Bash` 调用 | `tool_name`、`tool_input`、`reason`、`turn_id` | 只通知,回答被丢弃 |
 | `Setup` | 会话开始运行,早于 `SessionStart` | `reason`(`scene=<id> model=<模型>`) | 只通知,回答被丢弃 |
@@ -323,6 +323,13 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
   `<system-reminder>` 交给模型,这一轮接着跑;下一次要结束时 `Stop` 再问一遍,payload 的
   `stop_hook_active` 为 `true`。一个无条件拦的 hook 应当看这个字段放行;不看的,由每轮的
   调用上限截住。
+- **压缩与修剪。** hook 只管压缩:改写历史的那种——丢掉旧轮次、折叠成摘要或让模型写摘要,
+  事后对话里少了消息,transcript 记一个压缩标记。另有三种修剪不经过 `PreCompact`/`PostCompact`,
+  也拦不住:清掉很久以前的工具结果正文(`compaction` 的时间与缓存档)、把工具结果截到预算之内、
+  开了 `compaction.reactive` 时在轮中提前清旧工具结果。修剪不删消息,只把旧工具结果的正文换成占位,
+  `tool_use` 与 `tool_result` 的配对不变。想在修剪时做点什么,看 `compact` 帧上的 `"trim": true`;
+  想少做修剪,嵌入方用 `OnlyAtThreshold` 包住压缩器(关掉时间档、缓存档和提前修剪,工具结果预算那一档
+  仍在,要改它覆盖 `trim_tool_results`),或者关掉 `compaction.reactive`。
 - **任务的开始与结束。** `TaskCreated` / `TaskCompleted` 成对:任务在 `session.tasks` 里出现时
   发前者,结束(`status` 为 `done`、`failed`、`stopped`)时发后者,`reason` 是同一个任务的 JSON,
   `task_id` 对得上。两者都在会话自己的一个任务里发,和引发它们的那一步没有固定先后。后台 shell

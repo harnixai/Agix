@@ -662,7 +662,7 @@ impl Agent {
                 last_call_usage: self.turn.last_call_usage.unwrap_or_default(),
                 context: self.turn.last_call_usage.map(|u| self.context_usage(u)),
                 structured_output: self.turn.scope.take_structured_output(),
-                seq: self.session.messages.len() as u64,
+                seq: self.session.messages().len() as u64,
                 truncated: self.turn.truncated,
                 persisted,
             });

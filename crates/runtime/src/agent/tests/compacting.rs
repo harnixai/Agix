@@ -433,7 +433,7 @@ async fn automatic_compaction_leaves_room_for_the_request_overhead() {
     agent.compaction.set_overhead(2_000);
     assert!(agent.context_tokens() > 6_000);
     agent
-        .compact_if_needed(&tokio_util::sync::CancellationToken::new())
+        .fit_context(&tokio_util::sync::CancellationToken::new())
         .await;
     assert!(
         agent.context_tokens() <= 6_000,
@@ -536,7 +536,7 @@ fn push_rounds(agent: &mut Agent, rounds: usize) {
 async fn checks(agent: &mut Agent, n: usize) {
     for _ in 0..n {
         agent
-            .compact_if_needed(&tokio_util::sync::CancellationToken::new())
+            .fit_context(&tokio_util::sync::CancellationToken::new())
             .await;
     }
 }
@@ -602,7 +602,7 @@ impl Model for NeverAnswers {
     }
 }
 
-/// Aging and the compaction the budget forces are one: when the summary
+/// StaleTrim and the compaction the budget forces are one: when the summary
 /// is interrupted, the tool results time-based micro-compact had already
 /// blanked are put back and nothing reports a compaction.
 #[tokio::test]
@@ -670,7 +670,7 @@ async fn an_interrupted_compaction_leaves_the_aged_tool_results_as_they_were() {
 
     let cancel = CancellationToken::new();
     {
-        let compacting = agent.compact_if_needed(&cancel);
+        let compacting = agent.fit_context(&cancel);
         tokio::pin!(compacting);
         tokio::select! {
             _ = &mut compacting => panic!("the compaction finished without asking for a summary"),
@@ -716,18 +716,18 @@ impl compaction::compact::Compactor for RewritesThenFails {
         0
     }
 
-    fn reactive(
+    fn trim_early(
         &self,
         messages: &mut Vec<base::interface::model::ModelMessage>,
-        _input: &compaction::compact::ReactiveInput,
-    ) -> compaction::compact::ReactiveOutcome {
+        _input: &compaction::compact::EarlyTrimInput,
+    ) -> compaction::compact::EarlyTrimOutcome {
         for block in messages.iter_mut().flat_map(|m| m.content.iter_mut()) {
             if let base::interface::model::ModelContentBlock::Text { text } = block {
                 *text = "[cleared]".into();
                 break;
             }
         }
-        compaction::compact::ReactiveOutcome::Compacted
+        compaction::compact::EarlyTrimOutcome::Trimmed
     }
 
     fn wants_llm_summary(
@@ -790,7 +790,7 @@ async fn a_failed_compaction_puts_back_what_the_passes_before_it_rewrote() {
     assert!(agent.context_tokens() > 2_000);
 
     agent
-        .compact_if_needed(&tokio_util::sync::CancellationToken::new())
+        .fit_context(&tokio_util::sync::CancellationToken::new())
         .await;
 
     assert_eq!(blocks(&agent), before);

@@ -125,7 +125,7 @@ async fn clearing_old_tool_results_by_age_is_reported_as_a_compaction() {
     std::thread::sleep(std::time::Duration::from_millis(5));
 
     agent
-        .compact_if_needed(&tokio_util::sync::CancellationToken::new())
+        .fit_context(&tokio_util::sync::CancellationToken::new())
         .await;
 
     let mut frames = Vec::new();

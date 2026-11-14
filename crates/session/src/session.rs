@@ -13,7 +13,7 @@ use std::time::Instant;
 
 /// Session manager. Owns the conversation state; delegates persistence to `HistoryStore`.
 pub struct SessionManager {
-    pub messages: Vec<ModelMessage>,
+    messages: Vec<ModelMessage>,
     /// Per-message wall-clock timestamps (parallel to `messages`).
     /// Used by time-based micro-compaction to determine message age.
     /// Not serialized — ephemeral for the current session only.
@@ -142,6 +142,36 @@ impl SessionManager {
 
     pub fn messages(&self) -> &[ModelMessage] {
         &self.messages
+    }
+
+    /// Rewrite the messages without changing their number of entries on disk:
+    /// the trim passes blank tool results in place. Not for anything that
+    /// drops messages, which has to go through
+    /// [`Self::replace_messages_after_compact`] to be recorded.
+    pub fn trim_in_place<R>(&mut self, f: impl FnOnce(&mut Vec<ModelMessage>) -> R) -> R {
+        f(&mut self.messages)
+    }
+
+    /// Put back a list taken from [`Self::messages`] before an abandoned
+    /// compaction step.
+    pub fn restore_messages(&mut self, messages: Vec<ModelMessage>) {
+        self.messages = messages;
+    }
+
+    /// Append `images` to the newest user message that holds a `tool_result`,
+    /// after all of its `tool_result` blocks, which the API requires to come
+    /// first. With no such message the images are dropped: an orphan image
+    /// block is noise and no user turn is made up for it.
+    pub fn attach_to_tool_results(&mut self, images: Vec<ModelContentBlock>) {
+        let target = self.messages.iter_mut().rev().find(|m| {
+            m.role == base::interface::model::MessageRole::User
+                && m.content
+                    .iter()
+                    .any(|b| matches!(b, ModelContentBlock::ToolResult { .. }))
+        });
+        if let Some(message) = target {
+            message.content.extend(images);
+        }
     }
 
     /// Replace the text and tool results of the user message at `at` with

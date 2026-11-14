@@ -15,7 +15,7 @@ use backoff::AutoCompactBackoff;
 /// Compaction and micro-compaction, and what they remember between turns.
 pub(crate) struct Compaction {
     compactor: Arc<dyn compaction::compact::Compactor>,
-    compaction_state: compaction::reactive::CompactionState,
+    compaction_state: compaction::early_trim::CompactionState,
     /// Reset after compaction so the warning can fire again.
     compact_warning_issued: bool,
     /// Gates the `function_result_clearing` prompt section, so the model is
@@ -37,7 +37,7 @@ impl Compaction {
     ) -> Self {
         Self {
             compactor,
-            compaction_state: compaction::reactive::CompactionState::default(),
+            compaction_state: compaction::early_trim::CompactionState::default(),
             compact_warning_issued: false,
             tool_results_ever_cleared: false,
             time_based_mc_config: compaction::time_based_mc::TimeBasedMcConfig::default(),
@@ -89,17 +89,17 @@ impl Compaction {
     }
 }
 
-/// An aging pass already applied to the messages, not yet accounted for.
-struct PendingAging {
-    aging: compaction::aging::Aging,
+/// A stale-result trim already applied to the messages, not yet accounted for.
+struct PendingStaleTrim {
+    trim: compaction::trim::StaleTrim,
     messages: usize,
     tokens_before: usize,
     tokens_after: usize,
     took: std::time::Duration,
 }
 
-/// A predictive pass already applied to the messages, not yet accounted for.
-struct PendingReactive {
+/// An early trim already applied to the messages, not yet accounted for.
+struct PendingEarlyTrim {
     summary: CompactSummary,
     took: std::time::Duration,
 }
@@ -137,19 +137,19 @@ impl Agent {
 
     /// Compact session messages if token budget is exceeded.
     ///
-    /// The whole step is one transaction on the transcript: aging, the tool
+    /// The whole step is one transaction on the transcript: trim, the tool
     /// result budget, the predictive pass, the warning and the compaction the
     /// budget forces. Each is applied in turn, because each is judged on what
     /// the one before left, but none is accounted for — reported, its clock
     /// restarted — until the rest went through. A compaction that was
     /// interrupted or failed puts the transcript back as it was.
-    pub(crate) async fn compact_if_needed(&mut self, cancel: &CancellationToken) {
+    pub(crate) async fn fit_context(&mut self, cancel: &CancellationToken) {
         let checkpoint = self.transcript_checkpoint();
         let compactor = self.compaction.compactor.clone();
-        let aged = self.age_messages();
+        let stale = self.trim_stale();
         self.trim_tool_results(&compactor);
         let budget = self.context_budget();
-        let reactive = self.reactive_compact(&compactor, &budget);
+        let early = self.trim_early(&compactor, &budget);
         let abandoned = match self.compact_to_budget(&compactor, &budget, cancel).await {
             Ok(()) => false,
             Err(
@@ -162,15 +162,15 @@ impl Agent {
             self.restore_transcript(checkpoint);
             return;
         }
-        if let Some(reactive) = reactive {
-            self.commit_reactive(reactive);
+        if let Some(early) = early {
+            self.commit_early_trim(early);
         }
-        self.commit_aging(aged);
+        self.commit_stale_trim(stale);
     }
 
     fn transcript_checkpoint(&self) -> Checkpoint {
         Checkpoint {
-            messages: self.session.messages.clone(),
+            messages: self.session.messages().to_vec(),
             pushed: self.session.message_timestamps.len(),
             ever_cleared: self.compaction.tool_results_ever_cleared,
             warned: self.compaction.compact_warning_issued,
@@ -184,59 +184,59 @@ impl Agent {
             ever_cleared,
             warned,
         } = checkpoint;
-        self.session.messages = messages;
+        self.session.restore_messages(messages);
         self.session.message_timestamps.truncate(pushed);
         self.compaction.tool_results_ever_cleared = ever_cleared;
         self.compaction.compact_warning_issued = warned;
     }
 
-    fn age_messages(&mut self) -> PendingAging {
+    fn trim_stale(&mut self) -> PendingStaleTrim {
         let compactor = self.compaction.compactor.clone();
         let ages = self.session.message_ages();
         let started = std::time::Instant::now();
-        let tokens_before = compaction::grouping::estimate_tokens(&self.session.messages);
-        let aging = compactor.age(
-            &mut self.session.messages,
-            &compaction::aging::AgingInput {
-                message_ages: &ages,
-                time_based: &self.compaction.time_based_mc_config,
-                cached_due: self.compaction.cached_mc.should_run(),
-                cached_keep_recent: self.compaction.cached_mc.keep_recent(),
-            },
-        );
-        let tokens_after = if aging.time_based.cleared > 0 {
-            compaction::grouping::estimate_tokens(&self.session.messages)
+        let tokens_before = compaction::grouping::estimate_tokens(self.session.messages());
+        let input = compaction::trim::StaleTrimInput {
+            message_ages: &ages,
+            time_based: &self.compaction.time_based_mc_config,
+            cached_due: self.compaction.cached_mc.should_run(),
+            cached_keep_recent: self.compaction.cached_mc.keep_recent(),
+        };
+        let trim = self
+            .session
+            .trim_in_place(|messages| compactor.trim_stale(messages, &input));
+        let tokens_after = if trim.time_based.cleared > 0 {
+            compaction::grouping::estimate_tokens(self.session.messages())
         } else {
             tokens_before
         };
-        PendingAging {
-            messages: self.session.messages.len(),
+        PendingStaleTrim {
+            messages: self.session.messages().len(),
             tokens_before,
             tokens_after,
             took: started.elapsed(),
-            aging,
+            trim,
         }
     }
 
-    fn commit_aging(&mut self, aged: PendingAging) {
-        let PendingAging {
-            aging,
+    fn commit_stale_trim(&mut self, stale: PendingStaleTrim) {
+        let PendingStaleTrim {
+            trim,
             messages,
             tokens_before,
             tokens_after,
             took,
-        } = aged;
-        if aging.cleared() > 0 {
+        } = stale;
+        if trim.cleared() > 0 {
             self.compaction.tool_results_ever_cleared = true;
         }
-        if aging.time_based.cleared > 0 {
+        if trim.time_based.cleared > 0 {
             tracing::info!(
-                cleared = aging.time_based.cleared,
-                skipped = aging.time_based.skipped,
+                cleared = trim.time_based.cleared,
+                skipped = trim.time_based.skipped,
                 "time-based micro-compact applied"
             );
             let now = std::time::Instant::now();
-            self.report_compaction(
+            self.report_trim(
                 &CompactSummary {
                     strategy: format!("{:?}", compaction::compact::CompactStrategy::MicroCompact),
                     messages_before: messages,
@@ -244,24 +244,25 @@ impl Agent {
                     tokens_before,
                     tokens_after,
                 },
-                None,
                 now.checked_sub(took).unwrap_or(now),
             );
         }
-        if let Some(ids) = aging.cache_edits {
+        if let Some(ids) = trim.cache_edits {
             tracing::info!(
-                cleared = aging.cached_cleared,
+                cleared = trim.cached_cleared,
                 "cached micro-compact applied — pending cache_edits generated"
             );
             self.compaction.cached_mc.record_pass(ids);
             self.compaction
                 .cached_mc
-                .forget_edits_missing_from(&self.session.messages);
+                .forget_edits_missing_from(self.session.messages());
         }
     }
 
     fn trim_tool_results(&mut self, compactor: &Arc<dyn compaction::compact::Compactor>) {
-        let modified = compactor.trim_tool_results(&mut self.session.messages);
+        let modified = self
+            .session
+            .trim_in_place(|messages| compactor.trim_tool_results(messages));
         if modified > 0 {
             self.compaction.tool_results_ever_cleared = true;
             tracing::debug!(modified, "tool result budget enforced");
@@ -327,28 +328,29 @@ impl Agent {
         }
     }
 
-    fn reactive_compact(
+    fn trim_early(
         &mut self,
         compactor: &Arc<dyn compaction::compact::Compactor>,
         budget: &base::interface::budget_policy::ContextBudget,
-    ) -> Option<PendingReactive> {
+    ) -> Option<PendingEarlyTrim> {
         let context_tokens = self.context_tokens();
-        let reactive_start = std::time::Instant::now();
-        let reactive_from = compaction::grouping::estimate_tokens(&self.session.messages);
-        match compactor.reactive(
-            &mut self.session.messages,
-            &compaction::compact::ReactiveInput {
-                context_tokens,
-                context_limit: budget.compact_threshold,
-                keep_recent: budget.compact_keep_recent,
-                enabled: self.settings.values.compaction.reactive,
-                circuit_open: self.compaction.compaction_state.circuit_open,
-            },
-        ) {
-            compaction::compact::ReactiveOutcome::Compacted => {
-                let messages = self.session.messages.len();
-                tracing::info!(context_tokens, "reactive micro-compact completed");
-                Some(PendingReactive {
+        let early_start = std::time::Instant::now();
+        let early_from = compaction::grouping::estimate_tokens(self.session.messages());
+        let input = compaction::compact::EarlyTrimInput {
+            context_tokens,
+            context_limit: budget.compact_threshold,
+            keep_recent: budget.compact_keep_recent,
+            enabled: self.settings.values.compaction.reactive,
+            circuit_open: self.compaction.compaction_state.circuit_open,
+        };
+        match self
+            .session
+            .trim_in_place(|messages| compactor.trim_early(messages, &input))
+        {
+            compaction::compact::EarlyTrimOutcome::Trimmed => {
+                let messages = self.session.messages().len();
+                tracing::info!(context_tokens, "early trim completed");
+                Some(PendingEarlyTrim {
                     summary: CompactSummary {
                         strategy: format!(
                             "{:?}",
@@ -356,33 +358,31 @@ impl Agent {
                         ),
                         messages_before: messages,
                         messages_after: messages,
-                        tokens_before: reactive_from,
-                        tokens_after: compaction::grouping::estimate_tokens(&self.session.messages),
+                        tokens_before: early_from,
+                        tokens_after: compaction::grouping::estimate_tokens(
+                            self.session.messages(),
+                        ),
                     },
-                    took: reactive_start.elapsed(),
+                    took: early_start.elapsed(),
                 })
             }
-            compaction::compact::ReactiveOutcome::NoEffect => {
+            compaction::compact::EarlyTrimOutcome::NoEffect => {
                 self.compaction.compaction_state.record_failure();
                 tracing::warn!(
                     failures = self.compaction.compaction_state.consecutive_failures,
-                    "reactive micro-compact had no effect"
+                    "early trim had no effect"
                 );
                 None
             }
-            compaction::compact::ReactiveOutcome::NotTriggered => None,
+            compaction::compact::EarlyTrimOutcome::NotTriggered => None,
         }
     }
 
-    fn commit_reactive(&mut self, reactive: PendingReactive) {
+    fn commit_early_trim(&mut self, early: PendingEarlyTrim) {
         self.compaction.tool_results_ever_cleared = true;
         self.compaction.compaction_state.record_success();
         let now = std::time::Instant::now();
-        self.report_compaction(
-            &reactive.summary,
-            None,
-            now.checked_sub(reactive.took).unwrap_or(now),
-        );
+        self.report_trim(&early.summary, now.checked_sub(early.took).unwrap_or(now));
     }
 
     fn warn_about_context(
@@ -419,7 +419,7 @@ impl Agent {
         if !self.pre_compact_hooks_allow(target, trigger, cancel).await {
             return Err(NotCompacted::Declined);
         }
-        let messages_before = self.session.messages.len();
+        let messages_before = self.session.messages().len();
         // The summarizer must see what is about to be destroyed, and recovery
         // re-attaches files from reads that are about to be dropped.
         let pre_compact = self.session.messages().to_vec();
@@ -559,7 +559,7 @@ impl Agent {
         keep: usize,
         compact_start: std::time::Instant,
     ) -> Result<(Vec<ModelMessage>, compaction::compact::CompactResult), NotCompacted> {
-        let messages_before = self.session.messages.len();
+        let messages_before = self.session.messages().len();
         match self
             .compaction
             .compactor
@@ -576,6 +576,7 @@ impl Agent {
                         self.session.turn_count,
                         Some(self.current_turn_id.clone()),
                         telemetry::CompactActionPayload {
+                            kind: telemetry::CompactKind::Compact,
                             strategy: "error".into(),
                             before_tokens: tokens,
                             after_tokens: tokens,
@@ -608,7 +609,7 @@ impl Agent {
         self.compaction.auto_backoff = AutoCompactBackoff::default();
         self.compaction
             .cached_mc
-            .forget_edits_missing_from(&self.session.messages);
+            .forget_edits_missing_from(self.session.messages());
 
         // The opening context message and recalled memories are ordinary
         // compaction victims and not part of the recovery above. Resetting
@@ -616,7 +617,7 @@ impl Agent {
         // injection paths eligible again. A strategy that kept the opening
         // message keeps its flag.
         self.prompt
-            .reset_context(holds_session_context(&self.session.messages));
+            .reset_context(holds_session_context(self.session.messages()));
 
         tracing::info!(
             strategy = ?strategy,
@@ -630,7 +631,7 @@ impl Agent {
         tracing::debug!(
             "{}",
             compaction::compact::format_context_analysis(&compaction::compact::analyze_context(
-                &self.session.messages
+                self.session.messages()
             ))
         );
     }
@@ -698,7 +699,7 @@ impl Agent {
                     cwd: self.settings.paths.working_dir().display().to_string(),
                     permission_mode: hook_permission_mode(self.session_state.permission_mode()),
                     tool_input: Some(serde_json::json!({
-                        "messages_before": self.session.messages.len(),
+                        "messages_before": self.session.messages().len(),
                         "token_count": self.context_tokens(),
                         "threshold": target,
                         "trigger": trigger.as_str(),
@@ -787,12 +788,25 @@ impl Agent {
         compaction::grouping::estimate_tokens(&self.post_compact_recovery(&[], &[], true))
     }
 
-    /// The `compact` event and its telemetry.
     pub(super) fn report_compaction(
         &self,
         summary: &CompactSummary,
         projection: Option<&compaction::compact::SnipProjection>,
         started: std::time::Instant,
+    ) {
+        self.report(summary, projection, started, false);
+    }
+
+    fn report_trim(&self, summary: &CompactSummary, started: std::time::Instant) {
+        self.report(summary, None, started, true);
+    }
+
+    fn report(
+        &self,
+        summary: &CompactSummary,
+        projection: Option<&compaction::compact::SnipProjection>,
+        started: std::time::Instant,
+        trim: bool,
     ) {
         self.emit(AgentEvent::CompactAction {
             strategy: summary.strategy.clone(),
@@ -804,6 +818,7 @@ impl Agent {
             estimated_tokens_saved: projection.map(|p| p.estimated_tokens_saved),
             tokens_before: summary.tokens_before,
             tokens_after: summary.tokens_after,
+            trim,
         });
         self.telemetry
             .record(telemetry::TelemetryEvent::compact_action(
@@ -811,6 +826,11 @@ impl Agent {
                 self.session.turn_count,
                 Some(self.current_turn_id.clone()),
                 telemetry::CompactActionPayload {
+                    kind: if trim {
+                        telemetry::CompactKind::Trim
+                    } else {
+                        telemetry::CompactKind::Compact
+                    },
                     strategy: summary.strategy.clone(),
                     before_tokens: summary.tokens_before as u64,
                     after_tokens: summary.tokens_after as u64,

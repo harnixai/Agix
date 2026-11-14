@@ -1,10 +1,10 @@
-//! Reactive compaction — proactive context compression before the budget is exhausted.
+//! Early trim — blank old tool results before the budget is exhausted.
 //!
-//! Instead of waiting until the token budget is critically low, reactive
-//! compaction predicts when compaction will be needed and fires early
-//! (a MicroCompact) to avoid stalling the user with a last-minute big
-//! compaction. A circuit breaker stops it after
-//! [`MAX_CONSECUTIVE_FAILURES`] passes in a row that bought nothing.
+//! Instead of waiting until the token budget is critically low, the early
+//! trim predicts when compaction will be needed and clears old tool results
+//! ahead of it, so the compaction that follows is smaller or never needed. A
+//! circuit breaker stops it after [`MAX_CONSECUTIVE_FAILURES`] passes in a row
+//! that bought nothing.
 
 use crate::grouping::estimate_tokens;
 use base::interface::model::ModelMessage;
@@ -40,11 +40,11 @@ impl CompactionState {
     }
 }
 
-/// Whether to compact before the next API call: fewer than
+/// Whether to trim before the next API call: fewer than
 /// [`TRIGGER_AT_REMAINING_TOKENS`] are left below `context_limit`, or at
 /// `token_usage_velocity` (tokens per call) the rest runs out within three
 /// calls.
-pub fn should_compact_reactively(
+pub fn should_trim_early(
     current_tokens: usize,
     context_limit: usize,
     token_usage_velocity: Option<f64>,
@@ -76,18 +76,18 @@ mod tests {
 
     #[test]
     fn triggers_when_remaining_below_threshold() {
-        assert!(should_compact_reactively(180_000, 200_000, None));
-        assert!(!should_compact_reactively(100_000, 200_000, None));
+        assert!(should_trim_early(180_000, 200_000, None));
+        assert!(!should_trim_early(100_000, 200_000, None));
     }
 
     #[test]
     fn triggers_early_with_high_velocity() {
-        assert!(should_compact_reactively(100_000, 200_000, Some(50_000.0)));
+        assert!(should_trim_early(100_000, 200_000, Some(50_000.0)));
     }
 
     #[test]
     fn does_not_trigger_with_low_velocity() {
-        assert!(!should_compact_reactively(100_000, 200_000, Some(10_000.0)));
+        assert!(!should_trim_early(100_000, 200_000, Some(10_000.0)));
     }
 
     #[test]

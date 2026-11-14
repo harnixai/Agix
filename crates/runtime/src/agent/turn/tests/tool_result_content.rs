@@ -1,8 +1,6 @@
 //! 工具结果内容的渲染与图片追加。
 
-use crate::turn::tool_result::{
-    attach_tool_result_images, fence_external, render_tool_result_content, PendingToolImage,
-};
+use crate::turn::tool_result::{fence_external, render_tool_result_content, PendingToolImage};
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 
 use base::tool::{ToolResultBlock, ToolResultContent};
@@ -23,18 +21,31 @@ fn png_b64() -> String {
 /// carrying the rendered text, plus whatever images were lifted out.
 fn tool_result_message(content: ToolResultContent) -> ModelMessage {
     let (text, images) = render_tool_result_content(content);
-    let mut messages = vec![ModelMessage {
+    let mut session = session::session::SessionManager::in_memory(None);
+    session.push_message(ModelMessage {
         role: MessageRole::User,
         content: vec![ModelContentBlock::ToolResult {
             tool_use_id: "toolu_1".into(),
             content: text,
             is_error: Some(false),
         }],
-    }];
+    });
     if !images.is_empty() {
-        attach_tool_result_images(&mut messages, images);
+        attach_images(&mut session, images);
     }
-    messages.pop().unwrap()
+    session.messages()[0].clone()
+}
+
+fn attach_images(session: &mut session::session::SessionManager, images: Vec<PendingToolImage>) {
+    session.attach_to_tool_results(
+        images
+            .into_iter()
+            .map(|image| ModelContentBlock::Image {
+                media_type: image.media_type,
+                data: image.data,
+            })
+            .collect(),
+    );
 }
 
 /// #40: a structured MCP result with text *and* an image must reach the
@@ -120,7 +131,8 @@ fn image_only_result_gets_a_placeholder_text() {
 /// images are appended after *all* of them — never interleaved.
 #[test]
 fn images_are_appended_after_every_tool_result_block() {
-    let mut messages = vec![ModelMessage {
+    let mut session = session::session::SessionManager::in_memory(None);
+    session.push_message(ModelMessage {
         role: MessageRole::User,
         content: vec![
             ModelContentBlock::ToolResult {
@@ -134,16 +146,16 @@ fn images_are_appended_after_every_tool_result_block() {
                 is_error: Some(false),
             },
         ],
-    }];
-    attach_tool_result_images(
-        &mut messages,
+    });
+    attach_images(
+        &mut session,
         vec![PendingToolImage {
             media_type: "image/png".into(),
             data: png_b64(),
         }],
     );
 
-    let content = &messages[0].content;
+    let content = &session.messages()[0].content;
     assert_eq!(content.len(), 3);
     assert!(matches!(content[0], ModelContentBlock::ToolResult { .. }));
     assert!(matches!(content[1], ModelContentBlock::ToolResult { .. }));
@@ -154,29 +166,29 @@ fn images_are_appended_after_every_tool_result_block() {
 /// `new_messages` pushed something after it.
 #[test]
 fn images_skip_past_later_injected_messages() {
-    let mut messages = vec![
-        ModelMessage {
-            role: MessageRole::User,
-            content: vec![ModelContentBlock::ToolResult {
-                tool_use_id: "toolu_1".into(),
-                content: "result".into(),
-                is_error: Some(false),
-            }],
-        },
-        ModelMessage {
-            role: MessageRole::User,
-            content: vec![ModelContentBlock::Text {
-                text: "injected".into(),
-            }],
-        },
-    ];
-    attach_tool_result_images(
-        &mut messages,
+    let mut session = session::session::SessionManager::in_memory(None);
+    session.push_message(ModelMessage {
+        role: MessageRole::User,
+        content: vec![ModelContentBlock::ToolResult {
+            tool_use_id: "toolu_1".into(),
+            content: "result".into(),
+            is_error: Some(false),
+        }],
+    });
+    session.push_message(ModelMessage {
+        role: MessageRole::User,
+        content: vec![ModelContentBlock::Text {
+            text: "injected".into(),
+        }],
+    });
+    attach_images(
+        &mut session,
         vec![PendingToolImage {
             media_type: "image/png".into(),
             data: png_b64(),
         }],
     );
+    let messages = session.messages();
     assert_eq!(
         messages[0].content.len(),
         2,
