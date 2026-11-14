@@ -347,178 +347,182 @@ fn search_hits(content: &serde_json::Value) -> Vec<base::interface::model::Searc
 /// in `acc` (keyed by content block index), and the assembled
 /// `ModelEvent::ToolUse` is emitted only once `ContentBlockStop` confirms the
 /// block is complete.
-fn map_stream_event(
-    event: crate::stream::StreamEvent,
-    acc: &mut StreamState,
-) -> Vec<Result<ModelEvent, ModelError>> {
-    use crate::stream::{BlockDelta, ContentBlockStart, StreamEvent};
+type Mapped = Vec<Result<ModelEvent, ModelError>>;
+
+fn map_stream_event(event: crate::stream::StreamEvent, acc: &mut StreamState) -> Mapped {
+    use crate::stream::StreamEvent;
     match event {
         StreamEvent::ContentBlockStart {
             index,
             content_block,
-        } => match content_block {
-            ContentBlockStart::Text { text } => vec![Ok(ModelEvent::ContentBlockStart {
-                index: index as usize,
-                block: ModelContentBlock::Text { text },
-            })],
-            // The provider runs its own search and answers it inside the
-            // call; there is nothing for the engine to run.
-            ContentBlockStart::ServerToolUse { .. } => vec![],
-            ContentBlockStart::WebSearchToolResult { content, .. } => {
-                vec![Ok(ModelEvent::SearchResults {
-                    hits: search_hits(&content),
-                })]
-            }
-            ContentBlockStart::ToolUse { id, name, input } => {
-                // A streamed tool_use block's `ContentBlockStart.input` is a
-                // placeholder, not real content — this relay sends `{}` (an
-                // empty object), not `null`, so checking `is_null()` alone
-                // missed it: an empty-object placeholder got serialized to
-                // the literal string "{}" and seeded into the accumulator,
-                // and the real `InputJsonDelta` fragments then concatenated
-                // onto it — "{}" + "{\"pattern\": \"*.txt\"}" is two JSON
-                // values back to back, which fails to parse as one, and fell
-                // back to an empty object at `ContentBlockStop`. Confirmed
-                // via `AGIX_DEBUG_RAW_STREAM_EVENTS=1` against a real call.
-                // Only seed from a genuinely non-empty object/array/scalar —
-                // a provider that sends the whole `input` up front (no
-                // deltas to follow) still round-trips correctly this way.
-                let json = match &input {
-                    serde_json::Value::Null => String::new(),
-                    serde_json::Value::Object(o) if o.is_empty() => String::new(),
-                    _ => input.to_string(),
-                };
-                let start = ModelEvent::ToolUseStart {
-                    id: id.clone(),
-                    name: name.clone(),
-                };
-                acc.tool_uses
-                    .insert(index, PendingToolUse { id, name, json });
-                vec![Ok(start)]
-            }
-            // Thinking blocks were parsed by `stream.rs` but died here, in a
-            // `_ => vec![]` arm — never reaching `ModelEvent`, so hosts could
-            // not render reasoning and, worse, the blocks never made it into
-            // the transcript. See `ModelContentBlock::Thinking` for why the
-            // transcript half is a correctness issue and not just a UI gap.
-            //
-            // The opening event usually carries empty text (content arrives as
-            // deltas), but a provider may front-load it, so it is forwarded
-            // rather than dropped.
-            ContentBlockStart::Thinking { thinking } => {
-                if thinking.is_empty() {
-                    vec![]
-                } else {
-                    vec![Ok(ModelEvent::ThinkingDelta { text: thinking })]
-                }
-            }
-            ContentBlockStart::RedactedThinking { data } => {
-                vec![Ok(ModelEvent::RedactedThinking { data })]
-            }
-            ContentBlockStart::Unknown => vec![],
-        },
-        StreamEvent::ContentBlockDelta { index, delta } => match delta {
-            BlockDelta::TextDelta { text } => vec![Ok(ModelEvent::TextDelta { text })],
-            BlockDelta::ThinkingDelta { thinking } => {
-                vec![Ok(ModelEvent::ThinkingDelta { text: thinking })]
-            }
-            // Sent once, closing the thinking block. Load-bearing: the
-            // signature must survive into the transcript or the next request
-            // in a tool-use turn is rejected.
-            BlockDelta::SignatureDelta { signature } => {
-                vec![Ok(ModelEvent::ThinkingSignature { signature })]
-            }
-            BlockDelta::InputJsonDelta { partial_json } => match acc.tool_uses.get_mut(&index) {
-                // The fragment is forwarded *as well as* accumulated: the
-                // engine still acts on the assembled `ToolUse` emitted at
-                // `ContentBlockStop`, but concatenation is lossy in the one
-                // case worth investigating afterwards — arguments that never
-                // parsed. Observers see the bytes; nothing else changes.
-                Some(pending) => {
-                    pending.json.push_str(&partial_json);
-                    vec![Ok(ModelEvent::ToolArgsDelta {
-                        id: pending.id.clone(),
-                        partial_json,
-                    })]
-                }
-                // No corresponding tool_use block open (shouldn't happen for
-                // a spec-conformant provider) — nothing sensible to do with
-                // an orphan JSON fragment, so it's dropped rather than
-                // leaked into the visible text like before.
-                None => vec![],
-            },
-            _ => vec![],
-        },
-        StreamEvent::ContentBlockStop { index } => {
-            let Some(pending) = acc.tool_uses.remove(&index) else {
-                return vec![];
-            };
-            vec![Ok(crate::tool_use_from_arguments(
-                pending.id,
-                pending.name,
-                pending.json,
-            ))]
-        }
-        // The opening event is the only place the input count appears on the
-        // real wire — `message_delta` repeats the output count and, usually,
-        // nothing else. Kept rather than emitted: a caller wants one usage
-        // figure per call, at the end, and that is what `EndTurn` is.
+        } => map_block_start(index, content_block, acc),
+        StreamEvent::ContentBlockDelta { index, delta } => map_block_delta(index, delta, acc),
+        StreamEvent::ContentBlockStop { index } => map_block_stop(index, acc),
         StreamEvent::MessageStart { message } => {
-            acc.opening_usage = Usage {
-                input_tokens: message.usage.input_tokens as u32,
-                output_tokens: 0,
-                cache_creation_input_tokens: message.usage.cache_creation_input_tokens.unwrap_or(0)
-                    as u32,
-                cache_read_input_tokens: message.usage.cache_read_input_tokens.unwrap_or(0) as u32,
-            };
+            acc.opening_usage = opening_usage(&message);
             vec![]
         }
-        StreamEvent::MessageDelta { delta, usage } => {
-            let stop_reason = delta
-                .stop_reason
-                .map(|sr| match sr {
-                    base::message::StopReason::EndTurn => "end_turn",
-                    base::message::StopReason::MaxTokens => "max_tokens",
-                    base::message::StopReason::ToolUse => "tool_use",
-                    base::message::StopReason::StopSequence => "stop_sequence",
-                    base::message::StopReason::PauseTurn => "pause_turn",
-                    _ => "unknown",
-                })
-                .unwrap_or("unknown")
-                .to_string();
-            let reported = usage.unwrap_or_default();
-            // A relay that repeats an input-side count here is the later word
-            // on the same call and wins; the usual wire says nothing about
-            // any of them here, and the opening event answers instead.
-            let later_or_opening = |reported: u64, opening: u32| {
-                if reported > 0 {
-                    reported as u32
-                } else {
-                    opening
-                }
-            };
-            vec![Ok(ModelEvent::EndTurn {
-                stop_reason,
-                usage: Usage {
-                    input_tokens: later_or_opening(
-                        reported.input_tokens,
-                        acc.opening_usage.input_tokens,
-                    ),
-                    output_tokens: reported.output_tokens as u32,
-                    cache_creation_input_tokens: later_or_opening(
-                        reported.cache_creation_input_tokens.unwrap_or(0),
-                        acc.opening_usage.cache_creation_input_tokens,
-                    ),
-                    cache_read_input_tokens: later_or_opening(
-                        reported.cache_read_input_tokens.unwrap_or(0),
-                        acc.opening_usage.cache_read_input_tokens,
-                    ),
-                },
-            })]
-        }
+        StreamEvent::MessageDelta { delta, usage } => map_message_delta(delta, usage, acc),
         StreamEvent::Error { error } => vec![Err(api_error(error))],
         _ => vec![],
     }
+}
+
+fn map_block_start(
+    index: u32,
+    content_block: crate::stream::ContentBlockStart,
+    acc: &mut StreamState,
+) -> Mapped {
+    use crate::stream::ContentBlockStart;
+    match content_block {
+        ContentBlockStart::Text { text } => vec![Ok(ModelEvent::ContentBlockStart {
+            index: index as usize,
+            block: ModelContentBlock::Text { text },
+        })],
+        // The provider runs its own search and answers it inside the call;
+        // there is nothing for the engine to run.
+        ContentBlockStart::ServerToolUse { .. } => vec![],
+        ContentBlockStart::WebSearchToolResult { content, .. } => {
+            vec![Ok(ModelEvent::SearchResults {
+                hits: search_hits(&content),
+            })]
+        }
+        ContentBlockStart::ToolUse { id, name, input } => {
+            start_tool_use(index, id, name, input, acc)
+        }
+        // The opening event usually carries empty text, but a provider may
+        // front-load it, so a non-empty one is forwarded.
+        ContentBlockStart::Thinking { thinking } => {
+            if thinking.is_empty() {
+                vec![]
+            } else {
+                vec![Ok(ModelEvent::ThinkingDelta { text: thinking })]
+            }
+        }
+        ContentBlockStart::RedactedThinking { data } => {
+            vec![Ok(ModelEvent::RedactedThinking { data })]
+        }
+        ContentBlockStart::Unknown => vec![],
+    }
+}
+
+fn start_tool_use(
+    index: u32,
+    id: String,
+    name: String,
+    input: serde_json::Value,
+    acc: &mut StreamState,
+) -> Mapped {
+    // The streamed `input` is a placeholder: some relays send `{}` rather
+    // than `null`. Seeding the accumulator with "{}" would make the real
+    // `InputJsonDelta` fragments concatenate into two JSON values that fail
+    // to parse, so only a non-empty input seeds it.
+    let json = match &input {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Object(o) if o.is_empty() => String::new(),
+        _ => input.to_string(),
+    };
+    let start = ModelEvent::ToolUseStart {
+        id: id.clone(),
+        name: name.clone(),
+    };
+    acc.tool_uses
+        .insert(index, PendingToolUse { id, name, json });
+    vec![Ok(start)]
+}
+
+fn map_block_delta(index: u32, delta: crate::stream::BlockDelta, acc: &mut StreamState) -> Mapped {
+    use crate::stream::BlockDelta;
+    match delta {
+        BlockDelta::TextDelta { text } => vec![Ok(ModelEvent::TextDelta { text })],
+        BlockDelta::ThinkingDelta { thinking } => {
+            vec![Ok(ModelEvent::ThinkingDelta { text: thinking })]
+        }
+        // The signature must survive into the transcript or the next request
+        // in a tool-use turn is rejected.
+        BlockDelta::SignatureDelta { signature } => {
+            vec![Ok(ModelEvent::ThinkingSignature { signature })]
+        }
+        BlockDelta::InputJsonDelta { partial_json } => match acc.tool_uses.get_mut(&index) {
+            // Forwarded as well as accumulated, so observers see the raw
+            // bytes of arguments that never parsed.
+            Some(pending) => {
+                pending.json.push_str(&partial_json);
+                vec![Ok(ModelEvent::ToolArgsDelta {
+                    id: pending.id.clone(),
+                    partial_json,
+                })]
+            }
+            None => vec![],
+        },
+        _ => vec![],
+    }
+}
+
+fn map_block_stop(index: u32, acc: &mut StreamState) -> Mapped {
+    let Some(pending) = acc.tool_uses.remove(&index) else {
+        return vec![];
+    };
+    vec![Ok(crate::tool_use_from_arguments(
+        pending.id,
+        pending.name,
+        pending.json,
+    ))]
+}
+
+/// The opening event is the only place the input count appears on the real
+/// wire; it is kept for `EndTurn` rather than emitted.
+fn opening_usage(message: &crate::stream::MessageStartPayload) -> Usage {
+    Usage {
+        input_tokens: message.usage.input_tokens as u32,
+        output_tokens: 0,
+        cache_creation_input_tokens: message.usage.cache_creation_input_tokens.unwrap_or(0) as u32,
+        cache_read_input_tokens: message.usage.cache_read_input_tokens.unwrap_or(0) as u32,
+    }
+}
+
+fn map_message_delta(
+    delta: crate::stream::MessageDeltaPayload,
+    usage: Option<crate::stream::Usage>,
+    acc: &StreamState,
+) -> Mapped {
+    let stop_reason = delta
+        .stop_reason
+        .map(|sr| match sr {
+            base::message::StopReason::EndTurn => "end_turn",
+            base::message::StopReason::MaxTokens => "max_tokens",
+            base::message::StopReason::ToolUse => "tool_use",
+            base::message::StopReason::StopSequence => "stop_sequence",
+            base::message::StopReason::PauseTurn => "pause_turn",
+            _ => "unknown",
+        })
+        .unwrap_or("unknown")
+        .to_string();
+    let reported = usage.unwrap_or_default();
+    // A relay that repeats an input-side count here is the later word on the
+    // same call and wins; otherwise the opening event answers.
+    let later_or_opening = |reported: u64, opening: u32| {
+        if reported > 0 {
+            reported as u32
+        } else {
+            opening
+        }
+    };
+    vec![Ok(ModelEvent::EndTurn {
+        stop_reason,
+        usage: Usage {
+            input_tokens: later_or_opening(reported.input_tokens, acc.opening_usage.input_tokens),
+            output_tokens: reported.output_tokens as u32,
+            cache_creation_input_tokens: later_or_opening(
+                reported.cache_creation_input_tokens.unwrap_or(0),
+                acc.opening_usage.cache_creation_input_tokens,
+            ),
+            cache_read_input_tokens: later_or_opening(
+                reported.cache_read_input_tokens.unwrap_or(0),
+                acc.opening_usage.cache_read_input_tokens,
+            ),
+        },
+    })]
 }
 
 /// An `error` event, classified as the same error arriving as an HTTP status
