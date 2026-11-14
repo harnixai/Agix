@@ -76,7 +76,7 @@ panel = "ui/panel.js"
 两个字段回答的问题不同:
 
 - **`api_version`** 是插件契约的代际:破坏兼容的改动换一代,一个构建只认它实现了的那几代
-  (`plugin::manifest::SUPPORTED_API_VERSIONS`)。没有默认值,漏掉它解析不过;写了这个构建
+  (`packages::manifest::SUPPORTED_API_VERSIONS`)。没有默认值,漏掉它解析不过;写了这个构建
   没实现的代际会被拒,消息里给出支持的集合。
 - **`requires_engine`** 是包用到的增量能力从哪个引擎版本起才有,比如某个新的脚本点。可选,
   不写就只受 `api_version` 约束。写法是 semver 版本条件(`">=0.3.12"`、`"^0.3.12"`、

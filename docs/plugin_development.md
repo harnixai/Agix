@@ -9,8 +9,8 @@ Agix 的插件只有两种:**编译进宿主的 Rust 插件**,和**跑在内嵌 
 | `examples/plugins/rust/` | `demo-rust`,一个 Rust 插件。`Registrar` 的 16 个注册方法全部用到,每个做一件小事 |
 | `examples/plugins/quickjs/` | `demo-quickjs`,一个插件包。九个可绑定的点各绑一个脚本,另带一个 agent 类型和一个场景 |
 
-这两个样例有测试跑着:`tests/live/tests/demo_plugins.rs` 用模型桩逐项断言,每次 push 都跑;
-`tests/live/tests/live_plugins.rs` 让真实模型把它们用一遍(LIVE 层,见 `tests/README.md`)。
+这两个样例有测试跑着:`tests/blackbox/tests/demo_plugins.rs` 用模型桩逐项断言,每次 push 都跑;
+`tests/blackbox/tests/live_plugins.rs` 让真实模型把它们用一遍(LIVE 层,见 `tests/README.md`)。
 
 ## 选哪一种
 
@@ -160,8 +160,8 @@ Rust 层和 QuickJS 层之间同名不算冲突,按「叠加」那节的规则�
 - 要跑真实的轮次:`tests/runner` 的 `script_session::Session` 驱动一个真 `Agent`,模型那端按
   脚本回答,`Session::rust(..)` 把插件交给 `Builder`。`tests/runner/tests/rust_and_quickjs_layering.rs`
   是例子。
-- 要连 daemon 一起测:`tests/live` 的 `DaemonOptions::host(Host { plugins, .. })` 在本进程起一个
-  带插件的 daemon,见 `tests/live/tests/demo_plugins.rs`。
+- 要连 daemon 一起测:`tests/blackbox` 的 `DaemonOptions::host(Host { plugins, .. })` 在本进程起一个
+  带插件的 daemon,见 `tests/blackbox/tests/demo_plugins.rs`。
 
 ## QuickJS 插件
 
@@ -239,7 +239,7 @@ examples/plugins/quickjs/
 
 ```sh
 cargo test -p demo-rust-plugin                                    # 样例自己的单元测试
-cargo test -p live --test integration demo_plugins::              # 模型桩,两个样例一起
-cargo test -p live --features real-model --test real_model \
+cargo test -p blackbox --test integration demo_plugins::              # 模型桩,两个样例一起
+cargo test -p blackbox --features real-model --test real_model \
   live_plugins:: -- --nocapture                                    # 真实模型,要 .env
 ```
