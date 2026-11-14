@@ -161,6 +161,7 @@ const NOT_YET_PROBED: &[&str] = &[
     "event.sink",
     "health.check",
     "elicitation.ask",
+    "host_calls.call",
     "permission.check",
     "permission.grants",
     "scene",
