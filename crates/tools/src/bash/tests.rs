@@ -1367,6 +1367,7 @@ fn a_hash_the_shell_does_not_read_as_a_comment_hides_nothing_from_classify() {
         "echo \\ #; touch x",
         "echo a\u{a0}#; touch x",
         "echo $'\\''; touch x",
+        "echo ${x:- #}; touch x",
     ] {
         assert!(!classify::classify(cmd).read_only, "{cmd}");
     }

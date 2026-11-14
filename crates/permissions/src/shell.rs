@@ -782,6 +782,26 @@ mod tests {
     }
 
     #[test]
+    fn a_hash_inside_a_parameter_expansion_is_not_a_comment() {
+        assert!(split("echo ${x:- #}; rm x").contains(&"rm x".to_string()));
+        assert!(split("x=${y:+ #} ; rm x").contains(&"rm x".to_string()));
+        assert!(split("echo ${x:-$(id) #}").contains(&"id".to_string()));
+        assert!(split("echo ${x:-'}'}; rm x").contains(&"rm x".to_string()));
+    }
+
+    #[test]
+    fn a_here_document_body_is_read_up_to_its_delimiter() {
+        let rm = "rm x".to_string();
+        assert!(split("cat <<EOF\necho it's\nEOF\nrm x").contains(&rm));
+        assert!(split("cat <<EOF\nsay \"hi\nEOF\nrm x").contains(&rm));
+        assert!(split("cat <<-EOF\n\tit's\n\tEOF\nrm x").contains(&rm));
+        assert!(split("cat <<'E F'\nit's\nE F\nrm x").contains(&rm));
+        assert!(split("cat <<A <<B\nit's\nA\nit's\nB\nrm x").contains(&rm));
+        assert!(split("cat <<EOF\n$(rm y)\nEOF").contains(&"rm y".to_string()));
+        assert!(split("cat <<EOF\n`rm y`\nEOF").contains(&"rm y".to_string()));
+    }
+
+    #[test]
     fn ansi_c_quotes_let_a_backslash_escape_the_quote() {
         assert!(split("echo $'\\''; rm x").contains(&"rm x".to_string()));
         assert!(split("echo $(echo $'\\''); rm x").contains(&"rm x".to_string()));
