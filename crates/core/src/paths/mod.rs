@@ -213,17 +213,37 @@ impl PathSettings {
 /// telemetry recordings.
 pub const LOCAL_DATA_GITIGNORE: &str = "settings.local.json\nmcp.local.json\ntelemetry/\n";
 
-/// Give `dir` a `.gitignore` of [`LOCAL_DATA_GITIGNORE`] if it has none. One
-/// already there is the user's, and is left as it is.
+/// Make sure `dir`'s `.gitignore` has every [`LOCAL_DATA_GITIGNORE`] entry,
+/// appending the ones it lacks and touching nothing else in it: in a cloned
+/// repository the file is the repository author's, and the keys and
+/// recordings the engine writes here must stay out of it all the same.
 pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
     use std::io::Write;
-    let created = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dir.join(".gitignore"));
-    if let Ok(mut file) = created {
-        let _ = file.write_all(LOCAL_DATA_GITIGNORE.as_bytes());
+    let path = dir.join(".gitignore");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let lacking: Vec<&str> = LOCAL_DATA_GITIGNORE
+        .lines()
+        .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
+        .collect();
+    if lacking.is_empty() {
+        return;
     }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let mut added = String::new();
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        added.push('\n');
+    }
+    for entry in lacking {
+        added.push_str(entry);
+        added.push('\n');
+    }
+    let _ = file.write_all(added.as_bytes());
 }
 
 /// Unified management of AGENT persistent directory paths.
@@ -386,5 +406,43 @@ mod tests {
             p.global_data_dir.join("recordings")
         );
         assert_eq!(p.local_memory_dir(), p.local_data_dir.join("memory"));
+    }
+}
+
+#[cfg(test)]
+mod local_data_gitignore_tests {
+    use super::*;
+
+    #[test]
+    fn a_gitignore_the_repository_ships_gets_the_engines_entries_appended() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".gitignore");
+        std::fs::write(&file, "").unwrap();
+        ensure_local_data_gitignore(dir.path());
+        let lines: Vec<String> = std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .map(String::from)
+            .collect();
+        for entry in LOCAL_DATA_GITIGNORE.lines() {
+            assert!(
+                lines.iter().any(|l| l == entry),
+                "{entry} missing: {lines:?}"
+            );
+        }
+
+        std::fs::write(&file, "build/\nsettings.local.json").unwrap();
+        ensure_local_data_gitignore(dir.path());
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.starts_with("build/\nsettings.local.json\n"),
+            "{text:?}"
+        );
+        assert_eq!(text.matches("settings.local.json").count(), 1, "{text:?}");
+        assert!(text.contains("mcp.local.json\n") && text.contains("telemetry/\n"));
+
+        let before = text.clone();
+        ensure_local_data_gitignore(dir.path());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
     }
 }

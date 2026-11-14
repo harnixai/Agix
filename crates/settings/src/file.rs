@@ -324,10 +324,9 @@ mod tests {
         std::fs::write(mine.path().join(".gitignore"), "mine\n").unwrap();
         let tier = SettingsDir::lock(mine.path()).unwrap();
         tier.write(SETTINGS_LOCAL_FILE, &obj(json!({}))).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(mine.path().join(".gitignore")).unwrap(),
-            "mine\n"
-        );
+        let kept = std::fs::read_to_string(mine.path().join(".gitignore")).unwrap();
+        assert!(kept.starts_with("mine\n"), "{kept}");
+        assert!(kept.lines().any(|l| l == "settings.local.json"), "{kept}");
     }
 
     #[test]
