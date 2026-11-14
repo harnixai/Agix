@@ -342,6 +342,7 @@ dependencies = [
  "daemon",
  "demo-rust-plugin",
  "history",
+ "hostile-plugins",
  "mcp-oauth-mock",
  "model",
  "platform",
