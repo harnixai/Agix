@@ -181,25 +181,116 @@ async fn the_end_of_the_parent_session_stops_a_member_mid_turn() {
     }
 }
 
+/// A foreground sub-agent whose parent call is dropped — the batch abandoning
+/// it for a sibling's error — still ends for the host, the hooks and the
+/// telemetry, whether its model stops on the cancel or ignores it.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dropping_the_parent_call_aborts_the_foreground_sub_agent() {
-    let started = Arc::new(tokio::sync::Notify::new());
-    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let agent_tool = agent_tool_with_model(Arc::new(HangingModel {
-        started: started.clone(),
-        dropped: dropped.clone(),
-    }));
-    tokio::select! {
-        _ = run_sub_with(&agent_tool) => panic!("the model never answers"),
-        _ = started.notified() => {}
-    }
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !dropped.load(std::sync::atomic::Ordering::SeqCst) {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the sub-agent kept running after its parent dropped the call"
+async fn a_dropped_foreground_sub_agent_still_ends_for_the_host_hooks_and_telemetry() {
+    for heeds_cancel in [true, false] {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let model: Arc<dyn Model> = if heeds_cancel {
+            Arc::new(AnswersOnlyCancellation {
+                started: started.clone(),
+                dropped: dropped.clone(),
+            })
+        } else {
+            Arc::new(HangingModel {
+                started: started.clone(),
+                dropped: dropped.clone(),
+            })
+        };
+        let log = std::env::temp_dir().join(format!("agix-dropped-stop-{}", bg_task_id()));
+        let providers = platform::local_providers();
+        let runner = Arc::new(hooks::HookRunner::new(
+            std::collections::HashMap::from([(
+                hooks::HookEvent::SubagentStop,
+                vec![hooks::config::HookConfig::Command {
+                    command: format!("cat >> '{}'", log.display()),
+                    shell: None,
+                    timeout: Some(10_000),
+                    if_pattern: None,
+                    only_on_error: None,
+                    once: None,
+                    async_rewake: None,
+                    on_error: hooks::OnError::Allow,
+                }],
+            )]),
+            hooks::HookExec {
+                process: providers.process,
+                network: providers.network,
+            },
+        ));
+        let (telemetry_tx, mut telemetry_rx) = tokio::sync::mpsc::channel(64);
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut config = EngineConfig::defaults_for("test-model");
+        config.tool_cancel_grace = std::time::Duration::from_millis(100);
+        let agent_tool = TestParent {
+            config: Arc::new(config),
+            events: Some(runtime::event_bus::EventBus::new(events_tx)),
+            hooks: Arc::downgrade(&runner),
+            host: Some(runtime::agent::HostContracts {
+                telemetry: TelemetryHandle::new(telemetry_tx),
+                ..host_contracts()
+            }),
+            ..TestParent::new(model)
+        }
+        .agent_tool();
+
+        tokio::select! {
+            _ = run_sub_with(&agent_tool) => panic!("the model never answers"),
+            _ = started.notified() => {}
+        }
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut lifecycle = Vec::new();
+        while !lifecycle.iter().any(|(kind, _)| *kind == "completed") {
+            let event = tokio::time::timeout_at(deadline, events_rx.recv())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("no AgentCompleted (heeds cancel: {heeds_cancel}): {lifecycle:?}")
+                })
+                .expect("the parent channel is open");
+            match event {
+                AgentEvent::AgentSpawned { .. } => lifecycle.push(("spawned", String::new())),
+                AgentEvent::AgentCompleted { outcome, .. } => {
+                    lifecycle.push(("completed", outcome))
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            lifecycle,
+            vec![
+                ("spawned", String::new()),
+                ("completed", "cancelled".into())
+            ],
+            "heeds cancel: {heeds_cancel}"
         );
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+
+        let mut completed = 0;
+        while completed == 0 {
+            let event = tokio::time::timeout_at(deadline, telemetry_rx.recv())
+                .await
+                .unwrap_or_else(|_| panic!("no agent_completed (heeds cancel: {heeds_cancel})"))
+                .expect("the handle is still open");
+            completed += usize::from(event.kind() == "agent_completed");
+        }
+        let stops = loop {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            if !text.is_empty() || tokio::time::Instant::now() > deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        let _ = std::fs::remove_file(&log);
+        assert_eq!(
+            stops.matches("\"stop_reason\":\"cancelled\"").count(),
+            1,
+            "heeds cancel: {heeds_cancel}: {stops}"
+        );
     }
 }
 

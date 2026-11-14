@@ -200,9 +200,9 @@ impl Delegator {
         let prompt = self.opening_prompt(def.as_ref(), prompt);
         let tag = SubagentTag::new(self, &sid, agent_type, called_from).for_task(task.as_ref());
 
-        let (text, end) = if background {
+        if background {
             open_inbox(task.as_deref(), &agent);
-            let ran = run_one_turn(
+            let (text, end) = run_one_turn(
                 &mut agent,
                 &mut event_rx,
                 &input_tx,
@@ -213,7 +213,8 @@ impl Delegator {
             )
             .await;
             drop(input_tx);
-            ran
+            run.finish(&end, StopReason::OfTheEnd).await;
+            (text, end)
         } else {
             run_one_turn_detached(
                 &sid,
@@ -224,11 +225,11 @@ impl Delegator {
                 cancel,
                 Some(tag),
                 task,
+                run,
+                self.env.config.tool_cancel_grace,
             )
             .await
-        };
-        run.finish(&end, StopReason::OfTheEnd).await;
-        (text, end)
+        }
     }
 }
 

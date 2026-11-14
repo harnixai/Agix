@@ -2,6 +2,7 @@
 //! turn runners, and panic containment.
 
 use super::*;
+use crate::delegate::{DelegateRun, StopReason};
 
 /// Write the first `Meta` line for a freshly spawned sidechain (sub-agent /
 /// team member) session, linking it back to its parent via
@@ -219,9 +220,11 @@ pub(crate) fn with_stop_note(text: String, stop_reason: &str) -> String {
 
 /// [`run_one_turn`] on a task of its own, so a foreground sub-agent is
 /// scheduled like any other agent instead of being polled from inside the
-/// parent's turn. The parent still waits for it; if the parent's tool call is
-/// dropped instead, the guard aborts the sub-agent rather than leaving it
-/// running unobserved.
+/// parent's turn, ending `run` once it is over. The parent still waits for
+/// it; if the parent's tool call is dropped instead — a sibling's error
+/// abandoned it, a cancelled turn stopped waiting — the sub-agent is
+/// cancelled, given time to stop, then aborted, and still ends for the
+/// host, the hooks and the telemetry.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_one_turn_detached(
     session_id: &str,
@@ -232,27 +235,69 @@ pub(crate) async fn run_one_turn_detached(
     cancel: tokio_util::sync::CancellationToken,
     tag: Option<SubagentTag>,
     task: Option<Arc<base::context::RunningTask>>,
+    run: DelegateRun,
+    grace: std::time::Duration,
 ) -> (String, DelegateEnd) {
     use tracing::Instrument;
     let span = tracing::info_span!("subagent", session = %session_id);
-    let mut task = AbortOnDrop(tokio::spawn(
-        async move {
-            let outcome = run_one_turn(
-                &mut agent,
-                &mut event_rx,
-                &input_tx,
-                prompt,
-                cancel,
-                tag,
-                task.as_deref(),
-            )
-            .await;
-            drop(input_tx);
-            outcome
+    let stop = cancel.child_token();
+    let _stop_when_dropped = stop.clone().drop_guard();
+    let completes = tag.clone();
+    let turn = {
+        let stop = stop.clone();
+        tokio::spawn(
+            async move {
+                let outcome = run_one_turn(
+                    &mut agent,
+                    &mut event_rx,
+                    &input_tx,
+                    prompt,
+                    stop,
+                    tag,
+                    task.as_deref(),
+                )
+                .await;
+                drop(input_tx);
+                outcome
+            }
+            .instrument(span),
+        )
+    };
+    let ends = tokio::spawn(async move {
+        let mut turn = turn;
+        let ran = tokio::select! {
+            ran = &mut turn => joined(ran),
+            _ = stop.cancelled() => wound_down(turn, grace, completes.as_ref()).await,
+        };
+        run.finish(&ran.1, StopReason::OfTheEnd).await;
+        ran
+    });
+    joined(ends.await)
+}
+
+/// The cancelled turn's outcome once it has stopped on its own, or after
+/// twice `grace` an abort. An aborted turn never reached its own
+/// `AgentCompleted`, so it is sent here.
+async fn wound_down(
+    mut turn: tokio::task::JoinHandle<(String, DelegateEnd)>,
+    grace: std::time::Duration,
+    tag: Option<&SubagentTag>,
+) -> (String, DelegateEnd) {
+    // The sub-agent's own tools are given `grace` to stop; its turn needs
+    // that much and some margin to write what it did.
+    if let Ok(ran) = tokio::time::timeout(grace * 2, &mut turn).await {
+        return joined(ran);
+    }
+    turn.abort();
+    match turn.await {
+        Err(e) if e.is_cancelled() => {
+            if let Some(tag) = tag {
+                tag.completed("cancelled");
+            }
+            (String::new(), DelegateEnd::Cancelled)
         }
-        .instrument(span),
-    ));
-    joined((&mut task.0).await)
+        ran => joined(ran),
+    }
 }
 
 fn joined(outcome: Result<(String, DelegateEnd), tokio::task::JoinError>) -> (String, DelegateEnd) {
@@ -272,14 +317,6 @@ pub(crate) async fn without_panics(
     run: impl std::future::Future<Output = (String, DelegateEnd)> + Send + 'static,
 ) -> (String, DelegateEnd) {
     joined(tokio::spawn(run).await)
-}
-
-pub(crate) struct AbortOnDrop<T>(pub(crate) tokio::task::JoinHandle<T>);
-
-impl<T> Drop for AbortOnDrop<T> {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
 }
 
 pub(crate) fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
