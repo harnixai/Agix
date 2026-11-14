@@ -670,7 +670,7 @@ fn instance_entry(
         token_file: token_file.map(|f| f.path().to_path_buf()),
         scenes,
         protocol_version: daemon::discovery::INSTANCE_PROTOCOL_VERSION,
-        started_at: rfc3339_now(),
+        started_at: history::project::now_rfc3339(),
     }
 }
 
@@ -768,20 +768,6 @@ async fn shutdown_signal() {
     }
     let _ = tokio::signal::ctrl_c().await;
     info!("ctrl-c received; shutting down");
-}
-
-fn rfc3339_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    time::OffsetDateTime::from_unix_timestamp(secs as i64)
-        .ok()
-        .and_then(|t| {
-            t.format(&time::format_description::well_known::Rfc3339)
-                .ok()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
