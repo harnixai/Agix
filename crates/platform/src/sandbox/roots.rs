@@ -185,6 +185,96 @@ pub(super) fn submodules_of(git_dir: &Path) -> Submodules {
     found
 }
 
+/// What the project's own `.git/config` points at inside the working tree: the
+/// hooks directory `core.hooksPath` names and the files `[include]` and
+/// `[includeIf]` pull in, nested includes among them. Paths a command could
+/// create are listed whether or not they exist yet.
+#[derive(Default)]
+pub(super) struct GitConfigured {
+    pub(super) hooks: Option<PathBuf>,
+    pub(super) included: Vec<PathBuf>,
+}
+
+pub(super) fn git_configured(cwd: &Path, git_dir: &Path) -> GitConfigured {
+    let mut found = GitConfigured::default();
+    let home = base::paths::home_dir();
+    let mut seen = Vec::new();
+    read_git_config(
+        &git_dir.join("config"),
+        cwd,
+        home.as_deref(),
+        &mut seen,
+        &mut found,
+    );
+    found
+}
+
+fn read_git_config(
+    config: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    seen: &mut Vec<PathBuf>,
+    found: &mut GitConfigured,
+) {
+    let config = base::path::resolve_physically(config);
+    if seen.contains(&config) || seen.len() >= 32 {
+        return;
+    }
+    seen.push(config.clone());
+    let Ok(text) = std::fs::read_to_string(&config) else {
+        return;
+    };
+    let named = |value: &str, relative_to: &Path| match (value.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => relative_to.join(value),
+    };
+    let mut section = String::new();
+    for line in text.lines().map(str::trim) {
+        if let Some(header) = line.strip_prefix('[') {
+            section = header
+                .split(|c: char| c == ']' || c.is_whitespace() || c == '"')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim().to_ascii_lowercase(), config_value(value));
+        match (section.as_str(), key.as_str()) {
+            ("core", "hookspath") if !value.is_empty() => {
+                let hooks = base::path::resolve_physically(&named(&value, cwd));
+                // A hooks path that holds the project itself would shut it.
+                found.hooks = Some(hooks).filter(|h| !cwd.starts_with(h));
+            }
+            ("include" | "includeif", "path") if !value.is_empty() => {
+                let included = base::path::resolve_physically(&named(
+                    &value,
+                    config.parent().unwrap_or(Path::new("/")),
+                ));
+                found.included.push(included.clone());
+                read_git_config(&included, cwd, home, seen, found);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A git config value: unquoted trailing comment dropped, quotes removed.
+fn config_value(raw: &str) -> String {
+    let mut out = String::new();
+    let mut quoted = false;
+    for c in raw.trim().chars() {
+        match c {
+            '"' => quoted = !quoted,
+            '#' | ';' if !quoted => break,
+            _ => out.push(c),
+        }
+    }
+    out.trim().to_string()
+}
+
 /// What in the project a sandboxed command must not write, because the
 /// engine, or the user's own git, acts on it later outside the sandbox.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -218,6 +308,9 @@ pub(super) fn project_guard(cwd: &Path) -> ProjectGuard {
             files.extend(GIT_CONTROL_FILES.iter().map(|f| worktree.join(f)));
         }
     }
+    let configured = git_configured(cwd, &git_dir);
+    trees.extend(configured.hooks);
+    files.extend(configured.included);
     for name in ENGINE_CONFIG_ROOTS {
         let root = cwd.join(name);
         let real = base::path::resolve_physically(&root);

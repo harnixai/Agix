@@ -3,7 +3,7 @@
 //! tmpfs or `/dev/null` laid over the path it guards.
 
 use super::fence::{fenced_secrets, fenced_sockets, is_socket};
-use super::roots::{project_agix_dirs, subdirs, submodules_of, Roots};
+use super::roots::{git_configured, project_agix_dirs, subdirs, submodules_of, Roots};
 use super::{
     mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement, NetworkMode,
     ProcessSpec, SandboxMode, SandboxPolicy,
@@ -69,6 +69,13 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
             for dir in &submodules.dirs {
                 bind(args, "--bind", dir);
             }
+        }
+        let configured = git_configured(&roots.cwd, &git);
+        if let Some(hooks) = configured.hooks.filter(|p| roots.opens(p)) {
+            read_only(args, &hooks);
+        }
+        for file in configured.included.iter().filter(|p| roots.opens(p)) {
+            bind(args, "--ro-bind-try", file);
         }
         for repo in std::iter::once(&git).chain(&submodules.git_dirs) {
             for f in GIT_CONTROL_FILES {

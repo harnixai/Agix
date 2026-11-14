@@ -138,3 +138,47 @@ fn a_project_in_the_state_root_cannot_rewrite_the_state_roots_configuration() {
         "fine"
     );
 }
+
+/// `core.hooksPath` and `[include] path` in the project's own `.git/config`
+/// name files in the working tree that the user's git runs or reads, outside
+/// the sandbox, at the next commit.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_sandboxed_command_cannot_rewrite_the_hooks_path_or_included_config() {
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let project = root.join("project");
+    write_file(
+        &project.join(".git/config"),
+        "[core]\n\thooksPath = .githooks\n[include]\n\tpath = ../.gitconfig.local\n",
+    );
+    write_file(&project.join(".git/HEAD"), "ref: refs/heads/main\n");
+    write_file(&project.join(".githooks/pre-commit"), "fine");
+    write_file(&project.join(".gitconfig.local"), "fine");
+    let policy = SandboxPolicy {
+        state_root: Some(root.join("state")),
+        ..Default::default()
+    };
+    let runs = |command: &str| {
+        run_confined(&project, &policy, &[], command)
+            .status
+            .success()
+    };
+
+    assert!(runs("echo x > notes.md"), "the project stays writable");
+    for command in [
+        "echo x > .githooks/pre-commit",
+        "echo x > .githooks/post-commit",
+        "echo x > .gitconfig.local",
+    ] {
+        assert!(!runs(command), "`{command}` was allowed");
+    }
+    for file in [".githooks/pre-commit", ".gitconfig.local"] {
+        assert_eq!(std::fs::read_to_string(project.join(file)).unwrap(), "fine");
+    }
+    assert!(!project.join(".githooks/post-commit").exists());
+}

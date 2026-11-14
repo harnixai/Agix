@@ -380,3 +380,44 @@ fn a_lingering_process_cannot_read_a_credential_written_after_it_started() {
         "the mask shut a readable file too: {saw:?}"
     );
 }
+
+/// The hooks directory `core.hooksPath` names and the files `.git/config`
+/// includes are read-only mounts, absent or not.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_the_hooks_path_and_included_config_are_read_only() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let git = root.join(".git");
+    std::fs::create_dir_all(&git).unwrap();
+    std::fs::write(
+        git.join("config"),
+        "[core]\n\thooksPath = .githooks\n[include]\n\tpath = ../.gitconfig.local\n",
+    )
+    .unwrap();
+    std::fs::write(root.join(".gitconfig.local"), "").unwrap();
+    let cmd = wrap(opts("true", &root));
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
+    let args = &cmd.spec.args[..end];
+    let hooks = root.join(".githooks").display().to_string();
+    let included = root.join(".gitconfig.local").display().to_string();
+    let at = |triple: [&str; 3]| args.windows(3).position(|w| w == triple);
+    let bound = at([
+        "--bind",
+        &root.display().to_string(),
+        &root.display().to_string(),
+    ])
+    .unwrap();
+    assert!(
+        at(["--tmpfs", &hooks, "--remount-ro"]).is_some_and(|i| i > bound),
+        "{args:?}"
+    );
+    assert!(
+        at(["--ro-bind-try", &included, &included]).is_some_and(|i| i > bound),
+        "{args:?}"
+    );
+}

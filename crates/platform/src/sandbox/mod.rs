@@ -34,7 +34,8 @@
 //!
 //! Inside those, what the engine or git later acts on outside the sandbox is
 //! read-only: the project's `.git`, `.agix` and `.claude` entries themselves,
-//! `.git/{config,config.worktree,commondir}` and `.git/hooks/`, the same in
+//! `.git/{config,config.worktree,commondir}` and `.git/hooks/`, the hooks directory
+//! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
 //! included, and the directories leading down to them), the
 //! configuration under `.agix/` and `.claude/` (`base::paths::ENGINE_CONFIG_*`:
