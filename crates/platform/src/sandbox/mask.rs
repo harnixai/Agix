@@ -98,7 +98,7 @@ pub(super) fn mask_below(root: &Path, locs: &[Located], dir: &Path) -> Vec<Mount
 /// the root — when the root can be masked around them: the root is in the
 /// sandbox at all (`shown`), and each of them [`fits_a_hole`].
 pub(super) fn holes_in_state_root<'a>(
-    roots: &'a super::Roots,
+    roots: &'a super::roots::Roots,
     secrets: &[Located],
     shown: impl Fn(&Path) -> bool,
 ) -> Option<(&'a Path, Vec<PathBuf>)> {
@@ -401,8 +401,11 @@ mod tests {
             only_additional_writable: true,
             ..Default::default()
         };
-        let roots =
-            super::super::Roots::resolve(project.path(), std::slice::from_ref(&tmp), &policy);
+        let roots = super::super::roots::Roots::resolve(
+            project.path(),
+            std::slice::from_ref(&tmp),
+            &policy,
+        );
         let locs = roots.paths.credential_locations(&[]);
 
         let (root, holes) = holes_in_state_root(&roots, &locs, |_| true).expect("masked");
@@ -430,7 +433,7 @@ mod tests {
             state_root: Some(state.clone()),
             ..Default::default()
         };
-        let roots = super::super::Roots::resolve(&project, &[], &policy);
+        let roots = super::super::roots::Roots::resolve(&project, &[], &policy);
         let locs = roots.paths.credential_locations(&[]);
         let (root, holes) = holes_in_state_root(&roots, &locs, |_| true).expect("masked");
         let plan = mask_plan(root, &locs, &holes);

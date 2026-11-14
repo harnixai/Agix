@@ -60,11 +60,26 @@ const HOME_READERS: &[(&str, &str)] = &[
          the contract rather than with a backend.",
     ),
     (
-        "crates/platform/src/sandbox.rs",
+        "crates/platform/src/sandbox/roots.rs",
         "a backend confines a process on this machine, and the state root it \
          protects falls back to $HOME/.agix when the policy does not name one. \
          Where Agix's own settings.json lives comes from \
          `SandboxPolicy::state_root` first.",
+    ),
+    (
+        "crates/platform/src/sandbox/tests/macos.rs",
+        "the cases build the policy a confined command gets by default, which \
+         names this machine's home.",
+    ),
+    (
+        "crates/platform/src/sandbox/tests/strict.rs",
+        "the cases build the policy a confined command gets by default, which \
+         names this machine's home.",
+    ),
+    (
+        "crates/platform/src/sandbox/tests/wrap.rs",
+        "the cases build the policy a confined command gets by default, which \
+         names this machine's home.",
     ),
     (
         "crates/settings/src/trust.rs",

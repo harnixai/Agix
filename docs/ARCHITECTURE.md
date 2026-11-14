@@ -909,7 +909,7 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
    写进它自己的 `env`,不要靠继承。
 
 沙箱是**轻量限制,不是安全隔离**。已知逃逸路径写在
-`crates/platform/src/sandbox.rs` 的模块头里,五条;第 3 条对引擎自己的
+`crates/platform/src/sandbox/mod.rs` 的模块头里,五条;第 3 条对引擎自己的
 git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git;第 4 条(让别的进程替命令
 在沙箱外做事)在无人值守会话里收口;第 5 条(命令在项目里埋一个嵌套仓库)由命令结束后的检查
 隔离,后端本身挡不住(都见 §6.3)。它限住的写入与读取范围见 §6.3。
@@ -1384,7 +1384,7 @@ strict policy 兑现不了时(没有后端,Windows,Linux 上没有 bubblewrap):`
 上不存在的 `.claude` 不加挡(挡它会在每个项目里留下一个空挂载点),`.agents/skills/` 同理只在
 `.agents` 已经存在时挡(`.agents` 绑定到自身,挪不走;`skills` 只读,不存在时留一个只读的空挂载点),
 不存在的 `.agents` 在 Linux 上建得出来;没有 `.git` 的项目、没有
-`commondir` 的仓库在 Linux 上补不上这一道(见 `sandbox.rs` 模块头第 3 条),所以有下一段。
+`commondir` 的仓库在 Linux 上补不上这一道(见 `sandbox/mod.rs` 模块头第 3 条),所以有下一段。
 
 读遮挡的写法两个后端不同,来源相同:都是 `SensitivePaths::credential_locations` 给出的位置。macOS 把
 每条翻成一条读拒绝正则,所以 profile 写出之后才新建的场景目录也在内;内核按解析后的路径匹配,所以
@@ -1402,7 +1402,7 @@ strict policy 兑现不了时(没有后端,Windows,Linux 上没有 bubblewrap):`
 `settings.local.json`、`mcp.local.json` 读不到。
 
 逐个遮挡的 `/dev/null` 绑定钉在挂载那一刻的文件上:引擎之后新建、或用临时文件 rename 覆盖的密钥文件,
-命令留在后台的进程读得到。这是 Linux 上的已知缺口(`sandbox.rs` 模块头"已知出路"第 6 条),只剩可写
+命令留在后台的进程读得到。这是 Linux 上的已知缺口(`sandbox/mod.rs` 模块头"已知出路"第 6 条),只剩可写
 目录里直接放着凭据的几种布局——项目就是状态目录时它顶层的密钥文件与尚不存在的 `daemon/auth`,项目是
 某个场景目录时那个场景的密钥文件与尚不存在的 `mcp/oauth`,以及 `.agix` 是符号链接的项目的密钥文件;
 要堵就得把项目目录本身盖住,项目就没法用了。macOS 的读拒绝按路径正则匹配,没有这个缺口。
@@ -1441,7 +1441,7 @@ git 依赖、测试里建临时仓库一起弄坏,而且在别处建好再挪进
 改回名字即还原。两种情况都在工具结果后面附一行说明并发 `Notification`。没有危险键的只附说明。同一个仓库
 每个会话只报一次,被保留的要配置变了才再报。
 `Strict` 下的命令除 `TMPDIR` 外什么都写不了,不扫。这道检查挡不住的是命令起了个比它活得久的进程、之后才埋仓库。
-见 `sandbox.rs` 模块头已知逃逸。
+见 `sandbox/mod.rs` 模块头已知逃逸。
 
 引擎自己跑的 git(每轮的 `git status`、worktree 的创建与清理)经 `base::engine_exec::EngineExec` 起,走会话的
 `exec.process`:会话的命令进沙箱(没有

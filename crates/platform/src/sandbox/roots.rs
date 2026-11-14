@@ -1,0 +1,252 @@
+//! The paths a policy is written against: working directory, writable roots and state
+//! root resolved through their symlinks, plus what in a project must stay read-only
+//! (git control files, submodules, engine configuration). Shared by both backends.
+
+use super::SandboxPolicy;
+use base::paths::{
+    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
+    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, REPOSITORY_CONFIG_DIR,
+    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+};
+use std::path::{Path, PathBuf};
+
+/// The state root to protect: the one the caller named, else the
+/// conventional `$HOME/.agix`.
+fn state_root_of(policy: &SandboxPolicy) -> Option<PathBuf> {
+    policy
+        .state_root
+        .clone()
+        .or_else(|| base::paths::home_dir().map(|h| h.join(".agix")))
+}
+
+/// The project's `.agix`, as given and as the kernel sees it.
+pub(super) fn project_agix_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let given = cwd.join(".agix");
+    let real = base::path::resolve_physically(&given);
+    if real == given {
+        vec![given]
+    } else {
+        vec![given, real]
+    }
+}
+
+/// The paths a policy is written against, each with its symlinks resolved.
+///
+/// The kernel checks a write against the path it resolves to: on macOS a rule
+/// for `/tmp/x` never matches, because the write lands on `/private/tmp/x`.
+pub(super) struct Roots {
+    pub(super) cwd: PathBuf,
+    pub(super) only_additional: bool,
+    pub(super) writable: Vec<PathBuf>,
+    pub(super) state_root: Option<PathBuf>,
+    pub(super) paths: base::paths::SensitivePaths,
+}
+
+impl Roots {
+    pub(super) fn resolve(cwd: &Path, additional: &[PathBuf], policy: &SandboxPolicy) -> Self {
+        let cwd = base::path::resolve_physically(cwd);
+        let state_root = state_root_of(policy).map(|p| base::path::resolve_physically(&p));
+        Self {
+            paths: base::paths::SensitivePaths::new(state_root.as_deref(), Some(&cwd)),
+            cwd,
+            only_additional: policy.only_additional_writable,
+            writable: additional
+                .iter()
+                .map(|p| base::path::resolve_physically(p))
+                .collect(),
+            state_root,
+        }
+    }
+
+    /// Whether a write to `path` falls inside one of the writable roots.
+    pub(super) fn opens(&self, path: &Path) -> bool {
+        (!self.only_additional && path.starts_with(&self.cwd))
+            || self.writable.iter().any(|root| path.starts_with(root))
+    }
+
+    /// Where the state root is not fenced off, the files and the
+    /// directories of its configuration a command could otherwise write:
+    /// it is an `.agix` like a project's. One the working directory is in
+    /// is left out, or the project could not be written at all.
+    pub(super) fn unfenced_state_root_config(&self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let Some(root) = self
+            .state_root
+            .as_deref()
+            .filter(|_| self.fenced_state_root().is_none())
+        else {
+            return Default::default();
+        };
+        let guarded = |names: &[&str]| -> Vec<PathBuf> {
+            names
+                .iter()
+                .map(|name| root.join(name))
+                .filter(|p| self.opens(p) && !self.cwd.starts_with(p))
+                .collect()
+        };
+        (guarded(ENGINE_CONFIG_FILES), guarded(ENGINE_CONFIG_DIRS))
+    }
+
+    /// The state root to fence off, its working directories left open —
+    /// unless the project lives inside it, in which case fencing the root
+    /// would fence the project too, or nothing but the named roots is
+    /// writable, in which case it is shut already.
+    /// The writable roots that are a session's own directory under the
+    /// state root's `tmp/`: the fence around the state root would otherwise
+    /// shut them along with the rest of it.
+    pub(super) fn session_temp_dirs_in<'a>(
+        &'a self,
+        root: &Path,
+    ) -> impl Iterator<Item = &'a PathBuf> {
+        let tmp = root.join(STATE_ROOT_SESSION_TMP);
+        self.writable
+            .iter()
+            .filter(move |p| p.starts_with(&tmp) && **p != tmp)
+    }
+
+    pub(super) fn fenced_state_root(&self) -> Option<&Path> {
+        self.state_root
+            .as_deref()
+            .filter(|root| !self.only_additional && !self.project_in(root))
+    }
+
+    /// Whether the working directory is a project inside `state_root`. A
+    /// session without a project works in a directory of its own in the
+    /// state root's scratchpad, which the fence leaves open anyway, so that
+    /// one is no reason to drop the fence.
+    pub(super) fn project_in(&self, state_root: &Path) -> bool {
+        self.cwd.starts_with(state_root)
+            && !STATE_ROOT_WORKING_DIRS
+                .iter()
+                .any(|dir| self.cwd.starts_with(state_root.join(dir)))
+    }
+}
+
+/// The real directories directly under `dir`.
+pub(super) fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .collect()
+}
+
+/// How many directories deep below a git directory's `modules/` the search
+/// for submodules goes, counting both the levels of a name with slashes in
+/// it and the `modules/` of each nested submodule.
+const SUBMODULE_SEARCH_DEPTH: usize = 12;
+
+/// The most submodule git directories one project gets rules for.
+const SUBMODULE_LIMIT: usize = 256;
+
+/// The submodules of the repository whose git directory is `git_dir`, nested
+/// ones included.
+#[derive(Default)]
+pub(super) struct Submodules {
+    /// Every directory from `git_dir/modules` down to each submodule's git
+    /// directory, outermost first: what would let a command move a guarded
+    /// file's directory aside and put another in its place.
+    pub(super) dirs: Vec<PathBuf>,
+    pub(super) git_dirs: Vec<PathBuf>,
+}
+
+/// A submodule's git directory sits at `modules/<name>`, `<name>` possibly
+/// several directories deep, and has a `modules/` of its own. It is known by
+/// its `HEAD` or its `config`: the `config` is what a command cannot remove,
+/// so removing `HEAD` does not take a submodule off the list. Symbolic links
+/// are not followed: the rules are written against the paths found, and a
+/// link would lead them somewhere the repository chose.
+pub(super) fn submodules_of(git_dir: &Path) -> Submodules {
+    let mut found = Submodules::default();
+    let mut pending = vec![(git_dir.join("modules"), 0)];
+    while let Some((dir, depth)) = pending.pop() {
+        if depth >= SUBMODULE_SEARCH_DEPTH || found.git_dirs.len() >= SUBMODULE_LIMIT {
+            continue;
+        }
+        if !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        found.dirs.push(dir.clone());
+        for child in subdirs(&dir) {
+            let is_git_dir = ["HEAD", "config"]
+                .iter()
+                .any(|f| child.join(f).symlink_metadata().is_ok());
+            if is_git_dir {
+                found.dirs.push(child.clone());
+                pending.push((child.join("modules"), depth + 1));
+                found.git_dirs.push(child);
+            } else {
+                pending.push((child, depth + 1));
+            }
+        }
+    }
+    found
+}
+
+/// What in the project a sandboxed command must not write, because the
+/// engine, or the user's own git, acts on it later outside the sandbox.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) struct ProjectGuard {
+    /// `.git`, the directories down to each submodule's git directory and
+    /// the configuration roots themselves: renaming one away, or replacing
+    /// it with a symlink, would put every rule below on a path nobody reads.
+    pub(super) entries: Vec<PathBuf>,
+    pub(super) files: Vec<PathBuf>,
+    pub(super) trees: Vec<PathBuf>,
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) fn project_guard(cwd: &Path) -> ProjectGuard {
+    let git = cwd.join(REPOSITORY_CONFIG_DIR);
+    let git_dir = base::path::resolve_physically(&git);
+    let agix_dir = base::path::resolve_physically(&cwd.join(".agix"));
+
+    let mut entries = vec![git.clone()];
+    if git_dir != git {
+        entries.push(git_dir.clone());
+    }
+    let submodules = submodules_of(&git_dir);
+    entries.extend(submodules.dirs);
+    let mut files = Vec::new();
+    let mut trees = Vec::new();
+    for repo in std::iter::once(&git_dir).chain(&submodules.git_dirs) {
+        files.extend(GIT_CONTROL_FILES.iter().map(|f| repo.join(f)));
+        trees.push(repo.join(GIT_HOOKS_DIR));
+        for worktree in subdirs(&repo.join("worktrees")) {
+            files.extend(GIT_CONTROL_FILES.iter().map(|f| worktree.join(f)));
+        }
+    }
+    for name in ENGINE_CONFIG_ROOTS {
+        let root = cwd.join(name);
+        let real = base::path::resolve_physically(&root);
+        files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
+        trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
+        if real != root {
+            entries.push(real);
+        }
+        entries.push(root);
+    }
+    for dir in PROJECT_ENGINE_CONFIG_DIRS {
+        let mut above = cwd.to_path_buf();
+        for part in Path::new(dir).components() {
+            above.push(part);
+            let real = base::path::resolve_physically(&above);
+            if real != above {
+                entries.push(real);
+            }
+            entries.push(above.clone());
+        }
+        trees.push(base::path::resolve_physically(&above));
+    }
+
+    for worktree in subdirs(&agix_dir.join(PROJECT_WORKTREES_DIR)) {
+        files.push(worktree.join(REPOSITORY_CONFIG_DIR));
+    }
+    ProjectGuard {
+        entries,
+        files,
+        trees,
+    }
+}

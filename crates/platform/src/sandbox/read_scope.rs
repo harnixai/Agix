@@ -257,14 +257,14 @@ pub(super) fn macos_rules(read: &ReadScope, dirs: &UserDirs) -> String {
     );
     for p in strict_read_roots(scope, dirs)
         .iter()
-        .flat_map(|p| super::spellings(p))
+        .flat_map(|p| super::macos::spellings(p))
     {
         s.push_str(&format!(" (subpath \"{}\")", path(&p)));
     }
     // The xcrun shim (`/usr/bin/git`) looks its tool up in this cache and
     // prints an error on every run when it cannot read it. Not writable: the
     // unconfined xcrun reads it too.
-    if let Some(tmp) = super::darwin_user_temp_dir() {
+    if let Some(tmp) = super::macos::darwin_user_temp_dir() {
         s.push_str(&format!(" (literal \"{}\")", path(&tmp.join("xcrun_db"))));
     }
     s.push_str(")\n");
@@ -296,10 +296,10 @@ impl<'a> LinuxReadScope<'a> {
     /// The first mounts: the whole filesystem, or the system roots.
     pub(super) fn base_mounts(&self, args: &mut Vec<String>) {
         match self.scope {
-            None => super::bind(args, "--ro-bind", Path::new("/")),
+            None => super::linux::bind(args, "--ro-bind", Path::new("/")),
             Some(_) => {
                 for root in SYSTEM_READ_ROOTS {
-                    super::bind(args, "--ro-bind-try", Path::new(root));
+                    super::linux::bind(args, "--ro-bind-try", Path::new(root));
                 }
             }
         }
@@ -310,7 +310,7 @@ impl<'a> LinuxReadScope<'a> {
     pub(super) fn scope_mounts(&self, args: &mut Vec<String>) {
         let roots = self.scope.map(|scope| scope_read_roots(scope, &self.dirs));
         for root in roots.iter().flatten() {
-            super::bind(args, "--ro-bind-try", root);
+            super::linux::bind(args, "--ro-bind-try", root);
         }
     }
 

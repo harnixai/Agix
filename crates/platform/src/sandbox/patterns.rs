@@ -3,7 +3,8 @@
 //! engine's credentials and the scene files of the state root, in every scene
 //! directory including one created later or linked in from elsewhere.
 
-use super::{project_agix_dirs, sandbox_escape, Roots};
+use super::roots::{project_agix_dirs, Roots};
+use super::sandbox_escape;
 use std::path::{Path, PathBuf};
 
 /// Denies writing the state root's scene files.

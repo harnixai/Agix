@@ -7,7 +7,6 @@ file  crates/core/src/interface/catalog.rs                       -              
 file  crates/mcp/src/connect.rs                                  -                                      1328
 file  crates/mcp/src/manager.rs                                  -                                      1274
 file  crates/mcp/src/oauth/mod.rs                                -                                      1104
-file  crates/platform/src/sandbox.rs                             -                                      1633
 file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/transcript.rs                           -                                      880
 file  crates/telemetry/src/recorder/mod.rs                       -                                      942
@@ -51,8 +50,6 @@ fn    crates/model/src/openai/request.rs                         push_translated
 fn    crates/model/src/types.rs                                  MessagesRequest::serialize             99
 fn    crates/packages/src/manifest.rs                            validate                               95
 fn    crates/platform/src/process.rs                             LocalProcess::spawn                    82
-fn    crates/platform/src/sandbox.rs                             build_macos_profile                    157
-fn    crates/platform/src/sandbox.rs                             linux_wrap                             132
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
