@@ -368,6 +368,60 @@ async fn the_same_tool_on_two_servers_reaches_the_server_it_was_called_on() -> a
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let servers = json!({
+        "canned": canned_server(scratch.path(), "canned", &[tool("echo"), tool("echo__rm")])?,
+    });
+    let mut run = stubbed("allow-one", &stub)
+        .settings(json!({
+            "mcp_servers": servers,
+            "permission_mode": "default",
+            "permission_rules": [{ "tool": "mcp__canned__echo", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run.watch(&session, false).await?;
+    stub.script([Reply::text("ok")]);
+    run.turn(&session, "hello").await?;
+    let offered = stub.calls()[0].tool_names();
+    let sibling = offered
+        .iter()
+        .find(|n| n.starts_with("mcp__canned__echo") && *n != "mcp__canned__echo")
+        .cloned()
+        .expect("the sibling tool is offered");
+    stub.script([
+        Reply::calls("a1", "mcp__canned__echo", json!({})),
+        Reply::calls("a2", &sibling, json!({})),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "call both").await?;
+    assert!(
+        result_of(&events, "mcp__canned__echo").is_some_and(|r| !r.2),
+        "{events:?}"
+    );
+    let asked: Vec<String> = watcher
+        .asked()
+        .iter()
+        .map(|a| {
+            a.prompt["event"]["tool_name"]
+                .as_str()
+                .unwrap_or("?")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        asked,
+        [sibling],
+        "only the tool the rule does not name is asked about"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 fn is_api_tool_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
         && name

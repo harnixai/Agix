@@ -40,6 +40,16 @@ fn sanitize(raw: &str) -> String {
         .collect()
 }
 
+fn single_underscores(text: &str) -> String {
+    let mut single = String::with_capacity(text.len());
+    for c in text.chars() {
+        if !(c == '_' && single.ends_with('_')) {
+            single.push(c);
+        }
+    }
+    single
+}
+
 fn hash_suffix(raw: &str) -> String {
     let digest = Sha256::digest(raw.as_bytes());
     let mut hex = hex::encode(digest);
@@ -52,6 +62,9 @@ fn hashed(sanitized: &str, raw: &str, max: usize) -> String {
     let suffix = hash_suffix(raw);
     let keep = max.saturating_sub(suffix.len());
     let mut out: String = sanitized.chars().take(keep).collect();
+    while out.ends_with('_') {
+        out.pop();
+    }
     out.push_str(&suffix);
     out
 }
@@ -66,12 +79,7 @@ pub fn server_segment(server: &str) -> String {
     {
         return server.to_string();
     }
-    let mut single = String::with_capacity(server.len());
-    for c in sanitize(server).chars() {
-        if !(c == '_' && single.ends_with('_')) {
-            single.push(c);
-        }
-    }
+    let single = single_underscores(&sanitize(server));
     let kept = MAX_SERVER_SEGMENT - HASH_HEX - 1;
     let mut cut: String = single.chars().take(kept).collect();
     while cut.ends_with('_') {
@@ -80,16 +88,25 @@ pub fn server_segment(server: &str) -> String {
     format!("{cut}{}", hash_suffix(server))
 }
 
+/// The `<tool>` in `mcp__<server>__<tool>`, with no `__` in it: a rule
+/// naming one tool reads as a prefix of every name that continues after a
+/// `__`, so a tool part containing one would sit under another tool's rule.
+fn tool_segment(tool: &str, room: usize) -> String {
+    let plain = sanitize(tool);
+    if plain.contains(SEPARATOR) {
+        return hashed(&single_underscores(&plain), tool, room);
+    }
+    if plain.len() <= room {
+        plain
+    } else {
+        hashed(&plain, tool, room)
+    }
+}
+
 /// `mcp__<server>__<tool>` for one tool or prompt of `server`.
 pub fn tool_name(server: &str, tool: &str) -> String {
     let head = format!("{PREFIX}{}{SEPARATOR}", server_segment(server));
-    let tool_part = sanitize(tool);
-    let room = MAX_TOOL_NAME - head.len();
-    if tool_part.len() <= room {
-        format!("{head}{tool_part}")
-    } else {
-        format!("{head}{}", hashed(&tool_part, tool, room))
-    }
+    format!("{head}{}", tool_segment(tool, MAX_TOOL_NAME - head.len()))
 }
 
 /// [`tool_name`] for each of one server's `tools`, in order. A tool whose
@@ -107,7 +124,7 @@ pub fn tool_names<'a>(server: &str, tools: impl IntoIterator<Item = &'a str>) ->
             name = format!(
                 "{}{}",
                 &name[..head_len],
-                hashed(&sanitize(tool), tool, room)
+                hashed(&single_underscores(&sanitize(tool)), tool, room)
             );
         }
         taken.entry(name.clone()).or_insert(tool);
@@ -122,6 +139,27 @@ mod tests {
 
     fn api_accepts(name: &str) -> bool {
         (1..=MAX_TOOL_NAME).contains(&name.len()) && name.chars().all(allowed)
+    }
+
+    #[test]
+    fn a_tool_part_never_holds_the_segment_separator() {
+        let mut seen = std::collections::HashSet::new();
+        for raw in [
+            "t__x",
+            "t___x",
+            "t_",
+            "t__",
+            "__t",
+            "a.__b",
+            "x__".repeat(30).as_str(),
+        ] {
+            let name = tool_name("s", raw);
+            let part = name.strip_prefix("mcp__s__").unwrap();
+            assert!(!part.contains("__"), "{raw} -> {name}");
+            assert!(api_accepts(&name), "{raw} -> {name}");
+            assert!(seen.insert(name), "{raw} collides");
+        }
+        assert_eq!(tool_name("s", "t_x"), "mcp__s__t_x");
     }
 
     #[test]
