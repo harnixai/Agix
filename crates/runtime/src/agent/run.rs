@@ -591,7 +591,11 @@ impl Agent {
         // Asked for, so it must compact something: a keep floor of every
         // round there is would leave the summary nothing to cover, and the
         // cascade would then drop those rounds unsummarized.
-        let rounds = compaction::grouping::group_by_api_round(self.session.messages()).len();
+        let rounds = compaction::grouping::group_by_api_round(
+            self.session.messages(),
+            self.session.token_counter().as_ref(),
+        )
+        .len();
         let keep = self
             .policies
             .budget_policy

@@ -45,7 +45,8 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::compact::{CompactError, CompactResult, CompactStrategy, SnipProjection};
-use crate::grouping::{estimate_tokens, group_by_api_round};
+use crate::grouping::group_by_api_round;
+use base::interface::token_counter::TokenCounter;
 
 /// Output cap for the summary itself. The prompt asks for prose under nine
 /// headings; ~4k tokens is generous for that and bounds what re-enters context.
@@ -279,19 +280,21 @@ impl LlmSummarizer {
 /// - there is more than one round to keep back (otherwise there is nothing to
 ///   summarize), and
 /// - the rounds that would be dropped carry at least [`MIN_SUMMARIZED_TOKENS`].
-pub fn should_summarize(messages: &[ModelMessage], max_tokens: usize, keep_rounds: usize) -> bool {
-    if estimate_tokens(messages) <= max_tokens {
+pub fn should_summarize(
+    messages: &[ModelMessage],
+    max_tokens: usize,
+    keep_rounds: usize,
+    counter: &dyn TokenCounter,
+) -> bool {
+    if counter.count_messages(messages) <= max_tokens {
         return false;
     }
-    let rounds = group_by_api_round(messages);
+    let rounds = group_by_api_round(messages, counter);
     let keep = keep_rounds.clamp(1, rounds.len().max(1));
     if rounds.len() <= keep {
         return false;
     }
-    let dropped: usize = rounds[..rounds.len() - keep]
-        .iter()
-        .map(|r| r.estimated_tokens)
-        .sum();
+    let dropped: usize = rounds[..rounds.len() - keep].iter().map(|r| r.tokens).sum();
     dropped >= MIN_SUMMARIZED_TOKENS
 }
 
@@ -305,18 +308,14 @@ pub async fn full_compact(
     messages: Vec<ModelMessage>,
     max_tokens: usize,
     keep_rounds: usize,
+    counter: &dyn TokenCounter,
     cancel: &CancellationToken,
 ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
-    let tokens_before = estimate_tokens(&messages);
+    let tokens_before = counter.count_messages(&messages);
     let count_before = messages.len();
 
-    let rounds = group_by_api_round(&messages);
-    let tokens_from = |first: usize| -> usize {
-        rounds[first..]
-            .iter()
-            .map(|r| estimate_tokens(&r.messages))
-            .sum()
-    };
+    let rounds = group_by_api_round(&messages, counter);
+    let tokens_from = |first: usize| -> usize { rounds[first..].iter().map(|r| r.tokens).sum() };
     // How many recent rounds stay is settled before summarizing, never after:
     // a round shed once the summary is written would be covered by neither.
     let mut keep = keep_rounds.clamp(1, rounds.len().max(1));
@@ -343,7 +342,7 @@ pub async fn full_compact(
         result.extend(round.messages.iter().cloned());
     }
 
-    let tokens_after = estimate_tokens(&result);
+    let tokens_after = counter.count_messages(&result);
     let messages_after = result.len();
     let meta = CompactResult {
         strategy: CompactStrategy::FullCompact,
@@ -485,6 +484,11 @@ fn cap(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::compact::Compactor;
+
+    fn counter() -> std::sync::Arc<dyn TokenCounter> {
+        base::interface::token_counter::default_counter()
+    }
+
     use base::interface::model::{ModelError, ModelStream, ToolDef};
     use base::prompt::PromptBlock;
     use base::provider::ApiType;
@@ -628,10 +632,16 @@ mod tests {
         let model = FakeSummarizerModel::new("1. User intent — refactor the compaction chain.");
         let summarizer = LlmSummarizer::new(model.clone(), "cheap-model");
 
-        let (result, meta) =
-            full_compact(&summarizer, msgs.clone(), 500, 3, &CancellationToken::new())
-                .await
-                .expect("summarization should succeed");
+        let (result, meta) = full_compact(
+            &summarizer,
+            msgs.clone(),
+            500,
+            3,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("summarization should succeed");
 
         assert_eq!(meta.strategy, CompactStrategy::FullCompact);
         // The summary is spliced in at the head, in place of the dropped rounds.
@@ -657,9 +667,16 @@ mod tests {
         let model = FakeSummarizerModel::new("summary");
         let summarizer = LlmSummarizer::new(model.clone(), "cheap-model");
 
-        full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-            .await
-            .unwrap();
+        full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 
         let prompt = model.prompt_text();
         assert!(
@@ -682,9 +699,16 @@ mod tests {
         let model = FakeSummarizerModel::new("summary");
         let summarizer = LlmSummarizer::new(model.clone(), "m");
 
-        let (result, _) = full_compact(&summarizer, msgs, 500, 3, &CancellationToken::new())
-            .await
-            .unwrap();
+        let (result, _) = full_compact(
+            &summarizer,
+            msgs,
+            500,
+            3,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 
         let prompt = model.prompt_text();
         for i in 0..5 {
@@ -710,9 +734,16 @@ mod tests {
         let model = FakeSummarizerModel::new("summary");
         let summarizer = LlmSummarizer::new(model.clone(), "m");
 
-        full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-            .await
-            .unwrap();
+        full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
 
         let prompt = model.prompt_text();
         assert!(
@@ -727,9 +758,16 @@ mod tests {
         let msgs = bulky_conversation(8);
         let model = FakeSummarizerModel::new("summary");
         let summarizer = LlmSummarizer::new(model.clone(), "haiku-for-compaction");
-        full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-            .await
-            .unwrap();
+        full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let params = model.seen_params.lock().unwrap().take().unwrap();
         assert_eq!(params.model, "haiku-for-compaction");
     }
@@ -738,16 +776,23 @@ mod tests {
     async fn failing_model_yields_error_without_touching_messages() {
         let msgs = bulky_conversation(8);
         let summarizer = LlmSummarizer::new(Arc::new(FailingModel), "m");
-        let err = full_compact(&summarizer, msgs.clone(), 500, 2, &CancellationToken::new())
-            .await
-            .expect_err("a failing model must not produce a compaction");
+        let err = full_compact(
+            &summarizer,
+            msgs.clone(),
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a failing model must not produce a compaction");
         assert!(matches!(err, CompactError::Model(_)), "got {err:?}");
 
         // And the caller's fallback still has the full conversation to work
         // with — `full_compact` took `messages` by value but the caller keeps
         // its own copy; verify the non-LLM cascade handles it.
         let (fallback, meta) = crate::compact::DefaultCompactor
-            .compact(msgs, 500, 2)
+            .compact(msgs, 500, 2, &*counter())
             .await
             .expect("non-LLM cascade must still work");
         assert_ne!(meta.strategy, CompactStrategy::FullCompact);
@@ -759,9 +804,16 @@ mod tests {
         let msgs = bulky_conversation(8);
         let summarizer =
             LlmSummarizer::new(Arc::new(HangingModel), "m").with_timeout(Duration::from_secs(5));
-        let err = full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-            .await
-            .expect_err("must time out");
+        let err = full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("must time out");
         let CompactError::Model(error) = &err else {
             panic!("expected Model, got {err:?}");
         };
@@ -781,7 +833,7 @@ mod tests {
         });
         let err = tokio::time::timeout(
             Duration::from_secs(5),
-            full_compact(&summarizer, msgs, 500, 2, &cancel),
+            full_compact(&summarizer, msgs, 500, 2, &*counter(), &cancel),
         )
         .await
         .expect("the summary was waited out")
@@ -794,11 +846,16 @@ mod tests {
         let msgs = bulky_conversation(8);
         let model = FakeSummarizerModel::new("   \n  ");
         let summarizer = LlmSummarizer::new(model, "m");
-        assert!(
-            full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-                .await
-                .is_err()
-        );
+        assert!(full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new()
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
@@ -806,16 +863,23 @@ mod tests {
         let msgs = bulky_conversation(2);
         let model = FakeSummarizerModel::new("summary");
         let summarizer = LlmSummarizer::new(model, "m");
-        let err = full_compact(&summarizer, msgs, 500, 5, &CancellationToken::new())
-            .await
-            .expect_err("keep floor covers the whole conversation");
+        let err = full_compact(
+            &summarizer,
+            msgs,
+            500,
+            5,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("keep floor covers the whole conversation");
         assert!(matches!(err, CompactError::NotApplicable(_)), "got {err:?}");
     }
 
     #[test]
     fn gate_is_off_when_under_budget() {
         let msgs = bulky_conversation(12);
-        assert!(!should_summarize(&msgs, usize::MAX, 2));
+        assert!(!should_summarize(&msgs, usize::MAX, 2, &*counter()));
     }
 
     #[test]
@@ -823,13 +887,13 @@ mod tests {
         // Over budget, but the rounds being dropped are worth almost nothing —
         // not worth an API round-trip.
         let msgs = vec![user("hi"), assistant("hello"), user("ok"), assistant("yes")];
-        assert!(!should_summarize(&msgs, 1, 1));
+        assert!(!should_summarize(&msgs, 1, 1, &*counter()));
     }
 
     #[test]
     fn gate_is_on_when_real_history_is_about_to_be_destroyed() {
         let msgs = bulky_conversation(20);
-        assert!(should_summarize(&msgs, 500, 2));
+        assert!(should_summarize(&msgs, 500, 2, &*counter()));
     }
 
     #[tokio::test]
@@ -843,9 +907,16 @@ mod tests {
         }
         let model = FakeSummarizerModel::new("摘要");
         let summarizer = LlmSummarizer::new(model, "m");
-        let (result, _) = full_compact(&summarizer, msgs, 500, 2, &CancellationToken::new())
-            .await
-            .expect("must not panic on multi-byte text");
+        let (result, _) = full_compact(
+            &summarizer,
+            msgs,
+            500,
+            2,
+            &*counter(),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("must not panic on multi-byte text");
         assert!(!result.is_empty());
     }
 }

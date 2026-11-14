@@ -83,6 +83,7 @@ fn    crates/tools/src/tool_search.rs                            ToolSearchTool:
 fn    crates/tools/src/tool_search.rs                            render                                 92
 fn    daemon/src/main.rs                                         serve                                  96
 file  crates/compaction/src/compact.rs                            -                                      999
+file  crates/compaction/src/compact.rs                            -                                      1006
 file  crates/core/src/context/session.rs                          -                                      1121
 file  crates/core/src/interface/catalog.rs                        -                                      831
 file  crates/core/src/interface/tool.rs                           -                                      1037
@@ -91,7 +92,7 @@ file  crates/mcp/src/connect.rs                                   -             
 file  crates/mcp/src/manager.rs                                   -                                      1274
 file  crates/mcp/src/oauth/mod.rs                                 -                                      1104
 file  crates/platform/src/sandbox.rs                              -                                      1651
-file  crates/runtime/src/agent/turn/compact/mod.rs                -                                      881
+file  crates/runtime/src/agent/turn/compact/mod.rs                -                                      897
 file  crates/session/src/session.rs                               -                                      880
 file  crates/team/src/coordinator.rs                              -                                      912
 file  crates/telemetry/src/recorder/mod.rs                        -                                      942

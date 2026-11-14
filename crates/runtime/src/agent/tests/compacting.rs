@@ -16,6 +16,7 @@ impl compaction::compact::Compactor for KeepingCompactor {
         messages: Vec<base::interface::model::ModelMessage>,
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> Result<
         (
             Vec<base::interface::model::ModelMessage>,
@@ -41,6 +42,7 @@ impl compaction::compact::Compactor for KeepingCompactor {
         _messages: &[base::interface::model::ModelMessage],
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> bool {
         false
     }
@@ -306,6 +308,7 @@ async fn a_failed_summary_after_a_size_refusal_reports_its_own_kind() {
             messages: Vec<base::interface::model::ModelMessage>,
             _max_tokens: usize,
             _keep_rounds: usize,
+            _counter: &dyn base::interface::token_counter::TokenCounter,
         ) -> Result<
             (
                 Vec<base::interface::model::ModelMessage>,
@@ -332,6 +335,7 @@ async fn a_failed_summary_after_a_size_refusal_reports_its_own_kind() {
             _messages: &[base::interface::model::ModelMessage],
             _max_tokens: usize,
             _keep_rounds: usize,
+            _counter: &dyn base::interface::token_counter::TokenCounter,
         ) -> bool {
             true
         }
@@ -383,6 +387,7 @@ async fn automatic_compaction_leaves_room_for_the_request_overhead() {
             messages: Vec<base::interface::model::ModelMessage>,
             max_tokens: usize,
             keep_rounds: usize,
+            counter: &dyn base::interface::token_counter::TokenCounter,
         ) -> Result<
             (
                 Vec<base::interface::model::ModelMessage>,
@@ -391,7 +396,7 @@ async fn automatic_compaction_leaves_room_for_the_request_overhead() {
             compaction::compact::CompactError,
         > {
             compaction::compact::DefaultCompactor
-                .compact(messages, max_tokens, keep_rounds)
+                .compact(messages, max_tokens, keep_rounds, counter)
                 .await
         }
 
@@ -400,6 +405,7 @@ async fn automatic_compaction_leaves_room_for_the_request_overhead() {
             _messages: &[base::interface::model::ModelMessage],
             _max_tokens: usize,
             _keep_rounds: usize,
+            _counter: &dyn base::interface::token_counter::TokenCounter,
         ) -> bool {
             false
         }
@@ -456,6 +462,7 @@ impl compaction::compact::Compactor for Unshrinkable {
         messages: Vec<base::interface::model::ModelMessage>,
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> Result<
         (
             Vec<base::interface::model::ModelMessage>,
@@ -488,6 +495,7 @@ impl compaction::compact::Compactor for Unshrinkable {
         _messages: &[base::interface::model::ModelMessage],
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> bool {
         false
     }
@@ -694,6 +702,7 @@ impl compaction::compact::Compactor for RewritesThenFails {
         _messages: Vec<base::interface::model::ModelMessage>,
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> Result<
         (
             Vec<base::interface::model::ModelMessage>,
@@ -735,6 +744,7 @@ impl compaction::compact::Compactor for RewritesThenFails {
         _messages: &[base::interface::model::ModelMessage],
         _max_tokens: usize,
         _keep_rounds: usize,
+        _counter: &dyn base::interface::token_counter::TokenCounter,
     ) -> bool {
         false
     }

@@ -30,6 +30,7 @@ mod policies;
 use events_and_steering::*;
 mod build_snapshot;
 mod compacting;
+mod compaction_counter;
 mod exec_providers;
 mod prompt_middleware;
 mod web_tasks;

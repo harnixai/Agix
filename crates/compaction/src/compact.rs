@@ -20,10 +20,11 @@
 
 use async_trait::async_trait;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
+use base::interface::token_counter::TokenCounter;
 use base::text::truncate_at_char_boundary;
 
 pub use crate::budget::{enforce_tool_result_budget, ToolResultBudget, TOOL_IMAGE_CHARS};
-use crate::grouping::{estimate_tokens, group_by_api_round, ApiRound};
+use crate::grouping::{group_by_api_round, ApiRound};
 use crate::trim::{StaleTrim, StaleTrimInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +98,10 @@ pub enum CompactError {
 }
 
 /// What the early trim may look at.
-pub struct EarlyTrimInput {
+pub struct EarlyTrimInput<'a> {
     pub context_tokens: usize,
+    /// The counter the session judges its size with.
+    pub counter: &'a dyn TokenCounter,
     /// The effective context window. `0` disables the pass.
     pub context_limit: usize,
     pub keep_recent: usize,
@@ -144,11 +147,17 @@ pub struct BudgetState {
 pub trait Compactor: Send + Sync {
     /// Compact messages to fit within `max_tokens`, keeping at least `keep_rounds` recent rounds.
     /// Returns the compacted message list and metadata.
+    ///
+    /// `max_tokens` and every number in the result are in `counter`, the one
+    /// the session decides by. A custom counter that overrides
+    /// `count_messages` to something other than a sum over blocks makes
+    /// `snip` follow the sum over rounds instead.
     async fn compact(
         &self,
         messages: Vec<ModelMessage>,
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError>;
 
     /// Trim what has gone stale, before anyone looks at the budget.
@@ -185,7 +194,7 @@ pub trait Compactor: Send + Sync {
         if !input.enabled || input.context_limit == 0 || input.circuit_open {
             return EarlyTrimOutcome::NotTriggered;
         }
-        let velocity = crate::early_trim::estimate_token_velocity(messages);
+        let velocity = crate::early_trim::estimate_token_velocity(messages, input.counter);
         if !crate::early_trim::should_trim_early(
             input.context_tokens,
             input.context_limit,
@@ -194,7 +203,7 @@ pub trait Compactor: Send + Sync {
             return EarlyTrimOutcome::NotTriggered;
         }
         let keep = input.keep_recent.max(5);
-        if group_by_api_round(messages).len() <= keep {
+        if group_by_api_round(messages, input.counter).len() <= keep {
             // Nothing has aged out of the keep window yet. Not a failure: the
             // circuit breaker is there to stop paying for a pass that keeps
             // not helping, and a session with nothing old enough to clear is
@@ -202,9 +211,9 @@ pub trait Compactor: Send + Sync {
             // few rounds of every session and the pass never runs again.
             return EarlyTrimOutcome::NotTriggered;
         }
-        let before = estimate_tokens(messages);
-        let (compacted, _) = DefaultCompactor.micro_compact(messages.clone(), keep);
-        if estimate_tokens(&compacted) >= before {
+        let before = input.counter.count_messages(messages);
+        let (compacted, _) = DefaultCompactor.micro_compact(messages.clone(), keep, input.counter);
+        if input.counter.count_messages(&compacted) >= before {
             return EarlyTrimOutcome::NoEffect;
         }
         *messages = compacted;
@@ -266,8 +275,9 @@ pub trait Compactor: Send + Sync {
         messages: &[ModelMessage],
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> bool {
-        crate::llm_summary::should_summarize(messages, max_tokens, keep_rounds)
+        crate::llm_summary::should_summarize(messages, max_tokens, keep_rounds, counter)
     }
 }
 
@@ -286,8 +296,11 @@ impl<C: Compactor> Compactor for OnlyAtThreshold<C> {
         messages: Vec<ModelMessage>,
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
-        self.0.compact(messages, max_tokens, keep_rounds).await
+        self.0
+            .compact(messages, max_tokens, keep_rounds, counter)
+            .await
     }
 
     fn trim_stale(&self, _messages: &mut [ModelMessage], _input: &StaleTrimInput<'_>) -> StaleTrim {
@@ -297,7 +310,7 @@ impl<C: Compactor> Compactor for OnlyAtThreshold<C> {
     fn trim_early(
         &self,
         _messages: &mut Vec<ModelMessage>,
-        _input: &EarlyTrimInput,
+        _input: &EarlyTrimInput<'_>,
     ) -> EarlyTrimOutcome {
         EarlyTrimOutcome::NotTriggered
     }
@@ -323,8 +336,10 @@ impl<C: Compactor> Compactor for OnlyAtThreshold<C> {
         messages: &[ModelMessage],
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> bool {
-        self.0.wants_llm_summary(messages, max_tokens, keep_rounds)
+        self.0
+            .wants_llm_summary(messages, max_tokens, keep_rounds, counter)
     }
 }
 
@@ -335,10 +350,6 @@ fn holds_a_summary(round: &ApiRound) -> bool {
 }
 
 impl DefaultCompactor {
-    fn tokens(msgs: &[ModelMessage]) -> usize {
-        estimate_tokens(msgs)
-    }
-
     /// Snip: keep the most recent `keep_rounds` API rounds; if that is still
     /// over budget, keep fewer — down to a floor of 1 round, which is always
     /// kept even when it alone exceeds the budget (dropping it would leave the
@@ -350,28 +361,29 @@ impl DefaultCompactor {
     /// caller can build a SnipProjection for telemetry/UI.
     ///
     /// The cut is decided from the per-round token totals `group_by_api_round`
-    /// already computed: `estimate_tokens` is additive, so the cost of a set of
-    /// rounds is the sum of theirs.
+    /// already computed: counting is additive over blocks, so the cost of a set
+    /// of rounds is the sum of theirs.
     fn snip(
         &self,
         messages: Vec<ModelMessage>,
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> (Vec<ModelMessage>, CompactStrategy, usize, usize, usize) {
-        let rounds = group_by_api_round(&messages);
+        let rounds = group_by_api_round(&messages, counter);
         let total_rounds = rounds.len();
         let total_messages = messages.len();
         if total_rounds == 0 {
             return (messages, CompactStrategy::Snip, 0, 0, 0);
         }
-        let tokens_before = Self::tokens(&messages);
+        let tokens_before = counter.count_messages(&messages);
 
         let mut kept: Vec<bool> = rounds.iter().map(holds_a_summary).collect();
         let mut tokens: usize = rounds
             .iter()
             .zip(&kept)
             .filter(|(_, pinned)| **pinned)
-            .map(|(round, _)| round.estimated_tokens)
+            .map(|(round, _)| round.tokens)
             .sum();
         let target_keep = keep_rounds.clamp(1, total_rounds);
         let mut keep = 0usize;
@@ -379,7 +391,7 @@ impl DefaultCompactor {
             if kept[i] {
                 continue;
             }
-            let next = tokens + round.estimated_tokens;
+            let next = tokens + round.tokens;
             // The newest round is unconditional; beyond it, take a round only
             // if it fits and we still owe rounds toward `target_keep`.
             if keep > 0 && (next > max_tokens || keep >= target_keep) {
@@ -413,8 +425,9 @@ impl DefaultCompactor {
         &self,
         messages: Vec<ModelMessage>,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> (Vec<ModelMessage>, CompactStrategy) {
-        let rounds = group_by_api_round(&messages);
+        let rounds = group_by_api_round(&messages, counter);
         if rounds.len() <= keep_rounds {
             return (messages, CompactStrategy::MicroCompact);
         }
@@ -469,8 +482,9 @@ impl DefaultCompactor {
         &self,
         messages: Vec<ModelMessage>,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> (Vec<ModelMessage>, CompactStrategy) {
-        let rounds = group_by_api_round(&messages);
+        let rounds = group_by_api_round(&messages, counter);
         if rounds.len() <= keep_rounds {
             return (messages, CompactStrategy::CollapseContext);
         }
@@ -538,8 +552,9 @@ impl Compactor for DefaultCompactor {
         messages: Vec<ModelMessage>,
         max_tokens: usize,
         keep_rounds: usize,
+        counter: &dyn TokenCounter,
     ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
-        let tokens_before = Self::tokens(&messages);
+        let tokens_before = counter.count_messages(&messages);
         let count_before = messages.len();
         if tokens_before <= max_tokens {
             // Already within budget — nothing ran. Reported honestly as `NoOp`
@@ -558,21 +573,21 @@ impl Compactor for DefaultCompactor {
         }
 
         let (result, strategy, dropped_rounds, dropped_messages, tokens_saved) = {
-            let (r, s, dr, dm, ts) = self.snip(messages.clone(), max_tokens, keep_rounds);
-            if Self::tokens(&r) <= max_tokens {
+            let (r, s, dr, dm, ts) = self.snip(messages.clone(), max_tokens, keep_rounds, counter);
+            if counter.count_messages(&r) <= max_tokens {
                 (r, s, dr, dm, ts)
             } else {
-                let (r, s) = self.micro_compact(messages.clone(), keep_rounds);
-                if Self::tokens(&r) <= max_tokens {
+                let (r, s) = self.micro_compact(messages.clone(), keep_rounds, counter);
+                if counter.count_messages(&r) <= max_tokens {
                     (r, s, 0, 0, 0)
                 } else {
-                    let (r, s) = self.collapse_context(messages.clone(), keep_rounds);
+                    let (r, s) = self.collapse_context(messages.clone(), keep_rounds, counter);
                     (r, s, 0, 0, 0)
                 }
             }
         };
 
-        let tokens_after = Self::tokens(&result);
+        let tokens_after = counter.count_messages(&result);
         if tokens_after >= tokens_before {
             return Ok((
                 messages,
@@ -879,26 +894,18 @@ pub struct ContextAnalysis {
     pub conversation_pct: f64,
 }
 
-/// Analyze token composition of a message list.
-pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
+/// Analyze token composition of a message list, in the counter the session decides by.
+pub fn analyze_context(messages: &[ModelMessage], counter: &dyn TokenCounter) -> ContextAnalysis {
     let mut analysis = ContextAnalysis {
         total_messages: messages.len(),
         ..ContextAnalysis::default()
     };
 
-    // Same estimator the compaction decisions use, so the breakdown reported
-    // here adds up to the number that actually tripped compaction.
-    let estimate = |s: &str| {
-        base::interface::token_counter::estimate_model_block_tokens(&ModelContentBlock::Text {
-            text: s.to_string(),
-        })
-    };
-
     for msg in messages {
         for block in &msg.content {
             match block {
-                ModelContentBlock::Text { text } => {
-                    let tokens = estimate(text);
+                ModelContentBlock::Text { .. } => {
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     match msg.role {
                         MessageRole::User => analysis.user_text_tokens += tokens,
@@ -907,9 +914,9 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
                     }
                 }
                 // Attributed to whichever side of the conversation sent it,
-                // same as text. Flat estimate — see IMAGE_TOKEN_ESTIMATE.
+                // same as text.
                 ModelContentBlock::Image { .. } => {
-                    let tokens = base::interface::model::IMAGE_TOKEN_ESTIMATE;
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     match msg.role {
                         MessageRole::User => analysis.user_text_tokens += tokens,
@@ -917,18 +924,18 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
                         _ => analysis.system_tokens += tokens,
                     }
                 }
-                ModelContentBlock::Thinking { text, .. } => {
-                    let tokens = estimate(text);
+                ModelContentBlock::Thinking { .. } => {
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.assistant_text_tokens += tokens;
                 }
-                ModelContentBlock::RedactedThinking { data, .. } => {
-                    let tokens = estimate(data);
+                ModelContentBlock::RedactedThinking { .. } => {
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.assistant_text_tokens += tokens;
                 }
                 ModelContentBlock::ToolResult { content, .. } => {
-                    let tokens = base::interface::token_counter::estimate_model_block_tokens(block);
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.tool_result_tokens += tokens;
                     // Check if cleared
@@ -937,7 +944,7 @@ pub fn analyze_context(messages: &[ModelMessage]) -> ContextAnalysis {
                     }
                 }
                 ModelContentBlock::ToolUse { name, .. } => {
-                    let tokens = base::interface::token_counter::estimate_model_block_tokens(block);
+                    let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     analysis.tool_use_tokens += tokens;
                     let entry = analysis.tool_usage.entry(name.clone()).or_insert((0, 0));
@@ -1000,6 +1007,16 @@ pub fn format_context_analysis(analysis: &ContextAnalysis) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, OnceLock};
+
+    fn counter() -> &'static Arc<dyn TokenCounter> {
+        static C: OnceLock<Arc<dyn TokenCounter>> = OnceLock::new();
+        C.get_or_init(base::interface::token_counter::default_counter)
+    }
+
+    fn estimate_tokens(msgs: &[ModelMessage]) -> usize {
+        counter().count_messages(msgs)
+    }
     use crate::time_based_mc::TimeBasedMcConfig;
 
     fn text_user(s: &str) -> ModelMessage {
@@ -1071,8 +1088,9 @@ mod tests {
             .collect()
     }
 
-    fn early_trim_input() -> EarlyTrimInput {
+    fn early_trim_input() -> EarlyTrimInput<'static> {
         EarlyTrimInput {
+            counter: &**counter(),
             context_tokens: 1_000,
             context_limit: 20_000,
             keep_recent: 2,
@@ -1223,7 +1241,10 @@ mod tests {
             warned_already: false,
         };
         assert!(c.should_compact(&state));
-        let (out, result) = c.compact(messages, 500, 2).await.expect("compacts");
+        let (out, result) = c
+            .compact(messages, 500, 2, &**counter())
+            .await
+            .expect("compacts");
         assert_ne!(result.strategy, CompactStrategy::NoOp);
         assert!(estimate_tokens(&out) < estimate_tokens(&untouched));
     }
@@ -1239,15 +1260,22 @@ mod tests {
                 messages: Vec<ModelMessage>,
                 _max_tokens: usize,
                 _keep_rounds: usize,
+                counter: &dyn TokenCounter,
             ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
-                DefaultCompactor.compact(messages, 1, 1).await
+                DefaultCompactor.compact(messages, 1, 1, counter).await
             }
 
             fn should_compact(&self, _state: &BudgetState) -> bool {
                 true
             }
 
-            fn wants_llm_summary(&self, _: &[ModelMessage], _: usize, _: usize) -> bool {
+            fn wants_llm_summary(
+                &self,
+                _: &[ModelMessage],
+                _: usize,
+                _: usize,
+                _: &dyn TokenCounter,
+            ) -> bool {
                 true
             }
 
@@ -1270,7 +1298,7 @@ mod tests {
             warned_already: false,
         };
         assert!(wrapped.should_compact(&state));
-        assert!(wrapped.wants_llm_summary(&[], 1, 1));
+        assert!(wrapped.wants_llm_summary(&[], 1, 1, &**counter()));
         assert_eq!(wrapped.trim_tool_results(&mut []), 42);
         assert_eq!(wrapped.tool_result_budget().max_per_result, 7);
     }
@@ -1287,9 +1315,10 @@ mod tests {
                 messages: Vec<ModelMessage>,
                 max_tokens: usize,
                 keep_rounds: usize,
+                counter: &dyn TokenCounter,
             ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
                 DefaultCompactor
-                    .compact(messages, max_tokens, keep_rounds)
+                    .compact(messages, max_tokens, keep_rounds, counter)
                     .await
             }
 
@@ -1364,7 +1393,7 @@ mod tests {
         // Budget of 1 forces the full Snip → MicroCompact → CollapseContext
         // cascade; keep_rounds=2 leaves rounds to collapse.
         let (result, meta) = compactor
-            .compact(msgs, 1, 2)
+            .compact(msgs, 1, 2, &**counter())
             .await
             .expect("compaction must not panic on multi-byte text");
         assert_eq!(meta.strategy, CompactStrategy::CollapseContext);
@@ -1408,7 +1437,10 @@ mod tests {
     async fn snip_keeps_an_earlier_summary_however_old_it_is() {
         let mut msgs = vec![summary_message("SUMMARY-OF-THE-START")];
         msgs.extend(build_long_conversation(30));
-        let (out, meta) = DefaultCompactor.compact(msgs, 60, 2).await.unwrap();
+        let (out, meta) = DefaultCompactor
+            .compact(msgs, 60, 2, &**counter())
+            .await
+            .unwrap();
         assert_eq!(meta.strategy, CompactStrategy::Snip);
         assert!(texts(&out).contains("SUMMARY-OF-THE-START"), "{out:?}");
         assert!(texts(&out).contains("response 29"));
@@ -1424,7 +1456,10 @@ mod tests {
             msgs.push(text_user(&format!("{i}{}", chinese_text(100))));
             msgs.push(assistant_text(&chinese_text(100)));
         }
-        let (out, meta) = DefaultCompactor.compact(msgs, 1, 2).await.unwrap();
+        let (out, meta) = DefaultCompactor
+            .compact(msgs, 1, 2, &**counter())
+            .await
+            .unwrap();
         assert_eq!(meta.strategy, CompactStrategy::CollapseContext);
         assert!(texts(&out).contains("SUMMARY-TAIL"), "{out:?}");
         assert!(crate::llm_summary::is_summary(&out[0]));
@@ -1436,7 +1471,10 @@ mod tests {
     #[tokio::test]
     async fn a_cascade_whose_last_resort_changes_nothing_reports_noop() {
         let msgs = build_long_conversation(3);
-        let (out, meta) = DefaultCompactor.compact(msgs.clone(), 1, 10).await.unwrap();
+        let (out, meta) = DefaultCompactor
+            .compact(msgs.clone(), 1, 10, &**counter())
+            .await
+            .unwrap();
         assert_eq!(meta.strategy, CompactStrategy::NoOp);
         assert_eq!(out.len(), msgs.len());
         assert_eq!(meta.tokens_after, meta.tokens_before);
@@ -1447,7 +1485,10 @@ mod tests {
         let msgs = build_long_conversation(10);
         let compactor = DefaultCompactor;
         // Use tight budget to force snip: each round ~3 tokens
-        let (result, _) = compactor.compact(msgs.clone(), 20, 3).await.unwrap();
+        let (result, _) = compactor
+            .compact(msgs.clone(), 20, 3, &**counter())
+            .await
+            .unwrap();
         // Should keep ~3 rounds * 2 messages = 6 messages (if fits under 20 tokens)
         assert!(
             !result.is_empty() && result.len() <= 8,
@@ -1475,7 +1516,7 @@ mod tests {
             assistant_text("done c"),
         ];
         let compactor = DefaultCompactor;
-        let (result, _) = compactor.micro_compact(msgs, 1);
+        let (result, _) = compactor.micro_compact(msgs, 1, &**counter());
         // Old rounds (a, b) should have their tool results cleared.
         // Recent round (c) should be intact.
         let cleared_count = result.iter().filter(|m| {
@@ -1764,7 +1805,7 @@ mod tests {
             text_user("recent"),
             assistant_text("kept"),
         ];
-        let (result, _) = DefaultCompactor.micro_compact(msgs, 1);
+        let (result, _) = DefaultCompactor.micro_compact(msgs, 1, &**counter());
         let ids: Vec<&str> = result
             .iter()
             .flat_map(|m| &m.content)
@@ -1793,14 +1834,11 @@ mod tests {
     #[test]
     fn snip_keeps_exactly_keep_rounds_when_they_fit() {
         let msgs = build_sized_conversation(10, 10);
-        let rounds = group_by_api_round(&msgs);
-        let budget: usize = rounds[rounds.len() - 3..]
-            .iter()
-            .map(|r| r.estimated_tokens)
-            .sum();
+        let rounds = group_by_api_round(&msgs, &**counter());
+        let budget: usize = rounds[rounds.len() - 3..].iter().map(|r| r.tokens).sum();
 
         let (result, strategy, dropped_rounds, dropped_messages, saved) =
-            DefaultCompactor.snip(msgs.clone(), budget, 3);
+            DefaultCompactor.snip(msgs.clone(), budget, 3, &**counter());
 
         assert_eq!(strategy, CompactStrategy::Snip);
         assert_eq!(dropped_rounds, 7, "10 rounds, keep 3");
@@ -1816,11 +1854,12 @@ mod tests {
     #[test]
     fn snip_drops_below_keep_rounds_under_budget_pressure() {
         let msgs = build_sized_conversation(10, 10);
-        let rounds = group_by_api_round(&msgs);
+        let rounds = group_by_api_round(&msgs, &**counter());
         // Budget fits only the newest round, but keep_rounds asks for 5.
-        let budget = rounds[rounds.len() - 1].estimated_tokens;
+        let budget = rounds[rounds.len() - 1].tokens;
 
-        let (result, _, dropped_rounds, _, _) = DefaultCompactor.snip(msgs, budget, 5);
+        let (result, _, dropped_rounds, _, _) =
+            DefaultCompactor.snip(msgs, budget, 5, &**counter());
 
         assert_eq!(dropped_rounds, 9, "budget forces the keep count down to 1");
         assert_eq!(result.len(), 2);
@@ -1832,7 +1871,7 @@ mod tests {
         // Even a budget of zero must leave the newest round in place —
         // returning nothing at all would send the model an empty request.
         let msgs = build_sized_conversation(6, 20);
-        let (result, _, dropped_rounds, _, _) = DefaultCompactor.snip(msgs, 0, 3);
+        let (result, _, dropped_rounds, _, _) = DefaultCompactor.snip(msgs, 0, 3, &**counter());
         assert_eq!(dropped_rounds, 5);
         assert!(!result.is_empty());
         assert!(recovery_text(&result).contains("q5"));
@@ -1842,7 +1881,7 @@ mod tests {
     fn snip_keeps_everything_when_keep_rounds_covers_the_conversation() {
         let msgs = build_sized_conversation(3, 5);
         let (result, _, dropped_rounds, dropped_messages, _) =
-            DefaultCompactor.snip(msgs.clone(), usize::MAX, 10);
+            DefaultCompactor.snip(msgs.clone(), usize::MAX, 10, &**counter());
         assert_eq!(dropped_rounds, 0);
         assert_eq!(dropped_messages, 0);
         assert_eq!(result.len(), msgs.len());
@@ -1852,23 +1891,45 @@ mod tests {
     fn snip_reports_a_projection_consistent_with_what_it_returned() {
         let msgs = build_sized_conversation(8, 10);
         let before = estimate_tokens(&msgs);
-        let rounds = group_by_api_round(&msgs);
-        let budget: usize = rounds[rounds.len() - 2..]
-            .iter()
-            .map(|r| r.estimated_tokens)
-            .sum();
+        let rounds = group_by_api_round(&msgs, &**counter());
+        let budget: usize = rounds[rounds.len() - 2..].iter().map(|r| r.tokens).sum();
         let (result, _, dropped_rounds, dropped_messages, saved) =
-            DefaultCompactor.snip(msgs.clone(), budget, 2);
+            DefaultCompactor.snip(msgs.clone(), budget, 2, &**counter());
         assert_eq!(dropped_rounds, 6);
         assert_eq!(dropped_messages, msgs.len() - result.len());
         assert_eq!(saved, before - estimate_tokens(&result));
+    }
+
+    struct Doubled;
+
+    impl TokenCounter for Doubled {
+        fn count_text(&self, text: &str) -> usize {
+            counter().count_text(text) * 2
+        }
+
+        fn count_block(&self, block: &ModelContentBlock) -> usize {
+            counter().count_block(block) * 2
+        }
+    }
+
+    #[tokio::test]
+    async fn compact_fits_the_budget_in_the_callers_counter() {
+        let msgs = build_sized_conversation(12, 200);
+        let budget = estimate_tokens(&msgs);
+        let (out, result) = DefaultCompactor
+            .compact(msgs, budget, 2, &Doubled)
+            .await
+            .unwrap();
+        assert_ne!(result.strategy, CompactStrategy::NoOp);
+        assert!(Doubled.count_messages(&out) <= budget);
+        assert_eq!(result.tokens_after, Doubled.count_messages(&out));
     }
 
     #[tokio::test]
     async fn compact_under_budget_reports_noop_not_snip() {
         let msgs = build_long_conversation(3);
         let (result, meta) = DefaultCompactor
-            .compact(msgs.clone(), usize::MAX, 2)
+            .compact(msgs.clone(), usize::MAX, 2, &**counter())
             .await
             .unwrap();
         assert_eq!(
@@ -1921,7 +1982,7 @@ mod tests {
             tool_result("t1", &"file contents ".repeat(100)),
             assistant_text("all done"),
         ];
-        let analysis = analyze_context(&msgs);
+        let analysis = analyze_context(&msgs, &**counter());
         // `analyze_context` omits the tool_use_id / tool name framing that the
         // block estimator charges, so it is a lower bound, not an identity —
         // but it must be in the same ballpark, not off by 4x.

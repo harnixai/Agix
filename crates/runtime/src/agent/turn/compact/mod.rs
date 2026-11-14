@@ -168,6 +168,10 @@ impl Agent {
         self.commit_stale_trim(stale);
     }
 
+    fn count(&self, messages: &[ModelMessage]) -> usize {
+        self.session.token_counter().count_messages(messages)
+    }
+
     fn transcript_checkpoint(&self) -> Checkpoint {
         Checkpoint {
             messages: self.session.messages().to_vec(),
@@ -194,7 +198,7 @@ impl Agent {
         let compactor = self.compaction.compactor.clone();
         let ages = self.session.message_ages();
         let started = std::time::Instant::now();
-        let tokens_before = compaction::grouping::estimate_tokens(self.session.messages());
+        let tokens_before = self.count(self.session.messages());
         let input = compaction::trim::StaleTrimInput {
             message_ages: &ages,
             time_based: &self.compaction.time_based_mc_config,
@@ -205,7 +209,7 @@ impl Agent {
             .session
             .trim_in_place(|messages| compactor.trim_stale(messages, &input));
         let tokens_after = if trim.time_based.cleared > 0 {
-            compaction::grouping::estimate_tokens(self.session.messages())
+            self.count(self.session.messages())
         } else {
             tokens_before
         };
@@ -335,9 +339,11 @@ impl Agent {
     ) -> Option<PendingEarlyTrim> {
         let context_tokens = self.context_tokens();
         let early_start = std::time::Instant::now();
-        let early_from = compaction::grouping::estimate_tokens(self.session.messages());
+        let early_from = self.count(self.session.messages());
+        let counter = self.session.token_counter().clone();
         let input = compaction::compact::EarlyTrimInput {
             context_tokens,
+            counter: counter.as_ref(),
             context_limit: budget.compact_threshold,
             keep_recent: budget.compact_keep_recent,
             enabled: self.settings.values.compaction.reactive,
@@ -359,9 +365,7 @@ impl Agent {
                         messages_before: messages,
                         messages_after: messages,
                         tokens_before: early_from,
-                        tokens_after: compaction::grouping::estimate_tokens(
-                            self.session.messages(),
-                        ),
+                        tokens_after: self.count(self.session.messages()),
                     },
                     took: early_start.elapsed(),
                 })
@@ -456,8 +460,8 @@ impl Agent {
         let recovery =
             self.post_compact_recovery(&pre_compact, &compacted, result.strategy.drops_history());
         compacted.splice(0..0, recovery);
-        let tokens_before = compaction::grouping::estimate_tokens(&pre_compact);
-        let tokens_after = compaction::grouping::estimate_tokens(&compacted);
+        let tokens_before = self.count(&pre_compact);
+        let tokens_after = self.count(&compacted);
         if tokens_after >= tokens_before {
             tracing::info!(
                 strategy = ?result.strategy,
@@ -510,13 +514,19 @@ impl Agent {
         Ok(match self.compaction_summarizer() {
             Some(summarizer)
                 if trigger == CompactTrigger::Manual
-                    || compactor.wants_llm_summary(pre_compact, target, keep) =>
+                    || compactor.wants_llm_summary(
+                        pre_compact,
+                        target,
+                        keep,
+                        self.session.token_counter().as_ref(),
+                    ) =>
             {
                 match compaction::llm_summary::full_compact(
                     &summarizer,
                     pre_compact.to_vec(),
                     target,
                     keep,
+                    self.session.token_counter().as_ref(),
                     cancel,
                 )
                 .await
@@ -563,7 +573,12 @@ impl Agent {
         match self
             .compaction
             .compactor
-            .compact(pre_compact.to_vec(), target, keep)
+            .compact(
+                pre_compact.to_vec(),
+                target,
+                keep,
+                self.session.token_counter().as_ref(),
+            )
             .await
         {
             Ok(ok) => Ok(ok),
@@ -631,7 +646,8 @@ impl Agent {
         tracing::debug!(
             "{}",
             compaction::compact::format_context_analysis(&compaction::compact::analyze_context(
-                self.session.messages()
+                self.session.messages(),
+                self.session.token_counter().as_ref()
             ))
         );
     }
@@ -785,7 +801,7 @@ impl Agent {
     /// left out: one is re-attached only when its read was dropped, and the
     /// read cost at least as much.
     pub(super) fn recovery_reserve(&self) -> usize {
-        compaction::grouping::estimate_tokens(&self.post_compact_recovery(&[], &[], true))
+        self.count(&self.post_compact_recovery(&[], &[], true))
     }
 
     pub(super) fn report_compaction(
@@ -857,7 +873,7 @@ impl Agent {
     ) -> Result<(), TurnError> {
         tracing::warn!(error = %refusal, "refused for size; compacting, then retrying");
         let budget = self.context_budget();
-        let sent = compaction::grouping::estimate_tokens(self.session.messages());
+        let sent = self.count(self.session.messages());
         let target = (sent / 2)
             .min(budget.compact_threshold)
             .saturating_sub(self.recovery_reserve());

@@ -6,8 +6,8 @@
 //! circuit breaker stops it after [`MAX_CONSECUTIVE_FAILURES`] passes in a row
 //! that bought nothing.
 
-use crate::grouping::estimate_tokens;
 use base::interface::model::ModelMessage;
+use base::interface::token_counter::TokenCounter;
 
 /// Compact once fewer than this many tokens are left below the limit.
 const TRIGGER_AT_REMAINING_TOKENS: usize = 50_000;
@@ -61,11 +61,14 @@ pub fn should_trim_early(
 
 /// Pre-compute the token usage velocity from messages.
 /// Rough estimate: rate of token growth per API round.
-pub fn estimate_token_velocity(messages: &[ModelMessage]) -> Option<f64> {
+pub fn estimate_token_velocity(
+    messages: &[ModelMessage],
+    counter: &dyn TokenCounter,
+) -> Option<f64> {
     if messages.len() < 4 {
         return None;
     }
-    let total = estimate_tokens(messages);
+    let total = counter.count_messages(messages);
     let per_message = total as f64 / messages.len() as f64;
     Some(per_message * 2.0)
 }

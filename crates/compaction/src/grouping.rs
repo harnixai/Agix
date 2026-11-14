@@ -5,6 +5,7 @@
 //! for compact strategies (snip, micro-compact, etc.) to operate on.
 
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
+use base::interface::token_counter::TokenCounter;
 
 /// A group of messages belonging to one API round.
 #[derive(Debug, Clone)]
@@ -13,8 +14,8 @@ pub struct ApiRound {
     pub start: usize,
     /// Messages in this round.
     pub messages: Vec<ModelMessage>,
-    /// Approximate token count of all messages in this round.
-    pub estimated_tokens: usize,
+    /// Tokens in all messages of this round, in the counter the rounds were grouped with.
+    pub tokens: usize,
 }
 
 /// Group flat messages into API rounds.
@@ -26,7 +27,7 @@ pub struct ApiRound {
 ///
 /// Tool result messages (User role with ToolResult blocks) always stay in the
 /// same round as their preceding assistant message.
-pub fn group_by_api_round(messages: &[ModelMessage]) -> Vec<ApiRound> {
+pub fn group_by_api_round(messages: &[ModelMessage], counter: &dyn TokenCounter) -> Vec<ApiRound> {
     if messages.is_empty() {
         return vec![];
     }
@@ -55,7 +56,7 @@ pub fn group_by_api_round(messages: &[ModelMessage]) -> Vec<ApiRound> {
         let is_round_start = is_user_text || (is_assistant && prev_was_tool_result);
 
         if is_round_start && !current.is_empty() {
-            rounds.push(finish_round(&current, start_idx));
+            rounds.push(finish_round(&current, start_idx, counter));
             current = Vec::new();
             start_idx = i;
         }
@@ -64,39 +65,27 @@ pub fn group_by_api_round(messages: &[ModelMessage]) -> Vec<ApiRound> {
     }
 
     if !current.is_empty() {
-        rounds.push(finish_round(&current, start_idx));
+        rounds.push(finish_round(&current, start_idx, counter));
     }
 
     rounds
 }
 
-fn finish_round(messages: &[ModelMessage], start: usize) -> ApiRound {
-    let tokens = estimate_tokens(messages);
+fn finish_round(messages: &[ModelMessage], start: usize, counter: &dyn TokenCounter) -> ApiRound {
     ApiRound {
         start,
         messages: messages.to_vec(),
-        estimated_tokens: tokens,
+        tokens: counter.count_messages(messages),
     }
-}
-
-/// Estimate tokens for a slice of messages.
-///
-/// Delegates to the workspace's one estimator
-/// ([`base::interface::token_counter::estimate_message_tokens`]), the same one
-/// `session::SessionManager::token_count` falls back to, so the number that
-/// decides *whether* to compact and the number that decides *how much* to
-/// drop are the same number.
-///
-/// Note this is additive per message and per block, which
-/// `DefaultCompactor::snip` relies on: the token cost of a concatenation of
-/// rounds equals the sum of the rounds' `estimated_tokens`.
-pub fn estimate_tokens(msgs: &[ModelMessage]) -> usize {
-    base::interface::token_counter::estimate_message_tokens(msgs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn counter() -> std::sync::Arc<dyn TokenCounter> {
+        base::interface::token_counter::default_counter()
+    }
 
     fn text_user(s: &str) -> ModelMessage {
         ModelMessage {
@@ -146,7 +135,7 @@ mod tests {
             text_user("how are you"),
             assistant_text("good"),
         ];
-        let rounds = group_by_api_round(&msgs);
+        let rounds = group_by_api_round(&msgs, &*counter());
         assert_eq!(rounds.len(), 2);
         assert_eq!(rounds[0].messages.len(), 2);
         assert_eq!(rounds[1].messages.len(), 2);
@@ -165,7 +154,7 @@ mod tests {
             assistant_text("done"),
             text_user("edit it"),
         ];
-        let rounds = group_by_api_round(&msgs);
+        let rounds = group_by_api_round(&msgs, &*counter());
         assert_eq!(rounds.len(), 3, "expected 3 rounds");
         // Round 0: user text + assistant tool_use + tool result (tool result stays in same round)
         assert_eq!(rounds[0].messages.len(), 3);
@@ -192,7 +181,7 @@ mod tests {
             assistant_text("all done"),
             text_user("next"),
         ];
-        let rounds = group_by_api_round(&msgs);
+        let rounds = group_by_api_round(&msgs, &*counter());
         assert_eq!(rounds.len(), 4);
         assert_eq!(rounds[0].messages.len(), 3); // user + assistant t1 + result t1
         assert_eq!(rounds[1].messages.len(), 2); // assistant t2 + result t2
@@ -202,7 +191,7 @@ mod tests {
 
     #[test]
     fn empty_messages() {
-        let rounds = group_by_api_round(&[]);
+        let rounds = group_by_api_round(&[], &*counter());
         assert!(rounds.is_empty());
     }
 }

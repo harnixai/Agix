@@ -213,7 +213,8 @@ fn image_tool_result_is_estimated_at_the_flat_image_rate() {
         ToolResultBlock::image("image/png", big_b64.clone()),
     ]));
 
-    let estimate = compaction::grouping::estimate_tokens(std::slice::from_ref(&msg));
+    let estimate = base::interface::token_counter::default_counter()
+        .count_messages(std::slice::from_ref(&msg));
     let as_text_would_be = big_b64.len() / 4;
     assert!(
         estimate < as_text_would_be / 10,
