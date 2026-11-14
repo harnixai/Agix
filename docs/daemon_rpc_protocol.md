@@ -132,9 +132,8 @@ read-modify-write 同一个索引文件而丢更新。读取方 `read_dir` 汇�
 文件的客户端不用改代码。
 
 daemon 另外还写一份 `~/.agix/scenes/<scene>/daemon.lock`(`{pid, pid_start_time,
-socket_path, version, started_at, protocol_version}`)。它早于多场景支持,只描述
-一个场景,新客户端用 `instances.d/`。daemon 运行期间对它持有 `flock`,同一场景的第二个
-daemon 拿不到就拒绝启动;退出时删掉它。
+socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用 `instances.d/`。daemon
+运行期间对它持有 `flock`,同一场景的第二个 daemon 拿不到就拒绝启动;退出时删掉它。
 
 **socket 路径**(daemon 自己启动时的推导规则,列出仅供排查):
 

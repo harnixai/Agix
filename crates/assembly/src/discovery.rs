@@ -1,25 +1,20 @@
-//! Daemon discovery: `daemon.lock` (single-scene, legacy) and
-//! `instances.d/` (multi-scene, current — see `docs/daemon_rpc_protocol.md` §2).
+//! Daemon discovery: the per-scene `daemon.lock` single-instance lock and
+//! `instances.d/` (how clients find a running daemon — see
+//! `docs/daemon_rpc_protocol.md` §2).
 //!
 //! The daemon writes `~/.agix/scenes/<scene>/daemon.lock` (mode 0600, `<scene>` is
 //! the scene id resolved from `--scene` in `main.rs`, default
-//! `code`) on startup with `{pid, socket_path, version, started_at}`. IDE
-//! plugins read this file to find a running daemon — no env var hunting, no
-//! port scan.
+//! `code`) on startup with `{pid, pid_start_time, socket_path}`. It is a
+//! lock, not a discovery file: clients read `instances.d/`.
 //!
 //! The daemon holds the file with an advisory `flock` for as long as it
 //! runs, so two daemons starting together cannot both claim it; the kernel
 //! drops the lock however the process ends. On graceful shutdown the file is
 //! removed; after a crash the next daemon takes the lock and overwrites it.
 //!
-//! `daemon.lock` predates `--scenes` (plural) — a client reading it only
-//! ever learns about the one scene it's colocated with, not the full set a
-//! daemon may have activated via `--scenes`. `instances.d/<instance>.json`
-//! (one file per daemon instance, written under the *global* root so every
-//! instance's file lands in the same directory regardless of which scenes
-//! it serves) carries the full `scenes` list instead. It's additive: written
-//! alongside `daemon.lock`, not a replacement for it — existing single-scene
-//! clients keep working unmodified.
+//! `instances.d/<instance>.json` (one file per daemon instance, written under
+//! the *global* root so every instance's file lands in the same directory
+//! regardless of which scenes it serves) carries the full `scenes` list.
 
 use platform::process_identity::{
     decide_stale_lock, ProcessIdentity, ProcessLiveness, StaleLockDecision,
@@ -28,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonLock {
@@ -43,12 +37,6 @@ pub struct DaemonLock {
     pub pid_start_time: i64,
     /// Absolute path of the unix socket the daemon is listening on.
     pub socket_path: PathBuf,
-    /// Daemon binary version (Cargo).
-    pub version: String,
-    /// Unix timestamp (seconds) the lock was written.
-    pub started_at: i64,
-    /// Protocol version the daemon speaks; clients refuse mismatched majors.
-    pub protocol_version: String,
 }
 
 /// `daemon.lock`, held by this process until dropped; dropping it removes
@@ -137,12 +125,6 @@ pub fn write_lock_file(
         pid: identity.pid,
         pid_start_time: identity.started_at,
         socket_path: socket_path.to_path_buf(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        started_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0),
-        protocol_version: "1".into(),
     };
     let body = serde_json::to_string_pretty(&lock).map_err(LockFileError::Json)?;
     {
@@ -250,9 +232,7 @@ pub enum LockFileError {
 
 /// Protocol version this daemon speaks, as reported in `instances.d/`
 /// entries and by `daemon.auth`, `daemon.status` and `daemon.ping`
-/// (`docs/daemon_rpc_protocol.md` §5). Numeric here (unlike
-/// `DaemonLock::protocol_version`, which predates v2 and stayed a string for
-/// backward compatibility with existing readers).
+/// (`docs/daemon_rpc_protocol.md` §5). 
 pub const INSTANCE_PROTOCOL_VERSION: u32 = 3;
 
 /// What this daemon can do beyond the protocol version, named so a client can
@@ -553,7 +533,6 @@ mod tests {
         let read = read_lock_file(&lock).unwrap().unwrap();
         assert_eq!(read.pid, written.pid);
         assert_eq!(read.socket_path, sock);
-        assert_eq!(read.protocol_version, "1");
         assert_eq!(read.pid_start_time, written.pid_start_time);
     }
 
@@ -565,9 +544,6 @@ mod tests {
             pid: 999_999_999,
             pid_start_time: 0,
             socket_path: PathBuf::from("/tmp/whatever.sock"),
-            version: "0.0.0".into(),
-            started_at: 0,
-            protocol_version: "1".into(),
         };
         std::fs::write(&lock_path, serde_json::to_vec(&stale).unwrap()).unwrap();
         let sock = dir.path().join("new.sock");
@@ -600,9 +576,6 @@ mod tests {
             pid: child.pid(),
             pid_start_time: recorded_start,
             socket_path: PathBuf::from("/tmp/x.sock"),
-            version: "9.9.9".into(),
-            started_at: 0,
-            protocol_version: "1".into(),
         };
         std::fs::write(&lock_path, serde_json::to_vec(&alive).unwrap()).unwrap();
         let r = write_lock_file(&lock_path, &dir.path().join("new.sock"));
@@ -624,9 +597,6 @@ mod tests {
             pid: child.pid(),
             pid_start_time: 12345, // deliberately wrong — simulates reuse
             socket_path: PathBuf::from("/tmp/old.sock"),
-            version: "0.0.0".into(),
-            started_at: 0,
-            protocol_version: "1".into(),
         };
         std::fs::write(&lock_path, serde_json::to_vec(&stale).unwrap()).unwrap();
         let sock = dir.path().join("new.sock");
@@ -644,9 +614,6 @@ mod tests {
             pid: std::process::id(),
             pid_start_time: 1,
             socket_path: dir.path().join("first.sock"),
-            version: "0.0.0".into(),
-            started_at: 0,
-            protocol_version: "1".into(),
         };
         std::fs::write(&lock_path, serde_json::to_vec(&left).unwrap()).unwrap();
 

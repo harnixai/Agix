@@ -648,8 +648,7 @@ async fn reap_previous_groups(groups_file: &std::path::Path) -> anyhow::Result<(
     Ok(())
 }
 
-/// The multi-scene `instances.d` discovery entry, written alongside the legacy
-/// single-scene `daemon.lock` (additive; see `daemon::discovery`). It lives
+/// The `instances.d` discovery entry (see `daemon::discovery`). It lives
 /// under the global root, shared by every scene, because one instance file
 /// must be reachable whichever of this daemon's scenes a client cares about.
 fn instance_entry(
