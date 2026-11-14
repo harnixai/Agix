@@ -174,6 +174,11 @@ impl<'a> Run<'a> {
             None => self.without_delegator(stage),
         };
         self.cancelled |= self.ctx.cancel.is_cancelled();
+        let failed: Vec<String> = sections
+            .iter()
+            .filter(|(_, _, e)| *e)
+            .map(|(l, _, _)| l.clone())
+            .collect();
 
         if let Some(mode) = stage.aggregate.filter(|_| !self.cancelled) {
             if !sections.is_empty() {
@@ -192,15 +197,8 @@ impl<'a> Run<'a> {
         self.cancelled |= self.ctx.cancel.is_cancelled();
 
         self.append_scratch(si, stage, &sections).await;
-        self.finish_stage(
-            si,
-            stage_count,
-            stage,
-            stage_members,
-            &sections,
-            stage_start,
-        )
-        .await;
+        self.finish_stage(si, stage_count, stage, stage_members, failed, stage_start)
+            .await;
     }
 
     fn without_delegator(&mut self, stage: &TeamStage) -> Vec<Section> {
@@ -318,14 +316,9 @@ impl<'a> Run<'a> {
         stage_count: usize,
         stage: &TeamStage,
         stage_members: Vec<String>,
-        sections: &[Section],
+        failed: Vec<String>,
         stage_start: std::time::Instant,
     ) {
-        let failed: Vec<String> = sections
-            .iter()
-            .filter(|(_, _, e)| *e)
-            .map(|(l, _, _)| l.clone())
-            .collect();
         self.coord.emit_progress(
             &self.name,
             &self.team_id,

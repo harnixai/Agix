@@ -124,3 +124,70 @@ async fn a_batch_under_a_persistent_members_team_name_leaves_the_member_deletabl
     run.finish().await;
     Ok(())
 }
+
+/// A stage whose outputs are merged into one still reports the member that
+/// failed, in its `team_progress` and in the team's own event log.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_stage_still_reports_its_failed_member() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("team-merged-failure", &stub).start().await?;
+    let session = run.session().await?;
+    stub.script_when(
+        LEAD,
+        [
+            Reply::calls(
+                "c-1",
+                "TeamCreate",
+                json!({ "name": "crew", "stages": [{
+                    "name": "only",
+                    "aggregate": "aggregate",
+                    "agents": [
+                        { "label": "good", "prompt": "GOOD-MARK work" },
+                        { "label": "bad", "prompt": "BAD-MARK work" }
+                    ]
+                }] }),
+            ),
+            Reply::text("done"),
+        ],
+    );
+    stub.script_when("GOOD-MARK", [Reply::text("good result")]);
+    stub.script_when(
+        "BAD-MARK",
+        [Reply::status(
+            400,
+            r#"{"type":"error","error":{"type":"invalid_request_error","message":"refused"}}"#,
+        )],
+    );
+    let events = run.turn(&session, &format!("{LEAD} run the team")).await?;
+
+    let completed: Vec<_> = events
+        .events
+        .iter()
+        .filter(|e| e.to_string().contains("team_progress") && e.to_string().contains("completed"))
+        .collect();
+    anyhow::ensure!(
+        !completed.is_empty(),
+        "no stage completed: {:?}",
+        events.events
+    );
+    for event in &completed {
+        assert!(
+            event.to_string().contains(r#""failed":["bad"]"#),
+            "the merged stage lost its failed member: {event}"
+        );
+    }
+    let log = std::fs::read_dir(run.project.join(".agix/teams"))?
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path().join("events.jsonl")))
+        .collect::<Result<String, _>>()?;
+    let stage_completed: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("stage_completed"))
+        .collect();
+    assert!(
+        !stage_completed.is_empty() && stage_completed.iter().all(|l| l.contains(r#""bad""#)),
+        "{log}"
+    );
+    run.finish().await;
+    Ok(())
+}
