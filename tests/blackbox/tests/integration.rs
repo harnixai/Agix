@@ -23,4 +23,5 @@ mod session_boundaries;
 mod session_prompt;
 mod skills_and_memory;
 mod team_lifecycle;
+mod stream_recovery;
 mod turn_throughput;
