@@ -5,8 +5,8 @@
 use super::fence::{fenced_ports, fenced_secrets, fenced_sockets};
 use super::roots::{link_targets_outside, project_guard, Roots};
 use super::{
-    multiplexer_paths, patterns, read_scope, sandbox_escape, CommandEnv, Confined, Enforcement,
-    NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
+    egress, multiplexer_paths, patterns, read_scope, sandbox_escape, CommandEnv, Confined,
+    Enforcement, NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
 };
 use base::paths::STATE_ROOT_WORKING_DIRS;
 use std::path::{Path, PathBuf};
@@ -24,7 +24,17 @@ pub(super) fn mac_wrap(
         policy,
         &read_scope::UserDirs::of(env),
     );
-    let unmet = domains_sandbox_exec_cannot_allow(policy);
+    let mut unmet = domains_sandbox_exec_cannot_allow(policy);
+    let mut spec = ProcessSpec::new("sandbox-exec", &inner.cwd)
+        .arg("-p")
+        .arg(profile)
+        .arg(inner.program)
+        .args(inner.args);
+    if policy.network_mode == NetworkMode::Proxy {
+        let proxy = egress::seatbelt(policy.egress_proxy.as_ref());
+        unmet.extend(proxy.unmet);
+        spec.env = proxy.env;
+    }
     Confined {
         enforcement: if unmet.is_empty() {
             Enforcement::Full
@@ -32,11 +42,7 @@ pub(super) fn mac_wrap(
             Enforcement::Partial
         },
         unmet,
-        spec: ProcessSpec::new("sandbox-exec", &inner.cwd)
-            .arg("-p")
-            .arg(profile)
-            .arg(inner.program)
-            .args(inner.args),
+        spec,
         mode: SandboxMode::MacOSSandboxExec,
     }
 }
@@ -231,8 +237,6 @@ fn ipc_rules(s: &mut String, policy: &SandboxPolicy) {
 }
 
 fn network_rules(s: &mut String, policy: &SandboxPolicy) {
-    // DNS is IPC to mDNSResponder, which `network*` does not cover, so name
-    // resolution survives both restricted modes.
     match policy.network_mode {
         NetworkMode::Unrestricted => {}
         NetworkMode::DenyAll => {
@@ -251,6 +255,9 @@ fn network_rules(s: &mut String, policy: &SandboxPolicy) {
             {
                 s.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
             }
+        }
+        NetworkMode::Proxy => {
+            s.push_str(&egress::seatbelt(policy.egress_proxy.as_ref()).rules);
         }
     }
 }

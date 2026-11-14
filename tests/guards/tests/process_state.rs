@@ -64,6 +64,8 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/core/src/interface/tool/registry.rs", "NEXT", IdCounter, "registration ids, unique across every registry in the process"),
     ("crates/core/src/fs.rs", "NEXT", IdCounter, "temporary sibling names, distinct for every writer in the process"),
     ("crates/platform/src/sandbox/fence.rs", "NEXT_FENCE", IdCounter, "the keys of SERVED's entries"),
+    ("crates/platform/src/sandbox/egress.rs", "RELAYS", OsResource, "the unix sockets this process relays to egress proxies, one per proxy address: listeners of the process, which the sandboxed commands of every pool naming that proxy share"),
+    ("crates/platform/src/sandbox/egress.rs", "DIR", OsResource, "this process's own directory for those sockets"),
     ("crates/core/src/interface/catalog.rs", "POINTS", Constant, "the table of extension points"),
     ("crates/skills/src/tool.rs", "PLACEHOLDER", Constant, "a compiled regex"),
 ];

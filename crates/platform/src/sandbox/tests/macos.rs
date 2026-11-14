@@ -460,3 +460,69 @@ fn macos_profile_empty_deny_read_denies_only_the_engines_own_secrets() {
         "{reads:?}"
     );
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn macos_a_proxy_is_let_through_before_the_daemon_fences_and_named_to_the_command() {
+    let served = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let _fence = fence_port(served.local_addr().unwrap());
+    let policy = SandboxPolicy {
+        network_mode: NetworkMode::Proxy,
+        egress_proxy: Some(EgressProxy {
+            http: "127.0.0.1:3128".parse().unwrap(),
+            socks: None,
+            no_proxy: Vec::new(),
+        }),
+        ..Default::default()
+    };
+    let mut spec = ProcessSpec::new("bash", Path::new("/tmp/work")).args(["-c", "true"]);
+    spec.env
+        .push(("http_proxy".into(), "http://inherited.example:1".into()));
+    let confined = PlatformSandbox.confine(spec, &policy);
+    assert_eq!(
+        confined.enforcement,
+        Enforcement::Full,
+        "{:?}",
+        confined.unmet
+    );
+    let profile = &confined.spec.args[1];
+    let at = |rule: &str| {
+        profile
+            .find(rule)
+            .unwrap_or_else(|| panic!("{rule} not in:\n{profile}"))
+    };
+    let deny = at("(deny network*)");
+    let allow = at("(allow network-outbound (remote tcp \"localhost:3128\"))");
+    let fence = at(&format!(
+        "(deny network-outbound (remote tcp \"localhost:{}\"))",
+        served.local_addr().unwrap().port()
+    ));
+    assert!(deny < allow && allow < fence, "{profile}");
+    assert_eq!(profile.matches('(').count(), profile.matches(')').count());
+    let last = |name: &str| {
+        confined
+            .spec
+            .env
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(last("http_proxy").as_deref(), Some("http://127.0.0.1:3128"));
+    assert_eq!(last("NO_PROXY").as_deref(), Some(""));
+    assert_eq!(confined.spec.env.len(), 9);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_proxy_mode_without_a_proxy_cuts_the_network_and_says_so() {
+    let mut o = opts("ls", Path::new("/tmp/work"));
+    o.policy.network_mode = NetworkMode::Proxy;
+    let cmd = wrap(o);
+    let profile = network_mode_rules(&cmd.spec.args[1]);
+    assert!(profile.contains("(deny network*)"), "profile:\n{profile}");
+    assert!(!profile.contains("network-outbound"), "profile:\n{profile}");
+    assert_eq!(cmd.enforcement, Enforcement::Partial);
+    assert!(cmd.spec.env.is_empty());
+}

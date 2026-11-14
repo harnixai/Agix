@@ -14,7 +14,6 @@ static NEXT_FENCE: AtomicU64 = AtomicU64::new(0);
 #[cfg_attr(not(feature = "sandbox"), allow(dead_code))]
 enum Served {
     Socket(PathBuf),
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Port(SocketAddr),
     Secret(PathBuf),
 }
@@ -50,7 +49,8 @@ pub fn fence_socket(path: &Path) -> Fence {
 }
 
 /// [`fence_socket`] for a TCP listener. Only the macOS backend can refuse a
-/// port; bwrap can cut the network only as a whole.
+/// port; bwrap can cut the network only as a whole, and the egress relay
+/// refuses to forward to one.
 pub fn fence_port(addr: SocketAddr) -> Fence {
     fence(Served::Port(addr))
 }
@@ -92,7 +92,7 @@ pub(super) fn fenced_sockets() -> Vec<PathBuf> {
     })
 }
 
-#[cfg(all(feature = "sandbox", target_os = "macos"))]
+#[cfg(all(feature = "sandbox", any(target_os = "macos", target_os = "linux")))]
 pub(super) fn fenced_ports() -> Vec<SocketAddr> {
     fenced(|s| match s {
         Served::Port(addr) => Some(*addr),

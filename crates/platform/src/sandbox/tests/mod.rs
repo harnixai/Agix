@@ -11,6 +11,8 @@ use base::paths::{STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS};
 
 #[cfg(feature = "sandbox")]
 mod credentials;
+#[cfg(all(feature = "sandbox", any(target_os = "macos", target_os = "linux")))]
+mod egress;
 mod enforcement;
 #[cfg(feature = "sandbox")]
 mod fence;

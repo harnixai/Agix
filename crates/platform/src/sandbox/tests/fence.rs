@@ -127,6 +127,57 @@ fn an_allowlist_of_domains_runs_the_command_with_the_rest_of_the_network_shut() 
     );
 }
 
+/// Under `proxy` a command reaches the proxy and no other port, on either
+/// loopback address; without a proxy configured it reaches nothing.
+#[cfg(target_os = "macos")]
+#[test]
+fn under_a_proxy_a_command_reaches_the_proxy_and_nothing_else() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    let accepting = |listener: std::net::TcpListener| {
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                drop(conn);
+            }
+        });
+        port
+    };
+    let proxy = accepting(std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+    let direct = accepting(std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+    let direct_v6 = std::net::TcpListener::bind("[::1]:0").ok().map(accepting);
+    let under = |egress_proxy: Option<EgressProxy>| SandboxPolicy {
+        network_mode: NetworkMode::Proxy,
+        egress_proxy,
+        ..Default::default()
+    };
+    let configured = || {
+        under(Some(EgressProxy {
+            http: format!("127.0.0.1:{proxy}").parse().unwrap(),
+            socks: None,
+            no_proxy: Vec::new(),
+        }))
+    };
+
+    assert!(s.run_under(&format!("nc -z 127.0.0.1 {proxy}"), configured()));
+    assert!(
+        !s.run_under(&format!("nc -z 127.0.0.1 {direct}"), configured()),
+        "127.0.0.1:{direct}, which is not the proxy, was reached"
+    );
+    if let Some(port) = direct_v6 {
+        assert!(s.runs(&format!("nc -z ::1 {port}")));
+        assert!(
+            !s.run_under(&format!("nc -z ::1 {port}"), configured()),
+            "[::1]:{port}, which is not the proxy, was reached"
+        );
+    }
+    assert!(
+        !s.run_under(&format!("nc -z 127.0.0.1 {proxy}"), under(None)),
+        "with no proxy configured the network was open"
+    );
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 #[allow(clippy::unwrap_used)]

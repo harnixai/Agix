@@ -11,14 +11,21 @@
 //!   `(deny network*)`. A profile names a remote host only as `*` or
 //!   `localhost`, so the allowlist re-allows localhost when it names it and
 //!   no domain at all; the domains it names are reported unmet through
-//!   `Enforcement`, as on Linux. DNS goes through `mDNSResponder` IPC, which
-//!   `network*` does not cover, so name resolution keeps working under both
-//!   restricted modes.
+//!   `Enforcement`, as on Linux. `Proxy` re-allows only the proxy's ports on
+//!   `localhost` (which covers `127.0.0.1` and `::1`); a proxy off this
+//!   machine can be held only to its port, on any host, and is reported
+//!   unmet. Name resolution goes through `mDNSResponder`'s unix socket, which
+//!   `(deny network*)` covers (measured on macOS 26).
 //! - **Linux**: `bwrap --ro-bind / / --bind <writable> <writable> … <program>`
 //!   (`ReadScope::Only`: a read-only bind per root). No bwrap: no constraint. `DenyAll` uses
 //!   `--unshare-net`; bwrap has no domain-level filter, so `Allowlist`
 //!   degrades to the same whole-network cut rather than silently opening up —
 //!   failure goes toward the safer side, and says so through `Enforcement`.
+//!   `Proxy` cuts the network too, then binds a unix socket into the
+//!   namespace that this process forwards to the proxy (`egress::relay`),
+//!   and a `socat` started inside listens on the namespace's
+//!   `127.0.0.1:<proxy port>` and connects to it. Without `socat` in the
+//!   system directories the network stays cut, reported unmet.
 //!   Each command gets a PID namespace of its own, so the pids it sees (`$!`
 //!   among them) are not the host's, and a later command does not see what an
 //!   earlier one left running. What it left running outlives it, as on macOS.
@@ -92,7 +99,9 @@
 //! each one in the state root and its scene directories, not the directories
 //! themselves, which stay readable. macOS also refuses this process's TCP
 //! and WebSocket ports ([`fence_port`]); on Linux only `--unshare-net` cuts
-//! them off. The daemon refuses its own descendants on the unix socket as
+//! them off, and the egress relay will not forward to one. Under `Proxy` both
+//! backends set the command's `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and
+//! `NO_PROXY`, in both cases, over what it inherits. The daemon refuses its own descendants on the unix socket as
 //! well, which is what holds where no backend runs.
 //!
 //! **Behind the `sandbox` feature: off here, on in assembly and the daemon.** What it
@@ -179,11 +188,13 @@
 //! `LocalProcess` starts it in a session of its own.
 
 pub use base::interface::exec::{
-    default_deny_read, default_deny_read_in, Confined, Enforcement, EnvScope, NetworkMode,
-    ProcessSpec, ReadScope, Sandbox, SandboxMode, SandboxPolicy,
+    default_deny_read, default_deny_read_in, Confined, EgressProxy, Enforcement, EnvScope,
+    NetworkMode, ProcessSpec, ReadScope, Sandbox, SandboxMode, SandboxPolicy,
 };
 use std::path::{Path, PathBuf};
 
+#[cfg(all(feature = "sandbox", any(target_os = "macos", target_os = "linux")))]
+mod egress;
 mod fence;
 #[cfg(all(feature = "sandbox", target_os = "linux"))]
 mod linux;
@@ -440,7 +451,8 @@ impl Sandbox for PlatformSandbox {
             }
         }
         confined.spec.cwd = cwd;
-        confined.spec.env = env;
+        let backend_env = std::mem::replace(&mut confined.spec.env, env);
+        confined.spec.env.extend(backend_env);
         confined.spec.env_scope = env_scope;
         confined.spec.stdin = stdin;
         confined
