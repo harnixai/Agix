@@ -2407,7 +2407,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 `ok` 与 `router_rebuilt` 是**两件事**:配置可以解析得通(`ok: true`)却建不出客户端
 (`router_rebuilt: false` + `router_error`),`api_type: openai_compatible` 就是这种。
 
-`api_type` 取值：`anthropic`、`openai`（Chat Completions）、`openai_responses`（OpenAI Responses API，`/v1/responses`，流式事件按类型解析；PDF 以 `input_file` 送出）。
+`api_type` 取值：`anthropic`、`openai_compatible`（Chat Completions）、`openai_responses`（OpenAI Responses API，`/v1/responses`，流式事件按类型解析；PDF 以 `input_file` 送出）。
 
 重载按新配置重连 MCP server,最多等 10 秒:到点还没连完的列在 `mcp_connecting`,在后台接着连,
 各自的结果随后以 `mcp_connected` / `mcp_connect_failed` 通知到达(同会话创建)。命令不存在、
