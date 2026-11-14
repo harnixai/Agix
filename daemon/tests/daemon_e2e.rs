@@ -393,63 +393,10 @@ async fn no_session_is_created_after_shutdown_starts() {
         .unwrap();
 }
 
-/// `options` that do not read are reported field by field, and the fields
-/// that do read still apply.
+/// `options` that do not read are refused whole, and the error names each
+/// field; nothing is created.
 #[tokio::test]
-async fn malformed_options_are_reported() {
-    let (_server, sock, _dir, handle) = start_server().await;
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"session.create","id":1,"params":{"options":{"permission_mode":"plan","model":3,"permision_rules":[]}}}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    let sid = v["result"]["session_id"]
-        .as_str()
-        .expect("created")
-        .to_string();
-    let mut ignored: Vec<(String, String)> = v["result"]["ignored_options"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{v}"))
-        .iter()
-        .map(|i| {
-            (
-                i["field"].as_str().unwrap().to_string(),
-                i["error"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
-    ignored.sort();
-    assert_eq!(ignored.len(), 2, "{v}");
-    assert_eq!(ignored[0].0, "model");
-    assert!(ignored[0].1.contains("invalid type"), "{v}");
-    assert_eq!(ignored[1].0, "permision_rules");
-    assert_eq!(ignored[1].1, "unknown field");
-
-    let resumed = rpc_call(
-        &sock,
-        &format!(r#"{{"jsonrpc":"2.0","method":"session.resume","id":2,"params":{{"session_id":"{sid}"}}}}"#),
-    )
-    .await;
-    let resumed: serde_json::Value = serde_json::from_str(&resumed).unwrap();
-    assert_eq!(resumed["result"]["permission"]["mode"], "plan", "{resumed}");
-
-    let clean = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"session.create","id":3,"params":{"options":{"model":"claude-haiku-4-5"}}}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
-    assert!(v["result"].get("ignored_options").is_none(), "{v}");
-
-    _server.shutdown_token().cancel();
-    let _ = handle.await;
-}
-
-/// With `options.strict`, what plain parsing would leave out is refused
-/// instead, and the error names each field.
-#[tokio::test]
-async fn strict_options_refuse_what_they_cannot_read() {
+async fn malformed_options_are_refused() {
     let (_server, sock, _dir, handle) = start_server().await;
     let resp = rpc_call(
         &sock,
@@ -468,7 +415,7 @@ async fn strict_options_refuse_what_they_cannot_read() {
     fields.sort_unstable();
     assert_eq!(
         fields,
-        ["model", "permision_rules", "prompt_types[1]"],
+        ["model", "permision_rules", "prompt_types[1]", "strict"],
         "{v}"
     );
 
@@ -480,23 +427,14 @@ async fn strict_options_refuse_what_they_cannot_read() {
         "a refused create made a session: {listed}"
     );
 
-    for strict in ["true", "\"yes\""] {
-        let resp = rpc_call(
-            &sock,
-            &format!(
-                r#"{{"jsonrpc":"2.0","method":"session.create","id":3,"params":{{"options":{{"strict":{strict},"model":"claude-haiku-4-5"}}}}}}"#
-            ),
-        )
-        .await;
-        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-        if strict == "true" {
-            assert!(v["result"]["session_id"].is_string(), "{v}");
-            assert!(v["result"].get("ignored_options").is_none(), "{v}");
-        } else {
-            assert_eq!(v["error"]["code"], codes::INVALID_PARAMS, "{v}");
-            assert_eq!(v["error"]["data"]["invalid_options"][0]["field"], "strict");
-        }
-    }
+    let clean = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"session.create","id":3,"params":{"options":{"model":"claude-haiku-4-5"}}}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&clean).unwrap();
+    assert!(v["result"]["session_id"].is_string(), "{v}");
+    assert!(v["result"].get("ignored_options").is_none(), "{v}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;

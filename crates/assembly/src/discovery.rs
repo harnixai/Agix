@@ -254,7 +254,6 @@ pub const CAPABILITIES: &[&str] = &[
     "goals",
     "question_prompts",
     "session_export",
-    "strict_options",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

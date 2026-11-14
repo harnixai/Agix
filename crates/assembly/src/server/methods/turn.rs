@@ -4,14 +4,13 @@
 use super::*;
 use crate::rpc::methods::session::SessionRef;
 use crate::rpc::methods::turn::*;
-use crate::rpc::methods::WithIgnored;
 use crate::rpc::{read_options, RpcError};
 use crate::session_pool::api::{AskKind, ContextReport, Initiator, PoolError, TurnRequest};
 use crate::session_pool::{OnBusy, PromptAnswer};
 use base::context::goal::TurnOrigin;
 
 rpc_methods! {
-    "session.run_turn" => run_turn(RunTurnParams) -> WithIgnored<TurnReply>;
+    "session.run_turn" => run_turn(RunTurnParams) -> TurnReply;
     "session.compact" => compact(SessionRef) -> TurnReply;
     "session.clear" => clear(SessionRef) -> TurnReply;
     "session.respondToPrompt" => respond_to_prompt(RespondToPromptParams) -> PromptAnswered;
@@ -28,7 +27,7 @@ async fn run_turn(
     s: &DaemonServer,
     cx: &Call,
     p: RunTurnParams,
-) -> Result<WithIgnored<TurnReply>, RpcError> {
+) -> Result<TurnReply, RpcError> {
     let turn_id = p.turn_id.unwrap_or_else(|| Id::new().to_string());
     // A turn's origin is read from its id, so a client may not use the
     // form of a goal round or a scheduled job, which the daemon starts itself.
@@ -38,7 +37,7 @@ async fn run_turn(
              (a goal round or a scheduled job)"
         )));
     }
-    let (options, ignored_options) = read_options(cx.method, p.options.as_ref())?;
+    let options = read_options(p.options.as_ref())?;
     if p.message.trim().is_empty() && p.attachments.is_empty() {
         return Err(invalid("message is empty and there are no attachments"));
     }
@@ -52,10 +51,7 @@ async fn run_turn(
         initiator: Initiator::Client,
     };
     let outcome = s.pool.run_turn(request, Some(cx.client.clone())).await?;
-    Ok(WithIgnored {
-        result: outcome.into(),
-        ignored_options,
-    })
+    Ok(outcome.into())
 }
 
 async fn compact(s: &DaemonServer, cx: &Call, p: SessionRef) -> Result<TurnReply, PoolError> {

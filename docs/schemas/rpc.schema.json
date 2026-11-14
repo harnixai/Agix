@@ -2052,24 +2052,6 @@
       ],
       "type": "object"
     },
-    "IgnoredOption": {
-      "description": "A field of `options` the daemon left out, as the response's\n`ignored_options` reports it. `field` is `None` when `options` as a whole\ncould not be read.",
-      "properties": {
-        "error": {
-          "type": "string"
-        },
-        "field": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "error"
-      ],
-      "type": "object"
-    },
     "ImageSource": {
       "oneOf": [
         {
@@ -3612,8 +3594,7 @@
       ],
       "type": "object"
     },
-    "ResumeReportWithIgnored": {
-      "description": "`result` with what the call's `options` left out, as `ignored_options`;\nabsent when nothing was.",
+    "ResumeReport": {
       "properties": {
         "active": {
           "type": "boolean"
@@ -3625,12 +3606,6 @@
           "format": "uint",
           "minimum": 0,
           "type": "integer"
-        },
-        "ignored_options": {
-          "items": {
-            "$ref": "#/$defs/IgnoredOption"
-          },
-          "type": "array"
         },
         "last_active": {
           "type": "string"
@@ -3655,10 +3630,6 @@
         "scene": {
           "type": "string"
         },
-        "scene_inferred": {
-          "description": "The log recorded no scene; the session runs under this daemon's.",
-          "type": "boolean"
-        },
         "session_id": {
           "type": "string"
         },
@@ -3676,9 +3647,7 @@
         "last_active",
         "scene",
         "project_trust",
-        "permission",
-        "scene_inferred",
-        "ignored_options"
+        "permission"
       ],
       "type": "object"
     },
@@ -4454,17 +4423,10 @@
         }
       ]
     },
-    "SessionCreatedWithIgnored": {
-      "description": "`result` with what the call's `options` left out, as `ignored_options`;\nabsent when nothing was.",
+    "SessionCreated": {
       "properties": {
         "created_at": {
           "type": "string"
-        },
-        "ignored_options": {
-          "items": {
-            "$ref": "#/$defs/IgnoredOption"
-          },
-          "type": "array"
         },
         "project_root": {
           "type": [
@@ -4490,8 +4452,7 @@
         "scene",
         "session_kind",
         "project_trust",
-        "created_at",
-        "ignored_options"
+        "created_at"
       ],
       "type": "object"
     },
@@ -5214,12 +5175,6 @@
         "resumed": {
           "type": "boolean"
         },
-        "scene_inferred": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "session_id": {
           "type": "string"
         }
@@ -5633,99 +5588,6 @@
         }
       ],
       "description": "How a turn went, as `session.run_turn`, `session.compact` and\n`session.clear` answer it."
-    },
-    "TurnReplyWithIgnored": {
-      "anyOf": [
-        {
-          "properties": {
-            "api_calls": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "delivery": {
-              "$ref": "#/$defs/Delivery"
-            },
-            "name": {
-              "description": "The session's name after the turn.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "session_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "session_id",
-            "turn_id",
-            "delivery",
-            "api_calls"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "delivery": {
-              "$ref": "#/$defs/Delivery"
-            },
-            "into_turn_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "session_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "session_id",
-            "turn_id",
-            "delivery"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "session_id": {
-              "type": "string"
-            },
-            "skipped": {
-              "type": "boolean"
-            },
-            "turn_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "session_id",
-            "turn_id",
-            "skipped"
-          ],
-          "type": "object"
-        }
-      ],
-      "description": "`result` with what the call's `options` left out, as `ignored_options`;\nabsent when nothing was.",
-      "properties": {
-        "ignored_options": {
-          "items": {
-            "$ref": "#/$defs/IgnoredOption"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "ignored_options"
-      ],
-      "type": "object"
     },
     "TurnState": {
       "description": "What a session in memory is doing; a session not in memory is idle.",
@@ -6345,7 +6207,7 @@
         "$ref": "#/$defs/CreateParams"
       },
       "result": {
-        "$ref": "#/$defs/SessionCreatedWithIgnored"
+        "$ref": "#/$defs/SessionCreated"
       }
     },
     "session.delete": {
@@ -6473,7 +6335,7 @@
         "$ref": "#/$defs/ResumeParams"
       },
       "result": {
-        "$ref": "#/$defs/ResumeReportWithIgnored"
+        "$ref": "#/$defs/ResumeReport"
       }
     },
     "session.run_turn": {
@@ -6481,7 +6343,7 @@
         "$ref": "#/$defs/RunTurnParams"
       },
       "result": {
-        "$ref": "#/$defs/TurnReplyWithIgnored"
+        "$ref": "#/$defs/TurnReply"
       }
     },
     "session.setGoal": {

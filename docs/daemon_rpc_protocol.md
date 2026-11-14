@@ -757,7 +757,6 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
-| `strict_options` | `session.create` / `session.run_turn` / `session.resume` 接受 `options.strict:true`,读不出来的 `options` 报 `INVALID_PARAMS` 而不是忽略(§6.3 `session.create`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -1127,30 +1126,11 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 `options` 记在会话日志里一条 `ns` 为 `agix.session`、`event` 为 `spec` 的扩展条目上,
 `session.setModel` 选的模型也记在那里,所以同样跨重启保留。
 
-`options` 逐字段读:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)
-被**忽略**,其余字段照常生效;`options` 本身不是对象时整个忽略。被忽略的列在响应
-`result.ignored_options` 里(没有被忽略的就没有这个字段),daemon 日志里也各记一条 warn:
-
-```jsonc
-"ignored_options": [
-  { "field": "permission_mode", "error": "unknown variant `plann`, expected one of …" },
-  { "field": "permision_rules", "error": "unknown field" } ]
-```
-
-`permission_rules`、`prompt_types` 这两个列表字段逐条读:读不出来的那一条被忽略,`field` 写成
-`permission_rules[0]` 这样带下标,同一列表里其余的照常生效 —— 一条写错的 `allow` 不会连带它旁边的
-`deny` 一起失效。值本身不是数组时整个字段被忽略,`field` 不带下标。
-
-`field` 为 `null` 表示整个 `options` 读不出来。`session.create`、`session.run_turn`、
-`session.resume` 都这样。**以后的版本会改为拒绝**(`INVALID_PARAMS`),宿主现在就应当把
-`ignored_options` 当作错误处理。
-
-**严格读取(可选)。** `options` 里带 `"strict": true`,上面会被忽略的任何一项都让这次调用失败:
-`INVALID_PARAMS`,什么都不做(不建会话、不跑这一轮),`error.data` 列出每一项,写法与
-`ignored_options` 相同。`strict` 本身不是 `options` 的一个字段,不随会话保存,每次调用各自写;
-它的值不是布尔时也按严格处理,并在 `invalid_options` 里列出 `strict`。缺省(不写或 `false`)
-行为不变。daemon 支持它时 `capabilities` 里有 `strict_options`;不支持的老 daemon 会把
-`strict` 报成 `unknown field`。
+`options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
+会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)、`options`
+本身不是对象。`permission_rules`、`prompt_types` 这两个列表字段逐条读,`field` 写成
+`permission_rules[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
+`options` 读不出来。`session.create`、`session.run_turn`、`session.resume` 都这样。
 
 ```jsonc
 { "code": -32602, "message": "options that do not read: model, permission_rules[0]",
@@ -2971,7 +2951,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 // SIDECHAIN_TERMINAL
 { "session_id": "S1c1", "parent_session_id": "S1", "final_state": "completed" }  // completed | failed
 
-// INVALID_PARAMS,只在 options.strict 为真、有 options 字段被忽略时
+// INVALID_PARAMS,只在 options 里有读不出来的字段时
 { "invalid_options": [ { "field": "permission_mode", "error": "…" } ] }
 
 // METHOD_NOT_FOUND
@@ -3021,7 +3001,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 其余错误码**没有 `data`**,信息全在 `message` 里 —— 包括
 `SCENE_HAS_ACTIVE_SESSIONS`(挡路的会话 id 是拼在 message 文本里的)、
-`PROJECT_NOT_FOUND`、`PROJECT_REQUIRED`,以及不是上面那种 `options.strict` 拒绝的 `INVALID_PARAMS`。要展示给用户就直接展示
+`PROJECT_NOT_FOUND`、`PROJECT_REQUIRED`,以及不是上面那种 `options` 拒绝的 `INVALID_PARAMS`。要展示给用户就直接展示
 `message`,不要试图解析它。
 
 ---

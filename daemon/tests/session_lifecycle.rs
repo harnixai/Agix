@@ -4663,10 +4663,10 @@ async fn a_bad_settings_rule_leaves_the_deny_rules_beside_it_in_force() {
     srv.stop().await;
 }
 
-/// A rule in `options.permission_rules` that does not read is left out by
-/// itself: the deny next to it still refuses the call, without a prompt.
+/// A rule in `options.permission_rules` that does not read refuses the turn
+/// instead of running it without that rule.
 #[tokio::test]
-async fn a_bad_session_rule_leaves_the_deny_rules_beside_it_in_force() {
+async fn a_bad_session_rule_refuses_the_turn() {
     let (srv, _seen) = start_scripted_server(
         asking_bash_rounds("denied.txt"),
         ask_settings(),
@@ -4690,24 +4690,17 @@ async fn a_bad_session_rule_leaves_the_deny_rules_beside_it_in_force() {
     )
     .await;
 
-    assert!(response["result"].is_object(), "turn failed: {response}");
-    let ignored = response["result"]["ignored_options"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the bad rule is not reported: {response}"));
-    assert_eq!(ignored.len(), 1, "{response}");
-    assert_eq!(ignored[0]["field"], "permission_rules[0]", "{response}");
+    assert_eq!(response["error"]["code"], -32602, "{response}");
+    let invalid = &response["error"]["data"]["invalid_options"];
+    assert_eq!(invalid.as_array().map(Vec::len), Some(1), "{response}");
+    assert_eq!(invalid[0]["field"], "permission_rules[0]", "{response}");
     assert!(
-        ignored[0]["error"].as_str().unwrap().contains("allwo"),
+        invalid[0]["error"].as_str().unwrap().contains("allwo"),
         "{response}"
     );
     assert!(
-        events_of_kind(&frames, "prompt").is_empty(),
-        "the deny rule was dropped, so Bash was asked about: {frames:?}"
-    );
-    let rendered = serde_json::to_string(&events_of_kind(&frames, "tool_result")).unwrap();
-    assert!(
-        rendered.contains("Denied by permission") && !rendered.contains("no answer"),
-        "the deny rule must refuse the call itself: {rendered}"
+        events_of_kind(&frames, "tool_result").is_empty(),
+        "a refused turn ran: {frames:?}"
     );
 
     srv.stop().await;

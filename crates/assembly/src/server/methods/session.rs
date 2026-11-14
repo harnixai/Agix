@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::rpc::methods::session::*;
-use crate::rpc::methods::{Patch, WithIgnored};
+use crate::rpc::methods::Patch;
 use crate::rpc::{read_options, RpcError};
 use crate::session_pool::api::{
     DeleteReport, ForkReport, ModelChoice, PoolError, PromptChoice, Renamed, ResumeReport,
@@ -12,13 +12,13 @@ use crate::session_pool::api::{
 };
 
 rpc_methods! {
-    "session.create" => create(CreateParams) -> WithIgnored<SessionCreated>;
+    "session.create" => create(CreateParams) -> SessionCreated;
     "session.get" => get(SessionRef) -> SessionDetail;
     "session.list" => list(ListParams) -> SessionList;
     "session.close" => close(SessionRef) -> Closed;
     "session.delete" => delete(DeleteParams) -> DeleteReport;
     "session.fork" => fork(ForkParams) -> ForkReport;
-    "session.resume" => resume(ResumeParams) -> WithIgnored<ResumeReport>;
+    "session.resume" => resume(ResumeParams) -> ResumeReport;
     "session.rename" => rename(RenameParams) -> Renamed;
     "session.setModel" => set_model(SetModelParams) -> ModelChoice;
     "session.setPrompt" => set_prompt(SetPromptParams) -> PromptChoice;
@@ -33,18 +33,13 @@ fn invalid(message: impl Into<String>) -> RpcError {
 
 async fn create(
     s: &DaemonServer,
-    cx: &Call,
+    _: &Call,
     p: CreateParams,
-) -> Result<WithIgnored<SessionCreated>, RpcError> {
-    let (options, ignored_options) = read_options(cx.method, p.options.as_ref())?;
-    let result = s
-        .pool
+) -> Result<SessionCreated, RpcError> {
+    let options = read_options(p.options.as_ref())?;
+    Ok(s.pool
         .create_session(p.scene.as_deref(), p.project_root.into(), options.as_ref())
-        .await?;
-    Ok(WithIgnored {
-        result,
-        ignored_options,
-    })
+        .await?)
 }
 
 async fn get(s: &DaemonServer, _: &Call, p: SessionRef) -> Result<SessionDetail, PoolError> {
@@ -77,18 +72,13 @@ async fn fork(s: &DaemonServer, _: &Call, p: ForkParams) -> Result<ForkReport, P
 
 async fn resume(
     s: &DaemonServer,
-    cx: &Call,
+    _: &Call,
     p: ResumeParams,
-) -> Result<WithIgnored<ResumeReport>, RpcError> {
-    let (options, ignored_options) = read_options(cx.method, p.options.as_ref())?;
-    let result = s
-        .pool
+) -> Result<ResumeReport, RpcError> {
+    let options = read_options(p.options.as_ref())?;
+    Ok(s.pool
         .resume_session(&p.session_id, p.create_if_missing, options.as_ref())
-        .await?;
-    Ok(WithIgnored {
-        result,
-        ignored_options,
-    })
+        .await?)
 }
 
 async fn rename(s: &DaemonServer, _: &Call, p: RenameParams) -> Result<Renamed, PoolError> {
