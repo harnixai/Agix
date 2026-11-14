@@ -220,3 +220,35 @@ fn what_a_confined_command_leaves_running_outlives_it_in_its_process_group() {
     assert!(stopped, "stopping the group stops what the command left");
     assert!(released, "what the command left runs on outside its group");
 }
+
+/// Profile and bwrap arguments are text. A path that is not UTF-8 would be
+/// written lossily, and a rule for a path that does not exist matches
+/// nothing (bwrap's `-try` mounts skip it silently), so the command is not
+/// wrapped and says so.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_path_that_is_not_utf8_is_reported_not_written_lossily() {
+    use std::os::unix::ffi::OsStrExt;
+    let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/cred\xff"));
+    let work = Path::new("/tmp/work");
+    let cases = [
+        SandboxPolicy {
+            deny_read: vec![odd.clone()],
+            ..Default::default()
+        },
+        SandboxPolicy {
+            additional_writable: vec![odd.clone()],
+            ..Default::default()
+        },
+    ];
+    for policy in cases {
+        let mut o = opts("true", work);
+        o.policy = policy;
+        let c = wrap(o);
+        assert_eq!(c.enforcement, Enforcement::None, "{:?}", c.unmet);
+        assert!(c.unmet.iter().any(|u| u.contains("UTF-8")), "{:?}", c.unmet);
+    }
+    let mut o = opts("true", &odd);
+    o.policy = SandboxPolicy::default();
+    assert_eq!(wrap(o).enforcement, Enforcement::None);
+}

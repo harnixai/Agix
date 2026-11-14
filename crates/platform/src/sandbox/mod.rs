@@ -267,6 +267,17 @@ fn wrap_program(
 
     #[cfg(feature = "sandbox")]
     {
+        if let Some(odd) = non_utf8_path(cwd, additional_writable, policy) {
+            return Confined {
+                spec: inner,
+                unmet: vec![format!(
+                    "{} is not valid UTF-8, which a sandbox profile cannot name",
+                    odd.display()
+                )],
+                mode: SandboxMode::Unavailable,
+                enforcement: Enforcement::None,
+            };
+        }
         #[cfg(target_os = "macos")]
         {
             macos::mac_wrap(inner, cwd, additional_writable, policy, env)
@@ -283,6 +294,29 @@ fn wrap_program(
             plain(inner, SandboxMode::Unavailable)
         }
     }
+}
+
+/// The first path of the call that is not UTF-8. Profiles and bwrap
+/// arguments are text: such a path would be written lossily, as one that
+/// does not exist.
+#[cfg(feature = "sandbox")]
+fn non_utf8_path<'a>(
+    cwd: &'a Path,
+    additional_writable: &'a [PathBuf],
+    policy: &'a SandboxPolicy,
+) -> Option<&'a Path> {
+    let roots = match &policy.read {
+        ReadScope::Everything => &[][..],
+        ReadScope::Only(roots) => roots,
+    };
+    std::iter::once(cwd)
+        .chain(additional_writable.iter().map(PathBuf::as_path))
+        .chain(policy.additional_writable.iter().map(PathBuf::as_path))
+        .chain(policy.deny_read.iter().map(PathBuf::as_path))
+        .chain(policy.allow_read.iter().map(PathBuf::as_path))
+        .chain(policy.state_root.iter().map(PathBuf::as_path))
+        .chain(roots.iter().map(PathBuf::as_path))
+        .find(|p| p.to_str().is_none())
 }
 
 /// A command nothing wrapped, and the reason in words the operator can act on.
