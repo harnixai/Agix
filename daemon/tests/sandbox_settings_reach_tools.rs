@@ -184,7 +184,7 @@ async fn egress_goes_only_through_the_proxy() {
     for (id, command) in &rounds {
         daemon
             .model
-            .push_turn(tool_round(id, "Bash", json!({ "command": command })));
+            .push_turn(tool_round("Bash", id, json!({ "command": command })));
     }
     daemon.model.push_turn(text_round("done"));
     call(
