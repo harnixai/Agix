@@ -27,7 +27,7 @@ mod user_turn;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use compact::Compaction;
+pub(crate) use compact::{CompactArgs, Compaction};
 pub(crate) use gate::{DemuxHandles, Gate};
 pub(crate) use memory_extraction::MEMORY_EXTRACTION_GRACE;
 pub(crate) use process::hook_permission_mode;

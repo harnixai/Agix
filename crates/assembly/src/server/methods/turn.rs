@@ -15,7 +15,7 @@ use base::context::goal::TurnOrigin;
 
 rpc_methods! {
     "session.run_turn" => run_turn(RunTurnParams) -> TurnReply;
-    "session.compact" => compact(SessionRef) -> TurnReply;
+    "session.compact" => compact(CompactParams) -> TurnReply;
     "session.clear" => clear(SessionRef) -> TurnReply;
     "session.respondToPrompt" => respond_to_prompt(RespondToPromptParams) -> PromptAnswered;
     "session.respondToolCall" => respond_tool_call(RespondToolCallParams) -> ToolCallAnswered;
@@ -57,8 +57,9 @@ async fn run_turn(s: &DaemonServer, cx: &Call, p: RunTurnParams) -> Result<TurnR
     Ok(outcome.into())
 }
 
-async fn compact(s: &DaemonServer, cx: &Call, p: SessionRef) -> Result<TurnReply, PoolError> {
-    run_command(s, cx, p.session_id, "/compact").await
+async fn compact(s: &DaemonServer, cx: &Call, p: CompactParams) -> Result<TurnReply, PoolError> {
+    let command = p.command().map_err(PoolError::InvalidRequest)?;
+    run_command(s, cx, p.session_id, &command).await
 }
 
 async fn clear(s: &DaemonServer, cx: &Call, p: SessionRef) -> Result<TurnReply, PoolError> {

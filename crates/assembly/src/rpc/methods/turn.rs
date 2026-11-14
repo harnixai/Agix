@@ -238,6 +238,60 @@ pub struct Edited {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CompactParams {
+    pub session_id: String,
+    /// What the summary should keep or stress; at most 4000 characters.
+    #[serde(default)]
+    pub instructions: Option<String>,
+    /// Summarize up to here and keep what follows as it is.
+    #[serde(default)]
+    pub at: Option<CompactAtParam>,
+}
+
+/// Where a compaction stops: exactly one of the two.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CompactAtParam {
+    /// Up to and including this turn.
+    #[serde(default)]
+    pub to_turn: Option<String>,
+    /// Up to and including the round that holds this tool call and its result.
+    #[serde(default)]
+    pub to_tool_use: Option<String>,
+}
+
+pub const COMPACT_INSTRUCTIONS_MAX_CHARS: usize = 4000;
+
+impl CompactParams {
+    pub fn command(&self) -> Result<String, String> {
+        let mut command = String::from("/compact");
+        if let Some(at) = &self.at {
+            let (kind, id) = match (&at.to_turn, &at.to_tool_use) {
+                (Some(id), None) => ("turn", id),
+                (None, Some(id)) => ("tool_use", id),
+                _ => return Err("`at` takes exactly one of to_turn and to_tool_use".into()),
+            };
+            if id.is_empty() || id.contains(char::is_whitespace) {
+                return Err("`at` names an id with no whitespace".into());
+            }
+            command.push_str(&format!(" --at {kind}:{id}"));
+        }
+        if let Some(instructions) = self.instructions.as_deref().map(str::trim) {
+            if instructions.is_empty() {
+                return Err("`instructions` is empty".into());
+            }
+            if instructions.chars().count() > COMPACT_INSTRUCTIONS_MAX_CHARS {
+                return Err(format!(
+                    "`instructions` is longer than {COMPACT_INSTRUCTIONS_MAX_CHARS} characters"
+                ));
+            }
+            command.push(' ');
+            command.push_str(instructions);
+        }
+        Ok(command)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RewindParams {
     pub session_id: String,
     #[serde(flatten)]

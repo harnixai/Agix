@@ -507,6 +507,24 @@ impl Agent {
         &mut self,
         cancel: &CancellationToken,
     ) -> Option<crate::turn::CompactSummary> {
+        self.compact_with(&Default::default(), cancel).await.ok()
+    }
+
+    /// [`Self::compact_now`] with the host's summary instructions and cut
+    /// point; says why when it did nothing.
+    pub(crate) async fn compact_with(
+        &mut self,
+        args: &crate::turn::CompactArgs,
+        cancel: &CancellationToken,
+    ) -> Result<crate::turn::CompactSummary, String> {
+        let through = match &args.at {
+            Some(at) => Some(self.messages_through(at).await?),
+            None => None,
+        };
+        let shape = compaction::llm_summary::SummaryShape {
+            instructions: args.instructions.clone(),
+            through,
+        };
         let target = (self.session.token_count() / 2).max(1);
         // Asked for, so it must compact something: a keep floor of every
         // round there is would leave the summary nothing to cover, and the
@@ -523,9 +541,15 @@ impl Agent {
             .compact_keep_recent
             .min(rounds.saturating_sub(1))
             .max(1);
-        self.run_compaction(target, keep, crate::turn::CompactTrigger::Manual, cancel)
-            .await
-            .ok()
+        self.run_compaction_shaped(
+            target,
+            keep,
+            crate::turn::CompactTrigger::Manual,
+            &shape,
+            cancel,
+        )
+        .await
+        .map_err(|e| e.to_string())
     }
 
     pub async fn run_turn(

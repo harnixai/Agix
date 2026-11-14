@@ -181,6 +181,17 @@ impl LlmSummarizer {
         messages: &[ModelMessage],
         cancel: &CancellationToken,
     ) -> Result<String, CompactError> {
+        self.summarize_with(messages, None, cancel).await
+    }
+
+    /// [`Self::summarize`] with the host's own instructions for what the
+    /// summary should keep or stress, placed after the fixed prompt.
+    pub async fn summarize_with(
+        &self,
+        messages: &[ModelMessage],
+        instructions: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> Result<String, CompactError> {
         let Rendered {
             earlier_summaries,
             transcript,
@@ -194,6 +205,14 @@ impl LlmSummarizer {
         let mut content = vec![ModelContentBlock::Text {
             text: SUMMARY_PROMPT.to_string(),
         }];
+        if let Some(instructions) = instructions.filter(|i| !i.trim().is_empty()) {
+            content.push(ModelContentBlock::Text {
+                text: format!(
+                    "<summary-instructions>\n{}\n</summary-instructions>\nThe instructions above come from the user; follow them while keeping the nine headings.",
+                    instructions.trim()
+                ),
+            });
+        }
         content.extend(
             earlier_summaries
                 .iter()
@@ -311,6 +330,36 @@ pub async fn full_compact(
     counter: &dyn TokenCounter,
     cancel: &CancellationToken,
 ) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
+    full_compact_with(
+        summarizer,
+        messages,
+        max_tokens,
+        keep_rounds,
+        counter,
+        &SummaryShape::default(),
+        cancel,
+    )
+    .await
+}
+
+/// What a manual compaction asks of the summary beyond the budget.
+#[derive(Debug, Clone, Default)]
+pub struct SummaryShape {
+    pub instructions: Option<String>,
+    /// Summarize exactly the first this-many messages (rounded down to a
+    /// round boundary) and keep the rest verbatim, whatever the budget says.
+    pub through: Option<usize>,
+}
+
+pub async fn full_compact_with(
+    summarizer: &LlmSummarizer,
+    messages: Vec<ModelMessage>,
+    max_tokens: usize,
+    keep_rounds: usize,
+    counter: &dyn TokenCounter,
+    shape: &SummaryShape,
+    cancel: &CancellationToken,
+) -> Result<(Vec<ModelMessage>, CompactResult), CompactError> {
     let tokens_before = counter.count_messages(&messages);
     let count_before = messages.len();
 
@@ -318,16 +367,36 @@ pub async fn full_compact(
     let tokens_from = |first: usize| -> usize { rounds[first..].iter().map(|r| r.tokens).sum() };
     // How many recent rounds stay is settled before summarizing, never after:
     // a round shed once the summary is written would be covered by neither.
-    let mut keep = keep_rounds.clamp(1, rounds.len().max(1));
-    if rounds.len() <= keep {
-        return Err(CompactError::NotApplicable(
-            "fewer rounds than the keep floor — nothing to summarize".into(),
-        ));
-    }
-    while keep > 1 && tokens_from(rounds.len() - keep) > max_tokens {
-        keep -= 1;
-    }
-    let split = rounds.len() - keep;
+    let split = match shape.through {
+        Some(through) => {
+            let mut end = 0;
+            let split = rounds
+                .iter()
+                .take_while(|r| {
+                    end += r.messages.len();
+                    end <= through
+                })
+                .count();
+            if split == 0 {
+                return Err(CompactError::NotApplicable(
+                    "no whole round lies before that point — nothing to summarize".into(),
+                ));
+            }
+            split
+        }
+        None => {
+            let mut keep = keep_rounds.clamp(1, rounds.len().max(1));
+            if rounds.len() <= keep {
+                return Err(CompactError::NotApplicable(
+                    "fewer rounds than the keep floor — nothing to summarize".into(),
+                ));
+            }
+            while keep > 1 && tokens_from(rounds.len() - keep) > max_tokens {
+                keep -= 1;
+            }
+            rounds.len() - keep
+        }
+    };
 
     // Summarize BEFORE anything is discarded. If this fails, `messages` is
     // untouched and the caller's fallback sees the original conversation.
@@ -335,7 +404,9 @@ pub async fn full_compact(
         .iter()
         .flat_map(|r| r.messages.iter().cloned())
         .collect();
-    let summary = summarizer.summarize(&to_summarize, cancel).await?;
+    let summary = summarizer
+        .summarize_with(&to_summarize, shape.instructions.as_deref(), cancel)
+        .await?;
 
     let mut result = vec![summary_message(&summary)];
     for round in &rounds[split..] {
@@ -657,6 +728,50 @@ mod tests {
             "oldest rounds must have been dropped"
         );
         assert!(meta.messages_after < meta.messages_before);
+    }
+
+    #[tokio::test]
+    async fn instructions_reach_the_summary_request() {
+        let model = FakeSummarizerModel::new("summary");
+        let summarizer = LlmSummarizer::new(model.clone(), "cheap-model");
+        summarizer
+            .summarize_with(
+                &bulky_conversation(4),
+                Some("keep every file path verbatim"),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(model
+            .prompt_text()
+            .contains("keep every file path verbatim"));
+    }
+
+    #[tokio::test]
+    async fn through_summarizes_exactly_the_rounds_before_the_point() {
+        let msgs = bulky_conversation(6);
+        let model = FakeSummarizerModel::new("summary");
+        let summarizer = LlmSummarizer::new(model.clone(), "cheap-model");
+        let shape = SummaryShape {
+            instructions: None,
+            through: Some(5),
+        };
+        let (result, _) = full_compact_with(
+            &summarizer,
+            msgs,
+            1,
+            1,
+            &*counter(),
+            &shape,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let prompt = model.prompt_text();
+        assert!(prompt.contains("request 1:") && !prompt.contains("request 2:"));
+        let kept = summary_text(&result[1..]);
+        assert!(kept.contains("request 2:") && kept.contains("request 5:"));
+        assert_eq!(result.len(), 1 + 8);
     }
 
     #[tokio::test]

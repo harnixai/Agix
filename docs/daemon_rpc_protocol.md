@@ -1462,9 +1462,19 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 
 ```jsonc
 // → params
-{ "session_id": "…" }
+{ "session_id": "…",
+  "instructions": "保留所有文件路径原文",   // 可选:摘要要保留或强调什么,最长 4000 字符
+  "at": { "to_turn": "t1" } }              // 可选:恰好一个 to_turn | to_tool_use
 // ← result:同 session.run_turn
 ```
+
+`instructions` 原样放进摘要请求里,摘要仍按固定的九个标题写。没配摘要模型、走级联压缩时
+它不起作用。`session.run_turn` 发 `/compact <说明>` 等价于带 `instructions`;
+`/compact --at turn:<id> <说明>`、`--at tool_use:<id> <说明>` 等价于带 `at`。
+
+`at` 把压缩范围定在那一点:`to_turn` 是到这一轮结束为止(同 `session.rewind` 的 `to_turn`),
+`to_tool_use` 是到持有该工具调用及其结果的那一往返为止;之后的消息原样留在历史里。带了 `at`
+就一定要摘要模型写摘要,没有摘要模型、摘要失败或找不到这一点时历史不变,正文说明原因。
 
 **不看阈值,现在就压。** 配了摘要模型时由它写全文摘要(`FullCompact`),否则按引擎的
 级联压到历史当前大小的一半左右。压了会推一帧 `compact`(§7.1),没什么可压时没有这

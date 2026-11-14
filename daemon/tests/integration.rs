@@ -52,6 +52,7 @@ mod rpc_smoke;
 mod sandbox_settings_reach_tools;
 mod scene_lifecycle;
 mod schedule;
+mod session_compact_args;
 mod session_context;
 mod session_customizer;
 mod session_end_effects;

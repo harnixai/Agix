@@ -287,7 +287,7 @@ impl Agent {
                     unreachable!("MCP prompt commands are dispatched above")
                 }
                 crate::commands::Command::Local { .. } => {
-                    return Some(self.run_local_command(&sc.name, cancel).await);
+                    return Some(self.run_local_command(&sc.name, &sc.args, cancel).await);
                 }
             }
         }
@@ -327,6 +327,7 @@ impl Agent {
     async fn run_local_command(
         &mut self,
         name: &str,
+        args: &str,
         cancel: &CancellationToken,
     ) -> Result<TurnOutcome, TurnError> {
         let result_text = match name {
@@ -336,17 +337,23 @@ impl Agent {
                 self.handle_clear_command().await;
                 "Session cleared. All messages removed.".into()
             }
-            "compact" => match self.compact_now(cancel).await {
-                Some(c) => format!(
-                    "Compacted ({}): {} → {} messages, ~{} → ~{} tokens.",
-                    c.strategy,
-                    c.messages_before,
-                    c.messages_after,
-                    c.tokens_before,
-                    c.tokens_after
-                ),
-                None if cancel.is_cancelled() => "Compaction interrupted; nothing changed.".into(),
-                None => "Nothing to compact.".into(),
+            "compact" => match super::CompactArgs::parse(args) {
+                Err(e) => format!("Not compacted: {e}"),
+                Ok(parsed) => match self.compact_with(&parsed, cancel).await {
+                    Ok(c) => format!(
+                        "Compacted ({}): {} → {} messages, ~{} → ~{} tokens.",
+                        c.strategy,
+                        c.messages_before,
+                        c.messages_after,
+                        c.tokens_before,
+                        c.tokens_after
+                    ),
+                    Err(_) if cancel.is_cancelled() => {
+                        "Compaction interrupted; nothing changed.".into()
+                    }
+                    Err(e) if parsed.at.is_some() => format!("Not compacted: {e}"),
+                    Err(_) => "Nothing to compact.".into(),
+                },
             },
             "cost" => self.handle_cost_command(),
             _ => format!("Unknown local command: {name}"),

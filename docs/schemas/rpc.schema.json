@@ -400,6 +400,58 @@
       ],
       "type": "string"
     },
+    "CompactAtParam": {
+      "description": "Where a compaction stops: exactly one of the two.",
+      "properties": {
+        "to_tool_use": {
+          "default": null,
+          "description": "Up to and including the round that holds this tool call and its result.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_turn": {
+          "default": null,
+          "description": "Up to and including this turn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CompactParams": {
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompactAtParam"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Summarize up to here and keep what follows as it is."
+        },
+        "instructions": {
+          "default": null,
+          "description": "What the summary should keep or stress; at most 4000 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
     "ConfigGetParams": {
       "properties": {
         "include_secrets": {
@@ -6919,7 +6971,7 @@
     },
     "session.compact": {
       "params": {
-        "$ref": "#/$defs/SessionRef"
+        "$ref": "#/$defs/CompactParams"
       },
       "result": {
         "$ref": "#/$defs/TurnReply"
