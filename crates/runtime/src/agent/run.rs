@@ -258,6 +258,9 @@ impl Agent {
                 msg = fwd_rx.recv() => {
                     match msg {
                         Some((input, _)) if self.identity.drive_goals && !self.claims_goal_round(&input) => {
+                            if let InputMessage::User { turn_id, .. } = &input {
+                                lock_turn_cancel(&self.channels.current_turn_cancel).dropped(turn_id);
+                            }
                             tracing::debug!("dropped a goal round that is no longer wanted");
                         }
                         Some((input, turn_cancel)) => {
@@ -265,6 +268,9 @@ impl Agent {
                                 InputMessage::User { turn_id, .. } => Some(turn_id.clone()),
                                 _ => None,
                             };
+                            if let Some(turn_id) = &user_turn {
+                                lock_turn_cancel(&self.channels.current_turn_cancel).started(turn_id);
+                            }
                             let processed = self.process_turn(input, turn_cancel).await;
                             if let Some(turn_id) = &user_turn {
                                 lock_turn_cancel(&self.channels.current_turn_cancel).ended(turn_id);

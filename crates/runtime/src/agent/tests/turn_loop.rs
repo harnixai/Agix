@@ -1419,6 +1419,74 @@ async fn cancel_turn_lands_on_the_turn_it_names() {
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), engine).await;
 }
 
+/// A message queued while a turn runs does not take that turn's place as
+/// the one `CancelTurn` names: cancelling the running turn by its id stops
+/// it, and the queued one runs after it as usual.
+#[tokio::test]
+async fn cancel_turn_names_the_running_turn_while_another_is_queued() {
+    let tools = Arc::new(InMemoryToolRegistry::new());
+    tools.register(Arc::new(HangingTool));
+    let model: Arc<dyn Model> = Arc::new(ToolThenStopModel {
+        calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        tool: "Hang",
+    });
+    let (mut agent, mut event_rx, input_tx) = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(model)
+        .settings(Arc::new(test_settings()))
+        .tools(tools)
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+    let engine = tokio::spawn(async move { agent.run(CancellationToken::new()).await });
+    let turn = |turn_id: &str| {
+        input_tx
+            .send(InputMessage::User {
+                content: format!("turn {turn_id}"),
+                attachments: vec![],
+                turn_id: turn_id.into(),
+            })
+            .unwrap()
+    };
+
+    turn("running");
+    super::events_and_steering::next_event(
+        &mut event_rx,
+        |e| matches!(e, AgentEvent::ToolUse { name, .. } if name == "Hang"),
+        "the running turn's tool",
+    )
+    .await;
+    turn("queued");
+    input_tx
+        .send(InputMessage::System {
+            kind: EngineCommand::CancelTurn {
+                turn_id: Some("running".into()),
+            },
+            content: String::new(),
+        })
+        .unwrap();
+
+    let mut ended = Vec::new();
+    for _ in 0..2 {
+        match super::events_and_steering::next_event(
+            &mut event_rx,
+            |e| matches!(e, AgentEvent::TurnComplete { .. }),
+            "the end of a turn",
+        )
+        .await
+        {
+            AgentEvent::TurnComplete { stop_reason, .. } => ended.push(stop_reason),
+            _ => unreachable!(),
+        }
+    }
+    assert_eq!(ended, ["cancelled", "end_turn"]);
+
+    drop(input_tx);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), engine).await;
+}
+
 /// Cancelling the session's own token still cascades into the turn in
 /// flight — per-turn tokens are children, not replacements.
 #[tokio::test]

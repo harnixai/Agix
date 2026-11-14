@@ -161,19 +161,20 @@ impl Policies {
 pub(crate) struct Channels {
     pub(crate) input_rx: InputReceiver,
     pub(crate) event_tx: EventSender,
-    /// The turn last handed to the turn loop, replaced when its `User`
+    /// The turns handed to the turn loop, registered when their `User`
     /// message is queued and cancelled by the input demultiplexer, which
     /// holds no `&mut self`.
     pub(crate) current_turn_cancel: Arc<std::sync::Mutex<TurnCancel>>,
     pub(crate) steering: crate::steering::SharedSteerQueue,
 }
 
-/// Which turn `EngineCommand::CancelTurn` lands on.
+/// Which turn `EngineCommand::CancelTurn` lands on: the one running, else
+/// the next queued; by id, the turn of that id, running or queued.
 #[derive(Default)]
 pub(crate) struct TurnCancel {
-    turn_id: String,
-    token: CancellationToken,
-    ended: bool,
+    running: Option<(String, CancellationToken)>,
+    /// Queued, not yet started, in the order they were queued.
+    waiting: std::collections::VecDeque<(String, CancellationToken)>,
     /// Turns cancelled by id before their message was queued.
     cancelled_ahead: std::collections::VecDeque<String>,
 }
@@ -186,28 +187,50 @@ impl TurnCancel {
             self.cancelled_ahead.remove(at);
             token.cancel();
         }
-        self.turn_id = turn_id.to_string();
-        self.token = token;
-        self.ended = false;
+        self.waiting.push_back((turn_id.to_string(), token));
+    }
+
+    pub(crate) fn started(&mut self, turn_id: &str) {
+        if let Some(turn) = self.take_waiting(turn_id) {
+            self.running = Some(turn);
+        }
+    }
+
+    /// A queued turn that will not run after all.
+    pub(crate) fn dropped(&mut self, turn_id: &str) {
+        self.take_waiting(turn_id);
     }
 
     pub(crate) fn cancel(&mut self, turn_id: Option<&str>) {
-        match turn_id {
-            Some(id) if id != self.turn_id => {
+        let target = match turn_id {
+            None => self.running.as_ref().or(self.waiting.front()),
+            Some(id) => self
+                .running
+                .iter()
+                .chain(self.waiting.iter())
+                .find(|(turn, _)| turn == id),
+        };
+        match (target, turn_id) {
+            (Some((_, token)), _) => token.cancel(),
+            (None, Some(id)) => {
                 if self.cancelled_ahead.len() == Self::AHEAD_KEPT {
                     self.cancelled_ahead.pop_front();
                 }
                 self.cancelled_ahead.push_back(id.to_string());
             }
-            _ if self.ended => {}
-            _ => self.token.cancel(),
+            (None, None) => {}
         }
     }
 
     pub(crate) fn ended(&mut self, turn_id: &str) {
-        if self.turn_id == turn_id {
-            self.ended = true;
+        if self.running.as_ref().is_some_and(|(id, _)| id == turn_id) {
+            self.running = None;
         }
+    }
+
+    fn take_waiting(&mut self, turn_id: &str) -> Option<(String, CancellationToken)> {
+        let at = self.waiting.iter().position(|(id, _)| id == turn_id)?;
+        self.waiting.remove(at)
     }
 }
 
