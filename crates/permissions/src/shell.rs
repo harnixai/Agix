@@ -373,17 +373,43 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
     // `#` opens a comment only where a word could begin: `echo \ #` and
     // `echo a#` keep the `#` as text, and the rest of the line still runs.
     let mut at_word_start = true;
+    let mut docs = HereDocs::default();
+    let mut arithmetic_until = 0;
     let mut i = 0;
     while i < chars.len() {
+        if let Some(next) = docs.end_at_line_start(&chars, i) {
+            i = next;
+            continue;
+        }
         let c = chars[i];
-        if let Some(next) = step_over_quoted(&chars, i, out) {
+        let in_body = docs.in_body();
+        // `(( x << 1 ))` and `$[1<<2]` shift; they open no here-document.
+        if at_word_start && c == '(' && chars.get(i + 1) == Some(&'(') {
+            arithmetic_until = arithmetic_until.max(find_close_paren(&chars, i + 2) + 1);
+        } else if c == '$' && chars.get(i + 1) == Some(&'[') {
+            arithmetic_until = arithmetic_until.max(find_char(&chars, i + 2, ']') + 1);
+        }
+        if !in_body && i >= arithmetic_until {
+            if let Some(next) = docs.open_at(&chars, i) {
+                at_word_start = false;
+                current.extend(&chars[i..next]);
+                i = next;
+                continue;
+            }
+        }
+        let stepped = if in_body {
+            step_over_substitution(&chars, i, out)
+        } else {
+            step_over_quoted(&chars, i, out)
+        };
+        if let Some(next) = stepped {
             at_word_start = false;
             current.extend(&chars[i..next.min(chars.len())]);
             i = next;
             continue;
         }
         match c {
-            '#' if at_word_start => {
+            '#' if at_word_start && !in_body => {
                 while i < chars.len() && chars[i] != '\n' {
                     i += 1;
                 }
@@ -393,6 +419,9 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
                 at_word_start = true;
                 push_command(&current, out);
                 current.clear();
+                if c == '\n' {
+                    docs.line_ended();
+                }
             }
             '&' => {
                 let redirect =
@@ -415,29 +444,174 @@ fn split_into(src: &str, out: &mut Vec<Segment>) {
     push_command(&current, out);
 }
 
+/// The here-documents of a line: those whose operator has been read and
+/// whose body starts at the next newline, then those whose body is being
+/// read. A body runs up to its delimiter line, and in it quotes and `#` are
+/// ordinary characters while `$(...)`, `${...}` and backquotes still run.
+/// Its lines are still split as commands: that can only add segments, and
+/// a delimiter read wrong costs prompts, not a hidden command.
+#[derive(Default)]
+struct HereDocs {
+    waiting: Vec<HereDoc>,
+    reading: std::collections::VecDeque<HereDoc>,
+    at_line_start: bool,
+}
+
+struct HereDoc {
+    delimiter: String,
+    strip_tabs: bool,
+}
+
+impl HereDocs {
+    fn in_body(&self) -> bool {
+        !self.reading.is_empty()
+    }
+
+    fn line_ended(&mut self) {
+        self.reading.extend(self.waiting.drain(..));
+        self.at_line_start = true;
+    }
+
+    /// When `i` starts a line that closes the body being read, the index
+    /// just past that line.
+    fn end_at_line_start(&mut self, chars: &[char], i: usize) -> Option<usize> {
+        if !std::mem::take(&mut self.at_line_start) {
+            return None;
+        }
+        let doc = self.reading.front()?;
+        let end = find_char(chars, i, '\n');
+        let mut line = &chars[i..end];
+        if doc.strip_tabs {
+            while let [first, rest @ ..] = line {
+                if *first != '\t' {
+                    break;
+                }
+                line = rest;
+            }
+        }
+        if !line.iter().copied().eq(doc.delimiter.chars()) {
+            return None;
+        }
+        self.reading.pop_front();
+        self.at_line_start = true;
+        Some((end + 1).min(chars.len()))
+    }
+
+    /// When `chars[i]` starts a `<<` or `<<-` operator with its delimiter
+    /// word, note the document and return the index just past the word.
+    fn open_at(&mut self, chars: &[char], i: usize) -> Option<usize> {
+        if chars[i] != '<' || chars.get(i + 1) != Some(&'<') || chars.get(i + 2) == Some(&'<') {
+            return None;
+        }
+        let mut j = i + 2;
+        let strip_tabs = chars.get(j) == Some(&'-');
+        if strip_tabs {
+            j += 1;
+        }
+        while chars.get(j).is_some_and(|&c| c == ' ' || c == '\t') {
+            j += 1;
+        }
+        let mut delimiter = String::new();
+        while let Some(&c) = chars.get(j) {
+            match c {
+                c if is_blank(c) || matches!(c, ';' | '|' | '&' | '<' | '>' | '(' | ')') => break,
+                // A delimiter the scanner might read differently from the
+                // shell could swallow the rest of the line as a body.
+                '$' | '`' => return None,
+                '\'' => {
+                    let end = find_char(chars, j + 1, '\'');
+                    delimiter.extend(&chars[j + 1..end.min(chars.len())]);
+                    j = end + 1;
+                }
+                '"' => {
+                    let end = find_char(chars, j + 1, '"');
+                    let inner = &chars[j + 1..end.min(chars.len())];
+                    if inner.contains(&'\\') {
+                        return None;
+                    }
+                    delimiter.extend(inner);
+                    j = end + 1;
+                }
+                '\\' => {
+                    delimiter.extend(chars.get(j + 1));
+                    j += 2;
+                }
+                c => {
+                    delimiter.push(c);
+                    j += 1;
+                }
+            }
+        }
+        if delimiter.is_empty() || delimiter.contains('\n') {
+            return None;
+        }
+        self.waiting.push(HereDoc {
+            delimiter,
+            strip_tabs,
+        });
+        Some(j.min(chars.len()))
+    }
+}
+
 /// When `chars[i]` opens an escape, a quoted string or a substitution, scan
 /// it — splitting what runs inside into `out` — and return the index just
 /// past it.
 fn step_over_quoted(chars: &[char], i: usize, out: &mut Vec<Segment>) -> Option<usize> {
     let next = chars.get(i + 1);
     let end = match chars[i] {
-        '\\' => return Some(i + 2),
         '$' if next == Some(&'\'') => ansi_c_close(chars, i + 2),
         '\'' => find_char(chars, i + 1, '\''),
         '"' => scan_double_quoted(chars, i + 1, out),
+        '<' | '>' if next == Some(&'(') => {
+            let end = find_close_paren(chars, i + 2);
+            split_into_span(chars, i + 2, end, out);
+            end
+        }
+        _ => return step_over_substitution(chars, i, out),
+    };
+    Some(end + 1)
+}
+
+/// [`step_over_quoted`] for what still runs where quotes are plain text: an
+/// escape, `$(...)`, `${...}` and backquotes.
+fn step_over_substitution(chars: &[char], i: usize, out: &mut Vec<Segment>) -> Option<usize> {
+    let next = chars.get(i + 1);
+    let end = match chars[i] {
+        '\\' => return Some(i + 2),
         '`' => {
             let end = find_unescaped(chars, i + 1, '`');
             split_into_span(chars, i + 1, end, out);
             end
         }
-        '$' | '<' | '>' if next == Some(&'(') => {
+        '$' if next == Some(&'(') => {
             let end = find_close_paren(chars, i + 2);
             split_into_span(chars, i + 2, end, out);
             end
         }
+        '$' if next == Some(&'{') => scan_parameter_expansion(chars, i + 2, out),
         _ => return None,
     };
     Some(end + 1)
+}
+
+/// Scan a `${...}` starting just past its `{`, splitting any substitution
+/// inside it into `out`; returns the index of the closing `}`. Inside it a
+/// `#` is an operator (`${x#p}`, `${x:- #}`), never a comment, and `;` or `|`
+/// separate nothing.
+fn scan_parameter_expansion(chars: &[char], mut i: usize, out: &mut Vec<Segment>) -> usize {
+    while i < chars.len() {
+        match chars[i] {
+            '}' => return i,
+            '\'' => i = find_char(chars, i + 1, '\'') + 1,
+            '"' => i = scan_double_quoted(chars, i + 1, out) + 1,
+            '$' if chars.get(i + 1) == Some(&'\'') => i = ansi_c_close(chars, i + 2) + 1,
+            _ => match step_over_substitution(chars, i, out) {
+                Some(next) => i = next,
+                None => i += 1,
+            },
+        }
+    }
+    chars.len()
 }
 
 fn split_into_span(chars: &[char], from: usize, end: usize, out: &mut Vec<Segment>) {
@@ -799,6 +973,9 @@ mod tests {
         assert!(split("cat <<A <<B\nit's\nA\nit's\nB\nrm x").contains(&rm));
         assert!(split("cat <<EOF\n$(rm y)\nEOF").contains(&"rm y".to_string()));
         assert!(split("cat <<EOF\n`rm y`\nEOF").contains(&"rm y".to_string()));
+        assert!(split("(( x <<= 1 ))\necho ' #'; rm x").contains(&rm));
+        assert!(split("echo $[1<<2]\necho ' #'; rm x").contains(&rm));
+        assert!(split("cat <<\"E\\F\"\necho ' #'; rm x").contains(&rm));
     }
 
     #[test]
