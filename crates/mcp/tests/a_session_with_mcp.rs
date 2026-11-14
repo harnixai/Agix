@@ -196,7 +196,7 @@ async fn build_wires_mcp_elicitation_urls_to_the_elicitation_hook() {
         }],
     );
     let runner = Arc::new(
-        hooks::HookRunner::new(hooks_settings)
+        local_hook_runner(hooks_settings)
             .with_prompt_executor(Arc::new(RecordingPromptExecutor { fired: fired_tx })),
     );
 
@@ -464,4 +464,15 @@ async fn an_unresolvable_at_reference_degrades_to_visible_text() {
         transcript.contains("error=\"true\"") && transcript.contains("no such resource"),
         "the bad URI was not surfaced as visible text: {transcript}"
     );
+}
+
+fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
+    let providers = platform::local_providers();
+    hooks::HookRunner::new(
+        settings,
+        hooks::HookExec {
+            process: providers.process,
+            network: providers.network,
+        },
+    )
 }

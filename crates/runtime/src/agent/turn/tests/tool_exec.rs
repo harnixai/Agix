@@ -180,7 +180,7 @@ async fn tool_start_fires_before_tool_execution_completes() {
     tools.register(std::sync::Arc::new(ProbeTool {
         called: called.clone(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
     let mut ctx = test_exec_ctx(tools, hooks_runner);
@@ -238,7 +238,7 @@ async fn tool_execution_reports_the_sizes_and_the_failure_it_saw() {
         called: Default::default(),
     }));
     tools.register(Arc::new(FailingTool));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let mut ctx = test_exec_ctx(tools, hooks_runner);
 
     let input = serde_json::json!({"x": 1});
@@ -268,7 +268,7 @@ async fn tool_execution_says_a_user_approved_the_call_they_were_asked_about() {
     tools.register(Arc::new(ProbeTool {
         called: Default::default(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let mut ctx = test_exec_ctx_with_permission(
         tools,
         hooks_runner,
@@ -333,7 +333,7 @@ async fn a_pre_tool_use_approve_answers_the_permission_question_but_not_a_denial
                 on_error: hooks::OnError::Allow,
             }],
         );
-        Arc::new(hooks::HookRunner::new(settings))
+        Arc::new(local_hook_runner(settings))
     };
 
     let asking = || {
@@ -348,7 +348,7 @@ async fn a_pre_tool_use_approve_answers_the_permission_question_but_not_a_denial
     };
     let unanswered = test_exec_ctx_with_permission(
         tools.clone(),
-        Arc::new(hooks::HookRunner::new(std::collections::HashMap::new())),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
         asking(),
     );
     let declined = execute_tool_with_telemetry(&unanswered, "Probe", serde_json::json!({})).await;
@@ -380,7 +380,7 @@ async fn input_the_tool_rejects_never_runs_whatever_the_permission_handler() {
     let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
     tools.register(Arc::new(PickyTool { ran: ran.clone() }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let ctx = test_exec_ctx(tools, hooks_runner);
 
     let result = execute_tool_with_telemetry(&ctx, "Picky", serde_json::json!({})).await;
@@ -442,7 +442,7 @@ async fn a_deferred_tool_called_with_the_wrong_input_is_answered_with_its_schema
     tools.register(Arc::new(PickyTool {
         ran: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let resident = test_exec_ctx(tools, hooks_runner);
     let ctx = deferring(resident.clone(), &["NeedsPath", "Picky"]);
 
@@ -492,7 +492,7 @@ async fn pre_tool_use_hook_blocks_call() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let hooks_runner = Arc::new(hooks::HookRunner::new(settings));
+    let hooks_runner = Arc::new(local_hook_runner(settings));
     let ctx = test_exec_ctx_with_permission(
         tools,
         hooks_runner,
@@ -530,7 +530,7 @@ async fn pre_tool_use_hook_rewrites_input() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let hooks_runner = Arc::new(hooks::HookRunner::new(settings));
+    let hooks_runner = Arc::new(local_hook_runner(settings));
     let ctx = test_exec_ctx(tools, hooks_runner);
 
     let result = execute_tool_with_telemetry(&ctx, "Probe", serde_json::json!({"x": 1})).await;
@@ -588,7 +588,7 @@ async fn a_push_notification_reaches_the_event_stream_and_the_notification_hook(
             on_error: hooks::OnError::Allow,
         }],
     );
-    let mut ctx = test_exec_ctx(tools, Arc::new(hooks::HookRunner::new(settings)));
+    let mut ctx = test_exec_ctx(tools, Arc::new(local_hook_runner(settings)));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     ctx.events = Some(crate::event_bus::EventBus::new(tx));
 
@@ -642,7 +642,7 @@ async fn post_tool_use_hook_fires_after_execution() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let hooks_runner = Arc::new(hooks::HookRunner::new(settings));
+    let hooks_runner = Arc::new(local_hook_runner(settings));
     let ctx = test_exec_ctx(tools, hooks_runner);
 
     let result = execute_tool_with_telemetry(&ctx, "Probe", serde_json::json!({})).await;
@@ -831,7 +831,7 @@ async fn post_tool_use_failure_runs_for_a_call_its_batch_abandoned() {
     let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
     tools.register(Arc::new(RunsUntilDropped(started.clone())));
     tools.register(Arc::new(FailsAfterSiblingStarts(started)));
-    let template = test_exec_ctx(tools, Arc::new(hooks::HookRunner::new(settings)));
+    let template = test_exec_ctx(tools, Arc::new(local_hook_runner(settings)));
     let events: Vec<
         Result<base::interface::model::ModelEvent, base::interface::model::ModelError>,
     > = vec![
@@ -920,7 +920,7 @@ fn ctx_with_marker_hook(
             on_error: hooks::OnError::Allow,
         }],
     );
-    test_exec_ctx(tools, Arc::new(hooks::HookRunner::new(settings)))
+    test_exec_ctx(tools, Arc::new(local_hook_runner(settings)))
 }
 
 /// `PostToolUseFailure` is the error-only sibling of `PostToolUse`, so a
@@ -1005,7 +1005,7 @@ async fn lifecycle_hooks_cannot_discontinue_the_turn() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let ctx = test_exec_ctx(tools, Arc::new(hooks::HookRunner::new(settings)));
+    let ctx = test_exec_ctx(tools, Arc::new(local_hook_runner(settings)));
 
     let _ = execute_tool_with_telemetry(&ctx, "Failing", serde_json::json!({})).await;
     assert!(
@@ -1035,7 +1035,7 @@ async fn post_tool_use_hook_discontinue_sets_the_shared_flag() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let hooks_runner = Arc::new(hooks::HookRunner::new(settings));
+    let hooks_runner = Arc::new(local_hook_runner(settings));
     let ctx = test_exec_ctx(tools, hooks_runner);
 
     assert!(!ctx.discontinued.load(std::sync::atomic::Ordering::Relaxed));
@@ -1075,7 +1075,7 @@ async fn post_tool_use_hook_block_denies_only_this_result() {
             on_error: hooks::OnError::Allow,
         }],
     );
-    let hooks_runner = Arc::new(hooks::HookRunner::new(settings));
+    let hooks_runner = Arc::new(local_hook_runner(settings));
     let ctx = test_exec_ctx(tools, hooks_runner);
 
     let result = execute_tool_with_telemetry(&ctx, "Probe", serde_json::json!({})).await;
@@ -1136,7 +1136,7 @@ async fn permission_deny_blocks_the_call() {
     tools.register(std::sync::Arc::new(ProbeTool {
         called: called.clone(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let ctx = test_exec_ctx_with_permission(tools, hooks_runner, Arc::new(DenyAllTestPermission));
 
     let result = execute_tool_with_telemetry(&ctx, "Probe", serde_json::json!({})).await;
@@ -1197,7 +1197,7 @@ async fn the_call_runs_on_what_the_policy_let_it_through_on() {
     let seen = Arc::new(std::sync::Mutex::new(None));
     let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
     tools.register(Arc::new(ApprovalProbe(seen.clone())));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let ctx = test_exec_ctx_with_permission(tools, hooks_runner, Arc::new(StrictPermission));
     execute_tool_with_telemetry(&ctx, "ApprovalProbe", serde_json::json!({}))
         .await
@@ -1221,7 +1221,7 @@ async fn permission_prompt_with_no_response_blocks_until_cancelled() {
     tools.register(std::sync::Arc::new(ProbeTool {
         called: called.clone(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let mut ctx = test_exec_ctx_with_permission(
         tools,
         hooks_runner,
@@ -1293,7 +1293,7 @@ async fn a_permission_answer_that_beat_the_timeout_is_the_answer() {
     tools.register(std::sync::Arc::new(ProbeTool {
         called: called.clone(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let mut ctx = test_exec_ctx_with_permission(
         tools,
         hooks_runner,
@@ -1350,7 +1350,7 @@ async fn permission_prompt_answered_deny_blocks_the_call() {
     tools.register(std::sync::Arc::new(ProbeTool {
         called: called.clone(),
     }));
-    let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
     let mut ctx = test_exec_ctx_with_permission(
         tools,
         hooks_runner,
@@ -1442,7 +1442,7 @@ async fn permission_prompt_answered_permit_always_grants_in_the_scope_asked_for(
         tools.register(std::sync::Arc::new(ContentProbeTool {
             called: called.clone(),
         }));
-        let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+        let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
         let mut ctx = test_exec_ctx(tools, hooks_runner);
         let grants = Arc::new(RecordedGrants::default());
         ctx.permission = PermissionSet {
@@ -1482,7 +1482,7 @@ async fn an_answer_that_took_the_prompt_before_a_cancel_is_kept() {
         tools.register(std::sync::Arc::new(ContentProbeTool {
             called: Default::default(),
         }));
-        let hooks_runner = Arc::new(hooks::HookRunner::new(std::collections::HashMap::new()));
+        let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
         let mut ctx = test_exec_ctx(tools, hooks_runner);
         let grants = Arc::new(RecordedGrants::default());
         ctx.permission = PermissionSet {
@@ -1547,7 +1547,7 @@ async fn an_answer_that_took_the_prompt_before_a_cancel_is_kept() {
 fn a_redacting_transformer_also_takes_the_structured_result_away() {
     let mut ctx = test_exec_ctx(
         Arc::new(base::tool::InMemoryToolRegistry::new()),
-        Arc::new(hooks::HookRunner::new(std::collections::HashMap::new())),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
     );
     ctx.result_transformers =
         Arc::new(vec![
@@ -1636,7 +1636,7 @@ fn scanning_session(
     };
     let mut ctx = test_exec_ctx_with_permission(
         tools,
-        Arc::new(hooks::HookRunner::new(std::collections::HashMap::new())),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
         Arc::new(ScanningPermission(profile)),
     );
     let mut config = base::context::EngineConfig::defaults_for("test");
@@ -1791,7 +1791,7 @@ async fn a_file_from_outside_the_project_reaches_the_model_fenced() {
     tools.register(Arc::new(tools::file_read::FileReadTool));
     let mut ctx = test_exec_ctx(
         tools,
-        Arc::new(hooks::HookRunner::new(std::collections::HashMap::new())),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
     );
     ctx.cwd = cwd.clone();
     ctx.session_state = Arc::new(base::context::SessionState::for_tests_in(
@@ -1821,4 +1821,15 @@ async fn a_file_from_outside_the_project_reaches_the_model_fenced() {
     );
     assert!(fenced.contains("came from a file outside the project, not from the user"));
     assert!(read(cwd.join("ours.md")).await.starts_with("     1\tours"));
+}
+
+fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
+    let providers = platform::local_providers();
+    hooks::HookRunner::new(
+        settings,
+        hooks::HookExec {
+            process: providers.process,
+            network: providers.network,
+        },
+    )
 }

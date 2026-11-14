@@ -164,3 +164,41 @@ fn providers_and_a_process_ledger_are_not_given_together() {
     };
     assert!(e.to_string().contains("Builder::process_groups"), "{e}");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_hook_process_group_lands_in_the_session_ledger() {
+    let ledger = platform::GroupLedger::new();
+    let settings = prompt_hook("sleep 5 >/dev/null 2>&1 & echo '{}'");
+    let (mut agent, _event_rx, _input_tx) = Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(ToolThenStopModel {
+            calls: Default::default(),
+            tool: "ExecProbe",
+        }))
+        .settings(Arc::new(settings))
+        .process_groups(ledger.clone())
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+
+    agent
+        .process_turn(
+            InputMessage::User {
+                content: "go".into(),
+                attachments: vec![],
+                turn_id: "t1".into(),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the turn runs");
+
+    assert!(
+        !ledger.groups().is_empty(),
+        "the hook's process group was recorded"
+    );
+    ledger.reap(std::time::Duration::from_millis(100)).await;
+}

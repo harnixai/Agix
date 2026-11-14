@@ -3,7 +3,8 @@
 //! the listed files ask it for a home (SRC-1), a plugin's disclosure
 //! names no script engine (SRC-2), every `.rs` file in a package belongs to a
 //! target (SRC-3), and only the crates in `MAY_SPAWN` start a process
-//! themselves (SRC-4).
+//! themselves (SRC-4), and this machine's `Process` is built only where a
+//! session's default providers are assembled (SRC-5).
 //!
 //! Everything else reaches a process through the session's `&dyn Process`,
 //! which is what puts it on the machine the host chose, inside the session's
@@ -107,6 +108,12 @@ const MAY_SPAWN: &[(&str, &str)] = &[
          session of their own through process-wrap",
     ),
 ];
+
+const MAY_BUILD_LOCAL_PROCESS: &[(&str, &str)] = &[(
+    "crates/runtime/src/agent/turn/tool_env.rs",
+    "the session's default providers when the host gives none; everything else, hooks \
+     included, runs on the providers that session ended up with",
+)];
 
 /// Crates that still start one themselves, each with what takes it away.
 const NOT_YET: &[(&str, &str)] = &[];
@@ -356,4 +363,66 @@ fn the_spawn_scan_sees_through_aliases() {
         .map(|finding| finding.hit.line)
         .collect();
     assert_eq!(lines, BTreeSet::from([3, 4, 6, 7, 8, 9]));
+}
+
+fn names_the_local_process(segments: &[String]) -> bool {
+    let path = match segments {
+        [colons, rest @ ..] if colons == "::" => rest,
+        all => all,
+    };
+    match path {
+        [first, rest @ ..] if first == "platform" => rest
+            .iter()
+            .any(|s| s == "LocalProcess" || s.starts_with("local_providers")),
+        _ => false,
+    }
+}
+
+fn local_process_builders(files: Vec<&guards::SourceFile>, view: View) -> Vec<Finding> {
+    par_flat_map(files, |f| {
+        scan::paths(f, view)
+            .into_iter()
+            .filter(|(segments, _)| names_the_local_process(segments))
+            .map(|(_, hit)| Finding {
+                key: f.rel.clone(),
+                hit,
+            })
+            .collect()
+    })
+}
+
+#[test]
+fn only_the_default_assembly_builds_this_machines_process() {
+    let production: Vec<_> = ws()
+        .production()
+        .filter(|f| f.package != "platform" && !is_test_support(&f.package))
+        .collect();
+    allow::non_vacuous("sources::local_process", production.len(), 300);
+    allow::check(
+        "sources::MAY_BUILD_LOCAL_PROCESS",
+        local_process_builders(production, View::Prod),
+        MAY_BUILD_LOCAL_PROCESS,
+        "take the session's `ExecProviders` (`Agent.exec`, `ToolContext.exec`, `HookExec`) \
+         instead of building this machine's process; a host that runs elsewhere swaps those \
+         and anything built here would still run locally",
+    );
+}
+
+#[test]
+fn the_local_process_scan_sees_the_ways_of_naming_it() {
+    let src = r#"
+        use platform::LocalProcess as L;
+        fn a() {
+            let _ = platform::LocalProcess::default();
+            let _ = platform::local_providers_with(env);
+            let _ = L::default();
+            let _ = platform::LocalNetwork::default();
+        }
+    "#;
+    let f = guards::source::standalone("fixture.rs", src.to_string()).expect("parses");
+    let lines: BTreeSet<usize> = local_process_builders(vec![&f], View::Full)
+        .into_iter()
+        .map(|finding| finding.hit.line)
+        .collect();
+    assert_eq!(lines, BTreeSet::from([2, 4, 5, 6]));
 }

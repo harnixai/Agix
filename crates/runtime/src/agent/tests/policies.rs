@@ -11,6 +11,7 @@ fn build_hook_runner_defaults_to_empty_without_hooks_config() {
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
+        hooks::HookExec::nowhere(),
     );
     assert!(runner.is_empty());
 }
@@ -29,6 +30,7 @@ fn build_hook_runner_parses_hooks_config_into_real_hooks() {
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
+        hooks::HookExec::nowhere(),
     );
     assert!(!runner.is_empty());
     assert!(runner.has_hooks_for(hooks::HookEvent::PreToolUse));
@@ -55,6 +57,7 @@ fn build_hook_runner_keeps_hooks_for_unwired_events_and_only_warns() {
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
+        hooks::HookExec::nowhere(),
     );
     assert!(
         runner.has_hooks_for(hooks::HookEvent::ConfigChange),
@@ -78,6 +81,7 @@ fn build_hook_runner_degrades_to_empty_on_malformed_hooks_config() {
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
+        hooks::HookExec::nowhere(),
     );
     assert!(runner.is_empty());
 }
@@ -128,7 +132,7 @@ async fn build_starts_file_watching_for_the_instruction_file_when_a_hook_wants_i
         }],
     );
     let runner = Arc::new(
-        hooks::HookRunner::new(hooks_settings)
+        hooks::HookRunner::new(hooks_settings, hooks::HookExec::nowhere())
             .with_prompt_executor(Arc::new(RecordingPromptExecutor { fired: fired_tx })),
     );
 

@@ -8,6 +8,7 @@ impl Builder {
         settings: &LoadedSettings,
         model: &Arc<dyn Model>,
         session: &SessionManager,
+        exec: &base::interface::exec::ExecProviders,
     ) -> HookWiring {
         let delegator = crate::module::LateDelegator::default();
         let session_ended = CancellationToken::new();
@@ -19,6 +20,7 @@ impl Builder {
                 model.clone(),
                 Arc::new(delegator.clone()),
                 Some(session.session_id_str().to_string()),
+                hook_exec(exec, self.host.exec.is_some()),
             );
             Arc::new(runner.with_background(background))
         });
@@ -69,6 +71,30 @@ impl Builder {
         })
     }
 
+    pub(super) fn config_and_exec(
+        &self,
+        settings: &LoadedSettings,
+        scene: &SceneSpec,
+    ) -> Result<
+        (
+            Arc<base::context::EngineConfig>,
+            base::interface::exec::ExecProviders,
+        ),
+        EngineError,
+    > {
+        let config = self.engine_config(settings, scene);
+        let exec = match (&self.host.exec, &self.spec.process_groups) {
+            (Some(_), Some(_)) => Err(EngineError::Internal(
+                "Builder::exec and Builder::process_groups are both set; record groups in \
+                 the providers you pass (platform::local_providers_with_ledger)"
+                    .into(),
+            )),
+            (Some(exec), None) => Ok(exec.clone()),
+            (None, groups) => Ok(crate::turn::exec_providers_from(&config, groups.as_ref())),
+        }?;
+        Ok((config, exec))
+    }
+
     pub(super) fn wire_session_state(
         &self,
         settings: &LoadedSettings,
@@ -77,6 +103,7 @@ impl Builder {
         session: &SessionManager,
         hooks: &Arc<HookRunner>,
         instruction_file: Option<&PathBuf>,
+        exec: base::interface::exec::ExecProviders,
     ) -> Result<SessionWiring, EngineError> {
         let agent_depth = self.spec.agent_depth;
         // One `SessionState` per session, shared by every tool call: none of
@@ -87,19 +114,6 @@ impl Builder {
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(base::context::SessionState::new()), 0, false),
-        };
-        // One set for the session: its tool calls run on it, and a permission
-        // judging them reads it back from the session state.
-        let exec = match (&self.host.exec, &self.spec.process_groups) {
-            (Some(_), Some(_)) => {
-                return Err(EngineError::Internal(
-                    "Builder::exec and Builder::process_groups are both set; record groups in \
-                     the providers you pass (platform::local_providers_with_ledger)"
-                        .into(),
-                ))
-            }
-            (Some(exec), None) => exec.clone(),
-            (None, groups) => crate::turn::exec_providers_from(config, groups.as_ref()),
         };
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
@@ -149,6 +163,21 @@ impl Builder {
             pending_permissions,
             pending_questions,
         }
+    }
+}
+
+/// Hooks run their commands on the session's process provider. Their HTTP
+/// goes through the host's network when the host supplied the providers; the
+/// session's own egress policy bounds where the model may reach, which is not
+/// where an operator's hook endpoint (often `localhost`) may be.
+fn hook_exec(exec: &base::interface::exec::ExecProviders, host_supplied: bool) -> hooks::HookExec {
+    hooks::HookExec {
+        process: exec.process.clone(),
+        network: if host_supplied {
+            exec.network.clone()
+        } else {
+            Arc::new(platform::LocalNetwork::default())
+        },
     }
 }
 

@@ -96,11 +96,6 @@ const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
     ),
     ("model", "crates/model", "the model endpoint's HTTP client"),
     (
-        "hooks",
-        "crates/hooks",
-        "command hooks are local processes, HTTP hooks local requests",
-    ),
-    (
         "mcp",
         "crates/mcp",
         "stdio servers are local processes; OAuth is a local HTTP client",

@@ -22,6 +22,23 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+/// Where a runner's command hooks start their processes and its HTTP hooks send requests.
+#[derive(Clone)]
+pub struct HookExec {
+    pub process: Arc<dyn base::interface::exec::Process>,
+    pub network: Arc<dyn base::interface::exec::Network>,
+}
+
+impl HookExec {
+    pub fn nowhere() -> Self {
+        let none = base::interface::exec::ExecProviders::in_process();
+        Self {
+            process: none.process,
+            network: none.network,
+        }
+    }
+}
+
 /// 没写 `timeout` 的 hook 最多跑多久（60 秒），四种后端都一样。到时它什么都不拦、
 /// 不改，除非它写了 `on_error: "block"`。
 pub const DEFAULT_HOOK_TIMEOUT_MS: u64 = 60_000;
@@ -171,27 +188,27 @@ pub struct HookRunner {
     /// is still just a shell string, only the search path changes.
     hooks_search_dirs: Vec<std::path::PathBuf>,
     project_untrusted: bool,
-    process: platform::LocalProcess,
+    process: Arc<dyn base::interface::exec::Process>,
     background: BackgroundHooks,
 }
 
 impl HookRunner {
     /// Construct a new instance.
-    pub fn new(settings: HooksSettings) -> Self {
+    pub fn new(settings: HooksSettings, exec: HookExec) -> Self {
         warn_of_timeouts_past_the_cap(&settings);
         Self {
             settings: Arc::new(settings),
             default_timeout: Duration::from_millis(DEFAULT_HOOK_TIMEOUT_MS),
             prompt_executor: None,
             agent_executor: None,
-            net: Arc::new(platform::LocalNetwork::default()),
+            net: exec.network,
             once_executed: Default::default(),
             file_watcher: std::sync::Mutex::new(None),
             pending_rewakes: Default::default(),
             wake_receiver: std::sync::Mutex::new(None),
             hooks_search_dirs: Vec::new(),
             project_untrusted: false,
-            process: Default::default(),
+            process: exec.process,
             background: BackgroundHooks::new(),
         }
     }
@@ -201,12 +218,6 @@ impl HookRunner {
     /// ([`BackgroundHooks::drain`]). Without one, nothing waits for them.
     pub fn with_background(mut self, background: BackgroundHooks) -> Self {
         self.background = background;
-        self
-    }
-
-    /// Builder: the environment a `Command` hook starts from.
-    pub fn with_subprocess_env(mut self, env: base::interface::exec::SubprocessEnv) -> Self {
-        self.process = platform::LocalProcess::new(env);
         self
     }
 
@@ -232,7 +243,7 @@ impl HookRunner {
 
     /// Empty/default instance with no state.
     pub fn empty() -> Self {
-        Self::new(HooksSettings::default())
+        Self::new(HooksSettings::default(), HookExec::nowhere())
     }
 
     /// Alias for `empty()` — zero overhead noop runner.
@@ -795,7 +806,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         assert!(r.has_hooks_for(HookEvent::PreToolUse));
         assert!(!r.has_hooks_for(HookEvent::SessionStart)); // empty list
         assert!(!r.has_hooks_for(HookEvent::Stop));
@@ -817,7 +828,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
 
         let mut input = input_for_bash("ls");
         input.is_error = Some(false);
@@ -847,7 +858,7 @@ mod tests {
                 may_approve: false,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -886,7 +897,7 @@ mod tests {
                 },
             ],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -930,7 +941,7 @@ mod tests {
                 },
             ],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -964,7 +975,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -992,7 +1003,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
 
         // 不匹配 → skipped
         let r1 = r
@@ -1055,7 +1066,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s).with_hooks_search_dirs(vec![dir.clone()]);
+        let r = local_runner(s).with_hooks_search_dirs(vec![dir.clone()]);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -1111,7 +1122,7 @@ mod tests {
                     on_error,
                 }],
             );
-            HookRunner::new(s)
+            local_runner(s)
                 .with_hooks_search_dirs(vec![hooks_dir.clone()])
                 .with_project_untrusted(untrusted)
         };
@@ -1224,7 +1235,7 @@ mod tests {
                     on_error: OnError::Allow,
                 }],
             );
-            HookRunner::new(s)
+            local_runner(s)
                 .with_hooks_search_dirs(vec![hooks_dir.clone()])
                 .with_project_untrusted(untrusted)
         };
@@ -1312,7 +1323,7 @@ mod tests {
                     on_error: OnError::Allow,
                 }],
             );
-            HookRunner::new(s).with_project_untrusted(untrusted)
+            local_runner(s).with_project_untrusted(untrusted)
         };
 
         for command in [
@@ -1347,7 +1358,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn local_runner(settings: HooksSettings) -> HookRunner {
+        HookRunner::new(settings, local_exec(platform::local_providers()))
+    }
+
+    fn local_exec(providers: base::interface::exec::ExecProviders) -> HookExec {
+        HookExec {
+            process: providers.process,
+            network: providers.network,
+        }
+    }
+
     fn one_command_hook(command: &str, timeout_ms: u64) -> HookRunner {
+        one_command_hook_on(command, timeout_ms, local_exec(platform::local_providers()))
+    }
+
+    fn one_command_hook_on(command: &str, timeout_ms: u64, exec: HookExec) -> HookRunner {
         let mut s: HooksSettings = HashMap::new();
         s.insert(
             HookEvent::PreToolUse,
@@ -1362,7 +1388,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        HookRunner::new(s)
+        HookRunner::new(s, exec)
     }
 
     #[cfg(unix)]
@@ -1463,14 +1489,17 @@ mod tests {
             mode: base::interface::exec::SubprocessEnvMode::Allowlist,
             allow: vec![],
         };
-        let narrowed = one_command_hook(probe, 10_000)
-            .with_subprocess_env(allowlist)
-            .run(
-                HookEvent::PreToolUse,
-                &input_for_bash("ls"),
-                &CancellationToken::new(),
-            )
-            .await;
+        let narrowed = one_command_hook_on(
+            probe,
+            10_000,
+            local_exec(platform::local_providers_with(allowlist)),
+        )
+        .run(
+            HookEvent::PreToolUse,
+            &input_for_bash("ls"),
+            &CancellationToken::new(),
+        )
+        .await;
         assert_eq!(stdout_of(narrowed), "absent");
     }
 
@@ -1537,7 +1566,7 @@ mod tests {
                 on_error: OnError::Allow,
             }],
         );
-        let r = HookRunner::new(s); // no hooks_search_dirs configured
+        let r = local_runner(s); // no hooks_search_dirs configured
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -1565,7 +1594,7 @@ mod tests {
                 allow_local: false,
             }],
         );
-        let r = HookRunner::new(s);
+        let r = local_runner(s);
         let result = r
             .run(
                 HookEvent::PreToolUse,
@@ -1599,7 +1628,7 @@ mod tests {
     }
 
     fn on_pre_tool_use(hooks: Vec<HookConfig>) -> HookRunner {
-        HookRunner::new(HashMap::from([(HookEvent::PreToolUse, hooks)]))
+        local_runner(HashMap::from([(HookEvent::PreToolUse, hooks)]))
     }
 
     #[cfg(unix)]
@@ -1908,7 +1937,7 @@ mod tests {
     async fn an_observer_hook_runs_though_its_turn_was_stopped() {
         let dir = tempfile_dir();
         let ran = dir.join("ran");
-        let r = HookRunner::new(HashMap::from([(
+        let r = local_runner(HashMap::from([(
             HookEvent::SubagentStop,
             vec![command(&format!("touch '{}'", ran.display()))],
         )]));
@@ -1934,7 +1963,7 @@ mod tests {
         if let HookConfig::Command { timeout, .. } = &mut slow {
             *timeout = Some(60_000);
         }
-        let r = HookRunner::new(HashMap::from([(HookEvent::TurnStart, vec![slow])]));
+        let r = local_runner(HashMap::from([(HookEvent::TurnStart, vec![slow])]));
         let stop = CancellationToken::new();
         let input = HookInput::lifecycle("TurnStart", "s", ".", "default");
 
@@ -1965,7 +1994,7 @@ mod tests {
             *timeout = Some(60_000);
         }
         let background = BackgroundHooks::new();
-        let r = HookRunner::new(HashMap::from([(HookEvent::SessionEnd, vec![slow])]))
+        let r = local_runner(HashMap::from([(HookEvent::SessionEnd, vec![slow])]))
             .with_background(background.clone());
         let stop = CancellationToken::new();
         stop.cancel();
@@ -2272,7 +2301,7 @@ mod tests {
     }
 
     fn recording_file_changed(marker: &std::path::Path) -> Arc<HookRunner> {
-        Arc::new(HookRunner::new(HashMap::from([(
+        Arc::new(local_runner(HashMap::from([(
             HookEvent::FileChanged,
             vec![command(&format!("cat >> '{}'", marker.display()))],
         )])))

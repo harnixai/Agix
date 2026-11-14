@@ -147,7 +147,7 @@ fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父�
 
 | 注入口 | 换掉的契约 | 说明 |
 |---|---|---|
-| `Builder::exec(ExecProviders)` | `exec.process` / `filesystem` / `network` / `sandbox` | 工具调用、引擎的 git 与 `pdftotext`、warmup 的预连接都落在它上面;与 `Builder::process_groups` 互斥,同设时 `build()` 报错——要记进程组就把台账带在传入的 provider 里(`platform::local_providers_with_ledger`) |
+| `Builder::exec(ExecProviders)` | `exec.process` / `filesystem` / `network` / `sandbox` | 工具调用、引擎的 git 与 `pdftotext`、warmup 的预连接、command hook 的进程都落在它上面(HTTP hook 的出口:宿主给了 `exec` 就用它的 `network`,否则是不带模型出口策略的本机网络,因为 hook 是运维写的配置,常打 `localhost`);与 `Builder::process_groups` 互斥,同设时 `build()` 报错——要记进程组就把台账带在传入的 provider 里(`platform::local_providers_with_ledger`) |
 | `Builder::token_counter(..)` | `token.count` | 压缩触发的那个数、请求开销与 `inspectContext` 的逐块计数、`compact_now` 的目标大小,同一口径 |
 | `Builder::rule_provider(..)` | `rules.source` | 缺省 `RuleTiers::for_paths`(全局、场景、项目三层,后来居上);每次组装提示词时取一次 |
 

@@ -10,6 +10,7 @@ impl Builder {
         model: &Arc<dyn Model>,
         telemetry_handle: &TelemetryHandle,
     ) -> CronWiring {
+        register_task_tools(tools);
         let agent_depth = self.spec.agent_depth;
         // WebSearch searches through the session's own model unless
         // `task_models.web_search` routes it elsewhere.

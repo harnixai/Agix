@@ -246,7 +246,7 @@ async fn build_matches_the_golden_snapshot() {
 
     {
         let seen = fresh();
-        let runner = Arc::new(hooks::HookRunner::new(Default::default()));
+        let runner = Arc::new(local_hook_runner(Default::default()));
         let builder = builder_for(
             scene_deferring("delegate", &[]),
             template_of(vec![Arc::new(Named("Early"))]),
@@ -348,4 +348,15 @@ async fn build_matches_the_golden_snapshot() {
             expected.lines().nth(first),
         );
     }
+}
+
+fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
+    let providers = platform::local_providers();
+    hooks::HookRunner::new(
+        settings,
+        hooks::HookExec {
+            process: providers.process,
+            network: providers.network,
+        },
+    )
 }

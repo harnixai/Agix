@@ -9,7 +9,6 @@ description  = "Agix — lifecycle hook runner"
 
 [dependencies]
 base          = { workspace = true }
-platform      = { workspace = true }
 permissions   = { workspace = true }
 tokio         = { workspace = true }
 tokio-util    = { workspace = true }
@@ -22,6 +21,7 @@ globset       = { workspace = true }
 notify        = { workspace = true }
 
 [dev-dependencies]
+platform           = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]

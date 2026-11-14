@@ -7,7 +7,7 @@ use super::{HookOutcome, HookRunner};
 use crate::payload::{HookDecision, HookInput, HookResponse};
 
 use base::interface::exec::{
-    ExecError, OutputChunk, OutputStream, Process, ProcessSpec, OUTPUT_GRACE_AFTER_EXIT,
+    ExecError, OutputChunk, OutputStream, ProcessSpec, OUTPUT_GRACE_AFTER_EXIT,
 };
 use futures::{FutureExt, StreamExt};
 use std::path::Path;

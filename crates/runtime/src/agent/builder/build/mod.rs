@@ -13,7 +13,6 @@ mod wiring;
 
 use background::{spawn_cron, spawn_task_hooks};
 use modules::ModuleInputs;
-use toolset::register_task_tools;
 use types::*;
 use wiring::bind_tools;
 
@@ -30,11 +29,10 @@ impl Builder {
             .unwrap_or_else(|| Arc::new(DefaultCompactor) as Arc<dyn Compactor>);
         let agent_depth = self.spec.agent_depth;
         let mut plugins = self.register_plugins(&session, &r.settings, &r.scene)?;
-        let mut hooks = self.wire_hooks(&r.settings, &r.model, &session);
+        let (config, exec) = self.config_and_exec(&r.settings, &r.scene)?;
+        let mut hooks = self.wire_hooks(&r.settings, &r.model, &session, &exec);
         let skill_catalog = crate::module::LateSkillCatalog::default();
-        register_task_tools(&r.tools);
 
-        let config = self.engine_config(&r.settings, &r.scene);
         let state = self.wire_session_state(
             &r.settings,
             &config,
@@ -42,6 +40,7 @@ impl Builder {
             &session,
             &hooks.hooks,
             r.instruction_file.as_ref(),
+            exec,
         )?;
         let cron =
             self.register_session_tools(&r.tools, &r.settings, &r.model, &r.telemetry_handle);

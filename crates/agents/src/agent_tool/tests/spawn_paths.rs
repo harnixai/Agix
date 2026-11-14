@@ -360,7 +360,7 @@ async fn a_fail_closed_agent_hook_does_not_block_its_own_agents_tools() {
     }))
     .unwrap();
     let runner = Arc::new(
-        hooks::HookRunner::new(std::collections::HashMap::from([(
+        local_hook_runner(std::collections::HashMap::from([(
             hooks::HookEvent::PreToolUse,
             vec![guard],
         )]))
@@ -922,4 +922,15 @@ async fn a_typed_persistent_member_is_given_the_types_prompt_once() {
     assert!(last.contains("SECOND-TASK"), "{seen:?}");
     assert!(last.contains("TYPE-PROMPT\n\nTask: FIRST-TASK"), "{seen:?}");
     assert_eq!(last.matches("TYPE-PROMPT").count(), 1, "{seen:?}");
+}
+
+fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
+    let providers = platform::local_providers();
+    hooks::HookRunner::new(
+        settings,
+        hooks::HookExec {
+            process: providers.process,
+            network: providers.network,
+        },
+    )
 }
