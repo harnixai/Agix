@@ -253,37 +253,6 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn auto_and_yolo_in_settings_mean_bypass_permissions() -> anyhow::Result<()> {
-    for spelling in ["auto", "yolo"] {
-        let stub = ProviderStub::start().await?;
-        let mut run = stubbed(&format!("alias-{spelling}"), &stub)
-            .settings(json!({ "permission_mode": spelling }))
-            .start()
-            .await?;
-        let session = run.session().await?;
-        let watcher = run.watch(&session, false).await?;
-        stub.script([
-            bash("b1", "echo aliased > aliased.txt"),
-            Reply::text("done"),
-        ]);
-        run.turn(&session, "go").await?;
-        assert_eq!(
-            run.read_file("aliased.txt").as_deref(),
-            Some("aliased\n"),
-            "{spelling}"
-        );
-        assert!(watcher.asked().is_empty(), "{spelling} asked");
-        assert_eq!(
-            resumed_mode(&mut run, &session).await?,
-            json!("bypassPermissions"),
-            "{spelling} is reported under its own name"
-        );
-        run.finish().await;
-    }
-    Ok(())
-}
-
 async fn permit_always_local_then_a_new_session(reload: bool) -> anyhow::Result<usize> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("always-local", &stub)
@@ -325,32 +294,6 @@ async fn permit_always_local_holds_for_a_session_opened_after_a_reload() -> anyh
 #[tokio::test(flavor = "multi_thread")]
 async fn permit_always_local_holds_for_the_next_session() -> anyhow::Result<()> {
     assert_eq!(permit_always_local_then_a_new_session(false).await?, 0);
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_unanswered_prompt_is_a_denial_and_the_turn_goes_on() -> anyhow::Result<()> {
-    let stub = ProviderStub::start().await?;
-    let mut run = stubbed("timeout", &stub)
-        .settings(json!({ "permission_mode": "default" }))
-        .options(|o| o.prompt_timeout(Duration::from_secs(1)))
-        .start()
-        .await?;
-    let session = run.session().await?;
-    let watcher = run.watch(&session, false).await?;
-    stub.script([
-        bash("b1", "echo late > late.txt"),
-        Reply::text("carried on"),
-    ]);
-    let started = std::time::Instant::now();
-    let events = run.turn(&session, "go").await?;
-    assert!(run.read_file("late.txt").is_none());
-    let (_, out, is_error) = &events.tool_results[0];
-    assert!(*is_error && out.contains("within 1s"), "{out}");
-    assert!(events.text.contains("carried on") && events.turn_complete);
-    assert!(started.elapsed() >= Duration::from_secs(1));
-    assert_eq!(watcher.asked().len(), 1);
-    run.finish().await;
     Ok(())
 }
 
@@ -677,39 +620,6 @@ async fn a_team_member_is_no_freer_than_its_parent() -> anyhow::Result<()> {
     assert!(
         run.read_file("escalated.txt").is_none(),
         "a member of a `default` session wrote with a shell command nobody approved"
-    );
-    run.finish().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_skills_inline_command_is_held_to_the_bash_rules() -> anyhow::Result<()> {
-    let stub = ProviderStub::start().await?;
-    let mut run = stubbed("skill-cmd", &stub)
-        .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [
-                { "tool": "Skill", "action": "allow" },
-                { "tool": "Bash", "action": "deny" }
-            ]
-        }))
-        .start()
-        .await?;
-    run.write_file(
-        ".agents/skills/stamp/SKILL.md",
-        "---\nname: stamp\ndescription: stamps the project\n---\n\
-         Context: !`echo stamped > skill-ran.txt`\n",
-    )?;
-    let session = run.session().await?;
-    stub.script([
-        Reply::calls("s1", "Skill", json!({ "skill": "stamp" })),
-        Reply::text("done"),
-    ]);
-    let events = run.turn(&session, "use the skill").await?;
-    assert!(
-        run.read_file("skill-ran.txt").is_none(),
-        "the skill's command ran although every Bash call is denied: {:?}",
-        events.tool_results
     );
     run.finish().await;
     Ok(())

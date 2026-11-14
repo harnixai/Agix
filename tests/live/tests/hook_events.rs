@@ -1160,6 +1160,13 @@ async fn a_user_prompt_submit_hook_refuses_one_message_and_rewrites_another() ->
         0,
         "a refused message never reaches the model"
     );
+    let again = run.turn(&session, "FORBIDDEN again").await?;
+    let again_ended = again.turn_complete_event.clone().unwrap_or_default();
+    assert_eq!(
+        again_ended["stop_reason"], "stopped_by_hook",
+        "the session is free after a refusal: {again_ended}"
+    );
+    assert_eq!(stub.call_count(), 0);
 
     stub.script([Reply::text("ok")]);
     run.turn(&session, "ORIGINAL-WORDING please").await?;

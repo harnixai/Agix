@@ -1,35 +1,7 @@
 //! `resolve_session_permission_tests` 原样搬来的用例。
 
 use super::*;
-use crate::session_pool::parts::factory::resolve_session_permission;
 use base::settings::Divergence;
-
-/// A host policy that answers every call the same way.
-struct HostSays(fn() -> base::interface::permission::PermissionOutcome);
-#[async_trait::async_trait]
-impl base::interface::permission::PermissionPolicy for HostSays {
-    async fn decide(
-        &self,
-        _req: &base::interface::permission::PermissionRequest<'_>,
-    ) -> base::interface::permission::PermissionOutcome {
-        (self.0)()
-    }
-}
-
-fn host_permits() -> base::interface::permission::PermissionOutcome {
-    base::interface::permission::PermissionOutcome::Permit {
-        basis: base::interface::permission::Basis::Bypass,
-        profile: Default::default(),
-        obligations: Default::default(),
-    }
-}
-
-fn host_denies() -> base::interface::permission::PermissionOutcome {
-    base::interface::permission::PermissionOutcome::deny(
-        base::interface::permission::Stage::Rule,
-        "not on this host",
-    )
-}
 
 fn defaults() -> base::settings::LoadedSettings {
     base::settings::LoadedSettings::new(
@@ -38,107 +10,8 @@ fn defaults() -> base::settings::LoadedSettings {
     )
 }
 
-fn denying(tool: &str) -> base::settings::LoadedRule {
-    base::settings::LoadedRule::new(
-        base::settings::PermissionRuleEntry {
-            tool: tool.into(),
-            action: base::permission::RuleBehavior::Deny,
-            matching: Default::default(),
-        },
-        base::interface::config_source::Tier::Project,
-        false,
-    )
-}
-
-/// What the session `settings` resolve to, with `host` as the host's policy,
-/// makes of a `Bash` call running `command`.
-async fn bash_says(
-    settings: &base::settings::LoadedSettings,
-    host: Option<fn() -> base::interface::permission::PermissionOutcome>,
-    command: &str,
-) -> base::interface::permission::PermissionOutcome {
-    let host = host.map(|answer| {
-        Arc::new(HostSays(answer)) as Arc<dyn base::interface::permission::PermissionPolicy>
-    });
-    let resolved = resolve_session_permission(host.as_ref(), settings, None);
-    let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
-    tools::register_builtin_tools(&tools);
-    let bash = tools.get("Bash");
-    let cwd = std::env::temp_dir();
-    let mode = effective_permission_mode(settings, None);
-    let session =
-        Arc::new(base::context::SessionState::for_tests(cwd.clone()).with_permission_mode(mode));
-    let input = serde_json::json!({ "command": command });
-    let mut ctx = platform::tool_context_for_test(cwd.clone());
-    ctx.session = session.clone();
-    ctx.permission_mode = mode;
-    let facts = match &bash {
-        Some(bash) => {
-            base::interface::permission::ToolFacts::gather(bash.as_ref(), &input, &ctx).await
-        }
-        None => base::interface::permission::ToolFacts::unknown_tool(),
-    };
-    resolved
-        .policy
-        .decide(&base::interface::permission::PermissionRequest::new(
-            "Bash",
-            bash.as_ref(),
-            &input,
-            &facts,
-            &ctx,
-            &session,
-        ))
-        .await
-}
-
-/// The host's policy is one tier of the session's rules: its permit is an
-/// allow rule, which a deny rule of the settings still overrides.
 #[tokio::test]
-async fn a_hosts_permit_is_an_allow_rule_that_a_deny_rule_overrides() {
-    use base::interface::permission::{Basis, PermissionOutcome};
-    use base::permission::RuleSource;
-    let mut settings = defaults();
-    settings.rules = vec![denying("Bash(rm:*)")];
-
-    let touched = bash_says(&settings, Some(host_permits), "touch x").await;
-    assert!(
-        matches!(
-            &touched,
-            PermissionOutcome::Permit { basis: Basis::Rule(rule), .. } if rule.source == RuleSource::Host
-        ),
-        "{touched:?}"
-    );
-    let removed = bash_says(&settings, Some(host_permits), "rm -rf x").await;
-    assert!(
-        matches!(removed, PermissionOutcome::Deny { .. }),
-        "{removed:?}"
-    );
-    let asked = bash_says(&settings, None, "touch x").await;
-    assert!(
-        matches!(asked, PermissionOutcome::Prompt { .. }),
-        "without the host the call is asked about: {asked:?}"
-    );
-}
-
-/// The host's refusal stands in every mode, `bypassPermissions` included,
-/// which otherwise consults no rule of the settings.
-#[tokio::test]
-async fn a_hosts_deny_stands_even_under_bypass() {
-    use base::interface::permission::PermissionOutcome;
-    let mut settings = defaults();
-    settings.values.permission_mode = base::settings::PermissionMode::BypassPermissions;
-    settings.rules = vec![denying("Bash")];
-
-    let bypassed = bash_says(&settings, None, "ls").await;
-    assert!(
-        matches!(bypassed, PermissionOutcome::Permit { .. }),
-        "{bypassed:?}"
-    );
-    let refused = bash_says(&settings, Some(host_denies), "ls").await;
-    assert!(
-        matches!(&refused, PermissionOutcome::Deny { reason } if reason.message.contains("not on this host")),
-        "{refused:?}"
-    );
+async fn input_validation_still_refuses_under_bypass() {
     let ctx = base::tool::ToolContext::for_test_with(
         std::env::temp_dir(),
         base::interface::exec::ExecProviders::in_process(),

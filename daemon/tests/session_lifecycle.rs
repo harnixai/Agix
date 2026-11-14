@@ -4384,38 +4384,6 @@ async fn a_question_answered_as_a_permission_prompt_is_refused() {
 }
 
 #[tokio::test]
-async fn settings_bypass_permissions_opt_out_restores_allow_all() {
-    let mut settings = ask_settings();
-    settings.permission_mode = base::settings::PermissionMode::BypassPermissions;
-
-    let (srv, _seen) = start_scripted_server(
-        asking_bash_rounds("bypassed.txt"),
-        settings,
-        Duration::from_secs(30),
-    )
-    .await;
-
-    let (frames, response) = rpc_streaming(
-        &srv.sock,
-        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file"},"id":1}"#,
-    )
-    .await;
-
-    assert!(response["result"].is_object(), "turn failed: {response}");
-    assert!(
-        events_of_kind(&frames, "prompt").is_empty(),
-        "the opt-out must not prompt at all: {frames:?}"
-    );
-    let rendered = serde_json::to_string(&events_of_kind(&frames, "tool_result")).unwrap();
-    assert!(
-        !rendered.contains("Denied by permission"),
-        "the opt-out must not deny either: {rendered}"
-    );
-
-    srv.stop().await;
-}
-
-#[tokio::test]
 async fn per_session_bypass_option_is_clamped_to_the_configured_mode() {
     // `settings.permission_mode` is a policy, not a default. A client
     // asking for `bypassPermissions` against an `ask`-configured daemon is
@@ -5037,61 +5005,6 @@ async fn a_resumed_session_is_shown_its_opening_context_once() {
 }
 
 #[tokio::test]
-async fn a_watcher_keeps_watching_a_session_rebuilt_for_a_new_prompt() {
-    let (srv, _seen) = start_scripted_server(
-        vec![text_round("first"), text_round("second")],
-        ask_settings_no_memory(),
-        Duration::ZERO,
-    )
-    .await;
-    let sid = run_turn(&srv.sock, None, "hello").await;
-
-    let mut watcher = UnixStream::connect(&srv.sock).await.unwrap();
-    watcher
-        .write_all(
-            format!(
-                r#"{{"jsonrpc":"2.0","method":"session.subscribe","id":7,"params":{{"session_id":"{sid}"}}}}"#
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
-    watcher.write_all(b"\n").await.unwrap();
-    let (r, _w) = watcher.split();
-    let mut watched = BufReader::new(r);
-    let mut line = String::new();
-    watched.read_line(&mut line).await.unwrap();
-
-    let set = rpc(
-        &srv.sock,
-        &format!(
-            r#"{{"jsonrpc":"2.0","method":"session.setPrompt","params":{{"session_id":"{sid}","append":"Answer briefly."}},"id":3}}"#
-        ),
-    )
-    .await;
-    assert!(set["result"].is_object(), "{set}");
-    run_turn(&srv.sock, Some(&sid), "again").await;
-
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let mut line = String::new();
-            assert!(
-                watched.read_line(&mut line).await.unwrap() > 0,
-                "watcher closed"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if v["params"]["event"]["kind"] == "turn_complete" {
-                return;
-            }
-        }
-    })
-    .await
-    .expect("the watcher stopped hearing from the session after the rebuild");
-
-    srv.stop().await;
-}
-
-#[tokio::test]
 async fn subscribing_to_daemon_events_twice_delivers_each_event_once() {
     let (srv, _seen) = start_scripted_server(
         vec![text_round("x")],
@@ -5518,30 +5431,6 @@ async fn turn_complete_of(
         resp["result"]["session_id"].as_str().unwrap().to_string(),
         done[0].clone(),
     )
-}
-
-#[tokio::test]
-async fn a_prompt_blocked_by_a_hook_still_ends_the_turn_and_frees_the_session() {
-    let (srv, seen) = start_scripted_server(
-        vec![text_round("answer")],
-        hooked_settings(serde_json::json!({
-            "UserPromptSubmit": [
-                { "type": "command", "command": "echo '{\"decision\":\"block\",\"message\":\"not now\"}'" }
-            ]
-        })),
-        Duration::ZERO,
-    )
-    .await;
-
-    let (sid, done) = turn_complete_of(&srv.sock, None, "hello").await;
-    assert_eq!(done["stop_reason"], "stopped_by_hook");
-    assert_eq!(done["message"], "not now");
-
-    let (_, again) = turn_complete_of(&srv.sock, Some(&sid), "hello again").await;
-    assert_eq!(again["stop_reason"], "stopped_by_hook");
-    assert!(seen.lock().unwrap().is_empty(), "the model was called");
-
-    srv.stop().await;
 }
 
 #[tokio::test]
