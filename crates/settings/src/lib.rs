@@ -384,7 +384,9 @@ pub struct SandboxConfig {
     /// rather than adding to it, so repeat any of it you still want.
     pub deny_read: Vec<PathBuf>,
     /// Paths to re-allow reading, on top of the built-in credential deny
-    /// defaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). Most specific wins.
+    /// defaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the
+    /// entry it names; a parent directory, or a path below a denied one,
+    /// changes nothing.
     ///
     /// Exists because those defaults are applied to `Bash`, and some of them
     /// sit on legitimate workflows — `npm install` against a private registry

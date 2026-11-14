@@ -6,7 +6,7 @@ fn macos_a_read_scope_denies_everything_else_before_the_deny_list() {
     let home = base::paths::home_dir().unwrap_or_else(|| PathBuf::from("/Users/me"));
     let project = PathBuf::from("/tmp/work");
     let policy = SandboxPolicy {
-        deny_read: vec![home.join(".ssh")],
+        deny_read: vec![home.join(".ssh"), project.join("vendored")],
         allow_read: vec![home.join(".npmrc"), project.join("vendored")],
         ..Default::default()
     }

@@ -188,7 +188,7 @@ fn a_fenced_secret_stays_unreadable_whatever_allow_read_says() {
     std::fs::write(&secret, "t").unwrap();
     let _fence = fence_secret(&secret);
     let policy = SandboxPolicy {
-        deny_read: vec![PathBuf::from("/nowhere")],
+        deny_read: vec![PathBuf::from("/nowhere"), dir.path().to_path_buf()],
         allow_read: vec![dir.path().to_path_buf()],
         ..Default::default()
     };

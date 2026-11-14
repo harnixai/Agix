@@ -484,3 +484,29 @@ fn deny_write_names_hold_for_a_sandboxed_command() {
         assert!(s.run_under(command, policy()), "`{command}` was refused");
     }
 }
+
+/// `allow_read` re-allows the `deny_read` entry it names and nothing else
+/// (as on Linux): a parent directory in it does not reopen what is denied
+/// below it.
+#[cfg(target_os = "macos")]
+#[test]
+fn allow_read_naming_a_parent_does_not_reopen_a_denied_directory() {
+    let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
+    let secret = s.elsewhere.join("secret");
+    std::fs::create_dir_all(&secret).unwrap();
+    std::fs::write(secret.join("k"), "key\n").unwrap();
+    let read = format!("cat '{}'", secret.join("k").display());
+    let policy = |allow: &Path| SandboxPolicy {
+        deny_read: vec![secret.clone()],
+        allow_read: vec![allow.to_path_buf()],
+        ..Default::default()
+    };
+    assert!(
+        !s.run_under(&read, policy(&s.elsewhere)),
+        "parent reopened it"
+    );
+    assert!(
+        s.run_under(&read, policy(&secret)),
+        "exact allow was ignored"
+    );
+}

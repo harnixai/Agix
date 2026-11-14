@@ -444,7 +444,7 @@
           "type": "array"
         },
         "allow_read": {
-          "description": "Paths to re-allow reading, on top of the built-in credential deny\ndefaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). Most specific wins.\n\nExists because those defaults are applied to `Bash`, and some of them\nsit on legitimate workflows — `npm install` against a private registry\nreads `~/.npmrc`, `docker build` reads `~/.docker/config.json`.\nThis is the way to say \"yes, that one is fine here\".",
+          "description": "Paths to re-allow reading, on top of the built-in credential deny\ndefaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the\nentry it names; a parent directory, or a path below a denied one,\nchanges nothing.\n\nExists because those defaults are applied to `Bash`, and some of them\nsit on legitimate workflows — `npm install` against a private registry\nreads `~/.npmrc`, `docker build` reads `~/.docker/config.json`.\nThis is the way to say \"yes, that one is fine here\".",
           "items": {
             "type": "string"
           },

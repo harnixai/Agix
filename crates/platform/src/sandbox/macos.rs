@@ -175,11 +175,16 @@ fn read_rules(s: &mut String, policy: &SandboxPolicy, dirs: &read_scope::UserDir
     for p in policy.deny_read.iter().flat_map(|p| spellings(p)) {
         s.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quoted(&p)));
     }
+    // Only an entry `deny_read` names is re-allowed, as on Linux: a parent
+    // in `allow_read` written after the denies would win over every one of
+    // them below it.
+    let denied: Vec<PathBuf> = policy.deny_read.iter().flat_map(|p| spellings(p)).collect();
     for p in policy
         .allow_read
         .iter()
         .filter(|p| policy.read.names(p))
         .flat_map(|p| spellings(p))
+        .filter(|p| denied.contains(p))
     {
         s.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",

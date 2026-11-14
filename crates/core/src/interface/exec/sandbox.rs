@@ -25,8 +25,9 @@ use super::process::ProcessSpec;
 #[derive(Debug, Clone, Default)]
 pub struct SandboxPolicy {
     /// Absolute paths the sandbox is allowed to **read**, on top of the
-    /// universal default (everything readable). When non-empty, paths in
-    /// `deny_read` matching these get re-allowed (most-specific wins).
+    /// universal default (everything readable). An entry that is also in
+    /// `deny_read` is re-allowed; a parent directory, or a path below a
+    /// denied one, changes nothing.
     pub allow_read: Vec<PathBuf>,
     /// Absolute paths the sandbox is **denied** read access to. Defaults
     /// include common credential stores (see [`default_deny_read`]).
