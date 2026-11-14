@@ -354,8 +354,6 @@ async fn run_turn(sock: &Path, params: Value) -> (Vec<Value>, Value) {
     (conn.pushed, response)
 }
 
-// ---------------------------------------------------------------- requests
-
 struct RequestExample {
     methods: Vec<String>,
     ordinal: usize,
@@ -671,8 +669,6 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
         );
     }
 }
-
-// -------------------------------------------------------------- error.data
 
 fn documented_error_data(doc: &str) -> BTreeMap<String, Vec<Value>> {
     let start = doc.find("### 9.1").expect("the doc has a §9.1");
@@ -1192,8 +1188,6 @@ async fn a_method_of_a_module_this_build_lacks_names_the_module_in_error_data() 
         &response,
     );
 }
-
-// ------------------------------------------------------------------ events
 
 #[derive(Debug, Clone, Default)]
 struct FieldSpec {

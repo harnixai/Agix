@@ -14,16 +14,8 @@ pub(crate) struct PendingToolImage {
 /// Render a `ToolResultContent` into the text the model sees, lifting out any
 /// images so the caller can emit them as real `ModelContentBlock::Image`s.
 ///
-/// **The bug this replaces:** the `Blocks` arm was `format!("{:?}", b)` — the
-/// model literally received
-/// `[ToolResultBlock { block_type: "image", text: None, source: Some(Object {..}) }]`.
-/// Text blocks lost their content entirely (it was buried inside `text: Some(..)`
-/// in Debug form), and images arrived as a Rust struct dump. Every MCP server
-/// returning anything other than one plain string was affected.
-///
-/// `Blocks` is not an exotic shape — `mcp::adapter::into_tool_result` produces it
-/// for any structured MCP result — so this is the normal path for a large class
-/// of tools, not an edge case.
+/// `Blocks` is what `mcp::adapter::into_tool_result` produces for any structured
+/// MCP result, so this is the normal path for a large class of tools.
 pub(super) fn render_tool_result_content(
     content: base::tool::ToolResultContent,
 ) -> (String, Vec<PendingToolImage>) {

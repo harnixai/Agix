@@ -7,9 +7,9 @@ use super::*;
 const MARKER: &str = "STEERED-7f3a";
 
 /// The engine reads its input channel six seconds late — longer than the
-/// five a steer used to wait for the engine's answer before giving up and
-/// queueing the message as a turn of its own, while the engine went on to
-/// take it into the running turn as well.
+/// five a steer waits for the engine's answer before giving up, so the message
+/// must not also be queued as a turn of its own once the engine takes it into
+/// the running turn.
 #[tokio::test(start_paused = true)]
 async fn a_steered_message_reaches_the_conversation_once_however_slow_the_engine_reads() {
     let (pool, _dir) = test_pool().await;

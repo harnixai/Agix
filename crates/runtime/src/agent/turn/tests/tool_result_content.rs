@@ -64,7 +64,7 @@ fn mixed_text_and_image_blocks_render_as_text_plus_image_block() {
         content.contains("Source: ledger.csv"),
         "lost text: {content}"
     );
-    // The exact symptom of the bug: Rust struct field names reaching the model.
+    // Rust struct field names must not reach the model.
     assert!(
         !content.contains("ToolResultBlock"),
         "Debug output leaked: {content}"

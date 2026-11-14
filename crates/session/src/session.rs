@@ -1125,8 +1125,8 @@ mod tests {
 
         // The cursor must now track the *new* (shorter) length — pushing
         // and persisting one more message must append exactly one more
-        // entry, not silently no-op (the bug this guards against: a stale
-        // cursor larger than the new `messages.len()` makes `persist()`'s
+        // entry, not silently no-op (a stale cursor larger than the new
+        // `messages.len()` makes `persist()`'s
         // `while persisted_up_to < messages.len()` permanently false).
         mgr.push_message(make_text_msg("new message after compaction"));
         mgr.persist().await.unwrap();

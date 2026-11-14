@@ -23,8 +23,7 @@ pub use tool::{
     ToolExecutionPayload, ToolOutcome, ToolStartPayload,
 };
 
-/// The version of the record shape. 2: payloads no longer repeat the
-/// envelope's `turn_no` / `turn_id`, and the kinds nothing emitted are gone.
+/// The version of the record shape.
 pub const SCHEMA_VERSION: u32 = 2;
 
 /// 一个遥测事件（转成 JSON 时展平 `event_id`/`session_id`/`timestamp` 在顶层）。

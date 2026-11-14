@@ -1848,12 +1848,11 @@ mod tests {
     }
 
     /// The outer wrapper, which runs outside the sandbox, keeps its scratch
-    /// file off every writable root. It used to let `mktemp` land the file in
-    /// the session `TMPDIR` — a writable root a confined process shares — where
-    /// a process an earlier command left running could swap it for a symlink;
-    /// the wrapper then wrote through it outside the sandbox. It now pins the
-    /// file to the host's `/tmp`, which the sandbox always shadows with a
-    /// private tmpfs, so no confined command reaches it. The helpers are
+    /// file off every writable root: in the session `TMPDIR`, which a confined
+    /// process shares, a process an earlier command left running could swap it
+    /// for a symlink and make the wrapper write through it outside the sandbox.
+    /// The file is pinned to the host's `/tmp`, which the sandbox always
+    /// shadows with a private tmpfs, so no confined command reaches it. The helpers are
     /// addressed absolutely so `PATH` cannot redirect them.
     #[cfg(target_os = "linux")]
     #[test]
@@ -4494,12 +4493,12 @@ mod tests {
 
     /// A process an earlier command left running cannot read a credential the
     /// engine writes into the state root while a later command is confined.
-    /// Credentials used to be masked by binding over each file at wrap time;
-    /// a file absent then was never bound, and `/dev/null` bound over an
-    /// existing one falls off when the engine rewrites it through a temporary
-    /// file and a rename (both measured on bwrap 0.8). The state root's
-    /// credential directories are now covered with a tmpfs instead, so neither
-    /// a late create nor a rename reaches the confined command — while a
+    /// Binding over each file at wrap time would miss a file absent then, and
+    /// `/dev/null` bound over an existing one falls off when the engine rewrites
+    /// it through a temporary file and a rename (both measured on bwrap 0.8).
+    /// The state root's credential directories are covered with a tmpfs
+    /// instead, so neither a late create nor a rename reaches the confined
+    /// command — while a
     /// readable sibling stays readable.
     #[cfg(target_os = "linux")]
     #[test]

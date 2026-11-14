@@ -2,12 +2,6 @@
 
 use super::*;
 
-#[test]
-fn channel_types_construct() {
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
-    let _sender: EventSender = crate::event_bus::EventBus::new(tx);
-}
-
 /// Answers in one text block and stops. Enough to make a turn that emits
 /// a handful of events and finishes immediately.
 pub(super) struct PlainReplyModel;
