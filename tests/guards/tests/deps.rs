@@ -18,7 +18,7 @@ use guards::allow::{self, Finding};
 use guards::{ws, Dep, Hit, Package};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Tier {
+pub(crate) enum Tier {
     Contract,
     Machine,
     K1,
@@ -32,7 +32,7 @@ enum Tier {
 
 use Tier::*;
 
-const CRATES: &[(&str, Tier)] = &[
+pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("base", Contract),
     ("platform", Machine),
     ("model", K1),
@@ -83,7 +83,7 @@ const NOT_YET: &[(&str, &str, &str)] = &[];
 /// with what it does on this machine. The rest only implement or consume
 /// contracts, which is what lets a host that executes elsewhere use them
 /// unchanged.
-const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
+pub(crate) const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
     (
         "tools",
         "crates/tools",

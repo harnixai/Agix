@@ -3,6 +3,7 @@
 //! `cargo test -p guards --test integration process_state::`.
 
 mod api_surface;
+mod architecture_doc;
 mod base;
 mod decorators;
 mod delegation;

@@ -53,9 +53,9 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   在 `parts/mcp_hub/live.rs` 与签名相同的桩 `off.rs` 之间二选一;其余代码(server 的
   `mcp.*` 在内)只写一份,`feature = "mcp"` 不超过 6 处(`tests/guards/tests/layering.rs`)。
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
-  `model`、`hooks`、`mcp`、`packages`、`assembly`、`daemon`,清单与
+  `model`、`mcp`、`packages`、`assembly`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
-  `telemetry`、`ptc`、`permissions`、`settings`、`memory`、`skill-format`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
+  `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`skill-format`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
 - 内核与模块不能带模块命名的 feature,也不转发模块 feature;模块开关只在 `assembly`
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
@@ -100,6 +100,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
 | `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
 | `skill-format` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、自工作目录向上收集的 `AGENTS.md`、输出风格 |
+| `team` | 模块 | 团队协调器(`Coordinator`)、邮箱与 `TeamTool`;`agents` 的团队工具驱动它 |
 | `agents` | 模块 | 子 agent(`Agent` 工具)、agent 类型目录、团队工具;依赖 `team` |
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |
 | `skills` | 模块 | skill 目录与 `Skill` 工具 |
