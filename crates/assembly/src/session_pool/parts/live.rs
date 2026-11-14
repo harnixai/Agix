@@ -472,6 +472,17 @@ impl LiveSessions {
             .count()
     }
 
+    /// The engines taken out of the table that have not stopped yet.
+    pub(in crate::session_pool) fn engines_still_stopping(&self) -> Vec<CancellationToken> {
+        self.stopping
+            .lock()
+            .expect("stopping is never held across a panic")
+            .values()
+            .filter(|exited| !exited.is_cancelled())
+            .cloned()
+            .collect()
+    }
+
     pub(in crate::session_pool) fn next_generation(&self) -> Generation {
         self.generations.next()
     }

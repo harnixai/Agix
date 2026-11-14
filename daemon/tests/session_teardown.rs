@@ -1,6 +1,6 @@
-//! What `session.delete` waits for: an engine taken out of memory may still
-//! be finishing its turn, and nothing it writes on the way out may outlive a
-//! delete.
+//! What `session.delete`, `session.close` and `daemon.shutdown` wait for: an
+//! engine taken out of memory may still be finishing its turn, and nothing it
+//! writes on the way out may outlive a delete or be cut off by a shutdown.
 //! The turn under test is held open by an `AskUserQuestion` nobody answers,
 //! so the engine stops only once the question times out.
 
@@ -299,5 +299,25 @@ async fn a_deleted_session_leaves_nothing_behind_once_its_engine_stops() {
         !listed["result"].to_string().contains(&sid),
         "session.list lists the deleted session: {listed}"
     );
+    daemon.stop().await;
+}
+
+#[tokio::test]
+async fn a_shutdown_right_after_a_close_waits_for_the_closed_engine() {
+    let daemon = Daemon::start().await;
+    let sid = daemon.create(&daemon.root).await;
+    let turn = daemon.start_asking(&sid).await;
+
+    let closed = daemon
+        .call("session.close", json!({"session_id": sid}))
+        .await;
+    assert!(closed["result"].is_object(), "{closed}");
+    let shutdown = daemon.call("daemon.shutdown", json!({})).await;
+    assert_eq!(shutdown["result"]["shutting_down"], true, "{shutdown}");
+    assert!(
+        daemon.ended.exists(),
+        "daemon.shutdown answered before the closed session's SessionEnd hook ran"
+    );
+    turn.abort();
     daemon.stop().await;
 }

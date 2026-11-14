@@ -226,9 +226,9 @@ impl SessionPool {
         })
     }
 
-    /// 关闭所有 session，等每个 Agent 把手上的一轮收尾落盘再返回。From the
-    /// moment this starts no session is created; a second call waits for the
-    /// first to finish.
+    /// 关闭所有 session，等每个 Agent 把手上的一轮收尾落盘再返回——包括已经
+    /// 被 close、驱逐、还没停下的那些。From the moment this starts no session
+    /// is created; a second call waits for the first to finish.
     ///
     /// Each session is taken out under its session lock, as `session.close`
     /// takes it: a rebuild or resume in flight finishes first, or, past the
@@ -254,6 +254,10 @@ impl SessionPool {
             .into_iter()
             .flatten()
             .unzip();
+        let exits: Vec<CancellationToken> = exits
+            .into_iter()
+            .chain(self.live.engines_still_stopping())
+            .collect();
         let deadline = tokio::time::Instant::now() + AGENT_EXIT_GRACE;
         let all = futures::future::join_all(exits.iter().map(|e| e.cancelled()));
         if tokio::time::timeout_at(deadline, all).await.is_err() {
