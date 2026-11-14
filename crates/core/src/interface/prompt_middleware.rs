@@ -63,6 +63,8 @@ pub enum PromptAttachmentKind {
     Text,
     /// An image the host already decoded.
     Image,
+    /// A document the host already encoded.
+    Document,
 }
 
 impl PromptAttachmentKind {
@@ -71,6 +73,7 @@ impl PromptAttachmentKind {
             Self::File => "file",
             Self::Text => "text",
             Self::Image => "image",
+            Self::Document => "document",
         }
     }
 }
@@ -105,6 +108,16 @@ impl<'a> PromptAttachment<'a> {
             media_type: None,
             size: Some(content.len() as u64),
             text: Some(content),
+        }
+    }
+
+    pub fn document(name: Option<&'a str>, media_type: &'a str, size: u64) -> Self {
+        Self {
+            kind: PromptAttachmentKind::Document,
+            name,
+            media_type: Some(media_type),
+            size: Some(size),
+            text: None,
         }
     }
 

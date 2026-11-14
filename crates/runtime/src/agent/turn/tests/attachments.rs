@@ -1,6 +1,8 @@
 //! 附件解析成内容块。
 
-use crate::turn::attachments::{resolve_attachments, MAX_ATTACHMENT_IMAGE_BYTES};
+use crate::turn::attachments::{
+    resolve_attachments, MAX_ATTACHMENT_DOCUMENT_BYTES, MAX_ATTACHMENT_IMAGE_BYTES,
+};
 use base::interface::model::ModelContentBlock;
 
 use crate::agent::Attachment;
@@ -147,4 +149,79 @@ async fn a_credential_is_not_attached() {
     };
     assert!(!text.contains("SECRET"), "got {text}");
     assert!(text.contains("error="), "got {text}");
+}
+
+#[tokio::test]
+async fn pdf_file_becomes_a_document_block_titled_by_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("Report.PDF");
+    std::fs::write(&p, b"%PDF-1.4 body").unwrap();
+
+    let blocks = resolve_attachments(
+        &[Attachment::File {
+            path: p.to_string_lossy().into_owned(),
+        }],
+        &base::paths::PromptFiles::unscoped(),
+    )
+    .await;
+
+    let ModelContentBlock::Document {
+        media_type,
+        data,
+        title,
+    } = &blocks[0]
+    else {
+        panic!("expected a Document block, got {:?}", blocks[0]);
+    };
+    assert_eq!(media_type, "application/pdf");
+    assert_eq!(data, "JVBERi0xLjQgYm9keQ==");
+    assert_eq!(title.as_deref(), Some("Report.PDF"));
+}
+
+#[tokio::test]
+async fn pre_encoded_pdf_passes_through_and_other_types_are_refused() {
+    let blocks = resolve_attachments(
+        &[
+            Attachment::Document {
+                media_type: "application/pdf".into(),
+                data: "QUJD".into(),
+                name: Some("a.pdf".into()),
+            },
+            Attachment::Document {
+                media_type: "application/msword".into(),
+                data: "QUJD".into(),
+                name: None,
+            },
+        ],
+        &base::paths::PromptFiles::unscoped(),
+    )
+    .await;
+    assert!(matches!(
+        &blocks[0],
+        ModelContentBlock::Document { data, title, .. }
+            if data == "QUJD" && title.as_deref() == Some("a.pdf")
+    ));
+    let ModelContentBlock::Text { text } = &blocks[1] else {
+        panic!("expected a refusal note");
+    };
+    assert!(text.contains("unsupported document type"), "{text}");
+}
+
+#[tokio::test]
+async fn oversized_pdf_is_refused_rather_than_inlined() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("huge.pdf");
+    std::fs::write(&p, vec![0u8; (MAX_ATTACHMENT_DOCUMENT_BYTES + 1) as usize]).unwrap();
+
+    let blocks = resolve_attachments(
+        &[Attachment::File {
+            path: p.to_string_lossy().into_owned(),
+        }],
+        &base::paths::PromptFiles::unscoped(),
+    )
+    .await;
+    let ModelContentBlock::Text { text } = &blocks[0] else {
+        panic!("expected a Text block, got {:?}", blocks[0]);
+    };
+    assert!(text.contains("document too large"), "{text}");
 }

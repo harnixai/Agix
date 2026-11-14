@@ -92,6 +92,37 @@ impl ModelFactory for OpenAICompatibleFactory {
     }
 }
 
+/// OpenAI's Responses API.
+pub struct OpenAIResponsesFactory;
+
+impl ModelFactory for OpenAIResponsesFactory {
+    fn api_type(&self) -> &str {
+        "openai_responses"
+    }
+
+    fn build(
+        &self,
+        provider_id: &str,
+        cfg: &ProviderConfig,
+        credentials: &dyn CredentialSource,
+    ) -> Result<Arc<dyn Model>, String> {
+        let base_url = cfg
+            .base_url
+            .clone()
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| "https://api.openai.com".to_string());
+        let api_key = credentials
+            .api_key(provider_id, cfg)
+            .map_err(|e| format!("provider '{provider_id}': {e}"))?;
+        let default_model = cfg.default_model.clone().unwrap_or_default();
+        Ok(Arc::new(
+            crate::OpenAIResponsesModel::new(&base_url, api_key.expose(), default_model)
+                .map_err(|e| format!("provider '{provider_id}': {e}"))?
+                .with_provenance(provider_id),
+        ))
+    }
+}
+
 /// The protocols the engine ships with. A host adds to this rather than
 /// building its own from scratch, so registering a third protocol does not
 /// mean re-registering the first two.
@@ -99,6 +130,7 @@ pub fn builtin_registry() -> ModelFactoryRegistry {
     let mut registry = ModelFactoryRegistry::new();
     registry.register(Arc::new(AnthropicFactory));
     registry.register(Arc::new(OpenAICompatibleFactory));
+    registry.register(Arc::new(OpenAIResponsesFactory));
     registry
 }
 
@@ -110,7 +142,7 @@ mod tests {
     fn the_builtins_are_the_two_protocols_this_crate_implements() {
         assert_eq!(
             builtin_registry().api_types(),
-            ["anthropic", "openai_compatible"]
+            ["anthropic", "openai_compatible", "openai_responses"]
         );
     }
 

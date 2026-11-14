@@ -6,8 +6,10 @@
 //! - **OpenAI Chat Completions** ([`openai::OpenAICompatibleModel`]) — for
 //!   OpenAI itself and the many gateways that only expose its shape (vLLM,
 //!   Ollama, most third-party relays).
+//! - **OpenAI Responses** ([`openai::responses::OpenAIResponsesModel`]) — the
+//!   items-and-named-events protocol OpenAI's newer models are served on.
 //!
-//! Both translate the protocol-agnostic `PromptBlock` / `ToolDef` /
+//! All three translate the protocol-agnostic `PromptBlock` / `ToolDef` /
 //! `ModelMessage` inputs into their own request format and normalize the
 //! response back into a single `ModelEvent` stream, so nothing above this
 //! crate needs to know which protocol is in use.
@@ -26,6 +28,7 @@ pub mod stream;
 pub mod tokens;
 pub mod types;
 
+pub use openai::responses::OpenAIResponsesModel;
 pub use openai::OpenAICompatibleModel;
 
 /// The call a tool's streamed arguments make: no arguments at all are an

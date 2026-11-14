@@ -499,6 +499,14 @@ fn render_transcript(messages: &[ModelMessage]) -> Rendered {
                 ModelContentBlock::Image { media_type, .. } => {
                     lines.push(format!("{who}: [image: {media_type}]"));
                 }
+                ModelContentBlock::Document {
+                    media_type, title, ..
+                } => {
+                    lines.push(match title {
+                        Some(title) => format!("{who}: [document: {title}, {media_type}]"),
+                        None => format!("{who}: [document: {media_type}]"),
+                    });
+                }
                 ModelContentBlock::ToolUse { name, input, .. } => {
                     lines.push(format!("{who} called {name}({})", cap(&input.to_string())));
                 }

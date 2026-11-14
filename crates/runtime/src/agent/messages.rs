@@ -291,7 +291,8 @@ pub struct MessagesReport {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Attachment {
     /// A path the runtime should read. Images (by extension) become
-    /// [`ModelContentBlock::Image`]; anything else is inlined as text.
+    /// [`ModelContentBlock::Image`], `.pdf` into [`ModelContentBlock::Document`];
+    /// anything else is inlined as text.
     /// Use this when the host only has a path — e.g. a drag-and-drop.
     File { path: String },
     /// Text the host has already read. `path` is kept for the label shown to
@@ -302,6 +303,14 @@ pub enum Attachment {
     /// there is no file on disk at all. `data` is base64 without a data-URI
     /// prefix.
     Image { media_type: String, data: String },
+    /// A PDF the host already encoded. `data` is base64 without a data-URI
+    /// prefix; `name` is the label the model and the provider see.
+    Document {
+        media_type: String,
+        data: String,
+        #[serde(default)]
+        name: Option<String>,
+    },
 }
 
 /// Where a `PermitAlways` decision's effect should be retained.

@@ -51,7 +51,7 @@ pub struct ChatCompletionChunk {
 }
 
 /// An `error` chunk, in the vocabulary an HTTP status would have given it.
-fn chunk_error(error: &serde_json::Value) -> ModelError {
+pub(super) fn chunk_error(error: &serde_json::Value) -> ModelError {
     let field = |key: &str| {
         error
             .get(key)

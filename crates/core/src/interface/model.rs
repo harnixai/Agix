@@ -305,6 +305,13 @@ pub enum MessageRole {
 /// base64 payload length says almost nothing about the token cost.
 pub const IMAGE_TOKEN_ESTIMATE: usize = 1600;
 
+/// Token cost to charge a [`ModelContentBlock::Document`]: a PDF is billed as
+/// its text plus a picture per page, roughly 3000 tokens per ~50 KB page, so
+/// the estimate follows the decoded size and never drops below an image's.
+pub fn document_token_estimate(base64_len: usize) -> usize {
+    (base64_len / 4 * 3 / 20).max(IMAGE_TOKEN_ESTIMATE)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelContentBlock {
@@ -324,6 +331,14 @@ pub enum ModelContentBlock {
         media_type: String,
         /// Base64-encoded bytes, no data-URI prefix.
         data: String,
+    },
+    /// A base64-encoded document, PDF in practice. Like [`Image`](Self::Image)
+    /// its `data` is megabytes of base64 and must never be rendered as text.
+    Document {
+        media_type: String,
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     /// An extended-thinking block, with the signature that closed it if the
     /// provider sent one.

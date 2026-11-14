@@ -21,7 +21,9 @@
 //! than one that is exact and costs a network round-trip per turn, which is
 //! why the shipped default is the local estimate.
 
-use crate::interface::model::{ModelContentBlock, ModelMessage, IMAGE_TOKEN_ESTIMATE};
+use crate::interface::model::{
+    document_token_estimate, ModelContentBlock, ModelMessage, IMAGE_TOKEN_ESTIMATE,
+};
 use std::sync::OnceLock;
 
 /// Counts the tokens a piece of conversation will cost.
@@ -86,7 +88,7 @@ impl TokenCounter for FixedTokenCounter {
             ModelContentBlock::ToolUse { id, name, input } => {
                 id.len() + name.len() + input.to_string().len()
             }
-            ModelContentBlock::Image { .. } => 0,
+            ModelContentBlock::Image { .. } | ModelContentBlock::Document { .. } => 0,
         };
         self.per_block + text * self.per_char
     }
@@ -187,6 +189,7 @@ pub fn estimate_model_block_tokens(block: &ModelContentBlock) -> usize {
         // screenshot as hundreds of thousands of tokens and trip compaction on
         // the first image the user pastes — see `IMAGE_TOKEN_ESTIMATE`.
         ModelContentBlock::Image { .. } => IMAGE_TOKEN_ESTIMATE,
+        ModelContentBlock::Document { data, .. } => document_token_estimate(data.len()),
         // Thinking is billed as text. The signature is an opaque blob that the
         // API requires us to echo back; it is not counted.
         ModelContentBlock::Thinking { text, .. } => count_text(text),

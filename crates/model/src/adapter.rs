@@ -284,6 +284,14 @@ fn to_content_block(b: ModelContentBlock) -> Option<ContentBlock> {
         ModelContentBlock::Image { media_type, data } => ContentBlock::Image {
             source: base::message::ImageSource::Base64 { media_type, data },
         },
+        ModelContentBlock::Document {
+            media_type,
+            data,
+            title,
+        } => ContentBlock::Document {
+            source: base::message::ImageSource::Base64 { media_type, data },
+            title,
+        },
         // Echoed back verbatim, signature included. When thinking is enabled
         // and the turn used tools, the API rejects a request whose prior
         // assistant turn is missing these — and rejects one it cannot verify,
@@ -574,6 +582,29 @@ mod map_stream_event_tests {
     /// The OpenAI-compatible path has carried its own accumulator for this
     /// since it was written (`openai::stream`); this is the same claim on
     /// this side of the parity.
+    #[test]
+    fn a_document_goes_out_as_an_anthropic_document_block() {
+        let params = to_message_param(
+            ModelMessage {
+                role: MessageRole::User,
+                content: vec![ModelContentBlock::Document {
+                    media_type: "application/pdf".into(),
+                    data: "JVBERg==".into(),
+                    title: Some("spec.pdf".into()),
+                }],
+            },
+            None,
+        );
+        assert_eq!(
+            serde_json::to_value(&params.content[0]).unwrap(),
+            serde_json::json!({
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERg=="},
+                "title": "spec.pdf",
+            })
+        );
+    }
+
     #[test]
     fn the_input_count_comes_from_message_start_and_the_output_from_message_delta() {
         let out = run(vec![

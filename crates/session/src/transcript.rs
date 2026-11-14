@@ -642,6 +642,17 @@ fn model_content_block_to_content_block(
                 data: data.clone(),
             },
         },
+        M::Document {
+            media_type,
+            data,
+            title,
+        } => C::Document {
+            source: base::message::ImageSource::Base64 {
+                media_type: media_type.clone(),
+                data: data.clone(),
+            },
+            title: title.clone(),
+        },
         M::Thinking {
             text,
             signature,
@@ -822,6 +833,14 @@ fn content_block_to_model_content_block(
             media_type: media_type.clone(),
             data: data.clone(),
         }),
+        C::Document {
+            source: base::message::ImageSource::Base64 { media_type, data },
+            title,
+        } => Some(M::Document {
+            media_type: media_type.clone(),
+            data: data.clone(),
+            title: title.clone(),
+        }),
         C::Thinking {
             thinking,
             signature,
@@ -837,6 +856,10 @@ fn content_block_to_model_content_block(
         }),
         C::Image {
             source: base::message::ImageSource::Url { .. },
+        }
+        | C::Document {
+            source: base::message::ImageSource::Url { .. },
+            ..
         }
         | C::CacheEdits { .. } => None,
     }

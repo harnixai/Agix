@@ -2,9 +2,9 @@
 //! 单段文本的计数器在 `base::interface::token_counter`。
 
 use crate::types::{MessagesRequest, SystemBlock};
-use base::interface::model::IMAGE_TOKEN_ESTIMATE;
+use base::interface::model::{document_token_estimate, IMAGE_TOKEN_ESTIMATE};
 use base::interface::token_counter::count_text;
-use base::message::{ContentBlock, ToolResultContent};
+use base::message::{ContentBlock, ImageSource, ToolResultContent};
 
 /// 估算一段 `MessagesRequest` 的输入 token 数（不含模型输出）。
 ///
@@ -65,6 +65,11 @@ fn estimate_block_tokens(block: &ContentBlock) -> usize {
         // Flat per-image estimate, shared with the interface-level estimator so
         // the wire-format and context-budget views of the same image agree.
         ContentBlock::Image { .. } => IMAGE_TOKEN_ESTIMATE,
+        ContentBlock::Document {
+            source: ImageSource::Base64 { data, .. },
+            ..
+        } => document_token_estimate(data.len()),
+        ContentBlock::Document { .. } => IMAGE_TOKEN_ESTIMATE,
         // Cache edits are metadata-only (delete-tool-result operations), negligible token cost
         ContentBlock::CacheEdits { .. } => 0,
     }

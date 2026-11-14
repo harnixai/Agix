@@ -22,6 +22,7 @@
 //! When it does, the split point is [`OpenAICompatibleModel::stream`].
 
 pub mod request;
+pub mod responses;
 pub mod stream;
 
 use crate::retry_after::parse_retry_after;
@@ -39,8 +40,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio_util::sync::CancellationToken;
 use url::Url;
-
-use self::request::ChatCompletionsRequest;
 
 /// Maximum silence between two SSE events before the stream is declared dead.
 /// See [`stream::events_from_bytes`]; same value and same reasoning as
@@ -187,7 +186,7 @@ fn chat_completions_url(base_url: &str) -> Result<Url, ModelError> {
 }
 
 /// One HTTP attempt, with the response classified into [`ModelError`].
-async fn send_once(inner: &Inner, req: &ChatCompletionsRequest) -> Result<HttpStream, ModelError> {
+async fn send_once<T: serde::Serialize>(inner: &Inner, req: &T) -> Result<HttpStream, ModelError> {
     let body = serde_json::to_vec(req)
         .map_err(|e| ModelError::protocol(format!("serializing the request: {e}")))?;
     let builder = HttpRequest::post(inner.endpoint.as_str())
@@ -246,9 +245,9 @@ async fn drain_to_string(
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-async fn send_with_retry(
+async fn send_with_retry<T: serde::Serialize>(
     inner: &Inner,
-    req: &ChatCompletionsRequest,
+    req: &T,
 ) -> Result<HttpStream, ModelError> {
     let mut attempt = 0u32;
     loop {

@@ -642,6 +642,7 @@ fn render_content_blocks(content: &[ContentBlock], out: &mut String) {
                 out.push('\n');
             }
             ContentBlock::Image { .. } => out.push_str("[image]\n"),
+            ContentBlock::Document { .. } => out.push_str("[document]\n"),
             ContentBlock::ToolUse { name, input, .. } => {
                 out.push_str("[tool ");
                 out.push_str(name);
@@ -689,6 +690,7 @@ fn first_text(message: &Message) -> Option<&str> {
             }),
         },
         ContentBlock::Image { .. }
+        | ContentBlock::Document { .. }
         | ContentBlock::Thinking { .. }
         | ContentBlock::RedactedThinking { .. }
         | ContentBlock::CacheEdits { .. } => None,

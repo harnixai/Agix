@@ -53,6 +53,11 @@ pub enum ContentBlock {
     Image {
         source: ImageSource,
     },
+    Document {
+        source: ImageSource,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        title: Option<String>,
+    },
     ToolUse {
         id: String,
         name: String,

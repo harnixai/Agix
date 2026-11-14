@@ -314,6 +314,11 @@ fn push_translated(out: &mut Vec<ChatMessage>, m: ModelMessage, passback: Option
                     url: format!("data:{media_type};base64,{data}"),
                 },
             }),
+            ModelContentBlock::Document {
+                media_type, title, ..
+            } => parts.push(ContentPart::Text {
+                text: unsupported_document_note(&media_type, title.as_deref()),
+            }),
             ModelContentBlock::ToolUse { id, name, input } => tool_calls.push(ToolCall {
                 id,
                 kind: ToolCallKind::Function,
@@ -379,6 +384,17 @@ fn push_translated(out: &mut Vec<ChatMessage>, m: ModelMessage, passback: Option
         tool_call_id: None,
         reasoning_content,
     });
+}
+
+/// What stands in for a document on an endpoint that cannot read one: Chat
+/// Completions has no PDF input every gateway takes, and an error would leave
+/// the document in the history to fail every later request too.
+pub(crate) fn unsupported_document_note(media_type: &str, title: Option<&str>) -> String {
+    let name = title.map(|t| format!(" \"{t}\"")).unwrap_or_default();
+    format!(
+        "[document{name} ({media_type}) was attached but this model endpoint cannot read \
+         documents; tell the user it was not seen]"
+    )
 }
 
 /// Collapse content parts to the most compatible representation: a bare string
@@ -601,6 +617,35 @@ mod tests {
         // The text tags along after, as a plain user message.
         assert_eq!(ms[2]["role"], "user");
         assert_eq!(ms[2]["content"], "and also, please hurry");
+    }
+
+    /// A gateway that takes no PDF gets a note naming what it did not see, not
+    /// an error that would stay in the history and fail every later request.
+    #[test]
+    fn a_document_becomes_a_note_saying_it_was_not_seen() {
+        let req = build_request(
+            "m".into(),
+            vec![],
+            vec![],
+            vec![msg(
+                MessageRole::User,
+                vec![
+                    text("summarise"),
+                    ModelContentBlock::Document {
+                        media_type: "application/pdf".into(),
+                        data: "AAAA".into(),
+                        title: Some("spec.pdf".into()),
+                    },
+                ],
+            )],
+            None,
+            &Reasoning::default(),
+        );
+        let v = serde_json::to_value(&req).unwrap();
+        let content = v["messages"][0]["content"].as_str().unwrap();
+        assert!(content.contains("\"spec.pdf\""), "{content}");
+        assert!(content.contains("cannot read documents"), "{content}");
+        assert!(!content.contains("AAAA"), "{content}");
     }
 
     /// Images become a `data:` URI inside an `image_url` part, and the

@@ -915,7 +915,7 @@ pub fn analyze_context(messages: &[ModelMessage], counter: &dyn TokenCounter) ->
                 }
                 // Attributed to whichever side of the conversation sent it,
                 // same as text.
-                ModelContentBlock::Image { .. } => {
+                ModelContentBlock::Image { .. } | ModelContentBlock::Document { .. } => {
                     let tokens = counter.count_block(block);
                     analysis.total_estimated_tokens += tokens;
                     match msg.role {

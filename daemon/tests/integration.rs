@@ -31,6 +31,7 @@ mod model_rate_limit;
 mod no_project_sessions;
 #[cfg(feature = "otel")]
 mod otel_traces;
+mod pdf_attachment;
 mod permission_loop;
 mod permission_pipeline;
 mod plan_mode_in_delegates;

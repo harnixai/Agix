@@ -22,6 +22,17 @@ pub(super) fn image_media_type(path: &std::path::Path) -> Option<&'static str> {
 
 pub(super) const MAX_ATTACHMENT_IMAGE_BYTES: u64 = base::tool::MAX_IMAGE_BYTES;
 
+/// Anthropic caps a request at 32 MB, and base64 adds a third.
+pub(super) const MAX_ATTACHMENT_DOCUMENT_BYTES: u64 = 20 * 1024 * 1024;
+
+const PDF_MEDIA_TYPE: &str = "application/pdf";
+
+fn is_pdf_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
 /// What a prompt middleware is shown of the attachments.
 pub(super) async fn describe_attachments(
     attachments: &[crate::agent::Attachment],
@@ -34,9 +45,16 @@ pub(super) async fn describe_attachments(
         described.push(match att {
             Attachment::File { path } => {
                 let size = tokio::fs::metadata(path).await.ok().map(|m| m.len());
-                PromptAttachment::file(path, image_media_type(std::path::Path::new(path)), size)
+                let media_type = image_media_type(std::path::Path::new(path))
+                    .or_else(|| is_pdf_path(std::path::Path::new(path)).then_some(PDF_MEDIA_TYPE));
+                PromptAttachment::file(path, media_type, size)
             }
             Attachment::Text { path, content } => PromptAttachment::text(path, content),
+            Attachment::Document {
+                media_type,
+                data,
+                name,
+            } => PromptAttachment::document(name.as_deref(), media_type, base64_decoded_len(data)),
             Attachment::Image { media_type, data } => {
                 PromptAttachment::image(media_type, base64_decoded_len(data))
             }
@@ -74,6 +92,32 @@ pub(super) async fn resolve_attachments(
             Attachment::Text { path, content } => blocks.push(ModelContentBlock::Text {
                 text: format!("<attachment path=\"{path}\">\n{content}\n</attachment>"),
             }),
+            Attachment::Document {
+                media_type,
+                data,
+                name,
+            } => {
+                let label = name.as_deref().unwrap_or("document");
+                let size = base64_decoded_len(data);
+                blocks.push(if media_type != PDF_MEDIA_TYPE {
+                    ModelContentBlock::Text {
+                        text: format!(
+                            "<attachment path=\"{label}\" error=\"unsupported document type \
+                             {media_type}; only {PDF_MEDIA_TYPE}\" />"
+                        ),
+                    }
+                } else if size > MAX_ATTACHMENT_DOCUMENT_BYTES {
+                    ModelContentBlock::Text {
+                        text: document_too_large(label, size),
+                    }
+                } else {
+                    ModelContentBlock::Document {
+                        media_type: media_type.clone(),
+                        data: data.clone(),
+                        title: name.clone(),
+                    }
+                });
+            }
             Attachment::File { path } => {
                 let p = match files.resolve(std::path::Path::new(path)) {
                     Ok(resolved) => resolved,
@@ -85,6 +129,10 @@ pub(super) async fn resolve_attachments(
                     }
                 };
                 let p = p.as_path();
+                if is_pdf_path(std::path::Path::new(path)) {
+                    blocks.push(read_pdf(p, path).await);
+                    continue;
+                }
                 match image_media_type(std::path::Path::new(path)) {
                     Some(media_type) => {
                         let size = tokio::fs::metadata(p).await.map(|m| m.len()).unwrap_or(0);
@@ -120,6 +168,40 @@ pub(super) async fn resolve_attachments(
         }
     }
     blocks
+}
+
+fn document_too_large(label: &str, size: u64) -> String {
+    format!(
+        "<attachment path=\"{label}\" error=\"document too large: {size} bytes, cap is \
+         {MAX_ATTACHMENT_DOCUMENT_BYTES}\" />"
+    )
+}
+
+async fn read_pdf(resolved: &std::path::Path, path: &str) -> ModelContentBlock {
+    use base64::Engine as _;
+
+    let error = |reason: String| ModelContentBlock::Text {
+        text: format!("<attachment path=\"{path}\" error=\"{reason}\" />"),
+    };
+    let size = match tokio::fs::metadata(resolved).await {
+        Ok(meta) => meta.len(),
+        Err(e) => return error(e.to_string()),
+    };
+    if size > MAX_ATTACHMENT_DOCUMENT_BYTES {
+        return ModelContentBlock::Text {
+            text: document_too_large(path, size),
+        };
+    }
+    match tokio::fs::read(resolved).await {
+        Ok(bytes) => ModelContentBlock::Document {
+            media_type: PDF_MEDIA_TYPE.to_string(),
+            data: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            title: std::path::Path::new(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned()),
+        },
+        Err(e) => error(e.to_string()),
+    }
 }
 
 /// Truncate `s` to at most `max_bytes` bytes without splitting a multi-byte

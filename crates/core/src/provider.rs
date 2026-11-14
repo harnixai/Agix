@@ -28,13 +28,15 @@ pub enum ApiType {
     Anthropic,
     #[serde(rename = "openai_compatible")]
     OpenAICompatible,
+    #[serde(rename = "openai_responses")]
+    OpenAIResponses,
 }
 
 /// A single provider's connection + model config, as written in settings.json.
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ProviderConfig {
-    /// "anthropic" | "openai_compatible". Kept as a plain string (not
+    /// "anthropic" | "openai_compatible" | "openai_responses". Kept as a plain string (not
     /// `ApiType`) so an unrecognized value degrades to a warning instead of
     /// a hard parse failure of the whole settings.json.
     pub api_type: Option<String>,

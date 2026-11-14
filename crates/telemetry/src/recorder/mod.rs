@@ -701,6 +701,7 @@ impl RecorderModel {
                 match self.inner.api_type() {
                     ApiType::Anthropic => "anthropic",
                     ApiType::OpenAICompatible => "openai_compatible",
+                    ApiType::OpenAIResponses => "openai_responses",
                 }
                 .into()
             }),
