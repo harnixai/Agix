@@ -40,7 +40,7 @@ enum Kind {
 use Kind::*;
 
 const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
-    ("crates/model/src/tokens.rs", "C", Constant, "the default counter: a stateless estimator"),
+    ("crates/core/src/interface/token_counter.rs", "C", Constant, "the default counter: a stateless estimator"),
     ("crates/scene/src/code.rs", "SECTION_CACHE", SharedCache, "prompt sections keyed by a fingerprint of their inputs"),
     ("crates/memory/src/secrets.rs", "PATTERNS", Constant, "compiled regexes"),
     ("crates/core/src/dir_lock.rs", "LOCKS", OsResource, "serialises the holders of a settings or memory directory within this process, which every session of every pool may share; flock covers other processes"),
@@ -62,9 +62,8 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/platform/src/network.rs", "ONCE", OnceFlag, "installs the process-wide TLS provider reqwest needs"),
     ("crates/assembly/src/telemetry_otel.rs", "TOLD", OnceFlag, "says once that a later OpenTelemetry endpoint is ignored"),
     ("crates/core/src/interface/tool.rs", "NEXT", IdCounter, "registration ids, unique across every registry in the process"),
-    ("crates/history/src/path.rs", "NEXT", IdCounter, "temporary sibling names, distinct for every writer in the process"),
+    ("crates/core/src/fs.rs", "NEXT", IdCounter, "temporary sibling names, distinct for every writer in the process"),
     ("crates/platform/src/sandbox.rs", "NEXT_FENCE", IdCounter, "the keys of SERVED's entries"),
-    ("crates/plugin/src/state.rs", "SEQ", IdCounter, "temporary file names for saving the enable state"),
     ("crates/core/src/interface/catalog.rs", "POINTS", Constant, "the table of extension points"),
     ("crates/skills/src/tool.rs", "FENCED", Constant, "a compiled regex"),
     ("crates/skills/src/tool.rs", "INLINE", Constant, "a compiled regex"),

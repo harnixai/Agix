@@ -30,6 +30,11 @@ use syn::{Expr, Lit};
 
 const HOME_READERS: &[(&str, &str)] = &[
     (
+        "crates/core/src/paths/mod.rs",
+        "`home_dir()`, the one place this machine's home is looked up: HOME, \
+         else USERPROFILE.",
+    ),
+    (
         "crates/assembly/src/config.rs",
         "the entry point: resolves AGIX_CONFIG_HOME (or $HOME/.agix) once, \
          then passes it down. Everything else receives what this decides.",
