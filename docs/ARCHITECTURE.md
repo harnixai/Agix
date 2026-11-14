@@ -1756,7 +1756,7 @@ warn,`daemon.doctor` 的 `settings.tiers` 报 `degraded`、在那一层的 `igno
 ```jsonc
 // ~/.agix/settings.json 或 settings.local.json
 { "project_trust": {
-    "default": "trusted",                       // trusted | untrusted;0.3.x 缺省 trusted
+    "default": "untrusted",                     // trusted | untrusted;缺省 untrusted
     "trusted": ["/Users/x/work/**", "/srv/ipd/lines/*"] } }
 ```
 
@@ -1784,13 +1784,17 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 解析之后的真实目录,其中的 glob 元字符(`*`、`?`、`[` 等)转义掉——`Project [v2]` 这一条只
 命中它自己。往未信任项目的项目层里写配置的方法(`mcp.addServer` / `mcp.updateServer`、
 `config.setProvider`)以 `PROJECT_UNTRUSTED` 拒绝,什么都不写:写进去也不会生效。
-`session.create` / `session.resume` 的结果带 `project_trust`,宿主不必另查。
+`session.create` / `session.resume` 的结果带 `project_trust` 与 `trust_source`(`default`:由
+`default` 决定;`user`:全局 `settings.json` 里的条目;`host`:全局 `settings.local.json` 里的条目,
+`project.trust` 写在这里),`project.status` 也带 `trust_source`,宿主不必另查。
 `daemon.doctor` 的 `project.trust` 检查报 daemon 自己的项目:未信任且有东西被扣下,或只靠
-`default: trusted` 才信任而有东西要信任才生效,都是 `degraded`。确认对话框是宿主的事;无人值守部署用 `trusted` glob 预先信任
+`default: trusted` 才信任而有东西要信任才生效,都是 `degraded`,并列出这些键。确认对话框是宿主的事;无人值守部署用 `trusted` glob 预先信任
 它们自己创建的项目目录。
 
-**0.3.x 缺省 `trusted`**,行为与之前完全一样,`daemon.doctor` 提示哪些内容在缺省翻转后会停用;
-**计划在后续 0.3.x 把缺省改成 `untrusted`(具体版本发布说明另行通知)**。
+**缺省 `untrusted`**:克隆来的仓库在宿主经 `project.trust`、或用户在全局层 `trusted` 里确认之前,
+项目层只能收紧——项目的 hook、MCP server、可放宽的 agent 类型、skill 的 `` !`cmd` `` 与
+`allowed-tools`、放宽的 `permission_mode` 与沙箱都不生效。要沿用旧行为,在全局层写
+`"default": "trusted"`;`daemon.doctor` 会把因此生效的东西列出来。
 
 引擎自己改设置文件的地方——`project.trust`、`config.setProvider`、`mcp.addServer` /
 `updateServer`、权限询问里的"永久允许"——都走 `settings::file`:读改写期间锁住那一层
