@@ -56,6 +56,7 @@ pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("skills", Module),
     ("agents", Module),
     ("demo-rust-plugin", Module),
+    ("hostile-plugins", Module),
     ("assembly", Assembly),
     ("daemon", Shell),
     ("rpc-client", TestSupport),

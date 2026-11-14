@@ -1205,6 +1205,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostile-plugins"
+version = "0.3.12-2026111402"
+dependencies = [
+ "async-trait",
+ "base",
+ "runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "html2text"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
