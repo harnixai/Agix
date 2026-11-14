@@ -20,7 +20,7 @@ use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
-use mcp_oauth_mock::{consent, follow, McpServer};
+use mcp_oauth_mock::{consent, follow, IssMode, McpServer};
 
 struct Daemon {
     dir: tempfile::TempDir,
@@ -1375,4 +1375,113 @@ async fn a_servers_credentials_and_query_never_show_in_its_status() {
     for secret in ["bob", "hunter2", "QUERY-SECRET"] {
         assert!(!shown.contains(secret), "{shown}");
     }
+}
+
+/// Sign in to `docs` with the authorization server answering as `iss` says,
+/// and return the loopback page's status and text.
+async fn sign_in_with_iss(
+    conn: &mut Conn,
+    auth: &mcp_oauth_mock::AuthServer,
+    iss: IssMode,
+) -> (u16, String) {
+    auth.state.lock().unwrap().iss = iss;
+    let start = conn
+        .ok("mcp.auth.start", serde_json::json!({"server": "docs"}))
+        .await;
+    let location = consent(start["authorize_url"].as_str().unwrap()).await;
+    follow(&location).await
+}
+
+/// A callback refused for its `iss`: no code was exchanged, nothing was
+/// stored, and the server offers nothing.
+async fn assert_refused_for_iss(
+    d: &Daemon,
+    conn: &mut Conn,
+    auth: &mcp_oauth_mock::AuthServer,
+    page: (u16, String),
+) {
+    assert_ne!(page.0, 200, "{}", page.1);
+    let failed = conn.event("mcp_auth_failed", "docs").await;
+    assert!(
+        failed["error"].as_str().unwrap_or("").contains("issuer"),
+        "{failed}"
+    );
+    let status = conn.status("docs").await;
+    assert_eq!(status["auth"]["state"], "failed", "{status}");
+    assert_eq!(status["tool_count"], 0, "{status}");
+    assert_eq!(auth.state.lock().unwrap().count("authorization_code"), 0);
+    assert!(auth.issued().is_empty());
+    assert!(
+        d.credential_files()
+            .iter()
+            .all(|f| !std::fs::read_to_string(f)
+                .unwrap_or_default()
+                .contains("access_token")),
+        "{:?}",
+        d.credential_files()
+    );
+    d.model.push_turn(text_round("noted"));
+    run_turn(conn, "hello").await;
+    assert!(!offers_the_server(&last_request(d)));
+}
+
+#[tokio::test]
+async fn a_callback_whose_iss_names_another_server_is_refused_before_any_token_is_asked_for() {
+    let (mcp, auth) = McpServer::start().await;
+    let d = Daemon::start(serde_json::json!({"docs": http_server(&mcp.url)})).await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "auth_required").await;
+    let page = sign_in_with_iss(
+        &mut conn,
+        &auth,
+        IssMode::Wrong("https://evil.example".into()),
+    )
+    .await;
+    assert_refused_for_iss(&d, &mut conn, &auth, page).await;
+}
+
+#[tokio::test]
+async fn a_callback_without_iss_is_refused_from_a_server_that_promised_one() {
+    let (mcp, auth) = McpServer::start().await;
+    let d = Daemon::start(serde_json::json!({"docs": http_server(&mcp.url)})).await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "auth_required").await;
+    let page = sign_in_with_iss(&mut conn, &auth, IssMode::Absent).await;
+    assert_refused_for_iss(&d, &mut conn, &auth, page).await;
+}
+
+/// RFC 9207's rule for authorization servers that predate it: one that never
+/// said it sends `iss` is not held to it.
+#[tokio::test]
+async fn a_callback_without_iss_is_accepted_from_a_server_that_never_promised_one() {
+    let (mcp, auth) = McpServer::start().await;
+    auth.state.lock().unwrap().advertise_iss_support = false;
+    let d = Daemon::start(serde_json::json!({"docs": http_server(&mcp.url)})).await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "auth_required").await;
+    let (code, page) = sign_in_with_iss(&mut conn, &auth, IssMode::Absent).await;
+    assert_eq!(code, 200, "{page}");
+    conn.event("mcp_connected", "docs").await;
+    assert_eq!(conn.status("docs").await["auth"]["state"], "authorized");
+}
+
+#[tokio::test]
+async fn after_a_refused_iss_the_real_sign_in_still_works() {
+    let (mcp, auth) = McpServer::start().await;
+    let d = Daemon::start(serde_json::json!({"docs": http_server(&mcp.url)})).await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "auth_required").await;
+    let page = sign_in_with_iss(
+        &mut conn,
+        &auth,
+        IssMode::Wrong("https://evil.example".into()),
+    )
+    .await;
+    assert_refused_for_iss(&d, &mut conn, &auth, page).await;
+
+    let (code, page) = sign_in_with_iss(&mut conn, &auth, IssMode::Correct).await;
+    assert_eq!(code, 200, "{page}");
+    conn.event("mcp_connected", "docs").await;
+    let status = conn.wait_state("docs", "connected").await;
+    assert_eq!(status["auth"]["state"], "authorized", "{status}");
 }

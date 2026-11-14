@@ -204,11 +204,23 @@ pub struct Token {
     pub resource: String,
 }
 
+/// The `iss` the authorization server puts on its redirect back to the
+/// client (RFC 9207).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IssMode {
+    Correct,
+    Wrong(String),
+    Absent,
+}
+
 /// What the authorization server is told to do, and what it saw.
 pub struct AsState {
     pub issuer: String,
     pub resource: String,
     pub advertise_s256: bool,
+    pub iss: IssMode,
+    /// Whether the metadata says `authorization_response_iss_parameter_supported`.
+    pub advertise_iss_support: bool,
     /// Advertised in place of this server's own `/authorize`.
     pub authorization_endpoint: Option<String>,
     pub dynamic_registration: bool,
@@ -337,6 +349,8 @@ impl AuthServer {
             issuer: String::new(),
             resource: resource.to_string(),
             advertise_s256: true,
+            iss: IssMode::Correct,
+            advertise_iss_support: true,
             authorization_endpoint: None,
             dynamic_registration: true,
             revocation: true,
@@ -405,8 +419,10 @@ impl AuthServer {
                     "scopes_supported": ["mcp:read", "mcp:write"],
                     "code_challenge_methods_supported":
                         if s.advertise_s256 { serde_json::json!(["S256"]) } else { serde_json::json!(["plain"]) },
-                    "authorization_response_iss_parameter_supported": true,
                 });
+                if s.advertise_iss_support {
+                    metadata["authorization_response_iss_parameter_supported"] = true.into();
+                }
                 if s.dynamic_registration {
                     metadata["registration_endpoint"] = format!("{}/register", s.issuer).into();
                 }
@@ -473,11 +489,20 @@ impl AuthServer {
                     },
                 );
                 let mut location = url::Url::parse(&redirect).unwrap();
-                location
-                    .query_pairs_mut()
+                let mut query = location.query_pairs_mut();
+                query
                     .append_pair("code", &code)
-                    .append_pair("state", q.get("state").map(String::as_str).unwrap_or(""))
-                    .append_pair("iss", &s.issuer);
+                    .append_pair("state", q.get("state").map(String::as_str).unwrap_or(""));
+                match &s.iss {
+                    IssMode::Correct => {
+                        query.append_pair("iss", &s.issuer);
+                    }
+                    IssMode::Wrong(iss) => {
+                        query.append_pair("iss", iss);
+                    }
+                    IssMode::Absent => {}
+                }
+                drop(query);
                 Response::empty(302).with_header("location", location.as_str())
             }
             ("POST", "/token") => {
