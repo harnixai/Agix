@@ -65,8 +65,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/core/src/fs.rs", "NEXT", IdCounter, "temporary sibling names, distinct for every writer in the process"),
     ("crates/platform/src/sandbox/fence.rs", "NEXT_FENCE", IdCounter, "the keys of SERVED's entries"),
     ("crates/core/src/interface/catalog.rs", "POINTS", Constant, "the table of extension points"),
-    ("crates/skills/src/tool.rs", "FENCED", Constant, "a compiled regex"),
-    ("crates/skills/src/tool.rs", "INLINE", Constant, "a compiled regex"),
+    ("crates/skills/src/tool.rs", "PLACEHOLDER", Constant, "a compiled regex"),
 ];
 
 fn scanned() -> &'static [Static] {

@@ -358,8 +358,10 @@ impl PermissionPolicy for Policy {
         let verdict = call.delegated.granting(self.judge(&call), &call);
         self.conclude(verdict, facts, ctx, hook, attendance)
     }
+}
 
-    fn path_denial(
+impl base::interface::permission::PathDenials for Policy {
+    fn denial(
         &self,
         tool: &str,
         cwd: &std::path::Path,

@@ -38,6 +38,11 @@ const HOME_ENV_READERS: &[(&str, &str)] = &[(
 
 const HOME_READERS: &[(&str, &str)] = &[
     (
+        "daemon/tests/credentials_in_file_tools.rs",
+        "names this machine's home stores in the default deny-read list, which \
+         is what the case is about.",
+    ),
+    (
         "crates/assembly/src/config.rs",
         "the entry point: resolves AGIX_CONFIG_HOME (or $HOME/.agix) once, \
          then passes it down. Everything else receives what this decides.",

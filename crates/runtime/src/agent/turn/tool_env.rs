@@ -229,6 +229,7 @@ pub(super) fn tool_context_for(
     tool_ctx.attendance = attendance_of(&ctx.session_state, ctx.caller);
     tool_ctx.turn = ctx.turn.clone();
     tool_ctx.inline_commands = Some(Arc::new(SubCallDispatcher::for_inline_commands(ctx)));
+    tool_ctx.path_denials = ctx.permission.path_denials.clone();
     tool_ctx
 }
 

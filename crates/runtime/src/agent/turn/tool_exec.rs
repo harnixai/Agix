@@ -349,7 +349,6 @@ pub(super) async fn execute_tool_inner(
     };
     let user_approved = authorized.by_person;
     tool_ctx.approval = Some(authorized.approval);
-    tool_ctx.path_denial = ctx.permission.policy.path_denial(name, &tool_ctx.cwd, &[]);
     let owed = authorized
         .obligations
         .scan_nested_repos

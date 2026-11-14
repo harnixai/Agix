@@ -122,7 +122,7 @@ impl Tool for GlobTool {
             .compile_matcher();
 
         let scan_early_stop = max_results * 4;
-        let excluded = crate::security::walk_exclusion(&ctx, &root);
+        let excluded = crate::security::walk_exclusion(self.name(), &ctx, &root);
         let cancel = ctx.cancel.clone();
         let respect_gitignore = input.respect_gitignore;
         let scan = tokio::task::spawn_blocking(move || {

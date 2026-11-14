@@ -1452,6 +1452,7 @@ async fn permission_prompt_answered_permit_always_grants_in_the_scope_asked_for(
                 prompt_id: "permit-always",
             }),
             grants: Some(grants.clone()),
+            path_denials: None,
         };
         ctx.elicitation = base::interface::elicitation::FixedElicitation::new(
             base::interface::elicitation::ElicitOutcome::answered(
@@ -1490,6 +1491,7 @@ async fn an_answer_that_took_the_prompt_before_a_cancel_is_kept() {
         ctx.permission = PermissionSet {
             policy: Arc::new(PromptTestPermission { prompt_id: "raced" }),
             grants: Some(grants.clone()),
+            path_denials: None,
         };
         let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
         let pending: Arc<

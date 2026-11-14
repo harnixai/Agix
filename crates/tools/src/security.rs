@@ -176,11 +176,15 @@ pub fn read_allowed(path: &Path, ctx: &base::tool::ToolContext) -> bool {
 /// What a walk from `root` leaves out: the credentials under it, and what a
 /// permission rule denies the call.
 pub fn walk_exclusion(
+    tool: &str,
     ctx: &base::tool::ToolContext,
     root: &Path,
 ) -> impl Fn(&Path) -> bool + Send + Sync + 'static {
     let credentials = credentials(ctx).excluded_from_walk(root);
-    let denied = ctx.path_denial.clone();
+    let denied = ctx
+        .path_denials
+        .as_ref()
+        .and_then(|denials| denials.denial(tool, &ctx.cwd, &[]));
     move |path| credentials(path) || denied.as_ref().is_some_and(|denied| denied(path))
 }
 

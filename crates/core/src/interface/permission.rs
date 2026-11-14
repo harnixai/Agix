@@ -511,20 +511,21 @@ impl<'a> Delegate<'a> {
 #[async_trait]
 pub trait PermissionPolicy: Send + Sync {
     async fn decide(&self, req: &PermissionRequest<'_>) -> PermissionOutcome;
+}
 
-    /// The paths `tool` must leave out of what it walks on its own, because a
-    /// deny rule covers them: a search of a directory is judged on the
-    /// directory, so each file under it has to be judged as it is reached.
-    /// `extra` is the rules a delegation adds on top of the policy's own.
-    /// `None` when no rule does.
-    fn path_denial(
+/// Which paths a deny rule covers, for a tool that walks a directory on its
+/// own: a search is judged on the directory it starts in, so each file under
+/// it has to be judged as it is reached.
+pub trait PathDenials: Send + Sync {
+    /// The paths `tool` must leave out of its walk. `extra` is the rules a
+    /// delegation adds on top of the policy's own. `None` when no rule
+    /// covers a path.
+    fn denial(
         &self,
-        _tool: &str,
-        _cwd: &std::path::Path,
-        _extra: &[PermissionRule],
-    ) -> Option<PathDenial> {
-        None
-    }
+        tool: &str,
+        cwd: &std::path::Path,
+        extra: &[PermissionRule],
+    ) -> Option<PathDenial>;
 }
 
 /// Whether a deny rule covers this path.
@@ -636,15 +637,17 @@ pub trait PermissionGrants: Send + Sync {
 pub struct PermissionSet {
     pub policy: Arc<dyn PermissionPolicy>,
     pub grants: Option<Arc<dyn PermissionGrants>>,
+    pub path_denials: Option<Arc<dyn PathDenials>>,
 }
 
 impl PermissionSet {
     /// One value that both decides and keeps grants, so what it is granted
     /// changes what it decides.
-    pub fn of<P: PermissionPolicy + PermissionGrants + 'static>(p: Arc<P>) -> Self {
+    pub fn of<P: PermissionPolicy + PermissionGrants + PathDenials + 'static>(p: Arc<P>) -> Self {
         Self {
             policy: p.clone(),
-            grants: Some(p),
+            grants: Some(p.clone()),
+            path_denials: Some(p),
         }
     }
 
@@ -652,6 +655,7 @@ impl PermissionSet {
         Self {
             policy,
             grants: None,
+            path_denials: None,
         }
     }
 }

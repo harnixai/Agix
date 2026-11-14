@@ -53,15 +53,18 @@ impl Delegator {
     ) -> Relay {
         let env = &self.env;
         let turn_grants = Arc::new(TurnGrants::default());
+        let relay = Arc::new(DelegateRelay {
+            parent: env.host.permission.policy.clone(),
+            parent_denials: env.host.permission.path_denials.clone(),
+            parent_session: env.parent.state.clone(),
+            no_one_to_ask,
+            rules,
+            turn_grants: turn_grants.clone(),
+        });
         Relay {
             permission: PermissionSet {
-                policy: Arc::new(DelegateRelay {
-                    parent: env.host.permission.policy.clone(),
-                    parent_session: env.parent.state.clone(),
-                    no_one_to_ask,
-                    rules,
-                    turn_grants: turn_grants.clone(),
-                }),
+                policy: relay.clone(),
+                path_denials: Some(relay),
                 grants: env.host.permission.grants.clone().map(|parent| {
                     Arc::new(ParentGrants {
                         parent,

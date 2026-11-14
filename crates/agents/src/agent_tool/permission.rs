@@ -22,6 +22,7 @@ pub(crate) struct Relay {
 /// parent's rules.
 pub(crate) struct DelegateRelay {
     pub(crate) parent: Arc<dyn PermissionPolicy>,
+    pub(crate) parent_denials: Option<Arc<dyn base::interface::permission::PathDenials>>,
     /// The session `parent` belongs to.
     pub(crate) parent_session: Arc<base::context::SessionState>,
     /// Why nobody can be asked about its calls; `None` when its questions go
@@ -64,15 +65,18 @@ impl PermissionPolicy for DelegateRelay {
         }
         self.parent.decide(&relayed).await
     }
+}
 
-    fn path_denial(
+impl base::interface::permission::PathDenials for DelegateRelay {
+    fn denial(
         &self,
         tool: &str,
         cwd: &std::path::Path,
         extra: &[base::permission::PermissionRule],
     ) -> Option<PathDenial> {
-        self.parent
-            .path_denial(tool, cwd, &[extra, &self.rules].concat())
+        self.parent_denials
+            .as_ref()?
+            .denial(tool, cwd, &[extra, &self.rules].concat())
     }
 }
 
