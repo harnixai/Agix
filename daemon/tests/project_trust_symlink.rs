@@ -1,0 +1,243 @@
+//! A project whose `.agix` is a symlink to the global configuration
+//! directory is still a project of its own: its repository's skills, hooks
+//! and git wait for trust like any other, rather than passing as "no
+//! project tier".
+
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
+
+use daemon::config::{load_daemon_config, StaticDaemonPaths};
+use daemon::DaemonServer;
+use model::client::{AnthropicClient, CountFuture, EventStream};
+use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
+use model::types::MessagesRequest;
+use serde_json::json;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
+use tokio_util::sync::CancellationToken;
+
+struct Scripted(StdMutex<VecDeque<Vec<StreamEvent>>>);
+
+impl AnthropicClient for Scripted {
+    fn stream_messages(&self, _req: MessagesRequest) -> EventStream {
+        let events = self
+            .0
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| text_round("done"));
+        Box::pin(futures::stream::iter(events.into_iter().map(Ok)))
+    }
+
+    fn count_tokens<'a>(&'a self, _req: &'a MessagesRequest) -> CountFuture<'a> {
+        Box::pin(async { Ok(0usize) })
+    }
+}
+
+fn tool_round(tool: &str, id: &str, input: serde_json::Value) -> Vec<StreamEvent> {
+    vec![
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlockStart::ToolUse {
+                id: id.into(),
+                name: tool.into(),
+                input: serde_json::Value::Null,
+            },
+        },
+        StreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: BlockDelta::InputJsonDelta {
+                partial_json: input.to_string(),
+            },
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            delta: MessageDeltaPayload {
+                stop_reason: Some(base::message::StopReason::ToolUse),
+                stop_sequence: None,
+            },
+            usage: Some(Usage::default()),
+        },
+    ]
+}
+
+fn text_round(text: &str) -> Vec<StreamEvent> {
+    vec![
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlockStart::Text {
+                text: String::new(),
+            },
+        },
+        StreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: BlockDelta::TextDelta { text: text.into() },
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            delta: MessageDeltaPayload {
+                stop_reason: Some(base::message::StopReason::EndTurn),
+                stop_sequence: None,
+            },
+            usage: Some(Usage::default()),
+        },
+    ]
+}
+
+struct Daemon {
+    sock: PathBuf,
+    repo: PathBuf,
+    _dir: tempfile::TempDir,
+    _handle: tokio::task::JoinHandle<()>,
+}
+
+impl Daemon {
+    /// `~/.agix` is the global tier; `~/code/repo/.agix` links to it, and the
+    /// repository ships a skill that grants `python3`.
+    async fn start(global: serde_json::Value) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let global_dir = home.join(".agix");
+        let repo = home.join("code").join("repo");
+        std::fs::create_dir_all(&global_dir).unwrap();
+        std::fs::create_dir_all(repo.join(".agents/skills/py")).unwrap();
+        std::fs::write(global_dir.join("settings.json"), global.to_string()).unwrap();
+        std::os::unix::fs::symlink("../../.agix", repo.join(".agix")).unwrap();
+        std::fs::write(
+            repo.join(".agents/skills/py/SKILL.md"),
+            "---\nname: py\ndescription: run python\nallowed-tools: [\"Bash(python3:*)\"]\n---\nRun python.\n",
+        )
+        .unwrap();
+
+        let sock = dir.path().join("symlink.sock");
+        let paths = StaticDaemonPaths::with_project(global_dir.clone(), repo.clone())
+            .with_global(global_dir.clone());
+        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        config.settings.values.memory_enabled = false;
+        let rounds = VecDeque::from([
+            tool_round("Skill", "skill-1", json!({"skill": "py"})),
+            tool_round("Bash", "bash-1", json!({"command": "python3 -c 1"})),
+            text_round("done"),
+        ]);
+        let pool = daemon::assemble::pool(
+            &config,
+            Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+            daemon::Assembly {
+                cwd: Some(repo.clone()),
+                permission_prompt_timeout: Some(Duration::from_secs(30)),
+                model_client: Some(
+                    Arc::new(Scripted(StdMutex::new(rounds))) as Arc<dyn AnthropicClient>
+                ),
+                transcripts: daemon::Transcripts::Nowhere,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the daemon assembles");
+        let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
+        let bind = sock.clone();
+        let handle = tokio::spawn(async move {
+            let _ = server.serve_unix(&bind).await;
+        });
+        for _ in 0..80 {
+            if sock.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(sock.exists(), "socket never bound");
+        Self {
+            sock,
+            repo,
+            _dir: dir,
+            _handle: handle,
+        }
+    }
+
+    async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
+        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
+        conn.write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        let (r, _w) = conn.split();
+        let mut reader = BufReader::new(r);
+        loop {
+            let mut line = String::new();
+            assert!(
+                reader.read_line(&mut line).await.unwrap() > 0,
+                "{method}: EOF"
+            );
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("id").is_some() {
+                assert!(v.get("result").is_some(), "{method} failed: {v}");
+                return v["result"].clone();
+            }
+        }
+    }
+
+    /// Run a turn on `sid`, refusing every prompt, and return the tools that
+    /// asked.
+    async fn turn_refusing_prompts(&self, sid: &str) -> Vec<String> {
+        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
+        let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
+            "params":{"session_id": sid, "message": "use the py skill"},"id":1});
+        conn.write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        let (r, _w) = conn.split();
+        let mut reader = BufReader::new(r);
+        let mut asked = Vec::new();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).await.unwrap() > 0, "turn: EOF");
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("id").is_some() {
+                assert!(v.get("result").is_some(), "the turn failed: {v}");
+                return asked;
+            }
+            let event = &v["params"]["event"];
+            if event["kind"] == "prompt" {
+                asked.push(event["tool_name"].as_str().unwrap_or_default().to_string());
+                let prompt_id = event["prompt_id"].as_str().unwrap();
+                self.call(
+                    "session.respondToPrompt",
+                    json!({"session_id": sid, "prompt_id": prompt_id,
+                        "decision": {"type": "deny", "reason": "no"}}),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_project_agix_linked_to_the_global_directory_is_still_untrusted() {
+    let daemon = Daemon::start(json!({"project_trust": {"default": "untrusted"}})).await;
+
+    let created = daemon
+        .call("session.create", json!({"project_root": daemon.repo}))
+        .await;
+    assert_eq!(created["project_trust"], "untrusted", "{created}");
+    let status = daemon
+        .call("project.status", json!({"project_root": daemon.repo}))
+        .await;
+    assert_eq!(status["trust"], "untrusted", "{status}");
+    assert!(
+        status["requires_trust"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "skills/py"),
+        "{status}"
+    );
+
+    let sid = created["session_id"].as_str().unwrap();
+    let asked = daemon.turn_refusing_prompts(sid).await;
+    assert!(
+        asked.iter().any(|t| t == "Bash"),
+        "python3 ran without asking after the repository's skill granted it: {asked:?}"
+    );
+}

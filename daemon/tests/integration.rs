@@ -30,6 +30,7 @@ mod plan_mode_in_delegates;
 mod plugin_skills;
 mod plugin_tools_in_scene;
 mod project_trust;
+mod project_trust_symlink;
 mod protocol_doc_examples;
 mod protocol_doc_matches_dispatch;
 mod protocol_doc_wire;

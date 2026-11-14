@@ -95,10 +95,19 @@ impl ProjectTrustSettings {
 
     /// Whether `root` is trusted, and the pattern that said so.
     pub fn decide(&self, root: &Path) -> (ProjectTrust, Option<String>) {
+        self.decide_with_default(root, self.default)
+    }
+
+    /// [`decide`](Self::decide) with `default` for a root no pattern names.
+    pub fn decide_with_default(
+        &self,
+        root: &Path,
+        default: TrustLevel,
+    ) -> (ProjectTrust, Option<String>) {
         if let Some(pattern) = self.trusted.iter().find(|p| pattern_matches(p, root)) {
             return (ProjectTrust::Trusted, Some(pattern.clone()));
         }
-        let trust = match self.default {
+        let trust = match default {
             TrustLevel::Trusted => ProjectTrust::Trusted,
             TrustLevel::Untrusted => ProjectTrust::Untrusted,
         };
@@ -127,6 +136,19 @@ pub struct ProjectLayer {
 /// no project) resolves to.
 pub fn is_own_project_dir(project: &Path, global: &Path, scene: &Path) -> bool {
     !same_dir(project, global) && !same_dir(project, scene)
+}
+
+/// Whether `project` (a `.agix` directory) resolves to the global or scene
+/// directory although its project is not the directory that holds that one —
+/// a `.agix` linked there from a repository. Such a project has no tier of
+/// its own, but it is still somebody's repository.
+pub fn borrows_a_tier(project: &Path, global: &Path, scene: &Path) -> bool {
+    let root = project.parent().unwrap_or(project);
+    [global, scene].into_iter().any(|tier| {
+        project != tier
+            && same_dir(project, tier)
+            && !tier.parent().is_some_and(|holder| same_dir(root, holder))
+    })
 }
 
 pub fn same_dir(a: &Path, b: &Path) -> bool {

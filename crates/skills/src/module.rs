@@ -124,9 +124,6 @@ pub fn build_skill_manager_with_plugins(
 /// the project to be trusted. As `skills/<name>`, for `project.status`.
 pub fn project_skills_requiring_trust(settings: &LoadedSettings) -> Vec<String> {
     use crate::manager::SkillSource;
-    if settings.trust() == base::permission::ProjectTrust::NoProject {
-        return Vec::new();
-    }
     let Some(project) = settings.paths.project_root() else {
         return Vec::new();
     };

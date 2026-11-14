@@ -180,8 +180,11 @@ impl LoadedSettings {
                 .filter(|l| tiers.is_global(l.tier))
                 .map(|l| &l.value),
         );
+        let root = local_dir.parent().unwrap_or(&local_dir);
         let (trust, matched) = if own_project {
-            project_trust.decide(local_dir.parent().unwrap_or(&local_dir))
+            project_trust.decide(root)
+        } else if trust::borrows_a_tier(&local_dir, &global_dir, &scene_dir) {
+            project_trust.decide_with_default(root, trust::TrustLevel::Untrusted)
         } else {
             (ProjectTrust::NoProject, None)
         };
