@@ -234,7 +234,8 @@ impl World {
              git init -q . && mkdir -p sub/evil\n\
              (cd sub/evil && git init -q && touch g && git add g && {commit} -m e \
               && git config core.fsmonitor \"touch '{canary}'; false\")\n\
-             (cd sub && git init -q && touch f && git add f evil && {commit} -m s)\n",
+             (cd sub && git init -q && touch f && git add f evil && {commit} -m s)\n\
+             git add sub\n",
             commit = "git -c user.name=T -c user.email=t@example.invalid -c commit.gpgsign=false commit -q",
             canary = canary.display(),
         );
