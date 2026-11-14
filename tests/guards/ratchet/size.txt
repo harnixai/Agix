@@ -6,7 +6,7 @@ file  crates/assembly/src/plugins.rs                             -              
 file  crates/compaction/src/compact.rs                           -                                      1006
 file  crates/core/src/interface/catalog.rs                       -                                      831
 file  crates/mcp/src/connect.rs                                  -                                      1351
-file  crates/mcp/src/manager.rs                                  -                                      1279
+file  crates/mcp/src/manager.rs                                  -                                      1280
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
 file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/transcript.rs                           -                                      880
