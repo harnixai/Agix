@@ -458,7 +458,12 @@ impl Transcript {
             return Err(SessionError::NotFound(id.to_string()));
         }
         self.session_id = id.to_string();
-        self.turn_count = entries.iter().filter(|e| starts_a_turn(e)).count() as u32;
+        let void = history::transcript::voided(entries);
+        self.turn_count = entries
+            .iter()
+            .zip(&void)
+            .filter(|(e, voided)| !**voided && starts_a_turn(e))
+            .count() as u32;
         self.pending_marker = None;
 
         // Extract parent_session_id from the Meta entry if present.
@@ -485,7 +490,7 @@ impl Transcript {
     }
 
     /// Append an extension entry (`LogEntry::Extension`) to this session's
-    /// log. A no-op without a store.
+    /// log, in the turn lines are written in. A no-op without a store.
     pub async fn record_extension(
         &self,
         ns: &str,
@@ -497,14 +502,19 @@ impl Transcript {
         };
         let sid =
             SessionId::parse(&self.session_id).map_err(|e| SessionError::Id(e.to_string()))?;
+        let tags = history::entry::EntryTags {
+            turn_id: self.turn_id.clone(),
+            origin: None,
+        };
         store
-            .append(
+            .append_tagged(
                 sid,
                 history::entry::LogEntry::Extension {
                     ns: ns.to_string(),
                     event: event.to_string(),
                     payload,
                 },
+                tags,
             )
             .await
             .map_err(|e| SessionError::Store(e.to_string()))
@@ -861,20 +871,27 @@ pub enum SessionError {
     Id(String),
 }
 
-/// The payload of the last `ns`/`event` extension entry in `entries`.
+/// The payload of the last `ns`/`event` extension entry in `entries` that a
+/// rewind has not taken out.
 pub fn latest_extension(
     entries: &[history::entry::EnvelopedEntry],
     ns: &str,
     event: &str,
 ) -> Option<serde_json::Value> {
-    entries.iter().rev().find_map(|env| match &env.entry {
-        history::entry::LogEntry::Extension {
-            ns: n,
-            event: e,
-            payload,
-        } if n == ns && e == event => Some(payload.clone()),
-        _ => None,
-    })
+    let void = history::transcript::voided(entries);
+    entries
+        .iter()
+        .zip(&void)
+        .rev()
+        .filter(|(_, voided)| !**voided)
+        .find_map(|(env, _)| match &env.entry {
+            history::entry::LogEntry::Extension {
+                ns: n,
+                event: e,
+                payload,
+            } if n == ns && e == event => Some(payload.clone()),
+            _ => None,
+        })
 }
 
 #[cfg(test)]
@@ -1681,6 +1698,68 @@ mod tests {
         let mut mgr = Transcript::new(Some(store), None, None);
         let err = mgr.resume(&SessionId::new().to_string()).await.unwrap_err();
         assert!(matches!(err, SessionError::NotFound(_)));
+    }
+    /// A rewind is a line in the log, so what resume rebuilds is the view the
+    /// engine had right after the rewind: the rewound turn's messages and
+    /// state are gone, and the turn count is the turns that are left.
+    #[tokio::test]
+    async fn resume_skips_what_a_rewind_took_out_and_extensions_carry_their_turn() {
+        use history::entry::{EntryTags, LogEntry, MessageOrigin};
+        let tmp = tempfile::tempdir().unwrap();
+        let store = real_store(tmp.path()).await;
+        let sid = SessionId::new();
+        let mut mgr = Transcript::new(Some(store.clone()), Some(sid.to_string()), None);
+        for turn in ["t1", "t2"] {
+            mgr.set_turn_id(Some(turn.into()));
+            mgr.push_message_from(make_text_msg(turn), MessageOrigin::User);
+            mgr.persist().await.unwrap();
+            mgr.record_extension(
+                base::context::SESSION_STATE_NS,
+                base::context::SESSION_STATE_EVENT,
+                serde_json::json!({ "turn": turn }),
+            )
+            .await
+            .unwrap();
+        }
+        let entries = store.load(sid).await.unwrap();
+        let state = entries.last().unwrap();
+        assert_eq!(state.turn_id.as_deref(), Some("t2"));
+        let keep = entries
+            .iter()
+            .rposition(|e| e.turn_id.as_deref() == Some("t1"))
+            .unwrap()
+            + 1;
+        let commit = history::checkpoint::RewindCommit {
+            rewind_id: "r".into(),
+            cut_after: history::checkpoint::plan::cut_after(&entries, keep),
+            conversation: true,
+            files_restored: 0,
+        };
+        store
+            .append_tagged(
+                sid,
+                LogEntry::Extension {
+                    ns: history::checkpoint::REWIND_NS.into(),
+                    event: history::checkpoint::COMMIT.into(),
+                    payload: serde_json::to_value(commit).unwrap(),
+                },
+                EntryTags::default(),
+            )
+            .await
+            .unwrap();
+        let entries = store.load(sid).await.unwrap();
+        let mut resumed = Transcript::new(Some(store.clone()), None, None);
+        resumed.resume_from(&sid.to_string(), &entries).unwrap();
+        assert_eq!(resumed.messages().len(), 1);
+        assert_eq!(resumed.turn_count, 1);
+        assert_eq!(
+            latest_extension(
+                &entries,
+                base::context::SESSION_STATE_NS,
+                base::context::SESSION_STATE_EVENT
+            ),
+            Some(serde_json::json!({ "turn": "t1" }))
+        );
     }
 }
 

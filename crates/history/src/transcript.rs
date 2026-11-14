@@ -176,9 +176,10 @@ pub fn project_messages_with(
     entries: &[EnvelopedEntry],
     projection: &dyn TranscriptProjection,
 ) -> Vec<Message> {
+    let void = voided(entries);
     let mut out = Vec::new();
-    for env in entries {
-        if env.is_sidechain {
+    for (i, env) in entries.iter().enumerate() {
+        if env.is_sidechain || void[i] {
             continue;
         }
         projection.apply(&env.entry, &mut out);
@@ -202,10 +203,11 @@ pub fn project_messages_sourced<'a>(
     entries: &'a [EnvelopedEntry],
     projection: &dyn TranscriptProjection,
 ) -> Vec<SourcedMessage<'a>> {
+    let void = voided(entries);
     let mut messages = Vec::new();
     let mut sources: Vec<(&EnvelopedEntry, Option<usize>)> = Vec::new();
-    for env in entries {
-        if env.is_sidechain {
+    for (i, env) in entries.iter().enumerate() {
+        if env.is_sidechain || void[i] {
             continue;
         }
         let before = messages.len();
@@ -252,10 +254,11 @@ pub fn projected_lengths_with(
     entries: &[EnvelopedEntry],
     projection: &dyn TranscriptProjection,
 ) -> Vec<usize> {
+    let void = voided(entries);
     let mut out = Vec::with_capacity(entries.len());
     let mut messages = Vec::new();
-    for env in entries {
-        if !env.is_sidechain {
+    for (i, env) in entries.iter().enumerate() {
+        if !env.is_sidechain && !void[i] {
             projection.apply(&env.entry, &mut messages);
         }
         out.push(messages.len());
@@ -282,11 +285,16 @@ pub fn resume_projection_report_with(
         warning: None,
     };
 
+    let void = voided(entries);
     let mut messages = Vec::new();
     let mut saw_empty_compact = false;
-    for env in entries {
+    for (i, env) in entries.iter().enumerate() {
         if env.is_sidechain {
             report.sidechain_entry_count += 1;
+            continue;
+        }
+        if void[i] {
+            report.metadata_entry_count += 1;
             continue;
         }
         match &env.entry {
@@ -347,9 +355,10 @@ pub fn projected_message_count_through_entry_id_with(
     target_id: Id,
     projection: &dyn TranscriptProjection,
 ) -> Option<usize> {
+    let void = voided(entries);
     let mut messages: Vec<Message> = Vec::new();
-    for env in entries {
-        if !env.is_sidechain {
+    for (i, env) in entries.iter().enumerate() {
+        if !env.is_sidechain && !void[i] {
             projection.apply(&env.entry, &mut messages);
         }
         if env.id == target_id {
@@ -367,11 +376,75 @@ pub fn latest_projected_message_entry_id_with(
     entries: &[EnvelopedEntry],
     projection: &dyn TranscriptProjection,
 ) -> Option<Id> {
+    let void = voided(entries);
     entries
         .iter()
+        .enumerate()
         .rev()
-        .find(|env| !env.is_sidechain && projection.is_model_visible(&env.entry))
-        .map(|env| env.id)
+        .find(|(i, env)| !env.is_sidechain && !void[*i] && projection.is_model_visible(&env.entry))
+        .map(|(_, env)| env.id)
+}
+
+/// Which entries a committed rewind has taken out of the conversation:
+/// `true` at the positions projection, turn counting and the restore of the
+/// durable state skip.
+///
+/// Applied here rather than in [`TranscriptProjection::apply`], so a
+/// projection someone else wrote cannot bring rewound turns back. A
+/// `commit` voids the voidable lines between the line it names and itself;
+/// the rest — the session's own records, the goal, checkpoints, a host's or
+/// a plugin's entries — stay what they were.
+pub fn voided(entries: &[EnvelopedEntry]) -> Vec<bool> {
+    let mut out = vec![false; entries.len()];
+    let commits: Vec<(usize, crate::checkpoint::RewindCommit)> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, env)| match &env.entry {
+            LogEntry::Extension { ns, event, payload }
+                if ns == crate::checkpoint::REWIND_NS && event == crate::checkpoint::COMMIT =>
+            {
+                serde_json::from_value::<crate::checkpoint::RewindCommit>(payload.clone())
+                    .ok()
+                    .filter(|c| c.conversation)
+                    .map(|c| (i, c))
+            }
+            _ => None,
+        })
+        .collect();
+    if commits.is_empty() {
+        return out;
+    }
+    let position: std::collections::HashMap<Id, usize> =
+        entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+    for (at, commit) in commits {
+        let start = match commit.cut_after {
+            None => 0,
+            Some(id) => match position.get(&id) {
+                Some(&i) if i < at => i + 1,
+                _ => continue,
+            },
+        };
+        for i in start..at {
+            if is_voidable(&entries[i].entry) {
+                out[i] = true;
+            }
+        }
+    }
+    out
+}
+
+fn is_voidable(entry: &LogEntry) -> bool {
+    match entry {
+        LogEntry::User { .. }
+        | LogEntry::Assistant { .. }
+        | LogEntry::ToolResult { .. }
+        | LogEntry::Compact { .. }
+        | LogEntry::System { .. }
+        | LogEntry::Blob { .. }
+        | LogEntry::UsageSnapshot { .. } => true,
+        LogEntry::Extension { ns, .. } => ns == CONTEXT_NS || ns == base::context::SESSION_STATE_NS,
+        LogEntry::Meta { .. } | LogEntry::SessionEnd { .. } => false,
+    }
 }
 
 /// The extension namespace of a host's edits to a session's context — a

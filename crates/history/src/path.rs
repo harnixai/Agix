@@ -47,6 +47,12 @@ pub fn session_sidecar_dir(sessions_root: &Path, session: &SessionId) -> PathBuf
 }
 
 /// Session-scoped TUI input history. JSONL strings so multi-line prompts round-trip.
+/// Where the previous contents of files written in `session` are kept; the
+/// objects are under `objects/`.
+pub fn session_checkpoint_dir(sessions_root: &Path, session: &SessionId) -> PathBuf {
+    session_sidecar_dir(sessions_root, session).join("checkpoints")
+}
+
 pub fn session_tui_input_history_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
     session_sidecar_dir(sessions_root, session).join("tui_input_history.jsonl")
 }

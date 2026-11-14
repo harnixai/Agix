@@ -25,6 +25,16 @@ impl HistoryStore for JsonlHistoryStore {
         }
     }
 
+    fn checkpoint_objects(
+        &self,
+        root: SessionId,
+    ) -> Option<std::sync::Arc<dyn crate::blob::BlobStore>> {
+        let dir = crate::path::session_checkpoint_dir(&self.sessions_root, &root).join("objects");
+        Some(std::sync::Arc::new(
+            crate::checkpoint::CheckpointObjects::new(dir),
+        ))
+    }
+
     fn environment(&self) -> &dyn base::interface::environment::Environment {
         match &self.environment {
             Some(e) => &**e,

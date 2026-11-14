@@ -124,6 +124,10 @@ impl HistoryStore for ObservedHistoryStore {
         self.inner.projection()
     }
 
+    fn checkpoint_objects(&self, root: SessionId) -> Option<Arc<dyn crate::blob::BlobStore>> {
+        self.inner.checkpoint_objects(root)
+    }
+
     fn environment(&self) -> &dyn base::interface::environment::Environment {
         self.inner.environment()
     }

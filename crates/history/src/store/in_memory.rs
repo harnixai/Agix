@@ -22,6 +22,9 @@ pub struct InMemoryHistoryStore {
     sessions: std::sync::Mutex<std::collections::HashMap<SessionId, Vec<EnvelopedEntry>>>,
     titles: std::sync::Mutex<std::collections::HashMap<SessionId, String>>,
     deleted: std::sync::Mutex<std::collections::HashSet<SessionId>>,
+    checkpoints: std::sync::Mutex<
+        HashMap<SessionId, std::sync::Arc<crate::checkpoint::InMemoryCheckpointObjects>>,
+    >,
 }
 
 impl InMemoryHistoryStore {
@@ -91,6 +94,10 @@ impl HistoryStore for InMemoryHistoryStore {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&session);
+        self.checkpoints
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&session);
         self.deleted
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -123,6 +130,20 @@ impl HistoryStore for InMemoryHistoryStore {
                 .collect(),
             forks,
         })
+    }
+
+    fn checkpoint_objects(
+        &self,
+        root: SessionId,
+    ) -> Option<std::sync::Arc<dyn crate::blob::BlobStore>> {
+        let objects = self
+            .checkpoints
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(root)
+            .or_default()
+            .clone();
+        Some(objects)
     }
 
     async fn set_session_title(

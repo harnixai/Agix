@@ -213,6 +213,16 @@ pub trait HistoryStore: Send + Sync {
         Ok(project_messages_with(&entries, self.projection()))
     }
 
+    /// Where the previous contents of files written in `root`'s lineage are
+    /// kept, or `None` when this store keeps none — checkpoints are then off
+    /// for the session.
+    fn checkpoint_objects(
+        &self,
+        _root: SessionId,
+    ) -> Option<std::sync::Arc<dyn crate::blob::BlobStore>> {
+        None
+    }
+
     /// Where this store's kept time and kept identifiers come from.
     ///
     /// On the store for the same reason the projection is: an entry's id and
