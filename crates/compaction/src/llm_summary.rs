@@ -202,33 +202,7 @@ impl LlmSummarizer {
             ));
         }
 
-        let mut content = vec![ModelContentBlock::Text {
-            text: SUMMARY_PROMPT.to_string(),
-        }];
-        if let Some(instructions) = instructions.filter(|i| !i.trim().is_empty()) {
-            content.push(ModelContentBlock::Text {
-                text: format!(
-                    "<summary-instructions>\n{}\n</summary-instructions>\nThe instructions above come from the user; follow them while keeping the nine headings.",
-                    instructions.trim()
-                ),
-            });
-        }
-        content.extend(
-            earlier_summaries
-                .iter()
-                .map(|summary| ModelContentBlock::Text {
-                    text: format!("<earlier-summary>\n{summary}\n</earlier-summary>"),
-                }),
-        );
-        content.push(ModelContentBlock::Text {
-            text: format!(
-                "<conversation-to-summarize>\n{transcript}\n</conversation-to-summarize>"
-            ),
-        });
-        let request = vec![ModelMessage {
-            role: MessageRole::User,
-            content,
-        }];
+        let request = summary_request(earlier_summaries, &transcript, instructions);
         let params = StreamParams {
             model: self.model_name.clone(),
             max_tokens: self.max_tokens,
@@ -428,6 +402,39 @@ pub async fn full_compact_with(
         }),
     };
     Ok((result, meta))
+}
+
+/// The single user message that asks for the summary.
+fn summary_request(
+    earlier_summaries: Vec<String>,
+    transcript: &str,
+    instructions: Option<&str>,
+) -> Vec<ModelMessage> {
+    let mut content = vec![ModelContentBlock::Text {
+        text: SUMMARY_PROMPT.to_string(),
+    }];
+    if let Some(instructions) = instructions.filter(|i| !i.trim().is_empty()) {
+        content.push(ModelContentBlock::Text {
+            text: format!(
+                "<summary-instructions>\n{}\n</summary-instructions>\nThe instructions above come from the user; follow them while keeping the nine headings.",
+                instructions.trim()
+            ),
+        });
+    }
+    content.extend(
+        earlier_summaries
+            .iter()
+            .map(|summary| ModelContentBlock::Text {
+                text: format!("<earlier-summary>\n{summary}\n</earlier-summary>"),
+            }),
+    );
+    content.push(ModelContentBlock::Text {
+        text: format!("<conversation-to-summarize>\n{transcript}\n</conversation-to-summarize>"),
+    });
+    vec![ModelMessage {
+        role: MessageRole::User,
+        content,
+    }]
 }
 
 /// Wrap a summary in the transcript message that replaces the dropped rounds.

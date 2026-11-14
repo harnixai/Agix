@@ -8,7 +8,6 @@ file  crates/core/src/interface/catalog.rs                       -              
 file  crates/mcp/src/connect.rs                                  -                                      1351
 file  crates/mcp/src/manager.rs                                  -                                      1280
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
-file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/transcript.rs                           -                                      901
 file  crates/telemetry/src/recorder/mod.rs                       -                                      942
 fn    crates/agents/src/agent_tool/build.rs                      Delegator::build_delegate              95
@@ -33,7 +32,6 @@ fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models         
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
 fn    crates/compaction/src/budget.rs                            enforce_tool_result_budget             81
-fn    crates/compaction/src/llm_summary.rs                       LlmSummarizer::summarize               95
 fn    crates/core/src/prompt.rs                                  assemble_prompt_with                   94
 fn    crates/core/src/provider.rs                                resolve_task_models                    85
 fn    crates/history/src/transcript.rs                           apply_entry_to_messages                83
@@ -59,7 +57,6 @@ fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build 
 fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   97
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       84
-fn    crates/runtime/src/agent/turn/compact/mod.rs               Agent::run_compaction                  84
 fn    crates/runtime/src/agent/turn/request.rs                   Agent::recover_call                    97
 fn    crates/runtime/src/agent/turn/tool_exec.rs                 post_tool_use                          81
 fn    crates/runtime/src/agent/turn/tool_permission.rs           ask                                    84

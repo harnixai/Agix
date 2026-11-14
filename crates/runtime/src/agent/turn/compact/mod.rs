@@ -10,7 +10,10 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 mod backoff;
+mod manual;
+mod summary;
 use backoff::AutoCompactBackoff;
+pub(crate) use manual::CompactArgs;
 
 /// Compaction and micro-compaction, and what they remember between turns.
 pub(crate) struct Compaction {
@@ -102,14 +105,6 @@ struct PendingStaleTrim {
 struct PendingEarlyTrim {
     summary: CompactSummary,
     took: std::time::Duration,
-}
-
-/// What asking for an LLM summary came to, short of an interrupt.
-enum SummaryAttempt {
-    Written(Vec<ModelMessage>, compaction::compact::CompactResult),
-    /// Not wanted, no summarizer, or nothing the summary could have told.
-    Skipped,
-    ModelFailed(base::interface::model::ModelError),
 }
 
 /// The transcript and the flags a compaction step changes, as they were
@@ -450,38 +445,17 @@ impl Agent {
         let pre_compact = self.session.messages().to_vec();
 
         let compact_start = std::time::Instant::now();
-        let (mut compacted, result) = match self
-            .try_llm_summary(&pre_compact, target, keep, trigger, shape, cancel)
-            .await?
-        {
-            SummaryAttempt::Written(compacted, result) => (compacted, result),
-            SummaryAttempt::Skipped if shape.through.is_some() => {
-                return Err(NotCompacted::Failed(
-                    "compacting up to a chosen point needs a summary model and found nothing to summarize".into(),
-                ))
-            }
-            SummaryAttempt::ModelFailed(error) if shape.through.is_some() => {
-                return Err(NotCompacted::SummaryFailed(error))
-            }
-            SummaryAttempt::Skipped => {
-                self.cascade_compact(&pre_compact, target, keep, compact_start)
-                    .await?
-            }
-            // The cascade still gets its turn; when it cannot help either, the
-            // summary's failure is why nothing was compacted.
-            SummaryAttempt::ModelFailed(error) => match self
-                .cascade_compact(&pre_compact, target, keep, compact_start)
-                .await
-            {
-                Ok((_, result))
-                    if result.strategy == compaction::compact::CompactStrategy::NoOp =>
-                {
-                    return Err(NotCompacted::SummaryFailed(error))
-                }
-                Ok(ok) => ok,
-                Err(_) => return Err(NotCompacted::SummaryFailed(error)),
-            },
-        };
+        let (mut compacted, result) = self
+            .summarized_or_cascaded(
+                &pre_compact,
+                target,
+                keep,
+                trigger,
+                shape,
+                compact_start,
+                cancel,
+            )
+            .await?;
         if result.strategy == compaction::compact::CompactStrategy::NoOp {
             return Err(NotCompacted::NothingToDrop);
         }
@@ -525,116 +499,6 @@ impl Agent {
         self.reset_after_compaction(&summary, result.strategy, trigger);
         self.fire_post_compact_hook(&summary, cancel).await;
         Ok(summary)
-    }
-
-    async fn try_llm_summary(
-        &self,
-        pre_compact: &[ModelMessage],
-        target: usize,
-        keep: usize,
-        trigger: CompactTrigger,
-        shape: &compaction::llm_summary::SummaryShape,
-        cancel: &CancellationToken,
-    ) -> Result<SummaryAttempt, NotCompacted> {
-        // Ahead of the cascade because every cascade layer destroys
-        // information; a summary written after any of them could only
-        // describe the wreckage. Every failure falls through to the cascade,
-        // so the summary can fail to help but never fails a turn.
-        let compactor = self.compaction.compactor.clone();
-        Ok(match self.compaction_summarizer() {
-            Some(summarizer)
-                if trigger == CompactTrigger::Manual
-                    || compactor.wants_llm_summary(
-                        pre_compact,
-                        target,
-                        keep,
-                        self.session.token_counter().as_ref(),
-                    ) =>
-            {
-                match compaction::llm_summary::full_compact_with(
-                    &summarizer,
-                    pre_compact.to_vec(),
-                    target,
-                    keep,
-                    self.session.token_counter().as_ref(),
-                    shape,
-                    cancel,
-                )
-                .await
-                {
-                    Ok((compacted, result)) => {
-                        tracing::info!("compaction: LLM summary produced (FullCompact)");
-                        SummaryAttempt::Written(compacted, result)
-                    }
-                    // An interrupt can also surface as the summary request's
-                    // own error, depending on where the stream was when it hit.
-                    Err(e)
-                        if cancel.is_cancelled()
-                            || matches!(e, compaction::compact::CompactError::Cancelled) =>
-                    {
-                        tracing::info!("compaction: interrupted while summarizing; left as it was");
-                        return Err(NotCompacted::Cancelled);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            "compaction: LLM summary unavailable — falling back to the non-LLM cascade"
-                        );
-                        match e {
-                            compaction::compact::CompactError::Model(error) => {
-                                SummaryAttempt::ModelFailed(error)
-                            }
-                            _ => SummaryAttempt::Skipped,
-                        }
-                    }
-                }
-            }
-            _ => SummaryAttempt::Skipped,
-        })
-    }
-
-    async fn cascade_compact(
-        &self,
-        pre_compact: &[ModelMessage],
-        target: usize,
-        keep: usize,
-        compact_start: std::time::Instant,
-    ) -> Result<(Vec<ModelMessage>, compaction::compact::CompactResult), NotCompacted> {
-        let messages_before = self.session.messages().len();
-        match self
-            .compaction
-            .compactor
-            .compact(
-                pre_compact.to_vec(),
-                target,
-                keep,
-                self.session.token_counter().as_ref(),
-            )
-            .await
-        {
-            Ok(ok) => Ok(ok),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to compact messages, continuing with full context");
-                let tokens = self.context_tokens() as u64;
-                self.telemetry
-                    .record(telemetry::TelemetryEvent::compact_action(
-                        &self.session.session_id,
-                        self.session.turn_count,
-                        Some(self.current_turn_id.clone()),
-                        telemetry::CompactActionPayload {
-                            kind: telemetry::CompactKind::Compact,
-                            strategy: "error".into(),
-                            before_tokens: tokens,
-                            after_tokens: tokens,
-                            before_message_count: messages_before,
-                            after_message_count: messages_before,
-                            success: false,
-                            latency_ms: compact_start.elapsed().as_millis() as u64,
-                        },
-                    ));
-                Err(NotCompacted::Failed(e.to_string()))
-            }
-        }
     }
 
     fn reset_after_compaction(
@@ -936,116 +800,5 @@ impl Agent {
                 Err(TurnError::Model(error, false))
             }
         }
-    }
-}
-
-/// Where `/compact --at` cuts: the end of a turn, or the round holding a tool
-/// call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CompactAt {
-    Turn(String),
-    ToolUse(String),
-}
-
-/// The arguments of `/compact`: `[--at turn:<id>|tool_use:<id>] [instructions]`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CompactArgs {
-    pub(crate) at: Option<CompactAt>,
-    pub(crate) instructions: Option<String>,
-}
-
-impl CompactArgs {
-    pub(crate) fn parse(args: &str) -> Result<Self, String> {
-        let args = args.trim();
-        let (at, rest) = match args.strip_prefix("--at") {
-            Some(rest) if rest.starts_with(char::is_whitespace) => {
-                let rest = rest.trim_start();
-                let (reference, rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-                let at = match reference.split_once(':') {
-                    Some(("turn", id)) if !id.is_empty() => CompactAt::Turn(id.to_string()),
-                    Some(("tool_use", id)) if !id.is_empty() => CompactAt::ToolUse(id.to_string()),
-                    _ => {
-                        return Err(format!(
-                            "`--at` takes turn:<id> or tool_use:<id>, got `{reference}`"
-                        ))
-                    }
-                };
-                (Some(at), rest.trim())
-            }
-            _ => (None, args),
-        };
-        Ok(Self {
-            at,
-            instructions: (!rest.is_empty()).then(|| rest.to_string()),
-        })
-    }
-}
-
-impl Agent {
-    /// How many leading messages a compaction up to `at` summarizes.
-    pub(crate) async fn messages_through(&mut self, at: &CompactAt) -> Result<usize, String> {
-        match at {
-            CompactAt::ToolUse(id) => {
-                let messages = self.session.messages();
-                let call = messages
-                    .iter()
-                    .position(|m| {
-                        m.content.iter().any(
-                            |b| matches!(b, ModelContentBlock::ToolUse { id: u, .. } if u == id),
-                        )
-                    })
-                    .ok_or_else(|| format!("the conversation has no tool call `{id}`"))?;
-                let answered = messages[call + 1..].iter().position(|m| {
-                    m.content.iter().any(|b| {
-                        matches!(b, ModelContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id)
-                    })
-                });
-                Ok(match answered {
-                    Some(offset) => call + 1 + offset + 1,
-                    None => call + 1,
-                })
-            }
-            CompactAt::Turn(turn) => {
-                let store = self
-                    .session
-                    .history_store()
-                    .cloned()
-                    .ok_or("this session keeps no log")?;
-                self.flush_log().await?;
-                let sid = base::session::SessionId::parse(&self.session.session_id)
-                    .map_err(|e| e.to_string())?;
-                let entries = store.load(sid).await.map_err(|e| e.to_string())?;
-                let voided = history::transcript::voided(&entries);
-                let keep = history::checkpoint::plan::cut(
-                    &entries,
-                    &voided,
-                    &history::checkpoint::RewindTarget::ToTurn(turn.clone()),
-                )
-                .map_err(|e| e.to_string())?;
-                let last = history::checkpoint::plan::cut_after(&entries, keep)
-                    .ok_or("the turn has no messages")?;
-                history::transcript::projected_message_count_through_entry_id(&entries, last)
-                    .ok_or_else(|| "the turn is not in the log".to_string())
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod args_tests {
-    use super::*;
-
-    #[test]
-    fn args_split_into_a_point_and_instructions() {
-        assert_eq!(CompactArgs::parse("").unwrap(), CompactArgs::default());
-        let parsed = CompactArgs::parse("--at turn:t2 keep the API names").unwrap();
-        assert_eq!(parsed.at, Some(CompactAt::Turn("t2".into())));
-        assert_eq!(parsed.instructions.as_deref(), Some("keep the API names"));
-        let parsed = CompactArgs::parse("--at tool_use:abc").unwrap();
-        assert_eq!(parsed.at, Some(CompactAt::ToolUse("abc".into())));
-        assert_eq!(parsed.instructions, None);
-        let plain = CompactArgs::parse("--atlas matters").unwrap();
-        assert_eq!(plain.instructions.as_deref(), Some("--atlas matters"));
-        assert!(CompactArgs::parse("--at nowhere").is_err());
     }
 }
