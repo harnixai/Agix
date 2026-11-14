@@ -97,7 +97,7 @@ fn test_settings() -> base::settings::LoadedSettings {
     recall_test_settings(&std::env::temp_dir().join("agix-mcp-module-tests"))
 }
 
-// `McpManager::all_prompts` / `execute_prompt` / `list_resources` /
+// `McpManager::all_prompts` / `list_resources` /
 // `read_resource` must be reachable from a session, not only MCP *tools*.
 // These drive a whole turn through `run_turn`, so they cover the
 // registration in `Builder::build`, the slash-command interception, and

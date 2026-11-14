@@ -21,10 +21,6 @@ pub enum McpServerConfig {
         args: Vec<String>,
         #[serde(default)]
         env: HashMap<String, String>,
-        /// Optional scope: limit which tools/resources/prompts this server exposes.
-        /// An empty vec or None means "all". Each entry is a tool/resource/prompt name prefix.
-        #[serde(default)]
-        scope: Option<Vec<String>>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
         /// Where the process starts and a relative `command` is found; the
@@ -39,8 +35,6 @@ pub enum McpServerConfig {
         headers: HashMap<String, String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oauth: Option<McpOAuthConfig>,
-        #[serde(default)]
-        scope: Option<Vec<String>>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
     },
@@ -51,8 +45,6 @@ pub enum McpServerConfig {
         headers: HashMap<String, String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oauth: Option<McpOAuthConfig>,
-        #[serde(default)]
-        scope: Option<Vec<String>>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
     },
@@ -62,8 +54,6 @@ pub enum McpServerConfig {
         url: String,
         #[serde(default)]
         headers: HashMap<String, String>,
-        #[serde(default)]
-        scope: Option<Vec<String>>,
         #[serde(flatten)]
         timeouts: McpTimeouts,
     },
@@ -729,7 +719,6 @@ mod tests {
         let cfg = McpServerConfig::WebSocket {
             url: "ws://localhost/mcp".into(),
             headers: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
         };
         assert!(cfg.oauth().is_none() && !cfg.oauth_capable());
@@ -778,7 +767,6 @@ mod tests {
             command: "echo".into(),
             args: vec![],
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         };
@@ -788,7 +776,6 @@ mod tests {
             url: "https://example.com".into(),
             headers: HashMap::new(),
             oauth: None,
-            scope: None,
             timeouts: Default::default(),
         };
         assert_eq!(http.url(), Some("https://example.com"));
@@ -796,7 +783,6 @@ mod tests {
         let ws = McpServerConfig::WebSocket {
             url: "ws://localhost".into(),
             headers: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
         };
         assert_eq!(ws.url(), Some("ws://localhost"));

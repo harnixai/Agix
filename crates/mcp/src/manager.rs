@@ -750,25 +750,6 @@ impl McpManager {
         self.prompts = prompts;
     }
 
-    /// Execute a named MCP prompt on the specified server. Returns the
-    /// rendered text from the server's prompt handler, or an error message.
-    pub async fn execute_prompt(
-        &self,
-        server: &str,
-        prompt_name: &str,
-        args: &std::collections::HashMap<String, String>,
-    ) -> String {
-        for client in &self.clients {
-            if client.server_name() == server {
-                match client.get_prompt(prompt_name, args).await {
-                    Ok(content) => return content,
-                    Err(e) => return format!("MCP prompt error: {e}"),
-                }
-            }
-        }
-        format!("MCP server '{server}' not found")
-    }
-
     /// Look up a collected prompt by its slash command name
     /// (`mcp__<server>__<prompt>`).
     pub fn find_prompt_command(&self, command: &str) -> Option<&McpPromptEntry> {
@@ -1326,7 +1307,6 @@ mod tests {
                 url: "http://127.0.0.1:1/nonexistent".into(),
                 headers: HashMap::new(),
                 oauth: None,
-                scope: None,
                 timeouts: Default::default(),
             },
         );
@@ -1339,7 +1319,6 @@ mod tests {
             command: "/nonexistent/agix-mcp-server".into(),
             args: Vec::new(),
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         }
@@ -1477,7 +1456,6 @@ mod tests {
             command: "/bin/sh".into(),
             args: vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
             env: HashMap::new(),
-            scope: None,
             timeouts: crate::config::McpTimeouts {
                 startup_timeout_ms: Some(600),
                 ..Default::default()

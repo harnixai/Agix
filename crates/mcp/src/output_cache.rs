@@ -111,14 +111,6 @@ impl McpOutputCache {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-
-    /// Drop expired entries; returns how many went.
-    pub fn evict_expired(&mut self) -> usize {
-        let before = self.entries.len();
-        self.entries
-            .retain(|_, v| v.created_at.elapsed() <= CACHE_TTL);
-        before - self.entries.len()
-    }
 }
 
 #[cfg(test)]
@@ -206,14 +198,6 @@ mod tests {
         assert_eq!(cache.len(), 1);
         cache.clear();
         assert!(cache.is_empty());
-    }
-
-    #[test]
-    fn evict_expired_keeps_fresh_entries() {
-        let mut cache = McpOutputCache::new();
-        cache.put("s", "t", &make_args("x"), make_result("y"));
-        assert_eq!(cache.evict_expired(), 0);
-        assert_eq!(cache.len(), 1);
     }
 
     #[test]

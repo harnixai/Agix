@@ -471,7 +471,6 @@ mod tests {
             command: command.into(),
             args: vec![],
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         }
@@ -482,7 +481,6 @@ mod tests {
             url: url.into(),
             headers: HashMap::new(),
             oauth: None,
-            scope: None,
             timeouts: Default::default(),
         }
     }
@@ -661,7 +659,6 @@ mod tests {
         McpServerConfig::WebSocket {
             url: url.into(),
             headers: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
         }
     }

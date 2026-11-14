@@ -613,7 +613,7 @@ impl McpClient for StdioMcpClient {
 }
 
 /// 把 `prompts/get` 的结果渲染成给 slash command 用的纯文本：拼接所有消息的
-/// 文本内容，非文本 content（图片/资源）用占位说明——`execute_prompt()` 的调
+/// 文本内容，非文本 content（图片/资源）用占位说明——`invoke_prompt_command` 的调
 /// 用方期望一个可以直接当 prompt body 用的字符串，不是结构化多模态内容。
 /// 消息为空时退回 `description`（服务器可能只填了这一个字段）。
 fn render_prompt_result(result: rmcp::model::GetPromptResult) -> String {
@@ -1357,7 +1357,6 @@ done
             command: "/bin/sh".into(),
             args: vec![script.to_string_lossy().into_owned()],
             env: HashMap::new(),
-            scope: None,
             timeouts,
             working_dir: None,
         }
@@ -1370,7 +1369,6 @@ done
             command: "/bin/sh".into(),
             args: vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
             env: HashMap::new(),
-            scope: None,
             timeouts: crate::config::McpTimeouts {
                 startup_timeout_ms: Some(300),
                 ..Default::default()
@@ -1494,7 +1492,6 @@ done
                 ),
             ],
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         };
@@ -1542,7 +1539,6 @@ done
                         ),
                     ],
                     env: HashMap::new(),
-                    scope: None,
                     timeouts: Default::default(),
                     working_dir: None,
                 };
@@ -1590,7 +1586,6 @@ done
             command: "/nonexistent/agix-mcp-server".into(),
             args: Vec::new(),
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         };
@@ -1598,7 +1593,6 @@ done
             url: "not a url".into(),
             headers: HashMap::new(),
             oauth: None,
-            scope: None,
             timeouts: Default::default(),
         };
         let started = Instant::now();
@@ -1635,7 +1629,6 @@ done
             command: "./server.sh".into(),
             args: Vec::new(),
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         }
@@ -1668,7 +1661,6 @@ done
             command: "sh".into(),
             args: vec!["-c".into(), format!("env > '{}'", out.display())],
             env: HashMap::new(),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         };
@@ -1717,7 +1709,6 @@ done
             command: "sh".into(),
             args: vec!["-c".into(), format!("env > '{}'", out.display())],
             env: HashMap::from([("GIVEN".to_string(), format!("${OWN}"))]),
-            scope: None,
             timeouts: Default::default(),
             working_dir: None,
         };
@@ -1766,7 +1757,6 @@ done
                 command: "echo".into(),
                 args: Vec::new(),
                 env: HashMap::new(),
-                scope: None,
                 timeouts: Default::default(),
                 working_dir: None,
             },
@@ -1790,7 +1780,6 @@ done
                 url: "http://example.com/mcp".into(),
                 headers: HashMap::new(),
                 oauth: None,
-                scope: None,
                 timeouts: Default::default(),
             },
             instructions: None,
@@ -1816,7 +1805,6 @@ done
             url: url.into(),
             headers,
             oauth: None,
-            scope: None,
             timeouts: Default::default(),
         };
         let client = StdioMcpClient {
@@ -1858,7 +1846,6 @@ done
                 command: "echo".into(),
                 args: Vec::new(),
                 env: HashMap::new(),
-                scope: None,
                 timeouts: Default::default(),
                 working_dir: None,
             },
@@ -1936,7 +1923,6 @@ done
                 command: "/nonexistent/binary/that/should/fail".into(),
                 args: Vec::new(),
                 env: HashMap::new(),
-                scope: None,
                 timeouts: Default::default(),
                 working_dir: None,
             },
@@ -1993,7 +1979,6 @@ done
             config: McpServerConfig::WebSocket {
                 url: "ws://localhost:8080/mcp".into(),
                 headers: HashMap::new(),
-                scope: None,
                 timeouts: Default::default(),
             },
             instructions: None,
@@ -2016,7 +2001,6 @@ done
                 config: McpServerConfig::WebSocket {
                     url: "ws://localhost:8080/mcp".into(),
                     headers: HashMap::new(),
-                    scope: None,
                     timeouts: Default::default(),
                 },
                 instructions: None,
@@ -2044,7 +2028,6 @@ done
                     command: "echo".into(),
                     args: vec![],
                     env: HashMap::new(),
-                    scope: None,
                     timeouts: Default::default(),
                     working_dir: None,
                 },
