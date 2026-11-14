@@ -4,8 +4,8 @@
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration size::
 file  crates/compaction/src/compact.rs                           -                                      1006
 file  crates/core/src/interface/catalog.rs                       -                                      831
-file  crates/mcp/src/connect.rs                                  -                                      1335
-file  crates/mcp/src/manager.rs                                  -                                      1275
+file  crates/mcp/src/connect.rs                                  -                                      1351
+file  crates/mcp/src/manager.rs                                  -                                      1279
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
 file  crates/runtime/src/agent/turn/compact/mod.rs               -                                      897
 file  crates/session/src/transcript.rs                           -                                      880
@@ -30,7 +30,7 @@ fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::ru
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   90
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
-fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     86
+fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
 fn    crates/compaction/src/budget.rs                            enforce_tool_result_budget             81
 fn    crates/compaction/src/llm_summary.rs                       LlmSummarizer::summarize               95
 fn    crates/core/src/prompt.rs                                  assemble_prompt_with                   94

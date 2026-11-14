@@ -2273,6 +2273,7 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 // ← result
 { "servers": [ ] }
 // 元素:{ "name":"…", "transport":"…", "tool_count": 0, "state":"connected",
+//         "limited": "kept 200 of 300 tools; …",   // 仅当 server 的工具表被截过
 //         "auth": { "state":"authorized", "issuer":"https://…", "scopes":["…"],
 //                   "expires_at":"2026-11-08T10:00:00Z" } }
 ```
@@ -2308,7 +2309,10 @@ scope(403 `insufficient_scope`),现有令牌对别的请求仍然有效。
 (`mcp_auth.md` §1),带 `oauth_provider` 的配置被拒绝(`INVALID_PARAMS`,message 给出 `oauth`
 的写法)。每种都可以带 `startup_timeout_ms`(起进程加握手,以及工具调用以外的每个请求;默认取
 环境变量 `MCP_TIMEOUT`,再缺省 30000)与 `tool_timeout_ms`(一次工具调用;默认取
-`MCP_TOOL_TIMEOUT`,再缺省 600000),超时的请求在 server 端被取消。写进项目层 settings.json 并**立刻尝试连接**,
+`MCP_TOOL_TIMEOUT`,再缺省 600000),超时的请求在 server 端被取消。工具表的上限也在这里:
+`max_tools`(缺省 200,多出的丢弃)、`max_description_chars`(缺省 4096,截断)、
+`max_schema_bytes`(缺省 65536,超出的 schema 换成空对象 schema);截过就在 `mcp.status`
+对应条目的 `limited` 里写明截了什么。写进项目层 settings.json 并**立刻尝试连接**,
 所以它是项目层的 server:以项目根为工作目录启动,相对的 `command` 与参数里的相对路径按项目根
 解析;配置里的 `$VAR` 只从它自己的 `env` 块展开,不读 daemon 的环境,
 `oauth` 里的 `client_secret_env` / `private_key_jwt.key_env` 会让连接被拒(ARCHITECTURE.md

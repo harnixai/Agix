@@ -1017,6 +1017,7 @@ impl McpManager {
                 transport: c.transport_kind(),
                 tool_count: counts.get(c.server_name()).copied().unwrap_or(0),
                 connected: c.is_connected(),
+                tools_cut: c.tools_cut(),
             })
             .collect()
     }
@@ -1198,6 +1199,7 @@ impl ConnectOutcome {
                 transport: client.transport_kind(),
                 tool_count: adapters.len(),
                 connected: true,
+                tools_cut: client.tools_cut(),
             }),
             _ => None,
         }
@@ -1238,6 +1240,8 @@ pub struct ServerStatus {
     pub tool_count: usize,
     /// The connection was up when last seen; see [`McpClient::is_connected`].
     pub connected: bool,
+    /// What the server's tool list was cut to keep to its limits.
+    pub tools_cut: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1458,7 +1462,7 @@ mod tests {
             command: "/bin/sh".into(),
             args: vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
             env: HashMap::new(),
-            timeouts: crate::config::McpTimeouts {
+            timeouts: crate::config::McpLimits {
                 startup_timeout_ms: Some(600),
                 ..Default::default()
             },

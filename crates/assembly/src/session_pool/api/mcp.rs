@@ -60,6 +60,10 @@ pub struct McpServerStatus {
     pub state: McpServerState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// What the server's tool list was cut to keep to its limits
+    /// (`max_tools`, `max_description_chars`, `max_schema_bytes`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limited: Option<String>,
     pub auth: McpAuthStatus,
 }
 

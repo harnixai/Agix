@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod connect;
 pub mod error;
+pub mod limits;
 pub mod manager;
 pub mod module;
 pub mod naming;

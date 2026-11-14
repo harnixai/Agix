@@ -1,5 +1,5 @@
 //! MCP server 配置。`type` 字段做 enum tag；远端 server 的 `oauth` 块描述它的访问令牌
-//! 从哪来，语义见 `docs/mcp_auth.md`；每个 server 连接与调用的时限见 [`McpTimeouts`]。
+//! 从哪来，语义见 `docs/mcp_auth.md`；每个 server 连接与调用的时限见 [`McpLimits`]。
 //!
 //! 配置里的 `$VAR` 在连接时用本进程的环境展开（[`expand_env_vars`]）。项目层声明的
 //! server 先过 [`McpServerConfig::confined_to_own_env`]：只从它自己的 `env` 块取值。
@@ -22,7 +22,7 @@ pub enum McpServerConfig {
         #[serde(default)]
         env: HashMap<String, String>,
         #[serde(flatten)]
-        timeouts: McpTimeouts,
+        timeouts: McpLimits,
         /// Where the process starts and a relative `command` is found; the
         /// daemon's own working directory when `None`. Set by the embedder
         /// ([`McpServerConfig::run_in`]), never by configuration.
@@ -36,7 +36,7 @@ pub enum McpServerConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oauth: Option<McpOAuthConfig>,
         #[serde(flatten)]
-        timeouts: McpTimeouts,
+        timeouts: McpLimits,
         /// Which settings tier declared this server; part of the identity
         /// its stored sign-in is filed under. Set by the embedder
         /// ([`McpServerConfig::declared_in`]), never by configuration.
@@ -51,7 +51,7 @@ pub enum McpServerConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oauth: Option<McpOAuthConfig>,
         #[serde(flatten)]
-        timeouts: McpTimeouts,
+        timeouts: McpLimits,
         /// Which settings tier declared this server; part of the identity
         /// its stored sign-in is filed under. Set by the embedder
         /// ([`McpServerConfig::declared_in`]), never by configuration.
@@ -65,7 +65,7 @@ pub enum McpServerConfig {
         #[serde(default)]
         headers: HashMap<String, String>,
         #[serde(flatten)]
-        timeouts: McpTimeouts,
+        timeouts: McpLimits,
     },
 }
 
@@ -317,12 +317,14 @@ impl McpOAuthConfig {
     }
 }
 
-/// How long a server may take. Each limit is the server's own
-/// `startup_timeout_ms` / `tool_timeout_ms`, else the `MCP_TIMEOUT` /
-/// `MCP_TOOL_TIMEOUT` environment variable (milliseconds, as Claude Code
-/// reads them), else the default.
+/// How long a server may take and how much it may offer. Each time limit is
+/// the server's own `startup_timeout_ms` / `tool_timeout_ms`, else the
+/// `MCP_TIMEOUT` / `MCP_TOOL_TIMEOUT` environment variable (milliseconds, as
+/// Claude Code reads them), else the default. `max_tools`,
+/// `max_description_chars` and `max_schema_bytes` bound what a server's tool
+/// list puts in front of the model; the rest is cut and `mcp.status` says so.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct McpTimeouts {
+pub struct McpLimits {
     /// Starting the server and finishing the MCP handshake, and every
     /// request other than a tool call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -330,7 +332,17 @@ pub struct McpTimeouts {
     /// One `tools/call`. A call past it is cancelled on the server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tools: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_description_chars: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_schema_bytes: Option<usize>,
 }
+
+pub const DEFAULT_MAX_TOOLS: usize = 200;
+pub const DEFAULT_MAX_DESCRIPTION_CHARS: usize = 4096;
+pub const DEFAULT_MAX_SCHEMA_BYTES: usize = 64 * 1024;
 
 pub const DEFAULT_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 pub const DEFAULT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
@@ -342,7 +354,18 @@ fn limit(own: Option<u64>, env: &str, default: std::time::Duration) -> std::time
         .unwrap_or(default)
 }
 
-impl McpTimeouts {
+impl McpLimits {
+    /// What a tool list is cut to: tools kept, description characters, schema
+    /// bytes.
+    pub fn offered(&self) -> (usize, usize, usize) {
+        (
+            self.max_tools.unwrap_or(DEFAULT_MAX_TOOLS),
+            self.max_description_chars
+                .unwrap_or(DEFAULT_MAX_DESCRIPTION_CHARS),
+            self.max_schema_bytes.unwrap_or(DEFAULT_MAX_SCHEMA_BYTES),
+        )
+    }
+
     pub fn startup(&self) -> std::time::Duration {
         limit(
             self.startup_timeout_ms,
@@ -361,7 +384,7 @@ impl McpTimeouts {
 }
 
 impl McpServerConfig {
-    pub fn timeouts(&self) -> &McpTimeouts {
+    pub fn timeouts(&self) -> &McpLimits {
         match self {
             McpServerConfig::Stdio { timeouts, .. }
             | McpServerConfig::StreamableHttp { timeouts, .. }
@@ -774,7 +797,7 @@ mod tests {
         let bare: McpServerConfig =
             serde_json::from_value(json!({"type": "streamable_http", "url": "http://h/mcp"}))
                 .unwrap();
-        assert_eq!(*bare.timeouts(), McpTimeouts::default());
+        assert_eq!(*bare.timeouts(), McpLimits::default());
         let back = serde_json::to_value(&bare).unwrap();
         assert!(back.get("startup_timeout_ms").is_none(), "{back}");
     }

@@ -28,6 +28,7 @@ pub(in crate::session_pool) fn untrusted_mcp_entries(
                     "the project is not trusted; its own MCP servers start once it is (project.trust)"
                         .into(),
                 ),
+                limited: None,
                 auth: api::McpAuthStatus::default(),
             }
         })
@@ -83,12 +84,14 @@ pub(in crate::session_pool) fn mcp_status_entries(
                  tool_count: usize,
                  state: State,
                  error: Option<String>,
+                 limited: Option<String>,
                  auth: api::McpAuthStatus| api::McpServerStatus {
         name: name.to_string(),
         transport,
         tool_count,
         state,
         error,
+        limited,
         auth,
     };
     let connected = manager.server_statuses().into_iter().map(|s| {
@@ -103,6 +106,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
             s.tool_count,
             state,
             None,
+            s.tools_cut,
             auth(&s.name),
         )
     });
@@ -112,6 +116,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
             c.transport.to_string(),
             0,
             State::Connecting,
+            None,
             None,
             auth(&c.name),
         )
@@ -123,6 +128,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
             0,
             State::Failed,
             Some(f.error.clone()),
+            None,
             auth(&f.name),
         )
     });
@@ -132,6 +138,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
             p.transport.to_string(),
             0,
             State::AuthRequired,
+            None,
             None,
             auth(&p.name),
         )
@@ -143,6 +150,7 @@ pub(in crate::session_pool) fn mcp_status_entries(
             0,
             State::Denied,
             Some(d.reason.clone()),
+            None,
             api::McpAuthStatus::default(),
         )
     });

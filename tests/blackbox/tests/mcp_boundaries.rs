@@ -254,12 +254,14 @@ async fn a_server_that_answers_garbage_is_left_out_and_the_others_still_work() -
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_with_hundreds_of_tools_is_listed_whole_and_its_last_tool_answers(
+async fn a_server_with_hundreds_of_tools_is_listed_whole_under_a_raised_limit_and_its_last_tool_answers(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let scratch = tempfile::tempdir()?;
     let many: Vec<Value> = (0..400).map(|i| tool(&format!("t{i:03}"))).collect();
-    let servers = json!({ "many": canned_server(scratch.path(), "many", &many)? });
+    let mut many_server = canned_server(scratch.path(), "many", &many)?;
+    many_server["max_tools"] = json!(1000);
+    let servers = json!({ "many": many_server });
     let mut run = stubbed("many", &stub)
         .settings(json!({ "mcp_servers": servers }))
         .start()
@@ -298,6 +300,39 @@ async fn a_server_with_hundreds_of_tools_is_listed_whole_and_its_last_tool_answe
         ours.len() == 400 || searchable,
         "{} of 400 tools offered and no way to find the rest",
         ours.len()
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_past_the_metadata_limits_is_cut_and_status_says_so() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let mut tools: Vec<Value> = (0..300).map(|i| tool(&format!("t{i:03}"))).collect();
+    tools[0]["description"] = json!("d".repeat(50_000));
+    tools[1]["inputSchema"] = json!({
+        "type": "object",
+        "properties": { "p": { "type": "string", "description": "s".repeat(200_000) } }
+    });
+    let servers = json!({ "big": canned_server(scratch.path(), "big", &tools)? });
+    let mut run = stubbed("limits", &stub)
+        .settings(json!({ "mcp_servers": servers }))
+        .start()
+        .await?;
+    let status = mcp_status_until(&mut run, "the big server connected", |s| {
+        s.iter()
+            .any(|s| s["name"] == "big" && s["state"] == "connected")
+    })
+    .await?;
+    let big = status.iter().find(|s| s["name"] == "big").unwrap();
+    assert_eq!(big["tool_count"], 200, "{big}");
+    let limited = big["limited"].as_str().unwrap_or_default();
+    assert!(
+        limited.contains("200 of 300")
+            && limited.contains("description")
+            && limited.contains("schema"),
+        "{big}"
     );
     run.finish().await;
     Ok(())

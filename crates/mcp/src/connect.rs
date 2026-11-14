@@ -6,7 +6,7 @@
 //! ## 时限
 //!
 //! 起 server 加握手、以及工具调用以外的每个请求，受 server 的启动时限约束；
-//! `tools/call` 受工具时限约束（见 [`crate::config::McpTimeouts`]）。超时的请求在
+//! `tools/call` 受工具时限约束（见 [`crate::config::McpLimits`]）。超时的请求在
 //! server 端被取消（rmcp 发 `notifications/cancelled`），连接本身留着。
 //!
 //! ## 重连策略
@@ -75,6 +75,7 @@ pub struct StdioMcpClient {
     /// Also what serializes reconnects: two requests that find the
     /// connection gone make one new one between them.
     last_reconnect_at: Mutex<Option<Instant>>,
+    tools_cut: std::sync::Mutex<Option<String>>,
     consecutive_failures: AtomicU32,
     /// Kept so a reconnect rebuilds the same notification wiring — a server
     /// that came back after a crash is exactly one whose tool list may have
@@ -149,6 +150,7 @@ impl StdioMcpClient {
             instructions,
             inner: Mutex::new(Some(Arc::new(spawned.service))),
             last_reconnect_at: Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink,
             env_policy,
@@ -413,7 +415,7 @@ impl StdioMcpClient {
                 svc.list_tools(Default::default()),
             )
             .await?;
-        Ok(list
+        let tools = list
             .tools
             .into_iter()
             .map(|t| McpToolMeta {
@@ -429,7 +431,10 @@ impl StdioMcpClient {
                     })
                     .unwrap_or_default(),
             })
-            .collect())
+            .collect();
+        let (tools, cut) = crate::limits::within(tools, &self.config.timeouts().offered());
+        *self.tools_cut.lock().unwrap_or_else(|e| e.into_inner()) = cut;
+        Ok(tools)
     }
 
     async fn call_tool_inner(
@@ -571,6 +576,13 @@ impl McpClient for StdioMcpClient {
 
     fn is_connected(&self) -> bool {
         StdioMcpClient::is_connected(self)
+    }
+
+    fn tools_cut(&self) -> Option<String> {
+        self.tools_cut
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     async fn list_tools(&self) -> Result<Vec<McpToolMeta>, McpError> {
@@ -1300,6 +1312,10 @@ impl McpClient for WebSocketMcpClient {
         self.inner.instructions()
     }
 
+    fn tools_cut(&self) -> Option<String> {
+        self.inner.tools_cut()
+    }
+
     async fn list_tools(&self) -> Result<Vec<McpToolMeta>, McpError> {
         self.inner.list_tools().await
     }
@@ -1342,7 +1358,7 @@ mod tests {
     /// `tools/list`, answers a call to `ping`, and never answers a call to
     /// anything else.
     #[cfg(unix)]
-    fn sh_server(dir: &std::path::Path, timeouts: crate::config::McpTimeouts) -> McpServerConfig {
+    fn sh_server(dir: &std::path::Path, timeouts: crate::config::McpLimits) -> McpServerConfig {
         let script = dir.join("server.sh");
         std::fs::write(
             &script,
@@ -1376,7 +1392,7 @@ done
             command: "/bin/sh".into(),
             args: vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
             env: HashMap::new(),
-            timeouts: crate::config::McpTimeouts {
+            timeouts: crate::config::McpLimits {
                 startup_timeout_ms: Some(300),
                 ..Default::default()
             },
@@ -1403,7 +1419,7 @@ done
         let dir = tempfile::tempdir().unwrap();
         let cfg = sh_server(
             dir.path(),
-            crate::config::McpTimeouts {
+            crate::config::McpLimits {
                 tool_timeout_ms: Some(300),
                 ..Default::default()
             },
@@ -1771,6 +1787,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -1794,6 +1811,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -1826,6 +1844,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -1862,6 +1881,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -1939,6 +1959,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -1994,6 +2015,7 @@ done
             instructions: None,
             inner: tokio::sync::Mutex::new(None),
             last_reconnect_at: tokio::sync::Mutex::new(None),
+            tools_cut: Default::default(),
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             env_policy: Default::default(),
@@ -2016,6 +2038,7 @@ done
                 instructions: None,
                 inner: tokio::sync::Mutex::new(None),
                 last_reconnect_at: tokio::sync::Mutex::new(None),
+                tools_cut: Default::default(),
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
                 env_policy: Default::default(),
@@ -2044,6 +2067,7 @@ done
                 instructions: Some("test".into()),
                 inner: tokio::sync::Mutex::new(None),
                 last_reconnect_at: tokio::sync::Mutex::new(None),
+                tools_cut: Default::default(),
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
                 env_policy: Default::default(),

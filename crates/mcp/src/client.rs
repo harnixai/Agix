@@ -107,6 +107,12 @@ pub trait McpClient: Send + Sync {
         true
     }
 
+    /// What the last `list_tools` cut off to keep to the server's limits, if
+    /// anything.
+    fn tools_cut(&self) -> Option<String> {
+        None
+    }
+
     async fn list_tools(&self) -> Result<Vec<McpToolMeta>, McpError>;
 
     async fn call_tool(
