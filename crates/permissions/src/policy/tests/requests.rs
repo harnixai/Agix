@@ -466,15 +466,16 @@ async fn a_session_allow_cannot_carve_an_exception_out_of_a_settings_deny() {
     );
 }
 
-fn project_settings(root: &Path) -> base::settings::LoadedSettings {
+fn project_settings(root: &Path) -> settings::LoadedSettings {
     let project = root.join("project");
     std::fs::create_dir_all(&project).unwrap();
-    base::settings::LoadedSettings::load(
+    settings::LoadedSettings::load(
         root.join("global"),
         root.join("scene"),
         project,
         "code",
         "m",
+        &settings::section::Sections::none(),
     )
 }
 
@@ -485,7 +486,7 @@ async fn a_project_grant_is_written_where_the_next_session_reads_it() {
     let root = tempfile::tempdir().unwrap();
     let settings = project_settings(root.path());
     let local = settings.paths.local_settings_file().unwrap();
-    let perm = Policy::from_settings(&settings, []);
+    let perm = Policy::from_settings(&settings.permission_settings(), []);
 
     perm.grant(Grant::new(
         "Probe",
@@ -506,12 +507,12 @@ async fn a_project_grant_is_written_where_the_next_session_reads_it() {
     ));
     let reloaded = project_settings(root.path());
     assert!(
-        crate::rule::rules_from(&reloaded)
+        crate::rule::rules_from(&reloaded.permission_settings())
             .iter()
             .all(|r| r.source != RuleSource::LocalSettings),
         "an exact allow is not a pattern rule"
     );
-    let rules: Vec<_> = crate::rule::exact_allows_from(&reloaded)
+    let rules: Vec<_> = crate::rule::exact_allows_from(&reloaded.permission_settings())
         .into_iter()
         .filter(|r| r.source == RuleSource::LocalSettings)
         .collect();
@@ -530,14 +531,15 @@ async fn a_project_grant_is_written_where_the_next_session_reads_it() {
 #[tokio::test]
 async fn a_project_grant_without_a_project_is_kept_for_the_session() {
     let root = tempfile::tempdir().unwrap();
-    let settings = base::settings::LoadedSettings::load_without_project(
+    let settings = settings::LoadedSettings::load_without_project(
         root.path().join("global"),
         root.path().join("scene"),
         "code",
         "m",
+        &settings::section::Sections::none(),
     );
     assert_eq!(settings.paths.local_settings_file(), None);
-    let perm = Policy::from_settings(&settings, []);
+    let perm = Policy::from_settings(&settings.permission_settings(), []);
 
     perm.grant(Grant::new(
         "Probe",
@@ -577,13 +579,13 @@ async fn a_project_grant_writes_to_disk_off_the_async_thread() {
         .path()
         .join(".agix")
         .join(base::paths::SETTINGS_LOCAL_FILE);
-    let perm = Arc::new(empty().with_local_settings_file(Some(file.clone())));
+    let perm = Arc::new(empty().with_project_rules(Some(rule_file(&file))));
 
     let dir = root.path().join(".agix");
     let (locked_tx, locked_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     let holder = std::thread::spawn(move || {
-        let _held = base::settings_file::SettingsDir::lock(&dir).unwrap();
+        let _held = settings::file::SettingsDir::lock(&dir).unwrap();
         locked_tx.send(()).unwrap();
         release_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -622,7 +624,7 @@ async fn a_project_grant_with_nothing_to_scope_it_says_it_was_not_written() {
         .path()
         .join(".agix")
         .join(base::paths::SETTINGS_LOCAL_FILE);
-    let perm = empty().with_local_settings_file(Some(file.clone()));
+    let perm = empty().with_project_rules(Some(rule_file(&file)));
 
     let kept = perm
         .grant(Grant::new("Probe", None, GrantScope::Project))
@@ -662,15 +664,16 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("settings.json"), body).unwrap();
     }
-    let settings = base::settings::LoadedSettings::load(
+    let settings = settings::LoadedSettings::load(
         global,
         root.path().join("scene"),
         project,
         "code",
         "m",
+        &settings::section::Sections::none(),
     );
 
-    let perm = Policy::from_settings(&settings, []);
+    let perm = Policy::from_settings(&settings.permission_settings(), []);
     assert_eq!(
         perm.rules().iter().map(|r| r.source).collect::<Vec<_>>(),
         vec![RuleSource::UserSettings, RuleSource::ProjectSettings]
@@ -687,29 +690,27 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
     );
 }
 
-fn with_managed(
-    user: serde_json::Value,
-    managed: serde_json::Value,
-) -> base::settings::LoadedSettings {
+fn with_managed(user: serde_json::Value, managed: serde_json::Value) -> settings::LoadedSettings {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("settings.json"), user.to_string()).unwrap();
-    base::settings::LoadedSettings::load(
+    settings::LoadedSettings::load(
         root.path().to_path_buf(),
         root.path().join("scene"),
         root.path().join("project"),
         "code",
         "m",
+        &settings::section::Sections::none(),
     )
-    .with_managed(Some(base::managed_settings::from_value("it", managed)))
+    .with_managed(Some(settings::managed::from_value("it", managed)))
 }
 
 async fn verdict(
-    settings: &base::settings::LoadedSettings,
+    settings: &settings::LoadedSettings,
     mode: PermissionMode,
     command: &'static str,
 ) -> PermissionOutcome {
     decide(
-        &Policy::from_settings(settings, []),
+        &Policy::from_settings(&settings.permission_settings(), []),
         &content_tool("Bash", command),
         &session(mode),
     )
@@ -805,4 +806,8 @@ async fn a_managed_layer_that_cannot_be_honoured_refuses_every_call() {
             );
         }
     }
+}
+
+fn rule_file(path: &Path) -> Arc<dyn base::interface::permission::RuleFile> {
+    Arc::new(settings::file::LocalRules::new(path.to_path_buf()))
 }

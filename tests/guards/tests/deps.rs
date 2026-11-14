@@ -41,6 +41,7 @@ const CRATES: &[(&str, Tier)] = &[
     ("scene", K1),
     ("permissions", K1),
     ("ptc", K1),
+    ("settings", K1),
     ("hooks", K2),
     ("tools", K2),
     ("session", K2),

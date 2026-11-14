@@ -6,14 +6,9 @@
 //! mid-session git commits are not updated.
 
 pub mod frontmatter;
-pub mod import;
 pub mod memory;
 pub mod utils;
 
-pub use self::import::{
-    already_decided as import_already_decided, detect_import_sources, execute_import,
-    mark_imported, mark_skipped, ImportError, ImportSource, ImportSourceKind, ImportSummary,
-};
 pub use self::memory::MemoryFileEntry;
 
 use self::memory::collect_memory_files_with;

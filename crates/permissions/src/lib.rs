@@ -7,7 +7,7 @@ pub mod path_rule;
 pub mod path_safety;
 pub mod policy;
 pub mod rule;
+pub mod rule_string;
 pub mod ruleset;
-pub mod settings_patch;
 pub mod shadow;
 pub mod shell;

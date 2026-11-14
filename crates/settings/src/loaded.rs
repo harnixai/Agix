@@ -6,21 +6,20 @@
 //! [`LoadedSettings::load`] is the single canonical settings.json loader —
 //! `daemon` and any other embedder call it rather than parsing settings.json
 //! themselves. [`LoadedSettings::load_from`] takes the layers from any
-//! [`ConfigSource`](crate::interface::config_source::ConfigSource) and runs the
+//! [`ConfigSource`](base::interface::config_source::ConfigSource) and runs the
 //! same merge.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use crate::interface::config_source::{ConfigSource, FileTiers, Tier};
-use crate::paths::{PathSettings, Workspace};
-use crate::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
-use crate::project_trust::ProjectLayer;
+use base::interface::config_source::{ConfigSource, Tier};
+use base::paths::{PathSettings, Workspace};
+use base::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
 
-use super::{
-    merge_fitting, merge_json_values, read_permission_rules, unknown_settings_keys, IgnoredValue,
-    Settings,
-};
+use crate::merge::{merge_fitting, merge_json_values, read_permission_rules};
+use crate::section::Sections;
+use crate::trust::{self, ProjectLayer, ProjectTrustSettings};
+use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -32,7 +31,7 @@ pub struct LoadedSettings {
     /// global and scene ones.
     pub rules: Vec<LoadedRule>,
     /// The deployment's layer, above every other — see
-    /// [`crate::managed_settings`].
+    /// [`crate::managed`].
     pub managed: Option<ManagedSettings>,
     /// For each of `values.mcp_servers`, the directory of the tier its
     /// `command` was declared in: the global or scene configuration
@@ -79,7 +78,7 @@ impl LoadedSettings {
     /// The project tier is the one exception to "every layer merges the same
     /// way": unless the global tier's `project_trust` trusts the project root
     /// (`local_dir`'s parent), what in it could loosen anything is held back
-    /// before it merges — see [`crate::project_trust`]. `project_trust`
+    /// before it merges — see [`trust`]. `project_trust`
     /// itself is read from the global tier only. The decision, and what it
     /// held back, is [`trust`](Self::trust) and
     /// [`requires_trust`](Self::requires_trust).
@@ -104,6 +103,7 @@ impl LoadedSettings {
         local_dir: PathBuf,
         scope: &str,
         default_model: &str,
+        sections: &Sections,
     ) -> Self {
         let source = FileTiers::new(global_dir.clone(), scene_dir.clone(), local_dir.clone());
         Self::load_from(
@@ -113,26 +113,29 @@ impl LoadedSettings {
             local_dir,
             scope,
             default_model,
+            sections,
         )
     }
 
     /// [`load`](Self::load) for a session without a project: no project tier,
     /// and a [`Workspace::Scratch`] in the state root's scratchpad until the
     /// session is given a directory of its own
-    /// ([`crate::paths::session_scratch_dir`]).
+    /// ([`base::paths::session_scratch_dir`]).
     pub fn load_without_project(
         global_dir: PathBuf,
         scene_dir: PathBuf,
         scope: &str,
         default_model: &str,
+        sections: &Sections,
     ) -> Self {
-        let scratch = global_dir.join(crate::paths::STATE_ROOT_SCRATCHPAD);
+        let scratch = global_dir.join(base::paths::STATE_ROOT_SCRATCHPAD);
         let mut loaded = Self::load(
             global_dir.clone(),
             scene_dir,
             global_dir,
             scope,
             default_model,
+            sections,
         );
         loaded.paths.workspace = Workspace::Scratch(scratch);
         loaded
@@ -157,20 +160,18 @@ impl LoadedSettings {
         local_dir: PathBuf,
         scope: &str,
         default_model: &str,
+        sections: &Sections,
     ) -> Self {
-        use crate::project_trust::ProjectTrustSettings;
-
         let base = Settings::defaults_for(default_model);
-        let merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
+        let mut merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
+        seed_section_defaults(&mut merged_json, sections);
 
         let layers = source.layers();
-        let own_project =
-            crate::project_trust::is_own_project_dir(&local_dir, &global_dir, &scene_dir);
+        let own_project = trust::is_own_project_dir(&local_dir, &global_dir, &scene_dir);
         let tiers = TierView {
             own_project,
-            scene_is_global: crate::project_trust::same_dir(&scene_dir, &global_dir),
-            project_is_global: !own_project
-                && crate::project_trust::same_dir(&local_dir, &global_dir),
+            scene_is_global: trust::same_dir(&scene_dir, &global_dir),
+            project_is_global: !own_project && trust::same_dir(&local_dir, &global_dir),
         };
 
         let project_trust = ProjectTrustSettings::from_layers(
@@ -186,6 +187,7 @@ impl LoadedSettings {
         };
         let withhold = trust.is_untrusted();
         let mut fold = LayerFold {
+            sections,
             tiers,
             withhold,
             global_dir: &global_dir,
@@ -223,16 +225,17 @@ impl LoadedSettings {
 
         // Every merge step above was checked to deserialize.
         let mut values: Settings = serde_json::from_value(merged_json).unwrap_or(base);
+        values.sections.retain(|key, _| sections.get(key).is_some());
         values.project_trust = project_trust;
         guard_loaded_values(&mut values, &mcp_secret_vars);
 
-        let paths = PathSettings {
-            user_data_dir: scene_dir,
-            global_data_dir: global_dir,
-            workspace: Workspace::project_of(&local_dir),
-            local_data_dir: local_dir,
-            scope: scope.to_string(),
-        };
+        let paths = PathSettings::new(
+            scene_dir,
+            global_dir,
+            local_dir.clone(),
+            Workspace::project_of(&local_dir),
+            scope.to_string(),
+        );
         let loaded = Self {
             values,
             paths,
@@ -304,6 +307,17 @@ impl LoadedSettings {
     }
 }
 
+/// A section's defaults are in the merge from the start, so a project that is
+/// not trusted is held to them as it is to every core default.
+fn seed_section_defaults(merged: &mut serde_json::Value, sections: &Sections) {
+    for spec in sections.iter() {
+        let default = spec.default_value();
+        if !default.is_null() {
+            merged[spec.key] = default;
+        }
+    }
+}
+
 /// Two tiers sharing a directory are read once, at the higher tier: a project
 /// rooted at `$HOME` reads `~/.agix` as its project tier, and those files are
 /// still the user's global settings.
@@ -329,6 +343,7 @@ impl TierView {
 }
 
 struct LayerFold<'a> {
+    sections: &'a Sections,
     tiers: TierView,
     withhold: bool,
     global_dir: &'a std::path::Path,
@@ -344,17 +359,16 @@ struct LayerFold<'a> {
 }
 
 impl LayerFold<'_> {
-    fn apply(&mut self, layer: crate::interface::config_source::ConfigLayer) {
-        use crate::project_trust::gate_layer;
+    fn apply(&mut self, layer: base::interface::config_source::ConfigLayer) {
         if layer.tier == Tier::Managed {
-            let this = crate::managed_settings::from_value(layer.origin, layer.value);
+            let this = crate::managed::from_value(layer.origin, layer.value);
             self.managed = Some(match self.managed.take() {
                 Some(earlier) => earlier.followed_by(this),
                 None => this,
             });
             return;
         }
-        for key in unknown_settings_keys(&layer.value) {
+        for key in unknown_settings_keys(&layer.value, self.sections) {
             tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "settings key not recognised, ignoring it");
         }
         let is_global = self.tiers.is_global(layer.tier);
@@ -379,7 +393,7 @@ impl LayerFold<'_> {
                         .or_insert(serde_json::Value::Null);
                     merge_json_values(entry, server.clone());
                 }
-                let gated = gate_layer(obj, &self.merged_json, self.withhold);
+                let gated = trust::gate_layer(obj, &self.merged_json, self.withhold, self.sections);
                 if self.withhold && !gated.is_empty() {
                     tracing::warn!(origin = %layer.origin, withheld = ?gated, "project is not trusted; settings only a trusted project may set are ignored");
                 }
@@ -390,7 +404,7 @@ impl LayerFold<'_> {
             }
         }
         self.note_mcp_servers(layer.tier, &layer_json);
-        for (key, error) in merge_fitting(&mut self.merged_json, layer_json) {
+        for (key, error) in merge_fitting(&mut self.merged_json, layer_json, self.sections) {
             tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, error, "settings value does not fit its setting, ignoring it");
             self.ignored.push(IgnoredValue {
                 tier: layer.tier.name(),
@@ -455,7 +469,7 @@ impl LayerFold<'_> {
             // write are not secrets of the daemon's.
             if !self.tiers.is_own_project(tier) {
                 self.mcp_secret_vars.extend(
-                    crate::interface::exec::env::variables_an_mcp_server_reads(server),
+                    base::interface::exec::env::variables_an_mcp_server_reads(server),
                 );
             }
         }
@@ -472,7 +486,7 @@ fn guard_loaded_values(values: &mut Settings, mcp_secret_vars: &[String]) {
         .filter_map(|p| p.api_key_env.as_deref())
         .chain(mcp_secret_vars.iter().map(String::as_str))
     {
-        crate::interface::exec::env::hold_back_credential(name);
+        base::interface::exec::env::hold_back_credential(name);
     }
     if let Err(reason) = values.validate() {
         tracing::warn!("Settings validation: {reason}");

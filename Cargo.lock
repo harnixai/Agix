@@ -26,6 +26,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "settings",
  "skills",
  "team",
  "telemetry",
@@ -104,6 +105,7 @@ dependencies = [
  "hex",
  "history",
  "hooks",
+ "jsonschema",
  "libc",
  "mcp",
  "model",
@@ -123,6 +125,7 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
+ "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -275,7 +278,6 @@ dependencies = [
  "bs58",
  "futures",
  "globset",
- "jsonschema",
  "libc",
  "regex",
  "schemars",
@@ -601,6 +603,7 @@ dependencies = [
  "schemars",
  "script-host",
  "serde_json",
+ "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -1762,6 +1765,7 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
+ "settings",
  "tempfile",
  "test-runner",
  "tokio",
@@ -1844,6 +1848,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "settings",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
@@ -2268,6 +2273,7 @@ dependencies = [
  "base",
  "globset",
  "serde_json",
+ "settings",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2870,6 +2876,7 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
+ "settings",
  "telemetry",
  "tempfile",
  "thiserror 2.0.18",
@@ -3196,6 +3203,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings"
+version = "0.3.12-2026111402"
+dependencies = [
+ "base",
+ "globset",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3328,6 +3351,7 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
+ "settings",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -3580,9 +3604,11 @@ dependencies = [
  "platform",
  "runtime",
  "scene",
+ "schemars",
  "script-host",
  "serde",
  "serde_json",
+ "settings",
  "sha2 0.10.9",
  "skills",
  "telemetry",
@@ -3870,6 +3896,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "settings",
  "similar",
  "tempfile",
  "thiserror 2.0.18",

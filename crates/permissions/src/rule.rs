@@ -106,7 +106,7 @@ pub fn rules_from_settings(
 /// 全局与 scene 层是用户自己的设置（`UserSettings`），项目层是仓库里提交的
 /// （`ProjectSettings`），`settings.local.json` 是 `LocalSettings`，部署方的
 /// managed 层是 `PolicySettings`。
-pub fn rules_from(loaded: &base::settings::LoadedSettings) -> Vec<PermissionRule> {
+pub fn rules_from(loaded: &base::permission::PermissionSettings) -> Vec<PermissionRule> {
     let (local, shared): (Vec<_>, Vec<_>) = loaded.rules.iter().partition(|r| r.machine_local);
     let mut rules: Vec<PermissionRule> = shared
         .into_iter()
@@ -126,7 +126,7 @@ pub fn rules_from(loaded: &base::settings::LoadedSettings) -> Vec<PermissionRule
 /// The allow rules of `loaded` written `"match": "exact"` — what "allow every
 /// time" kept — each with its tier's [`RuleSource`]. [`rules_from`] leaves
 /// them out.
-pub fn exact_allows_from(loaded: &base::settings::LoadedSettings) -> Vec<PermissionRule> {
+pub fn exact_allows_from(loaded: &base::permission::PermissionSettings) -> Vec<PermissionRule> {
     loaded
         .rules
         .iter()

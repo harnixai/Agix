@@ -1,7 +1,7 @@
 //! The deployment's settings layer — what an IT department or an unattended
 //! host puts above everything a user, a project or a plugin can write.
 //!
-//! It is read from a fixed system path ([`managed_settings_path`]) that the
+//! It is read from a fixed system path ([`path`]) that the
 //! user's data directory, the project and the model have no say in; a daemon
 //! started with `--managed-settings <path>` reads that file instead. Only
 //! [`MANAGED_KEYS`] may appear in it. A file that is there but cannot be
@@ -15,7 +15,7 @@
 //! (`permissions::policy::ManagedLayer`); this module only says what the file
 //! holds. Semantics: `docs/ARCHITECTURE.md` §6.1.
 
-use crate::permission::{ManagedSettings, PermissionRuleEntry};
+use base::permission::{ManagedSettings, PermissionRuleEntry};
 use std::path::{Path, PathBuf};
 
 /// The keys a managed settings file may set. `$schema` is the editor's and is
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 pub const MANAGED_KEYS: &[&str] = &["permission_rules", "disable_bypass_permissions_mode"];
 
 /// Where the managed settings live on this platform.
-pub fn managed_settings_path() -> PathBuf {
+pub fn path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         PathBuf::from("/Library/Application Support/Agix/managed-settings.json")
@@ -120,7 +120,7 @@ fn broken(origin: String, error: String) -> ManagedSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permission::RuleBehavior;
+    use base::permission::RuleBehavior;
     use serde_json::json;
 
     #[test]

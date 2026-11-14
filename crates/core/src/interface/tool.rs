@@ -18,15 +18,15 @@ pub struct SandboxSettings {
     pub deny_read: Vec<PathBuf>,
     pub allowed_domains: Vec<String>,
     pub network_mode: NetworkModeConfig,
-    /// See `base::settings::SandboxConfig::deny_write`.
+    /// See `settings::SandboxConfig::deny_write`.
     pub deny_write: Vec<String>,
-    /// See `base::settings::SandboxConfig::allow_write`.
+    /// See `settings::SandboxConfig::allow_write`.
     pub allow_write: Vec<PathBuf>,
     /// See `base::context::config::SandboxPolicyConfig::paths`.
     pub paths: Arc<crate::paths::SensitivePaths>,
-    /// See `base::settings::SandboxConfig::require_enforcement`.
+    /// See `settings::SandboxConfig::require_enforcement`.
     pub require_enforcement: bool,
-    /// See `base::settings::SandboxConfig::unattended_requires_network_policy`.
+    /// See `settings::SandboxConfig::unattended_requires_network_policy`.
     pub unattended_requires_network_policy: bool,
 }
 pub use crate::context::config::PathStyle;

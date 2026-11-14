@@ -24,18 +24,6 @@ pub struct EngineConfig {
     ///   agents you want to cap (e.g. compactors at 1, memory-extractors
     ///   at 5).
     pub max_api_calls_per_turn: u32,
-    /// Maximum number of team-stage sub-agents (`crates/team`'s `TeamCreate`
-    /// tool) dispatched concurrently within a single stage. Was a hardcoded
-    /// `const STAGE_CONCURRENCY_LIMIT = 6` in `coordinator.rs` with no way
-    /// to tune it for resource-constrained or high-throughput deployments.
-    /// Default 6, matching the prior hardcoded value.
-    pub team_stage_concurrency: usize,
-    /// Reclaim policy for persistent team members (`Agent` tool's
-    /// `team_name`+`name` mode). See `ExecutionSettings::
-    /// team_max_persistent_members`'s doc comment for the policy.
-    pub team_max_persistent_members: usize,
-    /// See `ExecutionSettings::team_member_idle_timeout_secs`.
-    pub team_member_idle_timeout_secs: u64,
     /// Auto-routing: optional "strong" tier model. When set,
     ///   the engine starts each turn at `model` (cheap/fast tier, e.g.
     ///   `ds-v4-flash`) and **escalates to `strong_model`** mid-turn on any
@@ -200,10 +188,10 @@ pub struct SandboxPolicyConfig {
     pub network_mode: NetworkModeConfig,
     pub allowed_domains: Vec<String>,
     /// Extra filename segments no tool may write. See
-    /// `base::settings::SandboxConfig::deny_write`.
+    /// `settings::SandboxConfig::deny_write`.
     pub deny_write: Vec<String>,
     /// Paths exempt from the write deny rules. See
-    /// `base::settings::SandboxConfig::allow_write`.
+    /// `settings::SandboxConfig::allow_write`.
     pub allow_write: Vec<PathBuf>,
     /// This instance's sensitive paths: its state root, so the profile can
     /// protect the settings.json files that actually govern it, and the
@@ -211,9 +199,9 @@ pub struct SandboxPolicyConfig {
     /// the sandbox falls back to `$HOME/.agix` — which is only right when the
     /// instance happens to live there.
     pub paths: std::sync::Arc<crate::paths::SensitivePaths>,
-    /// See `base::settings::SandboxConfig::require_enforcement`.
+    /// See `settings::SandboxConfig::require_enforcement`.
     pub require_enforcement: bool,
-    /// See `base::settings::SandboxConfig::unattended_requires_network_policy`.
+    /// See `settings::SandboxConfig::unattended_requires_network_policy`.
     pub unattended_requires_network_policy: bool,
 }
 
@@ -287,9 +275,6 @@ impl EngineConfig {
             permission_prompt_timeout_secs: 300,
             max_parallelism: 10,
             max_api_calls_per_turn: 25,
-            team_stage_concurrency: 6,
-            team_max_persistent_members: 20,
-            team_member_idle_timeout_secs: 1800,
             strong_model: None,
             fallback_model: None,
             thinking_mode: ThinkingModeConfig::default(),
@@ -319,79 +304,6 @@ impl EngineConfig {
             deferred_tools: Default::default(),
         }
     }
-
-    /// Derive a real `EngineConfig` from loaded settings. Starts from
-    /// `defaults_for()`'s baseline and overlays every field `Settings`
-    /// actually carries; fields `Settings` has no equivalent for (e.g.
-    /// `strong_model`, `file_limits`) are left at their
-    /// `defaults_for()` value.
-    pub fn from_loaded(loaded: &crate::settings::LoadedSettings) -> Self {
-        let settings = &loaded.values;
-        let mut c = Self::defaults_for(settings.model.model_name.clone());
-        c.max_tokens = settings.model.max_tokens;
-        c.fallback_model = settings.model.fallback_model.clone();
-        c.thinking_mode = match settings.model.thinking_mode {
-            crate::interface::model::ThinkingMode::Auto => ThinkingModeConfig::Auto,
-            crate::interface::model::ThinkingMode::Off => ThinkingModeConfig::Off,
-            crate::interface::model::ThinkingMode::On => ThinkingModeConfig::On,
-            crate::interface::model::ThinkingMode::OnBudget(n) => ThinkingModeConfig::OnBudget(n),
-        };
-
-        c.permission_prompt_timeout_secs = settings.execution.permission_prompt_timeout_secs;
-        c.max_parallelism = settings.execution.max_parallelism;
-        c.max_api_calls_per_turn = settings.execution.max_api_calls_per_turn;
-        c.team_stage_concurrency = settings.execution.team_stage_concurrency;
-        c.team_max_persistent_members = settings.execution.team_max_persistent_members;
-        c.team_member_idle_timeout_secs = settings.execution.team_member_idle_timeout_secs;
-        c.max_agent_depth = settings.execution.max_agent_depth;
-
-        c.permission_mode = settings.permission_mode;
-        c.dangerously_disable_sandbox = settings.sandbox.dangerously_disable_sandbox;
-        // `Settings.sandbox.deny_read` is a plain `Vec`, empty when the user
-        // never configured it — mapping that to `Some(vec![])` would read as
-        // "use exactly this empty list", which *disables* the sandbox's
-        // built-in deny defaults (~/.ssh, ~/.aws, etc). Empty must map to
-        // `None` ("use built-in defaults"), matching `SandboxPolicyConfig`'s
-        // own documented Option semantics.
-        c.sandbox_policy = SandboxPolicyConfig {
-            allow_read: settings.sandbox.allow_read.clone(),
-            deny_write: settings.sandbox.deny_write.clone(),
-            allow_write: settings.sandbox.allow_write.clone(),
-            deny_read: if settings.sandbox.deny_read.is_empty() {
-                None
-            } else {
-                Some(settings.sandbox.deny_read.clone())
-            },
-            // Was hardcoded to the type default, which silently ignored a
-            // configured `sandbox.network_mode` — carry it through like every
-            // other field.
-            network_mode: settings.sandbox.network_mode,
-            allowed_domains: settings.sandbox.allowed_domains.clone(),
-            // The instance's own root, so the profile denies writes to the
-            // settings.json this session actually reads — not to whatever
-            // sits under the invoking user's home.
-            paths: std::sync::Arc::new(crate::paths::SensitivePaths::for_paths(
-                &crate::paths::ConfigPaths::from_settings(&loaded.paths),
-            )),
-            require_enforcement: settings.sandbox.require_enforcement,
-            unattended_requires_network_policy: settings.sandbox.unattended_requires_network_policy,
-        };
-        c.disable_skill_shell_execution = settings.disable_skill_shell_execution;
-        c.project_trust = loaded.trust();
-        c.prompt_files = crate::paths::PromptFiles::for_project(
-            &crate::paths::ConfigPaths::from_settings(&loaded.paths),
-        );
-        c.path_style = settings.path_style.unwrap_or_default();
-        c.subprocess_env = settings.sandbox.subprocess_env.clone();
-
-        c.system_prompt = SystemPromptSettings {
-            append: settings.prompt_append.clone(),
-            override_text: settings.prompt_override.clone(),
-            ..c.system_prompt
-        };
-
-        c
-    }
 }
 
 /// 依据模型名推断其上下文窗口大小。
@@ -412,34 +324,8 @@ pub fn infer_context_window_tokens(model: &str) -> usize {
 }
 
 #[cfg(test)]
-mod sandbox_wiring_tests {
+mod tests {
     use super::*;
-    use crate::paths::PathSettings;
-    use crate::settings::{LoadedSettings, Settings};
-
-    fn config_of(s: &Settings) -> EngineConfig {
-        EngineConfig::from_loaded(&LoadedSettings::new(s.clone(), PathSettings::default()))
-    }
-
-    #[test]
-    fn path_style_is_absolute_unless_settings_say_otherwise() {
-        let mut s = Settings::defaults_for("test-model");
-        assert_eq!(config_of(&s).path_style, PathStyle::Absolute);
-        s = serde_json::from_value(serde_json::json!({
-            "model": serde_json::to_value(&s.model).unwrap(),
-            "path_style": "workspace_relative",
-        }))
-        .unwrap();
-        assert_eq!(config_of(&s).path_style, PathStyle::WorkspaceRelative);
-    }
-
-    #[test]
-    fn the_delegation_depth_is_read_from_settings() {
-        let mut s = Settings::defaults_for("test-model");
-        assert_eq!(config_of(&s).max_agent_depth, 3);
-        s.execution.max_agent_depth = 1;
-        assert_eq!(config_of(&s).max_agent_depth, 1);
-    }
 
     #[test]
     fn render_is_relative_only_under_the_working_directory() {
@@ -453,49 +339,5 @@ mod sandbox_wiring_tests {
             PathStyle::WorkspaceRelative.render(Path::new("/other/a.rs"), cwd),
             "/other/a.rs"
         );
-    }
-
-    fn settings_with_sandbox(f: impl FnOnce(&mut crate::settings::SandboxConfig)) -> Settings {
-        let mut s = Settings::defaults_for("test-model");
-        f(&mut s.sandbox);
-        s
-    }
-
-    /// The whole point of `settings.sandbox` is that a user can configure it.
-    /// Each field below reaches `EngineConfig`, which `runtime::turn` copies
-    /// into `ToolContext.sandbox` and `tools::bash` lifts into a real
-    /// `SandboxPolicy` — a gap anywhere on that chain makes the setting inert
-    /// while still appearing in the schema.
-    #[test]
-    fn every_sandbox_setting_reaches_the_engine_config() {
-        let s = settings_with_sandbox(|sb| {
-            sb.network_mode = NetworkModeConfig::Allowlist;
-            sb.allowed_domains = vec!["api.example.com".into()];
-            sb.allow_read = vec![PathBuf::from("/tmp/ok")];
-            sb.deny_read = vec![PathBuf::from("/tmp/secret")];
-            sb.dangerously_disable_sandbox = true;
-        });
-        let c = config_of(&s);
-
-        assert_eq!(c.sandbox_policy.network_mode, NetworkModeConfig::Allowlist);
-        assert_eq!(c.sandbox_policy.allowed_domains, ["api.example.com"]);
-        assert_eq!(c.sandbox_policy.allow_read, [PathBuf::from("/tmp/ok")]);
-        assert_eq!(
-            c.sandbox_policy.deny_read,
-            Some(vec![PathBuf::from("/tmp/secret")])
-        );
-        assert!(c.dangerously_disable_sandbox);
-    }
-
-    /// An unconfigured `deny_read` must arrive as `None` ("use the built-in
-    /// credential deny defaults"), never as `Some(vec![])` — which reads as
-    /// "deny exactly nothing" and would switch those defaults off, making
-    /// `~/.ssh` and `~/.aws` readable by any command the classifier allows.
-    #[test]
-    fn empty_deny_read_means_defaults_not_an_empty_deny_list() {
-        let c = config_of(&settings_with_sandbox(|sb| {
-            sb.deny_read = Vec::new();
-        }));
-        assert_eq!(c.sandbox_policy.deny_read, None);
     }
 }

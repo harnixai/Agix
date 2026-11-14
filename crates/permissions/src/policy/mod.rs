@@ -30,13 +30,14 @@ use crate::ruleset::RuleSet;
 use async_trait::async_trait;
 use base::interface::permission::{
     Answerable, Attendance, Basis, Grant, GrantError, GrantMatch, GrantScope, PermissionGrants,
-    PermissionOutcome, PermissionPolicy, PermissionRequest, Reason, Stage, ToolFacts,
+    PermissionOutcome, PermissionPolicy, PermissionRequest, Reason, RuleFile, Stage, ToolFacts,
 };
-use base::permission::{PermissionMode, PermissionRule, RuleBehavior, RuleSource};
+use base::permission::{
+    PermissionMode, PermissionRule, PermissionSettings, RuleBehavior, RuleSource,
+};
 use base::tool::SandboxSettings;
 use delegated::Delegated;
 use host::HostSays;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 pub struct Policy {
@@ -51,14 +52,14 @@ pub struct Policy {
     /// with no project — keeps it for the session only: the state root's
     /// `settings.local.json` is the global tier, and a rule written there would
     /// allow the call everywhere.
-    local_settings_file: Option<PathBuf>,
+    project_rules: Option<Arc<dyn RuleFile>>,
     host: Option<Arc<dyn PermissionPolicy>>,
     /// Set when nothing can put a question to a person: an attended call's
     /// question is refused for this reason instead.
     no_one_to_ask: Option<&'static str>,
 }
 
-/// What the deployment's managed settings (`base::managed_settings`) hold
+/// What the deployment's managed settings (`settings::managed`) hold
 /// every call to, whatever the session's mode.
 #[derive(Clone, Default)]
 pub struct ManagedLayer {
@@ -139,7 +140,7 @@ impl Policy {
             exact: RwLock::default(),
             managed: ManagedLayer::default(),
             sandbox: SandboxSettings::default(),
-            local_settings_file: None,
+            project_rules: None,
             host: None,
             no_one_to_ask: None,
         }
@@ -156,7 +157,7 @@ impl Policy {
     /// Every embedder that builds its own permission should come through
     /// here; `runtime::agent::Builder` does when it is given none.
     pub fn from_settings(
-        settings: &base::settings::LoadedSettings,
+        settings: &PermissionSettings,
         extra_rules: impl IntoIterator<Item = PermissionRule>,
     ) -> Self {
         let mut rules = crate::rule::rules_from(settings);
@@ -165,23 +166,8 @@ impl Policy {
         policy.exact = RwLock::new(crate::rule::exact_allows_from(settings));
         policy
             .with_managed(ManagedLayer::from(&settings.managed))
-            .with_sandbox(SandboxSettings {
-                allow_read: settings.values.sandbox.allow_read.clone(),
-                deny_read: settings.values.sandbox.deny_read.clone(),
-                allowed_domains: settings.values.sandbox.allowed_domains.clone(),
-                network_mode: settings.values.sandbox.network_mode,
-                deny_write: settings.values.sandbox.deny_write.clone(),
-                allow_write: settings.values.sandbox.allow_write.clone(),
-                paths: std::sync::Arc::new(base::paths::SensitivePaths::for_paths(
-                    &base::paths::ConfigPaths::from_settings(&settings.paths),
-                )),
-                require_enforcement: settings.values.sandbox.require_enforcement,
-                unattended_requires_network_policy: settings
-                    .values
-                    .sandbox
-                    .unattended_requires_network_policy,
-            })
-            .with_local_settings_file(settings.paths.local_settings_file())
+            .with_sandbox(settings.sandbox.clone())
+            .with_project_rules(settings.project_rules.clone())
     }
 
     pub fn with_managed(mut self, managed: ManagedLayer) -> Self {
@@ -194,8 +180,8 @@ impl Policy {
         self
     }
 
-    pub fn with_local_settings_file(mut self, file: Option<PathBuf>) -> Self {
-        self.local_settings_file = file;
+    pub fn with_project_rules(mut self, file: Option<Arc<dyn RuleFile>>) -> Self {
+        self.project_rules = file;
         self
     }
 
@@ -283,34 +269,25 @@ impl Policy {
 
     async fn write_project_rule(
         &self,
-        path: &std::path::Path,
+        file: Arc<dyn RuleFile>,
         grant: &Grant,
     ) -> Result<(), GrantError> {
         let not_persisted = |reason: String| GrantError::NotPersisted {
-            path: path.to_path_buf(),
+            path: file.path().to_path_buf(),
             reason,
         };
         let Some(rule) =
-            crate::settings_patch::build_rule_string(&grant.tool_name, grant.content.as_deref())
+            crate::rule_string::build_rule_string(&grant.tool_name, grant.content.as_deref())
         else {
             return Err(not_persisted(
                 "the call has no content a rule could be scoped to".into(),
             ));
         };
-        let target = path.to_path_buf();
         let matching = grant.matching;
-        match tokio::task::spawn_blocking(move || match matching {
-            GrantMatch::Exact => crate::settings_patch::append_exact_allow(&target, &rule),
-            _ => crate::settings_patch::append_permission_rule(
-                &target,
-                crate::settings_patch::AppendTarget::Allow,
-                &rule,
-            ),
-        })
-        .await
-        {
+        let writer = file.clone();
+        match tokio::task::spawn_blocking(move || writer.append_allow(&rule, matching)).await {
             Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(not_persisted(e.to_string())),
+            Ok(Err(reason)) => Err(not_persisted(reason)),
             Err(e) => Err(not_persisted(e.to_string())),
         }
     }
@@ -404,8 +381,10 @@ impl PermissionGrants for Policy {
         // `Session`, not `Command`: `clear(Turn)` drops every `Command` rule
         // when a skill's turn ends, and a person's answer must outlive that.
         self.allow(RuleSource::Session, &grant);
-        match (grant.scope, &self.local_settings_file) {
-            (GrantScope::Project, Some(path)) => self.write_project_rule(path, &grant).await,
+        match (grant.scope, &self.project_rules) {
+            (GrantScope::Project, Some(file)) => {
+                self.write_project_rule(file.clone(), &grant).await
+            }
             _ => Ok(()),
         }
     }

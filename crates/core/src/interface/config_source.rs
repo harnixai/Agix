@@ -10,7 +10,7 @@
 //! What moves is only *where the layers come from*. The merge — six layers
 //! low-to-high, generic recursive JSON merge, `paths` stripped from every
 //! layer, `permission_rules` from an overlay held apart — stays exactly where
-//! it was, in [`crate::settings::LoadedSettings::load_from`]. A source hands over
+//! it was, in `settings::LoadedSettings::load_from`. A source hands over
 //! JSON values in priority order and has no say in what happens to them,
 //! which is what keeps "settings come from somewhere else" from turning into
 //! "settings mean something else".
@@ -34,8 +34,6 @@
 //! over as [`InMemoryLayers`]. [`Chain`] is for the common shape of the second
 //! case: the files on disk, with what the control plane says layered on top.
 
-use crate::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Which tier a layer belongs to, lowest priority first.
@@ -47,7 +45,7 @@ pub enum Tier {
     Scene,
     /// This project.
     Project,
-    /// The deployment's — see [`crate::managed_settings`]. Only
+    /// The deployment's — see `settings::managed`. Only
     /// `permission_rules` and `disable_bypass_permissions_mode` are read from
     /// it, and nothing below it can override them.
     Managed,
@@ -87,80 +85,6 @@ pub struct ConfigLayer {
 pub trait ConfigSource: Send + Sync {
     /// Every layer this source has, lowest priority first.
     fn layers(&self) -> Vec<ConfigLayer>;
-}
-
-/// The three directories on disk, each with its overlay — what the engine has
-/// always done.
-pub struct FileTiers {
-    global_dir: PathBuf,
-    scene_dir: PathBuf,
-    local_dir: PathBuf,
-}
-
-impl FileTiers {
-    pub fn new(global_dir: PathBuf, scene_dir: PathBuf, local_dir: PathBuf) -> Self {
-        Self {
-            global_dir,
-            scene_dir,
-            local_dir,
-        }
-    }
-}
-
-impl ConfigSource for FileTiers {
-    fn layers(&self) -> Vec<ConfigLayer> {
-        let tiers = [
-            (Tier::Global, &self.global_dir),
-            (Tier::Scene, &self.scene_dir),
-            (Tier::Project, &self.local_dir),
-        ];
-        let mut layers = Vec::new();
-        for (i, (tier, dir)) in tiers.iter().enumerate() {
-            // Two tiers can be one directory — a project rooted at `$HOME`
-            // shares `~/.agix` with the global tier. Read it once, at the
-            // higher tier: a merge applying it twice changes nothing, but
-            // `permission_rules` are concatenated and would be doubled.
-            if tiers[i + 1..].iter().any(|(_, later)| later == dir) {
-                continue;
-            }
-            let tier = *tier;
-            for (file, machine_local) in [(SETTINGS_FILE, false), (SETTINGS_LOCAL_FILE, true)] {
-                let path = dir.join(file);
-                if let Some(value) = read_settings_file(tier, &path) {
-                    layers.push(ConfigLayer {
-                        tier,
-                        machine_local,
-                        origin: path.display().to_string(),
-                        value,
-                    });
-                }
-            }
-        }
-        layers
-    }
-}
-
-/// Read and parse one settings file. `None` when it doesn't exist, can't be
-/// read, or doesn't parse — each of the latter two warns rather than
-/// aborting, so one broken file can't stop the process from starting.
-fn read_settings_file(tier: Tier, path: &Path) -> Option<serde_json::Value> {
-    if !path.exists() {
-        return None;
-    }
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(layer = tier.name(), path = %path.display(), error = %e, "failed to read settings file, skipping this layer");
-            return None;
-        }
-    };
-    match serde_json::from_str(&content) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            tracing::warn!(layer = tier.name(), path = %path.display(), error = %e, "failed to parse settings file, skipping this layer");
-            None
-        }
-    }
 }
 
 /// Layers the host already has in hand.
@@ -221,36 +145,6 @@ impl ConfigSource for Chain {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_tier_yields_its_shared_file_below_its_overlay() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(SETTINGS_FILE), r#"{"a":1}"#).unwrap();
-        std::fs::write(dir.path().join(SETTINGS_LOCAL_FILE), r#"{"a":2}"#).unwrap();
-        let source = FileTiers::new(
-            dir.path().to_path_buf(),
-            dir.path().join("absent"),
-            dir.path().join("absent"),
-        );
-
-        let layers = source.layers();
-        assert_eq!(layers.len(), 2);
-        assert!(!layers[0].machine_local);
-        assert!(layers[1].machine_local);
-        assert_eq!(layers[1].value["a"], 2);
-    }
-
-    #[test]
-    fn a_file_that_will_not_parse_is_skipped_rather_than_fatal() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(SETTINGS_FILE), "{not json").unwrap();
-        let source = FileTiers::new(
-            dir.path().to_path_buf(),
-            dir.path().join("absent"),
-            dir.path().join("absent"),
-        );
-        assert!(source.layers().is_empty());
-    }
 
     #[test]
     fn a_chain_puts_later_sources_above_earlier_ones() {

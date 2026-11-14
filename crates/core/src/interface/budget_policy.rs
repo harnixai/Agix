@@ -180,15 +180,6 @@ impl EngineBudget {
             ..Self::default()
         }
     }
-
-    /// The numbers a session's settings give.
-    pub fn from_settings(settings: &crate::settings::Settings) -> Self {
-        Self {
-            max_total_tokens: settings.execution.max_budget_tokens,
-            compact_threshold: settings.compaction.threshold_tokens,
-            compact_keep_recent: settings.compaction.keep_recent,
-        }
-    }
 }
 
 impl BudgetPolicy for EngineBudget {

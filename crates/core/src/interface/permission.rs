@@ -597,6 +597,13 @@ pub enum GrantError {
     NotPersisted { path: PathBuf, reason: String },
 }
 
+/// The file a project-scoped "allow every time" is written to.
+pub trait RuleFile: Send + Sync + std::fmt::Debug {
+    fn path(&self) -> &std::path::Path;
+    /// Add `rule` as an allow. `Ok(false)` when it was already there.
+    fn append_allow(&self, rule: &str, matching: GrantMatch) -> Result<bool, String>;
+}
+
 /// Where the allows handed out during a session are kept.
 #[async_trait]
 pub trait PermissionGrants: Send + Sync {

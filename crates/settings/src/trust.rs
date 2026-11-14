@@ -18,9 +18,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::context::config::NetworkModeConfig;
-use crate::interface::exec::env::SubprocessEnvMode;
-use crate::permission::{PermissionMode, ProjectTrust};
+use base::context::config::NetworkModeConfig;
+use base::interface::exec::env::SubprocessEnvMode;
+use base::permission::{PermissionMode, ProjectTrust};
+
+use crate::section::Sections;
 
 /// What a project no `trusted` pattern names is.
 #[derive(
@@ -83,14 +85,11 @@ impl ProjectTrustSettings {
     /// `settings.json` and `settings.local.json` — for a caller that needs
     /// the answer without loading a whole `Settings`.
     pub fn read_global(global_dir: &Path) -> Self {
-        let layers: Vec<Value> = [
-            crate::paths::SETTINGS_FILE,
-            crate::paths::SETTINGS_LOCAL_FILE,
-        ]
-        .iter()
-        .filter_map(|file| std::fs::read_to_string(global_dir.join(file)).ok())
-        .filter_map(|text| serde_json::from_str(&text).ok())
-        .collect();
+        let layers: Vec<Value> = [base::paths::SETTINGS_FILE, base::paths::SETTINGS_LOCAL_FILE]
+            .iter()
+            .filter_map(|file| std::fs::read_to_string(global_dir.join(file)).ok())
+            .filter_map(|text| serde_json::from_str(&text).ok())
+            .collect();
         Self::from_layers(&layers)
     }
 
@@ -267,10 +266,6 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
             "execution.permission_prompt_timeout_secs",
             Tighten(LowerZeroIsWidest),
         ),
-        ("execution.team_enabled", Tighten(FalseTighter)),
-        ("execution.team_max_persistent_members", Tighten(Lower)),
-        ("execution.team_member_idle_timeout_secs", Tighten(Lower)),
-        ("execution.team_stage_concurrency", Tighten(Lower)),
         ("hooks_config", Withheld),
         ("instruction_file", Withheld),
         ("language", Free),
@@ -287,9 +282,6 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("path_style", Free),
         ("permission_mode", Tighten(Mode)),
         ("permission_rules", Free),
-        ("plugins.allow", Tighten(SubsetEmptyIsAll)),
-        ("plugins.enable_on_install", Tighten(FalseTighter)),
-        ("plugins.enabled", Tighten(FalseTighter)),
         ("project_trust", Withheld),
         ("prompt_append", Free),
         ("prompt_override", Withheld),
@@ -314,48 +306,85 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
             "sandbox.unattended_requires_network_policy",
             Tighten(TrueTighter),
         ),
-        ("scripts", Withheld),
         ("task_models.*", Tighten(ProviderDefinedBelow)),
         ("telemetry_enabled", Tighten(TrueTighter)),
         ("telemetry_url", Withheld),
     ]
 };
 
-fn entries() -> impl Iterator<Item = (Vec<&'static str>, &'static ProjectKey)> {
-    PROJECT_TIER
+/// The table every key is judged by: [`PROJECT_TIER`] plus each registered
+/// section's entries under its key. A section nothing registered has no entry
+/// and is withheld.
+type Entries = Vec<(Vec<String>, ProjectKey)>;
+
+fn entries(sections: &Sections) -> Entries {
+    let own = PROJECT_TIER
         .iter()
-        .map(|(pattern, key)| (pattern.split('.').collect(), key))
+        .map(|(pattern, key)| (pattern.to_string(), *key));
+    let sectioned = sections.iter().flat_map(|spec| {
+        spec.project_tier.iter().map(|(relative, key)| {
+            let pattern = if relative.is_empty() {
+                spec.key.to_string()
+            } else {
+                format!("{}.{relative}", spec.key)
+            };
+            (pattern, *key)
+        })
+    });
+    own.chain(sectioned)
+        .map(|(pattern, key)| (pattern.split('.').map(String::from).collect(), key))
+        .collect()
 }
 
-fn agrees(pattern: &[&str], path: &[&str]) -> bool {
-    pattern.iter().zip(path).all(|(p, k)| *p == "*" || p == k)
+fn agrees(pattern: &[String], path: &[&str]) -> bool {
+    pattern.iter().zip(path).all(|(p, k)| p == "*" || p == k)
 }
 
 /// The entry governing `path`: the longest one `path` starts with.
-fn governing_entry(path: &[&str]) -> Option<(Vec<&'static str>, &'static ProjectKey)> {
-    entries()
+fn governing_entry<'a>(
+    entries: &'a Entries,
+    path: &[&str],
+) -> Option<&'a (Vec<String>, ProjectKey)> {
+    entries
+        .iter()
         .filter(|(pattern, _)| pattern.len() <= path.len() && agrees(pattern, path))
         .max_by_key(|(pattern, _)| pattern.len())
 }
 
 /// Whether some entry names a key beneath `path`, so `path` is a section to
 /// look into rather than a value to judge whole.
-fn has_entries_beneath(path: &[&str]) -> bool {
-    entries().any(|(pattern, _)| pattern.len() > path.len() && agrees(&pattern, path))
+fn has_entries_beneath(entries: &Entries, path: &[&str]) -> bool {
+    entries
+        .iter()
+        .any(|(pattern, _)| pattern.len() > path.len() && agrees(pattern, path))
 }
 
 /// Inspect one project-tier settings file for what only a trusted project
-/// may set, judged key by key against [`PROJECT_TIER`] and `lower` —
-/// everything merged beneath it. Returns what it found as dotted keys; with
-/// `withhold` set, also removes it from `layer`, so what is left can only
-/// add or tighten.
-pub fn gate_layer(layer: &mut Map<String, Value>, lower: &Value, withhold: bool) -> Vec<String> {
+/// may set, judged key by key against [`PROJECT_TIER`], the registered
+/// `sections` and `lower` — everything merged beneath it. Returns what it
+/// found as dotted keys; with `withhold` set, also removes it from `layer`,
+/// so what is left can only add or tighten.
+pub fn gate_layer(
+    layer: &mut Map<String, Value>,
+    lower: &Value,
+    withhold: bool,
+    sections: &Sections,
+) -> Vec<String> {
+    let entries = entries(sections);
     let mut found = Vec::new();
-    gate_section(layer, &mut Vec::new(), lower, withhold, &mut found);
+    gate_section(
+        &entries,
+        layer,
+        &mut Vec::new(),
+        lower,
+        withhold,
+        &mut found,
+    );
     found
 }
 
 fn gate_section(
+    entries: &Entries,
     section: &mut Map<String, Value>,
     path: &mut Vec<String>,
     lower: &Value,
@@ -367,11 +396,11 @@ fn gate_section(
         path.push(key.clone());
         let segments: Vec<&str> = path.iter().map(String::as_str).collect();
         let value = &section[&key];
-        if value.is_object() && has_entries_beneath(&segments) {
+        if value.is_object() && has_entries_beneath(entries, &segments) {
             if let Some(Value::Object(inner)) = section.get_mut(&key) {
-                gate_section(inner, path, lower, withhold, found);
+                gate_section(entries, inner, path, lower, withhold, found);
             }
-        } else if !keeps(value, &segments, lower) {
+        } else if !keeps(entries, value, &segments, lower) {
             found.push(path.join("."));
             if withhold {
                 section.remove(&key);
@@ -381,8 +410,108 @@ fn gate_section(
     }
 }
 
-fn keeps(value: &Value, path: &[&str], lower: &Value) -> bool {
-    match governing_entry(path).map(|(_, key)| *key) {
+/// What the project-tier table fails to cover in `schema`, as messages: a
+/// settings key with no entry, one governed by a shorter entry that is not
+/// `Withheld`, and an entry that names no key. A settings field added without
+/// a line in the table fails the test that calls this, rather than passing
+/// through an untrusted project unexamined.
+pub fn project_tier_gaps(schema: &Value, sections: &Sections) -> Vec<String> {
+    let entries = entries(sections);
+    let mut gaps = Vec::new();
+    let mut used = std::collections::HashSet::new();
+    for key in schema_keys(schema) {
+        let segments: Vec<&str> = key.iter().map(String::as_str).collect();
+        let dotted = key.join(".");
+        let Some((pattern, tier)) = governing_entry(&entries, &segments) else {
+            gaps.push(format!("`{dotted}` has no entry in the project tier"));
+            continue;
+        };
+        if pattern.len() != key.len() && *tier != ProjectKey::Withheld {
+            gaps.push(format!(
+                "`{dotted}` is governed by the shorter `{}`, which is not Withheld",
+                pattern.join(".")
+            ));
+        }
+        used.insert(pattern.join("."));
+    }
+    for (pattern, _) in &entries {
+        let pattern = pattern.join(".");
+        if !pattern.starts_with('$') && !used.contains(&pattern) {
+            gaps.push(format!(
+                "the project tier entry `{pattern}` names no settings key"
+            ));
+        }
+    }
+    gaps
+}
+
+/// The settings keys a file can hold, read off the published schema:
+/// an object with properties, or a map, is looked into; anything else —
+/// including a value that may be an object or something else — is one key.
+fn schema_keys(root: &Value) -> Vec<Vec<String>> {
+    fn resolve<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
+        while let Some(target) = node.get("$ref").and_then(Value::as_str) {
+            let Some(target) = root.pointer(target.trim_start_matches('#')) else {
+                break;
+            };
+            node = target;
+        }
+        node
+    }
+    fn walk(root: &Value, node: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        let node = resolve(root, node);
+        let branches: Vec<&Value> = ["anyOf", "oneOf", "allOf"]
+            .iter()
+            .flat_map(|b| node.get(*b).and_then(Value::as_array).into_iter().flatten())
+            .map(|b| resolve(root, b))
+            .filter(|b| b.get("type") != Some(&Value::from("null")))
+            .collect();
+        let alternatives = if branches.is_empty() {
+            vec![node]
+        } else {
+            branches
+        };
+        let is_section =
+            |a: &&Value| a.get("properties").is_some() || a.get("additionalProperties").is_some();
+        if !alternatives.iter().all(is_section) {
+            out.push(path.clone());
+            return;
+        }
+        for alternative in alternatives {
+            for (key, inner) in alternative
+                .get("properties")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                path.push(key.clone());
+                walk(root, inner, path, out);
+                path.pop();
+            }
+            match alternative.get("additionalProperties") {
+                Some(inner @ Value::Object(_)) => {
+                    path.push("*".into());
+                    walk(root, inner, path, out);
+                    path.pop();
+                }
+                Some(Value::Bool(true)) => {
+                    path.push("*".into());
+                    out.push(path.clone());
+                    path.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut Vec::new(), &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn keeps(entries: &Entries, value: &Value, path: &[&str], lower: &Value) -> bool {
+    match governing_entry(entries, path).map(|(_, key)| *key) {
         Some(ProjectKey::Free) => true,
         Some(ProjectKey::Tighten(order)) => {
             let below = path
@@ -491,13 +620,36 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[derive(Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+    struct Plugins {
+        enabled: bool,
+        allow: Vec<String>,
+        enable_on_install: bool,
+    }
+
+    impl crate::section::Section for Plugins {
+        const KEY: &'static str = "plugins";
+        const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[
+            ("allow", ProjectKey::Tighten(Order::SubsetEmptyIsAll)),
+            (
+                "enable_on_install",
+                ProjectKey::Tighten(Order::FalseTighter),
+            ),
+            ("enabled", ProjectKey::Tighten(Order::FalseTighter)),
+        ];
+    }
+
+    fn sections() -> Sections {
+        Sections::none().with::<Plugins>()
+    }
+
     fn lower() -> Value {
-        serde_json::to_value(crate::settings::Settings::defaults_for("m")).unwrap()
+        serde_json::to_value(crate::Settings::defaults_for("m")).unwrap()
     }
 
     fn gate(layer: Value, withhold: bool) -> (Value, Vec<String>) {
         let mut layer = layer.as_object().unwrap().clone();
-        let found = gate_layer(&mut layer, &lower(), withhold);
+        let found = gate_layer(&mut layer, &lower(), withhold, &sections());
         (Value::Object(layer), found)
     }
 
@@ -653,7 +805,7 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let found = gate_layer(&mut layer, &lower, true);
+        let found = gate_layer(&mut layer, &lower, true, &sections());
         assert_eq!(
             found,
             [
@@ -699,7 +851,7 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let found = gate_layer(&mut layer, &lower, true);
+        let found = gate_layer(&mut layer, &lower, true, &sections());
         assert_eq!(
             found,
             [
@@ -730,12 +882,10 @@ mod tests {
         let layer = json!({
             "sandbox": {"reap_process_groups": true, "subprocess_env": {"mode": "allowlist"}},
             "telemetry_enabled": true,
-            "plugins": {"enable_on_install": false},
             "execution": {
                 "max_agent_depth": 1,
                 "max_budget_tokens": 5000,
                 "permission_prompt_timeout_secs": 30,
-                "team_enabled": false,
             },
             "prompt_append": "Answer in French.",
             "$schema": "../settings.schema.json",
@@ -757,7 +907,7 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let found = gate_layer(&mut layer, &lower, true);
+        let found = gate_layer(&mut layer, &lower, true, &sections());
         assert_eq!(found, ["execution.max_budget_tokens"]);
         assert_eq!(
             Value::Object(layer),
@@ -795,95 +945,14 @@ mod tests {
         assert_eq!(left, layer);
     }
 
-    /// The settings keys a file can hold, read off the published schema:
-    /// an object with properties, or a map, is looked into; anything else —
-    /// including a value that may be an object or something else — is one key.
-    fn schema_keys(root: &Value) -> Vec<Vec<String>> {
-        fn resolve<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
-            while let Some(target) = node.get("$ref").and_then(Value::as_str) {
-                node = root.pointer(target.trim_start_matches('#')).unwrap();
-            }
-            node
-        }
-        fn walk(root: &Value, node: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
-            let node = resolve(root, node);
-            let branches: Vec<&Value> = ["anyOf", "oneOf", "allOf"]
-                .iter()
-                .flat_map(|b| node.get(*b).and_then(Value::as_array).into_iter().flatten())
-                .map(|b| resolve(root, b))
-                .filter(|b| b.get("type") != Some(&json!("null")))
-                .collect();
-            let alternatives = if branches.is_empty() {
-                vec![node]
-            } else {
-                branches
-            };
-            let is_section = |a: &&Value| {
-                a.get("properties").is_some() || a.get("additionalProperties").is_some()
-            };
-            if !alternatives.iter().all(is_section) {
-                out.push(path.clone());
-                return;
-            }
-            for alternative in alternatives {
-                for (key, inner) in alternative
-                    .get("properties")
-                    .and_then(Value::as_object)
-                    .into_iter()
-                    .flatten()
-                {
-                    path.push(key.clone());
-                    walk(root, inner, path, out);
-                    path.pop();
-                }
-                match alternative.get("additionalProperties") {
-                    Some(inner @ Value::Object(_)) => {
-                        path.push("*".into());
-                        walk(root, inner, path, out);
-                        path.pop();
-                    }
-                    Some(Value::Bool(true)) => {
-                        path.push("*".into());
-                        out.push(path.clone());
-                        path.pop();
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let mut out = Vec::new();
-        walk(root, root, &mut Vec::new(), &mut out);
-        out.sort();
-        out.dedup();
-        out
-    }
-
-    /// A settings field added without a line in `PROJECT_TIER` fails here,
-    /// rather than passing through an untrusted project unexamined.
     #[test]
     fn every_settings_key_has_an_entry() {
-        let keys = schema_keys(&crate::settings::settings_json_schema());
-        assert!(keys.len() > 50, "{keys:?}");
-        let mut used = std::collections::HashSet::new();
-        for key in &keys {
-            let segments: Vec<&str> = key.iter().map(String::as_str).collect();
-            let dotted = key.join(".");
-            let Some((pattern, tier)) = governing_entry(&segments) else {
-                panic!("`{dotted}` has no entry in PROJECT_TIER");
-            };
-            let pattern = pattern.join(".");
-            assert!(
-                pattern.split('.').count() == key.len() || *tier == ProjectKey::Withheld,
-                "`{dotted}` is governed by the shorter `{pattern}`, which is not Withheld"
-            );
-            used.insert(pattern);
-        }
-        for (pattern, _) in PROJECT_TIER {
-            assert!(
-                pattern.starts_with('$') || used.contains(*pattern),
-                "PROJECT_TIER entry `{pattern}` names no settings key"
-            );
-        }
+        let schema = crate::settings_json_schema(&sections());
+        assert!(schema_keys(&schema).len() > 40);
+        assert_eq!(
+            project_tier_gaps(&schema, &sections()),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

@@ -11,14 +11,15 @@ description  = "Agix — permission engine (rule matching, mode dispatch, path s
 base          = { workspace = true }
 tokio         = { workspace = true }
 async-trait   = { workspace = true }
-serde_json    = { workspace = true }
 thiserror     = { workspace = true }
 globset       = { workspace = true }
 tracing       = { workspace = true }
 unicode-normalization = { workspace = true }
 uuid          = { workspace = true }
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = { workspace = true }
+settings = { workspace = true }
 tokio-util = { workspace = true }
 
 [lints.clippy]

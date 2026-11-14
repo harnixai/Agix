@@ -341,15 +341,23 @@ fn registered_blocks(
 mod tests {
     use super::*;
     use crate::interface::instruction_provider::RuleProvider;
-    use crate::interface::model::ThinkingMode;
     use crate::interface::scene::{FixedPrompt, TokenBudget};
     use crate::memory::{memory_prompt, MemoryStore};
     use crate::paths::PathSettings;
-    use crate::permission::PermissionMode;
-    use crate::provider::ApiType;
-    use crate::settings::{ExecutionSettings, LoadedSettings, ModelSettings, Settings};
     use std::borrow::Cow;
     use tempfile::TempDir;
+
+    #[derive(Clone)]
+    struct TestSettings {
+        prompt_append: Option<String>,
+        prompt_override: Option<String>,
+        memory_enabled: bool,
+    }
+
+    struct TestLoaded {
+        values: TestSettings,
+        paths: PathSettings,
+    }
 
     fn scene_with(blocks: Vec<PromptBlock>) -> SceneSpec {
         let mut scene = SceneSpec::new("test", "Test", std::sync::Arc::new(FixedPrompt(blocks)));
@@ -387,10 +395,10 @@ mod tests {
         }
     }
 
-    fn test_loaded(settings: Settings) -> LoadedSettings {
-        LoadedSettings::new(
-            settings,
-            PathSettings {
+    fn test_loaded(settings: TestSettings) -> TestLoaded {
+        TestLoaded {
+            values: settings,
+            paths: PathSettings {
                 user_data_dir: "/tmp/agix/scenes/code".into(),
                 global_data_dir: "/tmp/agix".into(),
                 workspace: crate::paths::Workspace::project_of(std::path::Path::new(
@@ -399,13 +407,13 @@ mod tests {
                 local_data_dir: "/tmp/agix/local".into(),
                 scope: "code".into(),
             },
-        )
+        }
     }
 
     fn assemble_for_test(
         registry: &dyn crate::interface::prompt_registry::PromptRegistry,
         scene: &SceneSpec,
-        settings: &Settings,
+        settings: &TestSettings,
         store: &MemoryStore,
         ctx: &ScenePromptContext,
         rules: &[crate::rules::RuleEntry],
@@ -427,7 +435,7 @@ mod tests {
 
     fn assemble_prompt(
         scene: &SceneSpec,
-        settings: &LoadedSettings,
+        settings: &TestLoaded,
         store: &MemoryStore,
         ctx: &ScenePromptContext,
         skills_text: Option<&str>,
@@ -444,41 +452,11 @@ mod tests {
         )
     }
 
-    fn test_settings() -> Settings {
-        Settings {
-            model: ModelSettings {
-                api_type: ApiType::Anthropic,
-                base_url: "https://api.example.com".into(),
-                auth_token: "test".into(),
-                model_name: "test-model".into(),
-                max_tokens: 4096,
-                thinking_mode: ThinkingMode::Auto,
-                effort: None,
-                fallback_model: None,
-            },
-            execution: ExecutionSettings::default(),
-            compaction: Default::default(),
-            sandbox: Default::default(),
-            plugins: Default::default(),
-            scripts: Vec::new(),
-            instruction_file: None,
+    fn test_settings() -> TestSettings {
+        TestSettings {
             prompt_append: None,
             prompt_override: None,
-            recorder: None,
-            telemetry_url: None,
             memory_enabled: true,
-            disable_skill_shell_execution: false,
-            path_style: Default::default(),
-            permission_mode: PermissionMode::default(),
-            allow_client_permission_override: false,
-            telemetry_enabled: false,
-            hooks_config: None,
-            project_trust: Default::default(),
-            mcp_servers: Default::default(),
-            providers: Default::default(),
-            default_provider: None,
-            task_models: Default::default(),
-            language: None,
         }
     }
 

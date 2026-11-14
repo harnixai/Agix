@@ -120,7 +120,7 @@ pub enum RuleSource {
     CliArg,
     /// 会话内通过 `/permissions` 命令设置
     Session,
-    /// 部署方的 managed settings（`base::managed_settings`）
+    /// 部署方的 managed settings（`settings::managed`）
     PolicySettings,
     /// 由命令展开时临时注入
     Command,
@@ -229,6 +229,18 @@ impl ManagedSettings {
                     .iter()
                     .any(|r| r.action != RuleBehavior::Allow))
     }
+}
+
+/// What the permission engine reads of the loaded settings: every tier's
+/// rules, the managed layer, the sandbox's view, and where a project-scoped
+/// grant is written.
+#[derive(Debug, Clone, Default)]
+pub struct PermissionSettings {
+    pub rules: Vec<LoadedRule>,
+    pub managed: Option<ManagedSettings>,
+    pub sandbox: crate::interface::tool::SandboxSettings,
+    /// `None` for a session with no project: a grant lasts the session only.
+    pub project_rules: Option<std::sync::Arc<dyn crate::interface::permission::RuleFile>>,
 }
 
 /// Whether the project tier of a `LoadedSettings` is in effect as written.

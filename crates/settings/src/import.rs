@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 use time::OffsetDateTime;
 
-use crate::text::frontmatter::{extract_yaml_field, split_frontmatter};
+use base::text::frontmatter::{extract_yaml_field, split_frontmatter};
 
 /// Which external tool a detected import source came from. Single-select by
 /// design — importing from more than one source at
@@ -313,7 +313,7 @@ pub async fn execute_import(
     source: &ImportSource,
 ) -> Result<ImportSummary, ImportError> {
     let mut actions = Vec::new();
-    let files = crate::paths::SensitivePaths::default().prompt_files_within(cwd);
+    let files = base::paths::SensitivePaths::default().prompt_files_within(cwd);
     match source {
         ImportSource::ClaudeCode {
             claude_md,
@@ -428,7 +428,7 @@ fn merge_marked_section(existing: &str, new_content: &str, tag: &str) -> String 
 async fn copy_skill_dirs(
     src_dir: &Path,
     dest_dir: &Path,
-    files: &crate::paths::PromptFiles,
+    files: &base::paths::PromptFiles,
 ) -> std::io::Result<usize> {
     let mut count = 0;
     let mut entries = match tokio::fs::read_dir(src_dir).await {
