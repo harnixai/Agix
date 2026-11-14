@@ -4,7 +4,8 @@
       "description": "API protocol type.",
       "enum": [
         "anthropic",
-        "openai_compatible"
+        "openai_compatible",
+        "openai_responses"
       ],
       "type": "string"
     },
@@ -393,7 +394,7 @@
         },
         "api_type": {
           "default": null,
-          "description": "\"anthropic\" | \"openai_compatible\". Kept as a plain string (not\n`ApiType`) so an unrecognized value degrades to a warning instead of\na hard parse failure of the whole settings.json.",
+          "description": "\"anthropic\" | \"openai_compatible\" | \"openai_responses\". Kept as a plain string (not\n`ApiType`) so an unrecognized value degrades to a warning instead of\na hard parse failure of the whole settings.json.",
           "type": [
             "string",
             "null"
