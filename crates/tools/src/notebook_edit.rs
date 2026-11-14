@@ -143,10 +143,17 @@ impl Tool for NotebookEditTool {
             .map(|a| a.len())
             .unwrap_or(0);
 
+        let change = crate::file_change::describe(
+            path,
+            crate::file_change::Before::Content(content.as_bytes()),
+            new_content.as_bytes(),
+            &ctx.cwd,
+        );
         Ok(ToolResult::text(format!(
             "{:?} cell at index {} in {}; notebook now has {} cells.",
             input.mode, input.cell_index, input.file_path, cells_after
         ))
+        .with_file_change(change)
         .with_structured(json!({
                 "file_path": input.file_path,
                 "mode": format!("{:?}", input.mode).to_lowercase(),

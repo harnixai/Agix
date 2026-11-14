@@ -105,6 +105,78 @@ pub struct ToolResult {
     pub mcp_meta: Option<McpMeta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_messages: Option<Vec<Value>>,
+    /// The files this call wrote, for the host; the model never sees it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_changes: Vec<FileChange>,
+}
+
+/// One file a tool call wrote, as `tool_result` reports it to the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[non_exhaustive]
+pub struct FileChange {
+    /// The resolved write target, absolute.
+    pub path: String,
+    pub op: FileOp,
+    /// `sha256:<hex>` of the content before; `None` when there was none or
+    /// it was too large to hash.
+    pub before_hash: Option<String>,
+    pub after_hash: Option<String>,
+    pub before_bytes: Option<u64>,
+    pub after_bytes: u64,
+    pub added: u64,
+    pub removed: u64,
+    /// `--- a/<path>` / `+++ b/<path>`, three lines of context.
+    pub unified_diff: Option<String>,
+    /// The diff stops at a hunk boundary short of the whole change.
+    pub truncated: bool,
+    /// Why there is no diff, when there is none.
+    pub omitted: Option<DiffOmitted>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum FileOp {
+    Create,
+    Modify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DiffOmitted {
+    TooLarge,
+    Binary,
+    /// A result transformer rewrote the call's text, and the diff would
+    /// carry the file content it may have removed.
+    Redacted,
+}
+
+impl FileChange {
+    pub fn new(path: impl Into<String>, op: FileOp, after_bytes: u64) -> Self {
+        Self {
+            path: path.into(),
+            op,
+            before_hash: None,
+            after_hash: None,
+            before_bytes: None,
+            after_bytes,
+            added: 0,
+            removed: 0,
+            unified_diff: None,
+            truncated: false,
+            omitted: None,
+        }
+    }
+
+    /// What may go to a host that must not see the file's content.
+    pub fn without_content(mut self) -> Self {
+        if self.unified_diff.take().is_some() || self.omitted.is_none() {
+            self.omitted = Some(DiffOmitted::Redacted);
+        }
+        self.truncated = false;
+        self
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpMeta {
@@ -183,6 +255,7 @@ impl ToolResult {
             structured_content: None,
             mcp_meta: None,
             new_messages: None,
+            file_changes: Vec::new(),
         }
     }
     pub fn error_text(s: impl Into<String>) -> Self {
@@ -192,6 +265,7 @@ impl ToolResult {
             structured_content: None,
             mcp_meta: None,
             new_messages: None,
+            file_changes: Vec::new(),
         }
     }
     pub fn blocks(blocks: Vec<ToolResultBlock>) -> Self {
@@ -214,6 +288,10 @@ impl ToolResult {
     }
     pub fn with_new_messages(mut self, m: Vec<Value>) -> Self {
         self.new_messages = Some(m);
+        self
+    }
+    pub fn with_file_change(mut self, change: FileChange) -> Self {
+        self.file_changes.push(change);
         self
     }
 }

@@ -13,6 +13,7 @@ use base::event::{
 };
 use base::interface::elicitation::ElicitOption;
 use base::interface::model::Usage;
+use base::tool::FileChange;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -76,6 +77,8 @@ pub enum SessionEventPayload {
         name: String,
         content: String,
         is_error: Option<bool>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        file_changes: Vec<FileChange>,
     },
     Prompt(PromptPayload),
     PromptResolved {
@@ -371,11 +374,13 @@ impl SessionEventPayload {
                 content,
                 is_error,
                 turn_id: _,
+                file_changes,
             } => Self::ToolResult {
                 id: id.clone(),
                 name: name.clone(),
                 content: content.clone(),
                 is_error: *is_error,
+                file_changes: file_changes.clone(),
             },
             AgentEvent::PermissionPrompt {
                 prompt_id,

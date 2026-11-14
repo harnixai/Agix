@@ -69,6 +69,7 @@ mod session_unsubscribe;
 mod skill_inline_commands;
 mod support;
 mod tool_progress;
+mod tool_result_diff;
 mod transport_auth;
 mod turn_cancellation;
 mod turn_concurrency;

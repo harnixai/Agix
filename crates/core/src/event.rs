@@ -96,6 +96,10 @@ pub enum AgentEvent {
         content: String,
         is_error: Option<bool>,
         turn_id: String,
+        /// The files the call wrote. Not in the transcript: the model reads
+        /// `content`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        file_changes: Vec<crate::interface::tool::FileChange>,
     },
 
     /// Permission check requires upper-layer decision.

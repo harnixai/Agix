@@ -63,6 +63,8 @@ pub struct ToolAnswer {
     pub reported_failure: bool,
     /// The result's structured content, when the tool gave one.
     pub structured: Option<serde_json::Value>,
+    /// The files the call wrote, for the host.
+    pub file_changes: Vec<crate::interface::tool::FileChange>,
 }
 
 impl ToolAnswer {
@@ -73,6 +75,7 @@ impl ToolAnswer {
             new_messages: None,
             reported_failure: false,
             structured: None,
+            file_changes: Vec::new(),
         }
     }
 
@@ -83,6 +86,7 @@ impl ToolAnswer {
             new_messages: None,
             reported_failure: true,
             structured: None,
+            file_changes: Vec::new(),
         }
     }
 }

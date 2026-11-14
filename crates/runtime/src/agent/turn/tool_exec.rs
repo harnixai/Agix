@@ -626,6 +626,7 @@ fn answer_of(
                 new_messages: r.new_messages,
                 reported_failure: r.is_error,
                 structured: r.structured_content,
+                file_changes: r.file_changes,
             };
             (Ok(answer), images)
         }
@@ -707,10 +708,15 @@ pub(super) fn apply_result_transformers(
     // itself already called a failure hands back the same shape, because
     // nothing about it changed.
     let was_reported_failure = matches!(&outcome, Ok(a) if a.reported_failure);
-    let (text, is_error, new_messages, structured) = match outcome {
-        Ok(a) => (a.text, a.reported_failure, a.new_messages, a.structured),
-        Err(e) => (e, true, None, None),
+    let (text, is_error, carried) = match outcome {
+        Ok(a) => (
+            a.text,
+            a.reported_failure,
+            (a.new_messages, a.structured, a.file_changes),
+        ),
+        Err(e) => (e, true, (None, None, Vec::new())),
     };
+    let (new_messages, structured, file_changes) = carried;
     let original = (text.clone(), is_error);
     let mut draft = base::interface::tool_result::ToolResultDraft {
         text,
@@ -727,8 +733,15 @@ pub(super) fn apply_result_transformers(
     // The structured form is the same answer as the text; once a transformer
     // has rewritten the text (a redaction, say), handing a program the
     // untouched structure would undo it.
-    let structured =
-        structured.filter(|_| (&draft.text, draft.is_error) == (&original.0, original.1));
+    let untouched = (&draft.text, draft.is_error) == (&original.0, original.1);
+    let structured = structured.filter(|_| untouched);
+    let file_changes = match untouched {
+        true => file_changes,
+        false => file_changes
+            .into_iter()
+            .map(|c| c.without_content())
+            .collect(),
+    };
 
     let images = draft
         .images
@@ -747,6 +760,7 @@ pub(super) fn apply_result_transformers(
             new_messages,
             reported_failure: draft.is_error,
             structured,
+            file_changes,
         })
     };
     (outcome, images)

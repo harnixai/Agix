@@ -5,6 +5,7 @@ pub mod bash;
 pub mod cancel;
 pub mod cron;
 pub mod external_content;
+pub mod file_change;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;

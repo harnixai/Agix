@@ -29,6 +29,7 @@ html2text     = { workspace = true, optional = true }
 jsonschema    = { workspace = true, optional = true }
 ignore        = { workspace = true }
 similar       = { workspace = true }
+sha2          = { workspace = true }
 base64        = { workspace = true }
 time = { workspace = true }
 

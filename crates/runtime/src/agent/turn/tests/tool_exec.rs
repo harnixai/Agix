@@ -1566,6 +1566,7 @@ fn a_redacting_transformer_also_takes_the_structured_result_away() {
             new_messages: None,
             reported_failure: false,
             structured: Some(serde_json::json!({"password": text})),
+            file_changes: Vec::new(),
         })
     };
 
@@ -1594,6 +1595,63 @@ fn a_redacting_transformer_also_takes_the_structured_result_away() {
         untouched.structured,
         Some(serde_json::json!({"password": "nothing here"}))
     );
+}
+
+#[test]
+fn a_redacting_transformer_leaves_the_file_change_without_its_diff() {
+    let mut ctx = test_exec_ctx(
+        Arc::new(base::tool::InMemoryToolRegistry::new()),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
+    );
+    ctx.result_transformers =
+        Arc::new(vec![
+            Arc::new(base::interface::tool_result::RedactLiterals::new([
+                "hunter2",
+            ])) as Arc<dyn base::interface::tool_result::ToolResultTransformer>,
+        ]);
+    let change = tools::file_change::describe(
+        std::path::Path::new("/repo/creds"),
+        tools::file_change::Before::Content(b"password: x\n"),
+        b"password: hunter2\n",
+        std::path::Path::new("/repo"),
+    );
+    let answer = |text: &str| {
+        Ok(base::interface::tool_middleware::ToolAnswer {
+            text: text.into(),
+            new_messages: None,
+            reported_failure: false,
+            structured: None,
+            file_changes: vec![change.clone()],
+        })
+    };
+
+    let redacted = apply_result_transformers(
+        &ctx,
+        "Edit",
+        &serde_json::json!({}),
+        answer("+password: hunter2"),
+        Vec::new(),
+    )
+    .0
+    .unwrap();
+    let kept = &redacted.file_changes[0];
+    assert_eq!(kept.unified_diff, None);
+    assert_eq!(kept.omitted, Some(base::tool::DiffOmitted::Redacted));
+    assert_eq!(
+        (&kept.path, &kept.before_hash, &kept.after_hash),
+        (&change.path, &change.before_hash, &change.after_hash)
+    );
+
+    let untouched = apply_result_transformers(
+        &ctx,
+        "Edit",
+        &serde_json::json!({}),
+        answer("nothing here"),
+        Vec::new(),
+    )
+    .0
+    .unwrap();
+    assert_eq!(untouched.file_changes, vec![change]);
 }
 
 /// Lets every call through, owing a look for nested repositories.

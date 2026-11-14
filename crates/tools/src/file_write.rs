@@ -113,21 +113,33 @@ impl Tool for FileWriteTool {
         )
         .await;
 
-        let result = run_with_cancel(
-            &ctx.cancel,
-            write_file(&*ctx.exec.filesystem, &path, &input.content),
-        )
+        let result = run_with_cancel(&ctx.cancel, async {
+            let before = prior_content(&*ctx.exec.filesystem, &path).await;
+            let bytes = write_file(&*ctx.exec.filesystem, &path, &input.content).await?;
+            Ok::<_, ToolError>((bytes, before))
+        })
         .await?;
         if result.is_ok() {
             ctx.session.record_write(&path);
         }
 
-        result.map(|bytes| {
+        result.map(|(bytes, before)| {
+            let before = match &before {
+                Prior::Absent => crate::file_change::Before::Absent,
+                Prior::Read(content) => crate::file_change::Before::Content(content),
+                Prior::Unread(bytes) => crate::file_change::Before::Unread { bytes: *bytes },
+            };
             ToolResult::text(format!(
                 "Wrote {} byte{} to {}",
                 bytes,
                 if bytes == 1 { "" } else { "s" },
                 ctx.config.path_style.render(&path, &ctx.cwd)
+            ))
+            .with_file_change(crate::file_change::describe(
+                &path,
+                before,
+                input.content.as_bytes(),
+                &ctx.cwd,
             ))
         })
     }
@@ -138,6 +150,27 @@ impl FileWriteTool {
         serde_json::from_value::<FileWriteInput>(input.clone())
             .ok()
             .map(|i| i.file_path)
+    }
+}
+
+enum Prior {
+    Absent,
+    Read(Vec<u8>),
+    Unread(u64),
+}
+
+/// What the write replaces, for the host's report of it. A file that cannot
+/// be read is reported as though it were too large to read.
+async fn prior_content(fs: &dyn FileSystem, path: &Path) -> Prior {
+    let Ok(metadata) = fs.metadata_following_symlinks(path).await else {
+        return Prior::Absent;
+    };
+    if metadata.len > crate::file_change::HASHED_UP_TO {
+        return Prior::Unread(metadata.len);
+    }
+    match fs.read(path).await {
+        Ok(content) => Prior::Read(content),
+        Err(_) => Prior::Unread(metadata.len),
     }
 }
 

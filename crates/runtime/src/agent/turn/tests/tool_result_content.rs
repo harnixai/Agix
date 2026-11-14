@@ -238,6 +238,7 @@ fn answered(text: &str, failed: bool) -> base::interface::tool_middleware::ToolO
         new_messages: None,
         reported_failure: failed,
         structured: None,
+        file_changes: Vec::new(),
     })
 }
 

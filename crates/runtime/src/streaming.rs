@@ -24,7 +24,9 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+mod answer;
 mod stop;
+use answer::{buffer_result, read_outcome, Answered, DUPLICATE_CALL};
 use stop::Stop;
 pub(crate) use stop::{ABANDONED_BY_SIBLING, CANCELLED_WITH_THE_TURN};
 
@@ -376,8 +378,7 @@ where
                 idx,
                 &id,
                 &name,
-                "[Duplicate tool call skipped — identical call was already made this turn.]",
-                false,
+                Answered::plain(DUPLICATE_CALL, false),
             );
             return;
         }
@@ -438,7 +439,7 @@ where
                 .await
         };
         let result = self.read_ahead.during(barrier, &mut self.stream).await;
-        let (content, new_msgs, failed) = read_outcome(&result);
+        let (answered, new_msgs) = read_outcome(&result);
         buffer_result(
             self.event_tx,
             &self.turn_id,
@@ -446,8 +447,7 @@ where
             idx,
             &id,
             &name,
-            &content,
-            failed,
+            answered,
         );
         if let Some(msgs) = new_msgs {
             self.pending_new_msgs.push(msgs);
@@ -488,8 +488,7 @@ where
             idx,
             &id,
             &name,
-            &malformed_call_answer(&raw_input),
-            true,
+            Answered::plain(malformed_call_answer(&raw_input), true),
         );
     }
 
@@ -623,7 +622,7 @@ fn finish_tool(
     if result.is_err() {
         batch_abort.cancel();
     }
-    let (content, new_msgs, failed) = read_outcome(result);
+    let (answered, new_msgs) = read_outcome(result);
     let tname = queued_tool_names.get(idx).cloned().unwrap_or_default();
     buffer_result(
         event_tx,
@@ -632,8 +631,7 @@ fn finish_tool(
         idx,
         tool_use_id,
         &tname,
-        &content,
-        failed,
+        answered,
     );
     if let Some(msgs) = new_msgs {
         pending_new_msgs.push(msgs);
@@ -667,53 +665,6 @@ async fn drain_batch<S>(
             pending_new_msgs,
         );
     }
-}
-
-/// One outcome, read the two ways the loop needs it: what the model is shown,
-/// and whether that is a failure.
-///
-/// The second is not `is_err`. A tool that ran and calls its own result a
-/// failure — a non-zero exit, an MCP server's `isError`, a trapped guest —
-/// belongs on the wire with `is_error: true` and does *not* cancel the
-/// siblings sharing its batch, which is what an `Err` here means and what the
-/// caller keeps reading `is_err` for.
-fn read_outcome(
-    outcome: &base::interface::tool_middleware::ToolOutcome,
-) -> (String, Option<Vec<serde_json::Value>>, bool) {
-    match outcome {
-        Ok(a) => (a.text.clone(), a.new_messages.clone(), a.reported_failure),
-        Err(e) => (e.clone(), None, true),
-    }
-}
-
-/// `idx` is the submission index, restoring a deterministic order at write
-/// time whatever the completion order was.
-#[allow(clippy::too_many_arguments)]
-fn buffer_result(
-    event_tx: &EventSender,
-    turn_id: &str,
-    pending_result_blocks: &mut Vec<(usize, ModelContentBlock)>,
-    idx: usize,
-    tool_use_id: &str,
-    tool_name: &str,
-    content: &str,
-    is_error: bool,
-) {
-    pending_result_blocks.push((
-        idx,
-        ModelContentBlock::ToolResult {
-            tool_use_id: tool_use_id.to_string(),
-            content: content.to_string(),
-            is_error: Some(is_error),
-        },
-    ));
-    let _ = event_tx.send(AgentEvent::ToolResult {
-        id: tool_use_id.to_string(),
-        name: tool_name.to_string(),
-        content: content.to_string(),
-        is_error: Some(is_error),
-        turn_id: turn_id.to_string(),
-    });
 }
 
 /// A signature arriving with no thinking before it must not produce an empty

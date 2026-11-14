@@ -211,7 +211,13 @@ impl Tool for FileEditTool {
         // A TUI renders `structured_content` (`kind == "diff"`) inline; the
         // model and headless hosts read the text.
         let structured = serde_json::to_value(&outcome.diff).ok();
-        let mut result = ToolResult::text(outcome.summary);
+        let change = crate::file_change::describe(
+            &path,
+            crate::file_change::Before::Content(outcome.contents.0.as_bytes()),
+            outcome.contents.1.as_bytes(),
+            &ctx.cwd,
+        );
+        let mut result = ToolResult::text(outcome.summary).with_file_change(change);
         result.structured_content = structured;
         Ok(result)
     }
@@ -262,6 +268,8 @@ pub enum DiffLine {
 struct PerformOutcome {
     summary: String,
     diff: DiffPayload,
+    /// Before and after.
+    contents: (String, String),
 }
 
 /// Apply N edits atomically. Each edit runs against the
@@ -333,11 +341,10 @@ async fn perform_edits_structured(
     fs.write_str(path, &current).await?;
 
     let (diff_text, diff_payload) = render_diff(&original, &current, shown_path);
-    let edit_count = edits.len();
     let summary = format!(
         "Applied {} edit{} ({} replacement{}) to {} ({} → {} bytes)\n\n{}",
-        edit_count,
-        if edit_count == 1 { "" } else { "s" },
+        edits.len(),
+        if edits.len() == 1 { "" } else { "s" },
         total_replacements,
         if total_replacements == 1 { "" } else { "s" },
         shown_path,
@@ -348,6 +355,7 @@ async fn perform_edits_structured(
     Ok(PerformOutcome {
         summary,
         diff: diff_payload,
+        contents: (original, current),
     })
 }
 
