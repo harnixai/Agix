@@ -30,7 +30,10 @@ use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-const SESSION_STATE: &str = "crates/core/src/context/session.rs";
+const SESSION_STATE: &str = "crates/core/src/context/session/mod.rs";
+const TASKS: &str = "crates/core/src/context/session/tasks.rs";
+const NOTICES: &str = "crates/core/src/context/session/notices.rs";
+const READ_CACHE: &str = "crates/core/src/context/session/read_cache.rs";
 const LIVE: &str = "crates/assembly/src/session_pool/parts/live.rs";
 
 const FIELDS: &[(&str, &str)] = &[
@@ -56,11 +59,15 @@ const FIELDS: &[(&str, &str)] = &[
         "Session: recorded in the log with the durable state",
     ),
     (
-        "SessionState::running_tasks",
+        "SessionState::tasks",
         "Session: background work goes on across engines",
     ),
     (
-        "SessionState::task_events",
+        "TaskTable::running",
+        "Session: background work goes on across engines",
+    ),
+    (
+        "TaskTable::events",
         "Session: one forwarder per session reads it",
     ),
     ("SessionState::goal", "Session: recorded in the log"),
@@ -81,11 +88,19 @@ const FIELDS: &[(&str, &str)] = &[
         "Session: what the agent has not read yet",
     ),
     (
+        "Notices::pending",
+        "Session: what the agent has not read yet",
+    ),
+    (
         "SessionState::read_cache",
         "Session: what the model has read, for staleness checks",
     ),
     (
-        "SessionState::last_read_path",
+        "ReadCache::entries",
+        "Session: what the model has read, for staleness checks",
+    ),
+    (
+        "ReadCache::last_path",
         "Session: for the repeated-read check",
     ),
     (
@@ -188,7 +203,7 @@ const CREATED_AT: &[(&str, &str)] = &[
         "`SessionCore`: the state of a session the pool brings into memory",
     ),
     (
-        "crates/core/src/context/session.rs::SessionState::for_tests_in",
+        "crates/core/src/context/session/mod.rs::SessionState::for_tests_in",
         "a state for a test, which no session runs on",
     ),
 ];
@@ -213,6 +228,9 @@ fn every_field_of_a_sessions_state_says_whose_it_is() {
     let mut found = Vec::new();
     for (file, names) in [
         (SESSION_STATE, &["SessionState", "SessionEnv"][..]),
+        (TASKS, &["TaskTable"][..]),
+        (NOTICES, &["Notices"][..]),
+        (READ_CACHE, &["ReadCache"][..]),
         (LIVE, &["SessionCore", "EngineSlot"][..]),
     ] {
         let f = ws().file(file);

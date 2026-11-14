@@ -1,9 +1,18 @@
 //! 会话可变状态。
 
+mod notices;
+mod read_cache;
+mod tasks;
+
 use crate::permission::PermissionMode;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+
+use self::notices::Notices;
+pub use self::read_cache::FileReadEntry;
+use self::read_cache::ReadCache;
+use self::tasks::TaskTable;
+pub use self::tasks::{TaskLease, TaskScope};
 
 use super::goal::{GoalError, GoalView};
 use super::ledger::SessionLedger;
@@ -32,12 +41,8 @@ pub struct SessionState {
     /// 本会话用 `ToolSearch` 取过 schema 的 deferred 工具。schema 留在转录里，
     /// 工具表不变（保住 prompt cache）；压缩后的恢复提醒按这份名单让模型重新取。
     activated_tools: std::sync::Mutex<HashSet<String>>,
-    /// 后台跑的 sub-agent 任务。AgentTool 在 background=true 时把每个
-    /// 任务塞进来；TaskOutput 工具按 id 查；TaskStop 触发 cancel。
-    running_tasks: std::sync::Mutex<HashMap<String, std::sync::Arc<RunningTask>>>,
-    /// Its tasks' events, for whoever shows this session's tasks — see
-    /// [`SessionState::subscribe_tasks`].
-    task_events: broadcast::Sender<TaskEvent>,
+    /// 后台跑的 sub-agent 任务及其事件。
+    tasks: TaskTable,
     /// This session's goal — see [`super::goal`].
     goal: std::sync::Mutex<super::goal::GoalSlot>,
     /// Goal snapshots changed but not yet written to the session log; `None`
@@ -46,15 +51,10 @@ pub struct SessionState {
     goal_recording: std::sync::Arc<tokio::sync::Mutex<()>>,
     goal_events: broadcast::Sender<Option<GoalView>>,
     /// What the session's own agent should read at its next step boundary,
-    /// each under the key it can be retracted by — see
-    /// [`SessionState::post_notice`].
-    notices: std::sync::Mutex<Vec<(Option<String>, String)>>,
-    /// 已读取文件缓存。`FileRead` 成功后记录文件路径
-    /// 与当时的 mtime；`FileEdit` / `FileWrite` 的 `validate_input` 用它做
-    /// staleness 检测。
-    read_cache: std::sync::Mutex<HashMap<PathBuf, FileReadEntry>>,
-    /// 最近一次读取的文件路径，用于连续重复读取检测。
-    last_read_path: std::sync::Mutex<Option<PathBuf>>,
+    /// each under the key it can be retracted by.
+    notices: Notices,
+    /// 已读取文件缓存，供 staleness 与连续重复读取检测。
+    read_cache: ReadCache,
     ledger: std::sync::Mutex<SessionLedger>,
     /// The model a host chose for this session since it was built, read by
     /// whichever engine runs the next turn.
@@ -184,24 +184,6 @@ impl ModeSlot {
     }
 }
 
-/// 一次文件读取记录，包含读取时的 mtime。
-/// `FileEdit` / `FileWrite` 的 `validate_input` 用它做 staleness 检测。
-#[derive(Debug, Clone)]
-pub struct FileReadEntry {
-    /// 读取时的文件 mtime。
-    pub mtime: SystemTime,
-    /// 读取时的 offset（FileRead 的 offset 参数）。
-    /// `None` 表示整文件读取（offset 未指定）。
-    pub offset: Option<usize>,
-    /// 读取时的 limit（FileRead 的 limit 参数）。
-    /// `None` 表示读至文件末尾。
-    pub limit: Option<usize>,
-    /// Recorded by `Edit` / `Write` after they changed the file: the model
-    /// knows what is in it, but saw a diff rather than the text, so a later
-    /// `Read` still returns the content.
-    pub written: bool,
-}
-
 impl SessionState {
     /// A state no engine is attached to yet: its [`env`](Self::env) is empty
     /// until one is.
@@ -214,15 +196,13 @@ impl SessionState {
             todos: std::sync::Mutex::new(Vec::new()),
             recorded_durable: std::sync::Mutex::new(Some(DurableState::default())),
             activated_tools: std::sync::Mutex::new(HashSet::new()),
-            running_tasks: std::sync::Mutex::new(HashMap::new()),
-            task_events: tokio::sync::broadcast::channel(256).0,
-            notices: std::sync::Mutex::new(Vec::new()),
+            tasks: TaskTable::new(),
+            notices: Notices::default(),
             goal: std::sync::Mutex::new(super::goal::GoalSlot::default()),
             unrecorded_goal_changes: std::sync::Mutex::new(Vec::new()),
             goal_recording: Default::default(),
             goal_events: tokio::sync::broadcast::channel(64).0,
-            read_cache: std::sync::Mutex::new(HashMap::new()),
-            last_read_path: std::sync::Mutex::new(None),
+            read_cache: ReadCache::default(),
             ledger: Default::default(),
             model_choice: std::sync::Mutex::new(None),
         }
@@ -291,53 +271,7 @@ impl SessionState {
         cancel: tokio_util::sync::CancellationToken,
         detail: serde_json::Value,
     ) -> std::sync::Arc<RunningTask> {
-        let task_id = task_id.into();
-        let task =
-            std::sync::Arc::new(RunningTask::with_cancel(task_id.clone(), task_type, cancel));
-        *task.detail.lock().unwrap_or_else(|e| e.into_inner()) = detail;
-        task.report_to(self.task_events.clone());
-        self.running_tasks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(task_id, task.clone());
-        let quiet = matches!(task_type, TaskType::Shell | TaskType::Monitor);
-        if !quiet {
-            self.announce(&task);
-        } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let (task, events) = (task.clone(), self.task_events.clone());
-            runtime.spawn(async move {
-                let a_second = std::time::Duration::from_secs(1);
-                tokio::select! {
-                    _ = tokio::time::sleep(a_second) => {}
-                    _ = task.wait_ended() => return,
-                }
-                if task.has_ended() {
-                    return;
-                }
-                Self::announce_on(&events, &task);
-                loop {
-                    task.report_progress();
-                    tokio::select! {
-                        _ = tokio::time::sleep(a_second) => {}
-                        _ = task.wait_ended() => return,
-                    }
-                }
-            });
-        }
-        task
-    }
-
-    fn announce(&self, task: &RunningTask) {
-        Self::announce_on(&self.task_events, task);
-    }
-
-    fn announce_on(events: &broadcast::Sender<TaskEvent>, task: &RunningTask) {
-        if !task
-            .announced
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            let _ = events.send(TaskEvent::Started { task: task.info() });
-        }
+        self.tasks.register_task(task_id, task_type, cancel, detail)
     }
 
     /// Record that a task's work is over, having ended with `status`: its
@@ -346,47 +280,51 @@ impl SessionState {
     /// keeps the ending it has. Finished tasks beyond the newest few are
     /// forgotten.
     pub fn finish_task(&self, task_id: &str, status: RunningStatus) {
-        let Some(task) = self.find_running_task(task_id) else {
-            return;
-        };
-        Self::mark_ended(&task, status);
-        if Self::close_on(&self.task_events, &task) {
-            self.forget_old_tasks();
-        }
+        self.tasks.finish_task(task_id, status)
     }
 
-    /// Set the task's end and `status`, unless it has ended already.
-    fn mark_ended(task: &RunningTask, status: RunningStatus) {
-        {
-            let mut ended = task.ended_ms.lock().unwrap_or_else(|e| e.into_inner());
-            if ended.is_some() {
-                return;
-            }
-            *ended = Some(crate::clock::unix_ms());
-            let mut current = task.status.lock().unwrap_or_else(|e| e.into_inner());
-            if matches!(*current, RunningStatus::Running) {
-                *current = status;
-            }
-        }
-        task.ended.notify_waiters();
+    /// Every task this session knows — running, and the most recently ended —
+    /// oldest first.
+    pub fn task_infos(&self) -> Vec<TaskInfo> {
+        self.tasks.task_infos()
     }
 
-    /// Close the task's output and announce `task_finished`; `false` if it
-    /// was closed already.
-    fn close_on(events: &broadcast::Sender<TaskEvent>, task: &RunningTask) -> bool {
-        if !task.close_output() {
-            return false;
-        }
-        if task.announced.load(std::sync::atomic::Ordering::SeqCst) {
-            let _ = events.send(TaskEvent::Finished { task: task.info() });
-        }
-        true
+    /// Its tasks' events as they happen.
+    pub fn subscribe_tasks(&self) -> broadcast::Receiver<TaskEvent> {
+        self.tasks.subscribe_tasks()
     }
 
-    /// How long stopped work has to wind down and reach its own
-    /// [`finish_task`](Self::finish_task) before its output is closed for it;
-    /// longer than the 10 s a stopped program gets to wrap up.
-    const STOPPED_WORK_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+    /// 找一个 running task。返回 Arc 让 caller 读快照（output / status）。
+    pub fn find_running_task(&self, task_id: &str) -> Option<std::sync::Arc<RunningTask>> {
+        self.tasks.find_running_task(task_id)
+    }
+
+    /// 列出所有 running tasks 的 (id, status) 快照。
+    pub fn list_running_tasks(&self) -> Vec<(String, RunningStatus)> {
+        self.tasks.list_running_tasks()
+    }
+
+    /// Ids of the background work still running — sub-agents, teammates,
+    /// programs, monitors; not a foreground shell command — sorted.
+    pub fn running_background_task_ids(&self) -> Vec<String> {
+        self.tasks.running_background_task_ids()
+    }
+
+    /// The background work still running, as
+    /// [`running_background_task_ids`](Self::running_background_task_ids)
+    /// picks it, sorted by id.
+    pub fn running_background_tasks(&self) -> Vec<std::sync::Arc<RunningTask>> {
+        self.tasks.running_background_tasks()
+    }
+
+    /// Stop a running task: cancel what it runs under and record it as
+    /// stopped. `false` if there is no such task or it had already ended.
+    ///
+    /// `task_finished` waits for the work to wind down — what it prints on
+    /// the way out is part of its output — up to a grace period.
+    pub fn cancel_running_task(&self, task_id: &str) -> bool {
+        self.tasks.cancel_running_task(task_id)
+    }
 
     /// Tell this session's agent something it did not ask for in this turn,
     /// such as a background sub-agent having finished. A running turn reads
@@ -396,26 +334,58 @@ impl SessionState {
     /// it is read: one about a task the agent has since waited for tells it
     /// nothing new.
     pub fn post_notice(&self, key: Option<String>, text: impl Into<String>) {
-        self.notices
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((key, text.into()));
+        self.notices.post(key, text)
     }
 
     /// Withdraw the unread notice under `key`; `false` if there was none —
     /// never posted, or already read.
     pub fn retract_notice(&self, key: &str) -> bool {
-        let mut notices = self.notices.lock().unwrap_or_else(|e| e.into_inner());
-        let before = notices.len();
-        notices.retain(|(k, _)| k.as_deref() != Some(key));
-        notices.len() != before
+        self.notices.retract(key)
     }
 
     pub fn take_notices(&self) -> Vec<String> {
-        std::mem::take(&mut *self.notices.lock().unwrap_or_else(|e| e.into_inner()))
-            .into_iter()
-            .map(|(_, text)| text)
-            .collect()
+        self.notices.take()
+    }
+
+    /// Record that `Read` just read `path` over `offset`/`limit`, with its
+    /// mtime: a later read of the same range of an unchanged file is answered
+    /// from the cache, and `Edit`/`Write` know it was read and when.
+    pub fn record_read_with_range(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
+        self.read_cache.record_read(path, offset, limit)
+    }
+
+    /// Record that `Edit` / `Write` just changed `path`, so the next edit of
+    /// it does not ask for a `Read` first or call the session's own change
+    /// an outside one.
+    pub fn record_write(&self, path: &Path) {
+        self.read_cache.record_write(path)
+    }
+
+    /// 检查文件是否已读且未过期。
+    ///
+    /// - 文件不存在于磁盘 → 跳过检查（返回 None）
+    /// - 文件已读且 mtime 一致 → 返回 None（通过）
+    /// - 文件未读 → 返回 "must be read" 错误信息
+    /// - 文件已读但 mtime 不同 → 返回 "modified since read" 错误信息
+    pub fn check_read_staleness(&self, path: &Path) -> Option<&'static str> {
+        self.read_cache.check_staleness(path)
+    }
+
+    /// Check read dedup with explicit offset/limit range.
+    /// Only deduplicates when both the mtime AND the exact offset/limit range match.
+    pub fn check_read_dedup_with_range(
+        &self,
+        path: &Path,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> bool {
+        self.read_cache.check_dedup(path, offset, limit)
+    }
+
+    /// 给定路径是否与最近一次读取的文件一致。
+    /// 仅检查路径相等；mtime 一致性由调用方通过 `check_read_dedup_with_range` 保证。
+    pub fn is_consecutive_read(&self, path: &Path) -> bool {
+        self.read_cache.is_consecutive(path)
     }
 
     pub fn ledger(&self) -> std::sync::MutexGuard<'_, SessionLedger> {
@@ -439,49 +409,6 @@ impl SessionState {
         if let Some(durable) = durable {
             self.restore_durable_state(durable);
         }
-    }
-
-    const FINISHED_TASKS_KEPT: usize = 20;
-
-    fn forget_old_tasks(&self) {
-        let mut tasks = self.running_tasks.lock().unwrap_or_else(|e| e.into_inner());
-        let mut finished: Vec<(i64, String)> = tasks
-            .values()
-            .filter(|t| t.output_closed())
-            .filter_map(|t| {
-                let ended = (*t.ended_ms.lock().unwrap_or_else(|e| e.into_inner()))?;
-                Some((ended, t.task_id.clone()))
-            })
-            .collect();
-        if finished.len() <= Self::FINISHED_TASKS_KEPT {
-            return;
-        }
-        finished.sort();
-        for (_, id) in finished
-            .iter()
-            .take(finished.len() - Self::FINISHED_TASKS_KEPT)
-        {
-            tasks.remove(id);
-        }
-    }
-
-    /// Every task this session knows — running, and the most recently ended —
-    /// oldest first.
-    pub fn task_infos(&self) -> Vec<TaskInfo> {
-        let mut tasks: Vec<std::sync::Arc<RunningTask>> = self
-            .running_tasks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect();
-        tasks.sort_by_key(|t| t.started_ms);
-        tasks.iter().map(|t| t.info()).collect()
-    }
-
-    /// Its tasks' events as they happen.
-    pub fn subscribe_tasks(&self) -> broadcast::Receiver<TaskEvent> {
-        self.task_events.subscribe()
     }
 
     /// The goal as hosts and the model see it.
@@ -603,90 +530,6 @@ impl SessionState {
         let view = slot.view();
         let _ = self.goal_events.send(view.clone());
         view
-    }
-
-    /// 找一个 running task。返回 Arc 让 caller 读快照（output / status）。
-    pub fn find_running_task(&self, task_id: &str) -> Option<std::sync::Arc<RunningTask>> {
-        self.running_tasks
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(task_id)
-            .cloned()
-    }
-
-    /// 列出所有 running tasks 的 (id, status) 快照。
-    pub fn list_running_tasks(&self) -> Vec<(String, RunningStatus)> {
-        self.running_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    v.status.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-                )
-            })
-            .collect()
-    }
-
-    /// Ids of the background work still running — sub-agents, teammates,
-    /// programs, monitors; not a foreground shell command — sorted.
-    pub fn running_background_task_ids(&self) -> Vec<String> {
-        self.running_background_tasks()
-            .iter()
-            .map(|task| task.task_id.clone())
-            .collect()
-    }
-
-    /// The background work still running, as
-    /// [`running_background_task_ids`](Self::running_background_task_ids)
-    /// picks it, sorted by id.
-    pub fn running_background_tasks(&self) -> Vec<std::sync::Arc<RunningTask>> {
-        let mut tasks: Vec<std::sync::Arc<RunningTask>> = self
-            .running_tasks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .values()
-            .filter(|task| {
-                !matches!(task.task_type, TaskType::Shell)
-                    && matches!(
-                        *task.status.lock().unwrap_or_else(|e| e.into_inner()),
-                        RunningStatus::Running
-                    )
-            })
-            .cloned()
-            .collect();
-        tasks.sort_by(|a, b| a.task_id.cmp(&b.task_id));
-        tasks
-    }
-
-    /// Stop a running task: cancel what it runs under and record it as
-    /// stopped. `false` if there is no such task or it had already ended.
-    ///
-    /// `task_finished` waits for the work to wind down — what it prints on
-    /// the way out is part of its output — up to [`Self::STOPPED_WORK_GRACE`].
-    pub fn cancel_running_task(&self, task_id: &str) -> bool {
-        let Some(task) = self.find_running_task(task_id) else {
-            return false;
-        };
-        if task.has_ended() {
-            return false;
-        }
-        task.cancel.cancel();
-        Self::mark_ended(&task, RunningStatus::Cancelled);
-        match tokio::runtime::Handle::try_current() {
-            Ok(runtime) => {
-                let events = self.task_events.clone();
-                runtime.spawn(async move {
-                    tokio::time::sleep(Self::STOPPED_WORK_GRACE).await;
-                    Self::close_on(&events, &task);
-                });
-            }
-            Err(_) => {
-                Self::close_on(&self.task_events, &task);
-            }
-        }
-        true
     }
 
     /// Stop `task` from outside its lease, posting `notice` as its end's
@@ -813,110 +656,6 @@ impl SessionState {
         }
     }
 
-    /// Record that `Read` just read `path` over `offset`/`limit`, with its
-    /// mtime: a later read of the same range of an unchanged file is answered
-    /// from the cache, and `Edit`/`Write` know it was read and when.
-    pub fn record_read_with_range(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
-        if self.remember_file(path, offset, limit, false) {
-            *self
-                .last_read_path
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
-        }
-    }
-
-    /// Record that `Edit` / `Write` just changed `path`, so the next edit of
-    /// it does not ask for a `Read` first or call the session's own change
-    /// an outside one.
-    pub fn record_write(&self, path: &Path) {
-        self.remember_file(path, None, None, true);
-    }
-
-    fn remember_file(
-        &self,
-        path: &Path,
-        offset: Option<usize>,
-        limit: Option<usize>,
-        written: bool,
-    ) -> bool {
-        let Some(mtime) = std::fs::metadata(path).and_then(|m| m.modified()).ok() else {
-            return false;
-        };
-        self.read_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                path.to_path_buf(),
-                FileReadEntry {
-                    mtime,
-                    offset,
-                    limit,
-                    written,
-                },
-            );
-        true
-    }
-
-    /// 检查文件是否已读且未过期。
-    ///
-    /// - 文件不存在于磁盘 → 跳过检查（返回 None）
-    /// - 文件已读且 mtime 一致 → 返回 None（通过）
-    /// - 文件未读 → 返回 "must be read" 错误信息
-    /// - 文件已读但 mtime 不同 → 返回 "modified since read" 错误信息
-    pub fn check_read_staleness(&self, path: &Path) -> Option<&'static str> {
-        let meta = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(_) => return None, // file doesn't exist — skip staleness check
-        };
-        let current_mtime = match meta.modified() {
-            Ok(t) => t,
-            Err(_) => return None, // can't determine mtime — skip check
-        };
-        let cache = self.read_cache.lock().unwrap_or_else(|e| e.into_inner());
-        match cache.get(path) {
-            None => Some("File must be read before editing. Use the Read tool first."),
-            Some(entry) if entry.mtime != current_mtime => {
-                Some("File has been modified since it was read. Re-read it first.")
-            }
-            _ => None, // fresh
-        }
-    }
-
-    /// Check read dedup with explicit offset/limit range.
-    /// Only deduplicates when both the mtime AND the exact offset/limit range match.
-    pub fn check_read_dedup_with_range(
-        &self,
-        path: &Path,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> bool {
-        let meta = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let current_mtime = match meta.modified() {
-            Ok(t) => t,
-            Err(_) => return false,
-        };
-        let cache = self.read_cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get(path).is_some_and(|entry| {
-            !entry.written
-                && entry.mtime == current_mtime
-                && entry.offset == offset
-                && entry.limit == limit
-        })
-    }
-
-    /// 给定路径是否与最近一次读取的文件一致。
-    /// 仅检查路径相等；mtime 一致性由调用方通过 `check_read_dedup_with_range` 保证。
-    pub fn is_consecutive_read(&self, path: &Path) -> bool {
-        let last = self
-            .last_read_path
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        last.as_ref().is_some_and(|p| p == path)
-    }
-
     /// The providers the attached engine's tool calls run on, if one is
     /// attached.
     pub fn exec(&self) -> Option<crate::interface::exec::ExecProviders> {
@@ -965,118 +704,6 @@ impl SessionState {
         for name in names {
             set.insert(name);
         }
-    }
-}
-
-/// A task that lasts as long as this value: registered on creation, ended on
-/// drop — stopped if its token was cancelled, done otherwise. For work bounded
-/// by one call, like a shell command.
-pub struct TaskScope {
-    session: std::sync::Arc<SessionState>,
-    task: std::sync::Arc<RunningTask>,
-}
-
-impl TaskScope {
-    pub fn new(
-        session: std::sync::Arc<SessionState>,
-        task_id: impl Into<String>,
-        task_type: TaskType,
-        cancel: tokio_util::sync::CancellationToken,
-        detail: serde_json::Value,
-    ) -> Self {
-        let task = session.register_task(task_id, task_type, cancel, detail);
-        Self { session, task }
-    }
-
-    pub fn task(&self) -> &std::sync::Arc<RunningTask> {
-        &self.task
-    }
-}
-
-impl Drop for TaskScope {
-    fn drop(&mut self) {
-        let status = if self.task.cancel.is_cancelled() {
-            RunningStatus::Cancelled
-        } else {
-            RunningStatus::Completed
-        };
-        self.session.finish_task(&self.task.task_id, status);
-    }
-}
-
-/// A task whose holder says how it ended: registered on creation, ended by
-/// [`conclude`](Self::conclude). One dropped without concluding — its work
-/// panicked, was dropped from a queue, or its holder simply went away — ends
-/// as stopped, and the parent hears so when the lease was taken
-/// [notifying](Self::notifying) it. No task held by a lease is left running.
-pub struct TaskLease {
-    session: std::sync::Arc<SessionState>,
-    task: std::sync::Arc<RunningTask>,
-    stopped_notice: Option<StoppedNotice>,
-    concluded: bool,
-}
-
-type StoppedNotice = Box<dyn Fn(&RunningTask) -> String + Send + Sync>;
-
-impl TaskLease {
-    pub fn new(
-        session: std::sync::Arc<SessionState>,
-        task_id: impl Into<String>,
-        task_type: TaskType,
-        cancel: tokio_util::sync::CancellationToken,
-        detail: serde_json::Value,
-    ) -> Self {
-        let task = session.register_task(task_id, task_type, cancel, detail);
-        Self {
-            session,
-            task,
-            stopped_notice: None,
-            concluded: false,
-        }
-    }
-
-    /// The notice the parent is posted when the lease is dropped unconcluded.
-    pub fn notifying(
-        mut self,
-        notice: impl Fn(&RunningTask) -> String + Send + Sync + 'static,
-    ) -> Self {
-        self.stopped_notice = Some(Box::new(notice));
-        self
-    }
-
-    pub fn task(&self) -> &std::sync::Arc<RunningTask> {
-        &self.task
-    }
-
-    /// End the task with `status`. `notice` is posted to the session first,
-    /// so whoever wakes on the task's end finds it there to withdraw; a task
-    /// already stopped from outside gets none, since whoever stopped it knows.
-    pub fn conclude(mut self, status: RunningStatus, notice: Option<String>) {
-        self.concluded = true;
-        if !self.task.claim_end() {
-            return;
-        }
-        if let Some(notice) = notice.filter(|_| !self.task.has_ended()) {
-            self.session
-                .post_notice(Some(self.task.task_id.clone()), notice);
-        }
-        self.session.finish_task(&self.task.task_id, status);
-    }
-}
-
-impl Drop for TaskLease {
-    fn drop(&mut self) {
-        if self.concluded || !self.task.claim_end() {
-            return;
-        }
-        if let Some(notice) = self.stopped_notice.as_ref() {
-            if !self.task.has_ended() {
-                self.session
-                    .post_notice(Some(self.task.task_id.clone()), notice(&self.task));
-            }
-        }
-        self.session
-            .finish_task(&self.task.task_id, RunningStatus::Cancelled);
     }
 }
 

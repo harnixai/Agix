@@ -145,8 +145,8 @@ const BASE_FS: &[(&str, &str)] = &[
         "PromptFiles: every instruction file is read through the sensitive-path check",
     ),
     (
-        "crates/core/src/context/session.rs",
-        "the read cache compares mtimes; leaves with ReadCache in 2-3",
+        "crates/core/src/context/session/read_cache.rs",
+        "the read cache compares mtimes",
     ),
     (
         "crates/core/src/interface/exec/filesystem.rs",
