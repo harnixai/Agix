@@ -27,6 +27,7 @@ mod sandbox_chain;
 mod session_boundaries;
 mod session_prompt;
 mod session_rewind;
+mod settings_take_effect;
 mod skills_and_memory;
 mod stream_recovery;
 mod team_lifecycle;

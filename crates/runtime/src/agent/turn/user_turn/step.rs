@@ -232,11 +232,18 @@ impl Agent {
         };
         let tools_for_safety = Arc::clone(&template.tools);
         let cancel_grace = template.config.tool_cancel_grace;
+        let slots = Arc::new(tokio::sync::Semaphore::new(
+            template.config.max_parallelism.max(1),
+        ));
         let template = template.clone();
         let execute_tool = move |tool_use_id: String, name: String, input: serde_json::Value| {
             let mut exec_ctx = template.clone();
             exec_ctx.tool_use_id = tool_use_id;
-            async move { execute_tool_with_telemetry(&exec_ctx, &name, input).await }
+            let slots = Arc::clone(&slots);
+            async move {
+                let _slot = slots.acquire_owned().await;
+                execute_tool_with_telemetry(&exec_ctx, &name, input).await
+            }
         };
         let is_concurrency_safe = move |name: &str, input: &serde_json::Value| {
             tools_for_safety

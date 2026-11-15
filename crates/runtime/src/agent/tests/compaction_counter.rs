@@ -72,3 +72,36 @@ async fn a_manual_compaction_lands_under_its_target_in_the_sessions_counter() {
     assert_eq!(summary.tokens_before, before);
     assert_eq!(summary.tokens_after, agent.session.token_count());
 }
+
+fn built_with_cached_microcompact(on: bool) -> Agent {
+    let mut settings = test_settings();
+    settings.values.compaction.cached_microcompact = on;
+    Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(Arc::new(FailingModel))
+        .settings(Arc::new(settings))
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed")
+        .0
+}
+
+fn cleared_by_a_pass(agent: &mut Agent) -> usize {
+    conversation(agent, 30);
+    let mut messages = agent.session.messages().to_vec();
+    agent.compaction.cached_mc.run(&mut messages)
+}
+
+#[tokio::test]
+async fn the_cached_microcompact_setting_reaches_the_pass_it_gates() {
+    assert_eq!(
+        cleared_by_a_pass(&mut built_with_cached_microcompact(true)),
+        10
+    );
+    assert_eq!(
+        cleared_by_a_pass(&mut built_with_cached_microcompact(false)),
+        0
+    );
+}

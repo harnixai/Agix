@@ -25,7 +25,7 @@ pub(crate) struct Compaction {
     /// not told results were cleared when none were.
     tool_results_ever_cleared: bool,
     time_based_mc_config: compaction::time_based_mc::TimeBasedMcConfig,
-    cached_mc: compaction::cached::CachedMicroCompact,
+    pub(crate) cached_mc: compaction::cached::CachedMicroCompact,
     /// The system prompt and tool definitions of the last request, added to
     /// the message total by `context_tokens()`: without it the threshold check
     /// sees only message content and under-counts by a large constant.
