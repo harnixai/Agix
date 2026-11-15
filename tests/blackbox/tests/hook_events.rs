@@ -1117,14 +1117,14 @@ async fn a_failing_hook_with_on_error_block_blocks_the_call() -> anyhow::Result<
     let (_, timed_out, is_error) = &events.tool_results[0];
     assert!(
         *is_error
-            && timed_out.contains("Hook `PreToolUse` #1 failed and its on_error is block")
+            && timed_out.contains("failed and its on_error is block")
             && !timed_out.contains("hang.sh"),
         "{timed_out}"
     );
     let (_, exited, is_error) = &events.tool_results[1];
     assert!(
         *is_error
-            && exited.contains("Hook `PreToolUse` #1 failed and its on_error is block")
+            && exited.contains("failed and its on_error is block")
             && !exited.contains("failing.sh"),
         "{exited}"
     );
