@@ -625,7 +625,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn the_deadline_cancels_and_reports_a_timeout() {
-        let (_, scope, _) = hosted();
+        let (session, scope, _) = hosted();
         let peer = FakePeer::saying(vec![at("busy", TaskPayload::Working)]);
         let result = await_task("demo", &peer, created(), &scope, Duration::from_secs(2)).await;
         assert!(
@@ -633,6 +633,7 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(peer.cancels(), 1);
+        assert_eq!(session.task_infos()[0].status.as_str(), "failed");
     }
 
     #[test]
