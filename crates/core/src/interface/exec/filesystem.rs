@@ -65,6 +65,19 @@ pub trait FileSystem: Send + Sync {
         )))
     }
 
+    /// [`write`](Self::write), refusing when `path` itself is a symlink
+    /// rather than writing where it points. Provided as a check then a write;
+    /// a provider that can do both in one step (`O_NOFOLLOW`) should.
+    async fn write_not_following(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
+        if self.metadata(path).await.is_ok_and(|m| m.is_symlink) {
+            return Err(ExecError::failed(format!(
+                "{} is a symlink",
+                path.display()
+            )));
+        }
+        self.write(path, bytes).await
+    }
+
     /// What most callers actually want. Provided, so an implementor writes
     /// `read` and gets this.
     async fn read_to_string(&self, path: &Path) -> Result<String, ExecError> {

@@ -589,7 +589,7 @@ async fn write_recorded(
             if let Some(parent) = target.parent() {
                 let _ = fs.create_dir_all(parent).await;
             }
-            fs.write(target, bytes).await
+            fs.write_not_following(target, bytes).await
         }
         None if fs.metadata(target).await.is_ok() => fs.remove_file(target).await,
         None => Ok(()),

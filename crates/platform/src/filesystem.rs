@@ -30,6 +30,21 @@ impl FileSystem for LocalFileSystem {
             .map_err(|e| failed(path, e))
     }
 
+    async fn write_not_following(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
+        let (owned, bytes) = (path.to_path_buf(), bytes.to_vec());
+        let written = tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+            options.open(&owned)?.write_all(&bytes)
+        })
+        .await
+        .map_err(|e| ExecError::failed(format!("{}: {e}", path.display())))?;
+        written.map_err(|e| failed(path, e))
+    }
+
     async fn create_dir_all(&self, path: &Path) -> Result<(), ExecError> {
         tokio::fs::create_dir_all(path)
             .await
