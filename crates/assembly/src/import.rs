@@ -322,14 +322,18 @@ pub(crate) fn read_archive(path: &Path) -> Result<Archive, ImportError> {
     } else {
         Box::new(ZipSource::open(path)?)
     };
-    let manifest = manifest_of(source.as_mut())?;
+    read_from(source.as_mut(), MAX_TOTAL_BYTES)
+}
+
+fn read_from(source: &mut dyn Source, _budget: u64) -> Result<Archive, ImportError> {
+    let manifest = manifest_of(source)?;
     let rows = manifest["sessions"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         return invalid("the manifest lists no sessions");
     }
     let mut sessions = Vec::with_capacity(rows.len());
     for row in &rows {
-        sessions.push(session_of(source.as_mut(), row)?);
+        sessions.push(session_of(source, row)?);
     }
     let root = manifest["root_session_id"]
         .as_str()
@@ -496,6 +500,66 @@ fn rewrite_entry(entry: LogEntry, ids: &BTreeMap<String, String>, target: &Targe
 mod tests {
     use super::*;
     use history::entry::EnvelopedEntry;
+
+    /// An archive in memory that counts what is read from it.
+    struct Counting {
+        files: HashMap<String, Vec<u8>>,
+        read: u64,
+    }
+
+    impl Source for Counting {
+        fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>, ImportError> {
+            let bytes = self.files.get(name).cloned();
+            self.read += bytes.as_ref().map_or(0, |b| b.len() as u64);
+            Ok(bytes)
+        }
+    }
+
+    /// One session, listed `times` times, with a memory file of `memory`
+    /// bytes.
+    fn listed(times: usize, memory: usize) -> Counting {
+        let id = SessionId::new();
+        let line =
+            serde_json::to_string(&EnvelopedEntry::new(id, meta(None, SessionKind::Primary)))
+                .unwrap();
+        let transcript = format!("{line}\n").into_bytes();
+        let row = serde_json::json!({
+            "session_id": id.to_string(),
+            "transcript_sha256": hex::encode(Sha256::digest(&transcript)),
+        });
+        let manifest = serde_json::json!({
+            "format": FORMAT, "format_version": FORMAT_VERSION, "importable": true,
+            "root_session_id": id.to_string(),
+            "sessions": vec![row; times],
+        });
+        let mut files = HashMap::new();
+        files.insert(
+            "manifest.json".to_string(),
+            manifest.to_string().into_bytes(),
+        );
+        files.insert(format!("sessions/{id}/transcript.jsonl"), transcript);
+        files.insert(
+            format!("sessions/{id}/session_memory.md"),
+            vec![b'm'; memory],
+        );
+        Counting { files, read: 0 }
+    }
+
+    #[test]
+    fn what_an_import_reads_is_bounded_in_total_not_per_read() {
+        let mut twice = listed(2, 2_000);
+        assert!(matches!(
+            read_from(&mut twice, u64::MAX),
+            Err(ImportError::Invalid(_))
+        ));
+        assert!(twice.read < 2_000, "a session listed twice was read twice");
+
+        let mut big = listed(1, 4_000);
+        assert!(
+            matches!(read_from(&mut big, 2_000), Err(ImportError::Invalid(_))),
+            "a memory file over the total was read whole"
+        );
+    }
 
     fn meta(parent: Option<&str>, kind: SessionKind) -> LogEntry {
         LogEntry::Meta {
