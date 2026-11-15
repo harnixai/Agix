@@ -527,7 +527,7 @@ async fn a_2025_request_with_two_calls_in_flight_is_cancelled_not_guessed() -> a
         run.watch_with(&first, answering(blue())).await?,
         run.watch_with(&second, answering(blue())).await?,
     ];
-    let overlapping = json!({ "mode": "form", "wait_ms": 1500, "hold_ms": 3000 });
+    let overlapping = json!({ "mode": "form", "together": 2 });
     stub.script([
         Reply::calls("p1", "mcp__demo__ask", overlapping.clone()),
         Reply::calls("p2", "mcp__demo__ask", overlapping),
@@ -546,7 +546,9 @@ async fn a_2025_request_with_two_calls_in_flight_is_cancelled_not_guessed() -> a
     }
     assert_eq!(
         answers(&calls),
-        [json!({ "action": "cancel" }), json!({ "action": "cancel" })]
+        [json!({ "action": "cancel" }), json!({ "action": "cancel" })],
+        "{:?}",
+        McpToy::calls(&calls)
     );
     run.finish().await;
     Ok(())

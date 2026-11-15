@@ -33,7 +33,7 @@
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
 //! 2026-07-28 时走 `input_required` 一轮，更早的版本由 server 发 `elicitation/create`，
-//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发，`one_by_one` 时一个接一个）。
+//! `together` 让老版本 server 等这么多个 `ask` 都到了才问、都拿到回答了才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发，`one_by_one` 时一个接一个）。
 //! `work`（`steps` 步、每步 `step_ms`，`fail` 让它最后失败、`ask` 在第一步后问一个问题、
 //! `code` 原样写进结果文本）。收到的每个回答原样记一行
 //! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
@@ -130,6 +130,8 @@ struct State {
     max_protocol: Option<ProtocolVersion>,
     task: bool,
     tasks: TaskManager,
+    asking: tokio::sync::watch::Sender<usize>,
+    answered: tokio::sync::watch::Sender<usize>,
 }
 
 impl State {
@@ -142,7 +144,9 @@ impl State {
             .append(true)
             .open(path)
         {
-            let _ = writeln!(f, "{}\t{what}", self.name);
+            // One write per line: calls in flight together append at the same
+            // moment, and `writeln!` splits a line over writes that interleave.
+            let _ = f.write_all(format!("{}\t{what}\n", self.name).as_bytes());
         }
     }
 
@@ -199,10 +203,10 @@ struct AskRequest {
         description = "form (pick a color, the default), url (visit a page), long (a message over 4 KiB) or wide (a form of 40 fields)"
     )]
     mode: Option<String>,
-    #[schemars(description = "milliseconds to wait before asking, for a server that asks itself")]
-    wait_ms: Option<u64>,
-    #[schemars(description = "milliseconds to wait after the answer before finishing the call")]
-    hold_ms: Option<u64>,
+    #[schemars(
+        description = "for a server that asks itself: ask only once this many asks are in flight, and finish only once all of them are answered"
+    )]
+    together: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -304,19 +308,19 @@ impl ToyServer {
     #[tool(description = "Ask the user a question and report the answer.")]
     async fn ask(
         &self,
-        Parameters(AskRequest {
-            mode,
-            wait_ms,
-            hold_ms,
-        }): Parameters<AskRequest>,
+        Parameters(AskRequest { mode, together }): Parameters<AskRequest>,
         InputResponses(responses): InputResponses,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         self.state.record("ask");
         let asked = [("q", question(mode.as_deref()))];
-        let answered = self.put(&asked, responses, wait_ms, &context).await;
-        if let Some(ms) = hold_ms {
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        let together = together.filter(|_| !is_modern(&context));
+        if let Some(n) = together {
+            gather(&self.state.asking, n).await;
+        }
+        let answered = self.put_all(&asked, responses, &context, false).await;
+        if let Some(n) = together {
+            gather(&self.state.answered, n).await;
         }
         answered
     }
@@ -333,7 +337,7 @@ impl ToyServer {
             ("q1", question(Some("form"))),
             ("q2", question(Some("form"))),
         ];
-        self.put(&asked, responses, None, &context).await
+        self.put_all(&asked, responses, &context, false).await
     }
 
     #[tool(
@@ -456,23 +460,6 @@ impl ToyServer {
 
     /// Ask `asked` the way the negotiated protocol allows, and answer with
     /// what came back.
-    async fn put(
-        &self,
-        asked: &[(&str, ElicitRequestParams)],
-        responses: Option<rmcp::model::InputResponses>,
-        wait_ms: Option<u64>,
-        context: &RequestContext<RoleServer>,
-    ) -> Result<CallToolResponse, ErrorData> {
-        if let Some(ms) = wait_ms.filter(|_| {
-            !context
-                .protocol_version()
-                .is_some_and(|v| !v.has_initialize())
-        }) {
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-        }
-        self.put_all(asked, responses, context, false).await
-    }
-
     async fn put_all(
         &self,
         asked: &[(&str, ElicitRequestParams)],
@@ -480,9 +467,7 @@ impl ToyServer {
         context: &RequestContext<RoleServer>,
         concurrent: bool,
     ) -> Result<CallToolResponse, ErrorData> {
-        let modern = context
-            .protocol_version()
-            .is_some_and(|v| !v.has_initialize());
+        let modern = is_modern(context);
         let answers: Vec<serde_json::Value> = if modern {
             let Some(responses) = responses else {
                 let requests = asked
@@ -537,6 +522,18 @@ impl ToyServer {
             .join("\n");
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
     }
+}
+
+fn is_modern(context: &RequestContext<RoleServer>) -> bool {
+    context
+        .protocol_version()
+        .is_some_and(|v| !v.has_initialize())
+}
+
+/// Count this call in at `point` and wait until `n` calls have been.
+async fn gather(point: &tokio::sync::watch::Sender<usize>, n: usize) {
+    point.send_modify(|arrived| *arrived += 1);
+    let _ = point.subscribe().wait_for(|arrived| *arrived >= n).await;
 }
 
 #[tool_handler]
@@ -782,6 +779,8 @@ async fn main() -> anyhow::Result<()> {
         max_protocol: opts.max_protocol.clone(),
         task: opts.task,
         tasks: TaskManager::new(),
+        asking: tokio::sync::watch::Sender::new(0),
+        answered: tokio::sync::watch::Sender::new(0),
     });
     if opts.mute {
         return stay_mute(&state).await;
