@@ -603,6 +603,32 @@ mod tests {
     use super::*;
     use history::checkpoint::RecordedPath;
 
+    /// What a rewind writes is the file it checked, not whatever a link put
+    /// in its place since: a file swapped for a symlink between the check
+    /// and the write is not written through.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_file_swapped_for_a_symlink_after_the_check_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = std::fs::canonicalize(dir.path()).unwrap();
+        let outside = project.join("outside.txt");
+        std::fs::write(&outside, "keep me").unwrap();
+        let target = project.join("a.txt");
+        std::os::unix::fs::symlink(&outside, &target).unwrap();
+        let store: Arc<dyn history::store::HistoryStore> =
+            Arc::new(history::store::InMemoryHistoryStore::new());
+        let checkpoints = Checkpoints::for_root(
+            store,
+            &base::session::SessionId::new().to_string(),
+            Some(project.clone()),
+        )
+        .unwrap();
+        let fs: Arc<dyn FileSystem> = Arc::new(platform::filesystem::LocalFileSystem);
+        let wrote = write_recorded(&checkpoints, &fs, &target, Some(b"restored"), "r").await;
+        assert!(wrote.is_err(), "{wrote:?}");
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
+    }
+
     /// A project whose path is not in NFC — a folder Finder made, on macOS —
     /// still has its settings and secrets kept from a rewind.
     #[tokio::test]
