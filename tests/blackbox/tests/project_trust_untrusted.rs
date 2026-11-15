@@ -299,3 +299,54 @@ async fn a_nested_repository_does_not_run_its_program_for_a_status_in_the_projec
     run.finish().await;
     Ok(())
 }
+
+fn with_inline_limit(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
+    LiveRun::builder(name)
+        .config(LiveConfig::for_endpoint(
+            &stub.base_url(),
+            blackbox::ModelEndpoint::model(stub),
+        ))
+        .settings(json!({
+            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
+            "compaction": { "tool_result_inline_chars": 1 }
+        }))
+}
+
+async fn echo_hello(run: &mut LiveRun, stub: &ProviderStub) -> anyhow::Result<String> {
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo hello" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "say hello").await?;
+    let request = stub
+        .calls()
+        .into_iter()
+        .rfind(|c| c.purpose() == blackbox::Purpose::Turn)
+        .expect("a turn reached the model");
+    Ok(request.body["messages"].to_string())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untrusted_projects_inline_limit_is_ignored() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_inline_limit("hostile-inline", &stub)
+        .untrusted()
+        .start()
+        .await?;
+    let seen = echo_hello(&mut run, &stub).await?;
+    assert!(
+        !seen.contains("Output too long"),
+        "the project's limit applied: {seen}"
+    );
+    assert!(!run.project.join(".agix/tool-results").exists());
+
+    trust(&mut run).await?;
+    let seen = echo_hello(&mut run, &stub).await?;
+    assert!(
+        seen.contains("Output too long"),
+        "the control: once trusted the limit applies: {seen}"
+    );
+    run.finish().await;
+    Ok(())
+}

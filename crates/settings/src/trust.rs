@@ -346,7 +346,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("compaction.keep_recent", Free),
         ("compaction.reactive", Free),
         ("compaction.threshold_tokens", Free),
-        ("compaction.tool_result_inline_chars", Free),
+        ("compaction.tool_result_inline_chars", Withheld),
         ("default_provider", Tighten(ProviderDefinedBelow)),
         ("disable_skill_shell_execution", Tighten(TrueTighter)),
         ("execution.max_agent_depth", Tighten(Lower)),
@@ -790,6 +790,17 @@ mod tests {
         let (left, found) = gate(json!({"permission_mode": "yolo"}), true);
         assert_eq!(found, ["permission_mode"]);
         assert!(left.get("permission_mode").is_none());
+    }
+
+    #[test]
+    fn an_untrusted_project_cannot_set_the_inline_limit() {
+        let layer = json!({"compaction": {"tool_result_inline_chars": 1}});
+        let (left, found) = gate(layer.clone(), true);
+        assert_eq!(found, ["compaction.tool_result_inline_chars"]);
+        assert!(left["compaction"].get("tool_result_inline_chars").is_none());
+
+        let (left, _) = gate(layer, false);
+        assert_eq!(left["compaction"]["tool_result_inline_chars"], 1);
     }
 
     #[test]
