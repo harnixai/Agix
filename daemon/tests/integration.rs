@@ -12,6 +12,7 @@ mod config_reload_and_doctor;
 mod credentials_in_file_tools;
 mod daemon_shutdown_reply;
 mod daemon_socket_from_a_command;
+mod engine_exit;
 mod extension_entries;
 mod extension_points_doc;
 mod hook_events_doc;

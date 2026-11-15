@@ -7,7 +7,7 @@ use crate::session_pool::*;
 
 /// What one attempt at the turn slot came to.
 enum Claim {
-    Taken(TurnTicket, InputSender),
+    Taken(TurnTicket, InputSender, CancellationToken),
     Busy(Busy),
     /// The running turn's last frame has gone out and it is giving the slot
     /// back.
@@ -20,6 +20,7 @@ enum Claim {
 pub(in crate::session_pool) struct ClaimedTurn {
     ticket: TurnTicket,
     input_tx: InputSender,
+    engine_exited: CancellationToken,
     message: String,
     attachments: Vec<runtime::agent::Attachment>,
     initiator: Initiator,
@@ -128,7 +129,7 @@ impl SessionPool {
         // 必须**在发消息之前**占住会话：消息一旦 send 进去就归正在跑的那个
         // Agent 消费了，先发后占的话，调用方看到忙，消息却已经被别的 turn 吃掉。
         let mut steer_tried = false;
-        let (ticket, input_tx) = loop {
+        let (ticket, input_tx, engine_exited) = loop {
             let Some(idle) = self
                 .live
                 .with_live(&sid, |live| live.turn.idle.clone())
@@ -175,6 +176,7 @@ impl SessionPool {
                         return Claim::Busy(busy);
                     }
                     let input_tx = live.engine.input_tx.clone();
+                    let engine_exited = live.engine.exited.clone();
                     let running = RunningTurn::new(turn_id.clone(), initiator, initiator_id);
                     if live.turn.claim(running).is_err() {
                         unreachable!("a slot that is not busy is idle");
@@ -196,12 +198,14 @@ impl SessionPool {
                         turn_id.clone(),
                         live.turn.rx.clone(),
                     );
-                    Claim::Taken(ticket, input_tx)
+                    Claim::Taken(ticket, input_tx, engine_exited)
                 })
                 .await
                 .ok_or_else(|| PoolError::session_not_found(&sid))?;
             let busy = match claim {
-                Claim::Taken(ticket, input_tx) => break (ticket, input_tx),
+                Claim::Taken(ticket, input_tx, engine_exited) => {
+                    break (ticket, input_tx, engine_exited)
+                }
                 Claim::Finishing => None,
                 Claim::Skipped => {
                     return Ok(TurnOutcome::Skipped {
@@ -247,6 +251,7 @@ impl SessionPool {
         let claimed = ClaimedTurn {
             ticket,
             input_tx,
+            engine_exited,
             message,
             attachments,
             initiator,
@@ -378,6 +383,7 @@ impl SessionPool {
         let ClaimedTurn {
             ticket,
             input_tx,
+            engine_exited,
             message,
             attachments,
             initiator,
@@ -401,8 +407,9 @@ impl SessionPool {
             attachments,
             turn_id: turn_id.clone(),
         });
-        let (api_calls, ended_with, event_rx) =
-            self.relay_turn(&ticket, event_rx, initiator_id).await?;
+        let (api_calls, ended_with, event_rx) = self
+            .relay_turn(&ticket, event_rx, &engine_exited, initiator_id)
+            .await?;
 
         // The turn is over. A client that vanished mid-stream is not part of
         // this: the turn ran to completion and landed in the transcript, and
@@ -434,6 +441,7 @@ impl SessionPool {
         &self,
         ticket: &TurnTicket,
         mut event_rx: EventReceiver,
+        engine_exited: &CancellationToken,
         initiator_id: Option<WatcherId>,
     ) -> Result<(u32, String, EventReceiver), PoolError> {
         let core = &ticket.core;
@@ -446,7 +454,12 @@ impl SessionPool {
         };
         let mut tools_ran = false;
         loop {
-            let Some(event) = event_rx.recv().await else {
+            let next = tokio::select! {
+                biased;
+                event = event_rx.recv() => event,
+                _ = engine_exited.cancelled() => event_rx.try_recv().ok(),
+            };
+            let Some(event) = next else {
                 core.set_last_failure(base::event::FailureKind::EngineStopped);
                 let stopped = frame_of(SessionEvent::EngineStopped);
                 self.engine_gone_mid_turn(ticket, &stopped, initiator_id)
