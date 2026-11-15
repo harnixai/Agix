@@ -25,13 +25,17 @@
 //! - `--max-protocol VERSION`：扮成只认到这个 MCP 版本的老 server，如 `2025-11-25`——
 //!   `server/discover` 答"没有这个方法"，客户端回落到 `initialize`，询问改由 server 主动发
 //!   `elicitation/create`。
-//! - `--task`：每次 `tools/call` 都想回一个任务而不是结果。客户端没声明 tasks 扩展时，
-//!   rmcp 的 server 侧会把它换成 `-32021`（Missing required client capability）。
+//! - `--task`：server 声明 tasks 扩展，`work` 在客户端也声明了时以任务运行（`tasks/get`
+//!   轮询、`tasks/update` 回答、`tasks/cancel` 协作式取消）；没声明或没开 `--task` 时
+//!   同步跑完。任务建起记 `work:task <id>`，收到取消记 `work:cancel-requested`，真的停下
+//!   记 `work:cancelled`，其余 `work:done` / `work:failed` / `work:sync`。
 //!
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
 //! 2026-07-28 时走 `input_required` 一轮，更早的版本由 server 发 `elicitation/create`，
-//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发）。收到的每个回答原样记一行
+//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发）。
+//! `work`（`steps` 步、每步 `step_ms`，`fail` 让它最后失败、`ask` 在第一步后问一个问题、
+//! `code` 原样写进结果文本）。收到的每个回答原样记一行
 //! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
 //! 资源：`toy://notes/readme.md`、`toy://unicode`、`toy://big`，以及 `--resources` 的。
 //! 提示词：`greet`（`name` 必填、`style` 可选）、`mark`（无参数）。
@@ -44,15 +48,16 @@ use std::sync::Arc;
 use rmcp::handler::server::tool::{InputResponses, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, CreateTaskResult,
-    DiscoverRequestMethod, DiscoverResult, ElicitRequest, ElicitRequestParams,
-    GetPromptRequestParams, GetPromptResponse, GetPromptResult, InputRequest, InputRequiredResult,
-    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, Prompt, PromptArgument,
-    PromptMessage, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
-    ReadResourceResult, Resource, ResourceContents, Role, ServerCapabilities, ServerConfig, Task,
-    TaskStatus,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock,
+    CreateTaskResult, DiscoverRequestMethod, DiscoverResult, ElicitRequest, ElicitRequestParams,
+    GetPromptRequestParams, GetPromptResponse, GetPromptResult, GetTaskParams, GetTaskResult,
+    InputRequest, InputRequiredResult, ListPromptsResult, ListResourcesResult,
+    PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, ServerConfig, UpdateTaskParams,
 };
 use rmcp::service::RequestContext;
+use rmcp::task_manager::{TaskExit, TaskManager, TaskOptions};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler, ServiceExt};
 use tokio_util::sync::CancellationToken;
 
@@ -124,6 +129,7 @@ struct State {
     liar: bool,
     max_protocol: Option<ProtocolVersion>,
     task: bool,
+    tasks: TaskManager,
 }
 
 impl State {
@@ -206,6 +212,20 @@ struct FloodRequest {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct WorkRequest {
+    #[schemars(description = "how many steps (default 3)")]
+    steps: Option<u32>,
+    #[schemars(description = "milliseconds per step (default 200)")]
+    step_ms: Option<u64>,
+    #[schemars(description = "finish by failing")]
+    fail: Option<bool>,
+    #[schemars(description = "ask the user a question after the first step")]
+    ask: Option<bool>,
+    #[schemars(description = "text carried into the result")]
+    code: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct Empty {}
 
 // `#[tool_router]`/`#[tool_handler]` build `Self::tool_router()` per dispatch
@@ -245,6 +265,25 @@ impl ToyServer {
                 "slow: cancelled".to_string()
             }
         }
+    }
+
+    #[tool(
+        description = "Work for `steps` x `step_ms` milliseconds and report `work done`. A server \
+                       started with --task runs it as a task the client can poll and cancel."
+    )]
+    async fn work(
+        &self,
+        Parameters(WorkRequest {
+            steps,
+            step_ms,
+            code,
+            ..
+        }): Parameters<WorkRequest>,
+    ) -> String {
+        let (steps, step_ms) = (steps.unwrap_or(3), step_ms.unwrap_or(200));
+        tokio::time::sleep(std::time::Duration::from_millis(u64::from(steps) * step_ms)).await;
+        self.state.record("work:sync");
+        format!("work done: {steps} steps {}", code.unwrap_or_default())
     }
 
     #[tool(description = "Exit the server process immediately, without answering.")]
@@ -355,6 +394,63 @@ fn question(mode: Option<&str>) -> ElicitRequestParams {
 }
 
 impl ToyServer {
+    /// `work` as a task the client polls: one status message per step.
+    fn work_as_task(&self, args: WorkRequest) -> CreateTaskResult {
+        let state = self.state.clone();
+        let steps = args.steps.unwrap_or(3);
+        let step_ms = args.step_ms.unwrap_or(200);
+        let code = args.code.unwrap_or_default();
+        let (fail, ask) = (args.fail.unwrap_or(false), args.ask.unwrap_or(false));
+        let options = TaskOptions::new()
+            .with_poll_interval_ms(100)
+            .with_ttl_ms(120_000)
+            .with_status_message(format!("step 0/{steps}"));
+        let task = self.state.tasks.spawn(options, {
+            let state = state.clone();
+            move |cx| {
+                Box::pin(async move {
+                    for i in 1..=steps {
+                        tokio::select! {
+                            () = cx.cancelled() => {
+                                state.record("work:cancelled");
+                                return Err(TaskExit::Cancelled);
+                            }
+                            () = tokio::time::sleep(std::time::Duration::from_millis(step_ms)) => {}
+                        }
+                        cx.set_status_message(format!("step {i}/{steps}"));
+                        if ask && i == 1 {
+                            let request = ElicitRequest::new(question(Some("form")));
+                            let answer = match cx
+                                .request_input("color", InputRequest::Elicitation(request))
+                                .await
+                            {
+                                Ok(answer) => answer,
+                                Err(exit) => {
+                                    state.record("work:cancelled");
+                                    return Err(exit);
+                                }
+                            };
+                            state.record(&format!("ask {answer}"));
+                        }
+                    }
+                    if fail {
+                        state.record("work:failed");
+                        return Err(TaskExit::Error(ErrorData::internal_error(
+                            "work failed on purpose",
+                            None,
+                        )));
+                    }
+                    state.record("work:done");
+                    Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                        "work done: {steps} steps {code}"
+                    ))]))
+                })
+            }
+        });
+        self.state.record(&format!("work:task {}", task.task_id));
+        CreateTaskResult::new(task)
+    }
+
     /// Ask `asked` the way the negotiated protocol allows, and answer with
     /// what came back.
     async fn put(
@@ -443,14 +539,18 @@ impl ToyServer {
 #[tool_handler]
 impl ServerHandler for ToyServer {
     fn get_info(&self) -> ServerConfig {
-        let info = ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .enable_prompts()
-                .build(),
-        )
-        .with_instructions("Test-only MCP server: tools, resources and prompts for the harness.");
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_prompts();
+        let capabilities = if self.state.task {
+            capabilities.enable_tasks()
+        } else {
+            capabilities
+        };
+        let info = ServerConfig::new(capabilities.build()).with_instructions(
+            "Test-only MCP server: tools, resources and prompts for the harness.",
+        );
         match &self.state.max_protocol {
             Some(max) => info.with_protocol_version(max.clone()),
             None => info,
@@ -493,15 +593,57 @@ impl ServerHandler for ToyServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if self.state.task {
-            self.state.record(&format!("task:{}", request.name));
-            let at = "2026-11-14T00:00:00Z";
-            let task = Task::new("toy-task", TaskStatus::Working, at, at);
-            return Ok(CallToolResponse::Task(CreateTaskResult::new(task)));
+        let client_runs_tasks = context
+            .client_capabilities()
+            .is_some_and(|caps| caps.supports_tasks());
+        if self.state.task && client_runs_tasks && request.name == "work" {
+            let args = request
+                .arguments
+                .map(serde_json::Value::Object)
+                .map(serde_json::from_value::<WorkRequest>)
+                .transpose()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?
+                .unwrap_or(WorkRequest {
+                    steps: None,
+                    step_ms: None,
+                    fail: None,
+                    ask: None,
+                    code: None,
+                });
+            return Ok(CallToolResponse::Task(self.work_as_task(args)));
         }
         Self::tool_router()
             .call(ToolCallContext::new(self, request, context))
             .await
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        Ok(GetTaskResult::new(
+            self.state.tasks.get_task(&request.task_id)?,
+        ))
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.state
+            .tasks
+            .update_task(&request.task_id, request.input_responses)
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.state.record("work:cancel-requested");
+        self.state.tasks.cancel_task(&request.task_id)
     }
 
     async fn list_resources(
@@ -636,6 +778,7 @@ async fn main() -> anyhow::Result<()> {
         liar: opts.liar,
         max_protocol: opts.max_protocol.clone(),
         task: opts.task,
+        tasks: TaskManager::new(),
     });
     if opts.mute {
         return stay_mute(&state).await;

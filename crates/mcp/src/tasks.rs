@@ -18,6 +18,7 @@ use base::context::{RunningStatus, RunningTask, SessionState, TaskLease, TaskTyp
 use rmcp::model::{CallToolResult, DetailedTask, InputResponses, Task, TaskPayload};
 use tokio_util::sync::CancellationToken;
 
+use crate::connect::{Service, StdioMcpClient};
 use crate::elicit::{answer_input_requests, McpCallScope};
 use crate::error::McpError;
 
@@ -265,6 +266,74 @@ async fn drive(
                     "MCP server `{server}` reported a task status this client does not know"
                 )))
             }
+        }
+    }
+}
+
+pub(crate) struct Polling<'a> {
+    pub(crate) client: &'a StdioMcpClient,
+    pub(crate) svc: Arc<Service>,
+}
+
+#[async_trait::async_trait]
+impl crate::tasks::TaskPeer for Polling<'_> {
+    async fn get(&self, task_id: &str) -> Result<rmcp::model::DetailedTask, McpError> {
+        let params = rmcp::model::GetTaskParams::new(task_id);
+        self.client
+            .request(
+                "tasks/get",
+                self.client.request_limit(),
+                &self.svc,
+                self.svc.get_task(params),
+            )
+            .await
+            .map(|got| got.task)
+    }
+
+    async fn update(
+        &self,
+        task_id: &str,
+        responses: rmcp::model::InputResponses,
+    ) -> Result<(), McpError> {
+        let params = rmcp::model::UpdateTaskParams::new(task_id, responses);
+        self.client
+            .request(
+                "tasks/update",
+                self.client.request_limit(),
+                &self.svc,
+                self.svc.update_task(params),
+            )
+            .await
+    }
+
+    fn cancel_detached(&self, task_id: &str) {
+        let svc = self.svc.clone();
+        let params = rmcp::model::CancelTaskParams::new(task_id);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(5), svc.cancel_task(params)).await;
+            });
+        }
+    }
+}
+
+/// The call's result: what the server completed with, or, when it turned the
+/// call into a task, what the task ends with.
+pub(crate) async fn settle(
+    client: &StdioMcpClient,
+    svc: &Arc<Service>,
+    end: crate::elicit::CallEnd,
+    scope: &McpCallScope,
+    limit: Duration,
+) -> Result<CallToolResult, McpError> {
+    match end {
+        crate::elicit::CallEnd::Complete(result) => Ok(result),
+        crate::elicit::CallEnd::Task(task) => {
+            let peer = Polling {
+                client,
+                svc: svc.clone(),
+            };
+            await_task(&client.server_name, &peer, task, scope, limit).await
         }
     }
 }

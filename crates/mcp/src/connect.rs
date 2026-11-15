@@ -66,7 +66,7 @@ fn truncate_mcp_instructions(instructions: String) -> String {
 /// [`crate::notify::NotifyingHandler`]：除了我们会处理的几条 notification，
 /// 其余全部保持 trait 的默认行为。
 pub struct StdioMcpClient {
-    server_name: String,
+    pub(crate) server_name: String,
     config: McpServerConfig,
     instructions: Option<String>,
     /// Shared out per request rather than held across it, so one slow call
@@ -217,7 +217,7 @@ impl StdioMcpClient {
 
     /// Await one request on `svc` within `limit`. A connection that drops
     /// under it is given up, so the next request makes a new one.
-    async fn request<T>(
+    pub(crate) async fn request<T>(
         &self,
         op: &'static str,
         limit: Duration,
@@ -247,7 +247,7 @@ impl StdioMcpClient {
         }
     }
 
-    fn request_limit(&self) -> Duration {
+    pub(crate) fn request_limit(&self) -> Duration {
         self.config.timeouts().startup()
     }
 
@@ -454,25 +454,13 @@ impl StdioMcpClient {
         let _in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();
-        let end = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
+        let ended = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
             self.request("call_tool", limit, &svc, svc.call_tool_once(params))
         })
         .await?;
-        let result = match end {
-            crate::elicit::CallEnd::Complete(result) => result,
-            crate::elicit::CallEnd::Task(task) => {
-                let peer = Polling {
-                    client: self,
-                    svc: svc.clone(),
-                };
-                crate::tasks::await_task(&self.server_name, &peer, task, scope, limit).await?
-            }
-        };
+        let result = crate::tasks::settle(self, &svc, ended, scope, limit).await?;
 
-        let mut content_blocks = Vec::new();
-        for c in result.content.iter() {
-            content_blocks.push(rmcp_content_to_ours(c));
-        }
+        let content_blocks = result.content.iter().map(rmcp_content_to_ours).collect();
 
         Ok(McpCallResult {
             content: content_blocks,
@@ -675,54 +663,8 @@ fn render_prompt_result(result: rmcp::model::GetPromptResult) -> String {
     }
 }
 
-type Service = rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>;
-
-struct Polling<'a> {
-    client: &'a StdioMcpClient,
-    svc: Arc<Service>,
-}
-
-#[async_trait::async_trait]
-impl crate::tasks::TaskPeer for Polling<'_> {
-    async fn get(&self, task_id: &str) -> Result<rmcp::model::DetailedTask, McpError> {
-        let params = rmcp::model::GetTaskParams::new(task_id);
-        self.client
-            .request(
-                "tasks/get",
-                self.client.request_limit(),
-                &self.svc,
-                self.svc.get_task(params),
-            )
-            .await
-            .map(|got| got.task)
-    }
-
-    async fn update(
-        &self,
-        task_id: &str,
-        responses: rmcp::model::InputResponses,
-    ) -> Result<(), McpError> {
-        let params = rmcp::model::UpdateTaskParams::new(task_id, responses);
-        self.client
-            .request(
-                "tasks/update",
-                self.client.request_limit(),
-                &self.svc,
-                self.svc.update_task(params),
-            )
-            .await
-    }
-
-    fn cancel_detached(&self, task_id: &str) {
-        let svc = self.svc.clone();
-        let params = rmcp::model::CancelTaskParams::new(task_id);
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                let _ = tokio::time::timeout(Duration::from_secs(5), svc.cancel_task(params)).await;
-            });
-        }
-    }
-}
+pub(crate) type Service =
+    rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>;
 
 fn is_open(svc: &Service) -> bool {
     !svc.is_closed() && !svc.peer().is_transport_closed()

@@ -4,7 +4,7 @@
 //! slash command, a server added and then changed at runtime, the HTTP and
 //! SSE transports, the enterprise policy (with a plugin's server among the
 //! denied), a plugin's server across `config.reload`, and a tool whose server
-//! asks the user something.
+//! asks the user something, and a tool the server runs as a task.
 
 use std::path::Path;
 use std::time::Duration;
@@ -808,6 +808,45 @@ async fn live_model_uses_an_mcp_tool_that_asks_the_user() -> anyhow::Result<()> 
         events.text.to_lowercase().contains("blue"),
         "the model did not pass the answer on: {}",
         events.text
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_model_waits_for_an_mcp_task_and_uses_its_result() -> anyhow::Result<()> {
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy(), "--task"])?;
+    let mut run = LiveRun::builder("mcp-task")
+        .settings(json!({ "mcp_servers": { "toy": toy } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let host = run.watch(&session, true).await?;
+    let code = nonce();
+    let events = run
+        .turn(
+            &session,
+            &format!(
+                "Call mcp__toy__work once with steps 3 and code {code}, then tell me the code \
+                 it returned, verbatim."
+            ),
+        )
+        .await?;
+    assert!(
+        events.text.contains(&code),
+        "the model did not pass the task's result on: {}",
+        events.text
+    );
+    let finished = host.events("task_finished");
+    assert!(
+        finished
+            .iter()
+            .any(|f| f["event"]["task"]["kind"] == "mcp_task"
+                && f["event"]["task"]["status"] == "done"),
+        "{:?}",
+        host.frames()
     );
     run.finish().await;
     Ok(())

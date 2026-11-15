@@ -514,34 +514,6 @@ async fn an_elicitation_hook_can_refuse_before_the_host_is_asked() -> anyhow::Re
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_that_answers_with_a_task_is_reported_not_waited_on() -> anyhow::Result<()> {
-    let stub = ProviderStub::start().await?;
-    let scratch = tempfile::tempdir()?;
-    let calls = scratch.path().join("calls.log");
-    let mut run = toy_run("ask-task", &stub, &calls, &["--task"], json!({}))?
-        .start()
-        .await?;
-    let session = asking_session(&mut run).await?;
-    stub.script([
-        Reply::calls("k1", "mcp__demo__echo", json!({ "text": "hi" })),
-        Reply::text("done"),
-    ]);
-    let events =
-        tokio::time::timeout(Duration::from_secs(60), run.turn(&session, "echo")).await??;
-    let result = result_of(&events, "mcp__demo__echo").expect("the call's result");
-    assert!(result.2, "{result:?}");
-    // rmcp's server side already refuses to hand a task to a client that did
-    // not declare the extension (-32021), so this sees that refusal; a server
-    // that sends one anyway is the mcp crate's own unit case.
-    assert!(
-        result.1.contains("io.modelcontextprotocol/tasks"),
-        "{result:?}"
-    );
-    run.finish().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_2025_request_with_two_calls_in_flight_is_cancelled_not_guessed() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let scratch = tempfile::tempdir()?;
