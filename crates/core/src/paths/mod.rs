@@ -210,9 +210,10 @@ impl PathSettings {
 }
 
 /// What a data directory's `.gitignore` keeps out of the repository the
-/// directory sits in: the files the engine writes keys into, and its
-/// telemetry recordings.
-pub const LOCAL_DATA_GITIGNORE: &str = "settings.local.json\nmcp.local.json\ntelemetry/\n";
+/// directory sits in: the files the engine writes keys into, its telemetry
+/// recordings, and the tool results it saves.
+pub const LOCAL_DATA_GITIGNORE: &str =
+    "settings.local.json\nmcp.local.json\ntelemetry/\ntool-results/\n";
 
 /// Make sure `dir`'s `.gitignore` has every [`LOCAL_DATA_GITIGNORE`] entry,
 /// appending the ones it lacks and touching nothing else in it: in a cloned

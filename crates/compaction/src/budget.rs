@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn clearing_a_spilled_result_keeps_its_path() {
-        let path = "/p/.agix/scratchpad/tool-results/s/toolu_1.txt";
+        let path = "/p/.agix/tool-results/s/toolu_1.txt";
         let preview = format!(
             "{}\nhead\n\u{2026} [9 characters omitted] \u{2026}\ntail",
             spill_marker(184_233, 4_102, path)

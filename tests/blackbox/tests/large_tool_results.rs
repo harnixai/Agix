@@ -39,7 +39,7 @@ fn bash(id: &str, command: &str) -> Reply {
 }
 
 fn results_root(run: &LiveRun) -> PathBuf {
-    run.project.join(".agix/scratchpad/tool-results")
+    run.project.join(".agix/tool-results")
 }
 
 fn saved_path(run: &LiveRun, session: &str, tool_use_id: &str) -> PathBuf {

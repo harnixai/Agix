@@ -82,6 +82,14 @@ fn file_name_of(tool_use_id: &str) -> String {
 
 fn write_spill(dir: &Path, tool_use_id: &str, text: &str) -> std::io::Result<PathBuf> {
     create_private_dir(dir)?;
+    for level in [Some(dir), dir.parent()].into_iter().flatten() {
+        if std::fs::symlink_metadata(level)?.file_type().is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "{} is a symlink; a saved result is not written through one",
+                level.display()
+            )));
+        }
+    }
     let ignore = dir.join(".ignore");
     if !ignore.exists() {
         base::fs::write_atomic(&ignore, b"*\n", base::fs::WriteOpts::PRIVATE)?;

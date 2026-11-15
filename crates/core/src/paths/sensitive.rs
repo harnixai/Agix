@@ -611,10 +611,12 @@ pub fn session_scratch_dir(state_root: &Path, session_id: &str) -> PathBuf {
 }
 
 /// Where a session's oversized tool results are saved:
-/// `<state root>/scratchpad/tool-results/<root session id>`.
+/// `<state root>/tool-results/<root session id>`. Not under a
+/// [`STATE_ROOT_WORKING_DIRS`] entry: the engine writes here from outside the
+/// sandbox, and a directory a sandboxed command could swap for a symlink
+/// would take that write anywhere.
 pub fn tool_results_dir(state_root: &Path, session_id: &str) -> PathBuf {
     state_root
-        .join(STATE_ROOT_SCRATCHPAD)
         .join("tool-results")
         .join(session_dir_name(session_id))
 }
