@@ -214,7 +214,10 @@ fn deny() -> Option<Value> {
 /// quietly downgraded to an allow for the rest of the session.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sub_agents_local_permit_always_is_written_to_the_project() {
-    let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
+    let daemon = Daemon::start(Setup::default(), |home, work| {
+        crate::support::trust_projects_under(home, work)
+    })
+    .await;
     daemon.model.push_turn(tool_round(
         "Agent",
         "toolu_agent",
@@ -414,7 +417,10 @@ async fn a_permanent_allow_of_a_command_with_a_star_allows_only_that_command() {
 /// `"match": "exact"`, and a later session reads it back that way.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_permanent_allow_is_written_and_read_back_exact() {
-    let daemon = Daemon::start(Setup::default(), |_, _| {}).await;
+    let daemon = Daemon::start(Setup::default(), |home, work| {
+        crate::support::trust_projects_under(home, work)
+    })
+    .await;
     daemon.model.push_turn(tool_round(
         "Bash",
         "toolu_star",
