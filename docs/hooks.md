@@ -116,7 +116,8 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 **模型只能拦,不能批。** 模型回的 `"decision": "approve"` 缺省被丢掉,只有写了
 `"may_approve": true` 的 hook 才算替人答应权限询问(见"回答")。理由:模型读的 payload 里有
 `tool_input`,写这份入参的(被注入的模型、仓库里的内容)可以对着它下功夫,让它说"没问题";
-它说"不行"才可信。`block`、`continue`、`updated_input`、`message` 不受影响。
+它说"不行"才可信。同一个理由,模型回的 `additional_context` 也只在 `may_approve: true` 时放进对话,
+否则丢掉并记一条 warn。`block`、`continue`、`updated_input`、`message` 不受影响。
 
 ### `http`
 
@@ -233,7 +234,7 @@ hook 不能被换个写法绕过去,宁可多跑一次。**文件路径(`file_pa
 | `message` | 拦下的理由——交给模型或写进结果的那句话 |
 | `continue` | `false`:在能结束一轮的事件上结束它 |
 | `updated_input` | `PreToolUse`:新的入参(整个替换);`UserPromptSubmit`:新的消息文本(JSON 字符串) |
-| `additional_context` | 一段文字,在模型的下一步之前放进一个 `<system-reminder>` 交给它(写法也认 `additionalContext`;不认 Claude Code 的 `hookSpecificOutput.additionalContext`,要写在顶层)。只有 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`SubagentStart` 读它,别的事件给了会 warn 一次;被拦下的调用的 context 不收;`Stop` 不收——让一轮接着做用 `decision: "block"`。每个 hook 最多 10,000 字符、一个事件合计最多 20,000,超出截断并注明 |
+| `additional_context` | 一段文字,在模型的下一步之前放进一个 `<system-reminder>` 交给它(写法也认 `additionalContext`;不认 Claude Code 的 `hookSpecificOutput.additionalContext`,要写在顶层)。只有 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`SubagentStart` 读它,别的事件给了会 warn 一次;被拦下的调用的 context 不收;`Stop` 不收——让一轮接着做用 `decision: "block"`。每个 hook 最多 10,000 字符、一个事件合计最多 20,000,超出截断并注明;文字里的 `</system-reminder>` 会被拆开;`prompt` / `agent` hook 的只在写了 `may_approve: true` 时收 |
 | `rewake` | 见 `async_rewake` |
 
 `SessionStart` 的 context 在第一条用户消息之前送进,会话重建、恢复时该事件再发一次,就再注入一次。

@@ -84,12 +84,18 @@ impl HookOutcome {
 }
 
 /// What a prompt or agent hook's answer amounts to: a model's approval is not
-/// the user's, unless the hook says it may stand for it. It read the tool
-/// input, which whoever wrote that input can aim at it.
+/// the user's, nor is the context it wants put in front of the model, unless
+/// the hook says it may stand for the user. It read the tool input, which
+/// whoever wrote that input can aim at it.
 fn judged(mut outcome: HookOutcome, may_approve: bool) -> HookOutcome {
     if let HookOutcome::Ran { response, .. } = &mut outcome {
         if !may_approve && response.decision == Some(HookDecision::Approve) {
             response.decision = None;
+        }
+        if !may_approve && response.additional_context.take().is_some() {
+            tracing::warn!(
+                "a judge model's additional_context was dropped: the hook does not set may_approve"
+            );
         }
     }
     outcome
