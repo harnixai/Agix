@@ -590,3 +590,49 @@ async fn write_recorded(
     pending.finish(written.is_ok()).await;
     written.map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use history::checkpoint::RecordedPath;
+
+    /// A project whose path is not in NFC — a folder Finder made, on macOS —
+    /// still has its settings and secrets kept from a rewind.
+    #[tokio::test]
+    async fn a_path_not_in_nfc_still_meets_the_deny_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .join("De\u{301}veloppement");
+        std::fs::create_dir_all(project.join(".agix")).unwrap();
+        let store: Arc<dyn history::store::HistoryStore> =
+            Arc::new(history::store::InMemoryHistoryStore::new());
+        let checkpoints = Checkpoints::for_root(
+            store,
+            &base::session::SessionId::new().to_string(),
+            Some(project.clone()),
+        )
+        .unwrap();
+        let policy = permissions::path_safety::WritePolicy::new(project.clone());
+        for rel in [".agix/settings.json", ".env"] {
+            let step = plan::FileStep {
+                path: RecordedPath::Rel(rel.into()),
+                restore: Before::Absent,
+                expected_now: None,
+                tools: vec!["Write".into()],
+            };
+            let got = preflight(
+                &platform::filesystem::LocalFileSystem,
+                &checkpoints,
+                &policy,
+                &step,
+            )
+            .await;
+            assert!(
+                matches!(&got, Err(issue) if issue.issue == RewindIssueKind::Denied),
+                "{rel}: {:?}",
+                got.map(|r| r.target)
+            );
+        }
+    }
+}
