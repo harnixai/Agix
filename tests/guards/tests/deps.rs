@@ -314,6 +314,41 @@ fn only_the_listed_crates_reach_the_machine_through_platform() {
     }
 }
 
+/// Who may hold the session's state as its concrete type, with `attach`,
+/// `restore_from_log` and the goal rounds; everyone else sees `dyn Session`.
+const MAY_USE_SESSION_STATE: &[(&str, &str)] = &[
+    (
+        "runtime",
+        "builds the engine around the session's state: attaches it, restores it \
+         from the log, claims goal rounds",
+    ),
+    (
+        "assembly",
+        "the session pool injects the state into the engine and serves the goal \
+         methods to the host",
+    ),
+];
+
+#[test]
+fn only_the_listed_crates_hold_the_session_state_itself() {
+    let mut found = Vec::new();
+    for p in ws().packages() {
+        if first_party_edges(p).any(|d| d.name == "session-state") {
+            found.push(Finding {
+                key: p.name.clone(),
+                hit: manifest_hit(p, "session-state"),
+            });
+        }
+    }
+    allow::check(
+        "deps::MAY_USE_SESSION_STATE",
+        found,
+        MAY_USE_SESSION_STATE,
+        "take `base::context::Session` (`ToolContext.session`) instead, or list the crate with \
+         why it needs the concrete type; tests reach it through a dev-dependency",
+    );
+}
+
 #[test]
 fn the_contracts_and_the_machine_sit_at_the_bottom() {
     let base: Vec<&str> = first_party_edges(ws().package("base"))
