@@ -1982,7 +1982,8 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 ```
 
 `at_message` 数的是**投影后的消息**(和 `session.history` 同一套坐标)。超过总数会被
-夹到总数;`0` 是合法的("只要这个会话的开场,不要任何一轮")。不是非负整数则
+夹到总数;`0` 是合法的("只要这个会话的开场,不要任何一轮"):切在第一条消息之前,在那之前
+记下的规格(建会话时的 `options`、第一轮之前 `setModel` / `setPrompt` / `setSkillDirs` 设的)照样带过去。不是非负整数则
 `INVALID_PARAMS` —— 这里**不**像 `limit` 那样宽容,分叉到错的地方会产出一个看着
 像样的错误分支。
 
@@ -1998,8 +1999,8 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 写下的扩展条目(`session.appendEntry`)也在;从中间分叉时截在第 `at_message` 条消息
 所在的那一行。
 
-会话的 `options` 与 `session.setModel` / `session.setPrompt` 记下的值在规格条目里,随切点之前的
-行一起复制。录制的 `recorder` 去掉 `name` 再记一条:分叉录在自己的 id 下,不去重写源会话的录像。
+会话的 `options` 与 `session.setModel` / `session.setPrompt` / `session.setSkillDirs` 记下的值在规格条目里,
+随切点之前的行一起复制。录制的 `recorder` 去掉 `name` 再记一条:分叉录在自己的 id 下,不去重写源会话的录像。
 
 分叉记着源会话作 `parent_session_id`,但它是 `"session_kind":"primary"`,不是侧链:对源会话
 调 `session.close` 或 `session.delete` 不会删它。`session.list {parent_session_id}` 会把它和

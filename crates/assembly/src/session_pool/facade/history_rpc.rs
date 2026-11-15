@@ -294,22 +294,7 @@ impl SessionPool {
         let lengths = history::transcript::projected_lengths_with(&entries, store.projection());
         let total_messages = lengths.last().copied().unwrap_or(0);
         let target = at_message.unwrap_or(total_messages).min(total_messages);
-        // Shortest prefix already holding `target` messages. `target == 0`
-        // keeps nothing (a fork of the bare session start), which is a legal
-        // request: "give me this conversation's setup with none of its turns".
-        // A fork of the whole conversation keeps what follows its last message
-        // too: a host's entries written after the final turn.
-        let cut = if target >= total_messages {
-            entries.len()
-        } else if target == 0 {
-            0
-        } else {
-            lengths
-                .iter()
-                .position(|&len| len >= target)
-                .map(|i| i + 1)
-                .unwrap_or(entries.len())
-        };
+        let cut = fork_cut(&lengths, target, entries.len());
 
         let new_sid = base::session::SessionId::new();
         let (meta, settings) = self
@@ -497,6 +482,28 @@ impl SessionPool {
         }
         Some(ForkedResults { from, to, moved })
     }
+}
+
+/// How many of a log's `entries` a fork at `target` messages copies, given
+/// the running message counts `lengths`: the shortest prefix already holding
+/// `target`; at `0`, everything before the first message — the spec entries a
+/// session records when it is created and set up, none of its turns. A fork of
+/// the whole conversation keeps what follows its last message too: a host's
+/// entries written after the final turn. `lengths` can go down (a `Compact`
+/// entry replaces the view), so this scans rather than counts.
+fn fork_cut(lengths: &[usize], target: usize, entries: usize) -> usize {
+    let total = lengths.last().copied().unwrap_or(0);
+    if target >= total {
+        return entries;
+    }
+    if target == 0 {
+        return lengths.iter().position(|&len| len > 0).unwrap_or(entries);
+    }
+    lengths
+        .iter()
+        .position(|&len| len >= target)
+        .map(|i| i + 1)
+        .unwrap_or(entries)
 }
 
 /// Write a fork's log: its `Meta`, the lines of `copied` not `left_out`, and

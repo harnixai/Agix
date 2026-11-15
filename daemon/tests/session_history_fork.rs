@@ -415,6 +415,86 @@ async fn session_fork_at_a_message_truncates_and_carries_context_forward() {
     srv.stop().await;
 }
 
+/// A fork of a session's start keeps how the session was set up — its
+/// options and the model chosen for it — with none of its turns.
+#[tokio::test]
+async fn a_fork_at_the_start_keeps_the_sessions_options_and_chosen_model() {
+    let (srv, seen) = start_scripted_server(
+        vec![text_round("source answer"), text_round("fork answer")],
+        ask_settings(),
+        Duration::ZERO,
+    )
+    .await;
+    let created = rpc(
+        &srv.sock,
+        r#"{"jsonrpc":"2.0","method":"session.create","params":{"scene":"code","options":{"prompt":{"append":"FORKSPECMARKER"}}},"id":1}"#,
+    )
+    .await;
+    let source = created["result"]["session_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{created}"))
+        .to_string();
+    let chosen = rpc(
+        &srv.sock,
+        &serde_json::json!({
+            "jsonrpc": "2.0", "method": "session.setModel",
+            "params": {"session_id": source, "model": "claude-chosen-for-the-source"}, "id": 2,
+        })
+        .to_string(),
+    )
+    .await;
+    assert!(chosen["result"].is_object(), "{chosen}");
+    run_turn(&srv.sock, Some(&source), "MARKERONE").await;
+
+    let fork = rpc(
+        &srv.sock,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"session.fork","params":{{"session_id":"{source}","at_message":0}},"id":3}}"#
+        ),
+    )
+    .await;
+    assert_eq!(fork["result"]["forked_at_message"], 0, "{fork}");
+    let fork_id = fork["result"]["session_id"].as_str().unwrap().to_string();
+    let detail = rpc(
+        &srv.sock,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"session.get","params":{{"session_id":"{fork_id}"}},"id":4}}"#
+        ),
+    )
+    .await;
+    assert_eq!(detail["result"]["scene"], "code", "{detail}");
+    assert_eq!(history(&srv.sock, &fork_id).await["total"], 0);
+
+    seen.lock().unwrap().clear();
+    run_turn(&srv.sock, Some(&fork_id), "first turn of the fork").await;
+    let (model, system, messages) = {
+        let requests = seen.lock().unwrap();
+        // The memory extraction after the turn sends a request of its own,
+        // with no system prompt, and may land before or after this read.
+        let turn = requests
+            .iter()
+            .rev()
+            .find(|req| !req.system.is_empty())
+            .expect("the fork's turn called the model");
+        (
+            turn.model.clone(),
+            format!("{:?}", turn.system),
+            format!("{:?}", turn.messages),
+        )
+    };
+    assert_eq!(
+        model, "claude-chosen-for-the-source",
+        "the fork lost the model chosen for its source"
+    );
+    assert!(
+        system.contains("FORKSPECMARKER"),
+        "the fork lost its source's options: {system}"
+    );
+    assert!(!messages.contains("MARKERONE"), "the fork kept a turn");
+
+    srv.stop().await;
+}
+
 #[tokio::test]
 async fn session_fork_rejects_unknown_sessions_and_bad_branch_points() {
     let (srv, _seen) =
