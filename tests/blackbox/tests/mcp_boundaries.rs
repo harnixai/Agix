@@ -1525,9 +1525,10 @@ async fn the_mcp_tool_lists_each_servers_tools_under_their_callable_names() -> a
     let session = run.session().await?;
     let _host = run.watch(&session, true).await?;
     mcp_status_until(&mut run, "both servers connected", |s| {
-        ["alpha", "beta"]
-            .iter()
-            .all(|n| s.iter().any(|s| s["name"] == *n && s["state"] == "connected"))
+        ["alpha", "beta"].iter().all(|n| {
+            s.iter()
+                .any(|s| s["name"] == *n && s["state"] == "connected")
+        })
     })
     .await?;
 
