@@ -14,7 +14,7 @@
 //!
 //! Downstream projects (Harnix, IPDrun, …) are outside this workspace and
 //! nothing here can hold their edges; what they may rely on is the facade
-//! crate `agix` and `docs/agix-sdk.md` §8.
+//! crate `agix` and `docs/agix-sdk.md` §9.
 
 use std::collections::{BTreeMap, BTreeSet};
 

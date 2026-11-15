@@ -5,7 +5,7 @@
 
 use crate::client::{AnthropicClient, CountFuture, EventStream};
 use crate::error::AnthropicError;
-use crate::stream::StreamEvent;
+use crate::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use crate::types::MessagesRequest;
 use futures::stream;
 use std::collections::VecDeque;
@@ -31,6 +31,58 @@ impl MockAnthropicClient {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push_back(events.into_iter().map(Ok).collect());
+    }
+
+    /// 队尾追加一个 turn：一个 text 块，以 `end_turn` 结束。
+    pub fn push_text(&self, text: &str) {
+        self.push_turn(vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlockStart::Text {
+                    text: String::new(),
+                },
+            },
+            StreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: BlockDelta::TextDelta {
+                    text: text.to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            Self::message_end(base::message::StopReason::EndTurn),
+        ]);
+    }
+
+    /// 队尾追加一个 turn：一个 tool_use 块，以 `tool_use` 结束。
+    pub fn push_tool_use(&self, id: &str, name: &str, input: serde_json::Value) {
+        self.push_turn(vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlockStart::ToolUse {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    input: serde_json::Value::Null,
+                },
+            },
+            StreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: BlockDelta::InputJsonDelta {
+                    partial_json: input.to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            Self::message_end(base::message::StopReason::ToolUse),
+        ]);
+    }
+
+    fn message_end(stop_reason: base::message::StopReason) -> StreamEvent {
+        StreamEvent::MessageDelta {
+            delta: MessageDeltaPayload {
+                stop_reason: Some(stop_reason),
+                stop_sequence: None,
+            },
+            usage: Some(Usage::default()),
+        }
     }
 
     /// 队尾追加一个 turn，允许混入 Err（用来测错误传播）。
@@ -122,5 +174,54 @@ mod tests {
         assert_eq!(evs.len(), 2);
         assert_eq!(m.turns_remaining(), 1);
         assert_eq!(m.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn push_text_replays_one_text_block_ending_the_turn() {
+        let m = MockAnthropicClient::new();
+        m.push_text("你好");
+        let evs: Vec<_> = m
+            .stream_messages(MessagesRequest::minimal("x", "u"))
+            .collect()
+            .await;
+        assert!(matches!(
+            evs.first(),
+            Some(Ok(StreamEvent::ContentBlockStart { .. }))
+        ));
+        assert!(matches!(
+            evs.last(),
+            Some(Ok(StreamEvent::MessageDelta { delta, .. }))
+                if delta.stop_reason == Some(base::message::StopReason::EndTurn)
+        ));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Ok(StreamEvent::ContentBlockDelta { delta: BlockDelta::TextDelta { text }, .. }) if text == "你好"
+        )));
+    }
+
+    #[tokio::test]
+    async fn push_tool_use_replays_one_call_ending_on_tool_use() {
+        let m = MockAnthropicClient::new();
+        m.push_tool_use("toolu_1", "Echo", serde_json::json!({"a": 1}));
+        let evs: Vec<_> = m
+            .stream_messages(MessagesRequest::minimal("x", "u"))
+            .collect()
+            .await;
+        assert!(matches!(
+            evs.first(),
+            Some(Ok(StreamEvent::ContentBlockStart {
+                content_block: ContentBlockStart::ToolUse { id, name, .. }, ..
+            })) if id == "toolu_1" && name == "Echo"
+        ));
+        assert!(matches!(
+            evs.last(),
+            Some(Ok(StreamEvent::MessageDelta { delta, .. }))
+                if delta.stop_reason == Some(base::message::StopReason::ToolUse)
+        ));
+        assert!(evs.iter().any(|e| matches!(
+            e,
+            Ok(StreamEvent::ContentBlockDelta { delta: BlockDelta::InputJsonDelta { partial_json }, .. })
+                if partial_json == r#"{"a":1}"#
+        )));
     }
 }

@@ -1,4 +1,4 @@
-//! agixd 替自己做的进程级的事里，嵌入方也要做的那几件（见指南 §6 的对照表）。
+//! agixd 替自己做的进程级的事里，嵌入方也要做的那几件（见指南 §7 的对照表）。
 
 pub use ::assembly::discovery::identity;
 pub use ::assembly::logging::log_filter;

@@ -12,6 +12,7 @@
 | `tests/blackbox/tests/live_*.rs` | LIVE 层（真实模型，`live_*` 前缀 + `real-model` feature）：同一套框架，模型那端换成真实模型，以二次开发者的身份黑盒地把特性用一遍 | `cargo test -p blackbox --features real-model`，见下文「LIVE 层」 |
 | `tests/guards/tests/*.rs` | 架构守卫：读 `cargo metadata` 和各 target 的模块树，检查依赖方向、进程级状态这类代码结构上的不变量，不跑引擎 | `cargo test -p guards` |
 | `tests/scripts/*.sh` | 运维脚本（目前只有 `disk_report.sh`：报告 `target/` 占用）；构建面的断言（`full` 档不链 `packages` 与 `script-host` 等）在 `tests/guards/tests/deps.rs` | `bash tests/scripts/disk_report.sh` |
+| `docs/agix-sdk.md` 的 rust 块 | 嵌入指南的片段，经 `include_str!` 成为 `crates/agix` 的 doctest，模型那端是进程内的 mock，不联网 | `cargo test -p agix --doc` |
 | `tests/fixtures/`、`tests/rpc_client`、`tests/blackbox/src` | 支撑：fixture 项目与假服务器（MCP toy、OAuth mock）、RPC 客户端、黑盒框架（`World`、`Daemon`、`ProviderStub`、`LiveRun`） | 不单独跑 |
 
 一个 crate 的集成测试编成一个测试程序 `integration`：`tests/integration.rs` 把同目录的
@@ -265,6 +266,8 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 当 needle，每个会话就有自己的脚本。
 
 ## 几个约定
+
+**嵌入指南里的 Rust 片段只写在 `docs/agix-sdk.md`，它们就是 `agix` 的 doctest；不要在别处另抄一份。** 片段里模型那一端用 `model::mock::MockAnthropicClient`（`push_text`、`push_tool_use`），不联网、不花 token。
 
 **一个特性以黑盒用例跑通为完成。** 单元测试证明零件对，证明不了零件接上了：桩模型按测试
 期望的方式报错、测试直接调 `call()` 绕过权限闸门、直接构造 `McpManager` 绕过建会话的路径，

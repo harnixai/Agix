@@ -19,6 +19,16 @@ scene     = { workspace = true }
 telemetry = { workspace = true }
 hooks     = { workspace = true }
 
+[dev-dependencies]
+model       = { workspace = true, features = ["testing"] }
+tokio       = { workspace = true, features = ["full"] }
+tokio-util  = { workspace = true }
+tempfile    = { workspace = true }
+anyhow      = { workspace = true }
+serde_json  = { workspace = true }
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }
+
 [features]
 # The same switches as daemon's, forwarded the same way; `ws` and `full` are
 # agixd's (the WebSocket listener), which this crate does not export.

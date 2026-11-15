@@ -23,7 +23,16 @@ use guards::{par_flat_map, ws, DepKind, Hit, Package, SourceFile, TargetKind, Vi
 
 /// `(package, dependency)`: declared on purpose although no path in its code
 /// names it, with why.
-const DEP_EXCEPTIONS: &[(&str, &str)] = &[];
+// agix's dev-dependencies are used by the doctests in docs/agix-sdk.md, which the scan does not read.
+const DEP_EXCEPTIONS: &[(&str, &str)] = &[
+    ("agix tokio", "doctests in docs/agix-sdk.md"),
+    ("agix tokio-util", "doctests in docs/agix-sdk.md"),
+    ("agix tempfile", "doctests in docs/agix-sdk.md"),
+    ("agix anyhow", "doctests in docs/agix-sdk.md"),
+    ("agix serde_json", "doctests in docs/agix-sdk.md"),
+    ("agix async-trait", "doctests in docs/agix-sdk.md"),
+    ("agix tracing-subscriber", "doctests in docs/agix-sdk.md"),
+];
 
 /// Packages whose library is not named after the package, other than
 /// first-party ones (those come from `cargo metadata`).
