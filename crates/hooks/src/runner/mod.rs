@@ -1810,6 +1810,40 @@ mod tests {
         assert!(refused.blocked().is_some(), "{:?}", refused.outcomes);
     }
 
+    /// A judge model read the payload whoever wrote the tool input can aim at
+    /// it; what it wants put in front of the model counts only where the hook
+    /// says the model may stand for the user.
+    #[tokio::test]
+    async fn a_judge_models_context_counts_only_where_the_hook_allows_it() {
+        let run = |config: serde_json::Value| async move {
+            let config: HookConfig = serde_json::from_value(config).unwrap();
+            on_pre_tool_use(vec![config])
+                .with_prompt_executor(Arc::new(Answering(r#"{"additional_context":"CTX"}"#)))
+                .run(
+                    HookEvent::PreToolUse,
+                    &input_for_bash("ls"),
+                    &CancellationToken::new(),
+                )
+                .await
+        };
+        let unsaid = run(serde_json::json!({"type": "prompt", "prompt": "judge"})).await;
+        assert!(
+            unsaid.additional_context().is_empty(),
+            "{:?}",
+            unsaid.outcomes
+        );
+        let allowed = run(serde_json::json!({
+            "type": "prompt", "prompt": "judge", "may_approve": true
+        }))
+        .await;
+        assert_eq!(
+            allowed.additional_context().len(),
+            1,
+            "{:?}",
+            allowed.outcomes
+        );
+    }
+
     #[tokio::test]
     async fn every_backend_honors_its_if() {
         let r = on_pre_tool_use(vec![
