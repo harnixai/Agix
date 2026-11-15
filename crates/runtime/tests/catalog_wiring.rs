@@ -50,7 +50,7 @@ use base::interface::permission::{
     PermissionGrants, PermissionOutcome, PermissionPolicy, PermissionRequest, PermissionSet, Reach,
     Subject,
 };
-use base::interface::prompt_assembler::{AssemblyRequest, DefaultAssembler, PromptAssembler};
+use base::interface::prompt_assembler::{AssemblyRequest, PromptAssembler};
 use base::interface::prompt_assembly::{AssemblyHook, Authority, PromptAssembly};
 use base::interface::prompt_middleware::{PromptCall, PromptDecision, PromptMiddleware};
 use base::interface::prompt_registry::{InMemoryPromptRegistry, PromptRegistry, RegisteredBlock};
@@ -80,6 +80,7 @@ use memory::MemoryStore;
 use runtime::agent::{Builder, HostContracts, InputMessage};
 use runtime::module::{Module, ModuleError, SessionContext};
 use runtime::plugin::{Plugin, PluginSession, Registrar};
+use runtime::prompt_assembly::DefaultAssembler;
 use settings::{LoadedSettings, Settings};
 use tokio_util::sync::CancellationToken;
 
