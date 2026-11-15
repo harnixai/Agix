@@ -367,7 +367,7 @@ Builder::new().permission(PermissionSet::without_grants(Arc::new(MyPolicy)));
 `PermissionRequest` 带着判定要用的全部状态:分发用的那个 registry 里查到的工具(`tool`,
 查不到是 `None`——引擎自己的 `Policy` 对它询问而不放行)、工具陈述的这次调用的事实(`facts`:
 `ToolFacts`,由 `ToolFacts::gather` 用 `ctx` 收集一次)、这次调用真正要用的上下文(`ctx`)、策略所属会话的实时
-`SessionState`(`session`,会话中途的模式切换从这里看到)、子 Agent 与团队成员转来的调用的
+会话状态(`session`,`Arc<dyn Session>`,会话中途的模式切换从这里看到)、子 Agent 与团队成员转来的调用的
 `Delegate { session, mode, rules }`(`delegate`)、`PreToolUse` hook 的回答(`hook`),以及问得了人还是问不了
 (`attendance`)。结论是 `Permit { basis, profile, obligations }`、`Deny { reason }` 或
 `Prompt { .., answerable }`;`Reason` 带所在的 `Stage`。`without_grants` 的 `grants` 是 `None`:会话不记放行,询问时也就不提供
@@ -719,8 +719,8 @@ provider——模型、OAuth、遥测和 registry 的 client 各造各的。所�
 自己拼 `ExecProviders` 的用 `platform::local_providers_with_ledger`。
 
 自己实现 `PermissionPolicy`、又要构造 `ToolContext` 去收集工具的事实(`ToolFacts::gather`)的,provider 取
-`SessionState::exec()`——`Builder::build()` 把会话执行用的那套绑在那里,子 Agent 的调用用
-子 Agent 的 `SessionState`。另起一套本机的,判的就不是命令要跑的那台机器。
+`Session::exec()`(取自 `PermissionRequest::judged()`)——`Builder::build()` 把会话执行用的那套绑在那里,
+子 Agent 的调用用子 Agent 的会话状态。另起一套本机的,判的就不是命令要跑的那台机器。
 
 沙箱有一条不变量是引擎强制而不是请求的:**要求过约束的策略,绝不会悄悄变成一次不
 受约束的运行。** 后端报告 `Full`、`Partial` 或 `None`,并说清自己没能兑现什么;
@@ -1423,7 +1423,7 @@ match agent.delegator().delegate(req).await? {
 - **直接用 `Agent::run` 驱动的**:什么都不用做,它自己在一轮正常结束后开下一轮。
 - **自己调度 turn 的**(会话池、自己的队列):`Builder::goal_rounds_from_owner()`,每轮结束
   后问 `Agent::goal_round_after`,拿到的那一轮像普通 turn 一样排进去;轮到它开始时先调
-  `SessionState::goal_claim_round(turn_id)`,返回 `false` 就丢掉它不跑。没认领的那一轮一直
+  `session_state::SessionState::goal_claim_round(turn_id)`,返回 `false` 就丢掉它不跑。没认领的那一轮一直
   算待开始,在它之前不会交出下一轮;决定不跑它时调 `goal_abandon_round`。`agixd` 就是这样,
   自动轮在 `turn_started` 里是 `initiator:"goal"`。
 

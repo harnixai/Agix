@@ -145,7 +145,8 @@ fn the_policy_and_the_relay_judge_with_the_calls_own_context() {
             .into_iter()
             .filter(|call| {
                 matches!(&call.callee, Callee::Path(p)
-                    if p.ends_with(&["ToolContext".into(), "from_engine_ctx_with".into()]))
+                    if p.ends_with(&["ToolContext".into(), "new".into()])
+                        || p.last().is_some_and(|s| s == "tool_context_for_test"))
             })
             .map(|call| Finding {
                 key: place(f, &call.hit),

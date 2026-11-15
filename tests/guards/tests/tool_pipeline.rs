@@ -157,14 +157,14 @@ const MAKES_A_TOOL_CONTEXT: &[(&str, &str)] = &[
         "the one constructor every call's context comes from",
     ),
     (
-        "crates/platform/src/providers.rs::tool_context_for_test",
-        "the fixture other crates' tests build on: base's test context over this machine",
+        "crates/session-state/src/testing.rs::tool_context_for_test",
+        "the fixture other crates' tests build on: a test session over the providers the test hands in",
     ),
 ];
 
 #[test]
 fn a_calls_context_is_made_in_one_place() {
-    const MAKERS: &[&str] = &["new", "for_test_with", "from_engine_ctx_with"];
+    const MAKERS: &[&str] = &["new"];
     let found = par_flat_map(ws().production(), |f| {
         scan::calls(f, View::Prod)
             .into_iter()
@@ -192,6 +192,10 @@ fn a_calls_context_is_made_in_one_place() {
 }
 
 const SETS_A_TOOL_CONTEXT_FIELD: &[(&str, &str)] = &[
+    (
+        "crates/session-state/src/testing.rs::tool_context_for_test::session_id",
+        "a test context's session id, which `ToolContext::new` leaves empty",
+    ),
     (
         "crates/runtime/src/agent/turn/tool_exec.rs::execute_tool_inner::approval",
         "what the policy let the call through on, known only once it has",

@@ -145,10 +145,6 @@ const BASE_FS: &[(&str, &str)] = &[
         "PromptFiles: every instruction file is read through the sensitive-path check",
     ),
     (
-        "crates/core/src/context/session/read_cache.rs",
-        "the read cache compares mtimes",
-    ),
-    (
         "crates/core/src/interface/exec/filesystem.rs",
         "the Filesystem contract's provided methods call its own canonicalize and metadata",
     ),
@@ -220,7 +216,7 @@ fn base_reaches_the_filesystem_only_where_listed() {
         found,
         BASE_FS,
         "base holds contracts and data: do the I/O in the crate that owns it (settings, memory, \
-         prompt-files, platform) or through `exec.filesystem`; or list the file with why",
+         prompt-files, session-state, platform) or through `exec.filesystem`; or list the file with why",
     );
 }
 

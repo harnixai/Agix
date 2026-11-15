@@ -30,10 +30,11 @@ use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-const SESSION_STATE: &str = "crates/core/src/context/session/mod.rs";
-const TASKS: &str = "crates/core/src/context/session/tasks.rs";
-const NOTICES: &str = "crates/core/src/context/session/notices.rs";
-const READ_CACHE: &str = "crates/core/src/context/session/read_cache.rs";
+const SESSION_STATE: &str = "crates/session-state/src/lib.rs";
+const BASE_SESSION: &str = "crates/core/src/context/session.rs";
+const TASKS: &str = "crates/session-state/src/tasks.rs";
+const NOTICES: &str = "crates/session-state/src/notices.rs";
+const READ_CACHE: &str = "crates/session-state/src/read_cache.rs";
 const LIVE: &str = "crates/assembly/src/session_pool/parts/live.rs";
 
 const FIELDS: &[(&str, &str)] = &[
@@ -203,7 +204,7 @@ const CREATED_AT: &[(&str, &str)] = &[
         "`SessionCore`: the state of a session the pool brings into memory",
     ),
     (
-        "crates/core/src/context/session/mod.rs::SessionState::for_tests_in",
+        "crates/session-state/src/lib.rs::SessionState::for_tests_in",
         "a state for a test, which no session runs on",
     ),
 ];
@@ -227,7 +228,8 @@ fn place(f: &SourceFile, hit: &Hit) -> String {
 fn every_field_of_a_sessions_state_says_whose_it_is() {
     let mut found = Vec::new();
     for (file, names) in [
-        (SESSION_STATE, &["SessionState", "SessionEnv"][..]),
+        (SESSION_STATE, &["SessionState"][..]),
+        (BASE_SESSION, &["SessionEnv"][..]),
         (TASKS, &["TaskTable"][..]),
         (NOTICES, &["Notices"][..]),
         (READ_CACHE, &["ReadCache"][..]),

@@ -61,7 +61,7 @@ fn    crates/runtime/src/agent/turn/request.rs                   Agent::recover_
 fn    crates/runtime/src/agent/turn/tool_exec.rs                 execute_tool_inner                     89
 fn    crates/runtime/src/agent/turn/tool_exec.rs                 post_tool_use                          83
 fn    crates/runtime/src/agent/turn/tool_permission.rs           ask                                    89
-fn    crates/runtime/src/agent/turn/tool_permission.rs           authorize                              95
+fn    crates/runtime/src/agent/turn/tool_permission.rs           authorize                              89
 fn    crates/runtime/src/plugin.rs                               register_all                           82
 fn    crates/runtime/src/prompt_assembly.rs                      assemble                               90
 fn    crates/scene/src/declarative.rs                            DeclaredScene::parse                   90

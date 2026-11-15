@@ -207,8 +207,8 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 装配 | `assembly` | 会话池、配置、provider 路由、JSON-RPC 服务 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 
-`crates/` 下 23 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
-工作区共 32 个成员。
+`crates/` 下 24 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
+工作区共 33 个成员。
 
 ---
 

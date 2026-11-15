@@ -273,8 +273,8 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | assembly | `assembly` | session pool, configuration, provider routing, the JSON-RPC server |
 | shell | `daemon` | the `agixd` binary |
 
-23 crates under `crates/`, plus `daemon/`, the seven test members and the
-example plugin in `examples/plugins/rust` — 32 workspace members in total.
+24 crates under `crates/`, plus `daemon/`, the seven test members and the
+example plugin in `examples/plugins/rust` — 33 workspace members in total.
 
 ---
 

@@ -510,7 +510,7 @@ fn every_public_enum_is_non_exhaustive_or_closed_for_a_reason() {
         .filter(|f| {
             (matches!(
                 f.package.as_str(),
-                "base" | "settings" | "memory" | "prompt-files"
+                "base" | "settings" | "memory" | "prompt-files" | "session-state"
             ) && f.target == TargetKind::Lib)
                 || f.rel.starts_with("crates/assembly/src/session_pool/api/")
         })
