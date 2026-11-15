@@ -8,6 +8,7 @@ mod crash_recovery;
 mod daemon_surface;
 mod demo_plugins;
 mod engine_boundaries;
+mod engine_proxy;
 mod four_project_pipeline;
 mod harness;
 mod hook_events;

@@ -933,6 +933,15 @@ resume、轮数、durable state 的恢复与回滚后当场的视图是同一个
    的 IPv6……),除非 `allowed_domains` 点名了那个主机;HTTP hook 的 url 带
    `HttpRequest::public_only`,同样不许。重定向的每一跳都查;名字在发出前解析查一次,
    连接时用的解析器再查一次,中间换了答案的名字也进不去。
+
+   **引擎自己的 HTTP 走不走系统代理,与沙箱内命令的出网是两回事。** 模型调用、`WebFetch` / `Ping`、
+   MCP over HTTP、OAuth 经 `platform::LocalNetwork` 发出,缺省遵循环境里的 `HTTP_PROXY` / `HTTPS_PROXY` /
+   `ALL_PROXY` / `NO_PROXY`(回环地址总是直连);`network.use_system_proxy: false` 让它们全部直连,
+   `public_only` 解析器对代理主机的豁免随之取消。沙箱里命令的出网由 `sandbox.network_mode` /
+   `egress_proxy` 管,不受它影响。HTTP 客户端是进程级的,所以这项只认全局与托管层(scene、项目层写了
+   记 warn 并丢弃),值在读设置时(`assembly::settings_source::read_pair`)交给 `platform::configure_system_proxy`,
+   之后的改动要重启 daemon 才生效,`config.reload` 发现不一致只记 warn。`daemon.doctor` 的 `network.proxy`
+   报当前姿态。
 3. **受约束的策略绝不静默降级为无约束执行。** 后端报告 `Full` / `Partial` / `None`
    并列出兑现不了的部分;`sandbox.require_enforcement` 决定不足 `Full` 时是否拒绝。
 4. **一个命令是它起的整个进程组。** 本机 provider 让每个子进程领一个会话(也就领了一个
