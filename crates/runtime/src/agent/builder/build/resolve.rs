@@ -70,7 +70,7 @@ impl Builder {
             .host
             .rule_provider
             .clone()
-            .unwrap_or_else(|| Arc::new(base::rules::RuleTiers::for_paths(&settings.paths)));
+            .unwrap_or_else(|| Arc::new(prompt_files::rule_tiers(&settings.paths)));
         let memory_store = self.host.memory_store.take().unwrap_or_else(|| {
             Arc::new(MemoryStore::for_paths(
                 &base::paths::ConfigPaths::from_settings(&settings.paths),
@@ -112,12 +112,11 @@ impl Builder {
             dyn base::interface::instruction_provider::InstructionProvider,
         > = self.host.instruction_provider.clone().unwrap_or_else(|| {
             Arc::new(
-                base::interface::instruction_provider::InstructionFile::new(
-                    instruction_file.clone(),
-                )
-                .reading_with(base::paths::PromptFiles::for_project(
-                    &base::paths::ConfigPaths::from_settings(&settings.paths),
-                )),
+                prompt_files::InstructionFile::new(instruction_file.clone()).reading_with(
+                    base::paths::PromptFiles::for_project(
+                        &base::paths::ConfigPaths::from_settings(&settings.paths),
+                    ),
+                ),
             )
         });
         let claude_md_content = {

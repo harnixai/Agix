@@ -3,10 +3,14 @@
 //! styles, the configured instruction file and the `.agix/rules/` directories.
 
 mod agents_md;
+mod instructions;
 mod output_style;
+mod rules;
 
 pub use agents_md::collect_agents_md;
+pub use instructions::InstructionFile;
 pub use output_style::load_output_style;
+pub use rules::{first_line_description, rule_tiers, RuleDirectory, MAX_RULE_DESCRIPTION_CHARS};
 
 use std::path::Path;
 

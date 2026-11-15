@@ -340,9 +340,7 @@ fn registered_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interface::instruction_provider::RuleProvider;
     use crate::interface::scene::{FixedPrompt, TokenBudget};
-    use crate::paths::PathSettings;
     use std::borrow::Cow;
 
     #[derive(Clone)]
@@ -354,7 +352,6 @@ mod tests {
 
     struct TestLoaded {
         values: TestSettings,
-        paths: PathSettings,
     }
 
     fn scene_with(blocks: Vec<PromptBlock>) -> SceneSpec {
@@ -394,19 +391,7 @@ mod tests {
     }
 
     fn test_loaded(settings: TestSettings) -> TestLoaded {
-        TestLoaded {
-            values: settings,
-            paths: PathSettings {
-                user_data_dir: "/tmp/agix/scenes/code".into(),
-                global_data_dir: "/tmp/agix".into(),
-                workspace: crate::paths::Workspace::project_of(std::path::Path::new(
-                    "/tmp/agix/local",
-                )),
-                local_data_dir: "/tmp/agix/local".into(),
-                scope: "code".into(),
-                project_untrusted: false,
-            },
-        }
+        TestLoaded { values: settings }
     }
 
     fn assemble_for_test(
@@ -443,7 +428,7 @@ mod tests {
             scene,
             &settings.values,
             ctx,
-            &crate::rules::RuleTiers::for_paths(&settings.paths).rules(),
+            &[],
             (skills_text, mcp_instructions),
         )
     }

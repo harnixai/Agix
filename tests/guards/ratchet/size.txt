@@ -48,6 +48,7 @@ fn    crates/model/src/openai/request.rs                         push_translated
 fn    crates/model/src/types.rs                                  MessagesRequest::serialize             99
 fn    crates/packages/src/manifest.rs                            validate                               95
 fn    crates/platform/src/process.rs                             LocalProcess::spawn                    82
+fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
@@ -66,7 +67,6 @@ fn    crates/runtime/src/plugin.rs                               register_all   
 fn    crates/scene/src/declarative.rs                            DeclaredScene::parse                   90
 fn    crates/script-host/src/lib.rs                              bindings::install                      98
 fn    crates/settings/src/loaded.rs                              LoadedSettings::load_from              92
-fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
 fn    crates/skills/src/bundled.rs                               bundled_skills                         135
 fn    crates/telemetry/src/recorder/reader.rs                    load                                   95
 fn    crates/tools/src/bash/paths.rs                             path_args_stay_within                  111

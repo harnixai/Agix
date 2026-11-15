@@ -1,19 +1,12 @@
-//! `.agix/rules/` discovery — a lightweight, lazy index surfaced in the
-//! system prompt so the model knows rule documents exist without eagerly
-//! loading their content.
+//! The rule index: its entries, the merge of several rule sources, and the
+//! prompt block that advertises it.
 //!
-//! Rules stay intentionally lazy (Read-tool-on-demand, not auto-injected in
-//! full). This module only makes sure a `.md` file sitting in `.agix/rules/`
-//! is visible to the model even when nothing in `AGENTS.md` references it.
-//! Discovery only reads each file's first line, never full content.
-//!
-//! Where the documents come from is the
+//! Rules stay lazy: the model sees each document's name and first line and
+//! reads the rest on demand. Where the documents come from is the
 //! [`RuleProvider`](crate::interface::instruction_provider::RuleProvider)
-//! contract; this module owns the merge and the prompt block.
+//! contract; the directory-backed sources are in `prompt_files`.
 
-use crate::interface::instruction_provider::{RuleDirectory, RuleProvider};
-use crate::paths::PathSettings;
-use crate::paths::PromptFiles;
+use crate::interface::instruction_provider::RuleProvider;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -24,7 +17,7 @@ pub struct RuleEntry {
     pub name: String,
     /// First non-empty line of the file, `#`/whitespace-stripped — same
     /// "fallback to first body line" convention as skills. Capped at
-    /// `MAX_RULE_DESCRIPTION_CHARS` regardless of how verbose the line is.
+    /// `prompt_files::MAX_RULE_DESCRIPTION_CHARS` regardless of how verbose the line is.
     pub description: String,
     /// Absolute path — always resolvable by the Read tool regardless of
     /// which tier (project/scene/global) the file came from.
@@ -41,28 +34,6 @@ pub struct RuleTiers {
 impl RuleTiers {
     pub fn new(sources: Vec<Arc<dyn RuleProvider>>) -> Self {
         Self { sources }
-    }
-
-    /// The engine's own tiers, outermost first, so project overrides scene
-    /// overrides global — same precedence as skills/agents
-    /// (`crates/core/src/frozen/skill.rs`,
-    /// `crates/agents/src/agent_tool/catalog.rs::merge_agent_types`).
-    pub fn for_paths(paths: &PathSettings) -> Self {
-        let files = PromptFiles::for_project(&crate::paths::ConfigPaths::from_settings(paths));
-        let project = paths
-            .project_root()
-            .map(|project| project.join(".agix").join("rules"));
-        let sources = [
-            paths.global_data_dir.join("rules"),
-            paths.user_data_dir.join("rules"),
-        ]
-        .into_iter()
-        .chain(project)
-        .map(|dir| {
-            Arc::new(RuleDirectory::new(dir).reading_with(files.clone())) as Arc<dyn RuleProvider>
-        })
-        .collect();
-        Self::new(sources)
     }
 }
 
@@ -112,118 +83,42 @@ pub fn render_rules_prompt(entries: &[RuleEntry]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::interface::instruction_provider::StaticRules;
-    use crate::paths::PathSettings;
-    use std::path::Path;
-    use tempfile::TempDir;
 
-    fn write_rule(dir: &Path, filename: &str, content: &str) {
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join(filename), content).unwrap();
-    }
-
-    fn paths_for(project: &Path, scene: &Path, global: &Path) -> PathSettings {
-        PathSettings {
-            user_data_dir: scene.to_path_buf(),
-            global_data_dir: global.to_path_buf(),
-            workspace: crate::paths::Workspace::project_of(&project.join(".agix")),
-            local_data_dir: project.join(".agix"),
-            scope: "code".into(),
-            project_untrusted: false,
+    fn entry(name: &str, description: &str, path: &str) -> RuleEntry {
+        RuleEntry {
+            name: name.into(),
+            description: description.into(),
+            path: PathBuf::from(path),
         }
     }
 
     #[test]
-    fn discover_rules_empty_when_no_dirs_exist() {
-        let root = TempDir::new().unwrap();
-        let paths = paths_for(
-            &root.path().join("project"),
-            &root.path().join("scene"),
-            &root.path().join("global"),
-        );
-        assert!(RuleTiers::for_paths(&paths).rules().is_empty());
-        assert!(render_rules_prompt(&RuleTiers::for_paths(&paths).rules()).is_none());
+    fn no_rules_renders_no_block() {
+        assert!(render_rules_prompt(&[]).is_none());
     }
 
     #[test]
-    fn discover_rules_reads_first_line_as_description() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "security.md",
-            "# Security guidelines\n\nBody text here.",
-        );
-        let paths = paths_for(
-            &project,
-            &root.path().join("scene"),
-            &root.path().join("global"),
-        );
-        let entries = RuleTiers::for_paths(&paths).rules();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "security");
-        assert_eq!(entries[0].description, "Security guidelines");
-    }
-
-    #[test]
-    fn discover_rules_project_overrides_scene_overrides_global() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        let scene = root.path().join("scene");
-        let global = root.path().join("global");
-        write_rule(&global.join("rules"), "testing.md", "from global");
-        write_rule(&scene.join("rules"), "testing.md", "from scene");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "testing.md",
-            "from project",
-        );
-
-        let paths = paths_for(&project, &scene, &global);
-        let entries = RuleTiers::for_paths(&paths).rules();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].description, "from project");
-    }
-
-    #[test]
-    fn discover_rules_keeps_distinct_names_from_different_tiers() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        let global = root.path().join("global");
-        write_rule(&global.join("rules"), "architecture.md", "global rule");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "security.md",
-            "project rule",
-        );
-
-        let paths = paths_for(&project, &root.path().join("scene"), &global);
-        let entries = RuleTiers::for_paths(&paths).rules();
-        assert_eq!(entries.len(), 2);
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert!(names.contains(&"architecture"));
-        assert!(names.contains(&"security"));
-    }
-
-    #[test]
-    fn the_rules_block_lists_filenames_and_descriptions() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "testing.md",
+    fn the_rules_block_lists_paths_and_descriptions() {
+        let text = render_rules_prompt(&[entry(
+            "testing",
             "Testing conventions",
-        );
-        let paths = paths_for(
-            &project,
-            &root.path().join("scene"),
-            &root.path().join("global"),
-        );
-        let text = render_rules_prompt(&RuleTiers::for_paths(&paths).rules())
-            .expect("expected a rules block");
+            "/p/.agix/rules/testing.md",
+        )])
+        .expect("expected a rules block");
         assert!(text.contains("Available Rules"));
         assert!(text.contains("testing.md"));
         assert!(text.contains("Testing conventions"));
         assert!(text.contains("Read tool"));
+    }
+
+    #[test]
+    fn the_merge_is_sorted_by_name() {
+        let tiers = RuleTiers::new(vec![Arc::new(StaticRules::new(
+            "s",
+            vec![entry("b", "", "/b.md"), entry("a", "", "/a.md")],
+        ))]);
+        let names: Vec<String> = tiers.rules().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["a", "b"]);
     }
 
     /// The tier list is a composition of sources, not three paths written

@@ -156,10 +156,6 @@ const BASE_FS: &[(&str, &str)] = &[
         "crates/core/src/interface/exec/in_process/filesystem.rs",
         "InProcessFilesystem: the in-process implementation of that contract",
     ),
-    (
-        "crates/core/src/interface/instruction_provider.rs",
-        "the default rule provider lists .agix/rules",
-    ),
 ];
 
 /// Production files of base that call a model, each with why.

@@ -102,7 +102,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
 | `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
 | `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
-| `prompt-files` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格 |
+| `prompt-files` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格、指令文件与 `.agix/rules/` 规则目录 |
 | `team` | 模块 | 团队协调器(`Coordinator`)、邮箱与 `TeamTool`;`agents` 的团队工具驱动它 |
 | `agents` | 模块 | 子 agent(`Agent` 工具)、agent 类型目录、团队工具;依赖 `team` |
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |
@@ -153,7 +153,7 @@ fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父�
 |---|---|---|
 | `Builder::exec(ExecProviders)` | `exec.process` / `filesystem` / `network` / `sandbox` | 工具调用、引擎的 git 与 `pdftotext`、warmup 的预连接、command hook 的进程都落在它上面(HTTP hook 的出口:宿主给了 `exec` 就用它的 `network`,否则是不带模型出口策略的本机网络,因为 hook 是运维写的配置,常打 `localhost`);与 `Builder::process_groups` 互斥,同设时 `build()` 报错——要记进程组就把台账带在传入的 provider 里(`platform::local_providers_with_ledger`) |
 | `Builder::token_counter(..)` | `token.count` | 压缩触发的那个数、请求开销与 `inspectContext` 的逐块计数、`compact_now` 的目标大小,同一口径 |
-| `Builder::rule_provider(..)` | `rules.source` | 缺省 `RuleTiers::for_paths`(全局、场景、项目三层,后来居上);每次组装提示词时取一次 |
+| `Builder::rule_provider(..)` | `rules.source` | 缺省 `prompt_files::rule_tiers`(全局、场景、项目三层,后来居上);每次组装提示词时取一次 |
 
 ### 1.2 档位
 

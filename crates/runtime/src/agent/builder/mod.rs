@@ -139,7 +139,7 @@ impl Builder {
     }
 
     /// Where the rule index the model is shown comes from. Replaces the
-    /// three tiers (`base::rules::RuleTiers::for_paths`); compose with
+    /// three tiers (`prompt_files::rule_tiers`); compose with
     /// `RuleTiers::new`. Delegates are shown the same index.
     pub fn rule_provider(
         mut self,
