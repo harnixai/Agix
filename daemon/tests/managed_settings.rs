@@ -15,8 +15,6 @@ use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, StreamEvent};
 use model::types::MessagesRequest;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 /// Replays one canned round per model call, then repeats the last.
@@ -154,22 +152,7 @@ impl Daemon {
         method: &str,
         params: serde_json::Value,
     ) -> (Vec<serde_json::Value>, serde_json::Value) {
-        let mut stream = UnixStream::connect(&self.sock).await.unwrap();
-        let request = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-        stream
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let mut lines = BufReader::new(stream).lines();
-        let mut frames = Vec::new();
-        while let Some(line) = lines.next_line().await.unwrap() {
-            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if value.get("id").is_some() {
-                return (frames, value);
-            }
-            frames.push(value);
-        }
-        panic!("connection closed before a response to {method}");
+        crate::support::call_streaming(&self.sock, method, params).await
     }
 
     async fn run_turn(&self, options: serde_json::Value) -> Vec<serde_json::Value> {

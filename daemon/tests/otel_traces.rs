@@ -96,25 +96,7 @@ async fn call(
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    let request = serde_json::json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    loop {
-        let mut line = String::new();
-        assert!(
-            reader.read_line(&mut line).await.unwrap() > 0,
-            "{method}: closed"
-        );
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            assert!(frame.get("result").is_some(), "{method} failed: {frame}");
-            return frame["result"].clone();
-        }
-    }
+    crate::support::call(sock, method, params).await
 }
 
 fn contains(haystack: &[u8], needle: &str) -> bool {

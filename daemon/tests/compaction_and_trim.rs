@@ -16,8 +16,6 @@ use daemon::DaemonServer;
 use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const PARTS: usize = 8;
@@ -208,24 +206,7 @@ async fn call(
     method: &str,
     params: serde_json::Value,
 ) -> (Vec<serde_json::Value>, serde_json::Value) {
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    let request = serde_json::json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    let mut frames = Vec::new();
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await.unwrap();
-        assert!(n > 0, "connection closed before the call was answered");
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            return (frames, frame);
-        }
-        frames.push(frame);
-    }
+    crate::support::call_streaming(sock, method, params).await
 }
 
 async fn run_turn(

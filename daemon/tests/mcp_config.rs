@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::support::*;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 #[tokio::test]
 async fn mcp_status_empty_when_nothing_connected() {
@@ -222,18 +220,7 @@ async fn mcp_add_server_connects_a_real_server_and_lists_its_tools() {
     let binary = toy_mcp_server();
     let (_server, sock, dir, handle) = start_server().await;
 
-    let mut sub_client = UnixStream::connect(&sock).await.unwrap();
-    sub_client
-        .write_all(br#"{"jsonrpc":"2.0","method":"daemon.subscribeEvents","id":1}"#)
-        .await
-        .unwrap();
-    sub_client.write_all(b"\n").await.unwrap();
-    let (r, _w) = sub_client.split();
-    let mut sub_reader = BufReader::new(r);
-    let mut ack_line = String::new();
-    sub_reader.read_line(&mut ack_line).await.unwrap();
-    let ack: serde_json::Value = serde_json::from_str(&ack_line).unwrap();
-    assert_eq!(ack["result"]["subscribed"], true, "ack: {ack}");
+    let mut sub_client = subscribed(&sock, "daemon.subscribeEvents", serde_json::json!({})).await;
 
     let request = serde_json::json!({
         "jsonrpc": "2.0", "id": 2, "method": "mcp.addServer",
@@ -268,15 +255,11 @@ async fn mcp_add_server_connects_a_real_server_and_lists_its_tools() {
         binary.to_string_lossy().as_ref()
     );
 
-    let mut event_line = String::new();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        sub_reader.read_line(&mut event_line),
-    )
-    .await
-    .expect("timed out waiting for the mcp_connected notification")
-    .unwrap();
-    let event: serde_json::Value = serde_json::from_str(&event_line).unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(10), sub_client.next_frame())
+        .await
+        .expect("timed out waiting for the mcp_connected notification")
+        .unwrap()
+        .expect("the subscription closed");
     assert_eq!(event["method"], "daemon.event", "event: {event}");
     assert_eq!(event["params"]["kind"], "mcp_connected", "event: {event}");
     assert_eq!(event["params"]["server"], "toy", "event: {event}");
@@ -296,19 +279,7 @@ async fn mcp_add_server_connects_a_real_server_and_lists_its_tools() {
 async fn subscribe_events_receives_mcp_connect_failed_notification() {
     let (_server, sock, _dir, handle) = start_server().await;
 
-    let mut sub_client = UnixStream::connect(&sock).await.unwrap();
-    sub_client
-        .write_all(br#"{"jsonrpc":"2.0","method":"daemon.subscribeEvents","id":1}"#)
-        .await
-        .unwrap();
-    sub_client.write_all(b"\n").await.unwrap();
-    let (r, _w) = sub_client.split();
-    let mut sub_reader = BufReader::new(r);
-
-    let mut ack_line = String::new();
-    sub_reader.read_line(&mut ack_line).await.unwrap();
-    let ack: serde_json::Value = serde_json::from_str(&ack_line).unwrap();
-    assert_eq!(ack["result"]["subscribed"], true, "ack: {ack}");
+    let mut sub_client = subscribed(&sock, "daemon.subscribeEvents", serde_json::json!({})).await;
 
     // Trigger a connect attempt (guaranteed to fail — nonexistent binary)
     // from a second, independent connection.
@@ -318,15 +289,11 @@ async fn subscribe_events_receives_mcp_connect_failed_notification() {
     )
     .await;
 
-    let mut event_line = String::new();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        sub_reader.read_line(&mut event_line),
-    )
-    .await
-    .expect("timed out waiting for daemon.event notification")
-    .unwrap();
-    let event: serde_json::Value = serde_json::from_str(&event_line).unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(5), sub_client.next_frame())
+        .await
+        .expect("timed out waiting for daemon.event notification")
+        .unwrap()
+        .expect("the subscription closed");
     assert_eq!(event["method"], "daemon.event", "event: {event}");
     assert_eq!(event["params"]["kind"], "mcp_connect_failed");
     assert_eq!(event["params"]["server"], "bogus");

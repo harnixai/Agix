@@ -15,8 +15,6 @@ use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
 use runtime::agent::Builder;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const SECRET: &str = "PIPELINE-SECRET-91c4";
@@ -108,48 +106,21 @@ impl Daemon {
     }
 
     async fn call(&self, method: &str, params: Value) -> Value {
-        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line))
-                .await
-                .unwrap_or_else(|_| panic!("{method}: no response"))
-                .unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                assert!(frame.get("result").is_some(), "{method} failed: {frame}");
-                return frame["result"].clone();
-            }
-        }
+        crate::support::call(&self.sock, method, params).await
     }
 
     /// Runs one turn, answering each permission prompt with what `answer`
     /// returns for it (`None` leaves it unanswered); returns the prompts raised.
     async fn turn(&self, mut answer: impl FnMut(&Value) -> Option<Value>) -> Vec<Value> {
-        let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
-                             "params": {"message": "go"},"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
+        let mut client =
+            crate::support::begin(&self.sock, "session.run_turn", json!({"message": "go"})).await;
         let mut prompts = Vec::new();
         loop {
-            let mut line = String::new();
-            let n = tokio::time::timeout(Duration::from_secs(120), reader.read_line(&mut line))
+            let frame = tokio::time::timeout(Duration::from_secs(120), client.next_frame())
                 .await
                 .expect("the turn ended")
-                .unwrap();
-            assert!(n > 0, "connection closed before the turn ended");
-            let frame: Value = serde_json::from_str(&line).unwrap();
+                .unwrap()
+                .expect("connection closed before the turn ended");
             if frame.get("id").is_some() {
                 assert!(frame.get("result").is_some(), "turn failed: {frame}");
                 return prompts;

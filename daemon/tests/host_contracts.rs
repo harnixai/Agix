@@ -154,16 +154,14 @@ impl Daemon {
 }
 
 async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
-    let request = json!({"jsonrpc":"2.0","method":"session.respondToPrompt","params":{
+    let reply = crate::support::call_frame(
+        sock,
+        "session.respondToPrompt",
+        json!({
         "session_id": session_id, "prompt_id": prompt_id,
-        "decision": {"type": "deny", "reason": "audit"}},"id":2});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(conn).read_line(&mut line).await.unwrap();
-    let reply: Value = serde_json::from_str(&line).unwrap();
+        "decision": {"type": "deny", "reason": "audit"}}),
+    )
+    .await;
     assert_eq!(reply["result"]["prompt_id"], prompt_id, "{reply}");
 }
 
@@ -283,15 +281,12 @@ async fn a_provider_key_env_is_not_handed_to_commands() {
         },
     )
     .await;
-    let request = json!({"jsonrpc":"2.0","method":"project.status",
-                         "params":{"project_root": other},"id":3});
-    let mut conn = UnixStream::connect(&daemon.sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(conn).read_line(&mut line).await.unwrap();
-    let reply: Value = serde_json::from_str(&line).unwrap();
+    let reply = crate::support::call_frame(
+        &daemon.sock,
+        "project.status",
+        json!({"project_root": other}),
+    )
+    .await;
     assert!(reply.get("result").is_some(), "precondition: {reply}");
 
     daemon.model.push_turn(tool_round(

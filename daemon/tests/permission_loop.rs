@@ -3,8 +3,6 @@
 use std::time::Duration;
 
 use crate::support::*;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 #[tokio::test]
 async fn ask_default_prompts_then_proceeds_once_permitted() {
@@ -425,31 +423,32 @@ async fn a_prompt_is_answerable_on_the_same_connection_that_started_the_turn() {
     .await;
 
     let outcome = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut conn = UnixStream::connect(&srv.sock).await.unwrap();
-        conn.write_all(
-            br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file"},"id":1}"#,
+        let mut client = crate::support::begin(
+            &srv.sock,
+            "session.run_turn",
+            serde_json::json!({"message": "make a file"}),
         )
-        .await
-        .unwrap();
-        conn.write_all(b"\n").await.unwrap();
-
-        let (r, mut w) = conn.split();
-        let mut br = BufReader::new(r);
+        .await;
         let mut answered = false;
         loop {
-            let mut line = String::new();
-            let n = br.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed before the turn finished");
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed before the turn finished");
 
             if v["params"]["event"]["kind"] == "prompt" && !answered {
                 let sid = v["params"]["session_id"].as_str().unwrap();
                 let prompt_id = v["params"]["event"]["prompt_id"].as_str().unwrap();
                 // Same socket the turn is streaming on.
-                w.write_all(format!(
-                    r#"{{"jsonrpc":"2.0","method":"session.respondToPrompt","params":{{"session_id":"{sid}","prompt_id":"{prompt_id}","decision":{{"type":"deny","reason":"same-connection test"}}}},"id":2}}"#
-                ).as_bytes()).await.unwrap();
-                w.write_all(b"\n").await.unwrap();
+                client
+                    .send_request(
+                        "session.respondToPrompt",
+                        serde_json::json!({"session_id": sid, "prompt_id": prompt_id,
+                            "decision": {"type": "deny", "reason": "same-connection test"}}),
+                    )
+                    .await
+                    .unwrap();
                 answered = true;
             }
 

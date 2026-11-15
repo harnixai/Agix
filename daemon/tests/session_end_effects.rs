@@ -3,9 +3,6 @@
 use std::time::Duration;
 
 use crate::support::*;
-use tokio::io::AsyncWriteExt;
-
-use tokio::net::UnixStream;
 
 #[tokio::test]
 async fn a_stop_hook_that_discontinues_still_ends_the_turn_and_frees_the_session() {
@@ -252,16 +249,12 @@ async fn a_turn_in_a_slow_turn_start_hook_does_not_hold_up_close_and_resume() {
         .unwrap_or_else(|| panic!("no session: {created}"))
         .to_string();
 
-    let mut turn = UnixStream::connect(&srv.sock).await.unwrap();
-    turn.write_all(
-        format!(
-            r#"{{"jsonrpc":"2.0","method":"session.run_turn","params":{{"session_id":"{sid}","message":"hello"}},"id":2}}"#
-        )
-        .as_bytes(),
+    let _turn = crate::support::begin(
+        &srv.sock,
+        "session.run_turn",
+        serde_json::json!({"session_id": sid, "message": "hello"}),
     )
-    .await
-    .unwrap();
-    turn.write_all(b"\n").await.unwrap();
+    .await;
     tokio::time::timeout(Duration::from_secs(10), async {
         while !std::fs::read_to_string(&log)
             .unwrap_or_default()

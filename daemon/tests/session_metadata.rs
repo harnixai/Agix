@@ -4,8 +4,6 @@ use std::time::Duration;
 
 use crate::support::*;
 use daemon::rpc::codes;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// A session's name belongs to the person looking at it, and it has to
 /// survive that person closing the window. Kept beside the log rather than in
@@ -395,21 +393,16 @@ async fn subscribing_to_daemon_events_twice_delivers_each_event_once() {
         Duration::ZERO,
     )
     .await;
-    let mut events = UnixStream::connect(&srv.sock).await.unwrap();
-    events
-        .write_all(
-            b"{\"jsonrpc\":\"2.0\",\"method\":\"daemon.subscribeEvents\",\"id\":1}\n\
-              {\"jsonrpc\":\"2.0\",\"method\":\"daemon.subscribeEvents\",\"id\":2}\n",
-        )
-        .await
-        .unwrap();
-    let (r, _w) = events.split();
-    let mut reader = BufReader::new(r);
+    let mut events = crate::support::open(&srv.sock).await;
+    for _ in 0..2 {
+        events
+            .send_request("daemon.subscribeEvents", serde_json::json!({}))
+            .await
+            .unwrap();
+    }
     let mut acks = 0;
     while acks < 2 {
-        let mut line = String::new();
-        reader.read_line(&mut line).await.unwrap();
-        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let v = events.next_frame().await.unwrap().expect("closed");
         if v.get("id").is_some() {
             assert_eq!(v["result"]["subscribed"], true, "{v}");
             acks += 1;
@@ -420,11 +413,9 @@ async fn subscribing_to_daemon_events_twice_delivers_each_event_once() {
     let mut started = 0;
     let _ = tokio::time::timeout(Duration::from_millis(500), async {
         loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+            let Ok(Some(v)) = events.next_frame().await else {
                 return;
-            }
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            };
             if v["params"]["kind"] == "turn_started" {
                 started += 1;
             }

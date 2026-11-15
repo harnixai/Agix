@@ -15,8 +15,6 @@ use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const QUESTION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -150,24 +148,7 @@ impl Daemon {
     }
 
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            assert!(
-                reader.read_line(&mut line).await.unwrap() > 0,
-                "{method}: EOF"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if v.get("id").is_some() {
-                return v;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn create(&self, project_root: &Path) -> String {
@@ -189,20 +170,18 @@ impl Daemon {
     /// Start a turn on `sid` and return once its question is on the screen,
     /// leaving the turn running.
     async fn start_asking(&self, sid: &str) -> tokio::task::JoinHandle<()> {
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
-            "params":{"session_id": sid, "message": "ask me"},"id":1});
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let mut reader = BufReader::new(conn);
+        let mut client = crate::support::begin(
+            &self.sock,
+            "session.run_turn",
+            json!({"session_id": sid, "message": "ask me"}),
+        )
+        .await;
         loop {
-            let mut line = String::new();
-            assert!(
-                reader.read_line(&mut line).await.unwrap() > 0,
-                "the turn ended before it asked"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("the turn ended before it asked");
             assert!(v.get("id").is_none(), "the turn ended before it asked: {v}");
             if v["params"]["event"]["kind"] == "prompt"
                 && v["params"]["event"]["prompt_type"] == "question"
@@ -210,12 +189,7 @@ impl Daemon {
                 break;
             }
         }
-        tokio::spawn(async move {
-            let mut rest = String::new();
-            while reader.read_line(&mut rest).await.unwrap_or(0) > 0 {
-                rest.clear();
-            }
-        })
+        tokio::spawn(async move { while let Ok(Some(_)) = client.next_frame().await {} })
     }
 
     async fn engine_ended(&self) {

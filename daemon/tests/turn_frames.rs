@@ -5,8 +5,6 @@ use std::time::Duration;
 use crate::support::*;
 use daemon::rpc::codes;
 use model::stream::{BlockDelta, ContentBlockStart, StreamEvent};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// The `turn_complete` frame carries what the whole turn spent.
 ///
@@ -81,17 +79,12 @@ async fn every_watcher_has_turn_complete_before_the_turns_response() {
         .unwrap_or_else(|| panic!("{created}"))
         .to_string();
 
-    let (read, mut write) = UnixStream::connect(&srv.sock).await.unwrap().into_split();
-    let mut watcher = BufReader::new(read).lines();
-    let subscribe = serde_json::json!({
-        "jsonrpc": "2.0", "method": "session.subscribe", "id": 1,
-        "params": {"session_id": sid},
-    });
-    write
-        .write_all(format!("{subscribe}\n").as_bytes())
+    let mut watcher = crate::support::open(&srv.sock).await;
+    let subscribe_id = watcher
+        .send_request("session.subscribe", serde_json::json!({"session_id": sid}))
         .await
         .unwrap();
-    let (_, subscribed) = until_response(&mut watcher, 1).await;
+    let (_, subscribed) = until_response(&mut watcher, subscribe_id).await;
     assert!(subscribed["result"].is_object(), "{subscribed}");
 
     let run = serde_json::json!({
@@ -109,12 +102,11 @@ async fn every_watcher_has_turn_complete_before_the_turns_response() {
     );
     assert_eq!(last["params"]["turn_id"], "t-order", "{last}");
 
-    let ping = serde_json::json!({"jsonrpc": "2.0", "method": "daemon.ping", "id": 2});
-    write
-        .write_all(format!("{ping}\n").as_bytes())
+    let ping_id = watcher
+        .send_request("daemon.ping", serde_json::json!({}))
         .await
         .unwrap();
-    let (seen, pong) = until_response(&mut watcher, 2).await;
+    let (seen, pong) = until_response(&mut watcher, ping_id).await;
     assert_eq!(pong["result"]["pong"], true, "{pong}");
     let completes: Vec<&serde_json::Value> = seen
         .iter()
@@ -207,22 +199,12 @@ async fn a_failed_turn_tells_every_watcher_it_is_over() {
     .await;
     let sid = run_turn(&srv.sock, None, "hello").await;
 
-    let mut watcher = UnixStream::connect(&srv.sock).await.unwrap();
-    watcher
-        .write_all(
-            format!(
-                r#"{{"jsonrpc":"2.0","method":"session.subscribe","id":7,"params":{{"session_id":"{sid}"}}}}"#
-            )
-            .as_bytes(),
-        )
+    let mut watched = crate::support::open(&srv.sock).await;
+    let subscribe_id = watched
+        .send_request("session.subscribe", serde_json::json!({"session_id": sid}))
         .await
         .unwrap();
-    watcher.write_all(b"\n").await.unwrap();
-    let (r, _w) = watcher.split();
-    let mut watched = BufReader::new(r);
-    let mut line = String::new();
-    watched.read_line(&mut line).await.unwrap();
-    let subscribed: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let (_, subscribed) = until_response(&mut watched, subscribe_id).await;
     assert!(subscribed["result"].is_object(), "{subscribed}");
 
     let (frames, resp) = rpc_streaming(
@@ -240,12 +222,7 @@ async fn a_failed_turn_tells_every_watcher_it_is_over() {
 
     let ended = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let mut line = String::new();
-            assert!(
-                watched.read_line(&mut line).await.unwrap() > 0,
-                "watcher closed"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = watched.next_frame().await.unwrap().expect("watcher closed");
             if v["params"]["event"]["kind"] == "error" {
                 return v;
             }

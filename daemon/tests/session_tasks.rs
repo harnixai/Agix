@@ -16,8 +16,6 @@ use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, StreamEvent};
 use model::types::MessagesRequest;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const SESSION_NOT_FOUND: i64 = -32000;
@@ -104,22 +102,7 @@ impl Daemon {
     }
 
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = serde_json::json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -130,32 +113,13 @@ impl Daemon {
 
     /// Every `session.event` this connection receives after subscribing.
     async fn watch(&self, session_id: &str) -> Arc<Mutex<Vec<serde_json::Value>>> {
-        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        let request = serde_json::json!({
-            "jsonrpc":"2.0","method":"session.subscribe",
-            "params":{"session_id": session_id},"id":1
-        });
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let into = seen.clone();
-        tokio::spawn(async move {
-            let (r, _w) = conn.split();
-            let mut reader = BufReader::new(r);
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
-                    return;
-                }
-                let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-                if frame["method"] == "session.event" {
-                    into.lock().unwrap().push(frame["params"].clone());
-                }
-            }
-        });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        seen
+        crate::support::watch(
+            &self.sock,
+            "session.subscribe",
+            serde_json::json!({"session_id": session_id}),
+            |frame| (frame["method"] == "session.event").then(|| frame["params"].clone()),
+        )
+        .await
     }
 }
 

@@ -29,9 +29,6 @@ use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 use super::protocol_doc_examples::{protocol_doc, section, strip_line_comment, OneTurnClient};
@@ -122,42 +119,28 @@ fn allow_agents_and_shell(config: &mut daemon::config::DaemonConfig) {
 }
 
 struct Conn {
-    reader: BufReader<OwnedReadHalf>,
-    writer: OwnedWriteHalf,
+    client: rpc_client::DaemonRpcClient,
     pushed: Vec<Value>,
-    next_id: u64,
 }
 
 impl Conn {
     async fn open(sock: &Path) -> Self {
-        let (r, w) = UnixStream::connect(sock).await.unwrap().into_split();
         Self {
-            reader: BufReader::new(r),
-            writer: w,
+            client: crate::support::open(sock).await,
             pushed: Vec::new(),
-            next_id: 1,
         }
     }
 
     async fn send(&mut self, method: &str, params: Value) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        let request = json!({"jsonrpc": "2.0", "method": method, "params": params, "id": id});
-        self.writer
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        id
+        self.client.send_request(method, params).await.unwrap() as u64
     }
 
     async fn read(&mut self) -> Value {
-        let mut line = String::new();
-        let n = tokio::time::timeout(Duration::from_secs(30), self.reader.read_line(&mut line))
+        tokio::time::timeout(Duration::from_secs(30), self.client.next_frame())
             .await
             .expect("no frame within 30s")
-            .unwrap();
-        assert!(n > 0, "connection closed");
-        serde_json::from_str(&line).unwrap()
+            .unwrap()
+            .expect("connection closed")
     }
 
     async fn response(&mut self, id: u64) -> Value {
@@ -210,24 +193,19 @@ impl Watch {
         let mut seen = std::mem::take(&mut conn.pushed);
         let into = frames.clone();
         tokio::spawn(async move {
-            // The write half stays open for as long as the watcher listens:
+            // The connection stays open for as long as the watcher listens:
             // a daemon closes a connection whose peer has stopped writing.
-            let Conn {
-                mut reader,
-                writer: _writer,
-                ..
-            } = conn;
+            let mut client = conn.client;
             loop {
                 for frame in seen.drain(..) {
                     if frame["method"] == pushes {
                         into.lock().unwrap().push(frame["params"].clone());
                     }
                 }
-                let mut line = String::new();
-                if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                let Ok(Some(frame)) = client.next_frame().await else {
                     return;
-                }
-                seen.push(serde_json::from_str(&line).unwrap());
+                };
+                seen.push(frame);
             }
         });
         Self { frames }

@@ -14,8 +14,6 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const INVALID_PARAMS: i64 = -32602;
@@ -73,22 +71,7 @@ impl Daemon {
     }
 
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = serde_json::json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {

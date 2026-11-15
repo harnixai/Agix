@@ -13,8 +13,6 @@ use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 const INVALID_PARAMS: i64 = -32602;
@@ -129,25 +127,7 @@ impl Daemon {
     }
 
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line))
-                .await
-                .unwrap_or_else(|_| panic!("{method}: no response"))
-                .unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -303,14 +283,8 @@ async fn project_trust_and_status_round_trip() {
     )
     .await;
 
-    let mut events = UnixStream::connect(&daemon.sock).await.unwrap();
-    events
-        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"daemon.subscribeEvents\",\"id\":1}\n")
-        .await
-        .unwrap();
-    let mut events = BufReader::new(events);
-    let mut line = String::new();
-    events.read_line(&mut line).await.unwrap();
+    let mut events =
+        crate::support::subscribed(&daemon.sock, "daemon.subscribeEvents", json!({})).await;
 
     let before = daemon.status().await;
     assert_eq!(before["trust"], "untrusted", "{before}");
@@ -337,9 +311,7 @@ async fn project_trust_and_status_round_trip() {
 
     let event = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let mut line = String::new();
-            events.read_line(&mut line).await.unwrap();
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let frame = events.next_frame().await.unwrap().expect("closed");
             if frame["params"]["kind"] == "project_trust_changed" {
                 return frame["params"].clone();
             }

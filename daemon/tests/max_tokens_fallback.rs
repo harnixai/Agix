@@ -2,16 +2,9 @@
 //! files do not set one, not only the daemon's own project's.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use daemon::config::{load_daemon_config, StaticDaemonPaths};
-use daemon::DaemonServer;
-use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio_util::sync::CancellationToken;
 
 const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 const FALLBACK: u32 = 1234;
@@ -40,22 +33,6 @@ fn one_turn() -> Vec<StreamEvent> {
     ]
 }
 
-struct PermitAll;
-
-#[async_trait::async_trait]
-impl base::interface::permission::PermissionPolicy for PermitAll {
-    async fn decide(
-        &self,
-        _req: &base::interface::permission::PermissionRequest<'_>,
-    ) -> base::interface::permission::PermissionOutcome {
-        base::interface::permission::PermissionOutcome::Permit {
-            basis: base::interface::permission::Basis::Bypass,
-            profile: Default::default(),
-            obligations: Default::default(),
-        }
-    }
-}
-
 struct Daemon {
     sock: std::path::PathBuf,
     model: Arc<MockAnthropicClient>,
@@ -65,24 +42,7 @@ struct Daemon {
 
 impl Daemon {
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = serde_json::json!({
-            "jsonrpc":"2.0","method":method,"params":params,"id":1
-        });
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -96,56 +56,24 @@ impl Daemon {
 }
 
 async fn start_daemon() -> Daemon {
-    let dir = tempfile::tempdir().unwrap();
-    let sock = dir.path().join("tokens.sock");
-    let cwd = dir.path().join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-
     let model = Arc::new(MockAnthropicClient::new());
     model.push_turn(one_turn());
     model.push_turn(one_turn());
-
-    let mut config = load_daemon_config(
-        DEFAULT_MODEL,
-        FALLBACK,
-        Some(&sock),
-        "code",
-        &StaticDaemonPaths::new(dir.path().to_path_buf()),
-    );
-    config.settings.values.memory_enabled = false;
-
-    let pool = daemon::assemble::pool(
-        &config,
-        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
-        daemon::Assembly {
-            cwd: Some(cwd.clone()),
-            model_client: Some(model.clone() as Arc<dyn AnthropicClient>),
-            host_policy: Some(Arc::new(PermitAll)),
+    let served = crate::support::serve_permitting_all(
+        model.clone(),
+        crate::support::Serving {
+            model: DEFAULT_MODEL,
+            max_tokens: FALLBACK,
             ..Default::default()
         },
+        |_| {},
     )
-    .await
-    .expect("the daemon assembles");
-
-    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
-    let serving = server.clone();
-    let bind = sock.clone();
-    let handle = tokio::spawn(async move {
-        let _ = serving.serve_unix(&bind).await;
-    });
-    for _ in 0..80 {
-        if sock.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    assert!(sock.exists(), "socket never bound");
-
+    .await;
     Daemon {
-        sock,
+        sock: served.sock,
         model,
-        _dir: dir,
-        _handle: handle,
+        _dir: served.dir,
+        _handle: served.handle,
     }
 }
 

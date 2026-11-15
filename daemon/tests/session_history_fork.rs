@@ -4,8 +4,6 @@ use std::time::Duration;
 
 use crate::support::*;
 use daemon::rpc::codes;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// A list a host can group by. Scene and project come from the session's own
 /// `Meta` line, so an entry answers "which project, which scene" without the
@@ -741,24 +739,19 @@ async fn a_finished_step_is_on_disk_while_the_next_one_is_still_running() {
     )
     .await;
 
-    let mut client = UnixStream::connect(&srv.sock).await.unwrap();
-    client
-        .write_all(
-            br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"look around"},"id":1}"#,
-        )
-        .await
-        .unwrap();
-    client.write_all(b"\n").await.unwrap();
-    let (r, _w) = client.split();
-    let mut br = BufReader::new(r);
+    let mut client = crate::support::begin(
+        &srv.sock,
+        "session.run_turn",
+        serde_json::json!({"message": "look around"}),
+    )
+    .await;
     let sid = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            let mut line = String::new();
-            assert!(
-                br.read_line(&mut line).await.unwrap() > 0,
-                "connection closed"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed");
             if v["params"]["event"]["kind"] == "tool_result" {
                 return v["params"]["session_id"].as_str().unwrap().to_string();
             }

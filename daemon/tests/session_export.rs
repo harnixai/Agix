@@ -9,17 +9,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::rpc::codes;
-use daemon::DaemonServer;
 use futures::StreamExt;
 use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
 use sha2::Digest;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio_util::sync::CancellationToken;
 
 /// The eight bytes of a PNG signature, and the base64 a host would send them as.
 const PNG_BYTES: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -80,22 +75,6 @@ impl AnthropicClient for HeldClient {
     }
 }
 
-struct PermitAll;
-
-#[async_trait::async_trait]
-impl base::interface::permission::PermissionPolicy for PermitAll {
-    async fn decide(
-        &self,
-        _req: &base::interface::permission::PermissionRequest<'_>,
-    ) -> base::interface::permission::PermissionOutcome {
-        base::interface::permission::PermissionOutcome::Permit {
-            basis: base::interface::permission::Basis::Bypass,
-            profile: Default::default(),
-            obligations: Default::default(),
-        }
-    }
-}
-
 struct Daemon {
     sock: PathBuf,
     root: PathBuf,
@@ -108,29 +87,6 @@ struct Daemon {
 }
 
 async fn start_daemon(held: Option<usize>) -> Daemon {
-    let dir = tempfile::tempdir().unwrap();
-    let sock = dir.path().join("export.sock");
-    let cwd = dir.path().join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-
-    let mut config = load_daemon_config(
-        "claude-sonnet-4-6",
-        2000,
-        Some(&sock),
-        "code",
-        &StaticDaemonPaths::new(dir.path().to_path_buf()),
-    );
-    config.session_cap = 8;
-    config.settings.values.memory_enabled = false;
-
-    let store: Arc<dyn history::store::HistoryStore> = Arc::new(
-        history::store::JsonlHistoryStore::with_roots(
-            &cwd,
-            history::path::HistoryRoots::under(&config.settings.paths.global_data_dir),
-        )
-        .await
-        .unwrap(),
-    );
     let calls = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     let client = Arc::new(HeldClient {
@@ -138,68 +94,31 @@ async fn start_daemon(held: Option<usize>) -> Daemon {
         held,
         gate: gate.clone(),
     });
-
-    let pool = daemon::assemble::pool(
-        &config,
-        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
-        daemon::Assembly {
-            cwd: Some(cwd),
-            model_client: Some(client),
-            transcripts: daemon::Transcripts::In(store.clone()),
-            host_policy: Some(Arc::new(PermitAll)),
+    let served = crate::support::serve_permitting_all(
+        client,
+        crate::support::Serving {
+            session_cap: Some(8),
+            history: true,
             ..Default::default()
         },
+        |_| {},
     )
-    .await
-    .expect("the daemon assembles");
-
-    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
-    let serving = server.clone();
-    let bind = sock.clone();
-    let handle = tokio::spawn(async move {
-        let _ = serving.serve_unix(&bind).await;
-    });
-    for _ in 0..80 {
-        if sock.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    assert!(sock.exists(), "socket never bound");
-
+    .await;
     Daemon {
-        sock,
-        root: config.settings.paths.global_data_dir.clone(),
+        sock: served.sock,
+        root: served.global,
         out: tempfile::tempdir().unwrap(),
-        store,
+        store: served.store.expect("history was asked for"),
         calls,
         gate,
-        _dir: dir,
-        _handle: handle,
+        _dir: served.dir,
+        _handle: served.handle,
     }
 }
 
 impl Daemon {
     async fn raw(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = serde_json::json!({
-            "jsonrpc": "2.0", "method": method, "params": params, "id": 1
-        });
-        let mut client = UnixStream::connect(&self.sock).await.unwrap();
-        client
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = client.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {

@@ -11,8 +11,6 @@ use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 struct SaysOk;
@@ -113,25 +111,7 @@ impl Daemon {
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":1});
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            assert!(
-                reader.read_line(&mut line).await.unwrap() > 0,
-                "{method}: EOF"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if v.get("id").is_some() {
-                assert!(v.get("result").is_some(), "{method} failed: {v}");
-                return v["result"].clone();
-            }
-        }
+        crate::support::call(&self.sock, method, params).await
     }
 
     fn project(&self) -> serde_json::Value {

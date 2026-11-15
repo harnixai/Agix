@@ -21,8 +21,6 @@ use daemon::DaemonServer;
 use model::client::{AnthropicClient, CountFuture, EventStream};
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use model::types::MessagesRequest;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 /// The code scene with a context budget one token wide, so the first turn
@@ -89,45 +87,22 @@ impl base::interface::permission::PermissionPolicy for PermitAll {
 
 /// Every frame and the final response of one `session.run_turn`, in order.
 async fn run_one_turn(sock: &Path) -> Vec<serde_json::Value> {
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    let (r, mut w) = conn.split();
-    let mut reader = BufReader::new(r);
+    let created = crate::support::call(sock, "session.create", serde_json::json!({})).await;
+    let session_id = created["session_id"].as_str().unwrap().to_string();
 
-    let exchange = |method: &str, params: serde_json::Value, id: u32| {
-        let request = serde_json::json!({
-            "jsonrpc":"2.0","method":method,"params":params,"id":id
-        });
-        format!("{request}\n")
-    };
-
-    w.write_all(exchange("session.create", serde_json::json!({}), 1).as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    reader.read_line(&mut line).await.unwrap();
-    let created: serde_json::Value = serde_json::from_str(&line).unwrap();
-    let session_id = created["result"]["session_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    w.write_all(
-        exchange(
-            "session.run_turn",
-            serde_json::json!({"session_id": session_id, "message": "hello"}),
-            2,
-        )
-        .as_bytes(),
+    let mut client = crate::support::begin(
+        sock,
+        "session.run_turn",
+        serde_json::json!({"session_id": session_id, "message": "hello"}),
     )
-    .await
-    .unwrap();
-
+    .await;
     let mut frames = Vec::new();
     loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line).await.unwrap();
-        assert!(n > 0, "connection closed before the turn ended");
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let frame = client
+            .next_frame()
+            .await
+            .unwrap()
+            .expect("connection closed before the turn ended");
         let terminal = frame.get("id").is_some();
         frames.push(frame);
         if terminal {

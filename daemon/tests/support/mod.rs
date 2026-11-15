@@ -466,6 +466,210 @@ pub async fn call(sock: &Path, method: &str, params: serde_json::Value) -> serde
     frame["result"].clone()
 }
 
+pub struct PermitAll;
+
+#[async_trait::async_trait]
+impl base::interface::permission::PermissionPolicy for PermitAll {
+    async fn decide(
+        &self,
+        _req: &base::interface::permission::PermissionRequest<'_>,
+    ) -> base::interface::permission::PermissionOutcome {
+        base::interface::permission::PermissionOutcome::Permit {
+            basis: base::interface::permission::Basis::Bypass,
+            profile: Default::default(),
+            obligations: Default::default(),
+        }
+    }
+}
+
+/// What a daemon serving a caller-supplied model client starts from.
+pub struct Serving {
+    pub scene: &'static str,
+    pub model: &'static str,
+    pub max_tokens: u32,
+    pub session_cap: Option<usize>,
+    pub history: bool,
+}
+
+impl Default for Serving {
+    fn default() -> Self {
+        Self {
+            scene: "code",
+            model: "claude-sonnet-4-6",
+            max_tokens: 2000,
+            session_cap: None,
+            history: false,
+        }
+    }
+}
+
+pub struct Served {
+    pub sock: PathBuf,
+    pub work: PathBuf,
+    pub global: PathBuf,
+    pub store: Option<Arc<dyn history::store::HistoryStore>>,
+    pub dir: tempfile::TempDir,
+    pub handle: tokio::task::JoinHandle<()>,
+}
+
+/// A daemon on a real socket whose permission policy permits everything,
+/// memory extraction off, serving `client`; `configure` edits the config
+/// before the pool is assembled.
+pub async fn serve_permitting_all(
+    client: Arc<dyn AnthropicClient>,
+    serving: Serving,
+    configure: impl FnOnce(&mut daemon::config::DaemonConfig),
+) -> Served {
+    let dir = tempfile::tempdir().unwrap();
+    let sock = dir.path().join("daemon.sock");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+
+    let mut config = load_daemon_config(
+        serving.model,
+        serving.max_tokens,
+        Some(&sock),
+        serving.scene,
+        &StaticDaemonPaths::new(dir.path().to_path_buf()),
+    );
+    if let Some(cap) = serving.session_cap {
+        config.session_cap = cap;
+    }
+    config.settings.values.memory_enabled = false;
+    configure(&mut config);
+
+    let global = config.settings.paths.global_data_dir.clone();
+    let store: Option<Arc<dyn history::store::HistoryStore>> = if serving.history {
+        Some(Arc::new(
+            history::store::JsonlHistoryStore::with_roots(
+                &work,
+                history::path::HistoryRoots::under(&global),
+            )
+            .await
+            .unwrap(),
+        ))
+    } else {
+        None
+    };
+    let scene = if serving.scene == "harnix" {
+        Arc::new(scene::harnix::spec())
+    } else {
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive))
+    };
+
+    let pool = daemon::assemble::pool(
+        &config,
+        scene,
+        daemon::Assembly {
+            cwd: Some(work.clone()),
+            model_client: Some(client),
+            transcripts: match &store {
+                Some(store) => daemon::Transcripts::In(store.clone()),
+                None => daemon::Transcripts::default(),
+            },
+            host_policy: Some(Arc::new(PermitAll)),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the daemon assembles");
+
+    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
+    let serving_server = server.clone();
+    let bind = sock.clone();
+    let handle = tokio::spawn(async move {
+        let _ = serving_server.serve_unix(&bind).await;
+    });
+    for _ in 0..80 {
+        if sock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(sock.exists(), "socket never bound");
+
+    Served {
+        sock,
+        work,
+        global,
+        store,
+        dir,
+        handle,
+    }
+}
+
+/// A connection of its own, for tests that read frames as they arrive.
+pub async fn open(sock: &Path) -> rpc_client::DaemonRpcClient {
+    rpc_client::DaemonRpcClient::connect(sock).await.unwrap()
+}
+
+/// One request; every frame before the response, then the response frame.
+pub async fn call_streaming(
+    sock: &Path,
+    method: &str,
+    params: serde_json::Value,
+) -> (Vec<serde_json::Value>, serde_json::Value) {
+    let mut client = open(sock).await;
+    let id = client.send_request(method, params).await.unwrap();
+    let mut frames = Vec::new();
+    loop {
+        let frame = client
+            .next_frame()
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("connection closed before a response to {method}"));
+        if frame.get("id") == Some(&serde_json::json!(id)) {
+            return (frames, frame);
+        }
+        frames.push(frame);
+    }
+}
+
+/// A connection that has sent `method` and seen it acknowledged; whatever the
+/// daemon pushes afterwards is read with `next_frame`.
+pub async fn subscribed(
+    sock: &Path,
+    method: &str,
+    params: serde_json::Value,
+) -> rpc_client::DaemonRpcClient {
+    let mut client = open(sock).await;
+    let response = client.call(method, params).await.unwrap();
+    assert!(response.error.is_none(), "{method} refused: {response:?}");
+    client
+}
+
+/// Subscribe on a connection of its own and collect what `pick` keeps of
+/// every frame the daemon pushes afterwards.
+pub async fn watch(
+    sock: &Path,
+    method: &str,
+    params: serde_json::Value,
+    pick: impl Fn(&serde_json::Value) -> Option<serde_json::Value> + Send + 'static,
+) -> Arc<StdMutex<Vec<serde_json::Value>>> {
+    let seen: Arc<StdMutex<Vec<serde_json::Value>>> = Arc::default();
+    let mut client = subscribed(sock, method, params).await;
+    let into = seen.clone();
+    tokio::spawn(async move {
+        while let Ok(Some(frame)) = client.next_frame().await {
+            if let Some(kept) = pick(&frame) {
+                into.lock().unwrap().push(kept);
+            }
+        }
+    });
+    seen
+}
+
+/// A connection with a request in flight, the way a turn is started.
+pub async fn begin(
+    sock: &Path,
+    method: &str,
+    params: serde_json::Value,
+) -> rpc_client::DaemonRpcClient {
+    let mut client = open(sock).await;
+    client.send_request(method, params).await.unwrap();
+    client
+}
+
 /// Trust `root` and every project under it, keeping whatever else the
 /// global `settings.local.json` in `global` says.
 pub fn trust_projects_under(global: &Path, root: &Path) {
@@ -560,20 +764,19 @@ pub async fn inject_session_in_scene(
     sid
 }
 
-/// Read `lines` until the response to request `id`, returning the frames
+/// Read `client` until the response to request `id`, returning the frames
 /// that came before it and the response.
-pub async fn until_response<R: tokio::io::AsyncBufRead + Unpin>(
-    lines: &mut tokio::io::Lines<R>,
-    id: u64,
+pub async fn until_response(
+    client: &mut rpc_client::DaemonRpcClient,
+    id: i64,
 ) -> (Vec<serde_json::Value>, serde_json::Value) {
     let mut frames = Vec::new();
     loop {
-        let line = lines
-            .next_line()
+        let v = client
+            .next_frame()
             .await
             .unwrap()
             .expect("the connection closed before the response");
-        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
         if v["id"] == id {
             return (frames, v);
         }

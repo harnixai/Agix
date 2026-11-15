@@ -9,9 +9,7 @@ use std::sync::Arc;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
+use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 struct Daemon {
@@ -67,22 +65,7 @@ impl Daemon {
     }
 
     async fn turn(&self) {
-        let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
-                             "params":{"message":"search"},"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let mut reader = BufReader::new(conn);
-        loop {
-            let mut line = String::new();
-            assert!(reader.read_line(&mut line).await.unwrap() > 0);
-            let frame: Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                assert!(frame.get("result").is_some(), "turn failed: {frame}");
-                return;
-            }
-        }
+        crate::support::call(&self.sock, "session.run_turn", json!({"message":"search"})).await;
     }
 
     fn request(&self, n: usize) -> String {

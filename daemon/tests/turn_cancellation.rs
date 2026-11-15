@@ -9,8 +9,6 @@ use std::time::Duration;
 use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 struct Daemon {
@@ -65,21 +63,12 @@ impl Daemon {
     }
 
     async fn call(&self, request: serde_json::Value) -> serde_json::Value {
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed before a response: {request}");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(
+            &self.sock,
+            request["method"].as_str().unwrap(),
+            request["params"].clone(),
+        )
+        .await
     }
 }
 
@@ -95,24 +84,21 @@ async fn an_interrupt_withdraws_an_open_question_and_ends_the_turn_as_cancelled(
     model.push_turn(text_round("next turn"));
     let daemon = Daemon::start(model).await;
 
-    let mut conn = UnixStream::connect(&daemon.sock).await.unwrap();
-    let request = serde_json::json!({
-        "jsonrpc": "2.0", "method": "session.run_turn", "id": 1,
-        "params": {"message": "ask me", "options": {"prompt_types": ["permission", "question"]}},
-    });
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
+    let mut client = crate::support::begin(
+        &daemon.sock,
+        "session.run_turn",
+        serde_json::json!({"message": "ask me", "options": {"prompt_types": ["permission", "question"]}}),
+    )
+    .await;
     let mut frames = Vec::new();
     let mut session = None;
     let response = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed before the turn's response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let frame = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed before the turn's response");
             if frame.get("id").is_some() {
                 return frame;
             }

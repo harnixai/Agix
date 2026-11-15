@@ -4,8 +4,6 @@ use std::time::Duration;
 
 use crate::support::*;
 use daemon::rpc::codes;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 /// `turn_complete` means the session is idle: a watcher that sends the next
 /// turn the moment it sees one, refusing to queue, is never told the session
@@ -29,17 +27,12 @@ async fn a_turn_sent_on_turn_complete_finds_the_session_free() {
         .unwrap_or_else(|| panic!("{created}"))
         .to_string();
 
-    let (read, mut write) = UnixStream::connect(&srv.sock).await.unwrap().into_split();
-    let mut lines = BufReader::new(read).lines();
-    let subscribe = serde_json::json!({
-        "jsonrpc": "2.0", "method": "session.subscribe", "id": 1,
-        "params": {"session_id": sid},
-    });
-    write
-        .write_all(format!("{subscribe}\n").as_bytes())
-        .await
-        .unwrap();
-    until_response(&mut lines, 1).await;
+    let mut watcher = crate::support::subscribed(
+        &srv.sock,
+        "session.subscribe",
+        serde_json::json!({"session_id": sid}),
+    )
+    .await;
 
     for n in 0..30u64 {
         let goal = |params: serde_json::Value, method: &str| {
@@ -64,30 +57,30 @@ async fn a_turn_sent_on_turn_complete_finds_the_session_free() {
         .await;
         assert!(set["result"].is_object(), "{set}");
 
-        let id = 100 + n;
-        let next = serde_json::json!({
-            "jsonrpc": "2.0", "method": "session.run_turn", "id": id,
-            "params": {"session_id": sid, "message": "next", "turn_id": format!("t{n}"),
-                       "on_busy": "reject"},
-        });
-        let mut sent = false;
+        let next = serde_json::json!({"session_id": sid, "message": "next",
+            "turn_id": format!("t{n}"), "on_busy": "reject"});
+        let mut next_id = None;
         let answer = tokio::time::timeout(Duration::from_secs(20), async {
             loop {
-                let line = lines.next_line().await.unwrap().expect("connection open");
-                let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-                if frame["id"] == id {
+                let frame = watcher
+                    .next_frame()
+                    .await
+                    .unwrap()
+                    .expect("connection open");
+                if next_id.is_some_and(|id| frame["id"] == id) {
                     return frame;
                 }
                 let goal_round_over = frame["params"]["event"]["kind"] == "turn_complete"
                     && frame["params"]["turn_id"]
                         .as_str()
                         .is_some_and(|t| t.starts_with("goal-"));
-                if goal_round_over && !sent {
-                    sent = true;
-                    write
-                        .write_all(format!("{next}\n").as_bytes())
-                        .await
-                        .unwrap();
+                if goal_round_over && next_id.is_none() {
+                    next_id = Some(
+                        watcher
+                            .send_request("session.run_turn", next.clone())
+                            .await
+                            .unwrap(),
+                    );
                 }
             }
         })
@@ -129,12 +122,6 @@ async fn a_change_sent_on_turn_complete_finds_the_session_free() {
         ),
         ("session.compact", serde_json::json!({})),
     ];
-    let send = |id: u64, method: &str, params: serde_json::Value| {
-        format!(
-            "{}\n",
-            serde_json::json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params})
-        )
-    };
     for (method, extra) in calls {
         for n in 0..20u64 {
             let created = rpc(
@@ -146,40 +133,35 @@ async fn a_change_sent_on_turn_complete_finds_the_session_free() {
                 .as_str()
                 .unwrap_or_else(|| panic!("{created}"))
                 .to_string();
-            let (read, mut write) = UnixStream::connect(&srv.sock).await.unwrap().into_split();
-            let mut lines = BufReader::new(read).lines();
-            let subscribe = send(
-                1,
+            let mut client = crate::support::subscribed(
+                &srv.sock,
                 "session.subscribe",
                 serde_json::json!({"session_id": sid}),
-            );
-            write.write_all(subscribe.as_bytes()).await.unwrap();
-            until_response(&mut lines, 1).await;
-            let goal = send(
-                2,
-                "session.setGoal",
-                serde_json::json!({"session_id": sid, "objective": "tidy up", "max_rounds": 1}),
-            );
-            write.write_all(goal.as_bytes()).await.unwrap();
+            )
+            .await;
+            client
+                .send_request(
+                    "session.setGoal",
+                    serde_json::json!({"session_id": sid, "objective": "tidy up", "max_rounds": 1}),
+                )
+                .await
+                .unwrap();
 
             let mut params = extra.clone();
             params["session_id"] = serde_json::json!(sid);
-            let call = send(3, method, params);
-            let mut sent = false;
+            let mut call_id = None;
             let answer = tokio::time::timeout(Duration::from_secs(20), async {
                 loop {
-                    let line = lines.next_line().await.unwrap().expect("connection open");
-                    let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-                    if frame["id"] == 3 {
+                    let frame = client.next_frame().await.unwrap().expect("connection open");
+                    if call_id.is_some_and(|id| frame["id"] == id) {
                         return frame;
                     }
                     let goal_round_over = frame["params"]["event"]["kind"] == "turn_complete"
                         && frame["params"]["turn_id"]
                             .as_str()
                             .is_some_and(|t| t.starts_with("goal-"));
-                    if goal_round_over && !sent {
-                        sent = true;
-                        write.write_all(call.as_bytes()).await.unwrap();
+                    if goal_round_over && call_id.is_none() {
+                        call_id = Some(client.send_request(method, params.clone()).await.unwrap());
                     }
                 }
             })
@@ -215,31 +197,27 @@ async fn a_second_turn_on_a_busy_session_is_refused_and_its_message_is_not_swall
     // Park a turn on an unanswered permission prompt: the session is busy
     // for as long as nobody answers.
     let sock = srv.sock.clone();
-    let mut conn = UnixStream::connect(&sock).await.unwrap();
-    conn.write_all(
-        br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"first"},"id":1}"#,
+    let mut conn = crate::support::begin(
+        &sock,
+        "session.run_turn",
+        serde_json::json!({"message": "first"}),
     )
-    .await
-    .unwrap();
-    conn.write_all(b"\n").await.unwrap();
+    .await;
 
-    let (sid, prompt_id) = {
-        let (r, _w) = conn.split();
-        let mut br = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = br.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed before the prompt arrived");
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if v["params"]["event"]["kind"] == "prompt" {
-                break (
-                    v["params"]["session_id"].as_str().unwrap().to_string(),
-                    v["params"]["event"]["prompt_id"]
-                        .as_str()
-                        .unwrap()
-                        .to_string(),
-                );
-            }
+    let (sid, prompt_id) = loop {
+        let v = conn
+            .next_frame()
+            .await
+            .unwrap()
+            .expect("connection closed before the prompt arrived");
+        if v["params"]["event"]["kind"] == "prompt" {
+            break (
+                v["params"]["session_id"].as_str().unwrap().to_string(),
+                v["params"]["event"]["prompt_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            );
         }
     };
 
@@ -378,25 +356,21 @@ async fn interrupt_frees_a_busy_session_for_the_next_turn() {
     )
     .await;
 
-    let mut conn = UnixStream::connect(&srv.sock).await.unwrap();
-    conn.write_all(
-        br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"first"},"id":1}"#,
+    let mut conn = crate::support::begin(
+        &srv.sock,
+        "session.run_turn",
+        serde_json::json!({"message": "first"}),
     )
-    .await
-    .unwrap();
-    conn.write_all(b"\n").await.unwrap();
+    .await;
 
-    let sid = {
-        let (r, _w) = conn.split();
-        let mut br = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = br.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed before the prompt arrived");
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if v["params"]["event"]["kind"] == "prompt" {
-                break v["params"]["session_id"].as_str().unwrap().to_string();
-            }
+    let sid = loop {
+        let v = conn
+            .next_frame()
+            .await
+            .unwrap()
+            .expect("connection closed before the prompt arrived");
+        if v["params"]["event"]["kind"] == "prompt" {
+            break v["params"]["session_id"].as_str().unwrap().to_string();
         }
     };
 
@@ -426,31 +400,28 @@ async fn a_turn_can_be_interrupted_from_the_connection_running_it() {
     .await;
 
     let interrupted = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut conn = UnixStream::connect(&srv.sock).await.unwrap();
-        conn.write_all(
-            br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"go"},"id":1}"#,
+        let mut client = crate::support::begin(
+            &srv.sock,
+            "session.run_turn",
+            serde_json::json!({"message": "go"}),
         )
-        .await
-        .unwrap();
-        conn.write_all(b"\n").await.unwrap();
-
-        let (r, mut w) = conn.split();
-        let mut br = BufReader::new(r);
+        .await;
         let mut asked = false;
         loop {
-            let mut line = String::new();
-            let n = br.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "connection closed");
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed");
 
             // Wait until the turn is definitely in flight, then interrupt it
             // on this same socket.
             if v["params"]["event"]["kind"] == "prompt" && !asked {
                 let sid = v["params"]["session_id"].as_str().unwrap();
-                w.write_all(format!(
-                    r#"{{"jsonrpc":"2.0","method":"session.interrupt","params":{{"session_id":"{sid}"}},"id":2}}"#
-                ).as_bytes()).await.unwrap();
-                w.write_all(b"\n").await.unwrap();
+                client
+                    .send_request("session.interrupt", serde_json::json!({"session_id": sid}))
+                    .await
+                    .unwrap();
                 asked = true;
             }
 
@@ -472,29 +443,20 @@ async fn a_turn_can_be_interrupted_from_the_connection_running_it() {
 /// prompt holds the turn mid-step for as long as the test needs.
 async fn turn_held_at_a_prompt(
     sock: &std::path::Path,
-) -> (
-    BufReader<tokio::net::unix::OwnedReadHalf>,
-    tokio::net::unix::OwnedWriteHalf,
-    String,
-    String,
-) {
-    let conn = UnixStream::connect(sock).await.unwrap();
-    let (r, mut w) = conn.into_split();
-    w.write_all(
-        br#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","turn_id":"t1"},"id":1}"#,
+) -> (rpc_client::DaemonRpcClient, String, String) {
+    let mut client = crate::support::begin(
+        sock,
+        "session.run_turn",
+        serde_json::json!({"message": "make a file", "turn_id": "t1"}),
     )
-    .await
-    .unwrap();
-    w.write_all(b"\n").await.unwrap();
-    let mut br = BufReader::new(r);
+    .await;
     let (sid, prompt_id) = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            let mut line = String::new();
-            assert!(
-                br.read_line(&mut line).await.unwrap() > 0,
-                "connection closed"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed");
             if v["params"]["event"]["kind"] == "prompt" {
                 break (
                     v["params"]["session_id"].as_str().unwrap().to_string(),
@@ -508,21 +470,20 @@ async fn turn_held_at_a_prompt(
     })
     .await
     .expect("the turn never asked");
-    (br, w, sid, prompt_id)
+    (client, sid, prompt_id)
 }
 
 async fn drain_to_response(
-    br: &mut BufReader<tokio::net::unix::OwnedReadHalf>,
+    client: &mut rpc_client::DaemonRpcClient,
 ) -> (Vec<serde_json::Value>, serde_json::Value) {
     tokio::time::timeout(Duration::from_secs(20), async {
         let mut frames = Vec::new();
         loop {
-            let mut line = String::new();
-            assert!(
-                br.read_line(&mut line).await.unwrap() > 0,
-                "connection closed"
-            );
-            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let v = client
+                .next_frame()
+                .await
+                .unwrap()
+                .expect("connection closed");
             if v.get("id").is_some() {
                 return (frames, v);
             }
@@ -541,7 +502,7 @@ async fn a_steered_message_reaches_the_running_turn_after_its_tool_step() {
         Duration::from_secs(30),
     )
     .await;
-    let (mut turn, _w, sid, prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
+    let (mut turn, sid, prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
 
     let refused = rpc(
         &srv.sock,
@@ -620,7 +581,7 @@ async fn a_queued_message_runs_as_the_next_turn_once_the_session_is_free() {
     rounds.push(text_round("second answer"));
     let (srv, seen) =
         start_scripted_server(rounds, ask_settings_no_memory(), Duration::from_secs(30)).await;
-    let (mut turn, _w, sid, prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
+    let (mut turn, sid, prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
 
     let queued = {
         let sock = srv.sock.clone();
@@ -665,7 +626,7 @@ async fn an_interrupted_turn_hands_back_a_steered_message_it_never_read() {
         Duration::from_secs(30),
     )
     .await;
-    let (mut turn, _w, sid, _prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
+    let (mut turn, sid, _prompt_id) = turn_held_at_a_prompt(&srv.sock).await;
 
     let steered = rpc(
         &srv.sock,

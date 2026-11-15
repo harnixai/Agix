@@ -15,9 +15,6 @@ use daemon::{DaemonServer, SessionPool};
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 use mcp_oauth_mock::{consent, follow, IssMode, McpServer};
@@ -98,11 +95,8 @@ impl Daemon {
     }
 
     async fn connect(&self) -> Conn {
-        let (r, w) = UnixStream::connect(&self.sock).await.unwrap().into_split();
         let mut conn = Conn {
-            reader: BufReader::new(r),
-            writer: w,
-            next_id: 0,
+            client: crate::support::open(&self.sock).await,
             events: Vec::new(),
         };
         conn.ok("daemon.subscribeEvents", serde_json::json!({}))
@@ -137,22 +131,13 @@ impl Drop for Daemon {
 }
 
 struct Conn {
-    reader: BufReader<OwnedReadHalf>,
-    writer: OwnedWriteHalf,
-    next_id: u64,
+    client: rpc_client::DaemonRpcClient,
     events: Vec<serde_json::Value>,
 }
 
 impl Conn {
     async fn call(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        self.next_id += 1;
-        let id = self.next_id;
-        let request =
-            serde_json::json!({"jsonrpc": "2.0", "method": method, "params": params, "id": id});
-        self.writer
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        let id = self.client.send_request(method, params).await.unwrap();
         loop {
             let frame = self.frame().await;
             if frame["id"] == id {
@@ -178,13 +163,11 @@ impl Conn {
     }
 
     async fn frame(&mut self) -> serde_json::Value {
-        let mut line = String::new();
-        let n = tokio::time::timeout(Duration::from_secs(60), self.reader.read_line(&mut line))
+        let frame = tokio::time::timeout(Duration::from_secs(60), self.client.next_frame())
             .await
             .expect("the daemon went quiet")
-            .unwrap();
-        assert!(n > 0, "the daemon closed the connection");
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
+            .unwrap()
+            .expect("the daemon closed the connection");
         if frame["method"] == "daemon.event" {
             self.events.push(frame["params"].clone());
         }

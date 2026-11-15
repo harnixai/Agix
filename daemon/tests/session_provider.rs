@@ -5,15 +5,8 @@
 //! which choices the daemon accepts and keeps, not about the HTTP that follows.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use daemon::config::{load_daemon_config, StaticDaemonPaths};
-use daemon::DaemonServer;
-use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio_util::sync::CancellationToken;
 
 const INVALID_PARAMS: i64 = -32602;
 
@@ -25,24 +18,7 @@ struct Daemon {
 
 impl Daemon {
     async fn call(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
-        let request = serde_json::json!({
-            "jsonrpc":"2.0","method":method,"params":params,"id":1
-        });
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
-        loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line).await.unwrap();
-            assert!(n > 0, "{method}: connection closed before a response");
-            let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-            if frame.get("id").is_some() {
-                return frame;
-            }
-        }
+        crate::support::call_frame(&self.sock, method, params).await
     }
 
     async fn ok(&self, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -76,62 +52,26 @@ fn provider(models: &[&str]) -> base::provider::ProviderConfig {
 }
 
 async fn start_daemon() -> Daemon {
-    let dir = tempfile::tempdir().unwrap();
-    let sock = dir.path().join("provider.sock");
-    let cwd = dir.path().join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-    crate::support::trust_projects_under(dir.path(), dir.path());
-
-    let mut config = load_daemon_config(
-        "claude-sonnet-4-6",
-        2000,
-        Some(&sock),
-        "code",
-        &StaticDaemonPaths::new(dir.path().to_path_buf()),
-    );
-    config.settings.values.memory_enabled = false;
-    config
-        .settings
-        .values
-        .providers
-        .insert("one".into(), provider(&["one-a"]));
-    config
-        .settings
-        .values
-        .providers
-        .insert("two".into(), provider(&["two-a", "two-b"]));
-    config.settings.values.default_provider = Some("one".into());
-
-    let pool = daemon::assemble::pool(
-        &config,
-        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
-        daemon::Assembly {
-            cwd: Some(cwd.clone()),
-            model_client: Some(Arc::new(MockAnthropicClient::new()) as Arc<dyn AnthropicClient>),
-            ..Default::default()
+    let served = crate::support::serve_permitting_all(
+        Arc::new(MockAnthropicClient::new()),
+        Default::default(),
+        |config| {
+            let providers = &mut config.settings.values;
+            providers
+                .providers
+                .insert("one".into(), provider(&["one-a"]));
+            providers
+                .providers
+                .insert("two".into(), provider(&["two-a", "two-b"]));
+            providers.default_provider = Some("one".into());
         },
     )
-    .await
-    .expect("the daemon assembles");
-
-    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
-    let serving = server.clone();
-    let bind = sock.clone();
-    let handle = tokio::spawn(async move {
-        let _ = serving.serve_unix(&bind).await;
-    });
-    for _ in 0..80 {
-        if sock.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    assert!(sock.exists(), "socket never bound");
-
+    .await;
+    crate::support::trust_projects_under(served.dir.path(), served.dir.path());
     Daemon {
-        sock,
-        _dir: dir,
-        _handle: handle,
+        sock: served.sock,
+        _dir: served.dir,
+        _handle: served.handle,
     }
 }
 

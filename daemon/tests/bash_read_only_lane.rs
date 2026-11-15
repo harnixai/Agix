@@ -16,8 +16,6 @@ use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 fn bash_round(id: &str, command: &str) -> Vec<StreamEvent> {
@@ -111,23 +109,19 @@ impl Daemon {
     /// Runs a turn, denying every permission prompt it raises; returns the
     /// tool calls the prompts were about.
     async fn turn_denying_prompts(&self) -> Vec<String> {
-        let request = json!({"jsonrpc":"2.0","method":"session.run_turn",
-                             "params":{"message":"look around"},"id":1});
-        let mut conn = UnixStream::connect(&self.sock).await.unwrap();
-        conn.write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        let (r, _w) = conn.split();
-        let mut reader = BufReader::new(r);
+        let mut client = crate::support::begin(
+            &self.sock,
+            "session.run_turn",
+            json!({"message":"look around"}),
+        )
+        .await;
         let mut asked = Vec::new();
         loop {
-            let mut line = String::new();
-            let n = tokio::time::timeout(Duration::from_secs(120), reader.read_line(&mut line))
+            let frame = tokio::time::timeout(Duration::from_secs(120), client.next_frame())
                 .await
                 .expect("the turn ended")
-                .unwrap();
-            assert!(n > 0, "connection closed before the turn ended");
-            let frame: Value = serde_json::from_str(&line).unwrap();
+                .unwrap()
+                .expect("connection closed before the turn ended");
             if frame.get("id").is_some() {
                 assert!(frame.get("result").is_some(), "turn failed: {frame}");
                 return asked;
@@ -147,16 +141,14 @@ impl Daemon {
 }
 
 async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
-    let request = json!({"jsonrpc":"2.0","method":"session.respondToPrompt","params":{
+    let reply = crate::support::call_frame(
+        sock,
+        "session.respondToPrompt",
+        json!({
         "session_id": session_id, "prompt_id": prompt_id,
-        "decision": {"type": "deny", "reason": "not read-only"}},"id":2});
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let mut line = String::new();
-    BufReader::new(conn).read_line(&mut line).await.unwrap();
-    let reply: Value = serde_json::from_str(&line).unwrap();
+        "decision": {"type": "deny", "reason": "not read-only"}}),
+    )
+    .await;
     assert_eq!(reply["result"]["prompt_id"], prompt_id, "{reply}");
 }
 

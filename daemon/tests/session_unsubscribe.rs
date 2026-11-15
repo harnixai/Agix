@@ -10,44 +10,25 @@ use daemon::config::{load_daemon_config, StaticDaemonPaths};
 use daemon::DaemonServer;
 use model::mock::MockAnthropicClient;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 struct Connection {
-    reader: BufReader<OwnedReadHalf>,
-    writer: OwnedWriteHalf,
-    next_id: u64,
+    client: rpc_client::DaemonRpcClient,
 }
 
 impl Connection {
     async fn open(sock: &std::path::Path) -> Self {
-        let (r, writer) = UnixStream::connect(sock).await.unwrap().into_split();
         Self {
-            reader: BufReader::new(r),
-            writer,
-            next_id: 0,
+            client: crate::support::open(sock).await,
         }
     }
 
     async fn frame(&mut self) -> Value {
-        let mut line = String::new();
-        assert!(
-            self.reader.read_line(&mut line).await.unwrap() > 0,
-            "closed"
-        );
-        serde_json::from_str(&line).unwrap()
+        self.client.next_frame().await.unwrap().expect("closed")
     }
 
     async fn call(&mut self, method: &str, params: Value) -> Value {
-        self.next_id += 1;
-        let id = self.next_id;
-        let request = json!({"jsonrpc":"2.0","method":method,"params":params,"id":id});
-        self.writer
-            .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
+        let id = self.client.send_request(method, params).await.unwrap();
         loop {
             let frame = self.frame().await;
             if frame["id"] == id {

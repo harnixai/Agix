@@ -18,8 +18,6 @@ use mcp_oauth_mock::{consent, follow, McpServer};
 use model::client::AnthropicClient;
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Default)]
@@ -58,23 +56,10 @@ fn round(
 }
 
 async fn rpc(sock: &std::path::Path, method: &str, params: serde_json::Value) -> serde_json::Value {
-    let mut conn = UnixStream::connect(sock).await.unwrap();
-    let request =
-        serde_json::json!({"jsonrpc": "2.0", "method": method, "params": params, "id": 1});
-    conn.write_all(format!("{request}\n").as_bytes())
-        .await
-        .unwrap();
-    let (r, _w) = conn.split();
-    let mut reader = BufReader::new(r);
-    loop {
-        let mut line = String::new();
-        assert!(reader.read_line(&mut line).await.unwrap() > 0);
-        let frame: serde_json::Value = serde_json::from_str(&line).unwrap();
-        if frame.get("id").is_some() {
-            assert!(frame.get("error").is_none(), "{method}: {frame}");
-            return frame["result"].clone();
-        }
-    }
+    let mut client = rpc_client::DaemonRpcClient::connect(sock).await.unwrap();
+    let response = client.call(method, params).await.unwrap();
+    assert!(response.error.is_none(), "{method}: {response:?}");
+    response.result.unwrap_or_default()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

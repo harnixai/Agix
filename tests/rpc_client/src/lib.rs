@@ -324,6 +324,14 @@ impl DaemonRpcClient {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Send a request and return its id without reading anything back — for
+    /// connections the caller reads frame by frame itself.
+    pub async fn send_request(&mut self, method: &str, params: Value) -> anyhow::Result<i64> {
+        let id = self.next_id();
+        self.write_request(method, params, id).await?;
+        Ok(id)
+    }
+
     async fn write_request(&mut self, method: &str, params: Value, id: i64) -> anyhow::Result<()> {
         let req = serde_json::json!({
             "jsonrpc": "2.0",
