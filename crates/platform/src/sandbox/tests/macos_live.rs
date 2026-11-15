@@ -122,6 +122,26 @@ fn a_sandboxed_command_cannot_plant_what_runs_outside_the_sandbox() {
     assert!(!s.state_root.join("mcp.json").exists());
 }
 
+/// The engine writes and reads `.agix/tool-results/` outside the sandbox:
+/// export packs what it holds, fork links it, resume deletes from it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sandboxed_command_cannot_plant_a_saved_tool_result() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    std::fs::create_dir_all(s.project.join(".agix/tool-results/s")).unwrap();
+    let elsewhere = s.elsewhere.display().to_string();
+    for command in [
+        format!("ln -s '{elsewhere}/secret' .agix/tool-results/s/k.txt"),
+        "echo forged > .agix/tool-results/s/f.txt".to_string(),
+        "mkdir .agix/tool-results/t".to_string(),
+        "mv .agix/tool-results .agix/tool-results.old".to_string(),
+    ] {
+        assert!(!s.runs(&command), "`{command}` was allowed");
+    }
+}
+
 /// The filesystem here compares names without case, so a protected file
 /// spelled in another case is the same file. Seatbelt matches the path as
 /// the filesystem names it, not as the command spelled it, which is why
