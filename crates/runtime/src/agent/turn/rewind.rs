@@ -499,11 +499,18 @@ async fn preflight(
             format!("{} is gone", root.display()),
         ));
     }
-    let outside_project = match permissions::path_safety::check_write_for(&target, &target, policy)
-    {
+    use permissions::path_safety::{check_write_for, PathSafetyError};
+    // The NFC check is about how a model spelled a path; this one comes from
+    // the log, and the checks after it must still run.
+    let checked = match check_write_for(&target, &target, policy) {
+        Err(PathSafetyError::UnicodeNormalizationAttack { normalized, .. }) => {
+            check_write_for(&normalized, &target, policy)
+        }
+        other => other,
+    };
+    let outside_project = match checked {
         Ok(()) => false,
-        Err(permissions::path_safety::PathSafetyError::OutsideAllowedRoots { .. }) => true,
-        Err(permissions::path_safety::PathSafetyError::UnicodeNormalizationAttack { .. }) => false,
+        Err(PathSafetyError::OutsideAllowedRoots { .. }) => true,
         Err(e) => return Err(issue(step, RewindIssueKind::Denied, e.to_string())),
     };
     Ok(Restore {
@@ -634,5 +641,19 @@ mod tests {
                 got.map(|r| r.target)
             );
         }
+        let ordinary = plan::FileStep {
+            path: RecordedPath::Rel("notes.txt".into()),
+            restore: Before::Absent,
+            expected_now: None,
+            tools: vec!["Write".into()],
+        };
+        assert!(preflight(
+            &platform::filesystem::LocalFileSystem,
+            &checkpoints,
+            &policy,
+            &ordinary
+        )
+        .await
+        .is_ok());
     }
 }
