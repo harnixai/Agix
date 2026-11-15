@@ -287,20 +287,39 @@ pub fn fake_tools() -> Vec<Arc<dyn Tool>> {
     ]
 }
 
-/// Replace run-varying substrings with stable placeholders.
-fn scrub(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for line in s.lines() {
-        out.push_str(line);
-        out.push('\n');
+/// Run-varying substrings and the stable placeholders that stand in for them.
+///
+/// A saved tool result's path holds the temp dir and the session id, and both
+/// vary in length — the temp dir by machine, a base58 id by run — so the
+/// substitution has to happen before anything counts bytes, not after.
+#[derive(Clone, Default)]
+pub struct Placeholders(Vec<(String, String)>);
+
+impl Placeholders {
+    pub fn new(pairs: impl IntoIterator<Item = (String, &'static str)>) -> Self {
+        Self(
+            pairs
+                .into_iter()
+                .map(|(from, to)| (from, to.to_string()))
+                .collect(),
+        )
     }
-    out
+
+    pub fn pairs(&self) -> Vec<(String, String)> {
+        self.0.clone()
+    }
+
+    fn apply(&self, s: &str) -> String {
+        self.0.iter().fold(s.to_string(), |acc, (from, to)| {
+            acc.replace(from.as_str(), to)
+        })
+    }
 }
 
 /// One line per event: the variant name plus only the fields that encode a
 /// decision. Text is kept (it is the model's scripted answer, so it is
 /// stable); ids and turn ids are not.
-pub fn normalize_events(events: &[AgentEvent]) -> String {
+pub fn normalize_events(events: &[AgentEvent], placeholders: &Placeholders) -> String {
     let mut out = String::new();
     for ev in events {
         let line = match ev {
@@ -325,7 +344,7 @@ pub fn normalize_events(events: &[AgentEvent]) -> String {
                 ..
             } => format!(
                 "ToolResult {name} is_error={is_error:?} content={:?}",
-                elide(content)
+                elide(&placeholders.apply(content))
             ),
             AgentEvent::PermissionPrompt { message, .. } => {
                 format!("PermissionPrompt {:?}", first_line(message))
@@ -383,10 +402,10 @@ pub fn normalize_events(events: &[AgentEvent]) -> String {
             AgentEvent::TeamProgress { .. } => "TeamProgress".to_string(),
             AgentEvent::Error { failure, .. } => format!("Error code={}", failure.kind),
         };
-        out.push_str(&line);
+        out.push_str(&placeholders.apply(&line));
         out.push('\n');
     }
-    scrub(&out)
+    out
 }
 
 /// One line per log entry: its kind, and for the entries that carry a decision

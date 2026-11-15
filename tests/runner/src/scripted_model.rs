@@ -174,6 +174,10 @@ pub struct ScriptedModel {
     /// in the prompt and nothing in a count, so without this there is no
     /// channel a case about it could assert on.
     request_tools: Mutex<Vec<Vec<String>>>,
+    /// `(from, to)` substitutions applied to message text before it is
+    /// measured or kept. A path under a temp dir or a random session id
+    /// changes length between runs, and `content_bytes` would move with it.
+    placeholders: Mutex<Vec<(String, String)>>,
 }
 
 /// One model request, reduced to the parts a decision can move.
@@ -204,7 +208,14 @@ impl ScriptedModel {
             calls: Mutex::new(Vec::new()),
             request_texts: Mutex::new(Vec::new()),
             request_tools: Mutex::new(Vec::new()),
+            placeholders: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Measure and keep message text with each `from` replaced by its `to`.
+    pub fn measuring_with_placeholders(self: Arc<Self>, pairs: Vec<(String, String)>) -> Arc<Self> {
+        *self.placeholders.lock().unwrap_or_else(|e| e.into_inner()) = pairs;
+        self
     }
 
     /// Report `(input, output)` tokens on successive calls.
@@ -273,6 +284,11 @@ impl Model for ScriptedModel {
             text.push_str(&b.content);
             text.push('\n');
         }
+        let placeholders = self
+            .placeholders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let mut content_bytes = 0usize;
         let mut truncated_results = 0usize;
         for m in &messages {
@@ -285,6 +301,7 @@ impl Model for ScriptedModel {
                     _ => None,
                 };
                 if let Some(block_text) = text_of {
+                    let block_text = &substitute(block_text, &placeholders);
                     content_bytes += block_text.len();
                     if block_text.starts_with("[Tool result truncated:") {
                         truncated_results += 1;
@@ -351,4 +368,10 @@ impl Model for ScriptedModel {
             events.into_iter().map(Ok).collect::<Vec<_>>(),
         )))
     }
+}
+
+fn substitute(text: &str, pairs: &[(String, String)]) -> String {
+    pairs.iter().fold(text.to_string(), |acc, (from, to)| {
+        acc.replace(from.as_str(), to)
+    })
 }

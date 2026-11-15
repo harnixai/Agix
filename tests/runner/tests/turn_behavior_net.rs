@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::support::{
     compactable_tool, fake_tools, normalize_events, normalize_log, BudgetScene, GoldenFile,
+    Placeholders,
 };
 
 /// How a case is configured. Defaults are the boring ones; a case overrides
@@ -132,7 +133,13 @@ async fn trace(case: Case) -> String {
     let root = tmp.path();
     std::fs::create_dir_all(root.join("workdir")).expect("workdir");
 
-    let model_arc = ScriptedModel::new(case.replies);
+    let session_id = Id::new();
+    let placeholders = Placeholders::new([
+        (root.display().to_string(), "<tmp>"),
+        (session_id.to_string(), "<session>"),
+    ]);
+    let model_arc =
+        ScriptedModel::new(case.replies).measuring_with_placeholders(placeholders.pairs());
     let model_arc = if case.usage.is_empty() {
         model_arc
     } else {
@@ -169,7 +176,8 @@ async fn trace(case: Case) -> String {
 
     // A history store is what makes the session log observable at all — the
     // default `Builder` leaves it `None` and writes nothing. It also forces a
-    // parseable session id, hence the fixed `Id` rather than a readable label.
+    // parseable session id, which is why `session_id` is an `Id` rather than
+    // a readable label.
     let store = Arc::new(
         history::store::JsonlHistoryStore::with_roots(
             &root.join("workdir"),
@@ -178,7 +186,6 @@ async fn trace(case: Case) -> String {
         .await
         .expect("history store"),
     );
-    let session_id = Id::new();
 
     // Without this — and without an elicitation handler — the Builder's own
     // policy has nobody to ask and refuses every call it would put to the
@@ -248,7 +255,7 @@ async fn trace(case: Case) -> String {
                     panic!(
                         "case `{}` turn {i}: no TurnComplete within 30s. Events so far:\n{}",
                         case.name,
-                        normalize_events(&events)
+                        normalize_events(&events, &placeholders)
                     )
                 });
             let Some(ev) = ev else {
@@ -304,7 +311,7 @@ async fn trace(case: Case) -> String {
 
     let mut out = String::new();
     out.push_str("== events ==\n");
-    out.push_str(&normalize_events(&events));
+    out.push_str(&normalize_events(&events, &placeholders));
     out.push_str("\n== session log ==\n");
     out.push_str(&normalize_log(&entries));
     out.push_str("\n== model calls ==\n");
