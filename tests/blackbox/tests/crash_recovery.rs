@@ -46,6 +46,7 @@ async fn the_next_start_stops_what_a_killed_daemon_left_running() -> anyhow::Res
             "permission_rules": [{ "tool": "Bash", "action": "allow" }]
         }),
     )?;
+    world.trust_project(&project)?;
     let provider = ProviderStub::start().await?;
     provider.script([Reply::Blocks(vec![Block::tool(
         "call-1",
