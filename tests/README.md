@@ -222,7 +222,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 `daemon.event` 的连接，`next(kind, server, timeout)` 依次取 `mcp_auth_required` / `mcp_connected` 这类通知；
 `Daemon::pool()` 拿本进程 daemon 的会话池，给只有嵌入方才有的旋钮（如 `mcp_auth().set_flow_ttl`）。
 
-**模型那端的花样。** `ProviderStub` 的 `Reply::ended(blocks, "max_tokens" | "pause_turn")`、
+**模型那端的花样。** `ProviderStub` 缺省说 Anthropic SSE，`Reply::responses(events)` / `responses_text(..)` / `responses_calls(..)` 让它这一条回复改说 OpenAI Responses 的命名 SSE 事件（配 `openai_responses` 协议的 provider，一条桩层黑盒走通工具往返）；它的 `Reply::ended(blocks, "max_tokens" | "pause_turn")`、
 `Block::thinking(..)`、`Reply::delayed(d, reply)`（期间请求一直挂着）、`Reply::cut(bytes, reply)`
 （流断在半截）；`Reply::stalled(n, d, reply)`（第 n 个块收完后流停 d 再继续）、`Reply::errored(blocks, kind, message)`
 （200 之后流里来一个 `error` 事件）、`inject_failures(n, Reply::status(529, ..))` 让接下来 n 次对话请求先失败
@@ -331,6 +331,11 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 在，文档在，测试也在，就是从来没跑过。所以 `carriers` job 里那两步现在跑的是
 `cargo test`。
 
+**单元测试里的会话与工具上下文。** 要一个带真会话状态的 `ToolContext`，用
+`session_state::testing::tool_context_for_test(..)`（一个真的 `SessionState` 加调用方给的 provider），
+`platform` 不再提供这类函数；`base` 自己的单元测试不能依赖
+`session-state`（那会编出两份 `base`），所以测 `Session` 契约的用例在 `session-state` 里。
+
 ## 架构守卫
 
 代码结构上的不变量由 `tests/guards` 守，不跑引擎。`cargo test -p guards` 编一次之后几秒
@@ -362,7 +367,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | BASE-1..3、G8 | base 的依赖白名单、tokio 特性子集；生产行数棘轮（`ratchet/base.txt`）；`std::fs` 与模型调用只在白名单模块 | `cargo metadata`、syn、棘轮 | `tests/guards/tests/base.rs` |
 | UD-1 | 未用依赖和放错位置的依赖 | `cargo metadata` 加 syn | `tests/guards/tests/unused_deps.rs` |
 | PS-1..4 | 进程级状态：非朴素类型的 `static`、`thread_local!` 都登记，`static mut` 禁止 | syn | `tests/guards/tests/process_state.rs` |
-| G-D3-1..5 | 一个会话一份 `SessionState`：字段归属清单、创建点、不在引擎间搬状态、`ModelErrorKind` 只在分类处造、会话池派出的任务不带着池 | syn | `tests/guards/tests/session_state.rs` |
+| G-D3-1..6 | 一个会话一份 `SessionState`：字段归属清单、创建点、不在引擎间搬状态、`ModelErrorKind` 只在分类处造、会话池派出的任务不带着池、`base::context::Session` 只有 `session-state` 一个生产实现且无缺省方法 | syn | `tests/guards/tests/session_state.rs` |
 | WIR-1..5 | hook 接线与 `UNWIRED_EVENTS` 双向比对；每种遥测 kind 有生产方；组合根调用接线函数；任务路由取来的模型都被遥测包住；assembly 只经 `read_pair` 读设置 | `HookEvent::ALL`、`EventPayload::KINDS` 加 syn | `tests/guards/tests/wiring.rs` |
 | DLG-1..9 | 会话只在名单上的地方构造、委派只有一个分派、Builder 字段三分类、无晚绑定、`mcp__` 前缀匹配、`DelegateMode` 穷尽、任务只经租约、不造孤儿令牌、子 Agent 的起止只在 `DelegateRun` 里 | syn | `tests/guards/tests/delegation.rs` |
 | PERM-1..8 | 权限管线：工具只陈述事实、判定只在策略里、放行只来自策略或被问的人、有人值守只读一处、沙箱只在受控处约束进程、权限引擎不碰本机、判定矩阵覆盖每个 `Stage` | syn | `tests/guards/tests/permissions.rs` |

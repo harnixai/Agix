@@ -2515,7 +2515,7 @@ skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 
 两者都接受 `scene` / `project_root` 定位参数,语义与 `config.reload` 一致:省略 = 这个
 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
 `setProvider` 写的是**被指定项目**的 `{project_root}/.agix/settings.json`,
-`written_to` 回的就是那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。
+`written_to` 回的就是那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目的 `.agix` 借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
 
 **provider 路由是按 `(项目, 场景)` 解析的**:一个项目在自己的 settings 里配了
 `providers` / `task_models`,它的会话就走它自己的路由,不是 daemon 那个项目的。

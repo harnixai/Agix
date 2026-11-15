@@ -203,7 +203,7 @@ A Rust workspace in layers. Dependencies point downward only, and a test
  modules    agents (+team) · mcp · skills · script-host · packages
  kernel     runtime (K3) → hooks · tools · session · compaction (K2)
               → model · scene · history · telemetry · permissions · ptc ·
-                settings · memory · prompt-files (K1)
+                settings · memory · prompt-files · session-state (K1)
  machine    platform ───────── this machine's process, filesystem, network and OS sandbox
  contract   core (crate `base`) — the traits, shared data types and pure decisions
 ```
@@ -263,7 +263,7 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | kernel | `scene` | built-in scenes, `SceneRegistry`, declarative scenes |
 | kernel | `history` · `session` · `compaction` | transcript log, session state, context compaction |
 | kernel | `permissions` · `hooks` · `telemetry` | rule engine, lifecycle hooks, telemetry and the recorder |
-| kernel | `settings` · `memory` · `prompt-files` | settings tiers and project trust, file-based memory, `SKILL.md` and `AGENTS.md` readers |
+| kernel | `settings` · `memory` · `prompt-files` · `session-state` | settings tiers and project trust, file-based memory, the markdown files read into the prompt (`SKILL.md`, `AGENTS.md`, rules), one session's mutable state |
 | kernel | `ptc` | `RunCode`: the model's programs, run in an embedded QuickJS ([`docs/ptc.md`](docs/ptc.md)) |
 | module | `agents` · `team` | the `Agent` tool, agent types, teams |
 | module | `mcp` | MCP client and tool adapters, MCP OAuth authorization |
