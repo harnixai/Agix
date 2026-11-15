@@ -526,6 +526,41 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_servers_status_message_is_kept_short() {
+        let (session, scope, _) = hosted();
+        let long = |c: char| c.to_string().repeat(1 << 20);
+        let peer = FakePeer::saying(vec![
+            at(&long('a'), TaskPayload::Working),
+            at(&long('b'), TaskPayload::Working),
+            done("x"),
+        ]);
+        await_task("demo", &peer, created(), &scope, LONG)
+            .await
+            .unwrap();
+        let task = session
+            .find_running_task(&session.task_infos()[0].task_id)
+            .unwrap();
+        for line in task.output_text().lines() {
+            assert!(line.len() <= 4096, "a line of {} bytes", line.len());
+        }
+        let peer = FakePeer::saying(vec![at(&long('c'), TaskPayload::Working)]);
+        let (session, scope, cancel) = hosted();
+        let waiting = await_task("demo", &peer, created(), &scope, LONG);
+        let look = async {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let detail = session.task_infos()[0].detail.clone();
+            cancel.cancel();
+            detail
+        };
+        let (_, detail) = tokio::join!(waiting, look);
+        let kept = detail["status_message"].as_str().unwrap_or_default().len();
+        assert!(
+            kept <= 4096,
+            "a status_message of {kept} bytes in the task's detail"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn stopping_ends_the_task_stopped_and_cancels_on_the_server() {
         let (session, scope, _) = hosted();
         let peer = FakePeer::saying(vec![at("busy", TaskPayload::Working)]);
