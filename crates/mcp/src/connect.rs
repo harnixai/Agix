@@ -30,7 +30,7 @@ use crate::error::McpError;
 use async_trait::async_trait;
 use futures::StreamExt;
 use rmcp::{model::CallToolRequestParams, service::ClientServiceExt};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -372,13 +372,37 @@ impl StdioMcpClient {
         F: Fn() -> Fut,
         Fut: std::future::Future<Output = Result<T, McpError>>,
     {
+        let result = self.renewing(op, || true).await;
+        self.noted(result).await
+    }
+
+    /// One request with a current token, sent once more with a newly fetched
+    /// one when an unattended server refuses it — a request the server never
+    /// took, so sending it again does nothing twice. The refusal is left for
+    /// the caller to note.
+    pub(crate) async fn with_renewal<T, F, Fut>(&self, op: F) -> Result<T, McpError>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, McpError>>,
+    {
+        self.renewing(op, || true).await
+    }
+
+    async fn renewing<T, F, Fut>(&self, op: F, may_repeat: impl Fn() -> bool) -> Result<T, McpError>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, McpError>>,
+    {
         self.keep_token(false).await?;
         let first = op().await;
-        if matches!(first, Err(McpError::AuthRequired { .. })) && self.unattended().is_some() {
+        if matches!(first, Err(McpError::AuthRequired { .. }))
+            && self.unattended().is_some()
+            && may_repeat()
+        {
             self.keep_token(true).await?;
-            return self.noted(op().await).await;
+            return op().await;
         }
-        self.noted(first).await
+        first
     }
 
     /// Report an authorization refusal to the pool's authorization state —
@@ -449,15 +473,31 @@ impl StdioMcpClient {
         tool_name: &str,
         args: serde_json::Map<String, serde_json::Value>,
         scope: &crate::elicit::McpCallScope,
+        taken: &AtomicBool,
     ) -> Result<McpCallResult, McpError> {
         let svc = self.service().await?;
         let _in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();
-        let ended = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
-            self.request("call_tool", limit, &svc, svc.call_tool_once(params))
-        })
-        .await?;
+        let svc_ref = &svc;
+        let ended =
+            crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| async move {
+                let send = || {
+                    self.request(
+                        "call_tool",
+                        limit,
+                        svc_ref,
+                        svc_ref.call_tool_once(params.clone()),
+                    )
+                };
+                if taken.load(Ordering::SeqCst) {
+                    return self.with_renewal(send).await;
+                }
+                let sent = send().await;
+                taken.store(sent.is_ok(), Ordering::SeqCst);
+                sent
+            })
+            .await?;
         let result = crate::tasks::settle(self, &svc, ended, scope, limit).await?;
 
         let content_blocks = result.content.iter().map(rmcp_content_to_ours).collect();
@@ -601,9 +641,16 @@ impl McpClient for StdioMcpClient {
         args: serde_json::Map<String, serde_json::Value>,
         scope: &crate::elicit::McpCallScope,
     ) -> Result<McpCallResult, McpError> {
+        // Once the server has taken the call, each later request renews its
+        // own token; sending the call again would run the tool twice.
+        let taken = AtomicBool::new(false);
         let result = self
-            .authorized(|| self.call_tool_inner(tool_name, args.clone(), scope))
+            .renewing(
+                || self.call_tool_inner(tool_name, args.clone(), scope, &taken),
+                || !taken.load(Ordering::SeqCst),
+            )
             .await;
+        let result = self.noted(result).await;
         if let Err(e @ (McpError::ConnectionLost { .. } | McpError::Timeout { .. })) = &result {
             warn!(server = %self.server_name, tool = tool_name, error = %e, "MCP tool call failed; not repeated");
         }

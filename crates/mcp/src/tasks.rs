@@ -295,14 +295,15 @@ pub(crate) struct Polling<'a> {
 #[async_trait::async_trait]
 impl crate::tasks::TaskPeer for Polling<'_> {
     async fn get(&self, task_id: &str) -> Result<rmcp::model::DetailedTask, McpError> {
-        let params = rmcp::model::GetTaskParams::new(task_id);
         self.client
-            .request(
-                "tasks/get",
-                self.client.request_limit(),
-                &self.svc,
-                self.svc.get_task(params),
-            )
+            .with_renewal(|| {
+                self.client.request(
+                    "tasks/get",
+                    self.client.request_limit(),
+                    &self.svc,
+                    self.svc.get_task(rmcp::model::GetTaskParams::new(task_id)),
+                )
+            })
             .await
             .map(|got| got.task)
     }
@@ -312,14 +313,18 @@ impl crate::tasks::TaskPeer for Polling<'_> {
         task_id: &str,
         responses: rmcp::model::InputResponses,
     ) -> Result<(), McpError> {
-        let params = rmcp::model::UpdateTaskParams::new(task_id, responses);
         self.client
-            .request(
-                "tasks/update",
-                self.client.request_limit(),
-                &self.svc,
-                self.svc.update_task(params),
-            )
+            .with_renewal(|| {
+                self.client.request(
+                    "tasks/update",
+                    self.client.request_limit(),
+                    &self.svc,
+                    self.svc.update_task(rmcp::model::UpdateTaskParams::new(
+                        task_id,
+                        responses.clone(),
+                    )),
+                )
+            })
             .await
     }
 
