@@ -19,21 +19,6 @@ impl LoadedSettings {
         let mut c = EngineConfig::defaults_for(settings.model.model_name.clone());
         c.max_tokens = settings.model.max_tokens;
         c.fallback_model = settings.model.fallback_model.clone();
-        c.thinking_mode = match settings.model.thinking_mode {
-            base::interface::model::ThinkingMode::Auto => {
-                base::context::config::ThinkingModeConfig::Auto
-            }
-            base::interface::model::ThinkingMode::Off => {
-                base::context::config::ThinkingModeConfig::Off
-            }
-            base::interface::model::ThinkingMode::On => {
-                base::context::config::ThinkingModeConfig::On
-            }
-            base::interface::model::ThinkingMode::OnBudget(n) => {
-                base::context::config::ThinkingModeConfig::OnBudget(n)
-            }
-        };
-
         c.permission_prompt_timeout_secs = settings.execution.permission_prompt_timeout_secs;
         c.max_parallelism = settings.execution.max_parallelism;
         c.max_api_calls_per_turn = settings.execution.max_api_calls_per_turn;

@@ -477,7 +477,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("TaskModelOverride", SETTING),
     ("TeamStageStatus", PROJECTED),
     ("ThinkingMode", SETTING),
-    ("ThinkingModeConfig", SETTING),
     ("ThinkingToggle", SETTING),
     (
         "Tier",

@@ -47,14 +47,6 @@ pub struct EngineConfig {
     /// `None` = no fallback (propagate the error immediately).
     /// User-facing API: surface as `--fallback-model` CLI flag.
     pub fallback_model: Option<String>,
-    /// Thinking-mode policy.
-    /// - `Auto` — current default; engine picks based on model id (DS V4
-    ///   gets `Disabled` to avoid the multi-turn 400 reasoning_content
-    ///   protocol mismatch; everyone else gets `None` = let model decide).
-    /// - `Off` — explicit `thinking: {"type":"disabled"}` in request.
-    /// - `On` — explicit `thinking: Adaptive`.
-    /// - `OnBudget(N)` — explicit `thinking: Enabled{budget_tokens=N}`.
-    pub thinking_mode: ThinkingModeConfig,
 
     pub permission_mode: PermissionMode,
     /// The session's sandbox settings; every policy a command runs under is
@@ -187,19 +179,6 @@ pub struct McpServerInstruction {
     pub instructions: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum ThinkingModeConfig {
-    /// Engine decides based on model id. Default.
-    #[default]
-    Auto,
-    /// Explicit "no thinking" — sends `thinking: {type: "disabled"}`.
-    Off,
-    /// Explicit adaptive thinking.
-    On,
-    /// Explicit budgeted thinking.
-    OnBudget(u32),
-}
-
 /// How file tools word the paths the model reads: in tool descriptions and in
 /// the paths Grep, Glob, Write and Edit print. Resolving a path the model
 /// passes in is the same in both styles (relative against the working
@@ -254,7 +233,6 @@ impl EngineConfig {
             max_api_calls_per_turn: 25,
             strong_model: None,
             fallback_model: None,
-            thinking_mode: ThinkingModeConfig::default(),
 
             // permission / sandbox
             permission_mode: PermissionMode::Default,
