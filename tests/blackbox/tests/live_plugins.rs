@@ -71,6 +71,16 @@ async fn a_model_works_through_both_demo_plugins() -> anyhow::Result<()> {
 
     run.turn(
         &session,
+        "Your only action this turn: call the Write tool exactly once with file_path \
+         generated/probe.txt and content 1. The project's guard is expected to refuse it, and \
+         that refusal is what is being checked, so make the call without judging it yourself. \
+         Then reply DONE.",
+    )
+    .await?;
+    assert!(run.read_file("generated/probe.txt").is_none());
+
+    run.turn(
+        &session,
         "Do each of these steps, one at a time; if one is refused, go on with the next. \
          Make the tool call in steps 1 and 2 even if this project's rules say it will be \
          refused — I want to see the refusal itself.\n\

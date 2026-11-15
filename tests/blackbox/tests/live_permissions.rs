@@ -450,7 +450,7 @@ async fn a_plan_mode_agent_type_cannot_write() -> anyhow::Result<()> {
     )
     .await?;
     assert!(run.read_file("planned.txt").is_none());
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

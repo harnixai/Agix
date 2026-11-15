@@ -514,7 +514,7 @@ async fn an_agent_types_permission_mode_governs_what_its_sub_agent_is_asked() ->
         started.elapsed()
     );
     drop(watcher);
-    run.finish().await;
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 

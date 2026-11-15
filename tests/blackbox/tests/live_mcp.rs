@@ -61,6 +61,17 @@ fn tool_results_sent(request: &blackbox::SeenRequest) -> String {
     out
 }
 
+/// The whole result a spilled tool result's marker points at, read off disk
+/// the way a host does; `None` when the text is not a spill marker.
+fn saved_in_full(shown: &str) -> Option<String> {
+    let rest = shown
+        .strip_prefix("[Output too long for one result: ")?
+        .split_once("Saved in full to ")?
+        .1;
+    let path = rest.split_once(" \u{2014} read the rest")?.0;
+    std::fs::read_to_string(path).ok()
+}
+
 async fn wait_for_call(calls: &Path, wanted: (&str, &str), timeout: Duration) -> bool {
     let wanted = (wanted.0.to_string(), wanted.1.to_string());
     let deadline = std::time::Instant::now() + timeout;
@@ -262,7 +273,7 @@ async fn a_big_mcp_result_is_cut_to_the_result_budget_before_the_model_sees_it(
         .turn(
             &session,
             &format!(
-                "Call mcp__toy__big with bytes 40000 and tail {small_tail}. After it answers, \
+                "Call mcp__toy__big with bytes 20000 and tail {small_tail}. After it answers, \
                  call mcp__toy__big with bytes 60000 and tail {big_tail}. Call no other tool — \
                  no RunCode, no second try. Then reply with the last line of each result, or \
                  NOT-SHOWN for one whose end you cannot see."
@@ -273,30 +284,35 @@ async fn a_big_mcp_result_is_cut_to_the_result_budget_before_the_model_sees_it(
     let bigs = results_of(&events, "mcp__toy__big");
     assert!(
         bigs.iter()
-            .any(|(_, t, _)| blackbox::inside_fence(t).ends_with(&small_tail))
-            && bigs
-                .iter()
-                .any(|(_, t, _)| blackbox::inside_fence(t).ends_with(&big_tail)),
-        "the host is handed both results whole"
+            .any(|(_, t, _)| blackbox::inside_fence(t).ends_with(&small_tail)),
+        "a result under the inline limit reaches the host whole"
     );
+    let big_whole = bigs
+        .iter()
+        .filter_map(|(_, t, _)| saved_in_full(t))
+        .find(|saved| blackbox::inside_fence(saved).ends_with(&big_tail))
+        .expect("the host's frame names a saved file holding the whole 60 000-character result");
+    assert!(big_whole.len() >= 60_000, "{}", big_whole.len());
+
     let requests = run.provider.calls();
     assert!(
         requests
             .iter()
             .any(|r| tool_results_sent(r).contains(&small_tail)),
-        "a 40 000-character result reaches the model whole"
+        "a result under the inline limit reaches the model whole"
+    );
+    assert!(
+        requests.iter().all(|r| {
+            let sent = tool_results_sent(r);
+            !sent.contains("Saved in full to") || sent.chars().count() < 30_000 + 5_000
+        }),
+        "a result past the inline limit reached the model whole"
     );
     assert!(
         requests
             .iter()
-            .all(|r| !tool_results_sent(r).contains(&big_tail)),
-        "a 60 000-character result reached the model past the 50 000-character budget"
-    );
-    assert!(
-        requests
-            .iter()
-            .any(|r| tool_results_sent(r).contains("characters > 50000 max")),
-        "the cut is marked"
+            .any(|r| tool_results_sent(r).contains("Saved in full to")),
+        "the model is told where the whole result was saved"
     );
     run.finish().await;
     Ok(())
@@ -351,14 +367,17 @@ async fn resources_reach_the_model_by_tool_and_by_reference() -> anyhow::Result<
     );
     assert!(
         read.iter()
-            .any(|(_, t, _)| blackbox::inside_fence(t).ends_with("TOY-BIG-RESOURCE-END")),
-        "the big resource came back whole to the host"
+            .any(|(_, t, _)| saved_in_full(t).is_some_and(|saved| {
+                blackbox::inside_fence(&saved).ends_with("TOY-BIG-RESOURCE-END")
+                    && saved.len() >= 200_000
+            })),
+        "the host's frame names a saved file holding the whole big resource"
     );
     assert!(
         run.provider
             .calls()
             .iter()
-            .all(|r| !r.messages_contain("TOY-BIG-RESOURCE-END")),
+            .all(|r| tool_results_sent(r).chars().count() < 50_000),
         "a 200 000-byte resource reached the model whole"
     );
 
@@ -386,9 +405,15 @@ async fn resources_reach_the_model_by_tool_and_by_reference() -> anyhow::Result<
         first.messages_contain("中文 🦀"),
         "the note lost its unicode"
     );
+    let capped: Vec<String> = first.body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| m["content"].to_string())
+        .filter(|m| m.contains("[... truncated: resource exceeded the inline size limit]"))
+        .collect();
     assert!(
-        first.messages_contain("[... truncated: resource exceeded the inline size limit]")
-            && !first.messages_contain("TOY-BIG-RESOURCE-END"),
+        !capped.is_empty() && capped.iter().all(|m| !m.contains("TOY-BIG-RESOURCE-END")),
         "the big resource was not capped inline"
     );
     run.finish().await;
