@@ -715,7 +715,11 @@ impl compaction::compact::Compactor for RewritesThenFails {
         ))
     }
 
-    fn trim_tool_results(&self, messages: &mut [base::interface::model::ModelMessage]) -> usize {
+    fn trim_tool_results(
+        &self,
+        messages: &mut [base::interface::model::ModelMessage],
+        _: Option<&std::path::Path>,
+    ) -> usize {
         for block in messages.iter_mut().flat_map(|m| m.content.iter_mut()) {
             if let base::interface::model::ModelContentBlock::ToolResult { content, .. } = block {
                 *content = "[trimmed]".into();

@@ -259,9 +259,10 @@ impl Agent {
     }
 
     fn trim_tool_results(&mut self, compactor: &Arc<dyn compaction::compact::Compactor>) {
+        let saved_results = self.config.tool_results.dir.as_deref();
         let modified = self
             .session
-            .trim_in_place(|messages| compactor.trim_tool_results(messages));
+            .trim_in_place(|messages| compactor.trim_tool_results(messages, saved_results));
         if modified > 0 {
             self.compaction.tool_results_ever_cleared = true;
             tracing::debug!(modified, "tool result budget enforced");

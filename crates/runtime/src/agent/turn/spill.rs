@@ -6,7 +6,7 @@
 
 use super::tool_exec::{Caller, ToolExecCtx};
 use base::interface::tool_middleware::ToolOutcome;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const SPILL_HEAD_CHARS: usize = 2_000;
 const SPILL_TAIL_CHARS: usize = 1_000;
@@ -34,7 +34,7 @@ pub(super) async fn spill_oversized(
     let saved = {
         let (dir, body) = (dir.clone(), text.clone());
         let stem = file_stem_of(&ctx.session_id, &ctx.tool_use_id);
-        tokio::task::spawn_blocking(move || write_spill(&dir, &stem, &body)).await
+        tokio::task::spawn_blocking(move || crate::saved_results::write(&dir, &stem, &body)).await
     };
     let path = match saved {
         Ok(Ok(path)) => path,
@@ -55,11 +55,8 @@ pub(super) async fn spill_oversized(
 }
 
 fn preview(text: &str, path: &Path, max_line_chars: usize) -> String {
-    let mut marker = compaction::budget::spill_marker(
-        text.chars().count(),
-        text.lines().count(),
-        &path.display().to_string(),
-    );
+    let mut marker =
+        compaction::saved::saved_marker(text.chars().count(), text.lines().count(), path);
     if text
         .lines()
         .any(|l| l.chars().nth(max_line_chars).is_some())
@@ -83,6 +80,7 @@ fn file_stem_of(session_id: &str, tool_use_id: &str) -> String {
             .collect()
     };
     let (session, call) = (clean(session_id), clean(tool_use_id));
+    let call: String = call.chars().take(100).collect();
     let call = if call.is_empty() {
         "result".into()
     } else {
@@ -93,39 +91,6 @@ fn file_stem_of(session_id: &str, tool_use_id: &str) -> String {
     } else {
         format!("{session}-{call}")
     }
-}
-
-fn write_spill(dir: &Path, stem: &str, text: &str) -> std::io::Result<PathBuf> {
-    create_private_dir(dir)?;
-    for level in [Some(dir), dir.parent()].into_iter().flatten() {
-        if std::fs::symlink_metadata(level)?.file_type().is_symlink() {
-            return Err(std::io::Error::other(format!(
-                "{} is a symlink; a saved result is not written through one",
-                level.display()
-            )));
-        }
-    }
-    let ignore = dir.join(".ignore");
-    if !ignore.exists() {
-        base::fs::write_atomic(&ignore, b"*\n", base::fs::WriteOpts::PRIVATE)?;
-    }
-    let path = (0..)
-        .map(|n| match n {
-            0 => dir.join(format!("{stem}.txt")),
-            n => dir.join(format!("{stem}-{n}.txt")),
-        })
-        .find(|p| std::fs::symlink_metadata(p).is_err())
-        .unwrap_or_else(|| dir.join(format!("{stem}.txt")));
-    base::fs::write_atomic(&path, text.as_bytes(), base::fs::WriteOpts::PRIVATE)?;
-    Ok(path)
-}
-
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder.create(dir)
 }
 
 /// Whether this `Read`, `Grep` or `Bash` is aimed at something saved here:
@@ -178,7 +143,10 @@ mod tests {
         );
         let out = preview(&fenced, Path::new("/s/t.txt"), 2_000);
         let (marker, rest) = out.split_once('\n').unwrap();
-        assert_eq!(compaction::budget::spill_path_of(marker), Some("/s/t.txt"));
+        assert_eq!(
+            compaction::saved::saved_path_of(marker, Path::new("/s")),
+            Some("/s/t.txt")
+        );
         assert!(rest.starts_with("<external-content source=\"s\" from=\"f\">\nhhh"));
         assert!(
             rest.ends_with("ttt\n</external-content>\nNote.\n"),
@@ -203,7 +171,7 @@ mod tests {
         let dir = tmp.path().join("tool-results").join("s");
         std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&outside, &dir).unwrap();
-        assert!(write_spill(&dir, "toolu_1", "planted").is_err());
+        assert!(crate::saved_results::write(&dir, "toolu_1", "planted").is_err());
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
     }
 

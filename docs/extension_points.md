@@ -754,6 +754,9 @@ provider——模型、OAuth、遥测和 registry 的 client 各造各的。所�
 Builder::new().compactor(Arc::new(OnlyAtThreshold(DefaultCompactor)))
 ```
 
+覆盖 `trim_tool_results` 的宿主会收到会话的外置目录(`saved_results`);清旧结果时要保留路径,
+用 `compaction::saved::saved_path_of` 校验标记——路径不在这个目录下的标记只是工具打印的文字。
+
 `OnlyAtThreshold` 包住任何一个 compactor,把不是预算逼出来的都推掉——一个部署在
 "除非重写实在避不开,否则别动我的转录"时想要的就是这个形状。
 

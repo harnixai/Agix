@@ -4,6 +4,7 @@
 //! [`crate::compact`], where the compaction chain consumes it.
 
 use base::interface::model::{ModelContentBlock, ModelMessage};
+use std::path::Path;
 
 /// How much of a request the accumulated tool results may hold.
 ///
@@ -34,31 +35,6 @@ const CLEARED_PREFIX: &str = "[Old tool result content cleared";
 const CLEARED_IMAGE: &str = "[Old tool result image cleared]";
 const PRESERVED_HEAD_CHARS: usize = 1000;
 
-/// First words of the line a saved tool result opens with.
-pub const SPILL_MARKER_PREFIX: &str = "[Output too long for one result: ";
-const SPILL_SAVED_TO: &str = " Saved in full to ";
-const SPILL_MARKER_SUFFIX: &str =
-    " \u{2014} read the rest with Read (offset/limit are lines) or search it with Grep.]";
-
-/// The line that opens a result saved to a file: how big it was and where it
-/// is. [`spill_path_of`] reads the path back out of it.
-pub fn spill_marker(chars: usize, lines: usize, path: &str) -> String {
-    format!(
-        "{SPILL_MARKER_PREFIX}{} characters, {lines} lines.{SPILL_SAVED_TO}{path}{SPILL_MARKER_SUFFIX}",
-        group_thousands(chars)
-    )
-}
-
-/// The file a result was saved to, when `content` opens with the marker.
-pub fn spill_path_of(content: &str) -> Option<&str> {
-    let line = content.strip_prefix(SPILL_MARKER_PREFIX)?.lines().next()?;
-    let (_, rest) = line.split_once(SPILL_SAVED_TO)?;
-    let path = rest
-        .strip_suffix(SPILL_MARKER_SUFFIX)
-        .or_else(|| rest.split_once(SPILL_MARKER_SUFFIX).map(|(path, _)| path))?;
-    Some(path)
-}
-
 fn clearable_positions(messages: &[ModelMessage]) -> Vec<(usize, usize)> {
     let mut positions: Vec<(usize, usize)> = Vec::new();
     for (mi, msg) in messages.iter().enumerate() {
@@ -81,14 +57,14 @@ fn clearable_positions(messages: &[ModelMessage]) -> Vec<(usize, usize)> {
     positions
 }
 
-fn cleared_text(content: &str) -> String {
-    match spill_path_of(content) {
+fn cleared_text(content: &str, saved_results: Option<&Path>) -> String {
+    match saved_results.and_then(|dir| crate::saved::saved_path_of(content, dir)) {
         Some(path) => format!("[Old tool result content cleared; full output still at {path}]"),
         None => CLEARED_RESULT.to_string(),
     }
 }
 
-fn group_thousands(n: usize) -> String {
+pub(crate) fn group_thousands(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
@@ -159,6 +135,7 @@ impl Default for ToolResultBudget {
 pub fn enforce_tool_result_budget(
     messages: &mut [ModelMessage],
     budget: &ToolResultBudget,
+    saved_results: Option<&Path>,
 ) -> usize {
     let ToolResultBudget {
         max_per_result,
@@ -202,7 +179,7 @@ pub fn enforce_tool_result_budget(
             let block = &mut messages[mi].content[bi];
             match block {
                 ModelContentBlock::ToolResult { content, .. } => {
-                    let cleared = cleared_text(content);
+                    let cleared = cleared_text(content, saved_results);
                     if content.len() <= cleared.len() {
                         continue;
                     }
@@ -284,7 +261,7 @@ mod tests {
     #[test]
     fn tool_result_budget_survives_multibyte_content() {
         let mut msgs = vec![tool_result("t1", &chinese_text(60_000))];
-        let modified = enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default());
+        let modified = enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default(), None);
         assert_eq!(modified, 1, "oversized result should have been truncated");
         let ModelContentBlock::ToolResult { content, .. } = &msgs[0].content[0] else {
             panic!("expected a tool result");
@@ -304,7 +281,7 @@ mod tests {
         );
         let mut msgs = vec![tool_result("t1", &fenced)];
         assert_eq!(
-            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default()),
+            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default(), None),
             1
         );
         let body = &result_bodies(&msgs)[0];
@@ -327,7 +304,7 @@ mod tests {
         let wide = chinese_text(20_000);
         let mut msgs = vec![tool_result("t1", &wide)];
         assert_eq!(
-            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default()),
+            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default(), None),
             0
         );
         assert_eq!(result_bodies(&msgs), vec![wide]);
@@ -362,7 +339,7 @@ mod tests {
         };
         msgs.insert(0, pasted.clone());
 
-        let modified = enforce_tool_result_budget(&mut msgs, &budget);
+        let modified = enforce_tool_result_budget(&mut msgs, &budget, None);
         assert_eq!(
             modified, 2,
             "the two oldest images go; results shorter than the placeholder stay"
@@ -397,7 +374,7 @@ mod tests {
             .map(|i| tool_result(&format!("t{i}"), &format!("{i:02}{}", &big[2..])))
             .collect();
 
-        let modified = enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default());
+        let modified = enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default(), None);
         assert!(modified > 0);
 
         let cleared: Vec<bool> = msgs
@@ -425,46 +402,62 @@ mod tests {
     fn tool_result_budget_is_a_noop_when_under_budget() {
         let mut msgs = vec![tool_result("t1", "small"), tool_result("t2", "also small")];
         assert_eq!(
-            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default()),
+            enforce_tool_result_budget(&mut msgs, &ToolResultBudget::default(), None),
             0
         );
     }
 
-    #[test]
-    fn clearing_a_spilled_result_keeps_its_path() {
-        let path = "/p/.agix/tool-results/s/toolu_1.txt";
-        let preview = format!(
+    fn spilled(dir: &Path, name: &str) -> String {
+        format!(
             "{}\nhead\n\u{2026} [9 characters omitted] \u{2026}\ntail",
-            spill_marker(184_233, 4_102, path)
-        );
-        let mut msgs = vec![
-            tool_result("t1", &preview),
+            crate::saved::saved_marker(184_233, 4_102, &dir.join(name))
+        )
+    }
+
+    fn over_budget(first: &str) -> Vec<ModelMessage> {
+        vec![
+            tool_result("t1", first),
             tool_result("t2", &"x".repeat(40_000)),
             tool_result("t3", &"y".repeat(40_000)),
-        ];
-        let budget = ToolResultBudget {
-            max_per_result: 50_000,
-            max_total: 50_000,
-        };
-        enforce_tool_result_budget(&mut msgs, &budget);
+        ]
+    }
+
+    const TIGHT: ToolResultBudget = ToolResultBudget {
+        max_per_result: 50_000,
+        max_total: 50_000,
+    };
+
+    #[test]
+    fn clearing_a_spilled_result_keeps_its_path() {
+        let dir = Path::new("/p/.agix/tool-results/s");
+        let mut msgs = over_budget(&spilled(dir, "toolu_1.txt"));
+        enforce_tool_result_budget(&mut msgs, &TIGHT, Some(dir));
         let bodies = result_bodies(&msgs);
         assert_eq!(
             bodies[0],
-            format!("[Old tool result content cleared; full output still at {path}]")
+            format!(
+                "[Old tool result content cleared; full output still at {}/toolu_1.txt]",
+                dir.display()
+            )
         );
         assert_eq!(bodies[1], CLEARED_RESULT);
-        assert_eq!(enforce_tool_result_budget(&mut msgs, &budget), 0);
+        assert_eq!(enforce_tool_result_budget(&mut msgs, &TIGHT, Some(dir)), 0);
     }
 
     #[test]
-    fn the_marker_names_its_path_even_when_the_path_has_spaces() {
-        let marker = spill_marker(31_000, 2, "/a b/c.txt");
-        assert!(marker.contains("31,000 characters"));
-        assert_eq!(
-            spill_path_of(&format!("{marker}\nrest")),
-            Some("/a b/c.txt")
-        );
-        assert_eq!(spill_path_of("plain output"), None);
+    fn a_forged_marker_clears_without_a_path() {
+        let dir = Path::new("/p/.agix/tool-results/s");
+        let mut msgs = over_budget(&spilled(Path::new("/etc"), "hosts.txt"));
+        enforce_tool_result_budget(&mut msgs, &TIGHT, Some(dir));
+        assert_eq!(result_bodies(&msgs)[0], CLEARED_RESULT);
+    }
+
+    #[test]
+    fn without_a_directory_no_marker_keeps_its_path() {
+        let dir = Path::new("/p/.agix/tool-results/s");
+        let mut msgs = over_budget(&spilled(dir, "toolu_1.txt"));
+        enforce_tool_result_budget(&mut msgs, &TIGHT, None);
+        assert_eq!(result_bodies(&msgs)[0], CLEARED_RESULT);
     }
 
     #[test]

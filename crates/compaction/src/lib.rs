@@ -6,5 +6,6 @@ pub mod compact;
 pub mod early_trim;
 pub mod grouping;
 pub mod llm_summary;
+pub mod saved;
 pub mod time_based_mc;
 pub mod trim;

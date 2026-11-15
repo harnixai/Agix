@@ -13,6 +13,7 @@ pub mod host_tools;
 pub mod module;
 pub mod plugin;
 mod repeat_guard;
+pub mod saved_results;
 pub mod steering;
 pub mod streaming;
 mod tool_policy;

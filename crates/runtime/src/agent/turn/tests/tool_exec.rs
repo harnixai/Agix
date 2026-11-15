@@ -2099,7 +2099,8 @@ async fn a_redacted_secret_is_not_in_the_saved_file() {
         .await
         .unwrap()
         .text;
-    let path = compaction::budget::spill_path_of(&shown).expect("saved");
+    let path = compaction::saved::saved_path_of(&shown, &dir.path().join("tool-results/s"))
+        .expect("saved");
     let saved = std::fs::read_to_string(path).unwrap();
     assert!(saved.contains("filler text") && !saved.contains("hunter2"));
     assert!(!shown.contains("hunter2") && shown.chars().count() < 4_000);
@@ -2121,7 +2122,7 @@ async fn the_same_tool_use_id_in_two_sessions_saves_two_files() {
             .unwrap()
             .text;
         paths.push(
-            compaction::budget::spill_path_of(&shown)
+            compaction::saved::saved_path_of(&shown, &dir.path().join("tool-results/s"))
                 .expect("saved")
                 .to_string(),
         );

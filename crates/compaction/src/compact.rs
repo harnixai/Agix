@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use base::interface::token_counter::TokenCounter;
 use base::text::truncate_at_char_boundary;
+use std::path::Path;
 
 pub use crate::budget::{enforce_tool_result_budget, ToolResultBudget, TOOL_IMAGE_CHARS};
 use crate::grouping::{group_by_api_round, ApiRound};
@@ -259,9 +260,15 @@ pub trait Compactor: Send + Sync {
     }
 
     /// Bring the tool results back inside that budget. Returns how many were
-    /// rewritten.
-    fn trim_tool_results(&self, messages: &mut [ModelMessage]) -> usize {
-        enforce_tool_result_budget(messages, &self.tool_result_budget())
+    /// rewritten. `saved_results` is the session's directory of saved results: a
+    /// cleared result whose marker names a file there keeps the path (validate with
+    /// [`crate::saved::saved_path_of`]; a marker anywhere else is only text).
+    fn trim_tool_results(
+        &self,
+        messages: &mut [ModelMessage],
+        saved_results: Option<&Path>,
+    ) -> usize {
+        enforce_tool_result_budget(messages, &self.tool_result_budget(), saved_results)
     }
 
     /// Whether it is worth an API call to summarize before anything is
@@ -327,8 +334,12 @@ impl<C: Compactor> Compactor for OnlyAtThreshold<C> {
         self.0.tool_result_budget()
     }
 
-    fn trim_tool_results(&self, messages: &mut [ModelMessage]) -> usize {
-        self.0.trim_tool_results(messages)
+    fn trim_tool_results(
+        &self,
+        messages: &mut [ModelMessage],
+        saved_results: Option<&Path>,
+    ) -> usize {
+        self.0.trim_tool_results(messages, saved_results)
     }
 
     fn wants_llm_summary(
@@ -1286,7 +1297,7 @@ mod tests {
                 }
             }
 
-            fn trim_tool_results(&self, _: &mut [ModelMessage]) -> usize {
+            fn trim_tool_results(&self, _: &mut [ModelMessage], _: Option<&Path>) -> usize {
                 42
             }
         }
@@ -1299,7 +1310,7 @@ mod tests {
         };
         assert!(wrapped.should_compact(&state));
         assert!(wrapped.wants_llm_summary(&[], 1, 1, &**counter()));
-        assert_eq!(wrapped.trim_tool_results(&mut []), 42);
+        assert_eq!(wrapped.trim_tool_results(&mut [], None), 42);
         assert_eq!(wrapped.tool_result_budget().max_per_result, 7);
     }
 
@@ -1332,11 +1343,11 @@ mod tests {
 
         let mut messages = vec![tool_result("t0", &"x".repeat(5_000))];
         assert_eq!(
-            DefaultCompactor.trim_tool_results(&mut messages.clone()),
+            DefaultCompactor.trim_tool_results(&mut messages.clone(), None),
             0,
             "5 000 characters is nothing against the engine's 50 000"
         );
-        assert_eq!(Frugal.trim_tool_results(&mut messages), 1);
+        assert_eq!(Frugal.trim_tool_results(&mut messages, None), 1);
         assert!(result_bodies(&messages)[0].starts_with("[Tool result truncated:"));
     }
 
