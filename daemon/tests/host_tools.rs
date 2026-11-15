@@ -535,6 +535,7 @@ async fn bad_host_tool_declarations_are_refused() {
     let before = conn.ok("session.list", json!({})).await;
     let cases = [
         (vec![host_echo(json!({"name": "Read"}))], "host_tools"),
+        (vec![host_echo(json!({"name": "RunCode"}))], "host_tools"),
         (
             vec![host_echo(json!({"name": "mcp__x"}))],
             "host_tools[0].name",
