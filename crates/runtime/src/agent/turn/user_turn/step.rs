@@ -242,8 +242,11 @@ impl Agent {
             exec_ctx.tool_use_id = tool_use_id;
             let slots = Arc::clone(&slots);
             async move {
-                let _slot = slots.acquire_owned().await;
-                execute_tool_with_telemetry(&exec_ctx, &name, input).await
+                let cancel = exec_ctx.cancel.clone();
+                in_a_slot(slots, &cancel, || {
+                    execute_tool_with_telemetry(&exec_ctx, &name, input)
+                })
+                .await
             }
         };
         let is_concurrency_safe = move |name: &str, input: &serde_json::Value| {
@@ -458,5 +461,48 @@ impl Agent {
         if !cancel.is_cancelled() {
             self.deliver_queued_user_messages(false, cancel).await;
         }
+    }
+}
+
+/// `call` once one of the reply's `slots` (`execution.max_parallelism`) is free.
+async fn in_a_slot<F, Fut>(
+    slots: Arc<tokio::sync::Semaphore>,
+    _cancel: &CancellationToken,
+    call: F,
+) -> base::interface::tool_middleware::ToolOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = base::interface::tool_middleware::ToolOutcome>,
+{
+    let _slot = slots.acquire_owned().await;
+    call().await
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_call_waiting_for_a_slot_when_its_turn_is_stopped_does_not_start() {
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let held = slots.clone().acquire_owned().await.unwrap();
+        let cancel = CancellationToken::new();
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let waiting = {
+            let (slots, cancel, started) = (slots.clone(), cancel.clone(), started.clone());
+            tokio::spawn(async move {
+                in_a_slot(slots, &cancel, || async move {
+                    started.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(base::interface::tool_middleware::ToolAnswer::text("ran"))
+                })
+                .await
+            })
+        };
+        tokio::task::yield_now().await;
+        cancel.cancel();
+        drop(held);
+        let outcome = waiting.await.unwrap();
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(!started.load(std::sync::atomic::Ordering::SeqCst));
     }
 }
