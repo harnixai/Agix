@@ -116,6 +116,27 @@ trait Source {
     fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>, ImportError>;
 }
 
+struct Budgeted<'a> {
+    inner: &'a mut dyn Source,
+    left: u64,
+}
+
+impl Source for Budgeted<'_> {
+    fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>, ImportError> {
+        let bytes = self.inner.read(name)?;
+        let read = bytes.as_ref().map_or(0, |b| b.len() as u64);
+        self.left = match self.left.checked_sub(read) {
+            Some(left) => left,
+            None => {
+                return invalid(format!(
+                    "the archive unpacks to more than {MAX_TOTAL_BYTES} bytes"
+                ))
+            }
+        };
+        Ok(bytes)
+    }
+}
+
 fn bounded(mut from: impl Read, name: &str) -> Result<Vec<u8>, ImportError> {
     let mut bytes = Vec::new();
     from.by_ref()
@@ -325,15 +346,28 @@ pub(crate) fn read_archive(path: &Path) -> Result<Archive, ImportError> {
     read_from(source.as_mut(), MAX_TOTAL_BYTES)
 }
 
-fn read_from(source: &mut dyn Source, _budget: u64) -> Result<Archive, ImportError> {
-    let manifest = manifest_of(source)?;
+/// [`read_archive`] from `source`, reading at most `budget` bytes in all —
+/// the sizes an archive declares for its entries are its own to make up.
+fn read_from(source: &mut dyn Source, budget: u64) -> Result<Archive, ImportError> {
+    let mut source = Budgeted {
+        inner: source,
+        left: budget,
+    };
+    let manifest = manifest_of(&mut source)?;
     let rows = manifest["sessions"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         return invalid("the manifest lists no sessions");
     }
+    let mut listed = BTreeSet::new();
+    if !rows
+        .iter()
+        .all(|row| listed.insert(row["session_id"].to_string()))
+    {
+        return invalid("the manifest lists a session twice");
+    }
     let mut sessions = Vec::with_capacity(rows.len());
     for row in &rows {
-        sessions.push(session_of(source, row)?);
+        sessions.push(session_of(&mut source, row)?);
     }
     let root = manifest["root_session_id"]
         .as_str()
