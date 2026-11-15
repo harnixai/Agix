@@ -17,7 +17,7 @@ use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 use tokio_util::sync::CancellationToken;
 
-use mcp_oauth_mock::{consent, follow, IssMode, McpServer};
+use mcp_oauth_mock::{consent, follow, AuthServer, IssMode, McpServer};
 
 struct Daemon {
     dir: tempfile::TempDir,
@@ -55,7 +55,10 @@ impl Daemon {
             &StaticDaemonPaths::new(root.clone()),
         );
         config.settings.values.memory_enabled = false;
-        crate::support::allow_tools(&mut config, &["mcp__docs__echo", "mcp__docs__write"]);
+        crate::support::allow_tools(
+            &mut config,
+            &["mcp__docs__echo", "mcp__docs__write", "mcp__docs__slow"],
+        );
         let model = Arc::new(MockAnthropicClient::new());
         let pool = daemon::assemble::pool(
             &config,
@@ -999,6 +1002,73 @@ async fn client_credentials_connect_unattended_and_are_fetched_again_when_refuse
         "a token about to expire is fetched again before it is used"
     );
     assert_eq!(conn.status("docs").await["auth"]["state"], "authorized");
+}
+
+async fn unattended_task_server(name: &str) -> (McpServer, AuthServer, Daemon) {
+    let (mcp, auth) = McpServer::start().await;
+    mcp.state.lock().unwrap().tasks = true;
+    auth.preregister("svc", Some("svc-secret"));
+    let var = env_var(name, "svc-secret");
+    let d = Daemon::start(serde_json::json!({"docs": {
+        "type": "streamable_http", "url": mcp.url,
+        "oauth": {"grant": "client_credentials", "client_id": "svc", "client_secret_env": var,
+                  "issuer": auth.url, "scopes": ["mcp:read"]},
+    }}))
+    .await;
+    (mcp, auth, d)
+}
+
+/// Once the server has taken the call, what expires under it is the poll's
+/// token, not the call.
+fn expire_once_the_call_is_taken(mcp: &McpServer, auth: &AuthServer) {
+    let (calls, tokens) = (mcp.state.clone(), auth.state.clone());
+    tokio::spawn(async move {
+        loop {
+            if calls.lock().unwrap().calls.iter().any(|c| c == "tasks/get") {
+                for token in tokens.lock().unwrap().tokens.values_mut() {
+                    token.expires_at = 0;
+                }
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    });
+}
+
+#[tokio::test]
+async fn a_token_expiring_under_a_task_renews_the_poll_and_does_not_call_again() {
+    let (mcp, auth, d) = unattended_task_server("CC_TASK").await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "connected").await;
+    expire_once_the_call_is_taken(&mcp, &auth);
+
+    let sent = use_tool(&d, &mut conn, "mcp__docs__slow").await;
+    assert!(sent.contains("slow: done"), "{sent}");
+    let calls = mcp.state.lock().unwrap().calls.clone();
+    assert_eq!(
+        calls.iter().filter(|c| *c == "tools/call").count(),
+        1,
+        "the call was made again: {calls:?}"
+    );
+    assert!(auth.state.lock().unwrap().count("client_credentials") >= 2);
+}
+
+#[tokio::test]
+async fn a_task_whose_polls_stay_refused_fails_without_calling_again() {
+    let (mcp, _auth, d) = unattended_task_server("CC_TASK_REFUSED").await;
+    let mut conn = d.connect().await;
+    conn.wait_state("docs", "connected").await;
+    mcp.state.lock().unwrap().refuse_task_polls = true;
+
+    let sent = use_tool(&d, &mut conn, "mcp__docs__slow").await;
+    assert!(!sent.contains("slow: done"), "{sent}");
+    assert!(sent.contains("\"is_error\":true"), "{sent}");
+    let calls = mcp.state.lock().unwrap().calls.clone();
+    assert_eq!(
+        calls.iter().filter(|c| *c == "tools/call").count(),
+        1,
+        "the call was made again: {calls:?}"
+    );
 }
 
 #[tokio::test]

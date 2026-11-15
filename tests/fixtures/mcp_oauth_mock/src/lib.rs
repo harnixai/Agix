@@ -643,6 +643,12 @@ pub struct McpState {
     /// In every tool result: a value only this server, reached with a valid
     /// token, can give out.
     pub marker: String,
+    /// Whether it also offers `slow`, a tool it runs as a task that answers
+    /// `working` to the first `task_polls` `tasks/get` and then completes.
+    pub tasks: bool,
+    pub task_polls: usize,
+    /// `tasks/get` answers 401 whatever the token.
+    pub refuse_task_polls: bool,
 }
 
 pub struct McpServer {
@@ -669,6 +675,9 @@ impl McpServer {
             resource_metadata: true,
             challenge_scope: Some("mcp:read".into()),
             marker: format!("MCP-{}", uuid::Uuid::new_v4().simple()),
+            tasks: false,
+            task_polls: 3,
+            refuse_task_polls: false,
         }));
         let (mcp, tokens, issuer) = (state.clone(), auth.state.clone(), auth.url.clone());
         let handler: Handler = Arc::new(move |req| {
@@ -704,6 +713,13 @@ impl McpServer {
         (Self { url, state }, auth)
     }
 
+    fn task(status: &str) -> serde_json::Value {
+        serde_json::json!({
+            "taskId": "slow-1", "status": status, "ttlMs": null, "pollIntervalMs": 100,
+            "createdAt": "2026-01-01T00:00:00Z", "lastUpdatedAt": "2026-01-01T00:00:00Z",
+        })
+    }
+
     fn handle(s: &mut McpState, issued: &AsState, issuer: &str, req: Request) -> Response {
         let prm = format!("{}/.well-known/oauth-protected-resource/mcp", s.base);
         if req.method == "GET"
@@ -727,7 +743,8 @@ impl McpServer {
         if req.path != "/mcp" {
             return Response::empty(404);
         }
-        let token = req.bearer().and_then(|t| {
+        let refused_poll = s.refuse_task_polls && req.json()["method"] == "tasks/get";
+        let token = req.bearer().filter(|_| !refused_poll).and_then(|t| {
             let issued = issued.tokens.get(&t)?;
             (issued.expires_at > now() && issued.resource == format!("{}/mcp", s.base))
                 .then(|| (t, issued.clone()))
@@ -766,10 +783,32 @@ impl McpServer {
                 "serverInfo": {"name": "mock-docs", "version": "1.0.0"},
                 "instructions": "Docs server.",
             }),
-            "tools/list" => serde_json::json!({"tools": [
-                {"name": "echo", "description": "Echo", "inputSchema": {"type": "object", "properties": {}}},
-                {"name": "write", "description": "Write", "inputSchema": {"type": "object", "properties": {}}},
-            ]}),
+            "tools/list" => {
+                let mut tools = vec![
+                    serde_json::json!({"name": "echo", "description": "Echo", "inputSchema": {"type": "object", "properties": {}}}),
+                    serde_json::json!({"name": "write", "description": "Write", "inputSchema": {"type": "object", "properties": {}}}),
+                ];
+                if s.tasks {
+                    tools.push(serde_json::json!({"name": "slow", "description": "Slow", "inputSchema": {"type": "object", "properties": {}}}));
+                }
+                serde_json::json!({ "tools": tools })
+            }
+            "tools/call" if s.tasks && msg["params"]["name"] == "slow" => {
+                let mut task = Self::task("working");
+                task["resultType"] = "task".into();
+                task
+            }
+            "tasks/get" => {
+                let polled = s.calls.iter().filter(|c| *c == "tasks/get").count();
+                if polled <= s.task_polls {
+                    Self::task("working")
+                } else {
+                    let mut task = Self::task("completed");
+                    task["result"] = serde_json::json!({"content": [{"type": "text", "text": format!("slow: done {}", s.marker)}]});
+                    task
+                }
+            }
+            "tasks/cancel" => serde_json::json!({}),
             "tools/call" => {
                 let tool = msg["params"]["name"].as_str().unwrap_or_default();
                 if let Some(scope) = s.tool_scopes.get(tool) {
