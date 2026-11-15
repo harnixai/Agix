@@ -26,7 +26,7 @@ fn    crates/assembly/src/session_pool/facade/listing.rs         SessionPool::li
 fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::set_provider              117
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
-fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  179
+fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  174
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   93
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
