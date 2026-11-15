@@ -467,6 +467,16 @@ const NOT_SENT: &[(&str, &str)] = &[
         "needs an enterprise IdP configured and a token it issued",
     ),
     (
+        "session.call#0",
+        "needs a session whose recording holds that call; \
+         tests/blackbox/tests/session_calls.rs sends it over the socket",
+    ),
+    (
+        "session.callBlob#0",
+        "needs a recording holding a part past the inline limit; \
+         tests/blackbox/tests/session_calls.rs sends it over the socket",
+    ),
+    (
         "plugin.install#0",
         "needs a plugin archive whose checksum matches; the example's path is a stand-in",
     ),

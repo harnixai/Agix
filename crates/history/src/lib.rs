@@ -1,7 +1,7 @@
 //! Session persistence: the `HistoryStore` contract, the two implementations
 //! that ship with it (JSONL on disk, in memory), path sanitization, transcript
-//! projection, the session-query vocabulary and the blob store large content
-//! is moved into, the observers that watch appends go past, the
+//! projection, the session-query vocabulary, content search, the blob store
+//! large content is moved into, the observers that watch appends go past, the
 //! cross-process lock that keeps one writer per session log, and the file
 //! checkpoints a host rewinds to.
 
@@ -14,5 +14,6 @@ pub mod observers;
 pub mod path;
 pub mod project;
 pub mod query;
+pub mod search;
 pub mod store;
 pub mod transcript;

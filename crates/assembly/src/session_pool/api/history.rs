@@ -23,6 +23,22 @@ pub enum HistoryOrigin {
     Extension,
 }
 
+impl From<history::transcript::MessageSource> for HistoryOrigin {
+    fn from(source: history::transcript::MessageSource) -> Self {
+        use history::transcript::MessageSource;
+        match source {
+            MessageSource::User => Self::User,
+            MessageSource::Steer => Self::Steer,
+            MessageSource::Command => Self::Command,
+            MessageSource::Injected => Self::Injected,
+            MessageSource::ToolResult => Self::ToolResult,
+            MessageSource::Assistant => Self::Assistant,
+            MessageSource::Compact => Self::Compact,
+            MessageSource::Extension => Self::Extension,
+        }
+    }
+}
+
 /// One projected message, plus where it sits and where it came from.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HistoryItem {

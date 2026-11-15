@@ -522,7 +522,7 @@ static POINTS: [ExtensionPoint; 46] = [
     ExtensionPoint {
         id: "history.query",
         kind: Kind::Contract,
-        summary: "怎么找会话:按时间列表和按文本搜索",
+        summary: "怎么找会话:按时间列表、按文本搜索,以及按内容找到每个会话里第一次说到的地方",
         timing: "每当有人要的是若干会话而不是某一个会话",
         rewrites: "返回哪些会话、按什么顺序、怎么算匹配",
         frequency: Frequency::PerSession,
@@ -530,7 +530,7 @@ static POINTS: [ExtensionPoint; 46] = [
         defined_in: "history::store::HistoryStore::find_sessions",
         wired_by: &[Wiring::Carried {
             by: "history.store",
-            via: "HistoryStore::find_sessions",
+            via: "HistoryStore::find_sessions / search_text",
         }],
     },
     ExtensionPoint {

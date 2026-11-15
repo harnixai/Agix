@@ -498,6 +498,9 @@ fn every_optional_module_s_methods_are_listed_with_their_module() {
 /// result never belongs here.
 const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/AppendEntryParams/properties/payload",
+    "/$defs/CallBlob/properties/value",
+    "/$defs/CallPart_for_AnyValue/anyOf/2",
+    "/$defs/CallRequest/properties/input_map",
     "/$defs/ConfigSetProviderParams/properties/config",
     "/$defs/ConfigSetProviderParams/properties/task_models",
     "/$defs/ConfigTier/properties/managed",
@@ -526,6 +529,7 @@ const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/SubscribeResult/properties/pending_prompts/items",
     "/$defs/TaskInfo/properties/detail",
     "/$defs/TaskInfo/properties/structured_output",
+    "/$defs/ToolUseView/properties/input",
 ];
 
 /// A schema that says nothing about its value: `true`, or only annotations.

@@ -25,9 +25,9 @@ pub(in crate::session_pool) struct SessionSpec {
     pub(in crate::session_pool) provider: Option<String>,
     pub(in crate::session_pool) prompt: Option<runtime::agent::SessionPrompt>,
     /// Shared by every Agent this process builds for the session, so a
-    /// rebuild continues a replay where it stood instead of from the first
-    /// recorded call. Not persisted: a recording in progress does not outlive
-    /// the process that made it.
+    /// rebuild appends to the recording it was writing and continues a replay
+    /// where it stood instead of from the first recorded call. Not persisted:
+    /// a daemon that starts again starts the recording over.
     pub(in crate::session_pool) recorder: Option<Arc<telemetry::recorder::Recorder>>,
 }
 
@@ -159,14 +159,22 @@ impl SpecStore {
         // A log written before specs were recorded has none; the options of
         // the call that brought the session back are the best there is, and
         // are recorded so the next resume finds them too.
-        let adopted = resume && spec.options.is_none() && options.is_some();
+        let mut adopted = resume && spec.options.is_none() && options.is_some();
         if spec.options.is_none() {
             spec.options = options.cloned();
         }
-        // `recorder` is never recorded, so the call bringing the session back
-        // is the only place it can come from.
-        if let Some(recorder) = options.and_then(|o| o.recorder.clone()) {
-            spec.options.get_or_insert_with(Default::default).recorder = Some(recorder);
+        // Only recording is written to the log; a replay or rerun has to be
+        // asked for again by the call that brings the session back.
+        let logged_recording = spec
+            .options
+            .as_ref()
+            .and_then(|o| o.recorder.as_ref())
+            .is_some_and(|r| r.records());
+        if !logged_recording {
+            if let Some(recorder) = options.and_then(|o| o.recorder.clone()) {
+                adopted |= resume && recorder.records();
+                spec.options.get_or_insert_with(Default::default).recorder = Some(recorder);
+            }
         }
         if spec.options.as_ref().is_some_and(|o| o.recorder.is_some()) {
             spec.recorder = Some(telemetry::recorder::Recorder::new());
@@ -216,7 +224,7 @@ impl SpecStore {
         };
         let recorded = RecordedSpec {
             options: spec.options.clone().map(|mut o| {
-                o.recorder = None;
+                o.recorder = o.recorder.filter(|r| r.records());
                 o
             }),
             model: spec.model.clone(),
@@ -313,27 +321,45 @@ impl SpecStore {
     }
 }
 
-/// The spec `entries`, a session's log, recorded last; an empty one when they
-/// record none.
 /// Whether `entry` is a recorded spec.
 pub(in crate::session_pool) fn is_spec(entry: &history::entry::LogEntry) -> bool {
     matches!(entry, history::entry::LogEntry::Extension { ns, event, .. }
         if ns == SPEC_NS && event == SPEC_EVENT)
 }
 
-fn recorded_in(entries: &[history::entry::EnvelopedEntry]) -> SessionSpec {
-    let recorded = entries
-        .iter()
-        .rev()
-        .find_map(|env| match &env.entry {
-            history::entry::LogEntry::Extension { ns, event, payload }
-                if ns == SPEC_NS && event == SPEC_EVENT =>
-            {
-                serde_json::from_value::<RecordedSpec>(payload.clone()).ok()
-            }
-            _ => None,
-        })
-        .unwrap_or_default();
+fn last_recorded(entries: &[history::entry::EnvelopedEntry]) -> Option<RecordedSpec> {
+    entries.iter().rev().find_map(|env| match &env.entry {
+        history::entry::LogEntry::Extension { ns, event, payload }
+            if ns == SPEC_NS && event == SPEC_EVENT =>
+        {
+            serde_json::from_value::<RecordedSpec>(payload.clone()).ok()
+        }
+        _ => None,
+    })
+}
+
+/// The spec entry a fork appends after copying `copied`: the last spec it
+/// copied without its recording's name, so the fork records under its own id
+/// instead of starting its source's recording over. `None` when that spec
+/// names no recording.
+pub(in crate::session_pool) fn forked_spec(
+    copied: &[history::entry::EnvelopedEntry],
+) -> Option<history::entry::LogEntry> {
+    let mut spec = last_recorded(copied)?;
+    spec.options.as_mut()?.recorder.as_mut()?.name.take()?;
+    Some(history::entry::LogEntry::Extension {
+        ns: SPEC_NS.to_string(),
+        event: SPEC_EVENT.to_string(),
+        payload: serde_json::to_value(&spec).ok()?,
+    })
+}
+
+/// The spec `entries`, a session's log, recorded last; an empty one when they
+/// record none.
+pub(in crate::session_pool) fn recorded_in(
+    entries: &[history::entry::EnvelopedEntry],
+) -> SessionSpec {
+    let recorded = last_recorded(entries).unwrap_or_default();
     SessionSpec {
         options: recorded.options,
         model: recorded.model,

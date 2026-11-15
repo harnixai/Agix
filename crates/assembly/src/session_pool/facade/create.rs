@@ -111,7 +111,7 @@ impl SessionPool {
         self.live.refuse_while_shutting_down()?;
         self.live.wait_until_stopped(&session_id).await?;
         let claim = self.claim_log(&session_id).await?;
-        let spec = self.specs.spec_for(&session_id, log, options).await;
+        let spec = self.spec_for(&session_id, log, options, &binding).await;
         self.directory.note_served(project_root_for_meta.as_deref());
         let core = SessionCore::new(
             &session_id,
@@ -234,6 +234,19 @@ impl SessionPool {
         Ok(core)
     }
 
+    /// The spec of a session being brought up, with a recording's root
+    /// frozen into `options` before they can be kept.
+    async fn spec_for(
+        &self,
+        session_id: &str,
+        log: Option<&[history::entry::EnvelopedEntry]>,
+        options: Option<&SessionOptions>,
+        binding: &ProjectBinding,
+    ) -> SessionSpec {
+        let options = freeze_recording_root(options, &binding.settings);
+        self.specs.spec_for(session_id, log, options.as_ref()).await
+    }
+
     /// Put the next engine under live `sid`, whose slot `held` keeps turns
     /// off it. The engine is built first, and a session whose build fails
     /// goes on on the engine it has; the one it has is stopped before the
@@ -255,10 +268,6 @@ impl SessionPool {
         let claim = self.claim_log(sid).await?;
         let recorded = self.directory.read_log(sid).await?;
         let has_history = !recorded.is_empty();
-        let spec = self
-            .specs
-            .spec_for(sid, has_history.then_some(&recorded[..]), options)
-            .await;
         let scene_id = core.scene().id.clone();
         let Some(scene) = self.scenes.resolve(Some(&scene_id)) else {
             return Err(format!(
@@ -267,6 +276,9 @@ impl SessionPool {
             .into());
         };
         let binding = self.binding_for(core.project(), &scene_id).await;
+        let spec = self
+            .spec_for(sid, has_history.then_some(&recorded[..]), options, &binding)
+            .await;
         let restore = if has_history {
             Restore::Kept
         } else {

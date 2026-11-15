@@ -1,4 +1,5 @@
-//! 会话日志方法（`session.history` / `appendEntry` / `entries` / `export`）的
+//! 会话日志方法（`session.history` / `appendEntry` / `entries` / `export` /
+//! `import`）、录像读取（`calls` / `call` / `callBlob`）与内容搜索（`search`）的
 //! params。
 
 use super::session::ProjectRootParam;
@@ -57,4 +58,56 @@ pub struct ExportParams {
     /// `sidechains`, `attachments`, `recording`, `checkpoints`, `tool_results`; the first two and `tool_results` when omitted.
     #[serde(default)]
     pub include: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct CallsParams {
+    pub session_id: String,
+    /// The call index to start from; 0 when omitted.
+    #[serde(default)]
+    pub from: u64,
+    /// Clamped to 500 rather than refused; 200 when omitted.
+    #[serde(default)]
+    pub limit: Option<u64>,
+    /// The `generation` an earlier read saw; a recording started over since
+    /// is `INVALID_PARAMS` with the current one in `data.generation`.
+    #[serde(default)]
+    pub generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct CallParams {
+    pub session_id: String,
+    pub index: u64,
+    #[serde(default)]
+    pub generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct CallBlobParams {
+    pub session_id: String,
+    /// A `blob` reference from `session.call`.
+    pub blob: String,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct SearchParams {
+    /// Matched trimmed and case-insensitively; must not be empty.
+    pub query: String,
+    /// Only these sessions, in this order, sidechains included; omitted:
+    /// `session.list`'s range, most recent first.
+    #[serde(default)]
+    pub session_ids: Option<Vec<String>>,
+    /// Sessions with a hit; 20 when omitted, clamped to 100.
+    #[serde(default)]
+    pub limit: Option<u64>,
+    /// Sessions read at most; 500 when omitted, clamped to 5000.
+    #[serde(default)]
+    pub max_sessions: Option<u64>,
+    /// 2000 when omitted, clamped to 10000.
+    #[serde(default)]
+    pub deadline_ms: Option<u64>,
+    /// 120 when omitted, clamped to 500.
+    #[serde(default)]
+    pub snippet_chars: Option<u64>,
 }

@@ -22,6 +22,10 @@ impl From<PoolError> for RpcError {
                 Some(json!({ "invalid_options": invalid })),
             ),
             PoolError::SessionNotFound { .. } => (codes::SESSION_NOT_FOUND, None),
+            PoolError::RecordingRestarted { generation } => (
+                codes::INVALID_PARAMS,
+                Some(json!({ "generation": generation })),
+            ),
             PoolError::SessionBusy(busy) => (codes::SESSION_BUSY, Some(busy_data(busy))),
             PoolError::SceneNotFound { .. }
             | PoolError::SceneNotActive { .. }

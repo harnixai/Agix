@@ -1,10 +1,15 @@
-//! 会话日志：`session.history` / `appendEntry` / `entries` / `export`。
+//! 会话日志：`session.history` / `appendEntry` / `entries` / `export` / `import`；
+//! 录像：`session.calls` / `call` / `callBlob`；内容搜索：`session.search`。
 
 use super::*;
 use crate::rpc::methods::history::{
-    AppendEntryParams, EntriesParams, ExportParams, HistoryParams, ImportParams,
+    AppendEntryParams, CallBlobParams, CallParams, CallsParams, EntriesParams, ExportParams,
+    HistoryParams, ImportParams, SearchParams,
 };
-use crate::session_pool::api::{EntryList, EntryView, ExportSummary, HistoryPage, ImportSummary};
+use crate::session_pool::api::{
+    CallBlob, CallDetail, CallList, EntryList, EntryView, ExportSummary, HistoryPage,
+    ImportSummary, SearchRequest, SearchResult,
+};
 
 rpc_methods! {
     "session.history" => history(HistoryParams) -> HistoryPage;
@@ -12,6 +17,10 @@ rpc_methods! {
     "session.entries" => entries(EntriesParams) -> EntryList;
     "session.export" => export(ExportParams) -> ExportSummary;
     "session.import" => import(ImportParams) -> ImportSummary;
+    "session.calls" => calls(CallsParams) -> CallList;
+    "session.call" => call(CallParams) -> CallDetail;
+    "session.callBlob" => call_blob(CallBlobParams) -> CallBlob;
+    "session.search" => search(SearchParams) -> SearchResult;
 }
 
 /// Page size when the caller does not say: big enough for a typical
@@ -94,4 +103,66 @@ async fn import(
             keep_ids: params.keep_ids,
         })
         .await
+}
+
+const CALLS_DEFAULT_LIMIT: u64 = 200;
+const CALLS_MAX_LIMIT: u64 = 500;
+
+async fn calls(s: &DaemonServer, _: &Call, params: CallsParams) -> Result<CallList, PoolError> {
+    let limit = params
+        .limit
+        .unwrap_or(CALLS_DEFAULT_LIMIT)
+        .min(CALLS_MAX_LIMIT);
+    s.pool
+        .session_calls(
+            &params.session_id,
+            clamp(params.from, u64::MAX),
+            clamp(limit, CALLS_MAX_LIMIT),
+            params.generation,
+        )
+        .await
+}
+
+async fn call(s: &DaemonServer, _: &Call, params: CallParams) -> Result<CallDetail, PoolError> {
+    s.pool
+        .session_call(
+            &params.session_id,
+            clamp(params.index, u64::MAX),
+            params.generation,
+        )
+        .await
+}
+
+async fn call_blob(
+    s: &DaemonServer,
+    _: &Call,
+    params: CallBlobParams,
+) -> Result<CallBlob, PoolError> {
+    s.pool
+        .session_call_blob(&params.session_id, &params.blob)
+        .await
+}
+
+async fn search(
+    s: &DaemonServer,
+    _: &Call,
+    params: SearchParams,
+) -> Result<SearchResult, PoolError> {
+    let bound = |given: Option<u64>, default: u64, max: u64| clamp(given.unwrap_or(default), max);
+    s.pool
+        .search_sessions(SearchRequest {
+            query: params.query,
+            session_ids: params.session_ids,
+            limit: bound(params.limit, 20, 100).max(1),
+            max_sessions: bound(params.max_sessions, 500, 5000),
+            deadline: std::time::Duration::from_millis(
+                bound(params.deadline_ms, 2000, 10_000) as u64
+            ),
+            snippet_chars: bound(params.snippet_chars, 120, 500),
+        })
+        .await
+}
+
+fn clamp(n: u64, max: u64) -> usize {
+    usize::try_from(n.min(max)).unwrap_or(usize::MAX)
 }

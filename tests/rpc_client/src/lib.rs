@@ -618,6 +618,51 @@ impl DaemonRpcClient {
         .await
     }
 
+    /// `session.calls`：一份录像里的模型调用清单，从 `from` 起最多 `limit` 条。
+    pub async fn session_calls(
+        &mut self,
+        session_id: &str,
+        from: u64,
+        limit: Option<u64>,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "session_id": session_id, "from": from });
+        if let Some(limit) = limit {
+            params["limit"] = limit.into();
+        }
+        self.call("session.calls", params).await
+    }
+
+    /// `session.call`：第 `index` 条调用的完整请求与应答。
+    pub async fn session_call(
+        &mut self,
+        session_id: &str,
+        index: u64,
+    ) -> anyhow::Result<RpcResponse> {
+        self.call(
+            "session.call",
+            serde_json::json!({ "session_id": session_id, "index": index }),
+        )
+        .await
+    }
+
+    /// `session.callBlob`：取 `session.call` 以句柄代替的那一段原文。
+    pub async fn session_call_blob(
+        &mut self,
+        session_id: &str,
+        blob: &str,
+    ) -> anyhow::Result<RpcResponse> {
+        self.call(
+            "session.callBlob",
+            serde_json::json!({ "session_id": session_id, "blob": blob }),
+        )
+        .await
+    }
+
+    /// `session.search`：按内容找会话，`params` 原样发出。
+    pub async fn session_search(&mut self, params: Value) -> anyhow::Result<RpcResponse> {
+        self.call("session.search", params).await
+    }
+
     /// `session.respondToolCall`。
     pub async fn session_respond_tool_call(
         &mut self,

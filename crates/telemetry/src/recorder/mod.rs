@@ -34,6 +34,7 @@ pub mod override_doc;
 pub mod pack;
 pub mod reader;
 pub mod rerun;
+mod stream;
 pub mod writer;
 
 use async_trait::async_trait;
@@ -45,18 +46,16 @@ use base::provider::ApiType;
 use base::recorder::{Divergence, RecorderConfig, RecorderMode};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 use tokio_util::sync::CancellationToken;
 
 use blob::BlobId;
 use format::{
-    now_ms, CallRecord, ChunkRecord, EndRecord, Header, Outcome, Record, RecordedError,
-    RecordedParams, FORMAT_VERSION,
+    now_ms, CallRecord, Header, Outcome, Record, RecordedError, RecordedParams, FORMAT_VERSION,
 };
 use pack::RunPacker;
 use reader::Recording;
+use stream::{write_end, RecordingStream};
 use writer::RecordingWriter;
 
 /// A recording directory, created readable by its owner only.
@@ -686,6 +685,7 @@ impl RecorderModel {
                 .as_ref()
                 .and_then(|o| o.parent_session_id.clone()),
             agent_type: params.origin.as_ref().and_then(|o| o.agent_type.clone()),
+            turn_id: params.origin.as_ref().and_then(|o| o.turn_id.clone()),
             turn,
             step,
             purpose: params
@@ -824,121 +824,6 @@ fn exhausted_error(
 /// being reported as having stopped short.
 fn may_go_unreplayed(purpose: &str) -> bool {
     purpose == base::interface::model::call_purpose::TITLE
-}
-
-fn write_end(
-    writer: &RecordingWriter,
-    call_seq: u64,
-    outcome: Outcome,
-    stop_reason: Option<String>,
-    usage: Option<Usage>,
-    started: std::time::Instant,
-) {
-    let record = Record::End(EndRecord {
-        seq: writer.next_seq(),
-        ts: now_ms(),
-        call: call_seq,
-        outcome,
-        stop_reason,
-        usage,
-        duration_ms: started.elapsed().as_millis() as u64,
-    });
-    if let Err(e) = writer.append(&record).and_then(|()| writer.flush()) {
-        tracing::warn!(error = %e, "recorder: failed to write end record");
-    }
-}
-
-/// Forwards the model's stream downstream while writing every event.
-///
-/// Recording happens on the way through rather than after collection: buffering
-/// the whole response before returning it would make the recorder visible in
-/// the agent's own latency, and would lose everything if the process died
-/// mid-stream.
-struct RecordingStream {
-    inner: ModelStream,
-    writer: Arc<RecordingWriter>,
-    packer: RunPacker,
-    call_seq: u64,
-    started: std::time::Instant,
-    stop_reason: String,
-    usage: Usage,
-    finished: bool,
-}
-
-impl RecordingStream {
-    fn write(&mut self, mut records: Vec<Record>) {
-        for record in &mut records {
-            let from = self.writer.next_seq_block(pack::seq_width(record));
-            pack::stamp_seqs(record, from);
-            if let Err(e) = self.writer.append(record) {
-                tracing::warn!(error = %e, "recorder: failed to write chunk");
-                return;
-            }
-        }
-    }
-
-    fn finish(&mut self, outcome: Outcome) {
-        if self.finished {
-            return;
-        }
-        self.finished = true;
-        let tail = self.packer.flush();
-        self.write(tail);
-        let stop_reason = (!self.stop_reason.is_empty()).then(|| self.stop_reason.clone());
-        write_end(
-            &self.writer,
-            self.call_seq,
-            outcome,
-            stop_reason,
-            Some(self.usage),
-            self.started,
-        );
-    }
-}
-
-impl futures::Stream for RecordingStream {
-    type Item = Result<ModelEvent, ModelError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        match Pin::new(&mut this.inner).poll_next(cx) {
-            Poll::Ready(Some(Ok(event))) => {
-                if let ModelEvent::EndTurn { stop_reason, usage } = &event {
-                    this.stop_reason = stop_reason.clone();
-                    this.usage = *usage;
-                }
-                let records = this.packer.push(ChunkRecord {
-                    // Numbered on the way out, not here — see `pack::stamp_seqs`.
-                    seq: 0,
-                    ts: now_ms(),
-                    call: this.call_seq,
-                    chunk: event.clone(),
-                });
-                this.write(records);
-                Poll::Ready(Some(Ok(event)))
-            }
-            Poll::Ready(Some(Err(e))) => {
-                this.finish(Outcome::Error {
-                    error: RecordedError::from(&e),
-                });
-                Poll::Ready(Some(Err(e)))
-            }
-            Poll::Ready(None) => {
-                this.finish(Outcome::Ok);
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-/// A stream dropped before it ended was cancelled — the turn was interrupted,
-/// or a caller stopped reading. Closing the call here is what keeps every
-/// `call` record paired with an `end`.
-impl Drop for RecordingStream {
-    fn drop(&mut self) {
-        self.finish(Outcome::Cancelled);
-    }
 }
 
 #[cfg(test)]
@@ -1353,6 +1238,46 @@ mod tests {
             .as_ref()
             .expect("call must be closed");
         assert_eq!(end.outcome, Outcome::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn a_stream_dropped_after_its_final_event_records_the_call_as_answered() {
+        let root = tempfile::tempdir().unwrap();
+        let recorder = RecorderModel::new(
+            ScriptedModel::ok(script()),
+            Some(config(
+                RecorderMode::Record,
+                root.path(),
+                Divergence::Strict,
+            )),
+            "test",
+        );
+        {
+            let mut stream = recorder
+                .stream(
+                    prompt("sys"),
+                    tools(),
+                    vec![],
+                    params("S1", 0),
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            while let Some(event) = stream.next().await {
+                if matches!(event, Ok(ModelEvent::EndTurn { .. })) {
+                    break;
+                }
+            }
+        }
+        drop(recorder);
+
+        let recording = reader::load(&root.path().join("run")).unwrap();
+        let end = recording.calls[0]
+            .end
+            .as_ref()
+            .expect("call must be closed");
+        assert_eq!(end.outcome, Outcome::Ok);
+        assert!(end.stop_reason.is_some());
     }
 
     #[tokio::test]

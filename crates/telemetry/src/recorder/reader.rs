@@ -35,6 +35,8 @@ pub struct RecordedCall {
     /// Absent when the recording stops mid-call — the process died while the
     /// stream was open. Replay reproduces that as a stream that simply ends.
     pub end: Option<EndRecord>,
+    /// When the first response record of this call was written (ms since the epoch); `None` when none was.
+    pub first_event_at: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,24 +58,45 @@ pub fn load(dir: &Path) -> Result<Recording, ReadError> {
         Err(e) => return Err(ReadError::Io(e)),
     };
 
-    let mut header: Option<Header> = None;
-    let mut calls: Vec<RecordedCall> = Vec::new();
-    let mut damaged = 0usize;
-
-    for (i, line) in content.lines().enumerate() {
+    // A last line with no newline is one the writer is still in the middle
+    // of (or died in the middle of), not a damaged one.
+    let complete = match content.rfind('\n') {
+        Some(end) => &content[..=end],
+        None => "",
+    };
+    let mut reading = Reading::default();
+    for (i, line) in complete.lines().enumerate() {
         let line_no = i + 1;
         if line.trim().is_empty() {
             continue;
         }
-        let record = match serde_json::from_str::<Record>(line) {
-            Ok(r) => r,
+        match serde_json::from_str::<Record>(line) {
+            Ok(record) => reading.take(record, line_no)?,
             Err(e) => {
                 tracing::warn!(line = line_no, error = %e, "recording: unreadable line, skipped");
-                damaged += 1;
-                continue;
+                reading.damaged += 1;
             }
-        };
+        }
+    }
 
+    Ok(Recording {
+        header: reading.header.ok_or(ReadError::MissingHeader)?,
+        calls: reading.calls,
+        damaged: reading.damaged,
+    })
+}
+
+/// A recording as far as its lines have been read.
+#[derive(Default)]
+struct Reading {
+    header: Option<Header>,
+    calls: Vec<RecordedCall>,
+    damaged: usize,
+}
+
+impl Reading {
+    fn take(&mut self, record: Record, line_no: usize) -> Result<(), ReadError> {
+        let (calls, damaged) = (&mut self.calls, &mut self.damaged);
         match record {
             Record::Recording(h) => {
                 if h.version > super::format::FORMAT_VERSION {
@@ -82,40 +105,45 @@ pub fn load(dir: &Path) -> Result<Recording, ReadError> {
                         supported: super::format::FORMAT_VERSION,
                     });
                 }
-                header = Some(h);
+                self.header = Some(h);
             }
             Record::Call(request) => calls.push(RecordedCall {
                 request: *request,
                 response: Vec::new(),
                 end: None,
+                first_event_at: None,
             }),
             Record::Chunk(c) => push_events(
-                &mut calls,
+                calls,
                 c.call,
+                c.ts,
                 std::iter::once(c.chunk),
                 line_no,
-                &mut damaged,
+                damaged,
             ),
             Record::TextChunks(run) => push_packed(
-                &mut calls,
+                calls,
                 run.call,
+                run.ts0,
                 expand_text_run(&run, false),
                 line_no,
-                &mut damaged,
+                damaged,
             ),
             Record::ThinkingChunks(run) => push_packed(
-                &mut calls,
+                calls,
                 run.call,
+                run.ts0,
                 expand_text_run(&run, true),
                 line_no,
-                &mut damaged,
+                damaged,
             ),
             Record::ToolArgsChunks(run) => push_packed(
-                &mut calls,
+                calls,
                 run.call,
+                run.ts0,
                 expand_tool_args_run(&run),
                 line_no,
-                &mut damaged,
+                damaged,
             ),
             Record::End(end) => match calls.iter_mut().find(|c| c.request.seq == end.call) {
                 Some(call) => call.end = Some(end),
@@ -125,21 +153,16 @@ pub fn load(dir: &Path) -> Result<Recording, ReadError> {
                         call = end.call,
                         "recording: end record with no matching call, skipped"
                     );
-                    damaged += 1;
+                    *damaged += 1;
                 }
             },
             Record::Unknown => {
                 tracing::warn!(line = line_no, "recording: unknown record type, skipped");
-                damaged += 1;
+                *damaged += 1;
             }
         }
+        Ok(())
     }
-
-    Ok(Recording {
-        header: header.ok_or(ReadError::MissingHeader)?,
-        calls,
-        damaged,
-    })
 }
 
 /// Loads a recording for replay, applying the hand-written override beside it
@@ -178,6 +201,7 @@ pub(super) fn load_for_replay(
 fn push_packed(
     calls: &mut [RecordedCall],
     call_seq: u64,
+    ts: u64,
     expanded: Result<Vec<super::format::ChunkRecord>, super::pack::PackError>,
     line_no: usize,
     damaged: &mut usize,
@@ -186,6 +210,7 @@ fn push_packed(
         Ok(chunks) => push_events(
             calls,
             call_seq,
+            ts,
             chunks.into_iter().map(|c| c.chunk),
             line_no,
             damaged,
@@ -200,12 +225,16 @@ fn push_packed(
 fn push_events(
     calls: &mut [RecordedCall],
     call_seq: u64,
+    ts: u64,
     events: impl Iterator<Item = ModelEvent>,
     line_no: usize,
     damaged: &mut usize,
 ) {
     match calls.iter_mut().find(|c| c.request.seq == call_seq) {
-        Some(call) => call.response.extend(events),
+        Some(call) => {
+            call.first_event_at.get_or_insert(ts);
+            call.response.extend(events);
+        }
         None => {
             tracing::warn!(
                 line = line_no,
@@ -246,6 +275,7 @@ mod tests {
             session_id: Some("S1".into()),
             parent_session_id: None,
             agent_type: None,
+            turn_id: None,
             turn: 0,
             step: 0,
             purpose: None,
@@ -319,6 +349,7 @@ mod tests {
             ModelEvent::TextDelta { text } if text == "t0"
         ));
         assert!(matches!(call.end.as_ref().unwrap().outcome, Outcome::Ok));
+        assert_eq!(call.first_event_at, Some(1000));
     }
 
     #[test]
@@ -351,6 +382,20 @@ mod tests {
     }
 
     #[test]
+    fn a_line_still_being_written_is_left_out_rather_than_counted() {
+        let root = tempfile::tempdir().unwrap();
+        write_one_call(root.path());
+        let path = root.path().join("run").join("calls.jsonl");
+        let mut content = std::fs::read_to_string(&path).unwrap();
+        content.push_str("{\"type\":\"chunk\",\"seq\":9,\"ts\":1");
+        std::fs::write(&path, content).unwrap();
+
+        let recording = load(&root.path().join("run")).unwrap();
+        assert_eq!(recording.damaged, 0);
+        assert_eq!(recording.calls.len(), 1);
+    }
+
+    #[test]
     fn a_call_cut_off_mid_stream_reads_back_without_an_end() {
         let root = tempfile::tempdir().unwrap();
         let writer = RecordingWriter::create(root.path(), header());
@@ -373,6 +418,30 @@ mod tests {
         assert_eq!(recording.calls.len(), 1);
         assert_eq!(recording.calls[0].response.len(), 1);
         assert!(recording.calls[0].end.is_none());
+    }
+
+    #[test]
+    fn a_call_with_no_response_records_has_no_first_event_time() {
+        let root = tempfile::tempdir().unwrap();
+        let writer = RecordingWriter::create(root.path(), header());
+        writer
+            .append(&Record::Call(Box::new(call_record(0))))
+            .unwrap();
+        writer
+            .append(&Record::End(EndRecord {
+                seq: 1,
+                ts: 1100,
+                call: 0,
+                outcome: Outcome::Ok,
+                stop_reason: None,
+                usage: None,
+                duration_ms: 100,
+            }))
+            .unwrap();
+        writer.flush().unwrap();
+
+        let recording = load(&root.path().join("run")).unwrap();
+        assert_eq!(recording.calls[0].first_event_at, None);
     }
 
     #[test]

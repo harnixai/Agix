@@ -505,6 +505,7 @@ mod tests {
                 session_id: Some("S1".into()),
                 parent_session_id: None,
                 agent_type: None,
+                turn_id: None,
                 turn: 1,
                 step: 0,
                 purpose: None,

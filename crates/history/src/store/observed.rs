@@ -164,4 +164,11 @@ impl HistoryStore for ObservedHistoryStore {
     ) -> Result<Vec<SessionSummary>, HistoryError> {
         self.inner.find_sessions(query).await
     }
+
+    async fn search_text(
+        &self,
+        query: &crate::search::TextQuery,
+    ) -> Result<crate::search::TextSearch, HistoryError> {
+        self.inner.search_text(query).await
+    }
 }

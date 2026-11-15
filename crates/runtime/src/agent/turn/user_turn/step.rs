@@ -138,7 +138,8 @@ impl Agent {
             .with_lineage(
                 self.session.parent_session_id().map(str::to_string),
                 self.identity.agent_type().map(str::to_string),
-            ),
+            )
+            .with_turn_id(self.current_turn_id.clone()),
         );
         let request = self
             .prepare_request(&state.model, state.max_tokens, origin.clone())

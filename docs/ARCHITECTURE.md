@@ -433,7 +433,7 @@ MCP 连接、脚本绑定的 root、记忆目录、transcript 目录。
 重建照的是**会话规格**,不是触发重建的那次调用碰巧带了什么:创建时的 `options`、
 `session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词。规格以 `ns = "agix.session"`、`event = "spec"`
 的扩展条目写进会话日志,每次变化追加一条,最后一条为准,所以跨 daemon 重启也成立。
-recorder 不落盘:同一进程里的重建共用同一个 recorder,回放接着原来的进度。
+recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.fork` 去掉 `name`);同一进程里的重建共用同一个 recorder,录像接着写、回放接着原来的进度;daemon 重启后录像从头重写,回放要恢复时再给一次。录制时会话和它的子 Agent、起名、压缩等辅助调用进同一份录像,`session.calls` 经协议读它。
 
 重建之前先停掉旧 `Agent` 并等它收尾(有时限),然后才从盘上读 transcript——否则新
 `Agent` 读到的是旧的那个还没写完的历史。关停时同样等所有 `Agent` 收尾。超过时限的旧 `Agent`

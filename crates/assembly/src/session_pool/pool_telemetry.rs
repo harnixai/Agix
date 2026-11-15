@@ -21,6 +21,40 @@ pub(super) fn recordings_root(
     base::paths::ConfigPaths::from_settings(&settings.paths).global_recordings_dir()
 }
 
+/// `options` with a recording recorder's omitted `dir` set to the root it
+/// records under now: the spec keeps it, so a session goes on recording where
+/// it started whatever the settings say later.
+pub(super) fn freeze_recording_root(
+    options: Option<&SessionOptions>,
+    settings: &settings::LoadedSettings,
+) -> Option<SessionOptions> {
+    let mut options = options.cloned()?;
+    if let Some(recorder) = options.recorder.as_mut().filter(|r| r.records()) {
+        if recorder.dir.is_none() {
+            recorder.dir = Some(recordings_root(settings, None).display().to_string());
+        }
+    }
+    Some(options)
+}
+
+/// Where the recording of `session_id` is written: its root and its name, the
+/// session id when the recorder names none. `None` for a session that does
+/// not record.
+pub(super) fn recording_location(
+    recorder: Option<&api::RecorderOptions>,
+    settings: &settings::LoadedSettings,
+    session_id: &str,
+) -> Option<(PathBuf, String)> {
+    let recorder = recorder.filter(|r| r.records() && r.problems().is_empty())?;
+    Some((
+        recordings_root(settings, recorder.dir.as_deref()),
+        recorder
+            .name
+            .clone()
+            .unwrap_or_else(|| session_id.to_string()),
+    ))
+}
+
 /// A `TelemetryRecorder` that forwards turn/tool events to OpenTelemetry, or
 /// `None` when no OTLP endpoint is configured.
 ///

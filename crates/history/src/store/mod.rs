@@ -457,6 +457,28 @@ pub trait HistoryStore: Send + Sync {
         rows.truncate(query.limit);
         Ok(rows.into_iter().map(|(_, summary)| summary).collect())
     }
+
+    /// Where `query.text` first occurs in each of `query.sessions`: one hit
+    /// per session at most, in the order the sessions were given.
+    ///
+    /// What an implementation must keep:
+    ///
+    /// * **The same matches as the default.** Case-insensitive substring of
+    ///   the trimmed needle, over the text blocks of what the person typed and
+    ///   the model replied ([`crate::search::first_hit`]), reminders cut out;
+    ///   the first such place in the log, at its `session.history` position.
+    /// * **Order and bounds.** Hits follow `query.sessions`; at most
+    ///   `query.limit`; sidechains only when asked; `truncated` whenever a
+    ///   session was left unread because a bound or the deadline was reached.
+    ///
+    /// The default loads each session whole, checking the deadline between
+    /// sessions; a backend with a text index overrides it.
+    async fn search_text(
+        &self,
+        query: &crate::search::TextQuery,
+    ) -> Result<crate::search::TextSearch, HistoryError> {
+        crate::search::scan(self, query).await
+    }
 }
 
 #[cfg(test)]

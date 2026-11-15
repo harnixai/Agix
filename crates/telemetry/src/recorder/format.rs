@@ -79,6 +79,9 @@ pub struct CallRecord {
     pub parent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
+    /// The turn this call belongs to, as the session's events name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     pub turn: u32,
     pub step: u32,
     /// Present for a call made outside any turn — `compact`, `memory`, and so
@@ -246,6 +249,7 @@ mod tests {
             session_id: Some("S1".into()),
             parent_session_id: None,
             agent_type: None,
+            turn_id: Some("T1".into()),
             turn: 2,
             step: 1,
             purpose: None,
@@ -272,6 +276,7 @@ mod tests {
             panic!("expected a call record")
         };
         assert_eq!(back.seq, 3);
+        assert_eq!(back.turn_id.as_deref(), Some("T1"));
         assert_eq!(back.system.len(), 1);
     }
 

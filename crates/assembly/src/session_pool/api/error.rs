@@ -21,6 +21,9 @@ pub enum PoolError {
     InvalidOptions(Vec<InvalidOption>),
     #[error("{message}")]
     SessionNotFound { session_id: String, message: String },
+    /// The recording read was started over since the caller's last read.
+    #[error("the recording was started over; its generation is now {generation}")]
+    RecordingRestarted { generation: u64 },
     #[error("{}", .0.message)]
     SessionBusy(Busy),
     #[error("unknown scene: {scene}")]

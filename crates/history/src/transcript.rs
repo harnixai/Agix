@@ -196,6 +196,41 @@ pub struct SourcedMessage<'a> {
     pub part: Option<usize>,
 }
 
+/// Where a projected message came from, in the terms `session.history`
+/// reports it in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageSource {
+    User,
+    Steer,
+    Command,
+    Injected,
+    ToolResult,
+    Assistant,
+    /// A compaction's summary or kept history.
+    Compact,
+    Extension,
+}
+
+impl SourcedMessage<'_> {
+    /// `None` for a user-role line written before lines recorded their origin.
+    pub fn source(&self) -> Option<MessageSource> {
+        use crate::entry::MessageOrigin;
+        match (&self.message, self.part, &self.entry.entry) {
+            (Message::Assistant { .. }, _, _) => Some(MessageSource::Assistant),
+            (_, Some(_), _) => Some(MessageSource::Compact),
+            (_, None, LogEntry::ToolResult { .. }) => Some(MessageSource::ToolResult),
+            (_, None, LogEntry::Extension { .. }) => Some(MessageSource::Extension),
+            _ => self.entry.origin.map(|origin| match origin {
+                MessageOrigin::User => MessageSource::User,
+                MessageOrigin::Steer => MessageSource::Steer,
+                MessageOrigin::Command => MessageSource::Command,
+                MessageOrigin::Injected => MessageSource::Injected,
+                MessageOrigin::ToolResult => MessageSource::ToolResult,
+            }),
+        }
+    }
+}
+
 /// [`project_messages_with`], keeping for every message the line that put it
 /// there. Tool results folded into an earlier user message keep that
 /// message's line.

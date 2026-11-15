@@ -69,6 +69,7 @@ impl SessionOptions {
                 _ => value.clone(),
             };
             match Self::read_alone(name, &value) {
+                Ok(()) if name == "recorder" && !recorder_reads(&value, &mut ignored) => {}
                 Ok(()) => {
                     readable.insert(name.clone(), value);
                 }
@@ -120,6 +121,23 @@ impl SessionOptions {
         }
         kept
     }
+}
+
+/// Whether `options.recorder` names a usable place; what does not is added to
+/// `ignored` by field.
+fn recorder_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
+    use crate::session_pool::api::RecorderOptions;
+    let Ok(recorder) = serde_json::from_value::<RecorderOptions>(value.clone()) else {
+        return true;
+    };
+    let problems = recorder.problems();
+    for (field, error) in &problems {
+        ignored.push(IgnoredOption {
+            field: Some(format!("recorder.{field}")),
+            error: error.clone(),
+        });
+    }
+    problems.is_empty()
 }
 
 /// What the engine would refuse of `options.host_tools`, by the field of the
@@ -306,6 +324,43 @@ mod tests {
         ignored.sort_by(|a, b| a.field.cmp(&b.field));
         let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
         assert_eq!(fields, [Some("attended"), Some("auto_name")]);
+    }
+
+    #[test]
+    fn a_recorder_must_name_an_absolute_root_and_one_directory_under_it() {
+        for (recorder, field) in [
+            (
+                serde_json::json!({"mode": "record", "dir": "rel/dir"}),
+                "recorder.dir",
+            ),
+            (
+                serde_json::json!({"mode": "record", "name": "../up"}),
+                "recorder.name",
+            ),
+            (
+                serde_json::json!({"mode": "replay", "name": "a/b"}),
+                "recorder.name",
+            ),
+            (
+                serde_json::json!({"mode": "record", "name": ""}),
+                "recorder.name",
+            ),
+        ] {
+            let (options, ignored) = SessionOptions::from_params(
+                &serde_json::json!({"options": {"recorder": recorder}}),
+            );
+            assert!(options.is_none(), "{recorder}");
+            assert_eq!(ignored.len(), 1, "{recorder}");
+            assert_eq!(ignored[0].field.as_deref(), Some(field), "{recorder}");
+        }
+        let (options, ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "recorder": {"mode": "record", "dir": "/abs/root", "name": "run-1"}
+        }}));
+        assert!(ignored.is_empty());
+        assert_eq!(
+            options.unwrap().recorder.unwrap().name.as_deref(),
+            Some("run-1")
+        );
     }
 
     #[test]

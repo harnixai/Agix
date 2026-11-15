@@ -122,23 +122,58 @@ impl HostToolOption {
 }
 
 /// Record or replay this session's LLM calls.
+///
+/// A recorder that records is kept with the session's spec, so the session
+/// goes on recording after a restart; one that replays or reruns is not, and
+/// is given again by the call that brings the session back.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 pub struct RecorderOptions {
     pub mode: String, // "record" | "replay" | "rerun"
-    /// Directory name for the recording under `dir`. Omitted, the session id
-    /// is used — which is what production recording wants, and what a replay
-    /// must therefore override with the name of the recording it wants back.
+    /// Directory name for the recording under `dir`: one path component.
+    /// Omitted, the session id — recording, the session's sub-agents then
+    /// record into that same directory; a replay must name the recording it
+    /// wants back.
     #[serde(default)]
     pub name: Option<String>,
-    /// Absolute path to the recordings root. Omitted, the daemon's own root is
-    /// used — `settings.recorder.root` if configured, else
-    /// `ConfigPaths::global_recordings_dir()`.
+    /// Absolute path to the recordings root. Omitted, the daemon's own root —
+    /// `settings.recorder.root` if configured, else
+    /// `ConfigPaths::global_recordings_dir()` — as it is when the session is
+    /// created; a recording session keeps that root from then on.
     #[serde(default)]
     pub dir: Option<String>,
     /// On replay, whether a live request that differs from the recorded one
     /// fails the call (`true`) or only warns (`false`).
     #[serde(default)]
     pub strict: bool,
+}
+
+impl RecorderOptions {
+    pub fn records(&self) -> bool {
+        self.mode == "record"
+    }
+
+    /// What is wrong with `dir` and `name`, by field.
+    pub fn problems(&self) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        if let Some(dir) = &self.dir {
+            if !std::path::Path::new(dir).is_absolute() {
+                out.push(("dir", format!("`{dir}` is not an absolute path")));
+            }
+        }
+        if let Some(name) = &self.name {
+            let one = matches!(
+                std::path::Path::new(name)
+                    .components()
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                [std::path::Component::Normal(_)]
+            );
+            if !one {
+                out.push(("name", format!("`{name}` is not a single path component")));
+            }
+        }
+        out
+    }
 }
 
 #[derive(

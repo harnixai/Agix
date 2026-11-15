@@ -175,6 +175,25 @@
         }
       ]
     },
+    "BlobRef": {
+      "properties": {
+        "blob": {
+          "description": "`s.<id>` a system block, `m.<id>` a message, `t.<id>` the tool table.",
+          "type": "string"
+        },
+        "bytes": {
+          "description": "Length of the JSON `session.callBlob` answers with.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "blob",
+        "bytes"
+      ],
+      "type": "object"
+    },
     "BlockOrigin": {
       "description": "Where a prompt block came from.",
       "oneOf": [
@@ -245,6 +264,677 @@
           "type": "object"
         }
       ]
+    },
+    "CallBlob": {
+      "description": "`session.callBlob`: one part `session.call` gave by reference.",
+      "properties": {
+        "blob": {
+          "type": "string"
+        },
+        "bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "description": "The part, shaped as `session.call` would have inlined it."
+        }
+      },
+      "required": [
+        "blob",
+        "bytes",
+        "value"
+      ],
+      "type": "object"
+    },
+    "CallBlobParams": {
+      "properties": {
+        "blob": {
+          "description": "A `blob` reference from `session.call`.",
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "blob"
+      ],
+      "type": "object"
+    },
+    "CallDetail": {
+      "description": "`session.call`: one call in full.",
+      "properties": {
+        "generation": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request": {
+          "$ref": "#/$defs/CallRequest"
+        },
+        "response": {
+          "$ref": "#/$defs/CallResponse"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "index",
+        "generation",
+        "request",
+        "response"
+      ],
+      "type": "object"
+    },
+    "CallError": {
+      "properties": {
+        "http_status": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "`rate_limited`, `overloaded`, `auth`, … as the model error kinds name them.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retry_after_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "CallInput": {
+      "properties": {
+        "messages": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "system": {
+          "items": {
+            "$ref": "#/$defs/SystemBlockSize"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "description": "Tools offered; `None` when the recording no longer holds the table.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "system",
+        "messages"
+      ],
+      "type": "object"
+    },
+    "CallList": {
+      "description": "`session.calls`: one page of the calls a session's recording holds.",
+      "properties": {
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/CallSummary"
+          },
+          "type": "array"
+        },
+        "damaged": {
+          "description": "Lines of the recording that could not be read and were skipped.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next": {
+          "description": "Where the next read starts: past the last call returned, or at the\nfirst one still in flight, which a later read returns finished.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recording": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordingInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`None` when the session records nothing, or nothing has been written yet."
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "total": {
+          "description": "Calls in the whole recording.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "calls",
+        "next",
+        "total",
+        "damaged"
+      ],
+      "type": "object"
+    },
+    "CallOutput": {
+      "properties": {
+        "chars": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thinking_chars": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool_uses": {
+          "items": {
+            "$ref": "#/$defs/ToolUseRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "chars",
+        "thinking_chars",
+        "tool_uses"
+      ],
+      "type": "object"
+    },
+    "CallParams": {
+      "properties": {
+        "generation": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "index": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "index"
+      ],
+      "type": "object"
+    },
+    "CallPart_for_AnyValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BlobRef"
+        },
+        {
+          "$ref": "#/$defs/MissingPart"
+        },
+        true
+      ],
+      "description": "A part of a request: inline, or — past the inline limits — a reference\n`session.callBlob` resolves. `missing` when the recording no longer holds it."
+    },
+    "CallPart_for_SystemBlockView": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BlobRef"
+        },
+        {
+          "$ref": "#/$defs/MissingPart"
+        },
+        {
+          "$ref": "#/$defs/SystemBlockView"
+        }
+      ],
+      "description": "A part of a request: inline, or — past the inline limits — a reference\n`session.callBlob` resolves. `missing` when the recording no longer holds it."
+    },
+    "CallRequest": {
+      "properties": {
+        "agent_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_map": {
+          "description": "What the turn's user message is made of, as coordinates over `messages`."
+        },
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "messages": {
+          "description": "The messages as sent, images and documents reduced to their size.",
+          "items": {
+            "$ref": "#/$defs/CallPart_for_AnyValue"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "step": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "system": {
+          "description": "The assembled system blocks, in order, each as it was sent.",
+          "items": {
+            "$ref": "#/$defs/CallPart_for_SystemBlockView"
+          },
+          "type": "array"
+        },
+        "thinking_mode": {
+          "$ref": "#/$defs/ThinkingMode"
+        },
+        "tools": {
+          "$ref": "#/$defs/CallPart_for_AnyValue",
+          "description": "The tool table as sent: `name`, `description`, `input_schema`, `source`."
+        },
+        "turn": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "turn",
+        "step",
+        "provider",
+        "model",
+        "max_tokens",
+        "thinking_mode",
+        "system",
+        "tools",
+        "messages"
+      ],
+      "type": "object"
+    },
+    "CallResponse": {
+      "properties": {
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/CallStatus"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "The text blocks of the reply, joined.",
+          "type": "string"
+        },
+        "thinking_chars": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool_uses": {
+          "items": {
+            "$ref": "#/$defs/ToolUseView"
+          },
+          "type": "array"
+        },
+        "ttft_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "text",
+        "thinking_chars",
+        "tool_uses"
+      ],
+      "type": "object"
+    },
+    "CallStatus": {
+      "oneOf": [
+        {
+          "enum": [
+            "ok",
+            "cancelled",
+            "error"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "in_flight",
+          "description": "The response is still streaming.",
+          "type": "string"
+        },
+        {
+          "const": "unfinished",
+          "description": "The recording ends inside this call: the process that made it is gone.",
+          "type": "string"
+        }
+      ]
+    },
+    "CallSummary": {
+      "description": "One model call, without its content.",
+      "properties": {
+        "agent_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "description": "Position in the recording; what `session.call` takes.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input": {
+          "$ref": "#/$defs/CallInput"
+        },
+        "model": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/CallOutput"
+        },
+        "parent_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "purpose": {
+          "description": "`None` for a conversation call; `compact`, `title`, `memory`, … otherwise.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "The session that made the call: the root or one of its sub-agents.",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CallStatus"
+        },
+        "step": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timing": {
+          "$ref": "#/$defs/CallTiming"
+        },
+        "ts": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "turn": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CallUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "session_id",
+        "turn",
+        "step",
+        "ts",
+        "provider",
+        "model",
+        "input",
+        "output",
+        "status",
+        "timing"
+      ],
+      "type": "object"
+    },
+    "CallTiming": {
+      "properties": {
+        "duration_ms": {
+          "description": "`None` while the call has not ended.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sent_at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "ttft_ms": {
+          "description": "From sending to the first response event; `None` before one arrived.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sent_at"
+      ],
+      "type": "object"
+    },
+    "CallUsage": {
+      "description": "§3.5's four counts.",
+      "properties": {
+        "cache_creation_input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_read_input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens"
+      ],
+      "type": "object"
+    },
+    "CallsParams": {
+      "properties": {
+        "from": {
+          "default": 0,
+          "description": "The call index to start from; 0 when omitted.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generation": {
+          "default": null,
+          "description": "The `generation` an earlier read saw; a recording started over since\nis `INVALID_PARAMS` with the current one in `data.generation`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "description": "Clamped to 500 rather than refused; 200 when omitted.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
     },
     "CheckpointFile": {
       "properties": {
@@ -1559,6 +2249,17 @@
         "edited"
       ],
       "type": "object"
+    },
+    "Effort": {
+      "description": "How much work the model puts into a reply. DeepSeek accepts `low`,\n`high` and `max`, folding `medium` and `xhigh` into `high`.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "type": "string"
     },
     "EntriesParams": {
       "properties": {
@@ -3176,6 +3877,18 @@
       ],
       "type": "object"
     },
+    "MissingPart": {
+      "properties": {
+        "missing": {
+          "description": "The blob id the recording names but no longer holds.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "missing"
+      ],
+      "type": "object"
+    },
     "ModelChoice": {
       "properties": {
         "applies": {
@@ -4000,11 +4713,11 @@
       ]
     },
     "RecorderOptions": {
-      "description": "Record or replay this session's LLM calls.",
+      "description": "Record or replay this session's LLM calls.\n\nA recorder that records is kept with the session's spec, so the session\ngoes on recording after a restart; one that replays or reruns is not, and\nis given again by the call that brings the session back.",
       "properties": {
         "dir": {
           "default": null,
-          "description": "Absolute path to the recordings root. Omitted, the daemon's own root is\nused — `settings.recorder.root` if configured, else\n`ConfigPaths::global_recordings_dir()`.",
+          "description": "Absolute path to the recordings root. Omitted, the daemon's own root —\n`settings.recorder.root` if configured, else\n`ConfigPaths::global_recordings_dir()` — as it is when the session is\ncreated; a recording session keeps that root from then on.",
           "type": [
             "string",
             "null"
@@ -4015,7 +4728,7 @@
         },
         "name": {
           "default": null,
-          "description": "Directory name for the recording under `dir`. Omitted, the session id\nis used — which is what production recording wants, and what a replay\nmust therefore override with the name of the recording it wants back.",
+          "description": "Directory name for the recording under `dir`: one path component.\nOmitted, the session id — recording, the session's sub-agents then\nrecord into that same directory; a replay must name the recording it\nwants back.",
           "type": [
             "string",
             "null"
@@ -4029,6 +4742,42 @@
       },
       "required": [
         "mode"
+      ],
+      "type": "object"
+    },
+    "RecordingCoverage": {
+      "oneOf": [
+        {
+          "const": "latest_run",
+          "description": "The session's calls since the process now running it first called.",
+          "type": "string"
+        }
+      ]
+    },
+    "RecordingInfo": {
+      "properties": {
+        "covers": {
+          "$ref": "#/$defs/RecordingCoverage"
+        },
+        "created_at": {
+          "description": "When this run's recording began, RFC 3339.",
+          "type": "string"
+        },
+        "generation": {
+          "description": "Opaque; changes when the recording is started over, which makes every\nindex read before it meaningless.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "created_at",
+        "covers",
+        "generation"
       ],
       "type": "object"
     },
@@ -5303,6 +6052,133 @@
       ],
       "type": "object"
     },
+    "SearchHit": {
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/HistoryOrigin"
+        },
+        "seq": {
+          "description": "The message's position, in `session.history`'s coordinates.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "ts": {
+          "description": "RFC 3339.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "seq",
+        "origin",
+        "ts",
+        "snippet"
+      ],
+      "type": "object"
+    },
+    "SearchParams": {
+      "properties": {
+        "deadline_ms": {
+          "default": null,
+          "description": "2000 when omitted, clamped to 10000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "description": "Sessions with a hit; 20 when omitted, clamped to 100.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_sessions": {
+          "default": null,
+          "description": "Sessions read at most; 500 when omitted, clamped to 5000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "description": "Matched trimmed and case-insensitively; must not be empty.",
+          "type": "string"
+        },
+        "session_ids": {
+          "default": null,
+          "description": "Only these sessions, in this order, sidechains included; omitted:\n`session.list`'s range, most recent first.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "snippet_chars": {
+          "default": null,
+          "description": "120 when omitted, clamped to 500.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "SearchResult": {
+      "description": "`session.search`.",
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          },
+          "type": "array"
+        },
+        "scanned": {
+          "description": "Sessions read through.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "A bound stopped the search before every session in range was read.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "scanned",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "ServerDaemonEvent": {
       "description": "The `daemon.event` kinds the server makes up itself rather than relays\nfrom the pool.",
       "oneOf": [
@@ -6160,6 +7036,62 @@
       ],
       "type": "object"
     },
+    "SystemBlockSize": {
+      "properties": {
+        "chars": {
+          "description": "`None` when the recording no longer holds the block.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "The block's name (`identity`, `skills.catalog`, …).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SystemBlockView": {
+      "properties": {
+        "cache": {
+          "description": "`ephemeral` / `global` cache marking, when the block had one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "description": "Who put it there: `kernel`, `config`, `plugin:<id>`, `script:<path>`.",
+          "type": "string"
+        },
+        "role": {
+          "description": "`system`, `user` or `assistant`.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The block's name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "origin",
+        "text"
+      ],
+      "type": "object"
+    },
     "SystemKind": {
       "enum": [
         "local_command",
@@ -6383,6 +7315,33 @@
       ],
       "type": "object"
     },
+    "ThinkingMode": {
+      "description": "Model thinking/reasoning mode.",
+      "oneOf": [
+        {
+          "enum": [
+            "auto",
+            "off",
+            "on"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "on_budget": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "on_budget"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ToolCallAnswered": {
       "properties": {
         "call_id": {
@@ -6436,6 +7395,43 @@
         }
       ],
       "description": "`tool_result.content` 字段：string 或 ContentBlock 数组。\n\n`#[serde(untagged)]` 让 JSON `\"hello\"` 直接解到 Text 变体，`[…]` 解到 Blocks。"
+    },
+    "ToolUseRef": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ToolUseView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "description": "The arguments; for a call whose arguments did not parse, the raw text."
+        },
+        "malformed": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "input"
+      ],
+      "type": "object"
     },
     "TrustLevel": {
       "description": "What a project no `trusted` pattern names is.",
@@ -7163,6 +8159,30 @@
         "$ref": "#/$defs/EntryView"
       }
     },
+    "session.call": {
+      "params": {
+        "$ref": "#/$defs/CallParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CallDetail"
+      }
+    },
+    "session.callBlob": {
+      "params": {
+        "$ref": "#/$defs/CallBlobParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CallBlob"
+      }
+    },
+    "session.calls": {
+      "params": {
+        "$ref": "#/$defs/CallsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/CallList"
+      }
+    },
     "session.checkpoints": {
       "params": {
         "$ref": "#/$defs/SessionRef"
@@ -7361,6 +8381,14 @@
       },
       "result": {
         "$ref": "#/$defs/TurnReply"
+      }
+    },
+    "session.search": {
+      "params": {
+        "$ref": "#/$defs/SearchParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SearchResult"
       }
     },
     "session.setGoal": {

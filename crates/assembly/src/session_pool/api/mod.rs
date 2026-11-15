@@ -1,6 +1,7 @@
 //! 会话池对外的领域类型：调用方（server、嵌入方）只经由这些类型和池打交道，
 //! 不接触 JSON-RPC 线格式。
 
+mod calls;
 mod commands;
 mod daemon;
 mod error;
@@ -16,6 +17,12 @@ mod settings;
 mod tasks;
 mod turn;
 
+pub use calls::{
+    BlobRef, CallBlob, CallDetail, CallError, CallInput, CallList, CallOutput, CallPart,
+    CallRequest, CallResponse, CallStatus, CallSummary, CallTiming, CallUsage, MissingPart,
+    RecordingCoverage, RecordingInfo, SearchHit, SearchRequest, SearchResult, SystemBlockSize,
+    SystemBlockView, ToolUseRef, ToolUseView,
+};
 pub use commands::{CommandInfo, CommandKind, CommandSource, NewSchedule};
 pub use daemon::{CloseReason, DaemonEvent, EvictReason, ImportSource};
 pub use error::{Busy, BusyReason, InvalidOption, PoolError};

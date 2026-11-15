@@ -790,6 +790,8 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
 | `session_import` | 有 `session.import`,把 `session.export` 的归档装成新会话(§6.3) |
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
+| `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
+| `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -1150,7 +1152,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
   "options": {                            // 可选,只在创建时生效
     "permission_mode": "default",
     "permission_rules": [ ],
-    "recorder": { "mode":"replay", "name":"…", "dir":"…", "strict":true },
+    "recorder": { "mode":"replay", "name":"…", "dir":"/abs/recordings", "strict":true },
     "clock": { "start": "2026-10-28T09:00:00Z" },  // 可选,记下来的时间从这里起
     "telemetry": { "output":"/abs/path.jsonl" },
     "output_schema": { "type":"object", … },  // 结构化输出必须满足的 JSON Schema
@@ -1192,13 +1194,26 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
     { "field": "permission_rules[0]", "error": "unknown variant `allwo`, expected one of `allow`, `deny`, `ask`" } ] } }
 ```
 
-`recorder` 不落盘:同一进程里的重建接着原来的回放进度,不从头重放;daemon 重启之后,
-把会话带回内存的那次调用(`session.resume`、自动恢复的 `session.run_turn`;
-`session.subscribe` 不收 `options`)在 `options` 里再给一次 `recorder` 才接着录制或回放 ——
-这是 `options` 里唯一一项以这次调用为准的,其余仍按建会话时记下的。
+`recorder.mode` 取 `record` / `replay` / `rerun`。`dir` 是录像根目录,必须是绝对路径;省略时用
+daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名,必须是单独一段路径(不含 `/`、
+不是 `.` / `..`);录制时省略就用会话 id。两项不合要求都进 `invalid_options`(`field` 为
+`recorder.dir` / `recorder.name`)。
 
-`recorder.mode` 取 `record` / `replay` / `rerun`;`dir` 省略时用 daemon 自己的
-录制根目录。
+**录制随会话保存,回放不保存。** `mode:"record"` 的 `recorder` 和其余 `options` 一样记进会话日志:
+建会话时省略的 `dir` 当场换成那时的录制根目录记下来,之后设置怎么改都录到同一处;daemon 重启后
+会话回到内存(`session.resume`、自动恢复的 `session.run_turn`),不用再给 `recorder` 就接着录。
+日志里已经记了录制的,这次调用带的 `recorder` 被忽略。`replay` / `rerun` 不记:同一进程里的重建
+接着原来的回放进度,不从头重放;daemon 重启之后,把会话带回内存的那次调用在 `options` 里再给一次
+才接着回放(`session.subscribe` 不收 `options`)—— 这是 `options` 里唯一以这次调用为准的情形。
+从没记过录制的会话(包括更早的版本录制的),恢复时带上 `mode:"record"` 的 `recorder`,从此记下。
+
+**一个会话一份录像。** 录制时,会话自己的对话调用、它起的子 Agent(`Agent` 工具、
+`session.startAgent`)、首轮之后的起名、压缩等辅助调用,全都录进同一份录像,每次调用记着是哪个
+会话发的(`session.calls` 的 `session_id` / `parent_session_id`)。`name` 给了就录在那个名字下,
+同样包括子 Agent。录像只覆盖**最近一次运行**:进程里第一次调用时重写 `calls.jsonl`,所以 daemon
+重启后会话的第一次调用把上一次运行的录像清掉重来(`session.calls` 的 `generation` 随之改变)。
+`session.fork` 出的会话照样录制,但不带源会话的 `name`,录在自己的 id 下 —— 否则它的第一次调用
+会把源会话的录像重写掉。
 
 **录像不脱敏。** 系统提示、整段对话、工具参数与结果按发出去的原样记下,不经过遥测的脱敏
 策略——录像要的就是"实际发了什么"。所以提示里带着的密钥录像里也有;录像目录与文件只对
@@ -1765,6 +1780,136 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 
 侧链会话有自己完整的 transcript,用它自己的 `session_id` 查即可。
 
+#### `session.calls`
+
+会话录像里的模型调用,旧的在前。只读,与 `session.history` 同一敏感级别(录像不脱敏,见
+`session.create`);会话不在内存时从日志读它记下的 `recorder`,不建引擎、不把会话带回内存。
+
+```jsonc
+// → params
+{ "session_id": "…", "from": 0, "limit": 200, "generation": 1763200000000 }   // 后三项可选
+// ← result
+{ "session_id": "…",
+  "recording": { "name": "…", "created_at": "2026-11-15T09:46:40Z",
+                 "covers": "latest_run", "generation": 1763200000000 },   // 没录:null
+  "calls": [ { "index": 0,
+               "session_id": "…", "parent_session_id": null, "agent_type": null,  // 子 Agent 的带父会话与类型
+               "turn_id": "…", "turn": 1, "step": 0,
+               "purpose": null,          // 对话调用为 null;辅助调用是 compact / title / memory …
+               "ts": "2026-11-15T09:46:40Z", "provider": "anthropic", "model": "…",
+               "input": { "system": [ { "source": "identity", "chars": 1234 } ], "tools": 23, "messages": 8 },
+               "output": { "chars": 456, "thinking_chars": 0, "tool_uses": [ { "id": "…", "name": "Read" } ] },
+               "status": "ok",           // ok | cancelled | error | in_flight | unfinished
+               "stop_reason": "tool_use",
+               "usage": { "input_tokens": 10, "output_tokens": 20,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0 },  // §3.5;没结束为 null
+               "timing": { "sent_at": "2026-11-15T09:46:40Z", "ttft_ms": 800, "duration_ms": 4200 },
+               "error": null } ],        // status 为 error 时 { kind, message, http_status, retry_after_ms }
+  "next": 1, "total": 1, "damaged": 0 }
+```
+
+只有录制(`recorder.mode:"record"`)的会话有录像;没录的、录了但还没调用过模型的,`recording`
+为 `null`、`calls` 为 `[]`,不报错。子 Agent 与辅助调用都在根会话的录像里(见 `session.create`),
+各行的 `session_id` 写明是谁的;传子会话的 id 读不到它们。
+
+`index` 是调用在录像里的位置,`session.call` 用它取全文。`from` 是起始的 `index`,`limit` 默认
+200、上限 500,超了夹紧不报错。`total` 是整份录像的调用数,`damaged` 是读不出来、跳过的行数。
+
+**跟随一个正在跑的会话。** 下一次从 `next` 读,只回新写的。`next` 停在第一条还在流式返回的
+调用(`status:"in_flight"`)上,下一次连它一起再读一遍 —— 按 `index` 覆盖之前读到的那行。会话
+不在内存时,没有结束的调用是 `unfinished`(写它的进程已经不在了),不挡 `next`。`ttft_ms` 从发出
+请求到第一个响应事件,`duration_ms` 到调用结束;还没到的为 `null`。
+
+**`generation`。** 录像被重写时变(daemon 重启后会话的第一次调用,见 `session.create`),只用来比较
+相等。带上一次读到的 `generation` 而录像已经重写过 → `INVALID_PARAMS`,`data.generation` 是当前的
+(§9.1),宿主从 0 重读。不带就不检查。
+
+会话不存在 → `SESSION_NOT_FOUND`。
+
+#### `session.call`
+
+一次调用的全文:发出去的系统块、工具目录、消息和调用参数,以及回来的应答。
+
+```jsonc
+// → params
+{ "session_id": "…", "index": 0, "generation": 1763200000000 }   // generation 可选,同 session.calls
+// ← result
+{ "session_id": "…", "index": 0, "generation": 1763200000000,
+  "request": { "session_id": "…", "parent_session_id": null, "agent_type": null,
+               "turn_id": "…", "turn": 1, "step": 0, "purpose": null,
+               "provider": "anthropic", "model": "…", "max_tokens": 8192,
+               "thinking_mode": "off", "effort": null, "fallback_model": null,
+               "system": [ { "role": "system", "cache": "ephemeral", "source": "identity",
+                             "origin": "kernel", "text": "…" },
+                           { "blob": "s.0123456789abcdef", "bytes": 70000 } ],
+               "tools": [ { "name": "Read", "description": "…", "input_schema": { } } ],
+               "messages": [ { "role": "user", "content": [ { "type": "text", "text": "…" },
+                                                             { "type": "image", "media_type": "image/png", "bytes": 5 } ] } ],
+               "input_map": null },
+  "response": { "status": "ok", "text": "…", "thinking_chars": 0,
+                "tool_uses": [ { "id": "…", "name": "Read", "input": { "path": "/x" } } ],
+                "stop_reason": "tool_use", "usage": { }, "ttft_ms": 800, "duration_ms": 4200, "error": null } }
+```
+
+`request.system` 是组装好的系统块,按顺序、逐字是发出去的那份:`source` 是块名
+(`ARCHITECTURE.md` 的提示块名),`origin` 是谁放的(`kernel` / `config` / `plugin:<id>` /
+`script:<路径>`),`cache` 是缓存标记。`messages` 的元素是发给模型的消息;图片与文档的 base64 不给,
+只留 `type`、`media_type` 与解码后的字节数 `bytes`。工具参数解析失败的调用,`tool_uses` 里那一项的
+`input` 是原始文本、带 `"malformed": true`。
+
+**大块给引用。** 单帧有上限(§1),所以系统块、消息、整张工具目录这几种部分,哪一块的 JSON 超过
+64 KiB、或者前面内联的已经累计到 4 MiB,就换成 `{"blob": "<s|m|t>.<16 位十六进制>", "bytes": n}`
+(`s` 系统块、`m` 消息、`t` 工具目录;`bytes` 是 `session.callBlob` 回答的那份 JSON 的长度),用
+`session.callBlob` 取。录像里已经没有的块是 `{"missing": "<id>"}`。`response` 总是内联。
+
+`index` 超出录像 → `INVALID_PARAMS`;会话没有录像 → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
+
+#### `session.callBlob`
+
+```jsonc
+// → params
+{ "session_id": "…", "blob": "s.0123456789abcdef" }
+// ← result
+{ "blob": "s.0123456789abcdef", "bytes": 70000,
+  "value": { "role": "system", "cache": null, "source": "…", "origin": "plugin:p1", "text": "…" } }
+```
+
+`value` 就是 `session.call` 本该内联的那一块,形状相同。`blob` 只认 `session.call` 给出的形式,
+别的(包括带路径分隔符的)→ `INVALID_PARAMS`;录像里没有这一块、或者它大到一帧装不下(15 MiB 以上)
+→ `INVALID_PARAMS`。
+
+#### `session.search`
+
+按内容找会话:大小写无关、去掉首尾空白的子串,只比人说的话与模型答的文字。
+
+```jsonc
+// → params
+{ "query": "postgres",
+  "session_ids": null,      // 可选:只在这些会话里找,按给的顺序
+  "limit": 20,              // 可选,有命中的会话数,上限 100
+  "max_sessions": 500,      // 可选,至多读这么多个会话,上限 5000
+  "deadline_ms": 2000,      // 可选,上限 10000
+  "snippet_chars": 120 }    // 可选,片段的字符数,上限 500
+// ← result
+{ "hits": [ { "session_id": "…", "name": null, "seq": 12, "origin": "user",
+              "ts": "2026-11-15T09:46:40Z", "snippet": "…postgres 的连接池…" } ],
+  "scanned": 37, "truncated": false }
+```
+
+只比 `origin` 为 `user` / `steer` / `command` / `assistant` 的消息(`session.history` 的 `origin`)里的
+文字块;夹在其中的 `<system-reminder>…</system-reminder>` 先剔掉,工具调用、工具结果、思考、
+注入的消息都不比。每个会话至多一条命中,是日志里第一处;`seq` 与 `session.history` 同一坐标,
+宿主能直接跳过去;`snippet` 是命中处前后共 `snippet_chars` 个字符,空白压成一个空格,截断处是 `…`;
+`name` 是会话的名字(`session.rename` 或自动起名),没有为 `null`。
+
+`session_ids` 省略时范围同 `session.list`:这个 daemon 服务过的项目里的会话,不含侧链,最近写过的
+在前;给了就只找这些(侧链也找),不认识的 id 跳过,格式不对的 → `INVALID_PARAMS`。冷会话也找,
+不会被带回内存;在内存里的会话,正在跑的那一步要等它写进日志才搜得到(同 `session.history`)。
+
+三项上限任一先到就停,`truncated: true`:命中的会话数到了 `limit` 而后面还有没读的、范围里的会话
+多于 `max_sessions`、或者过了 `deadline_ms`(在会话之间检查)。`scanned` 是读完的会话数。上限超了
+夹紧不报错;`query` 是空的 → `INVALID_PARAMS`。
+
 #### `session.resume`
 
 把磁盘 transcript 投影回内存并建立运行实体。
@@ -1843,6 +1988,9 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 整段复制(省略 `at_message`,或它不小于消息总数)时复制到日志末尾,最后一条消息之后
 写下的扩展条目(`session.appendEntry`)也在;从中间分叉时截在第 `at_message` 条消息
 所在的那一行。
+
+会话的 `options` 与 `session.setModel` / `session.setPrompt` 记下的值在规格条目里,随切点之前的
+行一起复制。录制的 `recorder` 去掉 `name` 再记一条:分叉录在自己的 id 下,不去重写源会话的录像。
 
 分叉记着源会话作 `parent_session_id`,但它是 `"session_kind":"primary"`,不是侧链:对源会话
 调 `session.close` 或 `session.delete` 不会删它。`session.list {parent_session_id}` 会把它和
@@ -1943,8 +2091,9 @@ tool-results/<name>                      只在 include 列了 "tool_results"(�
 任意深度的侧链、图片本体、会话记忆,以及会话在内存里时的那部分运行状态。不带:分叉出去的会话和
 它分叉自的会话(只记 id)、"本会话内允许"的授权、设置 / provider / API key / OAuth、输入历史、
 `prompt_state.json`、遥测、团队目录、调度、运行中的任务。录像只覆盖**最近一次运行**(每次
-录制会重写 `calls.jsonl`);会话的 `recorder` 不记进日志,daemon 重启后只找得到 daemon 自己的
-录像根下以会话 id 命名的那份。
+录制会重写 `calls.jsonl`)。根会话的录像按它记下的 `recorder` 找,整棵会话树的调用都在里面;
+更早的版本给子 Agent 录在以子会话 id 命名的录像里,那些在根会话的录制根目录与 daemon 自己的
+录像根下按会话 id 找,找到的也带上。
 
 转录里的外置标记行(`[Output too long for one result: … Saved in full to <路径> …]`)指向**导出机器上**
 的路径;`session.import` 把它改写成新根会话的结果目录。缺外置文件的归档照样能导入,标记保持原样,
@@ -3383,6 +3532,8 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 // INVALID_PARAMS,只在 options 里有读不出来的字段时
 { "invalid_options": [ { "field": "permission_mode", "error": "…" } ] }
 // 另有只有建出引擎才知道的:host_tools 的重名,以及场景 tools.deny 了 StructuredOutput 时的 output_schema
+// INVALID_PARAMS,session.calls / session.call 带的 generation 不是录像当前的时
+{ "generation": 1763200000000 }
 
 // METHOD_NOT_FOUND
 { "module": "mcp" }   // 只在方法所属的模块没有编入这个构建时;未知方法没有 data
@@ -3443,7 +3594,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 其余错误码**没有 `data`**,信息全在 `message` 里 —— 包括
 `SCENE_HAS_ACTIVE_SESSIONS`(挡路的会话 id 是拼在 message 文本里的)、
-`PROJECT_NOT_FOUND`、`PROJECT_REQUIRED`,以及不是上面那种 `options` 拒绝的 `INVALID_PARAMS`。要展示给用户就直接展示
+`PROJECT_NOT_FOUND`、`PROJECT_REQUIRED`,以及不是上面两种的 `INVALID_PARAMS`。要展示给用户就直接展示
 `message`,不要试图解析它。
 
 ---

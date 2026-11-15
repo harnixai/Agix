@@ -153,6 +153,8 @@ pub struct CallOrigin {
     pub parent_session_id: Option<String>,
     /// Which kind of agent this session runs, for a sub-agent that has one.
     pub agent_type: Option<String>,
+    /// The turn this call belongs to, the same `turn_id` the session's events carry; `None` for a call outside any turn or whose caller does not know it.
+    pub turn_id: Option<String>,
     pub kind: CallKind,
 }
 
@@ -184,6 +186,7 @@ impl CallOrigin {
             session_id: session_id.into(),
             parent_session_id: None,
             agent_type: None,
+            turn_id: None,
             kind: CallKind::Turn { turn, step },
         }
     }
@@ -194,6 +197,7 @@ impl CallOrigin {
             session_id: session_id.into(),
             parent_session_id: None,
             agent_type: None,
+            turn_id: None,
             kind: CallKind::Auxiliary {
                 purpose: purpose.into(),
             },
@@ -207,6 +211,11 @@ impl CallOrigin {
     ) -> Self {
         self.parent_session_id = parent_session_id;
         self.agent_type = agent_type;
+        self
+    }
+
+    pub fn with_turn_id(mut self, turn_id: impl Into<String>) -> Self {
+        self.turn_id = Some(turn_id.into());
         self
     }
 

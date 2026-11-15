@@ -603,6 +603,19 @@ const NOT_COMPARED: &[(&str, &str)] = &[
         "lists the writes of a session that made some; compared field by field in          tests/blackbox/tests/session_rewind.rs",
     ),
     (
+        "session.calls",
+        "a recording's rows depend on what the model was sent; the shape is pinned by \
+         crates/assembly/src/recording_view/tests.rs and driven over the socket by \
+         tests/blackbox/tests/session_calls.rs",
+    ),
+    ("session.call", "the same as session.calls"),
+    ("session.callBlob", "the same as session.calls"),
+    (
+        "session.search",
+        "the hits depend on the transcripts searched; tests/blackbox/tests/session_calls.rs \
+         checks the fields over the socket",
+    ),
+    (
         "mcp.auth.start",
         "needs a remote MCP server behind an authorization server",
     ),

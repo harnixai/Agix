@@ -22,6 +22,7 @@ pub mod logging;
 pub mod model_router;
 pub mod modules;
 pub mod plugins;
+mod recording_view;
 pub mod rpc;
 pub mod server;
 pub mod session_pool;

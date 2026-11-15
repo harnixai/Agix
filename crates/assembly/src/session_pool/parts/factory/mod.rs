@@ -306,26 +306,9 @@ fn models(
     // Wrapping only the conversation's model left sub-agents, compaction
     // and memory extraction — everything reached through the router —
     // recording nothing whenever `providers` was configured.
-    let recorder_config =
-        options
-            .and_then(|o| o.recorder.as_ref())
-            .map(|recorder| RecorderConfig {
-                mode: match recorder.mode.as_str() {
-                    "record" => RecorderMode::Record,
-                    // `rerun` is driven from a recording, not from a live
-                    // session, so a session asking for it just talks to the
-                    // provider — see `telemetry::recorder::rerun`.
-                    "rerun" => RecorderMode::Rerun,
-                    _ => RecorderMode::Replay,
-                },
-                name: recorder.name.clone(),
-                root: recordings_root(base_settings, recorder.dir.as_deref()),
-                on_divergence: if recorder.strict {
-                    Divergence::Strict
-                } else {
-                    Divergence::Warn
-                },
-            });
+    let recorder_config = options
+        .and_then(|o| o.recorder.as_ref())
+        .map(|recorder| recorder_config(session_id, recorder, base_settings));
     let clock = session_clock(options, recorder_config.as_ref(), session_id);
     let provider_id = spec.provider();
     let conversation_model = match provider_id.as_deref() {
@@ -364,6 +347,36 @@ fn models(
         }
     };
     Ok((model, task_router, model_name, clock))
+}
+
+/// What the session's `recorder` option asks the model wrapper to do.
+fn recorder_config(
+    session_id: &str,
+    recorder: &crate::session_pool::api::RecorderOptions,
+    settings: &LoadedSettings,
+) -> RecorderConfig {
+    RecorderConfig {
+        mode: match recorder.mode.as_str() {
+            "record" => RecorderMode::Record,
+            // `rerun` is driven from a recording, not from a live
+            // session, so a session asking for it just talks to the
+            // provider — see `telemetry::recorder::rerun`.
+            "rerun" => RecorderMode::Rerun,
+            _ => RecorderMode::Replay,
+        },
+        // Recording, a session and its sub-agents write into one
+        // recording, named after the session.
+        name: recorder
+            .name
+            .clone()
+            .or_else(|| recorder.records().then(|| session_id.to_string())),
+        root: recordings_root(settings, recorder.dir.as_deref()),
+        on_divergence: if recorder.strict {
+            Divergence::Strict
+        } else {
+            Divergence::Warn
+        },
+    }
 }
 
 /// The session's telemetry pipeline: its JSONL file, plus OTel when an

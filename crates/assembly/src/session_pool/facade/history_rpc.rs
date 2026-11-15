@@ -189,21 +189,26 @@ impl SessionPool {
     /// The recordings these sessions write to, with how long each one's
     /// `calls.jsonl` is right now.
     ///
-    /// A recording is named by its `recorder.name`, or else by the session
-    /// whose calls it holds, under the root the session's recorder named or
-    /// the daemon's own. `recorder` is never written to the log, so for a
-    /// session this process did not build only the daemon's root and the
-    /// session ids are known.
+    /// The root's recording is where its recorder writes, by the spec this
+    /// process holds or else the one its log recorded; it holds the calls of
+    /// the whole lineage. Recordings named after the other sessions, under
+    /// that root or the daemon's own, are what earlier versions wrote for
+    /// sub-agents, and are taken too.
     pub(in crate::session_pool) async fn measure_recordings(
         &self,
         settings: &settings::LoadedSettings,
         root_session: &str,
         lineage: &history::store::LineageSnapshot,
     ) -> Vec<crate::export::RecordingPart> {
-        let recorder = self
-            .specs
-            .get(root_session)
-            .and_then(|spec| spec.options?.recorder);
+        let spec = self.specs.get(root_session).unwrap_or_else(|| {
+            lineage
+                .sessions
+                .first()
+                .map(|(_, entries)| crate::session_pool::parts::specs::recorded_in(entries))
+                .unwrap_or_default()
+        });
+        let recorder = spec.options.and_then(|o| o.recorder);
+        let location = recording_location(recorder.as_ref(), settings, root_session);
         let mut dirs = vec![recordings_root(
             settings,
             recorder.as_ref().and_then(|r| r.dir.as_deref()),
@@ -218,7 +223,10 @@ impl SessionPool {
             .map(|(sid, _)| sid.to_string())
             .collect();
         let mut names: Vec<(String, Vec<String>)> = Vec::new();
-        if let Some(name) = recorder.as_ref().and_then(|r| r.name.clone()) {
+        if let Some(name) = location
+            .map(|(_, name)| name)
+            .or_else(|| recorder.as_ref().and_then(|r| r.name.clone()))
+        {
             names.push((name, ids.clone()));
         }
         names.extend(ids.iter().map(|id| (id.clone(), vec![id.clone()])));
@@ -313,7 +321,6 @@ impl SessionPool {
         // conversation as if it were complete. Deleting is safer than
         // leaving it, and the id was minted here so nothing else can be
         // referencing it yet.
-        let mut copied = 0usize;
         let left_out = left_out_of_a_fork(&entries);
         let results = self
             .link_results_into_fork(session_id, new_sid, &settings, &entries[..cut], &left_out)
@@ -324,34 +331,22 @@ impl SessionPool {
                 let _ = std::fs::remove_dir_all(&results.to);
             }
         };
-        if let Err(e) = store.append(new_sid, meta).await {
-            discard_fork().await;
-            return Err(PoolError::Internal(format!(
-                "failed to write forked session metadata: {e}"
-            )));
-        }
-        for (env, _) in entries
-            .iter()
-            .zip(&left_out)
-            .take(cut)
-            .filter(|(_, out)| !**out)
+        let copied = match write_fork(
+            store.as_ref(),
+            new_sid,
+            meta,
+            &entries[..cut],
+            &left_out,
+            results.as_ref(),
+        )
+        .await
         {
-            let tags = history::entry::EntryTags {
-                turn_id: env.turn_id.clone(),
-                origin: env.origin,
-            };
-            let mut entry = env.entry.clone();
-            if let Some(results) = &results {
-                results.point(&mut entry);
-            }
-            if let Err(e) = store.append_tagged(new_sid, entry, tags).await {
+            Ok(copied) => copied,
+            Err(e) => {
                 discard_fork().await;
-                return Err(PoolError::Internal(format!(
-                    "failed to copy session history into the fork: {e}"
-                )));
+                return Err(PoolError::Internal(e));
             }
-            copied += 1;
-        }
+        };
 
         let message_count =
             history::transcript::project_messages_with(&entries[..cut], store.projection()).len();
@@ -504,6 +499,46 @@ impl SessionPool {
     }
 }
 
+/// Write a fork's log: its `Meta`, the lines of `copied` not `left_out`, and
+/// the spec it records under; how many lines that was after the `Meta`.
+async fn write_fork(
+    store: &dyn history::store::HistoryStore,
+    new_sid: base::session::SessionId,
+    meta: history::entry::LogEntry,
+    copied: &[history::entry::EnvelopedEntry],
+    left_out: &[bool],
+    results: Option<&ForkedResults>,
+) -> Result<usize, String> {
+    store
+        .append(new_sid, meta)
+        .await
+        .map_err(|e| format!("failed to write forked session metadata: {e}"))?;
+    let mut written = 0usize;
+    for (env, _) in copied.iter().zip(left_out).filter(|(_, out)| !**out) {
+        let tags = history::entry::EntryTags {
+            turn_id: env.turn_id.clone(),
+            origin: env.origin,
+        };
+        let mut entry = env.entry.clone();
+        if let Some(results) = results {
+            results.point(&mut entry);
+        }
+        store
+            .append_tagged(new_sid, entry, tags)
+            .await
+            .map_err(|e| format!("failed to copy session history into the fork: {e}"))?;
+        written += 1;
+    }
+    if let Some(spec) = crate::session_pool::parts::specs::forked_spec(copied) {
+        store
+            .append(new_sid, spec)
+            .await
+            .map_err(|e| format!("failed to record the fork's spec: {e}"))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
 /// The lines a fork does not copy: sidechain lines (an append cannot carry
 /// the envelope's flags), the source's `Meta` (the fork writes its own),
 /// what a rewind took out of the conversation, and the checkpoints and
@@ -594,26 +629,13 @@ pub(in crate::session_pool) fn history_item(
     seq: usize,
     sourced: &history::transcript::SourcedMessage<'_>,
 ) -> api::HistoryItem {
-    use api::HistoryOrigin;
-    use history::entry::{LogEntry, MessageOrigin};
+    use history::entry::LogEntry;
     let env = sourced.entry;
     let id = match sourced.part {
         Some(part) => format!("{}#{part}", env.id),
         None => env.id.to_string(),
     };
-    let origin = match (&sourced.message, sourced.part, &env.entry) {
-        (base::message::Message::Assistant { .. }, _, _) => Some(HistoryOrigin::Assistant),
-        (_, Some(_), _) => Some(HistoryOrigin::Compact),
-        (_, None, LogEntry::ToolResult { .. }) => Some(HistoryOrigin::ToolResult),
-        (_, None, LogEntry::Extension { .. }) => Some(HistoryOrigin::Extension),
-        _ => env.origin.map(|origin| match origin {
-            MessageOrigin::User => HistoryOrigin::User,
-            MessageOrigin::Steer => HistoryOrigin::Steer,
-            MessageOrigin::Command => HistoryOrigin::Command,
-            MessageOrigin::Injected => HistoryOrigin::Injected,
-            MessageOrigin::ToolResult => HistoryOrigin::ToolResult,
-        }),
-    };
+    let origin = sourced.source().map(api::HistoryOrigin::from);
     let usage = match (&env.entry, sourced.part) {
         (LogEntry::Assistant { usage: Some(u), .. }, None) => Some(api::HistoryUsage::from(u)),
         _ => None,

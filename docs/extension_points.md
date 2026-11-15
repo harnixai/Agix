@@ -59,7 +59,7 @@
 | `config.source` | 契约 | 进程级:`settings::LoadedSettings::load_from` | 进程启动,任何东西被构建之前 | 有哪些层、每层里是什么 JSON;合并本身动不了 | 每进程(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
 | `token.count` | 契约 | `Builder::token_counter` | 每次预算检查 | 压缩据以触发的那个数字 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.store` | 契约 | `Builder::history_store` | 每次追加,以及恢复时 | 日志怎么持久化、存到哪 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
-| `history.query` | 契约 | 随 `history.store`:`HistoryStore::find_sessions` | 每当有人要的是若干会话而不是某一个会话 | 返回哪些会话、按什么顺序、怎么算匹配 | 每会话(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
+| `history.query` | 契约 | 随 `history.store`:`HistoryStore::find_sessions / search_text` | 每当有人要的是若干会话而不是某一个会话 | 返回哪些会话、按什么顺序、怎么算匹配 | 每会话(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.blob` | 契约 | 随 `history.store`:`JsonlHistoryStore::with_blob_store` | 每次追加带图片或大负载时,以及加载时 | 大块内容存在哪、怎么寻址 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.projection` | 契约 | 随 `history.store`:`JsonlHistoryStore::with_projection` | 每次读取转录:恢复、分叉、搜索、翻页 | 哪些条目变成消息、它们说了什么 | 每会话(10⁰ 量级) | 不开放 | 不开放 | 不开放 |
 | `history.extension_entry` | 注册 | 随 `history.store`:`HistoryStore::append` | 任何时候;和其余条目同序 | 只能新增;内核从不解析 payload | 每轮(10⁰–10¹ 量级) | 完全 | 完全 | 只能新增 |
@@ -565,6 +565,13 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 mtime 排序、按目录收窄而已。有真索引的后端覆盖这一个方法,就把搜索整个接管过去了;
 它必须守住的保证——最新在前且是全序、不超过 limit、匹配数不少于一次大小写无关的
 子串扫描——写在这个方法的文档注释里。
+
+`HistoryStore::search_text` 回答另一个问题:这些会话里,每个会话第一次说到这句话的
+地方在哪。它收一个 `history::search::TextQuery`——针、要找的会话及其先后顺序、是否
+包含 sidechain、上限、截止时间、片段长度——回每个命中会话的第一处(位置、来源、时
+间、片段),另报 `scanned` 和 `truncated`。默认实现把会话逐个加载,只在两个会话之间
+检查截止时间;有文本索引的后端覆盖它。匹配规则与 `history::search::first_hit` 相
+同:只看人输入的文字和模型的文字回复,`<system-reminder>` 段落先剪掉。
 
 ### 大块内容 — `history.blob`
 
