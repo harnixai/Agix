@@ -347,6 +347,40 @@ mod tests {
         assert_eq!(answered.action, ElicitationAction::Cancel);
     }
 
+    /// Remembers the link it was shown.
+    #[derive(Default)]
+    struct Shown(Mutex<Option<String>>);
+
+    #[async_trait]
+    impl McpElicitor for Shown {
+        async fn elicit(&self, _: &str, _: String, mode: McpElicitMode) -> McpElicitationAnswer {
+            if let McpElicitMode::Url { url, .. } = mode {
+                *self.0.lock().unwrap() = Some(url);
+            }
+            McpElicitationAnswer::Cancel
+        }
+    }
+
+    /// The host is shown the link it would open, not the server's spelling
+    /// of it: line breaks and bidi controls cannot make one link look like
+    /// another.
+    #[tokio::test]
+    async fn a_url_is_put_to_the_host_as_it_parses() {
+        for link in [
+            "https://evil.example/x\n\n  https://accounts.google.com/",
+            "https://evil.example/\u{202e}moc.elgoog//:sptth",
+        ] {
+            let shown = Shown::default();
+            elicit("demo", url(link), Some(&shown)).await;
+            let got = shown.0.lock().unwrap().clone().unwrap();
+            assert!(
+                !got.chars().any(|c| c.is_control() || c == '\u{202e}'),
+                "{got:?}"
+            );
+            assert_eq!(got, url::Url::parse(link).unwrap().as_str());
+        }
+    }
+
     #[tokio::test]
     async fn only_an_https_or_loopback_url_is_put_to_anyone() {
         let elicitor = accepting();
