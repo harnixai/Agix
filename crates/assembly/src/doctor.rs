@@ -488,6 +488,10 @@ pub fn run_doctor(
             settings.clone(),
             Arc::new(platform::sandbox::PlatformSandbox),
         )))
+        .with(Arc::new(doctor_posture::NetworkProxyCheck::new(
+            platform::use_system_proxy_now(),
+            platform::proxy_variables_set(),
+        )))
         .with(Arc::new(doctor_posture::PanicStrategyCheck))
         .with(Arc::new(doctor_posture::StrictProfileCheck::new(
             settings.clone(),
@@ -947,13 +951,14 @@ mod tests {
                 "settings.hooks_fail_open",
                 "sandbox.network_allowlist",
                 "sandbox.egress_proxy",
+                "network.proxy",
                 "build.panic",
                 "sandbox.strict_profile",
                 "acme.licence"
             ]
         );
         assert_eq!(
-            report["health"]["checks"][10]["details"]["last_ok"],
+            report["health"]["checks"][11]["details"]["last_ok"],
             "2026-08-30T11:00:00Z"
         );
     }

@@ -147,6 +147,47 @@ impl HealthCheck for UnattendedNetworkCheck {
     }
 }
 
+/// How the engine's own HTTP is routed: through the environment's proxy
+/// (`system`) or not (`direct`). Names the proxy variables that are set,
+/// never their values.
+pub struct NetworkProxyCheck {
+    use_system_proxy: bool,
+    variables: Vec<String>,
+}
+
+impl NetworkProxyCheck {
+    pub fn new(use_system_proxy: bool, variables: Vec<String>) -> Self {
+        Self {
+            use_system_proxy,
+            variables,
+        }
+    }
+}
+
+impl HealthCheck for NetworkProxyCheck {
+    fn name(&self) -> &str {
+        "network.proxy"
+    }
+
+    fn check(&self) -> CheckResult {
+        let (mode, summary) = if self.use_system_proxy {
+            (
+                "system",
+                "the engine's HTTP follows the environment's proxy settings",
+            )
+        } else {
+            (
+                "direct",
+                "network.use_system_proxy is false: the engine's HTTP connects directly",
+            )
+        };
+        CheckResult::ok(summary).with_details(serde_json::json!({
+            "mode": mode,
+            "variables": self.variables,
+        }))
+    }
+}
+
 /// `network_mode: allowlist` reads as "these domains and nothing else", and
 /// for a sandboxed command it is "nothing else": neither OS backend filters
 /// by domain.
@@ -473,6 +514,16 @@ mod tests {
             ),
             "ok"
         );
+    }
+
+    #[test]
+    fn the_proxy_check_reports_the_mode_and_only_variable_names() {
+        let result = NetworkProxyCheck::new(true, vec!["HTTPS_PROXY".into()]).check();
+        let details = result.details;
+        assert_eq!(details["mode"], "system");
+        assert_eq!(details["variables"], serde_json::json!(["HTTPS_PROXY"]));
+        let direct = NetworkProxyCheck::new(false, Vec::new()).check();
+        assert_eq!(direct.details["mode"], "direct");
     }
 
     #[test]

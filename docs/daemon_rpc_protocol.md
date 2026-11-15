@@ -811,8 +811,8 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 记忆存了多少,外加这个进程的几项装配事实。不做任何修复,也不发起任何网络探测 —— `HealthCheck`
 契约要求每项检查从已经握着的状态立刻回答。
 
-下面是一个全新装配、三份 settings.json 都还不存在时,引擎自带的八项检查与顶层字段,逐字段为真
-(`path` 因机器而异,`build.panic` 的文字随构建的 panic 策略而变,其余是字面值;daemon 自己的会话池
+下面是一个全新装配、三份 settings.json 都还不存在时,引擎自带的十一项检查与顶层字段,逐字段为真
+(`path` 因机器而异,`build.panic` 的文字随构建的 panic 策略而变,`network.proxy` 的 `mode` 与 `variables` 随设置与环境而变(`variables` 例中只写了空数组),其余是字面值;daemon 自己的会话池
 与插件包、宿主另有检查,见下文):
 
 ```jsonc
@@ -830,6 +830,8 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
       { "name":"settings.hooks_fail_open",  "status":"ok", "summary":"no hooks configured" },
       { "name":"sandbox.network_allowlist", "status":"ok", "summary":"sandbox.network_mode is not allowlist" },
       { "name":"sandbox.egress_proxy",      "status":"ok", "summary":"sandbox.network_mode is not proxy" },
+      { "name":"network.proxy",             "status":"ok", "summary":"…",
+        "details": { "mode":"…", "variables":[] } },
       { "name":"build.panic",               "status":"ok", "summary":"…",
         "details": { "panic":"…" } },
       { "name":"sandbox.strict_profile",    "status":"…",  "summary":"…" } ] },
@@ -847,7 +849,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
   "runtime": { "sessions":[], "stopping_engines":0 } }
 ```
 
-`health` 是 `HealthCheck` 契约(`docs/extension_points.md`)的报告:引擎自带的八项
+`health` 是 `HealthCheck` 契约(`docs/extension_points.md`)的报告:引擎自带的十一项
 (上面例子里的)在前,daemon 自己的会话池、插件包的检查随后,宿主注册的检查排在最后,都在同一个 `checks` 里。状态是三值而不是布尔 ——
 `degraded`("还能用,但有人该知道")与 `failing`("这块不能指望了")是两件事。
 
@@ -954,7 +956,10 @@ MCP server 都被拒绝。
 引擎自带的另外几项是姿态检查,不看运行状态,只读设置与构建:`settings.permission_mode` 在
 `permission_mode` 是 `bypassPermissions`(含 `auto` / `yolo`)时是 `degraded`,否则 `ok`;
 `settings.hooks_fail_open` 在有 `PreToolUse` / `UserPromptSubmit` / `Stop` 的 hook 的 `on_error` 是
-`allow`(失败时放行)时是 `degraded`,`details.fail_open` 列出事件与条数;`build.panic` 说明这个
+`allow`(失败时放行)时是 `degraded`,`details.fail_open` 列出事件与条数;`network.proxy` 报引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)怎么走:
+`details.mode` 是 `system`(跟随环境里的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`,缺省)或
+`direct`(`network.use_system_proxy` 为 `false`,不经代理),`details.variables` 是环境里已设置的代理变量名
+(不含值);总是 `ok`。它与沙箱内命令的出网(`sandbox.network_mode`)是两回事。`build.panic` 说明这个
 二进制是 `panic = "abort"`(工具 panic 会结束进程)还是 `unwind`(变成那次调用的错误),总是 `ok`。
 
 插件包开着(`plugins.status` 是 `enabled`)时还有一项 `plugins.enable_state`:两层
