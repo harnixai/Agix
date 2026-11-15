@@ -60,13 +60,7 @@ pub(in crate::agent::turn) fn apply_result_transformers(
     // untouched structure would undo it.
     let untouched = (&draft.text, draft.is_error) == (&original.0, original.1);
     let structured = structured.filter(|_| untouched);
-    let file_changes = match untouched {
-        true => file_changes,
-        false => file_changes
-            .into_iter()
-            .map(|c| c.without_content())
-            .collect(),
-    };
+    let file_changes = withhold_diffs(ctx, &call, untouched, file_changes);
 
     let images = draft
         .images
@@ -89,4 +83,40 @@ pub(in crate::agent::turn) fn apply_result_transformers(
         })
     };
     (outcome, images)
+}
+
+/// Whether the transformers would rewrite the diff itself: the call's text
+/// may never show what the diff carries (`Write` says only how many bytes).
+fn rewrites_the_diff(
+    ctx: &ToolExecCtx,
+    call: &base::interface::tool_middleware::ToolCall,
+    change: &base::tool::FileChange,
+) -> bool {
+    let Some(diff) = &change.unified_diff else {
+        return false;
+    };
+    let mut draft = base::interface::tool_result::ToolResultDraft {
+        text: diff.clone(),
+        images: Vec::new(),
+        is_error: false,
+    };
+    base::interface::tool_result::apply(&ctx.result_transformers, call, &mut draft);
+    draft.text != *diff || draft.is_error
+}
+
+fn withhold_diffs(
+    ctx: &ToolExecCtx,
+    call: &base::interface::tool_middleware::ToolCall,
+    text_untouched: bool,
+    changes: Vec<base::tool::FileChange>,
+) -> Vec<base::tool::FileChange> {
+    changes
+        .into_iter()
+        .map(
+            |change| match text_untouched && !rewrites_the_diff(ctx, call, &change) {
+                true => change,
+                false => change.without_content(),
+            },
+        )
+        .collect()
 }

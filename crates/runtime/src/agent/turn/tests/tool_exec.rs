@@ -1643,16 +1643,70 @@ fn a_redacting_transformer_leaves_the_file_change_without_its_diff() {
         (&change.path, &change.before_hash, &change.after_hash)
     );
 
+    let clean = tools::file_change::describe(
+        std::path::Path::new("/repo/notes"),
+        tools::file_change::Before::Content(b"a\n"),
+        b"b\n",
+        std::path::Path::new("/repo"),
+    );
     let untouched = apply_result_transformers(
         &ctx,
         "Edit",
         &serde_json::json!({}),
-        answer("nothing here"),
+        Ok(base::interface::tool_middleware::ToolAnswer {
+            text: "nothing here".into(),
+            new_messages: None,
+            reported_failure: false,
+            structured: None,
+            file_changes: vec![clean.clone()],
+        }),
         Vec::new(),
     )
     .0
     .unwrap();
-    assert_eq!(untouched.file_changes, vec![change]);
+    assert_eq!(untouched.file_changes, vec![clean]);
+}
+
+#[test]
+fn a_secret_in_the_diff_is_redacted_though_the_calls_text_never_shows_it() {
+    let mut ctx = test_exec_ctx(
+        Arc::new(base::tool::InMemoryToolRegistry::new()),
+        Arc::new(local_hook_runner(std::collections::HashMap::new())),
+    );
+    ctx.result_transformers =
+        Arc::new(vec![
+            Arc::new(base::interface::tool_result::RedactLiterals::new([
+                "sk-live-0123456789",
+            ])) as Arc<dyn base::interface::tool_result::ToolResultTransformer>,
+        ]);
+    let change = tools::file_change::describe(
+        std::path::Path::new("/repo/env"),
+        tools::file_change::Before::Content(b"KEY=sk-live-0123456789\n"),
+        b"KEY=\n",
+        std::path::Path::new("/repo"),
+    );
+    assert!(change
+        .unified_diff
+        .as_deref()
+        .is_some_and(|d| d.contains("sk-live-0123456789")));
+    let written = apply_result_transformers(
+        &ctx,
+        "Write",
+        &serde_json::json!({}),
+        Ok(base::interface::tool_middleware::ToolAnswer {
+            text: "Wrote 5 bytes to /repo/env".into(),
+            new_messages: None,
+            reported_failure: false,
+            structured: None,
+            file_changes: vec![change],
+        }),
+        Vec::new(),
+    )
+    .0
+    .unwrap();
+    let kept = &written.file_changes[0];
+    assert_eq!(kept.unified_diff, None);
+    assert_eq!(kept.omitted, Some(base::tool::DiffOmitted::Redacted));
 }
 
 /// Lets every call through, owing a look for nested repositories.
