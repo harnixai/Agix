@@ -29,6 +29,7 @@ use rmcp::model::{
 };
 
 use crate::error::McpError;
+use tokio_util::sync::CancellationToken;
 
 /// Who answers the questions one tool call's server asks.
 #[async_trait]
@@ -51,10 +52,10 @@ pub struct McpCallScope {
 type Asker = Option<Arc<dyn McpElicitor>>;
 
 /// The requests in flight on one connection that a server's own
-/// `elicitation/create` could belong to.
+/// `elicitation/create` could belong to, each with the token its end cancels.
 #[derive(Default)]
 pub struct ElicitRoute {
-    inflight: Mutex<Vec<(u64, Asker)>>,
+    inflight: Mutex<Vec<(u64, Asker, CancellationToken)>>,
     seq: AtomicU64,
 }
 
@@ -67,26 +68,31 @@ pub struct InFlight {
 impl ElicitRoute {
     pub fn enter(self: &Arc<Self>, elicitor: Asker) -> InFlight {
         let id = self.seq.fetch_add(1, Ordering::Relaxed);
-        self.lock().push((id, elicitor));
+        self.lock().push((id, elicitor, CancellationToken::new()));
         InFlight {
             route: self.clone(),
             id,
         }
     }
 
-    /// The elicitor of the one request in flight, or how many there are when
-    /// that is not one.
-    fn sole(&self) -> Result<Asker, usize> {
+    /// The elicitor of the one request in flight and the token its end
+    /// cancels, or how many there are when that is not one.
+    fn sole(&self) -> Result<(Asker, CancellationToken), usize> {
         match self.lock().as_slice() {
-            [(_, elicitor)] => Ok(elicitor.clone()),
+            [(_, elicitor, ended)] => Ok((elicitor.clone(), ended.clone())),
             all => Err(all.len()),
         }
     }
 
-    /// Answer a server's own `elicitation/create`.
+    /// Answer a server's own `elicitation/create`. The question is withdrawn
+    /// when the call it arrived in ends: a server that asks and then returns
+    /// does not leave it standing for whatever the host does next.
     pub(crate) async fn answer(&self, server: &str, params: ElicitRequestParams) -> ElicitResult {
         let answer = match self.sole() {
-            Ok(elicitor) => elicit(server, params, elicitor.as_deref()).await,
+            Ok((elicitor, ended)) => tokio::select! {
+                answer = elicit(server, params, elicitor.as_deref()) => answer,
+                () = ended.cancelled() => McpElicitationAnswer::Cancel,
+            },
             Err(inflight) => {
                 tracing::warn!(
                     server,
@@ -99,14 +105,20 @@ impl ElicitRoute {
         elicit_result(answer)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Asker)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Asker, CancellationToken)>> {
         self.inflight.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.route.lock().retain(|(id, _)| *id != self.id);
+        self.route.lock().retain(|(id, _, ended)| {
+            let mine = *id == self.id;
+            if mine {
+                ended.cancel();
+            }
+            !mine
+        });
     }
 }
 
