@@ -550,14 +550,17 @@ async fn a_resume_refused_for_a_log_another_process_holds_removes_nothing() -> a
         .join("sessions")
         .join(&session)
         .join("writer.lock");
-    let _held = std::fs::OpenOptions::new().write(true).open(&lock)?;
-    // SAFETY: `flock` only reads the descriptor, which `_held` keeps open.
-    let rc = unsafe {
-        libc::flock(
-            std::os::fd::AsRawFd::as_raw_fd(&_held),
-            libc::LOCK_EX | libc::LOCK_NB,
-        )
-    };
+    let file = std::fs::OpenOptions::new().write(true).open(&lock)?;
+    // `session.close` does not wait for the session's engine, which lets go
+    // of the log as it exits; a blocking `flock` waits for that.
+    let taking = tokio::task::spawn_blocking(move || {
+        // SAFETY: `flock` only reads the descriptor, which `file` keeps open.
+        let rc = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
+        (rc, file)
+    });
+    let (rc, _held) = tokio::time::timeout(std::time::Duration::from_secs(10), taking)
+        .await
+        .map_err(|_| anyhow::anyhow!("the closed session's engine never let go of its log"))??;
     assert_eq!(rc, 0, "the closed session's log is free to hold");
     std::fs::write(
         &written_elsewhere,
