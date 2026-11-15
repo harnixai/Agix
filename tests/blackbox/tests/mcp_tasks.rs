@@ -69,7 +69,7 @@ async fn wait_started(host: &Watcher) -> anyhow::Result<Value> {
     .await
 }
 
-fn result_of<'a>(events: &'a rpc_client::TurnEvents) -> &'a (String, String, bool) {
+fn result_of(events: &rpc_client::TurnEvents) -> &(String, String, bool) {
     events
         .tool_results
         .iter()

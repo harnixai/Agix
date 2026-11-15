@@ -9,6 +9,7 @@ use runtime::agent::EventReceiver;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::session_pool) struct Generation(u64);
@@ -87,6 +88,9 @@ pub(in crate::session_pool) struct TurnTicket {
     pub(in crate::session_pool) generation: Generation,
     pub(in crate::session_pool) turn_id: String,
     pub(in crate::session_pool) rx: Arc<AsyncMutex<Option<EventReceiver>>>,
+    /// Cancelled when the engine's task has ended, whether or not its event
+    /// channel has closed: other holders of a sender keep it open.
+    pub(in crate::session_pool) engine_exited: CancellationToken,
     abandoned: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
@@ -96,12 +100,14 @@ impl TurnTicket {
         generation: Generation,
         turn_id: String,
         rx: Arc<AsyncMutex<Option<EventReceiver>>>,
+        engine_exited: CancellationToken,
     ) -> Self {
         Self {
             core,
             generation,
             turn_id,
             rx,
+            engine_exited,
             abandoned: std::sync::Mutex::new(None),
         }
     }

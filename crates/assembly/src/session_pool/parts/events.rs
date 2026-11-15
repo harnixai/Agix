@@ -7,44 +7,53 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::warn;
 
+/// The broadcast and what a subscriber that arrives late is still owed.
 #[derive(Clone)]
-pub(in crate::session_pool) struct DaemonEvents {
+struct Channel {
     /// `send` returning `Err` only means nobody listens right now.
     tx: broadcast::Sender<DaemonEvent>,
-    /// For what happens before any session's own handle exists — a resume
-    /// refused, or answered by a session already live — which has nowhere
-    /// else to record to. Every per-session event goes through that
-    /// session's handle.
-    telemetry: telemetry::TelemetryHandle,
     /// The one question the daemon asks at startup, before any client can
     /// have connected: kept for subscribers that arrive later, until it is
     /// answered.
     import_question: Arc<Mutex<Option<DaemonEvent>>>,
 }
 
+#[derive(Clone)]
+pub(in crate::session_pool) struct DaemonEvents {
+    channel: Channel,
+    /// For what happens before any session's own handle exists — a resume
+    /// refused, or answered by a session already live — which has nowhere
+    /// else to record to. Every per-session event goes through that
+    /// session's handle.
+    telemetry: telemetry::TelemetryHandle,
+}
+
 impl DaemonEvents {
     pub(in crate::session_pool) fn new(settings: &settings::LoadedSettings) -> Self {
         let (tx, _) = broadcast::channel(1024);
         Self {
-            tx,
+            channel: Channel {
+                tx,
+                import_question: Arc::new(Mutex::new(None)),
+            },
             telemetry: build_pool_telemetry(settings),
-            import_question: Arc::new(Mutex::new(None)),
         }
     }
 
     pub(in crate::session_pool) fn subscribe(&self) -> broadcast::Receiver<DaemonEvent> {
-        self.tx.subscribe()
+        self.channel.tx.subscribe()
     }
 
     pub(in crate::session_pool) fn emit(&self, event: DaemonEvent) {
         if let Some(recorded) = event.telemetry() {
             let _ = self.telemetry.record(recorded);
         }
-        let _ = self.tx.send(event);
+        let _ = self.channel.tx.send(event);
     }
 
     pub(in crate::session_pool) fn ask_import(&self, event: DaemonEvent) {
         *self
+            .channel
             .import_question
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(event.clone());
@@ -52,14 +61,16 @@ impl DaemonEvents {
     }
 
     pub(in crate::session_pool) fn import_question(&self) -> Option<DaemonEvent> {
-        self.import_question
+        self.channel
+            .import_question
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
     pub(in crate::session_pool) fn import_answered(&self) {
-        self.import_question
+        self.channel
+            .import_question
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();

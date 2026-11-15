@@ -7,6 +7,7 @@ use base::context::goal::TurnOrigin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex as StdMutex;
+use tokio_util::sync::CancellationToken;
 
 pub(super) async fn builder_with_history(
 ) -> (SessionPoolBuilder, tempfile::TempDir, tempfile::TempDir) {
@@ -296,13 +297,11 @@ async fn a_late_turn_complete_of_a_closed_session_leaves_the_resumed_one_alone()
     pool.ensure_live(&sid, None).await.unwrap();
     let resumed = slot_and_state(&pool, &sid).await.0;
     assert_ne!(resumed, old_generation);
-    late_tx
-        .send(turn_complete(base::event::ContextUsage {
-            tokens: 1000,
-            compact_threshold: 2000,
-            window: 4000,
-        }))
-        .unwrap();
+    let _ = late_tx.send(turn_complete(base::event::ContextUsage {
+        tokens: 1000,
+        compact_threshold: 2000,
+        window: 4000,
+    }));
     assert!(
         old_turn.await.unwrap().is_err(),
         "the closed turn completed"
@@ -353,7 +352,13 @@ async fn a_background_tasks_question_outlives_the_turn_and_goes_with_its_task() 
     raise_ask(&hub, &sid, "own", None);
     raise_ask(&hub, &sid, "background", Some("task-1"));
 
-    let ticket = TurnTicket::new(core, generation, "t1".into(), slot);
+    let ticket = TurnTicket::new(
+        core,
+        generation,
+        "t1".into(),
+        slot,
+        CancellationToken::new(),
+    );
     assert!(pool.release_turn_slot(&ticket, rx).await);
     assert_eq!(
         pending_ids(&pool, &sid).await,

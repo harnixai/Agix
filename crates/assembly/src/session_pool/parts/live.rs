@@ -11,7 +11,7 @@
 //! `session_locks` 的表锁和 `stopping` 只在取、放的那一下持有。
 
 use crate::session_pool::parts::hub::SessionHub;
-use crate::session_pool::parts::phase::{Generation, Generations, TurnSlot};
+use crate::session_pool::parts::phase::{Generation, Generations, TurnSlot, TurnTicket};
 use crate::session_pool::{CreateError, SessionNamer, AGENT_EXIT_GRACE, PROCESS_GROUP_GRACE};
 use base::context::SessionState;
 use base::event::ContextUsage;
@@ -222,6 +222,16 @@ pub(in crate::session_pool) struct LiveSession {
 }
 
 impl LiveSession {
+    pub(in crate::session_pool) fn ticket(&self, turn_id: &str) -> TurnTicket {
+        TurnTicket::new(
+            self.core.clone(),
+            self.engine.generation,
+            turn_id.to_string(),
+            self.turn.rx.clone(),
+            self.engine.exited.clone(),
+        )
+    }
+
     /// Whether this is `core`'s entry, still on engine `generation`.
     pub(in crate::session_pool) fn runs(
         &self,
