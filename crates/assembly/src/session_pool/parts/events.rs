@@ -3,6 +3,7 @@
 
 use crate::session_pool::api::DaemonEvent;
 use crate::session_pool::pool_telemetry::otel_sink;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -15,6 +16,10 @@ pub(in crate::session_pool) struct DaemonEvents {
     /// else to record to. Every per-session event goes through that
     /// session's handle.
     telemetry: telemetry::TelemetryHandle,
+    /// The one question the daemon asks at startup, before any client can
+    /// have connected: kept for subscribers that arrive later, until it is
+    /// answered.
+    import_question: Arc<Mutex<Option<DaemonEvent>>>,
 }
 
 impl DaemonEvents {
@@ -23,6 +28,7 @@ impl DaemonEvents {
         Self {
             tx,
             telemetry: build_pool_telemetry(settings),
+            import_question: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -35,6 +41,28 @@ impl DaemonEvents {
             let _ = self.telemetry.record(recorded);
         }
         let _ = self.tx.send(event);
+    }
+
+    pub(in crate::session_pool) fn ask_import(&self, event: DaemonEvent) {
+        *self
+            .import_question
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(event.clone());
+        self.emit(event);
+    }
+
+    pub(in crate::session_pool) fn import_question(&self) -> Option<DaemonEvent> {
+        self.import_question
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub(in crate::session_pool) fn import_answered(&self) {
+        self.import_question
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
     }
 
     pub(in crate::session_pool) fn record(&self, event: telemetry::TelemetryEvent) {

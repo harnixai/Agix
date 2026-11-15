@@ -531,7 +531,7 @@ fn spawn_import_detection(pool: Arc<daemon::session_pool::SessionPool>) {
         if sources.is_empty() {
             return;
         }
-        pool.emit_event(import_detected(&sources));
+        pool.ask_import(import_detected(&sources));
     });
 }
 

@@ -8,10 +8,11 @@ impl DaemonServer {
     /// (`{"subscribed": true}`) and, from then on, pushes every future
     /// `daemon.event` notification (see `SessionPool::emit_event`) to this
     /// same connection as a `DaemonEventFrame` — indefinitely, until the
-    /// connection closes. Does not replay past events; subscribe before the
-    /// event you care about can happen (e.g. right after startup, before
-    /// relying on `mcp_connected`/`import_detected`). Subscribing again on
-    /// the same connection changes nothing.
+    /// connection closes. Does not replay past events, with one exception:
+    /// an `import_detected` nobody has answered yet is sent to every new
+    /// subscriber first, because it is raised at startup, before any client
+    /// can have connected. Subscribing again on the same connection changes
+    /// nothing.
     pub(super) async fn daemon_subscribe_events(
         &self,
         client: Arc<Client>,
@@ -22,7 +23,14 @@ impl DaemonServer {
         }
         let mut rx = self.pool.subscribe_events();
         let forward = client;
+        let waiting = self.pool.pending_import_question();
         tokio::spawn(async move {
+            if let Some(event) = waiting {
+                let frame = crate::rpc::DaemonEventFrame::pool(&event);
+                if !send_frame(&forward, &frame).await {
+                    return;
+                }
+            }
             loop {
                 match rx.recv().await {
                     Ok(event) => {

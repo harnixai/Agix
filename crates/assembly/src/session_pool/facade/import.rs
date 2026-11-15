@@ -46,6 +46,7 @@ impl SessionPool {
         settings::import::mark_imported(project_root, &sources, kind)
             .await
             .map_err(|e| invalid(e.to_string()))?;
+        self.events.import_answered();
         Ok(api::ImportRun {
             source: summary.kind.as_str().to_string(),
             actions: summary.actions,

@@ -287,6 +287,17 @@ impl SessionPool {
         self.events.emit(event);
     }
 
+    /// Publish the `import_detected` question and keep it for subscribers
+    /// that connect later, until an import answers it.
+    pub fn ask_import(&self, event: api::DaemonEvent) {
+        self.events.ask_import(event);
+    }
+
+    /// The `import_detected` question still waiting for an answer.
+    pub fn pending_import_question(&self) -> Option<api::DaemonEvent> {
+        self.events.import_question()
+    }
+
     /// Record how long the daemon took to start, in the pool-level
     /// telemetry.
     pub fn record_startup(&self, timing: telemetry::StartupTimingPayload) {
