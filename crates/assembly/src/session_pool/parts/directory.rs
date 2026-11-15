@@ -14,6 +14,22 @@ pub(in crate::session_pool) struct SessionDirectory {
     /// no-project tier. Kept apart from the bindings, which a settings
     /// change empties.
     served: std::sync::Mutex<Vec<Option<PathBuf>>>,
+    importing: Arc<std::sync::Mutex<std::collections::HashSet<base::session::SessionId>>>,
+}
+
+/// Ids an import has set aside for itself until it is dropped.
+pub(in crate::session_pool) struct ImportReservation {
+    held: Vec<base::session::SessionId>,
+    importing: Arc<std::sync::Mutex<std::collections::HashSet<base::session::SessionId>>>,
+}
+
+impl Drop for ImportReservation {
+    fn drop(&mut self) {
+        let mut importing = self.importing.lock().unwrap_or_else(|e| e.into_inner());
+        for id in &self.held {
+            importing.remove(id);
+        }
+    }
 }
 
 impl SessionDirectory {
@@ -23,7 +39,28 @@ impl SessionDirectory {
         Self {
             store,
             served: std::sync::Mutex::new(Vec::new()),
+            importing: Arc::default(),
         }
+    }
+
+    /// All of `ids` or none: the first of two imports asking for one id gets
+    /// it, and the other is told the session exists.
+    pub(in crate::session_pool) fn reserve_for_import(
+        &self,
+        ids: impl Iterator<Item = base::session::SessionId>,
+    ) -> Result<ImportReservation, PoolError> {
+        let ids: Vec<_> = ids.collect();
+        let mut importing = self.importing.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(taken) = ids.iter().find(|id| importing.contains(id)) {
+            return Err(PoolError::SessionExists {
+                session_id: taken.to_string(),
+            });
+        }
+        importing.extend(ids.iter().copied());
+        Ok(ImportReservation {
+            held: ids,
+            importing: self.importing.clone(),
+        })
     }
 
     pub(in crate::session_pool) fn store(&self) -> Option<&Arc<dyn history::store::HistoryStore>> {

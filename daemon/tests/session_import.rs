@@ -426,6 +426,29 @@ async fn importing_twice_gives_two_sessions_and_keep_ids_refuses_when_one_exists
     assert_eq!(daemon.session_count().await, before);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_imports_of_one_id_at_once_leave_exactly_one_session() {
+    let daemon = start_daemon().await;
+    let sid = daemon.session_with_history().await;
+    let zip = daemon.export(&sid, "race.zip", "zip").await;
+    let expected = daemon.messages(&sid).await;
+    for round in 0..12 {
+        daemon
+            .call("session.delete", serde_json::json!({"session_id": sid}))
+            .await;
+        let params = serde_json::json!({"path": zip, "keep_ids": true});
+        let (a, b) = tokio::join!(daemon.import(params.clone()), daemon.import(params));
+        let won = [&a, &b]
+            .iter()
+            .filter(|r| r.get("result").is_some())
+            .count();
+        assert_eq!(won, 1, "round {round}: {a} {b}");
+        let lost = if a.get("result").is_some() { &b } else { &a };
+        assert_eq!(lost["error"]["code"], codes::SESSION_EXISTS, "{lost}");
+        assert_eq!(daemon.messages(&sid).await, expected, "round {round}");
+    }
+}
+
 #[tokio::test]
 async fn a_dir_export_imports_like_a_zip() {
     let daemon = start_daemon().await;

@@ -37,9 +37,13 @@ impl SessionPool {
         )?;
 
         let ids = id_map(&archive, request.keep_ids);
-        if request.keep_ids {
+        let _reservation = if request.keep_ids {
+            let reservation = self.directory.reserve_for_import(ids.values().copied())?;
             refuse_existing(store.as_ref(), ids.values().copied()).await?;
-        }
+            Some(reservation)
+        } else {
+            None
+        };
         let mut warnings = Vec::new();
         let mut written = rewrite(&archive, &ids, &target, &mut warnings);
         for (_, entries) in &mut written {
