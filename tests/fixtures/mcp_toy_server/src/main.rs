@@ -33,7 +33,7 @@
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
 //! 2026-07-28 时走 `input_required` 一轮，更早的版本由 server 发 `elicitation/create`，
-//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发）。
+//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发，`one_by_one` 时一个接一个）。
 //! `work`（`steps` 步、每步 `step_ms`，`fail` 让它最后失败、`ask` 在第一步后问一个问题、
 //! `code` 原样写进结果文本）。收到的每个回答原样记一行
 //! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
@@ -209,6 +209,9 @@ struct AskRequest {
 struct FloodRequest {
     #[schemars(description = "how many questions to put at once")]
     count: usize,
+    #[schemars(description = "an older server: put them one after another instead")]
+    #[serde(default)]
+    one_by_one: bool,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -339,7 +342,7 @@ impl ToyServer {
     )]
     async fn ask_flood(
         &self,
-        Parameters(FloodRequest { count }): Parameters<FloodRequest>,
+        Parameters(FloodRequest { count, one_by_one }): Parameters<FloodRequest>,
         InputResponses(responses): InputResponses,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
@@ -349,7 +352,7 @@ impl ToyServer {
             .iter()
             .map(|key| (key.as_str(), question(Some("form"))))
             .collect();
-        self.put_all(&asked, responses, &context, true).await
+        self.put_all(&asked, responses, &context, !one_by_one).await
     }
 }
 

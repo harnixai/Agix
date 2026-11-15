@@ -609,6 +609,46 @@ async fn a_2025_server_asking_six_at_once_has_four_open_and_two_cancelled() -> a
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_2025_server_asking_twelve_in_turn_is_answered_ten_and_the_result_says_so(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let mut run = toy_run("ask-in-turn", &stub, &calls, OLD_SERVER, json!({}))?
+        .start()
+        .await?;
+    let session = asking_session(&mut run).await?;
+    let host = run.watch_with(&session, answering(blue())).await?;
+    stub.script([
+        Reply::calls(
+            "f1",
+            "mcp__demo__ask_flood",
+            json!({ "count": 12, "one_by_one": true }),
+        ),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "ask me twelve things").await?;
+
+    assert_eq!(mcp_prompts(&host).len(), 10, "{:?}", host.frames());
+    let got = answers(&calls);
+    assert_eq!(
+        got[10..],
+        [answered_with("cancel"), answered_with("cancel")]
+    );
+    let sent = stub
+        .calls()
+        .last()
+        .map(|c| c.body.to_string())
+        .unwrap_or_default();
+    assert!(
+        sent.contains("at most 10"),
+        "the result does not say questions were cut: {sent}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_message_over_4_kib_is_cut_and_marked_limited() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let scratch = tempfile::tempdir()?;
