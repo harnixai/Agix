@@ -656,13 +656,17 @@ async fn a_project_grant_in_a_repository_borrowing_the_global_tier_stays_out_of_
         &settings::section::Sections::none(),
     );
     let perm = Policy::from_settings(&settings.permission_settings(), []);
-    let _ = perm
+    let kept = perm
         .grant(Grant::new(
             "Probe",
             Some("git status".into()),
             GrantScope::Project,
         ))
         .await;
+    assert!(
+        matches!(kept, Err(GrantError::NotPersisted { .. })),
+        "{kept:?}"
+    );
     assert!(
         !global.join(base::paths::SETTINGS_LOCAL_FILE).exists(),
         "the grant went to the global tier through the borrowed `.agix`"

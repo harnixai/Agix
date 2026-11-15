@@ -65,31 +65,39 @@ impl LoadedSettings {
         c
     }
 
-    /// The project's `settings.local.json`, unless its `.agix` is the global
-    /// or scene directory — a repository linking its `.agix` there, or a
-    /// project rooted at `$HOME` — where a rule for "this project" would
-    /// allow the call in every project.
-    fn own_local_settings_file(&self) -> Option<std::path::PathBuf> {
-        let paths = &self.paths;
-        self.paths.local_settings_file().filter(|_| {
-            crate::trust::is_own_project_dir(
-                &paths.local_data_dir,
-                &paths.global_data_dir,
-                &paths.user_data_dir,
-            )
-        })
-    }
-
-    /// What the permission gate reads of these settings.
+    /// What the permission gate reads of these settings. A project's
+    /// "always allow" is not written where it would not hold: in a `.agix`
+    /// that is the global or scene directory (a repository linking its
+    /// `.agix` there, a project rooted at `$HOME`) it would allow the call in
+    /// every project, and an untrusted project's file is withheld on the next
+    /// load.
     pub fn permission_settings(&self) -> PermissionSettings {
+        let paths = &self.paths;
+        let own = crate::trust::is_own_project_dir(
+            &paths.local_data_dir,
+            &paths.global_data_dir,
+            &paths.user_data_dir,
+        );
+        let refusal = if !own {
+            Some(
+                "the project's .agix is the global or scene directory, where the rule would \
+                 allow the call in every project",
+            )
+        } else if paths.project_untrusted {
+            Some(
+                "the project is not trusted, so its settings would not be read; trust it \
+                 first (project.trust)",
+            )
+        } else {
+            None
+        };
         PermissionSettings {
             rules: self.rules.clone(),
             managed: self.managed.clone(),
-            project_rules: self.own_local_settings_file().map(|path| {
-                std::sync::Arc::new(if self.paths.project_untrusted {
-                    LocalRules::untrusted(path)
-                } else {
-                    LocalRules::new(path)
+            project_rules: paths.local_settings_file().map(|path| {
+                std::sync::Arc::new(match refusal {
+                    Some(reason) => LocalRules::refusing(path, reason),
+                    None => LocalRules::new(path),
                 }) as std::sync::Arc<dyn base::interface::permission::RuleFile>
             }),
         }

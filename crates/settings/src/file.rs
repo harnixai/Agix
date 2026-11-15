@@ -244,26 +244,26 @@ fn append(
     Ok(true)
 }
 
-/// The local settings file as the permission engine's [`RuleFile`]. In an
-/// untrusted project nothing is written: the next load would withhold it.
+/// The local settings file as the permission engine's [`RuleFile`], or the
+/// reason a rule is not written there.
 #[derive(Debug, Clone)]
 pub struct LocalRules {
     path: PathBuf,
-    untrusted: bool,
+    refusal: Option<&'static str>,
 }
 
 impl LocalRules {
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
-            untrusted: false,
+            refusal: None,
         }
     }
 
-    pub fn untrusted(path: PathBuf) -> Self {
+    pub fn refusing(path: PathBuf, reason: &'static str) -> Self {
         Self {
             path,
-            untrusted: true,
+            refusal: Some(reason),
         }
     }
 }
@@ -274,12 +274,8 @@ impl RuleFile for LocalRules {
     }
 
     fn append_allow(&self, rule: &str, matching: GrantMatch) -> Result<bool, String> {
-        if self.untrusted {
-            return Err(
-                "the project is not trusted, so its settings would not be read; trust it first \
-                 (project.trust)"
-                    .into(),
-            );
+        if let Some(reason) = self.refusal {
+            return Err(reason.into());
         }
         append(&self.path, AppendTarget::Allow, rule, matching).map_err(|e| e.to_string())
     }
