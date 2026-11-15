@@ -24,6 +24,26 @@ impl FileSystem for LocalFileSystem {
         tokio::fs::read(path).await.map_err(|e| failed(path, e))
     }
 
+    async fn sha256(&self, path: &Path) -> Result<String, ExecError> {
+        use sha2::Digest;
+        use std::io::Read;
+        let owned = path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let mut file = std::fs::File::open(&owned)?;
+            let mut hasher = sha2::Sha256::new();
+            let mut chunk = vec![0u8; 64 * 1024];
+            loop {
+                match file.read(&mut chunk)? {
+                    0 => return Ok(hex::encode(hasher.finalize())),
+                    n => hasher.update(&chunk[..n]),
+                }
+            }
+        })
+        .await
+        .map_err(|e| ExecError::failed(format!("{}: {e}", path.display())))?
+        .map_err(|e| failed(path, e))
+    }
+
     async fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
         tokio::fs::write(path, bytes)
             .await

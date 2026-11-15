@@ -220,6 +220,17 @@ async fn observe(
     if !meta.is_file || meta.is_symlink {
         return Ok(Before::NotAFile);
     }
+    if meta.len > MAX_FILE_BYTES {
+        return Ok(match fs.sha256(target).await {
+            Ok(sha256) => Before::TooLarge {
+                sha256,
+                bytes: meta.len,
+            },
+            Err(e) => Before::Unreadable {
+                error: e.to_string(),
+            },
+        });
+    }
     let bytes = match fs.read(target).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -242,10 +253,8 @@ async fn observe(
 /// What `target` holds now, as a `post` records it.
 pub async fn current_state(fs: &dyn FileSystem, target: &Path) -> After {
     match fs.metadata(target).await {
-        Ok(meta) if meta.is_file && !meta.is_symlink => match fs.read(target).await {
-            Ok(bytes) => After::File {
-                sha256: history::checkpoint::sha256_hex(&bytes),
-            },
+        Ok(meta) if meta.is_file && !meta.is_symlink => match fs.sha256(target).await {
+            Ok(sha256) => After::File { sha256 },
             Err(_) => After::Unknown,
         },
         Ok(_) | Err(ExecError::Denied(_)) => After::Unknown,
@@ -291,5 +300,76 @@ impl PendingWrite {
             tracing::warn!(error = %e, path = %self.target.display(), "failed to record a checkpoint's post");
         }
         after
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base::interface::exec::in_process::InMemoryFileSystem;
+    use base::interface::exec::{DirEntry, Metadata};
+    use std::sync::Mutex;
+
+    struct CountingFs {
+        reads: Mutex<Vec<PathBuf>>,
+        inner: InMemoryFileSystem,
+    }
+
+    #[async_trait::async_trait]
+    impl FileSystem for CountingFs {
+        async fn read(&self, path: &Path) -> Result<Vec<u8>, ExecError> {
+            self.reads.lock().unwrap().push(path.to_path_buf());
+            self.inner.read(path).await
+        }
+        async fn sha256(&self, path: &Path) -> Result<String, ExecError> {
+            self.inner.sha256(path).await
+        }
+        async fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
+            self.inner.write(path, bytes).await
+        }
+        async fn create_dir_all(&self, path: &Path) -> Result<(), ExecError> {
+            self.inner.create_dir_all(path).await
+        }
+        async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ExecError> {
+            self.inner.read_dir(path).await
+        }
+        async fn remove_dir_all(&self, path: &Path) -> Result<(), ExecError> {
+            self.inner.remove_dir_all(path).await
+        }
+        async fn metadata(&self, path: &Path) -> Result<Metadata, ExecError> {
+            self.inner.metadata(path).await
+        }
+        async fn canonicalize(&self, path: &Path) -> Result<PathBuf, ExecError> {
+            self.inner.canonicalize(path).await
+        }
+    }
+
+    fn fs_with_big_file() -> CountingFs {
+        let big = vec![7u8; MAX_FILE_BYTES as usize + 1024 * 1024];
+        CountingFs {
+            reads: Mutex::default(),
+            inner: InMemoryFileSystem::new().with_file("/p/big.bin", big),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_over_the_limit_is_never_read_into_memory_to_record_it() {
+        let fs = fs_with_big_file();
+        let objects = history::checkpoint::InMemoryCheckpointObjects::default();
+        let before = observe(&fs, Path::new("/p/big.bin"), &objects)
+            .await
+            .unwrap();
+        assert!(matches!(before, Before::TooLarge { bytes, .. } if bytes > MAX_FILE_BYTES));
+        assert!(fs.reads.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_state_check_of_a_large_file_does_not_read_it_either() {
+        let fs = fs_with_big_file();
+        assert!(matches!(
+            current_state(&fs, Path::new("/p/big.bin")).await,
+            After::File { .. }
+        ));
+        assert!(fs.reads.lock().unwrap().is_empty());
     }
 }

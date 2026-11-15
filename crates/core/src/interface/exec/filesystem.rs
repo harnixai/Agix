@@ -78,6 +78,14 @@ pub trait FileSystem: Send + Sync {
         self.write(path, bytes).await
     }
 
+    /// The file's sha256, lowercase hex. Provided as a read then a hash; a
+    /// provider that can hash without holding the file should, because the
+    /// engine asks this about files too large to keep.
+    async fn sha256(&self, path: &Path) -> Result<String, ExecError> {
+        use sha2::Digest;
+        Ok(hex::encode(sha2::Sha256::digest(self.read(path).await?)))
+    }
+
     /// What most callers actually want. Provided, so an implementor writes
     /// `read` and gets this.
     async fn read_to_string(&self, path: &Path) -> Result<String, ExecError> {

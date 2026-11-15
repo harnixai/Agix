@@ -476,7 +476,19 @@ async fn preflight(
             )
         })?;
     let to = recorded_contents(checkpoints, step)?;
-    if fs.metadata(&target).await.is_ok_and(|m| m.is_symlink) {
+    let now = fs.metadata(&target).await.ok();
+    if let Some(len) = now
+        .as_ref()
+        .filter(|m| m.is_file && m.len > history::checkpoint::MAX_FILE_BYTES)
+        .map(|m| m.len)
+    {
+        return Err(issue(
+            step,
+            RewindIssueKind::Unavailable,
+            format!("it is {len} bytes now, too large to keep a copy of before overwriting"),
+        ));
+    }
+    if now.is_some_and(|m| m.is_symlink) {
         return Err(issue(
             step,
             RewindIssueKind::Symlink,
