@@ -49,6 +49,7 @@ impl HookedElicitation {
             server,
             mode,
             tool_use_id,
+            ..
         } = &request.kind
         else {
             return self.inner.ask_within(request, within).await;

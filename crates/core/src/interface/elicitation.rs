@@ -65,6 +65,8 @@ pub enum ElicitKind {
         server: String,
         mode: McpElicitMode,
         tool_use_id: Option<String>,
+        /// The engine cut the server's message down to fit.
+        limited: bool,
     },
 }
 

@@ -196,6 +196,7 @@ impl crate::elicit::McpElicitor for ToolCallElicitor {
         server: &str,
         message: String,
         mode: base::interface::elicitation::McpElicitMode,
+        limited: bool,
     ) -> base::interface::elicitation::McpElicitationAnswer {
         use base::interface::elicitation::{ElicitKind, ElicitRequest, McpElicitationAnswer};
         let ctx = &self.ctx;
@@ -213,6 +214,7 @@ impl crate::elicit::McpElicitor for ToolCallElicitor {
                 server: server.to_string(),
                 mode,
                 tool_use_id: Some(ctx.tool_use_id.clone()).filter(|id| !id.is_empty()),
+                limited,
             },
             message,
             options: Vec::new(),

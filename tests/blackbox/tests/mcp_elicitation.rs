@@ -579,3 +579,109 @@ async fn a_2025_request_with_two_calls_in_flight_is_cancelled_not_guessed() -> a
     run.finish().await;
     Ok(())
 }
+
+fn answered_with(action: &str) -> Value {
+    json!({ "action": action })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_2026_round_of_ten_questions_is_asked_eight_deep_and_the_rest_cancelled(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let mut run = toy_run("ask-round", &stub, &calls, &[], json!({}))?
+        .start()
+        .await?;
+    let session = asking_session(&mut run).await?;
+    let host = run.watch_with(&session, answering(blue())).await?;
+    stub.script([
+        Reply::calls("f1", "mcp__demo__ask_flood", json!({ "count": 10 })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "ask me ten things").await?;
+
+    assert_eq!(mcp_prompts(&host).len(), 8, "{:?}", host.frames());
+    let got = answers(&calls);
+    assert_eq!(got.len(), 10, "{got:?}");
+    assert_eq!(
+        got[..8].iter().filter(|a| a["action"] == "accept").count(),
+        8
+    );
+    assert_eq!(got[8..], [answered_with("cancel"), answered_with("cancel")]);
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_2025_server_asking_six_at_once_has_four_open_and_two_cancelled() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let mut run = toy_run("ask-flood", &stub, &calls, OLD_SERVER, json!({}))?
+        .options(|o| o.prompt_timeout(Duration::from_secs(2)))
+        .start()
+        .await?;
+    let session = asking_session(&mut run).await?;
+    let host = run.watch_with(&session, |_| None).await?;
+    stub.script([
+        Reply::calls("f1", "mcp__demo__ask_flood", json!({ "count": 6 })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "ask me six things").await?;
+
+    assert_eq!(mcp_prompts(&host).len(), 4, "{:?}", host.frames());
+    assert_eq!(answers(&calls), vec![answered_with("cancel"); 6]);
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_over_4_kib_is_cut_and_marked_limited() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let mut run = toy_run("ask-long", &stub, &calls, &[], json!({}))?
+        .start()
+        .await?;
+    let session = asking_session(&mut run).await?;
+    let host = run.watch_with(&session, answering(blue())).await?;
+    stub.script([
+        Reply::calls("l1", "mcp__demo__ask", json!({ "mode": "long" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "ask me").await?;
+
+    let asked = mcp_prompts(&host);
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    let event = &asked[0]["event"];
+    assert!(
+        event["message"].as_str().unwrap_or_default().len() <= 4096,
+        "{event}"
+    );
+    assert_eq!(event["limited"], json!(true), "{event}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_form_of_forty_fields_is_declined_without_asking_anyone() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let calls = scratch.path().join("calls.log");
+    let mut run = toy_run("ask-wide", &stub, &calls, &[], json!({}))?
+        .start()
+        .await?;
+    let session = asking_session(&mut run).await?;
+    let host = run.watch_with(&session, answering(blue())).await?;
+    stub.script([
+        Reply::calls("w1", "mcp__demo__ask", json!({ "mode": "wide" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "ask me").await?;
+
+    assert!(mcp_prompts(&host).is_empty(), "{:?}", host.frames());
+    assert_eq!(answers(&calls), [answered_with("decline")]);
+    run.finish().await;
+    Ok(())
+}

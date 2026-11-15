@@ -238,6 +238,8 @@ pub enum PromptPayload {
         url: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         url_host: Option<String>,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        limited: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_use_id: Option<String>,
     },
@@ -452,6 +454,7 @@ impl SessionEventPayload {
                 requested_schema,
                 url,
                 url_host,
+                limited,
                 turn_id: _,
                 tool_use_id,
                 task_id: _,
@@ -463,6 +466,7 @@ impl SessionEventPayload {
                 requested_schema: requested_schema.clone(),
                 url: url.clone(),
                 url_host: url_host.clone(),
+                limited: *limited,
                 tool_use_id: tool_use_id.clone(),
             }),
             AgentEvent::PromptResolved {

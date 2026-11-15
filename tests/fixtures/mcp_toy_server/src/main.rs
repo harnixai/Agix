@@ -31,7 +31,7 @@
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
 //! 2026-07-28 时走 `input_required` 一轮，更早的版本由 server 发 `elicitation/create`，
-//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）。收到的每个回答原样记一行
+//! `wait_ms` 先等这么久再问、`hold_ms` 拿到回答后再等这么久才答完）、`ask_twice`（同一轮问两个）、`ask_flood`（一次问 `count` 个；老版本 server 并发地发）。收到的每个回答原样记一行
 //! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
 //! 资源：`toy://notes/readme.md`、`toy://unicode`、`toy://big`，以及 `--resources` 的。
 //! 提示词：`greet`（`name` 必填、`style` 可选）、`mark`（无参数）。
@@ -189,12 +189,20 @@ struct BigRequest {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct AskRequest {
-    #[schemars(description = "form (pick a color, the default) or url (visit a page)")]
+    #[schemars(
+        description = "form (pick a color, the default), url (visit a page), long (a message over 4 KiB) or wide (a form of 40 fields)"
+    )]
     mode: Option<String>,
     #[schemars(description = "milliseconds to wait before asking, for a server that asks itself")]
     wait_ms: Option<u64>,
     #[schemars(description = "milliseconds to wait after the answer before finishing the call")]
     hold_ms: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct FloodRequest {
+    #[schemars(description = "how many questions to put at once")]
+    count: usize,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -285,6 +293,25 @@ impl ToyServer {
         ];
         self.put(&asked, responses, None, &context).await
     }
+
+    #[tool(
+        description = "Ask the user `count` questions at once (an older server sends them all \
+                       concurrently) and report every answer."
+    )]
+    async fn ask_flood(
+        &self,
+        Parameters(FloodRequest { count }): Parameters<FloodRequest>,
+        InputResponses(responses): InputResponses,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.state.record("ask_flood");
+        let keys: Vec<String> = (0..count).map(|i| format!("q{i}")).collect();
+        let asked: Vec<(&str, ElicitRequestParams)> = keys
+            .iter()
+            .map(|key| (key.as_str(), question(Some("form"))))
+            .collect();
+        self.put_all(&asked, responses, &context, true).await
+    }
 }
 
 /// What `ask` puts to the user in each mode.
@@ -295,6 +322,24 @@ fn question(mode: Option<&str>) -> ElicitRequestParams {
             "message": "Sign in to the toy service",
             "url": "https://auth.example.com/toy/sign-in",
             "elicitationId": "toy-sign-in",
+        }),
+        Some("long") => serde_json::json!({
+            "mode": "form",
+            "message": "Pick a color. ".repeat(1000),
+            "requestedSchema": {
+                "type": "object",
+                "properties": { "color": { "type": "string", "enum": ["red", "blue"] } },
+            },
+        }),
+        Some("wide") => serde_json::json!({
+            "mode": "form",
+            "message": "Fill in everything",
+            "requestedSchema": {
+                "type": "object",
+                "properties": (0..40)
+                    .map(|i| (format!("field{i}"), serde_json::json!({ "type": "string" })))
+                    .collect::<serde_json::Map<_, _>>(),
+            },
         }),
         _ => serde_json::json!({
             "mode": "form",
@@ -319,6 +364,23 @@ impl ToyServer {
         wait_ms: Option<u64>,
         context: &RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(ms) = wait_ms.filter(|_| {
+            !context
+                .protocol_version()
+                .is_some_and(|v| !v.has_initialize())
+        }) {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
+        self.put_all(asked, responses, context, false).await
+    }
+
+    async fn put_all(
+        &self,
+        asked: &[(&str, ElicitRequestParams)],
+        responses: Option<rmcp::model::InputResponses>,
+        context: &RequestContext<RoleServer>,
+        concurrent: bool,
+    ) -> Result<CallToolResponse, ErrorData> {
         let modern = context
             .protocol_version()
             .is_some_and(|v| !v.has_initialize());
@@ -338,19 +400,33 @@ impl ToyServer {
                 .map(|(key, _)| responses.get(*key).cloned().unwrap_or_default())
                 .collect()
         } else {
-            if let Some(ms) = wait_ms {
-                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-            }
             let mut answers = Vec::new();
-            for (_, params) in asked {
-                let result = context
-                    .peer
-                    .create_elicitation(params.clone())
-                    .await
-                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-                answers.push(serde_json::to_value(result).unwrap_or_default());
+            if concurrent {
+                let mut pending = tokio::task::JoinSet::new();
+                for (i, (_, params)) in asked.iter().enumerate() {
+                    let (peer, params) = (context.peer.clone(), params.clone());
+                    pending.spawn(async move { (i, peer.create_elicitation(params).await) });
+                }
+                while let Some(joined) = pending.join_next().await {
+                    let (i, result) =
+                        joined.map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                    let result = result
+                        .map(|r| serde_json::to_value(r).unwrap_or_default())
+                        .unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }));
+                    answers.push((i, result));
+                }
+                answers.sort_by_key(|(i, _)| *i);
+            } else {
+                for (i, (_, params)) in asked.iter().enumerate() {
+                    let result = context
+                        .peer
+                        .create_elicitation(params.clone())
+                        .await
+                        .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                    answers.push((i, serde_json::to_value(result).unwrap_or_default()));
+                }
             }
-            answers
+            answers.into_iter().map(|(_, a)| a).collect()
         };
         let text = answers
             .iter()

@@ -12,12 +12,17 @@
 //! answers `cancel` otherwise: a guess could put one session's server's
 //! question to another session's host.
 //!
+//! One call has at most [`MAX_OPEN_PER_CALL`] questions of an older server
+//! open at once and [`MAX_QUESTIONS_PER_ROUND`] in a round; the rest are
+//! answered `cancel`. A question's words are bounded too: a longer message is
+//! cut, a larger form is declined.
+//!
 //! In the first case the tool time limit applies to each round, so the time a
 //! person takes to answer does not count; in the second the server's
 //! `tools/call` is still open while the person answers, and it does.
 
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -31,7 +36,14 @@ use rmcp::model::{
 use crate::error::McpError;
 use tokio_util::sync::CancellationToken;
 
-/// Who answers the questions one tool call's server asks.
+pub const MAX_OPEN_PER_CALL: usize = 4;
+pub const MAX_QUESTIONS_PER_ROUND: usize = 8;
+const MAX_MESSAGE_BYTES: usize = 4 * 1024;
+const MAX_SCHEMA_BYTES: usize = 16 * 1024;
+const MAX_SCHEMA_PROPERTIES: usize = 32;
+
+/// Who answers the questions one tool call's server asks. `limited` is true
+/// when `message` was cut to fit.
 #[async_trait]
 pub trait McpElicitor: Send + Sync {
     async fn elicit(
@@ -39,6 +51,7 @@ pub trait McpElicitor: Send + Sync {
         server: &str,
         message: String,
         mode: McpElicitMode,
+        limited: bool,
     ) -> McpElicitationAnswer;
 }
 
@@ -55,8 +68,31 @@ type Asker = Option<Arc<dyn McpElicitor>>;
 /// `elicitation/create` could belong to, each with the token its end cancels.
 #[derive(Default)]
 pub struct ElicitRoute {
-    inflight: Mutex<Vec<(u64, Asker, CancellationToken)>>,
+    inflight: Mutex<Vec<Entry>>,
     seq: AtomicU64,
+}
+
+struct Entry {
+    id: u64,
+    elicitor: Asker,
+    ended: CancellationToken,
+    open: Arc<AtomicUsize>,
+}
+
+struct OpenQuestion(Arc<AtomicUsize>);
+
+impl OpenQuestion {
+    fn take(open: &Arc<AtomicUsize>) -> Option<Self> {
+        let before = open.fetch_add(1, Ordering::SeqCst);
+        let held = Self(open.clone());
+        (before < MAX_OPEN_PER_CALL).then_some(held)
+    }
+}
+
+impl Drop for OpenQuestion {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// One request entered in an [`ElicitRoute`], until dropped.
@@ -68,7 +104,12 @@ pub struct InFlight {
 impl ElicitRoute {
     pub fn enter(self: &Arc<Self>, elicitor: Asker) -> InFlight {
         let id = self.seq.fetch_add(1, Ordering::Relaxed);
-        self.lock().push((id, elicitor, CancellationToken::new()));
+        self.lock().push(Entry {
+            id,
+            elicitor,
+            ended: CancellationToken::new(),
+            open: Arc::default(),
+        });
         InFlight {
             route: self.clone(),
             id,
@@ -77,9 +118,9 @@ impl ElicitRoute {
 
     /// The elicitor of the one request in flight and the token its end
     /// cancels, or how many there are when that is not one.
-    fn sole(&self) -> Result<(Asker, CancellationToken), usize> {
+    fn sole(&self) -> Result<(Asker, CancellationToken, Arc<AtomicUsize>), usize> {
         match self.lock().as_slice() {
-            [(_, elicitor, ended)] => Ok((elicitor.clone(), ended.clone())),
+            [only] => Ok((only.elicitor.clone(), only.ended.clone(), only.open.clone())),
             all => Err(all.len()),
         }
     }
@@ -89,10 +130,19 @@ impl ElicitRoute {
     /// does not leave it standing for whatever the host does next.
     pub(crate) async fn answer(&self, server: &str, params: ElicitRequestParams) -> ElicitResult {
         let answer = match self.sole() {
-            Ok((elicitor, ended)) => tokio::select! {
-                biased;
-                () = ended.cancelled() => McpElicitationAnswer::Cancel,
-                answer = elicit(server, params, elicitor.as_deref()) => answer,
+            Ok((elicitor, ended, open)) => match OpenQuestion::take(&open) {
+                Some(_held) => tokio::select! {
+                    biased;
+                    () = ended.cancelled() => McpElicitationAnswer::Cancel,
+                    answer = elicit(server, params, elicitor.as_deref()) => answer,
+                },
+                None => {
+                    tracing::warn!(
+                        server,
+                        "more than {MAX_OPEN_PER_CALL} elicitation requests open in one tool call; cancelled"
+                    );
+                    McpElicitationAnswer::Cancel
+                }
             },
             Err(inflight) => {
                 tracing::warn!(
@@ -106,17 +156,17 @@ impl ElicitRoute {
         elicit_result(answer)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(u64, Asker, CancellationToken)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
         self.inflight.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.route.lock().retain(|(id, _, ended)| {
-            let mine = *id == self.id;
+        self.route.lock().retain(|entry| {
+            let mine = entry.id == self.id;
             if mine {
-                ended.cancel();
+                entry.ended.cancel();
             }
             !mine
         });
@@ -179,7 +229,18 @@ async fn answer_input_requests(
     scope: &McpCallScope,
 ) -> Result<InputResponses, McpError> {
     let mut responses = InputResponses::new();
-    for (key, request) in requests {
+    for (asked, (key, request)) in requests.into_iter().enumerate() {
+        if asked >= MAX_QUESTIONS_PER_ROUND {
+            tracing::warn!(
+                server,
+                "more than {MAX_QUESTIONS_PER_ROUND} questions in one round; the rest cancelled"
+            );
+            responses.insert(
+                key,
+                serde_json::to_value(elicit_result(McpElicitationAnswer::Cancel))?,
+            );
+            continue;
+        }
         let InputRequest::Elicitation(request) = request else {
             return Err(McpError::RmcpService(format!(
                 "MCP server `{server}` asked for sampling or roots, which this client does not \
@@ -206,7 +267,16 @@ async fn elicit(
             requested_schema,
             ..
         } => match serde_json::to_value(requested_schema) {
-            Ok(requested_schema) => (message, McpElicitMode::Form { requested_schema }),
+            Ok(requested_schema) if fits_a_form(&requested_schema) => {
+                (message, McpElicitMode::Form { requested_schema })
+            }
+            Ok(_) => {
+                tracing::warn!(
+                    server,
+                    "an elicitation form over the size limits was declined"
+                );
+                return McpElicitationAnswer::Decline;
+            }
             Err(_) => return McpElicitationAnswer::Decline,
         },
         ElicitRequestParams::UrlElicitationParams { message, url, .. } => match openable(&url) {
@@ -218,7 +288,29 @@ async fn elicit(
         },
         _ => return McpElicitationAnswer::Decline,
     };
-    elicitor.elicit(server, message, mode).await
+    let (message, limited) = cut_to_fit(message);
+    elicitor.elicit(server, message, mode, limited).await
+}
+
+fn fits_a_form(schema: &serde_json::Value) -> bool {
+    let properties = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map_or(0, |p| p.len());
+    properties <= MAX_SCHEMA_PROPERTIES
+        && serde_json::to_vec(schema).is_ok_and(|bytes| bytes.len() <= MAX_SCHEMA_BYTES)
+}
+
+fn cut_to_fit(mut message: String) -> (String, bool) {
+    if message.len() <= MAX_MESSAGE_BYTES {
+        return (message, false);
+    }
+    let mut end = MAX_MESSAGE_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message.truncate(end);
+    (message, true)
 }
 
 /// `url` as it parses — what a browser would open — and its host, when a
@@ -261,7 +353,13 @@ mod tests {
 
     #[async_trait]
     impl McpElicitor for Says {
-        async fn elicit(&self, _: &str, _: String, _: McpElicitMode) -> McpElicitationAnswer {
+        async fn elicit(
+            &self,
+            _: &str,
+            _: String,
+            _: McpElicitMode,
+            _: bool,
+        ) -> McpElicitationAnswer {
             self.0.clone()
         }
     }
@@ -317,7 +415,13 @@ mod tests {
 
     #[async_trait]
     impl McpElicitor for Held {
-        async fn elicit(&self, _: &str, _: String, _: McpElicitMode) -> McpElicitationAnswer {
+        async fn elicit(
+            &self,
+            _: &str,
+            _: String,
+            _: McpElicitMode,
+            _: bool,
+        ) -> McpElicitationAnswer {
             self.0.notified().await;
             McpElicitationAnswer::Accept {
                 content: Some(serde_json::json!({"color": "blue"})),
@@ -352,7 +456,13 @@ mod tests {
 
     #[async_trait]
     impl McpElicitor for Shown {
-        async fn elicit(&self, _: &str, _: String, mode: McpElicitMode) -> McpElicitationAnswer {
+        async fn elicit(
+            &self,
+            _: &str,
+            _: String,
+            mode: McpElicitMode,
+            _: bool,
+        ) -> McpElicitationAnswer {
             if let McpElicitMode::Url { url, .. } = mode {
                 *self.0.lock().unwrap() = Some(url);
             }

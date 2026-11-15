@@ -150,6 +150,9 @@ pub enum AgentEvent {
         url: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         url_host: Option<String>,
+        /// The engine cut `message` down to the length it puts to a person.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        limited: bool,
         turn_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_use_id: Option<String>,

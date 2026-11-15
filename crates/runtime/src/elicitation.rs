@@ -211,6 +211,7 @@ impl McpAsk<'_> {
             server,
             mode,
             tool_use_id,
+            limited,
         } = request.kind
         else {
             return Some(cannot_carry("this kind of question"));
@@ -233,6 +234,7 @@ impl McpAsk<'_> {
                 requested_schema,
                 url,
                 url_host,
+                limited,
                 turn_id: String::new(),
                 tool_use_id,
                 task_id: self.task_id.clone(),
