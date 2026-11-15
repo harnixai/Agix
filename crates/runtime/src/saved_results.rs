@@ -5,7 +5,8 @@
 //! callers run them on a blocking thread.
 
 use base::message::{ContentBlock, Message, ToolResultContent};
-use compaction::saved::{is_saved_file_name, saved_name_of, with_marker_moved};
+pub use compaction::saved::is_saved_file_name;
+use compaction::saved::{saved_name_of, with_marker_moved};
 use history::entry::LogEntry;
 use std::collections::BTreeSet;
 use std::io::Write;

@@ -176,6 +176,7 @@ impl SessionPool {
                 .checkpoints
                 .then(|| store.checkpoint_objects(root))
                 .flatten(),
+            saved_results: self.exported_results(&request).await,
             warnings,
         };
         tokio::task::spawn_blocking(move || crate::export::write(&request, snapshot))
@@ -302,10 +303,85 @@ impl SessionPool {
         };
 
         let new_sid = base::session::SessionId::new();
-        // Fork inherits the source session's own recorded scene and project
-        // when known (pre-v2 sources have neither) rather than the pool's
-        // defaults, since a source session may live under a different
-        // project or scene.
+        let (meta, settings) = self
+            .fork_meta(session_id, &entries, store.environment().now())
+            .await;
+
+        // Best-effort cleanup on a partial copy: a half-written fork that a
+        // client then resumes would silently present a truncated
+        // conversation as if it were complete. Deleting is safer than
+        // leaving it, and the id was minted here so nothing else can be
+        // referencing it yet.
+        let mut copied = 0usize;
+        let left_out = left_out_of_a_fork(&entries);
+        let results = self
+            .link_results_into_fork(session_id, new_sid, &settings, &entries[..cut], &left_out)
+            .await;
+        let discard_fork = || async {
+            let _ = store.delete(new_sid).await;
+            if let Some(results) = &results {
+                let _ = std::fs::remove_dir_all(&results.to);
+            }
+        };
+        if let Err(e) = store.append(new_sid, meta).await {
+            discard_fork().await;
+            return Err(PoolError::Internal(format!(
+                "failed to write forked session metadata: {e}"
+            )));
+        }
+        for (env, _) in entries
+            .iter()
+            .zip(&left_out)
+            .take(cut)
+            .filter(|(_, out)| !**out)
+        {
+            let tags = history::entry::EntryTags {
+                turn_id: env.turn_id.clone(),
+                origin: env.origin,
+            };
+            let mut entry = env.entry.clone();
+            if let Some(results) = &results {
+                results.point(&mut entry);
+            }
+            if let Err(e) = store.append_tagged(new_sid, entry, tags).await {
+                discard_fork().await;
+                return Err(PoolError::Internal(format!(
+                    "failed to copy session history into the fork: {e}"
+                )));
+            }
+            copied += 1;
+        }
+
+        let message_count =
+            history::transcript::project_messages_with(&entries[..cut], store.projection()).len();
+        info!(
+            source = %session_id,
+            fork = %new_sid,
+            at_message = message_count,
+            "session forked"
+        );
+        Ok(api::ForkReport {
+            session_id: new_sid.to_string(),
+            parent_session_id: session_id.to_string(),
+            forked_at_message: message_count,
+            message_count,
+            entry_count: copied,
+            source_message_count: total_messages,
+            active: false,
+        })
+    }
+}
+
+impl SessionPool {
+    /// The `Meta` line of a fork of `session_id`, and the settings of the project and
+    /// scene it inherits. Pre-v2 sources recorded neither, so those fall back to the
+    /// pool's own.
+    async fn fork_meta(
+        &self,
+        session_id: &str,
+        entries: &[history::entry::EnvelopedEntry],
+        started_at: time::OffsetDateTime,
+    ) -> (history::entry::LogEntry, Arc<settings::LoadedSettings>) {
         let (source_scene, source_project_root, source_schema_version) = entries
             .iter()
             .find_map(|env| match &env.entry {
@@ -338,7 +414,7 @@ impl SessionPool {
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| settings.paths.global_data_dir.display().to_string()),
-            started_at: store.environment().now(),
+            started_at,
             model: settings.values.model.model_name.clone(),
             permission_mode: serde_json::to_value(settings.values.permission_mode)
                 .ok()
@@ -352,56 +428,78 @@ impl SessionPool {
             session_kind: history::entry::SessionKind::Primary,
             schema_version: history::entry::CURRENT_META_SCHEMA_VERSION,
         };
+        (meta, settings)
+    }
+}
 
-        // Best-effort cleanup on a partial copy: a half-written fork that a
-        // client then resumes would silently present a truncated
-        // conversation as if it were complete. Deleting is safer than
-        // leaving it, and the id was minted here so nothing else can be
-        // referencing it yet.
-        let mut copied = 0usize;
-        let left_out = left_out_of_a_fork(&entries);
-        if let Err(e) = store.append(new_sid, meta).await {
-            let _ = store.delete(new_sid).await;
-            return Err(PoolError::Internal(format!(
-                "failed to write forked session metadata: {e}"
-            )));
+impl SessionPool {
+    async fn exported_results(
+        &self,
+        request: &crate::export::ExportRequest,
+    ) -> Option<crate::export::SavedResultsPart> {
+        if !request.include.tool_results {
+            return None;
         }
-        for (env, _) in entries
-            .iter()
-            .zip(&left_out)
-            .take(cut)
-            .filter(|(_, out)| !**out)
-        {
-            let tags = history::entry::EntryTags {
-                turn_id: env.turn_id.clone(),
-                origin: env.origin,
-            };
-            if let Err(e) = store.append_tagged(new_sid, env.entry.clone(), tags).await {
-                let _ = store.delete(new_sid).await;
-                return Err(PoolError::Internal(format!(
-                    "failed to copy session history into the fork: {e}"
-                )));
-            }
-            copied += 1;
-        }
+        let dir = self.saved_results_dir(&request.session_id).await?;
+        Some(crate::export::SavedResultsPart { dir })
+    }
+}
 
-        let message_count =
-            history::transcript::project_messages_with(&entries[..cut], store.projection()).len();
-        info!(
-            source = %session_id,
-            fork = %new_sid,
-            at_message = message_count,
-            "session forked"
+/// The saved results a fork took with it: where they were, where they are now, and
+/// which of them made it.
+struct ForkedResults {
+    from: PathBuf,
+    to: PathBuf,
+    moved: std::collections::BTreeSet<String>,
+}
+
+impl ForkedResults {
+    fn point(&self, entry: &mut history::entry::LogEntry) {
+        runtime::saved_results::move_markers(entry, &self.from, &self.to, &self.moved);
+    }
+}
+
+impl SessionPool {
+    /// Hard-link the files the copied lines' markers point at into the fork's own
+    /// directory, so the fork outlives a delete of its source. A file that cannot
+    /// be copied leaves its marker pointing at the source.
+    async fn link_results_into_fork(
+        &self,
+        session_id: &str,
+        new_sid: base::session::SessionId,
+        settings: &settings::LoadedSettings,
+        copied: &[history::entry::EnvelopedEntry],
+        left_out: &[bool],
+    ) -> Option<ForkedResults> {
+        let local = &settings.paths.local_data_dir;
+        let from = self.saved_results_dir(session_id).await?;
+        let to = local
+            .is_absolute()
+            .then(|| base::paths::tool_results_dir(local, &new_sid.to_string()))?;
+        let wanted = runtime::saved_results::marked_in(
+            copied
+                .iter()
+                .zip(left_out)
+                .filter(|(_, out)| !**out)
+                .map(|(env, _)| &env.entry),
+            &from,
         );
-        Ok(api::ForkReport {
-            session_id: new_sid.to_string(),
-            parent_session_id: session_id.to_string(),
-            forked_at_message: message_count,
-            message_count,
-            entry_count: copied,
-            source_message_count: total_messages,
-            active: false,
+        let wanted_count = wanted.len();
+        let moved = tokio::task::spawn_blocking({
+            let (from, to) = (from.clone(), to.clone());
+            move || runtime::saved_results::link_into(&from, &to, &wanted)
         })
+        .await
+        .unwrap_or_default();
+        if moved.len() < wanted_count {
+            warn!(
+                source = %session_id,
+                fork = %new_sid,
+                missing = wanted_count - moved.len(),
+                "saved results could not be copied into the fork; their markers keep the old path"
+            );
+        }
+        Some(ForkedResults { from, to, moved })
     }
 }
 

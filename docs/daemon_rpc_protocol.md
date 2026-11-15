@@ -1831,8 +1831,9 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 { "session_id": "…",
   "path": "/abs/dir/S1.agix.zip",            // daemon 所在机器上的绝对路径
   "format": "zip",                            // 可选:zip(默认)| dir
-  "include": ["sidechains", "attachments"] }  // 可选,省略即这两项;录像只在列了 "recording" 时带,
-                                              // 文件 checkpoint 只在列了 "checkpoints" 时带
+  "include": ["sidechains", "attachments", "tool_results"] }  // 可选,省略即这三项;录像只在列了 "recording" 时带,
+                                              // 文件 checkpoint 只在列了 "checkpoints" 时带;
+                                              // 显式列 include 而不列 "tool_results" 就不带外置结果
 // ← result
 { "session_id": "…",
   "path": "…",
@@ -1871,6 +1872,8 @@ attachments/<sha256>.<扩展名>             消息里的 base64 图片解码后
 recordings/<name>/calls.jsonl, blobs/    只在 include 列了 "recording" 时
 checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时:根会话日志里 agix.checkpoint
                                          记下的写前内容,还在的每份一个文件(不论属于哪一轮)
+tool-results/<name>                      只在 include 列了 "tool_results"(缺省)时:转录里外置标记行指着的
+                                         超长工具结果文件,扁平存放(一个归档只有一个根会话目录)
 ```
 
 `history.json` 里的图片块,`source` 换成 `{"attachment": "attachments/<sha256>.png",
@@ -1884,7 +1887,7 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
 { "format": "agix.session-export", "format_version": 1,
   "engine_version": "…", "protocol_version": 4,
   "cut_at": "…", "root_session_id": "…",
-  "include": ["sidechains", "attachments"],
+  "include": ["sidechains", "attachments", "tool_results"],
   "importable": true,
   "sessions": [ { "session_id": "…", "kind": "primary", "parent_session_id": null, "depth": 0,
                   "scene": "code", "project_root": "…", "title": null, "dir": "sessions/…",
@@ -1899,6 +1902,9 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
   "forks": [ ],             // 从这些会话分叉出去的会话 id,不进归档
   "recordings": [ { "dir": "recordings/…", "sessions": ["…"], "calls": 3, "covers": "latest_run" } ],
   "checkpoints": null,      // 列了 "checkpoints" 时 { "objects": 3, "bytes": 1234, "pruned_before": null }
+  "tool_results": { "dir": "<导出机器上的根会话结果目录>",   // 没列 "tool_results" 时为 null
+                    "files": [ { "name": "<sid>-<tool_use_id>.txt", "sha256": "…", "bytes": 31000 } ],
+                    "missing": 0 },                        // 标记指着、而文件已经不在的个数
   "warnings": [ ] }
 ```
 
@@ -1912,6 +1918,10 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
 `prompt_state.json`、遥测、团队目录、调度、运行中的任务。录像只覆盖**最近一次运行**(每次
 录制会重写 `calls.jsonl`);会话的 `recorder` 不记进日志,daemon 重启后只找得到 daemon 自己的
 录像根下以会话 id 命名的那份。
+
+转录里的外置标记行(`[Output too long for one result: … Saved in full to <路径> …]`)指向**导出机器上**
+的路径;`session.import` 把它改写成新根会话的结果目录。缺外置文件的归档照样能导入,标记保持原样,
+旧结果被清理时只剩"输出已清"。
 
 归档与转录一样敏感:它就是这些会话说过的全部内容。带了 `checkpoints` 的还有项目文件的历史内容,
 体积也可能远大于转录,所以缺省不带。
@@ -1937,7 +1947,8 @@ checkpoints/<sha256>                     只在 include 列了 "checkpoints" 时
 
 **什么都在写之前查完。** 路径必须是绝对路径、是普通文件或目录(符号链接不行),且不在会话历史目录
 (`projects/`、`sessions/`)之下。归档只读它的布局里认得的几项:`manifest.json`、
-`sessions/<id>/transcript.jsonl`、`sessions/<id>/session_memory.md`;条目名带 `..`、绝对路径或是
+`sessions/<id>/transcript.jsonl`、`sessions/<id>/session_memory.md`,以及清单 `tool_results.files` 列出的
+`tool-results/<name>`(文件名只能是 `[A-Za-z0-9_-]` 加 `.txt`,sha256 要对得上,否则 `INVALID_PARAMS`);条目名带 `..`、绝对路径或是
 符号链接的 zip、目录里有符号链接的目录一律拒绝,条目数上限 100,000、解开后总量上限 2 GiB、单个
 文件 512 MiB。清单要 `format` 是 `agix.session-export`、`format_version` 不高于这个 daemon 读得懂的
 (更高的是更新的 Agix 写的)、`importable` 为 `true`(没带附件导出的有损归档不能装);每个会话的
@@ -1951,7 +1962,9 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 `is_sidechain`、`turn_id`、`origin` 都保留——压缩行靠这些 id 指向前面的行,所以投影出的
 `session.history` 与原会话一样长、一样的内容;只改结构化的几项:每行的 `session_id`、`Meta` 的
 `parent_session_id` / `cwd` / `project_root`(换成目标的;无项目会话的 `cwd` 是 daemon 的全局数据目录)。
-消息正文、工具结果里提到的旧 id、旧路径**不改**。会话记忆一并带上。不带:`runtime.json`、`history.json`、
+消息正文、工具结果里提到的旧 id、旧路径**不改**;唯一的例外是外置标记行:归档带了 `tool_results` 时,
+文件落到新根会话的结果目录(`<local_data_dir>/tool-results/<新根 id>/`),标记行改指那里;归档里没有
+的文件,标记不改,`warnings` 记一条。会话记忆一并带上。不带:`runtime.json`、`history.json`、
 `entries.json`(它们是转录的派生视图)、附件文件(图片本来就在转录里)、录像、checkpoint 的写前内容与
 `agix.checkpoint` 记录——所以装进来的会话里,`session.rewind` 碰不到归档之前写的文件;也不带会话的
 规格(`agix.session/spec`:建会话时的 `options`、`session.setPrompt` 等),归档决定不了装进来的会话用什么

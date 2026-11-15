@@ -8,7 +8,8 @@
 //! in messages and tool results that names an old session id or path is left
 //! as it was written. Nothing is read from the archive outside its layout:
 //! `manifest.json`, `sessions/<id>/transcript.jsonl` and
-//! `sessions/<id>/session_memory.md`. The views (`history.json`,
+//! `sessions/<id>/session_memory.md`, and `tool-results/<name>` for the
+//! saved tool results the manifest lists. The views (`history.json`,
 //! `entries.json`), `runtime.json`, attachments, recordings and checkpoint
 //! copies are not restored, and the pool leaves out the checkpoint records and
 //! the recorded spec (`carried_by_an_import`).
@@ -66,9 +67,18 @@ pub(crate) struct ArchivedSession {
     pub(crate) message_count: Option<u64>,
 }
 
+/// The saved tool results an archive carries, with the directory its
+/// transcripts' markers name.
+pub(crate) struct SavedInArchive {
+    pub(crate) dir: PathBuf,
+    pub(crate) files: Vec<(String, Vec<u8>)>,
+    pub(crate) missing: Vec<String>,
+}
+
 pub(crate) struct Archive {
     pub(crate) root: SessionId,
     pub(crate) sessions: Vec<ArchivedSession>,
+    pub(crate) saved: Option<SavedInArchive>,
 }
 
 impl Archive {
@@ -258,6 +268,46 @@ fn layout_name(session: &str, file: &str) -> Result<String, ImportError> {
     }
 }
 
+fn saved_result_layout_name(name: &str) -> Result<String, ImportError> {
+    if runtime::saved_results::is_saved_file_name(name) {
+        Ok(format!("tool-results/{name}"))
+    } else {
+        invalid(format!("`{name}` is not a saved tool result's name"))
+    }
+}
+
+fn saved_results_of(
+    source: &mut dyn Source,
+    section: &Value,
+) -> Result<Option<SavedInArchive>, ImportError> {
+    if !section.is_object() {
+        return Ok(None);
+    }
+    let dir = section["dir"]
+        .as_str()
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute())
+        .ok_or_else(|| ImportError::Invalid("tool_results.dir is not an absolute path".into()))?;
+    let (mut files, mut missing) = (Vec::new(), Vec::new());
+    for row in section["files"].as_array().into_iter().flatten() {
+        let name = row["name"].as_str().unwrap_or_default();
+        let layout = saved_result_layout_name(name)?;
+        let Some(bytes) = source.read(&layout)? else {
+            missing.push(name.to_string());
+            continue;
+        };
+        if row["sha256"].as_str() != Some(hex::encode(Sha256::digest(&bytes)).as_str()) {
+            return invalid(format!("{layout} does not match its recorded checksum"));
+        }
+        files.push((name.to_string(), bytes));
+    }
+    Ok(Some(SavedInArchive {
+        dir,
+        files,
+        missing,
+    }))
+}
+
 fn manifest_of(source: &mut dyn Source) -> Result<Value, ImportError> {
     let bytes = source
         .read("manifest.json")?
@@ -373,7 +423,12 @@ fn read_from(source: &mut dyn Source, budget: u64) -> Result<Archive, ImportErro
         .as_str()
         .and_then(|s| SessionId::parse(s).ok())
         .ok_or_else(|| ImportError::Invalid("the manifest names no root session".into()))?;
-    let archive = Archive { root, sessions };
+    let saved = saved_results_of(&mut source, &manifest["tool_results"])?;
+    let archive = Archive {
+        root,
+        sessions,
+        saved,
+    };
     verify_relations(&archive)?;
     Ok(archive)
 }
@@ -629,6 +684,7 @@ mod tests {
         let mention = format!("session {root} at /old");
         let archive = Archive {
             root,
+            saved: None,
             sessions: vec![
                 ArchivedSession {
                     id: child,
@@ -697,6 +753,7 @@ mod tests {
         let (root, child) = (SessionId::new(), SessionId::new());
         let archive = Archive {
             root,
+            saved: None,
             sessions: vec![
                 ArchivedSession {
                     id: root,

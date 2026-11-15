@@ -273,7 +273,11 @@ transcript 不变,恢复策略重发的就是失败的那个请求;每次调用�
 (缺省 30,000 字符,`0` 关闭)时,整个写进根会话的结果目录,对话里只留一行标记(总字符数、
 行数、路径、"用 `Read` 的 `offset` 读后续")加前 2,000 与后 1,000 字符的预览(围栏保留)。
 标记行在最前,预算清旧结果时据此保留路径(`[Old tool result content cleared; full output still
-at <path>]`)。自己分页的 `Read`、`WebFetch`、`TaskOutput`(`ToolSpec::pages_itself`)、`RunCode`
+at <path>]`);只有路径直接落在本会话(根会话)结果目录、文件名合 `[A-Za-z0-9_-]+.txt` 的标记
+算数(`compaction::saved`),工具打印出来的伪标记按普通文本清。外置文件跟着会话走:`session.resume`
+时清掉转录(含侧链)里不再提到的;`session.fork` 把被引用的文件硬链接进新会话目录并改写标记行;
+`session.export`(`include` 含 `tool_results`,缺省)带走、`session.import` 落到新根会话目录并改写标记;
+`compaction.tool_result_inline_chars` 不受未信任项目影响。自己分页的 `Read`、`WebFetch`、`TaskOutput`(`ToolSpec::pages_itself`)、`RunCode`
 里的子调用和 skill 内联命令不外置;失败的结果一样外置;没有可写目录或写失败时不外置,交给
 单条预算截断。转录、压缩、录像看到的都只是预览。外置文件的内容可能是 MCP server 或网页写的,
 所以 `Read` / `Grep` 指向这个目录时一律按外部内容围栏,不让它借文件洗成项目文件。**已知限制:**
@@ -1937,7 +1941,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
 | `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删 |
-| `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删(`session.export` 目前不带) |
+| `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删;`session.resume` 清无引用的,`session.fork` 硬链接复制,`session.export` / `session.import` 带过去 |
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
 | `scenes/<id>/mcp/oauth/` | MCP server URL | 远端 MCP server 的 OAuth 凭据,一个 server 一个 0600 文件(§6.5) |

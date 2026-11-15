@@ -179,6 +179,7 @@ impl SessionPool {
                     ));
                 }
 
+                self.collect_saved_results(session_id, &log).await;
                 let (core, status) = match self.live.core_of(session_id).await {
                     Some(raced) => (raced, api::ResumeStatus::AlreadyActive),
                     None => (
@@ -191,6 +192,75 @@ impl SessionPool {
                 Ok(self.watched_report(&core, status, mode, watcher).await)
             })
             .await
+    }
+
+    /// Remove the saved results in the session's directory that no transcript of its
+    /// lineage mentions: a write whose transcript line never landed, a deleted
+    /// sidechain's, a fork's or import's leftovers. The sidechains' logs are read only
+    /// when a file is named after a delegate. Runs under the session lock, before the
+    /// engine can write, and never fails the resume.
+    async fn collect_saved_results(
+        &self,
+        session_id: &str,
+        log: &[history::entry::EnvelopedEntry],
+    ) {
+        if !is_primary(log) {
+            return;
+        }
+        let Some(dir) = self.saved_results_dir(session_id).await else {
+            return;
+        };
+        let names = {
+            let dir = dir.clone();
+            tokio::task::spawn_blocking(move || runtime::saved_results::files_in(&dir))
+                .await
+                .unwrap_or_default()
+        };
+        if names.is_empty() {
+            return;
+        }
+        let mut logs = vec![log.to_vec()];
+        let written_by_a_delegate = names.iter().any(|name| {
+            name.split_once('-')
+                .is_some_and(|(owner, _)| owner != session_id)
+        });
+        if written_by_a_delegate {
+            let lineage = match (
+                self.directory.require_store(),
+                base::session::SessionId::parse(session_id),
+            ) {
+                (Ok(store), Ok(root)) => store.snapshot_lineage(root).await,
+                _ => return,
+            };
+            match lineage {
+                Ok(lineage) => logs.extend(
+                    lineage
+                        .sessions
+                        .into_iter()
+                        .filter(|(id, _)| id.to_string() != session_id)
+                        .map(|(_, entries)| entries),
+                ),
+                Err(e) => {
+                    warn!(session = %session_id, error = %e, "saved result cleanup skipped: the sidechains could not be read");
+                    return;
+                }
+            }
+        }
+        let removed = tokio::task::spawn_blocking(move || {
+            let keep = runtime::saved_results::mentioned_in(
+                logs.iter().flatten().map(|env| &env.entry),
+                &dir,
+            );
+            runtime::saved_results::remove_all_but(&dir, &keep)
+        })
+        .await;
+        match removed {
+            Ok(0) => {}
+            Ok(removed) => {
+                info!(session = %session_id, removed, "saved results nobody refers to were removed")
+            }
+            Err(e) => warn!(session = %session_id, error = %e, "saved result cleanup failed"),
+        }
     }
 
     /// `watcher` subscribed to the session in memory, then its log counted
@@ -524,4 +594,11 @@ fn active_times(core: &SessionCore) -> (Option<String>, String, String) {
         format_instant(core.created_at()),
         format_instant(core.hub().last_active()),
     )
+}
+
+fn is_primary(log: &[history::entry::EnvelopedEntry]) -> bool {
+    log.iter().find_map(|env| match &env.entry {
+        history::entry::LogEntry::Meta { session_kind, .. } => Some(*session_kind),
+        _ => None,
+    }) == Some(history::entry::SessionKind::Primary)
 }

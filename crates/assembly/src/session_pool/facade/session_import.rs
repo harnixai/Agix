@@ -45,15 +45,31 @@ impl SessionPool {
             None
         };
         let mut warnings = Vec::new();
+        let results = self
+            .place_saved_results(&archive, &target, ids[&archive.root], &mut warnings)
+            .await;
         let mut written = rewrite(&archive, &ids, &target, &mut warnings);
         for (_, entries) in &mut written {
             entries.retain(|env| carried_by_an_import(&env.entry));
+        }
+        if let Some((from, to, moved)) = &results {
+            for env in written.iter_mut().flat_map(|(_, entries)| entries) {
+                runtime::saved_results::move_markers(&mut env.entry, from, to, moved);
+            }
         }
         let old_of: HashMap<SessionId, SessionId> =
             ids.iter().map(|(old, new)| (*new, *old)).collect();
         warn_of_count_mismatch(&archive, &old_of, &written, store.as_ref(), &mut warnings);
 
-        let summary = write_sessions(store.as_ref(), written).await?;
+        let summary = match write_sessions(store.as_ref(), written).await {
+            Ok(summary) => summary,
+            Err(e) => {
+                if let Some((_, to, _)) = &results {
+                    let _ = std::fs::remove_dir_all(to);
+                }
+                return Err(e);
+            }
+        };
         for session in &archive.sessions {
             let Some(memory) = &session.memory else {
                 continue;
@@ -76,6 +92,71 @@ impl SessionPool {
             sessions: summary,
             warnings,
         })
+    }
+
+    async fn saved_results_target(
+        &self,
+        archive: &Archive,
+        target: &Target,
+        new_root: SessionId,
+    ) -> Option<PathBuf> {
+        archive.saved.as_ref()?;
+        let scene = match archive.meta_of(archive.root) {
+            Some(LogEntry::Meta {
+                scene: Some(scene), ..
+            }) => scene.clone(),
+            _ => self.bindings.startup_scene().await,
+        };
+        let project = target.project_root.as_deref().map(PathBuf::from);
+        let binding = self.binding_for(project.as_deref(), &scene).await;
+        let local = &binding.settings.paths.local_data_dir;
+        local
+            .is_absolute()
+            .then(|| base::paths::tool_results_dir(local, &new_root.to_string()))
+    }
+
+    /// The archive's saved tool results written under the new root session:
+    /// where its markers pointed, where the files are now, and which made it.
+    async fn place_saved_results(
+        &self,
+        archive: &Archive,
+        target: &Target,
+        new_root: SessionId,
+        warnings: &mut Vec<String>,
+    ) -> Option<(PathBuf, PathBuf, std::collections::BTreeSet<String>)> {
+        let saved = archive.saved.as_ref()?;
+        warnings.extend(
+            saved
+                .missing
+                .iter()
+                .map(|name| format!("saved tool result {name} is not in the archive")),
+        );
+        let Some(to) = self.saved_results_target(archive, target, new_root).await else {
+            warnings.push(
+                "this daemon has no state directory; saved tool results were not imported".into(),
+            );
+            return None;
+        };
+        let (dir, files) = (to.clone(), saved.files.clone());
+        let placed = tokio::task::spawn_blocking(move || {
+            let mut moved = std::collections::BTreeSet::new();
+            let mut failures = Vec::new();
+            for (name, bytes) in &files {
+                match runtime::saved_results::put(&dir, name, bytes) {
+                    Ok(()) => {
+                        moved.insert(name.clone());
+                    }
+                    Err(e) => failures.push(format!(
+                        "saved tool result {name} could not be written: {e}"
+                    )),
+                }
+            }
+            (moved, failures)
+        })
+        .await;
+        let (moved, failures) = placed.unwrap_or_default();
+        warnings.extend(failures);
+        Some((saved.dir.clone(), to, moved))
     }
 
     fn placement(

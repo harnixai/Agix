@@ -1672,7 +1672,7 @@
         },
         "include": {
           "default": null,
-          "description": "`sidechains`, `attachments`, `recording`; the first two when omitted.",
+          "description": "`sidechains`, `attachments`, `recording`, `checkpoints`, `tool_results`; the first two and `tool_results` when omitted.",
           "items": {
             "type": "string"
           },

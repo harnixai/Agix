@@ -54,7 +54,7 @@ pub struct ExportParams {
     pub path: PathBuf,
     #[serde(default)]
     pub format: ArchiveFormat,
-    /// `sidechains`, `attachments`, `recording`; the first two when omitted.
+    /// `sidechains`, `attachments`, `recording`, `checkpoints`, `tool_results`; the first two and `tool_results` when omitted.
     #[serde(default)]
     pub include: Option<Vec<String>>,
 }

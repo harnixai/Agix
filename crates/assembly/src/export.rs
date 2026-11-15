@@ -14,8 +14,11 @@
 
 use crate::session_pool::api::PoolError;
 use base::session::SessionId;
+mod files;
 mod images;
 
+pub use files::SavedResultsPart;
+use files::{pack_checkpoints, pack_saved_results};
 use history::entry::{EnvelopedEntry, LogEntry};
 use images::{decode_image, for_each_image, placeholder, rewrite_history_images, Decoded};
 use serde_json::{json, Value};
@@ -39,6 +42,9 @@ pub struct Include {
     /// The earlier contents of files the root session's lineage wrote:
     /// project history, possibly far larger than the transcript.
     pub checkpoints: bool,
+    /// The files long tool results were saved to, which the transcript's
+    /// markers point at.
+    pub tool_results: bool,
 }
 
 impl Default for Include {
@@ -48,6 +54,7 @@ impl Default for Include {
             attachments: true,
             recording: false,
             checkpoints: false,
+            tool_results: true,
         }
     }
 }
@@ -59,6 +66,7 @@ impl Include {
             attachments: false,
             recording: false,
             checkpoints: false,
+            tool_results: false,
         };
         for name in names {
             match name.as_str() {
@@ -66,9 +74,10 @@ impl Include {
                 "attachments" => include.attachments = true,
                 "recording" => include.recording = true,
                 "checkpoints" => include.checkpoints = true,
+                "tool_results" => include.tool_results = true,
                 other => {
                     return Err(format!(
-                    "unknown include `{other}`: sidechains, attachments, recording or checkpoints"
+                    "unknown include `{other}`: sidechains, attachments, recording, checkpoints or tool_results"
                 ))
                 }
             }
@@ -82,6 +91,7 @@ impl Include {
             (self.attachments, "attachments"),
             (self.recording, "recording"),
             (self.checkpoints, "checkpoints"),
+            (self.tool_results, "tool_results"),
         ]
         .into_iter()
         .filter_map(|(on, name)| on.then_some(name))
@@ -191,6 +201,7 @@ pub struct ExportSnapshot {
     pub recordings: Vec<RecordingPart>,
     /// The root's checkpoint copies, when they were asked for.
     pub checkpoints: Option<std::sync::Arc<dyn history::blob::BlobStore>>,
+    pub saved_results: Option<SavedResultsPart>,
     pub warnings: Vec<String>,
 }
 
@@ -577,37 +588,6 @@ fn pack_recordings(
     packed
 }
 
-/// Every kept earlier version of a file the root's log names, under
-/// `checkpoints/<sha256>`; one that is no longer kept is left out.
-fn pack_checkpoints(
-    objects: &Option<std::sync::Arc<dyn history::blob::BlobStore>>,
-    sessions: &[SessionPart],
-    sink: &mut dyn Sink,
-) -> std::io::Result<Value> {
-    let (Some(objects), Some(root)) = (objects, sessions.first()) else {
-        return Ok(Value::Null);
-    };
-    let entries = &root.entries;
-    let ids: std::collections::BTreeSet<String> = entries
-        .iter()
-        .filter_map(history::checkpoint::plan::pre_of)
-        .flat_map(|pre| pre.files)
-        .filter_map(|file| match file.before {
-            history::checkpoint::Before::File { sha256, .. } => Some(sha256),
-            _ => None,
-        })
-        .collect();
-    let (mut count, mut bytes) = (0usize, 0u64);
-    for id in ids {
-        if let Some(content) = objects.get(&id)? {
-            sink.put(&format!("checkpoints/{id}"), &content, true)?;
-            count += 1;
-            bytes += content.len() as u64;
-        }
-    }
-    Ok(json!({ "objects": count, "bytes": bytes, "pruned_before": null }))
-}
-
 fn attachment_rows(attachments: &Attachments) -> Vec<Value> {
     attachments
         .by_sha
@@ -711,6 +691,7 @@ fn pack(
     let mut id_map = serde_json::Map::new();
     let mut depths: BTreeMap<String, usize> = BTreeMap::new();
     let checkpoints = pack_checkpoints(&snapshot.checkpoints, &snapshot.sessions, sink)?;
+    let tool_results = pack_saved_results(&snapshot.saved_results, &snapshot.sessions, sink)?;
 
     for mut part in snapshot.sessions {
         let sid = part.session_id.to_string();
@@ -776,6 +757,7 @@ fn pack(
         "forks": snapshot.forks.iter().map(SessionId::to_string).collect::<Vec<_>>(),
         "recordings": recordings,
         "checkpoints": checkpoints,
+        "tool_results": tool_results,
         "warnings": findings.warnings,
     });
     sink.put(

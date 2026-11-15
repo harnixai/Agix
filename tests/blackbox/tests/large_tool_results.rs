@@ -4,7 +4,9 @@
 //! `Read`, a server's text staying fenced through the file, `Grep` not finding
 //! what an earlier call saved, an old result cleared with its path kept, a
 //! sub-agent's output going under the root session, `session.delete`, what is
-//! never saved, and `WebFetch` read in windows.
+//! never saved, `WebFetch` read in windows, and what happens to the files over
+//! a session's life: a resume removing what nothing refers to, a fork and an
+//! export/import carrying them to the new session.
 //!
 //! The project allows the tools by rule; nothing runs under `bypassPermissions`.
 
@@ -476,6 +478,244 @@ async fn a_saved_mcp_result_read_back_through_bash_is_fenced_and_bash_is_not_sug
     assert!(!shown.contains("Bash"), "{shown}");
     let (_, read, failed) = result_of(&events, "Bash");
     assert!(!failed && read.starts_with("<external-content"), "{read}");
+async fn rpc(run: &mut LiveRun, method: &str, params: Value) -> anyhow::Result<Value> {
+    let response = run.client.call(method, params).await?;
+    anyhow::ensure!(response.error.is_none(), "{method}: {:?}", response.error);
+    Ok(response.result.unwrap_or_default())
+}
+
+async fn history_text(run: &mut LiveRun, session: &str) -> anyhow::Result<String> {
+    Ok(rpc(
+        run,
+        "session.history",
+        json!({ "session_id": session, "limit": 100 }),
+    )
+    .await?
+    .to_string())
+}
+
+async fn saved_once(name: &str, stub: &ProviderStub) -> anyhow::Result<(LiveRun, String)> {
+    let mut run = stubbed(name, stub).start().await?;
+    let session = run.session().await?;
+    stub.script_when(TURN, [bash("b1", "seq 1 50000"), Reply::text("done")]);
+    run.turn(&session, "count").await?;
+    Ok((run, session))
+}
+
+fn files_named(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".txt"))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resuming_a_session_removes_saved_files_nothing_refers_to() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-gc", &stub).await?;
+    let kept = saved_path(&run, &session, "b1");
+    let orphan = kept.with_file_name(format!("{session}-orphan.txt"));
+    std::fs::write(&orphan, "left behind")?;
+
+    rpc(&mut run, "session.close", json!({ "session_id": session })).await?;
+    rpc(&mut run, "session.resume", json!({ "session_id": session })).await?;
+    assert!(!orphan.exists(), "the unreferenced file is removed");
+    assert!(kept.exists(), "the referenced file stays");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resuming_keeps_a_sub_agents_saved_output() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("spill-gc-agent", &stub).start().await?;
+    let session = run.session().await?;
+    stub.script_when(
+        TURN,
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "prompt": "count to fifty thousand", "description": "count" }),
+            ),
+            bash("s1", "seq 1 50000"),
+            Reply::text("counted"),
+            Reply::text("done"),
+        ],
+    );
+    run.turn(&session, "delegate the counting").await?;
+    let dir = results_root(&run).join(&session);
+    let before = files_named(&dir);
+    assert_eq!(before.len(), 1, "{before:?}");
+
+    run.restart().await?;
+    rpc(&mut run, "session.resume", json!({ "session_id": session })).await?;
+    assert_eq!(files_named(&dir), before);
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_gets_its_own_copy_of_the_saved_outputs() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-fork", &stub).await?;
+    let source_file = saved_path(&run, &session, "b1");
+
+    let fork = rpc(&mut run, "session.fork", json!({ "session_id": session })).await?;
+    let fork = fork["session_id"].as_str().unwrap().to_string();
+    let copy = results_root(&run)
+        .join(&fork)
+        .join(source_file.file_name().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(&copy)?,
+        std::fs::read_to_string(&source_file)?
+    );
+    let history = history_text(&mut run, &fork).await?;
+    assert!(
+        history.contains(&copy.display().to_string())
+            && !history.contains(&source_file.display().to_string()),
+        "the fork's marker points at its own copy: {history}"
+    );
+
+    rpc(&mut run, "session.delete", json!({ "session_id": session })).await?;
+    assert!(copy.exists(), "deleting the source leaves the fork's file");
+
+    stub.script_when(
+        TURN,
+        [
+            Reply::calls(
+                "r1",
+                "Read",
+                json!({ "file_path": copy.to_string_lossy(), "offset": 40000, "limit": 2 }),
+            ),
+            Reply::text("read"),
+        ],
+    );
+    run.turn(&fork, "read it").await?;
+    assert!(result_in(&last_turn_request(&stub), "r1").contains("40000"));
+    run.finish().await;
+    Ok(())
+}
+
+async fn export_dir(
+    run: &mut LiveRun,
+    session: &str,
+    name: &str,
+    include: Option<Value>,
+) -> anyhow::Result<PathBuf> {
+    let path = run.world.root().join(name);
+    let mut params = json!({ "session_id": session, "path": path, "format": "dir" });
+    if let Some(include) = include {
+        params["include"] = include;
+    }
+    rpc(run, "session.export", params).await?;
+    Ok(path)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_export_carries_saved_outputs_and_an_import_points_at_its_copy() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-export", &stub).await?;
+    let file = saved_path(&run, &session, "b1");
+    let name = file.file_name().unwrap().to_string_lossy().into_owned();
+
+    let archive = export_dir(&mut run, &session, "export-saved", None).await?;
+    assert_eq!(
+        std::fs::read(archive.join("tool-results").join(&name))?,
+        std::fs::read(&file)?
+    );
+    let manifest: Value = serde_json::from_slice(&std::fs::read(archive.join("manifest.json"))?)?;
+    let files = manifest["tool_results"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1, "{manifest}");
+    assert_eq!(files[0]["name"], name);
+
+    let imported = rpc(&mut run, "session.import", json!({ "path": archive })).await?;
+    let new_root = imported["root_session_id"].as_str().unwrap().to_string();
+    let copy = results_root(&run).join(&new_root).join(&name);
+    assert_eq!(std::fs::read(&copy)?, std::fs::read(&file)?);
+    let history = history_text(&mut run, &new_root).await?;
+    assert!(
+        history.contains(&copy.display().to_string()),
+        "the imported marker points at the new directory: {history}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_export_without_tool_results_imports_with_the_old_marker() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-export-bare", &stub).await?;
+    let file = saved_path(&run, &session, "b1");
+
+    let archive = export_dir(
+        &mut run,
+        &session,
+        "export-bare",
+        Some(json!(["sidechains", "attachments"])),
+    )
+    .await?;
+    assert!(!archive.join("tool-results").exists());
+    let manifest: Value = serde_json::from_slice(&std::fs::read(archive.join("manifest.json"))?)?;
+    assert!(manifest["tool_results"].is_null(), "{manifest}");
+
+    let imported = rpc(&mut run, "session.import", json!({ "path": archive })).await?;
+    let new_root = imported["root_session_id"].as_str().unwrap();
+    let history = history_text(&mut run, new_root).await?;
+    assert!(history.contains(&file.display().to_string()), "{history}");
+    assert!(!results_root(&run).join(new_root).exists());
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archive_whose_saved_file_does_not_match_its_hash_is_refused() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-export-tampered", &stub).await?;
+    let name = saved_path(&run, &session, "b1")
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let archive = export_dir(&mut run, &session, "export-tampered", None).await?;
+    let inside = archive.join("tool-results").join(&name);
+    let mut bytes = std::fs::read(&inside)?;
+    bytes[0] ^= 1;
+    std::fs::write(&inside, bytes)?;
+
+    let before = std::fs::read_dir(results_root(&run))?.count();
+    let response = run
+        .client
+        .call("session.import", json!({ "path": archive }))
+        .await?;
+    let error = response.error.expect("refused");
+    assert_eq!(error.code, -32602, "{error:?}");
+    assert_eq!(std::fs::read_dir(results_root(&run))?.count(), before);
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archive_naming_a_saved_file_outside_its_layout_is_refused() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-export-layout", &stub).await?;
+    let archive = export_dir(&mut run, &session, "export-layout", None).await?;
+    let manifest_path = archive.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
+    manifest["tool_results"]["files"][0]["name"] = json!("../x.txt");
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
+
+    let response = run
+        .client
+        .call("session.import", json!({ "path": archive }))
+        .await?;
+    assert_eq!(response.error.expect("refused").code, -32602);
     run.finish().await;
     Ok(())
 }

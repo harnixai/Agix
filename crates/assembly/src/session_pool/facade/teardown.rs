@@ -163,19 +163,40 @@ impl SessionPool {
             .await)
     }
 
-    async fn remove_saved_tool_results(
+    /// Where `session_id`'s lineage saves results: its root session's directory under
+    /// the state root of the binding it was recorded under.
+    pub(in crate::session_pool) async fn saved_results_dir(
         &self,
         session_id: &str,
-        facts: history::store::SessionFacts,
-    ) {
+    ) -> Option<PathBuf> {
+        let mut root = session_id.to_string();
+        let mut facts = self.directory.facts_of(&root).await;
+        for _ in 0..16 {
+            if facts.session_kind != history::entry::SessionKind::Sidechain {
+                break;
+            }
+            root = facts.parent_session_id.clone()?;
+            facts = self.directory.facts_of(&root).await;
+        }
+        if facts.session_kind == history::entry::SessionKind::Sidechain {
+            return None;
+        }
         let scene = match facts.scene {
             Some(scene) => scene,
             None => self.bindings.startup_scene().await,
         };
         let project = facts.project_root.map(PathBuf::from);
         let binding = self.binding_for(project.as_deref(), &scene).await;
-        let dir = base::paths::tool_results_dir(&binding.settings.paths.local_data_dir, session_id);
-        let _ = std::fs::remove_dir_all(dir);
+        let local = &binding.settings.paths.local_data_dir;
+        local
+            .is_absolute()
+            .then(|| base::paths::tool_results_dir(local, &root))
+    }
+
+    async fn remove_saved_tool_results(&self, dir: Option<PathBuf>) {
+        if let Some(dir) = dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// `session.delete` — irreversibly deletes the parent's own transcript
@@ -212,7 +233,10 @@ impl SessionPool {
         // critical section — see that method's doc comment for the resume
         // race this closes. The children are looked for only once the
         // parent's engine has stopped: until then it can still start one.
-        let facts = self.directory.facts_of(session_id).await;
+        let saved_results = match self.directory.facts_of(session_id).await.session_kind {
+            history::entry::SessionKind::Primary => self.saved_results_dir(session_id).await,
+            history::entry::SessionKind::Sidechain => None,
+        };
         let (sidechains_deleted, sidechain_ids, delete_result) = self
             .live
             .with_session_lock(session_id, async {
@@ -228,7 +252,7 @@ impl SessionPool {
         let scratch =
             base::paths::session_scratch_dir(&self.bindings.paths().global_root(), session_id);
         let _ = std::fs::remove_dir_all(scratch);
-        self.remove_saved_tool_results(session_id, facts).await;
+        self.remove_saved_tool_results(saved_results).await;
         self.scheduler.remove_session(session_id);
         self.emit_event(api::DaemonEvent::SessionDeleted {
             session_id: session_id.to_string(),
