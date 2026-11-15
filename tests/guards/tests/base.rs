@@ -142,7 +142,7 @@ const BASE_FS: &[(&str, &str)] = &[
     ),
     (
         "crates/core/src/paths/sensitive.rs",
-        "PromptFiles: every instruction file is read through the sensitive-path check",
+        "PromptFiles: every file the engine reads for the model goes through the sensitive-path check; SensitivePaths resolves its roots and lists the scene directories once, when built",
     ),
     (
         "crates/core/src/interface/exec/filesystem.rs",
