@@ -285,6 +285,41 @@ async fn permit_always_local_then_a_new_session(reload: bool) -> anyhow::Result<
     Ok(asked)
 }
 
+/// In a project nobody has trusted, "always, this project" cannot be kept
+/// where the next session would read it: the host is told why, and the
+/// answer holds for this session.
+#[tokio::test(flavor = "multi_thread")]
+async fn permit_always_local_in_an_untrusted_project_is_kept_for_the_session_and_said_so(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("always-local-untrusted", &stub)
+        .settings(json!({ "permission_mode": "default" }))
+        .untrusted()
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::permit_always("local")))
+        .await?;
+    stub.script([
+        bash("b1", "echo one > one.txt"),
+        bash("b2", "echo one > one.txt"),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "twice").await?;
+    assert!(run.read_file(".agix/settings.local.json").is_none());
+    assert_eq!(watcher.asked().len(), 1, "the session kept the answer");
+    let told = watcher.frames().into_iter().any(|f| {
+        f["event"]["kind"] == "notification"
+            && f["event"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("project.trust"))
+    });
+    assert!(told, "{:?}", watcher.frames());
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn permit_always_local_holds_for_a_session_opened_after_a_reload() -> anyhow::Result<()> {
     assert_eq!(permit_always_local_then_a_new_session(true).await?, 0);
