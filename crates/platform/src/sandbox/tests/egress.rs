@@ -183,7 +183,9 @@ fn a_proxy_on_the_daemons_own_port_written_as_a_mapped_v6_address_is_refused() {
     let mapped = proxy(&format!("[::ffff:127.0.0.1]:{}", addr.port()), None);
     let cut = namespaced(Some(&mapped), &PROGRAMS, outside_socket);
     assert!(
-        cut.unmet.iter().any(|u| u.contains("port this daemon serves")),
+        cut.unmet
+            .iter()
+            .any(|u| u.contains("port this daemon serves")),
         "{:?}",
         cut.unmet
     );

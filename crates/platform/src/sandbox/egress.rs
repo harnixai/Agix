@@ -50,11 +50,14 @@ pub(super) fn served_here(proxy: &EgressProxy) -> Option<String> {
 }
 
 fn served(addr: SocketAddr) -> bool {
+    // `::ffff:127.0.0.1` is `127.0.0.1` on the wire; compare what is dialled.
+    let ip = addr.ip().to_canonical();
     fenced_ports().iter().any(|own| {
+        let own_ip = own.ip().to_canonical();
         own.port() == addr.port()
-            && (own.ip() == addr.ip()
-                || own.ip().is_unspecified()
-                || (own.ip().is_loopback() && addr.ip().is_loopback()))
+            && (own_ip == ip
+                || own_ip.is_unspecified()
+                || (own_ip.is_loopback() && ip.is_loopback()))
     })
 }
 
