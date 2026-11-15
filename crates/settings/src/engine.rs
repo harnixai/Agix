@@ -86,8 +86,11 @@ impl LoadedSettings {
             rules: self.rules.clone(),
             managed: self.managed.clone(),
             project_rules: self.own_local_settings_file().map(|path| {
-                std::sync::Arc::new(LocalRules::new(path))
-                    as std::sync::Arc<dyn base::interface::permission::RuleFile>
+                std::sync::Arc::new(if self.paths.project_untrusted {
+                    LocalRules::untrusted(path)
+                } else {
+                    LocalRules::new(path)
+                }) as std::sync::Arc<dyn base::interface::permission::RuleFile>
             }),
         }
     }

@@ -419,5 +419,12 @@ async fn grant_always(
     let grant = Grant::new(name, content.map(str::to_string), scope);
     if let Err(e) = grants.grant(grant).await {
         tracing::warn!(tool_name = %name, error = %e, "permit-always not kept as asked");
+        if let Some(events) = &ctx.events {
+            let _ = events.send(base::event::AgentEvent::Notification {
+                message: format!("allow `{name}` every time: {e}"),
+                status: None,
+                turn_id: ctx.turn_id.clone(),
+            });
+        }
     }
 }

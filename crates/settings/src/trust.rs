@@ -748,7 +748,10 @@ mod tests {
         let mut lower = lower();
         lower["providers"] = json!({"onprem": {}});
         lower["default_provider"] = json!("onprem");
-        let mut layer = json!({"default_provider": null}).as_object().unwrap().clone();
+        let mut layer = json!({"default_provider": null})
+            .as_object()
+            .unwrap()
+            .clone();
         let found = gate_layer(&mut layer, &lower, true, &sections());
         assert_eq!(found, ["default_provider"]);
         assert!(!layer.contains_key("default_provider"), "{layer:?}");
