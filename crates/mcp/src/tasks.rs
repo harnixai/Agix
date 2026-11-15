@@ -206,7 +206,8 @@ pub(crate) async fn await_task(
                 RunningStatus::Cancelled
             });
         }
-        Err(_) => {}
+        Err(McpError::TaskStopped { .. }) => {}
+        Err(e) => ticket.conclude(RunningStatus::Failed(e.to_string())),
     }
     outcome
 }
