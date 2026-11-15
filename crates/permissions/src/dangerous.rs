@@ -688,7 +688,7 @@ mod tests {
     /// resolves to `/**`, a one-letter prefix before `*` covers `bash -c …`,
     /// and a host glob under a public suffix is anyone's to register.
     #[test]
-    fn audit2_a_grant_that_reaches_everything_is_unscoped_whatever_its_prefix() {
+    fn a_grant_that_reaches_everything_is_unscoped_whatever_its_prefix() {
         let cwd = std::path::Path::new("/work/proj");
         let climbing = "x/../../../../../../../../../../**";
         assert_eq!(crate::path_rule::resolve_pattern(climbing, cwd), "/**");

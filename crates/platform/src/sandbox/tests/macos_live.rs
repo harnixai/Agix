@@ -182,7 +182,7 @@ fn a_protected_path_spelled_in_another_case_is_still_protected() {
 /// not. The rest of `.agents/` is the project's.
 #[cfg(target_os = "macos")]
 #[test]
-fn audit_f1_a_sandboxed_command_cannot_plant_a_project_skill() {
+fn a_sandboxed_command_cannot_plant_a_project_skill() {
     let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
     assert!(
         !s.runs("echo x > .agix/settings.json"),
@@ -222,7 +222,7 @@ fn audit_f1_a_sandboxed_command_cannot_plant_a_project_skill() {
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "known escape: the backends cannot stop a nested repository; tools::nested_repos catches it after the command"]
-fn audit2_a_sandboxed_command_cannot_plant_an_embedded_repositorys_configuration() {
+fn a_sandboxed_command_cannot_plant_an_embedded_repositorys_configuration() {
     let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
     assert!(
         !s.runs("git config core.fsmonitor 'touch x'"),

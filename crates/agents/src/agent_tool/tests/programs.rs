@@ -317,7 +317,7 @@ impl Model for ExtractionNeverReturns {
 /// A one-shot sub-agent is torn down as soon as its answer is in; a memory
 /// extraction it started then would be paid for and dropped unfinished.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn audit2_a_one_shot_sub_agent_does_not_start_a_memory_extraction_it_then_abandons() {
+async fn a_one_shot_sub_agent_does_not_start_a_memory_extraction_it_then_abandons() {
     let started = Arc::new(tokio::sync::Notify::new());
     let dropped = Arc::new(tokio::sync::Notify::new());
     let agent_tool = agent_tool_with_model(Arc::new(ExtractionNeverReturns {

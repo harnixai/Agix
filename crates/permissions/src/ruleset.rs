@@ -748,7 +748,7 @@ mod tests {
     /// A URL rule's host wildcard stays in the host: the host it pins cannot
     /// be spelled in another host's path.
     #[test]
-    fn audit_f14_a_subdomain_url_rule_matches_another_hosts_path() {
+    fn a_subdomain_url_rule_matches_another_hosts_path() {
         let rule = crate::rule::parse_rule_string(
             "WebFetch(https://*.example.com/**)",
             RuleSource::UserSettings,

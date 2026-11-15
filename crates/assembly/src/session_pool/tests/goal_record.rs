@@ -200,7 +200,7 @@ async fn answered_by_a_counting_model(pool: &SessionPool) -> Arc<CountsTurnCalls
 /// message reaches the engine; an interrupt in between is answered
 /// `interrupted: true`, so the round must not then run to the model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn audit2_an_interrupt_while_a_goal_round_records_its_claim_stops_that_round() {
+async fn an_interrupt_while_a_goal_round_records_its_claim_stops_that_round() {
     let (pool, store, _dir) = pool_with_gated_goal_writes().await;
     let model = answered_by_a_counting_model(&pool).await;
     let (sid, state) = session_with_a_goal(&pool).await;

@@ -915,7 +915,7 @@ mod tests {
     /// 解析后的目录交给按解析路径匹配的后端。
     #[cfg(unix)]
     #[test]
-    fn audit3_a_scene_linked_in_from_elsewhere_has_its_key_files_located() {
+    fn a_scene_linked_in_from_elsewhere_has_its_key_files_located() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("state");
         let elsewhere = dir.path().join("dotfiles/scene");

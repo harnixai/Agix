@@ -452,7 +452,7 @@ mod tests {
     /// the server reads `/%61dmin/` as `/admin/`. Otherwise a deny written
     /// for the host or the path does not refuse the very URL it names.
     #[test]
-    fn audit2_a_rule_meets_the_url_the_request_goes_to() {
+    fn a_rule_meets_the_url_the_request_goes_to() {
         assert!(
             matches("https://bücher.example/**", "https://bücher.example/x"),
             "a Unicode host does not match itself"

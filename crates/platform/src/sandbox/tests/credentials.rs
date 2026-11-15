@@ -104,7 +104,7 @@ fn a_sandboxed_command_reads_no_credentials_and_the_rest_of_the_state_root() {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 #[allow(clippy::unwrap_used)]
-fn audit3_a_scene_linked_in_from_elsewhere_keeps_its_settings_unreadable() {
+fn a_scene_linked_in_from_elsewhere_keeps_its_settings_unreadable() {
     if !a_backend_runs() {
         return;
     }
