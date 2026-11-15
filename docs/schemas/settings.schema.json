@@ -606,12 +606,12 @@
               "type": "null"
             }
           ],
-          "description": "Under `network_mode: \"proxy\"`, the one address a sandboxed command may\nconnect to: `\"127.0.0.1:3128\"` for an HTTP proxy, or an object with\n`http`, an optional `socks` and `no_proxy`. The command gets\n`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)\npointing at it. Put the proxy on this machine: macOS can hold a proxy\nelsewhere only to its port, and Linux needs `socat` to relay to it,\ncutting the network entirely without one. Ignored in other modes."
+          "description": "Under `network_mode: \"proxy\"`, the one address a sandboxed command may\nconnect to: `\"127.0.0.1:3128\"` for an HTTP proxy, or an object with\n`http`, an optional `socks` and `no_proxy`. The command gets\n`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)\npointing at it. Put the proxy on this machine: macOS can hold a proxy\nelsewhere only to its port, and Linux needs `socat` to relay to it,\ncutting the network entirely without one. Ignored in other modes.\nOnly sandboxed commands go through it: the engine's own `WebFetch` and\n`Ping` use the engine's network, not this proxy, and are not held to\n`allowed_domains`; filtering by domain is the host's proxy's job."
         },
         "network_mode": {
           "$ref": "#/$defs/NetworkMode",
           "default": "unrestricted",
-          "description": "Outbound network policy for sandboxed `Bash` commands. `proxy` lets a\ncommand connect only to `egress_proxy`, which both OS backends hold;\nfiltering by domain is then the proxy's job. `WebFetch` and `Ping` do\nnot go through the proxy: they follow `allowed_domains`."
+          "description": "Outbound network policy for sandboxed `Bash` commands. `proxy` lets a\ncommand connect only to `egress_proxy`, which both OS backends hold;\nfiltering by domain is then the proxy's job. The engine's own\n`WebFetch` and `Ping` are not bound by it: they use the engine's\nnetwork, not the proxy, and are not held to `allowed_domains` either."
         },
         "read_anywhere": {
           "default": false,

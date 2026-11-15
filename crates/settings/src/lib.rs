@@ -463,8 +463,9 @@ pub struct SandboxConfig {
     pub allowed_domains: Vec<String>,
     /// Outbound network policy for sandboxed `Bash` commands. `proxy` lets a
     /// command connect only to `egress_proxy`, which both OS backends hold;
-    /// filtering by domain is then the proxy's job. `WebFetch` and `Ping` do
-    /// not go through the proxy: they follow `allowed_domains`.
+    /// filtering by domain is then the proxy's job. The engine's own
+    /// `WebFetch` and `Ping` are not bound by it: they use the engine's
+    /// network, not the proxy, and are not held to `allowed_domains` either.
     #[serde(default)]
     pub network_mode: base::interface::exec::NetworkMode,
     /// Under `network_mode: "proxy"`, the one address a sandboxed command may
@@ -474,6 +475,9 @@ pub struct SandboxConfig {
     /// pointing at it. Put the proxy on this machine: macOS can hold a proxy
     /// elsewhere only to its port, and Linux needs `socat` to relay to it,
     /// cutting the network entirely without one. Ignored in other modes.
+    /// Only sandboxed commands go through it: the engine's own `WebFetch` and
+    /// `Ping` use the engine's network, not this proxy, and are not held to
+    /// `allowed_domains`; filtering by domain is the host's proxy's job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub egress_proxy: Option<EgressProxySetting>,
     /// Bypass the sandbox entirely, in a build that has one.

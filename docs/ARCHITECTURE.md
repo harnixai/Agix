@@ -276,8 +276,9 @@ transcript 不变,恢复策略重发的就是失败的那个请求;每次调用�
 at <path>]`)。自己分页的 `Read`、`WebFetch`、`TaskOutput`(`ToolSpec::pages_itself`)、`RunCode`
 里的子调用和 skill 内联命令不外置;失败的结果一样外置;没有可写目录或写失败时不外置,交给
 单条预算截断。转录、压缩、录像看到的都只是预览。外置文件的内容可能是 MCP server 或网页写的,
-所以 `Read` / `Grep` 指向这个目录时一律按外部内容围栏,不让它借文件洗成项目文件;`Bash` 的
-`cat` 读它不围栏,与 `Bash` 读任何项目文件一致。
+所以 `Read` / `Grep` 指向这个目录时一律按外部内容围栏,不让它借文件洗成项目文件。**已知限制:**
+`Bash`(`cat`、`sed -n`、`jq`)或 `RunCode` 读回外置的 MCP / 网页结果不加围栏,中间段落以本地命令
+输出的身份进对话;`cp` 进项目后再 `Read` 也一样。外置时写进文件首尾的围栏只包住整份,不跟着片段走。
 
 **一轮只有一个出口。** 循环里有十几处提前结束(hook 截停、预算耗尽、取消、出错),
 落盘和宣布结束都只在 `finish_turn` 做一次,所以哪条路都跳不过。顺序本身是契约:宿主
@@ -971,8 +972,10 @@ macOS 是 `(deny network*)` 后只放开 `localhost:<代理端口>`(覆盖 `127.
 系统目录里没有 `socat`、中继起不来时照 `deny_all` 断网,报 `Partial`。代理端口是 daemon 自己的端口
 时两边都拒(中继每个连接都再查一次围栏表)。没配 `egress_proxy` 时断网,`unmet` 写明;配了而模式
 不是 `proxy` 时地址被忽略。项目层设置不能写 `egress_proxy`,`network_mode` 只能收紧到
-`deny_all`(`proxy` 与 `allowlist` 不能互换)。`WebFetch` / `Ping` 不走代理,照第 2 条按
-`allowed_domains` 判——下游代理管不到工具自己的出网。`daemon.doctor` 的 `sandbox.egress_proxy`
+`deny_all`(`proxy` 与 `allowlist` 不能互换)。**Proxy 模式只约束沙箱内命令的出网**;
+引擎自己的 `WebFetch` / `Ping` 走引擎网络,不经代理,也不受 `allowed_domains` 约束(与 `unrestricted`
+下同,名单只表示"点了名的主机可以是内网地址")——域名过滤由宿主代理负责,而宿主代理管不到引擎自己的
+出网(引擎网络也经宿主代理的跟踪见 issue #58)。`daemon.doctor` 的 `sandbox.egress_proxy`
 报沙箱兑现了多少。
 
 **沙箱配置只有三份类型,各管一段。** `settings::SandboxConfig` 是设置文件里 `sandbox` 一节的形状(含
