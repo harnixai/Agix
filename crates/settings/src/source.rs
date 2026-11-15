@@ -40,9 +40,14 @@ impl ConfigSource for FileTiers {
                 continue;
             }
             let tier = *tier;
+            let links_may_reach = if tier == Tier::Project && *dir != &self.global_dir {
+                Vec::new()
+            } else {
+                user_roots(&self.global_dir)
+            };
             for (file, machine_local) in [(SETTINGS_FILE, false), (SETTINGS_LOCAL_FILE, true)] {
                 let path = dir.join(file);
-                if let Some(value) = read_settings_file(tier, &path) {
+                if let Some(value) = read_settings_file(tier, &path, &links_may_reach) {
                     layers.push(ConfigLayer {
                         tier,
                         machine_local,
@@ -56,16 +61,37 @@ impl ConfigSource for FileTiers {
     }
 }
 
+/// Where a user's own settings file may link: the state directory and the
+/// home directory, as the filesystem resolves them.
+fn user_roots(global_dir: &Path) -> Vec<PathBuf> {
+    [Some(global_dir.to_path_buf()), base::paths::home_dir()]
+        .into_iter()
+        .flatten()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .collect()
+}
+
 /// Read and parse one settings file. `None` when it doesn't exist, is a
-/// symlink (a link in a project is the repository's choice of what to read),
-/// can't be read, or doesn't parse — each of the latter three warns rather
-/// than aborting, so one broken file can't stop the process from starting.
-pub fn read_settings_file(tier: Tier, path: &Path) -> Option<serde_json::Value> {
+/// symlink resolving outside `links_may_reach` (none for a project: a link
+/// there is the repository's choice of what to read), can't be read, or
+/// doesn't parse — each of the latter three warns rather than aborting, so
+/// one broken file can't stop the process from starting.
+pub fn read_settings_file(
+    tier: Tier,
+    path: &Path,
+    links_may_reach: &[PathBuf],
+) -> Option<serde_json::Value> {
     match std::fs::symlink_metadata(path) {
         Err(_) => return None,
         Ok(meta) if meta.file_type().is_symlink() => {
-            tracing::warn!(layer = tier.name(), path = %path.display(), "settings file is a symlink; not read");
-            return None;
+            let target = std::fs::canonicalize(path).ok();
+            let reaches = target
+                .as_ref()
+                .is_some_and(|t| links_may_reach.iter().any(|root| t.starts_with(root)));
+            if !reaches {
+                tracing::warn!(layer = tier.name(), path = %path.display(), target = ?target, "settings file is a symlink to somewhere it may not lead; not read");
+                return None;
+            }
         }
         Ok(_) => {}
     }
