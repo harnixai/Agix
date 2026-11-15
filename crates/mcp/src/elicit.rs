@@ -90,8 +90,9 @@ impl ElicitRoute {
     pub(crate) async fn answer(&self, server: &str, params: ElicitRequestParams) -> ElicitResult {
         let answer = match self.sole() {
             Ok((elicitor, ended)) => tokio::select! {
-                answer = elicit(server, params, elicitor.as_deref()) => answer,
+                biased;
                 () = ended.cancelled() => McpElicitationAnswer::Cancel,
+                answer = elicit(server, params, elicitor.as_deref()) => answer,
             },
             Err(inflight) => {
                 tracing::warn!(
@@ -208,23 +209,21 @@ async fn elicit(
             Ok(requested_schema) => (message, McpElicitMode::Form { requested_schema }),
             Err(_) => return McpElicitationAnswer::Decline,
         },
-        ElicitRequestParams::UrlElicitationParams { message, url, .. } => {
-            match openable_host(&url) {
-                Some(host) => (message, McpElicitMode::Url { url, host }),
-                None => {
-                    tracing::warn!(server, "an elicitation URL that is not https was declined");
-                    return McpElicitationAnswer::Decline;
-                }
+        ElicitRequestParams::UrlElicitationParams { message, url, .. } => match openable(&url) {
+            Some((url, host)) => (message, McpElicitMode::Url { url, host }),
+            None => {
+                tracing::warn!(server, "an elicitation URL that is not https was declined");
+                return McpElicitationAnswer::Decline;
             }
-        }
+        },
         _ => return McpElicitationAnswer::Decline,
     };
     elicitor.elicit(server, message, mode).await
 }
 
-/// The host of `url` when a person may be sent there: `https`, or `http` to
-/// this machine.
-fn openable_host(url: &str) -> Option<String> {
+/// `url` as it parses — what a browser would open — and its host, when a
+/// person may be sent there: `https`, or `http` to this machine.
+fn openable(url: &str) -> Option<(String, String)> {
     let parsed = url::Url::parse(url).ok()?;
     let host = parsed.host_str()?.to_string();
     let loopback = matches!(parsed.host(), Some(url::Host::Domain("localhost")))
@@ -234,8 +233,8 @@ fn openable_host(url: &str) -> Option<String> {
             _ => false,
         };
     match parsed.scheme() {
-        "https" => Some(host),
-        "http" if loopback => Some(host),
+        "https" => Some((parsed.as_str().to_string(), host)),
+        "http" if loopback => Some((parsed.as_str().to_string(), host)),
         _ => None,
     }
 }
