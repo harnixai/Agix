@@ -146,6 +146,7 @@ mod context_op;
 mod eviction;
 mod goal_record;
 mod hub;
+mod import_question;
 pub(in crate::session_pool) mod mcp_for_project;
 /// Multiple scenes coexisting in one daemon process.
 mod multi_scene;
