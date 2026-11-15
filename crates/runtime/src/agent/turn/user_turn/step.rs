@@ -464,10 +464,11 @@ impl Agent {
     }
 }
 
-/// `call` once one of the reply's `slots` (`execution.max_parallelism`) is free.
+/// `call` once one of the reply's `slots` (`execution.max_parallelism`) is
+/// free, unless the turn was stopped while it waited.
 async fn in_a_slot<F, Fut>(
     slots: Arc<tokio::sync::Semaphore>,
-    _cancel: &CancellationToken,
+    cancel: &CancellationToken,
     call: F,
 ) -> base::interface::tool_middleware::ToolOutcome
 where
@@ -475,6 +476,9 @@ where
     Fut: std::future::Future<Output = base::interface::tool_middleware::ToolOutcome>,
 {
     let _slot = slots.acquire_owned().await;
+    if cancel.is_cancelled() {
+        return Err(crate::streaming::CANCELLED_WITH_THE_TURN.to_string());
+    }
     call().await
 }
 
