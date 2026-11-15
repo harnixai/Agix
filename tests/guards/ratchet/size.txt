@@ -31,7 +31,6 @@ fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
-fn    crates/core/src/prompt.rs                                  assemble_prompt_with                   94
 fn    crates/core/src/provider.rs                                resolve_task_models                    85
 fn    crates/history/src/transcript.rs                           apply_entry_to_messages                83
 fn    crates/hooks/src/catalog.rs                                HookEvent::spec                        194
@@ -64,6 +63,7 @@ fn    crates/runtime/src/agent/turn/tool_exec.rs                 post_tool_use  
 fn    crates/runtime/src/agent/turn/tool_permission.rs           ask                                    89
 fn    crates/runtime/src/agent/turn/tool_permission.rs           authorize                              95
 fn    crates/runtime/src/plugin.rs                               register_all                           82
+fn    crates/runtime/src/prompt_assembly.rs                      assemble                               90
 fn    crates/scene/src/declarative.rs                            DeclaredScene::parse                   90
 fn    crates/script-host/src/lib.rs                              bindings::install                      98
 fn    crates/settings/src/loaded.rs                              LoadedSettings::load_from              92

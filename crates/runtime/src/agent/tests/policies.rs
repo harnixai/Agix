@@ -1040,7 +1040,7 @@ async fn a_host_can_replace_prompt_assembly_outright() {
 /// and one cache breakpoint instead of several.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_merging_assembler_folds_a_real_session_prompt_into_one_block() {
-    use base::interface::prompt_assembler::MergedSystemPrompt;
+    use crate::prompt_assembly::MergedSystemPrompt;
 
     let default_blocks = prompt_blocks_for_one_turn(None).await;
     assert!(

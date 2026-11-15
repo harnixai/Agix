@@ -12,6 +12,7 @@ pub mod hook_executors;
 pub mod host_tools;
 pub mod module;
 pub mod plugin;
+pub mod prompt_assembly;
 mod repeat_guard;
 pub mod saved_results;
 pub mod steering;

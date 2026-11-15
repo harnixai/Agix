@@ -613,7 +613,7 @@ impl Agent {
             },
         );
         // Passes that have to await something — a script carrier, most of
-        // all. Kept out of `assemble_prompt_with` so assembly stays a
+        // all. Kept out of `prompt_assembly` so assembly stays a
         // synchronous function for every caller that registers none.
         base::interface::prompt_assembly::run_async_assembly_hooks(
             blocks,

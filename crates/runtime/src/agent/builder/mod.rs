@@ -252,7 +252,7 @@ impl Builder {
     /// whether two blocks stay two blocks.
     ///
     /// The default is
-    /// [`DefaultAssembler`](base::interface::prompt_assembler::DefaultAssembler),
+    /// [`DefaultAssembler`](crate::prompt_assembly::DefaultAssembler),
     /// which is the assembly the engine has always done.
     pub fn prompt_assembler(
         mut self,

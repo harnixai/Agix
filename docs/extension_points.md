@@ -1056,10 +1056,10 @@ let report = health.report();         // fresh answers, every time
 块。
 
 ```rust
-Builder::new().prompt_assembler(Arc::new(MergedSystemPrompt::default()))
+Builder::new().prompt_assembler(Arc::new(runtime::prompt_assembly::MergedSystemPrompt::default()))
 ```
 
-`DefaultAssembler` 是引擎自己的组装,也是默认。`MergedSystemPrompt` 包住任何一个
+`runtime::prompt_assembly::DefaultAssembler` 是引擎自己的组装,也是默认。`MergedSystemPrompt` 包住任何一个
 assembler,把它的系统块折成一个——提示贡献者比一个请求允许的四个 `cache_control`
 断点还多的部署要的正是这个:一个缓存前缀,而不是随便凑出来的四个。
 

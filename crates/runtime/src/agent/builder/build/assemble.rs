@@ -182,7 +182,7 @@ impl Builder {
             self.ext
                 .prompt_assembler
                 .take()
-                .unwrap_or_else(|| Arc::new(base::interface::prompt_assembler::DefaultAssembler)),
+                .unwrap_or_else(|| Arc::new(crate::prompt_assembly::DefaultAssembler)),
             prompt_middleware,
             self.spec.frozen.take(),
             claude_md_content,

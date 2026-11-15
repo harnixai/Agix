@@ -1,5 +1,4 @@
-//! The rule index: its entries, the merge of several rule sources, and the
-//! prompt block that advertises it.
+//! The rule index: its entries and the merge of several rule sources.
 //!
 //! Rules stay lazy: the model sees each document's name and first line and
 //! reads the rest on demand. Where the documents come from is the
@@ -56,29 +55,6 @@ impl RuleProvider for RuleTiers {
     }
 }
 
-/// Render the "Available Rules" system prompt block. Returns `None` when no
-/// rule documents exist anywhere — keeps token cost at zero for sessions
-/// that don't use this feature at all, matching the "宽进严出" philosophy
-/// used elsewhere in the config system (unused config = zero runtime cost).
-pub fn render_rules_prompt(entries: &[RuleEntry]) -> Option<String> {
-    if entries.is_empty() {
-        return None;
-    }
-    let mut lines = vec![
-        "## Available Rules".to_string(),
-        String::new(),
-        "The following rule documents exist under `.agix/rules/`. They are NOT \
-         auto-loaded — use the Read tool to load one when it's relevant to the \
-         current task."
-            .to_string(),
-        String::new(),
-    ];
-    for e in entries {
-        lines.push(format!("- `{}`: {}", e.path.display(), e.description));
-    }
-    Some(lines.join("\n"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,25 +66,6 @@ mod tests {
             description: description.into(),
             path: PathBuf::from(path),
         }
-    }
-
-    #[test]
-    fn no_rules_renders_no_block() {
-        assert!(render_rules_prompt(&[]).is_none());
-    }
-
-    #[test]
-    fn the_rules_block_lists_paths_and_descriptions() {
-        let text = render_rules_prompt(&[entry(
-            "testing",
-            "Testing conventions",
-            "/p/.agix/rules/testing.md",
-        )])
-        .expect("expected a rules block");
-        assert!(text.contains("Available Rules"));
-        assert!(text.contains("testing.md"));
-        assert!(text.contains("Testing conventions"));
-        assert!(text.contains("Read tool"));
     }
 
     #[test]
