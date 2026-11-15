@@ -739,6 +739,19 @@ mod tests {
         serde_json::to_value(crate::Settings::defaults_for("m")).unwrap()
     }
 
+    /// `null` is not a provider defined below: it takes away the one the
+    /// user chose, and the conversation goes wherever the defaults send it.
+    #[test]
+    fn an_untrusted_project_cannot_unset_the_default_provider() {
+        let mut lower = lower();
+        lower["providers"] = json!({"onprem": {}});
+        lower["default_provider"] = json!("onprem");
+        let mut layer = json!({"default_provider": null}).as_object().unwrap().clone();
+        let found = gate_layer(&mut layer, &lower, true, &sections());
+        assert_eq!(found, ["default_provider"]);
+        assert!(!layer.contains_key("default_provider"), "{layer:?}");
+    }
+
     fn gate(layer: Value, withhold: bool) -> (Value, Vec<String>) {
         let mut layer = layer.as_object().unwrap().clone();
         let found = gate_layer(&mut layer, &lower(), withhold, &sections());
