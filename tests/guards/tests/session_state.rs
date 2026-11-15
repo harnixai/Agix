@@ -22,6 +22,9 @@
 //! G-D3-5: a task the session pool spawns does not take the pool along —
 //! neither an `Arc<SessionPool>` nor the result of an upgrade made before it
 //! started — except as `HOLDS_THE_POOL` says.
+//!
+//! G-D3-6: `base::context::Session` has one production implementation, in
+//! `session-state`, and no default method.
 
 use guards::allow::{self, Finding};
 use guards::scan::{self, Callee};
@@ -760,5 +763,91 @@ fn a_task_the_pool_spawns_does_not_hold_the_pool() {
         HOLDS_THE_POOL,
         "take `self.this.clone()` (a `Weak`) into the task and upgrade it there, when the \
          task needs the pool; or take only the session's `SessionCore` / `SessionHub`",
+    );
+}
+
+/// G-D3-6: `base::context::Session` exists for the layering, not as an
+/// extension point: a second implementation would be a second copy of a
+/// session's state, and a default method would be state-shaped behaviour that
+/// no implementation owns. One production impl, in `SESSION_STATE`, and no
+/// method of the trait has a body.
+#[test]
+fn the_session_trait_has_one_implementation_and_no_default_methods() {
+    struct Impls<'a> {
+        f: &'a SourceFile,
+        found: Vec<Hit>,
+    }
+    impl<'ast> Visit<'ast> for Impls<'_> {
+        fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+            let is_session = i
+                .trait_
+                .as_ref()
+                .and_then(|(_, p, _)| p.segments.last())
+                .is_some_and(|s| s.ident == "Session");
+            if is_session {
+                self.found.push(Hit {
+                    file: self.f.rel.clone(),
+                    line: i.span().start().line,
+                    snippet: "impl Session for …".to_string(),
+                });
+            }
+            syn::visit::visit_item_impl(self, i);
+        }
+    }
+
+    let files: Vec<_> = ws()
+        .production()
+        .filter(|f| !ws().package(&f.package).dir.starts_with("tests/"))
+        .collect();
+    allow::non_vacuous("session_state::SESSION_IMPLS", files.len(), 200);
+    let impls: Vec<Finding> = par_flat_map(files, |f| {
+        let mut v = Impls {
+            f,
+            found: Vec::new(),
+        };
+        v.visit_file(&f.tree(View::Prod));
+        v.found
+            .into_iter()
+            .map(|hit| Finding {
+                key: f.rel.clone(),
+                hit,
+            })
+            .collect()
+    });
+    allow::non_vacuous("session_state::SESSION_IMPLS", impls.len(), 1);
+    allow::check(
+        "session_state::SESSION_IMPLS",
+        impls,
+        &[(
+            SESSION_STATE,
+            "the one implementation: a session's state lives in one place",
+        )],
+        "the trait exists for the layering, not as an extension point: a second implementation \
+         would be a second copy of a session's state",
+    );
+
+    let base = ws()
+        .production()
+        .find(|f| f.rel == BASE_SESSION)
+        .expect("base's session contract");
+    let tree = base.tree(View::Prod);
+    let with_body: Vec<String> = tree
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Trait(t) if t.ident == "Session" => Some(t),
+            _ => None,
+        })
+        .flat_map(|t| &t.items)
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(m) if m.default.is_some() => Some(m.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        with_body.is_empty(),
+        "[session_state::SESSION_IMPLS] `Session` has default methods: {}\n\nHow to fix: a method of \
+         the session's state is implemented once, in `session-state`; make it required.",
+        with_body.join(", ")
     );
 }
