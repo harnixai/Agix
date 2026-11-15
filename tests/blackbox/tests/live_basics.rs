@@ -140,7 +140,9 @@ async fn plan_mode_leaves_the_project_untouched() -> anyhow::Result<()> {
         .await?;
     assert_eq!(run.read_file("notes.txt").as_deref(), Some("keep me\n"));
     assert!(run.read_file("made.txt").is_none(), "{}", events.text);
-    run.finish().await;
+    // Leaving plan mode is the host's call; a model asking and not being
+    // answered is the expected ending here.
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 
