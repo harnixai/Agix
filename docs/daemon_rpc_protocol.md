@@ -59,7 +59,9 @@ TCP 与 WebSocket 都要求 `--token` 或 `AGIX_DAEMON_TOKEN`;没有 token 时�
 文件出现,就可以马上连上。
 
 **分帧之上的一切都与传输无关** —— 方法、参数、事件帧、权限提问三条路完全一致,
-换传输不需要改协议层代码。
+换传输不需要改协议层代码。把引擎嵌进自己进程的宿主经 `agix::embed`(`agix-sdk.md` §10)在任意
+字节流上服务一条连接(进程内就是 `tokio::io::duplex`),分帧、帧上限、在途上限、回复与事件同一条
+有序的流,都与 unix socket 上的一条连接相同,只是不要 `daemon.auth`。
 
 编码 UTF-8。**单帧上限 16 MiB**,三条传输都强制。超限的连接被**关闭**而不是跳过
 该帧:超限之后服务端已经不知道下一个帧边界在哪。
@@ -144,9 +146,16 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
 
 (Windows 上没有 Unix socket,daemon 改用命名管道 `\\.\pipe\agix-daemon`。)
 
+路径上已经有一个还有人在听的 socket(另一个 daemon,或嵌进别的进程的引擎)时,daemon 不替换它,
+以 `AddrInUse` 拒绝启动;没人听的旧 socket 文件照常换掉。
+
 `--instance <name>` 决定 `instances.d/<name>.json` 的文件名,默认是把所有激活场景
 (`--scene` 加 `--scenes`)去重排序后用 `,` 连接。多 daemon 并存时 instance 名必须
 不同 —— 重名不会被拦下,两个进程会互相覆盖对方的发现条目。
+
+经 `agix::embed` 嵌进宿主进程的引擎,`EmbedConfig.instance` 给了名字才写实例文件、拿
+`daemon.lock`,路径在它的数据根下;没给就两样都不写,`instances.d` 里找不到它,由宿主自己告诉
+客户端怎么连。一个进程里至多一个给了名字的引擎(`agix-sdk.md` §10)。
 
 ---
 

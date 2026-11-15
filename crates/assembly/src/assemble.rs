@@ -278,6 +278,10 @@ fn validate_task_router_config(
 
 /// The client used when no provider routing applies: keyed from the
 /// environment, else from the host's source, asked for provider `"default"`.
+///
+/// With no key anywhere it is still built, keyed with nothing: a daemon that
+/// cannot reach the default provider can still serve sessions routed to a
+/// configured one, and a turn that does reach it fails with an `auth` error.
 fn default_anthropic_client(
     host: Option<&dyn CredentialSource>,
 ) -> anyhow::Result<Arc<dyn AnthropicClient>> {
@@ -288,12 +292,15 @@ fn default_anthropic_client(
             Some(host) => host.api_key("default", &none),
             None => Err(env),
         })
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, or have the host supply credentials"
-            )
-        })?;
-    let auth = AuthMode::ApiKey(api_key.expose().to_string());
+        .map(|key| key.expose().to_string())
+        .unwrap_or_else(|_| {
+            warn!(
+                "no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, and the host supplied no \
+                 credentials: turns on the default provider will fail to authenticate"
+            );
+            String::new()
+        });
+    let auth = AuthMode::ApiKey(api_key);
     Ok(match std::env::var("ANTHROPIC_BASE_URL").ok() {
         Some(mut url) => {
             // Ensure trailing slash so Url::join appends instead of replacing

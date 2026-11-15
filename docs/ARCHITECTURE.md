@@ -19,7 +19,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 ## 1. 分层
 
 ```
- 外壳    daemon · agix ──── agixd:参数、进程(锁、信号、崩溃收尾);agix:嵌入门面,只再导出
+ 外壳    daemon · agix ──── agixd:参数、进程(信号、日志、崩溃收尾),建在 embed 上;agix:嵌入门面,只再导出
            │
  装配    assembly ───────── 会话池、(项目, 场景) 绑定与失效、provider 路由、插件包、模块清单;
            │                JSON-RPC 服务(Unix socket / TCP / WS)与实例发现
@@ -64,6 +64,12 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
 - 唯一装配点由可见性保证:`SessionPool::builder` 是 `pub(crate)`,`assembly` 之外建不出第二个池,
   要池只能走 `assembly::assemble::pool`(门面里它叫 `agix::pool::assemble`)。
+- 起一个说协议的引擎(池加上它的进程级职责)走 `assembly::embed`(`agix::embed`、`daemon::embed`),
+  `agixd` 自己也从这里起;只要池的嵌入方仍直接调 `assemble::pool`。`agixd` 的命令行参数
+  作字段进,协议连接出;读场景、建池、实例锁与发现文件、进程组登记、导入探测都在这里,`agixd` 的
+  `main` 只剩命令行、运行时、日志、崩溃钩子、信号与 otel 收尾,TCP / WebSocket 与 token 在
+  `assembly::agixd`。它是 0.x 里唯一单独承诺稳定的 Rust 面(`tests/guards/tests/embed_surface.rs`),
+  数据根只从配置来,不读进程环境。
 - 进程级状态(`static`、`thread_local!`)由 `tests/guards/tests/process_state.rs` 按语法树
   扫生产代码:类型不是朴素数据的 `static` 必须登记名字、种类与理由,`static mut` 不允许,
   登记了而代码里没有的条目失败。
@@ -118,9 +124,9 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `script-host` | 模块 | 脚本载体:配额与账本(`ScriptCarrier`)、九个点的适配器、QuickJS 引擎 |
 | `ptc` | 内核 | `RunCode`:模型写的一次性程序,在内嵌的 QuickJS 里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
 | `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
-| `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务与实例发现 |
+| `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |
 | `agix` | 外壳 | 嵌入门面:按主题再导出嵌入方用到的类型与函数,自身不含逻辑(`tests/guards/tests/facade.rs`);用法见 `agix-sdk.md` |
-| `daemon` | 外壳 | `agixd` 二进制:参数、锁、信号;库部分按旧路径重新导出 assembly |
+| `daemon` | 外壳 | `agixd` 二进制:参数、信号、日志,建在 `embed` 上;库部分按旧路径重新导出 assembly |
 
 ### 1.1 模块怎么进入会话
 

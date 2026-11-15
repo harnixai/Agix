@@ -3,7 +3,7 @@
 
 use super::*;
 
-pub(super) type Reader = Box<dyn AsyncRead + Send + Unpin + 'static>;
+pub(crate) type Reader = Box<dyn AsyncRead + Send + Unpin + 'static>;
 
 /// How many requests one connection may have in flight at once.
 ///

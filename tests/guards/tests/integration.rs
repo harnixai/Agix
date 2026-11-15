@@ -9,6 +9,7 @@ mod blackbox_discipline;
 mod decorators;
 mod delegation;
 mod deps;
+mod embed_surface;
 mod facade;
 mod layering;
 mod module_order;

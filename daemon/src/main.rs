@@ -1,21 +1,14 @@
 //! `agixd` — daemon binary.
 //!
-//! Builds a multi-session agent engine pool at startup and exposes it via
-//! JSON-RPC 2.0 over Unix socket (or TCP with token auth).
-//!
-//! # Startup profiling
-//!
-//! A [`PerfCollector`] marks when the configuration is read and when the pool
-//! is assembled; once the daemon is ready a [`StartupTimingPayload`] goes to the
-//! pool-level telemetry (if telemetry is enabled).
+//! The command line, the runtime, logging, the crash hook, signals and the
+//! OpenTelemetry flush are this process's; everything else is
+//! `daemon::embed`, the entry an embedder starts the engine through too, plus
+//! the TCP / WebSocket transports of `daemon::agixd`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use daemon::{config::*, write_lock_file, DaemonServer};
-use telemetry::events::StartupTimingPayload;
-use telemetry::perf::PerfCollector;
-use tokio_util::sync::CancellationToken;
+use daemon::embed::{EmbedConfig, Embedded};
 use tracing::info;
 
 const HELP: &str = "\
@@ -281,27 +274,6 @@ fn runtime(worker_threads: Option<usize>) -> std::io::Result<tokio::runtime::Run
     builder.enable_all().build()
 }
 
-/// The scene `--scene` names: a built-in, or a declarative scene under
-/// `user_scenes` (`<state root>/scenes/<id>/scene.json`).
-fn resolve_scene(
-    name: &str,
-    user_scenes: &std::path::Path,
-) -> anyhow::Result<Arc<base::interface::scene::SceneSpec>> {
-    let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
-    for e in registry.register_declarative_dir(user_scenes) {
-        tracing::warn!(error = %e, "a declarative scene was not loaded");
-    }
-    registry.resolve(name).ok_or_else(|| {
-        let mut known = registry.ids();
-        known.sort();
-        anyhow::anyhow!(
-            "unsupported --scene `{name}` — supported scenes: {}",
-            known.join(", ")
-        )
-    })
-}
-
 /// Every scene this daemon activates at startup — `--scene` plus
 /// `--scenes`, deduplicated and sorted. Sorting makes this (and anything
 /// derived from it, like [`default_instance_name`]) independent of the
@@ -329,252 +301,108 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn serve(cli: Cli) -> anyhow::Result<()> {
-    let perf = PerfCollector::new();
-
     init_logging();
-    let scene = resolve_scene(
-        &cli.scene,
-        &DefaultDaemonPaths::from_env(&cli.scene)
-            .global_root()
-            .join("scenes"),
-    )?;
-    let scope = scene.id.clone();
-
-    let mut daemon_config = daemon_config_from_cli(&cli, &scope)?;
-    let daemon_root = daemon_config.paths.global_root().join("daemon");
+    let data_root = daemon::config::default_global_root();
+    let listeners = listeners_from_cli(&cli)?;
     platform::crash::install(
-        daemon_root.join("crashes"),
+        data_root.join("daemon").join("crashes"),
         "agixd",
         env!("CARGO_PKG_VERSION"),
     );
-
-    configure_network_listeners(&cli, &mut daemon_config)?;
-
-    let socket = daemon_config.socket_path.clone();
-    let lock_path = daemon_config.lock_path.clone();
-    if let Some(parent) = socket.parent() {
-        daemon::discovery::create_private_dir(parent)?;
-    }
-
-    // Held until this function returns, which removes the file.
-    let lock = match write_lock_file(&lock_path, &socket) {
-        Ok(lock) => lock,
-        Err(e) => anyhow::bail!("could not claim daemon lock: {e}"),
-    };
-    info!(pid = lock.pid, "wrote discovery lock");
-
-    let instance_scenes = active_scenes(&cli.scene, &cli.scenes);
-    let instance_name = cli
-        .instance
-        .clone()
-        .unwrap_or_else(|| default_instance_name(&cli.scene, &cli.scenes));
-    let instances_dir = daemon_root.join("instances.d");
-
-    // Only after the lock is ours: a second daemon refused above must not
-    // touch the first one's commands.
-    let groups_file = daemon_root
-        .join("groups")
-        .join(format!("{instance_name}.json"));
-    reap_previous_groups(&groups_file).await?;
-
-    let (unix_socket_token, token_file) =
-        unix_socket_auth_token(&cli, &daemon_config, &daemon_root, &instance_name)?;
-    let instance_file = instance_entry(
-        &instance_name,
-        instance_scenes,
-        &daemon_config,
-        unix_socket_token.is_some(),
-        token_file.as_ref(),
-    );
-    let _config_load_ms = perf.checkpoint("config_loaded");
-    info!(elapsed_ms = _config_load_ms, "startup: config loaded");
-
-    let pool = build_pool(&cli, &daemon_config, scene).await?;
-    let pool_built_ms = perf.checkpoint("pool_built");
-    info!(
-        elapsed_ms = pool_built_ms,
-        "startup: session pool assembled"
-    );
-
-    spawn_import_detection(pool.clone());
-
-    record_startup_timing(&pool, &perf, _config_load_ms, pool_built_ms);
-
-    let cancel = CancellationToken::new();
-    let server = Arc::new(DaemonServer::new(pool.clone(), cancel.clone()));
-
-    spawn_shutdown_handler(server.clone());
-
-    set_transport_tokens(&server, &daemon_config, unix_socket_token).await;
-
-    bind_network_listeners(&server, &daemon_config).await?;
-
-    let unix = DaemonServer::bind_unix(&socket)?;
-
-    announce_instance(&instances_dir, &instance_name, &instance_file);
-
-    server.clone().serve_unix_listener(unix).await?;
-    shut_down_sessions(&pool).await;
-    drop(lock);
-    let _ = std::fs::remove_file(&groups_file);
-    drop(token_file);
-    daemon::discovery::remove_instance_file(&instances_dir, &instance_name);
+    let embedded = Arc::new(Embedded::start(embed_config(&cli, data_root)).await?);
+    spawn_shutdown_handler(embedded.clone());
+    let served = daemon::agixd::serve(&embedded, listeners).await;
+    embedded.shutdown().await;
+    #[cfg(feature = "otel")]
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(assembly::telemetry_otel::shutdown_process_exporter),
+    )
+    .await;
+    served?;
     info!("daemon stopped");
     Ok(())
 }
 
-fn configure_network_listeners(
-    cli: &Cli,
-    daemon_config: &mut daemon::config::DaemonConfig,
-) -> anyhow::Result<()> {
-    if let Some(ref addr_str) = cli.listen {
-        let addr: std::net::SocketAddr = addr_str
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid --listen `{addr_str}`: {e}"))?;
-        let token = cli
-            .token
+fn embed_config(cli: &Cli, data_root: PathBuf) -> EmbedConfig {
+    let mut config = EmbedConfig::new(data_root);
+    config.cwd = Some(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    config.scene = cli.scene.clone();
+    config.scenes = cli.scenes.clone();
+    config.model = cli.model.clone();
+    config.max_tokens = cli.max_tokens;
+    config.session_cap = cli.session_cap;
+    config.session_idle_timeout = std::time::Duration::from_secs(cli.session_idle_timeout);
+    config.permission_prompt_timeout = cli
+        .permission_prompt_timeout
+        .map(std::time::Duration::from_secs);
+    config.instance = Some(
+        cli.instance
             .clone()
-            .or_else(|| std::env::var("AGIX_DAEMON_TOKEN").ok())
-            .ok_or_else(|| anyhow::anyhow!("--listen requires --token or env AGIX_DAEMON_TOKEN"))?;
-        if !addr.ip().is_loopback() {
-            tracing::warn!(
-                %addr,
-                "--listen binds an address reachable from the network; the connection is not \
-                 encrypted, so the token and everything after it travel in the clear"
-            );
-        }
-        daemon_config.tcp_addr = Some(addr);
-        daemon_config.tcp_token = Some(token);
-    }
+            .unwrap_or_else(|| default_instance_name(&cli.scene, &cli.scenes)),
+    );
+    config.socket = cli.socket.clone();
+    config.mcp_policy = cli.mcp_policy.clone();
+    config.managed_settings = cli.managed_settings.clone();
+    config
+}
 
+/// `--listen`, `--listen-ws`, `--token` / `AGIX_DAEMON_TOKEN` and
+/// `--unix-socket-auth`, checked.
+fn listeners_from_cli(cli: &Cli) -> anyhow::Result<daemon::agixd::Listeners> {
+    let token = cli
+        .token
+        .clone()
+        .or_else(|| std::env::var("AGIX_DAEMON_TOKEN").ok());
+    let tcp = match &cli.listen {
+        Some(addr_str) => {
+            let addr: std::net::SocketAddr = addr_str
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid --listen `{addr_str}`: {e}"))?;
+            if token.is_none() {
+                anyhow::bail!("--listen requires --token or env AGIX_DAEMON_TOKEN");
+            }
+            if !addr.ip().is_loopback() {
+                tracing::warn!(
+                    %addr,
+                    "--listen binds an address reachable from the network; the connection is not \
+                     encrypted, so the token and everything after it travel in the clear"
+                );
+            }
+            Some(addr)
+        }
+        None => None,
+    };
     #[cfg(not(feature = "ws"))]
     if cli.listen_ws.is_some() {
         anyhow::bail!("--listen-ws: this build has no WebSocket listener (feature `ws`)");
     }
-    if let Some(ref addr_str) = cli.listen_ws {
-        let addr: std::net::SocketAddr = addr_str
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid --listen-ws `{addr_str}`: {e}"))?;
-        // Refused rather than warned about: this transport is what a browser
-        // connects to, and a browser reaching it from another machine would
-        // mean the token is the only thing between the daemon and the network.
-        if !addr.ip().is_loopback() {
-            anyhow::bail!(
-                "--listen-ws must bind a loopback address; `{addr}` is reachable from the network"
-            );
-        }
-        let token = cli
-            .token
-            .clone()
-            .or_else(|| std::env::var("AGIX_DAEMON_TOKEN").ok())
-            .or_else(|| daemon_config.tcp_token.clone())
-            .ok_or_else(|| {
-                anyhow::anyhow!("--listen-ws requires --token or env AGIX_DAEMON_TOKEN")
-            })?;
-        daemon_config.ws_addr = Some(addr);
-        daemon_config.tcp_token = Some(token);
-    }
-    Ok(())
-}
-
-fn unix_socket_auth_token(
-    cli: &Cli,
-    daemon_config: &daemon::config::DaemonConfig,
-    daemon_root: &std::path::Path,
-    instance_name: &str,
-) -> anyhow::Result<(
-    Option<String>,
-    Option<daemon::discovery::UnixSocketTokenFile>,
-)> {
-    let unix_socket_token = if cli.unix_socket_auth {
-        let given = cli
-            .token
-            .clone()
-            .or_else(|| std::env::var("AGIX_DAEMON_TOKEN").ok())
-            .or_else(|| daemon_config.tcp_token.clone());
-        Some(match given {
-            Some(token) => (token, None),
-            None => {
-                let path = daemon::discovery::unix_socket_token_path(daemon_root, instance_name);
-                let (token, file) =
-                    daemon::discovery::UnixSocketTokenFile::create(&path).map_err(|e| {
-                        anyhow::anyhow!(
-                            "--unix-socket-auth: could not write {}: {e}",
-                            path.display()
-                        )
-                    })?;
-                (token, Some(file))
+    let ws = match &cli.listen_ws {
+        Some(addr_str) => {
+            let addr: std::net::SocketAddr = addr_str
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid --listen-ws `{addr_str}`: {e}"))?;
+            // Refused rather than warned about: this transport is what a browser
+            // connects to, and a browser reaching it from another machine would
+            // mean the token is the only thing between the daemon and the network.
+            if !addr.ip().is_loopback() {
+                anyhow::bail!(
+                    "--listen-ws must bind a loopback address; `{addr}` is reachable from the network"
+                );
             }
-        })
-    } else {
-        None
+            if token.is_none() {
+                anyhow::bail!("--listen-ws requires --token or env AGIX_DAEMON_TOKEN");
+            }
+            Some(addr)
+        }
+        None => None,
     };
-    Ok(match unix_socket_token {
-        Some((token, file)) => (Some(token), file),
-        None => (None, None),
-    })
-}
-
-/// `daemon` is headless: no client is connected yet, so there is nobody to
-/// ask "import from X?" synchronously. Detection emits an `import_detected`
-/// event instead, which a subscribed client acts on through `import.list` /
-/// `import.run`; the `.imported.json` marker keeps it from nagging on every restart.
-fn spawn_import_detection(pool: Arc<daemon::session_pool::SessionPool>) {
-    let import_cwd = pool.cwd().to_path_buf();
-    tokio::spawn(async move {
-        if settings::import::already_decided(&import_cwd).await {
-            return;
-        }
-        let sources = settings::import::detect_import_sources(&import_cwd).await;
-        if sources.is_empty() {
-            return;
-        }
-        pool.ask_import(import_detected(&sources));
-    });
-}
-
-/// Ctrl-C, and the SIGTERM a supervisor stops a service with, shut down
-/// gracefully; a second one exits at once.
-fn spawn_shutdown_handler(server: Arc<DaemonServer>) {
-    tokio::spawn(async move {
-        shutdown_signal().await;
-        tokio::spawn(async {
-            shutdown_signal().await;
-            std::process::exit(130);
-        });
-        server.shutdown().await;
-    });
-}
-
-/// Bound before the daemon is announced, so a port already in use fails
-/// startup instead of leaving a daemon running without the transport the user
-/// asked for, and so a client that finds the `instances.d` entry can connect at once.
-async fn bind_network_listeners(
-    server: &Arc<DaemonServer>,
-    daemon_config: &daemon::config::DaemonConfig,
-) -> anyhow::Result<()> {
-    // `instances.d` entry can connect at once.
-    if let Some(addr) = daemon_config.tcp_addr {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| anyhow::anyhow!("could not bind --listen `{addr}`: {e}"))?;
-        info!(%addr, "TCP listener bound (token-auth required)");
-        let s = server.clone();
-        tokio::spawn(async move { s.serve_tcp_listener(listener).await });
-    }
-
-    if let Some(addr) = daemon_config.ws_addr {
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|e| anyhow::anyhow!("could not bind --listen-ws `{addr}`: {e}"))?;
-        info!(%addr, "WebSocket listener bound (token-auth required)");
-        let s = server.clone();
-        #[cfg(feature = "ws")]
-        tokio::spawn(async move { daemon::ws::serve_ws_listener(s, listener).await });
-        #[cfg(not(feature = "ws"))]
-        drop((s, listener));
-    }
-    Ok(())
+    Ok(daemon::agixd::Listeners::new(
+        tcp,
+        ws,
+        token,
+        cli.unix_socket_auth,
+    ))
 }
 
 fn init_logging() {
@@ -585,172 +413,18 @@ fn init_logging() {
         .init();
 }
 
-/// `daemon::assemble` does all the wiring; this binary adds only what a
-/// process has: its working directory, command line and listeners.
-async fn build_pool(
-    cli: &Cli,
-    daemon_config: &DaemonConfig,
-    scene: Arc<base::interface::scene::SceneSpec>,
-) -> anyhow::Result<Arc<daemon::session_pool::SessionPool>> {
-    daemon::assemble::pool(
-        daemon_config,
-        scene,
-        daemon::Assembly {
-            cwd: Some(std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
-            extra_scenes: cli.scenes.clone(),
-            permission_prompt_timeout: cli
-                .permission_prompt_timeout
-                .map(std::time::Duration::from_secs),
-            ..Default::default()
-        },
-    )
-    .await
+/// Ctrl-C, and the SIGTERM a supervisor stops a service with, shut down
+/// gracefully; a second one exits at once.
+fn spawn_shutdown_handler(embedded: Arc<Embedded>) {
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        tokio::spawn(async {
+            shutdown_signal().await;
+            std::process::exit(130);
+        });
+        embedded.shutdown().await;
+    });
 }
-
-fn daemon_config_from_cli(cli: &Cli, scope: &str) -> anyhow::Result<DaemonConfig> {
-    let paths = DefaultDaemonPaths::from_env(scope);
-    let mut daemon_config = load_daemon_config(
-        &cli.model,
-        cli.max_tokens,
-        cli.socket.as_deref(),
-        scope,
-        &paths,
-    );
-    daemon_config.session_cap = cli.session_cap;
-    daemon_config.session_idle_timeout_secs = cli.session_idle_timeout;
-    #[cfg(not(feature = "mcp"))]
-    if cli.mcp_policy.is_some() {
-        anyhow::bail!("--mcp-policy: this build has no MCP module (feature `mcp`)");
-    }
-    daemon_config.mcp_policy_path = cli.mcp_policy.clone();
-    daemon_config.managed_settings_path = cli.managed_settings.clone();
-    Ok(daemon_config)
-}
-
-/// Only after the daemon lock is ours: a second daemon refused by it must not
-/// touch the first one's commands.
-async fn reap_previous_groups(groups_file: &std::path::Path) -> anyhow::Result<()> {
-    let path = groups_file.to_path_buf();
-    let reaped = tokio::task::spawn_blocking(move || {
-        platform::orphans::reap_previous(&path, std::time::Duration::from_millis(500))
-    })
-    .await?;
-    if !reaped.is_empty() {
-        tracing::warn!(
-            count = reaped.len(),
-            groups = ?reaped,
-            "stopped process groups a previous run of this instance left running"
-        );
-    }
-    platform::orphans::persist_to(groups_file.to_path_buf());
-    Ok(())
-}
-
-/// The `instances.d` discovery entry (see `daemon::discovery`). It lives
-/// under the global root, shared by every scene, because one instance file
-/// must be reachable whichever of this daemon's scenes a client cares about.
-fn instance_entry(
-    instance_name: &str,
-    scenes: Vec<String>,
-    daemon_config: &DaemonConfig,
-    unix_socket_auth: bool,
-    token_file: Option<&daemon::discovery::UnixSocketTokenFile>,
-) -> daemon::discovery::InstanceFile {
-    let identity = platform::process_identity::ProcessIdentity::current();
-    daemon::discovery::InstanceFile {
-        instance: instance_name.to_string(),
-        pid: identity.pid,
-        pid_start_time: identity.started_at,
-        socket: daemon_config.socket_path.clone(),
-        tcp: daemon_config.tcp_addr.map(|a| a.to_string()),
-        ws: daemon_config.ws_addr.map(|a| a.to_string()),
-        unix_socket_auth,
-        token_file: token_file.map(|f| f.path().to_path_buf()),
-        scenes,
-        protocol_version: daemon::discovery::INSTANCE_PROTOCOL_VERSION,
-        started_at: base::clock::now_rfc3339(),
-    }
-}
-
-fn announce_instance(
-    instances_dir: &std::path::Path,
-    instance_name: &str,
-    instance_file: &daemon::discovery::InstanceFile,
-) {
-    match daemon::discovery::write_instance_file(instances_dir, instance_name, instance_file) {
-        Ok(()) => info!(instance = %instance_name, "wrote instances.d discovery entry"),
-        Err(e) => tracing::warn!(
-            instance = %instance_name,
-            error = %e,
-            "failed to write instances.d discovery entry; multi-scene discovery clients won't see this daemon"
-        ),
-    }
-}
-
-fn record_startup_timing(
-    pool: &daemon::session_pool::SessionPool,
-    perf: &PerfCollector,
-    config_load_ms: f64,
-    pool_built_ms: f64,
-) {
-    let pool_ready_ms = perf.checkpoint("pool_ready");
-    info!(elapsed_ms = pool_ready_ms, "startup: session pool ready");
-    let total_startup_ms = perf.elapsed_ms() as u64;
-    let timing = StartupTimingPayload {
-        total_startup_ms,
-        config_load_ms: config_load_ms as u64,
-        pool_build_ms: (pool_built_ms - config_load_ms).max(0.0) as u64,
-    };
-    info!(total_ms = total_startup_ms, ?timing, "startup complete");
-    pool.record_startup(timing);
-}
-
-/// One token covers both network transports; either flag alone sets it.
-async fn set_transport_tokens(
-    server: &DaemonServer,
-    daemon_config: &DaemonConfig,
-    unix_socket_token: Option<String>,
-) {
-    if let Some(token) = daemon_config.tcp_token.clone() {
-        server.set_tcp_token(token).await;
-    }
-    if let Some(token) = unix_socket_token {
-        server.set_tcp_token(token).await;
-        server.require_unix_socket_auth();
-    }
-}
-
-/// Whoever stopped the listener is stopping the sessions; this waits for it.
-async fn shut_down_sessions(pool: &daemon::session_pool::SessionPool) {
-    if tokio::time::timeout(SHUTDOWN_GRACE, pool.shutdown_all())
-        .await
-        .is_err()
-    {
-        tracing::warn!("sessions did not shut down within {SHUTDOWN_GRACE:?}; exiting anyway");
-    }
-    #[cfg(feature = "otel")]
-    let _ = tokio::time::timeout(
-        SHUTDOWN_GRACE,
-        tokio::task::spawn_blocking(assembly::telemetry_otel::shutdown_process_exporter),
-    )
-    .await;
-}
-
-fn import_detected(
-    sources: &[settings::import::ImportSource],
-) -> daemon::session_pool::api::DaemonEvent {
-    daemon::session_pool::api::DaemonEvent::ImportDetected {
-        sources: sources
-            .iter()
-            .map(|s| daemon::session_pool::api::ImportSource {
-                source: s.kind().as_str().to_string(),
-                description: s.describe(),
-            })
-            .collect(),
-    }
-}
-
-const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 
 async fn shutdown_signal() {
     #[cfg(unix)]
@@ -771,48 +445,6 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn resolve_scene_finds_every_builtin_via_the_registry() {
-        for id in ["code", "harnix", "mini"] {
-            assert_eq!(
-                resolve_scene(id, std::path::Path::new("/nonexistent"))
-                    .expect("builtin scene should resolve")
-                    .id
-                    .as_str(),
-                id
-            );
-        }
-    }
-
-    #[test]
-    fn resolve_scene_rejects_an_unknown_name_and_lists_the_known_ones() {
-        let err = match resolve_scene("not-a-real-scene", std::path::Path::new("/nonexistent")) {
-            Ok(_) => panic!("expected an error for an unknown scene name"),
-            Err(e) => e.to_string(),
-        };
-        assert!(err.contains("not-a-real-scene"), "{err}");
-        for id in ["code", "harnix", "mini"] {
-            assert!(err.contains(id), "expected `{id}` in error, got: {err}");
-        }
-    }
-
-    #[test]
-    fn resolve_scene_finds_a_declarative_scene_under_the_state_root() {
-        let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("triage");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("scene.json"),
-            r#"{"id": "triage", "name": "Triage"}"#,
-        )
-        .unwrap();
-        std::fs::write(dir.join("prompt.md"), "Sort incoming issues.").unwrap();
-        assert_eq!(
-            resolve_scene("triage", root.path()).unwrap().id.as_str(),
-            "triage"
-        );
-    }
 
     #[test]
     fn default_instance_name_sorts_and_dedupes_scenes() {
@@ -850,6 +482,20 @@ mod tests {
         assert_eq!(cli.managed_settings, None);
         assert!(!cli.unix_socket_auth);
         assert!(parse(&["--unix-socket-auth"]).unix_socket_auth);
+    }
+
+    #[test]
+    fn the_command_line_defaults_are_the_embed_entrys() {
+        let root = PathBuf::from("/data");
+        let from_cli = embed_config(&parse(&[]), root.clone());
+        let mut comparable = from_cli.clone();
+        comparable.cwd = None;
+        comparable.instance = None;
+        assert_eq!(
+            format!("{comparable:?}"),
+            format!("{:?}", EmbedConfig::new(root))
+        );
+        assert_eq!(from_cli.instance.as_deref(), Some("code"));
     }
 
     #[test]

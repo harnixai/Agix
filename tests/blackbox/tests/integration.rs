@@ -7,6 +7,7 @@ mod background_agents;
 mod crash_recovery;
 mod daemon_surface;
 mod demo_plugins;
+mod embed_entry;
 mod engine_boundaries;
 mod engine_proxy;
 mod four_project_pipeline;

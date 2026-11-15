@@ -65,15 +65,22 @@ pub struct DefaultDaemonPaths {
     project_root: PathBuf,
 }
 
+/// The state root a process uses when nobody names one: `AGIX_CONFIG_HOME`,
+/// else `$HOME/.agix`, else `/tmp/agix`. What `agixd` hands the embed entry;
+/// an embedder names its own.
+pub fn default_global_root() -> PathBuf {
+    if let Ok(p) = std::env::var("AGIX_CONFIG_HOME") {
+        PathBuf::from(p)
+    } else if let Some(home) = base::paths::home_dir() {
+        home.join(".agix")
+    } else {
+        PathBuf::from("/tmp/agix")
+    }
+}
+
 impl DefaultDaemonPaths {
     pub fn from_env(scope: &str) -> Self {
-        let global_root = if let Ok(p) = std::env::var("AGIX_CONFIG_HOME") {
-            PathBuf::from(p)
-        } else if let Some(home) = base::paths::home_dir() {
-            home.join(".agix")
-        } else {
-            PathBuf::from("/tmp/agix")
-        };
+        let global_root = default_global_root();
         let config_root = global_root.join("scenes").join(scope);
         let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {

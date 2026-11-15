@@ -1,6 +1,6 @@
 # 把 Agix 嵌进自己的进程
 
-这份指南给把引擎直接嵌进自己进程的 Rust 宿主看：依赖 `agix` 一个 crate，装出一个会话池，建会话、跑一轮、收事件、回答引擎的询问、关停。通过 RPC 使用引擎的看 `daemon_rpc_protocol.md`；每个扩展点的契约与触发时机看 `extension_points.md`；引擎怎么组织的看 `ARCHITECTURE.md`。
+这份指南给把引擎直接嵌进自己进程的 Rust 宿主看：依赖 `agix` 一个 crate，装出一个会话池，建会话、跑一轮、收事件、回答引擎的询问、关停。只想在自己进程里起引擎、然后经协议说话的宿主直接看 §10 的 `agix::embed`：它是 agixd 本身的启动路径，0.x 内单独承诺稳定。通过 RPC 使用引擎的看 `daemon_rpc_protocol.md`；每个扩展点的契约与触发时机看 `extension_points.md`；引擎怎么组织的看 `ARCHITECTURE.md`。
 
 本文里每个 Rust 片段都是 `agix` crate 的 doctest（`cargo test -p agix --doc`），以 `# ` 开头的行是 doctest 的准备代码（临时目录、运行时、模型的脚本），GitHub 上也会显示出来，读正文代码即可。模型这一端用进程内的 mock 客户端，不联网、不花 token；生产里把 `model_client` 留成 `None`。
 
@@ -477,22 +477,22 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 agixd 替自己做的进程级的事，嵌入方哪些也要做、哪些不用，对照如下：
 
-| 职责 | agixd 怎么做（`daemon/src/main.rs`） | 嵌入方 | 用什么 |
+| 职责 | agixd 怎么做（`daemon/src/main.rs` 与它下面的 `agix::embed`） | 嵌入方 | 用什么 |
 |---|---|---|---|
 | 异步运行时 | 多线程，`--worker-threads` | **必须**多线程 | 你的 `tokio::runtime::Builder::new_multi_thread()` |
 | 日志过滤 | `tracing_subscriber` 加 `log_filter(RUST_LOG)` | **必须**（只要装了 tracing subscriber）：rmcp 在 `debug` 下会写出 OAuth 授权码、令牌和表单答复 | `agix::process::log_filter` |
 | panic 钩子 | `crash::install(~/.agix/daemon/crashes, "agixd", 版本)` | **建议**：`panic = "abort"` 的构建里它先杀掉命令的进程组再写崩溃记录，不装则 abort 时命令留在机器上；一个进程装一次 | `agix::process::crash::install(dir, 程序名, 版本)` |
-| 进程组回收 | 拿到实例锁后 `reap_previous(groups/<实例>.json, 500 ms)`，再 `persist_to` 同一路径；正常退出删掉该文件 | **建议**（会跑 Bash 或 MCP stdio 的部署）：路径每个实例唯一；`reap_previous` 会跳过拥有者仍活着的记录；它会阻塞到宽限期，放在运行时之外或 `spawn_blocking` | `agix::process::orphans::{reap_previous, persist_to}` |
-| 信号 | SIGINT 或 SIGTERM 触发 `server.shutdown()`；第二次直接退出 130 | **必须**：收到时 `pool.shutdown_all()`，套一个上限（agixd 是 10 秒） | 你的信号处理加 `SessionPool::shutdown_all` |
-| 关停顺序 | `shutdown_all`（至多 10 秒）、otel 收尾、放锁、删 groups 文件、删 token 文件、删实例文件 | 照前两步，再删 groups 文件 | `shutdown_all`；开了 `otel` 就必须调 `agix::process::shutdown_process_exporter`，否则最后一批 span 丢 |
+| 进程组回收 | `Embedded::start` 拿到实例锁后 `reap_previous(groups/<实例>.json, 500 ms)`，池建好后 `persist_to` 同一路径；`shutdown` 删掉该文件 | **建议**（会跑 Bash 或 MCP stdio 的部署）：路径每个实例唯一；`reap_previous` 会跳过拥有者仍活着的记录；它会阻塞到宽限期，放在运行时之外或 `spawn_blocking` | `agix::process::orphans::{reap_previous, persist_to}`，或 `agix::embed`（给 `instance`） |
+| 信号 | SIGINT 或 SIGTERM 触发 `Embedded::shutdown()`；第二次直接退出 130 | **必须**：收到时 `pool.shutdown_all()`，套一个上限（agixd 是 10 秒） | 你的信号处理加 `SessionPool::shutdown_all` |
+| 关停顺序 | 停止监听、删 token 文件；`shutdown_all`（至多 10 秒）；删 groups 文件、删实例文件、放锁；最后 otel 收尾（至多 10 秒） | 照前两步，再删 groups 文件 | `shutdown_all`；开了 `otel` 就必须调 `agix::process::shutdown_process_exporter`，否则最后一批 span 丢 |
 | 配置热重载、janitor、定时任务、MCP 后台连接、插件加载 | `assemble::pool` 里起 | **不用做** | 无 |
 | 会话日志的写者锁 | 引擎自己对 `sessions/<id>/writer.lock` 持 flock | **不用做** | 无 |
-| 实例锁 `daemon.lock` | `write_lock_file(lock, socket)` 持有到退出 | 可不做：只在你也给 agix 客户端开 socket 时需要 | `assembly::discovery`，门面不收 |
-| 实例发现 `instances.d` | `write_instance_file` 与 `remove_instance_file` | 可不做：只有想让 agix 的客户端按场景找到你才做 | `assembly::discovery`，门面不收 |
-| 监听与认证 | `bind_unix`、`serve_*_listener`、token | 可不做：进程内用 `agix::rpc`（§8）或直接调池 | `agix::rpc::DaemonServer` |
-| 导入探测、启动计时 | `spawn_import_detection`、`record_startup` | 可不做 | 无 |
+| 实例锁 `daemon.lock` | `Embedded::start` 拿，持有到 `shutdown` | 可不做：只在你也给 agix 客户端开 socket 时需要 | `agix::embed`（给 `instance`），门面不单独收 |
+| 实例发现 `instances.d` | `serve_unix` 绑好 socket 后写，`shutdown` 删 | 可不做：只有想让 agix 的客户端按场景找到你才做 | `agix::embed`（给 `instance`），门面不单独收 |
+| 监听与认证 | `Embedded::serve_unix`；TCP / WebSocket 与 token 在 `assembly::agixd` | 可不做：进程内用 `Embedded::serve_stream`（§10）、`agix::rpc`（§8）或直接调池 | `agix::embed`、`agix::rpc::DaemonServer` |
+| 导入探测、启动计时 | `Embedded::start` 里做 | 可不做 | `agix::embed` |
 
-门面不收实例锁与实例发现：做这两件事等于在重写 agixd 的监听面，要做的宿主直接依赖 `assembly::discovery`。
+门面不收实例锁与实例发现：做这两件事等于在重写 agixd 的监听面。要它们的宿主用 §10 的 `agix::embed`：`EmbedConfig.instance` 给了名字，实例锁、实例发现、进程组的回收与登记、导入探测、启动计时都由它照 agixd 的做法做掉，表里剩给嵌入方的只有运行时、日志、panic 钩子、信号与 otel 收尾。
 
 `release` profile 是嵌入方自己的。`panic = "abort"` 时一个工具 panic 会带走整个进程（`ARCHITECTURE.md` §1.3），`crash::install` 的行为也随之不同：只有 abort 构建才杀进程组。
 
@@ -549,7 +549,7 @@ fn main() -> anyhow::Result<()> {
 
 RPC 层多做、池不替你做的检查：认证；`turn_id` 的形式（§3）；消息与附件都为空时拒绝；`options` 里未知字段的告警；宿主工具回答里图片的 `media_type` 与大小（`ImageSource::check`）：直接给 `ToolResultBlock::image` 不经这道检查。其余方法在 `SessionPool` 上多半同名（见 rustdoc）；它们的参数类型门面没收的，需要时到 `openatta/Agix` 提 issue。
 
-进程内说 RPC：`DaemonServer::new(pool, CancellationToken)`，`accept_connection(sink)`（`sink` 是实现 `FrameSink` 的帧出口），`dispatch_public(RpcRequest, client)`，用完 `drop_connection(client.id())`。进程内分派不走认证，只给与池同进程的代码用。
+进程内说 RPC：`DaemonServer::new(pool, CancellationToken)`，`accept_connection(sink)`（`sink` 是实现 `FrameSink` 的帧出口），`dispatch_public(RpcRequest, client)`，用完 `drop_connection(client.id())`。进程内分派不走认证，只给与池同进程的代码用。不必亲手装池、只要一条进程内协议连接的，用 §10 的 `Embedded::serve_stream`，回复与事件走同一条有序的流。
 
 ```rust
 # use std::sync::Arc;
@@ -641,8 +641,84 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 版本号是 `x.y.z-YYYYMMDDNN`（`Cargo.toml` 的 `[workspace.package] version`）；每次推送到远程就是一次发布，带附注标签 `Agix-v<x.y.z>-<YYYYMMDDNN>`。`agix::process::identity()` 报出版本与编入的模块。
 
-**不做兼容。** 没有 `#[deprecated]` 的过渡期（`api_surface` 守卫 A8），改名与删除在同一个版本里改掉仓库内的调用方。门面让这件事对下游可见：门面导出的东西被删或改名，升级时就是编译错误；行为变化写在标签消息里。
+**不做兼容。** 没有 `#[deprecated]` 的过渡期（`api_surface` 守卫 A8），改名与删除在同一个版本里改掉仓库内的调用方。门面让这件事对下游可见：门面导出的东西被删或改名，升级时就是编译错误；行为变化写在标签消息里。唯一的例外是 §10 的 `agix::embed`：0.x 内只加不改，改动写进 §10 的迁移说明。
 
 升级：把子模块挪到新标签，编译，读两个标签之间每条标签消息（门面有变化的发布在消息里单列「嵌入面」）。
 
 门面里没有的东西：到 `openatta/Agix` 提 issue（标签是项目名加 `enhancement`，标题 `[<项目> <编号>] …`），说明哪段代码要它。门面按需增长，不预先收：进门面的每一条都对应一个下游用法或本指南的一个片段，导出总数钉在 `tests/guards/tests/facade.rs`，加一条删一条都要在提交里写依据。
+
+## 10. 嵌入入口：`agix::embed`
+
+前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型，宿主之后只经协议（`daemon_rpc_protocol.md`）用引擎。
+
+```rust
+use agix::embed::{EmbedConfig, Embedded};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+# fn main() -> anyhow::Result<()> {
+# tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
+# let dir = tempfile::tempdir()?;
+# let work = dir.path().join("work");
+# std::fs::create_dir_all(&work)?;
+let mut config = EmbedConfig::new(dir.path().join("state"));
+config.cwd = Some(work);
+let engine = Embedded::start(config).await?;
+
+let (ours, theirs) = tokio::io::duplex(1 << 20);
+engine.serve_stream(theirs);
+let (read, mut write) = tokio::io::split(ours);
+write
+    .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"daemon.ping\"}\n")
+    .await?;
+let mut line = String::new();
+BufReader::new(read).read_line(&mut line).await?;
+let pong: serde_json::Value = serde_json::from_str(&line)?;
+assert!(pong["result"]["capabilities"].is_array());
+
+engine.shutdown().await;
+# Ok::<(), anyhow::Error>(())
+# })
+# }
+```
+
+**`EmbedConfig`** 就是 agixd 的命令行：`EmbedConfig::new(data_root)` 给出与 agixd 相同的缺省，再改字段（`#[non_exhaustive]`，不能用结构体字面量建）。
+
+| 字段 | agixd 的参数 | 缺省 |
+|---|---|---|
+| `data_root` | `AGIX_CONFIG_HOME`（否则 `~/.agix`） | 必给 |
+| `cwd` | 进程的工作目录 | `None`：本进程的工作目录 |
+| `scene` / `scenes` | `--scene` / `--scenes` | `code` / 无 |
+| `model` / `max_tokens` | `--model` / `--max-tokens` | 与 agixd 相同 |
+| `session_cap` / `session_idle_timeout` | `--session-cap` / `--session-idle-timeout` | 32 / 3600 秒 |
+| `permission_prompt_timeout` | `--permission-prompt-timeout` | `None`：按设置，再缺省 300 秒 |
+| `instance` | `--instance`（agixd 总有一个） | `None` |
+| `socket` | `--socket` | `<data_root>/scenes/<scene>/daemon.sock` |
+| `mcp_policy` / `managed_settings` | `--mcp-policy` / `--managed-settings` | 平台的路径；给了就必须存在 |
+
+数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的那一轮以 `auth` 失败（agixd 同样）。
+
+**`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），回收这个名字上一次运行留下的进程组并登记这次的（`<data_root>/daemon/groups/<名字>.json`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们都收掉。不给就三样都不做，锁由宿主自己管。进程组的登记是进程级的，一个进程至多起一个带 `instance` 的 `Embedded`：已有一个在跑时再起一个 → `EmbedError::InstanceInProcess`（前一个 `shutdown` 或 drop 之后才能再起）。这次运行的进程组在池建好之后才开始登记，`start` 失败不留登记文件。
+
+**`Embedded`**（`Send + Sync`，要在几个任务里用就放进 `Arc`）：
+
+- `start(config)`：读场景（内建的与 `<data_root>/scenes/` 下声明式的）、设置、插件包、MCP、调度器，建池并让它跑起来（§2 的 `assemble` 做的全部），探测可导入的配置、记启动计时。场景不认识 → `EmbedError::UnknownScene`，其余失败 → `EmbedError::Startup`。
+- `serve_stream(stream)`：在任意 `AsyncRead + AsyncWrite` 上服务一条连接，分帧、帧上限、在途上限、出站队列都与 unix socket 上的一条连接相同，不要 `daemon.auth`。回复与事件走同一条有序的流：等到一个回复，就已经收到了排在它前面的帧。进程内就用 `tokio::io::duplex`，不必再写一份进程内链路；对端关掉写端，任务结束。
+- `serve_unix()`：在 `config.socket` 上监听，直到关停开始；权限与 agixd 的 socket 相同（`0600`，拒绝引擎自己起的进程）。路径上已有一个还有人在听的 socket（另一个 agixd 或 `Embedded`）时不替换它，返回 `AddrInUse`；没人听的旧文件照常换掉。没有 `instance` 时没有锁，这是唯一挡住两个引擎抢同一个 socket 的地方。关停开始之后再调，什么都不绑、不写，立刻返回。
+- `closed()`：关停开始（有连接发了 `daemon.shutdown`，或调了 `shutdown`）就返回；宿主据此收尾自己的东西。
+- `shutdown()`：不再接受连接，停掉所有会话（至多等 10 秒），放掉锁、删掉上面那些文件。可以重复调、并发调，后来的等第一次做完。
+
+**不替宿主做的**，即 §7 表里剩下的：装 tracing subscriber（装了就用 `agix::process::log_filter`）、信号处理、panic 钩子、退出进程、建运行时（用调用方的，必须多线程），以及开了 `otel` 时最后的 `agix::process::shutdown_process_exporter`。
+
+**仍是进程级的**，两个 `Embedded` 会共用：
+
+- `network.use_system_proxy` 交给进程级的 HTTP 客户端：进程里第一次读到的设置生效，之后读到不同的只记一条 warn；两个数据根设得不同，后起的那个用不上自己的。代理变量（`HTTP(S)_PROXY`、`NO_PROXY`）也从进程环境读。
+- OpenTelemetry 导出器：第一个起它的端点就是全进程的端点。
+- 进程组登记：见上，至多一个带 `instance` 的（`InstanceInProcess`）。
+- `OTEL_EXPORTER_OTLP_ENDPOINT`（设置没写端点时）与上面的凭据变量从进程环境读。
+- `AGIX_RECORD` / `AGIX_REPLAY` / `AGIX_RECORDINGS_DIR` 只对自己拿 `RecorderModel` 包模型、又不给配置的代码起作用；池里会话的录制只看 `options.recorder`。
+
+### 迁移说明
+
+守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
+
+- **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。

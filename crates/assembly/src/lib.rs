@@ -1,20 +1,22 @@
 //! The assembly: how a host turns settings, modules and a working directory
 //! into sessions — the session pool, provider routing, plugin packages,
 //! configuration loading — and the JSON-RPC server over it (Unix socket, TCP,
-//! WebSocket) with instance discovery. `agixd` is a thin binary over this; an
-//! embedder that wants sessions without a socket uses the pool alone, and the
-//! server code is not linked in.
+//! WebSocket) with instance discovery. `embed` is the entry a host starts the
+//! engine through and that `agixd` itself is a thin binary over; an embedder
+//! that wants sessions without a socket uses the pool alone.
 //!
 //! The server lives here rather than in the binary's crate because it and the
 //! pool share most of their generic instantiations (serde_json, tokio, rmcp);
 //! split across two crates, each compiled its own copies, about 2.8 MB of a
 //! release `agixd`.
 
+pub mod agixd;
 pub mod assemble;
 pub mod config;
 pub mod discovery;
 pub mod doctor;
 pub mod doctor_posture;
+pub mod embed;
 pub mod export;
 pub mod health_bound;
 pub mod import;

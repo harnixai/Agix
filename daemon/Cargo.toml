@@ -13,23 +13,23 @@ name = "agixd"
 path = "src/main.rs"
 
 [dependencies]
-base          = { workspace = true }
 settings          = { workspace = true }
 platform      = { workspace = true }
 runtime       = { workspace = true }
-scene         = { workspace = true }
 tokio         = { workspace = true, features = ["full"] }
-tokio-util    = { workspace = true }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 tracing-subscriber = { workspace = true }
 lexopt        = "0.3"
-telemetry     = { workspace = true }
 assembly      = { workspace = true }
 # Only for the extension-point docs test, which reads the carrier's bindable points.
 script-host   = { workspace = true, optional = true }
 
 [dev-dependencies]
+base          = { workspace = true }
+scene         = { workspace = true }
+tokio-util    = { workspace = true }
+telemetry     = { workspace = true }
 session-state = { workspace = true, features = ["testing"] }
 history       = { workspace = true }
 time          = { workspace = true }

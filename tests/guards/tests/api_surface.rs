@@ -556,9 +556,11 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("AgentDef", "crates/packages/src/manifest.rs"),
     ("CallTraits", "crates/core/src/interface/tool/mod.rs"),
     ("CompactionConfig", "crates/settings/src/lib.rs"),
+    ("EmbedConfig", "crates/assembly/src/embed.rs"),
     ("ExecutionParams", "crates/core/src/interface/scene.rs"),
     ("ExecutionSettings", "crates/settings/src/lib.rs"),
     ("Grant", "crates/core/src/interface/permission.rs"),
+    ("Listeners", "crates/assembly/src/agixd.rs"),
     ("LoadedRule", "crates/core/src/permission.rs"),
     ("LoadedSettings", "crates/settings/src/loaded.rs"),
     ("McpPayload", "crates/packages/src/manifest.rs"),
@@ -591,7 +593,7 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("ToolSurface", "crates/core/src/interface/scene.rs"),
 ];
 
-const NON_EXHAUSTIVE_STRUCTS_AT_LEAST: usize = 33;
+const NON_EXHAUSTIVE_STRUCTS_AT_LEAST: usize = 35;
 
 #[test]
 fn the_structs_an_embedder_builds_are_non_exhaustive() {

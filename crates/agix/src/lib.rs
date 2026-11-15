@@ -2,6 +2,7 @@
 //! 本 crate 自身不含任何逻辑，只有 `pub use` 与 `pub mod`；用法见 `docs/agix-sdk.md`。
 
 pub mod contracts;
+pub mod embed;
 pub mod events;
 pub mod history;
 pub mod host_tools;

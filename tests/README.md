@@ -376,6 +376,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | PERM-1..8 | 权限管线：工具只陈述事实、判定只在策略里、放行只来自策略或被问的人、有人值守只读一处、沙箱只在受控处约束进程、权限引擎不碰本机、判定矩阵覆盖每个 `Stage` | syn | `tests/guards/tests/permissions.rs` |
 | PIPE-1..4 | 一条工具管线：`Tool::call` 只被 `call_tool` 调、权限只经 `authorize`、`ToolContext` 只在一处造且字段都有读写方、沙箱只有三份类型 | syn | `tests/guards/tests/tool_pipeline.rs` |
 | A1..A8 | 接口面：权限 trait 只有判与授、缺省方法不互相递归、工具不持 `dyn Tool`、契约无线程局部状态、公开枚举 `#[non_exhaustive]`、嵌入方构造的结构体、设置类型不带加载结果、不留 `#[deprecated]` | syn | `tests/guards/tests/api_surface.rs` |
+| 无编号 | 嵌入入口 `assembly::embed` 只增不改：`EmbedConfig` 的字段只加不改且 `#[non_exhaustive]`，`EmbedError` 的变体只加不改，`Embedded` 的方法签名、derive 与 trait 实现不变；入口不读进程环境 | syn | `tests/guards/tests/embed_surface.rs` |
 | DEC-1 | 包装器重写被包装 trait 的每个缺省方法（或登记理由） | syn | `tests/guards/tests/decorators.rs` |
 | ORD-1 | 读了前面模块产物的模块在 `Module::after` 里声明它 | syn | `tests/guards/tests/module_order.rs` |
 | G11 | 只有名单上的几处能改写 `Transcript` 里的对话 | syn | `tests/guards/tests/transcript_writers.rs` |

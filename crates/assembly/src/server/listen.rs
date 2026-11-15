@@ -124,15 +124,11 @@ impl DaemonServer {
             accept_backing_off(&self.shutdown_token, || listener.accept()).await
         {
             debug!(peer=%peer);
-            let this = self.clone();
-            tokio::spawn(async move {
-                let (r, w) = stream.into_split();
-                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
-                let sink: Sink = Arc::new(LineSink(writer));
-                if let Err(e) = this.handle_connection(Box::new(r), sink, true).await {
-                    warn!(error=%e);
-                }
-            });
+            let (r, w) = stream.into_split();
+            tokio::spawn(
+                self.clone()
+                    .serve_byte_stream(Box::new(r), Box::new(w), true),
+            );
         }
         Ok(())
     }
@@ -144,15 +140,23 @@ impl DaemonServer {
 
     /// Bind the unix socket, replacing a stale one, readable and writable by
     /// this user only; a directory it creates for it is this user's only
-    /// too. Split from [`Self::serve_unix_listener`] so a caller can bind
-    /// every listener before announcing the daemon — a client that finds it
-    /// must be able to connect. No command this process sandboxes can connect
-    /// to it.
+    /// too. One something still answers on is not replaced: that fails with
+    /// [`std::io::ErrorKind::AddrInUse`]. Split from
+    /// [`Self::serve_unix_listener`] so a caller can bind every listener
+    /// before announcing the daemon — a client that finds it must be able to
+    /// connect. No command this process sandboxes can connect to it.
     pub fn bind_unix(socket_path: &Path) -> anyhow::Result<UnixBinding> {
         if let Some(parent) = socket_path.parent() {
             crate::discovery::create_private_dir(parent)?;
         }
         if socket_path.exists() {
+            if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AddrInUse,
+                    format!("{} is being served already", socket_path.display()),
+                )
+                .into());
+            }
             std::fs::remove_file(socket_path)?;
         }
         let listener = UnixListener::bind(socket_path)?;
@@ -196,14 +200,27 @@ impl DaemonServer {
                     .unix_socket_auth
                     .load(std::sync::atomic::Ordering::SeqCst);
                 let (r, w) = stream.into_split();
-                let writer: ByteWriter = Arc::new(AsyncMutex::new(Box::new(w)));
-                let sink: Sink = Arc::new(LineSink(writer));
-                if let Err(e) = this.handle_connection(Box::new(r), sink, needs_auth).await {
-                    warn!(error=%e);
-                }
+                this.serve_byte_stream(Box::new(r), Box::new(w), needs_auth)
+                    .await;
             });
         }
         Ok(())
+    }
+
+    /// Serve one connection over a byte stream: newline-delimited frames, the
+    /// frame cap, the in-flight bound and the outbound queue, the same on
+    /// every transport that is a stream of bytes.
+    pub(crate) async fn serve_byte_stream(
+        self: Arc<Self>,
+        reader: Reader,
+        writer: Box<dyn AsyncWrite + Send + Unpin + 'static>,
+        needs_auth: bool,
+    ) {
+        let writer: ByteWriter = Arc::new(AsyncMutex::new(writer));
+        let sink: Sink = Arc::new(LineSink(writer));
+        if let Err(e) = self.handle_connection(reader, sink, needs_auth).await {
+            warn!(error=%e);
+        }
     }
 }
 

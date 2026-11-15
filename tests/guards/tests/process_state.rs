@@ -53,6 +53,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/platform/src/sandbox/fence.rs", "SERVED", OsResource, "the sockets and ports this process serves clients on, which no sandboxed child of any pool may reach, and the token files it writes for them, which none may read"),
     ("crates/core/src/interface/exec/env.rs", "NAMED_CREDENTIALS", ProcessEnv, "variables holding a provider key, kept out of every child's environment: the environment children inherit is the process's, which every pool shares"),
     ("crates/platform/src/orphans.rs", "ORPHANS", OsResource, "the process groups this process leads: an OS resource of the process, which an aborting panic hook must reach in full"),
+    ("crates/assembly/src/embed.rs", "NAMED_INSTANCE", OsResource, "the one named embed instance this process runs: it owns ORPHANS' file on disk, of which the process has one"),
     ("crates/assembly/src/telemetry_otel/mod.rs", "PROCESS_EXPORTER", OsResource, "the OpenTelemetry exporter installs process-wide providers; see assemble::pool"),
     ("crates/history/src/lock.rs", "HELD", OsResource, "the session-log locks this process holds: an flock belongs to an open file, so every pool writing one state directory must share the one open file per log"),
     ("crates/ptc/src/engine.rs", "ORIGIN", Constant, "the epoch of a monotonic clock, fixed on first read"),
