@@ -45,8 +45,8 @@ pub const ENGINE_CONFIG_ROOTS: &[&str] = &[".agix", ".claude"];
 pub const ENGINE_CONFIG_FILES: &[&str] =
     &["settings.json", "settings.local.json", "mcp.local.json"];
 
-/// Directories directly in an [`ENGINE_CONFIG_ROOTS`] directory that
-/// configure the engine, guarded with everything under them.
+/// Directories directly in an [`ENGINE_CONFIG_ROOTS`] directory that configure the
+/// engine or that it acts on unsandboxed, guarded with everything under them.
 pub const ENGINE_CONFIG_DIRS: &[&str] = &[
     "mcp",
     "hooks",
@@ -58,6 +58,7 @@ pub const ENGINE_CONFIG_DIRS: &[&str] = &[
     "policy",
     "scripts",
     "output-styles",
+    "tool-results",
 ];
 
 /// Directories in a project, outside the [`ENGINE_CONFIG_ROOTS`], that the

@@ -47,7 +47,8 @@
 //! included, and the directories leading down to them), the
 //! configuration under `.agix/` and `.claude/` (`base::paths::ENGINE_CONFIG_*`:
 //! settings, MCP, hooks, agents, skills, plugins, rules, scenes, policy,
-//! scripts, output styles), the project's skills (`.agents/skills/`,
+//! scripts, output styles, and the saved tool results the engine exports and
+//! forks), the project's skills (`.agents/skills/`,
 //! `base::paths::PROJECT_ENGINE_CONFIG_DIRS`, and the `.agents` entry above
 //! it), and the `.git` links of the engine's worktrees.
 //! Of the state root only `scratchpad/`, `memory/` and those of
