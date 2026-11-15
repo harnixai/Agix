@@ -629,6 +629,31 @@ mod tests {
         assert_eq!(peer.cancels() + failing.cancels(), 0);
     }
 
+    struct SlowToAnswer;
+
+    #[async_trait]
+    impl crate::elicit::McpElicitor for SlowToAnswer {
+        async fn elicit(
+            &self,
+            _: &str,
+            _: String,
+            _: crate::elicit::McpElicitMode,
+            _: bool,
+        ) -> base::interface::elicitation::McpElicitationAnswer {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            base::interface::elicitation::McpElicitationAnswer::Cancel
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_time_a_person_takes_to_answer_is_not_the_tasks() {
+        let (_, mut scope, _) = hosted();
+        scope.elicitor = Some(Arc::new(SlowToAnswer));
+        let peer = FakePeer::saying(vec![asking(&["a"]), done("x")]);
+        let result = await_task("demo", &peer, created(), &scope, Duration::from_secs(2)).await;
+        assert!(result.is_ok(), "{result:?}");
+    }
+
     #[tokio::test(start_paused = true)]
     async fn the_deadline_cancels_and_reports_a_timeout() {
         let (session, scope, _) = hosted();
