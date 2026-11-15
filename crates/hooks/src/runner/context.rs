@@ -15,29 +15,40 @@ impl HookRunResult {
     /// order. Nothing when the action was blocked: it did not happen, and
     /// its refusal already reaches the model as the `message`.
     pub fn additional_context(&self) -> Vec<(&str, &str)> {
+        self.contexts()
+            .into_iter()
+            .map(|(_, hook, context)| (hook, context))
+            .collect()
+    }
+
+    fn contexts(&self) -> Vec<(usize, &str, &str)> {
         if self.blocked().is_some() {
             return Vec::new();
         }
         self.outcomes
             .iter()
             .zip(&self.hooks)
-            .filter_map(|(o, hook)| match o {
+            .enumerate()
+            .filter_map(|(i, (o, hook))| match o {
                 HookOutcome::Ran { response, .. } => response
                     .additional_context
                     .as_deref()
                     .filter(|c| !c.trim().is_empty())
-                    .map(|c| (hook.as_str(), c)),
+                    .map(|c| (i, hook.as_str(), c)),
                 _ => None,
             })
             .collect()
     }
 
     /// [`Self::additional_context`] as the system reminders that carry it to
-    /// the model, one per hook, under the per-hook and per-event caps.
+    /// the model, one per hook, under the per-hook and per-event caps. A hook
+    /// is named by its event and number, never by its command or URL: those
+    /// may carry a token, and the reminder goes to the model and the
+    /// transcript.
     pub fn context_reminders(&self, event: HookEvent) -> Vec<String> {
         let mut left = CONTEXT_EVENT_CAP;
         let mut reminders = Vec::new();
-        for (hook, context) in self.additional_context() {
+        for (index, _, context) in self.contexts() {
             if left == 0 {
                 break;
             }
@@ -56,7 +67,8 @@ impl HookRunResult {
                 String::new()
             };
             reminders.push(format!(
-                "<system-reminder>\nHook `{event:?}` ({hook}) added this context:\n{text}{note}\n</system-reminder>"
+                "<system-reminder>\nHook `{event:?}` #{} added this context:\n{text}{note}\n</system-reminder>",
+                index + 1
             ));
         }
         reminders
@@ -158,6 +170,25 @@ mod tests {
     }
 
     #[test]
+    fn a_reminder_names_the_hook_by_event_and_number_not_by_command() {
+        let r = HookRunResult {
+            hooks: vec![
+                "command `curl https://x.test/t0ken`".into(),
+                "http `https://x.test/hook/t0ken`".into(),
+            ],
+            outcomes: vec![ran(), giving("hello", None)],
+        };
+        let reminders = r.context_reminders(HookEvent::PreToolUse);
+        assert_eq!(reminders.len(), 1);
+        assert!(
+            reminders[0].starts_with("<system-reminder>\nHook `PreToolUse` #2 added this context:"),
+            "{}",
+            reminders[0]
+        );
+        assert!(!reminders[0].contains("t0ken"), "{}", reminders[0]);
+    }
+
+    #[test]
     fn context_cannot_close_its_reminder_and_open_another() {
         let r = HookRunResult {
             hooks: vec!["a".into()],
@@ -191,6 +222,6 @@ mod tests {
         assert_eq!(reminders.len(), 2);
         assert!(reminders[0].contains("only the first 10000 are shown"));
         assert!(reminders[1].contains("only the first 10000 are shown"));
-        assert!(reminders[0].starts_with("<system-reminder>\nHook `PostToolUse` (a)"));
+        assert!(reminders[0].starts_with("<system-reminder>\nHook `PostToolUse` #1"));
     }
 }
