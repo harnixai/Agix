@@ -205,10 +205,11 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 模块 | `script-host` | QuickJS 载体 |
 | 模块 | `packages` | 插件包:manifest、安装、缓存、披露 |
 | 装配 | `assembly` | 会话池、配置、provider 路由、JSON-RPC 服务 |
+| 外壳 | `agix` | 嵌入门面:按主题再导出,自身不含逻辑 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 
-`crates/` 下 24 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
-工作区共 33 个成员。
+`crates/` 下 25 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
+工作区共 34 个成员。
 
 ---
 
@@ -276,16 +277,16 @@ ANTHROPIC_API_KEY=... cargo run --release -p runtime --example minimal -- "列�
 再加上自己的场景:
 
 ```rust
-let pool = daemon::assemble::pool(
-    &load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
-    Arc::new(scene::code::spec(Interaction::Interactive)),
-    daemon::Assembly { scenes: vec![my_scene], ..Default::default() },
+let pool = agix::pool::assemble(
+    &agix::pool::load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
+    Arc::new(agix::scenes::code::spec(agix::scenes::code::Interaction::Interactive)),
+    agix::pool::Assembly { scenes: vec![my_scene], ..Default::default() },
 )
 .await?;
 ```
 
 `agixd` 就是这一调用加上命令行与监听器;工作区里有别的地方用第二种方式组装会话池,
-测试就会让构建失败。
+测试就会让构建失败。嵌入方依赖的是 `agix` 这个 crate,指南见 [`agix-sdk.md`](agix-sdk.md)。
 
 ### 扩展它
 
@@ -432,6 +433,7 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | 文档 | 用途 |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 引擎怎么拼起来——分层、模块、一轮、会话与场景、历史、执行、并发、磁盘布局 |
+| [agix-sdk.md](agix-sdk.md) | 把引擎嵌进自己的 Rust 进程:门面 crate、一个池、一轮、事件、宿主工具、关停 |
 | [extension_points.md](extension_points.md) | 每个接缝:能换什么、能往哪里贡献、能拦截什么,代价与谁能用 |
 | [hooks.md](hooks.md) | hook 协议:配置、四种后端、退出码、超时、payload、回答,每个事件在何时触发 |
 | [telemetry.md](telemetry.md) | 遥测文件、信封与脱敏,每种事件与它的字段 |

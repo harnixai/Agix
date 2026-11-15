@@ -41,6 +41,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agix"
+version = "0.3.14-2026111501"
+dependencies = [
+ "assembly",
+ "base",
+ "history",
+ "hooks",
+ "model",
+ "platform",
+ "runtime",
+ "scene",
+ "settings",
+ "telemetry",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -141,6 +157,7 @@ dependencies = [
  "tonic",
  "tools",
  "tracing",
+ "tracing-subscriber",
  "url",
  "zip",
 ]

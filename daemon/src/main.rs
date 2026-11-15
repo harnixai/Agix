@@ -398,8 +398,6 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 
     spawn_import_detection(pool.clone());
 
-    pool.start_janitor();
-
     record_startup_timing(&pool, &perf, _config_load_ms, pool_built_ms);
 
     let cancel = CancellationToken::new();
@@ -581,7 +579,7 @@ async fn bind_network_listeners(
 
 fn init_logging() {
     tracing_subscriber::fmt()
-        .with_env_filter(daemon::logging::log_filter(
+        .with_env_filter(assembly::logging::log_filter(
             std::env::var("RUST_LOG").ok().as_deref(),
         ))
         .init();

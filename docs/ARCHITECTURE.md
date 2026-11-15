@@ -8,6 +8,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 这份文档讲**组件、概念、和它们之间的约束**。总览与快速开始见仓库根目录的 `README.md`
 (中文版 `docs/README.zh-CN.md`)。想知道怎么用请看:
 
+- `agix-sdk.md` —— 把引擎直接嵌进自己的进程
 - `daemon_rpc_protocol.md` —— 通过 RPC 使用它
 - `extension_points.md` —— 能扩展什么(总揽)
 - `extending_quickjs.md` —— 怎么用脚本扩展;`extension_points.md` —— 全部扩展点
@@ -18,7 +19,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 ## 1. 分层
 
 ```
- 外壳    daemon ─────────── agixd:参数、进程(锁、信号、崩溃收尾)
+ 外壳    daemon · agix ──── agixd:参数、进程(锁、信号、崩溃收尾);agix:嵌入门面,只再导出
            │
  装配    assembly ───────── 会话池、(项目, 场景) 绑定与失效、provider 路由、插件包、模块清单;
            │                JSON-RPC 服务(Unix socket / TCP / WS)与实例发现
@@ -55,14 +56,14 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   在 `parts/mcp_hub/live.rs` 与签名相同的桩 `off.rs` 之间二选一;其余代码(server 的
   `mcp.*` 在内)只写一份,`feature = "mcp"` 不超过 6 处(`tests/guards/tests/layering.rs`)。
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
-  `model`、`mcp`、`packages`、`assembly`、`daemon`,清单与
+  `model`、`mcp`、`packages`、`assembly`、`agix`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
   `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`prompt-files`、`session-state`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
 - 内核与模块不能带模块命名的 feature,也不转发模块 feature;模块开关只在 `assembly`
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
 - 唯一装配点由可见性保证:`SessionPool::builder` 是 `pub(crate)`,`assembly` 之外建不出第二个池,
-  要池只能走 `assembly::assemble::pool`。
+  要池只能走 `assembly::assemble::pool`(门面里它叫 `agix::pool::assemble`)。
 - 进程级状态(`static`、`thread_local!`)由 `tests/guards/tests/process_state.rs` 按语法树
   扫生产代码:类型不是朴素数据的 `static` 必须登记名字、种类与理由,`static mut` 不允许,
   登记了而代码里没有的条目失败。
@@ -118,6 +119,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `ptc` | 内核 | `RunCode`:模型写的一次性程序,在内嵌的 QuickJS 里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
 | `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
 | `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务与实例发现 |
+| `agix` | 外壳 | 嵌入门面:按主题再导出嵌入方用到的类型与函数,自身不含逻辑(`tests/guards/tests/facade.rs`);用法见 `agix-sdk.md` |
 | `daemon` | 外壳 | `agixd` 二进制:参数、锁、信号;库部分按旧路径重新导出 assembly |
 
 ### 1.1 模块怎么进入会话

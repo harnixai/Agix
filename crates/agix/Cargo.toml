@@ -1,0 +1,36 @@
+[package]
+name = "agix"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+publish      = false
+description  = "Agix — the crate an embedder depends on: the engine's embedding surface, re-exported by theme"
+
+[dependencies]
+assembly  = { workspace = true }
+runtime   = { workspace = true }
+base      = { workspace = true }
+settings  = { workspace = true }
+platform  = { workspace = true }
+model     = { workspace = true }
+history   = { workspace = true }
+scene     = { workspace = true }
+telemetry = { workspace = true }
+hooks     = { workspace = true }
+
+[features]
+# The same switches as daemon's, forwarded the same way; `ws` and `full` are
+# agixd's (the WebSocket listener), which this crate does not export.
+default = ["coding", "scripts", "plugin-packages", "sandbox"]
+coding = ["mcp", "agents", "skills", "web", "structured-output", "ptc"]
+mcp = ["assembly/mcp"]
+agents = ["assembly/agents"]
+skills = ["assembly/skills"]
+web = ["runtime/web"]
+structured-output = ["runtime/structured-output"]
+ptc = ["runtime/ptc"]
+scripts = ["assembly/scripts"]
+plugin-packages = ["assembly/plugin-packages"]
+sandbox = ["assembly/sandbox"]
+otel = ["assembly/otel"]

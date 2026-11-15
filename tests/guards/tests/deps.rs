@@ -11,6 +11,10 @@
 //!
 //! `platform` — this machine's execution providers — sits on `base` alone, and
 //! only the crates in `MAY_USE_PLATFORM` reach the machine through it.
+//!
+//! Downstream projects (Harnix, IPDrun, …) are outside this workspace and
+//! nothing here can hold their edges; what they may rely on is the facade
+//! crate `agix` and `docs/agix-sdk.md` §8.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -59,6 +63,7 @@ pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("demo-rust-plugin", Module),
     ("hostile-plugins", TestSupport),
     ("assembly", Assembly),
+    ("agix", Shell),
     ("daemon", Shell),
     ("rpc-client", TestSupport),
     ("blackbox", TestSupport),
@@ -111,6 +116,11 @@ pub(crate) const MAY_USE_PLATFORM: &[(&str, &str, &str)] = &[
         "assembly",
         "crates/assembly",
         "fences the sockets it serves from the sandbox; the discovery lock's process identity",
+    ),
+    (
+        "agix",
+        "crates/agix",
+        "re-exports the crash hook and orphan reaping an embedder's process installs",
     ),
     (
         "daemon",
@@ -312,6 +322,55 @@ fn only_the_listed_crates_reach_the_machine_through_platform() {
             "MAY_USE_PLATFORM lists {name} at {dir}, which is not where it lives"
         );
     }
+}
+
+/// Daemon features the facade does not forward, each with why.
+const FACADE_OMITS: &[(&str, &str)] = &[
+    (
+        "ws",
+        "the WebSocket listener is agixd's; the facade does not export it",
+    ),
+    ("full", "coding plus ws"),
+];
+
+fn without_deps(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .filter(|v| !v.starts_with("dep:"))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn the_facade_forwards_the_daemon_switches() {
+    let daemon = &ws().package("daemon").features;
+    let facade = &ws().package("agix").features;
+    let omitted: BTreeSet<&str> = FACADE_OMITS.iter().map(|(f, _)| *f).collect();
+    let mut problems = Vec::new();
+    for (name, values) in daemon.iter().filter(|(n, _)| !omitted.contains(n.as_str())) {
+        let Some(mine) = facade.get(name) else {
+            problems.push(format!("agix has no feature `{name}` (daemon has it)"));
+            continue;
+        };
+        let mut theirs = without_deps(values);
+        if name == "default" && theirs.remove("full") {
+            theirs.insert("coding".to_string());
+        }
+        if without_deps(mine) != theirs {
+            problems.push(format!(
+                "feature `{name}`: agix has {:?}, daemon has {theirs:?}",
+                without_deps(mine)
+            ));
+        }
+    }
+    for name in facade.keys().filter(|n| !daemon.contains_key(*n)) {
+        problems.push(format!("agix has `{name}`, daemon does not"));
+    }
+    assert!(
+        problems.is_empty(),
+        "the facade's features drifted from daemon's (FACADE_OMITS lists the ones left out):\n  {}",
+        problems.join("\n  ")
+    );
 }
 
 /// Who may hold the session's state as its concrete type, with `attach`,

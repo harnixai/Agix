@@ -271,10 +271,11 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | module | `script-host` | the QuickJS carrier |
 | module | `packages` | plugin packages: manifest, install, cache, disclosure |
 | assembly | `assembly` | session pool, configuration, provider routing, the JSON-RPC server |
+| shell | `agix` | the embedding facade: re-exports by theme, no logic of its own |
 | shell | `daemon` | the `agixd` binary |
 
-24 crates under `crates/`, plus `daemon/`, the seven test members and the
-example plugin in `examples/plugins/rust` — 33 workspace members in total.
+25 crates under `crates/`, plus `daemon/`, the seven test members and the
+example plugin in `examples/plugins/rust` — 34 workspace members in total.
 
 ---
 
@@ -347,16 +348,16 @@ As a session pool — the daemon's engine in your own process, with the same
 settings tiers, routing, history layout and modules, and your own scenes:
 
 ```rust
-let pool = daemon::assemble::pool(
-    &load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
-    Arc::new(scene::code::spec(Interaction::Interactive)),
-    daemon::Assembly { scenes: vec![my_scene], ..Default::default() },
+let pool = agix::pool::assemble(
+    &agix::pool::load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
+    Arc::new(agix::scenes::code::spec(agix::scenes::code::Interaction::Interactive)),
+    agix::pool::Assembly { scenes: vec![my_scene], ..Default::default() },
 )
 .await?;
 ```
 
 `agixd` is this call plus a command line and its listeners; a test fails the
-build if anything in the workspace assembles a pool a second way.
+build if anything in the workspace assembles a pool a second way. The `agix` crate is the one an embedder depends on; [`docs/agix-sdk.md`](docs/agix-sdk.md) is the guide.
 
 ### Extend it
 
@@ -527,6 +528,7 @@ recording proxy. How each layer works and how to run it:
 | Document | For |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the engine is put together — layers, modules, the turn, sessions and scenes, history, execution, concurrency, disk layout |
+| [docs/agix-sdk.md](docs/agix-sdk.md) | embedding the engine in your own Rust process: the facade crate, one pool, one turn, events, host tools, shutdown |
 | [docs/extension_points.md](docs/extension_points.md) | every seam: what you can replace, contribute to or intercept, what it costs, who may |
 | [docs/hooks.md](docs/hooks.md) | the hook protocol: configuration, the four backends, exit codes, timeouts, payloads, answers, and when each event fires |
 | [docs/telemetry.md](docs/telemetry.md) | the telemetry files, envelope and redaction, and every event type with its fields |

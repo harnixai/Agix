@@ -136,6 +136,12 @@ impl DaemonServer {
         self.pool.shutdown_all().await;
     }
 
+    /// Dispatch one request in this process, with no transport and no
+    /// authentication: for code that lives in the same process as the pool.
+    pub async fn dispatch_public(&self, req: RpcRequest, client: Arc<Client>) -> RpcResponse {
+        self.dispatch(req, client).await
+    }
+
     /// Public wrapper over [`Self::check_auth`], including the lint.
     #[allow(clippy::result_large_err)]
     pub async fn check_auth_public(&self, req: &RpcRequest) -> Result<RpcResponse, RpcResponse> {

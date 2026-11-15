@@ -203,8 +203,7 @@ pub struct SessionPool {
     /// pool-level telemetry.
     events: DaemonEvents,
     /// Process-scope diagnostics, reported by `daemon.doctor` — the plugin
-    /// fault records, plus whatever an embedder registered with
-    /// [`SessionPool::register_health_check`]. Not the same set as a
+    /// fault records, plus whatever a plugin registers. Not the same set as a
     /// session's: a session's checks come and go with the session, and one
     /// shared registry would grow an entry per session forever.
     health: std::sync::RwLock<base::interface::health::HealthChecks>,

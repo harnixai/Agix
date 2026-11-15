@@ -25,6 +25,7 @@ members = [
     "crates/team",
     "crates/agents",
     "crates/assembly",
+    "crates/agix",
     "daemon",
     "tests/rpc_client",
     "tests/blackbox",
