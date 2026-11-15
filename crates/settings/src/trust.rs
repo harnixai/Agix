@@ -686,6 +686,8 @@ impl Order {
                         .get("provider")
                         .and_then(Value::as_str)
                         .is_none_or(defined_below),
+                    // Unsets the choice made below, which then goes to the defaults.
+                    Value::Null => false,
                     _ => true,
                 }
             }
