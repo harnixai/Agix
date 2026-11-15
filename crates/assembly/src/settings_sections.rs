@@ -29,6 +29,7 @@ impl ScriptBindings {
 pub fn all() -> Sections {
     let sections = Sections::none()
         .with::<crate::plugins::PluginsConfig>()
+        .with::<runtime::checkpoint_settings::CheckpointSettings>()
         .with::<ScriptBindings>();
     #[cfg(feature = "agents")]
     let sections = sections.with::<agents::TeamSettings>();

@@ -10,8 +10,8 @@ use base::interface::permission::Subject;
 use base::session::SessionId;
 use history::blob::BlobStore;
 use history::checkpoint::{
-    After, Before, DelegateAttribution, PostRecord, PreFile, PreRecord, RecordedPath,
-    CHECKPOINT_NS, MAX_FILE_BYTES, POST, PRE,
+    After, Before, DelegateAttribution, PostRecord, PreFile, PreRecord, PrunedRecord, RecordedPath,
+    CHECKPOINT_NS, POST, PRE, PRUNED,
 };
 use history::entry::{EntryTags, LogEntry};
 use history::store::HistoryStore;
@@ -27,6 +27,30 @@ pub struct Checkpoints {
     project_root: Option<PathBuf>,
     author: Option<DelegateSeat>,
     locks: Arc<PathLocks>,
+    quota: Arc<Quota>,
+}
+
+/// What a session may keep, and how much of it is kept now (`None` until the
+/// first write measures it).
+struct Quota {
+    limits: CheckpointLimits,
+    kept: tokio::sync::Mutex<Option<u64>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckpointLimits {
+    pub max_bytes_per_file: u64,
+    pub max_total_bytes: u64,
+}
+
+impl Default for CheckpointLimits {
+    fn default() -> Self {
+        let settings = crate::checkpoint_settings::CheckpointSettings::default();
+        Self {
+            max_bytes_per_file: settings.max_bytes_per_file,
+            max_total_bytes: settings.max_total_bytes,
+        }
+    }
 }
 
 /// Which delegate of the root session a handle writes for.
@@ -67,6 +91,7 @@ impl Checkpoints {
         store: Arc<dyn HistoryStore>,
         root: &str,
         project_root: Option<PathBuf>,
+        limits: CheckpointLimits,
     ) -> Option<Arc<Self>> {
         let root = SessionId::parse(root).ok()?;
         let objects = store.checkpoint_objects(root)?;
@@ -77,6 +102,10 @@ impl Checkpoints {
             project_root,
             author: None,
             locks: Arc::default(),
+            quota: Arc::new(Quota {
+                limits,
+                kept: tokio::sync::Mutex::new(None),
+            }),
         }))
     }
 
@@ -89,7 +118,12 @@ impl Checkpoints {
             project_root: self.project_root.clone(),
             author: Some(seat),
             locks: self.locks.clone(),
+            quota: self.quota.clone(),
         })
+    }
+
+    pub fn max_file_bytes(&self) -> u64 {
+        self.quota.limits.max_bytes_per_file
     }
 
     pub fn root(&self) -> SessionId {
@@ -141,16 +175,14 @@ impl Checkpoints {
                 target.display()
             )
         };
-        let (before, path) = match RecordedPath::of(&target, self.project_root.as_deref()) {
-            Some(path) => (observe(&*fs, &target, &*self.objects).await, path),
-            None => (
-                Ok(Before::Unreadable {
-                    error: "unrepresentable path".into(),
-                }),
-                RecordedPath::Abs(target.to_string_lossy().into_owned()),
-            ),
+        let (before, path) = self
+            .observe_target(&*fs, &target)
+            .await
+            .map_err(|e| refused(e.to_string()))?;
+        let kept_now = match &before {
+            Before::File { bytes, .. } => *bytes,
+            _ => 0,
         };
-        let before = before.map_err(|e| refused(e.to_string()))?;
         let id = self.store.environment().new_id().to_string();
         let (turn_id, agent) = match &self.author {
             None => (by.turn_id, None),
@@ -185,6 +217,9 @@ impl Checkpoints {
             .sync(self.root)
             .await
             .map_err(|e| refused(e.to_string()))?;
+        if let Err(e) = self.enforce_total(kept_now).await {
+            tracing::warn!(error = %e, "could not keep the checkpoint copies within their quota");
+        }
         Ok(PendingWrite {
             store: self.store.clone(),
             root: self.root,
@@ -195,6 +230,126 @@ impl Checkpoints {
             _lock: lock,
         })
     }
+}
+
+impl Checkpoints {
+    async fn observe_target(
+        &self,
+        fs: &dyn FileSystem,
+        target: &Path,
+    ) -> std::io::Result<(Before, RecordedPath)> {
+        match RecordedPath::of(target, self.project_root.as_deref()) {
+            Some(path) => {
+                let limit = self.quota.limits.max_bytes_per_file;
+                Ok((observe(fs, target, &*self.objects, limit).await?, path))
+            }
+            None => Ok((
+                Before::Unreadable {
+                    error: "unrepresentable path".into(),
+                },
+                RecordedPath::Abs(target.to_string_lossy().into_owned()),
+            )),
+        }
+    }
+
+    /// Delete the oldest copies until the session is back under
+    /// `max_total_bytes`, never the newest write's. The `pruned` line is
+    /// written first: a crash in between leaves a line that says copies may
+    /// be gone, not copies that are gone with no line saying so.
+    async fn enforce_total(&self, added: u64) -> Result<(), String> {
+        let mut kept = self.quota.kept.lock().await;
+        let max = self.quota.limits.max_total_bytes;
+        let objects = self.objects.clone();
+        let listed = || {
+            let objects = objects.clone();
+            async move {
+                tokio::task::spawn_blocking(move || objects.list())
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())
+            }
+        };
+        let believed = match *kept {
+            Some(total) => total + added,
+            None => listed().await?.iter().map(|(_, bytes)| bytes).sum(),
+        };
+        if believed <= max {
+            *kept = Some(believed);
+            return Ok(());
+        }
+        let held = listed().await?;
+        let total: u64 = held.iter().map(|(_, bytes)| bytes).sum();
+        if total <= max {
+            *kept = Some(total);
+            return Ok(());
+        }
+        let entries = self
+            .store
+            .load(self.root)
+            .await
+            .map_err(|e| e.to_string())?;
+        let (doomed, pruned_through, total) = plan_prune(&entries, held, max);
+        if let Some(at) = pruned_through {
+            let record = PrunedRecord {
+                before: entries[at].id.to_string(),
+            };
+            let payload = serde_json::to_value(&record).map_err(|e| e.to_string())?;
+            self.store
+                .append(self.root, extension(PRUNED, payload))
+                .await
+                .map_err(|e| e.to_string())?;
+            self.store
+                .sync(self.root)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        let objects = self.objects.clone();
+        tokio::task::spawn_blocking(move || doomed.iter().try_for_each(|id| objects.remove(id)))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        *kept = Some(total);
+        Ok(())
+    }
+}
+
+/// The copies to delete, the newest `pre` line among those some `pre` still
+/// names, and what is kept afterwards. A copy the newest write named stays.
+fn plan_prune(
+    entries: &[history::entry::EnvelopedEntry],
+    held: Vec<(String, u64)>,
+    max: u64,
+) -> (Vec<String>, Option<usize>, u64) {
+    let mut total: u64 = held.iter().map(|(_, bytes)| bytes).sum();
+    let mut newest_use: HashMap<String, usize> = HashMap::new();
+    let mut newest_pre = None;
+    for (at, env) in entries.iter().enumerate() {
+        if let Some(pre) = history::checkpoint::plan::pre_of(env) {
+            newest_pre = Some(at);
+            for file in pre.files {
+                if let Before::File { sha256, .. } = file.before {
+                    newest_use.insert(sha256, at);
+                }
+            }
+        }
+    }
+    let mut order: Vec<(Option<usize>, String, u64)> = held
+        .into_iter()
+        .map(|(id, bytes)| (newest_use.get(&id).copied(), id, bytes))
+        .filter(|(used, _, _)| *used != newest_pre)
+        .collect();
+    order.sort();
+    let mut doomed = Vec::new();
+    let mut pruned_through = None;
+    for (used, id, bytes) in order {
+        if total <= max {
+            break;
+        }
+        total -= bytes;
+        pruned_through = pruned_through.max(used);
+        doomed.push(id);
+    }
+    (doomed, pruned_through, total)
 }
 
 fn extension(event: &str, payload: serde_json::Value) -> LogEntry {
@@ -211,6 +366,7 @@ async fn observe(
     fs: &dyn FileSystem,
     target: &Path,
     objects: &dyn BlobStore,
+    max_file_bytes: u64,
 ) -> std::io::Result<Before> {
     let meta = match fs.metadata(target).await {
         Ok(meta) => meta,
@@ -220,11 +376,14 @@ async fn observe(
     if !meta.is_file || meta.is_symlink {
         return Ok(Before::NotAFile);
     }
-    if meta.len > MAX_FILE_BYTES {
+    if meta.len > max_file_bytes {
         return Ok(match fs.sha256(target).await {
-            Ok(sha256) => Before::TooLarge {
+            Ok(Some(sha256)) => Before::TooLarge {
                 sha256,
                 bytes: meta.len,
+            },
+            Ok(None) => Before::Unreadable {
+                error: format!("{} bytes is too large to read to hash it", meta.len),
             },
             Err(e) => Before::Unreadable {
                 error: e.to_string(),
@@ -240,7 +399,7 @@ async fn observe(
         }
     };
     let len = bytes.len() as u64;
-    if len > MAX_FILE_BYTES {
+    if len > max_file_bytes {
         return Ok(Before::TooLarge {
             sha256: history::checkpoint::sha256_hex(&bytes),
             bytes: len,
@@ -254,8 +413,16 @@ async fn observe(
 pub async fn current_state(fs: &dyn FileSystem, target: &Path) -> After {
     match fs.metadata(target).await {
         Ok(meta) if meta.is_file && !meta.is_symlink => match fs.sha256(target).await {
-            Ok(sha256) => After::File { sha256 },
-            Err(_) => After::Unknown,
+            Ok(Some(sha256)) => After::File { sha256 },
+            Ok(None) if meta.len <= history::checkpoint::MAX_FILE_BYTES => {
+                match fs.read(target).await {
+                    Ok(bytes) => After::File {
+                        sha256: history::checkpoint::sha256_hex(&bytes),
+                    },
+                    Err(_) => After::Unknown,
+                }
+            }
+            Ok(None) | Err(_) => After::Unknown,
         },
         Ok(_) | Err(ExecError::Denied(_)) => After::Unknown,
         Err(_) => After::Absent,
@@ -321,8 +488,9 @@ mod tests {
             self.reads.lock().unwrap().push(path.to_path_buf());
             self.inner.read(path).await
         }
-        async fn sha256(&self, path: &Path) -> Result<String, ExecError> {
-            self.inner.sha256(path).await
+        async fn sha256(&self, path: &Path) -> Result<Option<String>, ExecError> {
+            let bytes = self.inner.read(path).await?;
+            Ok(Some(history::checkpoint::sha256_hex(&bytes)))
         }
         async fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), ExecError> {
             self.inner.write(path, bytes).await
@@ -345,7 +513,7 @@ mod tests {
     }
 
     fn fs_with_big_file() -> CountingFs {
-        let big = vec![7u8; MAX_FILE_BYTES as usize + 1024 * 1024];
+        let big = vec![7u8; CheckpointLimits::default().max_bytes_per_file as usize + 1024 * 1024];
         CountingFs {
             reads: Mutex::default(),
             inner: InMemoryFileSystem::new().with_file("/p/big.bin", big),
@@ -356,10 +524,11 @@ mod tests {
     async fn a_file_over_the_limit_is_never_read_into_memory_to_record_it() {
         let fs = fs_with_big_file();
         let objects = history::checkpoint::InMemoryCheckpointObjects::default();
-        let before = observe(&fs, Path::new("/p/big.bin"), &objects)
+        let limit = CheckpointLimits::default().max_bytes_per_file;
+        let before = observe(&fs, Path::new("/p/big.bin"), &objects, limit)
             .await
             .unwrap();
-        assert!(matches!(before, Before::TooLarge { bytes, .. } if bytes > MAX_FILE_BYTES));
+        assert!(matches!(before, Before::TooLarge { bytes, .. } if bytes > limit));
         assert!(fs.reads.lock().unwrap().is_empty());
     }
 

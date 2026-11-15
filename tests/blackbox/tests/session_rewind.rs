@@ -18,17 +18,26 @@ use serde_json::{json, Value};
 const TURN: &str = "\"input_schema\"";
 
 fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
+    stubbed_with(name, stub, json!({}))
+}
+
+fn stubbed_with(name: &str, stub: &ProviderStub, extra: Value) -> LiveRunBuilder {
+    let mut settings = json!({
+        "permission_rules": [
+            { "tool": "Write", "action": "allow" },
+            { "tool": "Edit", "action": "allow" }
+        ]
+    });
+    settings
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
     LiveRun::builder(name)
         .config(LiveConfig::for_endpoint(
             &stub.base_url(),
             blackbox::ModelEndpoint::model(stub),
         ))
-        .settings(json!({
-            "permission_rules": [
-                { "tool": "Write", "action": "allow" },
-                { "tool": "Edit", "action": "allow" }
-            ]
-        }))
+        .settings(settings)
 }
 
 fn write(id: &str, path: &Path, content: &str) -> Reply {
@@ -505,6 +514,99 @@ async fn a_busy_session_and_a_request_that_does_not_fit_are_refused() -> anyhow:
     assert_eq!(code, -32015, "{data}");
     assert_eq!(data["reason"], "turn_running", "{data}");
     slow.await??;
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_total_quota_prunes_the_oldest_copies_and_a_rewind_to_them_says_so() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed_with(
+        "rewind-quota",
+        &stub,
+        json!({ "checkpoints": { "max_total_bytes": 150 } }),
+    )
+    .start()
+    .await?;
+    let files: Vec<_> = (1..=3)
+        .map(|n| run.project.join(format!("f{n}.txt")))
+        .collect();
+    let session = run.session().await?;
+    for round in 0..2 {
+        for (n, f) in files.iter().enumerate() {
+            let content = if round == 0 {
+                format!("{n}").repeat(100)
+            } else {
+                "new\n".into()
+            };
+            stub.script_when(
+                TURN,
+                [
+                    write(&format!("w{round}{n}"), f, &content),
+                    Reply::text("DONE"),
+                ],
+            );
+            run.turn(&session, &format!("turn {round}{n}")).await?;
+        }
+    }
+
+    let menu = rpc(
+        &mut run,
+        "session.checkpoints",
+        json!({ "session_id": session }),
+    )
+    .await?;
+    assert_eq!(menu["pruned_before_turn"], "rewind-quota-t5", "{menu}");
+    assert_eq!(menu["turns"][3]["restorable"], false, "{menu}");
+    assert_eq!(menu["turns"][4]["restorable"], true, "{menu}");
+
+    let (code, data) = refused(
+        &mut run,
+        "session.rewind",
+        json!({ "session_id": session, "to_turn": "rewind-quota-t3", "scope": "files" }),
+    )
+    .await?;
+    assert_eq!(code, -32023, "{data}");
+    let issues = data["issues"].as_array().unwrap();
+    let f1 = issues.iter().find(|i| i["path"] == "f1.txt").unwrap();
+    assert_eq!(f1["issue"], "unavailable", "{data}");
+    assert!(f1["detail"].as_str().unwrap().contains("pruned"), "{data}");
+    assert_eq!(read(&files[0]).as_deref(), Some("new\n"));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_checkpoints_off_writes_go_through_and_there_is_nothing_to_rewind(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed_with(
+        "rewind-off",
+        &stub,
+        json!({ "checkpoints": { "enabled": false } }),
+    )
+    .start()
+    .await?;
+    let a = run.project.join("a.txt");
+    let session = run.session().await?;
+    stub.script_when(TURN, [write("w1", &a, "new\n"), Reply::text("DONE")]);
+    run.turn(&session, "one").await?;
+    assert_eq!(read(&a).as_deref(), Some("new\n"));
+    let menu = rpc(
+        &mut run,
+        "session.checkpoints",
+        json!({ "session_id": session }),
+    )
+    .await?;
+    assert_eq!(menu["turns"][0]["files"], json!([]), "{menu}");
+    let (code, _) = refused(
+        &mut run,
+        "session.rewind",
+        json!({ "session_id": session, "to_start": true, "scope": "files" }),
+    )
+    .await?;
+    assert_eq!(code, -32602);
     run.finish().await;
     Ok(())
 }

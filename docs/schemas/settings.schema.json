@@ -19,6 +19,30 @@
       "description": "[`SandboxConfig::cache_directories`]: toolchain name → cache paths.",
       "type": "object"
     },
+    "CheckpointSettings": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "`false`: the file tools write without recording what they overwrite,\nand the session cannot rewind files.",
+          "type": "boolean"
+        },
+        "max_bytes_per_file": {
+          "default": 16777216,
+          "description": "A file larger than this is hashed but its earlier contents are not kept.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 536870912,
+          "description": "Over this many bytes of kept copies per session, the oldest are\ndeleted and a `pruned` line is written to the transcript.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "CompactionConfig": {
       "description": "Context compaction, over what the scene asks for. A field left out keeps\nthe scene's own value (`SceneSpec::token_budget`).",
       "properties": {
@@ -842,6 +866,14 @@
       "default": false,
       "description": "Whether an RPC client may request a *more permissive* mode than\n`permission_mode` above.\n\nThe daemon's `session.create` takes an optional `permission_mode` in\nits options. With this `false` — the default — a client can *tighten*\nthe mode for its own session, but a request to loosen it is clamped to\nwhat is configured here. Otherwise any client that could authenticate\ncould open a `bypassPermissions` session no matter how the daemon was\nconfigured (`crates/assembly/src/server/mod.rs` notes there is no\nper-method authorization on that socket).\n\nSet it to `true` only when every client of this daemon is as trusted\nas the daemon itself.",
       "type": "boolean"
+    },
+    "checkpoints": {
+      "$ref": "#/$defs/CheckpointSettings",
+      "default": {
+        "enabled": true,
+        "max_bytes_per_file": 16777216,
+        "max_total_bytes": 536870912
+      }
     },
     "compaction": {
       "$ref": "#/$defs/CompactionConfig",

@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod checkpoint;
+pub mod checkpoint_settings;
 pub mod commands;
 pub mod elicitation;
 mod elicitation_hooks;

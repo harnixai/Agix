@@ -146,8 +146,9 @@ impl Agent {
             ))
             .await;
             let fs = &*self.exec.filesystem;
+            let pruned = plan::pruned_through(&plan.entries).is_some();
             for step in plan::file_steps(&plan.entries, keep) {
-                match preflight(fs, &checkpoints, &policy, &step).await {
+                match preflight(fs, &checkpoints, &policy, &step, pruned).await {
                     Ok(restore) => {
                         let changed = changed_since(fs, &step, &restore.target).await;
                         if changed.is_none() || request.force {
@@ -479,6 +480,7 @@ async fn preflight(
     checkpoints: &Checkpoints,
     policy: &permissions::path_safety::WritePolicy,
     step: &plan::FileStep,
+    pruned: bool,
 ) -> Result<Restore, RewindIssue> {
     let target = step
         .path
@@ -490,11 +492,11 @@ async fn preflight(
                 "recorded relative to a project this session does not have",
             )
         })?;
-    let to = recorded_contents(checkpoints, step)?;
+    let to = recorded_contents(checkpoints, step, pruned)?;
     let now = fs.metadata(&target).await.ok();
     if let Some(len) = now
         .as_ref()
-        .filter(|m| m.is_file && m.len > history::checkpoint::MAX_FILE_BYTES)
+        .filter(|m| m.is_file && m.len > checkpoints.max_file_bytes())
         .map(|m| m.len)
     {
         return Err(issue(
@@ -554,12 +556,16 @@ async fn preflight(
 fn recorded_contents(
     checkpoints: &Checkpoints,
     step: &plan::FileStep,
+    pruned: bool,
 ) -> Result<Option<Vec<u8>>, RewindIssue> {
     let unavailable = |detail: String| issue(step, RewindIssueKind::Unavailable, detail);
     match &step.restore {
         Before::Absent => Ok(None),
         Before::File { sha256, .. } => match checkpoints.objects().get(sha256) {
             Ok(Some(bytes)) => Ok(Some(bytes)),
+            _ if pruned => Err(unavailable(
+                "its earlier contents were pruned to stay under checkpoints.max_total_bytes, or are no longer kept".into(),
+            )),
             _ => Err(unavailable(
                 "its earlier contents are no longer kept".into(),
             )),
@@ -648,6 +654,7 @@ mod tests {
             store,
             &base::session::SessionId::new().to_string(),
             Some(project.clone()),
+            Default::default(),
         )
         .unwrap();
         let fs: Arc<dyn FileSystem> = Arc::new(platform::filesystem::LocalFileSystem);
@@ -692,6 +699,7 @@ mod tests {
             store,
             &base::session::SessionId::new().to_string(),
             Some(project.clone()),
+            Default::default(),
         )
         .unwrap();
         let policy = permissions::path_safety::WritePolicy::new(project.clone());
@@ -707,6 +715,7 @@ mod tests {
                 &checkpoints,
                 &policy,
                 &step,
+                false,
             )
             .await;
             assert!(
@@ -725,7 +734,8 @@ mod tests {
             &platform::filesystem::LocalFileSystem,
             &checkpoints,
             &policy,
-            &ordinary
+            &ordinary,
+            false
         )
         .await
         .is_ok());

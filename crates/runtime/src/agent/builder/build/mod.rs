@@ -131,9 +131,12 @@ impl Builder {
         settings: &LoadedSettings,
         session: &Transcript,
     ) -> Option<Arc<crate::checkpoint::Checkpoints>> {
+        let own = settings
+            .values
+            .section::<crate::checkpoint_settings::CheckpointSettings>();
         match self.spec.checkpoints.take() {
             Some(decided) => decided,
-            None if self.spec.agent_depth == 0 => {
+            None if self.spec.agent_depth == 0 && own.enabled => {
                 let store = self.host.history_store.clone()?;
                 let project_root = settings
                     .paths
@@ -143,6 +146,10 @@ impl Builder {
                     store,
                     session.session_id_str(),
                     project_root,
+                    crate::checkpoint::CheckpointLimits {
+                        max_bytes_per_file: own.max_bytes_per_file,
+                        max_total_bytes: own.max_total_bytes,
+                    },
                 )
             }
             None => None,

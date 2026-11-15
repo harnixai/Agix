@@ -6,7 +6,7 @@
 
 use super::{
     After, Before, PostRecord, PreRecord, RecordedPath, RewindBegin, RewindTarget, CHECKPOINT_NS,
-    POST, PRE, REWIND_NS,
+    POST, PRE, PRUNED, REWIND_NS,
 };
 use crate::entry::{EnvelopedEntry, LogEntry, MessageOrigin};
 use base::id::Id;
@@ -92,6 +92,20 @@ fn extension_payload<T: serde::de::DeserializeOwned>(
         }
         _ => None,
     }
+}
+
+/// The position of the newest `pre` line whose copy may have been pruned;
+/// a rewind that cuts before it has a file it cannot put back.
+pub fn pruned_through(entries: &[EnvelopedEntry]) -> Option<usize> {
+    entries
+        .iter()
+        .filter_map(|env| extension_payload::<super::PrunedRecord>(env, CHECKPOINT_NS, PRUNED))
+        .filter_map(|pruned| {
+            entries
+                .iter()
+                .position(|e| e.id.to_string() == pruned.before)
+        })
+        .max()
 }
 
 /// One file a rewind puts back.

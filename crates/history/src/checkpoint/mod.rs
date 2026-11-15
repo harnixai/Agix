@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 pub const CHECKPOINT_NS: &str = "agix.checkpoint";
 pub const PRE: &str = "pre";
 pub const POST: &str = "post";
+pub const PRUNED: &str = "pruned";
 
 pub const REWIND_NS: &str = "agix.rewind";
 pub const BEGIN: &str = "begin";
@@ -120,6 +121,13 @@ pub struct PreRecord {
     pub rewind_id: Option<String>,
     #[serde(default)]
     pub agent: Option<DelegateAttribution>,
+}
+
+/// `agix.checkpoint/pruned`: the copies named by `pre` lines up to and
+/// including `before` may have been deleted to stay under the quota.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrunedRecord {
+    pub before: String,
 }
 
 /// `agix.checkpoint/post`, after the write. `after` follows `files` of its
@@ -239,6 +247,32 @@ impl BlobStore for CheckpointObjects {
             Err(e) => Err(e),
         }
     }
+
+    fn list(&self) -> Result<Vec<(String, u64)>, std::io::Error> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut objects = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if let Some(id) = entry.file_name().to_str().filter(|id| is_object_id(id)) {
+                objects.push((id.to_string(), entry.metadata()?.len()));
+            }
+        }
+        Ok(objects)
+    }
+
+    fn remove(&self, id: &str) -> Result<(), std::io::Error> {
+        if !is_object_id(id) {
+            return Ok(());
+        }
+        match std::fs::remove_file(self.dir.join(id)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
 }
 
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
@@ -285,6 +319,24 @@ impl BlobStore for InMemoryCheckpointObjects {
             .get(id)
             .filter(|bytes| sha256_hex(bytes) == id)
             .cloned())
+    }
+
+    fn list(&self) -> Result<Vec<(String, u64)>, std::io::Error> {
+        Ok(self
+            .objects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(id, bytes)| (id.clone(), bytes.len() as u64))
+            .collect())
+    }
+
+    fn remove(&self, id: &str) -> Result<(), std::io::Error> {
+        self.objects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        Ok(())
     }
 }
 

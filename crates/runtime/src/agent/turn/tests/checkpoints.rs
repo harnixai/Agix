@@ -30,7 +30,12 @@ fn setup(
     ctx.cwd = cwd.clone();
     ctx.session_state = Arc::new(base::context::SessionState::for_tests(cwd.clone()));
     let root = base::session::SessionId::new();
-    ctx.checkpoints = Checkpoints::for_root(store.clone(), &root.to_string(), Some(cwd));
+    ctx.checkpoints = Checkpoints::for_root(
+        store.clone(),
+        &root.to_string(),
+        Some(cwd),
+        Default::default(),
+    );
     Setup {
         dir,
         store,

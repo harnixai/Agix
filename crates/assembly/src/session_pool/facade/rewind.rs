@@ -144,9 +144,17 @@ impl SessionPool {
             .and_then(|sid| store.checkpoint_objects(sid))
             .is_some();
         let voided = history::transcript::voided(&entries);
-        let turns = history::checkpoint::plan::live_turns(&entries, &voided)
+        let pruned_through = history::checkpoint::plan::pruned_through(&entries);
+        let live = history::checkpoint::plan::live_turns(&entries, &voided);
+        let pruned_before_turn = pruned_through.and_then(|at| {
+            live.iter()
+                .find(|turn| turn.last >= at)
+                .map(|turn| turn.turn_id.clone())
+        });
+        let turns = live
             .into_iter()
             .map(|turn| api::CheckpointTurn {
+                restorable: enabled && pruned_through.is_none_or(|at| turn.last >= at),
                 started_at: rfc3339(turn.started_at),
                 prompt: prompt_text(&turn.prompt),
                 files: turn
@@ -158,7 +166,6 @@ impl SessionPool {
                         agent: f.agent,
                     })
                     .collect(),
-                restorable: enabled,
                 turn_id: turn.turn_id,
             })
             .collect();
@@ -172,7 +179,7 @@ impl SessionPool {
         Ok(api::CheckpointList {
             session_id: session_id.to_string(),
             turns,
-            pruned_before_turn: None,
+            pruned_before_turn,
             interrupted_rewind,
             enabled,
         })

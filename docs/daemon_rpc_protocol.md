@@ -2102,7 +2102,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 | `issue` | 什么情况 | 放过它 |
 |---|---|---|
 | `modified` | 文件此刻不是会话最后写成的样子——用户手改、`Bash` 改、别的进程改;会话最后一次写它没有 `post` 记录时无从比较,文件还在就同样算 | `force: true` 覆盖 |
-| `unavailable` | 写前内容没留下(超过 16 MiB 只记了哈希)、读不出来、不是普通文件,或副本与哈希对不上 | `allow_partial: true` 跳过 |
+| `unavailable` | 写前内容没留下(超过 `max_bytes_per_file` 只记了哈希、被配额清掉)、读不出来、不是普通文件,文件此刻已大到回滚前无法留副本,或副本与哈希对不上 | `allow_partial: true` 跳过 |
 | `denied` | 写路径策略此刻拒绝这个位置(凭据、引擎配置、系统目录……) | `allow_partial` |
 | `symlink` | 它此刻是符号链接,或上面某一级目录解析到了别处;回滚**从不**跟随链接写 | `allow_partial` |
 | `worktree_removed` | 它在一个已经移除的 worktree 里 | `allow_partial` |
@@ -2149,12 +2149,21 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
                "prompt": "…",                                   // 开启这一轮的那条消息的前 200 个字符
                "files": [ { "path": "src/a.rs", "tool": "Write", "agent": null } ],  // agent:写它的子 Agent 会话
                "restorable": true } ],
-  "pruned_before_turn": null,
+  "pruned_before_turn": null,                                   // 早于它的轮次回不去了(副本被配额清掉)
   "interrupted_rewind": null,                                   // { "rewind_id", "ts" }:开始了却没结束的回滚
   "enabled": true }                                             // 这个会话记不记 checkpoint
 ```
 
 `turns` 按时间顺序,只列没被回滚作废的轮。子 Agent 的写算在它写下时最近的那一轮里。
+
+**配额。** 设置段 `checkpoints`:`enabled`(缺省 `true`;`false` 时文件工具照常写,但不记快照,
+`session.rewind` 要回文件就是 `INVALID_PARAMS`)、`max_bytes_per_file`(缺省 16 MiB,更大的文件只记
+哈希,回滚时是 `unavailable`)、`max_total_bytes`(缺省 512 MiB,一个会话保留的写前副本总量)。
+超过总量时,引擎按最旧的先清,并在转录里追加一条 `agix.checkpoint` / `pruned` 条目
+(`{"before": "<envelope id>"}`:此条目之前的 `pre` 的副本可能已删),最新一次写的副本不清。
+被清掉的轮次在这里是 `restorable: false`,`pruned_before_turn` 是第一个还回得去的轮;对它们
+`session.rewind` 的文件部分报 `unavailable`,`detail` 里写明是被配额清掉的。项目层的这三项只能收紧
+(关掉、调小)。
 
 #### `session.tasks`
 

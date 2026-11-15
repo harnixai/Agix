@@ -53,6 +53,18 @@ pub trait BlobStore: Send + Sync {
     fn put(&self, bytes: &[u8]) -> Result<String, std::io::Error>;
 
     fn get(&self, id: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
+
+    /// Every object held and its size, for a store that is asked to keep
+    /// within a quota. Provided as empty: a store that cannot enumerate cannot
+    /// be pruned.
+    fn list(&self) -> Result<Vec<(String, u64)>, std::io::Error> {
+        Ok(Vec::new())
+    }
+
+    /// Forget one object; one that is not there is not an error.
+    fn remove(&self, _id: &str) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 
 /// Files under `<base>/pastes/`, keyed by content hash.

@@ -12,7 +12,7 @@ fields   LiveSessions                                            8
 fields   McpHub                                                  3
 fields   SceneCatalog                                            6
 fields   Scheduler                                               1
-fields   SessionDirectory                                        2
+fields   SessionDirectory                                        3
 fields   SessionPool                                             12
 fields   SpecStore                                               4
 json!    crates/assembly/src/session_pool/facade/goal.rs         1
