@@ -535,6 +535,48 @@ async fn resuming_a_session_removes_saved_files_nothing_refers_to() -> anyhow::R
     Ok(())
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_refused_for_a_log_another_process_holds_removes_nothing() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let (mut run, session) = saved_once("spill-gc-held", &stub).await?;
+    let written_elsewhere =
+        saved_path(&run, &session, "b1").with_file_name(format!("{session}-other.txt"));
+    rpc(&mut run, "session.close", json!({ "session_id": session })).await?;
+
+    let lock = run
+        .world
+        .global_root()
+        .join("sessions")
+        .join(&session)
+        .join("writer.lock");
+    let _held = std::fs::OpenOptions::new().write(true).open(&lock)?;
+    // SAFETY: `flock` only reads the descriptor, which `_held` keeps open.
+    let rc = unsafe {
+        libc::flock(
+            std::os::fd::AsRawFd::as_raw_fd(&_held),
+            libc::LOCK_EX | libc::LOCK_NB,
+        )
+    };
+    assert_eq!(rc, 0, "the closed session's log is free to hold");
+    std::fs::write(
+        &written_elsewhere,
+        "the other process's output, its line not yet written",
+    )?;
+
+    let refused = run
+        .client
+        .call("session.resume", json!({ "session_id": session }))
+        .await?;
+    assert!(refused.error.is_some(), "{:?}", refused.result);
+    assert!(
+        written_elsewhere.exists(),
+        "a resume that could not take the log removed what its holder wrote"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn resuming_keeps_a_sub_agents_saved_output() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;

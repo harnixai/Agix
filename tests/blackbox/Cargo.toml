@@ -34,6 +34,8 @@ hostile-plugins = { workspace = true }
 # For reading what `session.export` wrote.
 zip = { workspace = true }
 async-trait = { workspace = true }
+# To hold a session log's writer lock as another process would.
+libc = { workspace = true }
 
 [features]
 # The live tier: cases that talk to a real model, with the credentials in the

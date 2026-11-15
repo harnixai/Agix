@@ -345,6 +345,7 @@ dependencies = [
  "demo-rust-plugin",
  "history",
  "hostile-plugins",
+ "libc",
  "mcp-oauth-mock",
  "model",
  "platform",
