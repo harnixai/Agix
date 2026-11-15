@@ -301,6 +301,40 @@ mod tests {
         );
     }
 
+    /// Answers once it is let go.
+    struct Held(Arc<tokio::sync::Notify>);
+
+    #[async_trait]
+    impl McpElicitor for Held {
+        async fn elicit(&self, _: &str, _: String, _: McpElicitMode) -> McpElicitationAnswer {
+            self.0.notified().await;
+            McpElicitationAnswer::Accept {
+                content: Some(serde_json::json!({"color": "blue"})),
+            }
+        }
+    }
+
+    /// A 2025 server's question is the question of the call it arrived in:
+    /// once that call is over, an answer given later is not sent.
+    #[tokio::test]
+    async fn a_question_outliving_its_call_is_cancelled() {
+        let route = Arc::new(ElicitRoute::default());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let call = route.enter(Some(Arc::new(Held(release.clone()))));
+        let asking = tokio::spawn({
+            let route = route.clone();
+            async move { route.answer("demo", form()).await }
+        });
+        tokio::task::yield_now().await;
+        drop(call);
+        release.notify_waiters();
+        let answered = tokio::time::timeout(std::time::Duration::from_secs(5), asking)
+            .await
+            .expect("the question ends with its call")
+            .unwrap();
+        assert_eq!(answered.action, ElicitationAction::Cancel);
+    }
+
     #[tokio::test]
     async fn only_an_https_or_loopback_url_is_put_to_anyone() {
         let elicitor = accepting();
