@@ -457,19 +457,16 @@ impl SessionPool {
         if !config.is_object() {
             return Err(invalid("config must be a JSON object".into()));
         }
-        let mut cfg: mcp::config::McpServerConfig = serde_json::from_value(config.clone())
+        let cfg: mcp::config::McpServerConfig = serde_json::from_value(config.clone())
             .map_err(|e| invalid(format!("invalid mcp server config: {e}")))?;
-        if self
-            .trusted_project_tier(
-                project_root,
-                scene_id,
-                "a server declared in its settings would not start",
-                "declare the server in the global tier",
-            )
-            .await?
-        {
-            cfg = cfg.confined_to_own_env().map_err(invalid)?;
-        }
+        self.trusted_project_tier(
+            project_root,
+            scene_id,
+            "a server declared in its settings would not start",
+            "declare the server in the global tier",
+        )
+        .await?;
+        let cfg = cfg.confined_to_own_env().map_err(invalid)?;
         self.admit_mcp(name, &cfg)
             .map_err(PoolError::McpServerDenied)?;
         self.write_mcp_server(project_root, scene_id, name, &cfg, config, must_exist)

@@ -3,18 +3,19 @@
 use crate::session_pool::*;
 
 impl SessionPool {
-    /// Whether a write to `project_root`'s settings lands in a project's own
-    /// tier (rather than the global or scene directory it may resolve to).
-    /// When it does and that project is not trusted, the write is refused
-    /// with `PROJECT_UNTRUSTED`: `what` would not take effect, and `instead`
-    /// is where it would.
+    /// Refuses a write to `project_root`'s settings that would not land in a
+    /// project's own tier: a `.agix` that resolves to the global or scene
+    /// directory (a link from a repository, or a project rooted at `$HOME`)
+    /// would put it in every project, so that is `INVALID_PARAMS`. A project
+    /// that is not trusted is refused with `PROJECT_UNTRUSTED`: `what` would
+    /// not take effect, and `instead` is where it would.
     pub(in crate::session_pool) async fn trusted_project_tier(
         &self,
         project_root: Option<&Path>,
         scene_id: &str,
         what: &str,
         instead: &str,
-    ) -> Result<bool, PoolError> {
+    ) -> Result<(), PoolError> {
         let startup_scene = self.bindings.startup_scene().await;
         let written_to = self.bindings.settings_path_of(project_root);
         if !settings::trust::is_own_project_dir(
@@ -22,7 +23,10 @@ impl SessionPool {
             &self.bindings.paths().global_root(),
             &self.bindings.scene_root(scene_id, &startup_scene),
         ) {
-            return Ok(false);
+            return Err(PoolError::InvalidRequest(format!(
+                "{} has no settings tier of its own (its `.agix` is the global or scene directory), so {what}; {instead}",
+                project_root.unwrap_or(self.cwd()).display()
+            )));
         }
         let target = project_root.unwrap_or(self.cwd());
         let decided = settings::trust::ProjectTrustSettings::read_global(
@@ -35,7 +39,7 @@ impl SessionPool {
                 target.display()
             )));
         }
-        Ok(true)
+        Ok(())
     }
 
     /// `project.status` — whether `project_root` (this daemon's own project

@@ -1457,3 +1457,53 @@ async fn a_sub_agent_granted_an_mcp_server_is_shown_and_keeps_its_tools() -> any
     run.finish().await;
     Ok(())
 }
+
+/// A repository whose `.agix` links to the global tier has no tier of its
+/// own: a server or provider written "to the project" would land in the
+/// global settings and apply to every project.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repository_borrowing_the_global_tier_cannot_be_written_to() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("borrowed-tier", &stub)
+        .before_start(|world, project| {
+            std::fs::remove_dir_all(project.join(".agix"))?;
+            std::os::unix::fs::symlink(world.global_root(), project.join(".agix"))?;
+            Ok(())
+        })
+        .start()
+        .await?;
+    let target = rpc_client::Target::project(&run.project);
+    let global = run.world.global_root();
+
+    let added = run
+        .client
+        .mcp_add_server(&target, "sneaky", McpToy::stdio_config(&[])?)
+        .await?;
+    let error = added
+        .error
+        .expect("mcp.addServer into a borrowed tier fails");
+    assert_eq!(error.code, -32602, "{}", error.message);
+
+    let provider = run
+        .client
+        .config_set_provider(
+            &target,
+            json!({ "provider_id": "sneaky", "config": { "kind": "openai", "base_url": "http://127.0.0.1:1" } }),
+        )
+        .await?;
+    let error = provider
+        .error
+        .expect("config.setProvider into a borrowed tier fails");
+    assert_eq!(error.code, -32602, "{}", error.message);
+
+    for file in ["settings.json", "settings.local.json"] {
+        let text = std::fs::read_to_string(global.join(file)).unwrap_or_default();
+        assert!(
+            !text.contains("sneaky"),
+            "{file} was written through the link: {text}"
+        );
+    }
+    run.finish().await;
+    Ok(())
+}
