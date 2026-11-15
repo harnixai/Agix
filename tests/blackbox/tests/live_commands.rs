@@ -180,7 +180,9 @@ async fn an_unknown_command_reaches_the_model_as_typed() -> anyhow::Result<()> {
         first.messages_contain(&typed),
         "the text was not passed through"
     );
-    run.finish().await;
+    // What the model does with an unknown command is its own business; a tool
+    // call nobody answers is not what this case is about.
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 
