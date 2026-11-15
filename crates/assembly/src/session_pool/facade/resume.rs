@@ -198,8 +198,8 @@ impl SessionPool {
     /// Remove the saved results in the session's directory that no transcript of its
     /// lineage mentions: a write whose transcript line never landed, a deleted
     /// sidechain's, a fork's or import's leftovers. The sidechains' logs are read only
-    /// when a file is named after a delegate. Runs under the session lock, before the
-    /// engine can write, and never fails the resume.
+    /// when a file is named after a delegate. Runs under the session lock and the
+    /// log's writer lock, before the engine can write, and never fails the resume.
     async fn collect_saved_results(
         &self,
         session_id: &str,
@@ -211,6 +211,16 @@ impl SessionPool {
         let Some(dir) = self.saved_results_dir(session_id).await else {
             return;
         };
+        // What is in the directory is only settled while no other process
+        // can be writing the session, and the log read before the claim may
+        // be older than what that process left.
+        let Ok(_claim) = self.claim_log(session_id).await else {
+            return;
+        };
+        let Ok(log) = self.directory.read_log(session_id).await else {
+            return;
+        };
+        let log = log.as_slice();
         let names = {
             let dir = dir.clone();
             tokio::task::spawn_blocking(move || runtime::saved_results::files_in(&dir))
