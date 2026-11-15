@@ -478,6 +478,10 @@ async fn a_saved_mcp_result_read_back_through_bash_is_fenced_and_bash_is_not_sug
     assert!(!shown.contains("Bash"), "{shown}");
     let (_, read, failed) = result_of(&events, "Bash");
     assert!(!failed && read.starts_with("<external-content"), "{read}");
+    run.finish().await;
+    Ok(())
+}
+
 async fn rpc(run: &mut LiveRun, method: &str, params: Value) -> anyhow::Result<Value> {
     let response = run.client.call(method, params).await?;
     anyhow::ensure!(response.error.is_none(), "{method}: {:?}", response.error);
