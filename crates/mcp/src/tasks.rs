@@ -501,6 +501,24 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_task_asks_no_more_rounds_of_questions_than_a_call_may() {
+        let (_, scope, _) = hosted();
+        let keys: Vec<String> = (0..30).map(|n| format!("k{n}")).collect();
+        let mut script: Vec<DetailedTask> =
+            keys.iter().map(|key| asking(&[key.as_str()])).collect();
+        script.push(done("x"));
+        let peer = FakePeer::saying(script);
+        let result = await_task("demo", &peer, created(), &scope, LONG).await;
+        assert!(result.is_err(), "{result:?}");
+        assert!(
+            peer.updates.lock().unwrap().len() <= rmcp::model::DEFAULT_MRTR_MAX_ROUNDS,
+            "{} rounds of answers",
+            peer.updates.lock().unwrap().len()
+        );
+        assert_eq!(peer.cancels(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn stopping_ends_the_task_stopped_and_cancels_on_the_server() {
         let (session, scope, _) = hosted();
         let peer = FakePeer::saying(vec![at("busy", TaskPayload::Working)]);
