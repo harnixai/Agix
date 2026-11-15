@@ -186,12 +186,7 @@ pub(crate) async fn await_task(
             name: server.to_string(),
             task_id: task.task_id.clone(),
         }),
-        () = tokio::time::sleep(limit) => Err(McpError::Timeout {
-            name: server.to_string(),
-            op: "tasks/get",
-            after: limit,
-        }),
-        ended = drive(server, peer, &task, scope, &ticket) => ended,
+        ended = drive(server, peer, &task, scope, &ticket, limit) => ended,
     };
     match &outcome {
         Ok(_) => {
@@ -218,8 +213,17 @@ async fn drive(
     created: &Task,
     scope: &McpCallScope,
     ticket: &Ticket,
+    limit: Duration,
 ) -> Result<CallToolResult, McpError> {
     let id = created.task_id.as_str();
+    // The deadline runs only while the task is the one waited on: the time a
+    // person takes over its questions is theirs, as in an MRTR round.
+    let mut left = limit;
+    let timed_out = || McpError::Timeout {
+        name: server.to_string(),
+        op: "tasks/get",
+        after: limit,
+    };
     let ended = |how: String| McpError::TaskEnded {
         name: server.to_string(),
         task_id: id.to_string(),
@@ -231,8 +235,14 @@ async fn drive(
     let mut rounds = 0;
     let mut timeouts = 0;
     loop {
-        tokio::time::sleep(every).await;
-        let got = match peer.get(id).await {
+        if left.is_zero() {
+            return Err(timed_out());
+        }
+        let polled = tokio::time::Instant::now();
+        tokio::time::sleep(every.min(left)).await;
+        let got = tokio::time::timeout(left.saturating_sub(polled.elapsed()), peer.get(id)).await;
+        left = left.saturating_sub(polled.elapsed());
+        let got = match got.unwrap_or_else(|_| Err(timed_out())) {
             Ok(got) => got,
             Err(McpError::Timeout { .. }) if timeouts < POLL_RETRIES => {
                 timeouts += 1;
