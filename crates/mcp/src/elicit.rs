@@ -60,6 +60,7 @@ pub trait McpElicitor: Send + Sync {
 #[derive(Clone, Default)]
 pub struct McpCallScope {
     pub elicitor: Option<Arc<dyn McpElicitor>>,
+    pub tasks: Option<crate::tasks::McpTaskHost>,
 }
 
 type Asker = Option<Arc<dyn McpElicitor>>;
@@ -173,14 +174,21 @@ impl Drop for InFlight {
     }
 }
 
-/// `tools/call` until the server completes it, answering each
-/// `input_required` round through `scope`. `send` makes one request.
+/// How `tools/call` ended: a result, or a task the server runs the call as.
+pub(crate) enum CallEnd {
+    Complete(CallToolResult),
+    Task(rmcp::model::Task),
+}
+
+/// `tools/call` until the server completes it or turns it into a task,
+/// answering each `input_required` round through `scope`. `send` makes one
+/// request.
 pub(crate) async fn call_with_rounds<F, Fut>(
     server: &str,
     mut params: CallToolRequestParams,
     scope: &McpCallScope,
     mut send: F,
-) -> Result<CallToolResult, McpError>
+) -> Result<CallEnd, McpError>
 where
     F: FnMut(CallToolRequestParams) -> Fut,
     Fut: Future<Output = Result<CallToolResponse, McpError>>,
@@ -188,7 +196,7 @@ where
     let mut state_only_rounds = 0u32;
     for _ in 0..DEFAULT_MRTR_MAX_ROUNDS {
         match send(params.clone()).await? {
-            CallToolResponse::Complete(result) => return Ok(result),
+            CallToolResponse::Complete(result) => return Ok(CallEnd::Complete(result)),
             CallToolResponse::InputRequired(round) => {
                 match round.input_requests.filter(|r| !r.is_empty()) {
                     Some(requests) => {
@@ -204,12 +212,7 @@ where
                 }
                 params.request_state = round.request_state;
             }
-            CallToolResponse::Task(_) => {
-                return Err(McpError::RmcpService(format!(
-                    "MCP server `{server}` answered the call with a task, which needs the tasks \
-                     extension this client does not declare; it was not waited on"
-                )))
-            }
+            CallToolResponse::Task(created) => return Ok(CallEnd::Task(created.task)),
             _ => {
                 return Err(McpError::RmcpService(format!(
                     "MCP server `{server}` answered the call with a result of an unknown type"
@@ -223,7 +226,7 @@ where
 }
 
 /// One at a time, so a host is never shown two of a call's questions at once.
-async fn answer_input_requests(
+pub(crate) async fn answer_input_requests(
     server: &str,
     requests: InputRequests,
     scope: &McpCallScope,
@@ -511,10 +514,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rounds_are_driven_until_the_call_completes_and_a_task_is_refused() {
+    async fn rounds_are_driven_until_the_call_completes_and_a_task_is_handed_back() {
         use rmcp::model::{InputRequiredResult, Task, TaskStatus};
         let scope = McpCallScope {
             elicitor: Some(accepting()),
+            tasks: None,
         };
         let mut sent: Vec<CallToolRequestParams> = Vec::new();
         let result = call_with_rounds("demo", CallToolRequestParams::new("ask"), &scope, |p| {
@@ -537,7 +541,11 @@ mod tests {
             }
         })
         .await;
-        assert!(result.is_ok(), "{result:?}");
+        assert!(
+            matches!(result, Ok(CallEnd::Complete(_))),
+            "{:?}",
+            result.err()
+        );
         assert_eq!(sent.len(), 2);
         assert_eq!(sent[1].request_state.as_deref(), Some("state-1"));
         assert_eq!(
@@ -552,8 +560,9 @@ mod tests {
         })
         .await;
         assert!(
-            matches!(&task, Err(McpError::RmcpService(m)) if m.contains("tasks extension")),
-            "{task:?}"
+            matches!(&task, Ok(CallEnd::Task(t)) if t.task_id == "t1"),
+            "{:?}",
+            task.err()
         );
     }
 }

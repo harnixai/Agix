@@ -20,6 +20,9 @@ pub enum TaskType {
     /// A persistent team member, alive between the messages it is handed;
     /// each message it runs is a `Teammate` task of its own.
     Member,
+    /// One MCP tool call that the server turned into a task; lasts as long
+    /// as that call.
+    McpTask,
 }
 
 impl TaskType {
@@ -32,6 +35,7 @@ impl TaskType {
             TaskType::Monitor => "monitor",
             TaskType::Code => "code",
             TaskType::Member => "member",
+            TaskType::McpTask => "mcp_task",
         }
     }
 
@@ -45,6 +49,7 @@ impl TaskType {
             TaskType::Monitor => "mo",
             TaskType::Code => "cd",
             TaskType::Member => "member",
+            TaskType::McpTask => "mcp",
         }
     }
 }
@@ -208,6 +213,12 @@ impl RunningTask {
         }
     }
 
+    /// Change what `detail` holds, then report `task_updated`.
+    pub fn update_detail(&self, change: impl FnOnce(&mut serde_json::Value)) {
+        change(&mut self.detail.lock().unwrap_or_else(|e| e.into_inner()));
+        self.report_update();
+    }
+
     /// `task_updated`, for a task whose start was announced and which has
     /// not ended: what changed is in the snapshot.
     fn report_update(&self) {
@@ -220,12 +231,13 @@ impl RunningTask {
     }
 
     /// Whether what the work prints is streamed as it runs (`task_progress`):
-    /// a shell command's and a monitor's. A sub-agent's output is its final
-    /// answer, reported when it finishes.
+    /// a shell command's, a monitor's, a program's and an MCP task's status
+    /// lines. A sub-agent's output is its final answer, reported when it
+    /// finishes.
     pub fn streams_output(&self) -> bool {
         matches!(
             self.task_type,
-            TaskType::Shell | TaskType::Monitor | TaskType::Code
+            TaskType::Shell | TaskType::Monitor | TaskType::Code | TaskType::McpTask
         )
     }
 
@@ -397,7 +409,7 @@ impl RunningTask {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, schemars::JsonSchema)]
 pub struct TaskInfo {
     pub task_id: String,
-    /// `agent`, `teammate`, `member`, `shell`, `monitor`, `cron` or `code`.
+    /// `agent`, `teammate`, `member`, `shell`, `monitor`, `cron`, `code` or `mcp_task`.
     #[serde(serialize_with = "wire_kind")]
     #[schemars(with = "String")]
     pub kind: TaskType,
@@ -526,6 +538,15 @@ fn ceil_char_boundary(text: &str, mut at: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_mcp_task_streams_its_status_lines() {
+        let task = RunningTask::new("mcp-1".into(), TaskType::McpTask);
+        assert!(task.streams_output());
+        assert_eq!(task.info().kind.as_str(), "mcp_task");
+        task.update_detail(|d| *d = serde_json::json!({"mcp_status": "working"}));
+        assert_eq!(task.info().detail["mcp_status"], "working");
+    }
 
     #[test]
     fn a_tail_is_cut_on_a_character_boundary() {

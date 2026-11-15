@@ -17,6 +17,7 @@ pub mod output_cache;
 pub mod policy;
 pub mod prompts;
 pub mod resources;
+pub mod tasks;
 pub mod tools;
 
 pub use module::McpModule;

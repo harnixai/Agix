@@ -11,6 +11,9 @@
 //! Tool and prompt changes are acted on. A resource change is counted and
 //! otherwise ignored: the resource tools ask the server on every call.
 //!
+//! The handler also declares the tasks extension, so a server may turn one
+//! tool call into a task (see `crate::tasks`).
+//!
 //! The handler also declares that this client answers elicitation, and takes
 //! an older server's own `elicitation/create` to [`crate::elicit::ElicitRoute`].
 
@@ -84,6 +87,13 @@ impl ClientHandler for NotifyingHandler {
                 .with_form(FormElicitationCapability::new().with_schema_validation(true))
                 .with_url(UrlElicitationCapability::new()),
         );
+        info.capabilities
+            .extensions
+            .get_or_insert_with(Default::default)
+            .insert(
+                rmcp::model::TASKS_EXTENSION_ID.to_string(),
+                Default::default(),
+            );
         info
     }
 
@@ -177,6 +187,12 @@ impl Announcements {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn the_client_declares_the_tasks_extension() {
+        let handler = NotifyingHandler::silent("demo");
+        assert!(handler.get_info().capabilities.supports_tasks());
+    }
 
     fn recorder() -> (NotificationSink, Arc<Mutex<Vec<McpNotification>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));

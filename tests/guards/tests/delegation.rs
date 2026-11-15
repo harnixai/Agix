@@ -31,7 +31,7 @@
 //! production code names each mode: no `_` arm stands in for one a new mode
 //! would fall into.
 //!
-//! DLG-7: in `agents`, a task is registered only through `TaskLease`, which
+//! DLG-7: in `agents` and `mcp`, a task is registered only through `TaskLease`, which
 //! ends it however its holder goes away; nothing calls `register_task` or
 //! holds a `TaskScope`.
 //!
@@ -555,7 +555,10 @@ fn every_match_on_a_delegate_mode_names_each_mode() {
 fn agents_register_tasks_only_through_a_lease() {
     let mut problems = Vec::new();
     let mut scanned = 0;
-    for f in ws().production().filter(|f| f.package == "agents") {
+    for f in ws()
+        .production()
+        .filter(|f| matches!(f.package.as_str(), "agents" | "mcp"))
+    {
         scanned += 1;
         for call in scan::calls(f, View::Prod) {
             let name = match &call.callee {

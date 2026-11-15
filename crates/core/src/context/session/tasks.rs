@@ -194,7 +194,7 @@ impl TaskTable {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .filter(|task| {
-                !matches!(task.task_type, TaskType::Shell)
+                !matches!(task.task_type, TaskType::Shell | TaskType::McpTask)
                     && matches!(
                         *task.status.lock().unwrap_or_else(|e| e.into_inner()),
                         RunningStatus::Running

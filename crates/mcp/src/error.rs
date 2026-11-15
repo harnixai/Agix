@@ -47,6 +47,17 @@ pub enum McpError {
     #[error("tool '{tool}' is not provided by server '{name}'")]
     UnknownTool { name: String, tool: String },
 
+    #[error("server '{name}' ran the call as task {task_id}; it was stopped and the server was asked to cancel it")]
+    TaskStopped { name: String, task_id: String },
+
+    /// `how` is `failed: <message>` or `was cancelled by the server`.
+    #[error("server '{name}' ran the call as task {task_id}, which {how}")]
+    TaskEnded {
+        name: String,
+        task_id: String,
+        how: String,
+    },
+
     #[error("rmcp service error: {}", without_url_secrets(.0))]
     RmcpService(String),
 

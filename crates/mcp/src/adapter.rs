@@ -162,8 +162,19 @@ impl Tool for McpToolAdapter {
             }
         }
 
+        let listed = Arc::<std::sync::OnceLock<Arc<base::context::RunningTask>>>::default();
         let scope = crate::elicit::McpCallScope {
-            elicitor: Some(Arc::new(ToolCallElicitor { ctx: ctx.clone() })),
+            elicitor: Some(Arc::new(ToolCallElicitor {
+                ctx: ctx.clone(),
+                listed: listed.clone(),
+            })),
+            tasks: Some(crate::tasks::McpTaskHost {
+                session: ctx.session.clone(),
+                tool: self.full_name.clone(),
+                tool_use_id: ctx.tool_use_id.clone(),
+                cancel: ctx.cancel.clone(),
+                listed,
+            }),
         };
         let result = tokio::select! {
             biased;
@@ -171,7 +182,10 @@ impl Tool for McpToolAdapter {
             r = self.client.call_tool(&self.tool_name, args.clone(), &scope) => r,
         };
 
-        let result = result.map_err(|e: McpError| ToolError::Execution(anyhow::Error::new(e)))?;
+        let result = result.map_err(|e: McpError| match e {
+            McpError::TaskStopped { .. } => ToolError::Cancelled,
+            e => ToolError::Execution(anyhow::Error::new(e)),
+        })?;
 
         if cacheable {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -187,6 +201,9 @@ impl Tool for McpToolAdapter {
 /// ask, no answer in time, or an answer that does not read is `cancel`.
 pub struct ToolCallElicitor {
     pub ctx: ToolContext,
+    /// The task the call was turned into, once it is listed: it is marked
+    /// waiting while its question is open.
+    pub listed: Arc<std::sync::OnceLock<Arc<base::context::RunningTask>>>,
 }
 
 #[async_trait]
@@ -219,11 +236,18 @@ impl crate::elicit::McpElicitor for ToolCallElicitor {
             message,
             options: Vec::new(),
         };
+        let prompt_id = request.id.clone();
+        if let Some(task) = self.listed.get() {
+            task.begin_waiting(&prompt_id);
+        }
         let asked = tokio::select! {
             biased;
-            _ = ctx.cancel.cancelled() => return McpElicitationAnswer::Cancel,
+            _ = ctx.cancel.cancelled() => None,
             asked = asker.ask_within(request, (secs > 0).then(|| Duration::from_secs(secs))) => asked,
         };
+        if let Some(task) = self.listed.get() {
+            task.end_waiting(&prompt_id);
+        }
         match asked {
             Some(outcome) => outcome.answer_as().unwrap_or_else(|| {
                 tracing::debug!(server, reason = ?outcome.decline_reason(), "MCP server's question not answered");

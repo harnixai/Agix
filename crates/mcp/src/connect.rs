@@ -454,10 +454,20 @@ impl StdioMcpClient {
         let _in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();
-        let result = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
+        let end = crate::elicit::call_with_rounds(&self.server_name, req, scope, |params| {
             self.request("call_tool", limit, &svc, svc.call_tool_once(params))
         })
         .await?;
+        let result = match end {
+            crate::elicit::CallEnd::Complete(result) => result,
+            crate::elicit::CallEnd::Task(task) => {
+                let peer = Polling {
+                    client: self,
+                    svc: svc.clone(),
+                };
+                crate::tasks::await_task(&self.server_name, &peer, task, scope, limit).await?
+            }
+        };
 
         let mut content_blocks = Vec::new();
         for c in result.content.iter() {
@@ -666,6 +676,53 @@ fn render_prompt_result(result: rmcp::model::GetPromptResult) -> String {
 }
 
 type Service = rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>;
+
+struct Polling<'a> {
+    client: &'a StdioMcpClient,
+    svc: Arc<Service>,
+}
+
+#[async_trait::async_trait]
+impl crate::tasks::TaskPeer for Polling<'_> {
+    async fn get(&self, task_id: &str) -> Result<rmcp::model::DetailedTask, McpError> {
+        let params = rmcp::model::GetTaskParams::new(task_id);
+        self.client
+            .request(
+                "tasks/get",
+                self.client.request_limit(),
+                &self.svc,
+                self.svc.get_task(params),
+            )
+            .await
+            .map(|got| got.task)
+    }
+
+    async fn update(
+        &self,
+        task_id: &str,
+        responses: rmcp::model::InputResponses,
+    ) -> Result<(), McpError> {
+        let params = rmcp::model::UpdateTaskParams::new(task_id, responses);
+        self.client
+            .request(
+                "tasks/update",
+                self.client.request_limit(),
+                &self.svc,
+                self.svc.update_task(params),
+            )
+            .await
+    }
+
+    fn cancel_detached(&self, task_id: &str) {
+        let svc = self.svc.clone();
+        let params = rmcp::model::CancelTaskParams::new(task_id);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(5), svc.cancel_task(params)).await;
+            });
+        }
+    }
+}
 
 fn is_open(svc: &Service) -> bool {
     !svc.is_closed() && !svc.peer().is_transport_closed()
