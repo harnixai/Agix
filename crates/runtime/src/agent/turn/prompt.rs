@@ -423,7 +423,7 @@ impl Agent {
     ///
     /// The frozen collection walks the directory tree upward and gathers
     /// every `AGENTS.md` it finds into `memory_blocks`
-    /// (`skill_format::collect_agents_md`), so a session rooted in a sub-package of
+    /// (`prompt_files::collect_agents_md`), so a session rooted in a sub-package of
     /// a monorepo also sees the repository-root conventions.
     ///
     /// **Precedence: root-first, nearest-last, nearest wins.** Files are

@@ -2255,12 +2255,12 @@ dependencies = [
  "hex",
  "libc",
  "platform",
+ "prompt-files",
  "scene",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "skill-format",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2506,6 +2506,16 @@ dependencies = [
  "tokio",
  "tracing",
  "windows",
+]
+
+[[package]]
+name = "prompt-files"
+version = "0.3.13-2026111403"
+dependencies = [
+ "base",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2902,6 +2912,7 @@ dependencies = [
  "model",
  "permissions",
  "platform",
+ "prompt-files",
  "ptc",
  "scene",
  "schemars",
@@ -2909,7 +2920,6 @@ dependencies = [
  "serde_json",
  "session",
  "settings",
- "skill-format",
  "telemetry",
  "tempfile",
  "thiserror 2.0.18",
@@ -3369,15 +3379,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
-name = "skill-format"
-version = "0.3.13-2026111403"
-dependencies = [
- "base",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "skills"
 version = "0.3.13-2026111403"
 dependencies = [
@@ -3387,12 +3388,12 @@ dependencies = [
  "notify",
  "permissions",
  "platform",
+ "prompt-files",
  "regex",
  "runtime",
  "scene",
  "serde_json",
  "settings",
- "skill-format",
  "tempfile",
  "tokio",
  "tokio-util",

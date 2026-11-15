@@ -31,7 +31,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
          hooks · tools · session · compaction ──────── K2
            │
          model · scene · history · telemetry · permissions · ptc ·
-         settings · memory · skill-format ─────────────────────── K1
+         settings · memory · prompt-files ─────────────────────── K1
            │
  本机    platform ───────── 执行层的本机实现(进程、文件、网络、OS 沙箱)、崩溃钩子、进程身份
            │
@@ -44,7 +44,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
   每个工作区成员在 `CRATES` 一张表里有一个级别,没登记的 crate 过不了。第一方的 normal / build
   边只能向下指,dev 边不限。
 - 内核分三级,同级之间不互相依赖:**K1**(`model`、`history`、`telemetry`、`scene`、
-  `permissions`、`ptc`、`settings`、`memory`、`skill-format`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
+  `permissions`、`ptc`、`settings`、`memory`、`prompt-files`)只需要契约与本机层,**K2**(`hooks`、`tools`、`session`、`compaction`)
   建在 K1 上,**K3**(`runtime`)建在两者之上。内核 crate **不依赖任何模块 crate**。
 - 级别不对的依赖只能登记在 `NOT_YET` 里,写明什么能去掉它;名单带陈旧检查,边没了条目就得删。
 - 模块依赖契约与内核;模块之间的依赖只经 `Module::requires`(硬依赖)与 `Module::after`(软顺序)声明,
@@ -57,7 +57,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
   `model`、`mcp`、`packages`、`assembly`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
-  `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`skill-format`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
+  `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`prompt-files`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
 - 内核与模块不能带模块命名的 feature,也不转发模块 feature;模块开关只在 `assembly`
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
@@ -102,7 +102,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
 | `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
 | `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
-| `skill-format` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格 |
+| `prompt-files` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格 |
 | `team` | 模块 | 团队协调器(`Coordinator`)、邮箱与 `TeamTool`;`agents` 的团队工具驱动它 |
 | `agents` | 模块 | 子 agent(`Agent` 工具)、agent 类型目录、团队工具;依赖 `team` |
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |

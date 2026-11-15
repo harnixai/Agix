@@ -37,7 +37,7 @@ pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("platform", Machine),
     ("model", K1),
     ("memory", K1),
-    ("skill-format", K1),
+    ("prompt-files", K1),
     ("history", K1),
     ("telemetry", K1),
     ("scene", K1),

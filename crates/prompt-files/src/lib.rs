@@ -1,5 +1,6 @@
-//! The markdown instruction files the engine reads: `SKILL.md` frontmatter,
-//! `AGENTS.md` collected from the working directory upward, and output styles.
+//! The markdown files the engine reads into the prompt: `SKILL.md`
+//! frontmatter, `AGENTS.md` collected from the working directory upward, output
+//! styles, the configured instruction file and the `.agix/rules/` directories.
 
 mod agents_md;
 mod output_style;

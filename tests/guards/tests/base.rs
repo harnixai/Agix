@@ -224,7 +224,7 @@ fn base_reaches_the_filesystem_only_where_listed() {
         found,
         BASE_FS,
         "base holds contracts and data: do the I/O in the crate that owns it (settings, memory, \
-         skill-format, platform) or through `exec.filesystem`; or list the file with why",
+         prompt-files, platform) or through `exec.filesystem`; or list the file with why",
     );
 }
 

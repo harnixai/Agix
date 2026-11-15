@@ -4,7 +4,7 @@ members = [
     "crates/core",
     "crates/settings",
     "crates/memory",
-    "crates/skill-format",
+    "crates/prompt-files",
     "crates/platform",
     "crates/model",
     "crates/hooks",
@@ -115,7 +115,7 @@ demo-rust-plugin = { path = "examples/plugins/rust" }
 hostile-plugins = { path = "tests/fixtures/hostile_plugins" }
 model    = { path = "crates/model" }
 memory   = { path = "crates/memory" }
-skill-format = { path = "crates/skill-format" }
+prompt-files = { path = "crates/prompt-files" }
 hooks    = { path = "crates/hooks" }
 packages = { path = "crates/packages" }
 script-host = { path = "crates/script-host" }

@@ -1,15 +1,16 @@
 [package]
-name = "skill-format"
+name = "prompt-files"
 version      = { workspace = true }
 edition      = { workspace = true }
 rust-version = { workspace = true }
 license      = { workspace = true }
 publish      = false
-description  = "Agix — markdown instruction files the engine reads: SKILL.md, AGENTS.md, output styles"
+description  = "Agix — the markdown files the engine reads into the prompt: SKILL.md, AGENTS.md, output styles, the instruction file, rule directories"
 
 [dependencies]
 base  = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -10,7 +10,7 @@ use base::interface::model::ToolDef;
 use base::interface::skill_provider::{SkillPrecedence, SkillProvider};
 use base::paths::PromptFiles;
 use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
-use skill_format::parse_skill_file;
+use prompt_files::parse_skill_file;
 use std::path::{Path, PathBuf};
 
 use crate::manager::SkillSource;

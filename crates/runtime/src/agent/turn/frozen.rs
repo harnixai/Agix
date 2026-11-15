@@ -1,5 +1,5 @@
 //! The session's frozen environment: base's git and platform facts, plus what
-//! needs the memory and skill-format crates (AGENTS.md, memory index, output
+//! needs the memory and prompt-files crates (AGENTS.md, memory index, output
 //! style).
 
 use base::engine_exec::EngineExec;
@@ -20,12 +20,12 @@ pub(crate) async fn collect(
     let project = (!opts.outside_project).then_some(ctx.cwd.clone());
     if let Some(project) = &project {
         ctx.memory_blocks =
-            skill_format::collect_agents_md(project, opts.walk_up_claude_md, paths, &files).await;
+            prompt_files::collect_agents_md(project, opts.walk_up_claude_md, paths, &files).await;
     }
     ctx.memory_index = memory::index_for_prompt(paths).await;
     ctx.output_style = match opts.output_style.as_deref() {
         Some(name) if !name.trim().is_empty() => {
-            skill_format::load_output_style(project.as_deref(), name, paths, &files)
+            prompt_files::load_output_style(project.as_deref(), name, paths, &files)
         }
         _ => None,
     };

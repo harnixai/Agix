@@ -66,7 +66,7 @@ fn    crates/runtime/src/plugin.rs                               register_all   
 fn    crates/scene/src/declarative.rs                            DeclaredScene::parse                   90
 fn    crates/script-host/src/lib.rs                              bindings::install                      98
 fn    crates/settings/src/loaded.rs                              LoadedSettings::load_from              92
-fn    crates/skill-format/src/lib.rs                             parse_skill_file                       85
+fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
 fn    crates/skills/src/bundled.rs                               bundled_skills                         135
 fn    crates/telemetry/src/recorder/reader.rs                    load                                   95
 fn    crates/tools/src/bash/paths.rs                             path_args_stay_within                  111

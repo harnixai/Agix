@@ -145,7 +145,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
  模块      agents(+team) · mcp · skills · script-host · packages
  内核      runtime(K3)→ hooks · tools · session · compaction(K2)
              → model · scene · history · telemetry · permissions · ptc ·
-               settings · memory · skill-format(K1)
+               settings · memory · prompt-files(K1)
  本机      platform ───────── 本机的进程、文件、网络与 OS 沙箱
  契约      core(包名 `base`)── trait、共享数据类型与纯判定
 ```
@@ -197,7 +197,7 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 内核 | `scene` | 内建场景、`SceneRegistry`、声明式场景 |
 | 内核 | `history` · `session` · `compaction` | transcript 日志、会话状态、上下文压缩 |
 | 内核 | `permissions` · `hooks` · `telemetry` | 规则引擎、生命周期 hooks、遥测与录制 |
-| 内核 | `settings` · `memory` · `skill-format` | 设置分层与项目信任、文件式记忆、`SKILL.md` 与 `AGENTS.md` 读取 |
+| 内核 | `settings` · `memory` · `prompt-files` | 设置分层与项目信任、文件式记忆、`SKILL.md` 与 `AGENTS.md` 读取 |
 | 内核 | `ptc` | `RunCode`:模型写的程序,在内嵌的 QuickJS 里跑([`ptc.md`](ptc.md)) |
 | 模块 | `agents` · `team` | `Agent` 工具、agent 类型、团队 |
 | 模块 | `mcp` | MCP 客户端与工具适配、MCP OAuth 授权 |
