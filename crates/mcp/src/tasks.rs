@@ -27,6 +27,7 @@ const POLL_MIN: Duration = Duration::from_millis(100);
 const POLL_MAX: Duration = Duration::from_secs(5);
 const POLL_RETRIES: u32 = 3;
 const FAILURE_MESSAGE_CHARS: usize = 2_000;
+const STATUS_MESSAGE_CHARS: usize = 1_000;
 
 /// Where a call's task is listed: the session of the tool call that started it.
 #[derive(Clone)]
@@ -85,10 +86,7 @@ impl Ticket {
             "mcp_status": status_name(task),
         });
         for (key, value) in [
-            (
-                "status_message",
-                task.status_message.clone().map(Into::into),
-            ),
+            ("status_message", status_message(task).map(Into::into)),
             ("poll_interval_ms", task.poll_interval_ms.map(Into::into)),
             ("ttl_ms", task.ttl_ms.map(Into::into)),
         ] {
@@ -114,7 +112,7 @@ impl Ticket {
 
     fn line(&self, task: &Task) {
         let Some(lease) = &self.lease else { return };
-        let message = task.status_message.as_deref().unwrap_or_default();
+        let message = status_message(task).unwrap_or_default();
         lease
             .task()
             .append_output(&format!("[{}] {message}\n", status_name(task)));
@@ -126,8 +124,8 @@ impl Ticket {
         self.line(task);
         lease.task().update_detail(|detail| {
             detail["mcp_status"] = status_name(task).into();
-            match &task.status_message {
-                Some(message) => detail["status_message"] = message.clone().into(),
+            match status_message(task) {
+                Some(message) => detail["status_message"] = message.into(),
                 None => {
                     if let Some(map) = detail.as_object_mut() {
                         map.remove("status_message");
@@ -142,6 +140,17 @@ impl Ticket {
             lease.conclude(status, None);
         }
     }
+}
+
+fn status_message(task: &Task) -> Option<String> {
+    let message = task.status_message.as_deref()?;
+    Some(
+        message
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(STATUS_MESSAGE_CHARS)
+            .collect(),
+    )
 }
 
 fn status_name(task: &Task) -> String {
