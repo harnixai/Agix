@@ -107,12 +107,19 @@ pub struct InFlight {
 }
 
 impl InFlight {
-    /// The server's own questions in this call that were cancelled for
-    /// going over [`MAX_QUESTIONS_PER_CALL`].
-    pub fn cut(&self) -> usize {
-        self.asked
+    /// What the call's result says when the server's own questions went over
+    /// [`MAX_QUESTIONS_PER_CALL`] and the rest were cancelled.
+    pub fn cut_note(&self) -> Option<String> {
+        let cut = self
+            .asked
             .load(Ordering::SeqCst)
-            .saturating_sub(MAX_QUESTIONS_PER_CALL)
+            .saturating_sub(MAX_QUESTIONS_PER_CALL);
+        (cut > 0).then(|| {
+            format!(
+                "[The engine cancelled {cut} more questions the server asked during this call: \
+                 one call may ask at most {MAX_QUESTIONS_PER_CALL} of them.]"
+            )
+        })
     }
 }
 

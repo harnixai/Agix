@@ -48,6 +48,12 @@ const HOME_READERS: &[(&str, &str)] = &[
          then passes it down. Everything else receives what this decides.",
     ),
     (
+        "crates/settings/src/source.rs",
+        "judges whether a user-tier settings file that is a symlink resolves \
+         inside the user's home — where a dotfile manager puts the real file, \
+         a fact about the machine, not a place to store things.",
+    ),
+    (
         "crates/permissions/src/dangerous.rs",
         "judges whether a grant reaches the user's home or above — a fact \
          about the machine the rule will run on, not a place to store things.",
