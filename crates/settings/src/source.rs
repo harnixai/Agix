@@ -125,6 +125,36 @@ mod tests {
         assert!(source.layers().is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_users_settings_file_may_link_within_the_state_directory_but_not_out_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global");
+        std::fs::create_dir_all(global.join("dotfiles")).unwrap();
+        std::fs::write(global.join("dotfiles/settings.json"), r#"{"a":1}"#).unwrap();
+        std::fs::write(outside.path().join("local.json"), r#"{"b":1}"#).unwrap();
+        std::os::unix::fs::symlink(
+            global.join("dotfiles/settings.json"),
+            global.join(SETTINGS_FILE),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("local.json"),
+            global.join(SETTINGS_LOCAL_FILE),
+        )
+        .unwrap();
+        let source = FileTiers::new(global, dir.path().join("absent"), dir.path().join("absent"));
+        let layers = source.layers();
+        assert_eq!(
+            layers.len(),
+            1,
+            "{:?}",
+            layers.iter().map(|l| &l.origin).collect::<Vec<_>>()
+        );
+        assert_eq!(layers[0].value["a"], 1);
+    }
+
     #[test]
     fn a_file_that_will_not_parse_is_skipped_rather_than_fatal() {
         let dir = tempfile::tempdir().unwrap();
