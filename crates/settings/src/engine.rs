@@ -65,12 +65,27 @@ impl LoadedSettings {
         c
     }
 
+    /// The project's `settings.local.json`, unless its `.agix` is the global
+    /// or scene directory — a repository linking its `.agix` there, or a
+    /// project rooted at `$HOME` — where a rule for "this project" would
+    /// allow the call in every project.
+    fn own_local_settings_file(&self) -> Option<std::path::PathBuf> {
+        let paths = &self.paths;
+        self.paths.local_settings_file().filter(|_| {
+            crate::trust::is_own_project_dir(
+                &paths.local_data_dir,
+                &paths.global_data_dir,
+                &paths.user_data_dir,
+            )
+        })
+    }
+
     /// What the permission gate reads of these settings.
     pub fn permission_settings(&self) -> PermissionSettings {
         PermissionSettings {
             rules: self.rules.clone(),
             managed: self.managed.clone(),
-            project_rules: self.paths.local_settings_file().map(|path| {
+            project_rules: self.own_local_settings_file().map(|path| {
                 std::sync::Arc::new(LocalRules::new(path))
                     as std::sync::Arc<dyn base::interface::permission::RuleFile>
             }),
