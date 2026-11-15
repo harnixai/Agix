@@ -176,6 +176,21 @@ fn a_proxy_on_the_daemons_own_port_is_refused_by_both_halves() {
 
 #[test]
 #[allow(clippy::unwrap_used)]
+fn a_proxy_on_the_daemons_own_port_written_as_a_mapped_v6_address_is_refused() {
+    let served = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = served.local_addr().unwrap();
+    let _fence = fence_port(addr);
+    let mapped = proxy(&format!("[::ffff:127.0.0.1]:{}", addr.port()), None);
+    let cut = namespaced(Some(&mapped), &PROGRAMS, outside_socket);
+    assert!(
+        cut.unmet.iter().any(|u| u.contains("port this daemon serves")),
+        "{:?}",
+        cut.unmet
+    );
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
 fn the_relay_forwards_its_socket_to_the_proxy_and_not_to_a_fenced_port() {
     let upstream = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let target = upstream.local_addr().unwrap();
