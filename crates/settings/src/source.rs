@@ -56,12 +56,18 @@ impl ConfigSource for FileTiers {
     }
 }
 
-/// Read and parse one settings file. `None` when it doesn't exist, can't be
-/// read, or doesn't parse — each of the latter two warns rather than
-/// aborting, so one broken file can't stop the process from starting.
+/// Read and parse one settings file. `None` when it doesn't exist, is a
+/// symlink (a link in a project is the repository's choice of what to read),
+/// can't be read, or doesn't parse — each of the latter three warns rather
+/// than aborting, so one broken file can't stop the process from starting.
 pub fn read_settings_file(tier: Tier, path: &Path) -> Option<serde_json::Value> {
-    if !path.exists() {
-        return None;
+    match std::fs::symlink_metadata(path) {
+        Err(_) => return None,
+        Ok(meta) if meta.file_type().is_symlink() => {
+            tracing::warn!(layer = tier.name(), path = %path.display(), "settings file is a symlink; not read");
+            return None;
+        }
+        Ok(_) => {}
     }
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -99,6 +105,24 @@ mod tests {
         assert!(!layers[0].machine_local);
         assert!(layers[1].machine_local);
         assert_eq!(layers[1].value["a"], 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_file_that_is_a_symlink_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere.json");
+        std::fs::write(&elsewhere, r#"{"a":1}"#).unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, project.join(SETTINGS_FILE)).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, project.join(SETTINGS_LOCAL_FILE)).unwrap();
+        let source = FileTiers::new(
+            dir.path().join("absent"),
+            dir.path().join("absent"),
+            project,
+        );
+        assert!(source.layers().is_empty());
     }
 
     #[test]
