@@ -3392,7 +3392,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `egress_denied` | 出口策略不允许连这个模型服务 | `false` |
 | `model_error` | 其余 5xx,或响应读不懂 | `false` |
 | `session_closed` | 这一轮中途会话被关闭或删除 | `false` |
-| `engine_stopped` | 引擎在一轮中途退出;会话已移出内存,下一次调用从 transcript 恢复它 | `true` |
+| `engine_stopped` | 引擎在一轮中途退出;会话已移出内存,下一次调用(包括排在这一轮后面等着的)从 transcript 恢复它。引擎 panic 也走这里,但只在会 unwind 的构建里(dev、`release-fast`);`--release` 构建是 `panic = "abort"`,panic 直接结束整个 daemon | `true` |
 | `engine_unreachable` | 引擎没有接下、没有回答一个回合之外的请求 | `true` |
 | `persist_failed` | 会话的日志缺了它在内存里的一部分(上一轮写日志失败,如 `turn_complete` 报 `persisted: false`),重建前补写又失败;会话没有重建,照旧在跑 | `true` |
 | `internal` | 引擎内部错误 | `false` |
