@@ -3,7 +3,7 @@ SystemInit
 TurnStart
 StepStart step=0
 ToolUse GoldenFlood {}
-ToolResult GoldenFlood is_error=Some(false) content="[Output too long for one result: 60,000 characters, 1 lines. Saved in full to /v… <3403 bytes total>"
+ToolResult GoldenFlood is_error=Some(false) content="[Output too long for one result: 60,000 characters, 1 lines. Saved in full to /v… <3415 bytes total>"
 StepEnd step=0 stop_reason=tool_use tool_calls=1
 StepStart step=1
 TextDelta "first"
@@ -12,7 +12,7 @@ TurnComplete stop_reason=end_turn
 TurnStart
 StepStart step=0
 ToolUse GoldenFlood {}
-ToolResult GoldenFlood is_error=Some(false) content="[Output too long for one result: 60,000 characters, 1 lines. Saved in full to /v… <3403 bytes total>"
+ToolResult GoldenFlood is_error=Some(false) content="[Output too long for one result: 60,000 characters, 1 lines. Saved in full to /v… <3415 bytes total>"
 StepEnd step=0 stop_reason=tool_use tool_calls=1
 StepStart step=1
 TextDelta "second"
@@ -39,10 +39,10 @@ Assistant
 
 == model calls ==
 golden-model max_tokens=1024 messages=3 content_bytes=602 truncated_results=0
-golden-model max_tokens=1024 messages=5 content_bytes=4005 truncated_results=0
-golden-model max_tokens=1024 messages=7 content_bytes=4013 truncated_results=0
-golden-model max_tokens=1024 messages=9 content_bytes=7416 truncated_results=0
-golden-model max_tokens=1024 messages=11 content_bytes=7427 truncated_results=0
+golden-model max_tokens=1024 messages=5 content_bytes=4017 truncated_results=0
+golden-model max_tokens=1024 messages=7 content_bytes=4025 truncated_results=0
+golden-model max_tokens=1024 messages=9 content_bytes=7440 truncated_results=0
+golden-model max_tokens=1024 messages=11 content_bytes=7451 truncated_results=0
 unconsumed_replies=0
 == telemetry ==
 turn_start turn_no=0
