@@ -594,6 +594,47 @@ async fn a_project_grant_without_a_project_is_kept_for_the_session() {
     );
 }
 
+/// An untrusted project's `settings.local.json` is withheld on the next load,
+/// so a grant written there would be asked again; it is refused with the
+/// reason, and holds for this session.
+#[tokio::test]
+async fn a_project_grant_in_an_untrusted_project_says_why_it_is_not_kept() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let settings = settings::LoadedSettings::load(
+        root.path().join("global"),
+        root.path().join("scene"),
+        project.clone(),
+        "code",
+        "m",
+        &settings::section::Sections::none(),
+    );
+    assert!(settings.trust().is_untrusted(), "{:?}", settings.trust());
+    let perm = Policy::from_settings(&settings.permission_settings(), []);
+    let kept = perm
+        .grant(Grant::new(
+            "Probe",
+            Some("git status".into()),
+            GrantScope::Project,
+        ))
+        .await;
+    assert!(
+        matches!(&kept, Err(GrantError::NotPersisted { reason, .. }) if reason.contains("project.trust")),
+        "{kept:?}"
+    );
+    assert!(!project.join(base::paths::SETTINGS_LOCAL_FILE).exists());
+    assert!(matches!(
+        decide(
+            &perm,
+            &content_tool("Probe", "git status"),
+            &session(PermissionMode::Default)
+        )
+        .await,
+        PermissionOutcome::Permit { .. }
+    ));
+}
+
 /// A repository whose `.agix` links to the global tier has no tier of its
 /// own: "always allow, this project" there must not land in the global
 /// `settings.local.json`, where it would allow the call in every project.
