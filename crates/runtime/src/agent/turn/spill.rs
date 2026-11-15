@@ -65,8 +65,8 @@ fn preview(text: &str, path: &Path, max_line_chars: usize) -> String {
         .any(|l| l.chars().nth(max_line_chars).is_some())
     {
         marker.push_str(&format!(
-            " Some lines are longer than Read shows ({max_line_chars} characters); \
-             use Bash (cut -c, jq) for those."
+            " Some lines are longer than Read shows ({max_line_chars} characters) and are \
+             cut there."
         ));
     }
     let cut = compaction::budget::cut_keeping_fence(text, SPILL_HEAD_CHARS, SPILL_TAIL_CHARS);
@@ -128,8 +128,9 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)
 }
 
-/// Whether this `Read` or `Grep` is aimed at something saved here: what it
-/// finds is a server's or a web page's words, however the path looks.
+/// Whether this `Read`, `Grep` or `Bash` is aimed at something saved here:
+/// what it finds is a server's or a web page's words, however the path
+/// looks. A `Bash` command counts when it names the saved-results directory.
 pub(super) fn reads_a_saved_result(
     ctx: &ToolExecCtx,
     name: &str,
@@ -147,6 +148,14 @@ pub(super) fn reads_a_saved_result(
     let key = match name {
         "Read" => "file_path",
         "Grep" => "path",
+        "Bash" => {
+            let names_it = input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .zip(root.file_name().and_then(|n| n.to_str()))
+                .is_some_and(|(command, dir)| command.contains(dir));
+            return names_it;
+        }
         _ => return false,
     };
     let Some(target) = input.get(key).and_then(|v| v.as_str()) else {
@@ -201,10 +210,8 @@ mod tests {
     #[test]
     fn a_line_longer_than_read_shows_adds_the_hint() {
         let out = preview(&"x".repeat(5_000), Path::new("/s/t.txt"), 2_000);
-        assert!(out
-            .lines()
-            .next()
-            .unwrap()
-            .contains("longer than Read shows"));
+        let marker = out.lines().next().unwrap();
+        assert!(marker.contains("longer than Read shows"));
+        assert!(!marker.contains("Bash"), "{marker}");
     }
 }

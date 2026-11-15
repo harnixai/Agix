@@ -415,3 +415,36 @@ async fn webfetch_reads_a_long_page_in_windows() -> anyhow::Result<()> {
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_mcp_result_read_back_through_bash_is_fenced_and_bash_is_not_suggested(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("spill-bash-fence", &stub)
+        .settings(json!({ "mcp_servers": { "toy": McpToy::stdio_config(&[])? } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    let path = saved_path(&run, &session, "m1");
+    stub.script_when(
+        TURN,
+        [
+            Reply::calls("m1", "mcp__toy__big", json!({ "bytes": 40_000 })),
+            bash(
+                "b1",
+                &format!("head -c 5000 {} | tail -c 200", path.display()),
+            ),
+            Reply::text("done"),
+        ],
+    );
+    let events = run
+        .turn(&session, "ask the server, then read it back with a shell")
+        .await?;
+    let shown = result_in(&last_turn_request(&stub), "m1");
+    assert!(!shown.contains("Bash"), "{shown}");
+    let (_, read, failed) = result_of(&events, "Bash");
+    assert!(!failed && read.starts_with("<external-content"), "{read}");
+    run.finish().await;
+    Ok(())
+}
