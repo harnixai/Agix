@@ -160,7 +160,11 @@ pub(super) async fn fire_ctx_hook_until(
 }
 
 fn post_context(ctx: &ToolExecCtx, event: hooks::HookEvent, result: &hooks::runner::HookRunResult) {
-    for reminder in result.context_reminders(event) {
+    post_reminders(ctx, result.context_reminders(event));
+}
+
+fn post_reminders(ctx: &ToolExecCtx, reminders: Vec<String>) {
+    for reminder in reminders {
         ctx.session_state.post_notice(None, reminder);
     }
 }
@@ -371,7 +375,7 @@ pub(super) async fn execute_tool_inner(
     let deferred = ctx.config.deferred_tools.contains(name);
 
     // The hook may rewrite the input, and permission judges what will run.
-    let (input, hook) = pre_tool_use(ctx, name, input).await;
+    let (input, hook, reminders) = pre_tool_use(ctx, name, input).await;
     let ends = EndsForTheHooks::arm(ctx, name, &input);
     let mut tool_ctx = tool_context_for(ctx, Some(&tool.spec()));
     if let base::tool::ValidationResult::Err(message, _) =
@@ -391,6 +395,7 @@ pub(super) async fn execute_tool_inner(
             return Err(refused);
         }
     };
+    post_reminders(ctx, reminders);
     let user_approved = authorized.by_person;
     tool_ctx.approval = Some(authorized.approval);
     let owed = authorized

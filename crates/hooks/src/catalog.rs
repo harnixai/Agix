@@ -80,7 +80,7 @@ impl HookEvent {
                      `Blocked by PreToolUse hook: <message>`;`updated_input`:换掉入参,换过的照常校验、过权限;\
                      `decision: \"approve\"`:权限检查要询问时不再问人,直接放行(规则拒绝的照样拒绝,managed 层的 `ask` 照样问人;\
                      `prompt` / `agent` hook 要写 `may_approve: true`);skill 的内联命令只认拦下,\
-                     批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(拦下的调用不收)",
+                     批准不算替人答应,要询问的照样不跑,`updated_input` 换过的命令照样按这个规矩判);`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(权限判定通过之后、调用执行之前才送;被 hook 拦下、被规则拒绝、询问被拒的调用不收)",
                 ),
             ),
             HookEvent::PostToolUse => (

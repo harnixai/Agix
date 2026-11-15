@@ -58,7 +58,7 @@ fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::i
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       84
 fn    crates/runtime/src/agent/turn/attachments.rs               resolve_attachments                    94
 fn    crates/runtime/src/agent/turn/request.rs                   Agent::recover_call                    97
-fn    crates/runtime/src/agent/turn/tool_exec.rs                 execute_tool_inner                     88
+fn    crates/runtime/src/agent/turn/tool_exec.rs                 execute_tool_inner                     89
 fn    crates/runtime/src/agent/turn/tool_exec.rs                 post_tool_use                          83
 fn    crates/runtime/src/agent/turn/tool_permission.rs           ask                                    89
 fn    crates/runtime/src/agent/turn/tool_permission.rs           authorize                              95

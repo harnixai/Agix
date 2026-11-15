@@ -1962,6 +1962,46 @@ async fn pre_tool_use_context_of_a_blocked_call_is_dropped() -> anyhow::Result<(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pre_tool_use_context_of_a_call_the_rules_deny_is_dropped_and_of_an_allowed_one_kept(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut run = stubbed("ctx-denied", &stub)
+        .settings(json!({
+            "hooks_config": { "PreToolUse": [adding_context(dir.path(), "d.sh", "PRE-CTX-MARK")?] },
+            "permission_rules": [
+                { "tool": "Bash(echo denied)", "action": "deny" },
+                { "tool": "Bash(echo allowed)", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls("d1", "Bash", json!({ "command": "echo denied" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "go").await?;
+    let second = &stub.calls()[1];
+    assert!(second.messages_contain("Denied by permission"));
+    assert!(
+        !second.messages_contain("PRE-CTX-MARK"),
+        "{}",
+        second.messages_text()
+    );
+
+    let before = stub.call_count();
+    stub.script([
+        Reply::calls("a1", "Bash", json!({ "command": "echo allowed" })),
+        Reply::text("done"),
+    ]);
+    run.turn(&session, "again").await?;
+    assert!(stub.calls()[before + 1].messages_contain("PRE-CTX-MARK"));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn context_past_the_cap_is_cut_and_says_so() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let dir = tempfile::tempdir()?;

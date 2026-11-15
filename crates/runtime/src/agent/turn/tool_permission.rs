@@ -7,8 +7,10 @@ use super::reporting::record_permission_decision;
 use super::tool_exec::{fire_ctx_lifecycle_hook, lifecycle_input, Caller, ToolExecCtx};
 use std::sync::Arc;
 
-/// `PreToolUse`: the input the call goes on with, and what the hook answered
-/// about it in advance. A block keeps the input as the model wrote it.
+/// `PreToolUse`: the input the call goes on with, what the hook answered
+/// about it in advance, and the reminders its `additional_context` makes,
+/// which are the caller's to deliver once the call is let through. A block
+/// keeps the input as the model wrote it.
 ///
 /// A skill's inline command is the repository's text put to the hook with no
 /// model in between: the hook may refuse it, but its approval does not stand
@@ -17,10 +19,10 @@ pub(super) async fn pre_tool_use(
     ctx: &ToolExecCtx,
     name: &str,
     input: serde_json::Value,
-) -> (serde_json::Value, base::interface::permission::HookAnswer) {
+) -> PreToolUseAnswer {
     use base::interface::permission::HookAnswer;
     if !ctx.hooks.has_hooks_for(hooks::HookEvent::PreToolUse) {
-        return (input, HookAnswer::None);
+        return (input, HookAnswer::None, Vec::new());
     }
     let pre_input = hooks::HookInput {
         hook_event_name: "PreToolUse".into(),
@@ -35,21 +37,19 @@ pub(super) async fn pre_tool_use(
         user_prompt: None,
         ..Default::default()
     };
-    match answer_of_pre_tool_use(
-        &ctx.hooks,
-        &pre_input,
-        input,
-        &ctx.cancel,
-        &ctx.session_state,
-    )
-    .await
-    {
-        (input, HookAnswer::Approve { .. }) if ctx.caller == Caller::InlineCommand => {
-            (input, HookAnswer::None)
+    match answer_of_pre_tool_use(&ctx.hooks, &pre_input, input, &ctx.cancel).await {
+        (input, HookAnswer::Approve { .. }, reminders) if ctx.caller == Caller::InlineCommand => {
+            (input, HookAnswer::None, reminders)
         }
         answered => answered,
     }
 }
+
+pub(super) type PreToolUseAnswer = (
+    serde_json::Value,
+    base::interface::permission::HookAnswer,
+    Vec<String>,
+);
 
 /// Run the `PreToolUse` hooks on `pre_input`, about a call with `input`.
 async fn answer_of_pre_tool_use(
@@ -57,8 +57,7 @@ async fn answer_of_pre_tool_use(
     pre_input: &hooks::HookInput,
     input: serde_json::Value,
     cancel: &tokio_util::sync::CancellationToken,
-    session_state: &base::context::SessionState,
-) -> (serde_json::Value, base::interface::permission::HookAnswer) {
+) -> PreToolUseAnswer {
     use base::interface::permission::HookAnswer;
     let hook_result = hooks
         .run(hooks::HookEvent::PreToolUse, pre_input, cancel)
@@ -68,7 +67,7 @@ async fn answer_of_pre_tool_use(
             hook: "PreToolUse".into(),
             reason: "the turn was cancelled before its hooks answered".into(),
         };
-        return (input, answer);
+        return (input, answer, Vec::new());
     }
     if let Some(response) = hook_result.blocked() {
         let answer = HookAnswer::Block {
@@ -78,11 +77,9 @@ async fn answer_of_pre_tool_use(
                 .clone()
                 .unwrap_or_else(|| "no reason given".into()),
         };
-        return (input, answer);
+        return (input, answer, Vec::new());
     }
-    for reminder in hook_result.context_reminders(hooks::HookEvent::PreToolUse) {
-        session_state.post_notice(None, reminder);
-    }
+    let reminders = hook_result.context_reminders(hooks::HookEvent::PreToolUse);
     let input = hook_result.updated_input().cloned().unwrap_or(input);
     let answer = match hook_result.approved() {
         Some(_) => HookAnswer::Approve {
@@ -90,7 +87,7 @@ async fn answer_of_pre_tool_use(
         },
         None => HookAnswer::None,
     };
-    (input, answer)
+    (input, answer, reminders)
 }
 
 /// Why a call does not run: what the `PermissionDenied` hook is told, and
