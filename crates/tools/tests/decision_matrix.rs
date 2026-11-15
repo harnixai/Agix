@@ -577,6 +577,11 @@ fn context_like_the_runtime(session: &Arc<dyn Session>, cwd: &Path) -> ToolConte
         .config
         .sandbox
         .confinement(&ctx.exec, cwd, &ctx.session_id);
+    ctx.engine_git = Arc::new(ctx.config.sandbox.engine_git(
+        &ctx.exec,
+        ctx.config.project_trust,
+        None,
+    ));
     assert_eq!(
         ctx.engine_git.is_sandboxed(),
         !ctx.config.sandbox.disabled,

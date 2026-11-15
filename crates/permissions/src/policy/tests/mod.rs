@@ -35,6 +35,12 @@ async fn call_in(
     );
     ctx.session_id = "s1".into();
     ctx.session = session.clone();
+    ctx.sandbox_mut().disabled = false;
+    ctx.engine_git = Arc::new(ctx.config.sandbox.engine_git(
+        &ctx.exec,
+        ctx.config.project_trust,
+        None,
+    ));
     let facts = match tool {
         Some(tool) => ToolFacts::gather(tool.as_ref(), input, &ctx).await,
         None => ToolFacts::unknown_tool(),
