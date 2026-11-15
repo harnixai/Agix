@@ -258,6 +258,7 @@ pub const CAPABILITIES: &[&str] = &[
     "session_export",
     "session_import",
     "checkpoints",
+    "session_attended",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

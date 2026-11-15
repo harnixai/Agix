@@ -247,6 +247,48 @@ async fn build_matches_the_golden_snapshot() {
 
     {
         let seen = fresh();
+        let mut scene = bare_scene("unattended");
+        scene.interactive = false;
+        let mut template: Vec<Arc<dyn base::tool::Tool>> = vec![Arc::new(Named("Early"))];
+        template.extend(
+            base::interface::scene::NEEDS_A_USER
+                .iter()
+                .map(|n| Arc::new(Named(n)) as Arc<dyn base::tool::Tool>),
+        );
+        let builder = builder_for(scene, template_of(template))
+            .question_prompts(true)
+            .attended(Some(true));
+        section(
+            "unattended scene, attended session",
+            build_described(builder, &seen),
+        );
+    }
+
+    {
+        let seen = fresh();
+        let mut scene = bare_scene("whitelist");
+        scene.tools = base::interface::scene::ToolSurface::allowing(&["Early"]);
+        let builder = builder_for(
+            scene,
+            template_of(vec![Arc::new(Named("Early")), structured()]),
+        )
+        .output_schema(serde_json::json!({"type": "object"}));
+        section(
+            "output schema through a whitelist",
+            build_described(builder, &seen),
+        );
+    }
+
+    {
+        let mut scene = bare_scene("refused");
+        scene.tools = base::interface::scene::ToolSurface::denying(&["StructuredOutput"]);
+        let builder = builder_for(scene, template_of(vec![structured()]))
+            .output_schema(serde_json::json!({"type": "object"}));
+        section("refused: output schema denied", refusal(builder));
+    }
+
+    {
+        let seen = fresh();
         let runner = Arc::new(local_hook_runner(Default::default()));
         let builder = builder_for(
             scene_deferring("delegate", &[]),

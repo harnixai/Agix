@@ -51,6 +51,8 @@ pub(super) struct HostSetup {
     /// See [`Builder::rule_provider`].
     pub(super) rule_provider: Option<Arc<dyn base::interface::instruction_provider::RuleProvider>>,
     pub(super) modules: Vec<Arc<dyn crate::module::Module>>,
+    /// See [`Builder::attended`].
+    pub(super) attended: Option<bool>,
 }
 
 impl HostSetup {
@@ -77,6 +79,7 @@ impl HostSetup {
             token_counter: None,
             rule_provider: None,
             modules: Vec::new(),
+            attended: None,
         }
     }
 }

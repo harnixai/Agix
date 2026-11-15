@@ -566,6 +566,7 @@ mod tests {
             output_style_content: None,
             available_tools: None,
             tool_results_ever_cleared: false,
+            attended: false,
         }
     }
 

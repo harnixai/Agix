@@ -15,6 +15,7 @@ impl Builder {
             .scene
             .take()
             .ok_or_else(|| EngineError::Internal("scene required".into()))?;
+        let attended = self.host.attended.unwrap_or(scene.interactive);
         let modules = crate::module::permitted_by(&self.host.modules, scene.as_ref())
             .map_err(|e| EngineError::Internal(e.to_string()))?;
         crate::module::check_order(&modules).map_err(|e| EngineError::Internal(e.to_string()))?;
@@ -91,6 +92,7 @@ impl Builder {
             environment,
             rules,
             memory_store,
+            attended,
         })
     }
 

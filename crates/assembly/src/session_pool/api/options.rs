@@ -59,6 +59,15 @@ pub struct SessionOptions {
     /// with `session.respondToolCall`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_tools: Vec<HostToolOption>,
+    /// Whether someone answers this session's questions and permission
+    /// prompts; `None` is its scene's `interactive`. Its sub-agents and team
+    /// members are attended as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attended: Option<bool>,
+    /// `false`: the session is not named after its first turn, its name is
+    /// left to `session.rename`. `None` or `true`: as its scene says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_name: Option<bool>,
 }
 
 /// One entry of `options.host_tools`.
@@ -148,6 +157,12 @@ pub struct TelemetryOptions {
 }
 
 impl SessionOptions {
+    /// Whether the session may be named after its first turn: unless
+    /// `auto_name` says no.
+    pub fn names_itself(&self) -> bool {
+        self.auto_name != Some(false)
+    }
+
     /// Whether the host answers the model's questions (`AskUserQuestion`).
     pub fn answers_questions(&self) -> bool {
         self.prompt_types

@@ -93,7 +93,9 @@ impl Agent {
             })
             .collect::<Vec<_>>()
             .into_iter()
-            .map(|(name, count)| crate::repeat_guard::notice(&name, count, self.scene.interactive))
+            .map(|(name, count)| {
+                crate::repeat_guard::notice(&name, count, self.identity.attended())
+            })
             .collect();
         for text in notices {
             self.session.push_message(ModelMessage {

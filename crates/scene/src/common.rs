@@ -150,6 +150,7 @@ pub(crate) fn test_ctx() -> ScenePromptContext<'static> {
     c.model_name = Cow::Borrowed("claude-sonnet-4-6");
     c.is_git = true;
     c.git_branch = Some(Cow::Borrowed("main"));
+    c.attended = true;
     c
 }
 

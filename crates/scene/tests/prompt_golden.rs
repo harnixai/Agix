@@ -44,7 +44,8 @@ fn ctx() -> ScenePromptContext<'static> {
 }
 
 fn render(scene: &SceneSpec) -> serde_json::Value {
-    let ctx = ctx();
+    let mut ctx = ctx();
+    ctx.attended = scene.interactive;
     serde_json::json!({
         "id": scene.id,
         "system_prompt": scene.system_prompt(&ctx),

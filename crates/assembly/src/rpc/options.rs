@@ -19,6 +19,8 @@ impl SessionOptions {
         "prompt",
         "prompt_types",
         "host_tools",
+        "attended",
+        "auto_name",
     ];
 
     /// The fields whose value is a list. Each entry is read on its own, so
@@ -234,6 +236,8 @@ mod tests {
                 deferred: false,
                 subagents: false,
             }],
+            attended: Some(true),
+            auto_name: Some(false),
         };
         let serialized = serde_json::to_value(&every_field).unwrap();
         let mut names: Vec<&str> = serialized
@@ -284,6 +288,24 @@ mod tests {
         let (_, ignored) =
             SessionOptions::from_params(&serde_json::json!({"options": {"permission_rules": {}}}));
         assert_eq!(ignored[0].field.as_deref(), Some("permission_rules"));
+    }
+
+    #[test]
+    fn attended_and_auto_name_take_only_a_bool() {
+        let (options, ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "attended": true, "auto_name": false,
+        }}));
+        let options = options.unwrap();
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(options.attended, Some(true));
+        assert!(!options.names_itself());
+
+        let (_, mut ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "attended": "yes", "auto_name": 0,
+        }}));
+        ignored.sort_by(|a, b| a.field.cmp(&b.field));
+        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        assert_eq!(fields, [Some("attended"), Some("auto_name")]);
     }
 
     #[test]

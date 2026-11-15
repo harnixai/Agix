@@ -35,7 +35,7 @@ impl Builder {
             session_state: w.session_state,
             current_turn_id: String::new(),
             session_end,
-            identity: self.identity(w.agent_depth),
+            identity: self.identity(w.agent_depth, w.resolved.attended),
             llm: ModelRoute::new(
                 w.resolved.model,
                 self.host.task_router.take(),
@@ -121,13 +121,14 @@ impl Builder {
         (recovery_policy, turn_policy, budget_policy)
     }
 
-    pub(super) fn identity(&mut self, agent_depth: u32) -> Identity {
+    pub(super) fn identity(&mut self, agent_depth: u32, attended: bool) -> Identity {
         Identity {
             agent_depth,
             agent_type: self.spec.agent_type.take(),
             team_seat: self.spec.team_seat.take(),
             drive_goals: !self.spec.goal_rounds_from_owner,
             skip_warmup: self.spec.skip_warmup,
+            attended,
             start_source: None,
         }
     }

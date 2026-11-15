@@ -487,7 +487,7 @@ impl Agent {
     pub(super) async fn inject_session_context(&mut self) {
         let model = self.settings.values.model.model_name.clone();
         let facts = {
-            let ctx = build_prompt_context(
+            let mut ctx = build_prompt_context(
                 &self.settings,
                 self.prompt.frozen.as_ref(),
                 None,
@@ -496,6 +496,7 @@ impl Agent {
                 self.compaction.ever_cleared(),
                 self.policies.environment().as_ref(),
             );
+            ctx.attended = self.identity.attended();
             self.scene.session_context(&ctx)
         };
         let instructions = self.build_instruction_context();
@@ -594,6 +595,7 @@ impl Agent {
             self.policies.environment().as_ref(),
         );
         ctx.available_tools = tools_ref;
+        ctx.attended = self.identity.attended();
         let rules = self.prompt.rules.rules();
         let values = &self.settings.values;
         let memory_prompt: Option<String> = values

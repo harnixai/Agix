@@ -3,7 +3,9 @@
 //! [`RESIDENT_TOOLS`] is advertised by name until `ToolSearch` fetches its
 //! schema. Created [`Interaction::Interactive`] (someone answers questions
 //! and permission prompts) or [`Interaction::Unattended`] (nobody does: the
-//! tools, prompt lines and skills that wait on a reply are left out).
+//! tools, prompt lines and skills that wait on a reply are left out) — the
+//! default for a session that does not say; the prompt follows the session's
+//! own attendance (`ScenePromptContext::attended`).
 //!
 //! System prompt assembly uses a section cache keyed by content fingerprint
 //! (see `SECTION_CACHE` below) so unchanged sections are not rebuilt on
@@ -115,24 +117,19 @@ pub enum Interaction {
 }
 
 pub fn spec(interaction: Interaction) -> SceneSpec {
-    let interactive = interaction == Interaction::Interactive;
-    let mut s = SceneSpec::new("code", "Agix Code", Arc::new(CodePrompt { interaction }));
+    let mut s = SceneSpec::new("code", "Agix Code", Arc::new(CodePrompt));
     s.description = "编程场景 — 完整工具权限的通用编程 Agent".into();
     s.requires_project = true;
     s.supports_team = true;
-    s.interactive = interactive;
+    s.interactive = interaction == Interaction::Interactive;
     let deferred: Vec<&str> = ALL_DEFERRABLE_TOOLS
         .iter()
         .copied()
         .filter(|name| !RESIDENT_TOOLS.contains(name))
         .collect();
     s.tools = ToolSurface::denying(NOT_OFFERED).deferring(&deferred);
-    let user: &[&str] = if interactive { USER_SKILLS } else { &[] };
-    s.bundled_skills = CODING_SKILLS
-        .iter()
-        .chain(user)
-        .map(|s| s.to_string())
-        .collect();
+    s.bundled_skills = CODING_SKILLS.iter().map(|s| s.to_string()).collect();
+    s.attended_skills = USER_SKILLS.iter().map(|s| s.to_string()).collect();
     s.token_budget = TokenBudget::new(150_000, 20);
     s.reminders = vec![Reminder::GitStatus];
     s
@@ -141,13 +138,11 @@ pub fn spec(interaction: Interaction) -> SceneSpec {
 /// The code scene's prompt: sections rebuilt only when their input changed
 /// (see `SECTION_CACHE`).
 #[derive(Debug, Clone, Copy)]
-pub struct CodePrompt {
-    pub interaction: Interaction,
-}
+pub struct CodePrompt;
 
 impl ScenePrompt for CodePrompt {
     fn system(&self, ctx: &ScenePromptContext) -> Vec<PromptBlock> {
-        let sections = build_section_registry(ctx, self.interaction == Interaction::Interactive);
+        let sections = build_section_registry(ctx, ctx.attended);
         render_prompt_blocks(resolve_sections(sections))
     }
 
@@ -740,28 +735,27 @@ mod tests {
 
     #[test]
     fn an_unattended_prompt_does_not_count_on_a_reply() {
-        let unattended = spec(Interaction::Unattended);
-        let interactive = code();
-        assert!(interactive.interactive && !unattended.interactive);
+        assert!(code().interactive && !spec(Interaction::Unattended).interactive);
+        let mut unattended = ctx();
+        unattended.attended = false;
 
-        let prompt = text(&unattended.system_prompt(&ctx()));
+        let prompt = text(&code().system_prompt(&unattended));
         for line in ["Check with the user", "`! <command>`", "AskUserQuestion"] {
             assert!(!prompt.contains(line), "{line}");
         }
         assert!(prompt.contains("Nobody is there to confirm"));
-        assert!(text(&interactive.system_prompt(&ctx())).contains("Check with the user"));
+        let attended = text(&spec(Interaction::Unattended).system_prompt(&ctx()));
+        assert!(attended.contains("Check with the user"));
     }
 
     #[test]
-    fn only_an_interactive_session_gets_the_skills_that_hand_back_to_the_user() {
-        let unattended = spec(Interaction::Unattended).bundled_skills;
-        let interactive = code().bundled_skills;
-        assert!(unattended
-            .iter()
-            .all(|s| CODING_SKILLS.contains(&s.as_str())));
-        for skill in USER_SKILLS {
-            assert!(interactive.iter().any(|s| s == skill), "{skill}");
-            assert!(!unattended.iter().any(|s| s == skill), "{skill}");
+    fn the_skills_that_hand_back_to_the_user_are_listed_only_when_attended() {
+        for scene in [code(), spec(Interaction::Unattended)] {
+            assert!(scene
+                .bundled_skills
+                .iter()
+                .all(|s| CODING_SKILLS.contains(&s.as_str())));
+            assert_eq!(scene.attended_skills, USER_SKILLS);
         }
     }
 }

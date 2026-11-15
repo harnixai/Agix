@@ -5587,6 +5587,20 @@
     "SessionOptions": {
       "description": "Optional per-session configuration passed via `session.create` or\n`session.run_turn` params.\n\nTaken when the session is created and kept with it: every rebuild of the\nsession's engine — a settings change, an idle eviction, a daemon restart —\napplies the same options again. Options sent with a later call to an\nexisting session are ignored.",
       "properties": {
+        "attended": {
+          "description": "Whether someone answers this session's questions and permission\nprompts; `None` is its scene's `interactive`. Its sub-agents and team\nmembers are attended as it is.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "auto_name": {
+          "description": "`false`: the session is not named after its first turn, its name is\nleft to `session.rename`. `None` or `true`: as its scene says.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "clock": {
           "anyOf": [
             {

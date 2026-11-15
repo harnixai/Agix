@@ -208,6 +208,17 @@ impl Builder {
         self
     }
 
+    /// Whether someone answers this session's questions and permission
+    /// prompts; `None` is its scene's [`SceneSpec::interactive`]. Decides
+    /// what the scene's `interactive` would: whether a call the policy asks
+    /// about is put to the host or refused, which tools and built-in skills
+    /// the session has, and which prompt a scene with two picks. Its
+    /// delegates are attended as it is.
+    pub fn attended(mut self, attended: Option<bool>) -> Self {
+        self.host.attended = attended;
+        self
+    }
+
     /// Whether the host answers MCP servers' questions over the channel
     /// protocol: `AgentEvent::McpElicitationPrompt` out,
     /// `InputMessage::McpElicitationResponse` back. Off by default; with it
@@ -602,6 +613,8 @@ impl Builder {
     /// `StructuredOutput` then shows the model this schema, refuses a call
     /// that does not match it, and is announced up front rather than left
     /// for `ToolSearch` to find. What it accepts arrives on `TurnComplete`.
+    /// It passes the scene's allow list; `build` fails with
+    /// [`EngineError::OutputSchema`] when the scene's deny list takes it.
     pub fn output_schema(mut self, schema: serde_json::Value) -> Self {
         self.spec.output_schema = Some(schema);
         self

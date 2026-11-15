@@ -118,10 +118,15 @@ pub(crate) struct Identity {
     team_seat: Option<base::interface::delegate::TeamSeat>,
     drive_goals: bool,
     skip_warmup: bool,
+    attended: bool,
     start_source: Option<StartSource>,
 }
 
 impl Identity {
+    pub(crate) fn attended(&self) -> bool {
+        self.attended
+    }
+
     pub(crate) fn agent_depth(&self) -> u32 {
         self.agent_depth
     }
@@ -262,6 +267,10 @@ pub enum EngineError {
     /// they are: one is malformed, or its name is taken.
     #[error("{0}")]
     HostTools(String),
+    /// The session asked for structured output ([`Builder::output_schema`])
+    /// and its scene's deny list takes the tool it is handed back with.
+    #[error("{0}")]
+    OutputSchema(String),
 }
 
 impl Default for Builder {

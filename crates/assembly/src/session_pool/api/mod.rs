@@ -18,7 +18,7 @@ mod turn;
 
 pub use commands::{CommandInfo, CommandKind, CommandSource, NewSchedule};
 pub use daemon::{CloseReason, DaemonEvent, EvictReason, ImportSource};
-pub use error::{Busy, BusyReason, PoolError};
+pub use error::{Busy, BusyReason, InvalidOption, PoolError};
 pub use events::{
     emitted_outside_turns, AskKind, PendingAsk, SessionEvent, SessionFrame, SessionWatcher,
     Subscribed, WatcherId,

@@ -423,13 +423,14 @@ scene.prompt = Arc::new(MyPrompt { base: scene::harnix::HarnixPrompt });
 
 | 字段 | 缺省 | 决定什么 |
 |---|---|---|
-| `interactive` | `false` | 有没有人在场。`false` 时权限询问直接变成写明怎么授权的拒绝、只在实例授权的根内读写、`Bash` 只在 OS 沙箱完整生效时放行(`ARCHITECTURE.md` §3.2.3、§6.3)。要等人回答的工具(`AskUserQuestion`、`EnterPlanMode` / `ExitPlanMode`,`base::interface::scene::NEEDS_A_USER`)由 `Builder::build()` 统一不注册,场景不必自己从白名单里拿掉;`true` 时 `AskUserQuestion` 还要宿主能回答提问才注册(见[向人提问](#向人提问--elicitationask)) |
+| `interactive` | `false` | 有没有人在场的缺省答案,会话自己给了 `Builder::attended` / `options.attended` 的以它为准。`false` 时权限询问直接变成写明怎么授权的拒绝、只在实例授权的根内读写、`Bash` 只在 OS 沙箱完整生效时放行(`ARCHITECTURE.md` §3.2.3、§6.3)。要等人回答的工具(`AskUserQuestion`、`EnterPlanMode` / `ExitPlanMode`,`base::interface::scene::NEEDS_A_USER`)由 `Builder::build()` 统一不注册,场景不必自己从白名单里拿掉;`true` 时 `AskUserQuestion` 还要宿主能回答提问才注册(见[向人提问](#向人提问--elicitationask)) |
 | `ScenePrompt::session_context` | 空 | 本会话的事实(工作目录、平台、草稿目录),由内核在会话开头连同项目说明作为一条上下文消息注入一次,压缩与 `/clear` 之后重新注入。**随会话而变的东西放这里,不要放进系统提示**:系统提示逐字节相同,厂商的前缀缓存才能跨会话命中 |
 | `bundled_skills` | `["skillify"]` | 列出哪些内置技能;依赖的工具不被允许的自动不列 |
+| `attended_skills` | 空 | 除 `bundled_skills` 外再列的内置技能,只在会话有人值守时列 |
 | `path_style` | 绝对路径 | 文件工具给模型看的路径;`harnix` 用相对路径,省掉每次都重复的项目前缀。设置里写了 `path_style` 以设置为准 |
 | `token_budget` | 150000 / 20 | 压缩阈值与保留轮数 |
 | `reminders` | 空 | 每轮 `<system-reminder>` 带什么(`GitStatus`、`Memory`),按列出的顺序;内建场景是 `[GitStatus]` |
-| `session_naming` | `None` | 首轮之后用这段提示(`{first_message}` 换成用户首条消息)让模型给会话起名 |
+| `session_naming` | `None` | 首轮之后用这段提示(`{first_message}` 换成用户首条消息)让模型给会话起名;会话的 `options.auto_name:false` 盖过它 |
 | `memory_extraction_intro` | `None` | 换掉每轮之后记忆抽取的开场白(缺省是写给编程的) |
 
 daemon 的嵌入方把自己的 scene 交给 `Assembly { scenes: vec![Arc::new(my_scene)], .. }`
@@ -502,7 +503,7 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 | `modules` | string[] 或缺省 | 缺省 = 全部 | 这个场景的会话跑哪些模块,见下 |
 | `disabled_modules` | string[] | `[]` | 即使 `modules` 放行也不跑的模块 |
 | `reminders` | `"git_status"` / `"memory"` 的数组 | `[]` | 每轮 `<system-reminder>` 带什么,按列出的顺序 |
-| `interactive` | bool | `false` | 有没有人应答提示;`false` 时需要批准的调用直接拒绝,见 `ARCHITECTURE.md` §3.2.3 |
+| `interactive` | bool | `false` | 有没有人应答提示的缺省答案,会话的 `options.attended` 盖过它;`false` 时需要批准的调用直接拒绝,见 `ARCHITECTURE.md` §3.2.3 |
 | `bundled_skills` | string[] 或缺省 | 缺省 = `["skillify"]` | 列出哪些内置技能;依赖的工具不被允许的不列 |
 
 校验从严:未知字段、缺了必填字段、id 不合规、同一列表里重复、一个名字同时在

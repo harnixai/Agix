@@ -48,6 +48,23 @@ impl SessionSpec {
             .filter(|p| !p.is_empty())
     }
 
+    /// Whether the session is named after its first turn by its scene's
+    /// naming prompt, and the prompt if so.
+    pub(in crate::session_pool) fn naming_prompt(
+        &self,
+        scene: &base::interface::scene::SceneSpec,
+        first_message: &str,
+    ) -> Option<String> {
+        if !self
+            .options
+            .as_ref()
+            .is_none_or(SessionOptions::names_itself)
+        {
+            return None;
+        }
+        scene.session_name_prompt(first_message)
+    }
+
     /// The conversation's model, by the same precedence as `provider`.
     pub(in crate::session_pool) fn model(&self) -> Option<String> {
         self.model

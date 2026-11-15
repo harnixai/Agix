@@ -72,7 +72,8 @@ impl Module for SkillsModule {
             let count = manager.load_from(provider.clone());
             tracing::info!(source = %id, count, "host skill source registered");
         }
-        let admission = crate::catalog::BundledAdmission::for_scene(cx.scene.as_ref());
+        let admission =
+            crate::catalog::BundledAdmission::for_scene(cx.scene.as_ref(), cx.host.attended);
         cx.provide_skill_catalog(Arc::new(crate::catalog::SceneSkills::new(
             manager.clone(),
             admission.clone(),

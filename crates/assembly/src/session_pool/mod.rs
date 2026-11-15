@@ -367,8 +367,11 @@ pub(super) enum CreateError {
     PersistFailed(String),
     /// The session's scene was deactivated while the session was built.
     SceneNotActive(String),
-    /// The engine refused the session's host tools.
-    InvalidHostTools(String),
+    /// The engine refused a field of the session's `options`.
+    InvalidOption {
+        field: String,
+        error: String,
+    },
     Failed(String),
 }
 
@@ -399,7 +402,7 @@ impl CreateError {
             },
             Self::PersistFailed(e) => Self::PersistFailed(outer(e)),
             Self::SceneNotActive(scene) => Self::SceneNotActive(scene),
-            Self::InvalidHostTools(e) => Self::InvalidHostTools(e),
+            Self::InvalidOption { field, error } => Self::InvalidOption { field, error },
             Self::Failed(e) => Self::Failed(outer(e)),
         }
     }
@@ -417,10 +420,9 @@ impl From<CreateError> for PoolError {
                 e,
             )),
             CreateError::SceneNotActive(scene) => Self::SceneNotActive { scene },
-            CreateError::InvalidHostTools(error) => Self::InvalidOptions {
-                field: "host_tools".into(),
-                error,
-            },
+            CreateError::InvalidOption { field, error } => {
+                Self::InvalidOptions(vec![api::InvalidOption { field, error }])
+            }
             CreateError::Failed(e) => Self::Internal(e),
         }
     }

@@ -36,6 +36,9 @@ pub struct HostContracts {
     /// Already narrowed by the scene and checked for order.
     pub modules: Vec<Arc<dyn crate::module::Module>>,
     pub host_layers: HostLayers,
+    /// Whether someone answers the session's questions, resolved against its
+    /// scene — see [`Builder::attended`].
+    pub attended: bool,
 }
 
 /// What the host wraps around a session's calls, before the plugins' layers
@@ -94,6 +97,7 @@ impl Builder {
                     recovery_policy,
                     compactor,
                 },
+            attended,
         } = host;
         self.host.exec = Some(exec);
         self.host.token_counter = Some(token_counter);
@@ -116,6 +120,7 @@ impl Builder {
         self.host.model_interceptors = model_interceptors;
         self.host.recovery_policy = recovery_policy;
         self.host.compactor = compactor;
+        self.host.attended = Some(attended);
         self
     }
 }

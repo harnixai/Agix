@@ -173,6 +173,7 @@ impl EngineFactory {
             .cron_store(req.cron_store)
             .run_slots(self.run_slots.clone())
             .background_hooks(self.background_hooks.clone())
+            .attended(options.and_then(|o| o.attended))
             .question_prompts(options.is_some_and(SessionOptions::answers_questions))
             .mcp_prompts(options.is_some_and(SessionOptions::answers_mcp_elicitation));
         if let Some(store) = &self.history_store {
@@ -485,7 +486,14 @@ fn bind_session_scripts(
 
 fn build_failed(e: runtime::agent::EngineError) -> CreateError {
     match e {
-        runtime::agent::EngineError::HostTools(why) => CreateError::InvalidHostTools(why),
+        runtime::agent::EngineError::HostTools(error) => CreateError::InvalidOption {
+            field: "host_tools".into(),
+            error,
+        },
+        runtime::agent::EngineError::OutputSchema(error) => CreateError::InvalidOption {
+            field: "output_schema".into(),
+            error,
+        },
         e => CreateError::Failed(format!("build agent: {e}")),
     }
 }

@@ -450,16 +450,18 @@ recorder 不落盘:同一进程里的重建共用同一个 recorder,回放接着
 它们记在日志里(`agix.session_state`,§4),驱逐、重启后恢复的会话同样读得回来。
 
 会话可以指定自己的厂商(`options.provider`):对话走那个厂商的 client,子 Agent、压缩
-等其余路由任务仍按绑定的路由走。首轮结束后的自动命名也是这个会话的调用:按会话自己绑定的
+等其余路由任务仍按绑定的路由走。首轮结束后的自动命名(`options.auto_name:false` 的会话不起)也是这个会话的调用:按会话自己绑定的
 `title` 路由,没有就用会话的对话模型,而且用的是套过录制器的那份 client,所以录得进录像、
 回放时也从录像里取。宿主可以经 `Assembly.customize_session` 在每个会话的
 `Builder` 建成之前改它,新建、恢复、重建都经过这一处。
 
 ### 3.2.3 有人值守与无人值守
 
-`SceneSpec::interactive` 回答"会话进行中有没有人回答问题、批准计划、应答权限提示"。缺省
+`SceneSpec::interactive` 是"会话进行中有没有人回答问题、批准计划、应答权限提示"的缺省答案。缺省
 `false`;只有交互版 `code` 是 `true`(声明式场景在 `scene.json` 里写 `"interactive": true`)。
-这一个答案同时决定四件事:
+会话自己的值(`Builder::attended`、`options.attended`)优先,在 `Builder::resolve` 里定一次再往下交:
+子 Agent 与团队成员经 `HostContracts::attended` 随根会话,提示词经 `ScenePromptContext::attended`,
+权限经 `SessionEnv::unattended`。这一个答案同时决定四件事:
 
 | | 无人值守 | 有人值守 |
 |---|---|---|
@@ -468,11 +470,11 @@ recorder 不落盘:同一进程里的重建共用同一个 recorder,回放接着
 | 内置技能 | 只有能独立做完的 | 再加需要用户在场的 |
 | 权限提示 | 不送给任何人,直接拒绝,拒绝消息里写清怎么授权(§6.3) | 送给宿主等回答 |
 
-内置技能由 `SceneSpec::bundled_skills` 点名,缺省只有 `skillify`;依赖的工具(`skills::bundled::required_tools`,
+内置技能由 `SceneSpec::bundled_skills` 点名,缺省只有 `skillify`;有人值守的会话再加 `SceneSpec::attended_skills`;依赖的工具(`skills::bundled::required_tools`,
 如 `loop` 要 `CronCreate`)在场景里不被允许的,也不列。磁盘上和宿主 provider 给的技能不受
 影响,同名的照样覆盖内置。`code` 无人值守带 `skillify` `simplify` `verify` `debug`
 `security-review`,有人值守再加 `batch` `stuck` `remember` `init` `import` `loop` `rename`
-`updateConfig`。
+`updateConfig`(即 `code` 的 `attended_skills`)。
 
 运行时另有一个与提示词无关的兜底:同一 agent 在一个 turn 里用同样的输入调同一个工具到第 3、
 5、8 次,在结果后附一条提醒,让模型看上次的结果、换方法或停下汇报(`runtime::repeat_guard`)。

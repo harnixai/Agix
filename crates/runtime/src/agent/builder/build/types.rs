@@ -18,6 +18,7 @@ pub(super) struct Resolved {
     pub(super) environment: Arc<dyn base::interface::environment::Environment>,
     pub(super) rules: Arc<dyn base::interface::instruction_provider::RuleProvider>,
     pub(super) memory_store: Arc<MemoryStore>,
+    pub(super) attended: bool,
 }
 
 pub(super) struct SessionWiring {

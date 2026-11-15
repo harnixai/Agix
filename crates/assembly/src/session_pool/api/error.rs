@@ -14,10 +14,11 @@ pub enum PoolError {
     /// question is still open.
     #[error("the answer does not fit the server's requested schema: {}", .problems.join("; "))]
     AnswerOutsideSchema { problems: Vec<String> },
-    /// A field of the session's `options` the engine refused, which reading
-    /// them could not tell: a host tool named like one the session has.
-    #[error("options that do not read: {field}")]
-    InvalidOptions { field: String, error: String },
+    /// Fields of the session's `options` that cannot stand, which reading
+    /// them could not tell: a host tool named like one the session has, an
+    /// output schema whose tool the scene denies.
+    #[error("options that do not read: {}", InvalidOption::fields(.0))]
+    InvalidOptions(Vec<InvalidOption>),
     #[error("{message}")]
     SessionNotFound { session_id: String, message: String },
     #[error("{}", .0.message)]
@@ -84,6 +85,30 @@ pub enum PoolError {
     SessionExists { session_id: String },
     #[error("{0}")]
     Internal(String),
+}
+
+/// One field of `options` that cannot stand, as `error.data.invalid_options`
+/// lists it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct InvalidOption {
+    pub field: String,
+    pub error: String,
+}
+
+impl InvalidOption {
+    pub fn new(field: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            error: error.into(),
+        }
+    }
+
+    fn fields(all: &[Self]) -> String {
+        all.iter()
+            .map(|o| o.field.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 impl PoolError {

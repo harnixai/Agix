@@ -119,7 +119,7 @@ impl Builder {
         &self,
         settings: &LoadedSettings,
         config: &Arc<base::context::EngineConfig>,
-        scene: &SceneSpec,
+        attended: bool,
         session: &Transcript,
         hooks: &Arc<HookRunner>,
         instruction_file: Option<&PathBuf>,
@@ -130,7 +130,7 @@ impl Builder {
         // its state works unless it survives from one call to the next.
         prepare_scratchpad(&settings.paths.local_data_dir.join("scratchpad"));
         prepare_working_dir(&settings.paths);
-        let session_env = session_env(settings, config, scene);
+        let session_env = session_env(settings, config, attended);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(session_state::SessionState::new()), 0, false),
@@ -237,7 +237,7 @@ pub(super) fn bind_tools(
 pub(super) fn session_env(
     settings: &LoadedSettings,
     config: &base::context::EngineConfig,
-    scene: &SceneSpec,
+    attended: bool,
 ) -> base::context::SessionEnv {
     let cwd = settings.paths.working_dir().to_path_buf();
     let resolve = |dir: &std::path::PathBuf| cwd.join(dir);
@@ -260,7 +260,7 @@ pub(super) fn session_env(
             .collect(),
         read_anywhere: settings.values.sandbox.read_anywhere,
         cache_directories: settings.values.sandbox.cache_directories.paths(&cwd),
-        unattended: !scene.interactive,
+        unattended: !attended,
         base_mode: config.permission_mode,
         cwd,
     }

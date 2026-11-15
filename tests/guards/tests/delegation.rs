@@ -80,6 +80,7 @@ const INHERITED: &[(&str, &str)] = &[
     ("model_interceptors", "host_layers.model_interceptors"),
     ("recovery_policy", "host_layers.recovery_policy"),
     ("compactor", "host_layers.compactor"),
+    ("attended", "attended"),
 ];
 
 /// Decided per delegate by whoever spawns it.

@@ -784,6 +784,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_agents` | 有 `session.startAgent`,宿主不经模型在会话下起子 Agent;子 Agent 任务带 `usage`、`structured_output`、`detail.tag`(§6.3) |
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
+| `session_attended` | `options.attended` / `options.auto_name`:会话自己定有没有人值守、起不起名,省略时取场景的;带 `output_schema` 的会话一定有 `StructuredOutput`,场景用 `tools.deny` 拒掉它时 `INVALID_PARAMS`(§6.3) |
 | `mcp_elicitation` | `options.prompt_types` 认 `mcp_elicitation`:MCP server 在工具调用中向用户的询问推成 `prompt_type:"mcp_elicitation"` 的 `prompt` 帧,答案按 §4.7 回给 server(§6.3、§7) |
 | `mcp_tasks` | MCP server 可以把工具调用转成任务(tasks 扩展):它作为 `kind:"mcp_task"` 列在 `session.tasks`、状态经 `task_progress` / `task_updated` 推出、`session.stopTask` 发 `tasks/cancel`(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
@@ -975,7 +976,7 @@ daemon 自己的会话池还有一项 `sandbox.unattended_network`:这个 daemon
 (没人回答提问与权限询问),`sandbox.network_mode` 是 `unrestricted`,而
 `sandbox.unattended_requires_network_policy` 关着——三条同时成立时是 `degraded`:无人值守会话里
 沙箱完整生效的 `Bash` / `Monitor` 命令不问就跑,网络又是开着的。`summary` 提示这个开关计划在
-后续 0.3.x 版本改为缺省开;其余情况是 `ok`。
+后续 0.3.x 版本改为缺省开;其余情况是 `ok`。这一项按场景缺省的 `interactive` 报;`options.attended` 把某个会话改成有人或无人值守,不反映在这里。
 
 ```jsonc
 { "name":"sandbox.unattended_network", "status":"degraded", "summary":"unattended scenes (code) run …",
@@ -1153,6 +1154,8 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "clock": { "start": "2026-10-28T09:00:00Z" },  // 可选,记下来的时间从这里起
     "telemetry": { "output":"/abs/path.jsonl" },
     "output_schema": { "type":"object", … },  // 结构化输出必须满足的 JSON Schema
+    "attended": true,                     // 可选,省略 = 场景的 interactive
+    "auto_name": false,                   // 可选,false = 首轮之后不起名
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
@@ -1210,7 +1213,7 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 首轮结束后的自动命名也走这个会话的录制器:录制时它是一条 `purpose` 为 `title` 的辅助调用,
 回放时从录像里取。起名是上面两条的例外:录像里没有这条调用(录的时候场景不起名、或者是更早
 的录像),回放的会话就不起名,`name` 留空,不会转去调真的模型,严格回放也不把这当成分歧;
-录像里有、这次没要的起名调用留着不用,不算回放没跑完。
+录像里有、这次没要的起名调用留着不用,不算回放没跑完。`auto_name:false` 的会话根本不发起名调用,录像里没有 `title`,也就没有东西要录要放。
 
 `clock.start`(RFC 3339)是这个会话"记下来的时间"的起点:提示里的日期、会话日志的时间戳
 从它起、按墙上时钟往前走(`ShiftedEnvironment`)。不给时用机器的时钟 —— 回放(`recorder.mode`
@@ -1221,14 +1224,31 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传
 `output_schema` 给了,`StructuredOutput` 工具就以这份 schema 作为自己的参数格式直接
 宣告给模型(不再需要先 `ToolSearch`),不符合 schema 的调用以错误结果退回、模型可以
 改了再交;被接受的那一份出现在 `turn_complete` 的 `structured_output` 里(§7.2)。
+带 `output_schema` 的会话一定有 `StructuredOutput`:它和插件的 `admit_tools`、宿主工具一样,照场景的
+允许表放行,只有场景的 `tools.deny` 点了它的名才进不来。那样 `session.create`(`session.run_turn`
+自动建会话、`session.resume`、重建同理)返回 `INVALID_PARAMS`,`error.data.invalid_options` 里是
+`{"field":"output_schema","error":"scene \"x\" denies StructuredOutput, …"}`,不建一个交不回结果的会话。
+子 Agent、`session.startAgent` 带 `output_schema` 同样。
 
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
-列了 `question`,有人值守场景(`ARCHITECTURE.md` §3.2.3,如 `code`)的会话才有
+列了 `question`,有人值守的会话(`attended`,缺省取场景的 `interactive`,`ARCHITECTURE.md` §3.2.3,如 `code`)才有
 `AskUserQuestion`,模型的提问推成 `prompt_type:"question"` 的帧等宿主回答;没列时这个
 会话根本没有 `AskUserQuestion` —— 一个只会被拒绝的工具不该给模型看。列了 `mcp_elicitation`,
 MCP server 在工具调用中要问用户的(2026-07-28 server 的 `input_required` 轮次,或老版本 server
 自己发的 `elicitation/create`)推成 `prompt_type:"mcp_elicitation"` 的帧;没列时不推,server 收到
 `cancel`。无人值守的会话从不问,同样回 `cancel`。不认识的取值被忽略,不会让整份 `options` 作废。
+
+`attended` 说这个会话有没有人值守,省略时取场景的 `interactive`。`ARCHITECTURE.md` §3.2.3 那张表里
+`interactive` 定的四件事都跟着它走:要等人回答的工具(`AskUserQuestion` 仍要 `prompt_types` 列了
+`question`,场景的工具表也得允许)、提示词(有两种提示的场景如 `code` 按它挑)、内置技能(场景的
+`attended_skills` 只在有人值守时列)、权限询问送给宿主还是直接拒绝(「项目之外」的收紧、MCP
+询问回 `cancel`、`Bash` 要求沙箱也一样)。`attended:false` 的会话就按无人值守的场景对待:询问直接
+拒绝,无人值守的沙箱规则也一样适用(`ARCHITECTURE.md` 权限顺序 S15:有人值守时要问的受限命令,在会话
+沙箱完整时不问、在沙箱里跑);`attended:true` 让询问送给宿主。规则与托管设置照旧判。子 Agent 与团队成员随根会话(§10)。随 `options` 记在会话日志里,重建、恢复、
+`session.fork` 都保留。
+
+`auto_name` 为 `false` 时首轮之后不调模型起名,`name` 一直是 `null`,直到 `session.rename`;省略或
+`true` 按场景的 `session_naming`(`true` 不会让没有 `session_naming` 的场景起名)。同样随 `options` 保存。
 
 `host_tools` 声明宿主自己实现的工具。它们和会话自己的工具一样宣告给模型,经过同样的权限、
 hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(§7.4),用
@@ -1256,8 +1276,9 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 `tools.deny` 写名字即可拒掉它。它们随 `options` 记在会话日志里,重建、恢复、`session.fork`
 都照原样再挂上。
 
-权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`),宿主想
-免问就在 `permission_rules` 里给 `{"source":"session","behavior":"allow","tool_name":"HostEcho"}`;
+权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
+会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`,
+想免问就在 `permission_rules` 里给 `{"source":"session","behavior":"allow","tool_name":"HostEcho"}`;
 deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `input`,不符合的调用以校验错误
 退回给模型,不发帧。
 
@@ -1282,7 +1303,7 @@ deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `inp
 // ← result
 { "session_id": "…", "turn_id": "…",
   "delivery": "turn",             // turn = 这条消息跑了一整轮;steer 见 §5.3
-  "name": null,                   // 首轮自动命名的结果,场景不开启时为 null
+  "name": null,                   // 首轮自动命名的结果,场景不开启或 auto_name:false 时为 null
   "api_calls": "…" }              // 数字:本轮打了几次模型 API
 ```
 
@@ -3361,6 +3382,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // INVALID_PARAMS,只在 options 里有读不出来的字段时
 { "invalid_options": [ { "field": "permission_mode", "error": "…" } ] }
+// 另有只有建出引擎才知道的:host_tools 的重名,以及场景 tools.deny 了 StructuredOutput 时的 output_schema
 
 // METHOD_NOT_FOUND
 { "module": "mcp" }   // 只在方法所属的模块没有编入这个构建时;未知方法没有 data
@@ -3451,7 +3473,8 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 `[sub-agent <侧链会话 id>]` 开头。用 `session.respondToPrompt` 回答,`session_id` 填
 **父会话**,不是侧链会话。子 Agent 调的 MCP 工具问用户时也一样。父会话空闲时这帧照样推(`turn_id` 为 `null`,§7)。等回答
 期间子 Agent 的任务是 `waiting`,`waiting_for` 里有这个 `prompt_id`(§6.3 `session.tasks`、
-§7 `task_updated`)。超时与关闭的规则同上。
+§7 `task_updated`)。超时与关闭的规则同上。子 Agent 与团队成员有人无人值守同它的根会话(`options.attended`):
+根会话无人值守时它们的询问直接被拒绝,不推 `prompt`。
 
 `permission_mode: "bubble"` 不是另一条路:子 Agent 的询问无论它是什么模式,到宿主的都是
 上面这条父会话的 `prompt` 帧,团队成员也一样。判的模式是子 Agent 自己的:agent 类型的 `permission_mode` 可以比父会话宽(插件带来的类型

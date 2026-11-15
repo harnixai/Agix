@@ -50,6 +50,10 @@ pub struct ScenePromptContext<'a> {
     /// this it was injected unconditionally every turn even when nothing
     /// had ever been cleared.
     pub tool_results_ever_cleared: bool,
+    /// Whether someone answers this session's questions — the session's
+    /// own, which defaults to [`SceneSpec::interactive`]. A scene with two
+    /// prompts picks by it.
+    pub attended: bool,
 }
 
 /// Context for building the `<system-reminder>` block.
@@ -79,8 +83,8 @@ impl<'a> ReminderContext<'a> {
     }
 }
 
-/// Tools that only work when someone answers. A session whose scene is not
-/// [`SceneSpec::interactive`] does not register them.
+/// Tools that only work when someone answers. A session nobody attends (see
+/// [`SceneSpec::interactive`]) does not register them.
 pub const NEEDS_A_USER: &[&str] = &["AskUserQuestion", "EnterPlanMode", "ExitPlanMode"];
 
 /// Token budget configuration for a scene.
@@ -292,9 +296,11 @@ pub struct SceneSpec {
     /// `false` means the Team tools are never registered for the session.
     pub supports_team: bool,
     /// Whether someone is there to answer a question, a plan to approve, a
-    /// permission prompt. When nobody is, a call the permission policy would
-    /// ask about is refused instead, the tools in [`NEEDS_A_USER`] are left
-    /// out, and the prompt must not count on a reply.
+    /// permission prompt — for a session that does not say otherwise
+    /// (`Builder::attended`). When nobody is, a call the permission policy
+    /// would ask about is refused instead, the tools in [`NEEDS_A_USER`] are
+    /// left out, [`Self::attended_skills`] are not listed, and the prompt
+    /// must not count on a reply.
     pub interactive: bool,
     /// How the file tools word paths when `Settings::path_style` is not set.
     pub path_style: PathStyle,
@@ -303,6 +309,10 @@ pub struct SceneSpec {
     /// The built-in skills a session lists, by name. A built-in is also left
     /// out when a tool it needs is not permitted here.
     pub bundled_skills: Vec<String>,
+    /// Built-in skills listed besides [`Self::bundled_skills`] only when
+    /// someone attends the session: ones that hand something back to the
+    /// user mid-task.
+    pub attended_skills: Vec<String>,
     pub reminders: Vec<Reminder>,
     /// When set, the session is named after its first turn by a model call
     /// with this prompt, `{first_message}` replaced by the user's message.
@@ -337,6 +347,7 @@ impl SceneSpec {
             },
             execution: ExecutionParams::default(),
             bundled_skills: vec!["skillify".into()],
+            attended_skills: Vec::new(),
             reminders: Vec::new(),
             session_naming: None,
             memory_extraction_intro: None,

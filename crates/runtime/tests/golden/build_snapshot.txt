@@ -42,6 +42,30 @@ env.flags: read_anywhere=false unattended=true base_mode=Default
 prompt_registry_blocks: []
 probe: tools=["Early", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "TaskStop", "TaskOutput", "TaskWait", "TaskMessage", "WebSearch", "WebFetch", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList"] agent_types=[] depth=0
 
+## unattended scene, attended session
+tools: ["Early", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "TaskStop", "TaskOutput", "TaskWait", "TaskMessage", "WebSearch", "WebFetch", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList", "RunCode"]
+path_style: Absolute
+deferred_tools: []
+env.cwd: /
+env.additional_writable_dirs: ["/tmp/scratchpad", "/tmp/memory"]
+env.read_directories: ["/tmp"]
+env.flags: read_anywhere=false unattended=false base_mode=Default
+prompt_registry_blocks: []
+probe: tools=["Early", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "TaskStop", "TaskOutput", "TaskWait", "TaskMessage", "WebSearch", "WebFetch", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList"] agent_types=[] depth=0
+
+## output schema through a whitelist
+tools: ["Early", "StructuredOutput"]
+path_style: Absolute
+deferred_tools: []
+env.cwd: /
+env.additional_writable_dirs: ["/tmp/scratchpad", "/tmp/memory"]
+env.read_directories: ["/tmp"]
+env.flags: read_anywhere=false unattended=true base_mode=Default
+prompt_registry_blocks: []
+probe: tools=["Early", "StructuredOutput", "TaskStop", "TaskOutput", "TaskWait", "TaskMessage", "WebSearch", "WebFetch", "EnterWorktree", "ExitWorktree", "CronCreate", "CronDelete", "CronList"] agent_types=[] depth=0
+
+## refused: output schema denied
+scene "refused" denies StructuredOutput, the tool the session's structured output is handed back with
 ## depth 1 with hooks from outside
 tools: ["Early", "TaskStop", "TaskOutput", "TaskWait", "TaskMessage", "WebSearch", "WebFetch", "EnterWorktree", "ExitWorktree"]
 path_style: Absolute

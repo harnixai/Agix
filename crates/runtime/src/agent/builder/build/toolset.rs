@@ -2,6 +2,8 @@
 
 use super::*;
 
+const STRUCTURED_OUTPUT: &str = "StructuredOutput";
+
 impl Builder {
     pub(super) fn register_session_tools(
         &self,
@@ -88,12 +90,14 @@ impl Builder {
         scene: &Arc<SceneSpec>,
         plugin_tools: Vec<Arc<dyn base::tool::Tool>>,
         plugin_tool_owners: &std::collections::HashMap<String, crate::plugin::ToolOwner>,
+        attended: bool,
         questions_answered: bool,
     ) -> Result<SessionTools, EngineError> {
         let tools = &registry;
         let host_tools = crate::host_tools::declared_tools(&self.spec.host_tools)?;
         admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
+        let host_schema = self.spec.output_schema.clone();
         let tool_policy = Arc::new(crate::tool_policy::ToolPolicy::new(
             scene,
             self.spec.tool_selector.clone(),
@@ -101,20 +105,19 @@ impl Builder {
                 .iter()
                 .filter(|(_, owner)| owner.admitted)
                 .map(|(name, _)| name.clone())
-                .chain(self.spec.host_tools.iter().map(|d| d.name.clone())),
+                .chain(self.spec.host_tools.iter().map(|d| d.name.clone()))
+                .chain(host_schema.is_some().then(|| STRUCTURED_OUTPUT.to_string())),
         ));
 
-        let host_schema = self.spec.output_schema.clone();
         match &host_schema {
             Some(schema) => tools::bind_output_schema(tools, schema),
             None => {
-                tools.remove("StructuredOutput");
+                tools.remove(STRUCTURED_OUTPUT);
             }
         }
         // The tool policy, applied to the registry itself rather than
         // only to what is advertised: `ToolSearch` and dispatch read this same
         // registry, so a tool the scene excludes has to be absent from it.
-        let attended = scene.interactive;
         for t in tools.list() {
             let waits_on_a_reply = base::interface::scene::NEEDS_A_USER.contains(&t.name())
                 && (!attended || (t.name() == ASK_USER_QUESTION && !questions_answered));
@@ -143,16 +146,15 @@ impl Builder {
             tools.register(run_code_for(tools.as_ref(), self.spec.run_slots.clone()));
         }
 
-        let names = tools.names();
-        let mut seen = std::collections::HashSet::new();
-        let twice: Vec<&String> = names.iter().filter(|n| !seen.insert(n.as_str())).collect();
-        debug_assert!(twice.is_empty(), "tools registered twice: {twice:?}");
-        if !twice.is_empty() {
-            tracing::error!(
-                tools = ?twice,
-                "tools registered twice; dispatch reaches only the first of each"
-            );
+        if host_schema.is_some() && tools.get(STRUCTURED_OUTPUT).is_none() {
+            return Err(EngineError::OutputSchema(format!(
+                "scene {:?} denies {STRUCTURED_OUTPUT}, the tool the session's structured \
+                 output is handed back with",
+                scene.id
+            )));
         }
+
+        report_duplicates(tools);
         Ok(SessionTools {
             tools: registry,
             policy: tool_policy,
@@ -221,6 +223,19 @@ pub(super) fn admit_extra_tools(
         }
     }
     Ok(())
+}
+
+fn report_duplicates(tools: &InMemoryToolRegistry) {
+    let names = tools.names();
+    let mut seen = std::collections::HashSet::new();
+    let twice: Vec<&String> = names.iter().filter(|n| !seen.insert(n.as_str())).collect();
+    debug_assert!(twice.is_empty(), "tools registered twice: {twice:?}");
+    if !twice.is_empty() {
+        tracing::error!(
+            tools = ?twice,
+            "tools registered twice; dispatch reaches only the first of each"
+        );
+    }
 }
 
 /// Whether `name` is in the registry or is one `finalize_tools` registers

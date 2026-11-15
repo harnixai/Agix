@@ -405,7 +405,7 @@ The `code` scene leaves out `NotebookEdit`, the worktree tools, `Ping`, `Sleep`
 and `PushNotification`; `StructuredOutput` is there only
 when the host sets an output schema. A scene is interactive (someone answers
 prompts) or unattended: `harnix` and `mini` are unattended, `code` is created
-either way. An unattended session has no `AskUserQuestion` or plan mode, refuses
+either way, and a session can override its scene's choice (`options.attended`). An unattended session has no `AskUserQuestion` or plan mode, refuses
 what would need approval instead of asking, and runs `Bash` only inside the OS
 sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
 

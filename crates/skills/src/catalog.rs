@@ -101,18 +101,21 @@ impl SkillCatalog for SkillManager {
     }
 }
 
-/// Which built-in skills a session lists: the ones its scene names, less any
-/// whose required tools the scene does not permit. Skills from disk and host
+/// Which built-in skills a session lists: the ones its scene names (with its
+/// `attended_skills` when someone attends the session), less any whose
+/// required tools the scene does not permit. Skills from disk and host
 /// providers always pass, so a project's own `loop` still shows in a scene
 /// that leaves the built-in one out.
 #[derive(Clone, Default)]
 pub struct BundledAdmission(Option<Arc<HashSet<String>>>);
 
 impl BundledAdmission {
-    pub fn for_scene(scene: &SceneSpec) -> Self {
+    pub fn for_scene(scene: &SceneSpec, attended: bool) -> Self {
+        let attended_skills = scene.attended_skills.iter().filter(|_| attended);
         let names = scene
             .bundled_skills
             .iter()
+            .chain(attended_skills)
             .filter(|name| {
                 crate::bundled::required_tools(name)
                     .iter()
@@ -222,7 +225,7 @@ mod tests {
     #[test]
     fn a_scene_lists_the_built_ins_it_names_and_can_run() {
         let scene = Picky(vec!["skillify", "loop", "debug"], vec!["Read", "Write"]);
-        let catalog = SceneSkills::new(manager(), BundledAdmission::for_scene(&scene));
+        let catalog = SceneSkills::new(manager(), BundledAdmission::for_scene(&scene, false));
         assert_eq!(
             names(&catalog),
             ["debug", "skillify"],
@@ -234,13 +237,26 @@ mod tests {
     }
 
     #[test]
+    fn the_attended_skills_are_listed_only_for_an_attended_session() {
+        let mut scene = Picky(vec!["skillify"], vec![]);
+        scene.attended_skills = vec!["remember".into()];
+        let attended = SceneSkills::new(manager(), BundledAdmission::for_scene(&scene, true));
+        assert_eq!(names(&attended), ["remember", "skillify"]);
+        let unattended = SceneSkills::new(manager(), BundledAdmission::for_scene(&scene, false));
+        assert_eq!(names(&unattended), ["skillify"]);
+    }
+
+    #[test]
     fn skills_from_elsewhere_pass_whatever_the_scene_names() {
         let mgr = manager();
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("loop.md");
         std::fs::write(&file, "---\nname: loop\ndescription: mine\n---\nbody").unwrap();
         mgr.reload_skill(&file).unwrap();
-        let catalog = SceneSkills::new(mgr, BundledAdmission::for_scene(&Picky(vec![], vec![])));
+        let catalog = SceneSkills::new(
+            mgr,
+            BundledAdmission::for_scene(&Picky(vec![], vec![]), true),
+        );
         assert_eq!(names(&catalog), ["loop"]);
     }
 }

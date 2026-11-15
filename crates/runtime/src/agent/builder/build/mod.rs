@@ -35,7 +35,7 @@ impl Builder {
         let state = self.wire_session_state(
             &r.settings,
             &config,
-            &r.scene,
+            r.attended,
             &session,
             &hooks.hooks,
             r.instruction_file.as_ref(),
@@ -72,6 +72,7 @@ impl Builder {
             &r.scene,
             plugin_tools,
             &plugins.tool_owners,
+            r.attended,
             questions_answered,
         )?;
         r.tools = surface.tools;

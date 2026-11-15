@@ -57,6 +57,7 @@ impl Builder {
             memory_store,
             instruction_provider,
             modules,
+            attended,
             ..
         } = resolved;
         // Dispatch looks tools up in the registry, so a grant's adapters live
@@ -83,6 +84,7 @@ impl Builder {
                 plugins: self.host.plugins.clone(),
                 modules: modules.to_vec(),
                 host_layers,
+                attended: *attended,
             };
             let mut cx = crate::module::SessionContext {
                 tools,

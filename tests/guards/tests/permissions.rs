@@ -10,7 +10,9 @@
 //! asked — nowhere else builds a `PermissionOutcome::Permit`.
 //! PERM-4: whether anyone attends a session is read in one place; everything
 //! else is handed the attendance, and a command the profile its approval
-//! names.
+//! names. A scene's `interactive` is only the default the builder resolves
+//! the session's attendance from, and whether a session names itself is
+//! decided where its own `auto_name` is read.
 //! PERM-5: only the shell's confinement, the engine's own processes and the
 //! confinement report confine a process; the backends implement `confine`
 //! and call nothing.
@@ -222,6 +224,67 @@ fn attendance_is_read_in_one_place_and_handed_on() {
         found,
         READS_UNATTENDED,
         "read `ToolContext::attendance` or `PermissionRequest::attendance` instead",
+    );
+}
+
+const READS_INTERACTIVE: &[(&str, &str)] = &[
+    (
+        "crates/runtime/src/agent/builder/build/resolve.rs::Builder::resolve",
+        "the session's attendance, resolved once against its scene's default",
+    ),
+    (
+        "crates/assembly/src/session_pool/facade/doctor.rs::SessionPool::unattended_scene_ids",
+        "doctor reports the scenes whose sessions are unattended unless they say otherwise",
+    ),
+    (
+        "crates/scene/src/declarative.rs::DeclaredScene::parse",
+        "a declared scene's `interactive`, read off its file",
+    ),
+];
+
+#[test]
+fn a_scenes_interactive_is_only_the_default_of_a_sessions_attendance() {
+    let found = par_flat_map(ws().production(), |f| {
+        scan::field_accesses(f, View::Prod)
+            .into_iter()
+            .filter(|access| access.name == "interactive" && !access.write)
+            .map(|access| Finding {
+                key: place(f, &access.hit),
+                hit: access.hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "permissions::READS_INTERACTIVE",
+        found,
+        READS_INTERACTIVE,
+        "read the session's attendance (`HostContracts::attended`, `ScenePromptContext::attended`, \
+         `SessionEnv::unattended`) instead of its scene's default",
+    );
+}
+
+const NAMES_SESSIONS: &[(&str, &str)] = &[(
+    "crates/assembly/src/session_pool/parts/specs.rs::SessionSpec::naming_prompt",
+    "the session's own `auto_name` before its scene's naming prompt",
+)];
+
+#[test]
+fn a_session_is_named_only_where_its_auto_name_is_read() {
+    let found = par_flat_map(ws().production(), |f| {
+        scan::calls(f, View::Prod)
+            .into_iter()
+            .filter(|c| matches!(&c.callee, Callee::Method(m) if m == "session_name_prompt"))
+            .map(|c| Finding {
+                key: place(f, &c.hit),
+                hit: c.hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "permissions::NAMES_SESSIONS",
+        found,
+        NAMES_SESSIONS,
+        "ask `SessionSpec::naming_prompt`, which honors the session's `auto_name`",
     );
 }
 

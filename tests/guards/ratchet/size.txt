@@ -27,7 +27,7 @@ fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::se
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  174
-fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   93
+fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   94
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
@@ -52,10 +52,10 @@ fn    crates/ptc/src/lib.rs                                      dispatch_calls 
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
 fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      86
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         101
-fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   96
+fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         102
+fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   98
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
-fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       84
+fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       86
 fn    crates/runtime/src/agent/turn/attachments.rs               resolve_attachments                    94
 fn    crates/runtime/src/agent/turn/request.rs                   Agent::recover_call                    97
 fn    crates/runtime/src/agent/turn/tool_exec.rs                 execute_tool_inner                     89

@@ -17,9 +17,9 @@ impl From<PoolError> for RpcError {
                 codes::INVALID_PARAMS,
                 Some(json!({ "schema_errors": problems })),
             ),
-            PoolError::InvalidOptions { field, error } => (
+            PoolError::InvalidOptions(invalid) => (
                 codes::INVALID_PARAMS,
-                Some(json!({ "invalid_options": [{ "field": field, "error": error }] })),
+                Some(json!({ "invalid_options": invalid })),
             ),
             PoolError::SessionNotFound { .. } => (codes::SESSION_NOT_FOUND, None),
             PoolError::SessionBusy(busy) => (codes::SESSION_BUSY, Some(busy_data(busy))),
