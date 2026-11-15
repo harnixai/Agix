@@ -53,7 +53,8 @@ Agix 是 agent 产品底下的那台引擎:它运行一个**会话**——装配
 **部署**
 - `agixd`:JSON-RPC 2.0(NDJSON)daemon,走 Unix socket、TCP 或 WebSocket;后两者带
   令牌认证。
-- 也可以把引擎嵌进自己的进程:用 builder 建一个 `Agent`,或者直接用 daemon 的整个会话池。
+- 也可以把引擎嵌进自己的进程:用 builder 建一个 `Agent`,直接用 daemon 的整个会话池,或者用
+  `agix::embed`——agixd 的参数进、协议连接出。
 - `release` 构建出 11 MB 的二进制;`release-fast` 体积翻倍,换一点速度和 panic 时展开。
 - 构建档位(`minimal`、`coding`、`full`),按模块开关:MCP、子 Agent、skill、web 工具、
   结构化输出、`RunCode`、WebSocket、脚本、插件、沙箱、OpenTelemetry。
@@ -108,11 +109,14 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
   答复权限询问和问题。
 - 启动、发消息、停止、跟随任务,按字节偏移读任务输出。
 - 换模型或提示词;管理场景、MCP 服务器、插件、定时任务,以及信任哪些项目。
+- 宿主在自己的连接上给所有会话提供工具与 hook(`daemon.setHostTools`、`daemon.setHooks`),
+  给宿主工具报进度,给单个会话挂它自己的 skill 目录(`options.skill_dirs`)。
 
 **扩展**
 - 公开的 47 个扩展点:31 个契约、10 个拦截点、6 个注册点。
 - 编译进宿主的 Rust 插件,与 QuickJS 脚本;可以打成插件包安装,安装时强制披露。
-- 二十九个时机的 hook,后端有 command、prompt、HTTP、agent 四种([hooks.md](hooks.md))。
+- 二十九个时机的 hook,后端有 command、prompt、HTTP、agent 四种,宿主连接也能经 RPC 登记 hook
+  ([hooks.md](hooks.md))。
 - MCP 客户端(stdio、SSE、streamable HTTP、WebSocket),按 MCP 2026-07-28 协商,对 2025-11-25 的
   server 回落到 `initialize`;server 在调用中向用户的询问推给宿主作答。声明式场景;自定义 Agent 类型。
 - MCP 授权(2026-07-28 规范,OAuth 2.1):发现、客户端 ID 元数据文档或动态客户端注册、PKCE、
@@ -128,7 +132,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 **记录**
 - 只追加的 JSONL 历史:可恢复、可分叉,崩溃后可重建。
 - 22 种遥测事件,可导出到 OpenTelemetry([telemetry.md](telemetry.md))。
-- 录制器:不联网,逐字节回放。
+- 录制器:不联网,逐字节回放;录像随会话保存,经 RPC 读(`session.calls`)。
 - 会话导出成 zip 或目录,子 Agent 一起带上。
 
 ---
@@ -286,7 +290,12 @@ let pool = agix::pool::assemble(
 ```
 
 `agixd` 就是这一调用加上命令行与监听器;工作区里有别的地方用第二种方式组装会话池,
-测试就会让构建失败。嵌入方依赖的是 `agix` 这个 crate,指南见 [`agix-sdk.md`](agix-sdk.md)。
+测试就会让构建失败。
+
+当协议端点用——`agix::embed`,`agixd` 自己就从这里起:`EmbedConfig` 把 `agixd` 的参数当字段,
+`Embedded::start` 起引擎,`Embedded::serve_stream` 在本进程的任意字节流上服务 JSON-RPC 协议
+(`serve_unix` 在 socket 上),看不到别的 Agix 类型。它是 0.x 里唯一承诺稳定的 Rust 面
+([`agix-sdk.md`](agix-sdk.md) §10)。嵌入方依赖的是 `agix` 这个 crate,指南见 [`agix-sdk.md`](agix-sdk.md)。
 
 ### 扩展它
 
@@ -362,7 +371,9 @@ let pool = agix::pool::assemble(
   读后续;阈值是 `compaction.tool_result_inline_chars`(`0` 关闭)。
 - **遥测**:22 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
   一轮的调用——压缩、记忆、hooks、搜索——也算进去。
-- **录制**:把任意 `Model` 包一层,一个会话就成了自包含的目录;回放逐字节一致、不用联网。
+- **录制**:把任意 `Model` 包一层,一个会话就成了自包含的目录;回放逐字节一致、不用联网。录像不脱敏
+  ——提示词、工具参数与结果按发出去的原样记下——所以要像保管 transcript 一样保管它。daemon 里录制的
+  会话把录制器记在自己的日志里,重启之后接着录,`session.calls` / `session.call` 经 RPC 读录像。
 
 ---
 
@@ -433,7 +444,7 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | 文档 | 用途 |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 引擎怎么拼起来——分层、模块、一轮、会话与场景、历史、执行、并发、磁盘布局 |
-| [agix-sdk.md](agix-sdk.md) | 把引擎嵌进自己的 Rust 进程:门面 crate、一个池、一轮、事件、宿主工具、关停 |
+| [agix-sdk.md](agix-sdk.md) | 把引擎嵌进自己的 Rust 进程:门面 crate、一个池、一轮、事件、宿主工具、关停,以及 `agix::embed` 入口 |
 | [extension_points.md](extension_points.md) | 每个接缝:能换什么、能往哪里贡献、能拦截什么,代价与谁能用 |
 | [hooks.md](hooks.md) | hook 协议:配置、四种后端、退出码、超时、payload、回答,每个事件在何时触发 |
 | [telemetry.md](telemetry.md) | 遥测文件、信封与脱敏,每种事件与它的字段 |

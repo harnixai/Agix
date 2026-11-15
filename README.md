@@ -79,8 +79,9 @@ when no one is watching.
 **Deployment**
 - `agixd`: a daemon speaking JSON-RPC 2.0 (NDJSON) over a Unix socket, TCP
   or WebSocket, with token authentication off the local socket.
-- Or embed the engine: one `Agent` from the builder, or the daemon's whole
-  session pool in your own process.
+- Or embed the engine: one `Agent` from the builder, the daemon's whole
+  session pool in your own process, or `agix::embed` — `agixd`'s arguments
+  in, protocol connections out.
 - `release` builds an 11 MB binary; `release-fast` trades twice the size for
   a little speed and unwinding on panic.
 - Build tiers (`minimal`, `coding`, `full`) and per-module features: MCP,
@@ -155,13 +156,17 @@ monitors and structured output ([table below](#tools--45-built-in)).
 - Start, message, stop and follow tasks, reading their output by byte offset.
 - Switch the model or prompt; manage scenes, MCP servers, plugins,
   schedules and which projects are trusted.
+- Provide tools and hooks from the host's own connection to every session
+  (`daemon.setHostTools`, `daemon.setHooks`), report progress on host tools,
+  and give a session skill directories of its own (`options.skill_dirs`).
 
 **Extensibility**
 - 47 published extension points: 31 contracts, 10 interceptions and 6
   registrations.
 - Rust plugins compiled into the host, and QuickJS scripts, installable as
   packages with install-time disclosure.
-- Hooks at twenty-nine moments, with command, prompt, HTTP and agent backends
+- Hooks at twenty-nine moments, with command, prompt, HTTP and agent backends,
+  and hooks a host connection registers over RPC
   ([`docs/hooks.md`](docs/hooks.md)).
 - An MCP client (stdio, SSE, streamable HTTP, WebSocket) on MCP 2026-07-28,
   falling back to `initialize` for 2025-11-25 servers; what a server asks the
@@ -187,7 +192,8 @@ monitors and structured output ([table below](#tools--45-built-in)).
   a crash.
 - 22 telemetry event types, with OpenTelemetry export (metrics and a span tree)
   ([`docs/telemetry.md`](docs/telemetry.md)).
-- A recorder for byte-exact offline replay.
+- A recorder for byte-exact offline replay; a session's recording is kept
+  with it and read over RPC (`session.calls`).
 - Session export as a zip archive or a directory, sub-agents included.
 
 ---
@@ -358,7 +364,13 @@ let pool = agix::pool::assemble(
 ```
 
 `agixd` is this call plus a command line and its listeners; a test fails the
-build if anything in the workspace assembles a pool a second way. The `agix` crate is the one an embedder depends on; [`docs/agix-sdk.md`](docs/agix-sdk.md) is the guide.
+build if anything in the workspace assembles a pool a second way.
+
+As a protocol endpoint — `agix::embed`, which `agixd` itself starts from:
+`EmbedConfig` takes `agixd`'s arguments as fields, `Embedded::start` brings the
+engine up, and `Embedded::serve_stream` serves the JSON-RPC protocol on any byte
+stream in your process (`serve_unix` on a socket), with no other Agix type in
+sight. It is the one Rust surface 0.x keeps stable ([`docs/agix-sdk.md`](docs/agix-sdk.md) §10). The `agix` crate is the one an embedder depends on; [`docs/agix-sdk.md`](docs/agix-sdk.md) is the guide.
 
 ### Extend it
 
@@ -428,7 +440,8 @@ Task keys `main`, `subagent`, `compact`, `memory`, `web_search` and `web_fetch`
 route each kind of call; a session can also choose its own provider. `WebSearch`
 searches through the session's own model (the provider's built-in search) unless
 `task_models.web_search` names another provider. `WebFetch` returns the page as
-plain text (truncated at 50,000 characters); only when `task_models.web_fetch`
+plain text in windows of up to 50,000 characters, read on with `offset` / `limit`
+(each continuation fetches the page again); only when `task_models.web_fetch`
 names a provider does that provider's model read the page and answer the call's
 `prompt` instead. It never falls back to the session's own model.
 
@@ -450,7 +463,9 @@ names a provider does that provider's model read the page and answer the call's
 - **Recorder**: wrap any `Model` and a session becomes a self-contained
   directory; replay is byte-exact and needs no network. A recording is not
   redacted — it holds the prompts, tool arguments and results as sent — so keep
-  it the way you keep the transcript.
+  it the way you keep the transcript. A daemon session that records keeps its
+  recorder in its log, so it records on after a restart, and `session.calls` /
+  `session.call` read the recording over RPC.
 
 ---
 
@@ -529,7 +544,7 @@ recording proxy. How each layer works and how to run it:
 | Document | For |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the engine is put together — layers, modules, the turn, sessions and scenes, history, execution, concurrency, disk layout |
-| [docs/agix-sdk.md](docs/agix-sdk.md) | embedding the engine in your own Rust process: the facade crate, one pool, one turn, events, host tools, shutdown |
+| [docs/agix-sdk.md](docs/agix-sdk.md) | embedding the engine in your own Rust process: the facade crate, one pool, one turn, events, host tools, shutdown, and the `agix::embed` entry |
 | [docs/extension_points.md](docs/extension_points.md) | every seam: what you can replace, contribute to or intercept, what it costs, who may |
 | [docs/hooks.md](docs/hooks.md) | the hook protocol: configuration, the four backends, exit codes, timeouts, payloads, answers, and when each event fires |
 | [docs/telemetry.md](docs/telemetry.md) | the telemetry files, envelope and redaction, and every event type with its fields |

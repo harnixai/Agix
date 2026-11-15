@@ -377,6 +377,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | PIPE-1..4 | 一条工具管线：`Tool::call` 只被 `call_tool` 调、权限只经 `authorize`、`ToolContext` 只在一处造且字段都有读写方、沙箱只有三份类型 | syn | `tests/guards/tests/tool_pipeline.rs` |
 | A1..A8 | 接口面：权限 trait 只有判与授、缺省方法不互相递归、工具不持 `dyn Tool`、契约无线程局部状态、公开枚举 `#[non_exhaustive]`、嵌入方构造的结构体、设置类型不带加载结果、不留 `#[deprecated]` | syn | `tests/guards/tests/api_surface.rs` |
 | 无编号 | 嵌入入口 `assembly::embed` 只增不改：`EmbedConfig` 的字段只加不改且 `#[non_exhaustive]`，`EmbedError` 的变体只加不改，`Embedded` 的方法签名、derive 与 trait 实现不变；入口不读进程环境 | syn | `tests/guards/tests/embed_surface.rs` |
+| 无编号 | 门面 `agix` 不含逻辑：按条目再导出而不是整个 crate、每条只导出一次、prelude 只列主题模块、导出总数钉住 | syn | `tests/guards/tests/facade.rs` |
 | DEC-1 | 包装器重写被包装 trait 的每个缺省方法（或登记理由） | syn | `tests/guards/tests/decorators.rs` |
 | ORD-1 | 读了前面模块产物的模块在 `Module::after` 里声明它 | syn | `tests/guards/tests/module_order.rs` |
 | G11 | 只有名单上的几处能改写 `Transcript` 里的对话 | syn | `tests/guards/tests/transcript_writers.rs` |
@@ -391,7 +392,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | DOC-* | 扩展点、hook、README、遥测、ptc 限额、ARCHITECTURE §1 的文档对账 | 文档用文本，代码一侧用运行时常量或 `guards::scan` | **不在 `tests/guards`**，在上面「文档不许漂移」表里各自的位置 |
 | CI-1 | base 和 platform 没有 http 栈（传递依赖） | `cargo tree` | `.github/workflows/ci.yml` |
 
-`cargo test -p guards` 当前共 112 个测试。支撑库自己的行为在 `support_selftest.rs` 里用
+`cargo test -p guards` 当前共 129 个测试。支撑库自己的行为在 `support_selftest.rs` 里用
 `tests/guards/fixtures` 钉住。
 
 ## fixture 项目

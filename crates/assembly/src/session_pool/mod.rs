@@ -395,11 +395,6 @@ pub(super) enum CreateError {
     PersistFailed(String),
     /// The session's scene was deactivated while the session was built.
     SceneNotActive(String),
-    /// The engine refused a field of the session's `options`.
-    InvalidOption {
-        field: String,
-        error: String,
-    },
     /// Entries of the session's `options` that cannot stand, each named.
     InvalidOptions(Vec<api::InvalidOption>),
     Failed(String),
@@ -432,7 +427,6 @@ impl CreateError {
             },
             Self::PersistFailed(e) => Self::PersistFailed(outer(e)),
             Self::SceneNotActive(scene) => Self::SceneNotActive(scene),
-            Self::InvalidOption { field, error } => Self::InvalidOption { field, error },
             Self::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             Self::Failed(e) => Self::Failed(outer(e)),
         }
@@ -451,9 +445,6 @@ impl From<CreateError> for PoolError {
                 e,
             )),
             CreateError::SceneNotActive(scene) => Self::SceneNotActive { scene },
-            CreateError::InvalidOption { field, error } => {
-                Self::InvalidOptions(vec![api::InvalidOption { field, error }])
-            }
             CreateError::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             CreateError::Failed(e) => Self::Internal(e),
         }

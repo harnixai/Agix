@@ -549,14 +549,18 @@ fn bind_session_scripts(
 
 fn build_failed(e: runtime::agent::EngineError) -> CreateError {
     match e {
-        runtime::agent::EngineError::HostTools(error) => CreateError::InvalidOption {
-            field: "host_tools".into(),
-            error,
-        },
-        runtime::agent::EngineError::OutputSchema(error) => CreateError::InvalidOption {
-            field: "output_schema".into(),
-            error,
-        },
+        runtime::agent::EngineError::HostTools(error) => {
+            CreateError::InvalidOptions(vec![crate::session_pool::api::InvalidOption::new(
+                "host_tools",
+                error,
+            )])
+        }
+        runtime::agent::EngineError::OutputSchema(error) => {
+            CreateError::InvalidOptions(vec![crate::session_pool::api::InvalidOption::new(
+                "output_schema",
+                error,
+            )])
+        }
         e => CreateError::Failed(format!("build agent: {e}")),
     }
 }
