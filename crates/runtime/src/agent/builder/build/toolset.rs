@@ -176,7 +176,7 @@ pub(super) fn admit_extra_tools(
     // (`get` returns the first match, and the engine's own instance is
     // appended after). That is precisely the shadowing this rejects.
     for t in scene.extra_tools.iter().cloned() {
-        if tools.get(t.name()).is_some() {
+        if taken(tools, t.name()) {
             return Err(EngineError::Internal(format!(
                 "scene {:?} contributes a tool named {:?}, which is already \
                      registered; rename the scene's tool",
@@ -188,7 +188,7 @@ pub(super) fn admit_extra_tools(
     }
 
     for t in host_tools {
-        if tools.get(t.name()).is_some() {
+        if taken(tools, t.name()) {
             return Err(EngineError::HostTools(format!(
                 "the host declares a tool named {:?}, which is already registered",
                 t.name()
@@ -209,12 +209,28 @@ pub(super) fn admit_extra_tools(
                     t.name()
                 )));
             }
+            None if taken(tools, t.name()) => {
+                return Err(EngineError::Internal(format!(
+                    "a plugin contributes a tool named {:?}, which the engine registers last",
+                    t.name()
+                )));
+            }
             None => {
                 tools.register(t);
             }
         }
     }
     Ok(())
+}
+
+/// Whether `name` is in the registry or is one `finalize_tools` registers
+/// after these, without a collision check of its own.
+fn taken(tools: &InMemoryToolRegistry, name: &str) -> bool {
+    #[cfg(feature = "ptc")]
+    if name == ptc::TOOL_NAME {
+        return true;
+    }
+    tools.get(name).is_some()
 }
 
 pub(super) fn register_task_tools(tools: &InMemoryToolRegistry) {
