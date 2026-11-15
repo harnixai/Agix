@@ -2051,6 +2051,30 @@ async fn a_redacted_secret_is_not_in_the_saved_file() {
     assert!(!shown.contains("hunter2") && shown.chars().count() < 4_000);
 }
 
+/// A delegate saves into its root's directory, and providers number tool
+/// calls per reply (`call_0`): the parent's result and the child's are two
+/// files.
+#[tokio::test]
+async fn the_same_tool_use_id_in_two_sessions_saves_two_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut paths = Vec::new();
+    for session in ["parent", "child"] {
+        let mut ctx = spilling_ctx(dir.path(), false);
+        ctx.session_id = session.into();
+        ctx.tool_use_id = "call_0".into();
+        let shown = execute_tool_with_telemetry(&ctx, "LongOutput", serde_json::json!({}))
+            .await
+            .unwrap()
+            .text;
+        paths.push(
+            compaction::budget::spill_path_of(&shown)
+                .expect("saved")
+                .to_string(),
+        );
+    }
+    assert_ne!(paths[0], paths[1]);
+}
+
 #[tokio::test]
 async fn a_tool_that_pages_itself_is_never_saved() {
     let dir = tempfile::tempdir().unwrap();
