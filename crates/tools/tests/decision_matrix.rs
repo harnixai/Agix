@@ -712,6 +712,43 @@ async fn delegated(
     stage_of(&policy.decide(&request).await)
 }
 
+/// A write under a host skill directory, from a session that does not list
+/// it, in `bypassPermissions`.
+async fn into_a_host_skill_dir(policy: &Policy, cwd: &Path) -> Option<Stage> {
+    let host_dir = cwd.join("host-skills");
+    let state = SessionState::for_tests(cwd.to_path_buf());
+    let env = SessionEnv {
+        base_mode: PermissionMode::BypassPermissions,
+        ..SessionEnv::new(cwd.to_path_buf())
+    };
+    env.protected_dirs.set(vec![host_dir.clone()]);
+    state.attach(EngineAttachment::new(
+        env,
+        ExecProviders {
+            sandbox: Arc::new(HoldsEverything),
+            ..platform::local_providers()
+        },
+        1,
+    ));
+    let session: Arc<dyn Session> = Arc::new(state);
+    let tool = builtin_tools().get("Write").unwrap();
+    let input = json!({ "file_path": host_dir.join("s/SKILL.md"), "content": "x" });
+    let ctx = context_like_the_runtime(&session, cwd);
+    let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
+    stage_of(
+        &policy
+            .decide(&PermissionRequest::new(
+                "Write",
+                Some(&tool),
+                &input,
+                &facts,
+                &ctx,
+                &session,
+            ))
+            .await,
+    )
+}
+
 /// PERM-8: every stage the policy refuses or asks at is reached by a call
 /// here, so a stage added to the policy is added to the matrix too.
 #[tokio::test]
@@ -894,6 +931,10 @@ async fn every_stage_of_the_policy_is_reached() {
                 Attendance::NoOneToAsk("nobody here"),
             )
             .await,
+        ),
+        (
+            Stage::HostSkillDir,
+            into_a_host_skill_dir(&permission("Write", RuleCase::None), &cwd).await,
         ),
     ];
     for (expected, got) in seen {

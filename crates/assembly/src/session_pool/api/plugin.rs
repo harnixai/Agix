@@ -32,6 +32,7 @@ pub enum SkillOrigin {
     User,
     Project,
     Plugin,
+    Host,
 }
 
 /// A package skill whose name another source holds.

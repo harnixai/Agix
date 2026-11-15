@@ -914,6 +914,13 @@ store 由造它的人自己配:`MemoryStore::new(user, local).with_environment(e
 只属于一个 source,展开时也只问这个 source 要正文。被磁盘或别的包遮住的包 skill,`plugin.list`
 在那个包的 `skill_conflicts` 里报出来。
 
+会话自己的宿主目录是这张表之上的另一层(`skills::host::HostSkillLayer`,经
+`SkillsModule::with_host` 装进去),来源是 `host`:它顶替内建、插件包、未受信项目的同名 skill,
+用户的磁盘层与受信项目的 `.agents/skills` 照旧占着名字(`SkillManager::yields_to_host`);几个宿主
+目录之间先列的赢。daemon 里它由 `options.skill_dirs` / `session.setSkillDirs` 给出,每个会话一份
+(daemon_rpc_protocol.md 的 `session.create`)。会话的命令表建在它自己的 skill 视图上,
+`Builder` 没有替换命令目录的口子。
+
 宿主自己的 source 是加进去,不是替掉:
 
 ```rust

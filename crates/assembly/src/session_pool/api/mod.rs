@@ -39,7 +39,7 @@ pub use mcp::{
     McpRedirect, McpServerRef, McpServerState, McpServerStatus, McpServerWritten,
 };
 pub use options::{
-    ClockOptions, HostToolOption, RecorderOptions, SessionOptions, TelemetryOptions,
+    ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption, TelemetryOptions,
 };
 pub use plugin::{
     PluginDisclosure, PluginInfo, PluginInstalled, PluginRemoved, PluginScope, PluginToggled,
@@ -53,7 +53,7 @@ pub use scene::{SceneCapabilities, SceneDescription, SceneReload, SceneSummary, 
 pub use session::{
     Applies, DeleteReport, ForkReport, ModelChoice, PermissionReport, PromptChoice, Renamed,
     ResumeReport, ResumeStatus, ScriptCall, ScriptCallOutcome, ScriptReport, SessionCreated,
-    SessionDetail, TurnState,
+    SessionDetail, ShadowedSkill, SkillDirReport, SkillDirState, TurnState,
 };
 pub use settings::{
     ConfigTier, ConfigTierName, ImportRun, ProjectStatus, ProjectTrustSet, ProviderConfigView,

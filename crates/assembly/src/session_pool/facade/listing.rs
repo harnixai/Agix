@@ -171,7 +171,7 @@ impl SessionPool {
             Some(id) => self.scenes.is_active(id),
             None => false,
         };
-        let (turn_state, current_turn_id, context, health) = self
+        let (turn_state, current_turn_id, context, health, core) = self
             .live
             .with_live(session_id, |live| {
                 (
@@ -179,10 +179,11 @@ impl SessionPool {
                     live.turn.current_turn_id(),
                     live.core.context(),
                     live.engine.health.clone(),
+                    Some(live.core.clone()),
                 )
             })
             .await
-            .unwrap_or_else(|| (api::TurnState::Idle, None, None, Default::default()));
+            .unwrap_or_else(|| (api::TurnState::Idle, None, None, Default::default(), None));
         let health = if health.is_empty() {
             None
         } else {
@@ -201,7 +202,43 @@ impl SessionPool {
             context,
             health,
             scripts: self.script_report(session_id).await,
+            skill_dirs: self.skill_dir_report(session_id, core.as_deref()).await,
         })
+    }
+
+    /// `session.get`'s `skill_dirs`: in full for `core`, the session in
+    /// memory; only the recorded paths of one out of it.
+    async fn skill_dir_report(
+        &self,
+        session_id: &str,
+        core: Option<&SessionCore>,
+    ) -> Option<Vec<api::SkillDirReport>> {
+        let recorded = match self.specs.get(session_id) {
+            Some(spec) => spec.skill_dirs(),
+            None => self.specs.recorded(session_id).await.skill_dirs(),
+        };
+        if recorded.is_empty() {
+            return None;
+        }
+        let Some(core) = core else {
+            return Some(
+                recorded
+                    .into_iter()
+                    .map(|dir| api::SkillDirReport {
+                        path: dir.path,
+                        state: None,
+                        skills: None,
+                        shadowed: None,
+                    })
+                    .collect(),
+            );
+        };
+        let binding = self.binding_for(core.project(), &core.scene().id).await;
+        Some(crate::session_pool::parts::bindings::report_skill_dirs(
+            &recorded,
+            core.skill_dirs(),
+            &binding.modules,
+        ))
     }
 
     /// What this session's scripts have done, for `session.get`.

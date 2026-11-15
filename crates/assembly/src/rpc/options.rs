@@ -21,13 +21,18 @@ impl SessionOptions {
         "host_tools",
         "attended",
         "auto_name",
+        "skill_dirs",
     ];
 
     /// The fields whose value is a list. Each entry is read on its own, so
     /// one bad entry is left out without the rest — a bad allow rule must not
     /// take the deny rules beside it along.
-    pub const LIST_FIELDS: &'static [&'static str] =
-        &["permission_rules", "prompt_types", "host_tools"];
+    pub const LIST_FIELDS: &'static [&'static str] = &[
+        "permission_rules",
+        "prompt_types",
+        "host_tools",
+        "skill_dirs",
+    ];
 
     /// `params.options` as far as it can be read, and what in it could not
     /// be: a field this daemon does not know, one whose value does not
@@ -256,6 +261,9 @@ mod tests {
             }],
             attended: Some(true),
             auto_name: Some(false),
+            skill_dirs: vec![crate::session_pool::api::SkillDirOption {
+                path: "/skills".into(),
+            }],
         };
         let serialized = serde_json::to_value(&every_field).unwrap();
         let mut names: Vec<&str> = serialized

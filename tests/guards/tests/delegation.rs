@@ -81,6 +81,7 @@ const INHERITED: &[(&str, &str)] = &[
     ("recovery_policy", "host_layers.recovery_policy"),
     ("compactor", "host_layers.compactor"),
     ("attended", "attended"),
+    ("skill_dirs", "skill_dirs"),
 ];
 
 /// Decided per delegate by whoever spawns it.
@@ -165,10 +166,6 @@ const NOT_FOR_DELEGATES: &[(&str, &str)] = &[
     (
         "wake_rx",
         "the tree's wake channel is wired on the root's runner",
-    ),
-    (
-        "commands_override",
-        "shared across a host's root sessions; a delegate builds its own",
     ),
     (
         "elicitation",

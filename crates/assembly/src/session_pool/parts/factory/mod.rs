@@ -90,6 +90,9 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     pub(in crate::session_pool) package_scripts: Vec<crate::plugins::PackageScripts>,
     pub(in crate::session_pool) mcp_module: Option<Arc<dyn runtime::module::Module>>,
     pub(in crate::session_pool) process_groups: Option<Arc<platform::GroupLedger>>,
+    /// The session's host skill directories, and every session's.
+    pub(in crate::session_pool) skill_dirs: &'a crate::session_pool::SessionSkillDirs,
+    pub(in crate::session_pool) protected_dirs: base::context::LiveDirs,
 }
 
 pub(in crate::session_pool) struct BuiltEngine {
@@ -169,7 +172,6 @@ impl EngineFactory {
             .session_id(session_id.to_string())
             .session_state(req.seed.state, req.seed.generation.get())
             .steering(req.seed.steer)
-            .commands_override(binding.commands.clone())
             .cron_store(req.cron_store)
             .run_slots(self.run_slots.clone())
             .background_hooks(self.background_hooks.clone())
@@ -196,7 +198,12 @@ impl EngineFactory {
         if let Some(module) = req.mcp_module {
             builder = builder.module(module);
         }
-        builder = builder.modules(binding.modules.session_modules());
+        builder = builder
+            .modules(binding.modules.session_modules(req.skill_dirs))
+            .skill_dirs(runtime::agent::HostSkillDirs {
+                readable: req.skill_dirs.readable().clone(),
+                protected: req.protected_dirs.clone(),
+            });
 
         if let Some(handle) = session_telemetry(&settings_snapshot, options, session_id) {
             builder = builder.telemetry_handle(handle);

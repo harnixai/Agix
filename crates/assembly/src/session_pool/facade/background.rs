@@ -58,6 +58,13 @@ impl SessionPool {
         use crate::watch_hub::{Tier, WatchTarget};
         match key.target {
             WatchTarget::Settings => {}
+            WatchTarget::Skills if matches!(key.tier, Tier::Host(_)) => {
+                if let Tier::Host(dir) = &key.tier {
+                    info!(dir = %dir.display(), "a host skill directory changed on disk");
+                    self.bindings.host_dirs().0.rescan(dir);
+                }
+                return;
+            }
             WatchTarget::Skills | WatchTarget::Agents => {
                 info!(tier = ?key.tier, target = ?key.target, "a catalog changed on disk");
                 self.bindings.refresh_catalogs(&key.tier, key.target).await;
@@ -70,6 +77,7 @@ impl SessionPool {
         let ours = match &key.tier {
             Tier::Project(root) => root == self.cwd(),
             Tier::Global | Tier::Scene(_) => true,
+            Tier::Host(_) => return,
         };
         if ours {
             info!(tier = ?key.tier, "settings changed on disk; reloading");

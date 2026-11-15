@@ -1,6 +1,6 @@
 //! 会话生命周期：`session.create` / `get` / `list` / `close` / `delete` / `fork` /
-//! `resume` / `rename` / `setModel` / `setPrompt` / `subscribe` / `unsubscribe` /
-//! `interrupt`。
+//! `resume` / `rename` / `setModel` / `setPrompt` / `setSkillDirs` / `subscribe` /
+//! `unsubscribe` / `interrupt`。
 
 use super::*;
 use crate::rpc::methods::session::*;
@@ -22,6 +22,7 @@ rpc_methods! {
     "session.rename" => rename(RenameParams) -> Renamed;
     "session.setModel" => set_model(SetModelParams) -> ModelChoice;
     "session.setPrompt" => set_prompt(SetPromptParams) -> PromptChoice;
+    "session.setSkillDirs" => set_skill_dirs(SetSkillDirsParams) -> SkillDirsSet;
     "session.subscribe" => subscribe(SubscribeParams) -> SubscribeResult;
     "session.unsubscribe" => unsubscribe(SessionRef) -> Unsubscribed;
     "session.interrupt" => interrupt(SessionRef) -> Interrupted;
@@ -108,6 +109,19 @@ async fn set_prompt(
         apply(&mut prompt.override_text, p.override_text);
     };
     Ok(s.pool.set_session_prompt(&p.session_id, change).await?)
+}
+
+async fn set_skill_dirs(
+    s: &DaemonServer,
+    _: &Call,
+    p: SetSkillDirsParams,
+) -> Result<SkillDirsSet, PoolError> {
+    let skill_dirs = s.pool.set_skill_dirs(&p.session_id, p.skill_dirs).await?;
+    Ok(SkillDirsSet {
+        session_id: p.session_id,
+        skill_dirs,
+        applies: crate::session_pool::api::Applies::NextTurn,
+    })
 }
 
 async fn subscribe(

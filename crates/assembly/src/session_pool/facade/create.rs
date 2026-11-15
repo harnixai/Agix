@@ -122,6 +122,7 @@ impl SessionPool {
                 ..Naming::default()
             },
         );
+        self.take_up_recorded_skill_dirs(&core, &spec, &binding, resume)?;
         let restore = if resume {
             Restore::FromLog
         } else {
@@ -391,6 +392,65 @@ impl SessionPool {
         }
     }
 
+    /// Give `core` the host skill directories of `spec`. A new session's
+    /// must all pass; of a resumed one's, those that no longer do are left
+    /// out.
+    fn take_up_recorded_skill_dirs(
+        &self,
+        core: &SessionCore,
+        spec: &SessionSpec,
+        binding: &ProjectBinding,
+        resume: bool,
+    ) -> Result<(), CreateError> {
+        let (accepted, refused) = HostDirTable::sort(&spec.skill_dirs(), &binding.settings);
+        if !refused.is_empty() && !resume {
+            self.specs.forget(core.id());
+            return Err(CreateError::InvalidOptions(refused));
+        }
+        self.take_up_skill_dirs(core, spec, accepted, refused, binding);
+        Ok(())
+    }
+
+    /// Give `core` the host skill directories of `spec` that passed; those
+    /// that did not are a recorded session's, left out with a warning.
+    pub(in crate::session_pool) fn take_up_skill_dirs(
+        &self,
+        core: &SessionCore,
+        spec: &SessionSpec,
+        accepted: Vec<crate::session_pool::parts::bindings::AcceptedDir>,
+        refused: Vec<api::InvalidOption>,
+        binding: &ProjectBinding,
+    ) {
+        let recorded = spec.skill_dirs();
+        let refused_paths = refused
+            .iter()
+            .filter_map(|left_out| {
+                warn!(
+                    session_id = %core.id(),
+                    field = %left_out.field,
+                    error = %left_out.error,
+                    "a recorded skill directory is left out"
+                );
+                let index = left_out
+                    .field
+                    .strip_prefix("skill_dirs[")?
+                    .split(']')
+                    .next()?
+                    .parse::<usize>()
+                    .ok()?;
+                recorded.get(index).map(|d| d.path.clone())
+            })
+            .collect();
+        let (table, hub) = self.bindings.host_dirs();
+        table.apply(
+            core.skill_dirs(),
+            &accepted,
+            refused_paths,
+            &binding.settings,
+            hub,
+        );
+    }
+
     /// Engine `generation` of `core`, on `binding` and `spec`, not yet
     /// attached to the session's state.
     async fn build_engine(
@@ -441,6 +501,8 @@ impl SessionPool {
                 .sandbox
                 .reap_process_groups
                 .then(|| core.process_groups().clone()),
+            skill_dirs: core.skill_dirs(),
+            protected_dirs: self.bindings.host_dirs().0.protected().clone(),
         })?;
         self.plugins
             .note_script_faults(std::mem::take(&mut built.script_faults));
@@ -594,6 +656,7 @@ fn run_engine(
     hub.answer_host_calls_with(input_tx.clone());
     let delegator = agent.delegator();
     let health = agent.health();
+    let commands = agent.commands();
     let end_reason = agent.end_reason();
     let cancel = CancellationToken::new();
     let exited = CancellationToken::new();
@@ -617,6 +680,7 @@ fn run_engine(
             delegator: Some(delegator),
             scripts,
             health,
+            commands,
         },
         event_rx,
     )

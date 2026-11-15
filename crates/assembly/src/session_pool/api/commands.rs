@@ -31,6 +31,8 @@ pub enum CommandSource {
     User,
     Project,
     Plugin,
+    /// A directory the host listed for the session (`options.skill_dirs`).
+    Host,
     Mcp,
 }
 
@@ -46,6 +48,7 @@ impl From<runtime::commands::CommandInfo> for CommandInfo {
             "user" => CommandSource::User,
             "project" => CommandSource::Project,
             "plugin" => CommandSource::Plugin,
+            "host" => CommandSource::Host,
             _ => CommandSource::Mcp,
         };
         Self {

@@ -67,6 +67,30 @@ impl Named {
             .map(String::as_str)
     }
 
+    /// The host skill directory a call that changes something names, taken
+    /// as `credential` takes its paths. A read is not one: the sessions that
+    /// list the directory read it, the others ask as for any other path.
+    pub(super) fn protected_skill_dir(
+        &self,
+        ctx: &ToolContext,
+        read_only: bool,
+    ) -> Option<std::path::PathBuf> {
+        if read_only || matches!(self.subject, Subject::ReadPath(_)) {
+            return None;
+        }
+        let protected = &ctx.session.env().protected_dirs;
+        self.candidates.iter().find_map(|candidate| {
+            std::iter::once(candidate.as_str())
+                .chain(candidate.split_once('=').map(|(_, value)| value))
+                .filter(|word| !word.is_empty())
+                .find_map(|word| {
+                    ResolvedPath::new(word, &ctx.cwd)
+                        .all()
+                        .find_map(|p| protected.holding(p))
+                })
+        })
+    }
+
     pub(super) fn bypass_immune(&self) -> Option<&str> {
         self.candidates
             .iter()

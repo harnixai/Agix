@@ -85,6 +85,7 @@ impl Builder {
                 modules: modules.to_vec(),
                 host_layers,
                 attended: *attended,
+                skill_dirs: self.host.skill_dirs.clone(),
             };
             let mut cx = crate::module::SessionContext {
                 tools,
@@ -126,22 +127,16 @@ impl Builder {
         skill_catalog: &crate::module::LateSkillCatalog,
         mcp: &dyn base::interface::mcp_servers::McpServers,
     ) -> Arc<crate::commands::CommandRegistry> {
-        self.ext.commands_override.clone().unwrap_or_else(|| {
-            let mut registry = crate::commands::CommandRegistry::from_skill_catalog(Arc::new(
-                skill_catalog.clone(),
-            ));
-            // Only a registry this builder owns can be extended; a shared
-            // `commands_override` is resolved off the live `McpManager` by
-            // the slash-command interception in `turn/process.rs`.
-            let mcp_prompts = mcp.prompt_commands();
-            if !mcp_prompts.is_empty() {
-                tracing::info!(
-                    count = mcp_prompts.len(),
-                    "registering MCP prompts as slash commands"
-                );
-                registry.register_mcp_prompts(&mcp_prompts);
-            }
-            std::sync::Arc::new(registry)
-        })
+        let mut registry =
+            crate::commands::CommandRegistry::from_skill_catalog(Arc::new(skill_catalog.clone()));
+        let mcp_prompts = mcp.prompt_commands();
+        if !mcp_prompts.is_empty() {
+            tracing::info!(
+                count = mcp_prompts.len(),
+                "registering MCP prompts as slash commands"
+            );
+            registry.register_mcp_prompts(&mcp_prompts);
+        }
+        std::sync::Arc::new(registry)
     }
 }

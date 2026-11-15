@@ -45,8 +45,10 @@ use facade::settings_reload::*;
 use mcp_hub::McpHub;
 pub(crate) use mcp_hub::McpSetup;
 pub use mcp_hub::{McpOptions, COMPILED as MCP_COMPILED};
+pub(crate) use parts::bindings::SessionSkillDirs;
 use parts::bindings::{
-    BindingCache, Cached, HostOverrides, ManagedLayer, ProjectBinding, ProjectSceneKey,
+    BindingCache, Cached, HostDirTable, HostOverrides, ManagedLayer, ProjectBinding,
+    ProjectSceneKey,
 };
 use parts::directory::SessionDirectory;
 use parts::events::DaemonEvents;
@@ -339,6 +341,32 @@ impl SessionPool {
             .map(api::CommandInfo::from)
             .collect()
     }
+
+    /// The slash commands `session_id` resolves: its scene's built-ins, its
+    /// host skill directories and its MCP prompts with the rest. Only a
+    /// session in memory has them; one out of it is `SessionNotFound` until
+    /// it is brought back.
+    pub async fn list_session_commands(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<api::CommandInfo>, PoolError> {
+        let commands = self
+            .live
+            .with_live(session_id, |live| live.engine.commands.clone())
+            .await;
+        match commands {
+            Some(commands) => Ok(commands
+                .list_detailed()
+                .into_iter()
+                .map(api::CommandInfo::from)
+                .collect()),
+            None if self.session_exists(session_id).await => Err(PoolError::session_gone(
+                session_id,
+                format!("session `{session_id}` is not in memory; session.resume it first"),
+            )),
+            None => Err(PoolError::session_not_found(session_id)),
+        }
+    }
 }
 
 /// A session in `Rebuilding`, the entry of `generation`.
@@ -372,6 +400,8 @@ pub(super) enum CreateError {
         field: String,
         error: String,
     },
+    /// Entries of the session's `options` that cannot stand, each named.
+    InvalidOptions(Vec<api::InvalidOption>),
     Failed(String),
 }
 
@@ -403,6 +433,7 @@ impl CreateError {
             Self::PersistFailed(e) => Self::PersistFailed(outer(e)),
             Self::SceneNotActive(scene) => Self::SceneNotActive(scene),
             Self::InvalidOption { field, error } => Self::InvalidOption { field, error },
+            Self::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             Self::Failed(e) => Self::Failed(outer(e)),
         }
     }
@@ -423,6 +454,7 @@ impl From<CreateError> for PoolError {
             CreateError::InvalidOption { field, error } => {
                 Self::InvalidOptions(vec![api::InvalidOption { field, error }])
             }
+            CreateError::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             CreateError::Failed(e) => Self::Internal(e),
         }
     }

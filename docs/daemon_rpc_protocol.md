@@ -801,6 +801,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
 | `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
+| `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -1171,6 +1172,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "model": "deepseek-chat",             // 可选
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
+    "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
     "host_tools": [ ] } }                 // 可选,宿主自己实现的工具,见下
 // ← result
 { "session_id": "…", "scene": "code", "session_kind": "primary",
@@ -1188,11 +1190,11 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传的 `options` 被忽略。
 会话日志里没有记录过 `options` 的旧会话例外:恢复时采用这次调用带的那份。
 `options` 记在会话日志里一条 `ns` 为 `agix.session`、`event` 为 `spec` 的扩展条目上,
-`session.setModel` 选的模型也记在那里,所以同样跨重启保留。
+`session.setModel` 选的模型、`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
 
 `options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
 会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)、`options`
-本身不是对象。`permission_rules`、`prompt_types`、`host_tools` 这几个列表字段逐条读,`field` 写成
+本身不是对象。`permission_rules`、`prompt_types`、`host_tools`、`skill_dirs` 这几个列表字段逐条读,`field` 写成
 `permission_rules[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
 `options` 读不出来。`session.create`、`session.run_turn`、`session.resume` 都这样。
 
@@ -1273,6 +1275,42 @@ MCP server 在工具调用中要问用户的(2026-07-28 server 的 `input_requir
 
 `auto_name` 为 `false` 时首轮之后不调模型起名,`name` 一直是 `null`,直到 `session.rename`;省略或
 `true` 按场景的 `session_naming`(`true` 不会让没有 `session_naming` 的场景起名)。同样随 `options` 保存。
+
+`skill_dirs` 给这个会话自己的 skill 目录(宿主的、按会话不同的 skill 来源):`[{ "path": "/abs" }]`,
+元素是对象不是裸字符串,至多 64 个;路径在引擎所在的机器上。目录里每个子目录一个 skill,格式与磁盘上的
+skill 目录相同。只有列了它的会话看得到:提示词里的 skill 清单、`Skill` 工具、`/name` 斜杠命令、
+`commands.list {session_id}` 都按会话算。子 Agent、团队成员、`context: fork` 的 skill、`session.startAgent`
+起的委派看到的是父会话的那一组,并跟着它变。
+
+同名时:宿主目录里的 skill 顶替内建的、插件包的、未受信项目的同名 skill;用户的磁盘层(`{global}/skills`、
+场景层)与受信项目的 `.agents/skills` 照旧占着名字。列出的几个目录之间,先列的赢(同 PATH)。
+这类 skill 的 `source` 是 `host`(`commands.list`,`session.get` 的 `shadowed.by`)。
+
+信任同插件包:`allowed-tools` 只认收窄的写法(`Bash(cargo test:*)`),裸工具名与指到项目之外的模式不认;
+`` !`cmd` `` 经会话自己的 `Bash`、按会话的权限执行,`disable_skill_shell_execution` 照样生效。
+读取以目录自己为根:skill 目录、`SKILL.md`、`files:` 里经符号链接指到目录之外的不读,记警告;
+名字以 `mcp__` 开头的不读;解析不了的 `SKILL.md` 跳过,同磁盘层。
+
+建会话时逐条检查,不过的 `INVALID_PARAMS`、`error.data.invalid_options` 一项一条、`field` 为
+`skill_dirs[i].path`(数量超限、构建没有 skills 模块时为 `skill_dirs`),什么都不建:必须是绝对路径;
+已存在但不是目录的拒绝;解开链接后同一目录出现两次(记在后一项上);落在这个绑定的 skill 层
+(`{global}/skills`、`{global}/scenes`、场景层的 `skills`)、会话的项目根、工作目录、可写目录
+(`sandbox.additional_directories`、状态根的 scratchpad 与 memory)、沙箱里的命令能写的目录(状态根的
+`tmp`、`sandbox.cache_directories`、`/dev`、macOS 的每用户临时目录 `/var/folders/…/T`,`tempfile` 之类
+缺省建在这里)或凭据位置之内、或把它们包在里面。不存在的目录收下,`state` 为 `missing`,出现之后在下一轮
+开始前(daemon 为会话跑的每一轮前检查)读进来,此后被监视;出现时是符号链接的,按它解析到的位置监视,
+那个位置同样受下面的读写边界约束。落在*另一个*项目(包括未受信的项目)里的目录照收,里面的 skill
+按宿主内容对待(`source:"host"`,`` !`cmd` `` 照跑),不按那个项目的信任判:列哪个目录由宿主负责。没有 skills 模块的构建拒绝任何非空的 `skill_dirs`。`session.resume` 时记下的某个目录
+已经通不过检查:这一项被略去、日志里记警告、`session.get` 报它 `state:"refused"`,其余照用。
+
+读写边界:会话自己的宿主目录不问就能读(算在它的可读根里,严格沙箱档也是,无人值守的场景也是)。
+daemon 进程里任何会话列过的目录,对所有会话都是只读:内建工具里任何非只读的调用,参数里点名了其下的
+路径,在每一种权限模式下都被拒,`bypassPermissions` 也不例外(权限阶段 `host_skill_dir`)。MCP 工具与
+宿主工具(`host_tools`)不向权限判定报路径,这一条拦不到它们,同凭据位置。这个保护集合在进程内只增不减。
+沙箱里的命令写不到宿主目录:它能写的根都在上面的检查里拒掉了。已知的缺口:冷会话的目录,要等某个列了
+它的会话在本进程里被载入才受保护;不沙箱的命令写到那里而没有点名路径,拦不住(同今天的
+`.agents/skills`),路径粘在选项上(`-o/dir/x`)或由变量拼出(`"$D"x/…`)也算没点名;落在*另一个*会话的
+项目里的宿主目录,那个会话的沙箱命令可以不点名地写它(检查只拒绝落在列它的会话自己范围内的目录)。
 
 `host_tools` 声明宿主自己实现的工具。它们和会话自己的工具一样宣告给模型,经过同样的权限、
 hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(§7.4),用
@@ -1367,6 +1405,17 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 是一个 `inspectContext` / `dropMessages` / `editMessage` 正独占着会话;后两种状态下
 `run_turn{on_busy:"reject"}` 报 `SESSION_BUSY`(§9.1),`current_turn_id` 为 `null`。
 不在内存里的会话是 `idle`。
+
+`skill_dirs` 只有会话列了宿主目录时才有,形如:
+
+```
+[ { "path": "/abs/skills", "state": "ok",
+    "skills": [ "tour" ],                 // 这个目录在本会话里占着的 skill 名
+    "shadowed": [ { "skill": "x", "by": "user|project|host", "path": "…" } ] } ]
+```
+
+`state` 取 `ok`、`missing`(目录还不存在)、`refused`(恢复时通不过检查);
+`shadowed` 是这个目录里被别处同名 skill 遮住的,`by` 是占着名字的一方。不在内存里的会话只有 `path`。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -1709,6 +1758,25 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 **只对内存里的会话有效**,冷会话返回 `SESSION_NOT_FOUND`(先 `session.resume`)。
 选择记在会话日志里(见 `session.create` 的 `options`):会话被驱逐后重建、
 `config.reload` 之后重建、daemon 重启后恢复,选的都还是这个模型和厂商。
+
+#### `session.setSkillDirs`
+
+```jsonc
+// → params
+{ "session_id": "…",
+  "skill_dirs": [ { "path": "/abs/skills" } ] }   // 整组替换;[] = 清空
+// ← result
+{ "session_id": "…", "skill_dirs": [ { "path": "/abs/skills" } ], "applies": "next_turn" }
+```
+
+换掉这个会话的整组宿主 skill 目录,检查与合并规则同 `session.create` 的 `options.skill_dirs`
+(`INVALID_PARAMS` 与 `invalid_options` 同样,`field` 带 `skill_dirs[i].path`)。不重建引擎:
+后台任务不停、也不因它们在跑而拒绝;下一轮开始时会话比对新旧的 skill 视图,发提醒与
+`skills_changed`;正在跑的这一轮可能已经看到新的一组。已经展开进 transcript 的 skill 正文不变。
+
+会话不在内存里时只改记下来的规格,`session.resume`、调度出来的轮次、重建与重启按它走。
+这样设的值优先于 `options.skill_dirs`(同 `session.setModel`),并记在 `agix.session/spec` 条目里。
+会话不存在 → `SESSION_NOT_FOUND`。
 
 #### `session.setPrompt`
 
@@ -3028,15 +3096,19 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 
 #### `commands.list`
 
-无参。
-
 ```jsonc
+// → params(可选)
+{ "session_id": "…" }   // 省略 = daemon 自己的那一组
 // ← result
 { "commands": [ ] }
 // 元素:{ "name":"…", "description":"…",
-//        "kind":"prompt|local",              prompt = 展开后继续问模型,local = 直接执行
-//        "source":"builtin|user|project|plugin" }
+//        "kind":"prompt|local|mcp-prompt",   prompt = 展开后继续问模型,local = 直接执行,mcp-prompt = MCP server 的 prompt
+//        "source":"builtin|user|project|plugin|host|mcp" }
 ```
+
+给了 `session_id`,返回这个会话自己的命令表(它的 skill 视图,含宿主目录里的 skill;场景的 `bundled_skills`
+没列的内建也不在其中;MCP 的 prompt 建会话时登记,之后的走实时的 MCP 回退)。只有内存里的会话:
+否则 `SESSION_NOT_FOUND`,消息指向先 `session.resume`。
 
 #### `import.list`
 
@@ -3213,7 +3285,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者 |
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
-| `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的)。缓存了 `commands.list` 的客户端该重取 |
+| `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`;引擎自己的提醒(如 `permit_always` 的 `local` 没能写下)也走这一帧,`status` 为 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
 | `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
@@ -3541,7 +3613,8 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // INVALID_PARAMS,只在 options 里有读不出来的字段时
 { "invalid_options": [ { "field": "permission_mode", "error": "…" } ] }
-// 另有只有建出引擎才知道的:host_tools 的重名,以及场景 tools.deny 了 StructuredOutput 时的 output_schema
+// 另有只有建出引擎才知道的:host_tools 的重名,以及场景 tools.deny 了 StructuredOutput 时的 output_schema;
+// 还有 skill_dirs 通不过的检查(session.create 等建新会话时,以及 session.setSkillDirs,field 为 skill_dirs[i].path)
 // INVALID_PARAMS,session.calls / session.call 带的 generation 不是录像当前的时
 { "generation": 1763200000000 }
 

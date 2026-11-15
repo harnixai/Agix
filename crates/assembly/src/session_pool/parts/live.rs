@@ -80,6 +80,9 @@ pub(in crate::session_pool) struct SessionCore {
     log: LogHealth,
     /// How its last failed turn failed.
     last_failure: Mutex<Option<base::event::FailureKind>>,
+    /// The host's skill directories for it, which every engine it gets is
+    /// built over.
+    skill_dirs: super::bindings::SessionSkillDirs,
 }
 
 impl SessionCore {
@@ -112,7 +115,12 @@ impl SessionCore {
             context: Mutex::new(None),
             log: LogHealth::default(),
             last_failure: Mutex::new(None),
+            skill_dirs: Default::default(),
         })
+    }
+
+    pub(in crate::session_pool) fn skill_dirs(&self) -> &super::bindings::SessionSkillDirs {
+        &self.skill_dirs
     }
 
     pub(in crate::session_pool) fn id(&self) -> &str {
@@ -203,6 +211,8 @@ pub(in crate::session_pool) struct EngineSlot {
     pub(in crate::session_pool) scripts: Option<Arc<base::interface::script::ScriptLedger>>,
     /// The checks this engine's plugins registered, for `session.get`.
     pub(in crate::session_pool) health: Arc<base::interface::health::HealthChecks>,
+    /// The slash commands this engine resolves, for `commands.list`.
+    pub(in crate::session_pool) commands: Arc<runtime::commands::CommandRegistry>,
 }
 
 impl EngineSlot {

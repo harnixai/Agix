@@ -6,16 +6,26 @@ use platform::sandbox;
 pub(super) fn sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
     let settings = &ctx.config.sandbox;
     let mut policy = settings.policy();
-    policy.additional_writable = ctx
-        .session
-        .env()
-        .additional_writable_dirs
+    policy.additional_writable = writable_dirs(
+        &ctx.session.env(),
+        settings.session_tmp_dir(&ctx.session_id),
+    );
+    policy
+}
+
+/// What a session's sandboxed commands may write besides its working
+/// directory and [`platform::sandbox::implicit_writable_roots`]: its writable
+/// directories, its package caches, and `session_tmp`, its `TMPDIR`.
+pub fn writable_dirs(
+    env: &base::context::SessionEnv,
+    session_tmp: std::path::PathBuf,
+) -> Vec<std::path::PathBuf> {
+    env.additional_writable_dirs
         .iter()
         .cloned()
-        .chain(cache_directories(ctx))
-        .chain([settings.session_tmp_dir(&ctx.session_id)])
-        .collect();
-    policy
+        .chain(cache_directories(env))
+        .chain([session_tmp])
+        .collect()
 }
 
 /// The policy the call's approval says its command runs under. A call
@@ -41,18 +51,16 @@ pub(super) fn policy_for_profile(ctx: &ToolContext) -> sandbox::SandboxPolicy {
 pub fn strict_sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
     let readable = crate::security::readable_roots(ctx)
         .into_iter()
-        .chain(cache_directories(ctx));
+        .chain(cache_directories(&ctx.session.env()));
     let settings = &ctx.config.sandbox;
     settings
         .policy()
         .strict(readable, Some(settings.session_tmp_dir(&ctx.session_id)))
 }
 
-fn cache_directories(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
+fn cache_directories(env: &base::context::SessionEnv) -> Vec<std::path::PathBuf> {
     let home = base::paths::home_dir();
-    ctx.session
-        .env()
-        .cache_directories
+    env.cache_directories
         .iter()
         .filter_map(|dir| match dir.strip_prefix("~") {
             Ok(rest) => home.as_ref().map(|h| h.join(rest)),

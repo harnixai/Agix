@@ -3,15 +3,18 @@
 //! 宿主覆盖层和托管设置层只在这里叠加。
 //!
 //! 锁序：`bindings` 在前，`last_good_routers` 在后（都是 tokio `Mutex`）；`settings`
-//! 是 tokio `RwLock`，只在取值或替换的那一下持有；`epochs` 和 `pool_watch` 是 std 叶子
-//! 锁。持着 `bindings` 时不读盘，也不调别的协作者。
+//! 是 tokio `RwLock`，只在取值或替换的那一下持有；`epochs`、`watch.own` 和宿主目录表
+//! 是 std 叶子锁。持着 `bindings` 时不读盘，也不调别的协作者。
 
 mod binding;
+mod host_dirs;
 mod host_overrides;
 
 pub(in crate::session_pool) use binding::{
     tier_covers, BindingStamp, ProjectBinding, ProjectSceneKey,
 };
+pub(crate) use host_dirs::SessionSkillDirs;
+pub(in crate::session_pool) use host_dirs::{report_skill_dirs, AcceptedDir, HostDirTable};
 pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
@@ -112,14 +115,9 @@ pub(in crate::session_pool) struct BindingCache {
     /// invalidation so a provider config that stops resolving — or stops
     /// producing a buildable client — leaves working routing in place.
     last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<base::provider::TaskRouter>>>,
-    /// One `notify` watcher for every settings file every binding was merged
-    /// from. `None` when the watcher could not be started: configuration
-    /// changes then reach the daemon only through `config.reload`.
-    watch: Option<WatchHub>,
-    /// The watch on the tiers of this daemon's own pair, held for the pool's
-    /// lifetime. Binding watches come and go with the bindings, and with every
-    /// binding invalidated nothing would be left to notice the next change.
-    pool_watch: std::sync::Mutex<Vec<WatchToken>>,
+    watch: Watching,
+    /// The host's skill directories of every session in memory.
+    host_dirs: HostDirTable,
     credentials: Arc<dyn base::interface::credentials::CredentialSource>,
     /// The client a pair with no provider configured talks through.
     client: Arc<dyn AnthropicClient>,
@@ -127,6 +125,18 @@ pub(in crate::session_pool) struct BindingCache {
     /// The project a session that names none belongs to.
     cwd: PathBuf,
     plugins: Arc<crate::plugins::PluginSubsystem>,
+}
+
+struct Watching {
+    /// One `notify` watcher for every settings file every binding was merged
+    /// from, and every host skill directory. `None` when the watcher could
+    /// not be started: configuration changes then reach the daemon only
+    /// through `config.reload`.
+    hub: Option<WatchHub>,
+    /// The watch on the tiers of this daemon's own pair, held for the pool's
+    /// lifetime. Binding watches come and go with the bindings, and with every
+    /// binding invalidated nothing would be left to notice the next change.
+    own: std::sync::Mutex<Vec<WatchToken>>,
 }
 
 /// The host's settings for this daemon's own pair as the pool serves them:
@@ -174,8 +184,11 @@ impl BindingCache {
                 epochs: std::sync::Mutex::new(HashMap::new()),
             },
             last_good_routers: AsyncMutex::new(HashMap::new()),
-            watch,
-            pool_watch: std::sync::Mutex::new(Vec::new()),
+            watch: Watching {
+                hub: watch,
+                own: std::sync::Mutex::new(Vec::new()),
+            },
+            host_dirs: HostDirTable::default(),
             credentials,
             client,
             paths,
@@ -392,7 +405,7 @@ impl BindingCache {
         settings: &LoadedSettings,
         key: &ProjectSceneKey,
     ) -> (Vec<WatchToken>, Vec<(Tier, PathBuf)>) {
-        let Some(hub) = self.watch.as_ref() else {
+        let Some(hub) = self.watch.hub.as_ref() else {
             return (Vec::new(), Vec::new());
         };
         // The project tier's skills sit beside the project (`.agents/skills`)
@@ -448,14 +461,15 @@ impl BindingCache {
     pub(in crate::session_pool) async fn watch_own_tiers(
         &self,
     ) -> Option<tokio::sync::broadcast::Receiver<WatchKey>> {
-        let changes = self.watch.as_ref()?.changes();
+        let changes = self.watch.hub.as_ref()?.changes();
         let settings = self.pool_settings().await;
         let own = (Some(self.cwd.clone()), settings.paths.scope.clone());
         let (tokens, _) = self.watch_tiers_of(&settings, &own);
         *self
-            .pool_watch
+            .watch
+            .own
             .lock()
-            .expect("pool_watch is never held across a panic") = tokens;
+            .expect("watch.own is never held across a panic") = tokens;
         Some(changes)
     }
 
@@ -504,6 +518,11 @@ impl BindingCache {
                 _ => {}
             }
         }
+    }
+
+    /// The host's skill directories of every session, and the watch on them.
+    pub(in crate::session_pool) fn host_dirs(&self) -> (&HostDirTable, Option<&WatchHub>) {
+        (&self.host_dirs, self.watch.hub.as_ref())
     }
 
     /// Re-merge what the plugin set now contributes into every binding's
@@ -596,6 +615,6 @@ impl BindingCache {
 
     #[cfg(test)]
     pub(in crate::session_pool) fn watched_path_count(&self) -> Option<usize> {
-        self.watch.as_ref().map(WatchHub::watched_path_count)
+        self.watch.hub.as_ref().map(WatchHub::watched_path_count)
     }
 }

@@ -80,6 +80,7 @@ pub enum SkillSource {
     User,
     Project,
     Plugin,
+    Host,
 }
 
 impl SkillSource {
@@ -88,6 +89,7 @@ impl SkillSource {
             SkillSource::User => "user",
             SkillSource::Project => "project",
             SkillSource::Plugin => "plugin",
+            SkillSource::Host => "host",
         }
     }
 }
@@ -98,6 +100,7 @@ impl From<FrozenSkillSource> for SkillSource {
             FrozenSkillSource::User => SkillSource::User,
             FrozenSkillSource::Project => SkillSource::Project,
             FrozenSkillSource::Plugin => SkillSource::Plugin,
+            FrozenSkillSource::Host => SkillSource::Host,
         }
     }
 }
@@ -585,6 +588,7 @@ impl SkillManager {
             SkillSource::User => FrozenSkillSource::User,
             SkillSource::Project => FrozenSkillSource::Project,
             SkillSource::Plugin => FrozenSkillSource::Plugin,
+            SkillSource::Host => FrozenSkillSource::Host,
         };
         let entry = parse_skill_file(&content, dir_name.to_string(), path, frozen_source)?;
         Some(SkillInfo::from(entry))
@@ -714,6 +718,7 @@ impl SkillManager {
             SkillSource::User => FrozenSkillSource::User,
             SkillSource::Project => FrozenSkillSource::Project,
             SkillSource::Plugin => FrozenSkillSource::Plugin,
+            SkillSource::Host => FrozenSkillSource::Host,
         };
 
         let content = self
@@ -730,6 +735,18 @@ impl SkillManager {
             .remove(&name);
         skills.insert(name, SkillInfo::from(entry));
         Ok(())
+    }
+
+    /// Whether a host skill directory's skill of the same name takes `info`'s
+    /// place in a session listing that directory: everything but what the
+    /// user put on disk and a trusted project's own. A built-in is `User` by
+    /// source and yields too.
+    pub fn yields_to_host(&self, info: &SkillInfo) -> bool {
+        match info.source {
+            SkillSource::User => info.path.to_string_lossy().starts_with("(bundled:"),
+            SkillSource::Project => self.project_defers,
+            SkillSource::Plugin | SkillSource::Host => true,
+        }
     }
 
     fn held_by_other(&self, name: &str, path: &Path, source: SkillSource) -> bool {

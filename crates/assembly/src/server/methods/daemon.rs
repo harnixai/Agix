@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::rpc::methods::daemon::{
-    CommandList, DaemonStatus, EventsSubscribed, Pong, ShuttingDown,
+    CommandList, CommandsListParams, DaemonStatus, EventsSubscribed, Pong, ShuttingDown,
 };
 
 rpc_methods! {
@@ -11,7 +11,7 @@ rpc_methods! {
     "daemon.doctor" => doctor(NoParams) -> crate::doctor::DoctorReport;
     "daemon.subscribeEvents" => subscribe_events(NoParams) -> EventsSubscribed;
     "daemon.shutdown" => shutdown(NoParams) -> ShuttingDown;
-    "commands.list" => commands_list(NoParams) -> CommandList;
+    "commands.list" => commands_list(CommandsListParams) -> CommandList;
 }
 
 async fn status(s: &DaemonServer, _: &Call, _: NoParams) -> Result<DaemonStatus, PoolError> {
@@ -52,8 +52,14 @@ async fn shutdown(s: &DaemonServer, _: &Call, _: NoParams) -> Result<ShuttingDow
     })
 }
 
-async fn commands_list(s: &DaemonServer, _: &Call, _: NoParams) -> Result<CommandList, PoolError> {
-    Ok(CommandList {
-        commands: s.pool.list_commands().await,
-    })
+async fn commands_list(
+    s: &DaemonServer,
+    _: &Call,
+    p: CommandsListParams,
+) -> Result<CommandList, PoolError> {
+    let commands = match p.session_id {
+        Some(session_id) => s.pool.list_session_commands(&session_id).await?,
+        None => s.pool.list_commands().await,
+    };
+    Ok(CommandList { commands })
 }

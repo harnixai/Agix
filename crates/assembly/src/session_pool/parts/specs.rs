@@ -24,6 +24,8 @@ pub(in crate::session_pool) struct SessionSpec {
     pub(in crate::session_pool) model: Option<String>,
     pub(in crate::session_pool) provider: Option<String>,
     pub(in crate::session_pool) prompt: Option<runtime::agent::SessionPrompt>,
+    /// Set by `session.setSkillDirs`; over `options.skill_dirs` once set.
+    pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
     /// Shared by every Agent this process builds for the session, so a
     /// rebuild appends to the recording it was writing and continues a replay
     /// where it stood instead of from the first recorded call. Not persisted:
@@ -65,6 +67,16 @@ impl SessionSpec {
         scene.session_name_prompt(first_message)
     }
 
+    /// The host's skill directories: set since, else given at creation.
+    pub(in crate::session_pool) fn skill_dirs(
+        &self,
+    ) -> Vec<crate::session_pool::api::SkillDirOption> {
+        self.skill_dirs
+            .clone()
+            .or_else(|| self.options.as_ref().map(|o| o.skill_dirs.clone()))
+            .unwrap_or_default()
+    }
+
     /// The conversation's model, by the same precedence as `provider`.
     pub(in crate::session_pool) fn model(&self) -> Option<String> {
         self.model
@@ -87,6 +99,8 @@ pub(in crate::session_pool) struct RecordedSpec {
     pub(in crate::session_pool) model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
 }
 
 pub(in crate::session_pool) struct SpecStore {
@@ -230,6 +244,7 @@ impl SpecStore {
             model: spec.model.clone(),
             provider: spec.provider.clone(),
             prompt: spec.prompt.clone(),
+            skill_dirs: spec.skill_dirs.clone(),
         };
         let Ok(payload) = serde_json::to_value(&recorded) else {
             return;
@@ -365,6 +380,7 @@ pub(in crate::session_pool) fn recorded_in(
         model: recorded.model,
         provider: recorded.provider,
         prompt: recorded.prompt,
+        skill_dirs: recorded.skill_dirs,
         recorder: None,
     }
 }

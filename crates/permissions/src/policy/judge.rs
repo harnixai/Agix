@@ -49,6 +49,20 @@ impl Call<'_> {
     }
 }
 
+fn host_skill_dir_write(call: &Call<'_>) -> Option<Verdict> {
+    let dir = call
+        .named
+        .protected_skill_dir(call.ctx, call.facts.traits.read_only)?;
+    Some(Verdict::deny(
+        Stage::HostSkillDir,
+        format!(
+            "'{}' is a skill directory the host lists for a session; no tool writes under it, \
+             in any permission mode",
+            dir.display()
+        ),
+    ))
+}
+
 fn unenforced(enforcement: base::interface::exec::Enforcement) -> bool {
     enforcement != base::interface::exec::Enforcement::Full
 }
@@ -92,6 +106,9 @@ impl Policy {
                     "'{path}' holds credentials; no tool reads or writes it, in any permission mode"
                 ),
             );
+        }
+        if let Some(denied) = host_skill_dir_write(call) {
+            return denied;
         }
         if let HookAnswer::Block { reason, .. } = call.hook {
             return Verdict::deny(Stage::Hook, format!("Blocked by PreToolUse hook: {reason}"));

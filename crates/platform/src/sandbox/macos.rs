@@ -125,13 +125,10 @@ fn write_rules(s: &mut String, roots: &Roots) {
     s.push_str("(allow file-write*\n");
     if !roots.only_additional {
         s.push_str(&format!("  (subpath \"{}\")\n", quoted(&roots.cwd)));
-        // macOS mktemp(1) ignores TMPDIR and creates its file here; without
-        // this every script that calls a bare `mktemp` fails.
-        if let Some(tmp) = darwin_user_temp_dir() {
-            s.push_str(&format!("  (subpath \"{}\")\n", quoted(&tmp)));
-        }
     }
-    s.push_str("  (subpath \"/dev\")\n");
+    for p in super::implicit_writable_roots(roots.only_additional) {
+        s.push_str(&format!("  (subpath \"{}\")\n", quoted(&p)));
+    }
     for p in &roots.writable {
         s.push_str(&format!("  (subpath \"{}\")\n", quoted(p)));
     }

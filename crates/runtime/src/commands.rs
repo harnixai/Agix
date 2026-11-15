@@ -330,6 +330,7 @@ impl CommandRegistry {
                         base::skill::SkillSource::User => "user",
                         base::skill::SkillSource::Project => "project",
                         base::skill::SkillSource::Plugin => "plugin",
+                        base::skill::SkillSource::Host => "host",
                     },
                 },
                 Command::McpPrompt { description, .. } => CommandInfo {

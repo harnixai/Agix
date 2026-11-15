@@ -22,6 +22,9 @@ pub enum Tier {
     Global,
     Scene(String),
     Project(PathBuf),
+    /// A skill directory a host listed for some sessions, by where it
+    /// resolves; no binding is merged from it.
+    Host(PathBuf),
 }
 
 /// What kind of resource under that tier's directory changed — carried back

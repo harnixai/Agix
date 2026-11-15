@@ -1124,14 +1124,36 @@
       "type": "object"
     },
     "CommandSource": {
-      "enum": [
-        "builtin",
-        "user",
-        "project",
-        "plugin",
-        "mcp"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "builtin",
+            "user",
+            "project",
+            "plugin",
+            "mcp"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "A directory the host listed for the session (`options.skill_dirs`).",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandsListParams": {
+      "properties": {
+        "session_id": {
+          "default": null,
+          "description": "That session's own commands; omitted, the daemon's own pair's.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "CompactAtParam": {
       "description": "Where a compaction stops: exactly one of the two.",
@@ -6341,6 +6363,16 @@
         "session_kind": {
           "$ref": "#/$defs/SessionKindName"
         },
+        "skill_dirs": {
+          "description": "The host's skill directories for the session, in order; absent when\nit has none. A session out of memory reports only their paths.",
+          "items": {
+            "$ref": "#/$defs/SkillDirReport"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "status": {
           "$ref": "#/$defs/SessionStatus"
         },
@@ -6559,6 +6591,13 @@
             }
           ]
         },
+        "skill_dirs": {
+          "description": "Skill directories of the host's for this session, merged over the\ntiers by name: a built-in, a package's or an untrusted project's skill\nyields to one of these; the user's tiers and a trusted project's do\nnot. Of two listed directories the first wins a name. Read-only to\nevery session.",
+          "items": {
+            "$ref": "#/$defs/SkillDirOption"
+          },
+          "type": "array"
+        },
         "telemetry": {
           "anyOf": [
             {
@@ -6760,6 +6799,25 @@
       ],
       "type": "object"
     },
+    "SetSkillDirsParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "skill_dirs": {
+          "description": "The whole set, replacing the one before; `[]` clears it.",
+          "items": {
+            "$ref": "#/$defs/SkillDirOption"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "skill_dirs"
+      ],
+      "type": "object"
+    },
     "SettingsReloaded": {
       "properties": {
         "default_provider": {
@@ -6788,6 +6846,26 @@
         "providers",
         "task_models",
         "routing"
+      ],
+      "type": "object"
+    },
+    "ShadowedSkill": {
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/SkillOrigin"
+        },
+        "path": {
+          "description": "The `SKILL.md` that holds the name.",
+          "type": "string"
+        },
+        "skill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill",
+        "by",
+        "path"
       ],
       "type": "object"
     },
@@ -6830,11 +6908,110 @@
       ],
       "type": "object"
     },
+    "SkillDirOption": {
+      "additionalProperties": false,
+      "description": "One entry of `options.skill_dirs` and `session.setSkillDirs`.",
+      "properties": {
+        "path": {
+          "description": "Absolute, on the machine the engine runs on. Need not exist yet.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "SkillDirReport": {
+      "description": "What one of the host's skill directories gives a session.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "shadowed": {
+          "description": "Its skills another source holds in the session.",
+          "items": {
+            "$ref": "#/$defs/ShadowedSkill"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "skills": {
+          "description": "The skills this directory has the name of in the session, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkillDirState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "SkillDirState": {
+      "oneOf": [
+        {
+          "enum": [
+            "ok"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "missing",
+          "description": "Not there; read once it is.",
+          "type": "string"
+        },
+        {
+          "const": "refused",
+          "description": "Recorded, but left out when the session was brought back: it no\nlonger passes the checks `options.skill_dirs` is held to.",
+          "type": "string"
+        }
+      ]
+    },
+    "SkillDirsSet": {
+      "properties": {
+        "applies": {
+          "$ref": "#/$defs/Applies"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "skill_dirs": {
+          "items": {
+            "$ref": "#/$defs/SkillDirOption"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "skill_dirs",
+        "applies"
+      ],
+      "type": "object"
+    },
     "SkillOrigin": {
       "enum": [
         "user",
         "project",
-        "plugin"
+        "plugin",
+        "host"
       ],
       "type": "string"
     },
@@ -7797,11 +7974,7 @@
   "methods": {
     "commands.list": {
       "params": {
-        "description": "no params; anything sent is ignored",
-        "type": [
-          "object",
-          "null"
-        ]
+        "$ref": "#/$defs/CommandsListParams"
       },
       "result": {
         "$ref": "#/$defs/CommandList"
@@ -8413,6 +8586,14 @@
       },
       "result": {
         "$ref": "#/$defs/PromptChoice"
+      }
+    },
+    "session.setSkillDirs": {
+      "params": {
+        "$ref": "#/$defs/SetSkillDirsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SkillDirsSet"
       }
     },
     "session.startAgent": {

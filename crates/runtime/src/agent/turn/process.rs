@@ -303,10 +303,9 @@ impl Agent {
     }
 
     async fn mcp_prompt_text(&self, sc: &crate::commands::SlashCommand) -> Option<String> {
-        // The fallback to the live `McpManager` is what makes this work for
-        // a registry shared across sessions (`commands_override`, the
-        // daemon's path): that catalog predates this session's MCP
-        // connections and any later `refresh_prompts`.
+        // The fallback to the live `McpManager` reaches the prompts of a
+        // server that connected, or refreshed its prompts, after the
+        // registry was built.
         let mcp_command: Option<String> = match self.tooling.commands().resolve(&sc.name) {
             Some(crate::commands::Command::McpPrompt { command, .. }) => Some(command),
             Some(_) => None,

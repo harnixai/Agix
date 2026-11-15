@@ -130,7 +130,7 @@ impl Builder {
         // its state works unless it survives from one call to the next.
         prepare_scratchpad(&settings.paths.local_data_dir.join("scratchpad"));
         prepare_working_dir(&settings.paths);
-        let session_env = session_env(settings, config, attended);
+        let session_env = session_env(settings, config, attended, &self.host.skill_dirs);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(session_state::SessionState::new()), 0, false),
@@ -238,6 +238,7 @@ pub(super) fn session_env(
     settings: &LoadedSettings,
     config: &base::context::EngineConfig,
     attended: bool,
+    skill_dirs: &super::super::host::HostSkillDirs,
 ) -> base::context::SessionEnv {
     let cwd = settings.paths.working_dir().to_path_buf();
     let resolve = |dir: &std::path::PathBuf| cwd.join(dir);
@@ -262,6 +263,8 @@ pub(super) fn session_env(
         cache_directories: settings.values.sandbox.cache_directories.paths(&cwd),
         unattended: !attended,
         base_mode: config.permission_mode,
+        skill_dirs: skill_dirs.readable.clone(),
+        protected_dirs: skill_dirs.protected.clone(),
         cwd,
     }
 }

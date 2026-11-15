@@ -215,6 +215,23 @@ mod tests;
 
 pub use fence::{fence_port, fence_secret, fence_socket, Fence};
 
+/// Where a confined command may write besides its working directory and the
+/// policy's `additional_writable`: device nodes, and on macOS the per-user
+/// temporary directory, where mktemp(1) creates its file whatever `TMPDIR`
+/// says — without it every script calling a bare `mktemp` fails. That one is
+/// left out when only the named roots are writable.
+pub fn implicit_writable_roots(only_additional: bool) -> Vec<PathBuf> {
+    #[cfg_attr(not(all(feature = "sandbox", target_os = "macos")), allow(unused_mut))]
+    let mut roots = vec![PathBuf::from("/dev")];
+    #[cfg(all(feature = "sandbox", target_os = "macos"))]
+    if !only_additional {
+        roots.extend(macos::darwin_user_temp_dir());
+    }
+    #[cfg(not(all(feature = "sandbox", target_os = "macos")))]
+    let _ = only_additional;
+    roots
+}
+
 #[derive(Debug, Clone)]
 pub struct SandboxOptions<'a> {
     pub command: &'a str,

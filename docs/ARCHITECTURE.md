@@ -433,11 +433,37 @@ MCP 连接、脚本绑定的 root、记忆目录、transcript 目录。
 变化:macOS 的 FSEvents 会把监视开始前不久的写入补报过来,照原样再写一遍也会报,这些都不作废
 绑定。
 
+**会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
+`(项目, 场景)` 的会话共享;宿主按会话给的目录(`options.skill_dirs` / `session.setSkillDirs`)不进
+绑定,而是每个会话一个 `skills::host::HostSkillLayer`(一组 `HostSkillDir`,各自带自己的 skill 与监视
+句柄)。会话看到的 skill 视图是 `SceneSkills::resolve`:先取绑定的共享目录,再按
+`SkillManager::yields_to_host` 让宿主层顶替内建、插件包、未受信项目的同名 skill(用户的磁盘层与
+受信项目的 `.agents/skills` 不让);宿主目录之间先列的赢。子 Agent、团队成员、`context: fork`、
+`session.startAgent` 的委派拿到的是父会话同一个层对象,所以跟着它变。
+
+目录对象由池里的宿主目录表(`BindingCache` 里的 `HostDirTable`,`parts/bindings/host_dirs.rs`)按解开链接后的路径去重
+共享:每个不同的目录一个对象、一个 `WatchHub` 订阅(tier `Host`),没有内存里的会话持有它时释放;
+变化只就地重扫这个目录,波及持有它的会话,不作废任何绑定。规格里记的是 `skill_dirs`(`RecordedSpec`),
+重建、恢复、`config.reload`、重启都按它重新取目录。
+
+每个会话也有自己的命令表,建在它自己的 skill 视图之上(MCP prompt 建时登记,之后的走实时的 MCP 回退),
+不取绑定共享的命令目录:场景的 `bundled_skills` 没列的内建,在这个会话里也不是 `/name`。
+
+读写边界:会话自己的宿主目录算它的可读根(严格沙箱档、无人值守场景同);进程里任何会话列过的目录
+进入一个只增不减的保护集合,内建工具非只读的调用点名其下路径,在每种权限模式下都拒(阶段 `host_skill_dir`;
+MCP 工具与宿主工具不报路径,拦不到,同凭据位置)。沙箱的命令靠建会话时的检查挡:沙箱放开写的每个根
+(工作目录、可写目录、包缓存、状态根的 `tmp`、`platform::sandbox::implicit_writable_roots`)里的目录都不收,
+检查与 `tools::bash::writable_dirs` 同出一处,由 `session_pool` 的单元测试对着真实会话的写根核对。
+出现时是符号链接的目录,在出现那一轮按解析到的位置重新登记、监视、保护。缺口是明说的:冷会话的目录要等
+持有它的会话载入才受保护;不点名路径的不沙箱命令拦不住(粘在选项上、由变量拼出的路径也算不点名);
+落在另一个会话的项目里的宿主目录,那个会话的沙箱命令可以不点名地写它(建会话时的检查只拒绝落在列它的
+会话自己范围内的目录)。落在别的(含未受信)项目里的目录按宿主内容收,列哪个由宿主负责。
+
 ### 3.2.2 会话规格:重建时照什么重来
 
 一个会话的 `Agent` 会被重建:它的绑定失效、janitor 回收后再被用到、daemon 重启后恢复。
 重建照的是**会话规格**,不是触发重建的那次调用碰巧带了什么:创建时的 `options`、
-`session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词。规格以 `ns = "agix.session"`、`event = "spec"`
+`session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词、`session.setSkillDirs` 设的宿主 skill 目录。规格以 `ns = "agix.session"`、`event = "spec"`
 的扩展条目写进会话日志,每次变化追加一条,最后一条为准,所以跨 daemon 重启也成立。
 recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.fork` 去掉 `name`);同一进程里的重建共用同一个 recorder,录像接着写、回放接着原来的进度;daemon 重启后录像从头重写,回放要恢复时再给一次。录制时会话和它的子 Agent、起名、压缩等辅助调用进同一份录像,`session.calls` 经协议读它。
 

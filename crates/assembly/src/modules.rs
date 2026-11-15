@@ -181,6 +181,7 @@ impl ProjectModules {
                                 skills::manager::SkillSource::User => SkillOrigin::User,
                                 skills::manager::SkillSource::Project => SkillOrigin::Project,
                                 skills::manager::SkillSource::Plugin => SkillOrigin::Plugin,
+                                skills::manager::SkillSource::Host => SkillOrigin::Host,
                             },
                             path: holder.path.display().to_string(),
                             plugin: package_of(&holder.path),
@@ -222,10 +223,16 @@ impl ProjectModules {
             .contains_key(name)
     }
 
-    /// Everything after MCP, in order. Pushed one by one because each push
-    /// is behind its own feature.
+    /// Everything after MCP, in order, for a session with the host's skill
+    /// directories `host`. Pushed one by one because each push is behind its
+    /// own feature.
     #[allow(clippy::vec_init_then_push)]
-    pub(crate) fn session_modules(&self) -> Vec<Arc<dyn Module>> {
+    pub(crate) fn session_modules(
+        &self,
+        host: &crate::session_pool::SessionSkillDirs,
+    ) -> Vec<Arc<dyn Module>> {
+        #[cfg(not(feature = "skills"))]
+        let _ = host;
         #[cfg_attr(not(any(feature = "agents", feature = "skills")), allow(unused_mut))]
         let mut out: Vec<Arc<dyn Module>> = Vec::new();
         #[cfg(feature = "agents")]
@@ -233,8 +240,19 @@ impl ProjectModules {
             agents::AgentsModule::new().shared_agent_types(self.agent_types.handle()),
         ));
         #[cfg(feature = "skills")]
-        out.push(Arc::new(skills::SkillsModule::shared(self.skills.clone())));
+        out.push(Arc::new(
+            skills::SkillsModule::shared(self.skills.clone()).with_host(host.layer().clone()),
+        ));
         out
+    }
+
+    /// What each of `host`'s directories gives a session on this pair.
+    #[cfg(feature = "skills")]
+    pub(crate) fn skill_dir_reports(
+        &self,
+        host: &crate::session_pool::SessionSkillDirs,
+    ) -> Vec<skills::host::HostDirReport> {
+        host.layer().report(&self.skills)
     }
 }
 

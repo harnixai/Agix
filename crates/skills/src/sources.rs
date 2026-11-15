@@ -20,6 +20,7 @@ fn frozen_source(source: SkillSource) -> FrozenSkillSource {
         SkillSource::User => FrozenSkillSource::User,
         SkillSource::Project => FrozenSkillSource::Project,
         SkillSource::Plugin => FrozenSkillSource::Plugin,
+        SkillSource::Host => FrozenSkillSource::Host,
     }
 }
 

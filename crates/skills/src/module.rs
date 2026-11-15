@@ -19,6 +19,7 @@ pub const MODULE_ID: &str = "skills";
 pub struct SkillsModule {
     shared: Option<Arc<SkillManager>>,
     providers: Vec<Arc<dyn SkillProvider>>,
+    host: Option<Arc<crate::host::HostSkillLayer>>,
 }
 
 impl SkillsModule {
@@ -27,6 +28,7 @@ impl SkillsModule {
         Self {
             shared: None,
             providers: Vec::new(),
+            host: None,
         }
     }
 
@@ -35,7 +37,17 @@ impl SkillsModule {
         Self {
             shared: Some(catalog),
             providers: Vec::new(),
+            host: None,
         }
+    }
+
+    /// Merge `layer` — the host's skill directories for one session — over
+    /// the catalog, for the session and every delegate it spawns, which are
+    /// handed this module whole. Replacing the layer's directories reaches
+    /// all of them at once.
+    pub fn with_host(mut self, layer: Arc<crate::host::HostSkillLayer>) -> Self {
+        self.host = Some(layer);
+        self
     }
 
     /// Add a skill source of the host's own, after the tiers and built-ins: it
@@ -74,14 +86,15 @@ impl Module for SkillsModule {
         }
         let admission =
             crate::catalog::BundledAdmission::for_scene(cx.scene.as_ref(), cx.host.attended);
-        cx.provide_skill_catalog(Arc::new(crate::catalog::SceneSkills::new(
-            manager.clone(),
-            admission.clone(),
-        )));
+        let mut catalog = crate::catalog::SceneSkills::new(manager, admission);
+        if let Some(layer) = &self.host {
+            catalog = catalog.with_host(layer.clone());
+        }
+        let catalog = Arc::new(catalog);
+        cx.provide_skill_catalog(catalog.clone());
         crate::tool::register(
             cx.tools,
-            manager,
-            admission,
+            catalog,
             cx.delegator(),
             cx.host.permission.grants.clone(),
         );

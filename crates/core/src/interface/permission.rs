@@ -355,6 +355,9 @@ pub enum Stage {
     Configuration,
     ModeDefault,
     Attendance,
+    /// A write under a skill directory a host listed for some session
+    /// (`options.skill_dirs`): read-only to every session.
+    HostSkillDir,
 }
 
 impl Stage {
@@ -375,6 +378,7 @@ impl Stage {
             Self::Configuration => "configuration",
             Self::ModeDefault => "mode_default",
             Self::Attendance => "attendance",
+            Self::HostSkillDir => "host_skill_dir",
         }
     }
 }

@@ -428,33 +428,7 @@ impl SessionPool {
     ) -> Result<Arc<SessionCore>, CreateError> {
         let _claim = self.claim_log(&sid).await?;
 
-        // Rebuild against *this session's own* recorded project, not
-        // always the pool default — otherwise a session created under
-        // `session.create {project_root: X}` would silently come back with
-        // project Y's settings the moment it needed reattaching (idle
-        // eviction, daemon restart, explicit `session.resume`).
-        let startup_scene = self.bindings.startup_scene().await;
-        let (binding, project_root_for_meta, scene_id) = match recorded_project(log) {
-            Some((schema_version, project_root, scene)) if schema_version >= 2 => {
-                let scene = scene.unwrap_or_else(|| startup_scene.clone());
-                match project_root {
-                    Some(p) => {
-                        let path = PathBuf::from(p);
-                        (
-                            self.binding_for(Some(&path), &scene).await,
-                            Some(path),
-                            scene,
-                        )
-                    }
-                    None => (self.binding_for(None, &scene).await, None, scene),
-                }
-            }
-            _ => (
-                self.default_binding().await,
-                Some(self.cwd().to_path_buf()),
-                startup_scene.clone(),
-            ),
-        };
+        let (binding, project_root_for_meta, scene_id) = self.binding_of_log(log).await;
 
         // The scene this session recorded, not this pool's default. Settings
         // were already resolved against the recorded scene above; handing the
@@ -482,6 +456,40 @@ impl SessionPool {
         )
         .await
         .map_err(|e| e.context(|e| format!("session `{sid}` could not be brought back: {e}")))
+    }
+
+    /// The binding a session whose log is `log` is built on, its project and
+    /// its scene: *its own* recorded project, not always the pool default —
+    /// otherwise a session created under `session.create {project_root: X}`
+    /// would silently come back with project Y's settings the moment it
+    /// needed reattaching (idle eviction, daemon restart, explicit
+    /// `session.resume`).
+    pub(in crate::session_pool) async fn binding_of_log(
+        &self,
+        log: &[history::entry::EnvelopedEntry],
+    ) -> (Arc<ProjectBinding>, Option<PathBuf>, String) {
+        let startup_scene = self.bindings.startup_scene().await;
+        match recorded_project(log) {
+            Some((schema_version, project_root, scene)) if schema_version >= 2 => {
+                let scene = scene.unwrap_or_else(|| startup_scene.clone());
+                match project_root {
+                    Some(p) => {
+                        let path = PathBuf::from(p);
+                        (
+                            self.binding_for(Some(&path), &scene).await,
+                            Some(path),
+                            scene,
+                        )
+                    }
+                    None => (self.binding_for(None, &scene).await, None, scene),
+                }
+            }
+            _ => (
+                self.default_binding().await,
+                Some(self.cwd().to_path_buf()),
+                startup_scene,
+            ),
+        }
     }
 
     /// `sid` in memory: resumed from its log, or created, unless it already

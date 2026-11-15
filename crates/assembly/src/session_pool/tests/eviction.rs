@@ -34,6 +34,7 @@ fn dummy_live_session(last_active: Instant) -> LiveSession {
             delegator: None,
             scripts: None,
             health: Default::default(),
+            commands: Default::default(),
         },
         turn: TurnSlot::new(event_rx),
     }

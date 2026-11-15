@@ -31,11 +31,10 @@ use std::sync::Arc;
 /// to call this," per-skill, which is the right granularity, and a coarser
 /// list would block a project's own `.agents/skills/*.md`.
 pub struct SkillTool {
-    /// Reference to the skill manager for looking up and expanding skills.
-    skill_manager: std::sync::Arc<crate::manager::SkillManager>,
-    /// The built-in skills this session's scene lists; the others are not
-    /// found here either.
-    admission: crate::catalog::BundledAdmission,
+    /// The session's skills: its scene's built-ins and its host directories
+    /// over the shared catalog. A skill is expanded by the manager that
+    /// holds it.
+    catalog: Arc<crate::catalog::SceneSkills>,
     /// What a `context: fork` skill is delegated through; without one it
     /// runs inline.
     delegator: Option<Arc<dyn Delegator>>,
@@ -54,19 +53,21 @@ pub struct SkillTool {
 }
 
 impl SkillTool {
+    /// Every skill `skill_manager` holds.
     pub fn new(skill_manager: std::sync::Arc<crate::manager::SkillManager>) -> Self {
-        Self {
+        Self::over(Arc::new(crate::catalog::SceneSkills::new(
             skill_manager,
-            admission: Default::default(),
+            Default::default(),
+        )))
+    }
+
+    pub fn over(catalog: Arc<crate::catalog::SceneSkills>) -> Self {
+        Self {
+            catalog,
             delegator: None,
             grants: None,
             already_injected: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
-    }
-
-    pub fn with_admission(mut self, admission: crate::catalog::BundledAdmission) -> Self {
-        self.admission = admission;
-        self
     }
 
     pub fn with_delegator(mut self, delegator: Arc<dyn Delegator>) -> Self {
@@ -132,11 +133,7 @@ impl Tool for SkillTool {
         let args = input["args"].as_str().unwrap_or("");
         let not_found = || ToolError::NotFound(format!("Skill '{skill_name}' not found."));
 
-        let info = self
-            .skill_manager
-            .get(skill_name)
-            .filter(|s| self.admission.admits(&s.name, &s.path))
-            .ok_or_else(not_found)?;
+        let (manager, info) = self.catalog.resolve(skill_name).ok_or_else(not_found)?;
         if info.disable_model_invocation {
             return Err(ToolError::Denied(format!(
                 "Skill '{skill_name}' has disable_model_invocation set. \
@@ -144,7 +141,7 @@ impl Tool for SkillTool {
             )));
         }
 
-        let expansion = match expand_for_invocation(&self.skill_manager, &info, args, &ctx).await {
+        let expansion = match expand_for_invocation(&manager, &info, args, &ctx).await {
             Ok(expansion) => expansion,
             Err(ExpandError::NotFound) => return Err(not_found()),
             Err(ExpandError::Rejected(msg)) => {
@@ -161,7 +158,7 @@ impl Tool for SkillTool {
                     .fork(delegator.as_ref(), skill_name, &info, expansion, &ctx)
                     .await;
                 if !result.is_error {
-                    self.skill_manager.record_invocation(skill_name);
+                    manager.record_invocation(skill_name);
                 }
                 return Ok(result);
             }
@@ -174,7 +171,7 @@ impl Tool for SkillTool {
             expansion.text
         );
 
-        self.skill_manager.record_invocation(skill_name);
+        manager.record_invocation(skill_name);
 
         self.grant_for_turn(&expansion.grants).await;
 
@@ -310,7 +307,8 @@ const SKILL_BODY_CHAR_CAP: usize = 8000;
 /// tool name switches off confirmation for every call to that tool, which is
 /// only safe from a skill the user put there. `<project>/.agents/skills/` is
 /// repository content — attacker-supplied on a cloned repo — and a plugin
-/// package is someone else's, so those only get grants that narrow the tool
+/// package or a host's skill directory is someone else's, so those only get
+/// grants that narrow the tool
 /// to a content pattern (`Bash(cargo test:*)`) — not one that reaches as far
 /// as the bare tool or out of the project (`Bash(b*)`, `Write(../**)`, see
 /// `permissions::dangerous::is_unscoped_grant_in`). A project skill gets none at all while
@@ -351,7 +349,9 @@ pub async fn expand_for_invocation(
 
     let restricted = matches!(
         info.source,
-        crate::manager::SkillSource::Project | crate::manager::SkillSource::Plugin
+        crate::manager::SkillSource::Project
+            | crate::manager::SkillSource::Plugin
+            | crate::manager::SkillSource::Host
     );
     let withheld = info.source == crate::manager::SkillSource::Project
         && ctx.config.project_trust.is_untrusted();
@@ -543,15 +543,14 @@ async fn run_skill_shell_command(
     }
 }
 
-/// Register the `Skill` tool over `m` in `r`.
+/// Register the `Skill` tool over `catalog` in `r`.
 pub fn register(
     r: &base::tool::InMemoryToolRegistry,
-    m: std::sync::Arc<crate::manager::SkillManager>,
-    admission: crate::catalog::BundledAdmission,
+    catalog: Arc<crate::catalog::SceneSkills>,
     delegator: Option<Arc<dyn Delegator>>,
     grants: Option<Arc<dyn base::interface::permission::PermissionGrants>>,
 ) {
-    let mut tool = SkillTool::new(m).with_admission(admission);
+    let mut tool = SkillTool::over(catalog);
     if let Some(delegator) = delegator {
         tool = tool.with_delegator(delegator);
     }

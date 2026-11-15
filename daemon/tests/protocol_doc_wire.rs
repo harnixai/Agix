@@ -38,6 +38,9 @@ struct Harness {
     project: PathBuf,
     store: Arc<dyn history::store::HistoryStore>,
     dir: tempfile::TempDir,
+    /// Outside the OS temporary directory, which a sandboxed command may
+    /// write and a host skill directory therefore may not be in.
+    skills: tempfile::TempDir,
 }
 
 async fn start(
@@ -101,6 +104,7 @@ async fn start(
         project,
         store,
         dir,
+        skills: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
     }
 }
 
@@ -493,6 +497,9 @@ fn fill(value: &mut Value, key: Option<&str>, session_id: &str, h: &Harness) {
         }
         Value::String(s) if key == Some("redirect_uri") && s.contains('…') => {
             *s = "https://app.example/oauth/done".into()
+        }
+        Value::String(s) if key == Some("path") && s.starts_with("/abs/skills") => {
+            *s = h.skills.path().display().to_string()
         }
         Value::String(s) if key == Some("path") && s.starts_with("/abs/") => {
             *s = h.dir.path().join("export.agix.zip").display().to_string()

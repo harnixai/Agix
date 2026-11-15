@@ -30,6 +30,13 @@ pub struct ShuttingDown {
     pub shutting_down: bool,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
+pub struct CommandsListParams {
+    /// That session's own commands; omitted, the daemon's own pair's.
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommandList {
     pub commands: Vec<CommandInfo>,

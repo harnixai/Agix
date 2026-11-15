@@ -28,7 +28,7 @@ mod tooling;
 pub mod turn;
 mod view;
 use crate::turn::{Compaction, Gate, Memory, ModelRoute, PromptContext};
-pub use builder::{default_run_slots, Builder, HostContracts, HostLayers};
+pub use builder::{default_run_slots, Builder, HostContracts, HostLayers, HostSkillDirs};
 use instruments::Telemetry;
 pub use messages::*;
 #[cfg(test)]

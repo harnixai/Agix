@@ -8,7 +8,7 @@ mod hook_runner;
 mod host;
 use fields::{ExtSetup, HostSetup, SpecSetup};
 pub(in crate::agent) use hook_runner::{build_hook_runner, hook_ambient, hook_run_recorder};
-pub use host::{HostContracts, HostLayers};
+pub use host::{HostContracts, HostLayers, HostSkillDirs};
 
 pub struct Builder {
     host: HostSetup,
@@ -216,6 +216,15 @@ impl Builder {
     /// delegates are attended as it is.
     pub fn attended(mut self, attended: Option<bool>) -> Self {
         self.host.attended = attended;
+        self
+    }
+
+    /// The host's skill directories: the ones this session lists, which its
+    /// file tools and sandbox read without asking, and every one any session
+    /// lists, under which no tool writes in any permission mode. Both are
+    /// live — a change reaches the running session and its delegates.
+    pub fn skill_dirs(mut self, dirs: HostSkillDirs) -> Self {
+        self.host.skill_dirs = dirs;
         self
     }
 
@@ -663,15 +672,6 @@ impl Builder {
     /// Disable startup warmup (for tests).
     pub fn skip_warmup(mut self, val: bool) -> Self {
         self.spec.skip_warmup = val;
-        self
-    }
-
-    /// Inject a pre-built command registry (built once, shared across many
-    /// sessions — see `daemon::SessionPool`) instead of scanning skill dirs
-    /// fresh for every session. Falls back to a registry over this session's
-    /// own skill catalog when not set.
-    pub fn commands_override(mut self, c: Arc<crate::commands::CommandRegistry>) -> Self {
-        self.ext.commands_override = Some(c);
         self
     }
 

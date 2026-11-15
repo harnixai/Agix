@@ -38,6 +38,7 @@ pub(in crate::session_pool) fn tier_covers(
         Tier::Global => true,
         Tier::Scene(scene) => &key.1 == scene,
         Tier::Project(root) => key.0.as_deref() == Some(root.as_path()),
+        Tier::Host(_) => false,
     }
 }
 

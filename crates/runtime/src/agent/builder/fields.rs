@@ -53,6 +53,8 @@ pub(super) struct HostSetup {
     pub(super) modules: Vec<Arc<dyn crate::module::Module>>,
     /// See [`Builder::attended`].
     pub(super) attended: Option<bool>,
+    /// See [`Builder::skill_dirs`].
+    pub(super) skill_dirs: super::host::HostSkillDirs,
 }
 
 impl HostSetup {
@@ -80,6 +82,7 @@ impl HostSetup {
             rule_provider: None,
             modules: Vec::new(),
             attended: None,
+            skill_dirs: Default::default(),
         }
     }
 }
@@ -183,9 +186,6 @@ pub(super) struct ExtSetup {
     pub(super) background_hooks: Option<hooks::BackgroundHooks>,
     pub(super) mcp_servers: Option<Box<dyn base::interface::mcp_servers::McpServers>>,
     pub(super) wake_rx: Option<tokio::sync::mpsc::UnboundedReceiver<()>>,
-    /// Pre-built command registry shared across many sessions instead of
-    /// re-scanning skill dirs per session — see `Builder::commands_override`.
-    pub(super) commands_override: Option<Arc<crate::commands::CommandRegistry>>,
     /// Replaces the built-in way of asking a person something — see
     /// [`Builder::elicitation`].
     pub(super) elicitation: Option<Arc<dyn base::interface::elicitation::Elicitation>>,
@@ -214,7 +214,6 @@ impl ExtSetup {
             background_hooks: None,
             mcp_servers: None,
             wake_rx: None,
-            commands_override: None,
             elicitation: None,
             host_calls: None,
             prompt_registry: None,

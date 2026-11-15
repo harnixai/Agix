@@ -261,6 +261,7 @@ pub const CAPABILITIES: &[&str] = &[
     "session_attended",
     "session_calls",
     "session_search",
+    "session_skill_dirs",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

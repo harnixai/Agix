@@ -119,6 +119,9 @@ pub enum SkillSource {
     /// Loaded from a plugin's manifest (`~/.agix/plugins/<name>/SKILL.md` or
     /// `~/.agix/scenes/<scope>/plugins/<name>/SKILL.md`)
     Plugin,
+    /// A directory the host listed for one session (`options.skill_dirs`):
+    /// trusted as a plugin package is.
+    Host,
 }
 
 impl SkillSource {
@@ -127,6 +130,7 @@ impl SkillSource {
             SkillSource::User => "user",
             SkillSource::Project => "project",
             SkillSource::Plugin => "plugin",
+            SkillSource::Host => "host",
         }
     }
 }

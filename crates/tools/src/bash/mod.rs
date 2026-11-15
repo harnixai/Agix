@@ -22,7 +22,7 @@ pub use base::interface::exec::SandboxMode;
 pub use platform::sandbox::sandbox_status;
 
 pub(crate) use sandbox::confine_shell;
-pub use sandbox::strict_sandbox_policy;
+pub use sandbox::{strict_sandbox_policy, writable_dirs};
 
 use async_trait::async_trait;
 use base::error::ToolError;

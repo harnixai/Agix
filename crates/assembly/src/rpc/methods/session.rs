@@ -115,6 +115,20 @@ pub struct SetModelParams {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SetSkillDirsParams {
+    pub session_id: String,
+    /// The whole set, replacing the one before; `[]` clears it.
+    pub skill_dirs: Vec<crate::session_pool::api::SkillDirOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SkillDirsSet {
+    pub session_id: String,
+    pub skill_dirs: Vec<crate::session_pool::api::SkillDirOption>,
+    pub applies: crate::session_pool::api::Applies,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SetPromptParams {
     pub session_id: String,
     /// A string sets it, `null` clears it back to the settings files', an

@@ -248,6 +248,8 @@ impl SessionPool {
             }
         };
         let (sid, generation) = (ticket.sid().to_string(), ticket.generation);
+        let (host_dirs, hub) = self.bindings.host_dirs();
+        host_dirs.take_up_appeared(ticket.core.skill_dirs(), hub);
         let weak = self.this.clone();
         let core = ticket.core.clone();
         ticket.on_abandon(move || {

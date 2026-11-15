@@ -68,6 +68,23 @@ pub struct SessionOptions {
     /// left to `session.rename`. `None` or `true`: as its scene says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_name: Option<bool>,
+    /// Skill directories of the host's for this session, merged over the
+    /// tiers by name: a built-in, a package's or an untrusted project's skill
+    /// yields to one of these; the user's tiers and a trusted project's do
+    /// not. Of two listed directories the first wins a name. Read-only to
+    /// every session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_dirs: Vec<SkillDirOption>,
+}
+
+/// One entry of `options.skill_dirs` and `session.setSkillDirs`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SkillDirOption {
+    /// Absolute, on the machine the engine runs on. Need not exist yet.
+    pub path: String,
 }
 
 /// One entry of `options.host_tools`.

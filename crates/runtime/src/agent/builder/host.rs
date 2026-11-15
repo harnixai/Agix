@@ -39,6 +39,17 @@ pub struct HostContracts {
     /// Whether someone answers the session's questions, resolved against its
     /// scene — see [`Builder::attended`].
     pub attended: bool,
+    pub skill_dirs: HostSkillDirs,
+}
+
+/// The host's skill directories as the permission checks see them — see
+/// [`Builder::skill_dirs`].
+#[derive(Clone, Default)]
+pub struct HostSkillDirs {
+    /// This session's: read without asking.
+    pub readable: base::context::LiveDirs,
+    /// Every session's: written by no tool.
+    pub protected: base::context::LiveDirs,
 }
 
 /// What the host wraps around a session's calls, before the plugins' layers
@@ -98,6 +109,7 @@ impl Builder {
                     compactor,
                 },
             attended,
+            skill_dirs,
         } = host;
         self.host.exec = Some(exec);
         self.host.token_counter = Some(token_counter);
@@ -121,6 +133,7 @@ impl Builder {
         self.host.recovery_policy = recovery_policy;
         self.host.compactor = compactor;
         self.host.attended = Some(attended);
+        self.host.skill_dirs = skill_dirs;
         self
     }
 }

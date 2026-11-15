@@ -137,6 +137,14 @@ const FIELDS: &[(&str, &str)] = &[
         "SessionEnv::base_mode",
         "Engine: the mode the engine is configured with",
     ),
+    (
+        "SessionEnv::skill_dirs",
+        "Session: its host skill directories, changed in place across engines",
+    ),
+    (
+        "SessionEnv::protected_dirs",
+        "Engine: the pool's set of every host skill directory a session has listed",
+    ),
     ("SessionCore::id", "Session: its id"),
     (
         "SessionCore::scene",
@@ -174,6 +182,10 @@ const FIELDS: &[(&str, &str)] = &[
         "Session: how its last failed turn failed, whichever engine ran it",
     ),
     (
+        "SessionCore::skill_dirs",
+        "Session: its host skill directories, which every engine it gets is built over",
+    ),
+    (
         "EngineSlot::generation",
         "Engine: the number it attached to the state under",
     ),
@@ -195,6 +207,10 @@ const FIELDS: &[(&str, &str)] = &[
     ("EngineSlot::delegator", "Engine: its delegator"),
     ("EngineSlot::scripts", "Engine: its bound scripts' record"),
     ("EngineSlot::health", "Engine: its plugins' checks"),
+    (
+        "EngineSlot::commands",
+        "Engine: the slash commands it resolves",
+    ),
 ];
 
 const CREATED_AT: &[(&str, &str)] = &[

@@ -3,6 +3,7 @@
 pub mod bundled;
 mod bundled_files;
 pub mod catalog;
+pub mod host;
 pub mod manager;
 pub mod mcp_builder;
 pub mod module;

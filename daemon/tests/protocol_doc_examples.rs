@@ -827,6 +827,13 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
         serde_json::json!({"session_id": sid, "append": "回答一律用中文。", "override": null}),
     )
     .await;
+    verify(
+        &doc,
+        &daemon,
+        "session.setSkillDirs",
+        serde_json::json!({"session_id": sid, "skill_dirs": [{"path": "/abs/skills"}]}),
+    )
+    .await;
     daemon
         .call(
             "session.run_turn",

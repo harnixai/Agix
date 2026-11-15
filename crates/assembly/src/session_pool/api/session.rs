@@ -34,6 +34,44 @@ pub struct SessionDetail {
     /// from scripts that never ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scripts: Option<ScriptReport>,
+    /// The host's skill directories for the session, in order; absent when
+    /// it has none. A session out of memory reports only their paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_dirs: Option<Vec<SkillDirReport>>,
+}
+
+/// What one of the host's skill directories gives a session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SkillDirReport {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<SkillDirState>,
+    /// The skills this directory has the name of in the session, sorted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
+    /// Its skills another source holds in the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadowed: Option<Vec<ShadowedSkill>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SkillDirState {
+    Ok,
+    /// Not there; read once it is.
+    Missing,
+    /// Recorded, but left out when the session was brought back: it no
+    /// longer passes the checks `options.skill_dirs` is held to.
+    Refused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ShadowedSkill {
+    pub skill: String,
+    pub by: super::SkillOrigin,
+    /// The `SKILL.md` that holds the name.
+    pub path: String,
 }
 
 /// What a session in memory is doing; a session not in memory is idle.

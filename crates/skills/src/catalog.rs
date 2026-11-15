@@ -11,6 +11,7 @@ use base::interface::tool::ToolOrigin;
 use base::skill::SkillEntry;
 use base::tool::ToolContext;
 
+use crate::host::HostSkillLayer;
 use crate::manager::{SkillInfo, SkillManager, SkillSource};
 
 type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
@@ -24,6 +25,7 @@ pub fn to_entry(skill: &SkillInfo) -> SkillEntry {
             SkillSource::User => base::skill::SkillSource::User,
             SkillSource::Project => base::skill::SkillSource::Project,
             SkillSource::Plugin => base::skill::SkillSource::Plugin,
+            SkillSource::Host => base::skill::SkillSource::Host,
         },
         path: skill.path.clone(),
         argument_hint: skill.argument_hint.clone(),
@@ -134,35 +136,63 @@ impl BundledAdmission {
     }
 }
 
-/// A [`SkillManager`] as one session's scene sees it — see [`BundledAdmission`].
+/// A [`SkillManager`] as one session sees it: its scene's built-ins (see
+/// [`BundledAdmission`]), with the host's skill directories for the session
+/// merged over it (see [`crate::host`]).
 pub struct SceneSkills {
     manager: Arc<SkillManager>,
     admission: BundledAdmission,
+    host: Option<Arc<HostSkillLayer>>,
 }
 
 impl SceneSkills {
     pub fn new(manager: Arc<SkillManager>, admission: BundledAdmission) -> Self {
-        Self { manager, admission }
+        Self {
+            manager,
+            admission,
+            host: None,
+        }
     }
 
-    fn keep(&self, entries: Vec<SkillEntry>) -> Vec<SkillEntry> {
+    pub fn with_host(mut self, host: Arc<HostSkillLayer>) -> Self {
+        self.host = Some(host);
+        self
+    }
+
+    /// The manager that answers for `name` in this session, and its entry
+    /// there: its body, `files:` and grants all come from that one.
+    pub fn resolve(&self, name: &str) -> Option<(Arc<SkillManager>, SkillInfo)> {
+        crate::host::winner(&self.manager, self.host.as_deref(), name)
+            .filter(|(_, info)| self.admission.admits(&info.name, &info.path))
+    }
+
+    /// Those of `entries` that are the one the session has under their name.
+    fn won(&self, entries: Vec<SkillEntry>) -> Vec<SkillEntry> {
         entries
             .into_iter()
-            .filter(|e| self.admission.admits(&e.name, &e.path))
+            .filter(|e| self.resolve(&e.name).is_some_and(|(_, w)| w.path == e.path))
             .collect()
     }
 }
 
 impl SkillCatalog for SceneSkills {
     fn list(&self) -> Vec<SkillEntry> {
-        self.keep(SkillCatalog::list(&*self.manager))
+        let mut names: Vec<String> = self.manager.list().into_iter().map(|s| s.name).collect();
+        if let Some(host) = &self.host {
+            names.extend(host.names());
+        }
+        names.sort();
+        names.dedup();
+        names
+            .iter()
+            .filter_map(|name| self.resolve(name).map(|(_, info)| to_entry(&info)))
+            .collect()
     }
     fn get(&self, name: &str) -> Option<SkillEntry> {
-        SkillCatalog::get(&*self.manager, name).filter(|e| self.admission.admits(&e.name, &e.path))
+        self.resolve(name).map(|(_, info)| to_entry(&info))
     }
     fn body(&self, name: &str) -> Option<String> {
-        SkillCatalog::get(self, name)?;
-        self.manager.get_skill_content(name)
+        self.resolve(name)?.0.get_skill_content(name)
     }
     fn expand<'a>(
         &'a self,
@@ -171,24 +201,34 @@ impl SkillCatalog for SceneSkills {
         ctx: &'a ToolContext,
     ) -> BoxFuture<'a, Option<Result<SkillExpansion, String>>> {
         Box::pin(async move {
-            SkillCatalog::get(self, name)?;
-            self.manager.expand(name, args, ctx).await
+            let (manager, _) = self.resolve(name)?;
+            manager.expand(name, args, ctx).await
         })
     }
     fn reload_changed(&self) -> usize {
         self.manager.check_for_changes()
     }
     fn discover_for_paths(&self, paths: &[PathBuf]) -> Vec<SkillEntry> {
-        self.keep(SkillCatalog::discover_for_paths(&*self.manager, paths))
+        SkillCatalog::discover_for_paths(&*self.manager, paths)
+            .into_iter()
+            .filter(|e| self.admission.admits(&e.name, &e.path))
+            .collect()
     }
     fn activate_for_paths(&self, files: &[PathBuf]) -> Vec<SkillEntry> {
-        self.keep(SkillCatalog::activate_for_paths(&*self.manager, files))
+        let mut found = SkillCatalog::activate_for_paths(&*self.manager, files);
+        for dir in self.host.iter().flat_map(|h| h.dirs()) {
+            let manager = dir.manager();
+            found.extend(SkillCatalog::activate_for_paths(&*manager, files));
+        }
+        self.won(found)
     }
     fn invocation_count(&self, name: &str) -> u32 {
-        self.manager.invocation_count(name)
+        self.resolve(name)
+            .map_or(0, |(manager, _)| manager.invocation_count(name))
     }
     fn last_invoked_seq(&self, name: &str) -> u64 {
-        self.manager.last_invoked_seq(name)
+        self.resolve(name)
+            .map_or(0, |(manager, _)| manager.last_invoked_seq(name))
     }
 }
 

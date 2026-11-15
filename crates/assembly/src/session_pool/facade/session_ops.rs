@@ -350,6 +350,51 @@ impl SessionPool {
     }
 }
 
+impl SessionPool {
+    /// `session.setSkillDirs` — the host's skill directories for the session,
+    /// all of them at once; `[]` clears them. Nothing is rebuilt: a session in
+    /// memory takes them up in place, its running delegates included, and
+    /// shows the change at the start of its next turn. A session out of
+    /// memory only has its recorded spec changed, and takes them up when it
+    /// is brought back. Checked as `options.skill_dirs` is at creation.
+    pub async fn set_skill_dirs(
+        &self,
+        session_id: &str,
+        dirs: Vec<api::SkillDirOption>,
+    ) -> Result<Vec<api::SkillDirOption>, PoolError> {
+        self.refuse_scene_mismatch(session_id).await?;
+        if !self.session_exists(session_id).await {
+            return Err(PoolError::session_not_found(session_id));
+        }
+        self.specs.load(session_id).await;
+        let change = |spec: &mut SessionSpec| spec.skill_dirs = Some(dirs.clone());
+        self.live
+            .with_session_lock(session_id, async {
+                match self.live.core_of(session_id).await {
+                    Some(core) => {
+                        let binding = self.binding_for(core.project(), &core.scene().id).await;
+                        let accepted = HostDirTable::check(&dirs, &binding.settings)
+                            .map_err(PoolError::InvalidOptions)?;
+                        let spec = self.specs.update(session_id, change).1;
+                        self.specs.persist(session_id, &spec).await;
+                        self.take_up_skill_dirs(&core, &spec, accepted, Vec::new(), &binding);
+                    }
+                    None => {
+                        let log = self.directory.load_entries(session_id).await?;
+                        let (binding, _, _) = self.binding_of_log(&log).await;
+                        HostDirTable::check(&dirs, &binding.settings)
+                            .map_err(PoolError::InvalidOptions)?;
+                        let spec = self.specs.update(session_id, change).1;
+                        self.specs.persist(session_id, &spec).await;
+                        self.specs.release(session_id);
+                    }
+                }
+                Ok(dirs.clone())
+            })
+            .await
+    }
+}
+
 fn choose_model(
     spec: &mut SessionSpec,
     model: Option<&str>,

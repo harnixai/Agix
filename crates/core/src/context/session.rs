@@ -35,6 +35,57 @@ pub struct SessionEnv {
     pub unattended: bool,
     /// The permission mode the engine is configured to run in.
     pub base_mode: PermissionMode,
+    /// The host's skill directories this session lists: readable without
+    /// asking, like `read_directories`, and changed without a rebuild.
+    pub skill_dirs: LiveDirs,
+    /// Every host skill directory a session in this process has listed: no
+    /// tool writes under one, in any permission mode.
+    pub protected_dirs: LiveDirs,
+}
+
+/// A list of directories shared by everything handed a clone and replaced
+/// in place, so a session's tools see a change without the session being
+/// rebuilt.
+#[derive(Debug, Clone, Default)]
+pub struct LiveDirs(Arc<std::sync::RwLock<Vec<PathBuf>>>);
+
+impl LiveDirs {
+    pub fn get(&self) -> Vec<PathBuf> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set(&self, dirs: Vec<PathBuf>) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = dirs;
+    }
+
+    /// Adds those of `dirs` not listed yet; removes nothing.
+    pub fn extend(&self, dirs: impl IntoIterator<Item = PathBuf>) {
+        let mut held = self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for dir in dirs {
+            if !held.contains(&dir) {
+                held.push(dir);
+            }
+        }
+    }
+
+    /// The listed directory `path` is in or is.
+    pub fn holding(&self, path: &Path) -> Option<PathBuf> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|dir| path.starts_with(dir))
+            .cloned()
+    }
 }
 
 impl SessionEnv {

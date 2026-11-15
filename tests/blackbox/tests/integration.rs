@@ -14,6 +14,7 @@ mod four_project_pipeline;
 mod harness;
 mod hook_events;
 mod host_agents;
+mod host_skill_dirs;
 mod hostile_plugins;
 mod import_sources;
 mod large_tool_results;

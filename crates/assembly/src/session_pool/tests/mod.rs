@@ -145,6 +145,7 @@ mod background;
 mod context_op;
 mod eviction;
 mod goal_record;
+mod host_skill_dirs;
 mod hub;
 mod import_question;
 pub(in crate::session_pool) mod mcp_for_project;

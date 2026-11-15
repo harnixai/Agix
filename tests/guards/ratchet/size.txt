@@ -18,8 +18,8 @@ fn    crates/agents/src/delegate/mod.rs                          Delegator::dele
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   104
 fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        331
-fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              86
-fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    135
+fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              88
+fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    136
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              97
 fn    crates/assembly/src/session_pool/facade/listing.rs         SessionPool::list_all                  139
@@ -27,7 +27,7 @@ fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::se
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  174
-fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   94
+fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   98
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
@@ -53,7 +53,7 @@ fn    crates/ptc/src/lib.rs                                      spawn_watchers 
 fn    crates/ptc/src/run.rs                                      execute                                96
 fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      86
 fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         102
-fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   98
+fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   99
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       86
 fn    crates/runtime/src/agent/turn/attachments.rs               resolve_attachments                    94

@@ -150,12 +150,14 @@ pub fn allowed_domains_name(url: &str, ctx: &base::tool::ToolContext) -> bool {
 }
 
 /// Where the file tools may read without asking: the project, every
-/// directory they may write, and `sandbox.read_directories`.
+/// directory they may write, `sandbox.read_directories`, and the host's
+/// skill directories the session lists.
 pub fn readable_roots(ctx: &base::tool::ToolContext) -> Vec<PathBuf> {
     let env = ctx.session.env();
     std::iter::once(ctx.cwd.clone())
         .chain(env.additional_writable_dirs.iter().cloned())
         .chain(env.read_directories.iter().cloned())
+        .chain(env.skill_dirs.get())
         .collect()
 }
 
