@@ -577,6 +577,11 @@ fn context_like_the_runtime(session: &Arc<dyn Session>, cwd: &Path) -> ToolConte
         .config
         .sandbox
         .confinement(&ctx.exec, cwd, &ctx.session_id);
+    assert_eq!(
+        ctx.engine_git.is_sandboxed(),
+        !ctx.config.sandbox.disabled,
+        "the engine's git is confined as the runtime confines it"
+    );
     ctx
 }
 
