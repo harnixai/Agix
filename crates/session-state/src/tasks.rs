@@ -1,33 +1,31 @@
 //! 会话的任务表：后台任务的登记、结束、取消与事件，以及绑定任务生命周期的 `TaskScope` / `TaskLease`。
 
-use super::SessionState;
-use crate::context::task::{RunningStatus, RunningTask, TaskEvent, TaskInfo, TaskType};
+use base::context::task::{RunningStatus, RunningTask, TaskEvent, TaskInfo, TaskType};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
 #[derive(Debug)]
-pub(super) struct TaskTable {
+pub(crate) struct TaskTable {
     running: std::sync::Mutex<HashMap<String, std::sync::Arc<RunningTask>>>,
     events: broadcast::Sender<TaskEvent>,
 }
 
 impl TaskTable {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             running: std::sync::Mutex::new(HashMap::new()),
             events: tokio::sync::broadcast::channel(256).0,
         }
     }
 
-    pub(super) fn register_task(
+    pub(crate) fn register_task(
         &self,
-        task_id: impl Into<String>,
+        task_id: String,
         task_type: TaskType,
         cancel: tokio_util::sync::CancellationToken,
         detail: serde_json::Value,
     ) -> std::sync::Arc<RunningTask> {
-        let task_id = task_id.into();
-        let task =
+                let task =
             std::sync::Arc::new(RunningTask::with_cancel(task_id.clone(), task_type, cancel));
         *task.detail.lock().unwrap_or_else(|e| e.into_inner()) = detail;
         task.report_to(self.events.clone());
@@ -75,7 +73,7 @@ impl TaskTable {
         }
     }
 
-    pub(super) fn finish_task(&self, task_id: &str, status: RunningStatus) {
+    pub(crate) fn finish_task(&self, task_id: &str, status: RunningStatus) {
         let Some(task) = self.find_running_task(task_id) else {
             return;
         };
@@ -92,7 +90,7 @@ impl TaskTable {
             if ended.is_some() {
                 return;
             }
-            *ended = Some(crate::clock::unix_ms());
+            *ended = Some(base::clock::unix_ms());
             let mut current = task.status.lock().unwrap_or_else(|e| e.into_inner());
             if matches!(*current, RunningStatus::Running) {
                 *current = status;
@@ -142,7 +140,7 @@ impl TaskTable {
         }
     }
 
-    pub(super) fn task_infos(&self) -> Vec<TaskInfo> {
+    pub(crate) fn task_infos(&self) -> Vec<TaskInfo> {
         let mut tasks: Vec<std::sync::Arc<RunningTask>> = self
             .running
             .lock()
@@ -154,11 +152,11 @@ impl TaskTable {
         tasks.iter().map(|t| t.info()).collect()
     }
 
-    pub(super) fn subscribe_tasks(&self) -> broadcast::Receiver<TaskEvent> {
+    pub(crate) fn subscribe_tasks(&self) -> broadcast::Receiver<TaskEvent> {
         self.events.subscribe()
     }
 
-    pub(super) fn find_running_task(&self, task_id: &str) -> Option<std::sync::Arc<RunningTask>> {
+    pub(crate) fn find_running_task(&self, task_id: &str) -> Option<std::sync::Arc<RunningTask>> {
         self.running
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -166,7 +164,7 @@ impl TaskTable {
             .cloned()
     }
 
-    pub(super) fn list_running_tasks(&self) -> Vec<(String, RunningStatus)> {
+    pub(crate) fn list_running_tasks(&self) -> Vec<(String, RunningStatus)> {
         self.running
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -180,14 +178,14 @@ impl TaskTable {
             .collect()
     }
 
-    pub(super) fn running_background_task_ids(&self) -> Vec<String> {
+    pub(crate) fn running_background_task_ids(&self) -> Vec<String> {
         self.running_background_tasks()
             .iter()
             .map(|task| task.task_id.clone())
             .collect()
     }
 
-    pub(super) fn running_background_tasks(&self) -> Vec<std::sync::Arc<RunningTask>> {
+    pub(crate) fn running_background_tasks(&self) -> Vec<std::sync::Arc<RunningTask>> {
         let mut tasks: Vec<std::sync::Arc<RunningTask>> = self
             .running
             .lock()
@@ -206,7 +204,7 @@ impl TaskTable {
         tasks
     }
 
-    pub(super) fn cancel_running_task(&self, task_id: &str) -> bool {
+    pub(crate) fn cancel_running_task(&self, task_id: &str) -> bool {
         let Some(task) = self.find_running_task(task_id) else {
             return false;
         };
@@ -228,117 +226,5 @@ impl TaskTable {
             }
         }
         true
-    }
-}
-
-/// A task that lasts as long as this value: registered on creation, ended on
-/// drop — stopped if its token was cancelled, done otherwise. For work bounded
-/// by one call, like a shell command.
-pub struct TaskScope {
-    session: std::sync::Arc<SessionState>,
-    task: std::sync::Arc<RunningTask>,
-}
-
-impl TaskScope {
-    pub fn new(
-        session: std::sync::Arc<SessionState>,
-        task_id: impl Into<String>,
-        task_type: TaskType,
-        cancel: tokio_util::sync::CancellationToken,
-        detail: serde_json::Value,
-    ) -> Self {
-        let task = session.register_task(task_id, task_type, cancel, detail);
-        Self { session, task }
-    }
-
-    pub fn task(&self) -> &std::sync::Arc<RunningTask> {
-        &self.task
-    }
-}
-
-impl Drop for TaskScope {
-    fn drop(&mut self) {
-        let status = if self.task.cancel.is_cancelled() {
-            RunningStatus::Cancelled
-        } else {
-            RunningStatus::Completed
-        };
-        self.session.finish_task(&self.task.task_id, status);
-    }
-}
-
-/// A task whose holder says how it ended: registered on creation, ended by
-/// [`conclude`](Self::conclude). One dropped without concluding — its work
-/// panicked, was dropped from a queue, or its holder simply went away — ends
-/// as stopped, and the parent hears so when the lease was taken
-/// [notifying](Self::notifying) it. No task held by a lease is left running.
-pub struct TaskLease {
-    session: std::sync::Arc<SessionState>,
-    task: std::sync::Arc<RunningTask>,
-    stopped_notice: Option<StoppedNotice>,
-    concluded: bool,
-}
-
-type StoppedNotice = Box<dyn Fn(&RunningTask) -> String + Send + Sync>;
-
-impl TaskLease {
-    pub fn new(
-        session: std::sync::Arc<SessionState>,
-        task_id: impl Into<String>,
-        task_type: TaskType,
-        cancel: tokio_util::sync::CancellationToken,
-        detail: serde_json::Value,
-    ) -> Self {
-        let task = session.register_task(task_id, task_type, cancel, detail);
-        Self {
-            session,
-            task,
-            stopped_notice: None,
-            concluded: false,
-        }
-    }
-
-    /// The notice the parent is posted when the lease is dropped unconcluded.
-    pub fn notifying(
-        mut self,
-        notice: impl Fn(&RunningTask) -> String + Send + Sync + 'static,
-    ) -> Self {
-        self.stopped_notice = Some(Box::new(notice));
-        self
-    }
-
-    pub fn task(&self) -> &std::sync::Arc<RunningTask> {
-        &self.task
-    }
-
-    /// End the task with `status`. `notice` is posted to the session first,
-    /// so whoever wakes on the task's end finds it there to withdraw; a task
-    /// already stopped from outside gets none, since whoever stopped it knows.
-    pub fn conclude(mut self, status: RunningStatus, notice: Option<String>) {
-        self.concluded = true;
-        if !self.task.claim_end() {
-            return;
-        }
-        if let Some(notice) = notice.filter(|_| !self.task.has_ended()) {
-            self.session
-                .post_notice(Some(self.task.task_id.clone()), notice);
-        }
-        self.session.finish_task(&self.task.task_id, status);
-    }
-}
-
-impl Drop for TaskLease {
-    fn drop(&mut self) {
-        if self.concluded || !self.task.claim_end() {
-            return;
-        }
-        if let Some(notice) = self.stopped_notice.as_ref() {
-            if !self.task.has_ended() {
-                self.session
-                    .post_notice(Some(self.task.task_id.clone()), notice(&self.task));
-            }
-        }
-        self.session
-            .finish_task(&self.task.task_id, RunningStatus::Cancelled);
     }
 }

@@ -14,7 +14,7 @@ pub struct ToolContext {
     pub config: Arc<crate::context::EngineConfig>,
     /// The session the call is made in: its live permission mode, the
     /// directories it may write besides its own, its running tasks.
-    pub session: Arc<crate::context::SessionState>,
+    pub session: Arc<dyn crate::context::Session>,
     pub tool_use_id: String,
     /// How many delegations deep the calling session is; `0` for the
     /// conversation the user talks to.
@@ -94,7 +94,7 @@ impl ToolContext {
         cancel: CancellationToken,
         exec: crate::interface::exec::ExecProviders,
         config: Arc<crate::context::EngineConfig>,
-        session: Arc<crate::context::SessionState>,
+        session: Arc<dyn crate::context::Session>,
     ) -> Self {
         // Without the session's TMPDIR: the runtime gives every call the
         // engine git it made, with the TMPDIR, once for the session.
@@ -133,33 +133,5 @@ impl ToolContext {
     /// rather than the conversation's own.
     pub fn in_delegate(&self) -> bool {
         self.agent_depth > 0
-    }
-
-    pub fn for_test_with(cwd: PathBuf, exec: crate::interface::exec::ExecProviders) -> Self {
-        let mut config = crate::context::EngineConfig::defaults_for("test");
-        config.sandbox = Arc::new(crate::interface::exec::SandboxSettings {
-            disabled: true,
-            ..Default::default()
-        });
-        config.file_limits.max_file_read_bytes = 0;
-        let session = Arc::new(crate::context::SessionState::for_tests(cwd.clone()));
-        let mut ctx = Self::new(
-            cwd,
-            CancellationToken::new(),
-            exec,
-            Arc::new(config),
-            session,
-        );
-        ctx.session_id = "test".into();
-        ctx
-    }
-    pub fn from_engine_ctx_with(
-        cwd: PathBuf,
-        cancel: CancellationToken,
-        exec: crate::interface::exec::ExecProviders,
-    ) -> Self {
-        let config = Arc::new(crate::context::EngineConfig::defaults_for("unknown"));
-        let session = Arc::new(crate::context::SessionState::for_tests(cwd.clone()));
-        Self::new(cwd, cancel, exec, config, session)
     }
 }

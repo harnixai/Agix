@@ -15,6 +15,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 mod answering;
+mod contract;
 mod judging;
 mod requests;
 

@@ -464,7 +464,7 @@ impl TaskStatus {
 }
 
 /// What a session's tasks report as they run
-/// ([`super::SessionState::subscribe_tasks`]).
+/// (`SessionState::subscribe_tasks` in `session-state`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(tag = "kind")]
 pub enum TaskEvent {

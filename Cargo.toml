@@ -20,6 +20,7 @@ members = [
     "crates/runtime",
     "crates/compaction",
     "crates/session",
+    "crates/session-state",
     "crates/scene",
     "crates/team",
     "crates/agents",
@@ -129,6 +130,7 @@ skills   = { path = "crates/skills" }
 runtime    = { path = "crates/runtime", default-features = false }
 compaction = { path = "crates/compaction" }
 session    = { path = "crates/session" }
+session-state = { path = "crates/session-state" }
 scene      = { path = "crates/scene" }
 team       = { path = "crates/team" }
 agents     = { path = "crates/agents" }

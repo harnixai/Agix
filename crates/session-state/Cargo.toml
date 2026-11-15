@@ -1,0 +1,24 @@
+[package]
+name = "session-state"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+publish      = false
+description  = "Agix — one session's mutable state: permission mode, todos, task table, notices, read cache, goal; the implementation of base::context::Session"
+
+[dependencies]
+base       = { workspace = true }
+tokio      = { workspace = true }
+tokio-util = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+
+[features]
+testing = []
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

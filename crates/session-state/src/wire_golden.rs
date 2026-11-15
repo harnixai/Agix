@@ -1,8 +1,9 @@
 //! 任务事件和目标视图的线上形状：`session.tasks`、`task_*`、`goal_changed`、
 //! `session.goal` 都原样转发这里产生的值，客户端按这份形状解析。
 
-use super::goal::{GoalAction, TurnOrigin};
 use super::*;
+use base::context::goal::{GoalAction, TurnOrigin};
+use base::context::{RunningStatus, TaskType};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -48,13 +49,13 @@ fn a_sub_agent_task_s_events_keep_their_shape() {
     let s = SessionState::for_tests(PathBuf::from("/tmp"));
     let mut rx = s.subscribe_tasks();
     let task = s.register_task(
-        "ag-1",
+        "ag-1".into(),
         TaskType::Agent,
         tokio_util::sync::CancellationToken::new(),
         json!({"description": "look around", "subagent_type": "explore"}),
     );
     task.begin_waiting("p-1");
-    task.add_usage(crate::interface::model::Usage {
+    task.add_usage(base::interface::model::Usage {
         input_tokens: 3,
         output_tokens: 4,
         cache_creation_input_tokens: 0,
@@ -146,7 +147,7 @@ fn every_status_and_kind_keeps_its_name() {
     ];
     for (task_type, id, status) in cases {
         let task = s.register_task(
-            id,
+            id.into(),
             task_type,
             tokio_util::sync::CancellationToken::new(),
             Value::Null,

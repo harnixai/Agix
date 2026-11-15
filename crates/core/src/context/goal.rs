@@ -23,10 +23,19 @@ pub const BLOCKED_MIN_ROUNDS: u32 = 3;
 const GOAL_TURN_PREFIX: &str = "goal-";
 
 /// Goal snapshots to write to the session log, oldest first; `None` records
-/// a cleared goal. See [`crate::context::SessionState::unrecorded_goal_changes`].
+/// a cleared goal. See `SessionState::unrecorded_goal_changes` in `session-state`.
 pub struct UnrecordedGoalChanges {
     pub changes: Vec<Option<Goal>>,
-    pub(crate) _writing: tokio::sync::OwnedMutexGuard<()>,
+    _writing: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl UnrecordedGoalChanges {
+    pub fn new(changes: Vec<Option<Goal>>, writing: tokio::sync::OwnedMutexGuard<()>) -> Self {
+        Self {
+            changes,
+            _writing: writing,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

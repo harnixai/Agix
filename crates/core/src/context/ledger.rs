@@ -1,5 +1,5 @@
 //! What a session has spent and asked for over its turns — kept on its
-//! [`SessionState`](super::SessionState), so it outlives the engine that ran
+//! `SessionState` (in `session-state`), so it outlives the engine that ran
 //! them.
 
 use crate::interface::budget_policy::OutputProgress;

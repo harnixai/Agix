@@ -7,7 +7,7 @@ use std::time::SystemTime;
 /// 一次文件读取记录，包含读取时的 mtime。
 /// `FileEdit` / `FileWrite` 的 `validate_input` 用它做 staleness 检测。
 #[derive(Debug, Clone)]
-pub struct FileReadEntry {
+pub(crate) struct FileReadEntry {
     /// 读取时的文件 mtime。
     pub mtime: SystemTime,
     /// 读取时的 offset（FileRead 的 offset 参数）。
@@ -23,19 +23,19 @@ pub struct FileReadEntry {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ReadCache {
+pub(crate) struct ReadCache {
     entries: std::sync::Mutex<HashMap<PathBuf, FileReadEntry>>,
     last_path: std::sync::Mutex<Option<PathBuf>>,
 }
 
 impl ReadCache {
-    pub(super) fn record_read(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
+    pub(crate) fn record_read(&self, path: &Path, offset: Option<usize>, limit: Option<usize>) {
         if self.remember_file(path, offset, limit, false) {
             *self.last_path.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_path_buf());
         }
     }
 
-    pub(super) fn record_write(&self, path: &Path) {
+    pub(crate) fn record_write(&self, path: &Path) {
         self.remember_file(path, None, None, true);
     }
 
@@ -64,7 +64,7 @@ impl ReadCache {
         true
     }
 
-    pub(super) fn check_staleness(&self, path: &Path) -> Option<&'static str> {
+    pub(crate) fn check_staleness(&self, path: &Path) -> Option<&'static str> {
         let meta = match std::fs::metadata(path) {
             Ok(m) => m,
             Err(_) => return None, // file doesn't exist — skip staleness check
@@ -83,7 +83,7 @@ impl ReadCache {
         }
     }
 
-    pub(super) fn check_dedup(
+    pub(crate) fn check_dedup(
         &self,
         path: &Path,
         offset: Option<usize>,
@@ -106,7 +106,7 @@ impl ReadCache {
         })
     }
 
-    pub(super) fn forget(&self, paths: Option<&[PathBuf]>) {
+    pub(crate) fn forget(&self, paths: Option<&[PathBuf]>) {
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         let mut last = self.last_path.lock().unwrap_or_else(|e| e.into_inner());
         match paths {
@@ -125,7 +125,7 @@ impl ReadCache {
         }
     }
 
-    pub(super) fn is_consecutive(&self, path: &Path) -> bool {
+    pub(crate) fn is_consecutive(&self, path: &Path) -> bool {
         let last = self.last_path.lock().unwrap_or_else(|e| e.into_inner());
         last.as_ref().is_some_and(|p| p == path)
     }
