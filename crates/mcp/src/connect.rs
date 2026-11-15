@@ -476,7 +476,7 @@ impl StdioMcpClient {
         taken: &AtomicBool,
     ) -> Result<McpCallResult, McpError> {
         let svc = self.service().await?;
-        let _in_flight = self.route.enter(scope.elicitor.clone());
+        let in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();
         let svc_ref = &svc;
@@ -500,7 +500,16 @@ impl StdioMcpClient {
             .await?;
         let result = crate::tasks::settle(self, &svc, ended, scope, limit).await?;
 
-        let content_blocks = result.content.iter().map(rmcp_content_to_ours).collect();
+        let mut content_blocks: Vec<McpContent> =
+            result.content.iter().map(rmcp_content_to_ours).collect();
+        let cut = in_flight.cut();
+        if cut > 0 {
+            content_blocks.push(McpContent::Text(format!(
+                "[The engine cancelled {cut} more questions the server asked during this call: \
+                 one call may ask at most {} of them.]",
+                crate::elicit::MAX_QUESTIONS_PER_CALL
+            )));
+        }
 
         Ok(McpCallResult {
             content: content_blocks,

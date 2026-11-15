@@ -522,7 +522,7 @@ bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会�
 列出每一处问题,**提问不撤**,可以改了再答;url 的 `accept` 带了 `content`、form 的 `accept` 没带,
 同样是 `INVALID_PARAMS`。
 
-对 server 的询问有上限:`message` 超过 4 KiB 被截断,那一帧带 `limited: true`;form 的 schema 超过 16 KiB 或属性多于 32 个,不推给宿主,直接回 server `decline`。一次工具调用里老版本 server 同时在途的询问至多 4 个、2026-07-28 的一轮至多问 8 个,超出的回 server `cancel`。
+对 server 的询问有上限:`message` 超过 4 KiB 被截断,那一帧带 `limited: true`;form 的 schema 超过 16 KiB 或属性多于 32 个,不推给宿主,直接回 server `decline`。一次工具调用里老版本 server 同时在途的询问至多 4 个、总共至多 10 个,2026-07-28 的一轮至多问 8 个、至多 10 轮(server 转成任务的调用同样按轮计),超出的回 server `cancel`;总数超了的,这次调用的结果末尾有一行说明被取消了几个。
 
 ### 4.8 `stop_reason`
 

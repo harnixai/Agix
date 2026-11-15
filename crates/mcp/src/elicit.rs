@@ -13,8 +13,8 @@
 //! question to another session's host.
 //!
 //! One call has at most [`MAX_OPEN_PER_CALL`] questions of an older server
-//! open at once and [`MAX_QUESTIONS_PER_ROUND`] in a round; the rest are
-//! answered `cancel`. A question's words are bounded too: a longer message is
+//! open at once and [`MAX_QUESTIONS_PER_CALL`] in all, and
+//! [`MAX_QUESTIONS_PER_ROUND`] in a round; the rest are answered `cancel`. A question's words are bounded too: a longer message is
 //! cut, a larger form is declined.
 //!
 //! In the first case the tool time limit applies to each round, so the time a
@@ -38,6 +38,8 @@ use tokio_util::sync::CancellationToken;
 
 pub const MAX_OPEN_PER_CALL: usize = 4;
 pub const MAX_QUESTIONS_PER_ROUND: usize = 8;
+/// An older server's questions in one call, one after another or not.
+pub const MAX_QUESTIONS_PER_CALL: usize = DEFAULT_MRTR_MAX_ROUNDS;
 const MAX_MESSAGE_BYTES: usize = 4 * 1024;
 const MAX_SCHEMA_BYTES: usize = 16 * 1024;
 const MAX_SCHEMA_PROPERTIES: usize = 32;
@@ -78,6 +80,7 @@ struct Entry {
     elicitor: Asker,
     ended: CancellationToken,
     open: Arc<AtomicUsize>,
+    asked: Arc<AtomicUsize>,
 }
 
 struct OpenQuestion(Arc<AtomicUsize>);
@@ -100,28 +103,47 @@ impl Drop for OpenQuestion {
 pub struct InFlight {
     route: Arc<ElicitRoute>,
     id: u64,
+    asked: Arc<AtomicUsize>,
+}
+
+impl InFlight {
+    /// The server's own questions in this call that were cancelled for
+    /// going over [`MAX_QUESTIONS_PER_CALL`].
+    pub fn cut(&self) -> usize {
+        self.asked
+            .load(Ordering::SeqCst)
+            .saturating_sub(MAX_QUESTIONS_PER_CALL)
+    }
 }
 
 impl ElicitRoute {
     pub fn enter(self: &Arc<Self>, elicitor: Asker) -> InFlight {
         let id = self.seq.fetch_add(1, Ordering::Relaxed);
+        let asked = Arc::<AtomicUsize>::default();
         self.lock().push(Entry {
             id,
             elicitor,
             ended: CancellationToken::new(),
             open: Arc::default(),
+            asked: asked.clone(),
         });
         InFlight {
             route: self.clone(),
             id,
+            asked,
         }
     }
 
     /// The elicitor of the one request in flight and the token its end
     /// cancels, or how many there are when that is not one.
-    fn sole(&self) -> Result<(Asker, CancellationToken, Arc<AtomicUsize>), usize> {
+    fn sole(&self) -> Result<(Asker, CancellationToken, Arc<AtomicUsize>, usize), usize> {
         match self.lock().as_slice() {
-            [only] => Ok((only.elicitor.clone(), only.ended.clone(), only.open.clone())),
+            [only] => Ok((
+                only.elicitor.clone(),
+                only.ended.clone(),
+                only.open.clone(),
+                only.asked.fetch_add(1, Ordering::SeqCst),
+            )),
             all => Err(all.len()),
         }
     }
@@ -131,7 +153,14 @@ impl ElicitRoute {
     /// does not leave it standing for whatever the host does next.
     pub(crate) async fn answer(&self, server: &str, params: ElicitRequestParams) -> ElicitResult {
         let answer = match self.sole() {
-            Ok((elicitor, ended, open)) => match OpenQuestion::take(&open) {
+            Ok((_, _, _, before)) if before >= MAX_QUESTIONS_PER_CALL => {
+                tracing::warn!(
+                    server,
+                    "more than {MAX_QUESTIONS_PER_CALL} elicitation requests in one tool call; cancelled"
+                );
+                McpElicitationAnswer::Cancel
+            }
+            Ok((elicitor, ended, open, _)) => match OpenQuestion::take(&open) {
                 Some(_held) => tokio::select! {
                     biased;
                     () = ended.cancelled() => McpElicitationAnswer::Cancel,
