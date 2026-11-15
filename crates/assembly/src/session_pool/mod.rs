@@ -298,6 +298,17 @@ impl SessionPool {
         self.events.import_question()
     }
 
+    /// [`Self::subscribe_events`] with the `import_detected` question still
+    /// waiting, which the subscriber gets once either way.
+    pub fn subscribe_events_with_question(
+        &self,
+    ) -> (
+        tokio::sync::broadcast::Receiver<api::DaemonEvent>,
+        Option<api::DaemonEvent>,
+    ) {
+        self.events.subscribe_with_question()
+    }
+
     /// Record how long the daemon took to start, in the pool-level
     /// telemetry.
     pub fn record_startup(&self, timing: telemetry::StartupTimingPayload) {

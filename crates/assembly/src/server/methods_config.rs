@@ -21,9 +21,8 @@ impl DaemonServer {
         if !client.start_daemon_events() {
             return subscribed;
         }
-        let mut rx = self.pool.subscribe_events();
+        let (mut rx, waiting) = self.pool.subscribe_events_with_question();
         let forward = client;
-        let waiting = self.pool.pending_import_question();
         tokio::spawn(async move {
             if let Some(event) = waiting {
                 let frame = crate::rpc::DaemonEventFrame::pool(&event);

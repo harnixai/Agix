@@ -3285,7 +3285,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `mcp_auth_required` | `{server, scopes}` | 远端 server 要求登录:没有令牌、令牌被拒且刷新不了,或要求更多 scope(这时 server 保持连接);`enterprise` server 还没有可用的企业身份(宿主该调 `mcp.auth.setIdentity`)。`scopes` 是要请求的(可能为空)。同一个 server 从已登录/未涉及变成需要登录时发一次 |
 | `mcp_auth_completed` | `{server}` | 登录完成,令牌已存;随后是这个 server 的 `mcp_connected` / `mcp_connect_failed` |
 | `mcp_auth_failed` | `{server, error}` | 登录失败:授权服务器在回调里报错、换令牌失败,或 10 分钟内没完成 |
-| `import_detected` | `{sources:[{source,description}]}` | 启动时探测到还没处理过的可导入配置。它在任何客户端连上之前就已产生,所以是本节唯一会补发的事件:`import.run` 回答之前,每个新订阅者订阅后先收到它 |
+| `import_detected` | `{sources:[{source,description}]}` | 启动时探测到还没处理过的可导入配置。它在任何客户端连上之前就已产生,所以是本节唯一会补发的事件:对 daemon 自己项目的 `import.run` 回答之前,每个新订阅者订阅后先收到它,且只收到一份;对别的项目跑 `import.run` 不算回答。daemon 没有"不导入"的方法:不理它即可,它不阻塞任何操作,只在 daemon 运行期间对新订阅者补发、重启后再问 |
 | `session_created` | `{session_id, scene, project_root}` | 一个新会话进了内存 |
 | `session_resumed` | `{session_id, scene, project_root}` | 一个已有的会话被恢复进内存 |
 | `session_evicted` | `{session_id, reason}` | 会话被移出内存,transcript 还在,可以恢复。`reason`:`idle`(空闲超时)、`capacity`(池子满了,挤掉最久没动的)、`rebuild`(原地重建时旧引擎 5 秒内没停下,见 `session.setModel`;或旧引擎停下之后新引擎没能读回日志,发起重建的调用失败)、`engine_fault`(daemon 里跑这一轮的部分出了故障,这一轮没能把会话交还;发起方的 `run_turn` 得到 `ENGINE_ERROR`、`data.kind` 为 `internal`,其余订阅者收到这一轮的 `error` 帧)。正在跑一轮、或还有后台任务在跑的会话不会被驱逐;池子满了而个个都忙时,新会话照样建,池子暂时超出上限。再用被驱逐的会话时,先等它旧的运行体停下(最多 5 秒;它的 `SessionEnd` 等只通知的 hook 在后台跑,不算在内)再重建,两个引擎不会同时在跑 |

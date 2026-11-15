@@ -52,12 +52,27 @@ impl DaemonEvents {
     }
 
     pub(in crate::session_pool) fn ask_import(&self, event: DaemonEvent) {
-        *self
+        let mut question = self
             .channel
             .import_question
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(event.clone());
+            .unwrap_or_else(|e| e.into_inner());
+        *question = Some(event.clone());
         self.emit(event);
+    }
+
+    /// A subscription and the question still waiting, taken together so the
+    /// question reaches the subscriber exactly once: asked before, it is
+    /// handed back here; asked after, it arrives on the subscription.
+    pub(in crate::session_pool) fn subscribe_with_question(
+        &self,
+    ) -> (broadcast::Receiver<DaemonEvent>, Option<DaemonEvent>) {
+        let question = self
+            .channel
+            .import_question
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        (self.subscribe(), question.clone())
     }
 
     pub(in crate::session_pool) fn import_question(&self) -> Option<DaemonEvent> {
