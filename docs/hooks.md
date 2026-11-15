@@ -260,8 +260,9 @@ hook 的 stdout 只用来读回答,引擎不把它交给模型或宿主;要让�
 warn。
 
 写了 **`"on_error": "block"`** 的 hook,失败等于它回答了 `{"decision": "block"}`,`message` 是
-`<哪个 hook> failed and its on_error is block: <失败原因>`(hook 写作 `` command `<命令>` ``、
-`` http `<url>` ``、`prompt hook`、`agent hook`)。拦下的效果按事件走,同回答 `block`:
+``Hook `<事件名>` #<序号> failed and its on_error is block.``(序号是它在这个事件的 hook 里
+的位置,从 1 起)。命令、URL 和失败原因不进这条消息——它会到达模型和转录,而它们可能带令牌;
+它们只进 daemon 日志(过 `scrub_secrets` 脱敏)。拦下的效果按事件走,同回答 `block`:
 `PreToolUse` 上这次调用不执行,`Stop` 上这一轮不结束、模型被送回去,只通知的事件上不起作用。
 `if`、`only_on_error` 没放行的那次不算失败。
 

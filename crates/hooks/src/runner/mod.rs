@@ -540,9 +540,10 @@ impl HookRunner {
         let result = HookRunResult {
             outcomes: indexed
                 .into_iter()
-                .map(|(idx, outcome)| match configs[idx].on_error() {
+                .enumerate()
+                .map(|(n, (idx, outcome))| match configs[idx].on_error() {
                     OnError::Allow => outcome,
-                    OnError::Block => block_on_failure(event, &configs[idx], outcome),
+                    OnError::Block => block_on_failure(event, n + 1, &configs[idx], outcome),
                 })
                 .collect(),
             hooks,
@@ -732,7 +733,12 @@ const NOT_JUDGED: &str = "agent hook: the event is a hook agent's own";
 ///
 /// A hook whose backend this host never wired is a failure here too: a hook
 /// written to fail closed must not open because nothing could run it.
-fn block_on_failure(event: HookEvent, cfg: &HookConfig, outcome: HookOutcome) -> HookOutcome {
+fn block_on_failure(
+    event: HookEvent,
+    number: usize,
+    cfg: &HookConfig,
+    outcome: HookOutcome,
+) -> HookOutcome {
     let (why, stdout, stderr, exit_code) = match outcome {
         HookOutcome::Error(error) => (error, String::new(), String::new(), None),
         HookOutcome::Cancelled => (
@@ -753,8 +759,14 @@ fn block_on_failure(event: HookEvent, cfg: &HookConfig, outcome: HookOutcome) ->
         }
         other => return other,
     };
-    let message = format!("{} failed and its on_error is block: {why}", cfg.describe());
-    tracing::warn!(event = ?event, %message, "hook failed; blocking");
+    let message = format!("Hook `{event:?}` #{number} failed and its on_error is block.");
+    tracing::warn!(
+        event = ?event,
+        number,
+        hook = %base::text::scrub_secrets(&cfg.describe()),
+        reason = %base::text::scrub_secrets(&why),
+        "hook failed; blocking"
+    );
     HookOutcome::Ran {
         response: HookResponse {
             decision: Some(HookDecision::Block),
@@ -2101,6 +2113,46 @@ mod tests {
         assert!(term.exists(), "the hook was not sent SIGTERM");
     }
 
+    const BLOCKED_MESSAGE: &str = "Hook `PreToolUse` #1 failed and its on_error is block.";
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_block_message_to_the_model_carries_no_command_url_or_reason() {
+        let secret = "https://hooks.test/t0ken-in-url";
+        let result = on_pre_tool_use(vec![
+            blocking_on_error(command("echo ok-hook")),
+            blocking_on_error(HookConfig::Http {
+                url: secret.into(),
+                headers: HashMap::new(),
+                timeout: Some(500),
+                if_pattern: None,
+                on_error: OnError::Block,
+                allow_local: true,
+            }),
+            blocking_on_error(command("echo sk-leaky-stderr >&2; exit 3")),
+        ])
+        .run(
+            HookEvent::PreToolUse,
+            &input_for_bash("ls"),
+            &CancellationToken::new(),
+        )
+        .await;
+        for message in result
+            .outcomes
+            .iter()
+            .filter_map(|o| match o {
+                HookOutcome::Ran { response, .. } => response.message.as_deref(),
+                _ => None,
+            })
+            .filter(|m| m.contains("on_error"))
+        {
+            for leaked in ["t0ken", "leaky", "echo", "http", "exited 3"] {
+                assert!(!message.contains(leaked), "{leaked} in: {message}");
+            }
+            assert!(message.starts_with("Hook `PreToolUse` #"), "{message}");
+        }
+    }
+
     fn blocking_on_error(mut hook: HookConfig) -> HookConfig {
         match &mut hook {
             HookConfig::Command { on_error, .. }
@@ -2125,10 +2177,10 @@ mod tests {
         if let HookConfig::Command { timeout, .. } = &mut timing_out {
             *timeout = Some(300);
         }
-        for (hook, said) in [
-            (timing_out, "timed out"),
-            (command("echo boom >&2; exit 1"), "exited 1: boom"),
-            (command("echo 'not json'"), "not a JSON answer"),
+        for hook in [
+            timing_out,
+            command("echo boom >&2; exit 1"),
+            command("echo 'not json'"),
         ] {
             let result = on_pre_tool_use(vec![blocking_on_error(hook)])
                 .run(
@@ -2137,11 +2189,7 @@ mod tests {
                     &CancellationToken::new(),
                 )
                 .await;
-            let message = block_message(&result);
-            assert!(
-                message.contains("command `") && message.contains(said),
-                "{message}"
-            );
+            assert_eq!(block_message(&result), BLOCKED_MESSAGE);
         }
     }
 
@@ -2207,7 +2255,7 @@ mod tests {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(block_message(&unparsable).contains("prompt hook"));
+        assert_eq!(block_message(&unparsable), BLOCKED_MESSAGE);
 
         let unwired = on_pre_tool_use(vec![prompt()])
             .run(
@@ -2216,7 +2264,7 @@ mod tests {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(block_message(&unwired).contains("PromptHookExecutor"));
+        assert_eq!(block_message(&unwired), BLOCKED_MESSAGE);
 
         let unreachable = on_pre_tool_use(vec![HookConfig::Http {
             url: "http://127.0.0.1:1/no-such".into(),
@@ -2232,7 +2280,7 @@ mod tests {
             &CancellationToken::new(),
         )
         .await;
-        assert!(block_message(&unreachable).contains("http `http://127.0.0.1:1/no-such`"));
+        assert_eq!(block_message(&unreachable), BLOCKED_MESSAGE);
 
         let timed_out = on_pre_tool_use(vec![agent(Some(200))])
             .with_agent_executor(Arc::new(Slow))
@@ -2242,7 +2290,7 @@ mod tests {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(block_message(&timed_out).contains("timed out"));
+        assert_eq!(block_message(&timed_out), BLOCKED_MESSAGE);
 
         let errored = on_pre_tool_use(vec![agent(None)])
             .with_agent_executor(Arc::new(Failing))
@@ -2252,7 +2300,7 @@ mod tests {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(block_message(&errored).contains("JUDGE-UNAVAILABLE"));
+        assert_eq!(block_message(&errored), BLOCKED_MESSAGE);
 
         let rambling = on_pre_tool_use(vec![agent(None)])
             .with_agent_executor(Arc::new(Answering("I think it is fine")))
@@ -2262,7 +2310,7 @@ mod tests {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(block_message(&rambling).contains("not JSON"));
+        assert_eq!(block_message(&rambling), BLOCKED_MESSAGE);
 
         let approving = on_pre_tool_use(vec![agent(None)])
             .with_agent_executor(Arc::new(Answering(r#"{"ok":true}"#)))
