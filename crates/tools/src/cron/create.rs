@@ -185,7 +185,10 @@ mod tests {
             create
                 .call(
                     json!({"cron": "0 9 * * *", "prompt": "test", "recurring": true}),
-                    platform::tool_context_for_test("/tmp".into()),
+                    session_state::testing::tool_context_for_test(
+                        platform::local_providers(),
+                        "/tmp".into(),
+                    ),
                     ProgressSender::noop(""),
                 )
                 .await
@@ -208,7 +211,10 @@ mod tests {
             delete
                 .call(
                     json!({"id": id}),
-                    platform::tool_context_for_test("/tmp".into()),
+                    session_state::testing::tool_context_for_test(
+                        platform::local_providers(),
+                        "/tmp".into(),
+                    ),
                     ProgressSender::noop(""),
                 )
                 .await

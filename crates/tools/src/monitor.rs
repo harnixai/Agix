@@ -16,7 +16,7 @@
 //! `sandbox.require_enforcement`.
 
 use async_trait::async_trait;
-use base::context::{RunningStatus, RunningTask, SessionState, TaskType};
+use base::context::{RunningStatus, RunningTask, Session, TaskType};
 use base::error::ToolError;
 use base::interface::exec::{OutputStream, ProcessHandle};
 use base::interface::permission::{PermissionFacts, Reach, Runs, Subject};
@@ -211,7 +211,7 @@ impl MonitorTool {
 
 /// One running monitor, from its first line to its end.
 struct Watch {
-    session: Arc<SessionState>,
+    session: Arc<dyn Session>,
     task: Arc<RunningTask>,
     description: String,
     cancel: CancellationToken,
@@ -446,10 +446,14 @@ fn ending_outcome(ending: Ending) -> (RunningStatus, Option<String>) {
 mod tests {
     use super::*;
     use serde_json::json;
+    use session_state::SessionState;
     use tempfile::TempDir;
 
     fn ctx_in(cwd: &std::path::Path) -> ToolContext {
-        platform::tool_context_for_test(cwd.to_path_buf())
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        )
     }
 
     struct Holds;
@@ -656,7 +660,7 @@ mod tests {
         assert!(schema.is_object(), "schema should be an object");
     }
 
-    fn session_in(dir: &std::path::Path) -> (ToolContext, Arc<SessionState>) {
+    fn session_in(dir: &std::path::Path) -> (ToolContext, Arc<dyn Session>) {
         let ctx = ctx_in(dir);
         let session = ctx.session.clone();
         (ctx, session)
@@ -670,7 +674,7 @@ mod tests {
     }
 
     /// The notices posted so far, waiting `up_to` for at least `n`.
-    async fn notices(session: &SessionState, n: usize, up_to: Duration) -> Vec<String> {
+    async fn notices(session: &Arc<dyn Session>, n: usize, up_to: Duration) -> Vec<String> {
         let deadline = tokio::time::Instant::now() + up_to;
         let mut seen = Vec::new();
         while seen.len() < n && tokio::time::Instant::now() < deadline {
@@ -680,7 +684,7 @@ mod tests {
         seen
     }
 
-    fn monitor_task(session: &SessionState) -> Arc<RunningTask> {
+    fn monitor_task(session: &Arc<dyn Session>) -> Arc<RunningTask> {
         let id = session
             .task_infos()
             .into_iter()

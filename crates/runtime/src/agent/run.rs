@@ -1,6 +1,7 @@
 //! `Agent`'s lifecycle: the `run` loop, warmup, session management, goal rounds and the read-only accessors.
 
 use super::*;
+use base::context::Session;
 
 /// A message on its way to the turn loop, with the token its turn runs under.
 type Forwarded = (InputMessage, CancellationToken);

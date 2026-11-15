@@ -12,7 +12,7 @@ mod engine;
 mod run;
 
 use async_trait::async_trait;
-use base::context::{RunningStatus, RunningTask, SessionState, TaskType};
+use base::context::{RunningStatus, RunningTask, Session, TaskType};
 use base::error::ToolError;
 use base::interface::permission::{PermissionFacts, Reach, Subject};
 use base::interface::tool_dispatch::{CallableTool, ToolDispatch};

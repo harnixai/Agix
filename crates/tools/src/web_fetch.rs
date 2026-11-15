@@ -360,7 +360,10 @@ mod tests {
     /// The pages these tests serve are on this machine, which a model-directed
     /// fetch reaches only when the deployment names the host.
     fn ctx_in(cwd: &Path) -> ToolContext {
-        let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        );
         ctx.exec = platform::local_providers().with_network(Arc::new(
             platform::LocalNetwork::for_agent_policy(
                 base::interface::exec::NetworkMode::Unrestricted,
@@ -379,7 +382,10 @@ mod tests {
             let refused = WebFetchTool::new()
                 .call(
                     json!({ "url": format!("http://{host}:{port}/") }),
-                    platform::tool_context_for_test("/tmp".into()),
+                    session_state::testing::tool_context_for_test(
+                        platform::local_providers(),
+                        "/tmp".into(),
+                    ),
                     ProgressSender::noop("t"),
                 )
                 .await;
@@ -445,7 +451,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_aborts() {
         let tool = WebFetchTool::new();
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         ctx.cancel.cancel();
         let r = tool
             .call(

@@ -3,6 +3,7 @@
 use super::*;
 use crate::session_pool::parts::live::{evict_lru, idle_session_ids, EngineSlot, Naming};
 use crate::session_pool::parts::phase::Generations;
+use base::context::Session;
 use runtime::agent::InputSender;
 
 /// A `LiveSession` with no real agent behind it — only `last_active`
@@ -95,7 +96,7 @@ fn inserting_over_an_existing_sid_must_cancel_the_replaced_sessions_token() {
 
 fn run_a_task(live: &LiveSession) {
     live.core.state().register_task(
-        "task-1",
+        "task-1".into(),
         base::context::TaskType::Agent,
         CancellationToken::new(),
         serde_json::json!({}),

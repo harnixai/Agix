@@ -12,9 +12,9 @@ fn defaults() -> settings::LoadedSettings {
 
 #[tokio::test]
 async fn input_validation_still_refuses_under_bypass() {
-    let ctx = base::tool::ToolContext::for_test_with(
-        std::env::temp_dir(),
+    let ctx = session_state::testing::tool_context_for_test(
         base::interface::exec::ExecProviders::in_process(),
+        std::env::temp_dir(),
     );
     let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
     tools::register_builtin_tools(&tools);

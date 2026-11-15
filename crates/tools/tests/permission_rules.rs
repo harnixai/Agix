@@ -54,11 +54,14 @@ impl Judged {
 }
 
 async fn check(perm: &Judged, tool: &str, input: Value, cwd: &Path) -> PermissionOutcome {
-    let session = Arc::new(
-        base::context::SessionState::for_tests(cwd.to_path_buf()).with_permission_mode(perm.mode),
+    let session: Arc<dyn base::context::Session> = Arc::new(
+        session_state::SessionState::for_tests(cwd.to_path_buf()).with_permission_mode(perm.mode),
     );
     let found = perm.tools.get(tool);
-    let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     ctx.session = session.clone();
     *ctx.sandbox_mut() = perm.sandbox.clone();
     let facts = match &found {

@@ -1,6 +1,7 @@
 //! Hook runner construction from `Settings::hooks_config`.
 
 use super::*;
+use base::context::Session;
 
 /// Build a `HookRunner` from `settings.hooks_config` (raw JSON from
 /// settings.json's `hooks` section) when the caller didn't inject one
@@ -120,7 +121,7 @@ pub(in crate::agent) fn hook_run_recorder(
 pub(in crate::agent) fn hook_ambient(
     session_id: String,
     cwd: String,
-    state: Arc<base::context::SessionState>,
+    state: Arc<session_state::SessionState>,
 ) -> hooks::payload::Ambient {
     let state = Arc::downgrade(&state);
     Arc::new(move || {

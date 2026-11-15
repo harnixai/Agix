@@ -36,6 +36,7 @@ time          = { workspace = true }
 libc          = { workspace = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 platform = { workspace = true, features = ["testing"] }
 settings = { workspace = true }
 scene = { workspace = true }

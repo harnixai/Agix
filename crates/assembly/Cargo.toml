@@ -8,6 +8,7 @@ publish      = false
 description  = "Agix — the assembly: modules into sessions, sessions into a pool, provider routing"
 
 [dependencies]
+session-state  = { workspace = true }
 base          = { workspace = true }
 settings          = { workspace = true }
 memory = { workspace = true }
@@ -61,6 +62,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 jsonschema = { workspace = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 session       = { workspace = true }
 model         = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

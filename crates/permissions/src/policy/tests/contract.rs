@@ -2,12 +2,14 @@
 
 use async_trait::async_trait;
 use base::context::Session;
-use base::interface::permission::{
-    Attendance, CallTraits, HookAnswer, ModeStance, PermissionFacts, PermissionRequest, Reach,
-    Runs, Subject, ToolFacts, ToolOrigin,
-};
 use base::error::ToolError;
-use base::interface::tool::{PathStyle, ProgressSender, ToolResult, ToolSpec};
+use base::interface::permission::{
+    Attendance, HookAnswer, ModeStance, PermissionFacts, PermissionRequest, Reach, Runs, Subject,
+    ToolFacts,
+};
+use base::interface::tool::{
+    CallTraits, PathStyle, ProgressSender, ToolOrigin, ToolResult, ToolSpec,
+};
 use base::tool::{Tool, ToolContext};
 use serde_json::{json, Value};
 use session_state::SessionState;
@@ -136,7 +138,7 @@ async fn a_tool_that_states_its_facts_is_taken_at_its_word() {
     let facts = ToolFacts::gather(&Declares::stating(stated.clone()), &json!({}), &ctx()).await;
     assert_eq!(facts.subject, stated.subject);
     assert_eq!(facts.reach, stated.reach);
-    assert_eq!(facts.runs, Some(Runs { background: true }));
+    assert_eq!(facts.runs, Some(Runs::background()));
     assert_eq!(facts.question.as_deref(), Some("watch it?"));
     assert_eq!(facts.origin, ToolOrigin::plugin("p"));
     assert_eq!(facts.stance, ModeStance::Normal);

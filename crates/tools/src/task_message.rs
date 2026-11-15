@@ -27,7 +27,7 @@ pub struct TaskMessageTool;
 
 /// Deliver `message` to task `task_id` of `session`; `Err` says why not.
 pub fn deliver(
-    session: &base::context::SessionState,
+    session: &dyn base::context::Session,
     task_id: &str,
     message: String,
 ) -> Result<(), String> {
@@ -96,17 +96,21 @@ impl Tool for TaskMessageTool {
         _: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
         let input: TaskMessageInput = serde_json::from_value(input)?;
-        Ok(match deliver(&ctx.session, &input.task_id, input.message) {
-            Ok(()) => ToolResult::text(format!("delivered to {}", input.task_id)),
-            Err(why) => ToolResult::error_text(why),
-        })
+        Ok(
+            match deliver(ctx.session.as_ref(), &input.task_id, input.message) {
+                Ok(()) => ToolResult::text(format!("delivered to {}", input.task_id)),
+                Err(why) => ToolResult::error_text(why),
+            },
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::context::{RunningStatus, SessionState, TaskInbox, TaskType};
+    use base::context::Session;
+    use base::context::{RunningStatus, TaskInbox, TaskType};
+    use session_state::SessionState;
     use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Default)]
@@ -121,8 +125,18 @@ mod tests {
     #[test]
     fn a_message_reaches_the_inbox_of_a_running_task_only() {
         let session = SessionState::for_tests(std::env::temp_dir());
-        let task = session.register_task("ag-1", TaskType::Agent, Default::default(), Value::Null);
-        session.register_task("sh-1", TaskType::Shell, Default::default(), Value::Null);
+        let task = session.register_task(
+            "ag-1".into(),
+            TaskType::Agent,
+            Default::default(),
+            Value::Null,
+        );
+        session.register_task(
+            "sh-1".into(),
+            TaskType::Shell,
+            Default::default(),
+            Value::Null,
+        );
         let recorder = Arc::new(Recorder::default());
         task.inbox.set(recorder.clone()).unwrap();
 

@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Weak};
 
-use base::context::{EngineConfig, SessionState};
+use base::context::{EngineConfig, Session};
 use base::interface::elicitation::Elicitation;
 use base::interface::mcp_servers::McpServers;
 use base::interface::model::Model;
@@ -45,7 +45,7 @@ pub(crate) struct DelegateEnv {
 
 pub(crate) struct ParentSession {
     pub(crate) id: String,
-    pub(crate) state: Arc<SessionState>,
+    pub(crate) state: Arc<dyn Session>,
     pub(crate) events: EventSender,
     pub(crate) pending_permissions: PendingPermissions,
     /// Where an MCP server's question to the parent's host waits; `None`

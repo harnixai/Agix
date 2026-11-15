@@ -2,6 +2,7 @@
 //! answers each request from the queue whose mark the request carries.
 
 use super::*;
+use base::context::Session;
 use base::interface::model::{CallKind, ModelEvent, ToolDef};
 
 pub(super) enum Step {

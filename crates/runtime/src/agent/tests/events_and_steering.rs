@@ -1,6 +1,7 @@
 //! Event channels and sinks, permission wire format, mid-turn steering.
 
 use super::*;
+use base::context::Session;
 
 /// Answers in one text block and stops. Enough to make a turn that emits
 /// a handful of events and finishes immediately.
@@ -376,13 +377,13 @@ async fn notices_reach_the_model_at_turn_start_and_at_step_boundaries() {
         .build()
         .expect("build should succeed");
     let state = agent.session_state();
-    state.post_notice(None, "notice from before the turn");
+    state.post_notice(None, "notice from before the turn".into());
 
     let poster = async {
         while sent.lock().unwrap().is_empty() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        state.post_notice(None, "notice from during the turn");
+        state.post_notice(None, "notice from during the turn".into());
         hold.notify_one();
     };
     let turn = agent.run_turn("the question".into(), "t1".into(), CancellationToken::new());

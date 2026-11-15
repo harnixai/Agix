@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use base::context::{RunningTask, SessionState, TaskLease, TaskType};
+use base::context::{stop_with_notice, RunningTask, Session, TaskLease, TaskType};
 use base::interface::delegate::{
     DelegateEnd, DelegateError, Delegated, LiveMember, StartedAgent, TeamSeat,
 };
@@ -68,11 +68,11 @@ impl MemberInbox {
         (inbox, rx)
     }
 
-    fn stop_unfinished(&self, session: &SessionState) {
+    fn stop_unfinished(&self, session: &dyn Session) {
         let unfinished =
             std::mem::take(&mut *self.unfinished.lock().unwrap_or_else(|e| e.into_inner()));
         for task in &unfinished {
-            session.stop_with_notice(task, |task| {
+            stop_with_notice(session, task, |task| {
                 task_notification(task, &DelegateEnd::Cancelled)
             });
         }
@@ -341,7 +341,7 @@ impl Delegator {
         if let Some(m) = member {
             tracing::debug!(team = %seat.team, member = %seat.member, id = %m.id, "stopping persistent team member");
             m.cancel.cancel();
-            m.inbox.stop_unfinished(&self.env.parent.state);
+            m.inbox.stop_unfinished(self.env.parent.state.as_ref());
         }
     }
 

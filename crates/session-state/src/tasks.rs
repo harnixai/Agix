@@ -25,7 +25,7 @@ impl TaskTable {
         cancel: tokio_util::sync::CancellationToken,
         detail: serde_json::Value,
     ) -> std::sync::Arc<RunningTask> {
-                let task =
+        let task =
             std::sync::Arc::new(RunningTask::with_cancel(task_id.clone(), task_type, cancel));
         *task.detail.lock().unwrap_or_else(|e| e.into_inner()) = detail;
         task.report_to(self.events.clone());

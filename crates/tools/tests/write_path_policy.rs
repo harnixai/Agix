@@ -15,7 +15,10 @@ use base::interface::tool::{Tool, ToolContext};
 use std::path::PathBuf;
 
 fn ctx_in(cwd: &std::path::Path) -> ToolContext {
-    let ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     ctx.session
         .set_permission_mode(base::permission::PermissionMode::Default);
     ctx
@@ -213,7 +216,8 @@ async fn gate_decision(
     let write: std::sync::Arc<dyn base::interface::tool::Tool> =
         std::sync::Arc::new(tools::file_write::FileWriteTool);
     let gate = permissions::policy::Policy::from_settings(&settings.permission_settings(), []);
-    let session = std::sync::Arc::new(base::context::SessionState::for_tests(cwd.to_path_buf()));
+    let session: std::sync::Arc<dyn base::context::Session> =
+        std::sync::Arc::new(session_state::SessionState::for_tests(cwd.to_path_buf()));
     let mut ctx = ctx_in(cwd);
     ctx.session = session.clone();
     ctx.sandbox_mut().allow_write = settings.values.sandbox.allow_write.clone();

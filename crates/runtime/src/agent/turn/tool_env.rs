@@ -3,6 +3,7 @@
 use super::tool_exec::{execute_tool_with_telemetry, Caller, ToolExecCtx};
 use super::tool_result::PendingToolImage;
 use crate::agent::Agent;
+use base::context::Session;
 use base::tool::ToolContext;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -174,7 +175,7 @@ impl base::interface::elicitation::Elicitation for NoAsking {
 /// Whether anyone can be asked about a call the session makes. The one place
 /// that reads `unattended` to decide it.
 pub(crate) fn attendance_of(
-    session: &base::context::SessionState,
+    session: &session_state::SessionState,
     caller: Caller,
 ) -> base::interface::permission::Attendance {
     use base::interface::permission::Attendance;

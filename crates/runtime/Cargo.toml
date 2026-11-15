@@ -8,6 +8,7 @@ publish      = false
 description  = "Agix — agent runtime (turn loop, Agent + Builder)"
 
 [dependencies]
+session-state  = { workspace = true }
 base          = { workspace = true }
 settings          = { workspace = true }
 platform      = { workspace = true }
@@ -47,6 +48,7 @@ ptc = ["dep:ptc"]
 structured-output = ["tools/structured-output"]
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 anyhow        = { workspace = true }
 uuid          = { workspace = true }
 url      = { workspace = true }

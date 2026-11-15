@@ -26,6 +26,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "session-state",
  "settings",
  "skills",
  "team",
@@ -126,6 +127,7 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
+ "session-state",
  "settings",
  "sha2 0.10.9",
  "skills",
@@ -631,6 +633,7 @@ dependencies = [
  "schemars",
  "script-host",
  "serde_json",
+ "session-state",
  "settings",
  "sha2 0.10.9",
  "skills",
@@ -1858,6 +1861,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "session-state",
  "settings",
  "sha2 0.10.9",
  "tempfile",
@@ -2323,11 +2327,11 @@ dependencies = [
  "base",
  "globset",
  "serde_json",
+ "session-state",
  "settings",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "tracing",
  "unicode-normalization",
  "uuid",
@@ -2552,6 +2556,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "session-state",
  "tokio",
  "tokio-util",
 ]
@@ -2919,6 +2924,7 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
+ "session-state",
  "settings",
  "telemetry",
  "tempfile",
@@ -3245,6 +3251,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-state"
+version = "0.3.13-2026111403"
+dependencies = [
+ "base",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "settings"
 version = "0.3.13-2026111403"
 dependencies = [
@@ -3393,6 +3410,7 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
+ "session-state",
  "settings",
  "tempfile",
  "tokio",
@@ -3576,6 +3594,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "session-state",
  "telemetry",
  "tempfile",
  "time",
@@ -3652,6 +3671,7 @@ dependencies = [
  "script-host",
  "serde",
  "serde_json",
+ "session-state",
  "settings",
  "sha2 0.10.9",
  "skills",
@@ -3940,6 +3960,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "session-state",
  "settings",
  "sha2 0.10.9",
  "similar",

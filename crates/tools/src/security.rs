@@ -282,7 +282,10 @@ mod tests {
         std::fs::write(outside.join("secret"), "s").unwrap();
         std::fs::write(proj.join("secret"), "p").unwrap();
         std::os::unix::fs::symlink(outside.join("sub"), proj.join("link")).unwrap();
-        let ctx = platform::tool_context_for_test(proj.clone());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            proj.clone(),
+        );
 
         assert_eq!(
             std::fs::read_to_string(proj.join("link/../secret")).unwrap(),
@@ -298,10 +301,13 @@ mod tests {
     fn a_credential_is_not_readable_even_where_everything_is() {
         let dir = tempfile::tempdir().unwrap();
         let (proj, state) = (dir.path().join("proj"), dir.path().join("state"));
-        let mut ctx = platform::tool_context_for_test(proj.clone());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            proj.clone(),
+        );
         ctx.sandbox_mut().paths =
             std::sync::Arc::new(base::paths::SensitivePaths::new(Some(&state), None));
-        let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
+        let session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
             read_anywhere: true,
             ..base::context::SessionEnv::new(proj)
         });

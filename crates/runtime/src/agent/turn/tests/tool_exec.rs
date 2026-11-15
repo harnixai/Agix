@@ -2,6 +2,7 @@
 
 use crate::turn::reporting::telemetry_error_text;
 use crate::turn::tool_exec::{apply_result_transformers, execute_tool_with_telemetry, ToolExecCtx};
+use base::context::Session;
 use base::event::AgentEvent;
 use std::sync::Arc;
 
@@ -163,7 +164,7 @@ pub(super) fn test_exec_ctx_with_permission(
         exec,
         engine_git,
         permission: base::interface::permission::PermissionSet::without_grants(permission),
-        session_state: Arc::new(base::context::SessionState::for_tests(std::env::temp_dir())),
+        session_state: Arc::new(session_state::SessionState::for_tests(std::env::temp_dir())),
         elicitation: Arc::new(base::interface::elicitation::DeclineAll),
         host_calls: None,
         tool_middleware: Arc::new(Vec::new()),
@@ -1769,7 +1770,7 @@ fn scanning_session(
     std::sync::Arc::make_mut(&mut config.sandbox).disabled = true;
     ctx.config = Arc::new(config);
     ctx.cwd = cwd.clone();
-    ctx.session_state = Arc::new(base::context::SessionState::for_tests_in(
+    ctx.session_state = Arc::new(session_state::SessionState::for_tests_in(
         base::context::SessionEnv {
             unattended,
             ..base::context::SessionEnv::new(cwd)
@@ -1920,7 +1921,7 @@ async fn a_file_from_outside_the_project_reaches_the_model_fenced() {
         Arc::new(local_hook_runner(std::collections::HashMap::new())),
     );
     ctx.cwd = cwd.clone();
-    ctx.session_state = Arc::new(base::context::SessionState::for_tests_in(
+    ctx.session_state = Arc::new(session_state::SessionState::for_tests_in(
         base::context::SessionEnv::new(cwd.clone()),
     ));
 

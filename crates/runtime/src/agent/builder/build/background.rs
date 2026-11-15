@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) fn spawn_task_hooks(
     hooks: &Arc<HookRunner>,
-    session_state: &Arc<base::context::SessionState>,
+    session_state: &Arc<session_state::SessionState>,
     hook_ambient: &hooks::payload::Ambient,
     session_ended: &CancellationToken,
     task_wake: Option<mpsc::UnboundedSender<()>>,

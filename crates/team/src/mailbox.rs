@@ -539,7 +539,10 @@ mod tests {
     use std::sync::Arc;
 
     fn ctx() -> ToolContext {
-        platform::tool_context_for_test(PathBuf::from("/tmp"))
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            PathBuf::from("/tmp"),
+        )
     }
 
     fn text_content(r: &ToolResult) -> &str {
@@ -864,7 +867,10 @@ mod tests {
 
     async fn states_a_contained_call(tool: &dyn base::tool::Tool, input: serde_json::Value) {
         use base::interface::permission::Reach;
-        let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::path::PathBuf::from("/tmp"),
+        );
         let stated = tool.permission_facts(&input, &ctx).await;
         assert!(
             matches!(

@@ -26,12 +26,12 @@ impl CheckWith for Policy {
     }
 }
 use async_trait::async_trait;
-use base::context::SessionState;
 use base::error::ToolError;
 use base::interface::permission::Attendance;
 use base::permission::PermissionMode;
 use base::tool::Tool;
 use serde_json::json;
+use session_state::SessionState;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -229,7 +229,10 @@ impl Tool for FakeTool {
 }
 
 fn ctx_with_mode(mode: PermissionMode) -> base::tool::ToolContext {
-    let mut ctx = ToolContext::for_test_with(PathBuf::from("/tmp"), ExecProviders::in_process());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        ExecProviders::in_process(),
+        PathBuf::from("/tmp"),
+    );
     ctx.session =
         Arc::new(SessionState::for_tests(PathBuf::from("/tmp")).with_permission_mode(mode));
     ctx.tool_use_id = "test".into();
@@ -550,7 +553,7 @@ async fn a_delegations_deny_rules_refuse_its_calls_in_any_mode_and_nothing_else(
     let input = json!({});
     for mode in [PermissionMode::BypassPermissions, PermissionMode::Default] {
         let ctx = ctx_with_mode(mode);
-        let delegate =
+        let delegate: Arc<dyn Session> =
             Arc::new(SessionState::for_tests(PathBuf::from("/tmp")).with_permission_mode(mode));
         let facts = ToolFacts::gather(bash.as_ref(), &input, &ctx).await;
         let request =
@@ -812,7 +815,7 @@ async fn delegates_call_with(
 ) -> PermissionOutcome {
     let tool: Arc<dyn Tool> = Arc::new(FakeTool::new("X").matches(content));
     let ctx = ctx_with_mode(mode);
-    let delegate =
+    let delegate: Arc<dyn Session> =
         Arc::new(SessionState::for_tests(PathBuf::from("/tmp")).with_permission_mode(mode));
     let input = json!({});
     let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;

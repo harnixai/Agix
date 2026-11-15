@@ -535,7 +535,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn ctx_in(cwd: &Path) -> ToolContext {
-        platform::tool_context_for_test(cwd.to_path_buf())
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        )
     }
 
     /// 起 grep 工具不再依赖 rg；这个 gate 函数保留为永远返回 true 兼容
@@ -728,7 +731,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_aborts() {
         let dir = TempDir::new().unwrap();
-        let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            dir.path().to_path_buf(),
+        );
         let cancel = ctx.cancel.clone();
         // We cancel before the call starts since grep is usually fast.
         // This verifies the cancel path exists and returns correctly.

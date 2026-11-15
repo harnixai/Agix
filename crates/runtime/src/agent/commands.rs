@@ -1,6 +1,7 @@
 //! Built-in slash commands handled by the agent itself (`/help`, `/skills`, `/clear`, `/cost`).
 
 use super::*;
+use base::context::Session;
 
 impl Agent {
     /// `/help` — list all available slash commands.

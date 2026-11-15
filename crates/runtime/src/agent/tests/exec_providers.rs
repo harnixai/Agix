@@ -2,6 +2,7 @@
 //! execution providers.
 
 use super::*;
+use base::context::Session;
 use base::interface::exec::{FileSystem, Sandbox};
 
 #[derive(Default)]

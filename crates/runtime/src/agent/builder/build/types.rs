@@ -21,7 +21,7 @@ pub(super) struct Resolved {
 }
 
 pub(super) struct SessionWiring {
-    pub(super) state: Arc<base::context::SessionState>,
+    pub(super) state: Arc<session_state::SessionState>,
     pub(super) generation: u64,
     pub(super) injected: bool,
     pub(super) env: base::context::SessionEnv,
@@ -83,10 +83,10 @@ pub(super) struct Wired {
     pub(super) resolved: Resolved,
     pub(super) config: Arc<base::context::EngineConfig>,
     pub(super) session: Transcript,
-    pub(super) session_state: Arc<base::context::SessionState>,
+    pub(super) session_state: Arc<session_state::SessionState>,
     pub(super) exec: base::interface::exec::ExecProviders,
     pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
-    pub(super) attachment: base::context::EngineAttachment,
+    pub(super) attachment: session_state::EngineAttachment,
     pub(super) hooks: HookWiring,
     pub(super) ambient: hooks::payload::Ambient,
     pub(super) events: EventWiring,

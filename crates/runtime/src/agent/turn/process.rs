@@ -4,6 +4,7 @@ use super::attachments::describe_attachments;
 use super::token_budget::{find_token_budget_directive, strip_token_budget_directive};
 use super::{TurnError, TurnOutcome, ENDS_A_GOAL_ROUND_NORMALLY};
 use crate::agent::{Agent, EngineCommand, InputMessage};
+use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage, Usage};
 use base::interface::prompt_middleware::{PromptDecision, PromptDelivery};
@@ -526,7 +527,7 @@ impl Agent {
         }
     }
 
-    /// [`base::context::SessionState::post_notice`]s, into the conversation.
+    /// [`session_state::SessionState::post_notice`]s, into the conversation.
     pub(super) fn deliver_notices(&mut self) -> bool {
         let notices = self.session_state.take_notices();
         for text in &notices {

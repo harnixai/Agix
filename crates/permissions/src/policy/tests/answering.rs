@@ -77,7 +77,10 @@ async fn outcome(
     attendance: Attendance,
 ) -> PermissionOutcome {
     let tool: Arc<dyn Tool> = Arc::new(Stated(facts));
-    let mut ctx = ToolContext::for_test_with(PathBuf::from("/tmp"), ExecProviders::in_process());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        ExecProviders::in_process(),
+        PathBuf::from("/tmp"),
+    );
     ctx.confinement = confinement;
     let input = json!({});
     let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;
@@ -194,7 +197,10 @@ async fn nobody_to_ask_refuses_with_why() {
 #[tokio::test]
 async fn a_hook_that_blocks_refuses_even_under_bypass() {
     let tool: Arc<dyn Tool> = Arc::new(Stated(command(Reach::Inside)));
-    let ctx = ToolContext::for_test_with(PathBuf::from("/tmp"), ExecProviders::in_process());
+    let ctx = session_state::testing::tool_context_for_test(
+        ExecProviders::in_process(),
+        PathBuf::from("/tmp"),
+    );
     ctx.session
         .set_permission_mode(base::permission::PermissionMode::BypassPermissions);
     let block = HookAnswer::Block {

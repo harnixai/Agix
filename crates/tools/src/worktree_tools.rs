@@ -347,7 +347,10 @@ mod tests {
         let r = tool
             .validate_input(
                 &json!({"slug": "../escape"}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
@@ -404,7 +407,10 @@ mod tests {
         }
 
         fn ctx(&self) -> ToolContext {
-            platform::tool_context_for_test(self.repo.path().to_path_buf())
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                self.repo.path().to_path_buf(),
+            )
         }
 
         async fn enter(&self, slug: &str) -> ToolResult {

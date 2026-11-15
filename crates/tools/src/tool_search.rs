@@ -283,7 +283,7 @@ impl Tool for ToolSearchTool {
             .filter(|m| m.deferred_schema.is_some())
             .map(|m| m.name.clone())
             .collect();
-        ctx.session.activate_tools(activated.iter().cloned());
+        ctx.session.activate_tools(activated.clone());
 
         let is_error = matches.is_empty() && already_loaded.is_empty();
         let body = render(
@@ -538,7 +538,10 @@ mod tests {
 
     /// A session that defers [`DEFERRED`].
     fn make_ctx() -> ToolContext {
-        let mut ctx = platform::tool_context_for_test(PathBuf::from("/tmp"));
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            PathBuf::from("/tmp"),
+        );
         let mut config = (*ctx.config).clone();
         config.deferred_tools = Arc::new(DEFERRED.iter().map(|n| n.to_string()).collect());
         ctx.config = Arc::new(config);

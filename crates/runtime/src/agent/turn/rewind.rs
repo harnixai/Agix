@@ -9,6 +9,7 @@ use crate::agent::{
     RewindIssueKind, RewindReport, RewindRequest, RewoundConversation, RewoundFiles,
 };
 use crate::checkpoint::{Checkpoints, WriteBy};
+use base::context::Session;
 use base::interface::exec::FileSystem;
 use history::checkpoint::{plan, After, Before, RewindTarget, REWIND_NS};
 use history::entry::{EnvelopedEntry, LogEntry};

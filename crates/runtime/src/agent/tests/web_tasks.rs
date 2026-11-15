@@ -60,7 +60,10 @@ pub(super) async fn search_once(agent: &Agent) -> String {
         .expect("WebSearch is registered")
         .call(
             serde_json::json!({"query": "rust"}),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             base::tool::ProgressSender::noop("t"),
         )
         .await
@@ -192,7 +195,10 @@ the whole page";
 }
 
 pub(super) async fn fetch_once(agent: &Agent, url: &str) -> String {
-    let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        std::env::temp_dir(),
+    );
     ctx.exec = platform::local_providers().with_network(Arc::new(
         platform::LocalNetwork::for_agent_policy(
             base::interface::exec::NetworkMode::Unrestricted,

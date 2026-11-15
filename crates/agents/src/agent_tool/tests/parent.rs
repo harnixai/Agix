@@ -20,7 +20,7 @@ pub(super) struct TestParent {
     pub(super) host: Option<runtime::agent::HostContracts>,
     /// Over `host`'s; `None` permits everything.
     pub(super) permission: Option<PermissionSet>,
-    pub(super) state: Arc<base::context::SessionState>,
+    pub(super) state: Arc<dyn base::context::Session>,
     /// `None` is a channel nobody reads.
     pub(super) events: Option<runtime::agent::EventSender>,
     pub(super) pending: runtime::agent::PendingPermissions,
@@ -57,7 +57,7 @@ impl TestParent {
             session_agent_types: Vec::new(),
             host: None,
             permission: None,
-            state: Arc::new(base::context::SessionState::for_tests(std::env::temp_dir())),
+            state: Arc::new(session_state::SessionState::for_tests(std::env::temp_dir())),
             events: None,
             pending: Arc::default(),
             ended: tokio_util::sync::CancellationToken::new(),
@@ -157,11 +157,11 @@ impl TestParent {
 /// What a test asks of an `AgentTool` it holds, in the terms of the calls it
 /// makes, each one a `DelegateRequest` through the one dispatch.
 impl AgentTool {
-    pub(super) fn parent_state(&self) -> Arc<base::context::SessionState> {
+    pub(super) fn parent_state(&self) -> Arc<dyn base::context::Session> {
         self.delegator.env.parent.state.clone()
     }
 
-    fn assert_parent(&self, session: &Arc<base::context::SessionState>) {
+    fn assert_parent(&self, session: &Arc<dyn base::context::Session>) {
         assert!(
             Arc::ptr_eq(session, &self.delegator.env.parent.state),
             "a delegate's task is the parent session's: pass `agent_tool.parent_state()`"
@@ -228,7 +228,7 @@ impl AgentTool {
     pub(super) async fn start_in_background_for_test(
         &self,
         prompt: &str,
-        session: &Arc<base::context::SessionState>,
+        session: &Arc<dyn base::context::Session>,
     ) -> Result<String, base::error::ToolError> {
         self.assert_parent(session);
         let mode = DelegateMode::Background {
@@ -273,7 +273,7 @@ impl AgentTool {
         prompt: String,
         agent_type: Option<String>,
         cwd: std::path::PathBuf,
-        session: Arc<base::context::SessionState>,
+        session: Arc<dyn base::context::Session>,
         permission_mode: Option<base::permission::PermissionMode>,
     ) -> Result<String, base::error::ToolError> {
         self.assert_parent(&session);

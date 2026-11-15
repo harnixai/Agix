@@ -2,6 +2,7 @@
 
 use crate::session_pool::parts::directory::{recorded_project, sidechain_terminal_state};
 use crate::session_pool::*;
+use base::context::Session;
 
 impl SessionPool {
     /// See [`SceneCheck`]. Safe to call unconditionally, including for a

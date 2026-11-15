@@ -3,6 +3,7 @@
 use super::process::hook_permission_mode;
 use super::tool_exec::ToolExecCtx;
 use crate::agent::Agent;
+use base::context::Session;
 use std::sync::Arc;
 
 /// The head of a failed call's text, as much of it as a telemetry line keeps.

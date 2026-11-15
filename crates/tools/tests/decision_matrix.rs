@@ -13,7 +13,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use base::context::{EngineAttachment, SessionEnv, SessionState};
+use base::context::Session;
+use base::context::SessionEnv;
 use base::interface::exec::{
     Confined, Enforcement, ExecProviders, ProcessSpec, Sandbox, SandboxMode, SandboxPolicy,
 };
@@ -25,6 +26,7 @@ use base::permission::{PermissionMode, PermissionRule, RuleBehavior, RuleSource}
 use base::tool::{InMemoryToolRegistry, Tool, ToolContext};
 use permissions::policy::Policy;
 use serde_json::{json, Value};
+use session_state::{EngineAttachment, SessionState};
 use settings::Settings;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -335,7 +337,7 @@ fn raw(no_hook: &PermissionOutcome, approved: &PermissionOutcome) -> &'static st
     }
 }
 
-fn session(cwd: &Path, mode: PermissionMode, unattended: bool) -> Arc<SessionState> {
+fn session(cwd: &Path, mode: PermissionMode, unattended: bool) -> Arc<dyn Session> {
     session_in(cwd, mode, unattended, Arc::new(HoldsEverything))
 }
 
@@ -344,7 +346,7 @@ fn session_in(
     mode: PermissionMode,
     unattended: bool,
     sandbox: Arc<dyn Sandbox>,
-) -> Arc<SessionState> {
+) -> Arc<dyn Session> {
     let state = SessionState::for_tests(cwd.to_path_buf());
     state.attach(EngineAttachment::new(
         SessionEnv {
@@ -503,7 +505,7 @@ impl Setup {
         }
     }
 
-    fn session(&self, cwd: &Path) -> Arc<SessionState> {
+    fn session(&self, cwd: &Path) -> Arc<dyn Session> {
         let sandbox: Arc<dyn Sandbox> = match self.sandboxing {
             Sandboxing::Holds => Arc::new(HoldsEverything),
             Sandboxing::HoldsPartlyAsDemanded => Arc::new(HoldsPartly),
@@ -511,7 +513,7 @@ impl Setup {
         session_in(cwd, self.mode, self.unattended, sandbox)
     }
 
-    fn context(&self, session: &Arc<SessionState>, cwd: &Path) -> ToolContext {
+    fn context(&self, session: &Arc<dyn Session>, cwd: &Path) -> ToolContext {
         let mut ctx = context_like_the_runtime(session, cwd);
         if let Sandboxing::HoldsPartlyAsDemanded = self.sandboxing {
             ctx.sandbox_mut().require_enforcement = true;
@@ -552,16 +554,13 @@ async fn every_builtin_tool_is_decided_the_same_in_every_cell() {
 }
 
 /// The context the runtime gives a call of `session`'s.
-fn context_like_the_runtime(session: &Arc<SessionState>, cwd: &Path) -> ToolContext {
+fn context_like_the_runtime(session: &Arc<dyn Session>, cwd: &Path) -> ToolContext {
     let settings = settings::LoadedSettings::new(
         Settings::defaults_for("matrix-model"),
         base::paths::PathSettings::default(),
     );
-    let mut ctx = ToolContext::from_engine_ctx_with(
-        cwd.to_path_buf(),
-        tokio_util::sync::CancellationToken::new(),
-        session.exec().unwrap(),
-    );
+    let mut ctx =
+        session_state::testing::tool_context_for_test(session.exec().unwrap(), cwd.to_path_buf());
     ctx.session_id = "matrix".into();
     *ctx.sandbox_mut() = settings::sandbox_settings(
         &settings.values.sandbox,

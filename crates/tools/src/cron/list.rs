@@ -105,7 +105,10 @@ mod tests {
         let r = rt.block_on(async {
             tool.call(
                 json!({}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop(""),
             )
             .await

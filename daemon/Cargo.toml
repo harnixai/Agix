@@ -30,6 +30,7 @@ assembly      = { workspace = true }
 script-host   = { workspace = true, optional = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 history       = { workspace = true }
 time          = { workspace = true }
 serde_json    = { workspace = true }

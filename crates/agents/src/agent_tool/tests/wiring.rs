@@ -575,7 +575,7 @@ async fn subagent_events_reach_the_parent_channel_tagged_without_changing_the_te
 pub(super) fn wire_parent(parent: TestParent, policy: Arc<dyn PermissionPolicy>) -> TestParent {
     TestParent {
         permission: Some(PermissionSet::without_grants(policy)),
-        state: Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        state: Arc::new(session_state::SessionState::for_tests("/tmp".into())),
         ..parent
     }
 }
@@ -588,7 +588,7 @@ pub(super) async fn sub_decides(
     name: &str,
     input: &Value,
     cwd: &Path,
-    session: &Arc<base::context::SessionState>,
+    session: &Arc<dyn base::context::Session>,
 ) -> base::interface::permission::PermissionOutcome {
     let (ctx, facts) = context_and_facts(tool, input, cwd, session).await;
     permission
@@ -605,10 +605,13 @@ pub(super) async fn context_and_facts(
     tool: Option<&Arc<dyn base::tool::Tool>>,
     input: &Value,
     cwd: &Path,
-    session: &Arc<base::context::SessionState>,
+    session: &Arc<dyn base::context::Session>,
 ) -> (ToolContext, base::interface::permission::ToolFacts) {
     use base::interface::permission::ToolFacts;
-    let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     ctx.session = session.clone();
     ctx.attendance = if session.env().unattended {
         base::interface::permission::Attendance::Unattended
@@ -635,7 +638,7 @@ async fn subagent_permission_check_routes_to_parent_and_deny_blocks_the_tool() {
                 deny: true,
             },
         ))),
-        state: Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        state: Arc::new(session_state::SessionState::for_tests("/tmp".into())),
         ..parent
     }
     .agent_tool();
@@ -673,7 +676,7 @@ async fn the_parents_question_comes_back_to_the_sub_agent_unasked() {
         permission: Some(PermissionSet::without_grants(Arc::new(
             PromptsForEverything,
         ))),
-        state: Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        state: Arc::new(session_state::SessionState::for_tests("/tmp".into())),
         events: Some(runtime::event_bus::EventBus::new(tx)),
         ..parent
     }
@@ -684,7 +687,8 @@ async fn the_parents_question_comes_back_to_the_sub_agent_unasked() {
         "Bash",
         &serde_json::json!({}),
         Path::new("/tmp"),
-        &Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        &(Arc::new(session_state::SessionState::for_tests("/tmp".into()))
+            as Arc<dyn base::context::Session>),
     )
     .await;
     assert!(
@@ -738,17 +742,19 @@ async fn parent_permit_passes_through_unchanged() {
                 deny: false,
             },
         ))),
-        state: Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        state: Arc::new(session_state::SessionState::for_tests("/tmp".into())),
         ..parent
     }
     .agent_tool();
+    let session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
     let outcome = sub_decides(
         &agent_tool.sub_permission(),
         None,
         "Bash",
         &serde_json::json!({}),
         Path::new("/tmp"),
-        &Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        &session,
     )
     .await;
     assert!(matches!(
@@ -769,8 +775,8 @@ async fn a_sub_agents_call_is_judged_in_its_own_mode_unless_the_parent_plans() {
     let registry = Arc::new(InMemoryToolRegistry::new());
     tools::register_builtin_tools(&registry);
     let parent = PermissionSet::of(Arc::new(permissions::policy::Policy::empty()));
-    let parent_session = Arc::new(
-        base::context::SessionState::for_tests(project.path().to_path_buf())
+    let parent_session: Arc<dyn base::context::Session> = Arc::new(
+        session_state::SessionState::for_tests(project.path().to_path_buf())
             .with_permission_mode(PermissionMode::AcceptEdits),
     );
     let agent_tool = TestParent {
@@ -780,9 +786,9 @@ async fn a_sub_agents_call_is_judged_in_its_own_mode_unless_the_parent_plans() {
     }
     .agent_tool();
     let sub = agent_tool.sub_permission();
-    let sub_session = Arc::new(base::context::SessionState::for_tests(
-        project.path().to_path_buf(),
-    ));
+    let sub_session: Arc<dyn base::context::Session> = Arc::new(
+        session_state::SessionState::for_tests(project.path().to_path_buf()),
+    );
     let check = |tool: &'static str, input: Value| {
         let (sub, sub_session, registry) = (sub.clone(), sub_session.clone(), registry.clone());
         let cwd = project.path().to_path_buf();
@@ -862,7 +868,7 @@ async fn a_team_member_is_judged_by_the_parents_rules() {
     let agent_tool = TestParent {
         permission: Some(parent),
         state: Arc::new(
-            base::context::SessionState::for_tests(project.path().to_path_buf())
+            session_state::SessionState::for_tests(project.path().to_path_buf())
                 .with_permission_mode(PermissionMode::AcceptEdits),
         ),
         ..test_parent()
@@ -870,16 +876,17 @@ async fn a_team_member_is_judged_by_the_parents_rules() {
     .agent_tool();
     let member = agent_tool.sub_permission();
     let write = registry.get("Write");
+    let session: Arc<dyn base::context::Session> = Arc::new(
+        session_state::SessionState::for_tests(project.path().to_path_buf())
+            .with_permission_mode(PermissionMode::AcceptEdits),
+    );
     let outcome = sub_decides(
         &member,
         write.as_ref(),
         "Write",
         &serde_json::json!({"file_path": project.path().join("locked/a.txt"), "content": "x"}),
         project.path(),
-        &Arc::new(
-            base::context::SessionState::for_tests(project.path().to_path_buf())
-                .with_permission_mode(PermissionMode::AcceptEdits),
-        ),
+        &session,
     )
     .await;
     assert!(
@@ -933,7 +940,8 @@ impl base::tool::Tool for AsksAboutDeploys {
 async fn a_sub_agents_permit_always_lands_in_the_parents_rules() {
     use base::interface::permission::{Grant, GrantScope, PermissionOutcome, PermissionRequest};
     let rules = Arc::new(permissions::policy::Policy::empty());
-    let parent_session = Arc::new(base::context::SessionState::for_tests("/tmp".into()));
+    let parent_session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
     let agent_tool = TestParent {
         permission: Some(PermissionSet::of(rules.clone())),
         state: parent_session.clone(),
@@ -988,7 +996,8 @@ async fn a_delegates_grants_are_its_own() {
     use base::interface::permission::{Grant, GrantScope, PermissionOutcome};
     use base::permission::{PermissionRule, RuleBehavior, RuleSource};
     let rules = Arc::new(permissions::policy::Policy::empty());
-    let parent_session = Arc::new(base::context::SessionState::for_tests("/tmp".into()));
+    let parent_session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
     let agent_tool = TestParent {
         permission: Some(PermissionSet::of(rules.clone())),
         state: parent_session.clone(),
@@ -996,8 +1005,9 @@ async fn a_delegates_grants_are_its_own() {
     }
     .agent_tool();
     let deploy: Arc<dyn base::tool::Tool> = Arc::new(AsksAboutDeploys);
-    let sub_session = Arc::new(base::context::SessionState::for_tests("/tmp".into()));
-    let decides = |permission: PermissionSet, session: Arc<base::context::SessionState>, target| {
+    let sub_session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
+    let decides = |permission: PermissionSet, session: Arc<dyn base::context::Session>, target| {
         let deploy = deploy.clone();
         async move {
             sub_decides(
@@ -1064,7 +1074,8 @@ async fn a_delegates_grants_are_its_own() {
 async fn a_task_sub_agents_question_reaches_the_parents_host_naming_its_task() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let pending: runtime::agent::PendingPermissions = Arc::default();
-    let parent_session = Arc::new(base::context::SessionState::for_tests("/tmp".into()));
+    let parent_session: Arc<dyn base::context::Session> =
+        Arc::new(session_state::SessionState::for_tests("/tmp".into()));
     let agent_tool = TestParent {
         state: parent_session.clone(),
         events: Some(runtime::event_bus::EventBus::new(tx)),
@@ -1073,7 +1084,7 @@ async fn a_task_sub_agents_question_reaches_the_parents_host_naming_its_task() {
     }
     .agent_tool();
     let task = parent_session.register_task(
-        "task-1",
+        "task-1".into(),
         base::context::TaskType::Agent,
         tokio_util::sync::CancellationToken::new(),
         serde_json::json!({}),
@@ -1180,17 +1191,17 @@ async fn an_unattended_sub_agent_is_handed_the_parents_question_unasked() {
         permission: Some(PermissionSet::without_grants(Arc::new(
             PromptsForEverything,
         ))),
-        state: Arc::new(base::context::SessionState::for_tests("/tmp".into())),
+        state: Arc::new(session_state::SessionState::for_tests("/tmp".into())),
         events: Some(runtime::event_bus::EventBus::new(tx)),
         pending: Arc::default(),
         ..parent
     }
     .agent_tool();
-    let sub_session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
+    let sub_session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
         unattended: true,
         ..base::context::SessionEnv::new("/tmp".into())
     });
-    let sub_session = Arc::new(sub_session);
+    let sub_session: Arc<dyn base::context::Session> = Arc::new(sub_session);
     let input = serde_json::json!({});
     let (ctx, facts) = context_and_facts(None, &input, Path::new("/tmp"), &sub_session).await;
     let outcome = agent_tool

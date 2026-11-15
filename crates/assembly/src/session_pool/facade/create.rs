@@ -5,6 +5,7 @@
 use crate::session_pool::parts::factory::{Restore, SessionSeed};
 use crate::session_pool::parts::live::{EngineSlot, Naming, SessionCore};
 use crate::session_pool::*;
+use base::context::Session;
 
 impl SessionPool {
     /// `session.create` — the explicit multi-project entry point, with an

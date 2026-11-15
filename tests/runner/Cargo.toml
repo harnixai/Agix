@@ -39,6 +39,7 @@ script-host   = { workspace = true }
 schemars      = { workspace = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 hooks         = { workspace = true }
 platform = { workspace = true }
 tempfile      = { workspace = true }

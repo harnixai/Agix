@@ -133,7 +133,7 @@ impl Builder {
         let session_env = session_env(settings, config, scene);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
             Some((state, generation)) => (state, generation, true),
-            None => (Arc::new(base::context::SessionState::new()), 0, false),
+            None => (Arc::new(session_state::SessionState::new()), 0, false),
         };
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
@@ -222,10 +222,10 @@ pub(super) fn bind_tools(
     exec: &base::interface::exec::ExecProviders,
     generation: u64,
     tools: &Arc<InMemoryToolRegistry>,
-    session_state: &Arc<base::context::SessionState>,
+    session_state: &Arc<session_state::SessionState>,
     injected_state: bool,
-) -> base::context::EngineAttachment {
-    let attachment = base::context::EngineAttachment::new(session_env, exec.clone(), generation)
+) -> session_state::EngineAttachment {
+    let attachment = session_state::EngineAttachment::new(session_env, exec.clone(), generation)
         .with_tools(&(tools.clone() as Arc<dyn base::tool::ToolRegistry>));
     if !injected_state {
         session_state.attach(attachment.clone());

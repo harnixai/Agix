@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::module::{Module, ModuleError, SessionContext};
+use base::context::Session;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Mutex;

@@ -57,7 +57,7 @@ impl Builder {
     /// the engine gets a state of its own, attached as it is built.
     pub fn session_state(
         mut self,
-        state: Arc<base::context::SessionState>,
+        state: Arc<session_state::SessionState>,
         generation: u64,
     ) -> Self {
         self.spec.session_state = Some((state, generation));

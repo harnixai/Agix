@@ -23,5 +23,6 @@ time = { workspace = true }
 telemetry = { workspace = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 platform = { workspace = true }
 tempfile = { workspace = true }

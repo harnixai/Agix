@@ -1,4 +1,5 @@
 use super::sandbox::sandbox_policy;
+use base::context::Session;
 use platform::sandbox;
 
 use base::interface::exec::{Confined, Enforcement, ProcessSpec, Sandbox, SandboxMode};
@@ -260,14 +261,14 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn ctx_in(cwd: &std::path::Path) -> ToolContext {
-    platform::tool_context_for_test(cwd.to_path_buf())
+    session_state::testing::tool_context_for_test(platform::local_providers(), cwd.to_path_buf())
 }
 
 #[test]
 fn a_sandboxed_command_may_write_the_cache_directories() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
+    let session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
         cache_directories: vec!["~/.npm".into(), "/opt/cache".into()],
         ..base::context::SessionEnv::new(dir.path().to_path_buf())
     });
@@ -285,7 +286,7 @@ fn unattended_in_a_holding_sandbox(
     network: base::interface::exec::NetworkMode,
 ) -> ToolContext {
     let mut ctx = ctx_in(cwd);
-    let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
+    let session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
         unattended: true,
         ..base::context::SessionEnv::new(cwd.to_path_buf())
     });
@@ -588,7 +589,7 @@ fn the_strict_policy_reads_the_sessions_roots_and_writes_only_its_tmpdir() {
     use base::interface::exec::{EnvScope, ReadScope};
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    let session = base::context::SessionState::for_tests_in(base::context::SessionEnv {
+    let session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
         cache_directories: vec![PathBuf::from("/caches/cargo")],
         additional_writable_dirs: vec![PathBuf::from("/elsewhere")],
         ..base::context::SessionEnv::new(dir.path().to_path_buf())
@@ -911,15 +912,15 @@ fn every_command_a_line_runs_must_be_read_only_for_the_line_to_be() {
 
 fn ctx_with_running_agent(cwd: &std::path::Path) -> ToolContext {
     let mut ctx = ctx_in(cwd);
-    let session = base::context::SessionState::for_tests(cwd.to_path_buf());
+    let session = session_state::SessionState::for_tests(cwd.to_path_buf());
     session.register_task(
-        "agent-1",
+        "agent-1".into(),
         base::context::task::TaskType::Agent,
         tokio_util::sync::CancellationToken::new(),
         serde_json::Value::Null,
     );
     session.register_task(
-        "shell-1",
+        "shell-1".into(),
         base::context::task::TaskType::Shell,
         tokio_util::sync::CancellationToken::new(),
         serde_json::Value::Null,
@@ -1219,7 +1220,10 @@ async fn run_in_background_is_refused_rather_than_silently_ignored() {
 async fn cancel_kills_child_quickly() {
     let dir = TempDir::new().unwrap();
     let tool = BashTool;
-    let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        dir.path().to_path_buf(),
+    );
     let cancel = ctx.cancel.clone();
     let task = tokio::spawn(async move {
         tool.call(

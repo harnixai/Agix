@@ -35,7 +35,7 @@ pub(super) fn hanging_team_tool(
 
 pub(super) async fn message_member(
     agent_tool: &AgentTool,
-    session: &Arc<base::context::SessionState>,
+    session: &Arc<dyn base::context::Session>,
     name: &str,
 ) -> Result<String, base::error::ToolError> {
     agent_tool
@@ -411,7 +411,7 @@ async fn a_background_sub_agent_reads_its_messages_and_reports_back_when_done() 
         .await
         .unwrap();
     started.notified().await;
-    tools::task_message::deliver(&session, &tid, "also check the lexer".into())
+    tools::task_message::deliver(session.as_ref(), &tid, "also check the lexer".into())
         .expect("a running sub-agent takes messages");
     go.notify_one();
 
@@ -608,7 +608,10 @@ async fn a_foreground_sub_agent_on_its_parents_scene_gets_the_scenes_tools_once(
     let result = base::tool::Tool::call(
         &agent_tool,
         serde_json::json!({ "prompt": "look", "description": "look" }),
-        platform::tool_context_for_test(std::env::temp_dir()),
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        ),
         ProgressSender::noop("t"),
     )
     .await
@@ -622,7 +625,10 @@ async fn a_foreground_sub_agent_on_its_parents_scene_gets_the_scenes_tools_once(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_background_sub_agent_and_a_spawned_one_get_the_scenes_tools_once() {
     let (agent_tool, offered) = agent_tool_on_a_scene_with_a_tool(&[]);
-    let ctx = platform::tool_context_for_test(std::env::temp_dir());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        std::env::temp_dir(),
+    );
     let session = agent_tool.parent_state();
     base::tool::Tool::call(
         &agent_tool,
@@ -684,7 +690,10 @@ async fn an_agent_types_tool_lists_narrow_the_scenes_tools_too() {
             serde_json::json!({
                 "prompt": "look", "description": "look", "subagent_type": agent_type
             }),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             ProgressSender::noop("t"),
         )
         .await

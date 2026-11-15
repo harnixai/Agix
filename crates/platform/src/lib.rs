@@ -24,7 +24,5 @@ pub use filesystem::LocalFileSystem;
 #[cfg(feature = "http")]
 pub use network::{install_tls_provider, LocalNetwork};
 pub use process::{GroupLedger, LocalProcess};
-pub use providers::{
-    local_providers, local_providers_with, local_providers_with_ledger, tool_context_for_test,
-};
+pub use providers::{local_providers, local_providers_with, local_providers_with_ledger};
 pub use sandbox::PlatformSandbox;

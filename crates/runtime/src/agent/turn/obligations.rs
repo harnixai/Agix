@@ -55,8 +55,9 @@ fn settle_when_its_task_ends(
 ) {
     let task = after
         .session
-        .running_background_tasks()
-        .into_iter()
+        .running_background_task_ids()
+        .iter()
+        .filter_map(|id| after.session.find_running_task(id))
         .find(|t| {
             t.detail
                 .lock()

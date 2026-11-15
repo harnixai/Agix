@@ -123,7 +123,10 @@ mod tests {
     use std::path::Path;
 
     fn ctx_in(cwd: &Path) -> ToolContext {
-        platform::tool_context_for_test(cwd.to_path_buf())
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        )
     }
 
     #[tokio::test]
@@ -170,7 +173,10 @@ mod tests {
     #[tokio::test]
     async fn cancel_aborts() {
         let tool = PingTool;
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         ctx.cancel.cancel();
         let r = tool
             .call(

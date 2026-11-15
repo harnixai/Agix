@@ -17,10 +17,10 @@ tracing       = { workspace = true }
 unicode-normalization = { workspace = true }
 uuid          = { workspace = true }
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 settings = { workspace = true }
-tokio-util = { workspace = true }
 
 [lints.clippy]
 unwrap_used = "warn"

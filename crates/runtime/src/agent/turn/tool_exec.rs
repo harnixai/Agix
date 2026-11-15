@@ -8,6 +8,7 @@ use super::tool_progress::{CloseOnDrop, GateHandle, ProgressGate};
 use super::tool_result::{
     fence_external, fence_saved_result, render_tool_result_content, PendingToolImage,
 };
+use base::context::Session;
 use base::event::AgentEvent;
 use std::sync::Arc;
 
@@ -49,7 +50,7 @@ pub(crate) struct ToolExecCtx {
     /// Cloned into every `ToolContext` so state a tool records (read cache,
     /// file snapshots, todos, plan mode) is visible to the next tool call
     /// instead of being dropped with a per-call throwaway.
-    pub session_state: Arc<base::context::SessionState>,
+    pub session_state: Arc<session_state::SessionState>,
     /// How this session asks a person to authorize a call. The turn decides
     /// what to do with the answer — hooks, telemetry, the deadline — and this
     /// decides how the question reaches a human at all.

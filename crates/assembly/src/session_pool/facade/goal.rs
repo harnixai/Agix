@@ -1,6 +1,7 @@
 //! 会话目标：目标轮次的续跑、目标变更与目标事件转发。
 
 use crate::session_pool::*;
+use base::context::Session;
 
 impl SessionPool {
     /// The goal round to start once a turn that ended with `stop_reason`
@@ -10,7 +11,7 @@ impl SessionPool {
     pub(in crate::session_pool) async fn goal_round_after(
         &self,
         sid: &str,
-        state: &base::context::SessionState,
+        state: &session_state::SessionState,
         stop_reason: &str,
     ) -> Option<base::context::goal::GoalRound> {
         if !runtime::turn::CONTINUES_A_GOAL.contains(&stop_reason) {
@@ -68,7 +69,7 @@ impl SessionPool {
     pub(in crate::session_pool) async fn live_state(
         &self,
         sid: &str,
-    ) -> Option<Arc<base::context::SessionState>> {
+    ) -> Option<Arc<session_state::SessionState>> {
         self.live
             .core_of(sid)
             .await
@@ -80,7 +81,7 @@ impl SessionPool {
     pub(in crate::session_pool) async fn record_goal_changes(
         &self,
         sid: &str,
-        state: &base::context::SessionState,
+        state: &session_state::SessionState,
     ) {
         let unrecorded = state.unrecorded_goal_changes().await;
         let (Some(store), Ok(parsed)) =

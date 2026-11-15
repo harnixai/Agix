@@ -17,6 +17,7 @@ tokio       = { workspace = true }
 tokio-util  = { workspace = true }
 
 [dev-dependencies]
+session-state = { workspace = true, features = ["testing"] }
 platform = { workspace = true }
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
 

@@ -1,6 +1,7 @@
 //! Compaction triggered through the agent: what is restated afterwards and when it is skipped.
 
 use super::*;
+use base::context::Session;
 
 /// Compacts by keeping the messages for which `keep` holds, reported as
 /// `strategy`.
@@ -134,7 +135,7 @@ pub(super) fn in_plan_mode_with_a_task(agent: &Agent) {
         .session_state
         .set_permission_mode(base::permission::PermissionMode::Plan);
     agent.session_state.register_task(
-        "ag-7",
+        "ag-7".into(),
         base::context::TaskType::Agent,
         CancellationToken::new(),
         serde_json::json!({"description": "survey the parser"}),

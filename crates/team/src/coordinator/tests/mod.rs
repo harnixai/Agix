@@ -131,7 +131,10 @@ impl Delegator for FakeDelegator {
 
 fn make_ctx() -> (tempfile::TempDir, ToolContext) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        dir.path().to_path_buf(),
+    );
     (dir, ctx)
 }
 

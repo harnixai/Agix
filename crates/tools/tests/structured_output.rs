@@ -18,7 +18,10 @@ fn tool() -> StructuredOutputTool {
 }
 
 async fn check(input: serde_json::Value) -> Result<(), String> {
-    let ctx = platform::tool_context_for_test(std::env::temp_dir());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        std::env::temp_dir(),
+    );
     match tool().validate_input(&input, &ctx).await {
         ValidationResult::Ok => Ok(()),
         ValidationResult::Err(msg, _) => Err(msg),

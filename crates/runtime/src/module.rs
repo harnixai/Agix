@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use base::context::{EngineConfig, SessionState};
+use base::context::{EngineConfig, Session};
 use base::interface::delegate::{
     DelegateError, DelegateRequest, Delegated, Delegator, LiveMember, TeamSeat,
 };
@@ -91,7 +91,7 @@ pub struct SessionContext<'a> {
     pub hook_ambient: &'a hooks::payload::Ambient,
     pub events: &'a crate::event_bus::EventBus,
     pub session_id: &'a str,
-    pub session_state: &'a Arc<SessionState>,
+    pub session_state: &'a Arc<dyn Session>,
     /// How many agents deep this session is: 0 for one a host created.
     pub depth: u32,
     /// What a delegate of this session is built on, whole.

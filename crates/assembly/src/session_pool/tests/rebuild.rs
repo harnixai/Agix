@@ -4,6 +4,7 @@ use super::mcp_for_project::test_pool_builder;
 use super::*;
 use crate::session_pool::api::BusyReason;
 use base::context::goal::TurnOrigin;
+use base::context::Session;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex as StdMutex;
@@ -39,7 +40,7 @@ async fn new_session(pool: &SessionPool) -> String {
 async fn slot_and_state(
     pool: &SessionPool,
     sid: &str,
-) -> (Generation, Arc<base::context::SessionState>) {
+) -> (Generation, Arc<session_state::SessionState>) {
     pool.live
         .with_live(sid, |live| {
             (live.engine.generation, live.core.state().clone())
@@ -513,7 +514,7 @@ async fn a_session_rebuilt_twice_hands_on_each_task_frame_once() {
 
     let (_, state) = slot_and_state(&pool, &sid).await;
     state.register_task(
-        "task-1",
+        "task-1".into(),
         base::context::TaskType::Agent,
         CancellationToken::new(),
         serde_json::json!({}),

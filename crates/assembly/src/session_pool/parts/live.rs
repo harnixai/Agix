@@ -13,11 +13,12 @@
 use crate::session_pool::parts::hub::SessionHub;
 use crate::session_pool::parts::phase::{Generation, Generations, TurnSlot, TurnTicket};
 use crate::session_pool::{CreateError, SessionNamer, AGENT_EXIT_GRACE, PROCESS_GROUP_GRACE};
-use base::context::SessionState;
+use base::context::Session;
 use base::event::ContextUsage;
 use base::interface::scene::SceneSpec;
 use runtime::agent::{EndReason, EndReasonSlot, InputSender};
 use runtime::steering::SteerHandle;
+use session_state::SessionState;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

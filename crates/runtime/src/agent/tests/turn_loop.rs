@@ -2,8 +2,9 @@
 
 use super::*;
 use base::context::goal::GoalPhase;
+use base::context::Session;
 
-fn goal_phase(state: &base::context::SessionState) -> Option<GoalPhase> {
+fn goal_phase(state: &session_state::SessionState) -> Option<GoalPhase> {
     state.goal_view().map(|view| view.goal.phase)
 }
 
@@ -656,7 +657,7 @@ async fn task_created_fires_when_a_running_task_starts() {
         .build()
         .expect("build should succeed");
     agent.session_state.register_task(
-        "t-1",
+        "t-1".into(),
         base::context::TaskType::Agent,
         CancellationToken::new(),
         serde_json::json!({"agent_type": "explore"}),
@@ -717,7 +718,7 @@ async fn task_completed_fires_when_a_running_task_ends_however_it_ends() {
     ];
     for (id, kind, _) in &endings {
         agent.session_state.register_task(
-            *id,
+            id.to_string(),
             *kind,
             CancellationToken::new(),
             serde_json::json!({}),
@@ -789,7 +790,7 @@ async fn an_async_rewake_hook_runs_again_once_a_running_task_ends() {
         .expect("build should succeed");
     let session = agent.session_state.clone();
     let task = session.register_task(
-        "t-1",
+        "t-1".into(),
         base::context::TaskType::Agent,
         CancellationToken::new(),
         serde_json::json!({}),

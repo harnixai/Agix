@@ -610,7 +610,10 @@ mod tests {
     use tempfile::TempDir;
 
     fn ctx_in(cwd: &Path) -> ToolContext {
-        platform::tool_context_for_test(cwd.to_path_buf())
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        )
     }
 
     #[tokio::test]
@@ -857,7 +860,10 @@ mod tests {
         tokio::fs::write(&p, "x").await.unwrap();
         let tool = FileReadTool;
 
-        let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            dir.path().to_path_buf(),
+        );
         ctx.cancel.cancel(); // 提前取消
         let err = tool
             .call(

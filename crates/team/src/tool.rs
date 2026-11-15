@@ -395,7 +395,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({}),
-                platform::tool_context_for_test(std::path::PathBuf::from("/tmp")),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::path::PathBuf::from("/tmp"),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -463,7 +466,10 @@ mod tests {
         let err = tool
             .call(
                 input,
-                platform::tool_context_for_test(dir.path().to_path_buf()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    dir.path().to_path_buf(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -499,7 +505,10 @@ mod tests {
 
     async fn states_a_contained_call(tool: &dyn base::tool::Tool, input: serde_json::Value) {
         use base::interface::permission::Reach;
-        let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::path::PathBuf::from("/tmp"),
+        );
         let stated = tool.permission_facts(&input, &ctx).await;
         assert!(
             matches!(

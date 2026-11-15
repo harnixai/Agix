@@ -42,7 +42,7 @@ struct HostWiring {
 fn build_host(
     wiring: HostWiring,
     task: &Arc<RunningTask>,
-    session: &Arc<SessionState>,
+    session: &Arc<dyn Session>,
     args: Option<&Value>,
 ) -> Host {
     let log_task = task.clone();
@@ -149,7 +149,7 @@ pub(super) async fn execute(
     input: RunCodeInput,
     dispatch: Arc<dyn ToolDispatch>,
     task: &Arc<RunningTask>,
-    session: &Arc<SessionState>,
+    session: &Arc<dyn Session>,
     limits: &Limits,
     run_slots: Option<&Arc<Semaphore>>,
     turn_cancel: CancellationToken,

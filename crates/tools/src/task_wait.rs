@@ -176,17 +176,27 @@ impl Tool for TaskWaitTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::context::{RunningStatus, SessionState, TaskType};
+    use base::context::Session;
+    use base::context::{RunningStatus, TaskType};
+    use session_state::SessionState;
     use tokio_util::sync::CancellationToken;
 
     fn ctx_with(session: Arc<SessionState>) -> ToolContext {
-        let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         ctx.session = session;
         ctx
     }
 
     fn register(session: &SessionState, id: &str) {
-        session.register_task(id, TaskType::Agent, CancellationToken::new(), Value::Null);
+        session.register_task(
+            id.into(),
+            TaskType::Agent,
+            CancellationToken::new(),
+            Value::Null,
+        );
     }
 
     async fn wait(session: &Arc<SessionState>, input: Value) -> Value {
@@ -227,7 +237,7 @@ mod tests {
         register(&session, "a");
         register(&session, "b");
         session.finish_task("a", RunningStatus::Completed);
-        session.post_notice(Some("a".into()), "a finished");
+        session.post_notice(Some("a".into()), "a finished".into());
         let s = session.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;

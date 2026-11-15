@@ -101,7 +101,10 @@ async fn snapshot(tool: &dyn Tool, cwd: &Path) -> Value {
         .guide(&prompt_ctx)
         .await
         .map(|g| json!({ "bytes": g.len(), "fnv1a": fnv1a(&g) }));
-    let ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     let mut calls = Vec::new();
     for input in samples(tool.name()) {
         let traits = tool.call_traits(&input);

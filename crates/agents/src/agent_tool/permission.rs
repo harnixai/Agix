@@ -25,7 +25,7 @@ pub(crate) struct DelegateRelay {
     pub(crate) parent: Arc<dyn PermissionPolicy>,
     pub(crate) parent_denials: Option<Arc<dyn base::interface::permission::PathDenials>>,
     /// The session `parent` belongs to.
-    pub(crate) parent_session: Arc<base::context::SessionState>,
+    pub(crate) parent_session: Arc<dyn base::context::Session>,
     /// Why nobody can be asked about its calls; `None` when its questions go
     /// to the parent's host.
     pub(crate) no_one_to_ask: Option<&'static str>,

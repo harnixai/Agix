@@ -3,6 +3,7 @@
 use super::mcp_for_project::test_pool_with_store;
 use super::*;
 use base::context::goal::TurnOrigin;
+use base::context::Session;
 use history::entry::{EnvelopedEntry, LogEntry};
 use history::error::HistoryError;
 use history::store::{HistoryStore, InMemoryHistoryStore};
@@ -56,7 +57,7 @@ async fn pool_with_gated_goal_writes() -> (Arc<SessionPool>, Arc<GatedGoalWrites
     (pool, store, dir)
 }
 
-async fn session_with_a_goal(pool: &SessionPool) -> (String, Arc<base::context::SessionState>) {
+async fn session_with_a_goal(pool: &SessionPool) -> (String, Arc<session_state::SessionState>) {
     let sid = pool
         .create_session(None, ProjectSelector::Default, None)
         .await
@@ -70,7 +71,7 @@ async fn session_with_a_goal(pool: &SessionPool) -> (String, Arc<base::context::
     (sid, state)
 }
 
-fn blocks_on_its_round_limit(state: &base::context::SessionState) {
+fn blocks_on_its_round_limit(state: &session_state::SessionState) {
     state.goal_claim_round(&state.goal_next_round().expect("a round").turn_id);
     assert!(state.goal_next_round().is_none());
     assert_eq!(
@@ -307,7 +308,7 @@ async fn an_interrupt_before_a_claimed_turn_s_message_reaches_the_engine_cancels
 /// while the test holds `gate`.
 struct HoldsTheGoalWriteAfterTheTurn {
     inner: InMemoryHistoryStore,
-    state: std::sync::OnceLock<Arc<base::context::SessionState>>,
+    state: std::sync::OnceLock<Arc<session_state::SessionState>>,
     edits: std::sync::atomic::AtomicUsize,
     gate: Arc<AsyncMutex<()>>,
     writing: tokio::sync::Notify,

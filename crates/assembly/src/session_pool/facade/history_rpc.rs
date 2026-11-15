@@ -1,6 +1,7 @@
 //! 历史相关 RPC：读取历史、导出会话、分叉会话，以及条目的视图转换。
 
 use crate::session_pool::*;
+use base::context::Session;
 
 impl SessionPool {
     /// `session.history` — a bounded page of a session's projected
@@ -91,7 +92,7 @@ impl SessionPool {
                 if !include.sidechains {
                     lineage.sessions.truncate(1);
                 }
-                let mut live: HashMap<String, (api::TurnState, Arc<base::context::SessionState>)> =
+                let mut live: HashMap<String, (api::TurnState, Arc<session_state::SessionState>)> =
                     HashMap::new();
                 for (sid, _) in &lineage.sessions {
                     let sid = sid.to_string();

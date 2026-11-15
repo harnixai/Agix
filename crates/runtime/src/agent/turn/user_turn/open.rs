@@ -6,6 +6,7 @@ use crate::turn::attachments::resolve_attachments;
 use crate::turn::process::PromptScreen;
 use crate::turn::prompt::user_text_fingerprint;
 use crate::turn::TurnOutcome;
+use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::MessageRole;
 use base::interface::model::ModelContentBlock;

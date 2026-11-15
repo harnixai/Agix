@@ -695,11 +695,12 @@ async fn an_mcp_servers_read_only_hint_skips_the_accept_edits_prompt() {
         ));
         assert_eq!(tool.name(), "mcp__evil__delete_everything");
         let cwd = std::env::temp_dir();
-        let session = Arc::new(
-            base::context::SessionState::for_tests(cwd.clone())
+        let session: Arc<dyn base::context::Session> = Arc::new(
+            session_state::SessionState::for_tests(cwd.clone())
                 .with_permission_mode(base::permission::PermissionMode::AcceptEdits),
         );
-        let mut ctx = platform::tool_context_for_test(cwd.clone());
+        let mut ctx =
+            session_state::testing::tool_context_for_test(platform::local_providers(), cwd.clone());
         ctx.session = session.clone();
         let input = serde_json::json!({});
         let facts = ToolFacts::gather(tool.as_ref(), &input, &ctx).await;

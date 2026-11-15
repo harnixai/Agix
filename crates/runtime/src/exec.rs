@@ -53,7 +53,7 @@ pub(crate) fn engine_git_for(
 /// What the session's sandbox holds a command to, probed the first time a
 /// call of the session asks.
 pub(crate) fn confinement_of(
-    session: &base::context::SessionState,
+    session: &session_state::SessionState,
     config: &EngineConfig,
     exec: &ExecProviders,
     cwd: &Path,

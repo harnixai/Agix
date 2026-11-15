@@ -203,10 +203,13 @@ mod tests {
 
     /// A context whose session runs `tasks` — id, output so far, status.
     fn ctx_with_tasks(tasks: &[(&str, &str, RunningStatus)]) -> ToolContext {
-        let ctx = platform::tool_context_for_test(Path::new("/").to_path_buf());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            Path::new("/").to_path_buf(),
+        );
         for (id, output, status) in tasks {
             let task = ctx.session.register_task(
-                *id,
+                id.to_string(),
                 TaskType::Code,
                 tokio_util::sync::CancellationToken::new(),
                 serde_json::Value::Null,

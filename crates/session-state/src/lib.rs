@@ -8,7 +8,9 @@ mod tasks;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-use base::context::goal::{Goal, GoalError, GoalAction, GoalRound, GoalSlot, GoalView, TurnOrigin, UnrecordedGoalChanges};
+use base::context::goal::{
+    Goal, GoalAction, GoalError, GoalRound, GoalSlot, GoalView, TurnOrigin, UnrecordedGoalChanges,
+};
 use base::context::{
     DurableState, PlanState, RunningStatus, RunningTask, Session, SessionEnv, SessionLedger,
     TaskEvent, TaskInfo, TaskType, TodoItem, TodoStatus,

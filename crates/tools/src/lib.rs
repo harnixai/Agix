@@ -294,7 +294,10 @@ mod register_builtin_tools_tests {
         let bad = t
             .validate_input(
                 &serde_json::json!({"query": "   "}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(bad.is_err(), "empty query must fail validation");
@@ -302,7 +305,10 @@ mod register_builtin_tools_tests {
         let r = t
             .call(
                 serde_json::json!({"query": "rust release notes"}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 base::tool::ProgressSender::noop("t"),
             )
             .await;
@@ -361,7 +367,12 @@ mod register_builtin_tools_tests {
         let store = Arc::new(crate::cron::CronStore::new());
         register_cron_tools(&reg, store.clone());
 
-        let ctx = || platform::tool_context_for_test("/tmp".into());
+        let ctx = || {
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                "/tmp".into(),
+            )
+        };
         let created = reg
             .get("CronCreate")
             .unwrap()
@@ -425,7 +436,10 @@ mod register_builtin_tools_tests {
             .unwrap()
             .call(
                 serde_json::json!({}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 base::tool::ProgressSender::noop("t"),
             )
             .await
@@ -445,7 +459,10 @@ mod register_builtin_tools_tests {
             .unwrap()
             .validate_input(
                 &serde_json::json!({"slug": "../escape"}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(bad.is_err());

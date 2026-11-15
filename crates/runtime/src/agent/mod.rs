@@ -56,8 +56,8 @@ struct SessionEnd {
     /// being stopped, while `ended` waits for it to have stopped.
     stopping: CancellationToken,
     tools: Arc<InMemoryToolRegistry>,
-    state: Arc<base::context::SessionState>,
-    attachment: base::context::EngineAttachment,
+    state: Arc<session_state::SessionState>,
+    attachment: session_state::EngineAttachment,
     reason: EndReasonSlot,
 }
 
@@ -80,7 +80,7 @@ pub struct Agent {
     /// Distinct from `session`: `Transcript` owns the *transcript*, this
     /// owns everything tools read and write across calls. One instance for the
     /// whole session, handed to every `ToolContext` — see `Builder::build()`.
-    session_state: Arc<base::context::SessionState>,
+    session_state: Arc<session_state::SessionState>,
     /// How this session's tool calls reach the machine: built once from
     /// `config` and the builder's process-group ledger, and bound to
     /// `session_state` for the permission that judges those calls.

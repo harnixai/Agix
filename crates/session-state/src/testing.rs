@@ -18,7 +18,13 @@ pub fn tool_context_for_test(exec: ExecProviders, cwd: PathBuf) -> ToolContext {
     });
     config.file_limits.max_file_read_bytes = 0;
     let session: Arc<dyn Session> = Arc::new(SessionState::for_tests(cwd.clone()));
-    let mut ctx = ToolContext::new(cwd, CancellationToken::new(), exec, Arc::new(config), session);
+    let mut ctx = ToolContext::new(
+        cwd,
+        CancellationToken::new(),
+        exec,
+        Arc::new(config),
+        session,
+    );
     ctx.session_id = "test".into();
     ctx
 }

@@ -5,6 +5,7 @@
 use super::process::hook_permission_mode;
 use super::reporting::record_permission_decision;
 use super::tool_exec::{fire_ctx_lifecycle_hook, lifecycle_input, Caller, ToolExecCtx};
+use base::context::Session;
 use std::sync::Arc;
 
 /// `PreToolUse`: the input the call goes on with, what the hook answered
@@ -140,15 +141,9 @@ pub(super) async fn authorize(
     };
     let started = std::time::Instant::now();
     let facts = ToolFacts::gather(tool.as_ref(), input, tool_ctx).await;
-    let request = PermissionRequest::new(
-        name,
-        Some(tool),
-        input,
-        &facts,
-        tool_ctx,
-        &ctx.session_state,
-    )
-    .with_hook(hook);
+    let judged: std::sync::Arc<dyn base::context::Session> = ctx.session_state.clone();
+    let request =
+        PermissionRequest::new(name, Some(tool), input, &facts, tool_ctx, &judged).with_hook(hook);
     let answer = match ctx.permission.policy.decide(&request).await {
         PermissionOutcome::Prompt {
             prompt_id,

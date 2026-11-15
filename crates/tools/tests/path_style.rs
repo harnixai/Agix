@@ -17,7 +17,10 @@ use tools::glob::GlobTool;
 use tools::grep::GrepTool;
 
 fn ctx_in(cwd: &Path, style: PathStyle) -> ToolContext {
-    let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     let mut config = (*ctx.config).clone();
     config.path_style = style;
     ctx.config = Arc::new(config);

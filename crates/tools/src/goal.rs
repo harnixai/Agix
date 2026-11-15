@@ -245,6 +245,7 @@ impl Tool for GoalUpdateTool {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Arc;
 
     async fn call(tool: &dyn Tool, input: Value, ctx: &ToolContext) -> ToolResult {
         tool.call(input, ctx.clone(), ProgressSender::noop("t"))
@@ -263,9 +264,19 @@ mod tests {
         }
     }
 
+    fn context_over(state: &Arc<session_state::SessionState>) -> ToolContext {
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
+        ctx.session = state.clone();
+        ctx
+    }
+
     #[tokio::test]
     async fn create_get_and_complete() {
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let state = Arc::new(session_state::SessionState::new());
+        let ctx = context_over(&state);
         let created = call(&GoalCreateTool, json!({"objective": "tests green"}), &ctx).await;
         assert!(!created.is_error, "{}", text(&created));
         let goal = call(&GoalGetTool, json!({}), &ctx).await;
@@ -283,12 +294,15 @@ mod tests {
         assert!(!done.is_error, "{}", text(&done));
         assert!(text(&done).contains("call no more tools"));
         assert_eq!(goal_json(&ctx)["phase"], "complete");
-        assert_eq!(ctx.session.unrecorded_goal_changes().await.changes.len(), 2);
+        assert_eq!(state.unrecorded_goal_changes().await.changes.len(), 2);
     }
 
     #[tokio::test]
     async fn a_sub_agent_has_no_goal() {
-        let mut ctx = platform::tool_context_for_test("/tmp".into());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         ctx.agent_depth = 1;
         let r = call(&GoalCreateTool, json!({"objective": "x"}), &ctx).await;
         assert!(r.is_error);
@@ -297,9 +311,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_automatic_round_cannot_pause() {
-        let mut ctx = platform::tool_context_for_test("/tmp".into());
+        let state = Arc::new(session_state::SessionState::new());
+        let mut ctx = context_over(&state);
         call(&GoalCreateTool, json!({"objective": "x"}), &ctx).await;
-        let round = ctx.session.goal_next_round().unwrap();
+        let round = state.goal_next_round().unwrap();
         ctx.turn = std::sync::Arc::new(base::tool::TurnScope::new(TurnOrigin::from_turn_id(
             &round.turn_id,
         )));
@@ -316,7 +331,10 @@ mod tests {
 
     #[tokio::test]
     async fn blocked_needs_a_reason() {
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         call(&GoalCreateTool, json!({"objective": "x"}), &ctx).await;
         let view = goal_json(&ctx);
         let r = call(

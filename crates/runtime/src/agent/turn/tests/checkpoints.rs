@@ -6,6 +6,7 @@ use super::tool_exec::{
 };
 use crate::checkpoint::{Checkpoints, DelegateSeat};
 use crate::turn::tool_exec::{execute_tool_with_telemetry, ToolExecCtx};
+use base::context::Session;
 use history::checkpoint::{plan, After, Before};
 use history::store::{HistoryStore, InMemoryHistoryStore};
 use std::sync::Arc;
@@ -28,7 +29,7 @@ fn setup(
     let hooks = Arc::new(local_hook_runner(Default::default()));
     let mut ctx = test_exec_ctx_with_permission(tools, hooks, permission);
     ctx.cwd = cwd.clone();
-    ctx.session_state = Arc::new(base::context::SessionState::for_tests(cwd.clone()));
+    ctx.session_state = Arc::new(session_state::SessionState::for_tests(cwd.clone()));
     let root = base::session::SessionId::new();
     ctx.checkpoints = Checkpoints::for_root(
         store.clone(),

@@ -3,6 +3,7 @@
 use super::support::{recall_test_settings, FixedUsageModel};
 use crate::agent::InputMessage;
 use crate::turn::prompt::build_prompt_context;
+use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::ThinkingMode;
 use base::interface::model::{ModelContentBlock, ModelMessage};

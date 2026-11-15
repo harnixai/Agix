@@ -15,7 +15,10 @@ use base::interface::tool::{ProgressSender, Tool, ToolContext, ToolResult};
 use std::sync::Arc;
 
 fn ctx_with(providers: ExecProviders, require_enforcement: bool) -> ToolContext {
-    let mut ctx = platform::tool_context_for_test(std::path::PathBuf::from("/work"));
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        std::path::PathBuf::from("/work"),
+    );
     ctx.sandbox_mut().disabled = false;
     ctx.sandbox_mut().require_enforcement = require_enforcement;
     ctx.exec = providers;

@@ -2,14 +2,18 @@
 //! read freely only under the readable roots, and in an unattended session run
 //! a shell command only when the OS sandbox holds it.
 
-use base::context::{SessionEnv, SessionState};
+use base::context::SessionEnv;
 use base::interface::permission::Reach;
 use base::interface::tool::{Tool, ToolContext};
+use session_state::SessionState;
 use std::path::Path;
 use std::sync::Arc;
 
 fn ctx_in(cwd: &Path, state: impl FnOnce(&mut SessionEnv)) -> ToolContext {
-    let mut ctx = platform::tool_context_for_test(cwd.to_path_buf());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
     let mut env = SessionEnv::new(cwd.to_path_buf());
     state(&mut env);
     ctx.session = Arc::new(SessionState::for_tests_in(env));
@@ -181,9 +185,9 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
         .permission_settings(),
         [],
     );
-    let session = Arc::new(base::context::SessionState::for_tests(
-        project.path().to_path_buf(),
-    ));
+    let session: Arc<dyn base::context::Session> = Arc::new(
+        session_state::SessionState::for_tests(project.path().to_path_buf()),
+    );
     let config = project
         .path()
         .join(".agix/agents/a.md")
@@ -198,7 +202,8 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
         let (gate, session, found) = (&gate, &session, registry.get(tool));
         let cwd = project.path().to_path_buf();
         async move {
-            let mut ctx = platform::tool_context_for_test(cwd);
+            let mut ctx =
+                session_state::testing::tool_context_for_test(platform::local_providers(), cwd);
             ctx.session = session.clone();
             let facts = ToolFacts::gather(found.as_deref().unwrap(), &input, &ctx).await;
             gate.decide(&PermissionRequest::new(

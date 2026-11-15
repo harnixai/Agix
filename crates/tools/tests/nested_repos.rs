@@ -63,7 +63,10 @@ async fn a_planted_repository_is_moved_aside_before_the_users_git_enters_it() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
     let pwned = elsewhere.path().join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(&ctx, &plant(&pwned)).await;
 
     let status = git(project.path(), &["status"]);
@@ -100,7 +103,10 @@ async fn a_planted_repository_is_moved_aside_before_the_users_git_enters_it() {
 async fn a_repository_someone_kept_is_reported_again_only_once_its_configuration_changes() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(&ctx, &plant(&elsewhere.path().join("pwned"))).await;
 
     let first = tools::nested_repos::scan(&ctx).await;
@@ -120,7 +126,10 @@ async fn a_repository_someone_kept_is_reported_again_only_once_its_configuration
 #[tokio::test]
 async fn harmless_and_unindexed_repositories_are_only_mentioned_and_only_once() {
     let project = project();
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         "mkdir plain && cd plain && git init -q && touch f && git add f && \
@@ -150,7 +159,10 @@ async fn a_declared_submodule_is_not_mentioned_but_still_checked() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
     let pwned = elsewhere.path().join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         &format!(
@@ -180,7 +192,10 @@ async fn a_dangerous_git_directory_under_the_projects_modules_is_checked() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
     let pwned = elsewhere.path().join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         &format!(
@@ -205,7 +220,10 @@ async fn a_dangerous_git_directory_under_the_projects_modules_is_checked() {
 async fn dependency_and_build_directories_are_not_walked_but_their_gitlinks_are_still_caught() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         "mkdir -p node_modules/pkg target/debug/dep deep/er && \
@@ -241,7 +259,8 @@ async fn a_repository_is_moved_aside_on_the_filesystem_the_session_runs_against(
     std::fs::write(git_dir.join("config"), "[core]\n").unwrap();
     let remote = base::interface::exec::in_process::InMemoryFileSystem::new()
         .with_file(git_dir.join("config"), "[core]\n\tfsmonitor = x\n");
-    let mut ctx = platform::tool_context_for_test(cwd.clone());
+    let mut ctx =
+        session_state::testing::tool_context_for_test(platform::local_providers(), cwd.clone());
     ctx.exec.filesystem = std::sync::Arc::new(remote.clone());
 
     let moved = tools::nested_repos::quarantine(&ctx, &git_dir)
@@ -263,7 +282,10 @@ async fn a_dangerous_repository_inside_a_clean_nested_repository_is_moved_aside(
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
     let pwned = elsewhere.path().join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         &format!(
@@ -294,7 +316,10 @@ async fn a_dangerous_repository_behind_a_gitdir_file_is_moved_aside() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
     let pwned = elsewhere.path().join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         &format!(
@@ -326,7 +351,10 @@ async fn a_dangerous_repository_behind_a_symlinked_git_directory_is_moved_aside(
     let elsewhere = tempfile::tempdir().unwrap();
     let elsewhere = elsewhere.path().canonicalize().unwrap();
     let pwned = elsewhere.join("pwned");
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(
         &ctx,
         &format!(
@@ -372,7 +400,10 @@ fn assert_status_no_longer_runs_it(project: &Path, pwned: &Path) {
 #[tokio::test]
 async fn hooks_worktree_configuration_and_a_non_utf8_config_are_checked() {
     let project = project();
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     let repo = |path: &str| {
         format!(
             "mkdir {path} && cd {path} && git init -q && touch f && git add f && \
@@ -414,7 +445,10 @@ async fn hooks_worktree_configuration_and_a_non_utf8_config_are_checked() {
 async fn a_repository_there_before_the_session_is_mentioned_once_until_it_changes() {
     let project = project();
     let elsewhere = tempfile::tempdir().unwrap();
-    let ctx = platform::tool_context_for_test(project.path().canonicalize().unwrap());
+    let ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        project.path().canonicalize().unwrap(),
+    );
     bash(&ctx, &plant(&elsewhere.path().join("pwned"))).await;
     tools::nested_repos::take_baseline(&ctx).await;
     bash(&ctx, "touch b").await;

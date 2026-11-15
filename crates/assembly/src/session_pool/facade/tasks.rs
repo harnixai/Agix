@@ -2,6 +2,7 @@
 
 use crate::session_pool::parts::phase::SessionOp;
 use crate::session_pool::*;
+use base::context::Session;
 
 fn delegate_error(e: base::interface::delegate::DelegateError) -> PoolError {
     use base::interface::delegate::DelegateError;
@@ -243,7 +244,7 @@ impl SessionPool {
             PoolError::session_gone(session_id, format!("session `{session_id}` is not running"))
         })?;
         Ok(
-            match tools::task_message::deliver(&state, task_id, message) {
+            match tools::task_message::deliver(state.as_ref(), task_id, message) {
                 Ok(()) => api::MessageDelivery {
                     delivered: true,
                     reason: None,

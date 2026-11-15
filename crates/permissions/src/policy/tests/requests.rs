@@ -1,12 +1,13 @@
 use super::*;
 use crate::ruleset::RuleSet;
 use async_trait::async_trait as async_trait2;
-use base::context::SessionState;
+use base::context::Session;
 use base::error::ToolError;
 use base::interface::permission::Delegate;
 use base::permission::PermissionMode;
 use base::tool::Tool;
 use serde_json::json;
+use session_state::SessionState;
 use std::path::Path;
 
 struct FakeTool {
@@ -126,7 +127,7 @@ fn shell_tool(content: &'static str) -> Arc<dyn Tool> {
     })
 }
 
-fn session(mode: PermissionMode) -> Arc<SessionState> {
+fn session(mode: PermissionMode) -> Arc<dyn Session> {
     Arc::new(SessionState::for_tests("/tmp".into()).with_permission_mode(mode))
 }
 
@@ -137,7 +138,7 @@ fn empty() -> Policy {
 async fn decide(
     perm: &Policy,
     tool: &Arc<dyn Tool>,
-    session: &Arc<SessionState>,
+    session: &Arc<dyn Session>,
 ) -> PermissionOutcome {
     let input = json!({});
     let (ctx, facts) = call_in(Some(tool), &input, session).await;
@@ -207,7 +208,8 @@ async fn a_delegate_is_judged_in_its_own_mode_held_to_plan_and_taken_along_by_by
     let perm = empty();
     let write = fake("Write", false);
     let session = session(PermissionMode::Default);
-    let delegate = Arc::new(SessionState::for_tests(std::path::PathBuf::from("/tmp")));
+    let delegate: Arc<dyn Session> =
+        Arc::new(SessionState::for_tests(std::path::PathBuf::from("/tmp")));
     let input = json!({});
     let judged = || {
         let (perm, write, input, session, delegate) = (&perm, &write, &input, &session, &delegate);

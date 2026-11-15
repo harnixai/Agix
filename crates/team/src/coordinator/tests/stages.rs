@@ -171,7 +171,10 @@ impl Delegator for MailboxAwareDelegator {
     }
 
     async fn delegate(&self, request: DelegateRequest) -> Result<Delegated, DelegateError> {
-        let ctx = platform::tool_context_for_test(cwd_of(&request));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd_of(&request),
+        );
         let extra_tools = stage_tools(request);
         let list_peers = extra_tools
             .iter()
@@ -254,7 +257,10 @@ impl Delegator for MemoryAwareDelegator {
         if !request.prompt.contains("remember") {
             return finished(request.prompt);
         }
-        let ctx = platform::tool_context_for_test(cwd_of(&request));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd_of(&request),
+        );
         let extra_tools = stage_tools(request);
         let save = extra_tools
             .iter()

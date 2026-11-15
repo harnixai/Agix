@@ -47,7 +47,10 @@ impl Model for LineageModel {
 }
 
 fn parent_ctx() -> ToolContext {
-    let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        std::env::temp_dir(),
+    );
     ctx.session_id = "parent-session-1".into();
     ctx.turn_no = 3;
     ctx.tool_use_id = "toolu_bg".into();

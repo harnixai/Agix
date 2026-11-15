@@ -610,7 +610,8 @@ mod dynamic_context_tests {
     }
 
     fn shell_ctx(cwd: std::path::PathBuf) -> (ToolContext, Arc<Shell>) {
-        let mut ctx = platform::tool_context_for_test(cwd.clone());
+        let mut ctx =
+            session_state::testing::tool_context_for_test(platform::local_providers(), cwd.clone());
         let shell = Arc::new(Shell {
             cwd,
             ran: Default::default(),
@@ -625,7 +626,10 @@ mod dynamic_context_tests {
 
     #[tokio::test]
     async fn a_command_the_session_does_not_answer_is_replaced_by_why() {
-        let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         ctx.inline_commands = Some(Arc::new(Refuses));
         assert_eq!(
             expand("Value: !`echo 42`.", &ctx).await,
@@ -635,7 +639,10 @@ mod dynamic_context_tests {
 
     #[tokio::test]
     async fn nothing_runs_where_the_session_runs_no_inline_commands() {
-        let ctx = platform::tool_context_for_test(std::env::temp_dir());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         assert_eq!(
             expand("!`echo 42`", &ctx).await,
             "[`echo 42` not run: nothing in this session runs inline commands]"
@@ -968,7 +975,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "code-review"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1062,7 +1072,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "uses-bash"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1113,7 +1126,10 @@ mod tests {
             .into_iter()
             .find(|s| s.name == "where-am-i")
             .unwrap();
-        let mut ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            dir.path().to_path_buf(),
+        );
         ctx.session_id = "session-of-the-invoker".into();
 
         let text = expand_for_invocation(&mgr, &info, "", &ctx)
@@ -1147,7 +1163,10 @@ mod tests {
                 ..Default::default()
             });
             let info = mgr.list().into_iter().find(|s| s.name == "py").unwrap();
-            let mut ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+            let mut ctx = session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                dir.path().to_path_buf(),
+            );
             ctx.config = Arc::new({
                 let mut c = base::context::EngineConfig::defaults_for("test-model");
                 c.project_trust = if untrusted {
@@ -1203,7 +1222,10 @@ mod tests {
                 ..Default::default()
             });
             let info = mgr.list().into_iter().find(|s| s.name == "wild").unwrap();
-            let ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+            let ctx = session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                dir.path().to_path_buf(),
+            );
             expand_for_invocation(&mgr, &info, "", &ctx)
                 .await
                 .unwrap()
@@ -1295,7 +1317,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "grabby"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1311,8 +1336,12 @@ mod tests {
         bash: &Arc<dyn Tool>,
     ) -> base::interface::permission::PermissionOutcome {
         let input = serde_json::json!({});
-        let session = Arc::new(base::context::SessionState::for_tests("/tmp".into()));
-        let mut ctx = platform::tool_context_for_test("/tmp".into());
+        let session: Arc<dyn base::context::Session> =
+            Arc::new(session_state::SessionState::for_tests("/tmp".into()));
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         ctx.session = session.clone();
         let facts =
             base::interface::permission::ToolFacts::gather(bash.as_ref(), &input, &ctx).await;
@@ -1340,7 +1369,10 @@ mod tests {
         assert_eq!(mgr.invocation_count("code-review"), 0);
         tool.call(
             serde_json::json!({"skill": "code-review"}),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             ProgressSender::noop("t"),
         )
         .await
@@ -1349,7 +1381,10 @@ mod tests {
 
         tool.call(
             serde_json::json!({"skill": "code-review"}),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             ProgressSender::noop("t"),
         )
         .await
@@ -1368,7 +1403,10 @@ mod tests {
         let _ = tool
             .call(
                 serde_json::json!({"skill": "manual-only"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await;
@@ -1383,7 +1421,10 @@ mod tests {
         register_test_skill(&mgr, "code-review", "Review the changed files.", false);
         let tool = SkillTool::new(mgr);
 
-        let ctx1 = platform::tool_context_for_test(std::env::temp_dir());
+        let ctx1 = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         let session_id = ctx1.session_id.clone();
         let first = tool
             .call(
@@ -1395,7 +1436,10 @@ mod tests {
             .expect("call should not error");
         assert!(first.new_messages.is_some());
 
-        let mut ctx2 = platform::tool_context_for_test(std::env::temp_dir());
+        let mut ctx2 = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         ctx2.session_id = session_id;
         let second = tool
             .call(
@@ -1426,7 +1470,10 @@ mod tests {
 
         tool.call(
             serde_json::json!({"skill": "code-review"}),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             ProgressSender::noop("t"),
         )
         .await
@@ -1437,7 +1484,10 @@ mod tests {
         // same literal session_id ("test"), so exercise the real
         // distinguishing behavior by asserting the dedup is keyed off
         // session_id explicitly instead of relying on `tool_context_for_test`'s default.
-        let mut ctx = platform::tool_context_for_test(std::env::temp_dir());
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         ctx.session_id = "a-different-session".into();
         let result = tool
             .call(
@@ -1473,7 +1523,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "deep-research"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1510,7 +1563,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "bg-research"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1546,7 +1602,10 @@ mod tests {
 
         tool.call(
             serde_json::json!({"skill": "pr-summary"}),
-            platform::tool_context_for_test(std::env::temp_dir()),
+            session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::env::temp_dir(),
+            ),
             ProgressSender::noop("t"),
         )
         .await
@@ -1577,7 +1636,10 @@ mod tests {
             });
             let delegator = Arc::new(MockDelegator::default());
             let tool = SkillTool::new(mgr).with_delegator(delegator.clone());
-            let mut ctx = platform::tool_context_for_test(dir.path().to_path_buf());
+            let mut ctx = session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                dir.path().to_path_buf(),
+            );
             ctx.turn_no = 3;
             ctx.tool_use_id = "toolu_skill".into();
 
@@ -1620,7 +1682,10 @@ mod tests {
         let err = tool
             .call(
                 serde_json::json!({"skill": "manual-only"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1637,7 +1702,10 @@ mod tests {
         let err = tool
             .call(
                 serde_json::json!({"skill": "does-not-exist"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1674,7 +1742,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "bundled-notes"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1706,7 +1777,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "cjk-body"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1755,7 +1829,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "cjk-notes"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1803,7 +1880,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "escaping-skill"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1842,7 +1922,10 @@ mod tests {
         let result = tool
             .call(
                 serde_json::json!({"skill": "no-files"}),
-                platform::tool_context_for_test(std::env::temp_dir()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    std::env::temp_dir(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -1860,7 +1943,10 @@ mod tests {
 
     async fn states_a_contained_call(tool: &dyn base::tool::Tool, input: serde_json::Value) {
         use base::interface::permission::Reach;
-        let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::path::PathBuf::from("/tmp"),
+        );
         let stated = tool.permission_facts(&input, &ctx).await;
         assert!(
             matches!(
@@ -1878,7 +1964,10 @@ mod tests {
         let mgr = Arc::new(crate::manager::SkillManager::new());
         let tool = SkillTool::new(mgr);
         let input = serde_json::json!({ "skill": "anything" });
-        let ctx = platform::tool_context_for_test(std::env::temp_dir());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::env::temp_dir(),
+        );
         let facts = tool.permission_facts(&input, &ctx).await;
         assert_eq!(facts.reach, base::interface::permission::Reach::Delegates);
         states_a_contained_call(&tool, input).await;

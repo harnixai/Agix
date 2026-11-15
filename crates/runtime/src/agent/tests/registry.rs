@@ -1,6 +1,7 @@
 //! Which tools a built session registers: scene filters, plugins, deferral policy, session memory.
 
 use super::*;
+use base::context::Session;
 
 /// A scene's whitelist decides what the session *has*, not only what it
 /// advertises: dispatch and `ToolSearch` read the same registry.
@@ -588,7 +589,8 @@ async fn build_applies_the_scenes_deferred_tool_policy() {
     // The session's ToolSearch must search the session's registry —
     // `select:GoalCreate` has to come back with the schema, or the name is
     // advertised with no way to get the schema back.
-    let mut ctx = platform::tool_context_for_test("/tmp".into());
+    let mut ctx =
+        session_state::testing::tool_context_for_test(platform::local_providers(), "/tmp".into());
     ctx.config = agent.config.clone();
     let found = agent
         .tooling
@@ -727,11 +729,12 @@ async fn decided_by(
 ) -> base::interface::permission::PermissionOutcome {
     use base::interface::permission::ToolFacts;
     let tool = agent.tooling.tools().get(name);
-    let mut ctx = base::tool::ToolContext::for_test_with(
-        "/tmp".into(),
+    let mut ctx = session_state::testing::tool_context_for_test(
         base::interface::exec::ExecProviders::in_process(),
+        "/tmp".into(),
     );
-    ctx.session = agent.session_state.clone();
+    let session: std::sync::Arc<dyn base::context::Session> = agent.session_state.clone();
+    ctx.session = session.clone();
     let facts = match &tool {
         Some(tool) => ToolFacts::gather(tool.as_ref(), input, &ctx).await,
         None => ToolFacts::unknown_tool(),
@@ -745,7 +748,7 @@ async fn decided_by(
             input,
             &facts,
             &ctx,
-            &agent.session_state,
+            &session,
         ))
         .await
 }

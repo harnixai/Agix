@@ -16,7 +16,7 @@ impl Agent {
 
     /// The session's own state — its todos, tasks, permission mode — shared
     /// with every tool call, for a host that shows or acts on it.
-    pub fn session_state(&self) -> Arc<base::context::SessionState> {
+    pub fn session_state(&self) -> Arc<session_state::SessionState> {
         self.session_state.clone()
     }
 

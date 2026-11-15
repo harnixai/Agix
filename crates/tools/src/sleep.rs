@@ -88,7 +88,10 @@ mod tests {
         let r = tool
             .validate_input(
                 &json!({"duration_ms": 0}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
@@ -100,7 +103,10 @@ mod tests {
         let r = tool
             .validate_input(
                 &json!({"duration_ms": 999_999}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
@@ -113,7 +119,10 @@ mod tests {
         let r = tool
             .call(
                 json!({"duration_ms": 50}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -125,7 +134,10 @@ mod tests {
     #[tokio::test]
     async fn cancellable() {
         let tool = SleepTool;
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         let cancel = ctx.cancel.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;

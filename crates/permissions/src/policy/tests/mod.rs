@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ruleset::{RuleHit, RuleSet};
-use base::context::SessionState;
+use base::context::Session;
 use base::interface::permission::{
     Answerable, Basis, ModeStance, PermissionFacts, PermissionOutcome, PermissionRequest, Reach,
     Stage, Subject, ToolFacts,
@@ -24,15 +24,14 @@ mod requests;
 async fn call_in(
     tool: Option<&Arc<dyn Tool>>,
     input: &Value,
-    session: &Arc<SessionState>,
+    session: &Arc<dyn Session>,
 ) -> (ToolContext, ToolFacts) {
     let env = session.env();
-    let mut ctx = ToolContext::from_engine_ctx_with(
-        env.cwd.clone(),
-        tokio_util::sync::CancellationToken::new(),
+    let mut ctx = session_state::testing::tool_context_for_test(
         session
             .exec()
             .unwrap_or_else(base::interface::exec::ExecProviders::in_process),
+        env.cwd.clone(),
     );
     ctx.session_id = "s1".into();
     ctx.session = session.clone();

@@ -1,6 +1,7 @@
 //! Builder validation, module ordering and scene narrowing, session end and failed-turn persistence.
 
 use super::*;
+use base::context::Session;
 
 #[test]
 fn builder_requires_scene() {
@@ -298,7 +299,7 @@ fn a_kept_module_whose_requirement_the_scene_excludes_is_refused() {
 
 #[test]
 fn a_session_state_handed_in_is_attached_only_when_the_engine_takes_it_over() {
-    let state = Arc::new(base::context::SessionState::new());
+    let state = Arc::new(session_state::SessionState::new());
     let (agent, _rx, _tx) = probe_builder(vec![])
         .session_state(state.clone(), 1)
         .build()
@@ -319,7 +320,7 @@ fn a_session_state_handed_in_is_attached_only_when_the_engine_takes_it_over() {
 
 #[test]
 fn what_a_session_spent_and_asked_for_outlives_its_engine() {
-    let state = Arc::new(base::context::SessionState::new());
+    let state = Arc::new(session_state::SessionState::new());
     let (first, _rx, _tx) = probe_builder(vec![])
         .session_state(state.clone(), 1)
         .build()

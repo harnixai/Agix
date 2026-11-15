@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use base::context::{RunningStatus, RunningTask, SessionState, TaskLease, TaskType};
+use base::context::{RunningStatus, RunningTask, Session, TaskLease, TaskType};
 use rmcp::model::{CallToolResult, DetailedTask, InputResponses, Task, TaskPayload};
 use tokio_util::sync::CancellationToken;
 
@@ -31,7 +31,7 @@ const FAILURE_MESSAGE_CHARS: usize = 2_000;
 /// Where a call's task is listed: the session of the tool call that started it.
 #[derive(Clone)]
 pub struct McpTaskHost {
-    pub session: Arc<SessionState>,
+    pub session: Arc<dyn Session>,
     pub tool: String,
     pub tool_use_id: String,
     pub cancel: CancellationToken,
@@ -403,8 +403,9 @@ mod tests {
         at("finished", TaskPayload::Completed { result })
     }
 
-    fn hosted() -> (Arc<SessionState>, McpCallScope, CancellationToken) {
-        let session = Arc::new(SessionState::for_tests("/tmp".into()));
+    fn hosted() -> (Arc<dyn Session>, McpCallScope, CancellationToken) {
+        let session: Arc<dyn Session> =
+            Arc::new(session_state::SessionState::for_tests("/tmp".into()));
         let cancel = CancellationToken::new();
         let scope = McpCallScope {
             elicitor: None,

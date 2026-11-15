@@ -122,7 +122,10 @@ mod tests {
     use std::path::Path;
 
     fn ctx_in(cwd: &Path) -> ToolContext {
-        platform::tool_context_for_test(cwd.to_path_buf())
+        session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            cwd.to_path_buf(),
+        )
     }
 
     #[tokio::test]

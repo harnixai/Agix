@@ -9,6 +9,7 @@ use crate::turn::tool_exec::execute_tool_with_telemetry;
 use crate::turn::tool_exec::ToolExecCtx;
 use crate::turn::tool_result::PendingToolImage;
 use crate::turn::TurnError;
+use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::MessageRole;
 use base::interface::model::ModelContentBlock;

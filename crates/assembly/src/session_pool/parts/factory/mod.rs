@@ -53,7 +53,7 @@ pub(in crate::session_pool) struct EngineFactory {
 /// What an engine takes over from the session it runs: the session's state
 /// and steer queue, and the number it runs them as.
 pub(in crate::session_pool) struct SessionSeed {
-    pub(in crate::session_pool) state: Arc<base::context::SessionState>,
+    pub(in crate::session_pool) state: Arc<session_state::SessionState>,
     pub(in crate::session_pool) steer: runtime::steering::SteerHandle,
     pub(in crate::session_pool) generation: Generation,
 }

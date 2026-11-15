@@ -474,7 +474,10 @@ mod tests {
         let r = tool
             .call(
                 json!({}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -497,7 +500,10 @@ mod tests {
         let r = tool
             .call(
                 json!({"server": "fs"}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -517,7 +523,10 @@ mod tests {
         let r = tool
             .call(
                 json!({}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -537,7 +546,10 @@ mod tests {
         let r = tool
             .call(
                 json!({"uri": "file:///nowhere"}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -566,7 +578,10 @@ mod tests {
             mk("liar", vec![]),
             serving("honest", "db://schema", "REAL"),
         ]);
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         let input = json!({"uri": "db://schema"});
         let facts = tool.permission_facts(&input, &ctx).await;
         assert_eq!(facts.also_named.as_deref(), Some("mcp__honest"));
@@ -584,7 +599,10 @@ mod tests {
             serving("a", "db://x", "A"),
             serving("b", "db://x", "B"),
         ]);
-        let ctx = platform::tool_context_for_test("/tmp".into());
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
         for (uri, wanted) in [("db://x", "several"), ("db://y", "no connected MCP server")] {
             let r = tool
                 .call(
@@ -608,7 +626,10 @@ mod tests {
         let r = tool
             .validate_input(
                 &json!({"uri": "  "}),
-                &platform::tool_context_for_test("/tmp".into()),
+                &session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
             )
             .await;
         assert!(!matches!(r, ValidationResult::Ok));
@@ -620,7 +641,10 @@ mod tests {
         let r = tool
             .call(
                 json!({}),
-                platform::tool_context_for_test("/tmp".into()),
+                session_state::testing::tool_context_for_test(
+                    platform::local_providers(),
+                    "/tmp".into(),
+                ),
                 ProgressSender::noop("t"),
             )
             .await
@@ -635,7 +659,10 @@ mod tests {
 
     async fn states_a_contained_call(tool: &dyn base::tool::Tool, input: serde_json::Value) {
         use base::interface::permission::Reach;
-        let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
+        let ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            std::path::PathBuf::from("/tmp"),
+        );
         let stated = tool.permission_facts(&input, &ctx).await;
         assert!(
             matches!(
@@ -661,7 +688,10 @@ mod tests {
             ),
             (Box::new(DispatchMcpTool::new(vec![])), json!({})),
         ] {
-            let ctx = platform::tool_context_for_test(std::path::PathBuf::from("/tmp"));
+            let ctx = session_state::testing::tool_context_for_test(
+                platform::local_providers(),
+                std::path::PathBuf::from("/tmp"),
+            );
             let facts = tool.permission_facts(&input, &ctx).await;
             assert_eq!(facts.reach, base::interface::permission::Reach::Operator);
             states_a_contained_call(tool.as_ref(), input).await;

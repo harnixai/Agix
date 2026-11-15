@@ -3,6 +3,7 @@
 use super::process::{hook_permission_mode, running_task_summary};
 use super::{holds_session_context, CompactSummary, CompactTrigger, NotCompacted, TurnError};
 use crate::agent::Agent;
+use base::context::Session;
 use base::event::AgentEvent;
 use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
 use std::collections::HashSet;

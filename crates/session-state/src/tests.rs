@@ -2,11 +2,11 @@
 
 use super::*;
 
+use base::context::{stop_with_notice, TaskLease};
 use base::context::{TaskEvent, TaskStatus};
 use base::interface::exec::ExecProviders;
 use base::permission::PermissionMode;
 use std::path::PathBuf;
-use base::context::{stop_with_notice, TaskLease};
 
 fn todo(content: &str) -> TodoItem {
     TodoItem {
@@ -18,8 +18,8 @@ fn todo(content: &str) -> TodoItem {
 
 #[test]
 fn plan_mode_and_todos_come_back_from_what_the_log_recorded() {
-    let before = SessionState::for_tests("/tmp".into())
-        .with_permission_mode(PermissionMode::AcceptEdits);
+    let before =
+        SessionState::for_tests("/tmp".into()).with_permission_mode(PermissionMode::AcceptEdits);
     assert_eq!(before.unrecorded_durable_state(), None);
     before.enter_plan_mode();
     before.set_todos(vec![todo("step one")]);
@@ -34,8 +34,8 @@ fn plan_mode_and_todos_come_back_from_what_the_log_recorded() {
         })
     );
 
-    let after = SessionState::for_tests("/tmp".into())
-        .with_permission_mode(PermissionMode::AcceptEdits);
+    let after =
+        SessionState::for_tests("/tmp".into()).with_permission_mode(PermissionMode::AcceptEdits);
     after.restore_durable_state(serde_json::from_value(logged).unwrap());
     assert_eq!(after.permission_mode(), PermissionMode::Plan);
     assert_eq!(after.todos(), vec![todo("step one")]);

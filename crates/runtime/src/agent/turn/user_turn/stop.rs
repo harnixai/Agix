@@ -4,6 +4,7 @@ use super::end::StopReason;
 use super::TurnLoopState;
 use crate::agent::Agent;
 use crate::turn::process::hook_permission_mode;
+use base::context::Session;
 use base::interface::model::MessageRole;
 use base::interface::model::ModelContentBlock;
 use base::interface::model::ModelMessage;

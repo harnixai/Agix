@@ -124,7 +124,7 @@ pub(super) struct SpecSetup {
     pub(super) process_groups: Option<Arc<platform::GroupLedger>>,
     pub(super) session_prompt: Option<SessionPrompt>,
     /// See [`Builder::session_state`].
-    pub(super) session_state: Option<(Arc<base::context::SessionState>, u64)>,
+    pub(super) session_state: Option<(Arc<session_state::SessionState>, u64)>,
     /// See [`Builder::steering`].
     pub(super) steering: Option<crate::steering::SteerHandle>,
     /// See [`Builder::run_slots`].
