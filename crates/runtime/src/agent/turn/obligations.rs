@@ -53,11 +53,10 @@ fn settle_when_its_task_ends(
     input: &serde_json::Value,
     after: ToolContext,
 ) {
-    let task = after
-        .session
-        .running_background_task_ids()
-        .iter()
-        .filter_map(|id| after.session.find_running_task(id))
+    let task = ctx
+        .session_state
+        .running_background_tasks()
+        .into_iter()
         .find(|t| {
             t.detail
                 .lock()
