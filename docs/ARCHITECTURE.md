@@ -1765,7 +1765,12 @@ server 写的 `message`、`requested_schema`、`url` 都是不受信的:`url` �
 推给宿主,别的回 `decline`;Agix 从不打开它。宿主的 form 答案在 daemon 收下时
 (`respondToPrompt`)按 `requested_schema` 校验,不合就以 `INVALID_PARAMS` 退回、提问不撤 ——
 只有那里还能叫宿主重答。`decline` 只表示人或 hook 明确说了不,其余没得到回答的都是 `cancel`。
-答案只回给 server,不进转录、不进遥测。Tasks 扩展(SEP-2663)不声明,server 回任务时报错而不等。
+答案只回给 server,不进转录、不进遥测。
+
+**server 把调用转成任务。** 客户端声明 Tasks 扩展(SEP-2663);server 回任务时调用在原地等:登记成
+`mcp_task`(只经 `TaskLease`)、轮询 `tasks/get`、任务里的询问走同一个 `McpElicitor`,完成的结果就是
+这次调用的结果。`tasks/cancel` 只从调用 future 的 `Drop` 发出(为什么见 `crates/mcp/src/tasks.rs`
+文件头)。
 
 ### 6.5 MCP 授权
 

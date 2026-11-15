@@ -6173,7 +6173,7 @@
           ]
         },
         "kind": {
-          "description": "`agent`, `teammate`, `member`, `shell`, `monitor`, `cron` or `code`.",
+          "description": "`agent`, `teammate`, `member`, `shell`, `monitor`, `cron`, `code` or `mcp_task`.",
           "type": "string"
         },
         "started_ms": {

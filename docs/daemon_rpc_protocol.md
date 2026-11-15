@@ -785,6 +785,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `goals` | 有 `session.goal` / `session.setGoal` / `session.updateGoal`,目标变化推 `goal_changed`(§6.3、§7) |
 | `question_prompts` | `session.create` 接受 `options.prompt_types`;列了 `question` 的会话把模型的 `AskUserQuestion` 推成 `prompt_type:"question"` 的 `prompt` 帧,用 `session.respondToPrompt` 回答(§6.3、§7) |
 | `mcp_elicitation` | `options.prompt_types` 认 `mcp_elicitation`:MCP server 在工具调用中向用户的询问推成 `prompt_type:"mcp_elicitation"` 的 `prompt` 帧,答案按 §4.7 回给 server(§6.3、§7) |
+| `mcp_tasks` | MCP server 可以把工具调用转成任务(tasks 扩展):它作为 `kind:"mcp_task"` 列在 `session.tasks`、状态经 `task_progress` / `task_updated` 推出、`session.stopTask` 发 `tasks/cancel`(§6.3、§7) |
 | `session_export` | 有 `session.export`,把会话连同侧链、附件打成一个归档写到宿主给的路径(§6.3) |
 | `session_import` | 有 `session.import`,把 `session.export` 的归档装成新会话(§6.3) |
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
@@ -2183,7 +2184,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 #### `session.tasks`
 
 这个会话里在会话之外继续跑的工作:子 Agent(前台的和后台的)、团队成员、执行中的
-Shell 命令与监视器,以及安排给它的定时任务(§6.7)。和模型用 `TaskOutput` / `TaskStop`
+Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排给它的定时任务(§6.7)。和模型用 `TaskOutput` / `TaskStop`
 看到的是同一份,另外列出活着的常驻团队成员。
 
 ```jsonc
@@ -2193,7 +2194,7 @@ Shell 命令与监视器,以及安排给它的定时任务(§6.7)。和模型用
 { "active": true,           // 引擎是否在内存里;不在时只有定时任务
   "tasks": [
     { "task_id": "…",
-      "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code
+      "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code | mcp_task
       "status": "running",  // running | waiting | done | failed | stopped;定时任务总是 waiting;member 为 idle | running
       "started_ms": 0, "ended_ms": null,
       "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,tag?}
@@ -2201,6 +2202,7 @@ Shell 命令与监视器,以及安排给它的定时任务(§6.7)。和模型用
                             // monitor:{command,description,persistent,tool_use_id}
                             // code:{description,background,tool_use_id}(RunCode 的程序,docs/ptc.md)
                             // cron:{cron,prompt,recurring,durable,expires_ms}
+                            // mcp_task:{server,tool,tool_use_id,mcp_task_id,mcp_status,status_message?,poll_interval_ms?,ttl_ms?}
       "usage": { },         // agent / teammate:它自己的模型调用到此刻的合计(§3.5 四字段)
       "structured_output": { },  // 带 output_schema 起的子 Agent 交了才有
       "waiting_for": [ "…" ],    // 仅 waiting(定时任务除外):在等宿主回答的 prompt_id
@@ -2217,6 +2219,13 @@ Shell 命令与监视器,以及安排给它的定时任务(§6.7)。和模型用
 
 子 Agent 有询问在等宿主回答(§10)时是 `waiting`,`waiting_for` 列出这些询问的
 `prompt_id`;答完(或超时)回到 `running`。它仍在跑:`stopTask`、`messageTask` 照常。
+
+`mcp_task` 在 MCP server 对 `tools/call` 回了任务时登记(客户端声明了 tasks 扩展),随这次调用
+结束:调用在原地等任务,完成的结果就是这次调用的结果,server 报失败则是错误结果。`mcp_status`
+是 server 报的原始状态(`working` / `input_required` / `completed` / `failed` / `cancelled`),
+`status` 按 `running`(含 `input_required`;在等宿主回答 server 的询问时为 `waiting`)、`done`、
+`failed`、`stopped` 映射;`error` 是 server 给的失败消息(server 的文字,不受信)。它不算后台任务,
+不挡重建。
 
 `member` 是一个活着的常驻团队成员(`id` 形如 `member-…`):它交给的每条消息各是一个 `teammate`
 任务,其中一个在跑时它是 `running`,否则 `idle`;`started_ms` 是它建起的时刻。活着的成员会挡住重建
@@ -2288,7 +2297,8 @@ stderr 按到达的块原样记下,两者交错。`RunCode` 程序记 `log()` / 
 
 和模型的 `TaskStop` 是同一个入口:取消这件工作所在的令牌 —— Shell 命令连同它的整个
 进程组一起结束,子 Agent 在下一个检查点停下;定时任务则是取消安排。被停掉的工具调用
-给模型回的是"已取消",这一轮照常继续。
+给模型回的是"已取消",这一轮照常继续。MCP 任务则向 server 发 `tasks/cancel`(协作式,server
+可能仍以完成告终,模型这边照样回"已取消");这一轮被打断时同样发。
 
 `session.tasks` 里它立刻是 `stopped`、带 `ended_ms`;`task_finished` 要等工作收完尾 —— 收尾时
 写的输出(进程退出前的几行、程序交回的结果)先随最后一帧 `task_progress` 出去。工作 15 秒内
@@ -3026,9 +3036,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `user_messages_returned` | `{messages:[{message_id,content}]}` | 运行中送来、但本轮结束前没读到的消息,不在 transcript 里,交还客户端 |
 | `turn_complete` | `{stop_reason,api_calls,tool_calls,seq,usage,last_call_usage,context?,structured_output?,message?,truncated?,persisted}` | 本轮结束,`persisted` 为 `true` 时 transcript 已落盘,`seq` 是此刻的消息数;最终响应随后到达 |
 | `error` | `{code,message,retryable,retry_after_ms,persisted}` | 本轮出错结束。只发给**发起这一轮之外**的订阅者 —— 发起者从 `run_turn` 的错误响应得知。`code`、`message`、`retryable`、`retry_after_ms` 与发起者收到的 `ENGINE_ERROR` 的 `data.kind`、`message`、`data.retryable`、`data.retry_after_ms` 相同(§9.1;字段叫 `code` 是因为帧里已经有 `kind:"error"`),`message` 同样是 "<kind>: <描述>";`persisted` 同 `turn_complete` 的(§7.2)。会话在这一轮中途被关闭或删除时 `code` 为 `session_closed`,引擎在一轮中途退出时为 `engine_stopped`,这两种 `persisted` 为 `false`(引擎没来得及报这一轮写到了哪里) |
-| `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;不属于任何一轮,`turn_id` 为 `null` |
+| `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;MCP 任务在 server 建任务时立即报;不属于任何一轮,`turn_id` 为 `null` |
 | `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
-| `task_progress` | `{task_id,appended,skipped_bytes,from_byte,next_byte}` | 一件报过开始的 Shell 命令、监视器或 `RunCode` 程序新打出来的输出,`appended` 是偏移 `from_byte..next_byte` 那段(偏移同 `session.taskOutput`)。每件任务每秒至多一帧,结束时在 `task_finished` 之前补最后一帧;一帧至多 8 KiB,多出的只发结尾,`skipped_bytes` 是跳过的字节数,恒等于本帧 `from_byte` 减上一帧 `next_byte`;漏帧或跳过的用 `session.taskOutput {from_byte}` 补;`turn_id` 为 `null` |
+| `task_progress` | `{task_id,appended,skipped_bytes,from_byte,next_byte}` | 一件报过开始的 Shell 命令、监视器、`RunCode` 程序或 MCP 任务(状态行 `[<mcp_status>] <status_message>`,每次变化一行,不受每秒一帧限制)新打出来的输出,`appended` 是偏移 `from_byte..next_byte` 那段(偏移同 `session.taskOutput`)。每件任务每秒至多一帧,结束时在 `task_finished` 之前补最后一帧;一帧至多 8 KiB,多出的只发结尾,`skipped_bytes` 是跳过的字节数,恒等于本帧 `from_byte` 减上一帧 `next_byte`;漏帧或跳过的用 `session.taskOutput {from_byte}` 补;`turn_id` 为 `null` |
 | `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
