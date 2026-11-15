@@ -218,6 +218,7 @@ async fn drive(
     let mut every = poll_every(created);
     let mut seen = (created.status, created.status_message.clone());
     let mut answered = BTreeSet::new();
+    let mut rounds = 0;
     let mut timeouts = 0;
     loop {
         tokio::time::sleep(every).await;
@@ -245,6 +246,12 @@ async fn drive(
                 if fresh.is_empty() {
                     continue;
                 }
+                if rounds == rmcp::model::DEFAULT_MRTR_MAX_ROUNDS {
+                    return Err(McpError::RmcpService(format!(
+                        "MCP server `{server}` asked for input more than {rounds} rounds"
+                    )));
+                }
+                rounds += 1;
                 answered.extend(fresh.keys().cloned());
                 let responses = answer_input_requests(server, fresh, scope).await?;
                 peer.update(id, responses).await?;
