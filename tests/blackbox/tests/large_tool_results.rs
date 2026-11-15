@@ -48,8 +48,8 @@ fn saved_path(run: &LiveRun, session: &str, tool_use_id: &str) -> PathBuf {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .collect();
     results_root(run)
-        .join(clean)
-        .join(format!("{tool_use_id}.txt"))
+        .join(&clean)
+        .join(format!("{clean}-{tool_use_id}.txt"))
 }
 
 fn last_turn_request(stub: &ProviderStub) -> SeenRequest {
@@ -300,7 +300,20 @@ async fn a_sub_agents_long_output_is_saved_under_the_root_session() -> anyhow::R
         ],
     );
     run.turn(&session, "delegate the counting").await?;
-    assert!(saved_path(&run, &session, "s1").exists());
+    let root_dir = saved_path(&run, &session, "s1")
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let saved: Vec<String> = std::fs::read_dir(&root_dir)?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with("-s1.txt"))
+        .collect();
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert!(
+        !saved[0].starts_with(session.as_str()),
+        "named by the sub-agent's session: {saved:?}"
+    );
     let dirs = std::fs::read_dir(results_root(&run))?.count();
     assert_eq!(dirs, 1, "one directory, the root session's");
     run.finish().await;

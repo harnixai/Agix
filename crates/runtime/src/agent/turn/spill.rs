@@ -32,8 +32,9 @@ pub(super) async fn spill_oversized(
         return outcome;
     }
     let saved = {
-        let (dir, id, body) = (dir.clone(), ctx.tool_use_id.clone(), text.clone());
-        tokio::task::spawn_blocking(move || write_spill(&dir, &id, &body)).await
+        let (dir, body) = (dir.clone(), text.clone());
+        let stem = file_stem_of(&ctx.session_id, &ctx.tool_use_id);
+        tokio::task::spawn_blocking(move || write_spill(&dir, &stem, &body)).await
     };
     let path = match saved {
         Ok(Ok(path)) => path,
@@ -72,15 +73,29 @@ fn preview(text: &str, path: &Path, max_line_chars: usize) -> String {
     format!("{marker}\n{cut}")
 }
 
-fn file_name_of(tool_use_id: &str) -> String {
-    let clean: String = tool_use_id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-        .collect();
-    format!("{}.txt", if clean.is_empty() { "result" } else { &clean })
+/// `<session>-<tool use>`: delegates save into their root's directory, and
+/// providers that number calls per reply (`call_0`) repeat ids across
+/// sessions and turns.
+fn file_stem_of(session_id: &str, tool_use_id: &str) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .collect()
+    };
+    let (session, call) = (clean(session_id), clean(tool_use_id));
+    let call = if call.is_empty() {
+        "result".into()
+    } else {
+        call
+    };
+    if session.is_empty() {
+        call
+    } else {
+        format!("{session}-{call}")
+    }
 }
 
-fn write_spill(dir: &Path, tool_use_id: &str, text: &str) -> std::io::Result<PathBuf> {
+fn write_spill(dir: &Path, stem: &str, text: &str) -> std::io::Result<PathBuf> {
     create_private_dir(dir)?;
     for level in [Some(dir), dir.parent()].into_iter().flatten() {
         if std::fs::symlink_metadata(level)?.file_type().is_symlink() {
@@ -94,7 +109,13 @@ fn write_spill(dir: &Path, tool_use_id: &str, text: &str) -> std::io::Result<Pat
     if !ignore.exists() {
         base::fs::write_atomic(&ignore, b"*\n", base::fs::WriteOpts::PRIVATE)?;
     }
-    let path = dir.join(file_name_of(tool_use_id));
+    let path = (0..)
+        .map(|n| match n {
+            0 => dir.join(format!("{stem}.txt")),
+            n => dir.join(format!("{stem}-{n}.txt")),
+        })
+        .find(|p| std::fs::symlink_metadata(p).is_err())
+        .unwrap_or_else(|| dir.join(format!("{stem}.txt")));
     base::fs::write_atomic(&path, text.as_bytes(), base::fs::WriteOpts::PRIVATE)?;
     Ok(path)
 }
@@ -159,9 +180,9 @@ mod tests {
 
     #[test]
     fn a_tool_use_id_with_path_characters_is_cleaned() {
-        assert_eq!(file_name_of("toolu_01-A"), "toolu_01-A.txt");
-        assert_eq!(file_name_of("../../etc/x"), "etcx.txt");
-        assert_eq!(file_name_of("//"), "result.txt");
+        assert_eq!(file_stem_of("s1", "toolu_01-A"), "s1-toolu_01-A");
+        assert_eq!(file_stem_of("../s", "../../etc/x"), "s-etcx");
+        assert_eq!(file_stem_of("", "//"), "result");
     }
 
     #[cfg(unix)]

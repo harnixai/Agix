@@ -1934,7 +1934,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
 | `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删 |
-| `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<tool_use_id>.txt`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删(`session.export` 目前不带) |
+| `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删(`session.export` 目前不带) |
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
 | `scenes/<id>/mcp/oauth/` | MCP server URL | 远端 MCP server 的 OAuth 凭据,一个 server 一个 0600 文件(§6.5) |
