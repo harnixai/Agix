@@ -58,7 +58,7 @@ pub(super) fn pack_saved_results(
     );
     let (mut files, mut missing) = (Vec::new(), 0usize);
     for name in names {
-        match std::fs::read(part.dir.join(&name)) {
+        match runtime::saved_results::read(&part.dir, &name, crate::import::MAX_FILE_BYTES) {
             Ok(bytes) => {
                 sink.put(&format!("tool-results/{name}"), &bytes, true)?;
                 files.push(json!({

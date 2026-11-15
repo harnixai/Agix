@@ -32,7 +32,7 @@ pub use crate::rpc::methods::session::ProjectRootParam;
 
 const MAX_ENTRIES: usize = 100_000;
 const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct ImportRequest {

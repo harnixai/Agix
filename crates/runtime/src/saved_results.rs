@@ -67,6 +67,36 @@ pub fn put(dir: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
     options.open(dir.join(name))?.write_all(bytes)
 }
 
+/// The bytes of the regular file `dir/name`, not through a symlink, refused
+/// over `limit`: what is in the directory is not only the engine's doing.
+pub fn read(dir: &Path, name: &str, limit: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let path = dir.join(name);
+    let refuse = |why: &str| Err(std::io::Error::other(format!("{}: {why}", path.display())));
+    if !std::fs::symlink_metadata(dir)?.is_dir() {
+        return refuse("its directory is not a directory");
+    }
+    let seen = std::fs::symlink_metadata(&path)?;
+    if !seen.is_file() {
+        return refuse("not a regular file");
+    }
+    let file = std::fs::File::open(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let opened = file.metadata()?;
+        if (opened.dev(), opened.ino()) != (seen.dev(), seen.ino()) {
+            return refuse("replaced while it was being opened");
+        }
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return refuse("over the size limit");
+    }
+    Ok(bytes)
+}
+
 /// The saved files in `dir`: regular files whose names pass `is_saved_file_name`.
 /// A missing or symlinked `dir` has none.
 pub fn files_in(dir: &Path) -> Vec<String> {
