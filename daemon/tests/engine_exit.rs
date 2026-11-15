@@ -134,3 +134,111 @@ async fn an_engine_that_dies_mid_turn_closes_its_session_as_engine_stopped_and_i
     let _ = handle.await;
     Ok(())
 }
+
+struct DiesOnTheFirstCallAfterAWhile(AtomicBool);
+
+impl AnthropicClient for DiesOnTheFirstCallAfterAWhile {
+    fn stream_messages(&self, _req: MessagesRequest) -> EventStream {
+        if !self.0.swap(true, Ordering::SeqCst) {
+            return Box::pin(futures::stream::once(async {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                panic!("the model client fell over");
+            }));
+        }
+        Box::pin(futures::stream::iter(
+            text_round("back again").into_iter().map(Ok),
+        ))
+    }
+
+    fn count_tokens<'a>(&'a self, _req: &'a MessagesRequest) -> CountFuture<'a> {
+        Box::pin(async { Ok(0usize) })
+    }
+}
+
+/// A turn queued behind the one whose engine dies runs on the session brought
+/// back from its transcript, as the next call would.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_queued_behind_an_engine_that_dies_runs_on_the_session_resumed() -> anyhow::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().to_path_buf();
+    let sock = root.join("exit.sock");
+    crate::support::trust_projects_under(&root, &root);
+    std::fs::write(
+        root.join("settings.json"),
+        json!({ "memory_enabled": false }).to_string(),
+    )?;
+    let config = load_daemon_config(
+        "claude-sonnet-4-6",
+        2000,
+        Some(&sock),
+        "code",
+        &StaticDaemonPaths::new(root.clone()),
+    );
+    let store: Arc<dyn history::store::HistoryStore> = Arc::new(
+        history::store::JsonlHistoryStore::with_roots(
+            &root,
+            history::path::HistoryRoots::under(&root),
+        )
+        .await?,
+    );
+    let pool = daemon::assemble::pool(
+        &config,
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+        daemon::Assembly {
+            cwd: Some(root.clone()),
+            model_client: Some(Arc::new(DiesOnTheFirstCallAfterAWhile(AtomicBool::new(
+                false,
+            )))),
+            transcripts: daemon::Transcripts::In(store),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let server = Arc::new(DaemonServer::new(pool, CancellationToken::new()));
+    let serving = server.clone();
+    let bind = sock.clone();
+    let handle = tokio::spawn(async move {
+        let _ = serving.serve_unix(&bind).await;
+    });
+    for _ in 0..80 {
+        if sock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let mut first = DaemonRpcClient::connect(&sock).await?;
+    let mut second = DaemonRpcClient::connect(&sock).await?;
+    let sid = first.session_create(json!({})).await?;
+    let dying = first.call(
+        "session.run_turn",
+        json!({ "session_id": sid, "message": "first" }),
+    );
+    let queued = async {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        second
+            .call(
+                "session.run_turn",
+                json!({ "session_id": sid, "message": "second", "on_busy": "queue" }),
+            )
+            .await
+    };
+    let (died, queued) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(dying, queued)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("the turns never ended"))?;
+    assert!(
+        died?.error.is_some(),
+        "the first turn fails with its engine"
+    );
+    let queued = queued?;
+    assert!(
+        queued.error.is_none(),
+        "the queued turn did not run on the resumed session: {queued:?}"
+    );
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+    Ok(())
+}
