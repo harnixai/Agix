@@ -159,15 +159,21 @@ impl Daemon {
 }
 
 async fn deny(sock: &Path, session_id: &str, prompt_id: &str) {
-    let reply = crate::support::call_frame(
-        sock,
-        "session.respondToPrompt",
-        json!({
-        "session_id": session_id, "prompt_id": prompt_id,
-        "decision": {"type": "deny", "reason": "audit"}}),
-    )
-    .await;
-    assert_eq!(reply["result"]["prompt_id"], prompt_id, "{reply}");
+    let reply = rpc_client::DaemonRpcClient::connect(sock)
+        .await
+        .unwrap()
+        .session_respond_to_prompt(
+            session_id,
+            prompt_id,
+            rpc_client::PromptReply::Permission(json!({"type": "deny", "reason": "audit"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.result.as_ref().map(|r| &r["prompt_id"]),
+        Some(&json!(prompt_id)),
+        "{reply:?}"
+    );
 }
 
 /// The state root is a read directory, but its settings, MCP OAuth tokens

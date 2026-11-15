@@ -57,6 +57,37 @@ pub struct TelemetryRunOptions {
     pub output: String,
 }
 
+/// `session.compact` 的 `at`，恰好一个。
+#[derive(Debug, Clone, Copy)]
+pub enum CompactAt<'a> {
+    Turn(&'a str),
+    ToolUse(&'a str),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RewindFlags {
+    pub force: bool,
+    pub allow_partial: bool,
+    pub dry_run: bool,
+    pub fork_first: bool,
+}
+
+/// 恰好一个：宿主跑了这次调用（`content` 是字符串或块数组），或跑不了。
+#[derive(Debug, Clone)]
+pub enum ToolCallReply {
+    Result { content: Value, is_error: bool },
+    Error(String),
+}
+
+/// `Permission` 带 `PermissionDecision` 的线上形状，如 `{"type": "permit"}`；
+/// 另两个带各自的 answer。
+#[derive(Debug, Clone)]
+pub enum PromptReply {
+    Permission(Value),
+    Question(Value),
+    McpElicitation(Value),
+}
+
 pub struct DaemonRpcClient {
     transport: Box<dyn Transport>,
     next_id: AtomicI64,
@@ -535,6 +566,98 @@ impl DaemonRpcClient {
             serde_json::json!({ "session_id": session_id }),
         )
         .await
+    }
+
+    /// `session.compact`。整轮读完才返回，期间这条连接上的帧被丢弃；要逐帧看的用另一条订阅连接。
+    pub async fn session_compact(
+        &mut self,
+        session_id: &str,
+        instructions: Option<&str>,
+        at: Option<CompactAt<'_>>,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "session_id": session_id });
+        if let Some(instructions) = instructions {
+            params["instructions"] = instructions.into();
+        }
+        match at {
+            Some(CompactAt::Turn(id)) => params["at"] = serde_json::json!({ "to_turn": id }),
+            Some(CompactAt::ToolUse(id)) => params["at"] = serde_json::json!({ "to_tool_use": id }),
+            None => {}
+        }
+        self.call("session.compact", params).await
+    }
+
+    /// `session.rewind`。`cut` 原样摊平进 params，与服务端的 `#[serde(flatten)]` 对应。
+    pub async fn session_rewind(
+        &mut self,
+        session_id: &str,
+        cut: &daemon::session_pool::api::RewindCut,
+        scope: daemon::session_pool::api::RewindScope,
+        flags: RewindFlags,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::to_value(cut)?;
+        params["session_id"] = session_id.into();
+        params["scope"] = serde_json::to_value(scope)?;
+        for (key, on) in [
+            ("force", flags.force),
+            ("allow_partial", flags.allow_partial),
+            ("dry_run", flags.dry_run),
+            ("fork_first", flags.fork_first),
+        ] {
+            params[key] = on.into();
+        }
+        self.call("session.rewind", params).await
+    }
+
+    /// `session.checkpoints`：回滚菜单，从日志读，不把会话带进内存。
+    pub async fn session_checkpoints(&mut self, session_id: &str) -> anyhow::Result<RpcResponse> {
+        self.call(
+            "session.checkpoints",
+            serde_json::json!({ "session_id": session_id }),
+        )
+        .await
+    }
+
+    /// `session.respondToolCall`。
+    pub async fn session_respond_tool_call(
+        &mut self,
+        session_id: &str,
+        call_id: &str,
+        reply: ToolCallReply,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "session_id": session_id, "call_id": call_id });
+        match reply {
+            ToolCallReply::Result { content, is_error } => {
+                params["result"] = serde_json::json!({ "content": content, "is_error": is_error });
+            }
+            ToolCallReply::Error(message) => {
+                params["error"] = serde_json::json!({ "message": message });
+            }
+        }
+        self.call("session.respondToolCall", params).await
+    }
+
+    /// `session.respondToPrompt`。`Permission` 的值进 `decision`，其余进 `answer`，
+    /// `prompt_type` 随变体。
+    pub async fn session_respond_to_prompt(
+        &mut self,
+        session_id: &str,
+        prompt_id: &str,
+        reply: PromptReply,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "session_id": session_id, "prompt_id": prompt_id });
+        match reply {
+            PromptReply::Permission(decision) => params["decision"] = decision,
+            PromptReply::Question(answer) => {
+                params["prompt_type"] = "question".into();
+                params["answer"] = answer;
+            }
+            PromptReply::McpElicitation(answer) => {
+                params["prompt_type"] = "mcp_elicitation".into();
+                params["answer"] = answer;
+            }
+        }
+        self.call("session.respondToPrompt", params).await
     }
 
     /// 读下一帧，不发任何请求——给"只旁观"的连接用。

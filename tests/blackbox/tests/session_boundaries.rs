@@ -1191,10 +1191,7 @@ async fn a_rebuilt_session_keeps_plan_mode_todos_and_loaded_tools() -> anyhow::R
     let after = runtime_of(&mut run, &session, "after").await?;
 
     stub.script_when(SUMMARY, [Reply::text("1. User intent — plan it.")]);
-    let compacted = run
-        .client
-        .call("session.compact", json!({ "session_id": session }))
-        .await?;
+    let compacted = run.client.session_compact(&session, None, None).await?;
     anyhow::ensure!(compacted.error.is_none(), "{compacted:?}");
     stub.script([Reply::text("after the compaction")]);
     run.turn(&session, "LAST-MARK and now").await?;
@@ -1534,7 +1531,16 @@ async fn a_host_tool_reply_with_a_bad_image_is_refused_and_can_be_given_again() 
     }
     let answered = run
         .client
-        .call("session.respondToolCall", reply("image/png", "AAAA".into()))
+        .session_respond_tool_call(
+            &session,
+            call_id.as_str().unwrap_or_default(),
+            rpc_client::ToolCallReply::Result {
+                content: json!([
+                    { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } }
+                ]),
+                is_error: false,
+            },
+        )
         .await?;
     assert!(answered.error.is_none(), "{answered:?}");
     tokio::time::timeout(Duration::from_secs(30), turn).await???;

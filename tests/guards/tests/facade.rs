@@ -160,7 +160,10 @@ fn collect(f: &SourceFile, items: &[Item], out: &mut Vec<Leaf>) {
 
 fn facade_leaves(prelude: bool) -> Vec<Leaf> {
     let mut out = Vec::new();
-    for f in facade_files().into_iter().filter(|f| is_prelude(f) == prelude) {
+    for f in facade_files()
+        .into_iter()
+        .filter(|f| is_prelude(f) == prelude)
+    {
         collect(f, &f.tree(View::Full).items, &mut out);
     }
     out

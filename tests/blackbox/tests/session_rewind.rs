@@ -11,6 +11,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Reply};
+use daemon::session_pool::api::{RewindCut, RewindScope};
+use rpc_client::RewindFlags;
 use serde_json::{json, Value};
 
 /// Only a turn's requests carry a tool table, so a title or memory call the
@@ -49,14 +51,12 @@ fn write(id: &str, path: &Path, content: &str) -> Reply {
 }
 
 async fn rpc(run: &mut LiveRun, method: &str, params: Value) -> anyhow::Result<Value> {
-    let response = run.client.call(method, params).await?;
+    ok(run.client.call(method, params).await?)
+}
+
+fn ok(response: daemon::rpc::RpcResponse) -> anyhow::Result<Value> {
     if let Some(error) = response.error {
-        anyhow::bail!(
-            "{method}: {} {} {:?}",
-            error.code,
-            error.message,
-            error.data
-        );
+        anyhow::bail!("{} {} {:?}", error.code, error.message, error.data);
     }
     Ok(response.result.unwrap_or_default())
 }
@@ -125,12 +125,7 @@ async fn writing_twice_and_rewinding_to_the_first_turn_puts_files_and_history_ba
     run.turn(&session, "second MARK-TWO").await?;
     assert_eq!(read(&a).as_deref(), Some("v2\n"));
 
-    let menu = rpc(
-        &mut run,
-        "session.checkpoints",
-        json!({ "session_id": session }),
-    )
-    .await?;
+    let menu = ok(run.client.session_checkpoints(&session).await?)?;
     assert_eq!(menu["enabled"], true, "{menu}");
     assert_eq!(menu["interrupted_rewind"], Value::Null, "{menu}");
     assert_eq!(menu["turns"][0]["turn_id"], "rewind-both-t1", "{menu}");
@@ -163,13 +158,21 @@ async fn writing_twice_and_rewinding_to_the_first_turn_puts_files_and_history_ba
         "the export carries what a.txt was"
     );
 
-    let report = rpc(
-        &mut run,
-        "session.rewind",
-        json!({ "session_id": session, "to_turn": "rewind-both-t1", "scope": "both",
-                "fork_first": true }),
-    )
-    .await?;
+    let report = ok(run
+        .client
+        .session_rewind(
+            &session,
+            &RewindCut {
+                to_turn: Some("rewind-both-t1".into()),
+                ..Default::default()
+            },
+            RewindScope::Both,
+            RewindFlags {
+                fork_first: true,
+                ..Default::default()
+            },
+        )
+        .await?)?;
     assert_eq!(read(&a).as_deref(), Some("v1\n"));
     let fork = report["fork_session_id"]
         .as_str()

@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use crate::support::*;
+use rpc_client::{CompactAt, DaemonRpcClient};
 use serde_json::json;
 
 async fn three_turns() -> (ScriptedServer, SeenRequests, String) {
@@ -45,12 +46,12 @@ fn history_text(history: &serde_json::Value) -> String {
 async fn instructions_reach_the_summary_request() {
     let (srv, seen, sid) = three_turns().await;
 
-    call(
-        &srv.sock,
-        "session.compact",
-        json!({ "session_id": sid, "instructions": "keep every file path verbatim" }),
-    )
-    .await;
+    let mut client = DaemonRpcClient::connect(&srv.sock).await.unwrap();
+    let compacted = client
+        .session_compact(&sid, Some("keep every file path verbatim"), None)
+        .await
+        .unwrap();
+    assert!(compacted.error.is_none(), "{compacted:?}");
 
     {
         let requests = seen.lock().unwrap();
@@ -68,12 +69,12 @@ async fn instructions_reach_the_summary_request() {
 async fn at_a_turn_keeps_what_follows_as_it_was() {
     let (srv, seen, sid) = three_turns().await;
 
-    call(
-        &srv.sock,
-        "session.compact",
-        json!({ "session_id": sid, "at": { "to_turn": "t1" } }),
-    )
-    .await;
+    let mut client = DaemonRpcClient::connect(&srv.sock).await.unwrap();
+    let compacted = client
+        .session_compact(&sid, None, Some(CompactAt::Turn("t1")))
+        .await
+        .unwrap();
+    assert!(compacted.error.is_none(), "{compacted:?}");
 
     let summarized = serde_json::to_string(seen.lock().unwrap().last().unwrap()).unwrap();
     assert!(summarized.contains("first question"), "{summarized}");
