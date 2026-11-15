@@ -231,8 +231,7 @@ async fn drive(
     };
     let mut every = poll_every(created);
     let mut seen = (created.status, created.status_message.clone());
-    let mut answered = BTreeSet::new();
-    let mut rounds = 0;
+    let mut asked = Asked::default();
     let mut timeouts = 0;
     loop {
         if left.is_zero() {
@@ -259,33 +258,16 @@ async fn drive(
         match got.payload {
             TaskPayload::Working => {}
             TaskPayload::InputRequired { input_requests } => {
-                let fresh: rmcp::model::InputRequests = input_requests
-                    .into_iter()
-                    .filter(|(key, _)| !answered.contains(key))
-                    .collect();
-                if fresh.is_empty() {
-                    continue;
+                if let Some(fresh) = asked.fresh(server, input_requests)? {
+                    let responses = answer_input_requests(server, fresh, scope).await?;
+                    peer.update(id, responses).await?;
                 }
-                if rounds == rmcp::model::DEFAULT_MRTR_MAX_ROUNDS {
-                    return Err(McpError::RmcpService(format!(
-                        "MCP server `{server}` asked for input more than {rounds} rounds"
-                    )));
-                }
-                rounds += 1;
-                answered.extend(fresh.keys().cloned());
-                let responses = answer_input_requests(server, fresh, scope).await?;
-                peer.update(id, responses).await?;
             }
             TaskPayload::Completed { result } => {
                 return Ok(serde_json::from_value(serde_json::Value::Object(result))?);
             }
             TaskPayload::Failed { error } => {
-                let message = error.get("message").and_then(|m| m.as_str()).map_or_else(
-                    || serde_json::Value::Object(error.clone()).to_string(),
-                    str::to_string,
-                );
-                let message: String = message.chars().take(FAILURE_MESSAGE_CHARS).collect();
-                return Err(ended(format!("failed: {message}")));
+                return Err(ended(format!("failed: {}", failure_of(&error))))
             }
             TaskPayload::Cancelled => return Err(ended("was cancelled by the server".into())),
             _ => {
@@ -294,6 +276,50 @@ async fn drive(
                 )))
             }
         }
+    }
+}
+
+/// The server's message for a failed task, cut to [`FAILURE_MESSAGE_CHARS`].
+fn failure_of(error: &rmcp::model::JsonObject) -> String {
+    let message = error.get("message").and_then(|m| m.as_str()).map_or_else(
+        || serde_json::Value::Object(error.clone()).to_string(),
+        str::to_string,
+    );
+    message.chars().take(FAILURE_MESSAGE_CHARS).collect()
+}
+
+/// The keys a task's questions have been answered under, and in how many
+/// rounds: a round is a poll that brings a new key.
+#[derive(Default)]
+struct Asked {
+    keys: BTreeSet<String>,
+    rounds: usize,
+}
+
+impl Asked {
+    /// The questions not answered yet, or `None` when there are none; more
+    /// rounds than an MRTR call may take is an error.
+    fn fresh(
+        &mut self,
+        server: &str,
+        requests: rmcp::model::InputRequests,
+    ) -> Result<Option<rmcp::model::InputRequests>, McpError> {
+        let fresh: rmcp::model::InputRequests = requests
+            .into_iter()
+            .filter(|(key, _)| !self.keys.contains(key))
+            .collect();
+        if fresh.is_empty() {
+            return Ok(None);
+        }
+        if self.rounds == rmcp::model::DEFAULT_MRTR_MAX_ROUNDS {
+            return Err(McpError::RmcpService(format!(
+                "MCP server `{server}` asked for input more than {} rounds",
+                self.rounds
+            )));
+        }
+        self.rounds += 1;
+        self.keys.extend(fresh.keys().cloned());
+        Ok(Some(fresh))
     }
 }
 
