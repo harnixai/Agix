@@ -18,6 +18,7 @@ mod mcp_boundaries;
 mod mcp_elicitation;
 mod mcp_tasks;
 mod minimal_tier;
+mod openai_responses;
 mod package_trust;
 mod permission_bounds;
 mod project_trust_untrusted;

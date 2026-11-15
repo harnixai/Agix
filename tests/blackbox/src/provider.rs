@@ -119,6 +119,10 @@ pub enum Reply {
         chunks: Vec<serde_json::Value>,
         done: bool,
     },
+    /// An OpenAI Responses stream: these events as named SSE events (the
+    /// name is each event's `type`). For a project whose provider is
+    /// `openai_responses` with this stub as its `base_url`.
+    Responses(Vec<serde_json::Value>),
 }
 
 impl Reply {
@@ -175,6 +179,37 @@ impl Reply {
         Self::Chat { chunks, done }
     }
 
+    pub fn responses(events: Vec<serde_json::Value>) -> Self {
+        Self::Responses(events)
+    }
+
+    /// A Responses stream of one text answer that spent `INPUT_TOKENS` (of
+    /// which `CACHE_READ_TOKENS` were cached) and `OUTPUT_TOKENS`.
+    pub fn responses_text(text: &str) -> Self {
+        Self::Responses(vec![
+            serde_json::json!({"type": "response.created", "response": {}}),
+            serde_json::json!({"type": "response.output_text.delta", "output_index": 0, "delta": text}),
+            responses_completed(),
+        ])
+    }
+
+    /// A Responses stream of one function call, its arguments split in two
+    /// deltas the way a provider streams them.
+    pub fn responses_calls(call_id: &str, name: &str, input: serde_json::Value) -> Self {
+        let args = input.to_string();
+        let (a, b) = args.split_at(args.len() / 2);
+        Self::Responses(vec![
+            serde_json::json!({"type": "response.created", "response": {}}),
+            serde_json::json!({"type": "response.output_item.added", "output_index": 0,
+                "item": {"type": "function_call", "call_id": call_id, "name": name, "arguments": ""}}),
+            serde_json::json!({"type": "response.function_call_arguments.delta", "output_index": 0, "delta": a}),
+            serde_json::json!({"type": "response.function_call_arguments.delta", "output_index": 0, "delta": b}),
+            serde_json::json!({"type": "response.output_item.done", "output_index": 0,
+                "item": {"type": "function_call", "call_id": call_id, "name": name, "arguments": args}}),
+            responses_completed(),
+        ])
+    }
+
     /// `kind` is the provider's error type — `overloaded_error`,
     /// `invalid_request_error`.
     pub fn errored(blocks: Vec<Block>, kind: &str, message: &str) -> Self {
@@ -222,6 +257,16 @@ impl Reply {
                     "type": "error",
                     "error": { "type": kind, "message": message }
                 })));
+                (Duration::ZERO, text.into_bytes())
+            }
+            Self::Responses(events) => {
+                let mut text = String::from(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncache-control: no-cache\r\nconnection: close\r\n\r\n",
+                );
+                for e in events {
+                    let kind = e["type"].as_str().unwrap_or_default();
+                    text.push_str(&format!("event: {kind}\ndata: {e}\n\n"));
+                }
                 (Duration::ZERO, text.into_bytes())
             }
             Self::Chat { chunks, done } => {
@@ -307,6 +352,13 @@ impl Failures {
         self.remaining -= 1;
         self.reply.clone()
     }
+}
+
+fn responses_completed() -> serde_json::Value {
+    serde_json::json!({"type": "response.completed", "response": {"usage": {
+        "input_tokens": INPUT_TOKENS + CACHE_READ_TOKENS,
+        "output_tokens": OUTPUT_TOKENS,
+        "input_tokens_details": {"cached_tokens": CACHE_READ_TOKENS}}}})
 }
 
 pub(crate) fn is_conversation(path: &str) -> bool {
