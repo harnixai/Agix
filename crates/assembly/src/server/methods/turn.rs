@@ -1,6 +1,6 @@
 //! 跑一轮与上下文：`session.run_turn` / `compact` / `clear` / `respondToPrompt` /
-//! `respondToolCall` / `inspectContext` / `dropMessages` / `editMessage` /
-//! `rewind` / `checkpoints`。
+//! `respondToolCall` / `respondHook` / `reportToolProgress` / `inspectContext` /
+//! `dropMessages` / `editMessage` / `rewind` / `checkpoints`。
 
 use super::*;
 use crate::rpc::methods::session::SessionRef;
@@ -19,6 +19,8 @@ rpc_methods! {
     "session.clear" => clear(SessionRef) -> TurnReply;
     "session.respondToPrompt" => respond_to_prompt(RespondToPromptParams) -> PromptAnswered;
     "session.respondToolCall" => respond_tool_call(RespondToolCallParams) -> ToolCallAnswered;
+    "session.respondHook" => respond_hook(RespondHookParams) -> HookAnswered;
+    "session.reportToolProgress" => report_tool_progress(ReportToolProgressParams) -> ProgressReported;
     "session.inspectContext" => inspect_context(SessionRef) -> ContextReport;
     "session.dropMessages" => drop_messages(DropMessagesParams) -> Dropped;
     "session.editMessage" => edit_message(EditMessageParams) -> Edited;
@@ -103,6 +105,9 @@ async fn respond_to_prompt(
                 "a host tool call is answered with session.respondToolCall",
             ))
         }
+        AskKind::HookCall => {
+            return Err(invalid("a hook call is answered with session.respondHook"))
+        }
     };
     s.pool
         .respond_to_prompt(&p.session_id, p.prompt_id.clone(), answer)
@@ -119,16 +124,43 @@ fn answer_as<T: serde::de::DeserializeOwned>(
     serde_json::from_value(answer).map_err(|e| invalid(format!("answer: {e}")))
 }
 
+fn caller(cx: &Call) -> Option<crate::session_pool::api::WatcherId> {
+    Some(crate::session_pool::api::WatcherId(cx.client.id().0))
+}
+
 async fn respond_tool_call(
     s: &DaemonServer,
-    _: &Call,
+    cx: &Call,
     p: RespondToolCallParams,
 ) -> Result<ToolCallAnswered, RpcError> {
     let reply = p.reply().map_err(invalid)?;
     s.pool
-        .respond_tool_call(&p.session_id, p.call_id.clone(), reply)
+        .respond_tool_call_from(caller(cx), &p.session_id, p.call_id.clone(), reply)
         .await?;
     Ok(ToolCallAnswered { call_id: p.call_id })
+}
+
+async fn respond_hook(
+    s: &DaemonServer,
+    cx: &Call,
+    p: RespondHookParams,
+) -> Result<HookAnswered, RpcError> {
+    let answer = p.answer().map_err(invalid)?;
+    s.pool
+        .respond_hook(caller(cx), &p.session_id, p.call_id.clone(), answer)
+        .await?;
+    Ok(HookAnswered { call_id: p.call_id })
+}
+
+async fn report_tool_progress(
+    s: &DaemonServer,
+    cx: &Call,
+    p: ReportToolProgressParams,
+) -> Result<ProgressReported, RpcError> {
+    s.pool
+        .report_tool_progress(caller(cx), &p.session_id, p.call_id.clone(), p.update())
+        .await?;
+    Ok(ProgressReported { call_id: p.call_id })
 }
 
 async fn inspect_context(

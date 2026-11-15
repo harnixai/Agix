@@ -11,6 +11,7 @@
 //!   inside parentheses belongs to the content, not the alternation
 
 use crate::payload::HookInput;
+use base::interface::tool_selector::ToolPattern;
 
 /// Check whether a hook's `if` pattern matches the given input.
 pub(crate) fn if_matches(pattern: &str, input: &HookInput) -> bool {
@@ -141,6 +142,17 @@ fn match_tool_name(rule: &str, actual: &str) -> bool {
         }
     }
     false
+}
+
+/// A tool selector pattern ([`ToolPattern`]) on the name alone: a hook payload names the tool, not
+/// its origin, and an MCP tool's name is `mcp__<server>__<tool>`.
+pub fn tool_matches(pattern: &str, name: &str) -> bool {
+    match ToolPattern::parse(pattern) {
+        ToolPattern::Name(n) => name == n,
+        ToolPattern::Prefix(p) => name.starts_with(p.as_str()),
+        ToolPattern::McpServer(s) => name.starts_with(&format!("mcp__{s}__")),
+        ToolPattern::AnyMcp => name.starts_with("mcp__"),
+    }
 }
 
 fn match_content(pattern: &str, content: &str) -> bool {

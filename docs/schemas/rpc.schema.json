@@ -80,6 +80,11 @@
           "const": "host_tool_call",
           "description": "A call to a tool the host declared; answered with\n`session.respondToolCall`, never `session.respondToPrompt`.",
           "type": "string"
+        },
+        {
+          "const": "hook_call",
+          "description": "A hook a host connection registered; answered with\n`session.respondHook` by that connection alone.",
+          "type": "string"
         }
       ]
     },
@@ -2996,6 +3001,38 @@
       ],
       "type": "object"
     },
+    "HookAnswered": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "HooksSet": {
+      "properties": {
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/HostHookSet"
+          },
+          "type": "array"
+        },
+        "refused": {
+          "items": {
+            "$ref": "#/$defs/RefusedEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hooks",
+        "refused"
+      ],
+      "type": "object"
+    },
     "HostContentBlock": {
       "description": "The `text` and `image` blocks of §4.1.",
       "oneOf": [
@@ -3032,6 +3069,26 @@
           "type": "object"
         }
       ]
+    },
+    "HostHookSet": {
+      "properties": {
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "events"
+      ],
+      "type": "object"
     },
     "HostToolContent": {
       "anyOf": [
@@ -3124,6 +3181,28 @@
       },
       "required": [
         "content"
+      ],
+      "type": "object"
+    },
+    "HostToolsSet": {
+      "properties": {
+        "host_tools": {
+          "description": "The names of the tools taken.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "refused": {
+          "items": {
+            "$ref": "#/$defs/RefusedEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "host_tools",
+        "refused"
       ],
       "type": "object"
     },
@@ -4431,6 +4510,17 @@
       ],
       "type": "object"
     },
+    "ProgressReported": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object"
+    },
     "ProjectStatus": {
       "properties": {
         "default": {
@@ -4803,6 +4893,36 @@
       ],
       "type": "object"
     },
+    "RefusedEntry": {
+      "description": "An entry `daemon.setHostTools` or `daemon.setHooks` did not take, and why;\nthe others are taken all the same.",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "field": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "index",
+        "error"
+      ],
+      "type": "object"
+    },
     "RemovedTurn": {
       "properties": {
         "prompt": {
@@ -4855,6 +4975,85 @@
       },
       "required": [
         "session_id"
+      ],
+      "type": "object"
+    },
+    "ReportToolProgressParams": {
+      "additionalProperties": false,
+      "description": "One progress report on an open host tool call; the keys of the\n`tool_progress` frame it becomes.",
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "progress": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "total": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "call_id",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RespondHookParams": {
+      "additionalProperties": false,
+      "description": "The answer to a `hook_call` frame: what a hook response may say, but\napproving, rewriting the input, ending the turn or asking to be run again.",
+      "properties": {
+        "additional_context": {
+          "default": null,
+          "description": "For the events that take it: text put in front of the model at its\nnext step.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "decision": {
+          "default": null,
+          "description": "`block` or `proceed`; omitted: `proceed`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "default": null,
+          "description": "With `block`: what the model reads, after the hook's prefix\n(`Blocked by PreToolUse hook: `).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "description": "The session the frame came in, a sub-agent's call's parent included.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "call_id"
       ],
       "type": "object"
     },
@@ -6749,6 +6948,35 @@
       ],
       "type": "object"
     },
+    "SetHooksParams": {
+      "additionalProperties": false,
+      "properties": {
+        "hooks": {
+          "default": null,
+          "description": "Each entry a `HostHookOption`; `[]` or `null` withdraws them all.\nRead one by one: a bad entry is refused alone.",
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SetHostToolsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "host_tools": {
+          "description": "Each entry as `options.host_tools` takes it; `[]` withdraws them all.\nRead one by one: a bad entry is refused alone.",
+          "items": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "host_tools"
+      ],
+      "type": "object"
+    },
     "SetModelParams": {
       "properties": {
         "model": {
@@ -8036,6 +8264,22 @@
         "$ref": "#/$defs/Pong"
       }
     },
+    "daemon.setHooks": {
+      "params": {
+        "$ref": "#/$defs/SetHooksParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HooksSet"
+      }
+    },
+    "daemon.setHostTools": {
+      "params": {
+        "$ref": "#/$defs/SetHostToolsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HostToolsSet"
+      }
+    },
     "daemon.shutdown": {
       "params": {
         "description": "no params; anything sent is ignored",
@@ -8514,6 +8758,22 @@
       },
       "result": {
         "$ref": "#/$defs/Renamed"
+      }
+    },
+    "session.reportToolProgress": {
+      "params": {
+        "$ref": "#/$defs/ReportToolProgressParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ProgressReported"
+      }
+    },
+    "session.respondHook": {
+      "params": {
+        "$ref": "#/$defs/RespondHookParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HookAnswered"
       }
     },
     "session.respondToPrompt": {
@@ -9031,6 +9291,30 @@
           "properties": {
             "kind": {
               "const": "goal_changed"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "hook_call": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "hook_call"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "hook_call_resolved": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "hook_call_resolved"
             }
           },
           "required": [

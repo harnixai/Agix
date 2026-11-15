@@ -1348,6 +1348,15 @@ impl Observed {
 
 const SESSION_EVENTS_NOT_PROVOKED: &[(&str, &str)] = &[
     (
+        "hook_call",
+        "only the connection that registered hooks with daemon.setHooks receives it, and this \
+         harness registers none; the host-hook cases in the black-box suite drive it",
+    ),
+    (
+        "hook_call_resolved",
+        "follows hook_call, to the same connection only",
+    ),
+    (
         "team_progress",
         "needs a team definition and a model that drives the Team tool through its stages",
     ),

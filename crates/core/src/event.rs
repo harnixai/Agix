@@ -186,10 +186,36 @@ pub enum AgentEvent {
         /// The sub-agent's session, when a sub-agent made the call.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_session_id: Option<String>,
+        /// The connection that provides the tool, when one does.
+        #[serde(skip)]
+        host: Option<crate::interface::host_call::HostId>,
     },
 
     /// The host call `call_id` is no longer open. Emitted once per call.
     HostToolCallResolved {
+        call_id: String,
+        resolution: PromptResolution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<HostCallWithdrawal>,
+    },
+
+    /// A hook `host` registered fires: the host answers it with `call_id`.
+    /// `input` is the payload a command hook reads on stdin.
+    HostHookCall {
+        call_id: String,
+        hook_event: String,
+        input: Value,
+        timeout_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_session_id: Option<String>,
+        #[serde(skip)]
+        host: Option<crate::interface::host_call::HostId>,
+    },
+
+    /// The hook call `call_id` is no longer open. Emitted once per call.
+    HostHookCallResolved {
         call_id: String,
         resolution: PromptResolution,
         #[serde(default, skip_serializing_if = "Option::is_none")]

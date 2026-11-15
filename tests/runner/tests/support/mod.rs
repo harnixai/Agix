@@ -340,6 +340,8 @@ pub fn normalize_events(events: &[AgentEvent]) -> String {
             AgentEvent::PromptResolved { .. } => continue,
             AgentEvent::HostToolCall { name, .. } => format!("HostToolCall {name}"),
             AgentEvent::HostToolCallResolved { .. } => continue,
+            AgentEvent::HostHookCall { hook_event, .. } => format!("HostHookCall {hook_event}"),
+            AgentEvent::HostHookCallResolved { .. } => continue,
             AgentEvent::TurnStart { .. } => "TurnStart".to_string(),
             AgentEvent::StepStart { step, .. } => format!("StepStart step={step}"),
             AgentEvent::ModelRetry {

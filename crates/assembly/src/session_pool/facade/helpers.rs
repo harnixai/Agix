@@ -1,6 +1,7 @@
 //! 池内通用的自由函数：事件中继与发布、LRU 驱逐、空闲判定等。
 
 use crate::session_pool::*;
+use base::interface::host_call::HostId;
 
 /// A goal round as its own boxed future: `run_turn` starts rounds and rounds
 /// run `run_turn`, so the `Send` of one cannot be inferred from the other.
@@ -33,23 +34,48 @@ pub(in crate::session_pool) fn relay_events(
 }
 
 /// The ask `event` raises — its `prompt_id`, the background task asking it
-/// when one does, and what kind of answer it wants.
+/// when one does, what kind of answer it wants, and the connection that
+/// alone answers it when one does.
 pub(in crate::session_pool) fn ask_of(
     event: &AgentEvent,
-) -> Option<(String, Option<String>, AskKind)> {
+) -> Option<(String, Option<String>, AskKind, Option<HostId>)> {
     match event {
         AgentEvent::PermissionPrompt {
             prompt_id, task_id, ..
-        } => Some((prompt_id.clone(), task_id.clone(), AskKind::Permission)),
+        } => Some((
+            prompt_id.clone(),
+            task_id.clone(),
+            AskKind::Permission,
+            None,
+        )),
         AgentEvent::QuestionPrompt {
             prompt_id, task_id, ..
-        } => Some((prompt_id.clone(), task_id.clone(), AskKind::Question)),
+        } => Some((prompt_id.clone(), task_id.clone(), AskKind::Question, None)),
         AgentEvent::McpElicitationPrompt {
             prompt_id, task_id, ..
-        } => Some((prompt_id.clone(), task_id.clone(), AskKind::McpElicitation)),
+        } => Some((
+            prompt_id.clone(),
+            task_id.clone(),
+            AskKind::McpElicitation,
+            None,
+        )),
         AgentEvent::HostToolCall {
-            call_id, task_id, ..
-        } => Some((call_id.clone(), task_id.clone(), AskKind::HostToolCall)),
+            call_id,
+            task_id,
+            host,
+            ..
+        } => Some((
+            call_id.clone(),
+            task_id.clone(),
+            AskKind::HostToolCall,
+            *host,
+        )),
+        AgentEvent::HostHookCall {
+            call_id,
+            task_id,
+            host,
+            ..
+        } => Some((call_id.clone(), task_id.clone(), AskKind::HookCall, *host)),
         _ => None,
     }
 }
@@ -64,8 +90,15 @@ pub(in crate::session_pool) fn publish_agent_event(
 ) {
     let ask = ask_of(&event);
     let resolved = match &event {
-        AgentEvent::PromptResolved { prompt_id, .. } => Some(prompt_id.clone()),
-        AgentEvent::HostToolCallResolved { call_id, .. } => Some(call_id.clone()),
+        AgentEvent::PromptResolved { prompt_id, .. } => {
+            Some((prompt_id.clone(), AskKind::Permission))
+        }
+        AgentEvent::HostToolCallResolved { call_id, .. } => {
+            Some((call_id.clone(), AskKind::HostToolCall))
+        }
+        AgentEvent::HostHookCallResolved { call_id, .. } => {
+            Some((call_id.clone(), AskKind::HookCall))
+        }
         _ => None,
     };
     let frame = SessionFrame {
@@ -74,10 +107,10 @@ pub(in crate::session_pool) fn publish_agent_event(
         event: SessionEvent::Agent(event),
     };
     match (ask, resolved) {
-        (Some((prompt_id, task_id, kind)), _) => {
-            hub.publish_ask(Arc::new(frame), prompt_id, task_id, kind)
+        (Some((prompt_id, task_id, kind, host)), _) => {
+            hub.publish_ask(Arc::new(frame), prompt_id, task_id, kind, host)
         }
-        (None, Some(prompt_id)) => hub.publish_resolved(&frame, &prompt_id),
+        (None, Some((prompt_id, kind))) => hub.publish_resolved(&frame, &prompt_id, kind),
         (None, None) => hub.publish(&frame),
     }
 }

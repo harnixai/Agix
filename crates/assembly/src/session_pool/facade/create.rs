@@ -176,6 +176,7 @@ impl SessionPool {
             };
         }
 
+        core.hub().serve_hosts(self.factory.hosts().clone());
         let (engine, event_rx) = run_engine(built, generation, &binding, claim, core.hub());
         let (event_rx, arrived) = relay_events(event_rx);
         let turn = TurnSlot::new(event_rx);
@@ -305,6 +306,7 @@ impl SessionPool {
             return Err(e);
         }
 
+        core.hub().serve_hosts(self.factory.hosts().clone());
         let (engine, event_rx) = run_engine(built, generation, &binding, claim, core.hub());
         let (event_rx, arrived) = relay_events(event_rx);
         let cancel = engine.cancel.clone();

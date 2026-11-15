@@ -239,6 +239,86 @@ pub struct ToolCallAnswered {
     pub call_id: String,
 }
 
+/// The answer to a `hook_call` frame: what a hook response may say, but
+/// approving, rewriting the input, ending the turn or asking to be run again.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RespondHookParams {
+    /// The session the frame came in, a sub-agent's call's parent included.
+    pub session_id: String,
+    pub call_id: String,
+    /// `block` or `proceed`; omitted: `proceed`.
+    #[serde(default)]
+    pub decision: Option<String>,
+    /// With `block`: what the model reads, after the hook's prefix
+    /// (`Blocked by PreToolUse hook: `).
+    #[serde(default)]
+    pub message: Option<String>,
+    /// For the events that take it: text put in front of the model at its
+    /// next step.
+    #[serde(default)]
+    pub additional_context: Option<String>,
+}
+
+impl RespondHookParams {
+    pub fn answer(&self) -> Result<crate::session_pool::api::HookAnswer, String> {
+        let block = match self.decision.as_deref() {
+            None | Some("proceed") => false,
+            Some("block") => true,
+            Some("approve") => {
+                return Err(
+                    "a host hook cannot approve a call: it may block it or let it \
+                            proceed to the permission check"
+                        .into(),
+                )
+            }
+            Some(other) => return Err(format!("decision `{other}` is not `block` or `proceed`")),
+        };
+        Ok(crate::session_pool::api::HookAnswer {
+            block,
+            message: self.message.clone(),
+            additional_context: self.additional_context.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HookAnswered {
+    pub call_id: String,
+}
+
+/// One progress report on an open host tool call; the keys of the
+/// `tool_progress` frame it becomes.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReportToolProgressParams {
+    pub session_id: String,
+    pub call_id: String,
+    pub message: String,
+    #[serde(default)]
+    pub progress: Option<f64>,
+    #[serde(default)]
+    pub total: Option<f64>,
+}
+
+impl ReportToolProgressParams {
+    pub fn update(&self) -> base::tool::ProgressUpdate {
+        let mut update = base::tool::ProgressUpdate::text(&self.message);
+        if let Some(progress) = self.progress {
+            update = update.with_progress(progress);
+        }
+        if let Some(total) = self.total {
+            update = update.with_total(total);
+        }
+        update
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProgressReported {
+    pub call_id: String,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DropMessagesParams {
     pub session_id: String,
@@ -341,4 +421,55 @@ pub struct RewindParams {
     /// Fork the whole session first, so the rewound part survives there.
     #[serde(default)]
     pub fork_first: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parse(extra: serde_json::Value) -> Result<RespondHookParams, serde_json::Error> {
+        let mut params = json!({"session_id": "s", "call_id": "hk_1"});
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(params)
+    }
+
+    #[test]
+    fn respond_hook_takes_block_proceed_and_context() {
+        let block = parse(json!({"decision": "block", "message": "m"})).unwrap();
+        let answer = block.answer().unwrap();
+        assert!(answer.block);
+        assert_eq!(answer.message.as_deref(), Some("m"));
+
+        assert!(!parse(json!({})).unwrap().answer().unwrap().block);
+        assert!(
+            !parse(json!({"decision": "proceed", "additional_context": "c"}))
+                .unwrap()
+                .answer()
+                .unwrap()
+                .block
+        );
+    }
+
+    #[test]
+    fn respond_hook_refuses_approve_and_unknown_decisions() {
+        assert!(parse(json!({"decision": "approve"}))
+            .unwrap()
+            .answer()
+            .is_err());
+        assert!(parse(json!({"decision": "maybe"}))
+            .unwrap()
+            .answer()
+            .is_err());
+    }
+
+    #[test]
+    fn respond_hook_refuses_fields_a_host_hook_may_not_use() {
+        for field in ["updated_input", "continue", "rewake"] {
+            assert!(parse(json!({ field: true })).is_err(), "{field}");
+        }
+    }
 }

@@ -32,6 +32,7 @@ struct InputDemux {
     questions: crate::elicitation::PendingQuestions,
     mcp: crate::elicitation::PendingMcpAnswers,
     host_calls: crate::host_tools::PendingHostCalls,
+    host_progress: crate::host_tools::PendingHostProgress,
     denials: Arc<std::sync::atomic::AtomicU32>,
     turn_cancel: Arc<std::sync::Mutex<TurnCancel>>,
     session_cancel: CancellationToken,
@@ -91,6 +92,9 @@ impl InputDemux {
                 }
                 InputMessage::HostToolResponse { call_id, end } => {
                     crate::host_tools::resolve_host_call(&self.host_calls, &call_id, end);
+                }
+                InputMessage::HostToolProgress { call_id, update } => {
+                    crate::host_tools::report_host_progress(&self.host_progress, &call_id, update);
                 }
                 InputMessage::System {
                     kind: EngineCommand::CancelTurn { turn_id },
@@ -230,6 +234,7 @@ impl Agent {
             let session_cancel = cancel.clone();
             let steering = self.channels.steering.clone();
             let host_calls = self.channels.pending_host_calls.clone();
+            let host_progress = self.channels.pending_host_progress.clone();
             tokio::spawn(
                 InputDemux {
                     raw_rx,
@@ -238,6 +243,7 @@ impl Agent {
                     questions,
                     mcp,
                     host_calls,
+                    host_progress,
                     denials,
                     turn_cancel,
                     session_cancel,

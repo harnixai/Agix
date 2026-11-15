@@ -57,6 +57,7 @@ pub(super) struct EventWiring {
     pub(super) pending_questions: crate::elicitation::PendingQuestions,
     pub(super) pending_mcp: crate::elicitation::PendingMcpAnswers,
     pub(super) pending_host_calls: crate::host_tools::PendingHostCalls,
+    pub(super) pending_host_progress: crate::host_tools::PendingHostProgress,
     pub(super) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 

@@ -211,7 +211,7 @@ pub fn all() -> &'static [ExtensionPoint] {
     &POINTS
 }
 
-static POINTS: [ExtensionPoint; 46] = [
+static POINTS: [ExtensionPoint; 47] = [
     ExtensionPoint {
         id: "tool.registry",
         kind: Kind::Contract,
@@ -378,7 +378,7 @@ static POINTS: [ExtensionPoint; 46] = [
     ExtensionPoint {
         id: "host_calls.call",
         kind: Kind::Contract,
-        summary: "宿主声明的工具怎么交给宿主去跑、等它答",
+        summary: "宿主声明的工具怎么交给宿主去跑、等它答;含连接经 daemon.setHostTools 提供的工具",
         timing: "模型调用一个宿主声明的工具时",
         rewrites: "这次调用的结果",
         frequency: Frequency::PerToolCall,
@@ -795,6 +795,17 @@ static POINTS: [ExtensionPoint; 46] = [
         },
         defined_in: "hooks::runner::HookRunner",
         wired_by: &[Wiring::Builder("hooks"), Wiring::Settings("hooks")],
+    },
+    ExtensionPoint {
+        id: "hooks.host",
+        kind: Kind::Interception,
+        summary: "宿主连接登记的 hook(daemon.setHooks):每次触发时现读,叠加在设置的 hook 之后,只能拦下或补一段上下文",
+        timing: "PreToolUse、PostToolUse、PostToolUseFailure、UserPromptSubmit、Stop;设置里的 hook 先跑",
+        rewrites: "拦下这次调用,或补一段上下文;不批准、不改入参",
+        frequency: Frequency::PerToolCall,
+        trust: Trust::host_only(),
+        defined_in: "hooks::runner::hosts::HostHookSource",
+        wired_by: &[Wiring::Builder("host_hooks")],
     },
 ];
 

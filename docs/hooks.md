@@ -33,6 +33,8 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 - **按层合并。** 设置文件各层(全局 `~/.agix/settings.json` → 场景 → 项目
   `.agix/settings.json`,每层后面跟它自己的 `settings.local.json`)按 JSON 递归合并:
   不同事件各自保留,**同一个事件在高层出现时,高层的数组整个替换低层的**。
+  唯一的例外是宿主连接登记的 hook(下面「宿主连接的 hook」):它不在设置里,永远叠加在设置
+  hook 之上,不会被任何一层替换。
 - **未信任的项目不算数。** 项目没被信任时(`ARCHITECTURE.md` §6.6),它两份设置文件里的
   `hooks_config` 整段忽略、记一条 warn,低层同名事件的 hook 照常生效;`project.trust` 之后
   这个项目的会话重建,项目的 hook 才加载。`project.status` 的 `requires_trust` 里有
@@ -285,6 +287,40 @@ agent hook 的子 Agent 以 `cancelled` 停下;它按失败算,写了 `"on_error
 ```
 
 hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则。
+
+---
+
+## 宿主连接的 hook
+
+嵌入 daemon 的宿主可以不改设置文件,经 `daemon.setHooks`(`daemon_rpc_protocol.md` §6.1)在
+**自己的连接**上登记 hook:引擎走到事件时,把 payload 作为 `hook_call` 帧发给这条连接,宿主用
+`session.respondHook` 回答。它和上面四种后端并列,但规则不同:
+
+- **叠加,不替换。** 同一事件上,设置里的 hook 先跑;其中有一个 `block`,宿主不再被问;
+  否则宿主看到的是设置 hook 用 `updated_input` 改写之后的入参。宿主 hook 从不被高层设置替换,
+  也不替换任何设置 hook。
+- **事件只有五个**:`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`UserPromptSubmit`、
+  `Stop`。`tools` 用工具名模式(`*`、`Prefix*`、完整名字、`mcp__<server>`、`mcp__*`)选工具,
+  只对工具事件有效。
+- **回答里只有三个字段算数**:`decision:"block"`(带 `message`)、`message`、
+  `additional_context`,效果同上表「回答」。`approve`(宿主不能替人批准)、`updated_input`、
+  `continue`、`rewake` 不收,出现就被拒(`INVALID_PARAMS`)。`PreToolUse` 的拦下消息保持
+  `Blocked by PreToolUse hook: <message>` 前缀;它在权限检查之前,所以 `bypassPermissions` 下也拦得住。
+- **失败按 `on_error`。** 登记时每条 hook 带 `timeout_ms`(1000..=30000,缺省 10000)与
+  `on_error`(`allow` 缺省 / `block`);超时、连接没了、帧发不出去、同一连接上悬着的调用超过
+  256 个都算失败,语义同上「失败」。这里的 `block` 失败消息同样是
+  ``Hook `<事件名>` #<序号> failed and its on_error is block.``。
+- **当策略用的 hook 写 `on_error:"block"`。** 256 个的上限由这条连接的所有会话共用,别的连接
+  起的会话也能把它占满;`allow` 之下,占满之后的调用不经这条 hook 直接放行。
+- **`Stop` 被拦没有次数上限**,同设置里的 hook:每拦一次这一轮多跑一步;一直拦(或在
+  `on_error:"block"` 下一直不答)这一轮就一直不结束。
+- **帧只发给登记者**,不发给该会话的别的订阅者。
+- **范围是整个 daemon。** 它作用于每个会话、子 Agent 里的工具调用,以及 skill 的内联命令
+  (`` !`cmd` `` 是一次 `Bash` 调用)。登记了 hook 的连接能看到每个会话每次相应工具调用的输入、
+  能拦下它——只登记给被信任的宿主。
+- **立即生效,包括已经建好的会话**;连接断开,它的 hook 随即消失,重连后要重新登记。断开时
+  还没处理完的 `daemon.setHooks` 不算数。
+- 一条连接至多 16 条,daemon 里至多 8 条连接同时登记 hook。
 
 ---
 

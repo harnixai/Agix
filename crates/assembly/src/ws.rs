@@ -208,7 +208,7 @@ async fn handle(server: Arc<DaemonServer>, stream: TcpStream) -> anyhow::Result<
     }
     // A tab closing takes its subscriptions and nothing else — see
     // `SessionPool::drop_watcher`.
-    server.drop_connection(client.id()).await;
+    server.close_connection(&client).await;
     ws_sink.close().await;
     Ok(())
 }

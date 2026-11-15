@@ -76,7 +76,7 @@ use compaction::compact::{CompactError, CompactResult, Compactor};
 use compaction::trim::{StaleTrim, StaleTrimInput};
 use history::store::{HistoryStore, InMemoryHistoryStore};
 use hooks::runner::PromptHookExecutor;
-use hooks::{HookInput, HookRunner};
+use hooks::{HookEvent, HookInput, HookRunner, HostHook, HostHookSource};
 use memory::MemoryStore;
 use runtime::agent::{Builder, HostContracts, InputMessage};
 use runtime::module::{Module, ModuleError, SessionContext};
@@ -501,6 +501,13 @@ const PROBES: &[Probe] = &[
         plan: Plan::Answer,
         install: |b, p| b.hooks(p.hook_runner.clone()),
         used: |p, _| p.seen.was_hit("hooks"),
+    },
+    Probe {
+        id: "hooks.host",
+        builder: "host_hooks",
+        plan: Plan::Answer,
+        install: |b, p| b.host_hooks(Arc::new(AsksHostHooks(p.seen.clone()))),
+        used: |p, _| p.seen.was_hit("hooks.host"),
     },
 ];
 
@@ -1037,6 +1044,20 @@ impl Plugin for Registers {
     }
     fn register(&self, _: &PluginSession<'_>, _: &mut Registrar) {
         self.0.hit("script.carrier");
+    }
+}
+
+struct AsksHostHooks(Arc<Seen>);
+
+impl HostHookSource for AsksHostHooks {
+    fn has_hooks_for(&self, event: HookEvent) -> bool {
+        if event == HookEvent::UserPromptSubmit {
+            self.0.hit("hooks.host");
+        }
+        false
+    }
+    fn hooks_for(&self, _: HookEvent) -> Vec<HostHook> {
+        Vec::new()
     }
 }
 

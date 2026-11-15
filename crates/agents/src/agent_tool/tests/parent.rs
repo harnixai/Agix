@@ -107,6 +107,7 @@ impl TestParent {
         let host_calls = Arc::new(runtime::host_tools::ChannelHostCalls::new(
             events.clone(),
             Default::default(),
+            Default::default(),
         ));
         let env = crate::delegate::DelegateEnv {
             host,

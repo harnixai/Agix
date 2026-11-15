@@ -67,7 +67,7 @@ when no one is watching.
    start, while the Agix daemon is already running; [how it was measured](tests/blackbox/tests/compare_dsh.rs)).
 5. **Your product stays in charge.** Every session, task, sub-agent, goal and
    prompt is visible, stoppable and editable over one JSON-RPC protocol.
-   46 extension points let you replace or intercept any subsystem from Rust
+   47 extension points let you replace or intercept any subsystem from Rust
    or a QuickJS script without forking. Every session is an
    append-only log you can resume, fork, export or replay byte for byte
    with no network.
@@ -148,7 +148,7 @@ monitors and structured output ([table below](#tools--45-built-in)).
   [ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.6).
 
 **Host control**
-- Seventy-nine RPC methods: create, resume, fork, rebuild, rewind, export and import sessions;
+- Eighty-three RPC methods: create, resume, fork, rebuild, rewind, export and import sessions;
   read history, the exact context of the next model call and a session's model-call
   recording; search sessions by content; answer
   permission and question prompts.
@@ -157,7 +157,7 @@ monitors and structured output ([table below](#tools--45-built-in)).
   schedules and which projects are trusted.
 
 **Extensibility**
-- 46 published extension points: 31 contracts, 9 interceptions and 6
+- 47 published extension points: 31 contracts, 10 interceptions and 6
   registrations.
 - Rust plugins compiled into the host, and QuickJS scripts, installable as
   packages with install-time disclosure.
@@ -224,8 +224,8 @@ layout.
 
 ### The extension surface
 
-The engine publishes a catalog of its seams, generated from the code: **46
-extension points** — 31 *contracts* (replace a subsystem), 9 *interceptions* (sit
+The engine publishes a catalog of its seams, generated from the code: **47
+extension points** — 31 *contracts* (replace a subsystem), 10 *interceptions* (sit
 in the path of something in flight), 6 *registrations* (contribute to a
 collection). From Rust, implement the trait and hand it to the builder. From
 outside a Rust build:
@@ -306,7 +306,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 While the turn runs, `session.event` frames stream back (text deltas, tool
 calls, tool results, prompts, task progress); the response arrives when the turn
 ends. A typical client subscribes to a session on one connection
-(`session.subscribe`) and drives it from another. Seventy-nine methods are
+(`session.subscribe`) and drives it from another. Eighty-three methods are
 documented in [`docs/daemon_rpc_protocol.md`](docs/daemon_rpc_protocol.md) —
 sessions, history and context, tasks and sub-agents, scenes, configuration,
 project trust, MCP, plugins, scheduling — and every documented response shape is compared

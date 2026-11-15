@@ -17,6 +17,7 @@ mod extension_entries;
 mod extension_points_doc;
 mod hook_events_doc;
 mod hooks_on_the_session_exec;
+mod host_connections;
 mod host_contracts;
 mod host_scenes;
 mod host_tools;

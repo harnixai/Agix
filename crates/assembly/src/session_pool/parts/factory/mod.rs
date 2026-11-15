@@ -2,6 +2,8 @@
 //! （会话的状态与 steer 队列、场景表、定时任务表、MCP 模块、进程组账本、插件脚本）
 //! 配好 `Builder` 建出 Agent。建出来的引擎还没挂到会话状态上，由门面在上一代引擎
 //! 停下之后 `attach_session`。只负责构造，不往会话表里插，也不写日志；不持锁。
+//! 宿主连接提供的工具与 hook 的登记处（`HostConnections`）也归它：工具在建引擎
+//! 那一刻拷进会话，hook 交给会话的 hook runner 每次现读。
 
 mod namer;
 mod permission_scripts;
@@ -11,6 +13,7 @@ pub(in crate::session_pool) use permission_scripts::*;
 
 use crate::session_pool::api::SessionOptions;
 use crate::session_pool::parts::bindings::ProjectBinding;
+use crate::session_pool::parts::hosts::HostConnections;
 use crate::session_pool::parts::phase::Generation;
 use crate::session_pool::parts::specs::SessionSpec;
 use crate::session_pool::pool_telemetry::{otel_sink, recordings_root, session_clock};
@@ -48,6 +51,7 @@ pub(in crate::session_pool) struct EngineFactory {
     /// process their own.
     run_slots: Arc<tokio::sync::Semaphore>,
     background_hooks: hooks::BackgroundHooks,
+    hosts: HostConnections,
 }
 
 /// What an engine takes over from the session it runs: the session's state
@@ -127,7 +131,19 @@ impl EngineFactory {
             history_store,
             run_slots: runtime::agent::default_run_slots(),
             background_hooks: hooks::BackgroundHooks::new(),
+            hosts: HostConnections::default(),
         }
+    }
+
+    /// What the host connections provide every session built from now on.
+    pub(in crate::session_pool) fn hosts(&self) -> &HostConnections {
+        &self.hosts
+    }
+
+    /// Whether a session's own tools could be called `name`: one of the
+    /// built-in tools or one the engine registers itself.
+    pub(in crate::session_pool) fn reserves_tool_name(&self, name: &str) -> bool {
+        runtime::host_tools::ENGINE_TOOL_NAMES.contains(&name) || self.tools.get(name).is_some()
     }
 
     pub(in crate::session_pool) fn run_slots(&self) -> &Arc<tokio::sync::Semaphore> {
@@ -214,8 +230,9 @@ impl EngineFactory {
         if let Some(schema) = options.and_then(|o| o.output_schema.clone()) {
             builder = builder.output_schema(schema);
         }
-        let host_tools = options.into_iter().flat_map(|o| &o.host_tools);
-        builder = builder.host_tools(host_tools.map(|t| t.declaration()).collect());
+        builder = builder
+            .host_tools(self.host_tools_of(session_id, options))
+            .host_hooks(Arc::new(self.hosts.clone()));
         if let Some(ledger) = &req.process_groups {
             builder = builder.process_groups(ledger.clone());
         }
@@ -247,6 +264,32 @@ impl EngineFactory {
             script_faults,
             settings: settings_snapshot,
         })
+    }
+
+    /// The session's own host tools, then those the host connections provide
+    /// now; a connection's that the session declares itself is left out.
+    fn host_tools_of(
+        &self,
+        session_id: &str,
+        options: Option<&SessionOptions>,
+    ) -> Vec<base::interface::host_call::HostToolDecl> {
+        let mut decls: Vec<_> = options
+            .into_iter()
+            .flat_map(|o| &o.host_tools)
+            .map(|t| t.declaration())
+            .collect();
+        for provided in self.hosts.tools() {
+            if decls.iter().any(|own| own.name == provided.name) {
+                warn!(
+                    session_id,
+                    tool = %provided.name,
+                    "a host connection's tool is left out: the session declares its own"
+                );
+                continue;
+            }
+            decls.push(provided);
+        }
+        decls
     }
 
     /// The pair's settings with this session's permission mode, model,

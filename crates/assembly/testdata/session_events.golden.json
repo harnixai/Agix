@@ -840,6 +840,97 @@
       }
     },
     {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": "child",
+            "call_id": "hk_1",
+            "hook_event": "PreToolUse",
+            "input": {
+              "hook_event_name": "PreToolUse",
+              "tool_name": "Bash"
+            },
+            "kind": "hook_call",
+            "task_id": null,
+            "timeout_ms": 10000
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_hook_call",
+      "event": {
+        "agent_session_id": "child",
+        "call_id": "hk_1",
+        "hook_event": "PreToolUse",
+        "input": {
+          "hook_event_name": "PreToolUse",
+          "tool_name": "Bash"
+        },
+        "kind": "host_hook_call",
+        "timeout_ms": 10000
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "agent_session_id": "child",
+            "call_id": "hk_1",
+            "hook_event": "PreToolUse",
+            "input": {
+              "hook_event_name": "PreToolUse",
+              "tool_name": "Bash"
+            },
+            "kind": "hook_call",
+            "task_id": null,
+            "timeout_ms": 10000
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hk_1",
+            "kind": "hook_call_resolved",
+            "reason": "cancelled",
+            "resolution": "withdrawn"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "host_hook_call_resolved",
+      "event": {
+        "call_id": "hk_1",
+        "kind": "host_hook_call_resolved",
+        "reason": "cancelled",
+        "resolution": "withdrawn"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "call_id": "hk_1",
+            "kind": "hook_call_resolved",
+            "reason": "cancelled",
+            "resolution": "withdrawn"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
       "between_turns": null,
       "case": "turn_start",
       "event": {

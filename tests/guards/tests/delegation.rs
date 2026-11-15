@@ -143,6 +143,11 @@ const OWN: &[(&str, &str)] = &[
 /// Not given to a delegate.
 const NOT_FOR_DELEGATES: &[(&str, &str)] = &[
     (
+        "host_hooks",
+        "a delegate shares its root's hook runner, which asks the host connections and routes the \
+         delegate's calls by its session",
+    ),
+    (
         "telemetry_url",
         "resolved into the telemetry handle, which is inherited",
     ),

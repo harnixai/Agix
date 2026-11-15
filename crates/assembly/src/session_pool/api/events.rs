@@ -16,6 +16,12 @@ pub trait SessionWatcher: Send + Sync {
     /// to a task it spawns. `false` drops this watcher's subscription to the
     /// session.
     fn deliver(&self, frame: &SessionFrame) -> bool;
+    /// `false` once the watcher is gone for good, as a closed connection is:
+    /// what it would register then is refused, and a failed delivery takes
+    /// what it provided out of the registry.
+    fn is_open(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +70,8 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
             | AgentEvent::McpElicitationPrompt { .. }
             | AgentEvent::HostToolCall { .. }
             | AgentEvent::HostToolCallResolved { .. }
+            | AgentEvent::HostHookCall { .. }
+            | AgentEvent::HostHookCallResolved { .. }
             | AgentEvent::SubagentProgress { .. }
             | AgentEvent::ToolProgress { .. }
             | AgentEvent::SkillsChanged { .. }
@@ -85,6 +93,9 @@ pub enum AskKind {
     /// A call to a tool the host declared; answered with
     /// `session.respondToolCall`, never `session.respondToPrompt`.
     HostToolCall,
+    /// A hook a host connection registered; answered with
+    /// `session.respondHook` by that connection alone.
+    HookCall,
 }
 
 impl AskKind {
@@ -94,6 +105,7 @@ impl AskKind {
             Self::Question => "question",
             Self::McpElicitation => "mcp_elicitation",
             Self::HostToolCall => "host_tool_call",
+            Self::HookCall => "hook_call",
         }
     }
 }
@@ -106,6 +118,8 @@ pub struct PendingAsk {
     /// The background task whose sub-agent asks, when one does.
     pub task_id: Option<String>,
     pub kind: AskKind,
+    /// The connection whose answer alone counts, when one provides the call.
+    pub host: Option<base::interface::host_call::HostId>,
     pub frame: Arc<SessionFrame>,
 }
 

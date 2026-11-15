@@ -37,6 +37,13 @@ pub struct ProgressSender {
     tool_use_id: String,
     callback: Option<Arc<dyn ProgressCallback>>,
 }
+impl std::fmt::Debug for ProgressSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProgressSender")
+            .field("tool_use_id", &self.tool_use_id)
+            .finish_non_exhaustive()
+    }
+}
 pub trait ProgressCallback: Send + Sync {
     fn on_progress(&self, tool_use_id: &str, data: &str);
     fn on_update(&self, tool_use_id: &str, update: ProgressUpdate) {

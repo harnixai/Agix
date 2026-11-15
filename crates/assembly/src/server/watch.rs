@@ -24,6 +24,10 @@ impl SessionWatcher for Client {
             }
         }
     }
+
+    fn is_open(&self) -> bool {
+        Client::is_open(self)
+    }
 }
 
 /// `session.subscribe`'s result: each open ask as the frame that raised it,

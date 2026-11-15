@@ -84,6 +84,7 @@ impl Builder {
                 current_turn_cancel: Default::default(),
                 steering: self.spec.steering.take().map(|s| s.0).unwrap_or_default(),
                 pending_host_calls: w.events.pending_host_calls,
+                pending_host_progress: w.events.pending_host_progress,
                 host_calls: w.events.host_calls,
             },
         };

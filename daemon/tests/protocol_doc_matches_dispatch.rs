@@ -524,6 +524,8 @@ const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/SceneSource/anyOf/1/additionalProperties",
     "/$defs/SessionDetail/properties/health",
     "/$defs/SessionOptions/properties/output_schema",
+    "/$defs/SetHooksParams/properties/hooks/items",
+    "/$defs/SetHostToolsParams/properties/host_tools/items",
     "/$defs/StartAgentParams/properties/output_schema",
     "/$defs/SubscribeResult/properties/pending_host_calls/items",
     "/$defs/SubscribeResult/properties/pending_prompts/items",

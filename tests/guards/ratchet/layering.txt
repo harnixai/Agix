@@ -7,7 +7,7 @@
 cfg-mcp  crates/assembly/src/                                    5
 fields   BindingCache                                            11
 fields   DaemonEvents                                            2
-fields   EngineFactory                                           8
+fields   EngineFactory                                           9
 fields   LiveSessions                                            8
 fields   McpHub                                                  3
 fields   SceneCatalog                                            6

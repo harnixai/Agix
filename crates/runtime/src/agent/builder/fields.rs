@@ -191,6 +191,8 @@ pub(super) struct ExtSetup {
     pub(super) elicitation: Option<Arc<dyn base::interface::elicitation::Elicitation>>,
     /// See [`Builder::host_calls`].
     pub(super) host_calls: Option<Arc<dyn base::interface::host_call::HostCalls>>,
+    /// See [`Builder::host_hooks`].
+    pub(super) host_hooks: Option<Arc<dyn hooks::HostHookSource>>,
     /// Contributions to the system prompt — see [`Builder::prompt_registry`].
     pub(super) prompt_registry: Option<Arc<dyn base::interface::prompt_registry::PromptRegistry>>,
     /// Replaces prompt assembly itself — see [`Builder::prompt_assembler`].
@@ -216,6 +218,7 @@ impl ExtSetup {
             wake_rx: None,
             elicitation: None,
             host_calls: None,
+            host_hooks: None,
             prompt_registry: None,
             prompt_assembler: None,
             turn_policy: None,

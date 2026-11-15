@@ -262,6 +262,9 @@ pub const CAPABILITIES: &[&str] = &[
     "session_calls",
     "session_search",
     "session_skill_dirs",
+    "host_tool_progress",
+    "host_tool_provider",
+    "host_hooks",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

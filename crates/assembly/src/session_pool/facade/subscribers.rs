@@ -95,13 +95,19 @@ impl SessionPool {
         }
     }
 
-    /// A watcher went away — a connection closed: forget it everywhere.
+    /// A watcher went away — a connection closed: forget it everywhere,
+    /// and what it provided. Its tools and hooks are gone from the registry
+    /// before its open calls are ended — those it withdrew earlier included —
+    /// so a call made meanwhile finds no provider and ends at once.
     ///
     /// That is all a disconnect means: the turn keeps running, because
     /// another connection may be watching and a teardown would cascade into
     /// deleting the session's sidechain transcripts.
     pub async fn drop_watcher(&self, watcher: WatcherId) {
+        let host = base::interface::host_call::HostId(watcher.0);
+        self.factory.hosts().remove(host);
         for hub in self.live.map_all(|live| live.core.hub().clone()).await {
+            hub.end_calls_of(host);
             hub.unsubscribe(watcher);
         }
     }
@@ -284,30 +290,30 @@ impl SessionPool {
 
     /// `session.respondToolCall` — the host's answer to a `host_tool_call`
     /// frame. A `call_id` nobody waits on is a silent no-op, as for
-    /// `respondToPrompt`; one that names an open prompt is refused.
+    /// `respondToPrompt`; one that names an open prompt is refused, and so
+    /// is one a host connection provides: that connection answers it with
+    /// [`Self::respond_tool_call_from`].
     pub async fn respond_tool_call(
         &self,
         session_id: &str,
         call_id: String,
         reply: base::interface::host_call::HostReply,
     ) -> Result<(), PoolError> {
-        let (input_tx, hub) = self
-            .live
-            .with_live(session_id, |live| {
-                (live.engine.input_tx.clone(), live.core.hub().clone())
-            })
+        self.respond_tool_call_from(None, session_id, call_id, reply)
             .await
-            .ok_or_else(|| PoolError::session_not_found(session_id))?;
-        if let Some(asked) = hub
-            .ask_kind(&call_id)
-            .filter(|asked| *asked != AskKind::HostToolCall)
-        {
-            return Err(PoolError::InvalidRequest(format!(
-                "`{call_id}` is a {} prompt, not a host tool call; answer it with \
-                 session.respondToPrompt",
-                asked.as_str()
-            )));
-        }
+    }
+
+    /// [`Self::respond_tool_call`] as `from` answers it.
+    pub async fn respond_tool_call_from(
+        &self,
+        from: Option<WatcherId>,
+        session_id: &str,
+        call_id: String,
+        reply: base::interface::host_call::HostReply,
+    ) -> Result<(), PoolError> {
+        let input_tx = self
+            .answerable(session_id, &call_id, AskKind::HostToolCall, from)
+            .await?;
         let _ = input_tx.send(InputMessage::HostToolResponse {
             call_id,
             end: base::interface::host_call::HostCallEnd::Replied(reply),

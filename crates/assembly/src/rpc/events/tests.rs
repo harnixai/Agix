@@ -115,6 +115,16 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             json!({"kind": "host_tool_call_resolved", "call_id": "hc_2", "resolution": "withdrawn", "reason": "no_host"}),
         ),
         (
+            "host_hook_call",
+            json!({"kind": "host_hook_call", "call_id": "hk_1", "hook_event": "PreToolUse",
+                   "input": {"hook_event_name": "PreToolUse", "tool_name": "Bash"}, "timeout_ms": 10000,
+                   "agent_session_id": "child"}),
+        ),
+        (
+            "host_hook_call_resolved",
+            json!({"kind": "host_hook_call_resolved", "call_id": "hk_1", "resolution": "withdrawn", "reason": "cancelled"}),
+        ),
+        (
             "turn_start",
             json!({"kind": "turn_start", "turn_id": "inner"}),
         ),

@@ -148,8 +148,16 @@ impl DaemonServer {
         self.check_auth(req).await
     }
 
+    /// The peer of `client` is gone: mark it closed, so a request of it
+    /// still being served registers no tools or hooks, then forget it.
+    pub async fn close_connection(&self, client: &Client) {
+        client.close();
+        self.drop_connection(client.id()).await;
+    }
+
     /// Forget a connection's subscriptions. Public for the same reason as
-    /// [`Self::accept_connection`].
+    /// [`Self::accept_connection`]; a transport that holds the [`Client`]
+    /// uses [`Self::close_connection`].
     pub async fn drop_connection(&self, connection: crate::rpc::ConnectionId) {
         self.pool
             .drop_watcher(crate::session_pool::api::WatcherId(connection.0))

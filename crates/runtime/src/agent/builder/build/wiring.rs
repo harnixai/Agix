@@ -15,14 +15,18 @@ impl Builder {
         let session_ended = CancellationToken::new();
         let own_runner = self.ext.hooks.is_none();
         let background = self.ext.background_hooks.take().unwrap_or_default();
+        let host_hooks = self.ext.host_hooks.take();
         let hooks = self.ext.hooks.take().unwrap_or_else(|| {
-            let runner = build_hook_runner(
+            let mut runner = build_hook_runner(
                 settings,
                 model.clone(),
                 Arc::new(delegator.clone()),
                 Some(session.session_id_str().to_string()),
                 hook_exec(exec, self.host.exec.is_some()),
             );
+            if let Some(source) = host_hooks {
+                runner = runner.with_hosts(source);
+            }
             Arc::new(
                 runner
                     .with_background(background)
@@ -184,10 +188,12 @@ impl Builder {
         let pending_questions: crate::elicitation::PendingQuestions = Default::default();
         let pending_mcp: crate::elicitation::PendingMcpAnswers = Default::default();
         let pending_host_calls: crate::host_tools::PendingHostCalls = Default::default();
+        let pending_host_progress: crate::host_tools::PendingHostProgress = Default::default();
         let host_calls = self.ext.host_calls.take().unwrap_or_else(|| {
             Arc::new(crate::host_tools::ChannelHostCalls::new(
                 event_tx.clone(),
                 pending_host_calls.clone(),
+                pending_host_progress.clone(),
             ))
         });
         EventWiring {
@@ -197,6 +203,7 @@ impl Builder {
             pending_questions,
             pending_mcp,
             pending_host_calls,
+            pending_host_progress,
             host_calls,
         }
     }

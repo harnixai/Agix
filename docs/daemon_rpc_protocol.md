@@ -739,6 +739,9 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 断线或订阅被取消期间漏掉的,从手上的 `next_byte` 起用 `session.taskOutput {from_byte}` 补齐
 (§6.3 `session.taskOutput` 的跟随做法)。
 
+**连接级的东西不跟着会话走。** `daemon.setHostTools` 提供的工具与 `daemon.setHooks` 登记的 hook
+属于连接:连接一断就没了,重连之后要重新调用这两个方法(§6.1)。它们悬着的调用在断开时立刻结束。
+
 **心跳**:daemon 不主动发心跳。空闲连接靠 TCP keepalive 或客户端自己的
 `daemon.ping` 维持。WebSocket 传输会自动回应 ping 帧,但浏览器的 WebSocket API
 发不了 ping —— 网页端要保活就用 `daemon.ping`。
@@ -802,6 +805,9 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
+| `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
+| `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
+| `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -1025,6 +1031,128 @@ bwrap,或 `sandbox.dangerously_disable_sandbox` 开着)时是 `degraded`:通道�
 // ← result
 { "subscribed": true }
 ```
+
+#### `daemon.setHostTools`
+
+宿主在**连接**上提供工具:每个会话都拿得到,不必逐个会话写进 `options.host_tools`。`host_tools`
+的每一项和 `session.create` 的 `options.host_tools` 条目一模一样(§6.3)。这次调用**整个替换**
+这条连接此前提供的全部工具,`[]` 撤回全部。
+
+```jsonc
+// → params
+{ "host_tools": [
+    { "name": "HostEcho",
+      "description": "Echo text back from the host.",
+      "input_schema": { "type": "object",
+                        "properties": { "text": { "type": "string" } },
+                        "required": ["text"] },
+      "read_only": true } ] }
+// ← result
+{ "host_tools": ["HostEcho"],     // 这条连接现在提供的工具名
+  "refused": [] }                 // 被拒的条目,见下
+```
+
+逐条检查,坏一条只丢一条,其余照常采纳。被拒的条目进 `refused`:
+
+```json
+{ "host_tools": ["HostEcho"],
+  "refused": [ { "index": 1, "name": "Read", "field": "name",
+                 "error": "a built-in tool has this name" } ] }
+```
+
+`index` 是条目在 `host_tools` 里的下标;`name` 在读得出名字时才有;`field` 指出哪个字段不对,
+条目根本读不出来(未知字段等)时没有,`error` 是原因。拒绝的原因:
+
+| 情形 | `field` |
+|---|---|
+| 读不出来(未知字段、类型不对) | 无 |
+| 声明本身不合规:名字格式或 `mcp__` 前缀、`input_schema` 不是对象或编译不了、`timeout_ms` 不在 1000..=600000 | 对应字段 |
+| 与内建工具或引擎工具同名(`Read`、`Bash`、`Agent`、`Skill`……) | `name` |
+| 同一次调用里同名两次(`declared twice`) | `name` |
+| 超过每条连接 64 个(`at most 64 tools per connection`) | 无 |
+| 别的连接已经提供了这个名字(先到的保留) | `name` |
+
+语义:
+
+- **只对此后建起来的引擎生效。** 工具在引擎构建时取一份快照,进每个此后才建的会话(新建、
+  `session.resume`、重建);已经建好的会话保留它当时有的那份,直到它下一次重建。没有为此专门
+  重建空闲会话。
+- **不进会话日志,也不进 `options`。** 重建时拿的是那一刻登记表里有的。
+- **会话自己的优先。** 会话的 `options.host_tools` 里有同名项时,这条连接的那个不进该会话
+  (daemon 日志记一条 warn),会话照常建起来;与插件或场景工具重名也是只丢连接这一个、记 warn,
+  不会让构建失败。
+- `subagents:true` 的,子 Agent 也拿得到(同 `options.host_tools`)。一个会话里连接提供的工具
+  至多 128 个,与 `options.host_tools` 的 64 个互不占用。
+
+连接提供的工具被调用时,`host_tool_call` 帧(§7.4)**一定**发给提供它的那条连接——即使它没有订阅
+这个会话——同时照常发给该会话的订阅者。**只有提供者的** `session.respondToolCall` 算数,
+别的连接回答 → `INVALID_PARAMS`。子 Agent 的调用用父会话的 `session_id` 回答。这些调用也在
+`session.subscribe` 的 `pending_host_calls` 里。
+
+**连接断开,它提供的工具就没了,重连后要重新调用本方法。** 断开时还没处理完的本方法也不算数:
+连接一关,它就什么都登记不进来(回答发不出去,`refused` 里每一项都是 `this connection is closed`)。
+投递帧时发现提供者的连接已经关了,也立即把它从登记表里摘掉。提供者断开时,它还悬着的调用以
+`host_tool_call_resolved{withdrawn, reason:"host_gone"}` 结束;已建好的会话里还留着这个工具的,
+之后的调用立刻以 `no_host` 结束;此后新建的引擎不再带它。`daemon.setHostTools` 传 `[]`
+撤回,对已建好的会话之后的调用是同样的效果(立刻 `no_host`);撤回之前已经发出的调用不受影响,
+提供者照样可以回答。
+
+#### `daemon.setHooks`
+
+宿主在**连接**上登记 hook:引擎走到指定的事件时,把那一刻的 payload 作为 `hook_call` 帧
+(§7.6)交给这条连接,等它用 `session.respondHook` 回答。`hooks` 的每一项:
+
+| 字段 | 说明 |
+|---|---|
+| `events` | 必填,非空;只能是 `PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`UserPromptSubmit`、`Stop` |
+| `tools` | 可选,工具名模式的列表,至多 64 个、不能有空串;缺省等于每个工具。只对工具事件起作用,`UserPromptSubmit` 与 `Stop` 忽略它。模式:`*`、`Prefix*`、完整名字、`mcp__<server>` / `mcp__<server>__*`、`mcp__*` |
+| `timeout_ms` | 可选,1000..=30000,缺省 10000;宿主在这段时间里没回答就算失败 |
+| `on_error` | 可选,`"allow"`(缺省)或 `"block"`:失败时放行,还是拦下 |
+
+```jsonc
+// → params
+{ "hooks": [
+    { "events": ["PreToolUse"], "tools": ["Bash", "Write*"],
+      "timeout_ms": 10000, "on_error": "block" } ] }
+// ← result
+{ "hooks": [ { "index": 0, "events": ["PreToolUse"] } ],   // 采纳的条目
+  "refused": [] }                                           // 被拒的条目
+```
+
+传 `[]` 或 `null` 撤回这条连接登记的全部。每次调用整个替换此前登记的。条目逐个检查,坏一条
+只丢一条;被拒的进 `refused`,形状同 `daemon.setHostTools`(`index`、`field`、`error`):读不出来
+(未知字段)、`events` 为空或含上面五个以外的事件(`field:"events"`)、`tools` 超限或含空串
+(`field:"tools"`)、`timeout_ms` 越界(`field:"timeout_ms"`)、一条连接超过 16 条(第 17 条起
+`at most 16 hooks per connection`)。daemon 里已经有 8 条别的连接登记着 hook 时,整个调用
+`INVALID_PARAMS`。
+
+**影响面:登记了 hook 的连接,看得到这个 daemon 里每个会话每次工具调用的输入,并且能拦下它们。**
+hook 不限于哪个会话、哪个订阅者:`PreToolUse` 的 payload 带 `tool_input`,`UserPromptSubmit`
+带用户消息的全文。只把它交给被信任的宿主,别把它当成"我只看自己的会话"的能力。
+
+语义:
+
+- **立即生效,包括已经建好的会话。** 登记表在每次触发时现读,`daemon.setHooks` 返回之后的
+  下一次触发就走它。这一点与 `daemon.setHostTools` 不同。
+- **与设置文件里的 hook 叠加,不被替换。** 同一事件上设置里的 hook 先跑;其中有一个拦下,
+  就不再问宿主;否则宿主看到的是设置里的 hook 用 `updated_input` 改写之后的输入。详见
+  [`hooks.md`](hooks.md)「宿主连接的 hook」。
+- **帧只发给登记的那条连接**,不发给别的订阅者,也不在 `session.subscribe` 的待答列表里。
+- `PreToolUse` 在权限检查之前,所以 `bypassPermissions` 下一样能拦,也不会有人被询问。覆盖子
+  Agent 的调用,和 skill 的内联命令(`` !`cmd` `` 是一次 `Bash` 调用)。
+- 回答能做什么,见 `session.respondHook`。
+- 失败(超时、连接没了、帧发不出去、这条连接上同时悬着的 hook 调用超过 256 个)按 `on_error`:
+  `allow` 让调用继续;`block` 拦下,模型读到 `` Hook `PreToolUse` #1 failed and its on_error is block. ``
+  (序号是它在这个事件的全部 hook 里的位置)。**拿 hook 当策略闸门的,写 `on_error:"block"`**:
+  256 个的上限是这条连接所有会话共用的,别的连接起的会话多、调用密,也能把它占满,`allow` 之下
+  多出来的调用就不经它直接放行。
+- `Stop` 上 `block` 一次,这一轮就再跑一步;次数没有上限(设置里的 hook 也一样)。一直拦
+  `Stop`,或在 `on_error:"block"` 下一直不答,这一轮就一直不结束、一直调模型。
+- 一轮在 hook 等回答时被中断:`hook_call_resolved{withdrawn, cancelled}`,发给登记者。
+
+**连接断开,它登记的 hook 就没了,重连后要重新调用本方法。** 它还悬着的 hook 调用立刻结束
+(按 `on_error` 处理)。断开时还没处理完的本方法不算数,同 `daemon.setHostTools`:连接一关,
+它就登记不进来了。
 
 #### `daemon.shutdown`
 
@@ -1336,7 +1464,8 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 重名(`Read`、场景或插件的工具)要等引擎建起来才知道,报在 `host_tools` 上。两种都是
 `INVALID_PARAMS`,不建会话。宿主工具只是加法,与场景的 `extra_tools` 同一个重名检查,场景的
 `tools.deny` 写名字即可拒掉它。它们随 `options` 记在会话日志里,重建、恢复、`session.fork`
-都照原样再挂上。
+都照原样再挂上。连接提供的工具(`daemon.setHostTools`,§6.1)是另一条路:不进这里,也不进会话日志,
+重建时取登记表当时的内容;会话自己的同名项优先。
 
 权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
 会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`,
@@ -2647,7 +2776,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 
 会话不在内存里 → `SESSION_NOT_FOUND`(这个和 `session.close` 不一样:答一个没在跑
 的会话的提问不可能是"已经完成了")。`prompt_type` 为 `host_tool_call` → `INVALID_PARAMS`:
-宿主工具的调用用 `session.respondToolCall` 回答。
+宿主工具的调用用 `session.respondToolCall` 回答;`hook_call` 同理,用 `session.respondHook`。
 
 未在 `--permission-prompt-timeout`(没给时取设置 `execution.permission_prompt_timeout_secs`,
 默认 300 秒)内回答的提问**失败关闭**:权限提问按拒绝
@@ -2681,6 +2810,63 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 两个都给、都不给、`content` 形状不对、图片的 `media_type` 不是 png / jpeg / gif / webp 或解码后超过 3.5 MB(同 MCP 结果里的图片) → `INVALID_PARAMS`,调用仍悬着,可以改了再答;`call_id` 是一帧还悬着的 `prompt`
 的 `prompt_id` → `INVALID_PARAMS`。**先答者生效**,`call_id` 未知(已答、超时、被取消)时
 **静默成功**,同 `session.respondToPrompt`。会话不在内存里 → `SESSION_NOT_FOUND`。
+
+**连接提供的工具只有提供者能答。** `daemon.setHostTools` 提供的工具的调用,只有提供它的那条连接
+的 `session.respondToolCall` 算数,别的连接 → `INVALID_PARAMS`;`options.host_tools` 的调用仍然
+谁都能答、先答者生效。
+
+#### `session.reportToolProgress`
+
+宿主在处理一次 `host_tool_call` 的过程中报进度。
+
+```jsonc
+// → params
+{ "session_id": "…", "call_id": "hc_…",
+  "message": "row 42 of 120",
+  "progress": 42,                // 可选
+  "total": 120 }                 // 可选
+// ← result
+{ "call_id": "hc_…" }
+```
+
+键与 `tool_progress` 帧(§7.3)的 `message`、`progress`、`total` 完全相同。引擎为这次调用的
+`tool_use_id` 向该会话的订阅者发 `tool_progress`,限流与别的工具一样(每次调用每秒至多一帧,
+第一条立刻发,其后的合并);子 Agent 的调用进度包在 `subagent_progress` 里。两种宿主工具
+(`options.host_tools` 与 `daemon.setHostTools`)都能用。
+
+`call_id` 未知或调用已结束时**静默成功**。连接提供的工具,非提供者的连接调用 →
+`INVALID_PARAMS`;`call_id` 是一帧 `prompt` 或 `hook_call` 的 id → `INVALID_PARAMS`。
+会话不在内存里 → `SESSION_NOT_FOUND`。
+
+
+#### `session.respondHook`
+
+回答一帧 `hook_call`(§7.6)。
+
+```jsonc
+// → params
+{ "session_id": "…", "call_id": "hk_…",
+  "decision": "block",                     // 可选,"block" 或 "proceed"
+  "message": "rm -rf is not allowed",      // 可选,拦下的理由
+  "additional_context": "…" }              // 可选,见下
+// ← result
+{ "call_id": "hk_…" }
+```
+
+`session_id` 用帧外层 `session.event` 的(根会话)。只有登记这条 hook 的连接能回答,别的连接 →
+`INVALID_PARAMS`。能起作用的字段只有三个,别的 hook 回答里的字段这里不收:
+
+- `decision:"block"`:拦下,`message` 是理由。`PreToolUse`:工具不执行,模型读到
+  `` Blocked by PreToolUse hook: <message> ``(前缀与设置里的 hook 一致),不再问权限;
+  `PostToolUse`:结果换成 `` Denied by PostToolUse hook: <message> ``;`Stop`:这一轮不结束,
+  `message` 作为提醒交还模型;`UserPromptSubmit`:这一轮以 `stopped_by_hook` 结束。省略或
+  `"proceed"` 放行。
+- `additional_context`:一段文字,在模型的下一步之前放进 `<system-reminder>`(`PreToolUse` 的
+  在权限判定通过之后才送)。长度限制同设置里的 hook。
+
+`decision:"approve"` → `INVALID_PARAMS`(宿主 hook 不能替人批准);出现 `updated_input`、
+`continue`、`rewake` 等别的字段 → `INVALID_PARAMS`(宿主 hook 看得到输入,不能改写它)。
+`call_id` 未知或已经结束(已答、超时、被取消)时**静默成功**,同 `session.respondToolCall`。
 
 ### 6.4 `config.*`
 
@@ -3282,7 +3468,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}`;`mcp_elicitation`:`{prompt_type,prompt_id,server,mode,message,requested_schema?,url?,url_host?,tool_use_id?}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答。`mcp_elicitation` 的 `mode` 为 `form`(带 `requested_schema`)或 `url`(带 `url` 与它的主机 `url_host`,只有 `https` 和本机的 `http` 会推到宿主,别的直接回 server `decline`);`message`、`requested_schema`、`url` 都是 **MCP server 写的**,宿主要标明来自 `server`、显示完整 URL 与 `url_host`、不自动打开 —— Agix 自己从不打开它 |
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
 | `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
-| `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者 |
+| `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者,连接提供的工具再加上提供者(§7.4) |
+| `hook_call` | `{call_id,hook_event,input,timeout_ms,task_id,agent_session_id}` | 宿主经 `daemon.setHooks` 登记的 hook 触发了,等登记它的连接用 `session.respondHook` 回答(§7.6)。**只发给登记者**;`input` 是这一刻的 hook payload;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
+| `hook_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `hook_call` 不再悬着:`answered` 或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`host_gone`、`no_host`。只发给登记者 |
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
@@ -3302,7 +3490,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped,overwrote_external}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
 | `subscription_dropped` | `{reason}` | 这条连接对该会话的订阅被取消了(`reason` 目前只有 `"overflow"`,§5.4);不属于任何一轮,`turn_id` 为 `null`。重新 `session.subscribe` 并追平 |
 
-`prompt`、`host_tool_call`、`host_tool_call_resolved`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:
+`prompt`、`host_tool_call`、`host_tool_call_resolved`、`hook_call`、`hook_call_resolved`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:
 后台子 Agent 在父会话空闲时照样会问、会推进度。这时它们不属于任何一轮,`turn_id` 为 `null`。
 
 **这张表是白名单。** 引擎内部还有其它事件,但只有上面这些会被转成帧发出来。特别地:
@@ -3445,6 +3633,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 (`task_progress`、`session.taskOutput`)。客户端只该拿它画"这次调用正在做什么",结果以
 `tool_result` 为准。
 
+宿主工具的进度由宿主用 `session.reportToolProgress`(§6.3)报:引擎收下后为这次调用的
+`tool_use_id` 发同样的帧,键就是上面的 `message`、`progress`、`total`,限流与别的工具一样。
+
 子 Agent 里的工具报的进度不单独成帧,包在 `subagent_progress` 里:`event` 是
 `{kind:"tool_progress",tool_use_id,name,message,progress?,total?,dropped,turn_id}`,
 `turn_id` 是子 Agent 自己的一轮,`parent_tool_use_id` 是父会话里那次 `Agent` 调用。
@@ -3477,6 +3668,8 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `timeout_ms` 到了没人答 | `` the host did not answer `HostEcho` within 120s ``,错误 | `withdrawn` / `timed_out` |
 | 发起时该会话一个订阅者都没有 | `` no host is connected to answer `HostEcho` ``,错误 | `withdrawn` / `no_host` |
 | 订阅者在回答之前走光了(`session.unsubscribe`、断开、慢连接被摘掉) | 同上 | `withdrawn` / `host_gone` |
+| 连接提供的工具:提供者在回答之前断开,或投递给它失败(出站队列满) | 同上 | `withdrawn` / `host_gone`;断开的,之后再调这个工具立刻 `no_host` |
+| 连接提供的工具:发起时提供者已断开或已撤回它 | 同上 | `withdrawn` / `no_host` |
 | 这一轮被中断 | 同别的工具被取消 | `withdrawn` / `cancelled` |
 
 没人连着的轮次(定时任务、目标的自动轮)里的调用因此立刻失败,不会每次都等满超时。只有旁观
@@ -3488,6 +3681,11 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 旁观者只画"等待宿主"。两个都实现了的宿主会都去执行;看到 `resolved` 而自己没被采纳的一方
 撤销副作用,或者一开始就只在自己创建的会话里执行。daemon 不仲裁。中途订阅的连接从
 `session.subscribe` 的 `pending_host_calls` 拿到还悬着的帧,照样能答。
+
+**连接提供的工具**(`daemon.setHostTools`,§6.1):帧发给提供者——**即使它没有订阅这个会话**——
+再加上这个会话的订阅者(并集);只有提供者的 `session.respondToolCall` 算数,别的连接答 →
+`INVALID_PARAMS`。「没有订阅者就 `no_host`」对它改成「提供者不在就 `no_host`」:提供者断开或
+`daemon.setHostTools []` 之后,已建好的会话里还挂着这个工具的,调用立刻以 `no_host` 结束。
 
 **子 Agent**:声明了 `subagents:true` 的工具,子 Agent(含团队成员)也拿得到,再受它的 agent
 类型的工具列表收窄;没声明的子 Agent 看不到。子 Agent 的调用经父会话的通道发出,帧带
@@ -3526,6 +3724,47 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
   MCP 与宿主工具也不报。
 
 ---
+
+### 7.6 `hook_call`
+
+```jsonc
+{ "kind":"hook_call",
+  "call_id":"hk_01J…",            // 回答用它
+  "hook_event":"PreToolUse",
+  "input":{ "hook_event_name":"PreToolUse", "session_id":"…", "cwd":"/work",
+            "permission_mode":"default", "tool_name":"Bash",
+            "tool_input":{ "command":"git push" }, "tool_use_id":"toolu_01…" },
+  "timeout_ms":10000,
+  "task_id":null,                 // 子 Agent 发起时为它的任务
+  "agent_session_id":null }       // 子 Agent 发起时为它的侧链会话
+
+{ "kind":"hook_call_resolved", "call_id":"hk_01J…",
+  "resolution":"withdrawn", "reason":"timed_out" }
+```
+
+`daemon.setHooks`(§6.1)登记过 hook 的连接收到的帧:引擎走到登记的事件,就把这一刻的 payload
+放在 `input` 里,等宿主用 `session.respondHook` 回答。`input` 的字段同设置里 hook 的 payload
+(`docs/hooks.md`「payload」):`hook_event_name`、`session_id`、`cwd`、`permission_mode`,以及
+这个事件的 `tool_name`、`tool_input`、`tool_use_id` 等。外层 `session.event` 的 `session_id`
+是根会话;子 Agent 的调用带 `agent_session_id`,而 `input.session_id` 是子 Agent 自己的。
+
+**只发给登记的那条连接**(哪怕它没有订阅这个会话),不发给别的订阅者,`session.subscribe` 的
+待答列表里也没有。一条连接登记了 hook,就等于被交出了这个 daemon 里每个会话的每次相应工具
+调用与用户消息(§6.1 `daemon.setHooks` 的"影响面")。
+
+每个调用有且只有一种结局,一轮永远能收尾:
+
+| 结局 | 对调用的效果 | `hook_call_resolved` |
+|---|---|---|
+| 宿主回答了 | 按 `session.respondHook` 的回答 | `answered` |
+| `timeout_ms` 到了没人答 | 按 `on_error` | `withdrawn` / `timed_out` |
+| 这一轮被中断 | 同别的 hook 被叫停,按 `on_error` | `withdrawn` / `cancelled` |
+| 登记者的连接断开 | 按 `on_error` | `withdrawn` / `host_gone` |
+| 帧发不出去(连接已关或出站队列满) | 按 `on_error` | `withdrawn` / `host_gone` |
+| 发起时登记者已不在 | 按 `on_error` | `withdrawn` / `no_host` |
+
+`on_error` 是登记那一条 hook 时写的:`allow`(缺省)放行,`block` 拦下。回答的字段与效果见
+`session.respondHook`。
 
 ## 8. 异步通知:`daemon.event`
 

@@ -152,6 +152,14 @@ impl Agent {
                 );
                 Ok(TurnOutcome::default())
             }
+            InputMessage::HostToolProgress { call_id, update } => {
+                crate::host_tools::report_host_progress(
+                    &self.channels.pending_host_progress,
+                    &call_id,
+                    update,
+                );
+                Ok(TurnOutcome::default())
+            }
             InputMessage::Steer { .. } => Ok(TurnOutcome::default()),
             InputMessage::Context { request, reply } => {
                 let _ = reply.send(self.handle_context(request).await);

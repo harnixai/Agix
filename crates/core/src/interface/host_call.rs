@@ -1,7 +1,8 @@
 //! `HostCalls` — how the engine hands the host something only the host can
-//! do, and waits for its one answer. Today that is a tool the host declared
-//! for the session; the call kind is an open enum so another kind of call
-//! can reuse the same wait, timeout, cancellation and disconnect handling.
+//! do, and waits for its one answer: a tool the host declared, or a hook a
+//! host connection registered. Both share the wait, timeout, cancellation and
+//! disconnect handling; a call that names its [`HostId`] is answered by that
+//! connection alone.
 
 use std::time::Duration;
 
@@ -9,7 +10,12 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::interface::tool::{CallTraits, ToolResult};
+use crate::interface::tool::{CallTraits, ProgressSender, ToolResult};
+
+/// The host connection that provides a tool or a hook, rather than the
+/// session's watchers at large.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct HostId(pub u64);
 
 /// A tool the host declared for a session: the model is offered it as it is
 /// offered any other, and calling it goes to the host.
@@ -25,6 +31,8 @@ pub struct HostToolDecl {
     pub deferred: bool,
     /// The session's sub-agents are offered it too.
     pub subagents: bool,
+    /// The connection that provides it; `None` for the session's own.
+    pub host: Option<HostId>,
 }
 
 impl HostToolDecl {
@@ -45,6 +53,7 @@ impl HostToolDecl {
             timeout: Self::DEFAULT_TIMEOUT,
             deferred: false,
             subagents: false,
+            host: None,
         }
     }
 
@@ -67,6 +76,11 @@ impl HostToolDecl {
         self.subagents = yes;
         self
     }
+
+    pub fn host(mut self, host: HostId) -> Self {
+        self.host = Some(host);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,10 +89,12 @@ pub enum HostCallKind {
     /// Run the declared tool `name` on `input`, already checked against its
     /// schema.
     Tool { name: String, input: Value },
+    /// Answer the hook `event` on `input`, the payload a command hook reads.
+    Hook { event: String, input: Value },
 }
 
 /// One call put to the host.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct HostCall {
     /// The engine's own id for the call, unique in the session the host
@@ -93,6 +109,10 @@ pub struct HostCall {
     pub task_id: Option<String>,
     /// The sub-agent's own session, when a sub-agent made it.
     pub agent_session_id: Option<String>,
+    /// The one connection whose answer counts; `None`: any watcher's.
+    pub host: Option<HostId>,
+    /// Where the host's progress reports on a tool call go.
+    pub progress: Option<ProgressSender>,
 }
 
 impl HostCall {
@@ -113,7 +133,35 @@ impl HostCall {
             timeout,
             task_id: None,
             agent_session_id: None,
+            host: None,
+            progress: None,
         }
+    }
+
+    pub fn hook(
+        call_id: impl Into<String>,
+        tool_use_id: impl Into<String>,
+        event: impl Into<String>,
+        input: Value,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            kind: HostCallKind::Hook {
+                event: event.into(),
+                input,
+            },
+            ..Self::tool(call_id, tool_use_id, String::new(), Value::Null, timeout)
+        }
+    }
+
+    pub fn for_host(mut self, host: Option<HostId>) -> Self {
+        self.host = host;
+        self
+    }
+
+    pub fn with_progress(mut self, progress: ProgressSender) -> Self {
+        self.progress = Some(progress);
+        self
     }
 
     /// Made by a sub-agent: its session, if no deeper one is named already,
@@ -138,6 +186,8 @@ pub enum HostReply {
     Result(ToolResult),
     /// It could not run the call.
     Failed(String),
+    /// Its answer to a hook call: a hook response object.
+    Hook(Value),
 }
 
 /// How a call to the host ended.

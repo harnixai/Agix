@@ -4,21 +4,28 @@
 //! - `background` — the hooks of notify-only events, run apart from their caller
 //! - `contracts` — the prompt and agent executors a host injects
 //! - `executor` — command, prompt, and HTTP hook execution
+//! - `hosts` — the hooks host connections register, asked after the settings'
 //! - `matcher` — hook `if` pattern matching utilities
+//! - `result` — what one run of an event's hooks came to
 //! - `rewake` — `once` and async-rewake bookkeeping, and waking the rewake hooks
 
 mod background;
 mod context;
 mod contracts;
 pub mod executor;
+mod hosts;
 pub mod matcher;
 mod report;
+mod result;
 mod rewake;
 
 pub use background::BackgroundHooks;
 pub use context::{CONTEXT_BLOCK_CAP, CONTEXT_EVENT_CAP};
 pub use contracts::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
+pub use hosts::{HostHook, HostHookSource, HOSTED_EVENTS};
+pub use matcher::tool_matches;
 pub use report::HookRunReport;
+pub use result::HookRunResult;
 
 use crate::config::{HookConfig, HookEvent, HooksSettings, OnError};
 use crate::payload::{HookDecision, HookInput, HookResponse, McpElicitationHook};
@@ -117,73 +124,6 @@ fn warn_of_timeouts_past_the_cap(settings: &HooksSettings) {
     }
 }
 
-/// 一次 `run` 的聚合结果。便于上层短路 / 统计。
-#[derive(Debug, Clone, Default)]
-pub struct HookRunResult {
-    pub outcomes: Vec<HookOutcome>,
-    /// What each outcome's hook is called, in step with `outcomes`.
-    pub hooks: Vec<String>,
-}
-
-impl HookRunResult {
-    /// 任意 hook 决议 block → 整体 block
-    pub fn blocked(&self) -> Option<&HookResponse> {
-        self.outcomes.iter().find_map(|o| match o {
-            HookOutcome::Ran { response, .. } if response.decision == Some(HookDecision::Block) => {
-                Some(response)
-            }
-            _ => None,
-        })
-    }
-    /// 第一条 approve；若有 hook 改写了入参，只认给出生效改写的那条 hook 自己的 approve——
-    /// 别的 hook 批准的是它看到的原入参，不能替改写后的入参答应询问
-    pub fn approved(&self) -> Option<&HookResponse> {
-        let rewrite_at = self.outcomes.iter().position(
-            |o| matches!(o, HookOutcome::Ran { response, .. } if response.updated_input.is_some()),
-        );
-        self.outcomes.iter().enumerate().find_map(|(i, o)| match o {
-            HookOutcome::Ran { response, .. }
-                if response.decision == Some(HookDecision::Approve)
-                    && rewrite_at.is_none_or(|at| at == i) =>
-            {
-                Some(response)
-            }
-            _ => None,
-        })
-    }
-    /// 任意 hook 要求中止整个 turn
-    pub fn discontinued(&self) -> bool {
-        self.outcomes
-            .iter()
-            .any(|o| matches!(o, HookOutcome::Ran { response, .. } if response.r#continue == Some(false)))
-    }
-    /// 第一个要求中止的 hook 给出的 `message`
-    pub fn discontinue_message(&self) -> Option<&str> {
-        self.outcomes.iter().find_map(|o| match o {
-            HookOutcome::Ran { response, .. } if response.r#continue == Some(false) => {
-                response.message.as_deref()
-            }
-            _ => None,
-        })
-    }
-    /// 第一个改写 input 的 hook 给出的新 input（按出现顺序）；多个 hook 都改写时后面的不看，记 warn
-    pub fn updated_input(&self) -> Option<&serde_json::Value> {
-        let mut rewrites = self.outcomes.iter().filter_map(|o| match o {
-            HookOutcome::Ran { response, .. } => response.updated_input.as_ref(),
-            _ => None,
-        });
-        let first = rewrites.next()?;
-        let ignored = rewrites.count();
-        if ignored > 0 {
-            tracing::warn!(
-                ignored,
-                "several hooks rewrote the same input; only the first in configuration order applies"
-            );
-        }
-        Some(first)
-    }
-}
-
 pub struct HookRunner {
     settings: Arc<HooksSettings>,
     default_timeout: Duration,
@@ -218,6 +158,7 @@ pub struct HookRunner {
     background: BackgroundHooks,
     context_warned: Arc<std::sync::Mutex<Vec<HookEvent>>>,
     observer: Option<Arc<dyn Fn(HookRunReport) + Send + Sync>>,
+    hosts: Option<Arc<hosts::Hosts>>,
 }
 
 impl HookRunner {
@@ -240,6 +181,7 @@ impl HookRunner {
             background: BackgroundHooks::new(),
             context_warned: Default::default(),
             observer: None,
+            hosts: None,
         }
     }
 
@@ -363,12 +305,11 @@ impl HookRunner {
         &*self.net
     }
 
-    /// True if hooks for event are present.
+    /// True if hooks for event are present, the settings' or a host
+    /// connection's.
     pub fn has_hooks_for(&self, event: HookEvent) -> bool {
-        self.settings
-            .get(&event)
-            .map(|v| !v.is_empty())
-            .unwrap_or(false)
+        self.settings.get(&event).is_some_and(|v| !v.is_empty())
+            || self.hosts.as_ref().is_some_and(|h| h.has_hooks_for(event))
     }
 
     /// `Elicitation`: an MCP server is about to put `asked` to the user.
@@ -475,18 +416,53 @@ impl HookRunner {
             background: self.background.clone(),
             context_warned: self.context_warned.clone(),
             observer: self.observer.clone(),
+            hosts: self.hosts.clone(),
         }
     }
 
+    /// The settings' hooks, then — unless one of them blocked — the host
+    /// connections', on the input as the settings' hooks rewrote it.
     async fn run_now(
         &self,
         event: HookEvent,
         input: &HookInput,
         stop: &CancellationToken,
     ) -> HookRunResult {
+        let started = std::time::Instant::now();
+        let (mut result, mut ran) = self.run_configured(event, input, stop).await;
+        let hosted = self.hosts.as_ref().is_some_and(|h| h.has_hooks_for(event));
+        if hosted && result.blocked().is_none() {
+            let updated = match event {
+                HookEvent::PreToolUse | HookEvent::UserPromptSubmit => result.updated_input(),
+                _ => None,
+            };
+            let hosted_input = hosts::rewritten(event, input, updated);
+            let hosted = self
+                .run_hosted(event, &hosted_input, result.outcomes.len() + 1, stop)
+                .await;
+            ran += hosted.len();
+            for (name, outcome) in hosted {
+                result.hooks.push(name);
+                result.outcomes.push(outcome);
+            }
+        }
+        self.warn_of_unread_context(event, &result);
+        if ran > 0 {
+            self.report(event, input, ran, started.elapsed(), &result);
+        }
+        result
+    }
+
+    /// The settings' hooks of `event`, and how many ran.
+    async fn run_configured(
+        &self,
+        event: HookEvent,
+        input: &HookInput,
+        stop: &CancellationToken,
+    ) -> (HookRunResult, usize) {
         let configs = match self.settings.get(&event) {
             Some(v) => v,
-            None => return HookRunResult::default(),
+            None => return (HookRunResult::default(), 0),
         };
 
         let pending = self.pending_indices(event, configs);
@@ -543,16 +519,14 @@ impl HookRunner {
                 .enumerate()
                 .map(|(n, (idx, outcome))| match configs[idx].on_error() {
                     OnError::Allow => outcome,
-                    OnError::Block => block_on_failure(event, n + 1, &configs[idx], outcome),
+                    OnError::Block => {
+                        block_on_failure(event, n + 1, &configs[idx].describe(), outcome)
+                    }
                 })
                 .collect(),
             hooks,
         };
-        self.warn_of_unread_context(event, &result);
-        if !pending.is_empty() {
-            self.report(event, input, pending.len(), started.elapsed(), &result);
-        }
-        result
+        (result, pending.len())
     }
 
     /// Run a single hook config, dispatching to the appropriate executor.
@@ -736,7 +710,7 @@ const NOT_JUDGED: &str = "agent hook: the event is a hook agent's own";
 fn block_on_failure(
     event: HookEvent,
     number: usize,
-    cfg: &HookConfig,
+    hook: &str,
     outcome: HookOutcome,
 ) -> HookOutcome {
     let (why, stdout, stderr, exit_code) = match outcome {
@@ -763,7 +737,7 @@ fn block_on_failure(
     tracing::warn!(
         event = ?event,
         number,
-        hook = %base::text::scrub_secrets(&cfg.describe()),
+        hook = %base::text::scrub_secrets(hook),
         reason = %base::text::scrub_secrets(&why),
         "hook failed; blocking"
     );

@@ -81,6 +81,7 @@
 | `compaction` | 契约 | `Builder::compactor` | 每轮一次:两趟老化、一趟预测,最后是阈值 | 消息历史,以及到底要不要重写 | 每轮(10⁰–10¹ 量级) | 不开放 | 不开放 | 不开放 |
 | `script.carrier` | 契约 | 模块:`script_host::bindings::bind`、`Builder::plugin` | 载体被绑到哪就在哪;受每轮配额约束 | 所绑那个点允许的一切,按脚本自己的来源定级 | 每轮(10⁰–10¹ 量级) | 完全 | 完全 | 需声明能力 |
 | `hooks` | 拦截 | `Builder::hooks`、设置项 `hooks` | 二十九个具名时刻;见 docs/hooks.md | 按事件而异:拦截、改写输入、结束这一轮 | 每次工具调用(10¹ 量级) | 完全 | 完全 | 需声明能力 |
+| `hooks.host` | 拦截 | `Builder::host_hooks` | PreToolUse、PostToolUse、PostToolUseFailure、UserPromptSubmit、Stop;设置里的 hook 先跑 | 拦下这次调用,或补一段上下文;不批准、不改入参 | 每次工具调用(10¹ 量级) | 不开放 | 不开放 | 不开放 |
 <!-- END GENERATED TABLE -->
 
 上面这张表由 `base::interface::catalog` 生成,这份文件一旦和它对不上,
@@ -642,6 +643,12 @@ Builder::new()
 时 `build` 以 `EngineError::HostTools` 失败。声明了 `subagents` 的那几个,子 Agent 也拿得到,
 调用经父会话的通道发出。daemon 上对应的是 `session.create` 的 `options.host_tools` 与
 `session.respondToolCall`(`daemon_rpc_protocol.md` §6.3、§7.4)。
+
+工具也可以挂在**连接**上:daemon 的 `daemon.setHostTools` 把一条连接提供的工具登记进
+`HostConnections`,此后建起来的每个会话都带它们(只对之后建的引擎生效,会话自己的同名项优先);
+这类调用的 `host_tool_call` 一定发给提供者,只有提供者的 `session.respondToolCall` 算数,连接断开
+工具随之消失(`daemon_rpc_protocol.md` §6.1、§7.4)。宿主也可以用 `session.reportToolProgress`
+为调用报进度,引擎把它变成 `tool_progress` 帧。
 
 ### 事件去哪 — `event.sink`
 
@@ -1213,12 +1220,25 @@ let store = Arc::new(ObservedHistoryStore::new(inner, vec![my_observer]));
 
 二十九个具名事件,四种后端(command、prompt、HTTP、agent),在 `settings.json` 的
 `hooks_config` 里配:事件名 → 一组 hook。各层按事件合并,上层写了某个事件就整组替换下层
-的那一组;没被信任的项目(`ARCHITECTURE.md` §6.6)那一层的整段不加载。有些事件能解析、能接受配置,但还没有任何地方触发它们;`hooks::UNWIRED_EVENTS`
+的那一组(宿主连接登记的 hook 例外,见下);没被信任的项目(`ARCHITECTURE.md` §6.6)那一层的整段不加载。有些事件能解析、能接受配置,但还没有任何地方触发它们;`hooks::UNWIRED_EVENTS`
 是那份清单,配到这类事件时引擎会告警,而 `tests/guards/tests/wiring.rs` 从两个
 方向盯着这份清单不许说谎。
 
 协议本身——配置格式、四种后端、退出码、超时、`if` / `once`、payload 字段、回答能做什么、
 每个事件何时触发——在 [`hooks.md`](hooks.md),那里的事件表由 `hooks::catalog` 生成。
+
+### 宿主连接的 hook — `hooks.host`
+
+```rust
+Builder::new().host_hooks(Arc::new(source))   // source: hooks::HostHookSource
+```
+
+`HostHookSource` 给 `HookRunner` 一份**每次触发时现读**的宿主 hook 表;触发时 `HookRunner` 经会话自己的
+`HostCalls` 把 `hook_call` 交给登记它的那一方、等一个回答。daemon 上它由 `daemon.setHooks` 与 `session.respondHook` 驱动(登记在
+连接上,连接断开即撤回)。和设置里的 hook 不同:不替换也不被替换,设置 hook 先跑,只有五个事件
+(`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`UserPromptSubmit`、`Stop`),回答只认 `block`、
+`message`、`additional_context`——不批准、不改入参、不结束一轮。登记者能看到整个 daemon 里每个会话
+相应工具调用的输入、能拦下它,只交给被信任的宿主(`hooks.md`「宿主连接的 hook」)。
 
 ---
 

@@ -7,6 +7,7 @@ mod daemon;
 mod error;
 mod events;
 mod history;
+mod host_connections;
 mod mcp;
 mod options;
 mod plugin;
@@ -33,6 +34,9 @@ pub use events::{
 pub use history::{
     ArchiveFormat, EntryList, EntryView, ExportSummary, ExportedSession, HistoryItem,
     HistoryOrigin, HistoryPage, HistoryUsage, ImportSummary, ImportedSession, SessionKindName,
+};
+pub use host_connections::{
+    HookAnswer, HooksSet, HostHookOnError, HostHookOption, HostHookSet, HostToolsSet, RefusedEntry,
 };
 pub use mcp::{
     McpAuthDone, McpAuthStarted, McpAuthState, McpAuthStatus, McpIdentity, McpReconnected,

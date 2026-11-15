@@ -54,6 +54,7 @@ pub(super) fn raise_ask(
         prompt_id.to_string(),
         task_id.map(str::to_string),
         AskKind::Permission,
+        None,
     );
 }
 
@@ -146,6 +147,7 @@ mod context_op;
 mod eviction;
 mod goal_record;
 mod host_skill_dirs;
+mod hosts;
 mod hub;
 mod import_question;
 pub(in crate::session_pool) mod mcp_for_project;

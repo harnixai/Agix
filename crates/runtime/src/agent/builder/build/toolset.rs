@@ -95,7 +95,7 @@ impl Builder {
     ) -> Result<SessionTools, EngineError> {
         let tools = &registry;
         let host_tools = crate::host_tools::declared_tools(&self.spec.host_tools)?;
-        admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
+        let host_names = admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
         let host_schema = self.spec.output_schema.clone();
         let tool_policy = Arc::new(crate::tool_policy::ToolPolicy::new(
@@ -105,7 +105,7 @@ impl Builder {
                 .iter()
                 .filter(|(_, owner)| owner.admitted)
                 .map(|(name, _)| name.clone())
-                .chain(self.spec.host_tools.iter().map(|d| d.name.clone()))
+                .chain(host_names)
                 .chain(host_schema.is_some().then(|| STRUCTURED_OUTPUT.to_string())),
         ));
 
@@ -162,12 +162,16 @@ impl Builder {
     }
 }
 
+/// Registers the scene's, the session's host, the plugins' and the host
+/// connections' tools, in that order, and returns the names of the host
+/// tools registered. A host connection's tool whose name is taken is left
+/// out with a warning: it must not keep the session from being built.
 pub(super) fn admit_extra_tools(
     tools: &InMemoryToolRegistry,
     scene: &SceneSpec,
-    host_tools: Vec<Arc<dyn base::tool::Tool>>,
+    (host_tools, provided_tools): crate::host_tools::DeclaredTools,
     plugin_tools: Vec<Arc<dyn base::tool::Tool>>,
-) -> Result<(), EngineError> {
+) -> Result<Vec<String>, EngineError> {
     // Scene-contributed tools (`SceneSpec::extra_tools`, default empty).
     //
     // Deliberately last. The collision check is the whole point of this
@@ -189,6 +193,7 @@ pub(super) fn admit_extra_tools(
         tools.register(t);
     }
 
+    let mut host_names = Vec::new();
     for t in host_tools {
         if taken(tools, t.name()) {
             return Err(EngineError::HostTools(format!(
@@ -196,6 +201,7 @@ pub(super) fn admit_extra_tools(
                 t.name()
             )));
         }
+        host_names.push(t.name().to_string());
         tools.register(t);
     }
 
@@ -222,7 +228,19 @@ pub(super) fn admit_extra_tools(
             }
         }
     }
-    Ok(())
+
+    for t in provided_tools {
+        if taken(tools, t.name()) {
+            tracing::warn!(
+                tool = t.name(),
+                "a host connection's tool is left out of the session: the name is taken"
+            );
+            continue;
+        }
+        host_names.push(t.name().to_string());
+        tools.register(t);
+    }
+    Ok(host_names)
 }
 
 fn report_duplicates(tools: &InMemoryToolRegistry) {

@@ -45,9 +45,7 @@ impl DaemonServer {
         }
         // The connection is what subscriptions belong to; sessions and their
         // turns are not. Dropping it takes its subscriptions and nothing else.
-        self.pool
-            .drop_watcher(crate::session_pool::api::WatcherId(client.id().0))
-            .await;
+        self.close_connection(&client).await;
         Ok(())
     }
 

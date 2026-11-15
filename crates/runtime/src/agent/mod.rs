@@ -174,6 +174,7 @@ pub(crate) struct Channels {
     /// Host calls awaiting the host's answer, which the input
     /// demultiplexer resolves.
     pub(crate) pending_host_calls: crate::host_tools::PendingHostCalls,
+    pub(crate) pending_host_progress: crate::host_tools::PendingHostProgress,
     pub(crate) host_calls: Arc<dyn base::interface::host_call::HostCalls>,
 }
 

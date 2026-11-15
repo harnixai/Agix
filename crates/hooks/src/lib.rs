@@ -13,4 +13,7 @@ pub use config::{
     UNWIRED_EVENTS,
 };
 pub use payload::{HookDecision, HookInput, HookResponse, McpElicitationHook};
-pub use runner::{BackgroundHooks, HookExec, HookRunReport, HookRunner};
+pub use runner::{
+    tool_matches, BackgroundHooks, HookExec, HookRunReport, HookRunner, HostHook, HostHookSource,
+    HOSTED_EVENTS,
+};

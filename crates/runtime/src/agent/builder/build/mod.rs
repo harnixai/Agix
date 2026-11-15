@@ -45,6 +45,9 @@ impl Builder {
             self.register_session_tools(&r.tools, &r.settings, &r.model, &r.telemetry_handle);
 
         let events = self.wire_events();
+        hooks
+            .hooks
+            .route_host_calls(session.session_id_str(), &events.host_calls);
         let mcp_slot = self.ext.mcp_servers.take();
         let mcp = self.run_modules(ModuleInputs {
             resolved: &r,

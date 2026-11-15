@@ -59,6 +59,7 @@ pub struct Client {
     enqueued: std::sync::Arc<std::sync::atomic::AtomicU64>,
     dropped: std::sync::Arc<std::sync::Mutex<Vec<DroppedSubscription>>>,
     daemon_events: std::sync::atomic::AtomicBool,
+    closed: std::sync::atomic::AtomicBool,
 }
 
 /// A session this connection was unsubscribed from because its queue was
@@ -123,11 +124,23 @@ impl Client {
             enqueued: std::sync::Arc::default(),
             dropped,
             daemon_events: std::sync::atomic::AtomicBool::new(false),
+            closed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     pub fn id(&self) -> ConnectionId {
         self.id
+    }
+
+    /// The peer is gone: requests of this connection still being served
+    /// register nothing from now on.
+    pub fn close(&self) {
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Neither [`Self::close`]d nor with its writer gone.
+    pub fn is_open(&self) -> bool {
+        !self.closed.load(std::sync::atomic::Ordering::SeqCst) && !self.tx.is_closed()
     }
 
     /// Mark this connection as receiving `daemon.event`; `false` if it

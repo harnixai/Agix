@@ -8,6 +8,7 @@ mod doctor;
 mod goal;
 pub(super) mod helpers;
 pub(super) mod history_rpc;
+mod host_connections;
 mod import;
 mod listing;
 mod plugins;

@@ -339,6 +339,27 @@ async fn documented_daemon_scene_and_config_results_are_real() {
     verify(
         &doc,
         &daemon,
+        "daemon.setHostTools",
+        serde_json::json!({"host_tools": [
+            {"name": "HostEcho", "description": "Echo text back from the host.",
+             "input_schema": {"type": "object",
+                              "properties": {"text": {"type": "string"}},
+                              "required": ["text"]},
+             "read_only": true}]}),
+    )
+    .await;
+    verify(
+        &doc,
+        &daemon,
+        "daemon.setHooks",
+        serde_json::json!({"hooks": [
+            {"events": ["PreToolUse"], "tools": ["Bash", "Write*"],
+             "timeout_ms": 10000, "on_error": "block"}]}),
+    )
+    .await;
+    verify(
+        &doc,
+        &daemon,
         "daemon.subscribeEvents",
         serde_json::json!({}),
     )
@@ -474,6 +495,21 @@ async fn documented_session_results_are_real() {
         "session.respondToolCall",
         serde_json::json!({"session_id": sid, "call_id": "hc-none",
                            "result": {"content": "late"}}),
+    )
+    .await;
+    verify(
+        &doc,
+        &daemon,
+        "session.respondHook",
+        serde_json::json!({"session_id": sid, "call_id": "hk-none", "decision": "block",
+                           "message": "late"}),
+    )
+    .await;
+    verify(
+        &doc,
+        &daemon,
+        "session.reportToolProgress",
+        serde_json::json!({"session_id": sid, "call_id": "hc-none", "message": "late"}),
     )
     .await;
     // Still in memory, so `status` is the documented `already_active`.

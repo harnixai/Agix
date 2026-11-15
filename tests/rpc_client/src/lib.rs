@@ -79,6 +79,18 @@ pub enum ToolCallReply {
     Error(String),
 }
 
+/// `session.respondHook` 的回答：放行或拦下，可带给模型的上下文。
+#[derive(Debug, Clone)]
+pub enum HookReply {
+    Proceed {
+        additional_context: Option<String>,
+    },
+    Block {
+        message: String,
+        additional_context: Option<String>,
+    },
+}
+
 /// `Permission` 带 `PermissionDecision` 的线上形状，如 `{"type": "permit"}`；
 /// 另两个带各自的 answer。
 #[derive(Debug, Clone)]
@@ -680,6 +692,72 @@ impl DaemonRpcClient {
             }
         }
         self.call("session.respondToolCall", params).await
+    }
+
+    /// `daemon.setHostTools`：这条连接提供的工具，整体替换；空表撤回全部。
+    pub async fn daemon_set_host_tools(
+        &mut self,
+        host_tools: Vec<Value>,
+    ) -> anyhow::Result<RpcResponse> {
+        self.call(
+            "daemon.setHostTools",
+            serde_json::json!({ "host_tools": host_tools }),
+        )
+        .await
+    }
+
+    /// `daemon.setHooks`：这条连接注册的 hook，整体替换；空表撤回全部。
+    pub async fn daemon_set_hooks(&mut self, hooks: Vec<Value>) -> anyhow::Result<RpcResponse> {
+        self.call("daemon.setHooks", serde_json::json!({ "hooks": hooks }))
+            .await
+    }
+
+    /// `session.respondHook`。
+    pub async fn session_respond_hook(
+        &mut self,
+        session_id: &str,
+        call_id: &str,
+        reply: HookReply,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({ "session_id": session_id, "call_id": call_id });
+        let context = match reply {
+            HookReply::Proceed { additional_context } => additional_context,
+            HookReply::Block {
+                message,
+                additional_context,
+            } => {
+                params["decision"] = "block".into();
+                params["message"] = message.into();
+                additional_context
+            }
+        };
+        if let Some(context) = context {
+            params["additional_context"] = context.into();
+        }
+        self.call("session.respondHook", params).await
+    }
+
+    /// `session.reportToolProgress`：宿主工具调用进行中的一次进度汇报。
+    pub async fn session_report_tool_progress(
+        &mut self,
+        session_id: &str,
+        call_id: &str,
+        message: &str,
+        progress: Option<f64>,
+        total: Option<f64>,
+    ) -> anyhow::Result<RpcResponse> {
+        let mut params = serde_json::json!({
+            "session_id": session_id,
+            "call_id": call_id,
+            "message": message,
+        });
+        if let Some(progress) = progress {
+            params["progress"] = progress.into();
+        }
+        if let Some(total) = total {
+            params["total"] = total.into();
+        }
+        self.call("session.reportToolProgress", params).await
     }
 
     /// `session.respondToPrompt`。`Permission` 的值进 `decision`，其余进 `answer`，

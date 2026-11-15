@@ -4,7 +4,7 @@
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration size::
 file  crates/assembly/src/plugins.rs                             -                                      825
 file  crates/compaction/src/compact.rs                           -                                      1017
-file  crates/core/src/interface/catalog.rs                       -                                      842
+file  crates/core/src/interface/catalog.rs                       -                                      853
 file  crates/mcp/src/connect.rs                                  -                                      1370
 file  crates/mcp/src/manager.rs                                  -                                      1237
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
@@ -17,8 +17,8 @@ fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn   
 fn    crates/agents/src/delegate/mod.rs                          Delegator::delegate                    86
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   104
-fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        331
-fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              88
+fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        357
+fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              92
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    136
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              97
@@ -27,7 +27,7 @@ fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::se
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90
 fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::set_project_trust         90
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  174
-fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   98
+fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   104
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      models                                 82
 fn    crates/assembly/src/session_pool/parts/mcp_hub/connect.rs  SessionPool::write_mcp_server          121
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
@@ -51,9 +51,9 @@ fn    crates/prompt-files/src/lib.rs                             parse_skill_fil
 fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
 fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
-fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      86
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         102
-fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   99
+fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      88
+fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         106
+fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   101
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       86
 fn    crates/runtime/src/agent/turn/attachments.rs               resolve_attachments                    94

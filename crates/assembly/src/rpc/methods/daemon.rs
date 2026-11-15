@@ -41,3 +41,20 @@ pub struct CommandsListParams {
 pub struct CommandList {
     pub commands: Vec<CommandInfo>,
 }
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetHostToolsParams {
+    /// Each entry as `options.host_tools` takes it; `[]` withdraws them all.
+    /// Read one by one: a bad entry is refused alone.
+    pub host_tools: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetHooksParams {
+    /// Each entry a `HostHookOption`; `[]` or `null` withdraws them all.
+    /// Read one by one: a bad entry is refused alone.
+    #[serde(default)]
+    pub hooks: Option<Vec<serde_json::Value>>,
+}

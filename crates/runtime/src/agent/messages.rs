@@ -23,11 +23,18 @@ pub enum InputMessage {
         prompt_id: String,
         answer: base::interface::elicitation::McpElicitationAnswer,
     },
-    /// How the host call `call_id` (`AgentEvent::HostToolCall`) ended on the
-    /// host's side: its answer, or that no host is there to give one.
+    /// How the host call `call_id` (`AgentEvent::HostToolCall` or
+    /// `AgentEvent::HostHookCall`) ended on the host's side: its answer, or
+    /// that no host is there to give one.
     HostToolResponse {
         call_id: String,
         end: base::interface::host_call::HostCallEnd,
+    },
+    /// The host's progress report on its open tool call `call_id`, reported
+    /// as the call's own `AgentEvent::ToolProgress`.
+    HostToolProgress {
+        call_id: String,
+        update: base::tool::ProgressUpdate,
     },
     System {
         kind: EngineCommand,

@@ -647,6 +647,15 @@ impl Builder {
         self
     }
 
+    /// Hooks host connections register, asked after the settings' through
+    /// [`Builder::host_calls`] and read each time one may fire. Only a
+    /// session that builds its own hook runner takes them; one handed a
+    /// runner with [`Builder::hooks`] has its calls routed on that runner's.
+    pub fn host_hooks(mut self, source: Arc<dyn hooks::HostHookSource>) -> Self {
+        self.ext.host_hooks = Some(source);
+        self
+    }
+
     /// Narrows every tool this session would have to what `selector` admits,
     /// on top of its scene: the ones it is handed, the engine's and modules',
     /// the scene's and plugins', and its MCP servers', those connected later

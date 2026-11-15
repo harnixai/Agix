@@ -580,7 +580,7 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 | `SceneCatalog`(`parts/scenes.rs`) | 默认场景、激活的场景、场景注册表、宿主登记与 `scene.register` 的场景 | std `RwLock`,叶子 |
 | `McpHub`(`parts/mcp_hub/`) | 按 `(project, scene)` 缓存的连接、登录状态、准入策略;没编进 MCP 时是桩 | 缓存的表锁只在找、加、删槽时持有;连接在槽自己的更新锁下 |
 | `SessionDirectory`(`parts/directory.rs`) | 读会话日志里的事实(`Meta`、计数、是否结束)、服务过的项目 | `served`(std,叶子) |
-| `EngineFactory`(`parts/factory/`) | 内置工具、宿主权限、Rust 插件、customizer、权限提示时限;按 `BuildRequest` 建 Agent,不插表 | 无 |
+| `EngineFactory`(`parts/factory/`) | 内置工具、宿主权限、Rust 插件、customizer、权限提示时限,以及宿主连接登记处 `HostConnections`(`parts/hosts.rs`,§3.5);按 `BuildRequest` 建 Agent,不插表 | `HostConnections` 的表(std,叶子) |
 | `Scheduler`(`parts/scheduler.rs`) | 定时任务表;到期的任务交给门面实现的 `TurnLauncher` | 无 |
 | `DaemonEvents`(`parts/events.rs`) | `daemon.subscribeEvents` 的广播和池级遥测 | 无 |
 
@@ -593,7 +593,8 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 
 **全局锁序:** `session_locks[sid]` → `sessions` → `TurnSlot.rx` → { `SessionHub.inner` |
 `SessionCore.*` | `SessionState.*` }(叶子之间互不嵌套);`bindings` →
-`last_good_routers`。其余 std 锁都是叶子,持锁时不 `.await`。
+`last_good_routers`。其余 std 锁都是叶子,持锁时不 `.await`。`HostConnections` 的表也是叶子:持着它不拿别的锁、
+不调订阅者;`SessionHub.inner` 可以在自己的锁下查它,反过来不行。
 
 **冷建的编排**(`create`):拒绝关闭中的池、等同 id 的旧引擎停下(`LiveSessions`)→ 认领日志 →
 取规格(`SpecStore`)→ 建 `SessionCore` → 备部件(场景表、定时任务表、MCP 模块、进程组账本、
@@ -765,6 +766,26 @@ plan 模式的那一次调用)、`short_description`、`callable_from_code`、`c
 调用交给 `HostCalls`(`base::interface::host_call`),引擎自带的实现发 `AgentEvent::HostToolCall`、
 等 `InputMessage::HostToolResponse`,超时、取消、宿主不在都有确定的结局,一轮总能收尾。挂在会话
 而不挂在场景上:场景是 daemon 上所有连接共享的,工具是某个宿主连接的能力。
+
+**连接级的工具与 hook(`daemon.setHostTools` / `daemon.setHooks`)。** 工具除了随会话声明,还能挂在
+宿主**连接**上:登记处是 `EngineFactory` 里的 `HostConnections`(`parts/hosts.rs`),按连接记下它提供的
+工具、登记的 hook 与能把帧交到它手上的订阅者。它是叶子锁,持着它不拿别的锁、不调订阅者;
+`SessionHub` 可以在自己的锁下查它。
+
+- **工具在建引擎时取快照**,经 `BuildRequest` 并进 `HostToolDecl`(带提供者的 `HostId`),所以只对此后
+  建起来的引擎生效,不进会话日志与 `options`,重建时重新取;会话自己的 `options.host_tools` 同名项优先,
+  与插件或场景工具重名只丢连接这一个并记 warn。**hook 每次触发时现读**登记表(`HookRunner::with_hosts`),
+  所以对已建好的会话也立刻生效,且叠加在设置 hook 之后跑——设置 hook 先、拦下就不问宿主,宿主看到的
+  是设置 hook 改写后的输入。
+- **回答只认提供者。** 调用带着 `HostId`,`session.respondToolCall` 与 `session.reportToolProgress` 的
+  来路连接对不上就拒绝(`INVALID_PARAMS`);`session.respondHook` 只认登记者。
+- **帧的收件人:** 连接提供的工具的 `host_tool_call` 发给订阅者 ∪ 提供者,不论提供者订没订阅这个
+  会话;`hook_call` 只发给登记者。这样旁观的订阅者看不到、也答不了 hook。
+- **断开的顺序:** 先从登记处摘掉这条连接并放开它的锁,再逐个 hub 结束它在途的调用
+  (`host_gone`)。两步之间发起的调用,在 hub 锁下查登记处已经查不到提供者,当场以 `no_host` 结束,
+  不会悬着。工具与 hook 都是,hook 的失败再按各自的 `on_error`。
+- 登记了 hook 的连接能看到、能拦下整个 daemon 里每个会话的工具调用——这是它的影响面,不是漏洞;
+  所以数量有上限(一连接 16 条、8 条连接,同一连接上悬着的调用 256 个),并只在宿主被信任时使用。
 
 三条硬约束:
 
@@ -2048,7 +2069,7 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 ## 9. 扩展面
 
-引擎有 46 个扩展点,分三类:**契约** 31 个(换掉一个子系统)、**拦截** 9 个
+引擎有 47 个扩展点,分三类:**契约** 31 个(换掉一个子系统)、**拦截** 10 个
 (坐在某件事的路径上)、**注册** 6 个(往一个集合里贡献)。
 
 扩展只有两种:**Rust**——契约直接 `impl` 那个 trait 交给 `runtime::agent::Builder`,

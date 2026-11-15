@@ -102,6 +102,20 @@ pub enum SessionEventPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<HostCallWithdrawal>,
     },
+    HookCall {
+        call_id: String,
+        hook_event: String,
+        input: Value,
+        timeout_ms: u64,
+        task_id: Option<String>,
+        agent_session_id: Option<String>,
+    },
+    HookCallResolved {
+        call_id: String,
+        resolution: PromptResolution,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<HostCallWithdrawal>,
+    },
     SubagentProgress {
         agent_label: String,
         agent_session_id: String,
@@ -276,6 +290,8 @@ impl SessionEventPayload {
         "prompt_resolved",
         "host_tool_call",
         "host_tool_call_resolved",
+        "hook_call",
+        "hook_call_resolved",
         "subagent_progress",
         "team_progress",
         "skills_changed",
@@ -582,6 +598,7 @@ impl SessionEventPayload {
                 timeout_ms,
                 task_id,
                 agent_session_id,
+                host: _,
             } => Self::HostToolCall {
                 call_id: call_id.clone(),
                 tool_use_id: tool_use_id.clone(),
@@ -596,6 +613,31 @@ impl SessionEventPayload {
                 resolution,
                 reason,
             } => Self::HostToolCallResolved {
+                call_id: call_id.clone(),
+                resolution: *resolution,
+                reason: *reason,
+            },
+            AgentEvent::HostHookCall {
+                call_id,
+                hook_event,
+                input,
+                timeout_ms,
+                task_id,
+                agent_session_id,
+                host: _,
+            } => Self::HookCall {
+                call_id: call_id.clone(),
+                hook_event: hook_event.clone(),
+                input: input.clone(),
+                timeout_ms: *timeout_ms,
+                task_id: task_id.clone(),
+                agent_session_id: agent_session_id.clone(),
+            },
+            AgentEvent::HostHookCallResolved {
+                call_id,
+                resolution,
+                reason,
+            } => Self::HookCallResolved {
                 call_id: call_id.clone(),
                 resolution: *resolution,
                 reason: *reason,

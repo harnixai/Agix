@@ -4,7 +4,7 @@
 //! stops; the instance's lifecycle and session list across an engine restart,
 //! with a project reached by two paths; a host scene's own tool in the hands
 //! of sub-agents; the context the next call carries, seen before it is
-//! made and edited by the host; and a tool the host declares and runs itself.
+//! made and edited by the host; a tool the host declares and runs itself; and a tool and a hook a connection provides for every session.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -890,6 +890,133 @@ async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
         "the reply carries what only the host knew: {}",
         turn.text
     );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connection_provides_a_tool_and_a_hook_that_blocks_bash() -> anyhow::Result<()> {
+    let mut run = LiveRun::start(
+        "host_provider",
+        json!({ "permission_mode": "default" }),
+        Mode::InProcess,
+    )
+    .await?;
+    let secret = format!("N-{}", nonce());
+    let marker = run.project.join(format!("ran-{}", nonce()));
+
+    let mut provider = run.daemon.connect().await?;
+    let set = provider
+        .daemon_set_host_tools(vec![json!({
+            "name": "HostNote",
+            "description": "Return the host's note for this session.",
+            "input_schema": { "type": "object", "properties": {} },
+            "read_only": true
+        })])
+        .await?;
+    anyhow::ensure!(set.error.is_none(), "{set:?}");
+    anyhow::ensure!(
+        set.result
+            .as_ref()
+            .is_some_and(|r| r["refused"] == json!([])),
+        "{set:?}"
+    );
+    let hooked = provider
+        .daemon_set_hooks(vec![json!({ "events": ["PreToolUse"], "tools": ["Bash"] })])
+        .await?;
+    anyhow::ensure!(hooked.error.is_none(), "{hooked:?}");
+
+    let session = run
+        .session_with(json!({ "options": {
+            "permission_mode": "default",
+            "permission_rules": [
+                { "source": "session", "behavior": "allow", "tool_name": "HostNote" },
+                { "source": "session", "behavior": "allow", "tool_name": "Bash" }
+            ]
+        }}))
+        .await?;
+
+    let asked: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let (seen, note, sid) = (asked.clone(), secret.clone(), session.clone());
+    let answering = tokio::spawn(async move {
+        while let Ok(Some(frame)) = provider.next_frame().await {
+            let event = frame["params"]["event"].clone();
+            let call_id = event["call_id"].as_str().unwrap_or_default().to_string();
+            match event["kind"].as_str() {
+                Some("host_tool_call") => {
+                    seen.lock().unwrap().push(event.clone());
+                    let _ = provider
+                        .session_respond_tool_call(
+                            &sid,
+                            &call_id,
+                            rpc_client::ToolCallReply::Result {
+                                content: json!(note),
+                                is_error: false,
+                            },
+                        )
+                        .await;
+                }
+                Some("hook_call") => {
+                    seen.lock().unwrap().push(event.clone());
+                    let _ = provider
+                        .session_respond_hook(
+                            &sid,
+                            &call_id,
+                            rpc_client::HookReply::Block {
+                                message: "the host forbids shell commands".into(),
+                                additional_context: None,
+                            },
+                        )
+                        .await;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let turn = run
+        .turn(
+            &session,
+            &format!(
+                "First call the HostNote tool and wait for its answer. Then run the shell \
+                 command `touch {}` with the Bash tool. Finally tell me exactly what \
+                 HostNote returned.",
+                marker.display()
+            ),
+        )
+        .await?;
+    answering.abort();
+
+    let asked = asked.lock().unwrap().clone();
+    assert!(
+        asked
+            .iter()
+            .any(|e| e["kind"] == "host_tool_call" && e["name"] == "HostNote"),
+        "{asked:#?}"
+    );
+    assert!(
+        asked.iter().any(|e| e["kind"] == "hook_call"
+            && e["hook_event"] == "PreToolUse"
+            && e["input"]["tool_name"] == "Bash"),
+        "{asked:#?}"
+    );
+    assert!(
+        !asked
+            .iter()
+            .any(|e| e["kind"] == "hook_call" && e["input"]["tool_name"] != "Bash"),
+        "the hook was asked about a tool it did not name: {asked:#?}"
+    );
+    assert!(!marker.exists(), "the blocked Bash command ran");
+    assert!(
+        turn.tool_results
+            .iter()
+            .any(|(name, content, is_error)| name == "Bash"
+                && *is_error
+                && content.contains("Blocked by PreToolUse hook: the host forbids")),
+        "{:?}",
+        turn.tool_results
+    );
+    assert!(turn.text.contains(&secret), "{}", turn.text);
     run.finish().await;
     Ok(())
 }
