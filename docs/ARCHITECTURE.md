@@ -70,12 +70,18 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 RPC 服务和会话池在同一个 crate 里是体积上的取舍:两者共用大量泛型实例(serde_json、
 tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大约 2.8 MB。
 
-**`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定,
-并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
+**`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定(生产代码
+约 1.87 万行,守卫的行数棘轮只降不升),并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
 `resolve_physically`、`truncate_chars` 等);别的 crate 实现它的 trait。
 这条约束是整个扩展面成立的前提:一个宿主要替换某个子系统时,面对的是 `core` 里的
 一个 trait,而不是某个具体 crate 的内部结构。`tests/guards/tests/base.rs` 守着它:
-生产行数只降不升,直接碰文件系统的文件有白名单,不调用模型。
+生产行数只降不升,直接碰文件系统的文件有白名单(七个,各写着理由),不调用模型。
+两样带实现的东西留在这里,各有理由:`base::paths::PromptFiles` 的读(`canonicalize` 后过敏感路径
+判定、再读**解析后的**路径)被 `memory`、`settings`、`prompt-files` 等互不依赖的 K1 共用,
+拆成"判定在 core、读在各家"就是让每家自己记得走这道门,正是它要防的检查与使用之间的换路径;
+`base::engine_exec::EngineExec` 不碰机器(进程经 `exec.process`、约束经 `exec.sandbox`),是
+"引擎自己起的 git 怎么被约束"的判定,`ToolContext.engine_git` 挂着它,tools(K2)看不到 runtime,
+搬走只能抽 trait,等于让这道唯一关口变成谁都能不走的接口。
 
 **`base` 只有契约、共享数据、策略与判定,以及上述小工具,不起进程。** 子进程环境的策略与判定
 (`SubprocessEnv::resolve` 给出 `EnvPlan`)在 `base`,把它写进一个 `tokio::process::Command`
@@ -154,6 +160,7 @@ fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父�
 |---|---|---|
 | `Builder::exec(ExecProviders)` | `exec.process` / `filesystem` / `network` / `sandbox` | 工具调用、引擎的 git 与 `pdftotext`、warmup 的预连接、command hook 的进程都落在它上面(HTTP hook 的出口:宿主给了 `exec` 就用它的 `network`,否则是不带模型出口策略的本机网络,因为 hook 是运维写的配置,常打 `localhost`);与 `Builder::process_groups` 互斥,同设时 `build()` 报错——要记进程组就把台账带在传入的 provider 里(`platform::local_providers_with_ledger`) |
 | `Builder::token_counter(..)` | `token.count` | 压缩触发的那个数、请求开销与 `inspectContext` 的逐块计数、`compact_now` 的目标大小,同一口径 |
+| `Builder::prompt_assembler(..)` | `prompt.assembler` | 缺省 `runtime::prompt_assembly::MergedSystemPrompt`(包着引擎自己的 `DefaultAssembler`);契约 `PromptAssembler` 与请求、块类型在 `base` |
 | `Builder::rule_provider(..)` | `rules.source` | 缺省 `prompt_files::rule_tiers`(全局、场景、项目三层,后来居上);每次组装提示词时取一次 |
 
 ### 1.2 档位
@@ -248,7 +255,8 @@ tool-use id,不能向人询问,要批准的调用直接被拒;宿主看不到它
 守着没有第二条路径。
 
 **取消有宽限。** 一轮被取消时,还在跑的工具先得到 `tool_cancel_grace`(缺省 2 秒)自己停下,
-过了就丢弃、把这次调用答成已取消,不拖着整轮不收尾。
+过了就丢弃、把这次调用答成已取消,不拖着整轮不收尾。MCP server 把调用转成任务时,调用在原地挂着
+等任务(§6.4),取消同样先走这段宽限;调用被丢弃时才向 server 发 `tasks/cancel`。
 
 **出错时什么都没留下,才交给 RecoveryPolicy。** 请求被拒(状态码、连不上),或者流在回复
 要工具之前断了(流里的 `error` 事件、没等到消息结尾就结束),这次调用的半截回复整个丢掉,
@@ -281,9 +289,9 @@ at <path>]`);只有路径直接落在本会话(根会话)结果目录、文件�
 `compaction.tool_result_inline_chars` 不受未信任项目影响。自己分页的 `Read`、`WebFetch`、`TaskOutput`(`ToolSpec::pages_itself`)、`RunCode`
 里的子调用和 skill 内联命令不外置;失败的结果一样外置;没有可写目录或写失败时不外置,交给
 单条预算截断。转录、压缩、录像看到的都只是预览。外置文件的内容可能是 MCP server 或网页写的,
-所以 `Read` / `Grep` 指向这个目录时一律按外部内容围栏,不让它借文件洗成项目文件。**已知限制:**
-`Bash`(`cat`、`sed -n`、`jq`)或 `RunCode` 读回外置的 MCP / 网页结果不加围栏,中间段落以本地命令
-输出的身份进对话;`cp` 进项目后再 `Read` 也一样。外置时写进文件首尾的围栏只包住整份,不跟着片段走。
+所以 `Read` / `Grep` 指向这个目录时一律按外部内容围栏,不让它借文件洗成项目文件。预览不再提示用
+`Bash` 读后续;`Bash` 命令文本点名了本会话外置目录时,整段结果按外部内容加围栏。**已知限制:**
+围栏只认命令文本里的目录名,命令把路径拼出来、或 `cp` 进项目后再读,不在其内。外置时写进文件首尾的围栏只包住整份,不跟着片段走。
 
 **一轮只有一个出口。** 循环里有十几处提前结束(hook 截停、预算耗尽、取消、出错),
 落盘和宣布结束都只在 `finish_turn` 做一次,所以哪条路都跳不过。顺序本身是契约:宿主
@@ -883,7 +891,7 @@ resume、轮数、durable state 的恢复与回滚后当场的视图是同一个
 往下走,分叉只记 id。默认实现一个接一个地 `load`,不是同一时刻,自己实现 store 的要覆盖它。
 `session.export` 就站在这上面:快照加上图片本体、两种 RPC 视图和一份带版本的清单写成
 一个归档;`session.import` 读同一份布局,用 `HistoryStore::append_enveloped` 把转录连同行 id、
-时间戳与标签原样写成新会话,压缩行对前面行 id 的引用才不会断(`daemon_rpc_protocol.md` 的
+时间戳与标签原样写成新会话(`keep_ids` 沿用归档里的会话 id 时,先以 `create_new` 原子占位、占不到就报冲突,并发的两次导入撞同一个 id 只有一个成功),压缩行对前面行 id 的引用才不会断(`daemon_rpc_protocol.md` 的
 `session.export`、`session.import`)。包装 store 的类型要转发它,默认实现拒绝而不是退成 `append_tagged`。
 
 **留存的时间戳与标识符走 `Environment` 契约**,所以在 `FixedEnvironment` 下同一段对话
@@ -980,7 +988,7 @@ macOS 是 `(deny network*)` 后只放开 `localhost:<代理端口>`(覆盖 `127.
 `deny_all`(`proxy` 与 `allowlist` 不能互换)。**Proxy 模式只约束沙箱内命令的出网**;
 引擎自己的 `WebFetch` / `Ping` 走引擎网络,不经代理,也不受 `allowed_domains` 约束(与 `unrestricted`
 下同,名单只表示"点了名的主机可以是内网地址")——域名过滤由宿主代理负责,而宿主代理管不到引擎自己的
-出网(引擎网络也经宿主代理的跟踪见 issue #58)。`daemon.doctor` 的 `sandbox.egress_proxy`
+出网;引擎网络不经宿主代理,不计划改。`daemon.doctor` 的 `sandbox.egress_proxy`
 报沙箱兑现了多少。
 
 **沙箱配置只有三份类型,各管一段。** `settings::SandboxConfig` 是设置文件里 `sandbox` 一节的形状(含
@@ -1013,7 +1021,11 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 只有这一个等待循环,子 Agent 也走这里)→ 记遥测(记的是最终结论)→ 把结论里的
 `approval { basis, profile }` 放进 `ctx.approval` 交给 `call` → `call` 返回后按 `obligations`
 收尾(§6.3 的嵌套仓库检查)→ 按 `relays` 与 `Reach` 给外部内容加围栏(`relays` 有值的、`Server`、
-`Host`、`Outside`;不认识的 reach 也加)。
+`Host`、`Outside`;不认识的 reach 也加)。`PreToolUse` hook 回的 `additional_context` 在这个 `Policy`
+结论放行之后、调用执行之前才送:被 hook 拦下、被规则拒绝、询问被拒的调用收不到,hook 不能靠一条
+被拒的调用往对话里塞内容。`prompt` / `agent` 型 hook 的 `approve` 与 `additional_context` 都要写
+`may_approve: true` 才算:判断用的模型读的是不受信的 payload,它说"不行"才可信,说"可以"不算;
+`command` / `http` 是运维写的配置,不受这条限制。
 
 **工具陈述事实。** `Tool` 的权限面只有 `permission_facts`,缺省 `PermissionFacts::unknown()`:
 什么都不声称,于是要问。事实有四项:`subject`(规则拿什么匹配:路径、命令行、URL 或不透明串)、
@@ -1768,7 +1780,7 @@ server 写的 `message`、`requested_schema`、`url` 都是不受信的:`url` �
 只有那里还能叫宿主重答。`decline` 只表示人或 hook 明确说了不,其余没得到回答的都是 `cancel`。
 答案只回给 server,不进转录、不进遥测。
 
-**server 把调用转成任务。** 客户端声明 Tasks 扩展(SEP-2663);server 回任务时调用在原地等:登记成
+**server 把调用转成任务。** 客户端声明 Tasks 扩展(SEP-2663,协议里的 `mcp_tasks` 能力);server 回任务时调用在原地等:登记成
 `mcp_task`(只经 `TaskLease`)、轮询 `tasks/get`、任务里的询问走同一个 `McpElicitor`,完成的结果就是
 这次调用的结果。`tasks/cancel` 只从调用 future 的 `Drop` 发出(为什么见 `crates/mcp/src/tasks.rs`
 文件头)。
@@ -1875,6 +1887,8 @@ warn,`daemon.doctor` 的 `settings.tiers` 报 `degraded`、在那一层的 `igno
 项目根是别的目录、它的 `.agix` 却解析到全局 / 场景目录(仓库里提交一个指过去的符号链接)→ 设置文件
 就是全局 / 场景那一份、只读一次,但仓库仍是别人写的:按未信任处理,`default` 不起作用,只有
 `trusted` 里命中的一条能信任它;
+这样借来的全局 / 场景层不是项目自己的层,`mcp.addServer`、`config.setProvider` 一类要把配置写进"项目层"的
+方法拒绝(`INVALID_PARAMS`,说明原因),不会把项目的写入落进对所有项目生效的那一份;
 `trusted` 里有一条命中项目根(路径相等,或 glob:`*` 不跨 `/`,`**` 跨,`~/` 是家目录;
 符号链接两种写法都认)→ 信任;否则取 `default`。比的是项目根解析之后的真实目录,原样给出的
 写法只在不含 `.` / `..` 时也拿来比,所以 `/home/u/work/**` 不会命中
@@ -1911,7 +1925,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 `updateServer`、权限询问里的"永久允许"——都走 `settings::file`:读改写期间锁住那一层
 的目录(进程内一把锁,unix 上跨进程靠目录上的 `flock`),写进同目录的临时文件、落盘之后改名替换,
 读的一方只会看到旧文件或新文件。`settings.local.json` 每次写都是 0600,别的文件保留原来的
-权限。设置文件是符号链接的,读写都拒绝:项目层里的链接是仓库内容,顺着它写等于让仓库挑一个
+权限。设置文件是符号链接的,读写都拒绝(加载时 `symlink_metadata` 为链接即不读):项目层里的链接是仓库内容,顺着它写等于让仓库挑一个
 用户的文件来改写,把链接换成普通文件又会悄悄拆掉用户自己的 dotfile 链接。
 
 ---
@@ -1946,7 +1960,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 |---|---|---|
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
-| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删 |
+| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删;`checkpoints` 设置段限单文件(`max_bytes_per_file`)与总量(`max_total_bytes`),超总量按最旧清并在转录里记 `pruned` |
 | `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删;`session.resume` 清无引用的,`session.fork` 硬链接复制,`session.export` / `session.import` 带过去 |
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
@@ -1978,6 +1992,7 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 文件 checkpoint 的副本放在 sidecar 而不是项目的 `.agix/` 里:那是用户的仓库,快照里是项目文件
 的历史内容,不该出现在仓库目录树里,也不该进 `git status`。按会话 id 找得到,随 `session.delete`
 一起删;不跨会话去重,所以删一个会话就是删一个目录。分叉不带它们(分叉和源会话共用工作区)。
+`session.rewind` 的 `force` 覆盖了会话之外对文件的改动时,在 `rewound` 帧与结果的 `overwrote_external` 里列出;被配额清掉的轮次文件回不去(`session.checkpoints` 的 `pruned_before_turn`)。
 
 区分两类目录靠**目录名能否解析成 `SessionId`**:sanitize 后的 cwd 必然以 `-` 开头
 (绝对路径首字符是分隔符),`_no-project` 以 `_` 开头,都解析不成 base58 id。
