@@ -22,7 +22,10 @@ pub mod testing;
 pub use env::apply_subprocess_env;
 pub use filesystem::LocalFileSystem;
 #[cfg(feature = "http")]
-pub use network::{install_tls_provider, LocalNetwork};
+pub use network::{
+    configure_system_proxy, install_tls_provider, proxy_variables_set, use_system_proxy_now,
+    LocalNetwork,
+};
 pub use process::{GroupLedger, LocalProcess};
 pub use providers::{local_providers, local_providers_with, local_providers_with_ledger};
 pub use sandbox::PlatformSandbox;

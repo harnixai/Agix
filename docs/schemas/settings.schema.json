@@ -292,6 +292,17 @@
         }
       ]
     },
+    "NetworkSettings": {
+      "description": "Egress of the engine's own HTTP: model calls, `WebFetch` / `Ping`, MCP over\nHTTP, OAuth. Not the network of a sandboxed command, which\n`sandbox.network_mode` and `sandbox.egress_proxy` decide.",
+      "properties": {
+        "use_system_proxy": {
+          "default": true,
+          "description": "Follow `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` from\nthe environment (default). `false` connects directly, ignoring them.\nRequests to this machine are direct either way. Takes effect when the\ndaemon starts; `config.reload` does not apply a change.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "PathStyle": {
       "description": "How file tools word the paths the model reads: in tool descriptions and in\nthe paths Grep, Glob, Write and Edit print. Resolving a path the model\npasses in is the same in both styles (relative against the working\ndirectory, absolute as is).",
       "enum": [
@@ -932,6 +943,13 @@
     },
     "model": {
       "$ref": "#/$defs/ModelSettings"
+    },
+    "network": {
+      "$ref": "#/$defs/NetworkSettings",
+      "default": {
+        "use_system_proxy": true
+      },
+      "description": "How this process's own HTTP reaches the network. Read from the global\nand managed tiers only: the clients are process-wide."
     },
     "path_style": {
       "anyOf": [

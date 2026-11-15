@@ -37,6 +37,7 @@ pub struct LocalNetwork {
     vouched: Vec<String>,
     /// Whether agent-directed egress is refused outright.
     agent_offline: bool,
+    use_system_proxy: bool,
 }
 
 impl Default for LocalNetwork {
@@ -58,6 +59,7 @@ impl LocalNetwork {
             allowed_domains,
             vouched,
             agent_offline,
+            use_system_proxy: use_system_proxy_now(),
         }
     }
 
@@ -154,12 +156,47 @@ impl LocalNetwork {
     }
 
     fn client_for(&self, url: &url::Url) -> &reqwest::Client {
-        if is_loopback(url) {
-            &self.direct
-        } else {
-            &self.proxied
+        match client_kind_for(url, self.use_system_proxy) {
+            ClientKind::Direct => &self.direct,
+            _ => &self.proxied,
         }
     }
+}
+
+fn client_kind_for(url: &url::Url, use_system_proxy: bool) -> ClientKind {
+    if is_loopback(url) || !use_system_proxy {
+        ClientKind::Direct
+    } else {
+        ClientKind::Proxied
+    }
+}
+
+static USE_SYSTEM_PROXY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Whether this process's own HTTP follows the environment's proxy. Unset
+/// it does. The clients are process-wide and built on first use, so the
+/// answer has to be given before any request goes out and holds for the life
+/// of the process; a later, different answer is ignored.
+pub fn configure_system_proxy(use_system_proxy: bool) {
+    if USE_SYSTEM_PROXY.set(use_system_proxy).is_err() && use_system_proxy_now() != use_system_proxy
+    {
+        tracing::warn!(
+            "network.use_system_proxy changed after this process's HTTP clients were set up; restart to apply it"
+        );
+    }
+}
+
+pub fn use_system_proxy_now() -> bool {
+    USE_SYSTEM_PROXY.get().copied().unwrap_or(true)
+}
+
+/// The names of the proxy variables set in the environment, never their values.
+pub fn proxy_variables_set() -> Vec<String> {
+    PROXY_VARIABLES
+        .iter()
+        .filter(|k| std::env::var(k).is_ok_and(|v| !v.is_empty()))
+        .map(|k| k.to_string())
+        .collect()
 }
 
 /// The ambient `HTTP(S)_PROXY` means "reach the internet through this egress",
@@ -255,28 +292,30 @@ impl reqwest::dns::Resolve for PublicOnlyResolver {
     }
 }
 
+const PROXY_VARIABLES: [&str; 6] = [
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+];
+
 /// The hosts of the proxies in the environment, read the way reqwest reads
 /// them when it builds a client.
 fn proxy_hosts() -> Vec<String> {
-    [
-        "HTTP_PROXY",
-        "http_proxy",
-        "HTTPS_PROXY",
-        "https_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-    ]
-    .iter()
-    .filter_map(|k| std::env::var(k).ok())
-    .filter_map(|v| {
-        let v = if v.contains("://") {
-            v
-        } else {
-            format!("http://{v}")
-        };
-        url::Url::parse(&v).ok().as_ref().and_then(host_key)
-    })
-    .collect()
+    PROXY_VARIABLES
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .filter_map(|v| {
+            let v = if v.contains("://") {
+                v
+            } else {
+                format!("http://{v}")
+            };
+            url::Url::parse(&v).ok().as_ref().and_then(host_key)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -313,12 +352,24 @@ fn build_client(kind: ClientKind) -> reqwest::Client {
         .user_agent(concat!("agix/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
+    let system_proxy = use_system_proxy_now();
     match kind {
-        ClientKind::Proxied => {}
+        ClientKind::Proxied => {
+            if !system_proxy {
+                b = b.no_proxy();
+            }
+        }
         ClientKind::Direct => b = b.no_proxy(),
         ClientKind::PublicOnly => {
+            if !system_proxy {
+                b = b.no_proxy();
+            }
             b = b.dns_resolver(PublicOnlyResolver {
-                proxies: proxy_hosts(),
+                proxies: if system_proxy {
+                    proxy_hosts()
+                } else {
+                    Vec::new()
+                },
             })
         }
     }
@@ -541,6 +592,22 @@ impl LocalNetwork {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn without_the_system_proxy_every_request_is_direct() {
+        let remote = url::Url::parse("https://example.com/").unwrap();
+        let local = url::Url::parse("http://127.0.0.1:9/").unwrap();
+        assert!(matches!(
+            client_kind_for(&remote, true),
+            ClientKind::Proxied
+        ));
+        assert!(matches!(
+            client_kind_for(&remote, false),
+            ClientKind::Direct
+        ));
+        assert!(matches!(client_kind_for(&local, true), ClientKind::Direct));
+        assert!(matches!(client_kind_for(&local, false), ClientKind::Direct));
+    }
+
     use super::*;
 
     #[test]

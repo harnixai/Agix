@@ -900,6 +900,27 @@ mod project_trust {
     }
 
     #[test]
+    fn the_system_proxy_is_used_unless_the_global_tier_says_otherwise() {
+        let tiers = Tiers::new();
+        write_settings(&tiers.global, "{}");
+        assert!(tiers.load().values.network.use_system_proxy);
+
+        write_settings(&tiers.global, r#"{"network": {"use_system_proxy": false}}"#);
+        assert!(!tiers.load().values.network.use_system_proxy);
+    }
+
+    #[test]
+    fn a_scene_or_project_cannot_turn_the_system_proxy_off() {
+        let tiers = Tiers::new();
+        write_settings(&tiers.global, "{}");
+        trust_project(&tiers.global, &tiers.project.join(".agix"));
+        let off = r#"{"network": {"use_system_proxy": false}}"#;
+        write_settings(&tiers.scene, off);
+        write_settings(&tiers.project.join(".agix"), off);
+        assert!(tiers.load().values.network.use_system_proxy);
+    }
+
+    #[test]
     fn an_untrusted_project_cannot_loosen_permissions() {
         let tiers = Tiers::new();
         write_settings(

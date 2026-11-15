@@ -380,6 +380,9 @@ impl LayerFold<'_> {
             if !is_global && obj.remove("project_trust").is_some() {
                 tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, "project_trust is read from the global tier only, ignoring it here");
             }
+            if !is_global && obj.remove("network").is_some() {
+                tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, "network is read from the global and managed tiers only, ignoring it here");
+            }
             if is_own_project {
                 for (name, server) in obj
                     .get("mcp_servers")

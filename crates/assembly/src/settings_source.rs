@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use settings::LoadedSettings;
 
 /// The three tiers merged, then `--max-tokens` where no tier set it. The only
-/// place in the assembly that calls `LoadedSettings::load*`.
+/// place in the assembly that calls `LoadedSettings::load*`. It also hands
+/// `network.use_system_proxy` to the process-wide HTTP clients; a later read
+/// that disagrees is the `config.reload` of a setting that needs a restart.
 pub(crate) fn read_pair(
     global_root: PathBuf,
     scene_root: PathBuf,
@@ -35,5 +37,6 @@ pub(crate) fn read_pair(
     if loaded.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
         loaded.values.model.max_tokens = max_tokens_fallback;
     }
+    platform::configure_system_proxy(loaded.values.network.use_system_proxy);
     loaded
 }

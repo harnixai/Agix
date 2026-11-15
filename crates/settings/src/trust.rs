@@ -372,6 +372,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("model.max_tokens", Free),
         ("model.model_name", Free),
         ("model.thinking_mode", Free),
+        ("network.use_system_proxy", Withheld),
         ("path_style", Free),
         ("permission_mode", Tighten(Mode)),
         ("permission_rules", Free),

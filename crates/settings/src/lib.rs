@@ -156,6 +156,11 @@ pub struct Settings {
     #[serde(default)]
     pub project_trust: trust::ProjectTrustSettings,
 
+    /// How this process's own HTTP reaches the network. Read from the global
+    /// and managed tiers only: the clients are process-wide.
+    #[serde(default)]
+    pub network: NetworkSettings,
+
     /// MCP server configurations, keyed by server name (merged from
     /// global/scene/project layers). `$VAR` / `${VAR}` / `${VAR:-default}`
     /// are expanded in a server's `command`, `args`, `env`, `url` and
@@ -385,8 +390,29 @@ pub struct CompactionConfig {
     pub tool_result_inline_chars: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+/// Egress of the engine's own HTTP: model calls, `WebFetch` / `Ping`, MCP over
+/// HTTP, OAuth. Not the network of a sandboxed command, which
+/// `sandbox.network_mode` and `sandbox.egress_proxy` decide.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct NetworkSettings {
+    /// Follow `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` from
+    /// the environment (default). `false` connects directly, ignoring them.
+    /// Requests to this machine are direct either way. Takes effect when the
+    /// daemon starts; `config.reload` does not apply a change.
+    pub use_system_proxy: bool,
+}
+
+impl Default for NetworkSettings {
+    fn default() -> Self {
+        Self {
+            use_system_proxy: true,
+        }
+    }
+}
+
 /// Sandbox/security configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
 pub struct SandboxConfig {
     /// Directories outside the project that tools may read and write, as if
@@ -683,6 +709,7 @@ impl Settings {
             permission_mode: PermissionMode::default(),
             hooks_config: None,
             project_trust: Default::default(),
+            network: Default::default(),
             mcp_servers: HashMap::new(),
             providers: HashMap::new(),
             default_provider: None,
