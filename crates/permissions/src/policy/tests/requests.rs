@@ -594,6 +594,40 @@ async fn a_project_grant_without_a_project_is_kept_for_the_session() {
     );
 }
 
+/// A repository whose `.agix` links to the global tier has no tier of its
+/// own: "always allow, this project" there must not land in the global
+/// `settings.local.json`, where it would allow the call in every project.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_project_grant_in_a_repository_borrowing_the_global_tier_stays_out_of_it() {
+    let root = tempfile::tempdir().unwrap();
+    let global = root.path().join("home").join(".agix");
+    std::fs::create_dir_all(&global).unwrap();
+    let repo = root.path().join("home").join("code").join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::os::unix::fs::symlink("../../.agix", repo.join(".agix")).unwrap();
+    let settings = settings::LoadedSettings::load(
+        global.clone(),
+        root.path().join("scene"),
+        repo.join(".agix"),
+        "code",
+        "m",
+        &settings::section::Sections::none(),
+    );
+    let perm = Policy::from_settings(&settings.permission_settings(), []);
+    let _ = perm
+        .grant(Grant::new(
+            "Probe",
+            Some("git status".into()),
+            GrantScope::Project,
+        ))
+        .await;
+    assert!(
+        !global.join(base::paths::SETTINGS_LOCAL_FILE).exists(),
+        "the grant went to the global tier through the borrowed `.agix`"
+    );
+}
+
 /// The write takes the settings directory's lock, which another writer may
 /// hold. Done on the async thread, it stalls every task on that thread for
 /// as long as the other writer takes; here the other writer holds it until
