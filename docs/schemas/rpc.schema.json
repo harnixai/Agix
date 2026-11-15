@@ -4536,6 +4536,13 @@
     },
     "RewoundFiles": {
       "properties": {
+        "overwrote_external": {
+          "description": "Restored over a change something other than the session made — or over\na write of the session's that left no record of what it wrote.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "restored": {
           "items": {
             "$ref": "#/$defs/RestoredFile"
@@ -4551,7 +4558,8 @@
       },
       "required": [
         "restored",
-        "skipped"
+        "skipped",
+        "overwrote_external"
       ],
       "type": "object"
     },

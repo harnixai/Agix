@@ -2261,6 +2261,9 @@
             "files_restored": 3,
             "files_skipped": 0,
             "kind": "rewound",
+            "overwrote_external": [
+              "a.txt"
+            ],
             "rewind_id": "r1",
             "scope": "both",
             "seq": 6

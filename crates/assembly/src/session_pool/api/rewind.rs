@@ -124,4 +124,7 @@ pub struct Rewound {
     pub seq: usize,
     pub files_restored: usize,
     pub files_skipped: usize,
+    /// Files `force` overwrote although something other than the session had
+    /// changed them.
+    pub overwrote_external: Vec<String>,
 }

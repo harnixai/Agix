@@ -36,6 +36,7 @@ struct Plan {
     keep: usize,
     restores: Vec<Restore>,
     issues: Vec<RewindIssue>,
+    overwrote_external: Vec<String>,
 }
 
 impl Agent {
@@ -136,6 +137,7 @@ impl Agent {
             keep,
             restores: Vec::new(),
             issues: Vec::new(),
+            overwrote_external: Vec::new(),
         };
         if let (true, Some(checkpoints)) = (request.scope.files(), checkpoints) {
             let policy = tools::security::write_policy(&self.context_outside_a_call(
@@ -149,6 +151,9 @@ impl Agent {
                     Ok(restore) => {
                         let changed = changed_since(fs, &step, &restore.target).await;
                         if changed.is_none() || request.force {
+                            if changed.is_some() {
+                                plan.overwrote_external.push(restore.shown.clone());
+                            }
                             plan.restores.push(restore);
                         }
                         plan.issues.extend(changed);
@@ -384,6 +389,7 @@ impl Agent {
                 .filter(|i| i.issue != RewindIssueKind::Modified)
                 .cloned()
                 .collect(),
+            overwrote_external: plan.overwrote_external.clone(),
         });
         RewindReport {
             rewind_id: rewind_id.to_string(),
@@ -441,14 +447,23 @@ fn issue(step: &plan::FileStep, kind: RewindIssueKind, detail: impl Into<String>
 }
 
 /// Something other than the session changed `target` since the session last
-/// wrote it. Nothing to compare with when that write has no `post`.
+/// wrote it. A write with no `post` has nothing to compare with, so any file
+/// there counts as changed: only `force` overwrites it.
 async fn changed_since(
     fs: &dyn FileSystem,
     step: &plan::FileStep,
     target: &Path,
 ) -> Option<RewindIssue> {
-    let expected = step.expected_now.as_ref()?;
     let now = crate::checkpoint::current_state(fs, target).await;
+    let Some(expected) = step.expected_now.as_ref() else {
+        return (now != After::Absent).then(|| {
+            issue(
+                step,
+                RewindIssueKind::Modified,
+                "the session's last write of it left no record of what it wrote, so it cannot be told from a change made since",
+            )
+        });
+    };
     (&now != expected).then(|| {
         issue(
             step,
@@ -639,6 +654,27 @@ mod tests {
         let wrote = write_recorded(&checkpoints, &fs, &target, Some(b"restored"), "r").await;
         assert!(wrote.is_err(), "{wrote:?}");
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep me");
+    }
+
+    /// A write that left no `post` has nothing to compare the file with, so a
+    /// file standing there is overwritten only with `force`.
+    #[tokio::test]
+    async fn a_write_without_a_post_counts_as_changed_unless_the_file_is_gone() {
+        use base::interface::exec::in_process::InMemoryFileSystem;
+        let fs = InMemoryFileSystem::new().with_file("/p/a.txt", "whatever");
+        let step = plan::FileStep {
+            path: RecordedPath::Rel("a.txt".into()),
+            restore: Before::Absent,
+            expected_now: None,
+            tools: vec!["Write".into()],
+        };
+        let changed = changed_since(&fs, &step, Path::new("/p/a.txt")).await;
+        assert!(
+            matches!(&changed, Some(i) if i.issue == RewindIssueKind::Modified && i.overridable_by == "force")
+        );
+        assert!(changed_since(&fs, &step, Path::new("/p/gone.txt"))
+            .await
+            .is_none());
     }
 
     /// A project whose path is not in NFC — a folder Finder made, on macOS —

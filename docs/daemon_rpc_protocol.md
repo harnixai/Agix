@@ -2079,7 +2079,8 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
                     "removed_turns": [ { "turn_id": "t2", "prompt": [ { "type": "text", "text": "…" } ] } ] },
   "files": { "restored": [ { "path": "src/a.rs", "to": "file", "sha256": "…",
                              "outside_project": false, "unverified": false } ],
-             "skipped": [ ] },
+             "skipped": [ ],
+             "overwrote_external": [ ] },   // force 覆盖了会话之外改动的文件
   "fork_session_id": null }
 ```
 
@@ -2100,14 +2101,15 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 
 | `issue` | 什么情况 | 放过它 |
 |---|---|---|
-| `modified` | 文件此刻不是会话最后写成的样子——用户手改、`Bash` 改、别的进程改 | `force: true` 覆盖 |
+| `modified` | 文件此刻不是会话最后写成的样子——用户手改、`Bash` 改、别的进程改;会话最后一次写它没有 `post` 记录时无从比较,文件还在就同样算 | `force: true` 覆盖 |
 | `unavailable` | 写前内容没留下(超过 16 MiB 只记了哈希)、读不出来、不是普通文件,或副本与哈希对不上 | `allow_partial: true` 跳过 |
 | `denied` | 写路径策略此刻拒绝这个位置(凭据、引擎配置、系统目录……) | `allow_partial` |
 | `symlink` | 它此刻是符号链接,或上面某一级目录解析到了别处;回滚**从不**跟随链接写 | `allow_partial` |
 | `worktree_removed` | 它在一个已经移除的 worktree 里 | `allow_partial` |
 
-会话最后一次写它之后没来得及记下结果的(进程在写完之后死掉),不做 `modified` 检查,
-`restored` 里标 `unverified: true`。项目外但当年被批准过的写照常恢复,标 `outside_project: true`。
+会话最后一次写它之后没来得及记下结果的(进程在写完之后死掉),无从判断文件是不是被人动过,
+所以要 `force` 才覆盖,覆盖后 `restored` 里标 `unverified: true`。`force` 覆盖掉的会话之外的改动
+列在 `files.overwrote_external`(路径与 `restored` 里的一致),`rewound` 帧里是同名字段。项目外但当年被批准过的写照常恢复,标 `outside_project: true`。
 回滚的写不走询问与 allow/ask 规则、不受权限模式影响(宿主本来就是全权,当年那次写也已过了
 判定),但重跑硬性的写路径检查;也不触发 `PreToolUse` / `PostToolUse`。**回滚会写项目文件,
 由宿主负责让用户确认**——`dry_run: true` 先给出计划与问题,`files.skipped` 里是全部问题。
@@ -3006,7 +3008,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
-| `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
+| `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped,overwrote_external}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
 | `subscription_dropped` | `{reason}` | 这条连接对该会话的订阅被取消了(`reason` 目前只有 `"overflow"`,§5.4);不属于任何一轮,`turn_id` 为 `null`。重新 `session.subscribe` 并追平 |
 
 `prompt`、`host_tool_call`、`host_tool_call_resolved`、`subagent_progress`、`team_progress`、`skills_changed`、`tool_progress`、`notification` 在两轮之间也会发:

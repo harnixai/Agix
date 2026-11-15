@@ -303,6 +303,7 @@ async fn a_file_changed_behind_the_sessions_back_needs_force_and_a_dry_run_says_
     let mut run = stubbed("rewind-conflict", &stub).start().await?;
     let a = run.project.join("a.txt");
     let session = run.session().await?;
+    let watch = run.watch(&session, false).await?;
     stub.script_when(TURN, [write("w1", &a, "v1\n"), Reply::text("ONE")]);
     run.turn(&session, "one").await?;
     stub.script_when(TURN, [write("w2", &a, "v2\n"), Reply::text("TWO")]);
@@ -333,8 +334,23 @@ async fn a_file_changed_behind_the_sessions_back_needs_force_and_a_dry_run_says_
     assert_eq!(read(&a).as_deref(), Some("by hand\n"));
     assert_eq!(history(&mut run, &session).await?["total"], before["total"]);
 
-    rpc(&mut run, "session.rewind", ask(json!({ "force": true }))).await?;
+    let forced = rpc(&mut run, "session.rewind", ask(json!({ "force": true }))).await?;
     assert_eq!(read(&a).as_deref(), Some("v1\n"));
+    assert_eq!(
+        forced["files"]["overwrote_external"],
+        json!(["a.txt"]),
+        "{forced}"
+    );
+    let frame = watch
+        .wait_for("a rewound frame", Duration::from_secs(10), |e| {
+            e["kind"] == "rewound"
+        })
+        .await?;
+    assert_eq!(
+        frame["event"]["overwrote_external"],
+        json!(["a.txt"]),
+        "{frame}"
+    );
     run.finish().await;
     Ok(())
 }

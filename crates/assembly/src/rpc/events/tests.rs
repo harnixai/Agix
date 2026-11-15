@@ -366,6 +366,7 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
                     seq: 6,
                     files_restored: 3,
                     files_skipped: 0,
+                    overwrote_external: vec!["a.txt".into()],
                 }),
             )),
         ),

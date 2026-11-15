@@ -127,6 +127,9 @@ pub struct RewoundConversation {
 pub struct RewoundFiles {
     pub restored: Vec<RestoredFile>,
     pub skipped: Vec<RewindIssue>,
+    /// Restored over a change something other than the session made — or over
+    /// a write of the session's that left no record of what it wrote.
+    pub overwrote_external: Vec<String>,
 }
 
 /// What a rewind did, or with `dry_run` would do.

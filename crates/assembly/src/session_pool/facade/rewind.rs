@@ -112,6 +112,7 @@ impl SessionPool {
                 seq,
                 files_restored: files.map_or(0, |f| f.restored.len()),
                 files_skipped: files.map_or(0, |f| f.skipped.len()),
+                overwrote_external: files.map_or_else(Vec::new, |f| f.overwrote_external.clone()),
             };
             core.hub().publish(&frame_between_turns(
                 core.id(),
