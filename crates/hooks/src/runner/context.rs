@@ -49,6 +49,7 @@ impl HookRunResult {
                 (context.to_string(), false)
             };
             left -= text.chars().count();
+            let text = defuse_closing_tags(&text);
             let note = if cut {
                 format!("\n[cut: {total} characters, only the first {cap} are shown]")
             } else {
@@ -60,6 +61,33 @@ impl HookRunResult {
         }
         reminders
     }
+}
+
+/// `text` with every `</system-reminder>` (any case, any spacing) broken by
+/// a backslash, so a hook's context cannot end its reminder early and go on
+/// as a reminder of nobody's.
+fn defuse_closing_tags(text: &str) -> String {
+    const NAME: &str = "system-reminder";
+    let lower = text.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let skip_ws = |mut i: usize| {
+        while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        i
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (at, _) in lower.match_indices('<') {
+        let slash = skip_ws(at + 1);
+        if bytes.get(slash) == Some(&b'/') && lower[skip_ws(slash + 1)..].starts_with(NAME) {
+            out.push_str(&text[copied..=at]);
+            out.push('\\');
+            copied = at + 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
 }
 
 impl HookRunner {
