@@ -2402,7 +2402,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 还在跑的调用,模型读到 `` host tool `HostEcho` failed: <message> ``。回答受 §1 的单帧上限约束,
 进模型前照常经过工具结果的预算与外置。
 
-两个都给、都不给、`content` 形状不对 → `INVALID_PARAMS`;`call_id` 是一帧还悬着的 `prompt`
+两个都给、都不给、`content` 形状不对、图片的 `media_type` 不是 png / jpeg / gif / webp 或解码后超过 3.5 MB(同 MCP 结果里的图片) → `INVALID_PARAMS`,调用仍悬着,可以改了再答;`call_id` 是一帧还悬着的 `prompt`
 的 `prompt_id` → `INVALID_PARAMS`。**先答者生效**,`call_id` 未知(已答、超时、被取消)时
 **静默成功**,同 `session.respondToPrompt`。会话不在内存里 → `SESSION_NOT_FOUND`。
 

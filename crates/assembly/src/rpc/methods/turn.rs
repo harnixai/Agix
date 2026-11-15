@@ -174,6 +174,27 @@ pub struct ImageSource {
     pub data: String,
 }
 
+impl ImageSource {
+    fn check(&self) -> Result<(), String> {
+        const TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+        if !TYPES.contains(&self.media_type.as_str()) {
+            return Err(format!(
+                "an image's media_type must be one of {}, not `{}`",
+                TYPES.join(", "),
+                self.media_type
+            ));
+        }
+        let bytes = self.data.len() / 4 * 3;
+        if bytes as u64 > base::tool::MAX_IMAGE_BYTES {
+            return Err(format!(
+                "an image of about {bytes} bytes is over the {}-byte limit for one image",
+                base::tool::MAX_IMAGE_BYTES
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct HostToolError {
     pub message: String,
@@ -194,6 +215,7 @@ impl RespondToolCallParams {
                             out.push(match block {
                                 HostContentBlock::Text { text } => ToolResultBlock::text(text),
                                 HostContentBlock::Image { source } if source.kind == "base64" => {
+                                    source.check()?;
                                     ToolResultBlock::image(&source.media_type, &source.data)
                                 }
                                 HostContentBlock::Image { .. } => {

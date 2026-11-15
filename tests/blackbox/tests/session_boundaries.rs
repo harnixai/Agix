@@ -1479,3 +1479,65 @@ async fn a_turn_cut_off_by_close_ends_with_a_terminal_frame_for_its_watchers() -
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_tool_reply_with_a_bad_image_is_refused_and_can_be_given_again() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("host-image", &stub).start().await?;
+    let session = run
+        .session_with(json!({ "options": {
+            "permission_rules": [
+                { "source": "session", "behavior": "allow", "tool_name": "HostShot" }
+            ],
+            "host_tools": [{
+                "name": "HostShot",
+                "description": "A screenshot from the host.",
+                "input_schema": { "type": "object", "properties": {} },
+                "read_only": true
+            }]
+        }}))
+        .await?;
+    let host = run.watch(&session, false).await?;
+    stub.script([
+        Reply::calls("h1", "HostShot", json!({})),
+        Reply::text("done"),
+    ]);
+    let turn = run
+        .spawn_turn(&session, "take a screenshot", json!({}))
+        .await?;
+    let call = host
+        .wait_for("the host tool call", Duration::from_secs(30), |e| {
+            e["kind"] == "host_tool_call"
+        })
+        .await?;
+    let call_id = call["event"]["call_id"].clone();
+    let reply = |media_type: &str, data: String| {
+        json!({
+            "session_id": session,
+            "call_id": call_id,
+            "result": { "content": [
+                { "type": "image", "source": { "type": "base64", "media_type": media_type, "data": data } }
+            ] }
+        })
+    };
+    for (media_type, data) in [
+        ("image/png", "A".repeat(5_000_000)),
+        ("text/html", "AAAA".to_string()),
+    ] {
+        let refused = run
+            .client
+            .call("session.respondToolCall", reply(media_type, data))
+            .await?;
+        let error = refused.error.expect("a bad image is refused");
+        assert_eq!(error.code, -32602, "{media_type}: {}", error.message);
+    }
+    let answered = run
+        .client
+        .call("session.respondToolCall", reply("image/png", "AAAA".into()))
+        .await?;
+    assert!(answered.error.is_none(), "{answered:?}");
+    tokio::time::timeout(Duration::from_secs(30), turn).await???;
+    run.finish().await;
+    Ok(())
+}
