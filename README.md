@@ -439,7 +439,7 @@ names a provider does that provider's model read the page and answer the call's
   emits cache edits so the prompt cache is not thrown away
   (`cached_microcompact`). A tool result over 30,000 characters (except those of
   `Read`, `WebFetch` and `TaskOutput`, which page themselves) is saved whole to the
-  session's scratchpad; the model gets a head and tail preview with the path and
+  project's `.agix/tool-results/`; the model gets a head and tail preview with the path and
   reads on with `Read` `offset`. The limit is
   `compaction.tool_result_inline_chars` (`0` turns it off).
 - **Telemetry**: 22 structured event types (`EventPayload` (22)) with

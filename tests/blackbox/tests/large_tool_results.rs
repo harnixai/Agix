@@ -1,5 +1,5 @@
 //! A tool result too long for the conversation is saved to a file in the
-//! session's scratchpad, and the model is handed its head, its tail and the
+//! project's `.agix/tool-results/`, and the model is handed its head, its tail and the
 //! path: the request after a long `Bash` run, reading the rest back with
 //! `Read`, a server's text staying fenced through the file, `Grep` not finding
 //! what an earlier call saved, an old result cleared with its path kept, a
