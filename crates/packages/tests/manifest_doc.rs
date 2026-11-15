@@ -21,7 +21,10 @@ fn example(doc: &str) -> String {
 
 fn fields_of(type_name: &str) -> BTreeSet<String> {
     let head = format!("pub struct {type_name} {{\n");
-    let start = MANIFEST_SRC.find(&head).expect("the type is in manifest.rs") + head.len();
+    let start = MANIFEST_SRC
+        .find(&head)
+        .expect("the type is in manifest.rs")
+        + head.len();
     let body = &MANIFEST_SRC[start..start + MANIFEST_SRC[start..].find("\n}").unwrap()];
     body.lines()
         .filter_map(|line| line.trim().strip_prefix("pub "))
@@ -69,6 +72,10 @@ fn the_documented_example_names_every_manifest_field_and_no_other() {
         ("skills", "SkillsSection"),
     ] {
         let table = first_table(&root[section], section);
-        assert_eq!(keys(table), fields_of(type_name), "[{section}] vs {type_name}");
+        assert_eq!(
+            keys(table),
+            fields_of(type_name),
+            "[{section}] vs {type_name}"
+        );
     }
 }
