@@ -5,7 +5,7 @@
 file  crates/assembly/src/plugins.rs                             -                                      825
 file  crates/compaction/src/compact.rs                           -                                      1017
 file  crates/core/src/interface/catalog.rs                       -                                      842
-file  crates/mcp/src/connect.rs                                  -                                      1371
+file  crates/mcp/src/connect.rs                                  -                                      1370
 file  crates/mcp/src/manager.rs                                  -                                      1237
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
 file  crates/session/src/transcript.rs                           -                                      924
@@ -21,7 +21,7 @@ fn    crates/assembly/src/rpc/events.rs                          SessionEventPay
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              86
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    135
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
-fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              131
+fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::fork_session              97
 fn    crates/assembly/src/session_pool/facade/listing.rs         SessionPool::list_all                  139
 fn    crates/assembly/src/session_pool/facade/providers.rs       SessionPool::set_provider              117
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90
