@@ -43,6 +43,30 @@ fn turn_driver(
 }
 
 impl SessionPool {
+    /// What notifies the end of `sid`'s turn. A session that left memory
+    /// while this call waited — its engine stopped under the turn ahead —
+    /// comes back from its transcript once, as any later call's would.
+    async fn idle_of(
+        &self,
+        sid: &str,
+        options: Option<&SessionOptions>,
+        reattached: &mut bool,
+    ) -> Result<Arc<tokio::sync::Notify>, PoolError> {
+        loop {
+            if let Some(idle) = self
+                .live
+                .with_live(sid, |live| live.turn.idle.clone())
+                .await
+            {
+                return Ok(idle);
+            }
+            if std::mem::replace(reattached, true) {
+                return Err(PoolError::session_not_found(sid));
+            }
+            self.live_for_turn(&sid.to_string(), options).await?;
+        }
+    }
+
     /// Give the receiver back and mark the session idle again, if the
     /// ticket's engine still runs the session — a session closed or rebuilt
     /// while the turn ran is not this turn's to touch. Whatever the turn's
@@ -128,14 +152,11 @@ impl SessionPool {
         // 必须**在发消息之前**占住会话：消息一旦 send 进去就归正在跑的那个
         // Agent 消费了，先发后占的话，调用方看到忙，消息却已经被别的 turn 吃掉。
         let mut steer_tried = false;
+        let mut reattached = false;
         let (ticket, input_tx) = loop {
-            let Some(idle) = self
-                .live
-                .with_live(&sid, |live| live.turn.idle.clone())
-                .await
-            else {
-                return Err(PoolError::session_not_found(&sid));
-            };
+            let idle = self
+                .idle_of(&sid, options.as_ref(), &mut reattached)
+                .await?;
             let became_idle = idle.notified();
             tokio::pin!(became_idle);
             became_idle.as_mut().enable();
