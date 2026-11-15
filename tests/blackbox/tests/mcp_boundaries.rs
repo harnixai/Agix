@@ -1507,3 +1507,53 @@ async fn a_repository_borrowing_the_global_tier_cannot_be_written_to() -> anyhow
     run.finish().await;
     Ok(())
 }
+
+/// The `MCP` tool lists what each connected server offers under the names the
+/// model calls them by, and `server` narrows it to one.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_mcp_tool_lists_each_servers_tools_under_their_callable_names() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let scratch = tempfile::tempdir()?;
+    let servers = json!({
+        "alpha": canned_server(scratch.path(), "alpha", &[tool("one"), tool("two")])?,
+        "beta": canned_server(scratch.path(), "beta", &[tool("three")])?,
+    });
+    let mut run = stubbed("mcp-introspection", &stub)
+        .settings(json!({ "mcp_servers": servers }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    mcp_status_until(&mut run, "both servers connected", |s| {
+        ["alpha", "beta"]
+            .iter()
+            .all(|n| s.iter().any(|s| s["name"] == *n && s["state"] == "connected"))
+    })
+    .await?;
+
+    stub.script([
+        Reply::calls("m1", "MCP", json!({})),
+        Reply::calls("m2", "MCP", json!({ "server": "beta" })),
+        Reply::text("listed"),
+    ]);
+    let events = run.turn(&session, "what MCP tools are there").await?;
+    let listings: Vec<&(String, String, bool)> = events
+        .tool_results
+        .iter()
+        .filter(|(name, _, _)| name == "MCP")
+        .collect();
+    assert_eq!(listings.len(), 2, "{:?}", events.tool_results);
+    let all = &listings[0].1;
+    assert!(!listings[0].2, "{all}");
+    for name in ["mcp__alpha__one", "mcp__alpha__two", "mcp__beta__three"] {
+        assert!(all.contains(name), "{name} missing from: {all}");
+    }
+    assert!(all.contains("3 MCP tool(s)"), "{all}");
+    let only_beta = &listings[1].1;
+    assert!(
+        only_beta.contains("mcp__beta__three") && !only_beta.contains("mcp__alpha__"),
+        "{only_beta}"
+    );
+    run.finish().await;
+    Ok(())
+}
