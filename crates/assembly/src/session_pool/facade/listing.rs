@@ -194,6 +194,7 @@ impl SessionPool {
             .await
             .ok()
         };
+        let reasoning = self.reasoning_report(&info).await;
         Ok(api::SessionDetail {
             info,
             scene_active,
@@ -203,7 +204,30 @@ impl SessionPool {
             health,
             scripts: self.script_report(session_id).await,
             skill_dirs: self.skill_dir_report(session_id, core.as_deref()).await,
+            reasoning,
         })
+    }
+
+    /// `session.get`'s `reasoning`: the session's own choice over the
+    /// settings of the project and scene it is bound to.
+    async fn reasoning_report(
+        &self,
+        info: &crate::session_pool::SessionInfo,
+    ) -> Option<runtime::agent::ReasoningReport> {
+        if info.session_kind == history::entry::SessionKind::Sidechain {
+            return None;
+        }
+        let scene = info.scene.as_deref()?;
+        let choice = match self.specs.get(&info.session_id) {
+            Some(spec) => spec.reasoning(),
+            None => self.specs.recorded(&info.session_id).await.reasoning(),
+        };
+        let project = info.project_root.as_deref().map(Path::new);
+        let binding = self.binding_for(project, scene).await;
+        Some(runtime::agent::ReasoningReport::resolve(
+            &choice,
+            &binding.settings.values.model,
+        ))
     }
 
     /// `session.get`'s `skill_dirs`: in full for `core`, the session in

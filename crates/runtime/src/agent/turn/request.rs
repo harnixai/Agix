@@ -328,6 +328,7 @@ impl Agent {
     ) -> ModelRequest {
         let (prompt_blocks, tool_defs, messages) = self.build_prompt_for_turn(model).await;
         let input_map = self.resolve_input_map(&messages);
+        let reasoning = self.reasoning();
         ModelRequest {
             prompt_blocks,
             tool_defs,
@@ -335,8 +336,8 @@ impl Agent {
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
                 max_tokens,
-                thinking_mode: self.settings.values.model.thinking_mode.clone(),
-                effort: self.settings.values.model.effort,
+                thinking_mode: reasoning.thinking_mode,
+                effort: reasoning.effort,
                 fallback_model: self.settings.values.model.fallback_model.clone(),
                 cache_edits: self.compaction.lend_cache_edits(),
                 origin,
@@ -344,6 +345,14 @@ impl Agent {
                 provider_search: None,
             },
         }
+    }
+
+    /// The session's own reasoning choice over the settings'.
+    pub(super) fn reasoning(&self) -> crate::agent::ReasoningReport {
+        crate::agent::ReasoningReport::resolve(
+            &self.session_state.reasoning_choice(),
+            &self.settings.values.model,
+        )
     }
 
     /// Reassemble after a recovery changed the model or the message list.
@@ -372,6 +381,7 @@ impl Agent {
         cache_edits: Vec<String>,
     ) -> ModelRequest {
         let input_map = self.resolve_input_map(&messages);
+        let reasoning = self.reasoning();
         ModelRequest {
             prompt_blocks: self.build_prompt_blocks(model).await,
             tool_defs,
@@ -379,8 +389,8 @@ impl Agent {
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
                 max_tokens,
-                thinking_mode: self.settings.values.model.thinking_mode.clone(),
-                effort: self.settings.values.model.effort,
+                thinking_mode: reasoning.thinking_mode,
+                effort: reasoning.effort,
                 fallback_model,
                 cache_edits,
                 origin,

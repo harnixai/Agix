@@ -784,6 +784,7 @@ impl Agent {
             model,
             provider: None,
             max_tokens: self.settings.values.model.max_tokens,
+            reasoning: self.reasoning(),
             system,
             tools,
             messages: MessagesReport {

@@ -264,6 +264,7 @@ pub struct ContextReport {
     #[serde(default)]
     pub provider: Option<String>,
     pub max_tokens: u32,
+    pub reasoning: ReasoningReport,
     pub system: Vec<SystemBlockReport>,
     pub tools: Vec<ToolReport>,
     pub messages: MessagesReport,
@@ -271,6 +272,51 @@ pub struct ContextReport {
     pub total_tokens: usize,
     pub compact_threshold: usize,
     pub hard_cap: Option<usize>,
+}
+
+/// The reasoning effort and thinking mode the session's next model call
+/// carries, and whether each is the session's own choice or the settings'.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ReasoningReport {
+    pub effort: Option<base::interface::model::Effort>,
+    pub effort_source: ChoiceSource,
+    pub thinking_mode: base::interface::model::ThinkingMode,
+    pub thinking_mode_source: ChoiceSource,
+}
+
+impl ReasoningReport {
+    pub fn resolve(
+        choice: &session_state::ReasoningChoice,
+        settings: &settings::ModelSettings,
+    ) -> Self {
+        let source = |chosen: bool| {
+            if chosen {
+                ChoiceSource::Session
+            } else {
+                ChoiceSource::Settings
+            }
+        };
+        Self {
+            effort: choice.effort.or(settings.effort),
+            effort_source: source(choice.effort.is_some()),
+            thinking_mode: choice
+                .thinking_mode
+                .clone()
+                .unwrap_or_else(|| settings.thinking_mode.clone()),
+            thinking_mode_source: source(choice.thinking_mode.is_some()),
+        }
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ChoiceSource {
+    Session,
+    Settings,
 }
 
 #[derive(

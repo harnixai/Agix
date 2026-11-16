@@ -20,7 +20,7 @@ fn    crates/assembly/src/assemble.rs                            pool           
 fn    crates/assembly/src/export.rs                              pack                                   104
 fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        365
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              89
-fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    137
+fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    138
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
 fn    crates/assembly/src/session_pool/facade/listing.rs         SessionPool::list_all                  139
 fn    crates/assembly/src/session_pool/facade/resume.rs          SessionPool::resume_watched            90

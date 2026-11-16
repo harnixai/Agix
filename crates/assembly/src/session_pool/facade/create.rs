@@ -123,6 +123,7 @@ impl SessionPool {
             },
         );
         self.take_up_recorded_skill_dirs(&core, &spec, &binding, resume)?;
+        core.state().set_reasoning_choice(spec.reasoning());
         let restore = if resume {
             Restore::FromLog
         } else {

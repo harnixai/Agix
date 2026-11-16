@@ -24,6 +24,10 @@ pub(in crate::session_pool) struct SessionSpec {
     pub(in crate::session_pool) model: Option<String>,
     pub(in crate::session_pool) provider: Option<String>,
     pub(in crate::session_pool) prompt: Option<runtime::agent::SessionPrompt>,
+    /// Set by `session.setModel`, over `options.effort`; `Some(None)` was
+    /// taken back to the settings'.
+    pub(in crate::session_pool) effort: Option<Option<base::interface::model::Effort>>,
+    pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
     /// Set by `session.setSkillDirs`; over `options.skill_dirs` once set.
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
     /// Shared by every Agent this process builds for the session, so a
@@ -83,6 +87,22 @@ impl SessionSpec {
             .clone()
             .or_else(|| self.options.as_ref().and_then(|o| o.model.clone()))
     }
+
+    /// The session's own effort and thinking mode: set since, else given at
+    /// creation.
+    pub(in crate::session_pool) fn reasoning(&self) -> session_state::ReasoningChoice {
+        let options = self.options.as_ref();
+        session_state::ReasoningChoice {
+            effort: match self.effort {
+                Some(set) => set,
+                None => options.and_then(|o| o.effort),
+            },
+            thinking_mode: match &self.thinking_mode {
+                Some(set) => set.clone(),
+                None => options.and_then(|o| o.thinking_mode.clone()),
+            },
+        }
+    }
 }
 
 /// The persisted part of a [`SessionSpec`], written to the session's log as
@@ -99,8 +119,29 @@ pub(in crate::session_pool) struct RecordedSpec {
     pub(in crate::session_pool) model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) provider: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "taken_back_as_null"
+    )]
+    pub(in crate::session_pool) effort: Option<Option<base::interface::model::Effort>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "taken_back_as_null"
+    )]
+    pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
+}
+
+/// A present `null` is a choice taken back, not an absent one.
+fn taken_back_as_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    <Option<T> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 pub(in crate::session_pool) struct SpecStore {
@@ -244,6 +285,8 @@ impl SpecStore {
             model: spec.model.clone(),
             provider: spec.provider.clone(),
             prompt: spec.prompt.clone(),
+            effort: spec.effort,
+            thinking_mode: spec.thinking_mode.clone(),
             skill_dirs: spec.skill_dirs.clone(),
         };
         let Ok(payload) = serde_json::to_value(&recorded) else {
@@ -380,6 +423,8 @@ pub(in crate::session_pool) fn recorded_in(
         model: recorded.model,
         provider: recorded.provider,
         prompt: recorded.prompt,
+        effort: recorded.effort,
+        thinking_mode: recorded.thinking_mode,
         skill_dirs: recorded.skill_dirs,
         recorder: None,
     }

@@ -7,8 +7,8 @@ use crate::rpc::methods::session::*;
 use crate::rpc::methods::Patch;
 use crate::rpc::{read_options, RpcError};
 use crate::session_pool::api::{
-    DeleteReport, ForkReport, ModelChoice, PoolError, PromptChoice, Renamed, ResumeReport,
-    SessionCreated, SessionDetail, WatcherId,
+    DeleteReport, ForkReport, ModelChoice, PoolError, PromptChoice, ReasoningChange, Renamed,
+    ResumeReport, SessionCreated, SessionDetail, WatcherId,
 };
 
 rpc_methods! {
@@ -83,12 +83,37 @@ async fn rename(s: &DaemonServer, _: &Call, p: RenameParams) -> Result<Renamed, 
 async fn set_model(s: &DaemonServer, _: &Call, p: SetModelParams) -> Result<ModelChoice, RpcError> {
     let named = |v: &Option<String>| v.clone().filter(|s| !s.trim().is_empty());
     let (model, provider) = (named(&p.model), named(&p.provider));
-    if model.is_none() && provider.is_none() {
-        return Err(invalid("missing model"));
+    let reasoning = ReasoningChange {
+        effort: change_of(p.effort),
+        thinking_mode: change_of(p.thinking_mode),
+    };
+    if let Some(Some(problem)) = reasoning.thinking_mode.as_ref().map(|mode| {
+        mode.as_ref()
+            .and_then(model::adapter::thinking_mode_problem)
+    }) {
+        return Err(invalid(format!("thinking_mode: {problem}")));
+    }
+    if model.is_none() && provider.is_none() && reasoning.is_empty() {
+        return Err(invalid(
+            "give `model`, `provider`, `effort` and/or `thinking_mode`",
+        ));
     }
     Ok(s.pool
-        .set_session_model(&p.session_id, model.as_deref(), provider.as_deref())
+        .set_session_model(
+            &p.session_id,
+            model.as_deref(),
+            provider.as_deref(),
+            reasoning,
+        )
         .await?)
+}
+
+fn change_of<T>(patch: Patch<T>) -> Option<Option<T>> {
+    match patch {
+        Patch::Keep => None,
+        Patch::Clear => Some(None),
+        Patch::Set(value) => Some(Some(value)),
+    }
 }
 
 async fn set_prompt(

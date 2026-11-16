@@ -1313,6 +1313,8 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "auto_name": false,                   // 可选,false = 首轮之后不起名
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
+    "effort": "high",                     // 可选,low | medium | high | xhigh | max,省略 = 设置的 model.effort
+    "thinking_mode": "on",                // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking_mode
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
     "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
@@ -1333,7 +1335,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传的 `options` 被忽略。
 会话日志里没有记录过 `options` 的旧会话例外:恢复时采用这次调用带的那份。
 `options` 记在会话日志里一条 `ns` 为 `agix.session`、`event` 为 `spec` 的扩展条目上,
-`session.setModel` 选的模型、`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
+`session.setModel` 选的模型、推理强度与思考开关,`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
 
 `options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
 会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)、`options`
@@ -1540,7 +1542,9 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
   "scene": "code", "project_root": "…",   // null = 无项目会话,或老日志没记
   "scene_active": true,
   "turn_state": "idle",            // idle | running | rebuilding | operating
-  "current_turn_id": null }
+  "current_turn_id": null,
+  "reasoning": { "effort": "high", "effort_source": "settings",
+                 "thinking_mode": "on", "thinking_mode_source": "settings" } }
 ```
 
 比 `session.list` 的条目多 `scene_active` / `turn_state` / `current_turn_id` 三项 ——
@@ -1560,6 +1564,10 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 
 `state` 取 `ok`、`missing`(目录还不存在)、`refused`(恢复时通不过检查);
 `shadowed` 是这个目录里被别处同名 skill 遮住的,`by` 是占着名字的一方。不在内存里的会话只有 `path`。
+
+`reasoning` 是这个会话下一次模型调用带的推理强度(`null` = 不发,交给端点)与思考开关,`*_source`
+为 `session`(会话自己的,`options` 或 `session.setModel` 设的)或 `settings`(会话绑定的项目与场景的
+`model.effort` / `model.thinking_mode`)。sidechain 与没记场景的老会话没有这个键。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -1867,10 +1875,13 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 ```jsonc
 // → params
 { "session_id": "…",
-  "model": "claude-opus-4-6",     // model 与 provider 至少给一个
-  "provider": "anthropic" }       // 可选,providers 里的 id
+  "model": "claude-opus-4-6",     // model / provider / effort / thinking_mode 至少给一个
+  "provider": "anthropic",        // 可选,providers 里的 id
+  "effort": "high",               // 可选,同 options.effort;null = 回到设置的值
+  "thinking_mode": "off" }        // 可选,同 options.thinking_mode;null = 回到设置的值
 // ← result
 { "session_id": "…", "model": "claude-opus-4-6", "provider": "anthropic",
+  "effort": "high", "thinking_mode": "off",   // 会话自己的,null = 随设置
   "applies": "next_turn" }
 ```
 
@@ -1883,6 +1894,13 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 该厂商的 `default_model`。`model` 按它将被发往的厂商的 `models` 白名单检查,不在
 白名单里 → `INVALID_PARAMS`,而不是把一个对端不认识的模型名静默发过去。子 Agent、
 压缩等其他路由任务仍按设置走。
+
+`effort` / `thinking_mode` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
+这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。
+不重建会话;键不给就不动,给 `null` 就去掉会话自己的值、回到设置的 `model.effort` /
+`model.thinking_mode`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
+(`options.thinking_mode` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
+就降到 `max_tokens - 1`,`max_tokens` 留不出 1024 时这次调用关掉思考,都记一条 warn。当前生效值与来源见 `session.get` 的 `reasoning`。
 
 **有 turn 在跑时返回 `SESSION_BUSY`**(`reason: "turn_running"`),不排队。选择记在会话上,
 哪一代引擎跑下一轮都在那一轮开始时读它;正在跑的这一轮不会换,这时受理下来,调用方被告知模型
@@ -1901,7 +1919,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 
 **只对内存里的会话有效**,冷会话返回 `SESSION_NOT_FOUND`(先 `session.resume`)。
 选择记在会话日志里(见 `session.create` 的 `options`):会话被驱逐后重建、
-`config.reload` 之后重建、daemon 重启后恢复,选的都还是这个模型和厂商。
+`config.reload` 之后重建、daemon 重启后恢复,选的都还是这个模型、厂商、推理强度与思考开关;
+`session.fork` 带过去切点之前记下的规格,其中也有它们。
 
 #### `session.setSkillDirs`
 
@@ -2444,6 +2463,8 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
   "model": "…",                             // `session.setModel` 换上的那个,没换过就是设置路由到的
   "provider": "…",                          // 下一次调用路由到的厂商 id;会话指名的厂商优先;没有可用的路由(没有配置厂商,或路由没建起来)时为 null
   "max_tokens": 0,
+  "reasoning": { "effort": "high", "effort_source": "settings",   // 同 session.get 的 reasoning;sidechain 见下
+                 "thinking_mode": "on", "thinking_mode_source": "settings" },
   "system": [ { "name": "skills.catalog",   // 块名,见引擎的扩展点文档
                 "role": "user",             // system:进系统提示;user:作为对话开头的一条消息
                 "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"}
@@ -2453,6 +2474,9 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
   "total_tokens": 0,                        // 本地估算(与 BPE 分词相差约 ±12%)
   "compact_threshold": 0, "hard_cap": null }
 ```
+
+对 sidechain(子 Agent 会话)调用时,`reasoning` 的 `settings` 指子 Agent 自己的设置:从父会话的设置
+派生,agent 类型写了 `effort` 的已经覆盖进去,所以 agent 类型给的 `effort` 也报为 `settings`。
 
 `basis` 说明这是什么:**现在开始一步、不带新输入**时的请求。真正的下一轮还会多出
 用户这句话、为它召回的记忆、提交时 hook 注入的内容,所以总量会更大。装配时脚本扩展照常

@@ -16,6 +16,8 @@ impl SessionOptions {
         "output_schema",
         "provider",
         "model",
+        "effort",
+        "thinking_mode",
         "prompt",
         "prompt_types",
         "host_tools",
@@ -75,6 +77,8 @@ impl SessionOptions {
             };
             match Self::read_alone(name, &value) {
                 Ok(()) if name == "recorder" && !recorder_reads(&value, &mut ignored) => {}
+                Ok(()) if name == "thinking_mode" && !thinking_mode_reads(&value, &mut ignored) => {
+                }
                 Ok(()) => {
                     readable.insert(name.clone(), value);
                 }
@@ -143,6 +147,25 @@ fn recorder_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
         });
     }
     problems.is_empty()
+}
+
+/// Whether `options.thinking_mode` is one a call can carry; what is not is
+/// added to `ignored`.
+fn thinking_mode_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
+    let Ok(mode) = serde_json::from_value::<base::interface::model::ThinkingMode>(value.clone())
+    else {
+        return true;
+    };
+    match model::adapter::thinking_mode_problem(&mode) {
+        Some(error) => {
+            ignored.push(IgnoredOption {
+                field: Some("thinking_mode".into()),
+                error,
+            });
+            false
+        }
+        None => true,
+    }
 }
 
 /// What the engine would refuse of `options.host_tools`, by the field of the
@@ -246,6 +269,8 @@ mod tests {
             output_schema: Some(serde_json::json!({})),
             provider: Some("p".into()),
             model: Some("m".into()),
+            effort: Some(base::interface::model::Effort::High),
+            thinking_mode: Some(base::interface::model::ThinkingMode::Off),
             prompt: Some(Default::default()),
             prompt_types: vec![AskKind::Question.as_str().into()],
             host_tools: vec![crate::session_pool::api::HostToolOption {

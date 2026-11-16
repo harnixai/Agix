@@ -1046,6 +1046,13 @@
       ],
       "type": "object"
     },
+    "ChoiceSource": {
+      "enum": [
+        "session",
+        "settings"
+      ],
+      "type": "string"
+    },
     "ClockOptions": {
       "properties": {
         "start": {
@@ -1636,6 +1643,9 @@
             "null"
           ]
         },
+        "reasoning": {
+          "$ref": "#/$defs/ReasoningReport"
+        },
         "system": {
           "items": {
             "$ref": "#/$defs/SystemBlockReport"
@@ -1659,6 +1669,7 @@
         "basis",
         "model",
         "max_tokens",
+        "reasoning",
         "system",
         "tools",
         "messages",
@@ -4060,6 +4071,17 @@
         "applies": {
           "$ref": "#/$defs/Applies"
         },
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The session's own; `None` follows the settings."
+        },
         "model": {
           "type": [
             "string",
@@ -4074,6 +4096,16 @@
         },
         "session_id": {
           "type": "string"
+        },
+        "thinking_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThinkingMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -4938,6 +4970,36 @@
           "type": "object"
         }
       ]
+    },
+    "ReasoningReport": {
+      "description": "The reasoning effort and thinking mode the session's next model call\ncarries, and whether each is the session's own choice or the settings'.",
+      "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effort_source": {
+          "$ref": "#/$defs/ChoiceSource"
+        },
+        "thinking_mode": {
+          "$ref": "#/$defs/ThinkingMode"
+        },
+        "thinking_mode_source": {
+          "$ref": "#/$defs/ChoiceSource"
+        }
+      },
+      "required": [
+        "effort_source",
+        "thinking_mode",
+        "thinking_mode_source"
+      ],
+      "type": "object"
     },
     "RecorderOptions": {
       "description": "Record or replay this session's LLM calls.\n\nA recorder that records is kept with the session's spec, so the session\ngoes on recording after a restart; one that replays or reruns is not, and\nis given again by the call that brings the session back.",
@@ -6646,6 +6708,17 @@
             "null"
           ]
         },
+        "reasoning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the session's next model call carries; absent for a sidechain,\nand for a session whose scene is not known."
+        },
         "resumable": {
           "description": "`false` only for a sidechain that already ran its one-shot task to\nconclusion — `session.resume` against it returns `SIDECHAIN_TERMINAL`.",
           "type": "boolean"
@@ -6834,6 +6907,17 @@
           ],
           "description": "Where this session's kept time starts (the date in its prompt, its log's timestamps).\nOmitted: the machine's clock — except in replay, where it starts when the recording did."
         },
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The conversation's reasoning effort; `None` takes the settings'\n`model.effort`. Its sub-agents keep the settings'."
+        },
         "host_tools": {
           "description": "Tools this session's host runs itself, offered to the model as the\nsession's own; a call to one is a `host_tool_call` frame, answered\nwith `session.respondToolCall`.",
           "items": {
@@ -6921,6 +7005,17 @@
               "type": "null"
             }
           ]
+        },
+        "thinking_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThinkingMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking_mode`. Its sub-agents keep the settings'."
         }
       },
       "type": "object"
@@ -7094,9 +7189,20 @@
     },
     "SetModelParams": {
       "properties": {
+        "effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` takes the session back to the settings' `model.effort`."
+        },
         "model": {
           "default": null,
-          "description": "At least one of `model` and `provider`.",
+          "description": "At least one of `model`, `provider`, `effort` and `thinking_mode`.",
           "type": [
             "string",
             "null"
@@ -7111,6 +7217,17 @@
         },
         "session_id": {
           "type": "string"
+        },
+        "thinking_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThinkingMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` takes the session back to the settings' `model.thinking_mode`."
         }
       },
       "required": [

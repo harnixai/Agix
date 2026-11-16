@@ -77,7 +77,7 @@ impl Model for AnthropicModel {
             betas.push("context-management-2025-06-27".into());
         }
         let anthropic_tools = wire_tools(tools);
-        let thinking = thinking_config(params.thinking_mode);
+        let thinking = thinking_config(params.thinking_mode, params.max_tokens);
 
         // A call that is only a search has nothing else to do, so it is told
         // to search rather than left to decide whether to.
@@ -205,12 +205,51 @@ fn wire_tools(tools: Vec<ToolDef>) -> Vec<crate::types::ToolDef> {
         .collect()
 }
 
-fn thinking_config(mode: ThinkingMode) -> Option<ThinkingConfig> {
+/// The least thinking budget Anthropic accepts.
+pub const MIN_THINKING_BUDGET: u32 = 1024;
+
+/// What is wrong with `mode` as a caller gave it: a budget under
+/// [`MIN_THINKING_BUDGET`].
+pub fn thinking_mode_problem(mode: &ThinkingMode) -> Option<String> {
+    match mode {
+        ThinkingMode::OnBudget(n) if *n < MIN_THINKING_BUDGET => Some(format!(
+            "on_budget must be at least {MIN_THINKING_BUDGET}, got {n}"
+        )),
+        _ => None,
+    }
+}
+
+/// The budget is held under `max_tokens`, which Anthropic requires of it; a
+/// call whose `max_tokens` leaves no room for the least budget goes without
+/// thinking.
+fn thinking_config(mode: ThinkingMode, max_tokens: u32) -> Option<ThinkingConfig> {
     match mode {
         ThinkingMode::Auto => None,
         ThinkingMode::Off => Some(ThinkingConfig::Disabled),
         ThinkingMode::On => Some(ThinkingConfig::Adaptive),
-        ThinkingMode::OnBudget(n) => Some(ThinkingConfig::Enabled { budget_tokens: n }),
+        ThinkingMode::OnBudget(n) if n < max_tokens => {
+            Some(ThinkingConfig::Enabled { budget_tokens: n })
+        }
+        ThinkingMode::OnBudget(n) => {
+            let room = max_tokens.saturating_sub(1);
+            if room < MIN_THINKING_BUDGET {
+                tracing::warn!(
+                    budget = n,
+                    max_tokens,
+                    "thinking budget left out: max_tokens leaves no room for one"
+                );
+                return Some(ThinkingConfig::Disabled);
+            }
+            tracing::warn!(
+                budget = n,
+                max_tokens,
+                held_to = room,
+                "thinking budget held under max_tokens"
+            );
+            Some(ThinkingConfig::Enabled {
+                budget_tokens: room,
+            })
+        }
     }
 }
 

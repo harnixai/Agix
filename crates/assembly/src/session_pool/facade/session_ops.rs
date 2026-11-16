@@ -196,11 +196,15 @@ impl SessionPool {
     /// against the provider it will be sent to and refused when that
     /// provider's `models` list does not have it — sending a name to an
     /// endpoint that does not serve it fails only later, and less legibly.
+    ///
+    /// `reasoning` changes the session's own effort and thinking mode, read
+    /// at each of its engine's model calls; neither needs a rebuild.
     pub async fn set_session_model(
         &self,
         session_id: &str,
         model: Option<&str>,
         provider: Option<&str>,
+        reasoning: api::ReasoningChange,
     ) -> Result<api::ModelChoice, PoolError> {
         self.refuse_scene_mismatch(session_id).await?;
         self.wait_out_finishing_turn(session_id).await;
@@ -238,7 +242,8 @@ impl SessionPool {
                 let switching_provider =
                     provider.is_some_and(|p| current_provider.as_deref() != Some(p));
                 let change = |spec: &mut SessionSpec| {
-                    choose_model(spec, model, provider, switching_provider)
+                    choose_model(spec, model, provider, switching_provider);
+                    choose_reasoning(spec, reasoning);
                 };
 
                 // A provider is a different client, which an engine is built
@@ -262,10 +267,13 @@ impl SessionPool {
                 }
             })
             .await?;
+        let reasoning = spec.reasoning();
         Ok(api::ModelChoice {
             session_id: session_id.to_string(),
             model: spec.model(),
             provider: spec.provider(),
+            effort: reasoning.effort,
+            thinking_mode: reasoning.thinking_mode,
             applies: api::Applies::NextTurn,
         })
     }
@@ -283,9 +291,15 @@ impl SessionPool {
     }
 
     pub(in crate::session_pool) async fn project_model_choice(&self, sid: &str) {
-        let model = self.specs.get(sid).and_then(|spec| spec.model());
+        let spec = self.specs.get(sid);
         if let Some(core) = self.live.core_of(sid).await {
-            core.state().set_model_choice(model);
+            core.state()
+                .set_model_choice(spec.as_ref().and_then(SessionSpec::model));
+            core.state().set_reasoning_choice(
+                spec.as_ref()
+                    .map(SessionSpec::reasoning)
+                    .unwrap_or_default(),
+            );
         }
     }
 
@@ -392,6 +406,15 @@ impl SessionPool {
                 Ok(dirs.clone())
             })
             .await
+    }
+}
+
+fn choose_reasoning(spec: &mut SessionSpec, change: api::ReasoningChange) {
+    if let Some(effort) = change.effort {
+        spec.effort = Some(effort);
+    }
+    if let Some(thinking_mode) = change.thinking_mode {
+        spec.thinking_mode = Some(thinking_mode);
     }
 }
 

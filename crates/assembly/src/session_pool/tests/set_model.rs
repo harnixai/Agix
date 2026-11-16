@@ -26,7 +26,12 @@ async fn a_session_with_a_turn_in_flight_refuses_rather_than_queues() {
         .expect("the session is live");
 
     match pool
-        .set_session_model(&session_id, Some("claude-opus-4-6"), None)
+        .set_session_model(
+            &session_id,
+            Some("claude-opus-4-6"),
+            None,
+            Default::default(),
+        )
         .await
     {
         Err(PoolError::SessionBusy(busy)) => {
@@ -125,7 +130,7 @@ async fn choose_a_model_while_a_rebuild_takes_the_session(pool: &Arc<SessionPool
     let chosen = {
         let (pool, sid) = (pool.clone(), sid.to_string());
         tokio::spawn(async move {
-            pool.set_session_model(&sid, Some("claude-opus-4-6"), None)
+            pool.set_session_model(&sid, Some("claude-opus-4-6"), None, Default::default())
                 .await
                 .map(|_| ())
         })
@@ -220,7 +225,7 @@ async fn a_failed_rebuild_keeps_a_model_chosen_while_it_was_on_its_way() {
     let chosen = {
         let (pool, sid) = (pool.clone(), sid.clone());
         tokio::spawn(async move {
-            pool.set_session_model(&sid, Some("claude-opus-4-6"), None)
+            pool.set_session_model(&sid, Some("claude-opus-4-6"), None, Default::default())
                 .await
                 .map(|_| ())
         })
@@ -338,7 +343,7 @@ async fn a_model_chosen_behind_a_delete_finds_the_session_gone() {
 
     let chosen = change_queued_behind_a_delete(&pool, &sid, |pool, sid| {
         tokio::spawn(async move {
-            pool.set_session_model(&sid, Some("claude-opus-4-6"), None)
+            pool.set_session_model(&sid, Some("claude-opus-4-6"), None, Default::default())
                 .await
         })
     })

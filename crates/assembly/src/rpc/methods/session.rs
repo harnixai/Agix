@@ -107,11 +107,19 @@ pub struct RenameParams {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SetModelParams {
     pub session_id: String,
-    /// At least one of `model` and `provider`.
+    /// At least one of `model`, `provider`, `effort` and `thinking_mode`.
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
+    /// `null` takes the session back to the settings' `model.effort`.
+    #[serde(default, deserialize_with = "Patch::present")]
+    #[schemars(with = "Option<base::interface::model::Effort>")]
+    pub effort: Patch<base::interface::model::Effort>,
+    /// `null` takes the session back to the settings' `model.thinking_mode`.
+    #[serde(default, deserialize_with = "Patch::present")]
+    #[schemars(with = "Option<base::interface::model::ThinkingMode>")]
+    pub thinking_mode: Patch<base::interface::model::ThinkingMode>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

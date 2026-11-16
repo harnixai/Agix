@@ -38,6 +38,10 @@ pub struct SessionDetail {
     /// it has none. A session out of memory reports only their paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_dirs: Option<Vec<SkillDirReport>>,
+    /// What the session's next model call carries; absent for a sidechain,
+    /// and for a session whose scene is not known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<runtime::agent::ReasoningReport>,
 }
 
 /// What one of the host's skill directories gives a session.
@@ -209,7 +213,24 @@ pub struct ModelChoice {
     pub session_id: String,
     pub model: Option<String>,
     pub provider: Option<String>,
+    /// The session's own; `None` follows the settings.
+    pub effort: Option<base::interface::model::Effort>,
+    pub thinking_mode: Option<base::interface::model::ThinkingMode>,
     pub applies: Applies,
+}
+
+/// A change to a session's own effort and thinking mode: `None` leaves a
+/// field as it is, `Some(None)` takes it back to the settings'.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReasoningChange {
+    pub effort: Option<Option<base::interface::model::Effort>>,
+    pub thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
+}
+
+impl ReasoningChange {
+    pub fn is_empty(&self) -> bool {
+        self.effort.is_none() && self.thinking_mode.is_none()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

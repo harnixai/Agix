@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use base::interface::model::{Effort, ThinkingMode};
 use model::mock::MockAnthropicClient;
 use model::stream::{BlockDelta, ContentBlockStart, MessageDeltaPayload, StreamEvent, Usage};
 
@@ -70,20 +71,46 @@ impl Daemon {
     /// conversation — so both counting requests and taking the last match
     /// would be answering about the wrong call.
     fn model_asked_for(&self, needle: &str) -> String {
+        self.request_carrying(needle).model
+    }
+
+    fn request_carrying(&self, needle: &str) -> model::types::MessagesRequest {
         for i in 0.. {
             let Some(request) = self.model.nth_request(i) else {
                 break;
             };
             let rendered = serde_json::to_string(&request).expect("a request serializes");
             if rendered.contains(needle) {
-                return request.model;
+                return request;
             }
         }
         panic!("no request carried `{needle}`")
     }
+
+    async fn create(&self, params: serde_json::Value) -> String {
+        self.ok("session.create", params).await["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn turn(&self, session: &str, message: &str) {
+        self.ok(
+            "session.run_turn",
+            serde_json::json!({"session_id": session, "message": message}),
+        )
+        .await;
+    }
 }
 
 async fn start_daemon(turns: usize) -> Daemon {
+    start_daemon_with(turns, |_| {}).await
+}
+
+async fn start_daemon_with(
+    turns: usize,
+    configure: impl FnOnce(&mut daemon::config::DaemonConfig),
+) -> Daemon {
     let model = Arc::new(MockAnthropicClient::new());
     for _ in 0..turns {
         model.push_turn(one_turn());
@@ -95,7 +122,7 @@ async fn start_daemon(turns: usize) -> Daemon {
             history: true,
             ..Default::default()
         },
-        |_| {},
+        configure,
     )
     .await;
     Daemon {
@@ -217,5 +244,188 @@ async fn a_model_is_required() {
     assert_eq!(
         response["error"]["code"], -32602,
         "INVALID_PARAMS: {response}"
+    );
+}
+
+/// Settings that ask for `low` effort and leave thinking to the endpoint, so
+/// a session's own choice is told apart from them.
+async fn start_reasoning_daemon(turns: usize) -> Daemon {
+    start_daemon_with(turns, |config| {
+        config.settings.values.model.effort = Some(Effort::Low);
+        config.settings.values.model.thinking_mode = ThinkingMode::Auto;
+    })
+    .await
+}
+
+#[tokio::test]
+async fn an_effort_set_on_one_session_is_what_its_next_call_carries_and_no_others() {
+    let daemon = start_reasoning_daemon(4).await;
+    let chosen = daemon.create(serde_json::json!({})).await;
+    let other = daemon.create(serde_json::json!({})).await;
+
+    let answer = daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": chosen, "effort": "high", "thinking_mode": "off"}),
+        )
+        .await;
+    assert_eq!(answer["effort"], "high", "{answer}");
+    assert_eq!(answer["thinking_mode"], "off", "{answer}");
+    assert_eq!(answer["model"], serde_json::Value::Null, "{answer}");
+
+    daemon.turn(&chosen, "MSG-CHOSEN").await;
+    daemon.turn(&other, "MSG-OTHER").await;
+    let request = daemon.request_carrying("MSG-CHOSEN");
+    assert_eq!(request.effort, Some(Effort::High));
+    assert!(
+        matches!(
+            request.thinking,
+            Some(model::types::ThinkingConfig::Disabled)
+        ),
+        "{:?}",
+        request.thinking
+    );
+    let request = daemon.request_carrying("MSG-OTHER");
+    assert_eq!(
+        request.effort,
+        Some(Effort::Low),
+        "the other session is left on the settings"
+    );
+    assert!(request.thinking.is_none(), "{:?}", request.thinking);
+
+    let got = daemon
+        .ok("session.get", serde_json::json!({"session_id": chosen}))
+        .await;
+    assert_eq!(
+        got["reasoning"],
+        serde_json::json!({
+            "effort": "high", "effort_source": "session",
+            "thinking_mode": "off", "thinking_mode_source": "session",
+        })
+    );
+    let got = daemon
+        .ok("session.get", serde_json::json!({"session_id": other}))
+        .await;
+    assert_eq!(
+        got["reasoning"],
+        serde_json::json!({
+            "effort": "low", "effort_source": "settings",
+            "thinking_mode": "auto", "thinking_mode_source": "settings",
+        })
+    );
+    let inspected = daemon
+        .ok(
+            "session.inspectContext",
+            serde_json::json!({"session_id": chosen}),
+        )
+        .await;
+    assert_eq!(inspected["reasoning"]["effort"], "high", "{inspected}");
+    assert_eq!(inspected["reasoning"]["effort_source"], "session");
+
+    let answer = daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": chosen, "effort": null}),
+        )
+        .await;
+    assert_eq!(answer["effort"], serde_json::Value::Null, "{answer}");
+    assert_eq!(
+        answer["thinking_mode"], "off",
+        "only the named field is taken back"
+    );
+    daemon.turn(&chosen, "MSG-TAKEN-BACK").await;
+    assert_eq!(
+        daemon.request_carrying("MSG-TAKEN-BACK").effort,
+        Some(Effort::Low),
+        "`null` puts the session back on the settings' effort"
+    );
+}
+
+#[tokio::test]
+async fn a_thinking_budget_under_the_minimum_is_invalid_params() {
+    let daemon = start_reasoning_daemon(0).await;
+    let refused = daemon
+        .call(
+            "session.create",
+            serde_json::json!({"options": {"thinking_mode": {"on_budget": 0}}}),
+        )
+        .await;
+    assert_eq!(refused["error"]["code"], -32602, "{refused}");
+    assert_eq!(
+        refused["error"]["data"]["invalid_options"][0]["field"], "thinking_mode",
+        "{refused}"
+    );
+
+    let session = daemon.create(serde_json::json!({})).await;
+    let refused = daemon
+        .call(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "thinking_mode": {"on_budget": 1023}}),
+        )
+        .await;
+    assert_eq!(refused["error"]["code"], -32602, "{refused}");
+    daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "thinking_mode": {"on_budget": 1024}}),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn a_thinking_budget_is_kept_under_the_calls_max_tokens() {
+    let daemon = start_daemon_with(2, |config| {
+        config.settings.values.model.max_tokens = 1500;
+        config.settings.values.model.thinking_mode = ThinkingMode::Auto;
+    })
+    .await;
+    let roomy = daemon
+        .create(serde_json::json!({"options": {"thinking_mode": {"on_budget": 8000}}}))
+        .await;
+    daemon.turn(&roomy, "MSG-BUDGET").await;
+    let request = daemon.request_carrying("MSG-BUDGET");
+    assert_eq!(request.max_tokens, 1500);
+    match request.thinking {
+        Some(model::types::ThinkingConfig::Enabled { budget_tokens }) => {
+            assert!((1024..1500).contains(&budget_tokens), "{budget_tokens}")
+        }
+        other => panic!("expected a budget under max_tokens, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn the_effort_options_ask_for_is_what_the_session_calls_with() {
+    let daemon = start_reasoning_daemon(1).await;
+    let session = daemon
+        .create(serde_json::json!({"options": {"effort": "max", "thinking_mode": "on"}}))
+        .await;
+    daemon.turn(&session, "MSG-OPTIONS").await;
+    let request = daemon.request_carrying("MSG-OPTIONS");
+    assert_eq!(request.effort, Some(Effort::Max));
+    assert!(
+        matches!(
+            request.thinking,
+            Some(model::types::ThinkingConfig::Adaptive)
+        ),
+        "{:?}",
+        request.thinking
+    );
+}
+
+#[tokio::test]
+async fn a_sessions_effort_is_kept_through_a_close_and_resume() {
+    let daemon = start_reasoning_daemon(1).await;
+    let session = daemon.create(serde_json::json!({})).await;
+    daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "effort": "xhigh"}),
+        )
+        .await;
+    crate::support::close_and_resume(&daemon.sock, &session).await;
+    daemon.turn(&session, "MSG-RESUMED").await;
+    assert_eq!(
+        daemon.request_carrying("MSG-RESUMED").effort,
+        Some(Effort::Xhigh)
     );
 }

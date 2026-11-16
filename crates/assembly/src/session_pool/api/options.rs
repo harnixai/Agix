@@ -45,6 +45,14 @@ pub struct SessionOptions {
     /// when `provider` is given, the settings' model otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The conversation's reasoning effort; `None` takes the settings'
+    /// `model.effort`. Its sub-agents keep the settings'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<base::interface::model::Effort>,
+    /// The conversation's thinking mode; `None` takes the settings'
+    /// `model.thinking_mode`. Its sub-agents keep the settings'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_mode: Option<base::interface::model::ThinkingMode>,
     /// A system-prompt append / override for this session's own agent, over
     /// the settings files'. Its delegates do not get it.
     #[serde(skip_serializing_if = "Option::is_none")]
