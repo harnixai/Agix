@@ -42,8 +42,11 @@ impl SessionPool {
                         api_type: cfg.api_type.clone(),
                         base_url: cfg.base_url.clone(),
                         api_key,
+                        api_key_env: cfg.api_key_env.clone(),
                         default_model: cfg.default_model.clone(),
                         models: cfg.models.clone(),
+                        reasoning_passback: cfg.reasoning_passback,
+                        thinking_toggle: cfg.thinking_toggle,
                     },
                 )
             })

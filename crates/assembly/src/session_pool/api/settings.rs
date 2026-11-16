@@ -48,8 +48,11 @@ pub struct ProviderView {
     pub base_url: Option<String>,
     /// Redacted to `***<last 4>` unless secrets were asked for.
     pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
     pub default_model: Option<String>,
     pub models: Vec<String>,
+    pub reasoning_passback: bool,
+    pub thinking_toggle: Option<base::provider::ThinkingToggle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

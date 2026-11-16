@@ -399,3 +399,29 @@ async fn set_provider_with_unresolvable_config_reports_routing_not_ok() {
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+#[tokio::test]
+async fn get_provider_reads_back_api_key_env_thinking_toggle_and_reasoning_passback() {
+    let (_server, sock, _dir, handle) = start_server().await;
+    let resp = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","api_key_env":"AGIX_TEST_GETPROVIDER_KEY","reasoning_passback":true,"thinking_toggle":"deepseek"}},"id":1}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    assert!(v["result"].is_object(), "setProvider: {v}");
+
+    let resp = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"config.getProvider","id":2}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    let p = &v["result"]["providers"]["deepseek"];
+    assert_eq!(p["api_key_env"], "AGIX_TEST_GETPROVIDER_KEY", "resp: {v}");
+    assert_eq!(p["reasoning_passback"], true, "resp: {v}");
+    assert_eq!(p["thinking_toggle"], "deepseek", "resp: {v}");
+
+    _server.shutdown_token().cancel();
+    let _ = handle.await;
+}

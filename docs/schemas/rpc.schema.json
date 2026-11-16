@@ -4814,6 +4814,12 @@
             "null"
           ]
         },
+        "api_key_env": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "api_type": {
           "type": [
             "string",
@@ -4837,10 +4843,24 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "reasoning_passback": {
+          "type": "boolean"
+        },
+        "thinking_toggle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThinkingToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "models"
+        "models",
+        "reasoning_passback"
       ],
       "type": "object"
     },
@@ -7808,6 +7828,26 @@
             "on_budget"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "ThinkingToggle": {
+      "description": "The request fields OpenAI-compatible endpoints use to switch thinking.",
+      "oneOf": [
+        {
+          "const": "deepseek",
+          "description": "`\"thinking\": {\"type\": \"enabled\" | \"disabled\"}` (DeepSeek).",
+          "type": "string"
+        },
+        {
+          "const": "enable_thinking",
+          "description": "`\"enable_thinking\": true | false` (Qwen / DashScope).",
+          "type": "string"
+        },
+        {
+          "const": "chat_template_kwargs",
+          "description": "`\"chat_template_kwargs\": {\"enable_thinking\": true | false}` (vLLM, SGLang).",
+          "type": "string"
         }
       ]
     },
