@@ -1420,6 +1420,7 @@ mod call_failure_tests {
         client.push_turn_with_errors(vec![Err(AnthropicError::Overloaded {
             status: 529,
             retry_after: None,
+            body: String::new(),
         })]);
         client.push_turn_with_errors(vec![Err(AnthropicError::Server {
             status: 400,

@@ -1145,6 +1145,7 @@ async fn a_turn_that_fails_after_a_tool_ran_says_so() {
     model.push_turn_with_errors(vec![Err(model::error::AnthropicError::Overloaded {
         status: 529,
         retry_after: None,
+        body: String::new(),
     })]);
     let h = start_code(model).await;
 

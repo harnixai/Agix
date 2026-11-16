@@ -77,10 +77,12 @@ async fn classify_response(resp: HttpStream) -> Result<HttpStream, AnthropicErro
             ModelErrorKind::RateLimited => AnthropicError::RateLimited {
                 retry_after,
                 headers: anthropic_headers,
+                body,
             },
             ModelErrorKind::Overloaded => AnthropicError::Overloaded {
                 status: code,
                 retry_after,
+                body,
             },
             _ => AnthropicError::Server {
                 status: code,

@@ -22,6 +22,8 @@ pub enum AnthropicError {
         retry_after: Option<Duration>,
         /// `anthropic-ratelimit-*` headers，原样保留供上层决策
         headers: std::collections::HashMap<String, String>,
+        /// 服务自己的说明（已截到 4096 字符）
+        body: String,
     },
 
     /// HTTP 503 / 529 —— 后端过载，可重试
@@ -29,6 +31,8 @@ pub enum AnthropicError {
     Overloaded {
         status: u16,
         retry_after: Option<Duration>,
+        /// 服务自己的说明（已截到 4096 字符）
+        body: String,
     },
 
     /// 其他 4xx / 5xx，类别由 [`classify`] 定
@@ -114,8 +118,11 @@ impl From<AnthropicError> for ModelError {
         let kind = e.kind();
         let retry_after = e.retry_after();
         let (status, message) = match e {
-            AnthropicError::Overloaded { status, .. } => (Some(status), String::new()),
-            AnthropicError::RateLimited { .. } | AnthropicError::Cancelled => (None, String::new()),
+            AnthropicError::Overloaded { status, body, .. } => {
+                (Some(status), service_message(&body))
+            }
+            AnthropicError::RateLimited { body, .. } => (None, service_message(&body)),
+            AnthropicError::Cancelled => (None, String::new()),
             AnthropicError::Server { status, body, .. } => (Some(status), body),
             AnthropicError::Auth(m)
             | AnthropicError::Timeout(m)
@@ -187,6 +194,13 @@ pub(crate) fn says_context_too_long(message: &str) -> bool {
 pub(crate) fn error_type(body: &str) -> Option<String> {
     let body: serde_json::Value = serde_json::from_str(body).ok()?;
     Some(body.get("error")?.get("type")?.as_str()?.to_string())
+}
+
+fn service_message(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| Some(v.get("error")?.get("message")?.as_str()?.to_string()))
+        .unwrap_or_else(|| body.to_string())
 }
 
 impl From<base::interface::exec::ExecError> for AnthropicError {
@@ -277,13 +291,15 @@ mod tests {
             kind(&AnthropicError::RateLimited {
                 retry_after: None,
                 headers: HashMap::new(),
+                body: String::new(),
             }),
             RequestFailure::RateLimited
         );
         assert_eq!(
             kind(&AnthropicError::Overloaded {
                 status: 529,
-                retry_after: None
+                retry_after: None,
+                body: String::new(),
             }),
             RequestFailure::Overloaded
         );
@@ -312,6 +328,7 @@ mod tests {
         let e = ModelError::from(AnthropicError::Overloaded {
             status: 529,
             retry_after: Some(Duration::from_secs(7)),
+            body: String::new(),
         });
         assert_eq!(e.kind, ModelErrorKind::Overloaded);
         assert_eq!(e.status, Some(529));

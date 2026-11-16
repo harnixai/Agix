@@ -22,31 +22,35 @@ const RATE_LIMITED: Refusal = Refusal {
     status: "429 Too Many Requests",
     retry_after: Some(120),
     error_type: "rate_limit_error",
+    message: "Usage limit reached for this key, resets at 09:00 UTC",
 };
 
 const OVERLOADED: Refusal = Refusal {
     status: "529 Overloaded",
     retry_after: Some(120),
     error_type: "overloaded_error",
+    message: "Capacity is exhausted in this region",
 };
 
 const BAD_KEY: Refusal = Refusal {
     status: "401 Unauthorized",
     retry_after: None,
     error_type: "authentication_error",
+    message: "no",
 };
 
 struct Refusal {
     status: &'static str,
     retry_after: Option<u64>,
     error_type: &'static str,
+    message: &'static str,
 }
 
 impl Refusal {
     fn response(&self) -> Vec<u8> {
         let body = format!(
-            r#"{{"type":"error","error":{{"type":"{}","message":"no"}}}}"#,
-            self.error_type
+            r#"{{"type":"error","error":{{"type":"{}","message":"{}"}}}}"#,
+            self.error_type, self.message
         );
         let retry_after = self
             .retry_after
@@ -216,4 +220,24 @@ async fn a_rejected_key_ends_the_turn_as_not_retryable() {
                "side_effects": false}),
         "{failed}"
     );
+}
+
+#[tokio::test]
+async fn a_rate_limit_keeps_the_services_own_explanation_in_the_turn_error() {
+    let daemon = Daemon::start(&RATE_LIMITED).await;
+
+    let failed = daemon.failed_turn().await;
+
+    let message = failed["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains(RATE_LIMITED.message), "{failed}");
+}
+
+#[tokio::test]
+async fn an_overload_keeps_the_services_own_explanation_in_the_turn_error() {
+    let daemon = Daemon::start(&OVERLOADED).await;
+
+    let failed = daemon.failed_turn().await;
+
+    let message = failed["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains(OVERLOADED.message), "{failed}");
 }
