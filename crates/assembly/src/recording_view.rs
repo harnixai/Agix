@@ -104,6 +104,7 @@ impl Opened {
             input: CallInput {
                 system: request.system.iter().map(|id| sizes.block(id)).collect(),
                 tools: sizes.tools(&request.tools),
+                tools_digest: request.tools.0.clone(),
                 messages: request.messages.len(),
             },
             output: CallOutput {
@@ -390,10 +391,12 @@ impl<'a> Sizes<'a> {
                 Ok(Some(block)) => SystemBlockSize {
                     source: block.name,
                     chars: Some(block.content.chars().count()),
+                    digest: id.0.clone(),
                 },
                 _ => SystemBlockSize {
                     source: None,
                     chars: None,
+                    digest: id.0.clone(),
                 },
             })
             .clone()

@@ -201,10 +201,11 @@ fn the_call_rows_are_the_protocol_s_shape() {
     let (rows, next) = opened.summaries(0, 10, true);
     assert_eq!(next, 2, "the call still streaming is read again");
     let system = json!([
-        {"source": "identity", "chars": 13},
-        {"source": "plugin.big", "chars": 70 * 1024},
+        {"source": "identity", "chars": 13, "digest": "879106ac742f0567"},
+        {"source": "plugin.big", "chars": 70 * 1024, "digest": "c4de74a820aee087"},
     ]);
-    let input = json!({"system": system, "tools": 1, "messages": 1});
+    let input = json!({"system": system, "tools": 1, "tools_digest": "286e970158096479",
+                       "messages": 1});
     let no_output = json!({"chars": 0, "thinking_chars": 0, "tool_uses": []});
     assert_eq!(
         serde_json::to_value(&rows).unwrap(),

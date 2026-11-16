@@ -803,6 +803,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `session_import` | 有 `session.import`,把 `session.export` 的归档装成新会话(§6.3) |
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
 | `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
+| `calls_digest` | `session.calls` 的 `input.system[].digest` 与 `input.tools_digest`(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
@@ -2004,7 +2005,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
                "turn_id": "…", "turn": 1, "step": 0,
                "purpose": null,          // 对话调用为 null;辅助调用是 compact / title / memory …
                "ts": "2026-11-15T09:46:40Z", "provider": "anthropic", "model": "…",
-               "input": { "system": [ { "source": "identity", "chars": 1234 } ], "tools": 23, "messages": 8 },
+               "input": { "system": [ { "source": "identity", "chars": 1234, "digest": "879106ac742f0567" } ],
+                          "tools": 23, "tools_digest": "286e970158096479", "messages": 8 },
                "output": { "chars": 456, "thinking_chars": 0, "tool_uses": [ { "id": "…", "name": "Read" } ] },
                "status": "ok",           // ok | cancelled | error | in_flight | unfinished
                "stop_reason": "tool_use",
@@ -2018,6 +2020,10 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 只有录制(`recorder.mode:"record"`)的会话有录像;没录的、录了但还没调用过模型的,`recording`
 为 `null`、`calls` 为 `[]`,不报错。子 Agent 与辅助调用都在根会话的录像里(见 `session.create`),
 各行的 `session_id` 写明是谁的;传子会话的 id 读不到它们。
+
+`digest` 与 `tools_digest` 是录像里那一块的 blob id(规范化 JSON 的 SHA-256 前 16 位十六进制,系统块各一个,
+工具目录按发出的顺序一个):两次调用的值相同,发出去的那一块就相同,宿主不必取全文去比。录像已不再持有
+那一块时 `chars` / `tools` 为 `null`,`digest` 仍在。
 
 `index` 是调用在录像里的位置,`session.call` 用它取全文。`from` 是起始的 `index`,`limit` 默认
 200、上限 500,超了夹紧不报错。`total` 是整份录像的调用数,`damaged` 是读不出来、跳过的行数。

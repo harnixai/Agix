@@ -260,6 +260,7 @@ pub const CAPABILITIES: &[&str] = &[
     "checkpoints",
     "session_attended",
     "session_calls",
+    "calls_digest",
     "session_search",
     "session_skill_dirs",
     "host_tool_progress",

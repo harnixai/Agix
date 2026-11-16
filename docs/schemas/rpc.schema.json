@@ -394,10 +394,15 @@
             "integer",
             "null"
           ]
+        },
+        "tools_digest": {
+          "description": "The recorded tool table's blob id; equal between two calls when the\ntable sent was the same.",
+          "type": "string"
         }
       },
       "required": [
         "system",
+        "tools_digest",
         "messages"
       ],
       "type": "object"
@@ -7494,6 +7499,10 @@
             "null"
           ]
         },
+        "digest": {
+          "description": "The block's recorded blob id; equal between two calls when the block\nsent was the same.",
+          "type": "string"
+        },
         "source": {
           "description": "The block's name (`identity`, `skills.catalog`, …).",
           "type": [
@@ -7502,6 +7511,9 @@
           ]
         }
       },
+      "required": [
+        "digest"
+      ],
       "type": "object"
     },
     "SystemBlockView": {

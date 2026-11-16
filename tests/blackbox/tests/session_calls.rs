@@ -214,6 +214,52 @@ async fn a_calls_system_blocks_are_what_the_model_was_sent() -> anyhow::Result<(
     Ok(())
 }
 
+/// Between two turns only the prompt append changes: the rows' digests tell which system block moved and that the tool table did not.
+#[tokio::test(flavor = "multi_thread")]
+async fn digests_tell_which_fixed_part_changed_between_two_turns() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("calls-digest", &stub).start().await?;
+    stub.script([Reply::text("one"), Reply::text("two")]);
+    let extra = recorded(&run)?;
+    let session = run.session_with(extra).await?;
+    run.turn(&session, "first").await?;
+    let set = run
+        .client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": session, "append": "CHANGED-APPEND" }),
+        )
+        .await?;
+    anyhow::ensure!(set.error.is_none(), "{set:?}");
+    run.turn(&session, "second").await?;
+    let list = until_calls(&mut run, &session, |r| {
+        r.iter().filter(|c| c["purpose"].is_null()).count() == 2
+    })
+    .await?;
+    let turns = conversation_rows(&list, &session);
+    let digests = |row: &Value| -> Vec<(Value, Value)> {
+        row["input"]["system"]
+            .as_array()
+            .expect("system")
+            .iter()
+            .map(|b| (b["source"].clone(), b["digest"].clone()))
+            .collect()
+    };
+    let (first, second) = (digests(&turns[0]), digests(&turns[1]));
+    assert!(first.iter().all(|(_, d)| d.is_string()), "{list}");
+    assert_eq!(
+        turns[0]["input"]["tools_digest"], turns[1]["input"]["tools_digest"],
+        "{list}"
+    );
+    assert!(turns[0]["input"]["tools_digest"].is_string(), "{list}");
+    let changed: Vec<_> = second.iter().filter(|b| !first.contains(b)).collect();
+    let kept = second.iter().filter(|b| first.contains(b)).count();
+    assert_eq!(changed.len(), 1, "only the append moved: {list}");
+    assert!(kept > 0, "{list}");
+    run.finish().await;
+    Ok(())
+}
+
 /// A part over 64 KiB comes as a handle, and `session.callBlob` returns it whole.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_oversized_message_is_a_blob_that_call_blob_returns_whole() -> anyhow::Result<()> {
@@ -374,7 +420,7 @@ async fn ping_advertises_the_calls_and_search_capabilities() -> anyhow::Result<(
     let mut run = stubbed("calls-ping", &stub).start().await?;
     let ping = ok(run.client.call("daemon.ping", Value::Null).await?)?;
     let capabilities = ping["capabilities"].as_array().expect("capabilities");
-    for name in ["session_calls", "session_search"] {
+    for name in ["session_calls", "session_search", "calls_digest"] {
         assert!(capabilities.iter().any(|c| c == name), "{ping}");
     }
     run.finish().await;

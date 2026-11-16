@@ -84,6 +84,9 @@ pub struct CallInput {
     pub system: Vec<SystemBlockSize>,
     /// Tools offered; `None` when the recording no longer holds the table.
     pub tools: Option<usize>,
+    /// The recorded tool table's blob id; equal between two calls when the
+    /// table sent was the same.
+    pub tools_digest: String,
     pub messages: usize,
 }
 
@@ -93,6 +96,9 @@ pub struct SystemBlockSize {
     pub source: Option<String>,
     /// `None` when the recording no longer holds the block.
     pub chars: Option<usize>,
+    /// The block's recorded blob id; equal between two calls when the block
+    /// sent was the same.
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
