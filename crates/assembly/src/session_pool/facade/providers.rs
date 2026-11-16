@@ -122,8 +122,7 @@ impl SessionPool {
                 .map_err(|e| e.to_string())?;
             Ok(local_changed)
         })
-        .await
-        .map_err(PoolError::InvalidRequest)?;
+        .await?;
 
         let target = project_root.unwrap_or(self.cwd());
         if tier_name == api::ProviderTier::Global

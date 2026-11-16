@@ -17,10 +17,11 @@
 //! rewritten, and replacing it would quietly undo a user's own dotfile link.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 
-use base::dir_lock::DirLock;
+use base::dir_lock::{DirLock, LockTimeout, DIR_LOCK_WAIT};
 use base::interface::permission::{GrantMatch, RuleFile};
 use base::paths::SETTINGS_LOCAL_FILE;
 
@@ -32,6 +33,8 @@ pub enum SettingsFileError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("the settings directory {} is locked by another process; nothing was written", dir.display())]
+    Locked { dir: PathBuf },
     #[error("existing {} is not valid JSON, refusing to overwrite it: {source}", path.display())]
     NotJson {
         path: PathBuf,
@@ -58,10 +61,22 @@ pub struct SettingsDir {
 }
 
 impl SettingsDir {
-    /// Create `dir` if it is missing and wait until no one else holds it.
+    /// Create `dir` if it is missing and wait, up to [`DIR_LOCK_WAIT`], until
+    /// no one else holds it.
     pub fn lock(dir: &Path) -> Result<Self, SettingsFileError> {
-        let lock = DirLock::acquire(dir).map_err(SettingsFileError::io(dir))?;
-        Ok(Self { lock })
+        Self::lock_within(dir, DIR_LOCK_WAIT)
+    }
+
+    fn lock_within(dir: &Path, wait: Duration) -> Result<Self, SettingsFileError> {
+        match DirLock::acquire_within(dir, wait) {
+            Ok(lock) => Ok(Self { lock }),
+            Err(e) => match LockTimeout::of(&e) {
+                Some(timeout) => Err(SettingsFileError::Locked {
+                    dir: timeout.dir.clone(),
+                }),
+                None => Err(SettingsFileError::io(dir)(e)),
+            },
+        }
     }
 
     pub fn path(&self, file: &str) -> PathBuf {
@@ -306,6 +321,27 @@ mod tests {
             Value::Object(fields) => fields,
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn a_held_directory_is_refused_as_locked_and_left_alone() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(SETTINGS_FILE), "{}").unwrap();
+        let held = SettingsDir::lock(dir.path()).unwrap();
+        let err = SettingsDir::lock_within(dir.path(), Duration::from_millis(100))
+            .err()
+            .expect("held");
+        assert!(
+            matches!(&err, SettingsFileError::Locked { dir: d } if *d == dir.path().canonicalize().unwrap()),
+            "{err}"
+        );
+        assert!(err.to_string().contains("nothing was written"));
+        drop(held);
+        SettingsDir::lock_within(dir.path(), Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap(),
+            "{}"
+        );
     }
 
     #[test]

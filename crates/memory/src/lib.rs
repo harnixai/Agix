@@ -480,7 +480,7 @@ impl MemoryStore {
 /// over the same directory — each session builds its own — and, on unix,
 /// other processes.
 fn lock_dir(dir: &Path) -> Result<base::dir_lock::DirLock, MemoryError> {
-    base::dir_lock::DirLock::acquire(dir)
+    base::dir_lock::DirLock::acquire_within(dir, base::dir_lock::DIR_LOCK_WAIT)
         .map_err(|e| MemoryError::Io(format!("{}: {e}", dir.display())))
 }
 

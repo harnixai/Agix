@@ -86,6 +86,10 @@ pub enum PoolError {
     /// exists here.
     #[error("session `{session_id}` already exists; nothing was imported")]
     SessionExists { session_id: String },
+    /// A settings directory another process held for as long as the engine
+    /// waits; nothing was written.
+    #[error("{0}")]
+    SettingsLocked(String),
     #[error("{0}")]
     Internal(String),
 }

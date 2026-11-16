@@ -8257,6 +8257,10 @@
     {
       "code": -32025,
       "name": "SESSION_EXISTS"
+    },
+    {
+      "code": -32026,
+      "name": "SETTINGS_LOCKED"
     }
   ],
   "frames": {

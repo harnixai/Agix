@@ -2070,7 +2070,8 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 引擎自己改设置文件的地方——`project.trust`、`config.setProvider`、`mcp.addServer` /
 `updateServer`、权限询问里的"永久允许"——都走 `settings::file`:读改写期间锁住那一层
 的目录(进程内一把锁,unix 上跨进程靠目录上的 `flock`),写进同目录的临时文件、落盘之后改名替换,
-读的一方只会看到旧文件或新文件。`settings.local.json` 每次写都是 0600,别的文件保留原来的
+读的一方只会看到旧文件或新文件。等锁有上限(`base::dir_lock::DIR_LOCK_WAIT`,10 秒):超时 RPC 回 `SETTINGS_LOCKED`、
+什么都不写,"永久允许"则只放行当前会话、不落盘并发 notification;记忆目录的锁同一上限。`settings.local.json` 每次写都是 0600,别的文件保留原来的
 权限。设置文件是符号链接的,引擎一律不写:项目层里的链接是仓库内容,顺着它写等于让仓库挑一个
 用户的文件来改写,把链接换成普通文件又会悄悄拆掉用户自己的 dotfile 链接。读取时项目层(含项目的
 `settings.local.json`)的链接不读;全局层与场景层的链接是用户自己(常是 dotfile 管理工具)放的,

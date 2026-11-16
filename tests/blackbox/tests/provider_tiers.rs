@@ -153,6 +153,51 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_global_tier_held_past_the_wait_is_refused_and_written_after_release(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("tier-global-locked", &stub).start().await?;
+    let global = run.world.global_root();
+    let tiers = [global.clone(), run.project.join(".agix")];
+    let target = Target::project(&run.project);
+    let params = json!({
+        "tier": "global",
+        "provider_id": "shared",
+        "config": provider_at(stub.base_url().as_str(), "anthropic"),
+        "default_provider": "shared"
+    });
+
+    let held = HeldDir::hold(&global)?;
+    let before = snapshot(&tiers);
+    let refused = run
+        .client
+        .config_set_provider(&target, params.clone())
+        .await?;
+    let error = refused
+        .error
+        .expect("a global tier held by another process is refused, not waited on forever");
+    assert_eq!(error.code, -32026, "{}", error.message);
+    assert!(
+        error.message.contains("locked by another process")
+            && error.message.contains("nothing was written"),
+        "{}",
+        error.message
+    );
+    assert_eq!(snapshot(&tiers), before, "the refused write changed a file");
+    drop(held);
+
+    let saved = run.client.config_set_provider(&target, params).await?;
+    let saved = saved.result.expect("setProvider result after release");
+    assert_eq!(saved["tier"], "global", "{saved}");
+    assert_eq!(
+        read_json(&global.join("settings.json"))["providers"]["shared"]["api_type"],
+        "anthropic"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_dry_run_writes_nothing_and_refuses_what_would_not_route() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("tier-dry-run", &stub).start().await?;

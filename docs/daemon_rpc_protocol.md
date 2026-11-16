@@ -3041,7 +3041,12 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 文件照写,`routing.error` / `routing.router_error` 报原因,已经在用的路由保留。
 
 两个文件在那一层目录的锁下读改写(与 `mcp.addServer`、`project.trust`、权限询问里的"永久允许"
-是同一把,跨进程也互斥;宿主自己改那一层的文件时对目录 `flock(LOCK_EX)` 就与引擎互斥),各自写临时文件再改名替换,先写 `settings.local.json`。设置文件是
+是同一把,跨进程也互斥;宿主自己改那一层的文件时对目录 `flock(LOCK_EX)` 就与引擎互斥),各自写临时文件再改名替换,先写 `settings.local.json`。
+引擎等这把锁最多 **10 秒**:宿主(或别的进程)一直握着它,`config.setProvider` / `mcp.addServer` /
+`mcp.updateServer` / `project.trust` 以 `SETTINGS_LOCKED (-32026)` 回,消息形如
+`the settings directory <dir> is locked by another process; nothing was written`,文件原样,放手后重发即可。
+等锁的那一段不随请求取消:客户端在这 10 秒里断开或放弃了请求,锁一到手,写照样可能落盘。权限询问里的"永久允许"拿不到锁时,这一次调用与当前会话照样放行,
+只是没有记进文件,turn 里发一条 `notification` 说明。设置文件是
 符号链接的,不顺着写也不替换,以 `INVALID_PARAMS` 拒绝,消息里写明是哪个文件。
 
 ### 6.5 `mcp.*` / `plugin.*` / `import.*` / `commands.*`
@@ -3479,7 +3484,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 `project.status`,外加 `written_to`。**`false` 只删这一条**:另一条 glob 或
 `default: "trusted"` 仍然信任它时,结果里照样是 `trusted`(`matched` 说明是哪一条),
 要改就改全局设置。缺 `trusted`、`project_root` 是相对路径、`trusted: true` 而目录不存在 →
-`INVALID_PARAMS`。
+`INVALID_PARAMS`;全局层目录 10 秒内拿不到锁 → `SETTINGS_LOCKED`,什么都没写(§6.4)。
 
 写完之后这个项目的会话在下一轮之前按新的信任状态重建,它的 MCP 连接重连,并发一条
 `project_trust_changed`(§8)。
@@ -3884,6 +3889,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写(§9.1) |
+| -32026 | SETTINGS_LOCKED | `project.trust` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 

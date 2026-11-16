@@ -112,6 +112,11 @@ error_codes! {
     /// `session.import` with `keep_ids`: a session of the archive already
     /// exists on this daemon; nothing was written. `data.session_id` names it.
     SessionExists = -32025, SESSION_EXISTS;
+    /// `project.trust` / `config.setProvider` / `mcp.addServer` /
+    /// `mcp.updateServer`: the settings directory stayed held by another
+    /// process for the whole wait, so nothing was written. Safe to retry once
+    /// the holder lets go.
+    SettingsLocked = -32026, SETTINGS_LOCKED;
 }
 
 #[cfg(test)]

@@ -132,7 +132,7 @@ impl SessionPool {
                 .map_err(|e| e.to_string())
         })
         .await
-        .map_err(PoolError::Internal)?;
+        .map_err(|e| e.into_pool(PoolError::Internal))?;
 
         let tier = Tier::Project(root.clone());
         self.forget_mcp_built_from(&tier, None).await;

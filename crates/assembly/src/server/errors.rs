@@ -77,6 +77,7 @@ impl From<PoolError> for RpcError {
                 codes::SESSION_EXISTS,
                 Some(json!({ "session_id": session_id })),
             ),
+            PoolError::SettingsLocked(_) => (codes::SETTINGS_LOCKED, None),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
         RpcError {

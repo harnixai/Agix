@@ -471,7 +471,6 @@ impl SessionPool {
             .map_err(PoolError::McpServerDenied)?;
         self.write_mcp_server(project_root, scene_id, name, &cfg, config, must_exist)
             .await
-            .map_err(invalid)
     }
 
     pub(in crate::session_pool) async fn write_mcp_server(
@@ -482,7 +481,7 @@ impl SessionPool {
         cfg: &mcp::config::McpServerConfig,
         config: serde_json::Value,
         must_exist: bool,
-    ) -> Result<api::McpServerWritten, String> {
+    ) -> Result<api::McpServerWritten, PoolError> {
         use base::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
         let settings_path = self.bindings.settings_path_of(project_root);
         let local_path = settings_path.with_file_name(SETTINGS_LOCAL_FILE);
