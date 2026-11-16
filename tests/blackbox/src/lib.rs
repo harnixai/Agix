@@ -44,10 +44,11 @@ pub mod mcp;
 pub mod oauth;
 pub mod page;
 pub mod provider;
+pub mod rusage;
 pub mod telemetry;
 pub mod world;
 
-pub use handle::{alternate_daemon_binary, Daemon, DaemonOptions, Host, Mode};
+pub use handle::{alternate_daemon_binary, daemon_binary, Daemon, DaemonOptions, Host, Mode};
 pub use live::{
     is_pro_model, Answer, Asked, Exchange, LiveConfig, LiveProvider, LiveRun, LiveRunBuilder,
     Tokens, Watcher,
@@ -56,6 +57,7 @@ pub use mcp::{McpToy, McpToyHttp};
 pub use oauth::{DaemonEvents, OAuthWorld};
 pub use page::{Page, PageServer};
 pub use provider::{Block, ProviderStub, Purpose, Reply, SeenRequest};
+pub use rusage::{reap, Reaped, Spent};
 pub use telemetry::{telemetry_kinds, telemetry_until};
 pub use world::{HostileProject, World, HOSTILE_SECRET};
 

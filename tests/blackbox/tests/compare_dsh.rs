@@ -29,20 +29,37 @@
 //!
 //! Token counts are what DeepSeek reported on each response, and tool calls
 //! are the `tool_use` blocks in those responses, both read off the proxy —
-//! sub-agents included — so both sides are measured the same way. Wall time for DSH includes
-//! its process start; Agix's daemon is already up. Not part of the `live_*`
+//! sub-agents included — so both sides are measured the same way. Peak context
+//! is the largest single request. Wall time for DSH includes its process
+//! start; Agix's daemon is already up.
+//!
+//! The two harnesses run one after the other, never at once, so neither's
+//! timing or CPU is the other's load; which goes first alternates by round.
+//! Agix runs as a spawned `agixd` — set `AGIX_TEST_DAEMON_BIN` to a release
+//! build, or the debug one beside this test is measured.
+//!
+//! CPU time and peak memory come from the kernel: each harness process is
+//! reaped here with `wait4`, which reports it together with every child it
+//! waited for, tool commands included however briefly they ran. Agix's
+//! daemon is shut down after the last turn and counted over its whole life,
+//! start-up included, as DSH's process start is in each of its turns (summed
+//! across turns). The peak is the largest single process. Beside that, `ps`
+//! every [`SAMPLE_EVERY`] gives the harness's own process without its tools
+//! and the summed resident set of the whole tree — sampled, so a floor.
+//!
+//! Not part of the `live_*`
 //! glob: it needs `AGIX_DSH_BIN` pointing at a `dsh` launcher
 //! (`npm i @deepseek-ai/dsh`). `AGIX_COMPARE_CASES=stats,biglog` runs a
 //! subset; `AGIX_COMPARE_REPEAT=3` runs each case that many times and reports
 //! medians. A summary goes to stderr and to `tests/output/compare_dsh/`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use blackbox::{
-    is_pro_model, Exchange, LiveConfig, LiveProvider, LiveRun, Mode, ModelEndpoint, Tokens,
+    is_pro_model, Exchange, LiveConfig, LiveProvider, LiveRun, Mode, ModelEndpoint, Spent, Tokens,
 };
 use serde_json::{json, Value};
 
@@ -850,6 +867,9 @@ struct Outcome {
     tool_calls: usize,
     tokens: Tokens,
     first_prompt: u64,
+    peak_context: u64,
+    usage: Usage,
+    spent: Spent,
     models: Vec<String>,
     shape: Value,
     first_request: Value,
@@ -903,6 +923,9 @@ impl Outcome {
             tool_calls: calls.iter().map(|e| e.tool_uses()).sum(),
             tokens,
             first_prompt: main.map(|e| e.tokens().prompt()).unwrap_or(0),
+            peak_context: calls.iter().map(|e| e.tokens().prompt()).max().unwrap_or(0),
+            usage: Usage::default(),
+            spent: Spent::default(),
             models,
             shape,
             first_request: main.map(|e| e.request.body.clone()).unwrap_or(Value::Null),
@@ -946,6 +969,9 @@ impl Outcome {
             "cache_write_tokens": self.tokens.cache_write,
             "output_tokens": self.tokens.output,
             "first_tool_call_prompt_tokens": self.first_prompt,
+            "peak_context_tokens": self.peak_context,
+            "usage": self.usage.to_json(),
+            "rusage": spent_json(self.spent),
             "models": self.models,
             "request_shape": self.shape,
             "per_call_uncached_cached_output": self.per_call,
@@ -961,13 +987,18 @@ async fn run_agix(case: Case, seed: u64) -> anyhow::Result<Outcome> {
     let mut run = LiveRun::start(
         &format!("agix-{}", case.name()),
         json!({ "permission_mode": "default" }),
-        Mode::InProcess,
+        Mode::Spawned,
     )
     .await?;
     case.setup(&run.project, seed)?;
     run.client
         .call("scene.activate", json!({ "scene": "harnix" }))
         .await?;
+    let pid = run
+        .daemon
+        .pid()
+        .ok_or_else(|| anyhow::anyhow!("a spawned daemon has a pid"))?;
+    let sampler = Sampler::start(pid);
     let session = run.session_with(json!({ "scene": "harnix" })).await?;
     let started = Instant::now();
     let mut error = None;
@@ -981,14 +1012,16 @@ async fn run_agix(case: Case, seed: u64) -> anyhow::Result<Outcome> {
         }
     }
     let wall = started.elapsed();
+    let usage = sampler.finish().await;
     let mut outcome = Outcome::from_exchanges("agix", case, &run.provider.exchanges());
     outcome.wall = wall;
+    outcome.usage = usage;
     match error {
         None => outcome.finished = true,
         Some(e) => outcome.note = e,
     }
     outcome.failures = case.verify(&run.project, seed);
-    run.finish_allowing_refusals().await;
+    outcome.spent = run.finish_counted().await.unwrap_or_default();
     Ok(outcome)
 }
 
@@ -1002,15 +1035,17 @@ async fn run_dsh(bin: &Path, case: Case, seed: u64) -> anyhow::Result<Outcome> {
     case.setup(&project, seed)?;
 
     let started = Instant::now();
+    let mut usage = Usage::default();
+    let mut spent = Spent::default();
     let mut session_id: Option<String> = None;
     let mut error = None;
     for prompt in case.prompts() {
-        let mut command = tokio::process::Command::new(bin);
+        let mut command = std::process::Command::new(bin);
         command.args(["--profile", "headless", "--json"]);
         if let Some(id) = &session_id {
             command.args(["--session-id", id]);
         }
-        let child = command
+        let mut child = command
             .arg(prompt)
             .current_dir(&project)
             .env("DSH_HOME", dir.path().join("dsh-home"))
@@ -1022,20 +1057,28 @@ async fn run_dsh(bin: &Path, case: Case, seed: u64) -> anyhow::Result<Outcome> {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
             .spawn()?;
-        let out = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-            Ok(Ok(out)) => out,
-            Ok(Err(e)) => {
-                error = Some(format!("dsh did not run: {e}"));
-                break;
-            }
-            Err(_) => {
-                error = Some(format!("dsh still running after {timeout:?}"));
+        let pid = child.id();
+        let sampler = Sampler::start(pid);
+        let stdout = drain(child.stdout.take());
+        let stderr = drain(child.stderr.take());
+        let reaped = tokio::task::spawn_blocking(move || blackbox::reap(pid, timeout)).await?;
+        usage = usage.then(sampler.finish().await);
+        let reaped = match reaped {
+            Ok(reaped) => reaped,
+            Err(e) => {
+                error = Some(format!("dsh could not be reaped: {e}"));
                 break;
             }
         };
-        let events: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        spent = add(spent, reaped.spent);
+        if reaped.killed {
+            error = Some(format!("dsh still running after {timeout:?}"));
+            break;
+        }
+        let stdout = stdout.join().unwrap_or_default();
+        let stderr = stderr.join().unwrap_or_default();
+        let events: Vec<Value> = String::from_utf8_lossy(&stdout)
             .lines()
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
@@ -1052,12 +1095,12 @@ async fn run_dsh(bin: &Path, case: Case, seed: u64) -> anyhow::Result<Outcome> {
             .find(|e| e["type"] == "final")
             .map(|e| e["reason"]["kind"].clone())
             .unwrap_or(Value::Null);
-        if !out.status.success() || reason != "completed" {
-            let stderr = String::from_utf8_lossy(&out.stderr);
+        if !reaped.status.success() || reason != "completed" {
+            let stderr = String::from_utf8_lossy(&stderr);
             let tail: String = stderr.lines().rev().take(8).collect::<Vec<_>>().join(" | ");
             error = Some(format!(
                 "exit {:?}, final reason {reason}: {tail}",
-                out.status.code()
+                reaped.status.code()
             ));
             break;
         }
@@ -1066,12 +1109,223 @@ async fn run_dsh(bin: &Path, case: Case, seed: u64) -> anyhow::Result<Outcome> {
 
     let mut outcome = Outcome::from_exchanges("dsh", case, &provider.exchanges());
     outcome.wall = wall;
+    outcome.usage = usage;
+    outcome.spent = spent;
     match error {
         None => outcome.finished = true,
         Some(e) => outcome.note = e,
     }
     outcome.failures = case.verify(&project, seed);
     Ok(outcome)
+}
+
+/// A pipe read to its end on a thread of its own, so a child that fills one
+/// is never blocked while the other is being read.
+fn drain(pipe: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    })
+}
+
+fn add(a: Spent, b: Spent) -> Spent {
+    Spent {
+        user: a.user + b.user,
+        system: a.system + b.system,
+        max_rss_bytes: a.max_rss_bytes.max(b.max_rss_bytes),
+    }
+}
+
+fn spent_json(s: Spent) -> Value {
+    json!({
+        "cpu_secs": s.cpu().as_secs_f64(),
+        "user_secs": s.user.as_secs_f64(),
+        "system_secs": s.system.as_secs_f64(),
+        "max_rss_mb": s.max_rss_bytes as f64 / 1048576.0,
+    })
+}
+
+const SAMPLE_EVERY: Duration = Duration::from_millis(100);
+
+/// CPU time and resident memory of one harness over one case: its own
+/// process, and that process with every descendant `ps` caught alive.
+#[derive(Clone, Copy, Debug, Default)]
+struct Usage {
+    cpu: Duration,
+    peak_rss_kb: u64,
+    start_rss_kb: u64,
+    tree_cpu: Duration,
+    tree_peak_rss_kb: u64,
+    samples: usize,
+}
+
+impl Usage {
+    /// This, then `next` in a fresh process — DSH starts one per turn.
+    fn then(self, next: Usage) -> Usage {
+        Usage {
+            cpu: self.cpu + next.cpu,
+            peak_rss_kb: self.peak_rss_kb.max(next.peak_rss_kb),
+            start_rss_kb: if self.samples == 0 {
+                next.start_rss_kb
+            } else {
+                self.start_rss_kb
+            },
+            tree_cpu: self.tree_cpu + next.tree_cpu,
+            tree_peak_rss_kb: self.tree_peak_rss_kb.max(next.tree_peak_rss_kb),
+            samples: self.samples + next.samples,
+        }
+    }
+
+    fn to_json(self) -> Value {
+        json!({
+            "cpu_secs": self.cpu.as_secs_f64(),
+            "peak_rss_mb": mb(self.peak_rss_kb),
+            "start_rss_mb": mb(self.start_rss_kb),
+            "tree_cpu_secs": self.tree_cpu.as_secs_f64(),
+            "tree_peak_rss_mb": mb(self.tree_peak_rss_kb),
+            "samples": self.samples,
+        })
+    }
+}
+
+fn mb(kb: u64) -> f64 {
+    kb as f64 / 1024.0
+}
+
+/// Polls `ps` for the tree under `root` until [`finish`](Self::finish).
+struct Sampler {
+    stop: tokio::sync::oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<Usage>,
+}
+
+impl Sampler {
+    fn start(root: u32) -> Self {
+        let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let mut tree = Tree::new(root);
+            loop {
+                tree.observe(&ps().await);
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = tokio::time::sleep(SAMPLE_EVERY) => {}
+                }
+            }
+            tree.observe(&ps().await);
+            tree.usage
+        });
+        Self { stop, task }
+    }
+
+    async fn finish(self) -> Usage {
+        let _ = self.stop.send(());
+        self.task.await.unwrap_or_default()
+    }
+}
+
+struct Row {
+    pid: u32,
+    ppid: u32,
+    rss_kb: u64,
+    cpu: Duration,
+}
+
+async fn ps() -> Vec<Row> {
+    let Ok(out) = tokio::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,rss=,time="])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut f = line.split_whitespace();
+            Some(Row {
+                pid: f.next()?.parse().ok()?,
+                ppid: f.next()?.parse().ok()?,
+                rss_kb: f.next()?.parse().ok()?,
+                cpu: cpu_time(f.next()?)?,
+            })
+        })
+        .collect()
+}
+
+/// `ps`'s `time` column: `[dd-][hh:]mm:ss[.cc]`.
+fn cpu_time(s: &str) -> Option<Duration> {
+    let (days, rest) = match s.split_once('-') {
+        Some((d, rest)) => (d.parse::<f64>().ok()?, rest),
+        None => (0.0, s),
+    };
+    let mut secs = 0.0;
+    for part in rest.split(':') {
+        secs = secs * 60.0 + part.parse::<f64>().ok()?;
+    }
+    Some(Duration::from_secs_f64(days * 86_400.0 + secs))
+}
+
+/// Each process seen under the root: the CPU it already had at the first
+/// sample — a long-lived daemon's start-up is not this case's — and the
+/// latest.
+struct Tree {
+    root: u32,
+    cpu: HashMap<u32, (Duration, Duration)>,
+    usage: Usage,
+}
+
+impl Tree {
+    fn new(root: u32) -> Self {
+        Self {
+            root,
+            cpu: HashMap::new(),
+            usage: Usage::default(),
+        }
+    }
+
+    fn observe(&mut self, rows: &[Row]) {
+        let Some(root) = rows.iter().find(|r| r.pid == self.root) else {
+            return;
+        };
+        let mut children: HashMap<u32, Vec<&Row>> = HashMap::new();
+        for r in rows {
+            children.entry(r.ppid).or_default().push(r);
+        }
+        let mut members = vec![root];
+        let mut i = 0;
+        while i < members.len() {
+            if let Some(kids) = children.get(&members[i].pid) {
+                members.extend(kids.iter().copied());
+            }
+            i += 1;
+        }
+        let first = self.usage.samples == 0;
+        for r in &members {
+            let base = if first { r.cpu } else { Duration::ZERO };
+            // A child that has exited but is not yet reaped is listed with
+            // no CPU at all; keep what it had.
+            let seen = self.cpu.entry(r.pid).or_insert((base, r.cpu));
+            seen.1 = seen.1.max(r.cpu);
+        }
+        let u = &mut self.usage;
+        if first {
+            u.start_rss_kb = root.rss_kb;
+        }
+        u.peak_rss_kb = u.peak_rss_kb.max(root.rss_kb);
+        u.tree_peak_rss_kb = u
+            .tree_peak_rss_kb
+            .max(members.iter().map(|r| r.rss_kb).sum());
+        u.samples += 1;
+        let spent = |(base, last): (Duration, Duration)| last.saturating_sub(base);
+        u.cpu = self
+            .cpu
+            .get(&self.root)
+            .copied()
+            .map_or(Duration::ZERO, spent);
+        u.tree_cpu = self.cpu.values().copied().map(spent).sum();
+    }
 }
 
 fn median(mut values: Vec<f64>) -> f64 {
@@ -1136,6 +1390,12 @@ impl Summary<'_> {
                 "prompt_tokens": self.med(|o| o.tokens.prompt() as f64),
                 "output_tokens": self.med(|o| o.tokens.output as f64),
                 "first_tool_call_prompt_tokens": self.med(|o| o.first_prompt as f64),
+                "peak_context_tokens": self.med(|o| o.peak_context as f64),
+                "cpu_secs": self.med(|o| o.spent.cpu().as_secs_f64()),
+                "max_rss_mb": self.med(|o| o.spent.max_rss_bytes as f64 / 1048576.0),
+                "own_cpu_secs_sampled": self.med(|o| o.usage.cpu.as_secs_f64()),
+                "own_peak_rss_mb_sampled": self.med(|o| mb(o.usage.peak_rss_kb)),
+                "tree_peak_rss_mb_sampled": self.med(|o| mb(o.usage.tree_peak_rss_kb)),
             },
         })
     }
@@ -1143,39 +1403,50 @@ impl Summary<'_> {
 
 fn print_table(outcomes: &[Outcome]) {
     eprintln!(
-        "\n{:<10} {:<5} {:>5} {:>7} {:>6} {:>6} {:>9} {:>10} {:>9} {:>8} {:>8}",
+        "\n{:<10} {:<5} {:>5} {:>7} {:>6} {:>6} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7} {:>7} {:>7}",
         "case",
         "who",
         "pass",
         "wall s",
         "calls",
         "tools",
-        "input",
-        "cache_read",
         "prompt",
         "output",
-        "1st tool"
+        "1st tool",
+        "peak ctx",
+        "cpu s",
+        "max MB",
+        "own s",
+        "own MB",
+        "tree MB"
     );
     for g in Summary::group(outcomes) {
         eprintln!(
-            "{:<10} {:<5} {:>5} {:>7.1} {:>6.1} {:>6.1} {:>9.0} {:>10.0} {:>9.0} {:>8.0} {:>8.0}",
+            "{:<10} {:<5} {:>5} {:>7.1} {:>6.1} {:>6.1} {:>9.0} {:>8.0} {:>8.0} {:>8.0} {:>7.2} {:>7.1} {:>7.2} {:>7.1} {:>7.1}",
             g.case.name(),
             g.harness,
             format!("{}/{}", g.passed(), g.runs.len()),
             g.med(|o| o.wall.as_secs_f64()),
             g.med(|o| o.calls as f64),
             g.med(|o| o.tool_calls as f64),
-            g.med(|o| o.tokens.input as f64),
-            g.med(|o| o.tokens.cache_read as f64),
             g.med(|o| o.tokens.prompt() as f64),
             g.med(|o| o.tokens.output as f64),
             g.med(|o| o.first_prompt as f64),
+            g.med(|o| o.peak_context as f64),
+            g.med(|o| o.spent.cpu().as_secs_f64()),
+            g.med(|o| o.spent.max_rss_bytes as f64 / 1048576.0),
+            g.med(|o| o.usage.cpu.as_secs_f64()),
+            g.med(|o| mb(o.usage.peak_rss_kb)),
+            g.med(|o| mb(o.usage.tree_peak_rss_kb)),
         );
     }
-    eprintln!("(medians over runs)");
+    eprintln!(
+        "(medians over runs; cpu s / max MB from the kernel at reaping, harness and every child it waited for; \
+         own s / own MB / tree MB sampled every {SAMPLE_EVERY:?})"
+    );
     for o in outcomes {
         eprintln!(
-            "  {} {}: {} wall {:.1}s calls {} tools {} prompt {} output {}; models {:?}; request {}",
+            "  {} {}: {} wall {:.1}s calls {} tools {} prompt {} output {} peak ctx {}; usage {}; models {:?}; request {}",
             o.case.name(),
             o.harness,
             if o.passed() { "pass" } else { "FAIL" },
@@ -1184,6 +1455,8 @@ fn print_table(outcomes: &[Outcome]) {
             o.tool_calls,
             o.tokens.prompt(),
             o.tokens.output,
+            o.peak_context,
+            json!({ "rusage": spent_json(o.spent), "sampled": o.usage.to_json() }),
             o.models,
             o.shape
         );
@@ -1234,9 +1507,13 @@ async fn agix_and_dsh_on_the_same_tasks() -> anyhow::Result<()> {
     for round in 0..repeat {
         for &case in &cases {
             let seed = seed.wrapping_add(round);
-            let (agix, dsh) = tokio::join!(run_agix(case, seed), run_dsh(&bin, case, seed));
-            outcomes.push(agix?);
-            outcomes.push(dsh?);
+            if round % 2 == 0 {
+                outcomes.push(run_agix(case, seed).await?);
+                outcomes.push(run_dsh(&bin, case, seed).await?);
+            } else {
+                outcomes.push(run_dsh(&bin, case, seed).await?);
+                outcomes.push(run_agix(case, seed).await?);
+            }
         }
     }
     print_table(&outcomes);
@@ -1246,6 +1523,7 @@ async fn agix_and_dsh_on_the_same_tasks() -> anyhow::Result<()> {
     let report = json!({
         "seed": seed,
         "repeat": repeat,
+        "agix_binary": blackbox::daemon_binary()?.display().to_string(),
         "summary": Summary::group(&outcomes).iter().map(Summary::to_json).collect::<Vec<_>>(),
         "outcomes": outcomes.iter().map(Outcome::to_json).collect::<Vec<_>>(),
     });

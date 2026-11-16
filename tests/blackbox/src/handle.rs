@@ -321,6 +321,15 @@ impl Daemon {
         }
     }
 
+    /// A spawned daemon's process id — `None` for one in this process, whose
+    /// CPU and memory cannot be told apart from the harness's.
+    pub fn pid(&self) -> Option<u32> {
+        match &self.running {
+            Running::Spawned { child, .. } => child.id(),
+            Running::InProcess { .. } => None,
+        }
+    }
+
     /// The session pool of a daemon in this process, for the knobs only an
     /// embedder has (how long a sign-in may take, say); `None` when spawned.
     pub fn pool(&self) -> Option<&Arc<SessionPool>> {
@@ -357,6 +366,26 @@ impl Daemon {
 
     pub async fn stop(mut self) {
         self.halt().await;
+    }
+
+    /// [`stop`](Self::stop) a spawned daemon, reaping it here rather than
+    /// through tokio for what the kernel counted against it over its whole
+    /// life — start-up included. `None` for one in this process, which has
+    /// nothing of its own to count.
+    pub async fn stop_and_count(self) -> Option<crate::Spent> {
+        let Running::Spawned { child, .. } = self.running else {
+            return None;
+        };
+        let pid = child.id()?;
+        if let Ok(mut client) = DaemonRpcClient::connect(&self.socket).await {
+            let _ = client.daemon_shutdown().await;
+        }
+        // Reaped below, so tokio must neither wait for it nor kill the pid
+        // on drop, when the number may already be someone else's.
+        std::mem::forget(child);
+        let reaped =
+            tokio::task::spawn_blocking(move || crate::reap(pid, Duration::from_secs(5))).await;
+        Some(reaped.ok()?.ok()?.spent)
     }
 
     /// [`stop`](Self::stop), for a holder that starts another in its place.

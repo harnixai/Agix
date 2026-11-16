@@ -24,6 +24,9 @@ url         = { workspace = true }
 tempfile    = { workspace = true }
 reqwest     = { workspace = true }
 mcp-oauth-mock = { workspace = true }
+# To reap a child for what the kernel counted against it, and to hold a
+# session log's writer lock as another process would.
+libc        = { workspace = true }
 
 [dev-dependencies]
 # For the demo package's zip: one packer, shared, rather than a second copy
@@ -34,8 +37,6 @@ hostile-plugins = { workspace = true }
 # For reading what `session.export` wrote.
 zip = { workspace = true }
 async-trait = { workspace = true }
-# To hold a session log's writer lock as another process would.
-libc = { workspace = true }
 
 [features]
 # The live tier: cases that talk to a real model, with the credentials in the

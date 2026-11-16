@@ -1016,15 +1016,33 @@ impl LiveRun {
         }
     }
 
+    /// [`finish_allowing_refusals`](Self::finish_allowing_refusals), with
+    /// what the kernel counted against a spawned daemon
+    /// ([`Daemon::stop_and_count`]).
+    pub async fn finish_counted(self) -> Option<crate::Spent> {
+        let unanswered = self.report_spend();
+        if !unanswered.is_empty() {
+            eprintln!(
+                "[live {}] refused, nobody answered the prompt: {unanswered:?}",
+                self.name
+            );
+        }
+        self.daemon.stop_and_count().await
+    }
+
     async fn close(self) -> Vec<String> {
+        let unanswered = self.report_spend();
+        self.daemon.stop().await;
+        unanswered
+    }
+
+    fn report_spend(&self) -> Vec<String> {
         let (calls, input, output) = self.provider.spend();
         eprintln!(
             "[live {}] {calls} model calls, {input} input tokens, {output} output tokens",
             self.name
         );
-        let unanswered = self.provider.unanswered_prompts();
-        self.daemon.stop().await;
-        unanswered
+        self.provider.unanswered_prompts()
     }
 }
 

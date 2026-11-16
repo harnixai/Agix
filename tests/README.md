@@ -133,34 +133,11 @@ prompt`）就报错——一条用例「过了」却在这里有记录，说明�
 算出来，汇报里出现它，说明结果确实是一层层传上来的。断言模型「说了某句话」的用例会
 随模型版本时好时坏，不要写。
 
-**和 DSH 对比：`compare_dsh.rs`。** 同一组任务、同一个模型，Agix 和 DeepSeek Harness 各自
-接一个录制代理，各跑一遍：短任务（照规格写一个小程序）、长流程（修一个包里的三个缺陷让测试
-通过，再加一个命令行入口）、长输入（回答一个约 1.4 MB 访问日志里的问题），以及日常用法——
-同一会话两轮，在一个陌生的多模块项目（`tests/fixtures/compare_dsh/shop`）里先按缺陷报告定位
-修复，再加一个功能；还有一个 workflow 式的审计（`tests/fixtures/compare_dsh/audit`）：四个包
-二十四个模块，六个违背了自己的 docstring，要求按包分给四个子 Agent 并行审、修好、汇总成
-`findings.json`，由项目之外的 `audit_check.py` 逐个校验契约，并核对没坏的模块一字未动、清单
-恰好是那六个；以及一个批量改动（`tests/fixtures/compare_dsh/migrate`）：三十个模块里 58 处调用
-从弃用的 `fetch_json(url, timeout_ms)` 迁到 `get_json(url, timeout_s=…)`，毫秒换成秒，调用写法有
-位置参数、关键字、跨行、常量四种，一次文本替换做不完；由 `migrate_check.py` 拿新接口的桩把每个
-服务重放一遍核对。产物用模型没见过的输入实际运行来判定；token 取 DeepSeek 在每个响应里报的数，工具调用数取这些响应里的
-`tool_use` 块，都从代理读、子 Agent 的也算在内，两边计量口径相同。它要一个
-`dsh` 启动器，所以不在 `real_model` 里，单独一个测试程序：
-
-```sh
-npm i --prefix /some/dir @deepseek-ai/dsh
-AGIX_DSH_BIN=/some/dir/node_modules/.bin/dsh \
-  cargo test -p blackbox --features real-model --test compare_dsh -- --nocapture
-```
-
-`AGIX_COMPARE_CASES=stats,biglog` 只跑其中几项；`AGIX_COMPARE_REPEAT=3` 每项跑三遍，表里
-是中位数——单次读数波动很大，下结论至少跑三遍。汇总表打到 stderr，明细（含每次调用的未命中
-/命中/输出 token）写进 `tests/output/compare_dsh/<seed>.json`，两边各自第一个带工具的请求
-原样存在旁边的 `<seed>-<case>-<harness>.request.json`，用来对比系统提示和工具表；每一遍最长的那个
-存成 `<seed>-<case>-<harness>-<第几遍>.last.json`，主对话的整个过程都在里面。断言只有
-两条：两边都没用到 Pro，Agix 的产物全部通过；DSH 的结果只记录不断言。两边都是 thinking
-开、effort high（表后每行的 `request` 里能看到实际发出的字段）。Agix 跑的是 `harnix` 场景、
-缺省权限策略——和 DSH headless 一样无人值守，权限检查不绕过。
+**和 DSH 对比：`compare_dsh.rs`。** 同一组六个工程任务、同一个模型，Agix 和 DeepSeek Harness
+各接一个录制代理，轮流各跑一遍，比 token、调用次数、墙钟、CPU 和内存，并用模型没见过的输入实际
+运行产物来判定对错。DSH 不在本仓库里，要先用 npm 装一份，再用 `AGIX_DSH_BIN` 指过去；它要一个
+`dsh` 启动器，所以不在 `real_model` 里，单独一个测试程序。怎么装、怎么跑、六个用例各测什么、
+每个指标怎么量、结果怎么读，见 [`docs/benchmark_dsh.md`](../docs/benchmark_dsh.md)。
 
 **宿主的那一侧用 `Watcher` 看。** `LiveRun::watch` 开第二条连接只订阅会话，按到达顺序
 留下每一帧，每个询问连同当时的 `session.tasks` 记进 `asked()`；`approve` 为真时批准每个
