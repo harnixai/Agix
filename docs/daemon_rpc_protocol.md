@@ -1302,6 +1302,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 // → params
 { "scene": "code",                      // 可选,默认 daemon 的 --scene
   "project_root": "/Users/x/repo-a",      // 见 §3.1 的三态
+  "session_id": "…",                      // 可选,用这个 id 建;已有就答那个会话,见下
   "options": {                            // 可选,只在创建时生效
     "permission_mode": "default",
     "permission_rules": [ ],
@@ -1324,15 +1325,45 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
   "project_root": "…",
   "project_trust": "untrusted",         // trusted | untrusted | none,§3.6
   "trust_source": "default",            // default | user | host | null,§3.6
-  "created_at": "…" }
+  "created_at": "…",
+  "existing": false }                   // true = session_id 已经是一个会话,答的就是它,没有新建
 ```
 
 `scene` 必须是**当前激活**的场景,否则 `SCENE_NOT_FOUND`。场景的 `requires_project`
 为真而 `project_root` 是 `null` → `PROJECT_REQUIRED`;给了路径但目录不存在 →
 `PROJECT_NOT_FOUND`。
 
+**`session_id`——建会话做成幂等。** 省略时引擎生成 id。给了就用它,格式必须是引擎自己的
+id(BASE58 编码的 UUID,与引擎生成的写法一字不差),否则 `INVALID_PARAMS`。这个 id 已经是
+一个会话(在内存里,或会话存储里有它的日志——daemon 重启过也算;sidechain 的 id 也算)时
+不新建、不动它的转录:
+
+- 它是主会话、`scene` 与 `project_root` 都和这次请求的一样、`options` 与建它时的一样 → 答那个会话,
+  `existing: true`,`created_at` 是它当初建立的时间;不在内存里就像 `session.resume` 一样把它带回来,
+  接着 `run_turn` 即可。
+- 否则 → `SESSION_EXISTS`,`data` 带那个会话的 `scene` / `project_root` / `session_kind`,什么都不做;
+  只是 `options` 不同时另带 `options_differ`,列出不同的字段名。
+
+**`options` 怎么比。** 比的是建会话时给的那份(记在会话日志里,见下),不是此后 `session.setModel`、
+`session.setSkillDirs` 改出来的当前值,所以原样重发建会话的请求总能得到 `existing: true`。逐字段比,
+省略 `options` 与 `{}` 相同,列表字段连顺序一起比;给了与没给不同,任何一项不同都拒绝,不会悄悄忽略。
+例外:
+
+- `recorder` 是录制(`mode:"record"`)且这次没给 `dir`:建会话时省略的 `dir` 已经换成了当时的录制根目录,
+  没给 `dir` 就算与记下的一致。
+- 回放(`replay` / `rerun`)不记进日志。会话已经不在这个进程里(daemon 重启过、或被回收且日志能还原它)
+  时无从核对,这次给的回放不算不同,并且照 `session.resume` 的规则用上,从头回放;会话还在这个进程里时
+  照常比。
+- 更早的版本建的、日志里没记 `options` 的会话,按建时没给 `options` 比。
+
+两个连接同时用同一个 id 建,只有一个新建,另一个得到 `existing: true`(`options` 不同则是 `SESSION_EXISTS`)。
+被 `session.delete` 删掉的 id 不算已有,可以再建。查找、核对与把会话带回内存在同一把会话锁里做,
+同时到达的 `session.delete` 排在它前面或后面,不会让一个建会话的调用得到 `SESSION_NOT_FOUND`。
+`session.import`(`keep_ids`)正在写这个 id 时 → `SESSION_BUSY`,`reason: "importing"`,稍后再试。
+
 `options` 在新建时生效,并随会话保存:之后每次重建引擎(设置变化、空闲回收后再用、
-daemon 重启后恢复)都按同一份 `options` 重建,之后的调用里再传的 `options` 被忽略。
+daemon 重启后恢复)都按同一份 `options` 重建,之后的调用(`run_turn`、`session.resume`)里再传的
+`options` 被忽略;`session.create` 带 `session_id` 时不忽略,与记下的不同就拒绝(见上)。
 会话日志里没有记录过 `options` 的旧会话例外:恢复时采用这次调用带的那份。
 `options` 记在会话日志里一条 `ns` 为 `agix.session`、`event` 为 `spec` 的扩展条目上,
 `session.setModel` 选的模型、推理强度与思考开关,`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
@@ -3920,7 +3951,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32010 | PROJECT_NOT_FOUND | `project_root` 不存在或不是目录 |
 | -32012 | PROJECT_REQUIRED | 场景 `requires_project` 为真,但传了 `project_root: null` |
 | -32014 | SIDECHAIN_TERMINAL | 侧链会话已终态收尾,不可 resume |
-| -32015 | SESSION_BUSY | 会话正忙,`data.reason` 说它在忙什么(§9.1):已有 turn 在跑且 `on_busy` 是 `reject`(§5.3),正在原地重建,有后台任务挡着需要重建的调用,正在做上下文操作或回滚,或要把它调回内存时它上一个引擎还没停下(`session.resume`) |
+| -32015 | SESSION_BUSY | 会话正忙,`data.reason` 说它在忙什么(§9.1):已有 turn 在跑且 `on_busy` 是 `reject`(§5.3),正在原地重建,有后台任务挡着需要重建的调用,正在做上下文操作或回滚,或要把它调回内存时它上一个引擎还没停下(`session.resume`),或 `session.create` 要的 id 正被 `session.import` 写入 |
 | -32016 | PLUGINS_DISABLED | 插件子系统不可用 —— 被编译裁掉或被策略关闭 |
 | -32017 | TOO_MANY_IN_FLIGHT | 这条连接同时在途的请求已达上限(§5.2) |
 | -32018 | TASK_NOT_FOUND | `session.taskOutput`:引擎不知道这个任务(没跑过、结束得早已被忘掉,或引擎不在内存里) |
@@ -3930,7 +3961,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
-| -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写(§9.1) |
+| -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |
 | -32026 | SETTINGS_LOCKED | `project.trust` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
@@ -3969,6 +4000,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // SESSION_EXISTS
 { "session_id": "S1" }
+// session.create 带的 session_id 是别的会话时,多出那个会话是什么;只是 options 不同时另带 options_differ
+{ "session_id": "S1", "scene": "code", "project_root": "/abs/repo", "session_kind": "primary",
+  "options_differ": [ "permission_mode" ] }
 
 // REWIND_FAILED
 { "rewind_id": "…", "failed": { "path": "b/b.txt", "error": "…" }, "rolled_back": [ "a.txt" ],
@@ -4014,8 +4048,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `previous_engine` | 刚被关闭、驱逐或重建,上一个引擎在宽限期内还没停下 | `null` |
 | `context_operation` | 一个 `inspectContext` / `dropMessages` / `editMessage` 还没答完,会话归它独占 | `null` |
 | `rewinding` | 一个 `session.rewind` 还没答完,会话归它独占 | `null` |
+| `importing` | 一个带 `keep_ids` 的 `session.import` 正在写这个 id(`session.create` 带 `session_id` 时) | `null` |
 
-`rebuilding`、`previous_engine`、`context_operation` 和 `rewinding` 的 `data` 形状与第一行相同。`session.rewind`
+`rebuilding`、`previous_engine`、`context_operation`、`rewinding` 和 `importing` 的 `data` 形状与第一行相同。`session.rewind`
 被后台任务挡住时报 `background_tasks`,同样带 `running_task_ids`。以后可能增加取值,不认识的
 `reason` 按"稍后再试"处理。
 

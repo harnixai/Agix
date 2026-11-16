@@ -49,6 +49,11 @@ pub struct CreateParams {
     pub project_root: ProjectRootParam,
     #[serde(default)]
     pub options: Option<RawOptions>,
+    /// The id to create the session under, in the engine's own spelling;
+    /// omitted, the engine picks one. A session already under it is
+    /// answered (`existing: true`) when its scene and project are these.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]

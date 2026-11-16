@@ -409,7 +409,7 @@ impl SessionPool {
         // reads below (`session_facts_and_resumable` per session, plus
         // `store.find_sessions()`) — holding the session table across that
         // much I/O would block every other pool operation for the duration.
-        let active_snapshot: Vec<(String, Option<String>, Instant, Instant)> = self
+        let active_snapshot: Vec<(String, Option<String>, time::OffsetDateTime, Instant)> = self
             .live
             .map_all(|live| {
                 (
@@ -441,7 +441,7 @@ impl SessionPool {
                 name,
                 preview: None,
                 message_count: 0,
-                created_at: format_instant(created_at),
+                created_at: format_time(created_at),
                 last_active: format_instant(last_active),
                 status: SessionStatus::Active,
                 session_kind: facts.session_kind,

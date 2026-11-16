@@ -353,8 +353,8 @@ impl SpecStore {
         }
     }
 
-    /// Forget a session's spec — it is deleted or closed, and an id is never
-    /// reused.
+    /// Forget a session's spec — it is deleted or closed. A deleted id
+    /// created again starts from the options it is created with.
     pub(in crate::session_pool) fn forget(&self, session_id: &str) {
         self.lock().remove(session_id);
     }

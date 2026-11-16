@@ -1733,6 +1733,14 @@
             "string",
             "null"
           ]
+        },
+        "session_id": {
+          "default": null,
+          "description": "The id to create the session under, in the engine's own spelling;\nomitted, the engine picks one. A session already under it is\nanswered (`existing: true`) when its scene and project are these.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -6606,6 +6614,10 @@
         "created_at": {
           "type": "string"
         },
+        "existing": {
+          "description": "`true`: the `session_id` asked for was already a session, and this is\nit; nothing was created.",
+          "type": "boolean"
+        },
         "project_root": {
           "type": [
             "string",
@@ -6641,7 +6653,8 @@
         "scene",
         "session_kind",
         "project_trust",
-        "created_at"
+        "created_at",
+        "existing"
       ],
       "type": "object"
     },
@@ -6880,7 +6893,7 @@
       "type": "object"
     },
     "SessionOptions": {
-      "description": "Optional per-session configuration passed via `session.create` or\n`session.run_turn` params.\n\nTaken when the session is created and kept with it: every rebuild of the\nsession's engine — a settings change, an idle eviction, a daemon restart —\napplies the same options again. Options sent with a later call to an\nexisting session are ignored.",
+      "description": "Optional per-session configuration passed via `session.create` or\n`session.run_turn` params.\n\nTaken when the session is created and kept with it: every rebuild of the\nsession's engine — a settings change, an idle eviction, a daemon restart —\napplies the same options again. Options sent with a later call to an\nexisting session are ignored, except by `session.create` under the\nsession's id, which refuses ones other than it was created with.",
       "properties": {
         "attended": {
           "description": "Whether someone answers this session's questions and permission\nprompts; `None` is its scene's `interactive`. Its sub-agents and team\nmembers are attended as it is.",

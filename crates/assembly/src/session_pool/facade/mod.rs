@@ -5,6 +5,7 @@ mod background;
 mod bindings;
 mod create;
 mod doctor;
+mod given_id;
 mod goal;
 pub(super) mod helpers;
 pub(super) mod history_rpc;

@@ -54,6 +54,7 @@ impl SessionDirectory {
         if let Some(taken) = ids.iter().find(|id| importing.contains(id)) {
             return Err(PoolError::SessionExists {
                 session_id: taken.to_string(),
+                existing: None,
             });
         }
         importing.extend(ids.iter().copied());

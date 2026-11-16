@@ -73,10 +73,7 @@ impl From<PoolError> for RpcError {
                 Some(json!({ "issues": issues })),
             ),
             PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
-            PoolError::SessionExists { session_id } => (
-                codes::SESSION_EXISTS,
-                Some(json!({ "session_id": session_id })),
-            ),
+            PoolError::SessionExists { .. } => (codes::SESSION_EXISTS, exists_data(&e)),
             PoolError::SettingsLocked(_) => (codes::SETTINGS_LOCKED, None),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
@@ -95,6 +92,19 @@ fn engine_data(failure: &TurnFailure) -> Value {
         "retry_after_ms": failure.retry_after_ms,
         "side_effects": failure.side_effects,
     })
+}
+
+fn exists_data(e: &PoolError) -> Option<Value> {
+    let PoolError::SessionExists {
+        session_id,
+        existing,
+    } = e
+    else {
+        return None;
+    };
+    let mut data = json!(existing).as_object().cloned().unwrap_or_default();
+    data.insert("session_id".into(), json!(session_id));
+    Some(Value::Object(data))
 }
 
 fn busy_data(busy: &Busy) -> Value {

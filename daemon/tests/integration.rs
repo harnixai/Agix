@@ -60,6 +60,7 @@ mod scene_lifecycle;
 mod schedule;
 mod session_compact_args;
 mod session_context;
+mod session_create_id;
 mod session_customizer;
 mod session_end_effects;
 mod session_event_compact;

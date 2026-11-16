@@ -14,6 +14,22 @@ pub struct SessionCreated {
     /// What decided `project_trust`; `null` with no project tier.
     pub trust_source: Option<settings::trust::TrustSource>,
     pub created_at: String,
+    /// `true`: the `session_id` asked for was already a session, and this is
+    /// it; nothing was created.
+    pub existing: bool,
+}
+
+/// What a session already under an id is, for the `SESSION_EXISTS` that
+/// refuses to create another under it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ExistingSession {
+    pub scene: Option<String>,
+    pub project_root: Option<String>,
+    pub session_kind: SessionKindName,
+    /// The `options` fields asked for that are not what the session was
+    /// created with; empty when the scene, project or kind is what differs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options_differ: Vec<String>,
 }
 
 /// `session.get`: the session's `session.list` entry plus what only the live

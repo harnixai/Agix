@@ -127,6 +127,11 @@ pub(in crate::session_pool) fn frame_between_turns(
     }
 }
 
+pub(in crate::session_pool) fn format_time(t: time::OffsetDateTime) -> String {
+    t.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "unknown".into())
+}
+
 pub(in crate::session_pool) fn format_instant(t: Instant) -> String {
     let ago = Instant::now().duration_since(t);
     let secs_ago = ago.as_secs();

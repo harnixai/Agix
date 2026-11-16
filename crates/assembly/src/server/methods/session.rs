@@ -35,7 +35,12 @@ fn invalid(message: impl Into<String>) -> RpcError {
 async fn create(s: &DaemonServer, _: &Call, p: CreateParams) -> Result<SessionCreated, RpcError> {
     let options = read_options(p.options.as_ref())?;
     Ok(s.pool
-        .create_session(p.scene.as_deref(), p.project_root.into(), options.as_ref())
+        .create_session_as(
+            p.scene.as_deref(),
+            p.project_root.into(),
+            options.as_ref(),
+            p.session_id.as_deref(),
+        )
         .await?)
 }
 

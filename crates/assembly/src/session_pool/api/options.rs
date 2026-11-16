@@ -9,7 +9,8 @@ use super::AskKind;
 /// Taken when the session is created and kept with it: every rebuild of the
 /// session's engine — a settings change, an idle eviction, a daemon restart —
 /// applies the same options again. Options sent with a later call to an
-/// existing session are ignored.
+/// existing session are ignored, except by `session.create` under the
+/// session's id, which refuses ones other than it was created with.
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionOptions {

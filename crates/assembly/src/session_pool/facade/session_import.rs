@@ -227,6 +227,7 @@ async fn refuse_existing(
             Ok(_) => {
                 return Err(PoolError::SessionExists {
                     session_id: id.to_string(),
+                    existing: None,
                 })
             }
             Err(history::error::HistoryError::SessionNotFound(_)) => {}

@@ -183,19 +183,34 @@ impl SessionPool {
                     ));
                 }
 
-                self.collect_saved_results(session_id, &log).await;
-                let (core, status) = match self.live.core_of(session_id).await {
-                    Some(raced) => (raced, api::ResumeStatus::AlreadyActive),
-                    None => (
-                        self.resume_or_create_from(session_id.to_string(), options, &log)
-                            .await
-                            .map_err(PoolError::from)?,
-                        api::ResumeStatus::loaded(has_history),
-                    ),
+                let (core, raced) = self.bring_back_locked(session_id, options, &log).await?;
+                let status = match raced {
+                    true => api::ResumeStatus::AlreadyActive,
+                    false => api::ResumeStatus::loaded(has_history),
                 };
                 Ok(self.watched_report(&core, status, mode, watcher).await)
             })
             .await
+    }
+
+    /// Bring `session_id`, whose `log` was just read, into memory; the
+    /// caller holds its session lock. `true` with a session another caller
+    /// brought back first.
+    pub(in crate::session_pool) async fn bring_back_locked(
+        &self,
+        session_id: &str,
+        options: Option<&SessionOptions>,
+        log: &[history::entry::EnvelopedEntry],
+    ) -> Result<(Arc<SessionCore>, bool), PoolError> {
+        self.collect_saved_results(session_id, log).await;
+        match self.live.core_of(session_id).await {
+            Some(raced) => Ok((raced, true)),
+            None => self
+                .resume_or_create_from(session_id.to_string(), options, log)
+                .await
+                .map(|core| (core, false))
+                .map_err(PoolError::from),
+        }
     }
 
     /// Remove the saved results in the session's directory that no transcript of its
@@ -619,7 +634,7 @@ impl SessionPool {
 fn active_times(core: &SessionCore) -> (Option<String>, String, String) {
     (
         core.naming().name.clone(),
-        format_instant(core.created_at()),
+        format_time(core.created_at()),
         format_instant(core.hub().last_active()),
     )
 }

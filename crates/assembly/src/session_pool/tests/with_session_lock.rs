@@ -136,3 +136,25 @@ async fn registry_entry_is_cleaned_up_after_use() {
         "a lock nothing else references must not linger in the registry forever"
     );
 }
+
+/// An id a `session.import` keeping ids is writing is not yet a session, so
+/// creating it is a wait-and-retry, not a refusal.
+#[tokio::test]
+async fn a_create_under_an_id_being_imported_is_busy_not_existing() {
+    let (pool, _dir) = test_pool().await;
+    let sid = base::session::SessionId::new();
+    let _importing = pool
+        .directory
+        .reserve_for_import(std::iter::once(sid))
+        .unwrap();
+    let refused = pool
+        .create_session_as(None, ProjectSelector::Default, None, Some(&sid.to_string()))
+        .await
+        .unwrap_err();
+    match refused {
+        PoolError::SessionBusy(busy) => {
+            assert_eq!(serde_json::to_value(busy.reason).unwrap(), "importing")
+        }
+        other => panic!("expected SESSION_BUSY, got {other:?}"),
+    }
+}

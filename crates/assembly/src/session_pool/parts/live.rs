@@ -83,7 +83,7 @@ pub(in crate::session_pool) struct SessionCore {
     /// `None` for a no-project session.
     project: Option<PathBuf>,
     worktree: Option<base::paths::LinkedWorktree>,
-    created_at: Instant,
+    created_at: time::OffsetDateTime,
     state: Arc<SessionState>,
     /// Who watches this session, what it is still asking, and when it was
     /// last active.
@@ -109,10 +109,12 @@ impl SessionCore {
         scene: Arc<SceneSpec>,
         place: Workplace,
         naming: Naming,
+        created_at: time::OffsetDateTime,
     ) -> Arc<Self> {
-        Self::active_at(id, scene, place, naming, Instant::now())
+        Self::build(id, scene, place, naming, Instant::now(), created_at)
     }
 
+    #[cfg(test)]
     pub(in crate::session_pool) fn active_at(
         id: &str,
         scene: Arc<SceneSpec>,
@@ -120,12 +122,30 @@ impl SessionCore {
         naming: Naming,
         at: Instant,
     ) -> Arc<Self> {
+        Self::build(
+            id,
+            scene,
+            place,
+            naming,
+            at,
+            time::OffsetDateTime::now_utc(),
+        )
+    }
+
+    fn build(
+        id: &str,
+        scene: Arc<SceneSpec>,
+        place: Workplace,
+        naming: Naming,
+        at: Instant,
+        created_at: time::OffsetDateTime,
+    ) -> Arc<Self> {
         Arc::new(Self {
             id: Arc::from(id),
             scene,
             project: place.project,
             worktree: place.worktree,
-            created_at: at,
+            created_at,
             state: Arc::new(SessionState::new()),
             hub: Arc::new(SessionHub::active_at(at)),
             steer: SteerHandle::default(),
@@ -158,7 +178,9 @@ impl SessionCore {
         self.worktree.as_ref()
     }
 
-    pub(in crate::session_pool) fn created_at(&self) -> Instant {
+    /// When the session was first created: its log's `Meta` line, for one
+    /// brought back from its log.
+    pub(in crate::session_pool) fn created_at(&self) -> time::OffsetDateTime {
         self.created_at
     }
 

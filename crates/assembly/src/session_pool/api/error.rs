@@ -83,9 +83,14 @@ pub enum PoolError {
     #[error("the rewind failed at {}: {}", .0.failed.path, .0.failed.error)]
     RewindFailed(Box<runtime::agent::RewindFailure>),
     /// `session.import` with `keep_ids`: a session of the archive already
-    /// exists here.
-    #[error("session `{session_id}` already exists; nothing was imported")]
-    SessionExists { session_id: String },
+    /// exists here; `session.create` with a `session_id` that is a session
+    /// of another scene, project or kind, or asked for with options other
+    /// than the ones it was created with, which `existing` describes.
+    #[error("session `{session_id}` already exists; nothing was written")]
+    SessionExists {
+        session_id: String,
+        existing: Option<super::ExistingSession>,
+    },
     /// A settings directory another process held for as long as the engine
     /// waits; nothing was written.
     #[error("{0}")]
@@ -174,6 +179,8 @@ pub enum BusyReason {
     ContextOperation,
     /// A rewind is under way.
     Rewinding,
+    /// A `session.import` keeping ids is writing this id.
+    Importing,
 }
 
 /// Why a session cannot take what was asked of it right now.
@@ -221,6 +228,14 @@ impl Busy {
 
     pub(crate) fn rewinding(session_id: &str) -> Self {
         Self::new(session_id, BusyReason::Rewinding, Self::MESSAGE.into())
+    }
+
+    pub(crate) fn importing(session_id: &str) -> Self {
+        Self::new(
+            session_id,
+            BusyReason::Importing,
+            "a session.import is writing this session id".into(),
+        )
     }
 
     pub(crate) fn previous_engine(session_id: &str, message: impl Into<String>) -> Self {

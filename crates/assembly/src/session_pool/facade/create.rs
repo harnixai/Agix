@@ -7,6 +7,56 @@ use crate::session_pool::parts::live::{EngineSlot, Naming, SessionCore, Workplac
 use crate::session_pool::*;
 use base::context::Session;
 
+/// Where `session.create` puts a new session.
+pub(in crate::session_pool) struct NewPlace {
+    pub(in crate::session_pool) scene: Arc<SceneSpec>,
+    pub(in crate::session_pool) binding: Arc<ProjectBinding>,
+    pub(in crate::session_pool) project: Option<PathBuf>,
+}
+
+/// `session.create`'s answer for `core`, a primary session in `scene` on
+/// `project`.
+pub(in crate::session_pool) fn created_answer(
+    core: &SessionCore,
+    scene: &str,
+    project: Option<&Path>,
+    binding: &ProjectBinding,
+    existing: bool,
+) -> api::SessionCreated {
+    api::SessionCreated {
+        session_id: core.id().to_string(),
+        scene: scene.to_string(),
+        session_kind: api::SessionKindName::Primary,
+        project_root: project.map(|p| p.display().to_string()),
+        project_trust: binding.settings.trust().into(),
+        trust_source: binding.settings.trust_source(),
+        created_at: format_time(core.created_at()),
+        existing,
+    }
+}
+
+/// When the session `log` holds was created: its `Meta` line's time. Now,
+/// for a new session or a log with no `Meta`.
+fn created_on(log: Option<&[history::entry::EnvelopedEntry]>) -> time::OffsetDateTime {
+    log.unwrap_or_default()
+        .iter()
+        .find(|env| matches!(env.entry, history::entry::LogEntry::Meta { .. }))
+        .map_or_else(time::OffsetDateTime::now_utc, |env| env.ts)
+}
+
+/// A caller's `session_id`, in the one spelling the engine gives its own.
+fn given_session_id(id: &str) -> Result<base::session::SessionId, PoolError> {
+    match base::session::SessionId::parse(id) {
+        Ok(sid) if sid.to_string() == id => Ok(sid),
+        Ok(_) => Err(PoolError::InvalidRequest(format!(
+            "invalid session_id `{id}`: not in the engine's spelling"
+        ))),
+        Err(e) => Err(PoolError::InvalidRequest(format!(
+            "invalid session_id `{id}`: {e}"
+        ))),
+    }
+}
+
 impl SessionPool {
     /// `session.create` — the explicit multi-project entry point, with an
     /// optional `scene` (resolved against the active scenes — see
@@ -22,73 +72,104 @@ impl SessionPool {
         project_root: ProjectSelector,
         options: Option<&SessionOptions>,
     ) -> Result<api::SessionCreated, PoolError> {
-        let Some(scene) = self.scenes.resolve(scene_id) else {
-            return Err(PoolError::SceneNotActive {
-                scene: scene_id.unwrap_or("").to_string(),
-            });
-        };
+        self.create_session_as(scene_id, project_root, options, None)
+            .await
+    }
 
-        // Settings are resolved against *this session's* scene, not the
-        // daemon's. The `Default` arm goes through the same call as the others
-        // so that a non-startup scene on the default project still picks up
-        // its own tier; `settings_for_project` short-circuits to the
-        // hot-swappable own settings for the one pair that is the pool's
-        // own.
-        // A scene that requires a project is refused here, not later: with no
-        // project root there is nothing for its tools to read or write, and
-        // the failure is far more legible at creation than at the first turn.
-        if scene.requires_project && matches!(project_root, ProjectSelector::NoProject) {
-            return Err(PoolError::ProjectRequired {
-                scene: scene.id.clone(),
-            });
-        }
-
-        let session_scene_id = scene.id.clone();
-        let (binding, project_root_for_meta) = match project_root {
-            ProjectSelector::Default => (
-                self.binding_for(Some(self.cwd()), &session_scene_id).await,
-                Some(self.cwd().to_path_buf()),
-            ),
-            ProjectSelector::NoProject => (self.binding_for(None, &session_scene_id).await, None),
-            ProjectSelector::Path(p) => {
-                if !p.is_dir() {
-                    return Err(PoolError::ProjectNotFound { path: p });
-                }
-                (self.binding_for(Some(&p), &session_scene_id).await, Some(p))
-            }
-        };
-
-        binding
+    /// [`Self::create_session`] under the caller's `session_id` when one is
+    /// given: a session already there under it is answered rather than a
+    /// second one made — see [`Self::create_or_find`].
+    pub async fn create_session_as(
+        &self,
+        scene_id: Option<&str>,
+        project_root: ProjectSelector,
+        options: Option<&SessionOptions>,
+        session_id: Option<&str>,
+    ) -> Result<api::SessionCreated, PoolError> {
+        let given = session_id.map(given_session_id).transpose()?;
+        let place = self.place_new_session(scene_id, project_root).await?;
+        place
+            .binding
             .check_model_choice(
                 options.and_then(|o| o.provider.as_deref()),
                 options.and_then(|o| o.model.as_deref()),
             )
             .map_err(PoolError::InvalidRequest)?;
+        match given {
+            None => {
+                self.start_new_session(Id::new().to_string(), &place, options)
+                    .await
+            }
+            Some(sid) => self.create_or_find(sid, place, options).await,
+        }
+    }
 
-        let scene_id_for_result = scene.id.clone();
-        let project_trust = binding.settings.trust();
-        let trust_source = binding.settings.trust_source();
-        let sid = Id::new().to_string();
+    /// The scene, binding and project a new session would be created with.
+    ///
+    /// A scene that requires a project is refused here, not later: with no
+    /// project root there is nothing for its tools to read or write, and the
+    /// failure is far more legible at creation than at the first turn.
+    /// Settings are resolved against *this session's* scene, not the
+    /// daemon's, so a non-startup scene on the default project still picks
+    /// up its own tier.
+    async fn place_new_session(
+        &self,
+        scene_id: Option<&str>,
+        project_root: ProjectSelector,
+    ) -> Result<NewPlace, PoolError> {
+        let Some(scene) = self.scenes.resolve(scene_id) else {
+            return Err(PoolError::SceneNotActive {
+                scene: scene_id.unwrap_or("").to_string(),
+            });
+        };
+        if scene.requires_project && matches!(project_root, ProjectSelector::NoProject) {
+            return Err(PoolError::ProjectRequired {
+                scene: scene.id.clone(),
+            });
+        }
+        let (binding, project) = match project_root {
+            ProjectSelector::Default => (
+                self.binding_for(Some(self.cwd()), &scene.id).await,
+                Some(self.cwd().to_path_buf()),
+            ),
+            ProjectSelector::NoProject => (self.binding_for(None, &scene.id).await, None),
+            ProjectSelector::Path(p) => {
+                if !p.is_dir() {
+                    return Err(PoolError::ProjectNotFound { path: p });
+                }
+                (self.binding_for(Some(&p), &scene.id).await, Some(p))
+            }
+        };
+        Ok(NewPlace {
+            scene,
+            binding,
+            project,
+        })
+    }
+
+    pub(in crate::session_pool) async fn start_new_session(
+        &self,
+        sid: String,
+        place: &NewPlace,
+        options: Option<&SessionOptions>,
+    ) -> Result<api::SessionCreated, PoolError> {
         let core = self
             .create(
                 sid,
-                scene,
-                binding,
-                project_root_for_meta.clone().into(),
+                place.scene.clone(),
+                place.binding.clone(),
+                place.project.clone().into(),
                 options,
                 None,
             )
             .await?;
-
-        Ok(api::SessionCreated {
-            session_id: core.id().to_string(),
-            scene: scene_id_for_result,
-            session_kind: api::SessionKindName::Primary,
-            project_root: project_root_for_meta.map(|p| p.display().to_string()),
-            project_trust: project_trust.into(),
-            trust_source,
-            created_at: format_instant(core.created_at()),
-        })
+        Ok(created_answer(
+            &core,
+            &place.scene.id,
+            place.project.as_deref(),
+            &place.binding,
+            false,
+        ))
     }
 
     /// Bring `session_id` into memory as a new session, or — given its `log`
@@ -121,6 +202,7 @@ impl SessionPool {
                 is_first_turn: true,
                 ..Naming::default()
             },
+            created_on(log),
         );
         self.take_up_recorded_skill_dirs(&core, &spec, &binding, resume)?;
         core.state().set_reasoning_choice(spec.reasoning());
