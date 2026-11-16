@@ -62,15 +62,62 @@ when no one is watching.
    prompt prefix is about 5.8K tokens, shared across sessions by the
    provider's cache, and long sessions compact themselves and carry on. On
    six engineering tasks, against another open agent harness on the same
-   model, that came to **34% less wall time and 13% fewer prompt tokens, with
-   every run correct** (the other harness's wall time includes its process
-   start, while the Agix daemon is already running; [how it was measured](tests/blackbox/tests/compare_dsh.rs)).
+   model, that came to **39% less wall time, 63% fewer prompt tokens, a fifth
+   of the CPU and a thirteenth of the memory, with every run correct**
+   ([measured](#measured)).
 5. **Your product stays in charge.** Every session, task, sub-agent, goal and
    prompt is visible, stoppable and editable over one JSON-RPC protocol.
    47 extension points let you replace or intercept any subsystem from Rust
    or a QuickJS script without forking. Every session is an
    append-only log you can resume, fork, export or replay byte for byte
    with no network.
+
+---
+
+## Measured
+
+Six engineering tasks, Agix 0.3.15 against DeepSeek Harness (DSH)
+0.2.2-rc.1 on the same model. Medians of three rounds; all 36 runs correct.
+
+| Task | Shape | Prompt tokens (Agix / DSH) | Wall s | CPU s | Peak memory MB |
+|---|---|---|---|---|---|
+| `stats` | write a small program from a precise spec | 29.3K / 44.5K | 13 / 28 | 0.56 / 3.55 | 18 / 278 |
+| `inventory` | fix three bugs across a package, then add a CLI | 75.0K / 123K | 27 / 50 | 0.81 / 3.53 | 21 / 283 |
+| `biglog` | answer questions about a 1.4 MB access log | 50.1K / 33.0K | 13 / 9 | 0.66 / 1.99 | 18 / 281 |
+| `shop` | two turns on an unfamiliar project: a bug report, then a feature | 125K / 127K | 21 / 27 | 0.71 / 4.34 | 21 / 283 |
+| `audit` | fan a 24-module review out to four sub-agents, fix and list what is broken | 369K / 1.74M | 70 / 141 | 3.05 / 16.95 | 22 / 303 |
+| `migrate` | move 58 calls in 30 modules off a deprecated helper | 153K / 128K | 28 / 28 | 1.00 / 3.01 | 25 / 282 |
+| **total** | | **802K / 2.19M** | **172 / 282** | **6.8 / 33.4** | |
+
+- **Resources.** These are the steadiest figures: the rounds barely differ.
+  The Agix daemon never passed 25 MB. One daemon serves every session,
+  where DSH runs a node process of about 280 MB per session.
+- **Tokens.** Most of the token saving is on `audit`, the sub-agent
+  workflow. On `biglog` and `migrate` Agix spent more: it took one or two
+  extra model calls to cross-check its own answer.
+- **Variance.** Prompt tokens follow the number of model calls, so a single
+  run can swing two- or threefold on either side; compare medians, not runs.
+
+How it was run:
+
+- **Configuration.** Agix ran a release `agixd` with the `harnix` scene,
+  unattended under the default permission policy. DSH ran `--profile
+  headless`. Both used `deepseek-flash`, thinking on, effort high. The two
+  never ran at the same time.
+- **Correctness.** Each result is checked by running it on inputs the model
+  never saw.
+- **Tokens.** These are what the provider reported, read off a recording
+  proxy in front of each harness, sub-agents included.
+- **CPU and peak memory.** These are the kernel's count when the harness
+  process is reaped, children included. For Agix that is the daemon's whole
+  life, start-up included.
+- **Wall time.** DSH's includes its process start each turn; the Agix daemon
+  is already up.
+- **Machine.** Measured 2026-11-15 on an M2 Max (macOS VM, 8 cores, 16 GB).
+
+DSH is not part of this repository. How to install it and run the comparison
+yourself, and what each task and figure means:
+[`docs/benchmark_dsh.md`](docs/benchmark_dsh.md).
 
 ---
 
@@ -555,6 +602,7 @@ recording proxy. How each layer works and how to run it:
 | [docs/ptc.md](docs/ptc.md) | `RunCode`: what a model's program can call, its permissions, limits and prompt |
 | [docs/mcp_auth.md](docs/mcp_auth.md) | OAuth for remote MCP servers: configuration, sign-in flows, RPCs and events, credential storage, security |
 | [docs/schemas/settings.schema.json](docs/schemas/settings.schema.json) | the generated schema of `settings.json` |
+| [docs/benchmark_dsh.md](docs/benchmark_dsh.md) | the comparison against DeepSeek Harness: setup, the six tasks, what is measured and how |
 | [tests/README.md](tests/README.md) | the test layers and the live tier |
 
 ## Design principles
