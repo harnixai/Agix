@@ -321,6 +321,8 @@ impl CommandRegistry {
                     description: description.clone(),
                     kind: "local",
                     source: "builtin",
+                    tier: None,
+                    dir: None,
                 },
                 Command::Prompt { entry } => CommandInfo {
                     name: name.clone(),
@@ -332,12 +334,23 @@ impl CommandRegistry {
                         base::skill::SkillSource::Plugin => "plugin",
                         base::skill::SkillSource::Host => "host",
                     },
+                    tier: match entry.source {
+                        base::skill::SkillSource::User => entry.tier.map(|t| t.as_str()),
+                        _ => None,
+                    },
+                    dir: entry
+                        .path
+                        .parent()
+                        .filter(|_| entry.path.is_absolute())
+                        .map(std::path::Path::to_path_buf),
                 },
                 Command::McpPrompt { description, .. } => CommandInfo {
                     name: name.clone(),
                     description: description.clone(),
                     kind: "mcp-prompt",
                     source: "mcp",
+                    tier: None,
+                    dir: None,
                 },
             })
             .collect();
@@ -360,6 +373,11 @@ pub struct CommandInfo {
     /// Where the command came from: `"builtin"`, `"user"`, `"project"`, or
     /// `"plugin"`.
     pub source: &'static str,
+    /// `"global"` or `"scene"`, for a `"user"` skill read from one of the
+    /// user-level directories.
+    pub tier: Option<&'static str>,
+    /// The directory a skill read from a file lives in.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 impl Default for CommandRegistry {

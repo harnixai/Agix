@@ -24,7 +24,7 @@ pub use calls::{
     RecordingCoverage, RecordingInfo, SearchHit, SearchRequest, SearchResult, SystemBlockSize,
     SystemBlockView, ToolUseRef, ToolUseView,
 };
-pub use commands::{CommandInfo, CommandKind, CommandSource, NewSchedule};
+pub use commands::{CommandInfo, CommandKind, CommandSource, CommandTier, NewSchedule};
 pub use daemon::{CloseReason, DaemonEvent, EvictReason, ImportSource};
 pub use error::{Busy, BusyReason, InvalidOption, PoolError};
 pub use events::{

@@ -31,6 +31,7 @@ fn frozen_source(source: SkillSource) -> FrozenSkillSource {
 pub struct SkillDirectory {
     dir: PathBuf,
     tier: SkillSource,
+    scope: Option<base::skill::SkillTier>,
     nested: bool,
     id: String,
     files: PromptFiles,
@@ -46,11 +47,18 @@ impl SkillDirectory {
         Self {
             dir,
             tier,
+            scope: None,
             nested: true,
             id,
             files: PromptFiles::unscoped(),
             precedence: SkillPrecedence::Override,
         }
+    }
+
+    /// Which user-level directory this is, stamped on every skill it yields.
+    pub fn in_scope(mut self, scope: Option<base::skill::SkillTier>) -> Self {
+        self.scope = scope;
+        self
     }
 
     /// Only the names nothing loaded before it has.
@@ -207,12 +215,14 @@ impl SkillProvider for McpSkills {
 impl SkillDirectory {
     fn parse_at_path(&self, path: &Path, dir_name: &str) -> Option<SkillEntry> {
         let content = self.files.read_to_string(path).ok()?;
-        parse_skill_file(
+        let mut entry = parse_skill_file(
             &content,
             dir_name.to_string(),
             path,
             frozen_source(self.tier),
-        )
+        )?;
+        entry.tier = self.scope;
+        Some(entry)
     }
 }
 

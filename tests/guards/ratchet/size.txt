@@ -8,6 +8,7 @@ file  crates/core/src/interface/catalog.rs                       -              
 file  crates/mcp/src/connect.rs                                  -                                      1323
 file  crates/mcp/src/manager.rs                                  -                                      1237
 file  crates/mcp/src/oauth/mod.rs                                -                                      1131
+file  crates/skills/src/manager.rs                                  -                                      828
 file  crates/session/src/transcript.rs                           -                                      924
 file  crates/telemetry/src/recorder/mod.rs                       -                                      828
 fn    crates/agents/src/agent_tool/build.rs                      Delegator::build_delegate              96

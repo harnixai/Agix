@@ -185,15 +185,19 @@ fn build_skill_manager(
         .paths
         .project_root()
         .map(|project| project.join(".agents").join("skills"));
-    let user_tiers = [
-        settings.paths.global_data_dir.join("skills"),
-        settings.paths.user_data_dir.join("skills"),
-    ];
+    let global_skills = settings.paths.global_data_dir.join("skills");
+    let scene_skills = settings.paths.user_data_dir.join("skills");
+    let mut user_tiers = vec![(global_skills.clone(), base::skill::SkillTier::Global)];
+    if base::path::resolve_physically(&scene_skills)
+        != base::path::resolve_physically(&global_skills)
+    {
+        user_tiers.push((scene_skills, base::skill::SkillTier::Scene));
+    }
     let mut loaded_count: usize = user_tiers
         .iter()
-        .map(|dir| {
+        .map(|(dir, scope)| {
             skill_mgr
-                .load_dir_subdirs(dir, SkillSource::User)
+                .load_dir_subdirs_in(dir, SkillSource::User, Some(*scope))
                 .unwrap_or(0)
         })
         .sum();
@@ -222,7 +226,11 @@ fn build_skill_manager(
     tracing::info!(loaded_count, total_skills, "skills loaded (incl. bundled)");
 
     if watch {
-        let watched: Vec<_> = user_tiers.into_iter().chain(project_skills_dir).collect();
+        let watched: Vec<_> = user_tiers
+            .into_iter()
+            .map(|(dir, _)| dir)
+            .chain(project_skills_dir)
+            .collect();
         if let Err(e) = skill_mgr.enable_watching(&watched) {
             tracing::warn!(error = %e, "failed to enable skill file watching; live skill reload disabled for this session");
         }

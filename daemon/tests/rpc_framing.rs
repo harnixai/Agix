@@ -467,3 +467,124 @@ async fn import_run_source_not_currently_detected_errors() {
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+#[cfg(feature = "skills")]
+#[tokio::test]
+async fn commands_list_tells_a_global_skill_from_a_scene_skill_and_says_where_it_lives() {
+    use daemon::config::{load_daemon_config, StaticDaemonPaths};
+    use daemon::DaemonServer;
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("agix");
+    let scene_root = global.join("scenes").join("code");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let skill = |root: &std::path::Path, name: &str| {
+        let folder = root.join("skills").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {name} skill\n---\nbody"),
+        )
+        .unwrap();
+        folder
+    };
+    let global_dir = skill(&global, "from-global");
+    let scene_dir = skill(&scene_root, "from-scene");
+
+    let sock = dir.path().join("agix.sock");
+    let paths = StaticDaemonPaths::with_project(scene_root, work.clone()).with_global(global);
+    let config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let pool = daemon::assemble::pool(
+        &config,
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+        daemon::Assembly {
+            cwd: Some(work),
+            transcripts: daemon::Transcripts::Nowhere,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("the daemon assembles");
+    let server = Arc::new(DaemonServer::new(
+        pool,
+        tokio_util::sync::CancellationToken::new(),
+    ));
+    let listener = DaemonServer::bind_unix(&sock).unwrap();
+    tokio::spawn(async move {
+        let _ = server.serve_unix_listener(listener).await;
+    });
+
+    let resp = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"commands.list","id":1}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    let find = |name: &str| {
+        v["result"]["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {v}"))
+    };
+
+    let (global, scene) = (find("from-global"), find("from-scene"));
+    assert_eq!(global["source"], "user");
+    assert_eq!(scene["source"], "user");
+    assert_eq!(global["tier"], "global", "{global}");
+    assert_eq!(scene["tier"], "scene", "{scene}");
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap();
+    assert_eq!(
+        canon(std::path::Path::new(global["dir"].as_str().unwrap())),
+        canon(&global_dir)
+    );
+    assert_eq!(
+        canon(std::path::Path::new(scene["dir"].as_str().unwrap())),
+        canon(&scene_dir)
+    );
+    let help = find("help");
+    assert!(
+        help.get("tier").is_none() && help.get("dir").is_none(),
+        "{help}"
+    );
+    let bundled = find("simplify");
+    assert!(
+        bundled.get("tier").is_none() && bundled.get("dir").is_none(),
+        "{bundled}"
+    );
+}
+
+#[cfg(feature = "skills")]
+#[tokio::test]
+async fn a_deployment_without_a_scene_layer_lists_its_skills_as_global_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("skills").join("only-layer");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("SKILL.md"),
+        "---\nname: only-layer\ndescription: only layer\n---\nbody",
+    )
+    .unwrap();
+    let (_server, sock, _dir, handle) = start_server_in(dir).await;
+
+    let resp = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"commands.list","id":1}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    let found: Vec<_> = v["result"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["name"] == "only-layer")
+        .collect();
+    assert_eq!(found.len(), 1, "{v}");
+    assert_eq!(found[0]["tier"], "global", "{v}");
+
+    _server.shutdown_token().cancel();
+    let _ = handle.await;
+}

@@ -1086,6 +1086,13 @@
         "description": {
           "type": "string"
         },
+        "dir": {
+          "description": "Absolute path of the directory a file-based skill lives in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
           "$ref": "#/$defs/CommandKind"
         },
@@ -1094,6 +1101,17 @@
         },
         "source": {
           "$ref": "#/$defs/CommandSource"
+        },
+        "tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandTier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only for a `user` skill read from a user-level directory."
         }
       },
       "required": [
@@ -1153,6 +1171,21 @@
         {
           "const": "host",
           "description": "A directory the host listed for the session (`options.skill_dirs`).",
+          "type": "string"
+        }
+      ]
+    },
+    "CommandTier": {
+      "description": "Which user-level skills directory a `user` command came from.",
+      "oneOf": [
+        {
+          "const": "global",
+          "description": "`<state root>/skills/`, shared by every scene.",
+          "type": "string"
+        },
+        {
+          "const": "scene",
+          "description": "`<state root>/scenes/<scene>/skills/`.",
           "type": "string"
         }
       ]

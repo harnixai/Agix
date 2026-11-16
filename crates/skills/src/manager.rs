@@ -21,6 +21,7 @@ pub struct SkillInfo {
     /// facing listing (e.g. example phrasings).
     pub when_to_use: Option<String>,
     pub source: SkillSource,
+    pub tier: Option<base::skill::SkillTier>,
     pub path: PathBuf,
     /// Restrict tools this skill can invoke (whitelist of tool names)
     pub allowed_tools: Option<Vec<String>>,
@@ -57,6 +58,7 @@ impl From<SkillEntry> for SkillInfo {
             description: e.description,
             when_to_use: e.when_to_use,
             source: SkillSource::from(e.source),
+            tier: e.tier,
             path: e.path,
             allowed_tools: e.allowed_tools,
             disallowed_tools: e.disallowed_tools,
@@ -124,6 +126,7 @@ pub struct InvocationStats {
 struct Tier {
     root: PathBuf,
     source: SkillSource,
+    scope: Option<base::skill::SkillTier>,
     nested: bool,
 }
 
@@ -133,6 +136,7 @@ enum Located {
     Skill {
         tier: usize,
         source: SkillSource,
+        scope: Option<base::skill::SkillTier>,
         name: String,
     },
     /// Inside a tier, but not where that tier keeps a skill — a skill's
@@ -195,7 +199,7 @@ impl SkillManager {
     /// Load the project tier at `dir` after everything else, so that with
     /// [`Self::with_project_deferring`] it only fills names nobody holds.
     pub fn load_project_tier(&self, dir: &Path) -> usize {
-        self.note_tier(dir, SkillSource::Project, true);
+        self.note_tier(dir, SkillSource::Project, None, true);
         let tier = crate::sources::SkillDirectory::tier(dir, SkillSource::Project)
             .reading_with(self.files.clone());
         let tier = if self.project_defers {
@@ -305,7 +309,7 @@ impl SkillManager {
     /// project skills: <cwd>/.agents/skills/).
     /// Each .md file is a skill; filename (without .md) is the skill name.
     pub fn load_dir(&self, dir: &Path, source: SkillSource) -> std::io::Result<usize> {
-        self.note_tier(dir, source, false);
+        self.note_tier(dir, source, None, false);
         Ok(self.load_from(std::sync::Arc::new(
             crate::sources::SkillDirectory::flat(dir, source).reading_with(self.files.clone()),
         )))
@@ -314,19 +318,39 @@ impl SkillManager {
     /// Load skills from a directory using SKILL.md subdirectory format.
     /// Each subdirectory containing a SKILL.md becomes a skill.
     pub fn load_dir_subdirs(&self, dir: &Path, source: SkillSource) -> std::io::Result<usize> {
-        self.note_tier(dir, source, true);
+        self.load_dir_subdirs_in(dir, source, None)
+    }
+
+    /// `load_dir_subdirs` for a user-level directory, recording which of the
+    /// two (`scope`) it is.
+    pub fn load_dir_subdirs_in(
+        &self,
+        dir: &Path,
+        source: SkillSource,
+        scope: Option<base::skill::SkillTier>,
+    ) -> std::io::Result<usize> {
+        self.note_tier(dir, source, scope, true);
         Ok(self.load_from(std::sync::Arc::new(
-            crate::sources::SkillDirectory::tier(dir, source).reading_with(self.files.clone()),
+            crate::sources::SkillDirectory::tier(dir, source)
+                .in_scope(scope)
+                .reading_with(self.files.clone()),
         )))
     }
 
-    fn note_tier(&self, dir: &Path, source: SkillSource, nested: bool) {
+    fn note_tier(
+        &self,
+        dir: &Path,
+        source: SkillSource,
+        scope: Option<base::skill::SkillTier>,
+        nested: bool,
+    ) {
         self.tiers
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .push(Tier {
                 root: base::path::resolve_physically(dir),
                 source,
+                scope,
                 nested,
             });
     }
@@ -350,6 +374,7 @@ impl SkillManager {
                 return Located::Skill {
                     tier: index,
                     source: tier.source,
+                    scope: tier.scope,
                     name: name.to_string(),
                 };
             }
@@ -695,20 +720,28 @@ impl SkillManager {
             return Ok(());
         }
 
-        let (name, source) = match self.locate(path) {
+        let (name, source, scope) = match self.locate(path) {
             Located::NotASkill => return Ok(()),
-            Located::Skill { tier, source, name } => {
+            Located::Skill {
+                tier,
+                source,
+                scope,
+                name,
+            } => {
                 if self.outranked(&name, path, tier) {
                     return Ok(());
                 }
-                (name, source)
+                (name, source, scope)
             }
             Located::Elsewhere => {
                 let name = name_from_layout(path)?;
                 let same_file = self.get(&name).filter(|s| {
                     base::path::resolve_physically(&s.path) == base::path::resolve_physically(path)
                 });
-                (name, same_file.map_or(SkillSource::Project, |s| s.source))
+                let source = same_file
+                    .as_ref()
+                    .map_or(SkillSource::Project, |s| s.source);
+                (name, source, same_file.and_then(|s| s.tier))
             }
         };
         if self.held_by_other(&name, path, source) {
@@ -725,8 +758,10 @@ impl SkillManager {
             .files
             .read_to_string(path)
             .map_err(|e| format!("Failed to read skill: {e}"))?;
-        let entry = parse_skill_file(&content, name.clone(), path, frozen_source)
+        let mut entry = parse_skill_file(&content, name.clone(), path, frozen_source)
             .ok_or_else(|| format!("Failed to parse skill file: {}", path.display()))?;
+
+        entry.tier = scope;
 
         let mut skills = self.skills.write().unwrap_or_else(PoisonError::into_inner);
         self.owners

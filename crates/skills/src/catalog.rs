@@ -27,6 +27,7 @@ pub fn to_entry(skill: &SkillInfo) -> SkillEntry {
             SkillSource::Plugin => base::skill::SkillSource::Plugin,
             SkillSource::Host => base::skill::SkillSource::Host,
         },
+        tier: skill.tier,
         path: skill.path.clone(),
         argument_hint: skill.argument_hint.clone(),
         allowed_tools: skill.allowed_tools.clone(),

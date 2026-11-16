@@ -3354,7 +3354,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "commands": [ ] }
 // 元素:{ "name":"…", "description":"…",
 //        "kind":"prompt|local|mcp-prompt",   prompt = 展开后继续问模型,local = 直接执行,mcp-prompt = MCP server 的 prompt
-//        "source":"builtin|user|project|plugin|host|mcp" }
+//        "source":"builtin|user|project|plugin|host|mcp",
+//        "tier":"global|scene",              仅 source 为 user 且来自磁盘上的用户层目录时有:global = {global}/skills,scene = 场景层的 skills
+//        "dir":"/abs/…" }                    文件来源的 skill 所在目录的绝对路径;builtin、内建 skill、mcp 没有
 ```
 
 给了 `session_id`,返回这个会话自己的命令表(它的 skill 视图,含宿主目录里的 skill;场景的 `bundled_skills`

@@ -8,6 +8,23 @@ pub struct CommandInfo {
     pub description: String,
     pub kind: CommandKind,
     pub source: CommandSource,
+    /// Only for a `user` skill read from a user-level directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<CommandTier>,
+    /// Absolute path of the directory a file-based skill lives in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+}
+
+/// Which user-level skills directory a `user` command came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CommandTier {
+    /// `<state root>/skills/`, shared by every scene.
+    Global,
+    /// `<state root>/scenes/<scene>/skills/`.
+    Scene,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -56,6 +73,12 @@ impl From<runtime::commands::CommandInfo> for CommandInfo {
             description: info.description,
             kind,
             source,
+            tier: match info.tier {
+                Some("global") => Some(CommandTier::Global),
+                Some("scene") => Some(CommandTier::Scene),
+                _ => None,
+            },
+            dir: info.dir.map(|d| d.display().to_string()),
         }
     }
 }

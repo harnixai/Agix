@@ -13,6 +13,8 @@ pub struct SkillEntry {
     /// frontmatter `when_to_use`；可选
     pub when_to_use: Option<String>,
     pub source: SkillSource,
+    /// Which user-level directory a `User` skill was read from.
+    pub tier: Option<SkillTier>,
     /// SKILL.md 的物理路径（用于 `/skills` 命令展示）
     pub path: PathBuf,
     /// Hint shown to user for arguments (e.g. "commit message")
@@ -66,6 +68,7 @@ impl Default for SkillEntry {
             description: String::new(),
             when_to_use: None,
             source: SkillSource::User,
+            tier: None,
             path: PathBuf::new(),
             argument_hint: None,
             allowed_tools: None,
@@ -122,6 +125,24 @@ pub enum SkillSource {
     /// A directory the host listed for one session (`options.skill_dirs`):
     /// trusted as a plugin package is.
     Host,
+}
+
+/// The user-level directory a skill came from: the state root's own
+/// `skills/` (shared by every scene) or the scene's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SkillTier {
+    Global,
+    Scene,
+}
+
+impl SkillTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SkillTier::Global => "global",
+            SkillTier::Scene => "scene",
+        }
+    }
 }
 
 impl SkillSource {
