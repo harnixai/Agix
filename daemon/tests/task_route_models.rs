@@ -103,3 +103,38 @@ async fn the_conversation_asks_for_the_model_task_models_main_names() {
         "two-b"
     );
 }
+
+async fn start_agent(served: &crate::support::Served, session: &str, prompt: &str) {
+    let started = crate::support::call_frame(
+        &served.sock,
+        "session.startAgent",
+        json!({"session_id": session, "prompt": prompt}),
+    )
+    .await;
+    assert!(started.get("result").is_some(), "{started}");
+}
+
+#[tokio::test]
+async fn a_task_on_the_default_provider_carries_its_model_not_the_named_providers() {
+    let stub = Stub::start(route).await;
+    let served = daemon(&stub, "one-a", json!({})).await;
+    let session = session(&served, json!({"provider": "two"})).await;
+    start_agent(&served, &session, "SUB-ON-ONE").await;
+    assert_eq!(
+        request_to(&stub, "/one/", "SUB-ON-ONE").await.body["model"],
+        "one-a",
+        "the sub-agent is routed to provider one by the settings, and goes with one's model"
+    );
+}
+
+#[tokio::test]
+async fn a_task_on_the_default_provider_carries_its_model_not_the_main_routes() {
+    let stub = Stub::start(route).await;
+    let served = daemon(&stub, "one-a", json!({"main": "two"})).await;
+    let session = session(&served, json!({})).await;
+    start_agent(&served, &session, "SUB-BESIDE-MAIN").await;
+    assert_eq!(
+        request_to(&stub, "/one/", "SUB-BESIDE-MAIN").await.body["model"],
+        "one-a"
+    );
+}

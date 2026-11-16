@@ -283,10 +283,11 @@ impl Agent {
         match &self.llm.task_router {
             Some(router) => (
                 self.accounted(router.model_for(task)),
-                router
-                    .model_name_for(task)
-                    .unwrap_or(&self.settings.values.model.model_name)
-                    .to_string(),
+                router.model_name_on_route(
+                    task,
+                    &*self.llm.model,
+                    &self.settings.values.model.model_name,
+                ),
             ),
             None => (
                 self.llm.model.clone(),

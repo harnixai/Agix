@@ -109,24 +109,19 @@ impl Delegator {
     }
 
     /// The model of a delegate whose spawn and agent type name none: the one
-    /// `task_models.subagent` routes sub-agents to, else the one the parent
-    /// session's next call asks for — a host's choice made since the session
-    /// was built is not in its settings.
+    /// the `"subagent"` route goes with, where the parent session's own is the
+    /// one its next call asks for — a host's choice made since the session was
+    /// built is not in its settings.
     fn unnamed_delegate_model(&self) -> String {
-        let routed = self
+        let parent = self
             .env
-            .host
-            .task_router
-            .as_ref()
-            .and_then(|router| router.model_name_for("subagent"));
-        match routed {
-            Some(name) => name.to_string(),
-            None => self
-                .env
-                .parent
-                .state
-                .model_choice()
-                .unwrap_or_else(|| self.env.config.model.clone()),
+            .parent
+            .state
+            .model_choice()
+            .unwrap_or_else(|| self.env.config.model.clone());
+        match &self.env.host.task_router {
+            Some(router) => router.model_name_on_route("subagent", &*self.env.model, &parent),
+            None => parent,
         }
     }
 

@@ -1522,8 +1522,9 @@ deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `inp
 退回给模型,不发帧。
 
 `provider` 让这个会话的对话走 `providers` 里那个厂商的 client,而不是设置里
-`task_models.main` 路由到的那个;子 Agent、压缩等其他路由任务仍按设置走。`model`
-省略时用该厂商的 `default_model`。厂商没配置、或 `model` 不在该厂商的 `models`
+`task_models.main` 路由到的那个;子 Agent、压缩等其他路由任务仍按设置走——没有
+`task_models` 条目的走 `default_provider` 的 client,带设置的 `model.model_name`,不带这个会话
+的模型。`model` 省略时用该厂商的 `default_model`。厂商没配置、或 `model` 不在该厂商的 `models`
 白名单里 → `INVALID_PARAMS`。对话的模型依次取:会话自己选的 `model`(`options.model` 或
 `session.setModel`);给了 `provider` 时该厂商的 `default_model`;没给时 `task_models.main`
 解析出的模型(详细写法的 `model`,简写时该厂商的 `default_model`);都没有用设置的
@@ -1928,7 +1929,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 该厂商的 `default_model`。`model` 按它将被发往的厂商的 `models` 白名单检查,不在
 白名单里 → `INVALID_PARAMS`,而不是把一个对端不认识的模型名静默发过去。子 Agent、
 压缩等其他路由任务的 client 仍按设置走;这个会话此后派生的子 Agent,`Agent` 调用与 agent
-类型都没指定模型、设置里也没有 `task_models.subagent` 时,用这里换上的模型,与会话本身一致。
+类型都没指定模型、设置里也没有 `task_models.subagent`、会话本身也在 `default_provider` 上时,
+用这里换上的模型,与会话本身一致;会话在别的 provider 上时它们带设置的 `model.model_name`。
 
 `effort` / `thinking_mode` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
 这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。

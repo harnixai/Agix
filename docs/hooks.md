@@ -155,7 +155,8 @@ JSON。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:
 `block`,`reason` 作 `message`;`ok: true` 缺省什么都不说,写了 `"may_approve": true` 的记为
 `approve`(配在 `PreToolUse` 上就是替人答应权限询问,见"回答";为什么缺省不算见 `prompt`)。
 不是 JSON 的回答只当 `message`,不拦不改。写了 `model` 的,子 Agent 跑在这个模型上,provider
-按会话的路由选;不写用 `task_models.subagent` 的模型,没配就用会话当前的模型。
+按会话的路由选;不写用 `task_models.subagent` 的模型,没配就与子 Agent 一样(会话在
+`default_provider` 上时用会话当前的模型,否则用设置的 `model.model_name`)。
 
 这个子 Agent 不占 `execution.max_concurrent_subagents`,模型把名额占满了照样起。它自己的事件
 (工具调用、`SubagentStart` 等)不再起 agent hook,按执行失败处理、走 `on_error`;command /

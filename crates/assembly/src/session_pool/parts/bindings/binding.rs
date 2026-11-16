@@ -262,6 +262,7 @@ pub(super) fn resolve_router(
             ) {
                 Ok(router) => {
                     report.router_rebuilt = true;
+                    let router = router.with_default_model(settings.model.model_name.clone());
                     (Some(Arc::new(router)), report)
                 }
                 Err(e) => {

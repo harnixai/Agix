@@ -365,6 +365,9 @@ pub struct TaskRouter {
     /// providers present in the same map `providers` was built from, so
     /// this shouldn't be reachable in practice).
     default: Arc<dyn crate::interface::model::Model>,
+    /// What a task with no entry asks `default` for when the conversation is
+    /// on another provider's client; `None` leaves it on the conversation's.
+    default_model: Option<String>,
 }
 
 impl TaskRouter {
@@ -377,6 +380,31 @@ impl TaskRouter {
             providers,
             resolved,
             default,
+            default_model: None,
+        }
+    }
+
+    pub fn with_default_model(mut self, name: impl Into<String>) -> Self {
+        self.default_model = Some(name.into());
+        self
+    }
+
+    /// The model name `task` goes to [`Self::model_for`]'s client with, for a
+    /// conversation asking `conversation` for `conversation_model`: its
+    /// entry's; else the conversation's when that is on the default client
+    /// too, and the default model when it is not.
+    pub fn model_name_on_route(
+        &self,
+        task: &str,
+        conversation: &dyn crate::interface::model::Model,
+        conversation_model: &str,
+    ) -> String {
+        if let Some(r) = self.resolved.get(task) {
+            return r.model.clone();
+        }
+        match &self.default_model {
+            Some(name) if self.default.provenance() != conversation.provenance() => name.clone(),
+            _ => conversation_model.to_string(),
         }
     }
 
@@ -443,6 +471,7 @@ impl TaskRouter {
             providers,
             resolved: self.resolved.clone(),
             default,
+            default_model: self.default_model.clone(),
         }
     }
 }
