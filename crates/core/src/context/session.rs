@@ -155,6 +155,10 @@ pub trait Session: Send + Sync + std::fmt::Debug {
     /// 退出计划模式，回到进入前的模式；会话一开始就在计划模式里的回到 `Default`。
     fn exit_plan_mode(&self) -> PermissionMode;
 
+    /// The model the session's next call asks for, when a host chose one;
+    /// `None` leaves it on the model its engine was built with.
+    fn model_choice(&self) -> Option<String>;
+
     /// Register work this session is running, under `cancel` — the token the
     /// work itself observes, so stopping the task stops the work.
     ///

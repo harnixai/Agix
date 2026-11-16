@@ -92,16 +92,30 @@ impl Delegator {
         }
     }
 
-    /// A sub-agent's `Settings`: the parent's, with its own model.
+    /// A sub-agent's `Settings`: the parent's, with its own model — `model_name`,
+    /// else the one the parent session runs on now.
     pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
         let c = &self.env.config;
-        let model_name = model_name.unwrap_or(&c.model).to_string();
+        let model_name = match model_name {
+            Some(name) => name.to_string(),
+            None => self.parent_model(),
+        };
         settings_from_parent(
             &self.env.settings,
             model_name,
             c.max_tokens,
             c.fallback_model.clone(),
         )
+    }
+
+    /// The model the parent session's next call asks for: a host's choice
+    /// made since the session was built is not in its settings.
+    fn parent_model(&self) -> String {
+        self.env
+            .parent
+            .state
+            .model_choice()
+            .unwrap_or_else(|| self.env.config.model.clone())
     }
 
     /// The scene a sub-agent should run in.

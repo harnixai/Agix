@@ -253,12 +253,6 @@ impl SessionState {
         self.restore_durable_state(durable.unwrap_or_default());
     }
 
-    /// The model the next turn asks for, when a host chose one; `None` leaves
-    /// the engine on the model it was built with.
-    pub fn model_choice(&self) -> Option<String> {
-        lock(&self.model_choice).clone()
-    }
-
     pub fn set_model_choice(&self, model: Option<String>) {
         *lock(&self.model_choice) = model;
     }
@@ -437,6 +431,10 @@ impl Session for SessionState {
 
     fn permission_mode(&self) -> PermissionMode {
         self.mode_slot().current
+    }
+
+    fn model_choice(&self) -> Option<String> {
+        lock(&self.model_choice).clone()
     }
 
     fn set_permission_mode(&self, mode: PermissionMode) {

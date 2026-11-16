@@ -429,3 +429,55 @@ async fn a_sessions_effort_is_kept_through_a_close_and_resume() {
         Some(Effort::Xhigh)
     );
 }
+
+/// A reply that hands `prompt` to a sub-agent and stops for its answer.
+fn agent_call(prompt: &str) -> Vec<StreamEvent> {
+    let input = serde_json::json!({"description": "look", "prompt": prompt});
+    vec![
+        StreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlockStart::ToolUse {
+                id: "toolu_agent".into(),
+                name: "Agent".into(),
+                input: serde_json::json!({}),
+            },
+        },
+        StreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: BlockDelta::InputJsonDelta {
+                partial_json: input.to_string(),
+            },
+        },
+        StreamEvent::ContentBlockStop { index: 0 },
+        StreamEvent::MessageDelta {
+            delta: MessageDeltaPayload {
+                stop_reason: Some(base::message::StopReason::ToolUse),
+                stop_sequence: None,
+            },
+            usage: Some(Usage::default()),
+        },
+    ]
+}
+
+#[tokio::test]
+async fn a_sub_agent_runs_on_the_model_its_session_was_switched_to() {
+    let daemon = start_daemon(0).await;
+    daemon.model.push_turn(agent_call("SUB-PROMPT"));
+    daemon.model.push_turn(one_turn());
+    daemon.model.push_turn(one_turn());
+    let session = daemon.create(serde_json::json!({})).await;
+    daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "model": CHOSEN_MODEL}),
+        )
+        .await;
+
+    daemon.turn(&session, "MSG-DELEGATE").await;
+    assert_eq!(daemon.model_asked_for("MSG-DELEGATE"), CHOSEN_MODEL);
+    assert_eq!(
+        daemon.model_asked_for("SUB-PROMPT"),
+        CHOSEN_MODEL,
+        "the sub-agent asks for the model its session now runs on"
+    );
+}
