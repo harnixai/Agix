@@ -202,7 +202,7 @@ fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父�
 报告这个构建是哪一种。中止前 panic hook 停掉
 命令所在的进程组并写崩溃记录(`~/.agix/daemon/crashes/`);来不及跑 hook 的(SIGKILL、
 OOM)由同名实例下次启动、拿到锁之后按落盘的进程组记录(`~/.agix/daemon/groups/`)
-清理:先 `SIGTERM`,500 ms 后 `SIGKILL`。会话历史每个条目整行写进日志,每一步结束和
+清理(不给实例名的嵌入方给 `EmbedConfig.groups_file`,下次用同一文件启动时清理):先 `SIGTERM`,500 ms 后 `SIGKILL`。会话历史每个条目整行写进日志,每一步结束和
 一轮结束时 fsync 一次,重启后照常恢复;崩溃时正在进行的那一轮不续跑。写到一半被打断的
 最后一行在读时略过(记一条 warn),下一次追加前截掉——不会让整份会话读不回来。
 
@@ -2113,7 +2113,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
 | `scenes/<id>/mcp/oauth/` | MCP server URL | 远端 MCP server 的 OAuth 凭据,一个 server 一个 0600 文件(§6.5) |
-| `daemon/groups/<instance>.json` | 实例 | 在跑命令的进程组,供崩溃后下次启动清理 |
+| `daemon/groups/<instance>.json` | 实例 | 在跑命令的进程组,供崩溃后下次启动清理;嵌入时 `EmbedConfig.groups_file` 可另给位置;拥有者是另一个活着的进程时 `start` 拒绝(`GroupsHeld`),`shutdown`/drop 删文件并停止登记 |
 | `daemon/crashes/` | 进程 | 崩溃记录 |
 
 项目里的 `<项目>/.agix/teams/<team_id>/` 是一个 `TeamCreate` 团队的全部状态:`team.json`、

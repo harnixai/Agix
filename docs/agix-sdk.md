@@ -487,7 +487,7 @@ agixd 替自己做的进程级的事，嵌入方哪些也要做、哪些不用�
 | 异步运行时 | 多线程，`--worker-threads` | **必须**多线程 | 你的 `tokio::runtime::Builder::new_multi_thread()` |
 | 日志过滤 | `tracing_subscriber` 加 `log_filter(RUST_LOG)` | **必须**（只要装了 tracing subscriber）：rmcp 在 `debug` 下会写出 OAuth 授权码、令牌和表单答复 | `agix::process::log_filter` |
 | panic 钩子 | `crash::install(~/.agix/daemon/crashes, "agixd", 版本)` | **建议**：`panic = "abort"` 的构建里它先杀掉命令的进程组再写崩溃记录，不装则 abort 时命令留在机器上；一个进程装一次 | `agix::process::crash::install(dir, 程序名, 版本)` |
-| 进程组回收 | `Embedded::start` 拿到实例锁后 `reap_previous(groups/<实例>.json, 500 ms)`，池建好后 `persist_to` 同一路径；`shutdown` 删掉该文件 | **建议**（会跑 Bash 或 MCP stdio 的部署）：路径每个实例唯一；`reap_previous` 会跳过拥有者仍活着的记录；它会阻塞到宽限期，放在运行时之外或 `spawn_blocking` | `agix::process::orphans::{reap_previous, persist_to}`，或 `agix::embed`（给 `instance`） |
+| 进程组回收 | `Embedded::start` 拿到实例锁后 `reap_previous(groups/<实例>.json, 500 ms)`，池建好后 `persist_to` 同一路径；`shutdown` 删掉该文件并不再登记 | **建议**（会跑 Bash 或 MCP stdio 的部署）：路径每个实例唯一；`reap_previous` 会跳过拥有者仍活着的记录，`live_owner` 告诉你这样的记录是谁的，该拒绝启动而不是 `persist_to` 盖掉它；收尾时调 `stop_persisting(路径)`，否则之后在本进程里结束的命令会把文件写回来；它会阻塞到宽限期，放在运行时之外或 `spawn_blocking` | `agix::process::orphans::{reap_previous, live_owner, persist_to, stop_persisting}`，或 `agix::embed`（给 `groups_file` 或 `instance`） |
 | 信号 | SIGINT 或 SIGTERM 触发 `Embedded::shutdown()`；第二次直接退出 130 | **必须**：收到时 `pool.shutdown_all()`，套一个上限（agixd 是 10 秒） | 你的信号处理加 `SessionPool::shutdown_all` |
 | 关停顺序 | 停止监听、删 token 文件；`shutdown_all`（至多 10 秒）；删 groups 文件、删实例文件、放锁；最后 otel 收尾（至多 10 秒） | 照前两步，再删 groups 文件 | `shutdown_all`；开了 `otel` 就必须调 `agix::process::shutdown_process_exporter`，否则最后一批 span 丢 |
 | 配置热重载、janitor、定时任务、MCP 后台连接、插件加载 | `assemble::pool` 里起 | **不用做** | 无 |
@@ -497,7 +497,7 @@ agixd 替自己做的进程级的事，嵌入方哪些也要做、哪些不用�
 | 监听与认证 | `Embedded::serve_unix`；TCP / WebSocket 与 token 在 `assembly::agixd` | 可不做：进程内用 `Embedded::serve_stream`（§10）、`agix::rpc`（§8）或直接调池 | `agix::embed`、`agix::rpc::DaemonServer` |
 | 导入探测、启动计时 | `Embedded::start` 里做 | 可不做 | `agix::embed` |
 
-门面不收实例锁与实例发现：做这两件事等于在重写 agixd 的监听面。要它们的宿主用 §10 的 `agix::embed`：`EmbedConfig.instance` 给了名字，实例锁、实例发现、进程组的回收与登记、导入探测、启动计时都由它照 agixd 的做法做掉，表里剩给嵌入方的只有运行时、日志、panic 钩子、信号与 otel 收尾。
+门面不收实例锁与实例发现：做这两件事等于在重写 agixd 的监听面。要它们的宿主用 §10 的 `agix::embed`：`EmbedConfig.instance` 给了名字，实例锁、实例发现、进程组的回收与登记、导入探测、启动计时都由它照 agixd 的做法做掉，表里剩给嵌入方的只有运行时、日志、panic 钩子、信号与 otel 收尾。自己管数据根互斥、不给 `instance` 的宿主，给 `EmbedConfig.groups_file` 就照样有进程组的回收与登记。
 
 `release` profile 是嵌入方自己的。`panic = "abort"` 时一个工具 panic 会带走整个进程（`ARCHITECTURE.md` §1.3），`crash::install` 的行为也随之不同：只有 abort 构建才杀进程组。
 
@@ -699,14 +699,17 @@ engine.shutdown().await;
 | `instance` | `--instance`（agixd 总有一个） | `None` |
 | `socket` | `--socket` | `<data_root>/scenes/<scene>/daemon.sock` |
 | `mcp_policy` / `managed_settings` | `--mcp-policy` / `--managed-settings` | 平台的路径；给了就必须存在 |
+| `groups_file` | 无（agixd 用 `instance` 的） | `None`：有 `instance` 时是 `<data_root>/daemon/groups/<名字>.json`，否则不登记 |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的那一轮以 `auth` 失败（agixd 同样）。
 
-**`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），回收这个名字上一次运行留下的进程组并登记这次的（`<data_root>/daemon/groups/<名字>.json`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们都收掉。不给就三样都不做，锁由宿主自己管。进程组的登记是进程级的，一个进程至多起一个带 `instance` 的 `Embedded`：已有一个在跑时再起一个 → `EmbedError::InstanceInProcess`（前一个 `shutdown` 或 drop 之后才能再起）。这次运行的进程组在池建好之后才开始登记，`start` 失败不留登记文件。
+**`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们收掉。不给就两样都不做，锁由宿主自己管。
+
+**`groups_file`。** 会话里的命令与 MCP stdio 服务器各领一个进程组，引擎被 `SIGKILL` 时它们不跟着走。给了这个文件，`start` 先停掉上一次用同一文件、没活到收尾的那次运行留下的进程组（最多等 500 ms 再 `SIGKILL`），池建好之后把这次的登记在这里；`shutdown` 删掉它，之后本进程里的命令不再往那里写。文件里的拥有者是另一个还活着（或查不出死活）的进程时，那是它的登记不是遗留：`start` 不动它、也不接管，返回 `EmbedError::GroupsHeld { owner, file }`，已拿的实例锁等随之放掉。不给而有 `instance` 时用 `<data_root>/daemon/groups/<名字>.json`（agixd 就是这样）；两个都不给就不登记。登记是进程级的，一个进程里同时只有一个 `Embedded` 能登记：已有一个在跑时再起一个要登记的 → 前一个是带 `instance` 的，`EmbedError::InstanceInProcess`，否则 `EmbedError::GroupsInProcess`（前一个 `shutdown` 或 drop 之后才能再起；drop 与 `shutdown` 一样不再登记并删文件）。这次运行的进程组在池建好之后才开始登记，`start` 失败不留登记文件。文件每个数据根（或实例）一个，别让两个同时在跑的进程用同一个。
 
 **`Embedded`**（`Send + Sync`，要在几个任务里用就放进 `Arc`）：
 
-- `start(config)`：读场景（内建的与 `<data_root>/scenes/` 下声明式的）、设置、插件包、MCP、调度器，建池并让它跑起来（§2 的 `assemble` 做的全部），探测可导入的配置、记启动计时。场景不认识 → `EmbedError::UnknownScene`，其余失败 → `EmbedError::Startup`。
+- `start(config)`：读场景（内建的与 `<data_root>/scenes/` 下声明式的）、设置、插件包、MCP、调度器，建池并让它跑起来（§2 的 `assemble` 做的全部），探测可导入的配置、记启动计时。场景不认识 → `EmbedError::UnknownScene`；实例锁被占 → `AlreadyRunning`；进程组登记冲突 → `InstanceInProcess` / `GroupsInProcess`（本进程已有一个在登记），或 `GroupsHeld`（登记文件的拥有者是另一个活着的进程）；其余失败 → `Startup`。
 - `serve_stream(stream)`：在任意 `AsyncRead + AsyncWrite` 上服务一条连接，分帧、帧上限、在途上限、出站队列都与 unix socket 上的一条连接相同，不要 `daemon.auth`。回复与事件走同一条有序的流：等到一个回复，就已经收到了排在它前面的帧。进程内就用 `tokio::io::duplex`，不必再写一份进程内链路；对端关掉写端，任务结束。
 - `serve_unix()`：在 `config.socket` 上监听，直到关停开始；权限与 agixd 的 socket 相同（`0600`，拒绝引擎自己起的进程）。路径上已有一个还有人在听的 socket（另一个 agixd 或 `Embedded`）时不替换它，返回 `AddrInUse`；没人听的旧文件照常换掉。没有 `instance` 时没有锁，这是唯一挡住两个引擎抢同一个 socket 的地方。关停开始之后再调，什么都不绑、不写，立刻返回。
 - `closed()`：关停开始（有连接发了 `daemon.shutdown`，或调了 `shutdown`）就返回；宿主据此收尾自己的东西。
@@ -718,7 +721,7 @@ engine.shutdown().await;
 
 - `network.use_system_proxy` 交给进程级的 HTTP 客户端：进程里第一次读到的设置生效，之后读到不同的只记一条 warn；两个数据根设得不同，后起的那个用不上自己的。代理变量（`HTTP(S)_PROXY`、`NO_PROXY`）也从进程环境读。
 - OpenTelemetry 导出器：第一个起它的端点就是全进程的端点。
-- 进程组登记：见上，至多一个带 `instance` 的（`InstanceInProcess`）。
+- 进程组登记：见上，至多一个登记的（`InstanceInProcess` / `GroupsInProcess`）。
 - `OTEL_EXPORTER_OTLP_ENDPOINT`（设置没写端点时）与上面的凭据变量从进程环境读。
 - `AGIX_RECORD` / `AGIX_REPLAY` / `AGIX_RECORDINGS_DIR` 只对自己拿 `RecorderModel` 包模型、又不给配置的代码起作用；池里会话的录制只看 `options.recorder`。
 
@@ -726,4 +729,5 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
-- **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。
+- **0.3.16** `EmbedError::GroupsHeld`：`groups_file` 里的拥有者是另一个活着的进程。`orphans::{live_owner, stop_persisting}`。`EmbedConfig.groups_file`：进程组的回收与登记不再要 `instance`，不给 `instance` 的宿主给它一个文件就有；给了 `instance` 而不给它，行为同前。`EmbedError::GroupsInProcess`：一个进程里已有一个不带 `instance` 而登记进程组的 `Embedded` 在跑时，再起一个要登记的。
+- **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表除 `groups_file` 外）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。

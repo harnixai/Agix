@@ -9,7 +9,7 @@ use guards::allow;
 use guards::{ws, Hit, SourceFile, View};
 use syn::{Attribute, Item, UseTree, Visibility};
 
-const FACADE_EXPORTS: usize = 159;
+const FACADE_EXPORTS: usize = 161;
 const PRELUDE_ITEMS: usize = 11;
 
 fn facade_files() -> Vec<&'static SourceFile> {

@@ -49,10 +49,10 @@ pub struct EmbedConfig {
     pub session_idle_timeout: Duration,
     /// Over every session's `execution.permission_prompt_timeout_secs`.
     pub permission_prompt_timeout: Option<Duration>,
-    /// `Some`: take the scene's `daemon.lock`, write the `instances.d` entry
-    /// under this name, and record the commands sessions leave running so a
-    /// later run can stop them. `None`: none of that — the host owns its own
-    /// exclusion.
+    /// `Some`: take the scene's `daemon.lock` and write the `instances.d`
+    /// entry under this name; without a `groups_file`, record the commands
+    /// sessions leave running at `<data_root>/daemon/groups/<name>.json`.
+    /// `None`: no lock and no entry — the host owns its own exclusion.
     pub instance: Option<String>,
     /// Where [`Embedded::serve_unix`] listens; `None` is
     /// `<data_root>/scenes/<scene>/daemon.sock`.
@@ -61,6 +61,10 @@ pub struct EmbedConfig {
     pub mcp_policy: Option<PathBuf>,
     /// The managed settings file in place of the platform's; it must exist.
     pub managed_settings: Option<PathBuf>,
+    /// Where to record the process groups sessions leave running, so that the
+    /// next start with the same file stops what a killed run left behind;
+    /// with or without an `instance`.
+    pub groups_file: Option<PathBuf>,
 }
 
 impl EmbedConfig {
@@ -80,7 +84,17 @@ impl EmbedConfig {
             socket: None,
             mcp_policy: None,
             managed_settings: None,
+            groups_file: None,
         }
+    }
+
+    /// `groups_file`, else the named instance's own.
+    fn groups_file(&self) -> Option<PathBuf> {
+        self.groups_file.clone().or_else(|| {
+            let name = self.instance.as_ref()?;
+            let file = format!("{name}.json");
+            Some(self.data_root.join("daemon").join("groups").join(file))
+        })
     }
 }
 
@@ -93,37 +107,60 @@ pub enum EmbedError {
     AlreadyRunning { pid: u32, socket: PathBuf },
     #[error("{0}")]
     Startup(String),
-    /// The process-group record is per process, and `running` holds it.
+    /// The process-group record is per process, and the named instance
+    /// `running` holds it.
     #[error(
         "this process already runs the named instance `{running}`; a process runs at most one"
     )]
     InstanceInProcess { running: String },
+    /// The process-group record is per process, and an engine without an
+    /// instance keeps it at `running`.
+    #[error(
+        "this process already records its process groups at {}; a process keeps one record",
+        .running.display()
+    )]
+    GroupsInProcess { running: PathBuf },
+    /// The groups file names a process that is running, or might be, as its
+    /// owner: it is that process's list, not leftovers.
+    #[error("{} is the process group record of the running process {owner}", .file.display())]
+    GroupsHeld { owner: u32, file: PathBuf },
 }
 
-/// The named instance this process runs, if any.
-static NAMED_INSTANCE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// Who keeps this process's process-group record: a named instance, or the
+/// file of an engine without one.
+static RECORDER: std::sync::Mutex<Option<(Option<String>, PathBuf)>> = std::sync::Mutex::new(None);
 
-/// This process's one named instance, held until dropped.
-struct NamedSlot;
+/// This process's one process-group record, held until dropped.
+struct RecordSlot {
+    file: PathBuf,
+}
 
-impl NamedSlot {
-    fn take(name: &str) -> Result<Self, EmbedError> {
-        let mut held = NAMED_INSTANCE
+impl RecordSlot {
+    fn take(instance: Option<&str>, file: &Path) -> Result<Self, EmbedError> {
+        let mut held = RECORDER
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(running) = held.as_ref() {
-            return Err(EmbedError::InstanceInProcess {
+        match held.as_ref() {
+            Some((Some(running), _)) => Err(EmbedError::InstanceInProcess {
                 running: running.clone(),
-            });
+            }),
+            Some((None, running)) => Err(EmbedError::GroupsInProcess {
+                running: running.clone(),
+            }),
+            None => {
+                *held = Some((instance.map(str::to_string), file.to_path_buf()));
+                Ok(RecordSlot {
+                    file: file.to_path_buf(),
+                })
+            }
         }
-        *held = Some(name.to_string());
-        Ok(NamedSlot)
     }
 }
 
-impl Drop for NamedSlot {
+impl Drop for RecordSlot {
     fn drop(&mut self) {
-        *NAMED_INSTANCE
+        platform::orphans::stop_persisting(&self.file);
+        *RECORDER
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
@@ -136,6 +173,7 @@ pub struct Embedded {
     pool: Arc<SessionPool>,
     socket: PathBuf,
     instance: Option<Instance>,
+    groups: Option<Groups>,
     stopped: tokio::sync::OnceCell<()>,
 }
 
@@ -144,9 +182,15 @@ struct Instance {
     name: String,
     scenes: Vec<String>,
     daemon_root: PathBuf,
-    groups_file: PathBuf,
     /// `None` once released: nothing is announced after that.
-    held: std::sync::Mutex<Option<(DaemonLockGuard, NamedSlot)>>,
+    held: std::sync::Mutex<Option<DaemonLockGuard>>,
+}
+
+/// The record of the process groups this run leaves running.
+struct Groups {
+    file: PathBuf,
+    /// `None` once released.
+    slot: std::sync::Mutex<Option<RecordSlot>>,
 }
 
 /// What the `instances.d` entry says beyond the unix socket: the listeners
@@ -170,7 +214,11 @@ impl Embedded {
         let daemon_config = daemon_config(&config, &scene.id)?;
         let socket = daemon_config.socket_path.clone();
         let instance = match &config.instance {
-            Some(name) => Some(claim(&config, name, &daemon_config).await?),
+            Some(name) => Some(claim(&config, name, &daemon_config)?),
+            None => None,
+        };
+        let groups = match config.groups_file() {
+            Some(file) => Some(Groups::claim(file, config.instance.as_deref()).await?),
             None => None,
         };
         let config_loaded = startup.checkpoint("config_loaded");
@@ -190,8 +238,8 @@ impl Embedded {
         .await
         .map_err(|e| EmbedError::Startup(format!("{e:#}")))?;
         let pool_built = startup.checkpoint("pool_built");
-        if let Some(instance) = &instance {
-            platform::orphans::persist_to(instance.groups_file.clone());
+        if let Some(groups) = &groups {
+            platform::orphans::persist_to(groups.file.clone());
         }
         spawn_import_detection(pool.clone());
         record_startup(&pool, &startup, config_loaded, pool_built);
@@ -202,6 +250,7 @@ impl Embedded {
             pool,
             socket,
             instance,
+            groups,
             stopped: tokio::sync::OnceCell::new(),
         })
     }
@@ -255,7 +304,8 @@ impl Embedded {
     }
 
     /// Stop accepting connections, stop every session (waiting up to ten
-    /// seconds), then give up the lock and the files a named instance wrote.
+    /// seconds), then remove the process-group record and give up the lock
+    /// and the entry a named instance wrote.
     /// Calling it again, or while it runs, waits for the first call.
     pub async fn shutdown(&self) {
         self.stopped
@@ -266,6 +316,9 @@ impl Embedded {
                     .is_err()
                 {
                     warn!("sessions did not shut down within {SHUTDOWN_GRACE:?}; going on");
+                }
+                if let Some(groups) = &self.groups {
+                    groups.release();
                 }
                 if let Some(instance) = &self.instance {
                     instance.release();
@@ -332,11 +385,8 @@ fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, Embe
     Ok(daemon_config)
 }
 
-/// Take the scene's lock for instance `name` and the process's one named
-/// instance, then stop what a previous run of it left running. This run's
-/// commands are recorded in its place once the pool is built, so a start
-/// that fails leaves no record behind.
-async fn claim(
+/// Take the scene's lock for instance `name`.
+fn claim(
     config: &EmbedConfig,
     name: &str,
     daemon_config: &DaemonConfig,
@@ -357,22 +407,6 @@ async fn claim(
             other => EmbedError::Startup(format!("could not claim the daemon lock: {other}")),
         })?;
     info!(pid = lock.pid, "wrote discovery lock");
-    let slot = NamedSlot::take(name)?;
-    let daemon_root = config.data_root.join("daemon");
-    let groups_file = daemon_root.join("groups").join(format!("{name}.json"));
-    let reaping = groups_file.clone();
-    let reaped = tokio::task::spawn_blocking(move || {
-        platform::orphans::reap_previous(&reaping, Duration::from_millis(500))
-    })
-    .await
-    .map_err(|e| EmbedError::Startup(format!("stopping a previous run's commands: {e}")))?;
-    if !reaped.is_empty() {
-        warn!(
-            count = reaped.len(),
-            groups = ?reaped,
-            "stopped process groups a previous run of this instance left running"
-        );
-    }
     let mut scenes: Vec<String> = std::iter::once(config.scene.clone())
         .chain(config.scenes.iter().cloned())
         .collect();
@@ -381,14 +415,53 @@ async fn claim(
     Ok(Instance {
         name: name.to_string(),
         scenes,
-        daemon_root,
-        groups_file,
-        held: std::sync::Mutex::new(Some((lock, slot))),
+        daemon_root: config.data_root.join("daemon"),
+        held: std::sync::Mutex::new(Some(lock)),
     })
 }
 
+impl Groups {
+    /// Take the process's one record, then stop what a previous run that kept
+    /// `file` left running. This run's commands are recorded there once the
+    /// pool is built, so a start that fails leaves no record behind.
+    async fn claim(file: PathBuf, instance: Option<&str>) -> Result<Groups, EmbedError> {
+        let slot = RecordSlot::take(instance, &file)?;
+        let reaping = file.clone();
+        let (reaped, holder) = tokio::task::spawn_blocking(move || {
+            let reaped = platform::orphans::reap_previous(&reaping, Duration::from_millis(500));
+            (reaped, platform::orphans::live_owner(&reaping))
+        })
+        .await
+        .map_err(|e| EmbedError::Startup(format!("stopping a previous run's commands: {e}")))?;
+        if let Some(owner) = holder {
+            return Err(EmbedError::GroupsHeld { owner, file });
+        }
+        if !reaped.is_empty() {
+            warn!(
+                count = reaped.len(),
+                groups = ?reaped,
+                file = %file.display(),
+                "stopped process groups a previous run left running"
+            );
+        }
+        Ok(Groups {
+            file,
+            slot: std::sync::Mutex::new(Some(slot)),
+        })
+    }
+
+    fn release(&self) {
+        let slot = self
+            .slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        drop(slot);
+    }
+}
+
 impl Instance {
-    fn held(&self) -> std::sync::MutexGuard<'_, Option<(DaemonLockGuard, NamedSlot)>> {
+    fn held(&self) -> std::sync::MutexGuard<'_, Option<DaemonLockGuard>> {
         self.held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -428,7 +501,6 @@ impl Instance {
 
     fn release(&self) {
         let mut held = self.held();
-        let _ = std::fs::remove_file(&self.groups_file);
         discovery::remove_instance_file(&self.daemon_root.join("instances.d"), &self.name);
         drop(held.take());
     }

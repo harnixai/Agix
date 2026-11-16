@@ -105,6 +105,33 @@ pub fn persist_to(path: PathBuf) {
     orphans.file = Some((path, owner));
 }
 
+/// Stops keeping the list at `path` and removes the file. Does nothing when
+/// the list is kept somewhere else.
+pub fn stop_persisting(path: &Path) {
+    let mut orphans = ORPHANS.lock().unwrap_or_else(|e| e.into_inner());
+    if orphans.file.as_ref().is_some_and(|(kept, _)| kept == path) {
+        orphans.file = None;
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// The pid of the process that owns the record at `path`, when that is not
+/// this process and it is running or might be.
+pub fn live_owner(path: &Path) -> Option<u32> {
+    let record = serde_json::from_slice::<Record>(&std::fs::read(path).ok()?).ok()?;
+    if record.owner_pid == std::process::id() {
+        return None;
+    }
+    let owner = ProcessIdentity {
+        pid: record.owner_pid,
+        started_at: record.owner_started_at,
+    };
+    match ProcessIdentity::check(&owner) {
+        ProcessLiveness::Alive | ProcessLiveness::Unknown => Some(owner.pid),
+        ProcessLiveness::Dead | ProcessLiveness::Reused => None,
+    }
+}
+
 /// `SIGKILL` to every group on the list, for a process that is about to abort.
 ///
 /// Never blocks: a panic raised while the list is locked finds it locked by

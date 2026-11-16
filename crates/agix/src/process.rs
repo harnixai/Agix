@@ -14,5 +14,5 @@ pub mod crash {
 pub mod orphans {
     //! 上一个实例留下的进程组：启动时回收，运行时登记。
 
-    pub use ::platform::orphans::{persist_to, reap_previous};
+    pub use ::platform::orphans::{live_owner, persist_to, reap_previous, stop_persisting};
 }

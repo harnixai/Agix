@@ -29,6 +29,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("socket", "Option<PathBuf>"),
     ("mcp_policy", "Option<PathBuf>"),
     ("managed_settings", "Option<PathBuf>"),
+    ("groups_file", "Option<PathBuf>"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[
@@ -36,6 +37,8 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("AlreadyRunning", "{pid:u32,socket:PathBuf}"),
     ("Startup", "(String)"),
     ("InstanceInProcess", "{running:String}"),
+    ("GroupsInProcess", "{running:PathBuf}"),
+    ("GroupsHeld", "{owner:u32,file:PathBuf}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

@@ -581,3 +581,255 @@ async fn a_process_runs_at_most_one_named_instance() -> anyhow::Result<()> {
     second.shutdown().await;
     Ok(())
 }
+
+/// One process, one process-group record: an engine with a `groups_file` and
+/// no instance holds it as a named instance does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_process_keeps_one_process_group_record() -> anyhow::Result<()> {
+    let _named = NAMED.lock().await;
+    let stub = ProviderStub::start().await?;
+    let (a, b) = (root(&stub)?, root(&stub)?);
+    let recording = |r: &Root| {
+        let mut c = config(r);
+        c.groups_file = Some(r.data.join("groups.json"));
+        c
+    };
+    let first = Embedded::start(recording(&a)).await?;
+    for second in [recording(&b), {
+        let mut c = config(&b);
+        c.instance = Some("two".into());
+        c
+    }] {
+        match Embedded::start(second).await {
+            Err(EmbedError::GroupsInProcess { running }) => {
+                assert_eq!(running, a.data.join("groups.json"))
+            }
+            Err(other) => panic!("expected GroupsInProcess, got {other:?}"),
+            Ok(_) => panic!("a second record was kept in this process"),
+        }
+    }
+    let anonymous = start(&b).await?;
+    anonymous.shutdown().await;
+
+    first.shutdown().await;
+    assert!(
+        !a.data.join("groups.json").exists(),
+        "the record outlived shutdown"
+    );
+    let second = Embedded::start(recording(&b)).await?;
+    second.shutdown().await;
+    Ok(())
+}
+
+/// Set in the host process [`a_killed_hosts_command_is_stopped_by_the_next_start_on_its_groups_file`]
+/// starts: the directory of the `Root` it runs on.
+const HOST_ROOT: &str = "AGIX_TEST_EMBED_HOST_ROOT";
+
+fn host_groups_file(dir: &Path) -> PathBuf {
+    dir.join("host-groups.json")
+}
+
+fn recorded_groups(file: &Path) -> Vec<i64> {
+    std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["groups"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_i64)
+        .collect()
+}
+
+/// The host process, killed when the case ends however it ends.
+struct Host(std::process::Child);
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn group_alive(group: i64) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", "--", &format!("-{group}")])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// The host: an engine without an instance, recording at the groups file,
+/// in a turn whose command never ends. It waits to be killed.
+async fn host_a_command_that_never_ends(dir: &Path) -> anyhow::Result<()> {
+    let mut c = EmbedConfig::new(dir.join("data"));
+    c.cwd = Some(dir.join("project"));
+    c.groups_file = Some(host_groups_file(dir));
+    let embedded = Embedded::start(c).await?;
+    let mut wire = duplex_wire(&embedded);
+    let created = wire.call("session.create", json!({})).await?;
+    let session = created["result"]["session_id"].clone();
+    wire.send(
+        "session.run_turn",
+        json!({ "session_id": session, "message": "wait a while", "turn_id": "t1" }),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    anyhow::bail!("the host was never killed")
+}
+
+/// Without an instance, a `groups_file` alone has the next start stop the
+/// command a `SIGKILL`ed host left running. The host is this case run again
+/// in a process of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_killed_hosts_command_is_stopped_by_the_next_start_on_its_groups_file(
+) -> anyhow::Result<()> {
+    if let Some(dir) = std::env::var_os(HOST_ROOT) {
+        return host_a_command_that_never_ends(Path::new(&dir)).await;
+    }
+    let _named = NAMED.lock().await;
+    let stub = ProviderStub::start().await?;
+    let r = root(&stub)?;
+    let dir = r.data.parent().unwrap().to_path_buf();
+    let mut settings: Value =
+        serde_json::from_slice(&std::fs::read(r.data.join("settings.json"))?)?;
+    settings["memory_enabled"] = json!(false);
+    settings["permission_rules"] = json!([{ "tool": "Bash", "action": "allow" }]);
+    std::fs::write(r.data.join("settings.json"), settings.to_string())?;
+    stub.script_when(TITLE_NEEDLE, (0..4).map(|_| Reply::text("a title")));
+    stub.script([Reply::calls(
+        "call-1",
+        "Bash",
+        json!({ "command": "tail -f /dev/null", "timeout_ms": 600000 }),
+    )]);
+
+    let case = concat!(
+        "embed_entry::",
+        "a_killed_hosts_command_is_stopped_by_the_next_start_on_its_groups_file"
+    );
+    let log = dir.join("host.log");
+    let mut host = Host(
+        std::process::Command::new(std::env::current_exe()?)
+            .args([case, "--exact", "--nocapture", "--test-threads=1"])
+            .env(HOST_ROOT, &dir)
+            .current_dir(&r.project)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::fs::File::create(&log)?)
+            .stderr(std::fs::File::create(dir.join("host.err"))?)
+            .spawn()?,
+    );
+    let file = host_groups_file(&dir);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let mut seen = Vec::new();
+    let group = loop {
+        let now = recorded_groups(&file);
+        if let Some(g) = now.iter().find(|g| seen.contains(*g) && group_alive(**g)) {
+            break *g;
+        }
+        seen = now;
+        let gone = host.0.try_wait()?;
+        anyhow::ensure!(
+            gone.is_none() && std::time::Instant::now() < deadline,
+            "the command never showed up in {} (host {gone:?}):\n{}",
+            file.display(),
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    drop(host);
+    assert!(
+        group_alive(group),
+        "the command died with its host; this case no longer tests anything"
+    );
+
+    let mut c = config(&r);
+    c.groups_file = Some(file.clone());
+    let again = Embedded::start(c).await?;
+    let left = group_alive(group);
+    if left {
+        let _ = std::process::Command::new("kill")
+            .args(["-9", "--", &format!("-{group}")])
+            .status();
+    }
+    assert!(
+        !left,
+        "the next start left the killed host's command running"
+    );
+    again.shutdown().await;
+    assert!(!file.exists(), "the record outlived shutdown");
+    Ok(())
+}
+
+/// After a recording engine shuts down, a later engine in the same
+/// process that does not record must not bring the first one's file back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shut_down_record_is_not_rewritten_by_a_later_engine() -> anyhow::Result<()> {
+    let _named = NAMED.lock().await;
+    let stub = ProviderStub::start().await?;
+    let (a, b) = (root(&stub)?, root(&stub)?);
+    let file = a.data.join("groups.json");
+    let mut c = config(&a);
+    c.groups_file = Some(file.clone());
+    let first = Embedded::start(c).await?;
+    first.shutdown().await;
+    assert!(!file.exists(), "the record outlived shutdown");
+
+    let mut settings: Value =
+        serde_json::from_slice(&std::fs::read(b.data.join("settings.json"))?)?;
+    settings["memory_enabled"] = json!(false);
+    settings["permission_rules"] = json!([{ "tool": "Bash", "action": "allow" }]);
+    std::fs::write(b.data.join("settings.json"), settings.to_string())?;
+    stub.script_when(TITLE_NEEDLE, (0..4).map(|_| Reply::text("a title")));
+    stub.script([
+        Reply::calls("call-1", "Bash", json!({ "command": "sleep 1" })),
+        Reply::text("done"),
+    ]);
+    let other = start(&b).await?;
+    let mut wire = duplex_wire(&other);
+    let created = wire.call("session.create", json!({})).await?;
+    let session = created["result"]["session_id"].clone();
+    let done = wire
+        .call(
+            "session.run_turn",
+            json!({ "session_id": session, "message": "run it", "turn_id": "t1" }),
+        )
+        .await?;
+    other.shutdown().await;
+    let back = file.exists();
+    let _ = std::fs::remove_file(&file);
+    assert!(
+        !back,
+        "an engine that keeps no record rewrote a shut-down engine's file ({done})"
+    );
+    Ok(())
+}
+
+/// A groups file whose owner is another live process is that
+/// process's list; a start on it is refused and leaves it alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_owners_groups_file_is_not_taken_over() -> anyhow::Result<()> {
+    let _named = NAMED.lock().await;
+    let stub = ProviderStub::start().await?;
+    let r = root(&stub)?;
+    let file = r.data.join("groups.json");
+    let mut other = std::process::Command::new("sleep").arg("30").spawn()?;
+    let owner = other.id();
+    // The record names a live owner and one group of its own.
+    let record = json!({ "owner_pid": owner, "owner_started_at": 0, "groups": [owner] });
+    std::fs::write(&file, record.to_string())?;
+    let mut c = config(&r);
+    c.groups_file = Some(file.clone());
+    let refused = Embedded::start(c).await;
+    let now: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+    let _ = other.kill();
+    let _ = other.wait();
+    assert!(
+        matches!(refused, Err(EmbedError::GroupsHeld { owner: o, .. }) if o == owner),
+        "start on a live owner's record was not refused"
+    );
+    assert_eq!(
+        now["owner_pid"],
+        json!(owner),
+        "the live owner's record was overwritten: {now}"
+    );
+    Ok(())
+}
