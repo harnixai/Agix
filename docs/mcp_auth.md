@@ -181,6 +181,12 @@ daemon 以自己的身份取令牌(OAuth 2.0 client credentials,MCP 的 SEP-1046
 (RFC 7523)每次请求现签一个 5 分钟有效的断言(`iss` = `sub` = `client_id`,`aud` = 授权服务器
 issuer);令牌端点必须是 HTTPS,只有 server 与授权服务器都在回环上时才允许 HTTP。
 
+`private_key_jwt` 要编入 feature `mcp-oauth-jwt`(agixd 与 `agix` 门面的缺省构建都带):rmcp 用
+jsonwebtoken 签断言,它带进第二套加密库 aws-lc(rmcp 把后端写死,换不了),约 1.7 MB。嵌入方不用
+`private_key_jwt` 时可以关掉(见 `docs/agix-sdk.md` §1),那个构建里配了 `private_key_jwt` 的
+server 在没有未过期的已存令牌时于连接时失败,错误点名 `mcp-oauth-jwt`,改用 `client_secret_env` 即可;带该 feature 的构建存下的令牌,在过期之前照常使用(不会退回成无认证连接);`daemon.ping` 的
+能力位 `mcp_oauth_jwt` 只在编入时才报。配置解析不受影响:同一份设置在两种构建里都读得进来。
+
 ### `enterprise`:企业托管授权(ID-JAG)
 
 用户已经登录了企业 IdP,宿主手里有他的 ID token(或 IdP 的刷新令牌)。daemon 拿它到 IdP 做

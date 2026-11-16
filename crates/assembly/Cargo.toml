@@ -79,6 +79,8 @@ default = ["scripts", "plugin-packages", "mcp", "agents", "skills", "sandbox"]
 
 # The modules a session can be assembled with; see `modules.rs`.
 mcp = ["dep:mcp"]
+# `oauth.private_key_jwt` for MCP servers; see `mcp`'s feature of the same name.
+mcp-oauth-jwt = ["mcp", "mcp/mcp-oauth-jwt"]
 # The WebSocket listener.
 ws = ["dep:tokio-tungstenite"]
 agents = ["dep:agents"]

@@ -533,6 +533,17 @@ fn no_kernel_crate_declares_or_forwards_a_module_feature() {
 /// turns them on, features forwarded the way cargo unifies them for this one
 /// package alone.
 fn linked_crates(root: &str, defaults: bool, features: &[&str]) -> BTreeSet<String> {
+    linked_features(root, defaults, features)
+        .into_keys()
+        .collect()
+}
+
+/// [`linked_crates`], with the features each linked crate ends up with.
+fn linked_features(
+    root: &str,
+    defaults: bool,
+    features: &[&str],
+) -> BTreeMap<String, BTreeSet<String>> {
     let mut on: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut queue: Vec<(String, Vec<String>, bool)> = vec![(
         root.to_string(),
@@ -554,6 +565,9 @@ fn linked_crates(root: &str, defaults: bool, features: &[&str]) -> BTreeSet<Stri
                 match e.split_once('/') {
                     Some((dep, sub)) => {
                         let dep = dep.trim_end_matches('?');
+                        if !ws().packages().iter().any(|p| p.name == dep) {
+                            continue;
+                        }
                         let weak = e.contains("?/");
                         if !weak {
                             known.insert(format!("dep:{dep}"));
@@ -593,7 +607,7 @@ fn linked_crates(root: &str, defaults: bool, features: &[&str]) -> BTreeSet<Stri
             queue.push((d.name.clone(), d.features.clone(), d.default_features));
         }
     }
-    on.into_keys().collect()
+    on
 }
 
 /// The locked build states that no extension execution path is in the binary,
@@ -617,4 +631,68 @@ fn the_full_tier_links_neither_the_package_layer_nor_the_script_carrier() {
         "the default daemon build must link `packages` and `script-host`, or this guard cannot \
          tell a locked build from an ordinary one: {default:?}"
     );
+}
+
+/// rmcp's `auth-client-credentials-jwt` brings jsonwebtoken on its aws-lc
+/// backend into the binary next to the ring the rest of it uses. The only way
+/// to it is `mcp`'s `mcp-oauth-jwt`, so a build without that feature has no
+/// `aws-lc-rs` in its graph.
+#[test]
+fn the_aws_lc_backend_is_reachable_only_through_the_mcp_oauth_jwt_feature() {
+    const RMCP_FEATURE: &str = "auth-client-credentials-jwt";
+    let mcp = ws().package("mcp");
+    let rmcp = mcp
+        .normal_deps()
+        .find(|d| d.name == "rmcp")
+        .expect("mcp depends on rmcp");
+    assert!(
+        !rmcp.features.iter().any(|f| f == RMCP_FEATURE),
+        "`mcp` enables rmcp's `{RMCP_FEATURE}` unconditionally; it belongs behind `mcp-oauth-jwt`"
+    );
+    let gate = mcp.features.get("mcp-oauth-jwt").expect("mcp-oauth-jwt");
+    assert_eq!(gate, &[format!("rmcp/{RMCP_FEATURE}")]);
+    for p in ws().packages() {
+        if p.name == "mcp" {
+            continue;
+        }
+        for d in p.deps.iter().filter(|d| d.name == "rmcp") {
+            assert!(
+                !d.features.iter().any(|f| f == RMCP_FEATURE),
+                "`{}` enables rmcp's `{RMCP_FEATURE}` itself",
+                p.name
+            );
+        }
+    }
+
+    let jwt_of = |crates: &BTreeMap<String, BTreeSet<String>>| {
+        crates
+            .get("mcp")
+            .is_some_and(|f| f.contains("mcp-oauth-jwt"))
+    };
+    let without = linked_features(
+        "daemon",
+        false,
+        &[
+            "mcp",
+            "agents",
+            "skills",
+            "web",
+            "structured-output",
+            "ptc",
+            "ws",
+        ],
+    );
+    allow::non_vacuous("deps::mcp without jwt closure", without.len(), 15);
+    assert!(
+        without.contains_key("mcp") && !jwt_of(&without),
+        "{without:?}"
+    );
+    for (name, features, defaults) in [
+        ("daemon", &["coding"][..], false),
+        ("daemon", &[][..], true),
+        ("agix", &[][..], true),
+    ] {
+        let on = linked_features(name, defaults, features);
+        assert!(jwt_of(&on), "`{name}` {features:?} lost `mcp-oauth-jwt`");
+    }
 }

@@ -276,6 +276,9 @@ pub fn capabilities() -> Vec<&'static str> {
     if cfg!(feature = "agents") {
         out.push("host_agents");
     }
+    if cfg!(feature = "mcp-oauth-jwt") {
+        out.push("mcp_oauth_jwt");
+    }
     if runtime::PTC_ENABLED {
         out.push("ptc");
     }

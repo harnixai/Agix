@@ -44,5 +44,12 @@ tempfile = { workspace = true }
 mcp-oauth-mock = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
+[features]
+# `oauth.private_key_jwt` (RFC 7523 client assertions). rmcp signs them with
+# jsonwebtoken, which carries a second crypto backend (aws-lc) into the
+# binary; off, a server configured with `private_key_jwt` is refused at
+# connect time and nothing of that backend is linked.
+mcp-oauth-jwt = ["rmcp/auth-client-credentials-jwt"]
+
 [lints.clippy]
 field_reassign_with_default = "allow"

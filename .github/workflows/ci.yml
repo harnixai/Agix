@@ -124,6 +124,17 @@ jobs:
           cargo check -p daemon --no-default-features --features coding
           cargo check -p daemon --no-default-features --features coding,scripts
 
+      # MCP without `private_key_jwt`: it compiles, and the second crypto
+      # backend (aws-lc) that rmcp's JWT signing brings is not in the graph.
+      - name: mcp without jwt
+        run: |
+          cargo check -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws
+          cargo test -p mcp --lib
+          if cargo tree -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws -e normal | grep -q 'aws-lc-rs v'; then
+            echo "daemon without mcp-oauth-jwt still links aws-lc-rs"
+            exit 1
+          fi
+
       # The package layer without the script carrier. Checked rather than
       # tested because every test gated on the package layer also compiles
       # into the default build, which the `test` job runs.

@@ -12,6 +12,7 @@ use rmcp::transport::auth::enterprise::{
     EmaExchangeStage,
 };
 use rmcp::transport::auth::{AuthorizationMetadata, ClientCredentialsConfig};
+#[cfg(feature = "mcp-oauth-jwt")]
 use rmcp::transport::JwtSigningAlgorithm;
 
 use super::store::now_secs;
@@ -74,6 +75,7 @@ where
         .map_err(|e| format!("cannot run the token request: {e}"))
 }
 
+#[cfg(feature = "mcp-oauth-jwt")]
 fn signing_alg(alg: &str) -> Result<JwtSigningAlgorithm, String> {
     Ok(match alg {
         "RS256" => JwtSigningAlgorithm::RS256,
@@ -83,6 +85,15 @@ fn signing_alg(alg: &str) -> Result<JwtSigningAlgorithm, String> {
         "ES384" => JwtSigningAlgorithm::ES384,
         other => return Err(format!("unsupported signing algorithm `{other}`")),
     })
+}
+
+#[cfg(not(feature = "mcp-oauth-jwt"))]
+fn jwt_unavailable() -> Unattended {
+    Unattended::Failed(
+        "oauth.private_key_jwt is not available: this build has no private_key_jwt support (it \
+         needs the `mcp-oauth-jwt` feature); use client_secret_env"
+            .into(),
+    )
 }
 
 fn supports_only_post(metadata: &AuthorizationMetadata) -> bool {
@@ -174,9 +185,14 @@ impl McpAuth {
         oauth: &McpOAuthConfig,
     ) -> Result<(), Unattended> {
         let failed = Unattended::Failed;
+        #[cfg(not(feature = "mcp-oauth-jwt"))]
+        if oauth.private_key_jwt.is_some() {
+            return Err(jwt_unavailable());
+        }
         let (_, metadata) = self.unattended_metadata(url, key).await?;
         let client_id = oauth.client_id.clone().unwrap_or_default();
         let config = match &oauth.private_key_jwt {
+            #[cfg(feature = "mcp-oauth-jwt")]
             Some(jwt) => ClientCredentialsConfig::PrivateKeyJwt {
                 client_id,
                 signing_key: jwt.pem().map_err(failed)?,
@@ -185,6 +201,8 @@ impl McpAuth {
                 scopes: oauth.scopes.clone(),
                 resource: Some(super::resource_of(key).to_string()),
             },
+            #[cfg(not(feature = "mcp-oauth-jwt"))]
+            Some(_) => return Err(jwt_unavailable()),
             None => ClientCredentialsConfig::ClientSecret {
                 client_id,
                 client_secret: self
@@ -424,12 +442,34 @@ mod tests {
         assert!(!shown.contains("secret"), "{shown}");
     }
 
+    #[cfg(feature = "mcp-oauth-jwt")]
     #[test]
     fn every_configurable_algorithm_maps_to_a_signer() {
         for alg in crate::config::SIGNING_ALGS {
             assert!(signing_alg(alg).is_ok(), "{alg}");
         }
         assert!(signing_alg("HS256").is_err());
+    }
+
+    #[cfg(not(feature = "mcp-oauth-jwt"))]
+    #[tokio::test]
+    async fn a_build_without_jwt_support_refuses_a_private_key_jwt_server_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = McpAuth::with_file_store(dir.path().to_path_buf());
+        let oauth: McpOAuthConfig = serde_json::from_value(serde_json::json!({
+            "grant": "client_credentials", "client_id": "svc",
+            "private_key_jwt": {"key_env": "K", "alg": "ES256"}
+        }))
+        .unwrap();
+        let refused = auth
+            .ensure_unattended("docs", "https://mcp.example.com/mcp", None, &oauth, false)
+            .await;
+        match refused {
+            Err(Unattended::Failed(message)) => {
+                assert!(message.contains("mcp-oauth-jwt"), "{message}")
+            }
+            _ => panic!("a build without jwt support took a private_key_jwt server"),
+        }
     }
 
     #[tokio::test]

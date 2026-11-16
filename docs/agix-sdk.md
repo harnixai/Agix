@@ -21,9 +21,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 | feature | 含义 |
 |---|---|
 | 缺省 | `coding` + `scripts` + `plugin-packages` + `sandbox` |
-| `coding` | `mcp` `agents` `skills` `web` `structured-output` `ptc` |
+| `coding` | `mcp` `mcp-oauth-jwt` `agents` `skills` `web` `structured-output` `ptc` |
+| `mcp-oauth-jwt` | MCP 的 `oauth.private_key_jwt`（RFC 7523）。rmcp 用 jsonwebtoken 签断言，带进第二套加密库 aws-lc，约 1.7 MB；关掉后依赖图里没有 `aws-lc-rs`，配了 `private_key_jwt` 的 server 连接时报错并点名这个 feature，能力位 `mcp_oauth_jwt` 不报 |
 | `--no-default-features` | minimal：只有内核 |
 | `otel` | 另开：把遥测发给 OTLP 收集器 |
+
+关掉 `mcp-oauth-jwt`：它在 `coding` 里，所以不用 `coding`，把成员逐个列出来：`default-features = false, features = ["mcp", "agents", "skills", "web", "structured-output", "ptc", "scripts", "plugin-packages", "sandbox"]`。
 
 没有 `ws` 与 `full`：WebSocket 监听是 agixd 的。设置里写了未编入模块的段（如 minimal 下的 `mcp_servers`）启动时警告并忽略；`scripts` 段在没编 `scripts` 时记 error（`ARCHITECTURE.md` §1.2）。`agix::process::identity().modules` 报出这个构建编入了哪些模块。
 

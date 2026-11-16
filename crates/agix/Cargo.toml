@@ -33,8 +33,9 @@ tracing-subscriber = { workspace = true }
 # The same switches as daemon's, forwarded the same way; `ws` and `full` are
 # agixd's (the WebSocket listener), which this crate does not export.
 default = ["coding", "scripts", "plugin-packages", "sandbox"]
-coding = ["mcp", "agents", "skills", "web", "structured-output", "ptc"]
+coding = ["mcp", "mcp-oauth-jwt", "agents", "skills", "web", "structured-output", "ptc"]
 mcp = ["assembly/mcp"]
+mcp-oauth-jwt = ["assembly/mcp-oauth-jwt"]
 agents = ["assembly/agents"]
 skills = ["assembly/skills"]
 web = ["runtime/web"]

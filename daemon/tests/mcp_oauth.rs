@@ -922,6 +922,7 @@ async fn a_project_server_at_the_same_url_does_not_use_the_global_servers_sign_i
 }
 
 /// An EC P-256 key generated for these tests only.
+#[cfg(feature = "mcp-oauth-jwt")]
 const TEST_SIGNING_KEY: &str = "-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg/ZPFSfCUF/GrtLOT
 H09ol9nY5GBMrfhEuil1uXnGJiahRANCAATszeKXDDXvOCL7jv1JTGw6SiWjeN9s
@@ -1071,6 +1072,20 @@ async fn a_task_whose_polls_stay_refused_fails_without_calling_again() {
     );
 }
 
+#[cfg(feature = "mcp-oauth-jwt")]
+#[tokio::test]
+async fn ping_advertises_private_key_jwt_when_it_is_compiled_in() {
+    let d = Daemon::start(serde_json::json!({})).await;
+    let mut conn = d.connect().await;
+    let ping = conn.ok("daemon.ping", serde_json::Value::Null).await;
+    assert!(ping["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c == "mcp_oauth_jwt"));
+}
+
+#[cfg(feature = "mcp-oauth-jwt")]
 #[tokio::test]
 async fn client_credentials_can_authenticate_with_a_signed_assertion() {
     let (mcp, auth) = McpServer::start().await;
