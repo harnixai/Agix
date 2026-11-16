@@ -8,10 +8,12 @@ use crate::session_pool::api::{
     CallResponse, CallStatus, CallSummary, CallTiming, CallUsage, MissingPart, RecordingCoverage,
     RecordingInfo, SystemBlockSize, SystemBlockView, ToolUseRef, ToolUseView,
 };
-use base::interface::model::{ModelEvent, Usage};
+use base::interface::model::{MessageRole, ModelEvent, Usage};
 use base::prompt::{BlockOrigin, BlockRole, CacheStrategy, PromptBlock};
+use base::text::truncate_chars;
+use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use telemetry::recorder::blob::{BlobId, BlobStore};
 use telemetry::recorder::format::Outcome;
@@ -21,6 +23,11 @@ use telemetry::recorder::reader::{self, ReadError, RecordedCall, Recording};
 pub(crate) const INLINE_PART_MAX: usize = 64 * 1024;
 /// All parts inlined in one `session.call` together at most this long.
 pub(crate) const INLINE_TOTAL_MAX: usize = 4 * 1024 * 1024;
+/// How much of an answer or a tool's arguments a summary row quotes.
+const PREVIEW_CHARS: usize = 200;
+/// A message blob larger than this is not read to tell whether a tool call
+/// was answered with an error; the row leaves the flag out.
+const TAIL_MESSAGE_MAX: u64 = 1024 * 1024;
 /// A part `session.callBlob` refuses to answer with: it would not fit a frame.
 pub(crate) const BLOB_MAX: usize = 15 * 1024 * 1024;
 
@@ -68,6 +75,8 @@ impl Opened {
         let start = from.min(calls.len());
         let end = start.saturating_add(limit).min(calls.len());
         let mut sizes = Sizes::new(&self.blobs);
+        let mut results = ResultFlags::new(&self.blobs);
+        let next_conversation = self.next_conversation_calls();
         let mut next = end;
         let mut rows = Vec::with_capacity(end - start);
         for (index, call) in calls.iter().enumerate().take(end).skip(start) {
@@ -75,7 +84,8 @@ impl Opened {
             if status == CallStatus::InFlight {
                 next = next.min(index);
             }
-            rows.push(self.summary(index, call, status, &mut sizes));
+            let follow_up = next_conversation[index].map(|i| &calls[i]);
+            rows.push(self.summary(index, call, status, follow_up, &mut sizes, &mut results));
         }
         (rows, next)
     }
@@ -85,10 +95,20 @@ impl Opened {
         index: usize,
         call: &RecordedCall,
         status: CallStatus,
+        follow_up: Option<&RecordedCall>,
         sizes: &mut Sizes<'_>,
+        results: &mut ResultFlags<'_>,
     ) -> CallSummary {
         let request = &call.request;
         let response = Response::of(call);
+        let flags = match follow_up {
+            Some(next) if status == CallStatus::Ok && !response.tool_uses.is_empty() => results
+                .of(next)
+                .as_ref()
+                .filter(|tail| tail.continues(&response.tool_uses))
+                .map(|tail| &tail.is_error),
+            _ => None,
+        };
         CallSummary {
             index,
             session_id: self.session_of(call),
@@ -109,6 +129,7 @@ impl Opened {
             },
             output: CallOutput {
                 chars: response.text.chars().count(),
+                text_preview: truncate_chars(&response.text, PREVIEW_CHARS, "…"),
                 thinking_chars: response.thinking_chars,
                 tool_uses: response
                     .tool_uses
@@ -116,6 +137,12 @@ impl Opened {
                     .map(|t| ToolUseRef {
                         id: t.id.clone(),
                         name: t.name.clone(),
+                        input_preview: truncate_chars(
+                            &preview_source(&t.input),
+                            PREVIEW_CHARS,
+                            "…",
+                        ),
+                        result_is_error: flags.and_then(|f| f.get(&t.id).copied()),
                     })
                     .collect(),
             },
@@ -129,6 +156,26 @@ impl Opened {
             },
             error: error_of(call),
         }
+    }
+
+    /// For each call, the next call of its session that is not an auxiliary
+    /// one: the one whose messages carry the results of the tools it asked for.
+    fn next_conversation_calls(&self) -> Vec<Option<usize>> {
+        let calls = &self.recording.calls;
+        let mut latest: HashMap<&str, usize> = HashMap::new();
+        let mut next = vec![None; calls.len()];
+        for (index, call) in calls.iter().enumerate().rev() {
+            let session = call
+                .request
+                .session_id
+                .as_deref()
+                .unwrap_or(&self.recording.header.session_id);
+            next[index] = latest.get(session).copied();
+            if call.request.purpose.is_none() {
+                latest.insert(session, index);
+            }
+        }
+        next
     }
 
     /// The call at `index` in full, or `None` past the end.
@@ -411,6 +458,96 @@ impl<'a> Sizes<'a> {
                 .flatten()
                 .map(|t| t.len())
         })
+    }
+}
+
+/// What a conversation call's trailing messages say about the call before it:
+/// which tool uses the last assistant message made, and whether each result
+/// was an error. Each call's messages are read once however many rows ask.
+struct ResultFlags<'a> {
+    blobs: &'a BlobStore,
+    by_call: HashMap<u64, Option<Tail>>,
+}
+
+impl<'a> ResultFlags<'a> {
+    fn new(blobs: &'a BlobStore) -> Self {
+        Self {
+            blobs,
+            by_call: HashMap::new(),
+        }
+    }
+
+    fn of(&mut self, call: &RecordedCall) -> &Option<Tail> {
+        let blobs = self.blobs;
+        self.by_call
+            .entry(call.request.seq)
+            .or_insert_with(|| Tail::read(blobs, &call.request.messages))
+    }
+}
+
+struct Tail {
+    tool_use_ids: HashSet<String>,
+    is_error: HashMap<String, bool>,
+}
+
+impl Tail {
+    fn continues(&self, tool_uses: &[ToolUseView]) -> bool {
+        self.tool_use_ids.len() == tool_uses.len()
+            && tool_uses.iter().all(|t| self.tool_use_ids.contains(&t.id))
+    }
+
+    /// `None` when an assistant message is not reached through readable,
+    /// reasonably sized blobs.
+    fn read(blobs: &BlobStore, messages: &[BlobId]) -> Option<Self> {
+        let mut is_error = HashMap::new();
+        for id in messages.iter().rev() {
+            if blobs.len(id)? > TAIL_MESSAGE_MAX {
+                return None;
+            }
+            let message: SlimMessage = blobs.get(id).ok()??;
+            if message.role == MessageRole::Assistant {
+                let tool_use_ids = message
+                    .content
+                    .into_iter()
+                    .filter(|b| b.kind == "tool_use")
+                    .filter_map(|b| b.id)
+                    .collect();
+                return Some(Self {
+                    tool_use_ids,
+                    is_error,
+                });
+            }
+            for block in message.content {
+                if let (true, Some(id)) = (block.kind == "tool_result", block.tool_use_id) {
+                    is_error.insert(id, block.is_error.unwrap_or(false));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// A message with only what [`Tail`] needs; tool outputs and image data are
+/// skipped by the parser instead of being built.
+#[derive(Deserialize)]
+struct SlimMessage {
+    role: MessageRole,
+    content: Vec<SlimBlock>,
+}
+
+#[derive(Deserialize)]
+struct SlimBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    id: Option<String>,
+    tool_use_id: Option<String>,
+    is_error: Option<bool>,
+}
+
+fn preview_source(input: &Value) -> String {
+    match input {
+        Value::String(raw) => raw.clone(),
+        other => other.to_string(),
     }
 }
 

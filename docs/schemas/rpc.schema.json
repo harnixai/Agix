@@ -465,6 +465,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "text_preview": {
+          "description": "The answer's first 200 characters, with `…` after them when cut.",
+          "type": "string"
+        },
         "thinking_chars": {
           "format": "uint",
           "minimum": 0,
@@ -479,6 +483,7 @@
       },
       "required": [
         "chars",
+        "text_preview",
         "thinking_chars",
         "tool_uses"
       ],
@@ -7860,13 +7865,25 @@
         "id": {
           "type": "string"
         },
+        "input_preview": {
+          "description": "The arguments as compact JSON, the first 200 characters, with `…`\nafter them when cut.",
+          "type": "string"
+        },
         "name": {
           "type": "string"
+        },
+        "result_is_error": {
+          "description": "Whether the tool's result was an error, as the same session's next\nconversation call carries it; absent when that call is not recorded\nyet or does not carry this result.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
         "id",
-        "name"
+        "name",
+        "input_preview"
       ],
       "type": "object"
     },

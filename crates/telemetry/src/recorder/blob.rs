@@ -139,6 +139,12 @@ impl BlobStore {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
+    pub fn len(&self, id: &BlobId) -> Option<u64> {
+        std::fs::metadata(self.dir.join(&id.0))
+            .ok()
+            .map(|m| m.len())
+    }
+
     pub fn get_raw(&self, id: &BlobId) -> Result<Option<String>, std::io::Error> {
         match std::fs::read_to_string(self.dir.join(&id.0)) {
             Ok(s) => Ok(Some(s)),

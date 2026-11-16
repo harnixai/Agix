@@ -260,6 +260,47 @@ async fn digests_tell_which_fixed_part_changed_between_two_turns() -> anyhow::Re
     Ok(())
 }
 
+/// A multi-step turn lists, in one read, what each step said, what it called with and whether the call failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn rows_carry_the_answer_text_the_arguments_and_whether_each_tool_failed(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("calls-preview", &stub).start().await?;
+    run.write_file("present.txt", "PRESENT-BODY\n")?;
+    let present = run
+        .project
+        .join("present.txt")
+        .to_string_lossy()
+        .to_string();
+    stub.script([
+        Reply::calls("r1", "Read", json!({ "offset": "not-a-number-marker" })),
+        Reply::calls("r2", "Read", json!({ "file_path": present })),
+        Reply::text("FINAL-ANSWER"),
+    ]);
+    let extra = recorded(&run)?;
+    let session = run.session_with(extra).await?;
+    run.turn(&session, "read both").await?;
+    let list = until_calls(&mut run, &session, |r| {
+        r.iter().filter(|c| c["purpose"].is_null()).count() == 3
+    })
+    .await?;
+    let steps = conversation_rows(&list, &session);
+    let use_of = |step: usize| steps[step]["output"]["tool_uses"][0].clone();
+    assert_eq!(use_of(0)["name"], "Read", "{list}");
+    assert!(
+        use_of(0)["input_preview"]
+            .as_str()
+            .is_some_and(|p| p.contains("not-a-number-marker")),
+        "{list}"
+    );
+    assert_eq!(use_of(0)["result_is_error"], true, "{list}");
+    assert_eq!(use_of(1)["result_is_error"], false, "{list}");
+    assert_eq!(steps[2]["output"]["text_preview"], "FINAL-ANSWER", "{list}");
+    assert_eq!(steps[2]["output"]["tool_uses"], json!([]), "{list}");
+    run.finish().await;
+    Ok(())
+}
+
 /// A part over 64 KiB comes as a handle, and `session.callBlob` returns it whole.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_oversized_message_is_a_blob_that_call_blob_returns_whole() -> anyhow::Result<()> {
@@ -420,7 +461,12 @@ async fn ping_advertises_the_calls_and_search_capabilities() -> anyhow::Result<(
     let mut run = stubbed("calls-ping", &stub).start().await?;
     let ping = ok(run.client.call("daemon.ping", Value::Null).await?)?;
     let capabilities = ping["capabilities"].as_array().expect("capabilities");
-    for name in ["session_calls", "session_search", "calls_digest"] {
+    for name in [
+        "session_calls",
+        "session_search",
+        "calls_digest",
+        "calls_preview",
+    ] {
         assert!(capabilities.iter().any(|c| c == name), "{ping}");
     }
     run.finish().await;

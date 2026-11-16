@@ -804,6 +804,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `checkpoints` | 有 `session.rewind` / `session.checkpoints`,文件工具的每次写都记下写前内容,宿主可以把文件、对话或两者退回到之前的一轮;回滚推 `rewound`(§6.3、§7) |
 | `session_calls` | 有 `session.calls` / `session.call` / `session.callBlob`,经协议读会话的模型调用录像;录制的 `recorder` 随会话保存(§6.3) |
 | `calls_digest` | `session.calls` 的 `input.system[].digest` 与 `input.tools_digest`(§6.3) |
+| `calls_preview` | `session.calls` 的 `output.text_preview`、`output.tool_uses[].input_preview` 与 `result_is_error`(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
@@ -2007,7 +2008,9 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
                "ts": "2026-11-15T09:46:40Z", "provider": "anthropic", "model": "…",
                "input": { "system": [ { "source": "identity", "chars": 1234, "digest": "879106ac742f0567" } ],
                           "tools": 23, "tools_digest": "286e970158096479", "messages": 8 },
-               "output": { "chars": 456, "thinking_chars": 0, "tool_uses": [ { "id": "…", "name": "Read" } ] },
+               "output": { "chars": 456, "text_preview": "…", "thinking_chars": 0,
+                           "tool_uses": [ { "id": "…", "name": "Read", "input_preview": "{\"file_path\":\"…\"}",
+                                            "result_is_error": false } ] },
                "status": "ok",           // ok | cancelled | error | in_flight | unfinished
                "stop_reason": "tool_use",
                "usage": { "input_tokens": 10, "output_tokens": 20,
@@ -2024,6 +2027,11 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 `digest` 与 `tools_digest` 是录像里那一块的 blob id(规范化 JSON 的 SHA-256 前 16 位十六进制,系统块各一个,
 工具目录按发出的顺序一个):两次调用的值相同,发出去的那一块就相同,宿主不必取全文去比。录像已不再持有
 那一块时 `chars` / `tools` 为 `null`,`digest` 仍在。
+
+`text_preview` 是回答文字的前 200 个字符,`input_preview` 是工具入参紧凑 JSON 的前 200 个字符(入参畸形的工具调用,`malformed` 为真,取原始入参文本的前 200 个字符),
+被截断时两者末尾加 `…`(按字符,不按字节)。`result_is_error` 取自同一会话的下一次对话调用(`purpose` 为
+`null`)带的消息里、`tool_use_id` 对得上的 `tool_result` 的 `is_error`;只在这次调用成功结束、且下一次调用确实接着它(那条调用之前最后一条 assistant 消息带的正是这次调用的全部工具调用 id)时才有,还没有下一次调用、对不上,或读它时有一条消息体超过 1 MiB 时整个字段省略。
+这样画调用列表不必逐条 `session.call`。
 
 `index` 是调用在录像里的位置,`session.call` 用它取全文。`from` 是起始的 `index`,`limit` 默认
 200、上限 500,超了夹紧不报错。`total` 是整份录像的调用数,`damaged` 是读不出来、跳过的行数。

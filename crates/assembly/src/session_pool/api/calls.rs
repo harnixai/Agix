@@ -104,6 +104,8 @@ pub struct SystemBlockSize {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CallOutput {
     pub chars: usize,
+    /// The answer's first 200 characters, with `…` after them when cut.
+    pub text_preview: String,
     pub thinking_chars: usize,
     pub tool_uses: Vec<ToolUseRef>,
 }
@@ -112,6 +114,14 @@ pub struct CallOutput {
 pub struct ToolUseRef {
     pub id: String,
     pub name: String,
+    /// The arguments as compact JSON, the first 200 characters, with `…`
+    /// after them when cut.
+    pub input_preview: String,
+    /// Whether the tool's result was an error, as the same session's next
+    /// conversation call carries it; absent when that call is not recorded
+    /// yet or does not carry this result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_is_error: Option<bool>,
 }
 
 /// §3.5's four counts.
