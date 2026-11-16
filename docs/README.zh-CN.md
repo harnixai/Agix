@@ -395,7 +395,8 @@ let pool = agix::pool::assemble(
 ```
 
 任务键 `main`、`subagent`、`compact`、`memory`、`web_search`、`web_fetch` 各自路由一类
-调用;会话也能选自己的 provider。`WebSearch` 默认经会话自己的模型让提供方搜索,
+调用;会话也能选自己的 provider。子 Agent 的模型依次取:`Agent` 调用(或 `session.startAgent`)
+的 `model`、agent 类型的 `model`、`task_models.subagent` 的模型、会话当前的模型。`WebSearch` 默认经会话自己的模型让提供方搜索,
 `task_models.web_search` 可以换一个提供方。`WebFetch` 默认返回页面转成的纯文本(超过
 50,000 字符分段,用 `offset` / `limit` 续读,续读会再抓一次页面);只有 `task_models.web_fetch` 配了 provider 时,才由那个模型读页面、按调用
 的 `prompt` 作答。它不会退回到会话自己的模型。

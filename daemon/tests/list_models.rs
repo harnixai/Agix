@@ -14,10 +14,10 @@ const ENGINE_ERROR: i64 = -32002;
 const MODELS_UNSUPPORTED: i64 = -32027;
 
 #[derive(Clone, Debug)]
-struct Seen {
-    path: String,
+pub(crate) struct Seen {
+    pub(crate) path: String,
     headers: Vec<(String, String)>,
-    body: Value,
+    pub(crate) body: Value,
 }
 
 impl Seen {
@@ -31,13 +31,13 @@ impl Seen {
 
 /// An HTTP endpoint that answers each request with what `route` makes of its
 /// path, and remembers every request.
-struct Stub {
-    base: String,
+pub(crate) struct Stub {
+    pub(crate) base: String,
     seen: Arc<Mutex<Vec<Seen>>>,
 }
 
 impl Stub {
-    async fn start(route: fn(&str) -> String) -> Self {
+    pub(crate) async fn start(route: fn(&str) -> String) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
@@ -59,7 +59,7 @@ impl Stub {
         Self { base, seen }
     }
 
-    fn seen(&self) -> Vec<Seen> {
+    pub(crate) fn seen(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
 }
@@ -105,7 +105,7 @@ async fn read_request(sock: &mut tokio::net::TcpStream) -> Option<Seen> {
     })
 }
 
-fn http(code: u16, body: &str) -> String {
+pub(crate) fn http(code: u16, body: &str) -> String {
     format!(
         "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
          connection: close\r\n\r\n{body}",
@@ -113,7 +113,7 @@ fn http(code: u16, body: &str) -> String {
     )
 }
 
-fn sse_text(text: &str) -> String {
+pub(crate) fn sse_text(text: &str) -> String {
     let events = [
         json!({"type": "message_start", "message": {"id": "msg", "model": "m", "role": "assistant",
             "usage": {"input_tokens": 3, "output_tokens": 0}}}),

@@ -78,6 +78,7 @@ mod session_teardown;
 mod session_title_telemetry;
 mod session_unsubscribe;
 mod skill_inline_commands;
+mod subagent_model;
 mod support;
 mod tool_progress;
 mod tool_result_diff;

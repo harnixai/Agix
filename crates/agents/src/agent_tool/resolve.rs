@@ -93,12 +93,12 @@ impl Delegator {
     }
 
     /// A sub-agent's `Settings`: the parent's, with its own model — `model_name`,
-    /// else the one the parent session runs on now.
+    /// else [`Self::unnamed_delegate_model`].
     pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
         let c = &self.env.config;
         let model_name = match model_name {
             Some(name) => name.to_string(),
-            None => self.parent_model(),
+            None => self.unnamed_delegate_model(),
         };
         settings_from_parent(
             &self.env.settings,
@@ -108,14 +108,26 @@ impl Delegator {
         )
     }
 
-    /// The model the parent session's next call asks for: a host's choice
-    /// made since the session was built is not in its settings.
-    fn parent_model(&self) -> String {
-        self.env
-            .parent
-            .state
-            .model_choice()
-            .unwrap_or_else(|| self.env.config.model.clone())
+    /// The model of a delegate whose spawn and agent type name none: the one
+    /// `task_models.subagent` routes sub-agents to, else the one the parent
+    /// session's next call asks for — a host's choice made since the session
+    /// was built is not in its settings.
+    fn unnamed_delegate_model(&self) -> String {
+        let routed = self
+            .env
+            .host
+            .task_router
+            .as_ref()
+            .and_then(|router| router.model_name_for("subagent"));
+        match routed {
+            Some(name) => name.to_string(),
+            None => self
+                .env
+                .parent
+                .state
+                .model_choice()
+                .unwrap_or_else(|| self.env.config.model.clone()),
+        }
     }
 
     /// The scene a sub-agent should run in.
