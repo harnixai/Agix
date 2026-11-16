@@ -91,7 +91,7 @@ pub struct SkillDirOption {
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HostToolOption {
-    /// `^[A-Za-z][A-Za-z0-9_]{0,63}$`, not starting `mcp__`, not taken.
+    /// `^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not starting `mcp__`, not taken.
     pub name: String,
     /// At most 8 KiB.
     pub description: String,

@@ -3151,7 +3151,7 @@
           "description": "A `type: object` JSON Schema, at most 64 KiB; the host only ever gets\ninput that matches it."
         },
         "name": {
-          "description": "`^[A-Za-z][A-Za-z0-9_]{0,63}$`, not starting `mcp__`, not taken.",
+          "description": "`^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not starting `mcp__`, not taken.",
           "type": "string"
         },
         "read_only": {

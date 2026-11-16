@@ -1447,7 +1447,7 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 
 ```jsonc
 "host_tools": [
-  { "name": "HostEcho",                       // ^[A-Za-z][A-Za-z0-9_]{0,63}$,不以 mcp__ 开头
+  { "name": "HostEcho",                       // ^[A-Za-z][A-Za-z0-9_-]{0,63}$,不以 mcp__ 开头
     "description": "Echo text back from the host.",   // ≤ 8 KiB
     "input_schema": { "type": "object",       // type:object、能编译的 JSON Schema,≤ 64 KiB
                       "properties": { "text": { "type": "string" } },

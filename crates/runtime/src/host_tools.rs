@@ -86,11 +86,13 @@ pub fn declaration_problems(decl: &HostToolDecl) -> Vec<(&'static str, String)> 
     let name = &decl.name;
     let well_formed = name.len() <= 64
         && name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
     if !well_formed {
         problems.push((
             "name",
-            "must match ^[A-Za-z][A-Za-z0-9_]{0,63}$".to_string(),
+            "must match ^[A-Za-z][A-Za-z0-9_-]{0,63}$".to_string(),
         ));
     } else if name.starts_with("mcp__") {
         problems.push(("name", "`mcp__` names belong to MCP servers".to_string()));
@@ -682,6 +684,16 @@ mod tests {
                 .collect()
         };
         assert!(fields(HostToolDecl::new("HostEcho", "d", schema.clone())).is_empty());
+        assert!(fields(HostToolDecl::new(
+            "ext__hello-app__echo",
+            "d",
+            schema.clone()
+        ))
+        .is_empty());
+        assert_eq!(
+            fields(HostToolDecl::new("-x", "d", schema.clone())),
+            ["name"]
+        );
         assert_eq!(
             fields(HostToolDecl::new("mcp__x", "d", schema.clone())),
             ["name"]

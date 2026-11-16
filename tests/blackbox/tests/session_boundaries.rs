@@ -1547,3 +1547,69 @@ async fn a_host_tool_reply_with_a_bad_image_is_refused_and_can_be_given_again() 
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_tool_name_with_hyphens_is_accepted_and_reaches_the_host_unchanged(
+) -> anyhow::Result<()> {
+    const NAME: &str = "ext__hello-app__echo";
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("host-hyphen", &stub).start().await?;
+    let decl = json!({
+        "name": NAME,
+        "description": "Echo from the host.",
+        "input_schema": { "type": "object", "properties": {} },
+        "read_only": true
+    });
+    let set = run.client.daemon_set_host_tools(vec![decl.clone()]).await?;
+    anyhow::ensure!(set.error.is_none(), "{set:?}");
+    anyhow::ensure!(
+        set.result
+            .as_ref()
+            .is_some_and(|r| r["refused"] == json!([])),
+        "{set:?}"
+    );
+    let bad = run
+        .client
+        .daemon_set_host_tools(vec![json!({ "name": "-lead", "description": "d",
+            "input_schema": { "type": "object" } })])
+        .await?;
+    anyhow::ensure!(
+        bad.result
+            .as_ref()
+            .is_some_and(|r| r["refused"].as_array().is_some_and(|a| a.len() == 1)),
+        "{bad:?}"
+    );
+
+    let session = run
+        .session_with(json!({ "options": {
+            "permission_rules": [
+                { "source": "session", "behavior": "allow", "tool_name": NAME }
+            ],
+            "host_tools": [decl]
+        }}))
+        .await?;
+    let host = run.watch(&session, false).await?;
+    stub.script([Reply::calls("h1", NAME, json!({})), Reply::text("done")]);
+    let turn = run.spawn_turn(&session, "echo", json!({})).await?;
+    let call = host
+        .wait_for("the host tool call", Duration::from_secs(30), |e| {
+            e["kind"] == "host_tool_call"
+        })
+        .await?;
+    assert_eq!(call["event"]["name"], NAME, "{call}");
+    let answered = run
+        .client
+        .session_respond_tool_call(
+            &session,
+            call["event"]["call_id"].as_str().unwrap_or_default(),
+            rpc_client::ToolCallReply::Result {
+                content: json!([{ "type": "text", "text": "ok" }]),
+                is_error: false,
+            },
+        )
+        .await?;
+    assert!(answered.error.is_none(), "{answered:?}");
+    tokio::time::timeout(Duration::from_secs(30), turn).await???;
+    run.finish().await;
+    Ok(())
+}
