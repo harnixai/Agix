@@ -82,7 +82,8 @@ Agix 是 agent 产品底下的那台引擎:它运行一个**会话**——装配
 - **机器。** 2026-11-15 在 M2 Max 上测(macOS 虚拟机,8 核,16 GB)。
 
 DSH 不在本仓库里。怎么装、怎么自己跑这个对比,以及每个任务、每个指标的含义,见
-[`benchmark_dsh.md`](benchmark_dsh.md)。
+[`benchmark/compare_dsh.md`](benchmark/compare_dsh.md);这次测试的完整记录(版本、环境、每一轮)
+见 [`benchmark/2026-11-15-agix-0.3.15-vs-dsh-0.2.2-rc.1.md`](benchmark/2026-11-15-agix-0.3.15-vs-dsh-0.2.2-rc.1.md)。
 
 ---
 
@@ -493,7 +494,7 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | [ptc.md](ptc.md) | `RunCode`:模型写的程序能调什么、权限、限额与提示词 |
 | [mcp_auth.md](mcp_auth.md) | 远端 MCP server 的 OAuth:配置、登录流程、RPC 与通知、凭据存储、安全 |
 | [schemas/settings.schema.json](schemas/settings.schema.json) | 生成的 `settings.json` schema |
-| [benchmark_dsh.md](benchmark_dsh.md) | 与 DeepSeek Harness 的对比测试:准备、六个任务、量什么与怎么量 |
+| [benchmark/](benchmark/compare_dsh.md) | 与 DeepSeek Harness 的对比测试:准备、六个任务、量什么与怎么量,以及每次测试的记录 |
 | [tests/README.md](../tests/README.md) | 测试分层与 LIVE 层 |
 
 ## 设计原则

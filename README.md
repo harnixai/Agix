@@ -117,7 +117,9 @@ How it was run:
 
 DSH is not part of this repository. How to install it and run the comparison
 yourself, and what each task and figure means:
-[`docs/benchmark_dsh.md`](docs/benchmark_dsh.md).
+[`docs/benchmark/compare_dsh.md`](docs/benchmark/compare_dsh.md). The full
+record of this run — versions, environment and every round:
+[`docs/benchmark/2026-11-15-agix-0.3.15-vs-dsh-0.2.2-rc.1.md`](docs/benchmark/2026-11-15-agix-0.3.15-vs-dsh-0.2.2-rc.1.md).
 
 ---
 
@@ -602,7 +604,7 @@ recording proxy. How each layer works and how to run it:
 | [docs/ptc.md](docs/ptc.md) | `RunCode`: what a model's program can call, its permissions, limits and prompt |
 | [docs/mcp_auth.md](docs/mcp_auth.md) | OAuth for remote MCP servers: configuration, sign-in flows, RPCs and events, credential storage, security |
 | [docs/schemas/settings.schema.json](docs/schemas/settings.schema.json) | the generated schema of `settings.json` |
-| [docs/benchmark_dsh.md](docs/benchmark_dsh.md) | the comparison against DeepSeek Harness: setup, the six tasks, what is measured and how |
+| [docs/benchmark/](docs/benchmark/compare_dsh.md) | the comparison against DeepSeek Harness: setup, the six tasks, what is measured and how, and the record of each run |
 | [tests/README.md](tests/README.md) | the test layers and the live tier |
 
 ## Design principles

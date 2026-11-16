@@ -137,7 +137,7 @@ prompt`）就报错——一条用例「过了」却在这里有记录，说明�
 各接一个录制代理，轮流各跑一遍，比 token、调用次数、墙钟、CPU 和内存，并用模型没见过的输入实际
 运行产物来判定对错。DSH 不在本仓库里，要先用 npm 装一份，再用 `AGIX_DSH_BIN` 指过去；它要一个
 `dsh` 启动器，所以不在 `real_model` 里，单独一个测试程序。怎么装、怎么跑、六个用例各测什么、
-每个指标怎么量、结果怎么读，见 [`docs/benchmark_dsh.md`](../docs/benchmark_dsh.md)。
+每个指标怎么量、结果怎么读，见 [`docs/benchmark/compare_dsh.md`](../docs/benchmark/compare_dsh.md)。
 
 **宿主的那一侧用 `Watcher` 看。** `LiveRun::watch` 开第二条连接只订阅会话，按到达顺序
 留下每一帧，每个询问连同当时的 `session.tasks` 记进 `asked()`；`approve` 为真时批准每个
