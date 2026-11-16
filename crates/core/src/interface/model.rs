@@ -546,6 +546,8 @@ pub enum ModelErrorKind {
     NotFound,
     /// 401, 403.
     Auth,
+    /// There was no credential to send, so nothing was sent.
+    NoCredentials,
     /// 402, or a body saying `billing_error`.
     Billing,
     /// The egress policy refused the connection.
@@ -576,6 +578,7 @@ impl ModelErrorKind {
             Self::InvalidRequest => "invalid_request",
             Self::NotFound => "not_found",
             Self::Auth => "auth",
+            Self::NoCredentials => "no_credentials",
             Self::Billing => "billing",
             Self::Denied => "denied",
             Self::ServerError => "server_error",

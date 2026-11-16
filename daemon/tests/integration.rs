@@ -30,6 +30,7 @@ mod mcp_config;
 mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;
+mod no_credentials;
 mod no_project_sessions;
 #[cfg(feature = "otel")]
 mod otel_traces;

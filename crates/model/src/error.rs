@@ -73,6 +73,10 @@ pub enum AnthropicError {
     /// 而 `Transport` 会被退避策略当成值得再试一次的那一类。
     #[error("refused by egress policy: {0}")]
     Denied(String),
+
+    /// 没有可用的凭据，请求没有发出。
+    #[error("{0}")]
+    NoCredentials(String),
 }
 
 impl AnthropicError {
@@ -91,6 +95,7 @@ impl AnthropicError {
             Self::Refused => ModelErrorKind::InvalidRequest,
             Self::Cancelled => ModelErrorKind::Cancelled,
             Self::Denied(_) => ModelErrorKind::Denied,
+            Self::NoCredentials(_) => ModelErrorKind::NoCredentials,
         }
     }
 
@@ -116,7 +121,8 @@ impl From<AnthropicError> for ModelError {
             | AnthropicError::Timeout(m)
             | AnthropicError::Sse(m)
             | AnthropicError::ParseError(m)
-            | AnthropicError::Denied(m) => (None, m),
+            | AnthropicError::Denied(m)
+            | AnthropicError::NoCredentials(m) => (None, m),
             AnthropicError::Transport(e) => (None, e.to_string()),
             other => (None, other.to_string()),
         };

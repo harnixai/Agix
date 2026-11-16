@@ -550,6 +550,8 @@ pub enum FailureKind {
     /// feature it does not serve.
     ModelRejected,
     Auth,
+    /// The provider has no credential configured; the request was not sent.
+    NoCredentials,
     Billing,
     EgressDenied,
     /// The provider failed in a way sending again will not fix.
@@ -571,6 +573,7 @@ impl FailureKind {
             Self::ContextTooLong => "context_too_long",
             Self::ModelRejected => "model_rejected",
             Self::Auth => "auth",
+            Self::NoCredentials => "no_credentials",
             Self::Billing => "billing",
             Self::EgressDenied => "egress_denied",
             Self::ModelError => "model_error",
@@ -608,6 +611,7 @@ impl From<crate::interface::model::ModelErrorKind> for FailureKind {
             M::ContextTooLong => Self::ContextTooLong,
             M::InvalidRequest | M::NotFound | M::Unsupported => Self::ModelRejected,
             M::Auth => Self::Auth,
+            M::NoCredentials => Self::NoCredentials,
             M::Billing => Self::Billing,
             M::Denied => Self::EgressDenied,
             M::ServerError | M::Protocol | M::Cancelled | M::NotRecorded => Self::ModelError,

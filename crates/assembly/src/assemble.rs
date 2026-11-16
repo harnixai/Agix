@@ -21,7 +21,7 @@ use std::time::Duration;
 use base::interface::credentials::CredentialSource;
 use base::interface::permission::PermissionPolicy;
 use base::interface::scene::SceneSpec;
-use model::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
+use model::client::{AnthropicClient, AuthMode, HttpAnthropicClient, NoCredentialsClient};
 use tracing::{info, warn};
 
 use crate::config::DaemonConfig;
@@ -279,9 +279,10 @@ fn validate_task_router_config(
 /// The client used when no provider routing applies: keyed from the
 /// environment, else from the host's source, asked for provider `"default"`.
 ///
-/// With no key anywhere it is still built, keyed with nothing: a daemon that
-/// cannot reach the default provider can still serve sessions routed to a
-/// configured one, and a turn that does reach it fails with an `auth` error.
+/// With no key anywhere (an empty one counts as none) it is a
+/// [`NoCredentialsClient`]: a daemon that cannot reach the default provider
+/// can still serve sessions routed to a configured one, and a turn that does
+/// reach it fails with `no_credentials` before anything is sent.
 fn default_anthropic_client(
     host: Option<&dyn CredentialSource>,
 ) -> anyhow::Result<Arc<dyn AnthropicClient>> {
@@ -292,25 +293,37 @@ fn default_anthropic_client(
             Some(host) => host.api_key("default", &none),
             None => Err(env),
         })
+        .ok()
         .map(|key| key.expose().to_string())
-        .unwrap_or_else(|_| {
-            warn!(
-                "no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, and the host supplied no \
-                 credentials: turns on the default provider will fail to authenticate"
-            );
-            String::new()
-        });
-    let auth = AuthMode::ApiKey(api_key);
-    Ok(match std::env::var("ANTHROPIC_BASE_URL").ok() {
+        .filter(|key| !key.is_empty());
+    let base = match std::env::var("ANTHROPIC_BASE_URL").ok() {
         Some(mut url) => {
             // Ensure trailing slash so Url::join appends instead of replacing
             if !url.ends_with('/') {
                 url.push('/');
             }
-            let base = reqwest::Url::parse(&url)
-                .map_err(|e| anyhow::anyhow!("invalid ANTHROPIC_BASE_URL: {e}"))?;
-            Arc::new(HttpAnthropicClient::with_base(auth, base)?)
+            Some(
+                reqwest::Url::parse(&url)
+                    .map_err(|e| anyhow::anyhow!("invalid ANTHROPIC_BASE_URL: {e}"))?,
+            )
         }
+        None => None,
+    };
+    let Some(api_key) = api_key else {
+        warn!(
+            "no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY, and the host supplied no \
+             credentials: turns on the default provider will fail with no_credentials"
+        );
+        return Ok(Arc::new(NoCredentialsClient::new(
+            "provider `default` has no API key: set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY \
+             (any non-empty value for an ANTHROPIC_BASE_URL gateway that needs none), configure \
+             a provider with `api_key` / `api_key_env` in settings, or have the host supply one \
+             through its CredentialSource; the request was not sent",
+        )));
+    };
+    let auth = AuthMode::ApiKey(api_key);
+    Ok(match base {
+        Some(base) => Arc::new(HttpAnthropicClient::with_base(auth, base)?),
         None => Arc::new(HttpAnthropicClient::new(auth)?),
     })
 }

@@ -3009,6 +3009,12 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 
 `api_key` 默认脱敏为 `***<末 4 位>`。
 
+没配 `providers` / `task_models.main` 时用的缺省客户端(provider id `default`),密钥依次取
+`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、宿主的 `CredentialSource`。都没有时 daemon 照样启动,
+走它的每一次模型调用(主轮、子 Agent、压缩、记忆提取)都不发请求,这一轮以 `no_credentials`
+(§9.1)结束。`ANTHROPIC_BASE_URL` 指向不需要密钥的网关时也要给一个任意非空值,与 `providers`
+里配的 provider 缺 key 时建不出来一致。
+
 ```jsonc
 // setProvider 的 params
 { "tier": "project",                                   // 可选;"project"(缺省)| "global"
@@ -3957,6 +3963,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `context_too_long` | 请求因过长被拒,压缩之后还是不行 | `false` |
 | `model_rejected` | 请求被拒:其余 4xx、模型不存在、厂商做不了这件事 | `false` |
 | `auth` | 401、403 | `false` |
+| `no_credentials` | 这一轮要用的 provider 没有可用的密钥,请求没有发出,提示词没有离开本机;`message` 说明是哪个 provider(缺省客户端是 `default`)缺什么、去哪配 | `false` |
 | `billing` | 402、余额不足 | `false` |
 | `egress_denied` | 出口策略不允许连这个模型服务 | `false` |
 | `model_error` | 其余 5xx,或响应读不懂 | `false` |

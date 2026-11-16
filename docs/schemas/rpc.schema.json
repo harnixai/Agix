@@ -2570,6 +2570,11 @@
           "type": "string"
         },
         {
+          "const": "no_credentials",
+          "description": "The provider has no credential configured; the request was not sent.",
+          "type": "string"
+        },
+        {
           "const": "model_error",
           "description": "The provider failed in a way sending again will not fix.",
           "type": "string"

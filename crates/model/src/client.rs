@@ -392,6 +392,31 @@ impl AnthropicClient for HttpAnthropicClient {
     }
 }
 
+/// Stands where a client would be when there is no credential to give it:
+/// every call fails with `NoCredentials` and nothing leaves the machine.
+pub struct NoCredentialsClient {
+    message: String,
+}
+
+impl NoCredentialsClient {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl AnthropicClient for NoCredentialsClient {
+    fn stream_messages(&self, _req: MessagesRequest) -> EventStream {
+        let error = AnthropicError::NoCredentials(self.message.clone());
+        Box::pin(futures::stream::once(async move { Err(error) }))
+    }
+
+    fn count_tokens<'a>(&'a self, req: &'a MessagesRequest) -> CountFuture<'a> {
+        Box::pin(async move { Ok(crate::tokens::estimate_input_tokens(req)) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
