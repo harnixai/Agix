@@ -1,6 +1,6 @@
 //! `config.*` 的 params，以及配置类方法共用的定位参数 [`ConfigTarget`]。
 
-use crate::session_pool::api::ConfigTierName;
+use crate::session_pool::api::{ConfigTierName, ProviderTier};
 use serde::{Deserialize, Deserializer};
 use std::path::PathBuf;
 
@@ -50,8 +50,13 @@ pub struct ConfigGetProviderParams {
 pub struct ConfigSetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,
+    #[serde(default)]
+    pub tier: ProviderTier,
+    /// Work out what the write would do, and write nothing.
+    #[serde(default)]
+    pub dry_run: bool,
     pub provider_id: String,
-    /// A partial patch merged key by key onto the project tier's entry.
+    /// A partial patch merged key by key onto `tier`'s entry.
     #[serde(default)]
     pub config: Option<serde_json::Value>,
     #[serde(default)]

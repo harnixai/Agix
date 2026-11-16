@@ -18,7 +18,7 @@ pub(in crate::session_pool) use host_dirs::{report_skill_dirs, AcceptedDir, Host
 pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
-use crate::settings_source::read_pair;
+use crate::settings_source::{read_pair, read_pair_as_if};
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
 use model::client::AnthropicClient;
 use settings::LoadedSettings;
@@ -251,6 +251,48 @@ impl BindingCache {
         })
         .await;
         self.layers.over(loaded, own)
+    }
+
+    /// What `project`'s pair would be read as with each `(path, value)` of
+    /// `in_memory` in place of that settings file — the host's and managed
+    /// layers on top — and the routing it would build, from nothing it was
+    /// served by before. Nothing on disk, in the cache or in the pool's own
+    /// settings changes.
+    pub(in crate::session_pool) async fn as_if(
+        &self,
+        project: &Path,
+        scene: &str,
+        in_memory: Vec<(PathBuf, serde_json::Value)>,
+    ) -> (LoadedSettings, binding::RoutingReport) {
+        let own = self.is_own_pair(Some(project), scene).await;
+        let startup_scene = self.startup_scene().await;
+        let default_model = self.settings.read().await.values.model.model_name.clone();
+        let (global_root, scene_root, scene, project, fallback) = (
+            self.paths.global_root(),
+            self.scene_root(scene, &startup_scene),
+            scene.to_string(),
+            project.to_path_buf(),
+            self.layers.max_tokens_fallback,
+        );
+        let loaded = off_the_runtime(move || {
+            read_pair_as_if(
+                in_memory,
+                global_root,
+                scene_root,
+                &project,
+                &scene,
+                &default_model,
+                fallback,
+            )
+        })
+        .await;
+        let loaded = self.layers.over(loaded, own);
+        let credentials = self.credentials.clone();
+        off_the_runtime(move || {
+            let (_, routing) = binding::resolve_router(&loaded.values, None, &credentials);
+            (loaded, routing)
+        })
+        .await
     }
 
     /// Whether `(project_root, scene_id)` is this daemon's own pair.

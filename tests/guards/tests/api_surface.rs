@@ -439,6 +439,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("PromptContent", HOST_INPUT),
     ("PromptDecision", HOST_ANSWER),
     ("PromptDelivery", HOST_ANSWER),
+    ("ProviderTier", HOST_INPUT),
     ("ReadScope", SANDBOX),
     ("RecorderMode", SETTING),
     ("Recovery", HOST_ANSWER),

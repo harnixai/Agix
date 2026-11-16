@@ -49,6 +49,8 @@ async fn set_provider(
             project_root.as_deref(),
             &scene,
             ProviderPatch {
+                tier: params.tier,
+                dry_run: params.dry_run,
                 provider_id: params.provider_id,
                 delete: params.delete,
                 config: params.config,

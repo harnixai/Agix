@@ -18,6 +18,18 @@ pub enum ConfigTierName {
     Effective,
 }
 
+/// Which settings layer `config.setProvider` writes.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderTier {
+    #[default]
+    Project,
+    /// The state root's own, under every scene and project.
+    Global,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConfigTier {
     pub scene: String,
@@ -72,6 +84,10 @@ pub struct SettingsReloaded {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderSaved {
+    pub tier: ProviderTier,
+    /// Nothing was written: `written_to`, `secrets_written_to` and the rest
+    /// are what the write would have done.
+    pub dry_run: bool,
     pub written_to: String,
     /// Set when a credential was written, to the `settings.local.json`
     /// beside `written_to`.
@@ -84,6 +100,8 @@ pub struct ProviderSaved {
 /// What `set_provider` is asked to write.
 #[derive(Debug, Clone)]
 pub struct ProviderPatch {
+    pub tier: ProviderTier,
+    pub dry_run: bool,
     pub provider_id: String,
     pub delete: bool,
     pub config: Option<serde_json::Value>,

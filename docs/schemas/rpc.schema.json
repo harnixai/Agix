@@ -1268,7 +1268,7 @@
       "properties": {
         "config": {
           "default": null,
-          "description": "A partial patch merged key by key onto the project tier's entry."
+          "description": "A partial patch merged key by key onto `tier`'s entry."
         },
         "default_provider": {
           "default": null,
@@ -1280,6 +1280,11 @@
         "delete": {
           "default": false,
           "description": "Remove the provider instead of merging.",
+          "type": "boolean"
+        },
+        "dry_run": {
+          "default": false,
+          "description": "Work out what the write would do, and write nothing.",
           "type": "boolean"
         },
         "project_root": {
@@ -1302,6 +1307,10 @@
         "task_models": {
           "default": null,
           "description": "A partial patch merged key by key."
+        },
+        "tier": {
+          "$ref": "#/$defs/ProviderTier",
+          "default": "project"
         }
       },
       "required": [
@@ -4714,6 +4723,10 @@
             "null"
           ]
         },
+        "dry_run": {
+          "description": "Nothing was written: `written_to`, `secrets_written_to` and the rest\nare what the write would have done.",
+          "type": "boolean"
+        },
         "providers": {
           "items": {
             "type": "string"
@@ -4736,17 +4749,38 @@
           },
           "type": "array"
         },
+        "tier": {
+          "$ref": "#/$defs/ProviderTier"
+        },
         "written_to": {
           "type": "string"
         }
       },
       "required": [
+        "tier",
+        "dry_run",
         "written_to",
         "providers",
         "task_models",
         "routing"
       ],
       "type": "object"
+    },
+    "ProviderTier": {
+      "description": "Which settings layer `config.setProvider` writes.",
+      "oneOf": [
+        {
+          "enum": [
+            "project"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "The state root's own, under every scene and project.",
+          "type": "string"
+        }
+      ]
     },
     "ProviderView": {
       "properties": {

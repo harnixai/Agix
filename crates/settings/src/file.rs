@@ -71,25 +71,7 @@ impl SettingsDir {
     /// The file's top-level object; empty when it does not exist or has
     /// nothing in it.
     pub fn read(&self, file: &str) -> Result<Map<String, Value>, SettingsFileError> {
-        let path = self.path(file);
-        refuse_symlink(&path)?;
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
-            Err(source) => return Err(SettingsFileError::Io { path, source }),
-        };
-        if bytes.iter().all(u8::is_ascii_whitespace) {
-            return Ok(Map::new());
-        }
-        let parsed: Value =
-            serde_json::from_slice(&bytes).map_err(|source| SettingsFileError::NotJson {
-                path: path.clone(),
-                source,
-            })?;
-        match parsed {
-            Value::Object(fields) => Ok(fields),
-            _ => Err(SettingsFileError::NotObject { path }),
-        }
+        read_object(&self.path(file))
     }
 
     pub fn write(&self, file: &str, value: &Map<String, Value>) -> Result<(), SettingsFileError> {
@@ -112,6 +94,36 @@ impl SettingsDir {
             base::paths::ensure_local_data_gitignore(self.lock.dir());
         }
         Ok(())
+    }
+}
+
+/// What [`SettingsDir::read`] reads, without holding the directory or creating
+/// it: for a caller that only looks at what a write would start from.
+pub fn read_object(path: &Path) -> Result<Map<String, Value>, SettingsFileError> {
+    refuse_symlink(path)?;
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(source) => {
+            return Err(SettingsFileError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Map::new());
+    }
+    let parsed: Value =
+        serde_json::from_slice(&bytes).map_err(|source| SettingsFileError::NotJson {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    match parsed {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(SettingsFileError::NotObject {
+            path: path.to_path_buf(),
+        }),
     }
 }
 

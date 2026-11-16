@@ -1,5 +1,6 @@
 //! The files-on-disk [`ConfigSource`]: three directories, each with its
-//! gitignored overlay.
+//! gitignored overlay, and any of those files replaced by JSON held in memory
+//! — what a write would make of them, read without making it.
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,7 @@ pub struct FileTiers {
     global_dir: PathBuf,
     scene_dir: PathBuf,
     local_dir: PathBuf,
+    in_memory: Vec<(PathBuf, serde_json::Value)>,
 }
 
 impl FileTiers {
@@ -19,7 +21,17 @@ impl FileTiers {
             global_dir,
             scene_dir,
             local_dir,
+            in_memory: Vec::new(),
         }
+    }
+
+    /// Read `value` wherever the file at `path` would be read, whether or not
+    /// it exists. `path` is compared as given: a tier's directory joined with
+    /// the file's name.
+    pub fn with_contents(mut self, path: PathBuf, value: serde_json::Value) -> Self {
+        self.in_memory.retain(|(held, _)| *held != path);
+        self.in_memory.push((path, value));
+        self
     }
 }
 
@@ -47,7 +59,12 @@ impl ConfigSource for FileTiers {
             };
             for (file, machine_local) in [(SETTINGS_FILE, false), (SETTINGS_LOCAL_FILE, true)] {
                 let path = dir.join(file);
-                if let Some(value) = read_settings_file(tier, &path, &links_may_reach) {
+                let held = self.in_memory.iter().find(|(held, _)| *held == path);
+                let value = match held {
+                    Some((_, value)) => Some(value.clone()),
+                    None => read_settings_file(tier, &path, &links_may_reach),
+                };
+                if let Some(value) = value {
                     layers.push(ConfigLayer {
                         tier,
                         machine_local,
@@ -179,6 +196,32 @@ mod tests {
             layers.iter().map(|l| &l.origin).collect::<Vec<_>>()
         );
         assert_eq!(layers[0].value["a"], 1);
+    }
+
+    #[test]
+    fn contents_held_in_memory_stand_in_for_the_file_present_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(SETTINGS_FILE), r#"{"a":1}"#).unwrap();
+        let source = FileTiers::new(
+            dir.path().to_path_buf(),
+            dir.path().join("absent"),
+            dir.path().join("absent"),
+        )
+        .with_contents(dir.path().join(SETTINGS_FILE), serde_json::json!({"a": 2}))
+        .with_contents(
+            dir.path().join("absent").join(SETTINGS_LOCAL_FILE),
+            serde_json::json!({"b": 3}),
+        );
+
+        let layers = source.layers();
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].value["a"], 2);
+        assert_eq!(layers[1].tier, Tier::Project);
+        assert_eq!(layers[1].value["b"], 3);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap(),
+            r#"{"a":1}"#
+        );
     }
 
     #[test]

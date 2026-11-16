@@ -1974,7 +1974,8 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 绑定与 MCP 连接重建,发 `project_trust_changed` 通知。`project.trust` 只收绝对路径,记下的是
 解析之后的真实目录,其中的 glob 元字符(`*`、`?`、`[` 等)转义掉——`Project [v2]` 这一条只
 命中它自己。往未信任项目的项目层里写配置的方法(`mcp.addServer` / `mcp.updateServer`、
-`config.setProvider`)以 `PROJECT_UNTRUSTED` 拒绝,什么都不写:写进去也不会生效。
+`config.setProvider`)以 `PROJECT_UNTRUSTED` 拒绝,什么都不写:写进去也不会生效;
+`config.setProvider` 的 `tier:"global"` 写全局层,不看项目信任。
 `session.create` / `session.resume` 的结果带 `project_trust` 与 `trust_source`(`default`:由
 `default` 决定;`user`:全局 `settings.json` 里的条目;`host`:全局 `settings.local.json` 里的条目,
 `project.trust` 写在这里),`project.status` 也带 `trust_source`,宿主不必另查。

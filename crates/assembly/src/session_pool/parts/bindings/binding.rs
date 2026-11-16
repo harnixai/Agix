@@ -226,7 +226,7 @@ pub(in crate::session_pool) struct RoutingReport {
 /// (`api_type: openai_compatible` is accepted by the schema and has no
 /// runtime implementation), keeps it rather than tearing working routing down
 /// over a bad edit — the failure is reported, not acted on.
-fn resolve_router(
+pub(super) fn resolve_router(
     settings: &Settings,
     last_good: Option<Arc<base::provider::TaskRouter>>,
     credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
@@ -266,14 +266,22 @@ fn resolve_router(
                     // `resolve_task_models` itself succeeded (the warnings
                     // above already reflect that), only the build step
                     // failed; see `RoutingReport`'s doc comment.
-                    warn!(error = %e, "task router build failed; keeping the previous router");
+                    if last_good.is_some() {
+                        warn!(error = %e, "task router build failed; keeping the previous router");
+                    } else {
+                        warn!(error = %e, "task router build failed; no router");
+                    }
                     report.router_error = Some(e);
                     (last_good, report)
                 }
             }
         }
         Err(e) => {
-            warn!(error = %e, "provider config no longer resolves; keeping the previous router");
+            if last_good.is_some() {
+                warn!(error = %e, "provider config no longer resolves; keeping the previous router");
+            } else {
+                warn!(error = %e, "provider config does not resolve; no router");
+            }
             report.error = Some(e);
             (last_good, report)
         }

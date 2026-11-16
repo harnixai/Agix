@@ -576,7 +576,7 @@ TCP 与 WebSocket 需要(开了 `--unix-socket-auth` 时 unix socket 也要),都
 
 认证粒度是 **daemon 级**,不按场景或会话签发 —— 一条通过认证的连接可以访问这个
 daemon 的全部场景与会话,而且**没有任何逐方法的授权**。特别地,
-`config.setProvider` 能把后续所有模型流量指向调用方给的 `base_url`/`api_key`;
+`config.setProvider` 能把后续所有模型流量指向调用方给的 `base_url`/`api_key`(`tier:"global"` 时是所有项目的);
 把 socket 或 token 暴露出去,等同于暴露模型凭据本身。连接不加密(§1),token 在不可信的
 网络上一过就算泄露了。
 
@@ -808,6 +808,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
+| `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
 #### `daemon.status`
@@ -2953,8 +2954,9 @@ skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 
 
 两者都接受 `scene` / `project_root` 定位参数,语义与 `config.reload` 一致:省略 = 这个
 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
-`setProvider` 写的是**被指定项目**的 `{project_root}/.agix/settings.json`,
-`written_to` 回的就是那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目的 `.agix` 借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
+`setProvider` 缺省写**被指定项目**的 `{project_root}/.agix/settings.json`(`tier:"project"`),
+`tier:"global"` 写全局层的 `settings.json`(`config.get` 的 `global` 那一份,对所有场景、所有项目生效);
+`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目的 `.agix` 借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
 
 **provider 路由是按 `(项目, 场景)` 解析的**:一个项目在自己的 settings 里配了
 `providers` / `task_models`,它的会话就走它自己的路由,不是 daemon 那个项目的。
@@ -2974,7 +2976,9 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 
 ```jsonc
 // setProvider 的 params
-{ "provider_id": "deepseek",
+{ "tier": "project",                                   // 可选;"project"(缺省)| "global"
+  "dry_run": false,                                    // 可选;true = 只试算,不写
+  "provider_id": "deepseek",
   "config": { "api_type":"openai_compatible", "base_url":"…",
               "api_key":"…", "default_model":"…" },   // 部分补丁,逐键 merge
   "default_provider": "deepseek",                      // 可选
@@ -2982,22 +2986,34 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
   "delete": false }                                    // 可选;true = 删掉这个 provider
 ```
 
-响应是 `config.reload` 的结果再加 `written_to`(写入的 settings.json)和
-`secrets_written_to`(写了密钥时才有,即那个 settings.local.json)。
+响应是 `config.reload` 的结果再加 `tier`、`dry_run`、`written_to`(写入的 settings.json)和
+`secrets_written_to`(写了密钥时才有,即那个 settings.local.json)。`routing` 与其余字段
+报的是定位参数指的那一对(scene, 项目)写完之后的样子。
 
-**总是写项目层**(daemon 默认项目下的 `.agix/`),没有选层的参数。`config` /
-`task_models` 是部分补丁:只提到的键被覆盖,没提到的保持原样。
+只有这两层:场景层不能经它写。`config` / `task_models` 是部分补丁:只提到的键被覆盖,没提到的
+保持原样。`delete: true` 同样作用于 `tier` 指的那一层。
 
 **密钥不进 settings.json。** `config.api_key` 写进项目层的 `settings.local.json` —— 这个
 文件按约定不提交,在 unix 上每次写都是 0600;其余字段照旧写 settings.json。settings.json 里
 这个 provider 已有的 `api_key`(早先版本写进去的)在这次写入时挪进 settings.local.json。
 `delete: true` 从两个文件里都删掉这个 provider。
 
-目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,什么都不写:项目层的 `providers` 在未信任时
-不生效。要给它配 provider,先 `project.trust`,或者配在全局层。
+`tier:"project"` 而目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,什么都不写:项目层的
+`providers` 在未信任时不生效。要给它配 provider,先 `project.trust`,或者用 `tier:"global"`
+配在全局层——全局层是用户自己的,不看项目信任。写全局层之后,daemon 自己那一对的设置重读,所有
+`(scene, 项目)` 的绑定作废,已有会话在下一轮前换上新配置。
 
-两个文件在同一把锁下读改写(与 `mcp.addServer`、`project.trust`、权限询问里的"永久允许"
-是同一把,跨进程也互斥),各自写临时文件再改名替换,先写 `settings.local.json`。设置文件是
+**`dry_run: true`**:做写入之前的全部检查(参数、项目信任、`.agix` 是否借用全局 / 场景层),
+读出那一层的两个文件、在内存里套上补丁,按会写成的样子与其余各层合并、解析 provider 路由、
+建出 client(不发网络请求)。哪个文件都不写、不建目录、不拿锁,也不动正在用的配置。
+套上之后路由解析不了或 client 建不出来(比如写错的 `api_type`、`openai_compatible` 缺
+`base_url`、没有 `api_key`)→ `INVALID_PARAMS`,消息里是原因;能用时回的结果与真写一样,
+`dry_run` 为 `true`,`written_to` / `secrets_written_to` 是会写的路径,`routing.mcp_*` 为空。
+所以宿主可以先 `dry_run` 再写,确认这一对 `(项目, 场景)` 的配置能用。检查只覆盖这一对:`tier:"global"` 的改动同样会进入其他项目与场景的合并结果,它们自己那几层是否依赖这处改动,`dry_run` 不检查。真写不因路由解析不了而拒绝:
+文件照写,`routing.error` / `routing.router_error` 报原因,已经在用的路由保留。
+
+两个文件在那一层目录的锁下读改写(与 `mcp.addServer`、`project.trust`、权限询问里的"永久允许"
+是同一把,跨进程也互斥;宿主自己改那一层的文件时对目录 `flock(LOCK_EX)` 就与引擎互斥),各自写临时文件再改名替换,先写 `settings.local.json`。设置文件是
 符号链接的,不顺着写也不替换,以 `INVALID_PARAMS` 拒绝,消息里写明是哪个文件。
 
 ### 6.5 `mcp.*` / `plugin.*` / `import.*` / `commands.*`
@@ -3824,7 +3840,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `execution.max_concurrent_subagents`,或委派已到最深 |
 | -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
-| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`:目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
+| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写(§9.1) |
