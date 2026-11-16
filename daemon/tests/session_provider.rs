@@ -46,7 +46,7 @@ fn provider(models: &[&str]) -> base::provider::ProviderConfig {
         api_key: Some("unused".into()),
         api_key_env: None,
         default_model: models.first().map(|m| m.to_string()),
-        models: models.iter().map(|m| m.to_string()).collect(),
+        models: models.iter().map(|m| (*m).into()).collect(),
         ..Default::default()
     }
 }

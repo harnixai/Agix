@@ -307,6 +307,16 @@ impl BindingCache {
             .is_ok_and(|key| !key.is_empty())
     }
 
+    /// The key the credential source provider clients are built with yields
+    /// for this provider.
+    pub(in crate::session_pool) fn api_key(
+        &self,
+        provider_id: &str,
+        config: &base::provider::ProviderConfig,
+    ) -> Result<base::interface::credentials::Secret, String> {
+        self.credentials.api_key(provider_id, config)
+    }
+
     /// Whether `(project_root, scene_id)` is this daemon's own pair.
     pub(in crate::session_pool) async fn is_own_pair(
         &self,

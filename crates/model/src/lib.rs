@@ -16,6 +16,7 @@
 
 pub mod adapter;
 mod cancel;
+pub mod catalog;
 pub mod client;
 pub mod error;
 pub mod factory;

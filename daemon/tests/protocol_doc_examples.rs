@@ -606,6 +606,11 @@ async fn the_documented_shutdown_result_is_real() {
 /// and why.
 const NOT_COMPARED: &[(&str, &str)] = &[
     (
+        "config.listModels",
+        "the answer is whatever a provider's endpoint lists; daemon/tests/list_models.rs \
+         compares it against stub endpoints",
+    ),
+    (
         "session.import",
         "`id_map` is keyed by the archive's own session ids, which an example cannot name; \
          daemon/tests/session_import.rs holds the shape",

@@ -1313,6 +1313,32 @@
       },
       "type": "object"
     },
+    "ConfigListModelsParams": {
+      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "properties": {
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
     "ConfigSetProviderParams": {
       "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
       "properties": {
@@ -3566,6 +3592,56 @@
       },
       "type": "object"
     },
+    "ListedModel": {
+      "description": "One model a provider's endpoint lists, with only what the endpoint said.",
+      "properties": {
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "max_output": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "description": "Whether the model reasons, when the endpoint says.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "LogReport": {
       "properties": {
         "behind": {
@@ -4122,6 +4198,37 @@
       ],
       "type": "object"
     },
+    "ModelEntry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/ModelSpec"
+        }
+      ],
+      "description": "One entry of a provider's `models`."
+    },
+    "ModelList": {
+      "description": "What a provider's endpoint lists, as `config.listModels` answers.",
+      "properties": {
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ListedModel"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "The endpoint had more pages than are read; `models` is the first of them.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "models",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "ModelReport": {
       "properties": {
         "api_type": {
@@ -4134,6 +4241,53 @@
       "required": [
         "model_name",
         "api_type"
+      ],
+      "type": "object"
+    },
+    "ModelSpec": {
+      "description": "A model with what the engine should know about it beyond its id.\n\n`context_window` and `max_output` are applied to the model's calls;\n`reasoning_levels` and `input_types` are kept and reported; nothing in\nthe engine decides by them.",
+      "properties": {
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "max_output": {
+          "description": "The most `max_tokens` a call to this model is sent with.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoning_levels": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
       ],
       "type": "object"
     },
@@ -4917,7 +5071,7 @@
         },
         "models": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ModelEntry"
           },
           "type": "array"
         },
@@ -8474,6 +8628,10 @@
     {
       "code": -32026,
       "name": "SETTINGS_LOCKED"
+    },
+    {
+      "code": -32027,
+      "name": "MODELS_UNSUPPORTED"
     }
   ],
   "frames": {
@@ -8510,6 +8668,14 @@
       },
       "result": {
         "$ref": "#/$defs/ProviderConfigView"
+      }
+    },
+    "config.listModels": {
+      "params": {
+        "$ref": "#/$defs/ConfigListModelsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ModelList"
       }
     },
     "config.reload": {

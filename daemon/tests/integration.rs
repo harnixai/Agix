@@ -23,6 +23,7 @@ mod host_scenes;
 mod host_tools;
 mod inline_command_pipeline;
 mod instruction_files;
+mod list_models;
 mod managed_settings;
 mod max_tokens_fallback;
 mod max_tokens_recovery;

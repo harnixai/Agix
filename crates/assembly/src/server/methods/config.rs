@@ -2,17 +2,18 @@
 
 use super::*;
 use crate::rpc::methods::config::{
-    ConfigGetParams, ConfigGetProviderParams, ConfigSetProviderParams,
+    ConfigGetParams, ConfigGetProviderParams, ConfigListModelsParams, ConfigSetProviderParams,
 };
 use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
-    ConfigTier, ProviderConfigView, ProviderPatch, ProviderSaved, SettingsReloaded,
+    ConfigTier, ModelList, ProviderConfigView, ProviderPatch, ProviderSaved, SettingsReloaded,
 };
 
 rpc_methods! {
     "config.get" => get(ConfigGetParams) -> ConfigTier;
     "config.getProvider" => get_provider(ConfigGetProviderParams) -> ProviderConfigView;
     "config.setProvider" => set_provider(ConfigSetProviderParams) -> ProviderSaved;
+    "config.listModels" => list_models(ConfigListModelsParams) -> ModelList;
     "config.reload" => reload(ConfigTarget) -> SettingsReloaded;
 }
 
@@ -36,6 +37,23 @@ async fn get_provider(
     Ok(s.pool
         .get_providers(project_root.as_deref(), &scene, params.include_secrets)
         .await)
+}
+
+/// Abandoned when the connection that asked goes away, or the daemon stops.
+async fn list_models(
+    s: &DaemonServer,
+    cx: &Call,
+    params: ConfigListModelsParams,
+) -> Result<ModelList, PoolError> {
+    let (project_root, scene) = s.target_of(params.target);
+    let listing = s
+        .pool
+        .list_models(project_root.as_deref(), &scene, &params.provider);
+    tokio::select! {
+        listed = listing => listed,
+        _ = cx.client.closed() => Err(PoolError::Internal("the connection closed".into())),
+        _ = s.shutdown_token.cancelled() => Err(PoolError::Internal("the daemon is stopping".into())),
+    }
 }
 
 async fn set_provider(

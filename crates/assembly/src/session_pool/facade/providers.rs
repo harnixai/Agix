@@ -1,5 +1,5 @@
 //! provider 配置的读写：`get_providers`、`set_provider`（写项目层或全局层，或只试算不写），
-//! 以及 provider 里密钥的拆出。
+//! provider 里密钥的拆出，以及向 provider 端点问它有哪些模型的 `list_models`。
 
 use crate::session_pool::*;
 
@@ -56,6 +56,50 @@ impl SessionPool {
             providers,
             default_provider: settings.values.default_provider.clone(),
             task_models: settings.values.task_models.clone().into_iter().collect(),
+        }
+    }
+
+    /// `config.listModels`: the models `provider_id`'s endpoint lists, asked
+    /// with the credential its client is built with. Without one nothing is
+    /// sent.
+    pub async fn list_models(
+        &self,
+        project_root: Option<&Path>,
+        scene_id: &str,
+        provider_id: &str,
+    ) -> Result<api::ModelList, PoolError> {
+        use base::event::TurnFailure;
+        use model::catalog::ListModelsError;
+        let settings = self
+            .binding_for(Some(project_root.unwrap_or(self.cwd())), scene_id)
+            .await
+            .settings
+            .clone();
+        let Some(cfg) = settings.values.providers.get(provider_id) else {
+            return Err(PoolError::InvalidRequest(format!(
+                "provider `{provider_id}` is not configured"
+            )));
+        };
+        let key = match self.bindings.api_key(provider_id, cfg) {
+            Ok(key) if !key.is_empty() => key,
+            Ok(_) => return Err(no_key(provider_id, "its key is empty")),
+            Err(reason) => return Err(no_key(provider_id, &reason)),
+        };
+        let api_type = cfg.api_type.as_deref().unwrap_or("anthropic");
+        let network = platform::LocalNetwork::default();
+        match model::catalog::list_models(api_type, cfg.base_url.as_deref(), &key, &network).await {
+            Ok(listing) => Ok(api::ModelList {
+                models: listing.models,
+                truncated: listing.truncated,
+            }),
+            Err(ListModelsError::Unsupported(why)) => Err(PoolError::ModelsUnsupported(format!(
+                "provider `{provider_id}` does not list its models: {why}"
+            ))),
+            Err(ListModelsError::Failed(e)) => {
+                let mut failure = TurnFailure::model(&e, false);
+                failure.message = format!("provider `{provider_id}`: {}", failure.message);
+                Err(PoolError::Engine(failure))
+            }
         }
     }
 
@@ -199,6 +243,19 @@ impl SessionPool {
             reloaded: settings_reloaded(&settings.values, status),
         })
     }
+}
+
+/// The refusal `list_models` gives a provider with no credential, the kind a
+/// turn on it would fail with.
+fn no_key(provider_id: &str, reason: &str) -> PoolError {
+    PoolError::Engine(base::event::TurnFailure::new(
+        base::event::FailureKind::NoCredentials,
+        format!(
+            "provider `{provider_id}` has no API key ({reason}): set its `api_key` or \
+             `api_key_env`, or have the host supply one through its CredentialSource; \
+             the request was not sent"
+        ),
+    ))
 }
 
 fn check_provider_patch(patch: &api::ProviderPatch) -> Result<(), PoolError> {

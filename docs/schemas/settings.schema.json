@@ -211,6 +211,17 @@
         }
       ]
     },
+    "ModelEntry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/ModelSpec"
+        }
+      ],
+      "description": "One entry of a provider's `models`."
+    },
     "ModelSettings": {
       "description": "LLM model configuration for a single provider.",
       "properties": {
@@ -266,6 +277,53 @@
           "$ref": "#/$defs/ThinkingMode"
         }
       },
+      "type": "object"
+    },
+    "ModelSpec": {
+      "description": "A model with what the engine should know about it beyond its id.\n\n`context_window` and `max_output` are applied to the model's calls;\n`reasoning_levels` and `input_types` are kept and reported; nothing in\nthe engine decides by them.",
+      "properties": {
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "max_output": {
+          "description": "The most `max_tokens` a call to this model is sent with.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoning_levels": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
       "type": "object"
     },
     "NetworkMode": {
@@ -452,9 +510,9 @@
         },
         "models": {
           "default": [],
-          "description": "Allow-list used purely to *filter* an explicitly-requested model name;\nit is not a live catalog fetched from the provider. Empty = no\nfiltering, any model name is accepted as-is.",
+          "description": "The models this provider serves, each a bare id or an id with what the\nengine should know about it. The ids filter an explicitly requested\nmodel name; empty accepts any name. Not fetched from the provider —\n`config.listModels` does that, on request.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ModelEntry"
           },
           "type": "array"
         },

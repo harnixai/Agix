@@ -47,6 +47,13 @@ pub struct ConfigGetProviderParams {
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ConfigListModelsParams {
+    #[serde(flatten)]
+    pub target: ConfigTarget,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct ConfigSetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,

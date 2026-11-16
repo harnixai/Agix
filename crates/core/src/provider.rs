@@ -54,11 +54,12 @@ pub struct ProviderConfig {
     /// Model used when a task_models override doesn't name one explicitly,
     /// or when a named model fails the `models` allow-list check below.
     pub default_model: Option<String>,
-    /// Allow-list used purely to *filter* an explicitly-requested model name;
-    /// it is not a live catalog fetched from the provider. Empty = no
-    /// filtering, any model name is accepted as-is.
+    /// The models this provider serves, each a bare id or an id with what the
+    /// engine should know about it. The ids filter an explicitly requested
+    /// model name; empty accepts any name. Not fetched from the provider —
+    /// `config.listModels` does that, on request.
     #[serde(default)]
-    pub models: Vec<String>,
+    pub models: Vec<ModelEntry>,
     /// OpenAI-compatible only: echo the model's `reasoning_content` back on
     /// the assistant messages of the current tool loop. DeepSeek's thinking
     /// mode requires it; OpenAI itself and older reasoners reject it, hence
@@ -68,6 +69,115 @@ pub struct ProviderConfig {
     /// or off when `thinking_mode` is not `auto`. Unset sends nothing — Chat
     /// Completions has no standard field for it.
     pub thinking_toggle: Option<ThinkingToggle>,
+}
+
+/// One entry of a provider's `models`.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum ModelEntry {
+    Id(String),
+    Spec(ModelSpec),
+}
+
+/// A model with what the engine should know about it beyond its id.
+///
+/// `context_window` and `max_output` are applied to the model's calls;
+/// `reasoning_levels` and `input_types` are kept and reported; nothing in
+/// the engine decides by them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelSpec {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    /// The most `max_tokens` a call to this model is sent with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_levels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_types: Option<Vec<String>>,
+}
+
+impl ModelEntry {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Id(id) => id,
+            Self::Spec(spec) => &spec.id,
+        }
+    }
+
+    pub fn spec(&self) -> Option<&ModelSpec> {
+        match self {
+            Self::Id(_) => None,
+            Self::Spec(spec) => Some(spec),
+        }
+    }
+}
+
+impl From<&str> for ModelEntry {
+    fn from(id: &str) -> Self {
+        Self::Id(id.to_string())
+    }
+}
+
+impl From<String> for ModelEntry {
+    fn from(id: String) -> Self {
+        Self::Id(id)
+    }
+}
+
+/// By hand rather than `untagged`, so a malformed entry says what is wrong
+/// with it instead of that it matched no variant.
+impl<'de> Deserialize<'de> for ModelEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        match serde_json::Value::deserialize(d)? {
+            serde_json::Value::String(id) => Ok(Self::Id(id)),
+            object @ serde_json::Value::Object(_) => serde_json::from_value(object)
+                .map(Self::Spec)
+                .map_err(|e| D::Error::custom(format!("a model entry: {e}"))),
+            _ => Err(D::Error::custom(
+                "a model entry is an id string or an object with `id`",
+            )),
+        }
+    }
+}
+
+impl ProviderConfig {
+    /// Whether `model` may be sent to this provider: listed, or nothing is.
+    pub fn accepts_model(&self, model: &str) -> bool {
+        self.models.is_empty() || self.models.iter().any(|m| m.id() == model)
+    }
+
+    pub fn model_ids(&self) -> Vec<&str> {
+        self.models.iter().map(ModelEntry::id).collect()
+    }
+
+    /// What `models` says about `model` beyond its id, if anything.
+    pub fn model_spec(&self, model: &str) -> Option<&ModelSpec> {
+        self.models
+            .iter()
+            .find(|m| m.id() == model)
+            .and_then(ModelEntry::spec)
+    }
+}
+
+/// One model a provider's endpoint lists, with only what the endpoint said.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ListedModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_types: Option<Vec<String>>,
+    /// Whether the model reasons, when the endpoint says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<bool>,
 }
 
 /// The request fields OpenAI-compatible endpoints use to switch thinking.
@@ -203,25 +313,21 @@ pub fn resolve_task_models(
                 ));
                 default_model.clone()
             }),
-            Some(m)
-                if provider_cfg.models.is_empty() || provider_cfg.models.iter().any(|x| x == m) =>
-            {
-                m.to_string()
-            }
+            Some(m) if provider_cfg.accepts_model(m) => m.to_string(),
             Some(m) => {
                 let fallback = provider_cfg.default_model.clone().unwrap_or_else(|| {
                     warnings.push(format!(
                         "task_models.{task} 指定的模型 '{m}' 不在 provider \
                          '{requested_provider}' 的 models 列表 {:?} 中，且该 provider 没有 \
                          default_model，回退到 default_provider '{default_provider}'",
-                        provider_cfg.models
+                        provider_cfg.model_ids()
                     ));
                     default_model.clone()
                 });
                 warnings.push(format!(
                     "task_models.{task} 指定的模型 '{m}' 不在 provider '{requested_provider}' \
                      的 models 列表 {:?} 中，已回退到该 provider 的默认模型 '{fallback}'",
-                    provider_cfg.models
+                    provider_cfg.model_ids()
                 ));
                 fallback
             }
@@ -352,7 +458,7 @@ mod tests {
             api_key: Some("key".into()),
             api_key_env: None,
             default_model: Some(default_model.into()),
-            models: models.iter().map(|s| s.to_string()).collect(),
+            models: models.iter().map(|s| (*s).into()).collect(),
             ..Default::default()
         }
     }
@@ -610,5 +716,27 @@ mod tests {
                 model: Some("deepseek-flash".into())
             }
         );
+    }
+
+    #[test]
+    fn models_take_ids_and_objects_side_by_side() {
+        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
+            "models": ["a", {"id": "b", "max_output": 100, "input_types": ["text"]}]
+        }))
+        .unwrap();
+        assert_eq!(cfg.model_ids(), ["a", "b"]);
+        assert!(cfg.accepts_model("b") && !cfg.accepts_model("c"));
+        assert_eq!(cfg.model_spec("a"), None);
+        assert_eq!(cfg.model_spec("b").and_then(|s| s.max_output), Some(100));
+        assert_eq!(
+            serde_json::to_value(&cfg.models).unwrap(),
+            serde_json::json!(["a", {"id": "b", "max_output": 100, "input_types": ["text"]}])
+        );
+
+        let err = serde_json::from_value::<ProviderConfig>(serde_json::json!({
+            "models": [{"max_output": 1}]
+        }))
+        .unwrap_err();
+        assert!(err.to_string().contains("`id`"), "{err}");
     }
 }

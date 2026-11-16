@@ -95,6 +95,9 @@ pub enum PoolError {
     /// waits; nothing was written.
     #[error("{0}")]
     SettingsLocked(String),
+    /// A provider endpoint that does not list its models.
+    #[error("{0}")]
+    ModelsUnsupported(String),
     #[error("{0}")]
     Internal(String),
 }

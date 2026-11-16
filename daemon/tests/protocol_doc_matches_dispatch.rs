@@ -276,6 +276,7 @@ fn starts_a_daemon(src: &str) -> bool {
         "DaemonRpcClient::connect",
         "blackbox::",
         "serve_unix",
+        "serve_permitting_all",
         "start_server",
         "start_scripted_server",
     ];

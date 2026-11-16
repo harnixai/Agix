@@ -779,11 +779,12 @@ impl Agent {
             + tools.iter().map(|t| t.tokens).sum::<usize>()
             + message_tokens;
         let budget = self.context_budget();
+        let max_tokens = self.output_cap(&model, self.settings.values.model.max_tokens);
         ContextReport {
             basis: "next_step_without_new_input".to_string(),
             model,
             provider: None,
-            max_tokens: self.settings.values.model.max_tokens,
+            max_tokens,
             reasoning: self.reasoning(),
             system,
             tools,

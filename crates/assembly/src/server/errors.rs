@@ -75,6 +75,7 @@ impl From<PoolError> for RpcError {
             PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
             PoolError::SessionExists { .. } => (codes::SESSION_EXISTS, exists_data(&e)),
             PoolError::SettingsLocked(_) => (codes::SETTINGS_LOCKED, None),
+            PoolError::ModelsUnsupported(_) => (codes::MODELS_UNSUPPORTED, None),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
         RpcError {

@@ -397,3 +397,122 @@ async fn a_retry_carries_the_cache_edits_of_the_call_that_failed() {
     );
     assert!(agent.compaction.lend_cache_edits().is_empty());
 }
+
+/// A provider `p` whose replies stop at `max_tokens` until `cut_off` of them
+/// have, and the `max_tokens` each of the conversation's calls carried.
+struct CutOff {
+    cut_off: u32,
+    sent: Mutex<Vec<u32>>,
+}
+
+#[async_trait::async_trait]
+impl Model for CutOff {
+    fn api_type(&self) -> base::provider::ApiType {
+        base::provider::ApiType::Anthropic
+    }
+
+    fn provenance(&self) -> Option<&str> {
+        Some("p")
+    }
+
+    async fn stream(
+        &self,
+        _prompt_blocks: Vec<base::prompt::PromptBlock>,
+        _tools: Vec<ToolDef>,
+        _messages: Vec<ModelMessage>,
+        params: StreamParams,
+        _cancel: CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
+        if params.origin.as_ref().and_then(|o| o.purpose()).is_some() {
+            return Ok(Box::new(futures::stream::iter(vec![Ok(ended())])));
+        }
+        let calls = {
+            let mut sent = self.sent.lock().unwrap();
+            sent.push(params.max_tokens);
+            sent.len() as u32
+        };
+        let stop_reason = if calls <= self.cut_off {
+            "max_tokens"
+        } else {
+            "end_turn"
+        };
+        Ok(Box::new(futures::stream::iter(vec![
+            Ok(ModelEvent::TextDelta {
+                text: format!("part {calls}"),
+            }),
+            Ok(ModelEvent::EndTurn {
+                stop_reason: stop_reason.into(),
+                usage: Usage::default(),
+            }),
+        ])))
+    }
+}
+
+/// Raises the limit past anything, and remembers the limit it was told was
+/// in force each time.
+#[derive(Default)]
+struct RaiseAndRecord {
+    told: Mutex<Vec<u32>>,
+}
+
+impl RecoveryPolicy for RaiseAndRecord {
+    fn on_failure(&self, _failure: &ModelFailure<'_>, _so_far: &CallRecovery) -> Recovery {
+        Recovery::Fail
+    }
+
+    fn on_early_stop(&self, reason: &str, attempt: &RecoveryAttempt) -> StopRecovery {
+        if reason != "max_tokens" {
+            return StopRecovery::Accept;
+        }
+        self.told.lock().unwrap().push(attempt.current_max_tokens);
+        if attempt.output_limit_escalations >= 2 {
+            return StopRecovery::Accept;
+        }
+        StopRecovery::RaiseOutputLimit {
+            max_tokens: 64_000,
+            nudge: None,
+        }
+    }
+}
+
+/// The policy is told the limit the call went out with: the configured one
+/// held to the model's `max_output`, not the configured one.
+#[tokio::test]
+async fn the_recovery_policy_is_told_the_limit_the_call_went_out_with() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut settings = recall_test_settings(tmp.path());
+    settings.values.memory_enabled = false;
+    settings.values.model.model_name = "m".into();
+    settings.values.model.max_tokens = 32_000;
+    settings.values.providers.insert(
+        "p".into(),
+        serde_json::from_value(serde_json::json!({
+            "api_type": "anthropic",
+            "models": [{"id": "m", "max_output": 8192}],
+        }))
+        .unwrap(),
+    );
+    let model = Arc::new(CutOff {
+        cut_off: 2,
+        sent: Mutex::new(Vec::new()),
+    });
+    let policy = Arc::new(RaiseAndRecord::default());
+    let (mut agent, _events, _input) = crate::agent::Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(model.clone())
+        .settings(Arc::new(settings))
+        .skip_warmup(true)
+        .recovery_policy(policy.clone())
+        .build()
+        .expect("build should succeed");
+
+    let outcome = turn(&mut agent, CancellationToken::new())
+        .await
+        .expect("the turn ends");
+
+    assert_eq!(outcome.stop_reason, "end_turn");
+    assert_eq!(*model.sent.lock().unwrap(), vec![8192, 8192, 8192]);
+    assert_eq!(*policy.told.lock().unwrap(), vec![8192, 8192]);
+}

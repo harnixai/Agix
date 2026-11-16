@@ -196,7 +196,7 @@ pub(crate) fn error_type(body: &str) -> Option<String> {
     Some(body.get("error")?.get("type")?.as_str()?.to_string())
 }
 
-fn service_message(body: &str) -> String {
+pub(crate) fn service_message(body: &str) -> String {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| Some(v.get("error")?.get("message")?.as_str()?.to_string()))

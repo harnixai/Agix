@@ -714,15 +714,22 @@ impl Agent {
         outcome
     }
 
+    /// The conversation model's context window: its `models` entry's, else
+    /// inferred from its name.
+    fn context_window(&self) -> u64 {
+        let model = &self.settings.values.model.model_name;
+        self.model_spec(model)
+            .and_then(|spec| spec.context_window)
+            .unwrap_or_else(|| base::context::config::infer_context_window_tokens(model) as u64)
+    }
+
     pub(super) fn context_usage(&self, last_call: Usage) -> base::event::ContextUsage {
         base::event::ContextUsage {
             tokens: u64::from(last_call.input_tokens)
                 + u64::from(last_call.cache_read_input_tokens)
                 + u64::from(last_call.cache_creation_input_tokens),
             compact_threshold: self.context_budget().compact_threshold as u64,
-            window: base::context::config::infer_context_window_tokens(
-                &self.settings.values.model.model_name,
-            ) as u64,
+            window: self.context_window(),
         }
     }
 }

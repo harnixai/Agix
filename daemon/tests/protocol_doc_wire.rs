@@ -613,7 +613,7 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
             }
             let h = if matches!(
                 method.as_str(),
-                "session.create" | "session.setModel" | "mcp.auth.start"
+                "session.create" | "session.setModel" | "mcp.auth.start" | "config.listModels"
             ) {
                 &with_providers
             } else {

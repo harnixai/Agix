@@ -59,7 +59,7 @@ pub struct Client {
     enqueued: std::sync::Arc<std::sync::atomic::AtomicU64>,
     dropped: std::sync::Arc<std::sync::Mutex<Vec<DroppedSubscription>>>,
     daemon_events: std::sync::atomic::AtomicBool,
-    closed: std::sync::atomic::AtomicBool,
+    gone: tokio_util::sync::CancellationToken,
 }
 
 /// A session this connection was unsubscribed from because its queue was
@@ -124,7 +124,7 @@ impl Client {
             enqueued: std::sync::Arc::default(),
             dropped,
             daemon_events: std::sync::atomic::AtomicBool::new(false),
-            closed: std::sync::atomic::AtomicBool::new(false),
+            gone: tokio_util::sync::CancellationToken::new(),
         }
     }
 
@@ -135,12 +135,21 @@ impl Client {
     /// The peer is gone: requests of this connection still being served
     /// register nothing from now on.
     pub fn close(&self) {
-        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.gone.cancel();
     }
 
     /// Neither [`Self::close`]d nor with its writer gone.
     pub fn is_open(&self) -> bool {
-        !self.closed.load(std::sync::atomic::Ordering::SeqCst) && !self.tx.is_closed()
+        !self.gone.is_cancelled() && !self.tx.is_closed()
+    }
+
+    /// Resolves once the connection is no longer [open](Self::is_open): for a
+    /// request whose work is worth abandoning when no one is left to answer.
+    pub async fn closed(&self) {
+        tokio::select! {
+            _ = self.gone.cancelled() => {}
+            _ = self.tx.closed() => {}
+        }
     }
 
     /// Mark this connection as receiving `daemon.event`; `false` if it

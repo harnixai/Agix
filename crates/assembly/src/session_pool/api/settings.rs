@@ -50,13 +50,21 @@ pub struct ProviderView {
     pub api_key: Option<String>,
     pub api_key_env: Option<String>,
     pub default_model: Option<String>,
-    pub models: Vec<String>,
+    pub models: Vec<base::provider::ModelEntry>,
     pub reasoning_passback: bool,
     pub thinking_toggle: Option<base::provider::ThinkingToggle>,
     /// Whether the credential source the engine builds this provider's client
     /// with yields a non-empty key. Never the key itself, whatever
     /// `include_secrets` says.
     pub credential_present: bool,
+}
+
+/// What a provider's endpoint lists, as `config.listModels` answers.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelList {
+    pub models: Vec<base::provider::ListedModel>,
+    /// The endpoint had more pages than are read; `models` is the first of them.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

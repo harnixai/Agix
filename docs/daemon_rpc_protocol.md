@@ -3067,6 +3067,33 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 
 `api_key` 默认脱敏为 `***<末 4 位>`。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
 
+`models` 的每一项是模型 id 字符串,或一个对象,两种写法可以混用;读回时原样是写进去的形状:
+
+```jsonc
+"models": [
+  "deepseek-chat",                                   // 只给 id
+  { "id": "deepseek-reasoner",
+    "context_window": 128000,                        // 可选:上下文窗口(token)
+    "max_output": 8192,                              // 可选:发给它的 max_tokens 上限
+    "reasoning_levels": ["low", "high"],             // 可选:只记录、原样报出
+    "input_types": ["text"] }                        // 可选:只记录、原样报出
+]
+```
+
+id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`session.create` / `setModel`
+的 `model`)必须是其中之一。对象里的值按**这个 provider 的 client 发出的调用**取:会话用的模型
+(含子 Agent)在它的 provider 里有对象条目时——
+
+- `max_output`:这一轮每次调用的 `max_tokens` 取 `model.max_tokens` 与它的较小值;回复在
+  `max_tokens` 处被截断后的重试也以它为上限(先于 `model.max_output_tokens`,再先于按模型名查的表)。
+  压缩、记忆提取、标题这些自带小上限的调用不受影响。
+- `context_window`:`turn_complete` 的 `context.window` 报它,不再按模型名推断。压缩阈值仍由
+  场景与 `compaction.*` 决定。
+- `reasoning_levels`、`input_types`:引擎目前没有按它们做决定的地方,只保存并在
+  `getProvider` 里报出。
+
+对象缺 `id`、或某项既不是字符串也不是对象,`setProvider` 以 `INVALID_PARAMS` 拒绝。
+
 没配 `providers` / `task_models.main` 时用的缺省客户端(provider id `default`),密钥依次取
 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、宿主的 `CredentialSource`。都没有时 daemon 照样启动,
 走它的每一次模型调用(主轮、子 Agent、压缩、记忆提取)都不发请求,这一轮以 `no_credentials`
@@ -3119,6 +3146,46 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 等锁的那一段不随请求取消:客户端在这 10 秒里断开或放弃了请求,锁一到手,写照样可能落盘。权限询问里的"永久允许"拿不到锁时,这一次调用与当前会话照样放行,
 只是没有记进文件,turn 里发一条 `notification` 说明。设置文件是
 符号链接的,不顺着写也不替换,以 `INVALID_PARAMS` 拒绝,消息里写明是哪个文件。
+
+#### `config.listModels`
+
+用 provider 已配置的凭据与 `base_url` 问它的端点有哪些模型。宿主不必自己拿着 key 去调
+`/models`。定位参数 `scene` / `project_root` 同 `config.getProvider`,`provider` 是
+那一对 `(项目, 场景)` 合并后 `providers` 里的 id。
+
+```jsonc
+// → params
+{ "provider": "deepseek", "scene": "code", "project_root": "/Users/x/repo-b" }   // 后两个可选
+// ← result
+{ "models": [
+    { "id": "deepseek-chat" },
+    { "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6" },
+    { "id": "vendor/m", "context_window": 131072, "max_output": 8192,
+      "input_types": ["text", "image"], "reasoning": true } ],
+  "truncated": false }   // true = 端点还有更多页,这里只是前 50 页
+```
+
+- `anthropic`(或没写 `api_type`):`GET …/v1/models`,带 `x-api-key` 与 `anthropic-version`,
+  按 `has_more` / `last_id` 翻页取全,最多 50 页;第 50 页之后还有时 `truncated` 为 `true`。
+- `openai_compatible` / `openai_responses`:`GET …/models`,带 `Authorization: Bearer`;路径与
+  这个 provider 发对话请求的端点同级(`base_url` 写到主机、写到 `/v1`、写全端点都一样)。
+
+每项只有 `id` 必有;其余字段端点给了才有,不按模型名猜:`display_name`(Anthropic)、
+`context_window`(`context_window` / `max_input_tokens` / `context_length` / `max_model_len`)、
+`max_output`(`max_output` / `max_tokens` / `max_output_tokens` / `top_provider.max_completion_tokens`)、
+`input_types`(`input_types` / `input_modalities` / `architecture.input_modalities`)、
+`reasoning`(布尔 `reasoning`,或 `supported_parameters` 里有没有 `"reasoning"`)。不缓存,每次都问端点。
+
+请求与模型调用走同一条出口(同样的代理设置),整次最多等 30 秒;发起请求的连接断开、或 daemon
+停下时放弃。失败:
+
+- `provider` 不在配置里 → `INVALID_PARAMS`。
+- 这个 provider 拿不到凭据 → 不发请求,`ENGINE_ERROR`,`data.kind` 为 `no_credentials`。
+- 端点回 404 / 405 / 501,或回的不是带 `data` 列表的 JSON,或 `api_type` 是宿主自己注册的
+  协议 → `MODELS_UNSUPPORTED`(§9),`message` 带端点的说明。
+- 其余 HTTP 失败与连不上、超时按模型调用的失败分类,`ENGINE_ERROR`,`data.kind` 为 `auth`、
+  `rate_limited`、`model_unavailable` 等(§9.1),`message` 带端点的说明(截到 500 字)。
+- 一页超过 8 MiB → 不往下读,`ENGINE_ERROR`。
 
 ### 6.5 `mcp.*` / `plugin.*` / `import.*` / `commands.*`
 
@@ -3963,6 +4030,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |
 | -32026 | SETTINGS_LOCKED | `project.trust` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
+| -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api_type` 没有引擎知道的列法(§6.4) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 

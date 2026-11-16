@@ -172,13 +172,9 @@ impl ProjectBinding {
             return Ok(());
         };
         match self.settings.values.providers.get(&id) {
-            Some(config)
-                if !config.models.is_empty() && !config.models.iter().any(|m| m == model) =>
-            {
-                Err(format!(
-                    "model `{model}` is not one of provider `{id}`'s models"
-                ))
-            }
+            Some(config) if !config.accepts_model(model) => Err(format!(
+                "model `{model}` is not one of provider `{id}`'s models"
+            )),
             _ => Ok(()),
         }
     }

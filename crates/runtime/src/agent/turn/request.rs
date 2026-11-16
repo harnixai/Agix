@@ -335,7 +335,7 @@ impl Agent {
             messages,
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
-                max_tokens,
+                max_tokens: self.output_cap(model, max_tokens),
                 thinking_mode: reasoning.thinking_mode,
                 effort: reasoning.effort,
                 fallback_model: self.settings.values.model.fallback_model.clone(),
@@ -388,7 +388,7 @@ impl Agent {
             messages,
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
-                max_tokens,
+                max_tokens: self.output_cap(model, max_tokens),
                 thinking_mode: reasoning.thinking_mode,
                 effort: reasoning.effort,
                 fallback_model,
@@ -455,6 +455,25 @@ impl Agent {
     /// which is fine, a session's first turn is never near its budget.
     pub(crate) fn context_tokens(&self) -> usize {
         self.session.token_count() + self.compaction.overhead()
+    }
+
+    /// What the `models` entry of the provider this session's client was built
+    /// for says about `model`.
+    pub(crate) fn model_spec(&self, model: &str) -> Option<&base::provider::ModelSpec> {
+        let provider = self.llm.model.provenance()?;
+        self.settings
+            .values
+            .providers
+            .get(provider)?
+            .model_spec(model)
+    }
+
+    /// `max_tokens`, held to `model`'s configured `max_output`.
+    pub(crate) fn output_cap(&self, model: &str, max_tokens: u32) -> u32 {
+        match self.model_spec(model).and_then(|spec| spec.max_output) {
+            Some(cap) => max_tokens.min(cap),
+            None => max_tokens,
+        }
     }
 
     /// What the scene asked for, after the deployment's budget policy has had
@@ -578,7 +597,8 @@ impl Agent {
     /// to the loop's own state, which is the part that has to happen in this
     /// order, and holding a raised limit to what `model` accepts — a policy
     /// knows no model names, and a request past the model's limit is refused
-    /// before it starts. A raise never lowers the limit already in force.
+    /// before it starts. The limit in force is the one the call went out
+    /// with, after `output_cap`; a raise never lowers it.
     /// A continuation adds nothing: the stopped reply is already the
     /// conversation's last message, which is what the provider continues from.
     pub(super) fn handle_early_stop(
@@ -589,11 +609,12 @@ impl Agent {
         effective_max_tokens: &mut u32,
     ) -> bool {
         use base::interface::recovery_policy::StopRecovery;
+        let in_force = self.output_cap(model, *effective_max_tokens);
         let decision = self.llm.recovery_policy.on_early_stop(
             stop_reason,
             &base::interface::recovery_policy::RecoveryAttempt {
                 output_limit_escalations: *max_tokens_recovery,
-                current_max_tokens: *effective_max_tokens,
+                current_max_tokens: in_force,
             },
         );
         match decision {
@@ -608,12 +629,11 @@ impl Agent {
             StopRecovery::RaiseOutputLimit { max_tokens, nudge } => {
                 *max_tokens_recovery += 1;
                 let ceiling = self
-                    .settings
-                    .values
-                    .model
-                    .max_output_tokens
+                    .model_spec(model)
+                    .and_then(|spec| spec.max_output)
+                    .or(self.settings.values.model.max_output_tokens)
                     .unwrap_or_else(|| super::output_limit::max_output_tokens(model));
-                *effective_max_tokens = max_tokens.min(ceiling).max(*effective_max_tokens);
+                *effective_max_tokens = max_tokens.min(ceiling).max(in_force);
                 if let Some(nudge) = nudge {
                     self.session.push_message(ModelMessage {
                         role: MessageRole::User,

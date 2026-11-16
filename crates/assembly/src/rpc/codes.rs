@@ -117,6 +117,10 @@ error_codes! {
     /// process for the whole wait, so nothing was written. Safe to retry once
     /// the holder lets go.
     SettingsLocked = -32026, SETTINGS_LOCKED;
+    /// `config.listModels`: the provider's endpoint does not list its models
+    /// — it answered 404, 405 or 501, or with something that is not a model
+    /// list — or the provider's `api_type` has no listing the engine knows.
+    ModelsUnsupported = -32027, MODELS_UNSUPPORTED;
 }
 
 #[cfg(test)]
