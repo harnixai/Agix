@@ -8,7 +8,7 @@
 //!
 //! The module defines built-in agent types (`builtin_agent_types()`) and can
 //! load user-defined types from a directory (e.g. `~/.agix/scenes/<scope>/agents/*.md`
-//! or `<project>/.agix/agents/*.md`) via `load_agent_types_from_dir()`. Each
+//! or `<project>/<project dir>/agents/*.md`) via `load_agent_types_from_dir()`. Each
 //! type specifies a system prompt and an allowed tool set, which
 //! `delegate_selector()` holds a sub-agent's session to.
 
@@ -184,9 +184,15 @@ impl AgentTool {
             .paths
             .project_root()
             .map_or_else(|| ctx.session.env().cwd.clone(), Path::to_path_buf);
-        create_worktree(&ctx.exec, &ctx.engine_git, &repo, slug)
-            .await
-            .map_err(|e| base::error::ToolError::Execution(anyhow!("worktree: {e}")))
+        create_worktree(
+            &ctx.exec,
+            &ctx.engine_git,
+            &repo,
+            slug,
+            &self.delegator.env.settings.paths.layout,
+        )
+        .await
+        .map_err(|e| base::error::ToolError::Execution(anyhow!("worktree: {e}")))
     }
 
     async fn start_in_background(
@@ -244,8 +250,11 @@ impl base::tool::Tool for AgentTool {
     fn input_schema(&self, _: PathStyle) -> Value {
         serde_json::to_value(schemars::schema_for!(AgentInput)).unwrap_or(Value::Null)
     }
-    async fn guide(&self, _: &base::tool::PromptContext) -> Option<String> {
-        Some(include_str!("agent_tool.prompt.md").to_string())
+    async fn guide(&self, ctx: &base::tool::PromptContext) -> Option<String> {
+        Some(tools::worktree::name_the_directories(
+            include_str!("agent_tool.prompt.md"),
+            &ctx.project_dir,
+        ))
     }
 
     async fn call(

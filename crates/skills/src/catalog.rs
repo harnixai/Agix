@@ -248,9 +248,10 @@ mod tests {
 
     fn manager() -> Arc<SkillManager> {
         let mgr = SkillManager::new();
-        for skill in crate::bundled::bundled_skills() {
-            mgr.register_bundled(skill);
-        }
+        mgr.load_from(Arc::new(crate::sources::BundledSkills::new(
+            Default::default(),
+            PathBuf::from("/state"),
+        )));
         Arc::new(mgr)
     }
 

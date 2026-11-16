@@ -38,7 +38,7 @@ struct TierStatus {
 }
 
 fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
-    let path = dir.join("settings.json");
+    let path = dir.join(base::paths::entry::SETTINGS);
     let path_str = path.display().to_string();
     if !path.exists() {
         return TierStatus {
@@ -121,7 +121,7 @@ impl SettingsTiersCheck {
         Self {
             global: paths.global_root(),
             scenes,
-            project: project.join(".agix"),
+            project: settings.paths.layout.project_dir(&project),
             ignored: settings.ignored.clone(),
         }
     }
@@ -733,6 +733,7 @@ mod tests {
             "code",
             "m",
             &crate::settings_sections::all(),
+            Default::default(),
         );
         let paths = StaticDaemonPaths::with_project(global.join("scenes/code"), project)
             .with_global(global);

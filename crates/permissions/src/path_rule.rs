@@ -15,7 +15,7 @@
 //! the write policy and the tools use these. Lexical normalization and
 //! physical resolution are `base::path`.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The file a tool call names, and other spellings of the same file.
 pub struct ResolvedPath {
@@ -140,24 +140,6 @@ fn expand_home(raw: &str) -> Option<PathBuf> {
     Some(base::paths::home_dir()?.join(rest))
 }
 
-/// What `path` names inside a git worktree the engine made,
-/// `<repository>/.agix/worktrees/<name>/<rest>`, as the main checkout holds
-/// it: `<repository>/<rest>`, and for a worktree made inside another, each
-/// checkout out to the main one. Nothing is read from disk.
-pub fn main_checkout_copies(path: &Path) -> Vec<PathBuf> {
-    let mut copies = Vec::new();
-    let mut current: Vec<Component<'_>> = path.components().collect();
-    while let Some(at) = current.windows(3).rposition(|w| {
-        w[0].as_os_str() == ".agix"
-            && w[1].as_os_str() == base::paths::PROJECT_WORKTREES_DIR
-            && matches!(w[2], Component::Normal(_))
-    }) {
-        current.drain(at..at + 3);
-        copies.push(current.iter().collect());
-    }
-    copies
-}
-
 /// `p` resolved by the OS; when it does not exist, its parent resolved with
 /// the file name put back, and failing that `p` as given.
 pub fn canonicalize_best_effort(p: &Path) -> PathBuf {
@@ -248,26 +230,6 @@ mod tests {
         let r = ResolvedPath::new("link/../x", &proj);
         assert_eq!(r.primary, proj.join("x"));
         assert!(r.aliases.contains(&outside.join("x")), "{:?}", r.aliases);
-    }
-
-    #[test]
-    fn a_path_in_a_worktree_has_its_main_checkouts_copy() {
-        let copies = |p: &str| main_checkout_copies(Path::new(p));
-        assert_eq!(
-            copies("/r/.agix/worktrees/wt/sub/a"),
-            [PathBuf::from("/r/sub/a")]
-        );
-        assert_eq!(copies("/r/.agix/worktrees/wt"), [PathBuf::from("/r")]);
-        assert_eq!(
-            copies("/r/.agix/worktrees/a/.agix/worktrees/b/x"),
-            [
-                PathBuf::from("/r/.agix/worktrees/a/x"),
-                PathBuf::from("/r/x")
-            ]
-        );
-        assert!(copies("/r/.agix/worktrees").is_empty());
-        assert!(copies("/r/.agix/sessions/s/x").is_empty());
-        assert!(copies("/r/src/a").is_empty());
     }
 
     #[test]

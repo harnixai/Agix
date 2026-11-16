@@ -68,6 +68,7 @@ pub struct MemoryStore {
     user_dir: PathBuf,
     local_dir: PathBuf,
     state_root: Option<PathBuf>,
+    layout: base::paths::Layout,
     project_shadows: bool,
 }
 
@@ -80,6 +81,7 @@ impl MemoryStore {
             user_dir,
             local_dir,
             state_root: None,
+            layout: base::paths::Layout::default(),
             project_shadows: true,
         }
     }
@@ -96,6 +98,7 @@ impl MemoryStore {
     pub fn for_paths(paths: &ConfigPaths) -> Self {
         let store = Self {
             state_root: Some(paths.global_data_dir.clone()),
+            layout: paths.layout.clone(),
             ..Self::new(paths.global_memory_dir(), paths.local_memory_dir())
         };
         if paths.project_untrusted {
@@ -108,7 +111,8 @@ impl MemoryStore {
     /// How a file in `dir` is read: memories are files the store writes
     /// there itself, so one that resolves anywhere else is not one.
     fn files_in(&self, dir: &Path) -> PromptFiles {
-        base::paths::SensitivePaths::new(self.state_root.as_deref(), None).prompt_files_within(dir)
+        base::paths::SensitivePaths::new(self.state_root.as_deref(), None, self.layout.clone())
+            .prompt_files_within(dir)
     }
 
     /// Where a memory with no other home is written — the directory the
@@ -944,7 +948,12 @@ It can have multiple lines."#;
     #[test]
     fn a_session_store_lives_where_config_paths_say() {
         let tmp = TempDir::new().unwrap();
-        let paths = ConfigPaths::new(tmp.path().join("g"), tmp.path().join("p/.agix"), "code");
+        let paths = ConfigPaths::new(
+            tmp.path().join("g"),
+            tmp.path().join("p/.agix"),
+            "code",
+            Default::default(),
+        );
         let store = MemoryStore::for_paths(&paths);
         assert_eq!(store.user_dir(), paths.global_memory_dir());
         store

@@ -55,7 +55,7 @@ mod tests {
         std::fs::create_dir_all(root.join("scene")).unwrap();
         std::fs::write(root.join("scene/scene.json"), scene_json).unwrap();
         std::fs::write(root.join("scene/prompt.md"), "You review.").unwrap();
-        Plugin::load(root, &root.join("plugin.toml")).unwrap()
+        Plugin::load(root, &root.join("plugin.toml"), &Default::default()).unwrap()
     }
 
     #[test]
@@ -93,7 +93,12 @@ mod tests {
             "[plugin]\nname = \"p\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n",
         )
         .unwrap();
-        let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(declared_scene(&p).is_none());
         assert_eq!(p.scene_id(), None);
     }

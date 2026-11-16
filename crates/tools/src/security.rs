@@ -85,7 +85,7 @@ pub async fn write_policy(ctx: &base::tool::ToolContext) -> permissions::path_sa
     for path in &ctx.config.sandbox.allow_write {
         allowed.push(fs.canonicalize_best_effort(path).await);
     }
-    permissions::path_safety::WritePolicy::new(root)
+    permissions::path_safety::WritePolicy::new(root, ctx.config.sandbox.paths.clone())
         .with_additional_roots(additional)
         .with_extra_blacklist(ctx.config.sandbox.deny_write.clone())
         .with_allowed(allowed)
@@ -307,14 +307,23 @@ mod tests {
 
     #[test]
     fn a_credential_is_not_readable_even_where_everything_is() {
+        for name in [".agix", ".codix"] {
+            a_credential_is_not_readable_in(name);
+        }
+    }
+
+    fn a_credential_is_not_readable_in(own: &str) {
         let dir = tempfile::tempdir().unwrap();
         let (proj, state) = (dir.path().join("proj"), dir.path().join("state"));
         let mut ctx = session_state::testing::tool_context_for_test(
             platform::local_providers(),
             proj.clone(),
         );
-        ctx.sandbox_mut().paths =
-            std::sync::Arc::new(base::paths::SensitivePaths::new(Some(&state), None));
+        ctx.sandbox_mut().paths = std::sync::Arc::new(base::paths::SensitivePaths::new(
+            Some(&state),
+            None,
+            base::paths::Layout::new(own).unwrap(),
+        ));
         let session = session_state::SessionState::for_tests_in(base::context::SessionEnv {
             read_anywhere: true,
             ..base::context::SessionEnv::new(proj)
@@ -323,9 +332,11 @@ mod tests {
 
         assert!(!read_allowed(&state.join("mcp/oauth/x.json"), &ctx));
         assert!(!read_allowed(&state.join("settings.json"), &ctx));
-        assert!(!read_allowed(Path::new(".agix/settings.local.json"), &ctx));
+        let own = Path::new(own);
+        assert!(!read_allowed(&own.join("settings.local.json"), &ctx));
+        assert!(!read_allowed(Path::new(".agix/mcp.local.json"), &ctx));
         assert!(read_allowed(&state.join("skills/x/SKILL.md"), &ctx));
-        assert!(read_allowed(Path::new(".agix/settings.json"), &ctx));
+        assert!(read_allowed(&own.join("settings.json"), &ctx));
 
         let excluded = credentials(&ctx).excluded_from_walk(&state);
         assert!(excluded(&state.join("mcp/oauth")));

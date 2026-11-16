@@ -279,10 +279,10 @@ daemon 按**单轮**如实上报,不做跨轮/跨会话聚合。
 
 ### 3.6 项目信任
 
-一个项目自己的配置(`<项目>/.agix/` 下的设置、agent 类型、hook 脚本,`.agents/skills/`)
+一个项目自己的配置(项目层目录 `<项目>/.agix/` 下的设置、agent 类型、hook 脚本,`.agents/skills/`;项目层目录缺省叫 `.agix`,嵌入方可经 `EmbedConfig.project_dir` 改名,下文的 `.agix` 凡指项目里的都是它)
 是仓库内容。**没被信任的项目按插件级信任处理**:它的设置只能收紧,不能放宽,而且是白名单——
 项目层里没有登记的设置键一律不生效,登记了的要么照常、要么只在不比下面几层更宽时保留、要么整个不生效;
-它的 `hooks_config`、`mcp_servers`、`scripts` 不生效,`.agix/hooks/` 不进 hook 命令的 `PATH`;
+它的 `hooks_config`、`mcp_servers`、`scripts` 不生效,项目层目录的 `hooks/` 不进 hook 命令的 `PATH`;
 决定对话、凭据、遥测送到哪里的键(`providers`、指向项目自己 provider 的 `default_provider` /
 `task_models`、`model.base_url`、`model.api_type`、`telemetry_url`、`recorder`)、`instruction_file` 与
 整个替换系统提示词的 `prompt_override` 不生效,`telemetry_enabled: false`(关审计记录)也不生效;
@@ -296,7 +296,7 @@ glob 清单),项目自己写的忽略。三态:
 |---|---|
 | `trusted` | 项目层全部生效 |
 | `untrusted` | 项目层按上面收紧 |
-| `none` | 没有自己的项目层(无项目会话,或项目根就是放全局目录的那个目录,如 `$HOME`)。项目的 `.agix` 是链到全局 / 场景目录的符号链接时不算,按 `untrusted` |
+| `none` | 没有自己的项目层(无项目会话,或项目根就是放全局目录的那个目录,如 `$HOME`)。项目层目录(缺省 `.agix`)是链到全局 / 场景目录的符号链接时不算,按 `untrusted` |
 
 **缺省 `default: "untrusted"`**:一个谁都没确认过的项目,项目层按上面收紧。
 宿主用 `project.status`(§6.8)拿到状态和"信任之后才生效的东西"来画确认对话框,用
@@ -398,7 +398,7 @@ glob 清单),项目自己写的忽略。三态:
 | `plan` | 只允许只读工具 |
 | `default` | 未显式放行的工具调用都发 `prompt` 询问(**默认**) |
 | `bubble` | 把询问上抛给父 Agent —— 程序专用,写进 settings.json 会被退回 `default` |
-| `acceptEdits` | 自动放行项目内的文件写入与只读调用,其余询问。"项目内"指会话的工作目录、`sandbox.additional_directories`,读还包括 `sandbox.read_directories`(`sandbox.read_anywhere` 时不限):项目外的写入照样询问,`Read` / `Glob` / `Grep` 读项目外、只读的 `Bash` / `Monitor` 命令参数指向项目外(含 `~`、`$VAR` 这类展开不了的写法)也照样询问,与 `default` 一致(`.ssh` 一类的凭据仍被拒)。项目内的 `.git`、`.agix`、`.claude`、`.agents/skills` 下的写入也照样询问(改它们等于改 agent 自己的规则)。只读的 `Bash` / `Monitor` 命令只要跑 `git`,就还要求每一次 `git` 找到的仓库就是会话目录自己所在的那个(不能是裸仓库;`cd` 进项目自带的嵌套 `.git`、或 `cd` 到去向不明的目录再跑 `git`,都要询问),因为仓库配置(`core.fsmonitor`、`diff.external` 一类)会让 git 自己去启动程序,会话自己的仓库是用户的,项目里带来的是别人写的。`WebFetch` / `Ping` 只放行 `sandbox.allowed_domains` 列出的主机;MCP 工具一律询问,server 自报的 `readOnlyHint` 不算(有 allow 规则的照常放行) |
+| `acceptEdits` | 自动放行项目内的文件写入与只读调用,其余询问。"项目内"指会话的工作目录、`sandbox.additional_directories`,读还包括 `sandbox.read_directories`(`sandbox.read_anywhere` 时不限):项目外的写入照样询问,`Read` / `Glob` / `Grep` 读项目外、只读的 `Bash` / `Monitor` 命令参数指向项目外(含 `~`、`$VAR` 这类展开不了的写法)也照样询问,与 `default` 一致(`.ssh` 一类的凭据仍被拒)。项目内的 `.git`、项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)、`.claude`、`.agents/skills` 下的写入也照样询问(改它们等于改 agent 自己的规则)。只读的 `Bash` / `Monitor` 命令只要跑 `git`,就还要求每一次 `git` 找到的仓库就是会话目录自己所在的那个(不能是裸仓库;`cd` 进项目自带的嵌套 `.git`、或 `cd` 到去向不明的目录再跑 `git`,都要询问),因为仓库配置(`core.fsmonitor`、`diff.external` 一类)会让 git 自己去启动程序,会话自己的仓库是用户的,项目里带来的是别人写的。`WebFetch` / `Ping` 只放行 `sandbox.allowed_domains` 列出的主机;MCP 工具一律询问,server 自报的 `readOnlyHint` 不算(有 allow 规则的照常放行) |
 | `bypassPermissions` | 不询问、不看用户各层(设置文件、`options.permission_rules`)的规则 —— 那些规则里的 `deny`、`/etc/passwd` 一类路径、`rm -rf /` 一类命令都放行。凭据(`.ssh` / `.aws` / `.gnupg`、沙箱拒读的家目录凭据库如 `.git-credentials` / `.config/gh` / `.kube`、状态目录里的设置与 token 等,§6.1)任何模式都拒,部署方 managed 层的 `deny` / `ask`、宿主策略的 `deny` 照样生效;`PreToolUse` hook 的拦截、委派带来的 deny 照样拒;`sandbox.require_enforcement` 打开而沙箱兜不住的命令照样拒(没装 `bwrap` 的 Linux 上即每条 `Bash`);除此之外只有不合法的输入(没读过就改、超出上限、会被读错的路径)被拒,`Bash` 仍在 OS 沙箱里 |
 
 `auto`、`yolo` 是 `bypassPermissions` 的另外两种写法:在 settings.json、`options.permission_mode`、
@@ -449,7 +449,7 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
   `cd` 到不是项目内字面路径之后再读的,照常询问。
 - 文件类工具用 glob(`"/etc/**"`)。匹配前两边都规整成绝对路径:相对路径按会话的
   工作目录解析,`.` / `..` 去掉,`~` 展开;符号链接解析后的路径上命中 `deny` / `ask`
-  也算,`<目录>/.agix/worktrees/<名>/` 下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
+  也算,`<目录>/<项目层目录>/worktrees/<名>/` 下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
   命中 `deny` / `ask` 也算——锚在项目上的规则对子 Agent worktree 里的拷贝同样成立。`*` 不跨
   `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样约束 `Write` /
   `NotebookEdit`。沙箱开着时,点名具体路径的 `Read(...)` `deny`——一个文件或目录,或目录后面只跟
@@ -504,14 +504,14 @@ bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会�
 { "type": "permit" }
 { "type": "deny", "reason": "…" }
 { "type": "permit_always", "scope": "session" }   // 本会话内一直允许
-{ "type": "permit_always", "scope": "local" }     // 另外写进 .agix/settings.local.json,之后新建的会话即可见
+{ "type": "permit_always", "scope": "local" }     // 另外写进项目层目录(缺省 .agix)的 settings.local.json,之后新建的会话即可见
 ```
 
 `permit_always` 放行的是这一次调用的原文:`touch *.rs` 不会放行 `touch other.rs`。`local` 写下的是
 `{"tool": "Bash(touch *.rs)", "action": "allow", "match": "exact"}`,`match: "exact"` 让之后的会话
 同样按原文比对。会话的权限不记放行时(嵌入方给了 `without_grants`),嵌入方的 `Elicitation` 收到的选项里没有 `permit_always`。
 `local` 写不下去时——项目未信任(它的 `settings.local.json` 下次加载会被扣下,先 `project.trust`)、
-项目的 `.agix` 是全局或场景目录、写盘失败——放行只在本会话有效,会话收到一帧 `notification`
+项目层目录是全局或场景目录、写盘失败——放行只在本会话有效,会话收到一帧 `notification`
 (`status: null`)说明原因。
 
 未信任的项目(§3.6)不读它 `settings.local.json` 里的 allow 规则,`local` 写下的规则因此
@@ -2232,7 +2232,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   `{session_id, reason: "previous_engine", current_turn_id: null}`;过一会儿再试。两个引擎不会同时写一份转录。
   `session.run_turn` 指名这样的会话同样如此。
 - 目标是在 worktree 里干活的子 Agent 的侧链(`Agent` 的 `worktree`),而那个 worktree 已经不在、
-  不在项目所在仓库的 `.agix/worktrees/` 下、或者它的 `.git` 链接不再指回仓库的 `.git` →
+  不在项目所在仓库的项目层目录(缺省 `.agix`)的 `worktrees/` 下、或者它的 `.git` 链接不再指回仓库的 `.git` →
   `INTERNAL_ERROR`,消息含 "worktree" 与原因(如 "is gone")。不会在主检出里恢复它。侧链按它记下的
   项目恢复(`project_trust` 等与父会话的项目相同),在 worktree 里干活的仍在那个 worktree 里。
 - 会话因别的原因建不回来(例如它记录的 `provider` 已经不在配置里)→ `INTERNAL_ERROR`,
@@ -3037,7 +3037,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 只作废从那一层合出来的绑定:项目层只作废同一项目的会话,场景层只作废那个场景的,全局层
 作废全部。skills、agents 目录的改动不作废任何会话,新内容就地生效。不存在的设置文件与
 skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 的 `local` 第一次写出
-`settings.local.json`,项目第一次建出 `.agents/skills/` 或 `.agix/agents/`),下一次用到那一对 scene / 项目的
+`settings.local.json`,项目第一次建出 `.agents/skills/` 或项目层目录的 `agents/`),下一次用到那一对 scene / 项目的
 配置时(在上面新建会话,daemon 自己那一对还有 `commands.list` 等)会发现并重读,已经在跑的
 会话要等到那时才作废。这个
 方法留给监视起不来的时候(权限、内核 inotify 上限;`daemon.doctor` 会报),以及要已有会话
@@ -3047,9 +3047,9 @@ skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 
 
 两者都接受 `scene` / `project_root` 定位参数,语义与 `config.reload` 一致:省略 = 这个
 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
-`setProvider` 缺省写**被指定项目**的 `{project_root}/.agix/settings.json`(`tier:"project"`),
+`setProvider` 缺省写**被指定项目**的项目层目录里的 `settings.json`(`{project_root}/.agix/settings.json`,`tier:"project"`),
 `tier:"global"` 写全局层的 `settings.json`(`config.get` 的 `global` 那一份,对所有场景、所有项目生效);
-`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目的 `.agix` 借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
+`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目层目录借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
 
 **provider 路由是按 `(项目, 场景)` 解析的**:一个项目在自己的 settings 里配了
 `providers` / `task_models`,它的会话就走它自己的路由,不是 daemon 那个项目的。
@@ -3129,7 +3129,7 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 配在全局层——全局层是用户自己的,不看项目信任。写全局层之后,daemon 自己那一对的设置重读,所有
 `(scene, 项目)` 的绑定作废,已有会话在下一轮前换上新配置。
 
-**`dry_run: true`**:做写入之前的全部检查(参数、项目信任、`.agix` 是否借用全局 / 场景层),
+**`dry_run: true`**:做写入之前的全部检查(参数、项目信任、项目层目录是否借用全局 / 场景层),
 读出那一层的两个文件、在内存里套上补丁,按会写成的样子与其余各层合并、解析 provider 路由、
 建出 client(不发网络请求)。哪个文件都不写、不建目录、不拿锁,也不动正在用的配置。
 套上之后路由解析不了或 client 建不出来(比如写错的 `api_type`、`openai_compatible` 缺
@@ -3885,7 +3885,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 **工作目录与深度**:`cwd` 是发起调用的那个会话的工作目录,`depth` 是它的委派深度:根会话 0,
 它起的子 Agent 1,子 Agent 再起的 2,依此类推。在 worktree 里跑的子 Agent(`Agent` 的
-`worktree`)的 `cwd` 是那个 worktree(`<项目根>/.agix/worktrees/<名>`),宿主工具该在那里读写。
+`worktree`)的 `cwd` 是那个 worktree(`<项目根>/<项目层目录>/worktrees/<名>`,缺省 `.agix`),宿主工具该在那里读写。
 子 Agent 结束时 worktree 若原样未动就删掉,否则连同分支 `agix/worktree-<名>` 留下(后台子 Agent
 的任务 `detail.worktree` 记着,见 §6.3 `session.tasks`),所以之后的帧里这个 `cwd` 可能已经不存在,也可能
 还在。`EnterWorktree` 不改会话的工作目录,之后的调用 `cwd` 照旧。

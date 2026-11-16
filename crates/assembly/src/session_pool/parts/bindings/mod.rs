@@ -20,6 +20,7 @@ pub(in crate::session_pool) use host_overrides::HostOverrides;
 use crate::session_pool::off_the_runtime;
 use crate::settings_source::{read_pair, read_pair_as_if};
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
+use base::paths::{entry, StateRoot};
 use model::client::AnthropicClient;
 use settings::LoadedSettings;
 use std::collections::HashMap;
@@ -157,6 +158,7 @@ pub(in crate::session_pool) fn own_settings_in(
         paths.global_root(),
         paths.config_root(),
         Some(cwd),
+        &paths.layout(),
         &host.paths.scope,
         &host.values.model.model_name,
         layers.max_tokens_fallback,
@@ -239,11 +241,13 @@ impl BindingCache {
             project.map(Path::to_path_buf),
             self.layers.max_tokens_fallback,
         );
+        let layout = self.paths.layout();
         let loaded = off_the_runtime(move || {
             read_pair(
                 global_root,
                 scene_root,
                 project.as_deref(),
+                &layout,
                 &scene,
                 &default_model,
                 fallback,
@@ -274,12 +278,14 @@ impl BindingCache {
             project.to_path_buf(),
             self.layers.max_tokens_fallback,
         );
+        let layout = self.paths.layout();
         let loaded = off_the_runtime(move || {
             read_pair_as_if(
                 in_memory,
                 global_root,
                 scene_root,
                 &project,
+                &layout,
                 &scene,
                 &default_model,
                 fallback,
@@ -475,22 +481,31 @@ impl BindingCache {
         // The project tier's skills sit beside the project (`.agents/skills`)
         // rather than under `.agix`, which is why this is two paths and the
         // others are one — see `skills::module::build_default_skill_manager`.
-        let project_root = key.0.clone();
-        let mut tiers = vec![(
-            Tier::Global,
-            settings.paths.global_data_dir.clone(),
-            settings.paths.global_data_dir.join("skills"),
-        )];
-        tiers.push((
-            Tier::Scene(key.1.clone()),
-            settings.paths.user_data_dir.clone(),
-            settings.paths.user_data_dir.join("skills"),
-        ));
-        if let Some(root) = project_root {
+        let dirs = settings.paths.config_paths();
+        let mut tiers = vec![
+            (
+                Tier::Global,
+                dirs.global_data_dir.clone(),
+                dirs.global_skills_dir(),
+                dirs.global_agents_dir(),
+            ),
+            (
+                Tier::Scene(key.1.clone()),
+                dirs.user_data_dir.clone(),
+                dirs.user_skills_dir(),
+                dirs.user_agents_dir(),
+            ),
+        ];
+        if let (Some(root), Some(skills), Some(agents)) = (
+            key.0.clone(),
+            dirs.project_skills_dir(),
+            dirs.project_agents_dir(),
+        ) {
             tiers.push((
-                Tier::Project(root.clone()),
-                settings.paths.local_data_dir.clone(),
-                root.join(".agents").join("skills"),
+                Tier::Project(root),
+                dirs.local_data_dir.clone(),
+                skills,
+                agents,
             ));
         }
 
@@ -509,12 +524,12 @@ impl BindingCache {
                 unwatched.push((tier.clone(), path));
             }
         };
-        for (tier, config_dir, skills_dir) in tiers {
-            for file in [base::paths::SETTINGS_FILE, base::paths::SETTINGS_LOCAL_FILE] {
+        for (tier, config_dir, skills_dir, agents_dir) in tiers {
+            for file in [entry::SETTINGS, entry::SETTINGS_LOCAL] {
                 subscribe(&tier, WatchTarget::Settings, config_dir.join(file));
             }
             subscribe(&tier, WatchTarget::Skills, skills_dir);
-            subscribe(&tier, WatchTarget::Agents, config_dir.join("agents"));
+            subscribe(&tier, WatchTarget::Agents, agents_dir);
         }
         (tokens, unwatched)
     }
@@ -620,18 +635,17 @@ impl BindingCache {
         if scene_id == startup_scene {
             self.paths.config_root()
         } else {
-            self.paths.global_root().join("scenes").join(scene_id)
+            StateRoot::new(self.paths.global_root()).scene_dir(scene_id)
         }
     }
 
     /// The project-tier `settings.json` of `project_root`, or of this
     /// daemon's own project when none is named.
     pub(in crate::session_pool) fn settings_path_of(&self, project_root: Option<&Path>) -> PathBuf {
-        project_root
-            .unwrap_or(&self.cwd)
-            .to_path_buf()
-            .join(".agix")
-            .join(base::paths::SETTINGS_FILE)
+        self.paths
+            .layout()
+            .project_dir(project_root.unwrap_or(&self.cwd))
+            .join(entry::SETTINGS)
     }
 
     #[cfg(test)]

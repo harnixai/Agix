@@ -4,7 +4,8 @@
 //! directories used by the AGENT: a flat cross-scene **global** root
 //! (conventionally `~/.agix/`), a **scene**-specific override root nested
 //! under it (`<global>/scenes/<scope>/`), and a **local**/project root
-//! (`<cwd>/.agix/`).
+//! (`<cwd>/<project dir>/`, `.agix` unless the instance's [`Layout`] names
+//! another). The names themselves are in [`layout`].
 //!
 //! **The roots are given, never discovered.** Nothing in this module reads
 //! the environment: the process entry point decides which directory the
@@ -42,18 +43,27 @@
 //! and other external agent tools scan. `ConfigPaths` only models Agix's
 //! own private state and extensions, which no other tool reads.
 
+pub mod layout;
 mod sensitive;
 
+pub use layout::{
+    entry, ConfigRoot, Layout, LayoutError, StateRoot, AGENTS_DIR, CLAUDE_DIR, DEFAULT_PROJECT_DIR,
+    DEFAULT_STATE_DIR, ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, FOREIGN_CONFIG_ROOTS,
+    GIT_WORKTREES_DIR, LOCAL_DATA_IGNORED_DIRS, LOCAL_DATA_IGNORED_FILES,
+    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_SKILLS_DIR, PROJECT_WORKTREES_DIR, QUARANTINE_PREFIX,
+    SETTINGS_FILE, SETTINGS_LOCAL_FILE, STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD,
+    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS, WORKTREE_BRANCH_PREFIX,
+};
 pub use sensitive::{
-    credential_dir_names, session_scratch_dir, tool_results_dir, Credential, KeyFileNames, Located,
-    PromptFiles, Scope, Secret, SensitivePaths, CREDENTIALS, ENGINE_CONFIG_DIRS,
-    ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
-    GIT_WORKTREE_CONTROL_FILES, HOME_CREDENTIAL_STORES, PROJECT_ENGINE_CONFIG_DIRS,
-    PROJECT_WORKTREES_DIR, REPOSITORY_CONFIG_DIR, SECRET_FILE_NAMES, STATE_ROOT_SCENE_FILES,
-    STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    credential_dir_names, session_scratch_dir, tool_results_dir, ConfigRootAt, Credential,
+    KeyFileNames, Located, PromptFiles, Scope, Secret, SensitivePaths, CREDENTIALS,
+    GIT_CONTROL_FILES, GIT_HOOKS_DIR, GIT_WORKTREE_CONTROL_FILES, HOME_CREDENTIAL_STORES,
+    REPOSITORY_CONFIG_DIR, SECRET_FILE_NAMES,
 };
 
 use std::path::{Path, PathBuf};
+
+use crate::interface::config_source::Tier;
 
 use serde::{Deserialize, Serialize};
 
@@ -69,13 +79,6 @@ pub fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// The shared, committed settings file present in every tier.
-pub const SETTINGS_FILE: &str = "settings.json";
-
-/// The gitignored per-machine overlay sitting beside `SETTINGS_FILE` in the
-/// same tier, overriding it.
-pub const SETTINGS_LOCAL_FILE: &str = "settings.local.json";
-
 /// Path configuration for data directories.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
@@ -89,7 +92,7 @@ pub struct PathSettings {
     /// See `base::paths::ConfigPaths` module docs for the full breakdown.
     #[serde(default)]
     pub global_data_dir: PathBuf,
-    /// The project tier's root: `<project>/.agix/` in a project, the state
+    /// The project tier's root: `<project>/<project dir>/` in a project, the state
     /// root itself (`global_data_dir`) in a session without one.
     pub local_data_dir: PathBuf,
     /// Where the session's tools work, and whether there is a project.
@@ -110,6 +113,11 @@ pub struct PathSettings {
     #[serde(skip)]
     #[schemars(skip)]
     pub worktree: Option<LinkedWorktree>,
+    /// What the instance names its directories; `local_data_dir` is
+    /// [`Layout::project_dir`] of the project.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub layout: Layout,
 }
 
 /// A linked worktree of the project, and where in the repository's git
@@ -171,14 +179,16 @@ impl WorktreeGit {
 /// ones [`LoadedSettings::new`] is commonly given in tests.
 impl Default for PathSettings {
     fn default() -> Self {
+        let state = PathBuf::from("~").join(DEFAULT_STATE_DIR);
         Self {
-            user_data_dir: PathBuf::from("~/.agix/scenes/agent"),
-            global_data_dir: PathBuf::from("~/.agix"),
+            user_data_dir: StateRoot::new(state.clone()).scene_dir("agent"),
+            global_data_dir: state,
             local_data_dir: PathBuf::from("."),
             workspace: Workspace::Project(PathBuf::new()),
             scope: default_scope(),
             project_untrusted: false,
             worktree: None,
+            layout: Layout::default(),
         }
     }
 }
@@ -191,7 +201,8 @@ fn default_scope() -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Workspace {
-    /// A project: the tools work in it, and its `.agix` is the project tier.
+    /// A project: the tools work in it, and its project directory is the
+    /// project tier.
     Project(PathBuf),
     /// No project (`project_root: null`): no project tier, no git or
     /// `AGENTS.md` context, and the tools work in this directory of the
@@ -202,7 +213,7 @@ pub enum Workspace {
 }
 
 impl Workspace {
-    /// The project whose `.agix` is `local_data_dir`.
+    /// The project whose project directory is `local_data_dir`.
     pub fn project_of(local_data_dir: &Path) -> Self {
         Self::Project(
             local_data_dir
@@ -228,6 +239,7 @@ impl PathSettings {
         local_data_dir: PathBuf,
         workspace: Workspace,
         scope: String,
+        layout: Layout,
     ) -> Self {
         Self {
             user_data_dir,
@@ -237,7 +249,13 @@ impl PathSettings {
             scope,
             project_untrusted: false,
             worktree: None,
+            layout,
         }
+    }
+
+    /// The derived paths of these roots.
+    pub fn config_paths(&self) -> ConfigPaths {
+        ConfigPaths::from_settings(self)
     }
 
     /// The project, `None` in a session without one.
@@ -273,13 +291,13 @@ impl PathSettings {
         let branch_is_plain = git.branch.split('/').all(|part| {
             !part.is_empty() && part != "." && part != ".." && !part.ends_with(".lock")
         });
-        (admin.parent() == Some(own.join("worktrees").as_path()) && branch_is_plain).then(|| {
-            WorktreeGit {
+        (admin.parent() == Some(own.join(GIT_WORKTREES_DIR).as_path()) && branch_is_plain).then(
+            || WorktreeGit {
                 dir: own,
                 admin,
                 branch: git.branch.clone(),
-            }
-        })
+            },
+        )
     }
 
     /// What of the repository's git directory a sandboxed command in the
@@ -291,7 +309,7 @@ impl PathSettings {
     /// The project tier's `settings.local.json` — the file the interactive
     /// permission prompt's "always allow, this project" writes to.
     ///
-    /// Inside `local_data_dir` (`<project_root>/.agix/`), not beside it: the
+    /// Inside `local_data_dir` (the project directory), not beside it: the
     /// Bash sandbox's deny-file-write rules (`tools::bash::sandbox`) protect
     /// exactly this path to stop a sandboxed command from granting itself
     /// permissions, and a copy written anywhere else would sit outside that
@@ -307,12 +325,17 @@ impl PathSettings {
 }
 
 /// What a data directory's `.gitignore` keeps out of the repository the
-/// directory sits in: the files the engine writes keys into, its telemetry
-/// recordings, and the tool results it saves.
-pub const LOCAL_DATA_GITIGNORE: &str =
-    "settings.local.json\nmcp.local.json\ntelemetry/\ntool-results/\n";
+/// directory sits in, one line each: [`LOCAL_DATA_IGNORED_FILES`] and
+/// [`LOCAL_DATA_IGNORED_DIRS`].
+pub fn local_data_gitignore() -> Vec<String> {
+    LOCAL_DATA_IGNORED_FILES
+        .iter()
+        .map(|file| file.to_string())
+        .chain(LOCAL_DATA_IGNORED_DIRS.iter().map(|dir| format!("{dir}/")))
+        .collect()
+}
 
-/// Make sure `dir`'s `.gitignore` has every [`LOCAL_DATA_GITIGNORE`] entry,
+/// Make sure `dir`'s `.gitignore` has every [`local_data_gitignore`] entry,
 /// appending the ones it lacks and touching nothing else in it: in a cloned
 /// repository the file is the repository author's, and the keys and
 /// recordings the engine writes here must stay out of it all the same.
@@ -320,9 +343,9 @@ pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
     use std::io::Write;
     let path = dir.join(".gitignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let lacking: Vec<&str> = LOCAL_DATA_GITIGNORE
-        .lines()
-        .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
+    let lacking: Vec<String> = local_data_gitignore()
+        .into_iter()
+        .filter(|entry| !existing.lines().any(|line| line.trim() == entry))
         .collect();
     if lacking.is_empty() {
         return;
@@ -339,34 +362,33 @@ pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
         added.push('\n');
     }
     for entry in lacking {
-        added.push_str(entry);
+        added.push_str(&entry);
         added.push('\n');
     }
     let _ = file.write_all(added.as_bytes());
 }
 
-/// Unified management of AGENT persistent directory paths.
+/// Unified management of AGENT persistent directory paths: the three tiers'
+/// roots and every path derived from them. A caller asks for the path here
+/// rather than joining a name onto a root.
 ///
-/// Default: `global_data_dir = $HOME/.agix/`
-///          `user_data_dir   = $HOME/.agix/scenes/<scope>/`
-///          `local_data_dir  = <cwd>/.agix/`
-///
-/// `global_data_dir` (and therefore `user_data_dir`, derived from it) can be
-/// overridden via `AGIX_DATA_DIR`; `local_data_dir` via `AGIX_LOCAL_DATA_DIR`.
+/// Usually `global_data_dir = $HOME/.agix/`,
+/// `user_data_dir = <global>/scenes/<scope>/`,
+/// `local_data_dir = <project>/<layout's project dir>/`.
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {
-    /// User-level, scene-specific override root. Default `$HOME/.agix/scenes/<scope>/`.
+    /// User-level, scene-specific override root.
     pub user_data_dir: PathBuf,
     /// User-level, cross-scene global root (flat, shared by every scene).
-    /// Default `$HOME/.agix/`.
     pub global_data_dir: PathBuf,
-    /// Local/project data root. Default `<cwd>/.agix/`.
+    /// The project tier's root; the state root in a session without a project.
     pub local_data_dir: PathBuf,
     /// The project, `None` for a session without one
     /// ([`crate::paths::PathSettings::project_root`]).
     pub project_root: Option<PathBuf>,
     /// See [`PathSettings::project_untrusted`].
     pub project_untrusted: bool,
+    pub layout: Layout,
 }
 
 impl ConfigPaths {
@@ -381,16 +403,43 @@ impl ConfigPaths {
     ///
     /// `scope` identifies the product instance whose scene-specific override
     /// tree lives under `global_data_dir/scenes/<scope>/`.
-    pub fn new(global_data_dir: PathBuf, local_data_dir: PathBuf, scope: &str) -> Self {
+    pub fn new(
+        global_data_dir: PathBuf,
+        local_data_dir: PathBuf,
+        scope: &str,
+        layout: Layout,
+    ) -> Self {
         let project_root = Workspace::project_of(&local_data_dir)
             .project_root()
             .map(PathBuf::from);
         Self {
-            user_data_dir: global_data_dir.join("scenes").join(scope),
+            user_data_dir: StateRoot::new(global_data_dir.clone()).scene_dir(scope),
             global_data_dir,
             local_data_dir,
             project_root,
             project_untrusted: false,
+            layout,
+        }
+    }
+
+    /// The paths of a session of `scene_dir` in `project`, or in none: the
+    /// project tier is `layout`'s directory in the project, and without a
+    /// project it is the state root, as `LoadedSettings` makes it.
+    pub fn of(
+        global_data_dir: PathBuf,
+        scene_dir: PathBuf,
+        project: Option<&Path>,
+        layout: Layout,
+    ) -> Self {
+        Self {
+            user_data_dir: scene_dir,
+            local_data_dir: project
+                .map(|root| layout.project_dir(root))
+                .unwrap_or_else(|| global_data_dir.clone()),
+            global_data_dir,
+            project_root: project.map(Path::to_path_buf),
+            project_untrusted: false,
+            layout,
         }
     }
 
@@ -404,34 +453,170 @@ impl ConfigPaths {
             local_data_dir: paths.local_data_dir.clone(),
             project_root: paths.project_root().map(PathBuf::from),
             project_untrusted: paths.project_untrusted,
+            layout: paths.layout.clone(),
         }
     }
 
-    pub fn user_skills_dir(&self) -> PathBuf {
-        self.user_data_dir.join("skills")
+    pub fn state_root(&self) -> StateRoot {
+        StateRoot::new(self.global_data_dir.clone())
+    }
+
+    pub fn scene_dir(&self) -> &Path {
+        &self.user_data_dir
+    }
+
+    /// The project's own directory, `None` without a project.
+    pub fn project_dir(&self) -> Option<&Path> {
+        self.project_root
+            .as_ref()
+            .map(|_| self.local_data_dir.as_path())
+    }
+
+    /// The directory of a settings tier: the state root, the scene
+    /// directory, the project directory. `None` for the project tier
+    /// without a project, and for the managed tier, which is a file.
+    pub fn tier_dir(&self, tier: Tier) -> Option<PathBuf> {
+        match tier {
+            Tier::Global => Some(self.global_data_dir.clone()),
+            Tier::Scene => Some(self.user_data_dir.clone()),
+            Tier::Project => self.project_dir().map(Path::to_path_buf),
+            Tier::Managed => None,
+        }
+    }
+
+    /// `name`, one of [`entry`], in a tier's directory.
+    pub fn tier_entry(&self, tier: Tier, name: &str) -> Option<PathBuf> {
+        self.tier_dir(tier).map(|dir| dir.join(name))
+    }
+
+    pub fn settings_file(&self, tier: Tier) -> Option<PathBuf> {
+        self.tier_entry(tier, entry::SETTINGS)
+    }
+
+    pub fn settings_local_file(&self, tier: Tier) -> Option<PathBuf> {
+        self.tier_entry(tier, entry::SETTINGS_LOCAL)
     }
 
     pub fn global_skills_dir(&self) -> PathBuf {
-        self.global_data_dir.join("skills")
+        self.global_data_dir.join(entry::SKILLS)
+    }
+
+    pub fn user_skills_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::SKILLS)
+    }
+
+    /// `<project>/.agents/skills`: beside the project directory, not in it.
+    pub fn project_skills_dir(&self) -> Option<PathBuf> {
+        self.project_root
+            .as_ref()
+            .map(|root| root.join(PROJECT_SKILLS_DIR))
+    }
+
+    pub fn global_agents_dir(&self) -> PathBuf {
+        self.global_data_dir.join(entry::AGENTS)
+    }
+
+    pub fn user_agents_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::AGENTS)
+    }
+
+    pub fn project_agents_dir(&self) -> Option<PathBuf> {
+        self.tier_entry(Tier::Project, entry::AGENTS)
+    }
+
+    pub fn global_hooks_dir(&self) -> PathBuf {
+        self.global_data_dir.join(entry::HOOKS)
+    }
+
+    pub fn user_hooks_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::HOOKS)
+    }
+
+    pub fn project_hooks_dir(&self) -> Option<PathBuf> {
+        self.tier_entry(Tier::Project, entry::HOOKS)
+    }
+
+    pub fn global_rules_dir(&self) -> PathBuf {
+        self.global_data_dir.join(entry::RULES)
+    }
+
+    pub fn user_rules_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::RULES)
+    }
+
+    pub fn project_rules_dir(&self) -> Option<PathBuf> {
+        self.tier_entry(Tier::Project, entry::RULES)
+    }
+
+    pub fn user_output_styles_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::OUTPUT_STYLES)
+    }
+
+    pub fn project_output_styles_dir(&self) -> Option<PathBuf> {
+        self.tier_entry(Tier::Project, entry::OUTPUT_STYLES)
     }
 
     pub fn global_plugins_dir(&self) -> PathBuf {
-        self.global_data_dir.join("plugins")
+        self.global_data_dir.join(entry::PLUGINS)
+    }
+
+    pub fn user_plugins_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::PLUGINS)
     }
 
     /// Cross-scene memory root — used when there's no specific project open
     /// (reserved for future no-project/desktop use; today sessions always
     /// have a project, so `local_memory_dir()` is what's actually read).
     pub fn global_memory_dir(&self) -> PathBuf {
-        self.global_data_dir.join("memory")
+        self.global_data_dir.join(entry::MEMORY)
     }
 
     pub fn global_recordings_dir(&self) -> PathBuf {
-        self.global_data_dir.join("recordings")
+        self.global_data_dir.join(entry::RECORDINGS)
     }
 
     pub fn local_memory_dir(&self) -> PathBuf {
-        self.local_data_dir.join("memory")
+        self.local_data_dir.join(entry::MEMORY)
+    }
+
+    pub fn scratchpad_dir(&self) -> PathBuf {
+        self.local_data_dir.join(entry::SCRATCHPAD)
+    }
+
+    pub fn telemetry_dir(&self) -> PathBuf {
+        self.local_data_dir.join(entry::TELEMETRY)
+    }
+
+    /// [`tool_results_dir`] under the project tier's root.
+    pub fn tool_results_dir(&self, session_id: &str) -> PathBuf {
+        tool_results_dir(&self.local_data_dir, session_id)
+    }
+
+    /// The scene's `scheduled_tasks.json`.
+    pub fn scheduled_tasks_file(&self) -> PathBuf {
+        self.user_data_dir.join(entry::SCHEDULED_TASKS)
+    }
+
+    pub fn mcp_oauth_dir(&self) -> PathBuf {
+        self.user_data_dir.join(entry::MCP).join(entry::OAUTH)
+    }
+
+    /// Where the import records that its question was answered, `None`
+    /// without a project.
+    pub fn imported_marker(&self) -> Option<PathBuf> {
+        self.tier_entry(Tier::Project, entry::IMPORTED_MARKER)
+    }
+
+    /// The teams of a session working in `cwd` ([`Layout::teams_dir`]).
+    pub fn teams_dir(&self, cwd: &Path) -> PathBuf {
+        self.layout.teams_dir(cwd)
+    }
+
+    /// The engine's worktrees of the project ([`Layout::worktrees_dir`]).
+    pub fn worktrees_dir(&self) -> Option<PathBuf> {
+        self.project_root
+            .as_ref()
+            .map(|root| self.layout.worktrees_dir(root))
     }
 }
 
@@ -444,6 +629,7 @@ mod tests {
             PathBuf::from("/state/.agix"),
             PathBuf::from("/tmp/test-project/.agix"),
             "code",
+            Layout::default(),
         )
     }
 
@@ -467,8 +653,8 @@ mod tests {
     fn different_scopes_get_different_user_roots_but_same_global_root() {
         let global = PathBuf::from("/state/.agix");
         let local = PathBuf::from("/tmp/p/.agix");
-        let code = ConfigPaths::new(global.clone(), local.clone(), "code");
-        let ops = ConfigPaths::new(global, local, "ops");
+        let code = ConfigPaths::new(global.clone(), local.clone(), "code", Layout::default());
+        let ops = ConfigPaths::new(global, local, "ops", Layout::default());
         assert_ne!(code.user_data_dir, ops.user_data_dir);
         assert_eq!(code.global_data_dir, ops.global_data_dir);
         // Local root is scope-independent (project-level is flat).
@@ -488,8 +674,10 @@ mod tests {
             scope: "code".into(),
             project_untrusted: false,
             worktree: None,
+            layout: Layout::new(".codix").unwrap(),
         };
         let back = ConfigPaths::from_settings(&carried);
+        assert_eq!(back.layout, carried.layout);
         assert_eq!(back.user_data_dir, p.user_data_dir);
         assert_eq!(back.global_data_dir, p.global_data_dir);
         assert_eq!(back.local_data_dir, p.local_data_dir);
@@ -506,6 +694,52 @@ mod tests {
             p.global_data_dir.join("recordings")
         );
         assert_eq!(p.local_memory_dir(), p.local_data_dir.join("memory"));
+    }
+
+    #[test]
+    fn the_project_tiers_paths_are_in_the_layouts_directory() {
+        for layout in layout::test_layouts() {
+            let name = layout.project_dir_name().to_string();
+            let project = Path::new("/repo");
+            let p = ConfigPaths::of(
+                PathBuf::from("/state"),
+                PathBuf::from("/state/scenes/code"),
+                Some(project),
+                layout,
+            );
+            let own = project.join(&name);
+            assert_eq!(p.project_dir(), Some(own.as_path()));
+            assert_eq!(
+                p.settings_file(Tier::Project),
+                Some(own.join("settings.json"))
+            );
+            assert_eq!(p.project_agents_dir(), Some(own.join("agents")));
+            assert_eq!(p.project_hooks_dir(), Some(own.join("hooks")));
+            assert_eq!(p.project_rules_dir(), Some(own.join("rules")));
+            assert_eq!(
+                p.project_output_styles_dir(),
+                Some(own.join("output-styles"))
+            );
+            assert_eq!(p.imported_marker(), Some(own.join(".imported.json")));
+            assert_eq!(p.worktrees_dir(), Some(own.join("worktrees")));
+            assert_eq!(p.telemetry_dir(), own.join("telemetry"));
+            assert_eq!(p.scratchpad_dir(), own.join("scratchpad"));
+            assert_eq!(p.project_skills_dir(), Some(project.join(".agents/skills")));
+            assert_eq!(
+                p.settings_local_file(Tier::Scene),
+                Some(PathBuf::from("/state/scenes/code/settings.local.json"))
+            );
+            assert_eq!(p.tier_dir(Tier::Managed), None);
+        }
+        let none = ConfigPaths::of(
+            PathBuf::from("/state"),
+            PathBuf::from("/state/scenes/code"),
+            None,
+            Layout::default(),
+        );
+        assert_eq!(none.project_dir(), None);
+        assert_eq!(none.settings_file(Tier::Project), None);
+        assert_eq!(none.local_data_dir, PathBuf::from("/state"));
     }
 }
 
@@ -524,11 +758,8 @@ mod local_data_gitignore_tests {
             .lines()
             .map(String::from)
             .collect();
-        for entry in LOCAL_DATA_GITIGNORE.lines() {
-            assert!(
-                lines.iter().any(|l| l == entry),
-                "{entry} missing: {lines:?}"
-            );
+        for entry in local_data_gitignore() {
+            assert!(lines.contains(&entry), "{entry} missing: {lines:?}");
         }
 
         std::fs::write(&file, "build/\nsettings.local.json").unwrap();

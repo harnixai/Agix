@@ -375,7 +375,15 @@ async fn the_real_agent_tools_guide_is_reachable() {
         .guide(&base::tool::PromptContext::default())
         .await
         .expect("AgentTool ships agent_tool.prompt.md and must count as documented");
-    assert_eq!(guide, include_str!("../agent_tool.prompt.md"));
+    let context = base::tool::PromptContext::default();
+    assert_eq!(
+        guide,
+        tools::worktree::name_the_directories(
+            include_str!("../agent_tool.prompt.md"),
+            &context.project_dir
+        )
+    );
+    assert!(!guide.contains('{'), "{guide}");
     assert_ne!(
         guide.trim(),
         agent_tool.description().trim(),

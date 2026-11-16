@@ -386,8 +386,9 @@ pub enum Attachment {
 pub enum PersistScope {
     /// In-memory only, this session.
     Session,
-    /// In-memory for this session AND written to `.agix/settings.local.json`
-    /// so future sessions in this project also allow it.
+    /// In-memory for this session AND written to the project directory's
+    /// `settings.local.json` (`.agix` by default), so future sessions in this
+    /// project also allow it.
     Local,
 }
 
@@ -406,8 +407,8 @@ pub enum PermissionDecision {
     /// Like `Permit`, but also persists an Allow rule beyond this single
     /// tool call — see `base::interface::permission::PermissionGrants`.
     /// `scope: Session` keeps it in-memory only (rest of this session);
-    /// `scope: Local` additionally writes it to `.agix/settings.local.json`
-    /// so future sessions in this project inherit it too.
+    /// `scope: Local` additionally writes it to the project directory's
+    /// `settings.local.json`, so future sessions in this project inherit it too.
     PermitAlways {
         scope: PersistScope,
     },

@@ -73,7 +73,7 @@ pub struct OutputStyle {
 pub enum OutputStyleSource {
     /// `~/.agix/scenes/<scope>/output-styles/<name>.md`
     User,
-    /// `<cwd>/.agix/output-styles/<name>.md`
+    /// `<cwd>/<project dir>/output-styles/<name>.md`
     Project,
 }
 
@@ -407,7 +407,12 @@ mod tests {
 
     /// Roots under a tempdir. Tests never inherit the running user's home.
     fn test_paths(root: &Path) -> ConfigPaths {
-        ConfigPaths::new(root.join(".agix"), root.join(".agix"), "code")
+        ConfigPaths::new(
+            root.join(".agix"),
+            root.join(".agix"),
+            "code",
+            Default::default(),
+        )
     }
 
     use tempfile::TempDir;

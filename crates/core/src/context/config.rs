@@ -60,6 +60,9 @@ pub struct EngineConfig {
     pub project_trust: crate::permission::ProjectTrust,
     /// How the engine reads the files it puts in front of the model.
     pub prompt_files: crate::paths::PromptFiles,
+    /// What the instance names its directories, for the tools that make one
+    /// or name one to the model.
+    pub layout: crate::paths::Layout,
     /// Mirrors `Settings.sandbox.subprocess_env`.
     pub subprocess_env: crate::interface::exec::SubprocessEnv,
 
@@ -240,6 +243,7 @@ impl EngineConfig {
             disable_skill_shell_execution: false,
             project_trust: crate::permission::ProjectTrust::default(),
             prompt_files: crate::paths::PromptFiles::unscoped(),
+            layout: Default::default(),
             subprocess_env: Default::default(),
 
             // grouped sub-configs

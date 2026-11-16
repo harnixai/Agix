@@ -4343,7 +4343,7 @@
           "type": "object"
         },
         {
-          "description": "Like `Permit`, but also persists an Allow rule beyond this single\ntool call — see `base::interface::permission::PermissionGrants`.\n`scope: Session` keeps it in-memory only (rest of this session);\n`scope: Local` additionally writes it to `.agix/settings.local.json`\nso future sessions in this project inherit it too.",
+          "description": "Like `Permit`, but also persists an Allow rule beyond this single\ntool call — see `base::interface::permission::PermissionGrants`.\n`scope: Session` keeps it in-memory only (rest of this session);\n`scope: Local` additionally writes it to the project directory's\n`settings.local.json`, so future sessions in this project inherit it too.",
           "properties": {
             "scope": {
               "$ref": "#/$defs/PersistScope"
@@ -4371,7 +4371,7 @@
         },
         {
           "const": "acceptEdits",
-          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, `.agix`, `.claude` and `.agents/skills` still ask.",
+          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
           "type": "string"
         },
         {
@@ -4449,7 +4449,7 @@
         },
         {
           "const": "local",
-          "description": "In-memory for this session AND written to `.agix/settings.local.json`\nso future sessions in this project also allow it.",
+          "description": "In-memory for this session AND written to the project directory's\n`settings.local.json` (`.agix` by default), so future sessions in this\nproject also allow it.",
           "type": "string"
         }
       ]
@@ -6012,12 +6012,12 @@
         },
         {
           "const": "projectSettings",
-          "description": "`<git-root>/.agix/settings.json`",
+          "description": "`settings.json` in the project directory (`.agix` by default)",
           "type": "string"
         },
         {
           "const": "localSettings",
-          "description": "`<git-root>/.agix/settings.local.json`",
+          "description": "`settings.local.json` in the project directory",
           "type": "string"
         },
         {

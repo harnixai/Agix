@@ -411,15 +411,6 @@ impl SkillManager {
             .unwrap_or_else(PoisonError::into_inner);
     }
 
-    /// Register a bundled (in-memory) skill. Used for built-in skills.
-    /// Disk-loaded skills with the same name take priority (skip).
-    pub fn register_bundled(&self, entry: SkillEntry) {
-        let mut skills = self.skills.write().unwrap_or_else(PoisonError::into_inner);
-        let name = entry.name.clone();
-        // Disk skills take priority — only register if not already loaded
-        skills.entry(name).or_insert_with(|| SkillInfo::from(entry));
-    }
-
     /// Discover skills by walking up directory tree from given file paths.
     /// For each path, walks up to find `skills/` directories
     /// containing SKILL.md files relevant to the path.
@@ -439,7 +430,7 @@ impl SkillManager {
             };
             // Walk up to filesystem root
             loop {
-                let candidate = current.join("skills");
+                let candidate = current.join(base::paths::entry::SKILLS);
                 if candidate.is_dir() && seen_dirs.insert(candidate.clone()) {
                     if let Ok(entries) = std::fs::read_dir(&candidate) {
                         for entry in entries.flatten() {
@@ -514,15 +505,12 @@ impl SkillManager {
     ///
     /// Bundled and MCP-derived skills use sentinel `path` values —
     /// `(bundled:name)` / `(mcp:server:tool)` — not real filesystem paths.
-    /// Bundled bodies are compiled in (`crate::bundled::bundled_body`); an
-    /// MCP skill's body comes from the source that holds its tool list
-    /// (`crate::sources::McpSkills`), like any other source's.
+    /// Bundled bodies are compiled in and come from `crate::sources::BundledSkills`,
+    /// which knows the instance's directories; an MCP skill's body comes from the
+    /// source that holds its tool list (`crate::sources::McpSkills`), like any
+    /// other source's.
     pub fn get_skill_content(&self, name: &str) -> Option<String> {
         let info = self.get(name)?;
-        let path_str = info.path.to_string_lossy();
-        if path_str.starts_with("(bundled:") {
-            return crate::bundled::bundled_body(name).map(|s| s.to_string());
-        }
         let owner = self
             .owners
             .read()
@@ -950,15 +938,19 @@ mod tests {
         // A bundled skill's `path` is a `(bundled:name)` sentinel, not a real
         // filesystem path, so `get_skill_content` must not read it from disk.
         let mgr = SkillManager::new();
-        for bundled in crate::bundled::bundled_skills() {
-            mgr.register_bundled(bundled);
-        }
+        let source = crate::sources::BundledSkills::new(
+            Default::default(),
+            std::path::PathBuf::from("/state"),
+        );
+        mgr.load_from(std::sync::Arc::new(source));
         let content = mgr.get_skill_content("simplify");
         assert!(
             content.is_some(),
             "expected bundled skill content, got None"
         );
-        let expected = crate::bundled::bundled_body("simplify").unwrap();
+        let expected =
+            crate::bundled::bundled_body("simplify", &Default::default(), Path::new("/state"))
+                .unwrap();
         assert_eq!(content.unwrap(), expected);
     }
 
@@ -1128,7 +1120,7 @@ mod tests {
     }
 
     #[test]
-    fn register_bundled_respects_disk_priority() {
+    fn a_fallback_sources_skill_yields_to_the_disk() {
         let mgr = SkillManager::new();
         // Register a bundled skill
         let bundled = SkillEntry {
@@ -1138,7 +1130,9 @@ mod tests {
             path: PathBuf::from("(bundled:test-skill)"),
             ..Default::default()
         };
-        mgr.register_bundled(bundled);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![bundled]),
+        ));
         assert_eq!(
             mgr.get("test-skill").unwrap().description,
             "bundled version"
@@ -1167,13 +1161,18 @@ mod tests {
     fn list_is_sorted_by_name_regardless_of_registration_order() {
         let mgr = SkillManager::new();
         for name in ["zebra", "apple", "mango"] {
-            mgr.register_bundled(SkillEntry {
-                name: name.into(),
-                description: format!("{name} skill"),
-                source: FrozenSkillSource::User,
-                path: PathBuf::from(format!("(bundled:{name})")),
-                ..Default::default()
-            });
+            mgr.load_from(std::sync::Arc::new(
+                base::interface::skill_provider::StaticSkills::new(
+                    "test",
+                    vec![SkillEntry {
+                        name: name.into(),
+                        description: format!("{name} skill"),
+                        source: FrozenSkillSource::User,
+                        path: PathBuf::from(format!("(bundled:{name})")),
+                        ..Default::default()
+                    }],
+                ),
+            ));
         }
         let names: Vec<String> = mgr.list().into_iter().map(|s| s.name).collect();
         assert_eq!(names, vec!["apple", "mango", "zebra"]);
@@ -1192,7 +1191,9 @@ mod tests {
             paths: Some(vec!["**/*.rs".into(), "**/Cargo.toml".into()]),
             ..Default::default()
         };
-        mgr.register_bundled(skill_with_paths);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill_with_paths]),
+        ));
 
         // Register a skill without paths — should never activate
         let skill_no_paths = SkillEntry {
@@ -1203,7 +1204,9 @@ mod tests {
             paths: None,
             ..Default::default()
         };
-        mgr.register_bundled(skill_no_paths);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill_no_paths]),
+        ));
 
         // Register a skill with empty paths — should never activate
         let skill_empty_paths = SkillEntry {
@@ -1214,7 +1217,9 @@ mod tests {
             paths: Some(Vec::new()),
             ..Default::default()
         };
-        mgr.register_bundled(skill_empty_paths);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill_empty_paths]),
+        ));
 
         // Matching .rs files
         let result =
@@ -1250,7 +1255,9 @@ mod tests {
             paths: Some(vec!["/.claude/*".into()]),
             ..Default::default()
         };
-        mgr.register_bundled(skill);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill]),
+        ));
 
         // With anchored pattern /.claude/* (stripped to .claude/*), globset
         // with literal_separator expects .claude as an immediate child of the
@@ -1292,8 +1299,12 @@ mod tests {
             paths: Some(vec!["**/*.md".into()]),
             ..Default::default()
         };
-        mgr.register_bundled(skill_rs);
-        mgr.register_bundled(skill_md);
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill_rs]),
+        ));
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new("test", vec![skill_md]),
+        ));
 
         let result = mgr.activate_conditional_skills_for_paths(&[
             PathBuf::from("/proj/src/lib.rs"),

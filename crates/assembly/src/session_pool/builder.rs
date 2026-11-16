@@ -145,7 +145,7 @@ impl SessionPoolBuilder {
             parts::bindings::own_settings_in(&self.cwd, settings, self.paths.as_ref(), &layers);
         let mcp = McpHub::new(self.mcp, &settings.paths.user_data_dir);
         let _ = std::fs::create_dir_all(&settings.paths.user_data_dir);
-        let scheduler = Scheduler::load(settings.paths.user_data_dir.join("scheduled_tasks.json"));
+        let scheduler = Scheduler::load(settings.paths.config_paths().scheduled_tasks_file());
 
         let paths = self.paths.clone();
         let plugins = Arc::new(crate::plugins::PluginSubsystem::new(
@@ -155,7 +155,10 @@ impl SessionPoolBuilder {
         let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
         tools::register_builtin_tools(&tools);
 
-        let scenes = SceneCatalog::new(self.scene, paths.global_root().join("scenes"));
+        let scenes = SceneCatalog::new(
+            self.scene,
+            base::paths::StateRoot::new(paths.global_root()).scenes_dir(),
+        );
 
         let events = DaemonEvents::new(&settings);
         let watch = match crate::watch_hub::WatchHub::new() {

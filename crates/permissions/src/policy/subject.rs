@@ -6,7 +6,6 @@ use crate::path_rule::ResolvedPath;
 use crate::rule::format_rule_string;
 use crate::ruleset::{path_rule_group, shell_rule_group, RuleHit, RuleSet};
 use base::interface::permission::Subject;
-use base::paths::SensitivePaths;
 use base::permission::PermissionRule;
 use base::tool::ToolContext;
 
@@ -37,14 +36,19 @@ impl Named {
 
     pub(super) fn hit(&self, rules: &RuleSet, tool_name: &str, ctx: &ToolContext) -> RuleHit {
         if let (Some(group), Some(path)) = (path_rule_group(&self.subject), &self.resolved) {
-            let own = rules.evaluate_path(tool_name, group, path, &ctx.cwd);
+            let layout = &ctx.config.layout;
+            let own = rules.evaluate_path(tool_name, group, path, &ctx.cwd, layout);
             return ctx
                 .session
                 .env()
                 .refusal_rule_roots
                 .iter()
                 .fold(own, |hit, root| {
-                    hit.restricted_by(rules.evaluate_path(tool_name, group, path, root).refusal())
+                    hit.restricted_by(
+                        rules
+                            .evaluate_path(tool_name, group, path, root, layout)
+                            .refusal(),
+                    )
                 });
         }
         match &self.subject {
@@ -106,10 +110,9 @@ impl Named {
             .map(String::as_str)
     }
 
-    pub(super) fn names_configuration(&self) -> bool {
-        self.candidates
-            .iter()
-            .any(|s| SensitivePaths::names_configuration(s))
+    pub(super) fn names_configuration(&self, ctx: &ToolContext) -> bool {
+        let paths = &ctx.config.sandbox.paths;
+        self.candidates.iter().any(|s| paths.names_configuration(s))
     }
 }
 

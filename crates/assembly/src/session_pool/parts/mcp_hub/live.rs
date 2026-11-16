@@ -127,7 +127,11 @@ impl McpHub {
         });
         let auth = match setup.credential_store {
             Some(store) => mcp::oauth::McpAuth::new(store),
-            None => mcp::oauth::McpAuth::with_file_store(user_data_dir.join("mcp").join("oauth")),
+            None => mcp::oauth::McpAuth::with_file_store(
+                user_data_dir
+                    .join(base::paths::entry::MCP)
+                    .join(base::paths::entry::OAUTH),
+            ),
         };
         let auth = match setup.oauth_client {
             Some(client) => auth.with_client(client),

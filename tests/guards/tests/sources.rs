@@ -72,10 +72,10 @@ const HOME_READERS: &[(&str, &str)] = &[
     ),
     (
         "crates/platform/src/sandbox/roots.rs",
-        "a backend confines a process on this machine, and the state root it \
-         protects falls back to $HOME/.agix when the policy does not name one. \
-         Where Agix's own settings.json lives comes from \
-         `SandboxPolicy::state_root` first.",
+        "a backend confines a process on this machine, and the git \
+         configuration a project's `include.path` names may start with `~/`, \
+         which only this machine's home resolves. The state root it protects \
+         comes from `SandboxPolicy::state_root` alone.",
     ),
     (
         "crates/platform/src/sandbox/tests/macos.rs",

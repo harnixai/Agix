@@ -123,7 +123,7 @@ pub(in crate::session_pool) fn build_pool_telemetry(
         // whatever the process's working directory happens to be.
         return telemetry::TelemetryHandle::noop();
     }
-    let path = dir.join("telemetry").join("pool.jsonl");
+    let path = dir.join(base::paths::entry::TELEMETRY).join("pool.jsonl");
     let rec = match telemetry::file_recorder::FileRecorder::new(&path) {
         Ok(rec) => {
             base::paths::ensure_local_data_gitignore(dir);

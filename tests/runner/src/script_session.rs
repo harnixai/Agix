@@ -292,6 +292,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
             "code",
             "script-model",
             &crate::sections::all(),
+            Default::default(),
         ),
         None => settings::LoadedSettings::new(
             Settings::defaults_for("script-model"),

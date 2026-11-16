@@ -24,6 +24,26 @@ fn ctx_in(cwd: &std::path::Path) -> ToolContext {
     ctx
 }
 
+/// `ctx_in` of an instance whose project directory is `layout`'s.
+fn ctx_in_layout(cwd: &std::path::Path, layout: &base::paths::Layout) -> ToolContext {
+    let mut ctx = ctx_in(cwd);
+    std::sync::Arc::make_mut(&mut ctx.config).layout = layout.clone();
+    ctx.sandbox_mut().paths = std::sync::Arc::new(base::paths::SensitivePaths::new(
+        None,
+        Some(cwd),
+        layout.clone(),
+    ));
+    ctx
+}
+
+#[allow(clippy::unwrap_used)]
+fn layouts() -> [base::paths::Layout; 2] {
+    [
+        base::paths::Layout::default(),
+        base::paths::Layout::new(".codix").unwrap(),
+    ]
+}
+
 async fn write_decision(ctx: &ToolContext, path: &std::path::Path) -> Reach {
     tools::file_write::FileWriteTool
         .permission_facts(
@@ -276,37 +296,49 @@ async fn the_gate_honours_a_configured_exemption() {
 /// them.
 #[tokio::test]
 async fn a_sub_agent_can_write_inside_its_worktree() {
-    let repo = tempfile::tempdir().unwrap();
-    let worktree = repo.path().join(".agix/worktrees/feature");
-    std::fs::create_dir_all(&worktree).unwrap();
+    for layout in layouts() {
+        let repo = tempfile::tempdir().unwrap();
+        let worktree = layout.worktrees_dir(repo.path()).join("feature");
+        std::fs::create_dir_all(&worktree).unwrap();
 
-    let d = write_decision(&ctx_in(&worktree), &worktree.join("src/main.rs")).await;
-    assert!(
-        matches!(d, Reach::Inside),
-        "the worktree is the sub-agent's project: {d:?}"
-    );
+        let d = write_decision(
+            &ctx_in_layout(&worktree, &layout),
+            &worktree.join("src/main.rs"),
+        )
+        .await;
+        assert!(
+            matches!(d, Reach::Inside),
+            "the worktree is the sub-agent's project: {d:?}"
+        );
+    }
 }
 
 /// And the thing that guarding `.agix` was for still holds.
 #[tokio::test]
 async fn the_engines_own_settings_stay_guarded() {
-    let repo = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join(".agix")).unwrap();
-    for name in [
-        ".agix/settings.json",
-        ".agix/settings.local.json",
-        ".agix/mcp.local.json",
-        ".claude/settings.json",
-        ".claude/settings.local.json",
-    ] {
-        let d = write_decision(&ctx_in(repo.path()), &repo.path().join(name)).await;
-        assert!(denied(&d), "{name}: {d:?}");
+    for layout in layouts() {
+        let own = layout.project_dir_name();
+        let repo = tempfile::tempdir().unwrap();
+        let ctx = ctx_in_layout(repo.path(), &layout);
+        std::fs::create_dir_all(layout.project_dir(repo.path())).unwrap();
+        for name in [
+            format!("{own}/settings.json"),
+            format!("{own}/settings.local.json"),
+            format!("{own}/mcp.local.json"),
+            ".agix/settings.json".into(),
+            ".agix/mcp.local.json".into(),
+            ".claude/settings.json".into(),
+            ".claude/settings.local.json".into(),
+        ] {
+            let d = write_decision(&ctx, &repo.path().join(&name)).await;
+            assert!(denied(&d), "{name}: {d:?}");
+        }
+        // A file that merely lives beside them is not the settings.
+        assert!(matches!(
+            write_decision(&ctx, &repo.path().join(own).join("notes.md")).await,
+            Reach::Inside
+        ));
     }
-    // A file that merely lives beside them is not the settings.
-    assert!(matches!(
-        write_decision(&ctx_in(repo.path()), &repo.path().join(".agix/notes.md")).await,
-        Reach::Inside
-    ));
 }
 
 /// direnv runs `.envrc` in the user's own shell, outside any sandbox, once

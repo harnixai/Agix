@@ -1,8 +1,8 @@
 //! Cross-tool configuration import — detect and migrate Claude Code
 //! (`CLAUDE.md`/`.claude/skills/`), Cursor (`.cursorrules`/`.cursor/rules/*.mdc`),
 //! and Codex-style (`AGENTS.md` present but `.agents/skills/` missing) project
-//! state into this engine's `AGENTS.md` + `.agents/skills/` + `.agix/rules/`
-//! layout.
+//! state into this engine's `AGENTS.md` + `.agents/skills/` + project-directory
+//! `rules/` layout.
 //!
 //! Two layers, kept separate on purpose:
 //! - This module: pure detection + execution, no UI, no callback awareness.
@@ -15,7 +15,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use base::paths::{entry, Layout, AGENTS_DIR, CLAUDE_DIR, PROJECT_SKILLS_DIR};
 use base::text::frontmatter::{extract_yaml_field, split_frontmatter};
+
+const CURSOR_RULES_DIR: &str = ".cursor/rules";
+
+fn claude_skills_rel() -> String {
+    format!("{CLAUDE_DIR}/{}/", entry::SKILLS)
+}
 
 /// Which external tool a detected import source came from. Single-select by
 /// design — importing from more than one source at
@@ -85,14 +92,16 @@ impl ImportSource {
             } => {
                 let mut parts = Vec::new();
                 if claude_md.is_some() {
-                    parts.push("CLAUDE.md");
+                    parts.push("CLAUDE.md".to_string());
                 }
                 if skills_dir.is_some() {
-                    parts.push(".claude/skills/");
+                    parts.push(claude_skills_rel());
                 }
                 format!("Claude Code ({})", parts.join(", "))
             }
-            ImportSource::Codex => "Codex (AGENTS.md present, .agents/skills/ missing)".to_string(),
+            ImportSource::Codex => {
+                format!("Codex (AGENTS.md present, {PROJECT_SKILLS_DIR}/ missing)")
+            }
             ImportSource::Cursor {
                 legacy_rules,
                 mdc_files,
@@ -119,7 +128,7 @@ pub async fn detect_import_sources(cwd: &Path) -> Vec<ImportSource> {
     // Claude Code
     let claude_md_path = cwd.join("CLAUDE.md");
     let claude_md = path_exists(&claude_md_path).await.then_some(claude_md_path);
-    let claude_skills_dir_path = cwd.join(".claude").join("skills");
+    let claude_skills_dir_path = cwd.join(CLAUDE_DIR).join(entry::SKILLS);
     let claude_skills_dir = dir_has_any_skill_md(&claude_skills_dir_path)
         .await
         .then_some(claude_skills_dir_path);
@@ -132,7 +141,7 @@ pub async fn detect_import_sources(cwd: &Path) -> Vec<ImportSource> {
 
     // Codex: AGENTS.md present but .agents/skills/ missing.
     let agents_md = cwd.join("AGENTS.md");
-    let agents_skills = cwd.join(".agents").join("skills");
+    let agents_skills = cwd.join(PROJECT_SKILLS_DIR);
     if path_exists(&agents_md).await && !path_exists(&agents_skills).await {
         sources.push(ImportSource::Codex);
     }
@@ -142,7 +151,7 @@ pub async fn detect_import_sources(cwd: &Path) -> Vec<ImportSource> {
     let legacy_rules = path_exists(&cursorrules_path)
         .await
         .then_some(cursorrules_path);
-    let mdc_files = scan_cursor_mdc_files(&cwd.join(".cursor").join("rules")).await;
+    let mdc_files = scan_cursor_mdc_files(&cwd.join(CURSOR_RULES_DIR)).await;
     if legacy_rules.is_some() || !mdc_files.is_empty() {
         sources.push(ImportSource::Cursor {
             legacy_rules,
@@ -201,19 +210,19 @@ struct ImportedMarker {
     skipped_reason: Option<String>,
 }
 
-fn marker_path(cwd: &Path) -> PathBuf {
-    cwd.join(".agix").join(".imported.json")
+fn marker_path(cwd: &Path, layout: &Layout) -> PathBuf {
+    layout.project_dir(cwd).join(entry::IMPORTED_MARKER)
 }
 
-async fn load_marker(cwd: &Path) -> ImportedMarker {
-    match tokio::fs::read_to_string(marker_path(cwd)).await {
+async fn load_marker(cwd: &Path, layout: &Layout) -> ImportedMarker {
+    match tokio::fs::read_to_string(marker_path(cwd, layout)).await {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => ImportedMarker::default(),
     }
 }
 
-async fn write_marker(cwd: &Path, marker: &ImportedMarker) -> std::io::Result<()> {
-    let path = marker_path(cwd);
+async fn write_marker(cwd: &Path, layout: &Layout, marker: &ImportedMarker) -> std::io::Result<()> {
+    let path = marker_path(cwd, layout);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -230,11 +239,11 @@ async fn write_marker(cwd: &Path, marker: &ImportedMarker) -> std::io::Result<()
 /// The **manual** `/import` path (the bundled `import` skill) intentionally
 /// does not consult this — a user explicitly asking to import should always
 /// get a fresh detection, regardless of prior decisions.
-pub async fn already_decided(cwd: &Path) -> bool {
-    if path_exists(&cwd.join(".agents")).await {
+pub async fn already_decided(cwd: &Path, layout: &Layout) -> bool {
+    if path_exists(&cwd.join(AGENTS_DIR)).await {
         return true;
     }
-    let marker = load_marker(cwd).await;
+    let marker = load_marker(cwd, layout).await;
     matches!(
         marker.decision.as_deref(),
         Some("imported") | Some("skipped")
@@ -245,6 +254,7 @@ pub async fn already_decided(cwd: &Path) -> bool {
 /// `execute_import()`.
 pub async fn mark_imported(
     cwd: &Path,
+    layout: &Layout,
     sources_seen: &[ImportSource],
     chosen: ImportSourceKind,
 ) -> std::io::Result<()> {
@@ -258,7 +268,7 @@ pub async fn mark_imported(
             .collect(),
         skipped_reason: None,
     };
-    write_marker(cwd, &marker).await
+    write_marker(cwd, layout, &marker).await
 }
 
 /// Record that the user explicitly declined to import. Only call this for a
@@ -266,6 +276,7 @@ pub async fn mark_imported(
 /// `already_decided` docs).
 pub async fn mark_skipped(
     cwd: &Path,
+    layout: &Layout,
     sources_seen: &[ImportSource],
     reason: Option<String>,
 ) -> std::io::Result<()> {
@@ -279,7 +290,7 @@ pub async fn mark_skipped(
             .collect(),
         skipped_reason: reason,
     };
-    write_marker(cwd, &marker).await
+    write_marker(cwd, layout, &marker).await
 }
 
 #[derive(Debug, Clone)]
@@ -302,10 +313,12 @@ pub enum ImportError {
 /// detected list, not just the chosen one.
 pub async fn execute_import(
     cwd: &Path,
+    layout: &Layout,
     source: &ImportSource,
 ) -> Result<ImportSummary, ImportError> {
     let mut actions = Vec::new();
-    let files = base::paths::SensitivePaths::default().prompt_files_within(cwd);
+    let files =
+        base::paths::SensitivePaths::new(None, Some(cwd), layout.clone()).prompt_files_within(cwd);
     match source {
         ImportSource::ClaudeCode {
             claude_md,
@@ -321,17 +334,18 @@ pub async fn execute_import(
                 }
             }
             if let Some(src_dir) = skills_dir {
-                let dest_dir = cwd.join(".agents").join("skills");
+                let dest_dir = cwd.join(PROJECT_SKILLS_DIR);
                 let copied = copy_skill_dirs(src_dir, &dest_dir, &files).await?;
                 actions.push(format!(
-                    "copied {copied} skill dir(s) from .claude/skills/ to .agents/skills/"
+                    "copied {copied} skill dir(s) from {} to {PROJECT_SKILLS_DIR}/",
+                    claude_skills_rel()
                 ));
             }
         }
         ImportSource::Codex => {
-            let dest = cwd.join(".agents").join("skills");
+            let dest = cwd.join(PROJECT_SKILLS_DIR);
             tokio::fs::create_dir_all(&dest).await?;
-            actions.push("created empty .agents/skills/ directory".to_string());
+            actions.push(format!("created empty {PROJECT_SKILLS_DIR}/ directory"));
         }
         ImportSource::Cursor {
             legacy_rules,
@@ -347,14 +361,16 @@ pub async fn execute_import(
                 if let Ok(content) = files.read_to_string(mdc_path) {
                     if let Some(slug) = mdc_path.file_stem().and_then(|s| s.to_str()) {
                         let (rule_body, always_apply) = convert_mdc_to_rule(&content);
-                        let dest = cwd.join(".agix").join("rules").join(format!("{slug}.md"));
+                        let rule_rel =
+                            format!("{}/{}/{slug}.md", layout.project_dir_name(), entry::RULES);
+                        let dest = cwd.join(&rule_rel);
                         if let Some(parent) = dest.parent() {
                             tokio::fs::create_dir_all(parent).await?;
                         }
                         tokio::fs::write(&dest, rule_body).await?;
-                        actions.push(format!("wrote .agix/rules/{slug}.md"));
+                        actions.push(format!("wrote {rule_rel}"));
                         if always_apply {
-                            append_rule_reference(cwd, &format!(".agix/rules/{slug}.md")).await?;
+                            append_rule_reference(cwd, &rule_rel).await?;
                             actions.push(format!(
                                 "referenced always-apply rule {slug} from AGENTS.md"
                             ));
@@ -450,8 +466,8 @@ async fn copy_skill_dirs(
 }
 
 /// Parse a Cursor `.mdc` file's YAML frontmatter (`description`/`globs`/
-/// `alwaysApply`) and produce the `.agix/rules/<slug>.md` body. `globs` is
-/// kept as a documentation comment only — Agix's `.agix/rules/` is
+/// `alwaysApply`) and produce the `<project dir>/rules/<slug>.md` body. `globs` is
+/// kept as a documentation comment only — Agix's `<project dir>/rules/` is
 /// lazily loaded (via `AGENTS.md` references), not auto-matched by path, so
 /// there's no live glob-matching behavior to wire it into. Returns
 /// `(body, always_apply)`.
@@ -496,6 +512,10 @@ async fn append_rule_reference(cwd: &Path, rule_path: &str) -> Result<(), Import
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn layouts() -> [Layout; 2] {
+        [Layout::default(), Layout::new(".codix").unwrap()]
+    }
 
     #[tokio::test]
     async fn detects_nothing_in_empty_project() {
@@ -599,31 +619,51 @@ mod tests {
         tokio::fs::create_dir_all(dir.path().join(".agents"))
             .await
             .unwrap();
-        assert!(already_decided(dir.path()).await);
+        for layout in layouts() {
+            assert!(already_decided(dir.path(), &layout).await);
+        }
     }
 
     #[tokio::test]
     async fn already_decided_false_for_fresh_project() {
         let dir = TempDir::new().unwrap();
-        assert!(!already_decided(dir.path()).await);
+        for layout in layouts() {
+            assert!(!already_decided(dir.path(), &layout).await);
+        }
     }
 
     #[tokio::test]
     async fn already_decided_true_after_mark_imported() {
-        let dir = TempDir::new().unwrap();
-        mark_imported(dir.path(), &[], ImportSourceKind::ClaudeCode)
-            .await
+        for layout in layouts() {
+            let dir = TempDir::new().unwrap();
+            mark_imported(dir.path(), &layout, &[], ImportSourceKind::ClaudeCode)
+                .await
+                .unwrap();
+            assert!(already_decided(dir.path(), &layout).await);
+            assert!(dir
+                .path()
+                .join(layout.project_dir_name())
+                .join(".imported.json")
+                .is_file());
+            let other = Layout::new(if layout == Layout::default() {
+                ".codix"
+            } else {
+                ".agix"
+            })
             .unwrap();
-        assert!(already_decided(dir.path()).await);
+            assert!(!already_decided(dir.path(), &other).await);
+        }
     }
 
     #[tokio::test]
     async fn already_decided_true_after_mark_skipped() {
-        let dir = TempDir::new().unwrap();
-        mark_skipped(dir.path(), &[], Some("user said no".into()))
-            .await
-            .unwrap();
-        assert!(already_decided(dir.path()).await);
+        for layout in layouts() {
+            let dir = TempDir::new().unwrap();
+            mark_skipped(dir.path(), &layout, &[], Some("user said no".into()))
+                .await
+                .unwrap();
+            assert!(already_decided(dir.path(), &layout).await);
+        }
     }
 
     #[tokio::test]
@@ -644,7 +684,9 @@ mod tests {
             claude_md: Some(claude_md),
             skills_dir: Some(dir.path().join(".claude/skills")),
         };
-        let summary = execute_import(dir.path(), &source).await.unwrap();
+        let summary = execute_import(dir.path(), &Layout::default(), &source)
+            .await
+            .unwrap();
         assert_eq!(summary.kind, ImportSourceKind::ClaudeCode);
         assert_eq!(summary.actions.len(), 2);
 
@@ -682,7 +724,9 @@ mod tests {
             claude_md: None,
             skills_dir: Some(dir.path().join(".claude/skills")),
         };
-        execute_import(dir.path(), &source).await.unwrap();
+        execute_import(dir.path(), &Layout::default(), &source)
+            .await
+            .unwrap();
 
         let content = tokio::fs::read_to_string(existing_dest.join("SKILL.md"))
             .await
@@ -696,7 +740,7 @@ mod tests {
     #[tokio::test]
     async fn execute_codex_creates_empty_skills_dir() {
         let dir = TempDir::new().unwrap();
-        let summary = execute_import(dir.path(), &ImportSource::Codex)
+        let summary = execute_import(dir.path(), &Layout::default(), &ImportSource::Codex)
             .await
             .unwrap();
         assert_eq!(summary.kind, ImportSourceKind::Codex);
@@ -707,6 +751,13 @@ mod tests {
 
     #[tokio::test]
     async fn execute_cursor_merges_rules_and_converts_mdc() {
+        for layout in layouts() {
+            execute_cursor_into(&layout).await;
+        }
+    }
+
+    async fn execute_cursor_into(layout: &Layout) {
+        let name = layout.project_dir_name();
         let dir = TempDir::new().unwrap();
         let cursorrules = dir.path().join(".cursorrules");
         tokio::fs::write(&cursorrules, "always use tabs")
@@ -727,7 +778,7 @@ mod tests {
             legacy_rules: Some(cursorrules),
             mdc_files: vec![mdc_path],
         };
-        let summary = execute_import(dir.path(), &source).await.unwrap();
+        let summary = execute_import(dir.path(), layout, &source).await.unwrap();
         assert_eq!(summary.kind, ImportSourceKind::Cursor);
 
         let agents_md = tokio::fs::read_to_string(dir.path().join("AGENTS.md"))
@@ -736,11 +787,11 @@ mod tests {
         assert!(agents_md.contains("always use tabs"));
         assert!(agents_md.contains("IMPORTED_FROM_CURSOR_RULES_BEGIN"));
         assert!(
-            agents_md.contains(".agix/rules/style.md"),
+            agents_md.contains(&format!("{name}/rules/style.md")),
             "always-apply rule must be referenced"
         );
 
-        let rule_content = tokio::fs::read_to_string(dir.path().join(".agix/rules/style.md"))
+        let rule_content = tokio::fs::read_to_string(dir.path().join(name).join("rules/style.md"))
             .await
             .unwrap();
         assert!(rule_content.contains("Use rustfmt."));

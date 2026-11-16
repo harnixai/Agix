@@ -40,10 +40,11 @@ impl SessionPool {
                 "source `{source}` not currently detected in this project"
             )));
         };
-        let summary = settings::import::execute_import(project_root, matched)
+        let layout = self.layout();
+        let summary = settings::import::execute_import(project_root, &layout, matched)
             .await
             .map_err(|e| invalid(e.to_string()))?;
-        settings::import::mark_imported(project_root, &sources, kind)
+        settings::import::mark_imported(project_root, &layout, &sources, kind)
             .await
             .map_err(|e| invalid(e.to_string()))?;
         if project_root == self.cwd() {

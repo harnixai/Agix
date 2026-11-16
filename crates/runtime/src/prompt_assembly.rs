@@ -153,7 +153,7 @@ fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     }
 
     // 3b. Rules — lightweight discovery index only (filenames + first-line
-    // description), not full content. Omitted entirely when no `.agix/rules/`
+    // description), not full content. Omitted entirely when no `<project dir>/rules/`
     // files exist anywhere, so sessions that don't use this feature pay zero
     // extra tokens.
     if let Some(text) = render_rules_prompt(rules) {
@@ -279,7 +279,7 @@ pub fn render_rules_prompt(entries: &[RuleEntry]) -> Option<String> {
     let mut lines = vec![
         "## Available Rules".to_string(),
         String::new(),
-        "The following rule documents exist under `.agix/rules/`. They are NOT \
+        "The following rule documents are available. They are NOT \
          auto-loaded — use the Read tool to load one when it's relevant to the \
          current task."
             .to_string(),

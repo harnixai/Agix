@@ -2,14 +2,14 @@
 //!
 //! 本模块不引入 git 库依赖，全靠 `git` 子命令；每条都经 [`EngineExec`] 起——
 //! 会话的命令在沙箱里时，这里的 git 也在同一个沙箱里，只能写 git 目录与
-//! `.agix/worktrees/`。删除 worktree 时，它的目录和 `.git/worktrees/` 下的那一项
+//! `<项目层目录>/worktrees/`。删除 worktree 时，它的目录和 `.git/worktrees/` 下的那一项
 //! 由引擎经 `FileSystem` 删，不交给 git：沙箱不许写已有 worktree 的 `.git` 链接
 //! 与 `commondir`。
 //!
 //! ## 用法
 //!
 //! ```ignore
-//! let handle = create_worktree(&exec, &git, repo_root, "probe").await?;
+//! let handle = create_worktree(&exec, &git, repo_root, "probe", &Default::default()).await?;
 //! // sub-agent 在 handle.path() 跑
 //! if let Some(kept) = handle.remove_if_untouched().await {
 //!     // 有未提交的改动或新提交：worktree 与分支都留着，kept 说在哪
@@ -29,14 +29,14 @@
 
 use base::engine_exec::{EngineExec, EngineExecError, GitAccess};
 use base::interface::exec::{ExecError, ExecProviders, FileSystem};
+use base::paths::Layout;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, warn};
 
 const SLUG_MAX_LEN: usize = 64;
 const GIT_TIMEOUT: Duration = Duration::from_secs(15);
-const WORKTREES_SUBDIR: &str = ".agix/worktrees";
-const BRANCH_PREFIX: &str = "agix/worktree-";
+const BRANCH_PREFIX: &str = base::paths::WORKTREE_BRANCH_PREFIX;
 const UNREADABLE: &str = "a state git could not read";
 
 /// `WorktreeHandle` —— 创建后持有；drop 时不自动清（避免 sync drop 起 tokio
@@ -61,13 +61,15 @@ pub struct WorktreeHandle {
 struct Repo {
     root: PathBuf,
     git_dir: PathBuf,
+    /// Where the engine's worktrees of it live ([`Layout::worktrees_dir`]).
+    worktrees: PathBuf,
 }
 
 impl Repo {
     /// What `git worktree` and `git branch` may write: the bookkeeping in the
     /// git directory, and the directory the worktrees live in.
     fn bookkeeping(&self) -> Vec<PathBuf> {
-        vec![self.git_dir.clone(), self.root.join(WORKTREES_SUBDIR)]
+        vec![self.git_dir.clone(), self.worktrees.clone()]
     }
 }
 
@@ -218,7 +220,10 @@ async fn admin_dir(fs: &dyn FileSystem, path: &Path, git_dir: &Path) -> Option<P
     let link = fs.read_to_string(&path.join(".git")).await.ok()?;
     let named = link.trim().strip_prefix("gitdir:")?.trim();
     let admin = fs.canonicalize(&path.join(named)).await.ok()?;
-    let worktrees = fs.canonicalize(&git_dir.join("worktrees")).await.ok()?;
+    let worktrees = fs
+        .canonicalize(&git_dir.join(base::paths::GIT_WORKTREES_DIR))
+        .await
+        .ok()?;
     (admin.parent() == Some(worktrees.as_path())).then_some(admin)
 }
 
@@ -284,8 +289,8 @@ async fn loose_branch(
 }
 
 /// The worktree at `dir` again, for a session brought back from its log
-/// that worked there: still a directory under
-/// `<repository>/.agix/worktrees/`, of a repository `project` is in, and
+/// that worked there: still a directory under the repository's
+/// [`Layout::worktrees_dir`], of a repository `project` is in, and
 /// still linked to `<repository>/.git`. That git directory is the one it
 /// carries, never one the links name, and the branch is the one the engine
 /// names after the directory, never the one the worktree's `HEAD` names.
@@ -293,6 +298,7 @@ pub async fn reopen_worktree(
     fs: &dyn FileSystem,
     project: &Path,
     dir: &Path,
+    layout: &Layout,
 ) -> Result<base::paths::LinkedWorktree, String> {
     let not_one = || {
         format!(
@@ -303,8 +309,8 @@ pub async fn reopen_worktree(
     };
     let root = dir
         .parent()
-        .filter(|parent| parent.ends_with(WORKTREES_SUBDIR))
         .and_then(|parent| parent.parent()?.parent())
+        .filter(|root| dir.parent() == Some(layout.worktrees_dir(root).as_path()))
         .ok_or_else(not_one)?;
     let name = dir
         .file_name()
@@ -359,18 +365,19 @@ pub enum WorktreeError {
 /// 创建 worktree。会:
 /// 1. 验 slug
 /// 2. 找 repo root 与 git 目录（slug 错或非 git 都 fail-fast）
-/// 3. 写 `.gitignore` 加 `.agix/`（若未存在）
+/// 3. 写 `.gitignore` 加项目层目录（若未存在）
 /// 4. `git worktree add -b <branch> <path> <HEAD 的提交>`
 pub async fn create_worktree(
     exec: &ExecProviders,
     git: &EngineExec,
     cwd: &Path,
     slug: &str,
+    layout: &Layout,
 ) -> Result<WorktreeHandle, WorktreeError> {
     validate_slug(slug)?;
-    let repo = find_repo(git, cwd).await?;
+    let repo = find_repo(git, cwd, layout).await?;
     let flat = flatten_slug(slug);
-    let path = repo.root.join(WORKTREES_SUBDIR).join(&flat);
+    let path = repo.worktrees.join(&flat);
     if exec.filesystem.metadata(&path).await.is_ok() {
         return Err(WorktreeError::AlreadyExists(path));
     }
@@ -381,7 +388,7 @@ pub async fn create_worktree(
         exec.filesystem.create_dir_all(parent).await?;
     }
 
-    ensure_gitignore_entry(exec, &repo.root, ".agix/").await;
+    ensure_gitignore_entry(exec, &repo.root, &layout.gitignore_entry()).await;
 
     let base = run_git_capture(git, &repo.root, &["rev-parse", "HEAD"], &[])
         .await?
@@ -427,17 +434,22 @@ pub async fn create_worktree(
 /// - 找当前 cwd 所在 git repo（非 git 仓库时 silently no-op）
 /// - 跑 `git worktree prune` —— 清掉 git 元数据里"目录已经不存在"的 worktree
 ///   引用（这是 git 自带操作；安全）
-/// - 扫 `.agix/worktrees/<*>/` 下每个目录：如果对应分支
+/// - 扫 `<项目层目录>/worktrees/<*>/` 下每个目录：如果对应分支
 ///   `agix/worktree-<flat>` 还在但 git worktree list 不见这个 worktree
 ///   注册，就把整个目录 + 分支删了（恢复磁盘空间）
 ///
-/// 设计权衡：**我们只清以 `.agix/worktrees/` 为前缀的目录**。
+/// 设计权衡：**我们只清以 `<项目层目录>/worktrees/` 为前缀的目录**。
 /// 其它工具的 worktree 不动。
 ///
 /// 失败仅 warn，不阻塞启动 —— 用户体验上 "agix 启动忽然卡住" 比 "孤儿没清"
 /// 更糟。
-pub async fn prune_orphan_worktrees(exec: &ExecProviders, git: &EngineExec, cwd: &Path) {
-    let repo = match find_repo(git, cwd).await {
+pub async fn prune_orphan_worktrees(
+    exec: &ExecProviders,
+    git: &EngineExec,
+    cwd: &Path,
+    layout: &Layout,
+) {
+    let repo = match find_repo(git, cwd, layout).await {
         Ok(r) => r,
         Err(_) => return, // 非 git repo，没什么可清的
     };
@@ -448,8 +460,8 @@ pub async fn prune_orphan_worktrees(exec: &ExecProviders, git: &EngineExec, cwd:
         debug!(error = %e, "git worktree prune failed; ignoring");
     }
 
-    // 2. 扫 `.agix/worktrees/` 残留
-    let worktrees_root = repo.root.join(WORKTREES_SUBDIR);
+    // 2. 扫 `<项目层目录>/worktrees/` 残留
+    let worktrees_root = repo.worktrees.clone();
     let entries = match exec.filesystem.read_dir(&worktrees_root).await {
         Ok(e) => e,
         Err(_) => return, // 目录不存在 → 没有孤儿
@@ -496,6 +508,14 @@ pub async fn prune_orphan_worktrees(exec: &ExecProviders, git: &EngineExec, cwd:
             "pruned orphan worktrees from previous sessions"
         );
     }
+}
+
+/// `template` with `{project_dir}` and `{branch_prefix}` filled in: where this
+/// instance keeps worktrees and what its branches are called.
+pub fn name_the_directories(template: &str, project_dir: &str) -> String {
+    template
+        .replace("{project_dir}", project_dir)
+        .replace("{branch_prefix}", BRANCH_PREFIX)
 }
 
 /// Slug 校验：长度上限 + segment 正则 + 拒 `.` `..`
@@ -545,7 +565,7 @@ pub(crate) fn flatten_slug(s: &str) -> String {
 /// A sandboxed git may write the git directory only where the sandbox guards
 /// its configuration and hooks, which it does for `<root>/.git`; a repository
 /// whose git directory lives anywhere else is refused there.
-async fn find_repo(git: &EngineExec, cwd: &Path) -> Result<Repo, WorktreeError> {
+async fn find_repo(git: &EngineExec, cwd: &Path, layout: &Layout) -> Result<Repo, WorktreeError> {
     let out = run_git_capture(git, cwd, &["rev-parse", "--show-toplevel"], &[]).await?;
     let trimmed = out.trim();
     if trimmed.is_empty() {
@@ -565,7 +585,11 @@ async fn find_repo(git: &EngineExec, cwd: &Path) -> Result<Repo, WorktreeError> 
             guarded.display()
         )));
     }
-    Ok(Repo { root, git_dir })
+    Ok(Repo {
+        worktrees: layout.worktrees_dir(&root),
+        root,
+        git_dir,
+    })
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -651,6 +675,29 @@ async fn run_git_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base::paths::Layout;
+
+    fn layouts() -> [Layout; 2] {
+        [Layout::default(), Layout::new(".codix").unwrap()]
+    }
+
+    #[test]
+    fn the_guides_name_the_instances_directory_and_branches() {
+        for layout in layouts() {
+            let name = layout.project_dir_name();
+            let text = name_the_directories(
+                include_str!("prompts/coding/worktree_enter.prompt.md"),
+                name,
+            );
+            assert!(
+                text.contains(&format!("`{name}/worktrees/<slug>`")),
+                "{text}"
+            );
+            assert!(text.contains(&format!("`{BRANCH_PREFIX}<slug>`")), "{text}");
+            assert!(!text.contains('{'), "{text}");
+        }
+    }
+
     use tempfile::TempDir;
 
     #[test]
@@ -859,38 +906,40 @@ mod tests {
 
     #[tokio::test]
     async fn create_worktree_succeeds_in_real_repo() {
-        let repo = make_minimal_repo().await;
-        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "probe")
-            .await
-            .unwrap();
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let mut handle = create_worktree(&exec(), &direct(), repo.path(), "probe", &layout)
+                .await
+                .unwrap();
 
-        // worktree 路径应当存在且包含一份 README
-        assert!(handle.path().exists(), "worktree path missing");
-        assert!(
-            handle.path().join("README.md").exists(),
-            "worktree should have README"
-        );
-        assert_eq!(handle.branch(), "agix/worktree-probe");
+            // worktree 路径应当存在且包含一份 README
+            assert!(handle.path().exists(), "worktree path missing");
+            assert!(
+                handle.path().join("README.md").exists(),
+                "worktree should have README"
+            );
+            assert_eq!(handle.branch(), "agix/worktree-probe");
 
-        // .gitignore 应当多出 .agix/
-        let gi = tokio::fs::read_to_string(repo.path().join(".gitignore"))
-            .await
-            .unwrap_or_default();
-        assert!(
-            gi.contains(".agix/"),
-            "expected .gitignore entry; got {gi:?}"
-        );
+            // .gitignore 应当多出 .agix/
+            let gi = tokio::fs::read_to_string(repo.path().join(".gitignore"))
+                .await
+                .unwrap_or_default();
+            assert!(
+                gi.contains(&layout.gitignore_entry()),
+                "expected .gitignore entry; got {gi:?}"
+            );
 
-        // cleanup 后路径 + 分支都应当消失
-        handle.cleanup().await;
-        assert!(!repo.path().join(".agix/worktrees/probe").exists());
-        let branches = run_git_capture(&direct(), repo.path(), &["branch", "--list"], &[])
-            .await
-            .unwrap();
-        assert!(
-            !branches.contains("agix/worktree-probe"),
-            "branch should be deleted; got {branches:?}"
-        );
+            // cleanup 后路径 + 分支都应当消失
+            handle.cleanup().await;
+            assert!(!layout.worktrees_dir(repo.path()).join("probe").exists());
+            let branches = run_git_capture(&direct(), repo.path(), &["branch", "--list"], &[])
+                .await
+                .unwrap();
+            assert!(
+                !branches.contains("agix/worktree-probe"),
+                "branch should be deleted; got {branches:?}"
+            );
+        }
     }
 
     async fn branch_exists(repo: &Path, branch: &str) -> bool {
@@ -902,50 +951,54 @@ mod tests {
 
     #[tokio::test]
     async fn an_untouched_worktree_is_removed_with_its_branch() {
-        let repo = make_minimal_repo().await;
-        let handle = create_worktree(&exec(), &direct(), repo.path(), "clean")
-            .await
-            .unwrap();
-        let path = handle.path().to_path_buf();
-        assert_eq!(handle.remove_if_untouched().await, None);
-        assert!(!path.exists());
-        assert!(!branch_exists(repo.path(), "agix/worktree-clean").await);
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let handle = create_worktree(&exec(), &direct(), repo.path(), "clean", &layout)
+                .await
+                .unwrap();
+            let path = handle.path().to_path_buf();
+            assert_eq!(handle.remove_if_untouched().await, None);
+            assert!(!path.exists());
+            assert!(!branch_exists(repo.path(), "agix/worktree-clean").await);
+        }
     }
 
     #[tokio::test]
     async fn a_worktree_with_changes_or_commits_is_kept_with_its_branch() {
-        let repo = make_minimal_repo().await;
-        let edited = create_worktree(&exec(), &direct(), repo.path(), "edited")
-            .await
-            .unwrap();
-        std::fs::write(edited.path().join("new.txt"), "untracked").unwrap();
-        let kept = edited.remove_if_untouched().await.expect("kept");
-        assert_eq!(kept.holds, ["uncommitted changes"]);
-        assert!(kept.path.join("new.txt").is_file());
-        assert!(branch_exists(repo.path(), &kept.branch).await);
-
-        let committed = create_worktree(&exec(), &direct(), repo.path(), "committed")
-            .await
-            .unwrap();
-        std::fs::write(committed.path().join("c.txt"), "c").unwrap();
-        for args in [&["add", "c.txt"][..], &["commit", "-qm", "c"]] {
-            run_git_capture(&direct(), committed.path(), args, &[])
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let edited = create_worktree(&exec(), &direct(), repo.path(), "edited", &layout)
                 .await
                 .unwrap();
+            std::fs::write(edited.path().join("new.txt"), "untracked").unwrap();
+            let kept = edited.remove_if_untouched().await.expect("kept");
+            assert_eq!(kept.holds, ["uncommitted changes"]);
+            assert!(kept.path.join("new.txt").is_file());
+            assert!(branch_exists(repo.path(), &kept.branch).await);
+
+            let committed = create_worktree(&exec(), &direct(), repo.path(), "committed", &layout)
+                .await
+                .unwrap();
+            std::fs::write(committed.path().join("c.txt"), "c").unwrap();
+            for args in [&["add", "c.txt"][..], &["commit", "-qm", "c"]] {
+                run_git_capture(&direct(), committed.path(), args, &[])
+                    .await
+                    .unwrap();
+            }
+            run_git_capture(
+                &direct(),
+                committed.path(),
+                &["checkout", "-q", "--detach", "HEAD~1"],
+                &[],
+            )
+            .await
+            .unwrap();
+            let kept = committed.remove_if_untouched().await.expect("kept");
+            assert_eq!(kept.holds, ["1 commit(s) since it was made"]);
+            assert_eq!(kept.branch, "agix/worktree-committed");
+            assert!(kept.path.is_dir());
+            assert!(branch_exists(repo.path(), &kept.branch).await);
         }
-        run_git_capture(
-            &direct(),
-            committed.path(),
-            &["checkout", "-q", "--detach", "HEAD~1"],
-            &[],
-        )
-        .await
-        .unwrap();
-        let kept = committed.remove_if_untouched().await.expect("kept");
-        assert_eq!(kept.holds, ["1 commit(s) since it was made"]);
-        assert_eq!(kept.branch, "agix/worktree-committed");
-        assert!(kept.path.is_dir());
-        assert!(branch_exists(repo.path(), &kept.branch).await);
     }
 
     /// A worktree is reopened, with what a commit in it writes, while it
@@ -953,53 +1006,60 @@ mod tests {
     /// the repository reopens it too, and anything else is refused.
     #[tokio::test]
     async fn a_worktree_is_reopened_only_while_it_is_still_linked_to_the_repository() {
-        let repo = make_minimal_repo().await;
-        let root = repo.path().canonicalize().unwrap();
-        let git_dir = root.join(".git");
-        let handle = create_worktree(&exec(), &direct(), &root, "again")
-            .await
-            .unwrap();
-        let dir = handle.path().to_path_buf();
-        let reopened = reopen_worktree(&platform::LocalFileSystem, &root, &dir)
-            .await
-            .unwrap();
-        assert_eq!(reopened.dir, dir);
-        let git = reopened
-            .git
-            .expect("a fresh worktree's branch is a loose ref");
-        assert_eq!(git.dir, git_dir);
-        assert_eq!(git.branch, handle.branch());
-        assert_eq!(git, handle.linked().git.unwrap());
-        assert!(
-            reopen_worktree(&platform::LocalFileSystem, &root.join("sub"), &dir)
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let root = repo.path().canonicalize().unwrap();
+            let git_dir = root.join(".git");
+            let handle = create_worktree(&exec(), &direct(), &root, "again", &layout)
                 .await
-                .is_ok()
-        );
-
-        let elsewhere = TempDir::new().unwrap();
-        let refused = |project: PathBuf, dir: PathBuf| async move {
-            reopen_worktree(&platform::LocalFileSystem, &project, &dir)
+                .unwrap();
+            let dir = handle.path().to_path_buf();
+            let reopened = reopen_worktree(&platform::LocalFileSystem, &root, &dir, &layout)
                 .await
-                .unwrap_err()
-        };
-        assert!(refused(elsewhere.path().to_path_buf(), dir.clone())
-            .await
-            .contains("is not a worktree of"));
-        assert!(refused(root.clone(), root.join("src"))
-            .await
-            .contains("is not a worktree of"));
-        assert!(refused(root.clone(), root.join(".agix/worktrees/never"))
-            .await
-            .contains("is gone"));
+                .unwrap();
+            assert_eq!(reopened.dir, dir);
+            let git = reopened
+                .git
+                .expect("a fresh worktree's branch is a loose ref");
+            assert_eq!(git.dir, git_dir);
+            assert_eq!(git.branch, handle.branch());
+            assert_eq!(git, handle.linked().git.unwrap());
+            assert!(
+                reopen_worktree(&platform::LocalFileSystem, &root.join("sub"), &dir, &layout)
+                    .await
+                    .is_ok()
+            );
 
-        let commondir = git_dir.join("worktrees/again/commondir");
-        std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
-        assert!(refused(root.clone(), dir.clone())
-            .await
-            .contains("no longer linked"));
-        std::fs::write(&commondir, "../..\n").unwrap();
-        handle.remove_if_untouched().await;
-        assert!(refused(root.clone(), dir).await.contains("is gone"));
+            let elsewhere = TempDir::new().unwrap();
+            let refused = |project: PathBuf, dir: PathBuf| {
+                let layout = layout.clone();
+                async move {
+                    reopen_worktree(&platform::LocalFileSystem, &project, &dir, &layout)
+                        .await
+                        .unwrap_err()
+                }
+            };
+            assert!(refused(elsewhere.path().to_path_buf(), dir.clone())
+                .await
+                .contains("is not a worktree of"));
+            assert!(refused(root.clone(), root.join("src"))
+                .await
+                .contains("is not a worktree of"));
+            assert!(
+                refused(root.clone(), layout.worktrees_dir(&root).join("never"))
+                    .await
+                    .contains("is gone")
+            );
+
+            let commondir = git_dir.join("worktrees/again/commondir");
+            std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
+            assert!(refused(root.clone(), dir.clone())
+                .await
+                .contains("no longer linked"));
+            std::fs::write(&commondir, "../..\n").unwrap();
+            handle.remove_if_untouched().await;
+            assert!(refused(root.clone(), dir).await.contains("is gone"));
+        }
     }
 
     /// The git directory a worktree commits to is the one its links led
@@ -1007,244 +1067,276 @@ mod tests {
     /// rewritten link leads nowhere accepted.
     #[tokio::test]
     async fn a_worktree_carries_the_git_directory_its_links_led_back_to() {
-        let repo = make_minimal_repo().await;
-        let git_dir = repo.path().join(".git").canonicalize().unwrap();
-        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "linked")
-            .await
-            .unwrap();
-        let linked = handle.linked();
-        assert_eq!(linked.dir, handle.path());
-        assert_eq!(
-            linked.git,
-            Some(base::paths::WorktreeGit {
-                dir: git_dir.clone(),
-                admin: git_dir.join("worktrees/linked"),
-                branch: "agix/worktree-linked".into(),
-            })
-        );
-        let providers = exec();
-        let linked_git = |handle: &WorktreeHandle| {
-            let (path, repo, branch) = (
-                handle.path().to_path_buf(),
-                handle.repo.clone(),
-                handle.branch.clone(),
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let git_dir = repo.path().join(".git").canonicalize().unwrap();
+            let mut handle = create_worktree(&exec(), &direct(), repo.path(), "linked", &layout)
+                .await
+                .unwrap();
+            let linked = handle.linked();
+            assert_eq!(linked.dir, handle.path());
+            assert_eq!(
+                linked.git,
+                Some(base::paths::WorktreeGit {
+                    dir: git_dir.clone(),
+                    admin: git_dir.join("worktrees/linked"),
+                    branch: "agix/worktree-linked".into(),
+                })
             );
-            let providers = providers.clone();
-            async move { linked_worktree_git(&providers, &path, &repo, &branch).await }
-        };
+            let providers = exec();
+            let linked_git = |handle: &WorktreeHandle| {
+                let (path, repo, branch) = (
+                    handle.path().to_path_buf(),
+                    handle.repo.clone(),
+                    handle.branch.clone(),
+                );
+                let providers = providers.clone();
+                async move { linked_worktree_git(&providers, &path, &repo, &branch).await }
+            };
 
-        let elsewhere = TempDir::new().unwrap();
-        let commondir = git_dir.join("worktrees/linked/commondir");
-        std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
-        assert_eq!(linked_git(&handle).await, None);
-        std::fs::write(&commondir, "../..\n").unwrap();
-        assert_eq!(linked_git(&handle).await, linked.git);
-        run_git_capture(&direct(), repo.path(), &["pack-refs", "--all"], &[])
-            .await
+            let elsewhere = TempDir::new().unwrap();
+            let commondir = git_dir.join("worktrees/linked/commondir");
+            std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
+            assert_eq!(linked_git(&handle).await, None);
+            std::fs::write(&commondir, "../..\n").unwrap();
+            assert_eq!(linked_git(&handle).await, linked.git);
+            run_git_capture(&direct(), repo.path(), &["pack-refs", "--all"], &[])
+                .await
+                .unwrap();
+            assert_eq!(linked_git(&handle).await, None, "a packed branch");
+
+            let fake = elsewhere.path().join("linked");
+            std::fs::create_dir_all(&fake).unwrap();
+            std::fs::write(fake.join("commondir"), format!("{}\n", git_dir.display())).unwrap();
+            std::fs::write(
+                handle.path().join(".git"),
+                format!("gitdir: {}\n", fake.display()),
+            )
             .unwrap();
-        assert_eq!(linked_git(&handle).await, None, "a packed branch");
-
-        let fake = elsewhere.path().join("linked");
-        std::fs::create_dir_all(&fake).unwrap();
-        std::fs::write(fake.join("commondir"), format!("{}\n", git_dir.display())).unwrap();
-        std::fs::write(
-            handle.path().join(".git"),
-            format!("gitdir: {}\n", fake.display()),
-        )
-        .unwrap();
-        assert_eq!(linked_git(&handle).await, None);
-        handle.cleanup().await;
+            assert_eq!(linked_git(&handle).await, None);
+            handle.cleanup().await;
+        }
     }
 
     #[tokio::test]
     async fn create_worktree_flattens_nested_slug() {
-        let repo = make_minimal_repo().await;
-        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "team/feature-a")
-            .await
-            .unwrap();
-        // 嵌套 slug 应当 flatten 成 +
-        assert!(
-            handle.path().to_string_lossy().contains("team+feature-a"),
-            "expected flattened path; got {}",
-            handle.path().display()
-        );
-        assert_eq!(handle.branch(), "agix/worktree-team+feature-a");
-        handle.cleanup().await;
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let mut handle =
+                create_worktree(&exec(), &direct(), repo.path(), "team/feature-a", &layout)
+                    .await
+                    .unwrap();
+            // 嵌套 slug 应当 flatten 成 +
+            assert!(
+                handle.path().to_string_lossy().contains("team+feature-a"),
+                "expected flattened path; got {}",
+                handle.path().display()
+            );
+            assert_eq!(handle.branch(), "agix/worktree-team+feature-a");
+            handle.cleanup().await;
+        }
     }
 
     #[tokio::test]
     async fn create_worktree_fails_on_existing_path() {
-        let repo = make_minimal_repo().await;
-        let mut h1 = create_worktree(&exec(), &direct(), repo.path(), "dup")
-            .await
-            .unwrap();
-        // 第二次同名 slug 应当 AlreadyExists
-        let r2 = create_worktree(&exec(), &direct(), repo.path(), "dup").await;
-        assert!(matches!(r2, Err(WorktreeError::AlreadyExists(_))));
-        h1.cleanup().await;
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let mut h1 = create_worktree(&exec(), &direct(), repo.path(), "dup", &layout)
+                .await
+                .unwrap();
+            // 第二次同名 slug 应当 AlreadyExists
+            let r2 = create_worktree(&exec(), &direct(), repo.path(), "dup", &layout).await;
+            assert!(matches!(r2, Err(WorktreeError::AlreadyExists(_))));
+            h1.cleanup().await;
+        }
     }
 
     #[tokio::test]
     async fn create_worktree_fails_on_non_git_dir() {
-        let plain = TempDir::new().unwrap();
-        let r = create_worktree(&exec(), &direct(), plain.path(), "probe").await;
-        assert!(
-            matches!(
-                r,
-                Err(WorktreeError::NotAGitRepo(_)) | Err(WorktreeError::GitFailed(_))
-            ),
-            "expected NotAGitRepo or GitFailed, got {r:?}"
-        );
+        for layout in layouts() {
+            let plain = TempDir::new().unwrap();
+            let r = create_worktree(&exec(), &direct(), plain.path(), "probe", &layout).await;
+            assert!(
+                matches!(
+                    r,
+                    Err(WorktreeError::NotAGitRepo(_)) | Err(WorktreeError::GitFailed(_))
+                ),
+                "expected NotAGitRepo or GitFailed, got {r:?}"
+            );
+        }
     }
 
     #[tokio::test]
     async fn create_worktree_rejects_invalid_slug_before_touching_disk() {
-        let repo = make_minimal_repo().await;
-        let r = create_worktree(&exec(), &direct(), repo.path(), "../escape").await;
-        assert!(matches!(r, Err(WorktreeError::InvalidSlug(_))));
-        // 路径不应当被创建
-        assert!(!repo.path().join(".agix").exists());
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let r = create_worktree(&exec(), &direct(), repo.path(), "../escape", &layout).await;
+            assert!(matches!(r, Err(WorktreeError::InvalidSlug(_))));
+            // 路径不应当被创建
+            assert!(!layout.project_dir(repo.path()).exists());
+        }
     }
 
     #[tokio::test]
     async fn ensure_gitignore_entry_is_idempotent() {
-        let dir = TempDir::new().unwrap();
-        // 第一次：写入
-        ensure_gitignore_entry(&exec(), dir.path(), ".agix/").await;
-        let v1 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
-            .await
-            .unwrap();
-        assert!(v1.contains(".agix/"));
-        // 第二次：no-op，文件不变
-        ensure_gitignore_entry(&exec(), dir.path(), ".agix/").await;
-        let v2 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
-            .await
-            .unwrap();
-        assert_eq!(v1, v2, "second call should not change file");
+        for layout in layouts() {
+            let dir = TempDir::new().unwrap();
+            // 第一次：写入
+            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            let v1 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
+                .await
+                .unwrap();
+            assert!(v1.contains(&layout.gitignore_entry()));
+            // 第二次：no-op，文件不变
+            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            let v2 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
+                .await
+                .unwrap();
+            assert_eq!(v1, v2, "second call should not change file");
+        }
     }
 
     #[tokio::test]
     async fn prune_removes_orphan_worktree_dir() {
-        let repo = make_minimal_repo().await;
-        // 模拟孤儿：手动 mkdir .agix/worktrees/orphan/ —— 没经过 git worktree add
-        let orphan = repo.path().join(".agix/worktrees/orphan");
-        tokio::fs::create_dir_all(&orphan).await.unwrap();
-        tokio::fs::write(orphan.join("leftover.txt"), "stale")
-            .await
-            .unwrap();
-        assert!(orphan.exists());
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            // 模拟孤儿：手动 mkdir .agix/worktrees/orphan/ —— 没经过 git worktree add
+            let orphan = layout.worktrees_dir(repo.path()).join("orphan");
+            tokio::fs::create_dir_all(&orphan).await.unwrap();
+            tokio::fs::write(orphan.join("leftover.txt"), "stale")
+                .await
+                .unwrap();
+            assert!(orphan.exists());
 
-        prune_orphan_worktrees(&exec(), &direct(), repo.path()).await;
-        assert!(
-            !orphan.exists(),
-            "orphan dir should be removed; still at {}",
-            orphan.display()
-        );
+            prune_orphan_worktrees(&exec(), &direct(), repo.path(), &layout).await;
+            assert!(
+                !orphan.exists(),
+                "orphan dir should be removed; still at {}",
+                orphan.display()
+            );
+        }
     }
 
     #[tokio::test]
     async fn prune_keeps_active_worktrees() {
-        let repo = make_minimal_repo().await;
-        // 一个真活跃的 worktree
-        let mut active = create_worktree(&exec(), &direct(), repo.path(), "active")
-            .await
-            .unwrap();
-        let active_path = active.path().to_path_buf();
-        // 一个孤儿（不经 git worktree add）
-        let orphan = repo.path().join(".agix/worktrees/orphan");
-        tokio::fs::create_dir_all(&orphan).await.unwrap();
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            // 一个真活跃的 worktree
+            let mut active = create_worktree(&exec(), &direct(), repo.path(), "active", &layout)
+                .await
+                .unwrap();
+            let active_path = active.path().to_path_buf();
+            // 一个孤儿（不经 git worktree add）
+            let orphan = layout.worktrees_dir(repo.path()).join("orphan");
+            tokio::fs::create_dir_all(&orphan).await.unwrap();
 
-        prune_orphan_worktrees(&exec(), &direct(), repo.path()).await;
+            prune_orphan_worktrees(&exec(), &direct(), repo.path(), &layout).await;
 
-        // 活跃的应当还在
-        assert!(active_path.exists(), "active worktree should be preserved");
-        // 孤儿应当清了
-        assert!(!orphan.exists(), "orphan should be pruned");
+            // 活跃的应当还在
+            assert!(active_path.exists(), "active worktree should be preserved");
+            // 孤儿应当清了
+            assert!(!orphan.exists(), "orphan should be pruned");
 
-        // cleanup 真活跃的
-        active.cleanup().await;
+            // cleanup 真活跃的
+            active.cleanup().await;
+        }
     }
 
     #[tokio::test]
     async fn prune_in_non_git_dir_is_silent_noop() {
-        let plain = TempDir::new().unwrap();
-        // 不应当 panic 或 error
-        prune_orphan_worktrees(&exec(), &direct(), plain.path()).await;
+        for layout in layouts() {
+            let plain = TempDir::new().unwrap();
+            // 不应当 panic 或 error
+            prune_orphan_worktrees(&exec(), &direct(), plain.path(), &layout).await;
+        }
     }
 
     #[tokio::test]
     async fn prune_with_no_agix_dir_is_silent_noop() {
-        let repo = make_minimal_repo().await;
-        // 全新 repo 没 .agix/worktrees/ 目录
-        prune_orphan_worktrees(&exec(), &direct(), repo.path()).await;
-        // git 还是好的
-        let r = run_git_capture(&direct(), repo.path(), &["status"], &[]).await;
-        assert!(r.is_ok());
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            // 全新 repo 没 .agix/worktrees/ 目录
+            prune_orphan_worktrees(&exec(), &direct(), repo.path(), &layout).await;
+            // git 还是好的
+            let r = run_git_capture(&direct(), repo.path(), &["status"], &[]).await;
+            assert!(r.is_ok());
+        }
     }
 
     #[tokio::test]
     async fn ensure_gitignore_entry_appends_to_existing() {
-        let dir = TempDir::new().unwrap();
-        tokio::fs::write(dir.path().join(".gitignore"), "node_modules/\n*.log\n")
-            .await
-            .unwrap();
-        ensure_gitignore_entry(&exec(), dir.path(), ".agix/").await;
-        let after = tokio::fs::read_to_string(dir.path().join(".gitignore"))
-            .await
-            .unwrap();
-        assert!(after.contains("node_modules/"), "preserved existing");
-        assert!(after.contains("*.log"), "preserved existing");
-        assert!(after.contains(".agix/"), "added new");
+        for layout in layouts() {
+            let dir = TempDir::new().unwrap();
+            tokio::fs::write(dir.path().join(".gitignore"), "node_modules/\n*.log\n")
+                .await
+                .unwrap();
+            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            let after = tokio::fs::read_to_string(dir.path().join(".gitignore"))
+                .await
+                .unwrap();
+            assert!(after.contains("node_modules/"), "preserved existing");
+            assert!(after.contains("*.log"), "preserved existing");
+            assert!(after.contains(&layout.gitignore_entry()), "added new");
+        }
     }
 
     #[tokio::test]
     async fn every_git_call_and_every_write_reaches_the_providers() {
-        let repo = make_minimal_repo().await;
-        let (providers, log) = watched();
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let (providers, log) = watched();
 
-        let mut handle = create_worktree(&providers, &engine(&providers), repo.path(), "watched")
+            let mut handle = create_worktree(
+                &providers,
+                &engine(&providers),
+                repo.path(),
+                "watched",
+                &layout,
+            )
             .await
             .unwrap();
-        handle.cleanup().await;
+            handle.cleanup().await;
 
-        let argv = log.argv.lock().unwrap().clone();
-        assert!(
-            argv.iter().all(|a| a[0] == "git"),
-            "nothing but git should be spawned: {argv:?}"
-        );
-        let options = base::engine_exec::ENGINE_GIT_OPTIONS;
-        assert!(
-            argv.iter()
-                .all(|a| a[1..]
-                    .starts_with(&options.iter().map(|o| o.to_string()).collect::<Vec<_>>())),
-            "every git call carries the engine's options: {argv:?}"
-        );
-        let subcommands: Vec<&[String]> = argv.iter().map(|a| &a[1 + options.len()..]).collect();
-        for expected in [
-            vec!["rev-parse", "--show-toplevel"],
-            vec!["worktree", "add"],
-            vec!["branch", "-D"],
-        ] {
+            let argv = log.argv.lock().unwrap().clone();
             assert!(
-                subcommands
-                    .iter()
-                    .any(|a| a.iter().zip(&expected).all(|(got, want)| got == want)
+                argv.iter().all(|a| a[0] == "git"),
+                "nothing but git should be spawned: {argv:?}"
+            );
+            let options = base::engine_exec::ENGINE_GIT_OPTIONS;
+            assert!(
+                argv.iter().all(|a| a[1..]
+                    .starts_with(&options.iter().map(|o| o.to_string()).collect::<Vec<_>>())),
+                "every git call carries the engine's options: {argv:?}"
+            );
+            let subcommands: Vec<&[String]> =
+                argv.iter().map(|a| &a[1 + options.len()..]).collect();
+            for expected in [
+                vec!["rev-parse", "--show-toplevel"],
+                vec!["worktree", "add"],
+                vec!["branch", "-D"],
+            ] {
+                assert!(
+                    subcommands.iter().any(|a| a
+                        .iter()
+                        .zip(&expected)
+                        .all(|(got, want)| got == want)
                         && a.len() >= expected.len()),
-                "`git {}` never reached the Process contract; got {argv:?}",
-                expected.join(" ")
+                    "`git {}` never reached the Process contract; got {argv:?}",
+                    expected.join(" ")
+                );
+            }
+
+            let written = log.written.lock().unwrap().clone();
+            assert_eq!(
+                written
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+                vec![".gitignore".to_string()],
+                "the .gitignore write is the one write this path makes, and it has \
+                 to go through the FileSystem contract"
             );
         }
-
-        let written = log.written.lock().unwrap().clone();
-        assert_eq!(
-            written
-                .iter()
-                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            vec![".gitignore".to_string()],
-            "the .gitignore write is the one write this path makes, and it has \
-             to go through the FileSystem contract"
-        );
     }
 
     /// `git worktree add` runs the repository's post-checkout hook, and the
@@ -1252,19 +1344,21 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn creating_a_worktree_does_not_run_the_repositorys_hooks() {
-        use std::os::unix::fs::PermissionsExt;
-        let repo = make_minimal_repo().await;
-        let marker = repo.path().join("hook-ran");
-        let hook = repo.path().join(".git").join("hooks").join("post-checkout");
-        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
-        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for layout in layouts() {
+            use std::os::unix::fs::PermissionsExt;
+            let repo = make_minimal_repo().await;
+            let marker = repo.path().join("hook-ran");
+            let hook = repo.path().join(".git").join("hooks").join("post-checkout");
+            std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+            std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "hooked")
-            .await
-            .unwrap();
-        handle.cleanup().await;
-        assert!(!marker.exists(), "post-checkout ran");
+            let mut handle = create_worktree(&exec(), &direct(), repo.path(), "hooked", &layout)
+                .await
+                .unwrap();
+            handle.cleanup().await;
+            assert!(!marker.exists(), "post-checkout ran");
+        }
     }
 
     /// In a sandboxed session the worktree's git runs in the sandbox, writing
@@ -1272,70 +1366,74 @@ mod tests {
     /// makes is one git can work in; untouched, it goes with its branch.
     #[tokio::test]
     async fn a_sandboxed_git_still_creates_and_removes_a_working_worktree() {
-        if !crate::bash::sandbox_status().starts_with("available") {
-            return;
-        }
-        let repo = make_minimal_repo().await;
-        let state = TempDir::new().unwrap();
-        let git = EngineExec::new(
-            exec(),
-            Confinement::Sandboxed {
-                policy: base::interface::exec::SandboxPolicy {
-                    state_root: Some(state.path().to_path_buf()),
-                    ..Default::default()
+        for layout in layouts() {
+            if !crate::bash::sandbox_status().starts_with("available") {
+                return;
+            }
+            let repo = make_minimal_repo().await;
+            let state = TempDir::new().unwrap();
+            let git = EngineExec::new(
+                exec(),
+                Confinement::Sandboxed {
+                    policy: base::interface::exec::SandboxPolicy {
+                        state_root: Some(state.path().to_path_buf()),
+                        ..Default::default()
+                    },
+                    require_enforcement: true,
+                    tmpdir: None,
                 },
-                require_enforcement: true,
-                tmpdir: None,
-            },
-            ProjectTrust::Trusted,
-        );
+                ProjectTrust::Trusted,
+            );
 
-        let handle = create_worktree(&exec(), &git, repo.path(), "boxed")
-            .await
-            .unwrap();
-        assert!(handle.path().join("README.md").is_file());
-        let head = handle
-            .git_in_worktree(&["rev-parse", "--abbrev-ref", "HEAD"])
-            .await
-            .unwrap();
-        assert_eq!(head.trim(), "agix/worktree-boxed");
+            let handle = create_worktree(&exec(), &git, repo.path(), "boxed", &layout)
+                .await
+                .unwrap();
+            assert!(handle.path().join("README.md").is_file());
+            let head = handle
+                .git_in_worktree(&["rev-parse", "--abbrev-ref", "HEAD"])
+                .await
+                .unwrap();
+            assert_eq!(head.trim(), "agix/worktree-boxed");
 
-        let path = handle.path().to_path_buf();
-        assert_eq!(handle.remove_if_untouched().await, None);
-        assert!(!path.exists());
-        let direct = |args: &'static [&'static str]| {
-            let root = repo.path().to_path_buf();
-            async move { run_git_capture(&direct(), &root, args, &[]).await.unwrap() }
-        };
-        assert!(!direct(&["branch", "--list"]).await.contains("boxed"));
-        assert!(!direct(&["worktree", "list", "--porcelain"])
-            .await
-            .contains("boxed"));
+            let path = handle.path().to_path_buf();
+            assert_eq!(handle.remove_if_untouched().await, None);
+            assert!(!path.exists());
+            let direct = |args: &'static [&'static str]| {
+                let root = repo.path().to_path_buf();
+                async move { run_git_capture(&direct(), &root, args, &[]).await.unwrap() }
+            };
+            assert!(!direct(&["branch", "--list"]).await.contains("boxed"));
+            assert!(!direct(&["worktree", "list", "--porcelain"])
+                .await
+                .contains("boxed"));
+        }
     }
 
     /// A git that must run in the sandbox and cannot is not run at all, and
     /// the worktree is refused with the reason.
     #[tokio::test]
     async fn a_worktree_is_refused_when_its_git_must_be_sandboxed_and_cannot_be() {
-        let repo = make_minimal_repo().await;
-        let (mut providers, log) = watched();
-        providers.sandbox = std::sync::Arc::new(base::interface::exec::in_process::NoSandbox);
-        let git = EngineExec::new(
-            providers.clone(),
-            Confinement::Sandboxed {
-                policy: Default::default(),
-                require_enforcement: true,
-                tmpdir: None,
-            },
-            ProjectTrust::Trusted,
-        );
+        for layout in layouts() {
+            let repo = make_minimal_repo().await;
+            let (mut providers, log) = watched();
+            providers.sandbox = std::sync::Arc::new(base::interface::exec::in_process::NoSandbox);
+            let git = EngineExec::new(
+                providers.clone(),
+                Confinement::Sandboxed {
+                    policy: Default::default(),
+                    require_enforcement: true,
+                    tmpdir: None,
+                },
+                ProjectTrust::Trusted,
+            );
 
-        let r = create_worktree(&providers, &git, repo.path(), "refused").await;
-        assert!(
-            matches!(&r, Err(WorktreeError::GitRefused(why)) if why.contains("require_enforcement")),
-            "{r:?}"
-        );
-        assert!(log.argv.lock().unwrap().is_empty(), "git ran anyway");
-        assert!(!repo.path().join(".agix").exists());
+            let r = create_worktree(&providers, &git, repo.path(), "refused", &layout).await;
+            assert!(
+                matches!(&r, Err(WorktreeError::GitRefused(why)) if why.contains("require_enforcement")),
+                "{r:?}"
+            );
+            assert!(log.argv.lock().unwrap().is_empty(), "git ran anyway");
+            assert!(!layout.project_dir(repo.path()).exists());
+        }
     }
 }

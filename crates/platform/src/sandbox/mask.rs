@@ -224,12 +224,12 @@ fn is_real_dir(path: &Path) -> bool {
 }
 
 /// Each [`base::paths::CREDENTIALS`] entry a backend masks, placed under
-/// `root` and the project's `agix`, and a file it names: in a scene that
-/// may not exist yet, each key-file stem.
+/// `root` and the project's engine directory `engine_dir`, and a file it
+/// names: in a scene that may not exist yet, each key-file stem.
 #[cfg(test)]
 pub(super) fn credential_examples(
     root: &Path,
-    agix: &Path,
+    engine_dir: &Path,
 ) -> Vec<(base::paths::Credential, PathBuf)> {
     use base::paths::{Scope, CREDENTIALS};
     let mut examples = Vec::new();
@@ -237,7 +237,7 @@ pub(super) fn credential_examples(
         let dir = match credential.scope {
             Scope::StateRoot => root.to_path_buf(),
             Scope::EachSceneDir => root.join("scenes").join("added-later"),
-            Scope::AnyAgixDir => agix.to_path_buf(),
+            Scope::AnyEngineDir => engine_dir.to_path_buf(),
             Scope::Anywhere => continue,
         };
         let names: Vec<String> = match credential.secret {
@@ -258,7 +258,7 @@ pub(super) fn credential_examples(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use base::paths::{Scope, SensitivePaths};
+    use base::paths::{Layout, Scope, SensitivePaths};
 
     /// Whether `path` is readable after `plan`: the last mount over it or a
     /// directory above it decides.
@@ -298,7 +298,8 @@ mod tests {
         std::fs::create_dir_all(state.join("skills")).unwrap();
         write(&state.join("settings.json"));
         write(&state.join("settings.local.json"));
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         let plan = mask_plan(&state, &locs, &[]);
 
         assert_eq!(plan.first(), Some(&Mount::Tmpfs(state.clone())));
@@ -326,7 +327,8 @@ mod tests {
         write(&state.join("mcp/servers.json"));
         write(&state.join("daemon/auth/desktop.token"));
         write(&state.join("daemon/instances.d/a.json"));
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         let plan = mask_plan(&state, &locs, &[]);
 
         assert!(plan.contains(&Mount::Tmpfs(state.join("mcp"))));
@@ -345,7 +347,8 @@ mod tests {
         std::fs::create_dir_all(state.join("scenes")).unwrap();
         std::os::unix::fs::symlink(elsewhere.path(), state.join("scenes/linked")).unwrap();
         write(&state.join("scenes/notes.txt"));
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         let plan = mask_plan(&state, &locs, &[]);
 
         assert!(!readable(&plan, &state.join("scenes/linked/settings.json")));
@@ -365,7 +368,8 @@ mod tests {
         let project = state.join("projects/app");
         let tmp = state.join("tmp/session");
         std::fs::create_dir_all(&tmp).unwrap();
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         assert!(fits_a_hole(&state, &locs, &project));
         assert!(fits_a_hole(&state, &locs, &tmp));
         let plan = mask_plan(&state, &locs, &[project.clone(), tmp.clone()]);
@@ -463,7 +467,8 @@ mod tests {
         write(&state.join("scenes/code/scene.json"));
         write(&state.join("mcp/servers.json"));
         write(&state.join("skills/s/SKILL.md"));
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         let scenes = mask_below(&state, &locs, &state.join("scenes"));
         let mcp = mask_below(&state, &locs, &state.join("mcp"));
 
@@ -495,14 +500,24 @@ mod tests {
     /// rename-written over the old one is not readable.
     #[test]
     fn a_projects_agix_is_masked_around_its_key_files() {
+        for name in [".agix", ".codix"] {
+            an_engine_dir_is_masked_around_its_key_files(name, name);
+        }
+        an_engine_dir_is_masked_around_its_key_files(".codix", ".agix");
+    }
+
+    /// `dir` in a project of an instance whose own directory is `own`.
+    fn an_engine_dir_is_masked_around_its_key_files(own: &str, dir: &str) {
         let project = tempfile::tempdir().unwrap();
         let project = project.path().canonicalize().unwrap();
-        let agix = project.join(".agix");
+        let agix = project.join(dir);
         write(&agix.join("settings.json"));
         write(&agix.join("settings.local.json"));
         write(&agix.join("scratchpad/notes.md"));
-        let locs = SensitivePaths::new(None, Some(&project))
-            .credential_locations(std::slice::from_ref(&agix));
+        let paths = SensitivePaths::new(None, Some(&project), Layout::new(own).unwrap());
+        let dirs = paths.engine_dirs_in(&project);
+        assert!(dirs.contains(&agix), "{dirs:?}");
+        let locs = paths.credential_locations(&dirs);
         let tmp = agix.join(".settings.local.json.1.tmp");
         let plan = mask_plan(&agix, &locs, &[agix.join("scratchpad"), tmp.clone()]);
 
@@ -525,7 +540,8 @@ mod tests {
         let (_dir, state) = state();
         write(&state.join("scenes/code/settings.json"));
         write(&state.join("daemon/auth/desktop.token"));
-        let locs = SensitivePaths::new(Some(&state), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&state), None, Default::default()).credential_locations(&[]);
         for hole in [
             state.clone(),
             state.join("daemon/auth"),
@@ -554,7 +570,8 @@ mod tests {
     fn an_absent_root_needs_no_mounts() {
         let (_dir, state) = state();
         let missing = state.join("missing");
-        let locs = SensitivePaths::new(Some(&missing), None).credential_locations(&[]);
+        let locs =
+            SensitivePaths::new(Some(&missing), None, Default::default()).credential_locations(&[]);
         assert!(mask_plan(&missing, &locs, &[]).is_empty());
     }
 
@@ -563,28 +580,37 @@ mod tests {
     /// reaches one of them.
     #[test]
     fn every_credential_is_masked_on_linux() {
-        let (_dir, root) = state();
-        let project = tempfile::tempdir().unwrap();
-        let agix = project.path().canonicalize().unwrap().join(".agix");
-        std::fs::create_dir_all(&agix).unwrap();
-        let examples = credential_examples(&root, &agix);
-        for (_, path) in &examples {
-            write(path);
-        }
-        write(&root.join("skills/x/SKILL.md"));
-        let locs = SensitivePaths::new(Some(&root), None)
-            .credential_locations(std::slice::from_ref(&agix));
-        let plan = mask_plan(&root, &locs, &[]);
-        let agix_plan = mask_plan(&agix, &locs, &[]);
+        for layout in [Layout::default(), Layout::new(".codix").unwrap()] {
+            let (_dir, root) = state();
+            let project = tempfile::tempdir().unwrap();
+            let project = project.path().canonicalize().unwrap();
+            let paths = SensitivePaths::new(Some(&root), Some(&project), layout.clone());
+            let dirs = paths.engine_dirs_in(&project);
+            let examples: Vec<_> = dirs
+                .iter()
+                .flat_map(|dir| {
+                    std::fs::create_dir_all(dir).unwrap();
+                    credential_examples(&root, dir)
+                        .into_iter()
+                        .map(move |(credential, path)| (dir.clone(), credential, path))
+                })
+                .collect();
+            for (_, _, path) in &examples {
+                write(path);
+            }
+            write(&root.join("skills/x/SKILL.md"));
+            let locs = paths.credential_locations(&dirs);
+            let plan = mask_plan(&root, &locs, &[]);
 
-        assert!(!examples.is_empty());
-        for (credential, path) in &examples {
-            let masked = match credential.scope {
-                Scope::AnyAgixDir => !readable(&agix_plan, path),
-                _ => !readable(&plan, path),
-            };
-            assert!(masked, "{credential:?}: {} is readable", path.display());
+            assert!(!examples.is_empty());
+            for (dir, credential, path) in &examples {
+                let masked = match credential.scope {
+                    Scope::AnyEngineDir => !readable(&mask_plan(dir, &locs, &[]), path),
+                    _ => !readable(&plan, path),
+                };
+                assert!(masked, "{credential:?}: {} is readable", path.display());
+            }
+            assert!(readable(&plan, &root.join("skills/x/SKILL.md")));
         }
-        assert!(readable(&plan, &root.join("skills/x/SKILL.md")));
     }
 }

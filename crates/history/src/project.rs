@@ -1,67 +1,21 @@
-//! Project-local session state plus global session sidecars.
+//! Global session sidecars: metadata, memory snapshot, input history.
 
 use crate::error::HistoryError;
 use crate::path::{
-    project_session_state_file, session_file, session_memory_file, session_metadata_file,
-    session_prompt_state_file, session_repl_input_history_file, session_sidecar_dir,
-    session_tui_input_history_file,
+    session_file, session_memory_file, session_metadata_file, session_prompt_state_file,
+    session_repl_input_history_file, session_sidecar_dir, session_tui_input_history_file,
 };
 use base::session::SessionId;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-const PROJECT_SESSION_SCHEMA_VERSION: u32 = 1;
 const SESSION_METADATA_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProjectSessionState {
-    pub schema_version: u32,
-    pub session_id: SessionId,
-    pub canonical_cwd: String,
-    pub history_file: String,
-    pub updated_at: String,
-}
-
-impl ProjectSessionState {
-    pub fn new(canonical_cwd: &Path, project_history_dir: &Path, session: SessionId) -> Self {
-        Self {
-            schema_version: PROJECT_SESSION_SCHEMA_VERSION,
-            session_id: session,
-            canonical_cwd: canonical_cwd.display().to_string(),
-            history_file: session_file(project_history_dir, &session)
-                .display()
-                .to_string(),
-            updated_at: base::clock::now_rfc3339(),
-        }
-    }
-
-    pub async fn load(canonical_cwd: &Path) -> Result<Option<Self>, HistoryError> {
-        let path = project_session_state_file(canonical_cwd);
-        let content = match tokio::fs::read_to_string(&path).await {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(HistoryError::Io(e)),
-        };
-        let state = serde_json::from_str(&content)?;
-        Ok(Some(state))
-    }
-
-    pub async fn save(&self, canonical_cwd: &Path) -> Result<(), HistoryError> {
-        let path = project_session_state_file(canonical_cwd);
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        write_json_atomic(&path, self).await?;
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionMetadata {
     pub schema_version: u32,
     pub session_id: SessionId,
     pub canonical_cwd: String,
-    pub project_state_file: String,
     pub history_file: String,
     pub created_at: String,
     pub updated_at: String,
@@ -99,9 +53,6 @@ impl SessionMetadata {
             schema_version: SESSION_METADATA_SCHEMA_VERSION,
             session_id: session,
             canonical_cwd: canonical_cwd.display().to_string(),
-            project_state_file: project_session_state_file(canonical_cwd)
-                .display()
-                .to_string(),
             history_file: session_file(project_history_dir, &session)
                 .display()
                 .to_string(),
@@ -236,9 +187,6 @@ pub async fn ensure_session_sidecar_in(
     metadata.updated_at = base::clock::now_rfc3339();
     metadata.canonical_cwd = canonical_cwd.display().to_string();
     metadata.history_file = session_file(project_history_dir, &session)
-        .display()
-        .to_string();
-    metadata.project_state_file = project_session_state_file(canonical_cwd)
         .display()
         .to_string();
 
@@ -409,41 +357,14 @@ mod tests {
         assert!(left.is_empty(), "{left:?}");
     }
 
-    #[tokio::test]
-    async fn project_state_roundtrips() {
-        let cwd = TempDir::new().unwrap();
-        let history = TempDir::new().unwrap();
-        let session = SessionId::new();
-        let state = ProjectSessionState::new(cwd.path(), history.path(), session);
-
-        state.save(cwd.path()).await.unwrap();
-        let loaded = ProjectSessionState::load(cwd.path())
-            .await
-            .unwrap()
-            .expect("state should exist");
-
-        assert_eq!(loaded.session_id, session);
-        assert_eq!(loaded.schema_version, PROJECT_SESSION_SCHEMA_VERSION);
-        assert!(loaded.history_file.ends_with(&format!("{session}.jsonl")));
-        assert_no_temp_files(cwd.path().join(".agix").as_path());
-    }
-
-    #[tokio::test]
-    async fn missing_project_state_returns_none() {
-        let cwd = TempDir::new().unwrap();
-        let loaded = ProjectSessionState::load(cwd.path()).await.unwrap();
-        assert!(loaded.is_none());
-    }
-
     #[test]
-    fn metadata_points_at_project_and_history() {
+    fn metadata_points_at_the_history_file() {
         let cwd = PathBuf::from("/tmp/project");
         let history = PathBuf::from("/tmp/history");
         let session = SessionId::new();
         let metadata = SessionMetadata::new(&cwd, &history, session);
 
         assert_eq!(metadata.session_id, session);
-        assert!(metadata.project_state_file.ends_with(".agix/session.json"));
         assert!(metadata.history_file.ends_with(&format!("{session}.jsonl")));
     }
 

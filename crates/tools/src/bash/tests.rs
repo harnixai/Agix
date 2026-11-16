@@ -459,8 +459,11 @@ fn each_session_gets_its_own_tmpdir_under_the_state_root() {
     let dir = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mut ctx = ctx_in(dir.path());
-    ctx.sandbox_mut().paths =
-        std::sync::Arc::new(base::paths::SensitivePaths::new(Some(state.path()), None));
+    ctx.sandbox_mut().paths = std::sync::Arc::new(base::paths::SensitivePaths::new(
+        Some(state.path()),
+        None,
+        Default::default(),
+    ));
     let root = state.path().join(base::paths::STATE_ROOT_SESSION_TMP);
     let a = ctx.config.sandbox.session_tmp_dir("session-a");
     assert_eq!(a, root.join("session-a"));
@@ -693,8 +696,11 @@ fn a_read_deny_that_holds_what_a_command_reads_to_start_is_left_to_the_permissio
     }
     let mut ctx = ctx_in(&cwd);
     let parent = cwd.parent().unwrap().display().to_string();
-    ctx.sandbox_mut().paths =
-        std::sync::Arc::new(base::paths::SensitivePaths::new(Some(&state), Some(&cwd)));
+    ctx.sandbox_mut().paths = std::sync::Arc::new(base::paths::SensitivePaths::new(
+        Some(&state),
+        Some(&cwd),
+        Default::default(),
+    ));
     let held = [
         "./**".to_string(),
         ".".into(),

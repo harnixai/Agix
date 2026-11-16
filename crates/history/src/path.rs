@@ -3,6 +3,7 @@
 //! 同一 cwd 产生同一项目目录名，jsonl 文件名也一致。
 
 use crate::error::HistoryError;
+use base::paths::StateRoot;
 use base::session::SessionId;
 use std::path::{Path, PathBuf};
 
@@ -24,21 +25,10 @@ pub struct HistoryRoots {
 impl HistoryRoots {
     pub fn under(global_root: &Path) -> Self {
         Self {
-            projects: global_root.join("projects"),
-            sessions: global_root.join("sessions"),
+            projects: StateRoot::new(global_root).projects_dir(),
+            sessions: StateRoot::new(global_root).sessions_dir(),
         }
     }
-}
-
-/// Project-local state directory (`<cwd>/.agix`) —— 与
-/// `ConfigPaths::local_data_dir` 一致。
-pub fn project_local_dir(canonical_cwd: &Path) -> PathBuf {
-    canonical_cwd.join(".agix")
-}
-
-/// Project-local active session pointer.
-pub fn project_session_state_file(canonical_cwd: &Path) -> PathBuf {
-    project_local_dir(canonical_cwd).join("session.json")
 }
 
 /// Global sidecar directory for session-scoped private state.
@@ -138,15 +128,6 @@ mod tests {
         assert_eq!(f.extension().and_then(|e| e.to_str()), Some("jsonl"));
         let stem = f.file_stem().and_then(|s| s.to_str()).unwrap();
         assert_eq!(stem, id.to_string());
-    }
-
-    #[test]
-    fn project_local_state_layout() {
-        let cwd = PathBuf::from("/Users/me/work");
-        assert_eq!(
-            project_session_state_file(&cwd),
-            PathBuf::from("/Users/me/work/.agix/session.json")
-        );
     }
 
     #[test]

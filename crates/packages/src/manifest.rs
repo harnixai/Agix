@@ -299,10 +299,17 @@ where
 pub struct Plugin {
     pub root: PathBuf,
     pub manifest: PluginManifest,
+    layout: base::paths::Layout,
 }
 
 impl Plugin {
-    pub fn load(root: &Path, manifest_path: &Path) -> Result<Self, PluginError> {
+    /// `layout` names the instance's directories, whose key files
+    /// [`Self::path`] refuses wherever they are.
+    pub fn load(
+        root: &Path,
+        manifest_path: &Path,
+        layout: &base::paths::Layout,
+    ) -> Result<Self, PluginError> {
         let raw = std::fs::read_to_string(manifest_path)?;
         refuse_retired_sections(&raw)?;
         let manifest: PluginManifest = toml::from_str(&raw)?;
@@ -311,6 +318,7 @@ impl Plugin {
         Ok(Plugin {
             root: root.to_path_buf(),
             manifest,
+            layout: layout.clone(),
         })
     }
 
@@ -346,7 +354,9 @@ impl Plugin {
                 resolved.display()
             )));
         }
-        if base::paths::SensitivePaths::default().is_credential(&resolved) {
+        if base::paths::SensitivePaths::new(None, None, self.layout.clone())
+            .is_credential(&resolved)
+        {
             return Err(PluginError::Schema(format!(
                 "`{}` resolves to a credential location, {}",
                 rel.display(),
@@ -657,7 +667,12 @@ api_version = "0.1"
         )
         .unwrap();
         std::os::unix::fs::symlink(outside.path(), dir.path().join("skills")).unwrap();
-        let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         let err = p.path(Path::new("skills")).unwrap_err().to_string();
         assert!(err.contains("outside the package"), "{err}");
     }
@@ -931,7 +946,12 @@ version = "1.0.0"
             dir.path().join("linked.md"),
         )
         .unwrap();
-        let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(p.path(Path::new("own.md")).is_ok());
         let err = p.path(Path::new("linked.md")).unwrap_err().to_string();
         assert!(err.contains("outside the package"), "{err}");
@@ -960,7 +980,12 @@ version = "1.0.0"
     fn scene_id_is_namespaced_and_only_present_when_a_scene_is_declared() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("plugin.toml"), MINIMAL).unwrap();
-        let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(p.scene_id(), None);
 
         std::fs::write(
@@ -968,7 +993,34 @@ version = "1.0.0"
             format!("{MINIMAL}\n[scene]\ndir = \"scene\"\n"),
         )
         .unwrap();
-        let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(p.scene_id().as_deref(), Some("plugin:p"));
+    }
+
+    #[test]
+    fn a_path_to_the_instances_key_file_does_not_resolve() {
+        for name in [".agix", ".codix"] {
+            let layout = base::paths::Layout::new(name).unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("plugin.toml"), MINIMAL).unwrap();
+            for engine_dir in layout.engine_dir_names() {
+                let keys = dir.path().join(engine_dir);
+                std::fs::create_dir_all(&keys).unwrap();
+                std::fs::write(keys.join("settings.local.json"), "{}").unwrap();
+            }
+            let p = Plugin::load(dir.path(), &dir.path().join("plugin.toml"), &layout).unwrap();
+            for engine_dir in layout.engine_dir_names() {
+                let err = p
+                    .path(&Path::new(engine_dir).join("settings.local.json"))
+                    .unwrap_err()
+                    .to_string();
+                assert!(err.contains("credential"), "{name}: {engine_dir}: {err}");
+            }
+        }
     }
 }

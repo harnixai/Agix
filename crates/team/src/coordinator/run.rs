@@ -68,7 +68,9 @@ impl<'a> Run<'a> {
             .flat_map(|s| s.agents.iter().map(|a| a.label.clone()))
             .collect();
         let team_id = format!("team-{}-{}", name, chrono_id());
-        let team_dir = ctx.session.env().cwd.join(".agix/teams").join(&team_id);
+        let env = ctx.session.env();
+        let state_home = env.refusal_rule_roots.first().unwrap_or(&env.cwd);
+        let team_dir = ctx.config.layout.teams_dir(state_home).join(&team_id);
         let sp_path = team_dir.join("SCRATCHPAD.md");
         if let Some(p) = sp_path.parent() {
             let _ = tokio::fs::create_dir_all(p).await;

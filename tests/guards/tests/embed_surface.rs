@@ -30,6 +30,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("mcp_policy", "Option<PathBuf>"),
     ("managed_settings", "Option<PathBuf>"),
     ("groups_file", "Option<PathBuf>"),
+    ("project_dir", "String"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[
@@ -39,6 +40,7 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("InstanceInProcess", "{running:String}"),
     ("GroupsInProcess", "{running:PathBuf}"),
     ("GroupsHeld", "{owner:u32,file:PathBuf}"),
+    ("InvalidProjectDir", "{name:String,reason:String}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

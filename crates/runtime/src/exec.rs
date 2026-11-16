@@ -130,7 +130,11 @@ mod tests {
     fn under(state: &Path) -> EngineConfig {
         let mut config = EngineConfig::defaults_for("test-model");
         config.sandbox = Arc::new(SandboxSettings {
-            paths: Arc::new(base::paths::SensitivePaths::new(Some(state), None)),
+            paths: Arc::new(base::paths::SensitivePaths::new(
+                Some(state),
+                None,
+                Default::default(),
+            )),
             ..Default::default()
         });
         config

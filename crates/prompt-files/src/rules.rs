@@ -1,4 +1,4 @@
-//! The `.agix/rules/` directories as `RuleProvider`s: one directory of `.md`
+//! The `<project dir>/rules/` directories as `RuleProvider`s: one directory of `.md`
 //! files, and the engine's global, scene and project tiers of them.
 
 use base::interface::instruction_provider::RuleProvider;
@@ -46,19 +46,14 @@ impl RuleProvider for RuleDirectory {
 /// precedence as skills and agents.
 pub fn rule_tiers(paths: &PathSettings) -> RuleTiers {
     let files = PromptFiles::for_project(&ConfigPaths::from_settings(paths));
-    let project = paths
-        .project_root()
-        .map(|project| project.join(".agix").join("rules"));
-    let sources = [
-        paths.global_data_dir.join("rules"),
-        paths.user_data_dir.join("rules"),
-    ]
-    .into_iter()
-    .chain(project)
-    .map(|dir| {
-        Arc::new(RuleDirectory::new(dir).reading_with(files.clone())) as Arc<dyn RuleProvider>
-    })
-    .collect();
+    let dirs = paths.config_paths();
+    let sources = [dirs.global_rules_dir(), dirs.user_rules_dir()]
+        .into_iter()
+        .chain(dirs.project_rules_dir())
+        .map(|dir| {
+            Arc::new(RuleDirectory::new(dir).reading_with(files.clone())) as Arc<dyn RuleProvider>
+        })
+        .collect();
     RuleTiers::new(sources)
 }
 
@@ -115,7 +110,7 @@ pub fn first_line_description(content: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base::paths::Workspace;
+    use base::paths::{Layout, Workspace};
     use tempfile::TempDir;
 
     fn write_rule(dir: &Path, filename: &str, content: &str) {
@@ -123,82 +118,98 @@ mod tests {
         std::fs::write(dir.join(filename), content).unwrap();
     }
 
-    fn paths_for(project: &Path, scene: &Path, global: &Path) -> PathSettings {
+    fn layouts() -> [Layout; 2] {
+        [Layout::default(), Layout::new(".codix").unwrap()]
+    }
+
+    fn paths_for(project: &Path, scene: &Path, global: &Path, layout: &Layout) -> PathSettings {
+        let local = layout.project_dir(project);
         PathSettings::new(
             scene.to_path_buf(),
             global.to_path_buf(),
-            project.join(".agix"),
-            Workspace::project_of(&project.join(".agix")),
+            local.clone(),
+            Workspace::project_of(&local),
             "code".into(),
+            layout.clone(),
         )
     }
 
     #[test]
     fn no_rules_when_no_dirs_exist() {
-        let root = TempDir::new().unwrap();
-        let paths = paths_for(
-            &root.path().join("project"),
-            &root.path().join("scene"),
-            &root.path().join("global"),
-        );
-        assert!(rule_tiers(&paths).rules().is_empty());
+        for layout in layouts() {
+            let root = TempDir::new().unwrap();
+            let paths = paths_for(
+                &root.path().join("project"),
+                &root.path().join("scene"),
+                &root.path().join("global"),
+                &layout,
+            );
+            assert!(rule_tiers(&paths).rules().is_empty());
+        }
     }
 
     #[test]
     fn the_first_line_is_the_description() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "security.md",
-            "# Security guidelines\n\nBody text here.",
-        );
-        let paths = paths_for(
-            &project,
-            &root.path().join("scene"),
-            &root.path().join("global"),
-        );
-        let entries = rule_tiers(&paths).rules();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "security");
-        assert_eq!(entries[0].description, "Security guidelines");
+        for layout in layouts() {
+            let root = TempDir::new().unwrap();
+            let project = root.path().join("project");
+            write_rule(
+                &layout.project_dir(&project).join("rules"),
+                "security.md",
+                "# Security guidelines\n\nBody text here.",
+            );
+            let paths = paths_for(
+                &project,
+                &root.path().join("scene"),
+                &root.path().join("global"),
+                &layout,
+            );
+            let entries = rule_tiers(&paths).rules();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].name, "security");
+            assert_eq!(entries[0].description, "Security guidelines");
+        }
     }
 
     #[test]
     fn project_overrides_scene_overrides_global() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        let scene = root.path().join("scene");
-        let global = root.path().join("global");
-        write_rule(&global.join("rules"), "testing.md", "from global");
-        write_rule(&scene.join("rules"), "testing.md", "from scene");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "testing.md",
-            "from project",
-        );
+        for layout in layouts() {
+            let root = TempDir::new().unwrap();
+            let project = root.path().join("project");
+            let scene = root.path().join("scene");
+            let global = root.path().join("global");
+            write_rule(&global.join("rules"), "testing.md", "from global");
+            write_rule(&scene.join("rules"), "testing.md", "from scene");
+            write_rule(
+                &layout.project_dir(&project).join("rules"),
+                "testing.md",
+                "from project",
+            );
 
-        let entries = rule_tiers(&paths_for(&project, &scene, &global)).rules();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].description, "from project");
+            let entries = rule_tiers(&paths_for(&project, &scene, &global, &layout)).rules();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].description, "from project");
+        }
     }
 
     #[test]
     fn distinct_names_from_different_tiers_all_show() {
-        let root = TempDir::new().unwrap();
-        let project = root.path().join("project");
-        let global = root.path().join("global");
-        write_rule(&global.join("rules"), "architecture.md", "global rule");
-        write_rule(
-            &project.join(".agix").join("rules"),
-            "security.md",
-            "project rule",
-        );
+        for layout in layouts() {
+            let root = TempDir::new().unwrap();
+            let project = root.path().join("project");
+            let global = root.path().join("global");
+            write_rule(&global.join("rules"), "architecture.md", "global rule");
+            write_rule(
+                &layout.project_dir(&project).join("rules"),
+                "security.md",
+                "project rule",
+            );
 
-        let paths = paths_for(&project, &root.path().join("scene"), &global);
-        let entries = rule_tiers(&paths).rules();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["architecture", "security"]);
+            let paths = paths_for(&project, &root.path().join("scene"), &global, &layout);
+            let entries = rule_tiers(&paths).rules();
+            let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+            assert_eq!(names, ["architecture", "security"]);
+        }
     }
 
     #[test]

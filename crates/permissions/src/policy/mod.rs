@@ -53,6 +53,9 @@ pub struct Policy {
     /// Set when nothing can put a question to a person: an attended call's
     /// question is refused for this reason instead.
     no_one_to_ask: Option<&'static str>,
+    /// Whose worktrees the path rules also hold in, for the sandbox's
+    /// denials ([`base::interface::permission::PathDenials`]).
+    layout: base::paths::Layout,
 }
 
 /// What the deployment's managed settings (`settings::managed`) hold
@@ -138,6 +141,7 @@ impl Policy {
             project_rules: None,
             host: None,
             no_one_to_ask: None,
+            layout: base::paths::Layout::default(),
         }
     }
 
@@ -160,6 +164,7 @@ impl Policy {
         let mut policy = Self::new(RuleSet::new(rules));
         policy.exact = RwLock::new(crate::rule::exact_allows_from(settings));
         policy
+            .with_layout(settings.layout.clone())
             .with_managed(ManagedLayer::from(&settings.managed))
             .with_project_rules(settings.project_rules.clone())
     }
@@ -176,6 +181,13 @@ impl Policy {
 
     pub fn with_host(mut self, host: Option<Arc<dyn PermissionPolicy>>) -> Self {
         self.host = host;
+        self
+    }
+
+    /// The project directory name the worktree aliases of its `Read` denials
+    /// follow; [`Self::from_settings`] takes it from the settings.
+    pub fn with_layout(mut self, layout: base::paths::Layout) -> Self {
+        self.layout = layout;
         self
     }
 
@@ -367,7 +379,7 @@ impl base::interface::permission::PathDenials for Policy {
         cwd: &std::path::Path,
         extra: &[PermissionRule],
     ) -> Option<base::interface::permission::PathDenial> {
-        crate::ruleset::path_denial(self.rules_with(extra), tool, cwd)
+        crate::ruleset::path_denial(self.rules_with(extra), tool, cwd, &self.layout)
     }
 
     fn denied_read_paths(
@@ -375,7 +387,7 @@ impl base::interface::permission::PathDenials for Policy {
         cwd: &std::path::Path,
         extra: &[PermissionRule],
     ) -> Vec<std::path::PathBuf> {
-        crate::ruleset::denied_read_paths(&self.rules_with(extra), cwd)
+        crate::ruleset::denied_read_paths(&self.rules_with(extra), cwd, &self.layout)
     }
 }
 

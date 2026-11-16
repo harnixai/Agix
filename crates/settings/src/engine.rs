@@ -37,6 +37,7 @@ impl LoadedSettings {
         c.prompt_files = base::paths::PromptFiles::for_project(
             &base::paths::ConfigPaths::from_settings(&loaded.paths),
         );
+        c.layout = loaded.paths.layout.clone();
         c.path_style = settings.path_style.unwrap_or_default();
         c.subprocess_env = settings.sandbox.subprocess_env.clone();
 
@@ -54,9 +55,9 @@ impl LoadedSettings {
     }
 
     /// What the permission gate reads of these settings. A project's
-    /// "always allow" is not written where it would not hold: in a `.agix`
+    /// "always allow" is not written where it would not hold: in a project directory
     /// that is the global or scene directory (a repository linking its
-    /// `.agix` there, a project rooted at `$HOME`) it would allow the call in
+    /// project directory there, a project rooted at `$HOME`) it would allow the call in
     /// every project, and an untrusted project's file is withheld on the next
     /// load.
     pub fn permission_settings(&self) -> PermissionSettings {
@@ -67,14 +68,16 @@ impl LoadedSettings {
             &paths.user_data_dir,
         );
         let refusal = if !own {
-            Some(
-                "the project's .agix is the global or scene directory, where the rule would \
+            Some(format!(
+                "the project's {} is the global or scene directory, where the rule would \
                  allow the call in every project",
-            )
+                paths.layout.project_dir_name()
+            ))
         } else if paths.project_untrusted {
             Some(
                 "the project is not trusted, so its settings would not be read; trust it \
-                 first (project.trust)",
+                 first (project.trust)"
+                    .to_string(),
             )
         } else {
             None
@@ -88,6 +91,7 @@ impl LoadedSettings {
                     None => LocalRules::new(path),
                 }) as std::sync::Arc<dyn base::interface::permission::RuleFile>
             }),
+            layout: paths.layout.clone(),
         }
     }
 }
@@ -258,6 +262,18 @@ mod tests {
             .sandbox
             .paths
             .is_credential(std::path::Path::new("/tmp/agix-elsewhere/key.txt")));
+    }
+
+    #[test]
+    fn the_layout_reaches_the_engine_the_gate_and_the_sandbox() {
+        let mut paths = PathSettings::default();
+        paths.layout = base::paths::Layout::new(".codix").unwrap();
+        let loaded = LoadedSettings::new(Settings::defaults_for("test-model"), paths);
+        let c = loaded.engine_config();
+        assert_eq!(c.layout.project_dir_name(), ".codix");
+        assert_eq!(c.sandbox.paths.layout(), &c.layout);
+        assert_eq!(c.sandbox.policy().layout, c.layout);
+        assert_eq!(loaded.permission_settings().layout, c.layout);
     }
 
     /// The setting file says `"network_mode": "deny_all"`; that is what the

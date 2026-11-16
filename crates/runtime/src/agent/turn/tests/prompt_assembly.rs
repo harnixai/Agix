@@ -362,7 +362,12 @@ async fn parent_agents_md_reaches_the_prompt_with_nearest_last() {
     let frozen = super::super::frozen::collect(
         child.clone(),
         base::frozen::CollectOptions::defaults(),
-        &base::paths::ConfigPaths::new(child.join(".state"), child.join(".agix"), "code"),
+        &base::paths::ConfigPaths::new(
+            child.join(".state"),
+            child.join(".agix"),
+            "code",
+            Default::default(),
+        ),
         &base::interface::environment::SystemEnvironment,
         &base::engine_exec::EngineExec::new(
             platform::local_providers(),
@@ -417,7 +422,12 @@ async fn single_instruction_file_is_injected_verbatim() {
     let frozen = super::super::frozen::collect(
         root.clone(),
         base::frozen::CollectOptions::defaults(),
-        &base::paths::ConfigPaths::new(root.join(".state"), root.join(".agix"), "code"),
+        &base::paths::ConfigPaths::new(
+            root.join(".state"),
+            root.join(".agix"),
+            "code",
+            Default::default(),
+        ),
         &base::interface::environment::SystemEnvironment,
         &base::engine_exec::EngineExec::new(
             platform::local_providers(),

@@ -447,7 +447,8 @@ impl SessionPool {
         let _claim = self.claim_log(&sid).await?;
 
         let (binding, project_root_for_meta, scene_id) = self.binding_of_log(log).await;
-        let worktree = recorded_worktree(log, project_root_for_meta.as_deref())
+        let layout = self.bindings.paths().layout();
+        let worktree = recorded_worktree(log, project_root_for_meta.as_deref(), &layout)
             .await
             .map_err(|why| format!("session `{sid}` could not be brought back: {why}"))?;
 
@@ -647,6 +648,7 @@ fn active_times(core: &SessionCore) -> (Option<String>, String, String) {
 async fn recorded_worktree(
     log: &[history::entry::EnvelopedEntry],
     project: Option<&Path>,
+    layout: &base::paths::Layout,
 ) -> Result<Option<base::paths::LinkedWorktree>, String> {
     let (
         Some(history::entry::LogEntry::Meta {
@@ -666,7 +668,7 @@ async fn recorded_worktree(
     if same(cwd, project) {
         return Ok(None);
     }
-    tools::worktree::reopen_worktree(&platform::LocalFileSystem, project, cwd)
+    tools::worktree::reopen_worktree(&platform::LocalFileSystem, project, cwd, layout)
         .await
         .map(Some)
 }

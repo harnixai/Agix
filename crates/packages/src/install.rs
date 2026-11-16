@@ -71,6 +71,7 @@ pub async fn install(
     cache: &PluginCache,
     name: &str,
     source: &PluginSource,
+    layout: &base::paths::Layout,
 ) -> Result<Installed, PluginError> {
     crate::cache::check_component("name", name)?;
     crate::cache::check_component("version", &source.version)?;
@@ -97,15 +98,19 @@ pub async fn install(
     let name = name.to_string();
     let version = source.version.clone();
     let expected = source.checksum.clone();
+    let layout = layout.clone();
     tokio::task::spawn_blocking(move || {
         unpack_into(
             &PluginCache::new(root),
             &name,
             &version,
-            &bytes,
-            &sha256,
-            expected.as_deref(),
+            Archive {
+                bytes: &bytes,
+                sha256: &sha256,
+                expected: expected.as_deref(),
+            },
             &UnpackLimits::default(),
+            &layout,
         )
     })
     .await
@@ -145,15 +150,27 @@ fn marker_agrees(cache: &PluginCache, name: &str, version: &str, expected: Optio
     }
 }
 
+/// A downloaded package: its bytes, their hash, and the hash the source
+/// promised, if any.
+struct Archive<'a> {
+    bytes: &'a [u8],
+    sha256: &'a str,
+    expected: Option<&'a str>,
+}
+
 fn unpack_into(
     cache: &PluginCache,
     name: &str,
     version: &str,
-    bytes: &[u8],
-    sha256: &str,
-    expected: Option<&str>,
+    archive: Archive<'_>,
     limits: &UnpackLimits,
+    layout: &base::paths::Layout,
 ) -> Result<Installed, PluginError> {
+    let Archive {
+        bytes,
+        sha256,
+        expected,
+    } = archive;
     let _lock = cache.lock()?;
     if cache.is_cached(name, version) && marker_agrees(cache, name, version, expected) {
         return Ok(Installed::AlreadyPresent);
@@ -163,7 +180,7 @@ fn unpack_into(
     let staging = plugin_dir.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
     let dest = cache.version_dir(name, version);
     let placed = extract_zip(bytes, &staging, limits)
-        .and_then(|()| check_staged(&staging, name, cache))
+        .and_then(|()| check_staged(&staging, name, cache, layout))
         .and_then(|()| Ok(std::fs::write(staging.join(INSTALLED_MARKER), sha256)?))
         .and_then(|()| {
             if dest.exists() {
@@ -222,8 +239,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn check_staged(staging: &Path, name: &str, cache: &PluginCache) -> Result<(), PluginError> {
-    let plugin = crate::manifest::Plugin::load(staging, &staging.join("plugin.toml"))?;
+fn check_staged(
+    staging: &Path,
+    name: &str,
+    cache: &PluginCache,
+    layout: &base::paths::Layout,
+) -> Result<(), PluginError> {
+    let plugin = crate::manifest::Plugin::load(staging, &staging.join("plugin.toml"), layout)?;
     if plugin.name() != name {
         return Err(PluginError::Schema(format!(
             "the package calls itself `{}`, not `{name}`",
@@ -333,7 +355,10 @@ mod tests {
             checksum: None,
             version: "1.0.0".into(),
         };
-        let Installed::Into(dest) = install(&cache, "demo", &source).await.unwrap() else {
+        let Installed::Into(dest) = install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap()
+        else {
             panic!("an empty cache already had the package");
         };
         assert!(dest.join("plugin.toml").is_file());
@@ -359,7 +384,10 @@ mod tests {
             checksum: Some(checksum),
             version: "1.0.0".into(),
         };
-        let Installed::Into(dest) = install(&cache, "demo", &source).await.unwrap() else {
+        let Installed::Into(dest) = install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap()
+        else {
             panic!("an empty cache already had the package");
         };
         assert!(dest.join("plugin.toml").is_file());
@@ -382,7 +410,9 @@ mod tests {
             checksum: Some("0".repeat(64)),
             version: "1.0.0".into(),
         };
-        let err = install(&cache, "demo", &source).await.unwrap_err();
+        let err = install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap_err();
         assert!(matches!(err, PluginError::Checksum(_)));
     }
 
@@ -395,7 +425,9 @@ mod tests {
             checksum: None,
             version: "1.0.0".into(),
         };
-        let err = install(&cache, "demo", &source).await.unwrap_err();
+        let err = install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap_err();
         assert!(matches!(err, PluginError::Checksum(_)));
     }
 
@@ -441,7 +473,9 @@ mod tests {
                 checksum: None,
                 version: version.into(),
             };
-            assert!(install(&cache, name, &source).await.is_err());
+            assert!(install(&cache, name, &source, &Default::default())
+                .await
+                .is_err());
             assert!(uninstall(&cache, name, Some(version)).is_err());
         }
         assert!(uninstall(&cache, "..", None).is_err());
@@ -488,10 +522,13 @@ mod tests {
                 &cache,
                 "p",
                 "1.0.0",
-                &zip_bytes(&entries),
-                "",
-                None,
+                Archive {
+                    bytes: &zip_bytes(&entries),
+                    sha256: "",
+                    expected: None,
+                },
                 &limits,
+                &Default::default(),
             )
             .unwrap_err()
             .to_string();
@@ -526,7 +563,10 @@ mod tests {
             checksum: None,
             version: "1.0.0".into(),
         };
-        let Installed::Into(dest) = install(&cache, "demo", &source).await.unwrap() else {
+        let Installed::Into(dest) = install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap()
+        else {
             panic!("an unfinished directory was taken for an install");
         };
         assert!(std::fs::read_to_string(dest.join("plugin.toml"))
@@ -534,7 +574,9 @@ mod tests {
             .contains("demo"));
         assert!(cache.is_cached("demo", "1.0.0"));
         assert!(matches!(
-            install(&cache, "demo", &source).await.unwrap(),
+            install(&cache, "demo", &source, &Default::default())
+                .await
+                .unwrap(),
             Installed::AlreadyPresent
         ));
     }
@@ -560,7 +602,9 @@ mod tests {
         let original_sum = sha256_hex(&original);
         let source = file_source(tmp.path(), &original, Some(original_sum.clone()));
         assert!(matches!(
-            install(&cache, "demo", &source).await.unwrap(),
+            install(&cache, "demo", &source, &Default::default())
+                .await
+                .unwrap(),
             Installed::Into(_)
         ));
         assert_eq!(
@@ -568,13 +612,18 @@ mod tests {
             Some(original_sum.as_str())
         );
         assert!(matches!(
-            install(&cache, "demo", &source).await.unwrap(),
+            install(&cache, "demo", &source, &Default::default())
+                .await
+                .unwrap(),
             Installed::AlreadyPresent
         ));
 
         let other = zip_bytes(&[("plugin.toml", DEMO_MANIFEST), ("tool.js", "different")]);
         let other_source = file_source(tmp.path(), &other, Some(sha256_hex(&other)));
-        let Installed::Into(dest) = install(&cache, "demo", &other_source).await.unwrap() else {
+        let Installed::Into(dest) = install(&cache, "demo", &other_source, &Default::default())
+            .await
+            .unwrap()
+        else {
             panic!("a different checksum for the same version was taken for what is cached");
         };
         assert_eq!(
@@ -591,7 +640,9 @@ mod tests {
         let manifest = format!("{DEMO_MANIFEST}description = \"{long}\"\n");
         let archive = zip_bytes(&[("plugin.toml", manifest.as_str())]);
         let source = file_source(tmp.path(), &archive, None);
-        assert!(install(&cache, "demo", &source).await.is_err());
+        assert!(install(&cache, "demo", &source, &Default::default())
+            .await
+            .is_err());
         assert!(!cache.version_dir("demo", "1.0.0").exists());
         assert!(walkdir_files(&tmp.path().join("cache").join("demo")).is_empty());
     }
@@ -606,7 +657,7 @@ mod tests {
         );
         let archive = zip_bytes(&[("plugin.toml", manifest.as_str())]);
         let source = file_source(tmp.path(), &archive, None);
-        let e = install(&cache, "demo", &source)
+        let e = install(&cache, "demo", &source, &Default::default())
             .await
             .unwrap_err()
             .to_string();
@@ -628,14 +679,14 @@ mod tests {
         let archive = zip_bytes(&[("plugin.toml", manifest.as_str())]);
         let source = file_source(tmp.path(), &archive, None);
 
-        let e = install(&cache, "demo", &source)
+        let e = install(&cache, "demo", &source, &Default::default())
             .await
             .unwrap_err()
             .to_string();
         assert_eq!(e, "requires plugin `base` `^1.2`, which is not installed");
 
         std::fs::create_dir_all(cache.version_dir("base", "1.0.0")).unwrap();
-        let e = install(&cache, "demo", &source)
+        let e = install(&cache, "demo", &source, &Default::default())
             .await
             .unwrap_err()
             .to_string();
@@ -643,7 +694,9 @@ mod tests {
         assert!(!cache.version_dir("demo", "1.0.0").exists());
 
         std::fs::create_dir_all(cache.version_dir("base", "1.4.0")).unwrap();
-        install(&cache, "demo", &source).await.unwrap();
+        install(&cache, "demo", &source, &Default::default())
+            .await
+            .unwrap();
         assert!(cache.version_dir("demo", "1.0.0").exists());
     }
 
@@ -664,7 +717,7 @@ mod tests {
             ),
         ]);
         let source = file_source(tmp.path(), &archive, None);
-        let err = install(&cache, "demo", &source)
+        let err = install(&cache, "demo", &source, &Default::default())
             .await
             .unwrap_err()
             .to_string();

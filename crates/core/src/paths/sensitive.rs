@@ -12,61 +12,11 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use super::layout::{
+    entry, Layout, CLAUDE_CREDENTIALS, ENGINE_CONFIG_FILES, PROJECT_ENGINE_CONFIG_DIRS,
+    PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+};
 use super::ConfigPaths;
-
-/// The state root's subdirectories that are the agent's own working space
-/// rather than configuration: the only parts of it the agent's tools and its
-/// sandboxed commands may write.
-pub const STATE_ROOT_WORKING_DIRS: &[&str] = &[STATE_ROOT_SCRATCHPAD, "memory"];
-
-/// The state root's scratchpad, one of [`STATE_ROOT_WORKING_DIRS`].
-pub const STATE_ROOT_SCRATCHPAD: &str = "scratchpad";
-
-/// Under the state root, one temporary directory per session,
-/// `<state root>/tmp/<session>`: the session's sandboxed commands may write
-/// their own and no other.
-pub const STATE_ROOT_SESSION_TMP: &str = "tmp";
-
-/// The directory in a project's `.agix` that holds the git worktrees
-/// `EnterWorktree` creates: project work checked out elsewhere, not
-/// configuration, so it is outside [`ENGINE_CONFIG_DIRS`].
-pub const PROJECT_WORKTREES_DIR: &str = "worktrees";
-
-/// The directories an agent's configuration lives in: `.agix` in a project
-/// and as the state root, and `.claude`, which the engine imports from.
-/// What may be written in one is decided by [`ENGINE_CONFIG_FILES`] and
-/// [`ENGINE_CONFIG_DIRS`]; the rest (scratchpad, memory, sessions,
-/// worktrees) is working space.
-pub const ENGINE_CONFIG_ROOTS: &[&str] = &[".agix", ".claude"];
-
-/// Files in an [`ENGINE_CONFIG_ROOTS`] directory that configure the engine.
-/// The write tools refuse them anywhere under such a directory, a sandboxed
-/// command directly in it.
-pub const ENGINE_CONFIG_FILES: &[&str] =
-    &["settings.json", "settings.local.json", "mcp.local.json"];
-
-/// Directories directly in an [`ENGINE_CONFIG_ROOTS`] directory that configure the
-/// engine or that it acts on unsandboxed, guarded with everything under them.
-pub const ENGINE_CONFIG_DIRS: &[&str] = &[
-    "mcp",
-    "hooks",
-    "agents",
-    "skills",
-    "plugins",
-    "rules",
-    "scenes",
-    "policy",
-    "scripts",
-    "output-styles",
-    "tool-results",
-];
-
-/// Directories in a project, outside the [`ENGINE_CONFIG_ROOTS`], that the
-/// engine loads configuration from: the project's skills, whose
-/// `allowed-tools` grant permissions. Guarded like a configuration
-/// directory in those roots: a write tool asks, a sandboxed command cannot
-/// write, and the directories above one cannot be moved aside.
-pub const PROJECT_ENGINE_CONFIG_DIRS: &[&str] = &[".agents/skills"];
 
 /// The repository's own configuration: confirmed like the engine's rather
 /// than refused — `git` plumbing through `Bash` is normal work, and a
@@ -86,11 +36,6 @@ pub const GIT_WORKTREE_CONTROL_FILES: &[&str] =
 
 /// The directory in a git directory whose programs git runs.
 pub const GIT_HOOKS_DIR: &str = "hooks";
-
-/// The files in the state root and in each `scenes/<scene>/` under it that a
-/// sandboxed command must not rewrite: the settings, and — for a
-/// declarative scene — the files that define it.
-pub const STATE_ROOT_SCENE_FILES: &[&str] = &["settings.json", "scene.json", "prompt.md"];
 
 /// Names of files that hold secrets wherever they are, which the write tools
 /// refuse as a path component, as they do the [`credential_dir_names`].
@@ -138,7 +83,7 @@ pub const HOME_CREDENTIAL_STORES: &[&str] = &[
     ".config/rclone",
     ".huggingface/token",
     ".cache/huggingface/token",
-    ".claude/.credentials.json",
+    CLAUDE_CREDENTIALS,
     ".codex/auth.json",
 ];
 
@@ -157,8 +102,10 @@ pub enum Scope {
     StateRoot,
     /// `<state root>/scenes/<any>/`, including a scene created later.
     EachSceneDir,
-    /// Any `<dir>/.agix/`. The sandbox applies it to the project's `.agix`.
-    AnyAgixDir,
+    /// Any `<dir>/<engine dir>/`, an engine dir being the instance's project
+    /// directory or `.agix` ([`Layout::engine_dir_names`]). The sandbox
+    /// applies it to those of the project.
+    AnyEngineDir,
     /// Any directory. The sandbox leaves it to `deny_read`, which covers the
     /// user's home.
     Anywhere,
@@ -181,7 +128,7 @@ pub enum KeyFileNames {
     /// The state root and the scene directories: the settings files, whose
     /// provider keys and MCP headers are plain text.
     StateRoot,
-    /// A project's `.agix`: the files the engine writes the project's keys to.
+    /// A project directory (and a foreign `.agix`): the files the engine writes the project's keys to.
     Project,
 }
 
@@ -189,7 +136,7 @@ impl KeyFileNames {
     pub fn stems(self) -> &'static [&'static str] {
         match self {
             Self::StateRoot => &["settings", "mcp.local"],
-            Self::Project => &["settings.local.json", "mcp.local.json"],
+            Self::Project => &[entry::SETTINGS_LOCAL, entry::MCP_LOCAL],
         }
     }
 
@@ -244,7 +191,7 @@ pub const CREDENTIALS: &[Credential] = &[
         secret: Secret::Tree("daemon/auth"),
     },
     Credential {
-        scope: Scope::AnyAgixDir,
+        scope: Scope::AnyEngineDir,
         secret: Secret::KeyFiles(KeyFileNames::Project),
     },
     Credential {
@@ -336,6 +283,18 @@ impl Located {
     }
 }
 
+/// A configuration root in a directory, as [`SensitivePaths::config_roots_in`]
+/// gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRootAt {
+    pub path: PathBuf,
+    /// `path` with its symbolic links resolved.
+    pub resolved: PathBuf,
+    /// The instance's own project directory: held even when absent, its
+    /// working entries left writable.
+    pub own: bool,
+}
+
 /// [`CREDENTIALS`] and the working space, resolved for one session: what its
 /// state root and its project are.
 #[derive(Debug, Clone, Default)]
@@ -348,10 +307,11 @@ pub struct SensitivePaths {
     linked_scenes: Vec<PathBuf>,
     read_denials: Vec<Spellings>,
     read_exemptions: Vec<Spellings>,
+    layout: Layout,
 }
 
 impl SensitivePaths {
-    pub fn new(state_root: Option<&Path>, project: Option<&Path>) -> Self {
+    pub fn new(state_root: Option<&Path>, project: Option<&Path>, layout: Layout) -> Self {
         let state_root = state_root.map(Spellings::of);
         let linked_scenes = state_root
             .iter()
@@ -365,7 +325,13 @@ impl SensitivePaths {
             linked_scenes,
             read_denials: Vec::new(),
             read_exemptions: Vec::new(),
+            layout,
         }
+    }
+
+    /// The names these paths were resolved with.
+    pub fn layout(&self) -> &Layout {
+        &self.layout
     }
 
     /// Also treats as credentials what a sandboxed command may not read:
@@ -405,7 +371,11 @@ impl SensitivePaths {
     /// For a session with these roots. A session without a project has no
     /// project here either.
     pub fn for_paths(paths: &ConfigPaths) -> Self {
-        Self::new(Some(&paths.global_data_dir), paths.project_root.as_deref())
+        Self::new(
+            Some(&paths.global_data_dir),
+            paths.project_root.as_deref(),
+            paths.layout.clone(),
+        )
     }
 
     pub fn state_root(&self) -> Option<&Path> {
@@ -436,10 +406,10 @@ impl SensitivePaths {
         }
         match credential.scope {
             Scope::Anywhere => (0..components.len()).any(|i| secret.holds(&components[i..])),
-            Scope::AnyAgixDir => components
-                .iter()
-                .enumerate()
-                .any(|(i, c)| c == ".agix" && secret.holds(&components[i + 1..])),
+            Scope::AnyEngineDir => components.iter().enumerate().any(|(i, c)| {
+                self.layout.engine_dir_names().any(|dir| c == dir)
+                    && secret.holds(&components[i + 1..])
+            }),
             Scope::StateRoot | Scope::EachSceneDir => self
                 .state_root
                 .iter()
@@ -450,7 +420,9 @@ impl SensitivePaths {
                     };
                     match (credential.scope, rest) {
                         (Scope::StateRoot, _) => secret.holds(rest),
-                        (_, [scenes, _, inner @ ..]) => scenes == "scenes" && secret.holds(inner),
+                        (_, [scenes, _, inner @ ..]) => {
+                            scenes == entry::SCENES && secret.holds(inner)
+                        }
                         _ => false,
                     }
                 }),
@@ -459,9 +431,10 @@ impl SensitivePaths {
 
     /// Every [`CREDENTIALS`] entry a sandbox backend masks, placed on disk:
     /// those of the state root and its scenes under the state root as it
-    /// resolves, those of any `.agix` in each of `agix_dirs`. The `Anywhere`
-    /// ones are left out — the backends reach them through `deny_read`.
-    pub fn credential_locations(&self, agix_dirs: &[PathBuf]) -> Vec<Located> {
+    /// resolves, those of an engine directory in each of `engine_dirs`
+    /// ([`Self::engine_dirs_in`]). The `Anywhere` ones are left out — the
+    /// backends reach them through `deny_read`.
+    pub fn credential_locations(&self, engine_dirs: &[PathBuf]) -> Vec<Located> {
         let mut located = Vec::new();
         for credential in CREDENTIALS {
             let at = |base: &Path| Located {
@@ -473,18 +446,59 @@ impl SensitivePaths {
                 Scope::StateRoot | Scope::EachSceneDir => {
                     located.extend(self.state_root.as_ref().map(|root| at(&root.real)));
                 }
-                Scope::AnyAgixDir => located.extend(agix_dirs.iter().map(|dir| at(dir))),
+                Scope::AnyEngineDir => located.extend(engine_dirs.iter().map(|dir| at(dir))),
                 Scope::Anywhere => {}
             }
         }
         located
     }
 
+    /// The engine directories in `dir` whose key files the sandbox hides
+    /// ([`Scope::AnyEngineDir`]), each as given and as it resolves, whether
+    /// or not it exists.
+    pub fn engine_dirs_in(&self, dir: &Path) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        for name in self.layout.engine_dir_names() {
+            let given = dir.join(name);
+            let real = crate::path::resolve_physically(&given);
+            dirs.push(given.clone());
+            if real != given {
+                dirs.push(real);
+            }
+        }
+        dirs
+    }
+
+    /// The configuration roots in `dir` as the sandbox guards them: the
+    /// instance's own held even when absent, a foreign one where it exists.
+    pub fn config_roots_in(&self, dir: &Path) -> Vec<ConfigRootAt> {
+        self.layout
+            .config_roots()
+            .map(|root| {
+                let path = dir.join(root.name);
+                ConfigRootAt {
+                    resolved: crate::path::resolve_physically(&path),
+                    path,
+                    own: root.own,
+                }
+            })
+            .collect()
+    }
+
+    /// The directories of the engines' worktrees in `dir`, the instance's
+    /// own first: a `.git` link in one leads git somewhere.
+    pub fn worktree_dirs_in(&self, dir: &Path) -> Vec<PathBuf> {
+        self.layout
+            .engine_dir_names()
+            .map(|name| dir.join(name).join(PROJECT_WORKTREES_DIR))
+            .collect()
+    }
+
     /// Whether this path (or command argument) names configuration that
     /// must never be reached by a *silent* fast path, but which the user can
-    /// legitimately approve: [`REPOSITORY_CONFIG_DIR`], an
-    /// [`ENGINE_CONFIG_ROOTS`] directory outside its working space, or a
-    /// [`PROJECT_ENGINE_CONFIG_DIRS`] directory.
+    /// legitimately approve: [`REPOSITORY_CONFIG_DIR`], a configuration root
+    /// ([`Layout::config_roots`]) outside the instance's own working space,
+    /// or a [`PROJECT_ENGINE_CONFIG_DIRS`] directory.
     ///
     /// Not credentials: refusing them would make editing
     /// `.claude/settings.json` or `.agix/agents/*.md` impossible, and
@@ -492,8 +506,10 @@ impl SensitivePaths {
     /// risk is a tool quietly rewriting the rules it is judged by, so the
     /// gate does not let the tool's own `Allow` through for them.
     ///
-    /// Matched by whole component — `.github` is not `.git`.
-    pub fn names_configuration(text: &str) -> bool {
+    /// Matched by whole component — `.github` is not `.git`. Only the
+    /// instance's own directory has working space: in a foreign root every
+    /// entry is configuration.
+    pub fn names_configuration(&self, text: &str) -> bool {
         let lowered = text.to_lowercase();
         let components: Vec<&str> = lowered.split('/').collect();
         // In a shell command the name runs on into whatever follows it.
@@ -516,11 +532,13 @@ impl SensitivePaths {
         lowered.contains('/')
             && components.iter().enumerate().any(|(i, component)| {
                 let config_root = *component == REPOSITORY_CONFIG_DIR
-                    || (ENGINE_CONFIG_ROOTS.contains(component)
-                        && !(*component == ".agix"
-                            && components.get(i + 1).is_some_and(|next| {
-                                Self::is_engine_working_entry(&name_in(next))
-                            })));
+                    || self.layout.config_roots().any(|root| {
+                        *component == root.name
+                            && !(root.own
+                                && components.get(i + 1).is_some_and(|next| {
+                                    self.is_engine_working_entry(&name_in(next))
+                                }))
+                    });
                 config_root
                     || PROJECT_ENGINE_CONFIG_DIRS
                         .iter()
@@ -528,24 +546,25 @@ impl SensitivePaths {
             })
     }
 
-    /// Whether `abs` is one of the [`ENGINE_CONFIG_FILES`] anywhere under an
-    /// [`ENGINE_CONFIG_ROOTS`] directory — by name and location, not by
-    /// directory: `.agix` also holds a sub-agent's worktree.
-    pub fn is_engine_settings_file(abs: &Path) -> bool {
+    /// Whether `abs` is one of the [`ENGINE_CONFIG_FILES`] anywhere under a
+    /// configuration root — by name and location, not by directory: the
+    /// project directory also holds a sub-agent's worktree.
+    pub fn is_engine_settings_file(&self, abs: &Path) -> bool {
         let Some(name) = abs.file_name().and_then(|n| n.to_str()) else {
             return false;
         };
         ENGINE_CONFIG_FILES.contains(&name)
             && abs.components().any(|c| {
-                matches!(c, Component::Normal(d) if ENGINE_CONFIG_ROOTS.iter().any(|root| d == *root))
+                matches!(c, Component::Normal(d)
+                    if self.layout.config_roots().any(|root| d == root.name))
             })
     }
 
-    /// Whether this entry directly in `.agix` is the agent's working space
-    /// rather than its configuration: the scratchpad its prompt sends
-    /// temporary files to, the memory directory it is told to write to
-    /// directly, or the worktrees its sessions work in.
-    pub fn is_engine_working_entry(name: &str) -> bool {
+    /// Whether this entry directly in the instance's own directory is the
+    /// agent's working space rather than its configuration: the scratchpad
+    /// its prompt sends temporary files to, the memory directory it is told
+    /// to write to directly, or the worktrees its sessions work in.
+    pub fn is_engine_working_entry(&self, name: &str) -> bool {
         STATE_ROOT_WORKING_DIRS.contains(&name) || name == PROJECT_WORKTREES_DIR
     }
 
@@ -613,7 +632,7 @@ impl SensitivePaths {
 pub fn session_scratch_dir(state_root: &Path, session_id: &str) -> PathBuf {
     state_root
         .join(STATE_ROOT_SCRATCHPAD)
-        .join("sessions")
+        .join(entry::SESSIONS)
         .join(session_dir_name(session_id))
 }
 
@@ -621,7 +640,7 @@ pub fn session_scratch_dir(state_root: &Path, session_id: &str) -> PathBuf {
 /// outside [`STATE_ROOT_WORKING_DIRS`], as the engine writes there unsandboxed.
 pub fn tool_results_dir(state_root: &Path, session_id: &str) -> PathBuf {
     state_root
-        .join("tool-results")
+        .join(entry::TOOL_RESULTS)
         .join(session_dir_name(session_id))
 }
 
@@ -747,7 +766,7 @@ struct SceneDir {
 /// The scene directories in `base/scenes/`, symbolic links to directories
 /// included, in name order.
 fn scene_dirs_in(base: &Path) -> Vec<SceneDir> {
-    let Ok(entries) = std::fs::read_dir(base.join("scenes")) else {
+    let Ok(entries) = std::fs::read_dir(base.join(entry::SCENES)) else {
         return Vec::new();
     };
     let mut dirs: Vec<SceneDir> = entries
@@ -781,9 +800,20 @@ fn lowered_components(path: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::layout::test_layouts;
+    use crate::paths::ENGINE_CONFIG_DIRS;
 
     fn sensitive(state_root: &str) -> SensitivePaths {
-        SensitivePaths::new(Some(Path::new(state_root)), None)
+        SensitivePaths::new(Some(Path::new(state_root)), None, Layout::default())
+    }
+
+    fn in_layout(layout: &Layout) -> SensitivePaths {
+        SensitivePaths::new(Some(Path::new("/state/home")), None, layout.clone())
+    }
+
+    /// `p` with `{own}` spelled as the layout's project directory.
+    fn own(p: &str, layout: &Layout) -> String {
+        p.replace("{own}", layout.project_dir_name())
     }
 
     #[test]
@@ -838,11 +868,29 @@ mod tests {
             assert!(!paths.is_credential(Path::new(p)), "{p}");
         }
         assert!(!SensitivePaths::default().is_credential(Path::new("/state/home/settings.json")));
+
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for p in [
+                "/repo/{own}/settings.local.json",
+                "/repo/{own}/mcp.local.json",
+                "/repo/.agix/settings.local.json",
+            ] {
+                assert!(paths.is_credential(Path::new(&own(p, &layout))), "{p}");
+            }
+            for p in [
+                "/repo/{own}/settings.json",
+                "/repo/.claude/settings.local.json",
+            ] {
+                assert!(!paths.is_credential(Path::new(&own(p, &layout))), "{p}");
+            }
+        }
+        assert!(!sensitive("/state/home").is_credential(Path::new("/repo/.codix/mcp.local.json")));
     }
 
     /// Where an entry of [`CREDENTIALS`] puts its secret, and a path beside
     /// it that the entry must not catch.
-    fn example(credential: &Credential) -> (String, String) {
+    fn example(credential: &Credential, layout: &Layout) -> (String, String) {
         let name = match credential.secret {
             Secret::KeyFiles(KeyFileNames::StateRoot) => "settings.json",
             Secret::KeyFiles(KeyFileNames::Project) => "settings.local.json",
@@ -854,33 +902,38 @@ mod tests {
                 format!("/state/home/scenes/triage/{name}"),
                 format!("/state/home/scenes/{name}"),
             ),
-            Scope::AnyAgixDir => (format!("/repo/.agix/{name}"), format!("/repo/{name}")),
+            Scope::AnyEngineDir => (
+                format!("/repo/{}/{name}", layout.project_dir_name()),
+                format!("/repo/{name}"),
+            ),
             Scope::Anywhere => (format!("/home/u/{name}/x"), format!("/home/u/{name}-not/x")),
         }
     }
 
     #[test]
     fn every_credential_is_recognized_and_every_scope_has_a_near_miss() {
-        let paths = sensitive("/state/home");
         let mut scopes = Vec::new();
-        for credential in CREDENTIALS {
-            let (hit, miss) = example(credential);
-            assert!(
-                paths.is_credential(Path::new(&hit)),
-                "{credential:?}: {hit}"
-            );
-            assert!(
-                !paths.is_credential(Path::new(&miss)),
-                "{credential:?}: {miss}"
-            );
-            if !scopes.contains(&credential.scope) {
-                scopes.push(credential.scope);
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for credential in CREDENTIALS {
+                let (hit, miss) = example(credential, &layout);
+                assert!(
+                    paths.is_credential(Path::new(&hit)),
+                    "{credential:?}: {hit}"
+                );
+                assert!(
+                    !paths.is_credential(Path::new(&miss)),
+                    "{credential:?}: {miss}"
+                );
+                if !scopes.contains(&credential.scope) {
+                    scopes.push(credential.scope);
+                }
             }
         }
         for scope in [
             Scope::StateRoot,
             Scope::EachSceneDir,
-            Scope::AnyAgixDir,
+            Scope::AnyEngineDir,
             Scope::Anywhere,
         ] {
             assert!(scopes.contains(&scope), "no credential in {scope:?}");
@@ -931,7 +984,8 @@ mod tests {
         std::fs::write(elsewhere.join("settings.json"), "").unwrap();
         std::os::unix::fs::symlink(&elsewhere, root.join("scenes/linked")).unwrap();
         let root = root.canonicalize().unwrap();
-        let located = SensitivePaths::new(Some(&root), None).credential_locations(&[]);
+        let located =
+            SensitivePaths::new(Some(&root), None, Layout::default()).credential_locations(&[]);
         let keys = located
             .iter()
             .find(|l| l.under_each_scene && matches!(l.secret, Secret::KeyFiles(_)))
@@ -957,7 +1011,7 @@ mod tests {
         std::fs::create_dir_all(root.join("scenes")).unwrap();
         std::fs::create_dir_all(&elsewhere).unwrap();
         std::os::unix::fs::symlink(&elsewhere, root.join("scenes/linked")).unwrap();
-        let paths = SensitivePaths::new(Some(&root), None);
+        let paths = SensitivePaths::new(Some(&root), None, Layout::default());
         let real = elsewhere.canonicalize().unwrap();
         assert_eq!(
             paths.linked_scene_dirs_resolved(),
@@ -979,7 +1033,8 @@ mod tests {
             std::fs::write(root.join("scenes").join(scene).join("settings.json"), "").unwrap();
         }
         std::fs::write(root.join("scenes/code/scene.json"), "").unwrap();
-        let located = SensitivePaths::new(Some(&root), None).credential_locations(&[]);
+        let located =
+            SensitivePaths::new(Some(&root), None, Layout::default()).credential_locations(&[]);
         let keys = located
             .iter()
             .find(|l| l.under_each_scene && matches!(l.secret, Secret::KeyFiles(_)))
@@ -1046,73 +1101,92 @@ mod tests {
         }
     }
 
-    /// 配置目录（`.git` / `.claude` / `.agix`）不是凭据，走的是"要确认"而不是
-    /// "一律拒绝"——否则 agent 连自己的 `.claude/settings.json` 都改不了。
+    /// 配置目录（`.git` / `.claude` / 项目层目录 / 外来的 `.agix`）不是凭据，走的是"要确认"
+    /// 而不是"一律拒绝"——否则 agent 连自己的 `.claude/settings.json` 都改不了。
     #[test]
     fn config_dirs_require_confirmation() {
-        for p in [
-            "repo/.git/config",
-            "/Users/me/.agix/settings.json",
-            "/a/b/.claude/settings.local.json",
-        ] {
-            assert!(SensitivePaths::names_configuration(p), "{p}");
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for p in [
+                "repo/.git/config",
+                "/Users/me/{own}/settings.json",
+                "/Users/me/.agix/settings.json",
+                "/a/b/.claude/settings.local.json",
+            ] {
+                assert!(paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+            assert!(!paths.names_configuration("/repo/.github/workflows/ci.yml"));
+            assert!(!paths.names_configuration("/repo/src/main.rs"));
         }
-        assert!(!SensitivePaths::names_configuration(
-            "/repo/.github/workflows/ci.yml"
-        ));
-        assert!(!SensitivePaths::names_configuration("/repo/src/main.rs"));
+        assert!(!sensitive("/s").names_configuration("/repo/.codix/settings.json"));
     }
 
     #[test]
     fn a_projects_skills_are_configuration() {
-        for p in [
-            "/repo/.agents/skills/x/SKILL.md",
-            "/repo/.agents/skills",
-            ".agents/skills;",
-            "/repo/.Agents/Skills/x/SKILL.md",
-        ] {
-            assert!(SensitivePaths::names_configuration(p), "{p}");
-        }
-        for p in [
-            "/repo/.agents/notes.md",
-            "/repo/.agents/skills2/x",
-            "/repo/skills/x",
-            "/repo/AGENTS.md",
-        ] {
-            assert!(!SensitivePaths::names_configuration(p), "{p}");
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for p in [
+                "/repo/.agents/skills/x/SKILL.md",
+                "/repo/.agents/skills",
+                ".agents/skills;",
+                "/repo/.Agents/Skills/x/SKILL.md",
+            ] {
+                assert!(paths.names_configuration(p), "{p}");
+            }
+            for p in [
+                "/repo/.agents/notes.md",
+                "/repo/.agents/skills2/x",
+                "/repo/skills/x",
+                "/repo/AGENTS.md",
+            ] {
+                assert!(!paths.names_configuration(p), "{p}");
+            }
         }
     }
 
     #[test]
-    fn the_agents_working_space_under_agix_is_not_configuration() {
-        for p in [
-            "/repo/.agix/scratchpad/cases.txt",
-            "/Users/me/.agix/memory/MEMORY.md",
-            "cd /repo\nS=/repo/.agix/scratchpad\nmkdir -p \"$S\"",
-            "printf x > \"$d/.agix/scratchpad\"",
-            "/repo/.agix/worktrees/feat-a/feature.txt",
-            "cd /repo/.agix/worktrees/feat-a && git add -A",
-        ] {
-            assert!(!SensitivePaths::names_configuration(p), "{p}");
+    fn the_agents_working_space_in_its_own_directory_is_not_configuration() {
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for p in [
+                "/repo/{own}/scratchpad/cases.txt",
+                "/Users/me/{own}/memory/MEMORY.md",
+                "cd /repo\nS=/repo/{own}/scratchpad\nmkdir -p \"$S\"",
+                "printf x > \"$d/{own}/scratchpad\"",
+                "/repo/{own}/worktrees/feat-a/feature.txt",
+                "cd /repo/{own}/worktrees/feat-a && git add -A",
+            ] {
+                assert!(!paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+            for p in [
+                "/repo/{own}/agents/reviewer.md",
+                "/repo/{own}/scratchpad.md",
+                "/repo/{own}/worktrees/feat-a/{own}/agents/reviewer.md",
+                "/repo/{own}/worktrees/feat-a/.agix/agents/reviewer.md",
+                "/repo/{own}/worktrees/feat-a/.claude/settings.json",
+                "/repo/{own}/worktrees/feat-a/.git",
+                "/repo/.claude/scratchpad/x",
+            ] {
+                assert!(paths.names_configuration(&own(p, &layout)), "{p}");
+            }
         }
-        for p in [
-            "/repo/.agix/agents/reviewer.md",
-            "/repo/.agix/scratchpad.md",
-            "/repo/.agix/worktrees/feat-a/.agix/agents/reviewer.md",
-            "/repo/.agix/worktrees/feat-a/.claude/settings.json",
-            "/repo/.agix/worktrees/feat-a/.git",
-        ] {
-            assert!(SensitivePaths::names_configuration(p), "{p}");
+        let codix = in_layout(&Layout::new(".codix").unwrap());
+        for p in ["/repo/.agix/scratchpad/x", "/repo/.agix/worktrees/a/f.txt"] {
+            assert!(
+                codix.names_configuration(p),
+                "a foreign .agix has no working space: {p}"
+            );
         }
     }
 
     #[test]
     fn what_the_gate_treats_as_working_space_the_sandbox_leaves_writable() {
+        let paths = SensitivePaths::default();
         for name in STATE_ROOT_WORKING_DIRS
             .iter()
             .chain([&PROJECT_WORKTREES_DIR])
         {
-            assert!(SensitivePaths::is_engine_working_entry(name), "{name}");
+            assert!(paths.is_engine_working_entry(name), "{name}");
             assert!(
                 !ENGINE_CONFIG_DIRS.contains(name) && !ENGINE_CONFIG_FILES.contains(name),
                 "{name}"
@@ -1122,24 +1196,69 @@ mod tests {
 
     #[test]
     fn engine_settings_files_are_known_by_name_under_a_config_root() {
-        for p in [
-            "/repo/.agix/settings.json",
-            "/repo/.claude/settings.local.json",
-            "/repo/.agix/worktrees/a/.agix/mcp.local.json",
-            "/repo/.agix/agents/settings.json",
-        ] {
-            assert!(SensitivePaths::is_engine_settings_file(Path::new(p)), "{p}");
+        for layout in test_layouts() {
+            let paths = in_layout(&layout);
+            for p in [
+                "/repo/{own}/settings.json",
+                "/repo/.agix/settings.json",
+                "/repo/.claude/settings.local.json",
+                "/repo/{own}/worktrees/a/{own}/mcp.local.json",
+                "/repo/{own}/agents/settings.json",
+            ] {
+                assert!(
+                    paths.is_engine_settings_file(Path::new(&own(p, &layout))),
+                    "{p}"
+                );
+            }
+            for p in [
+                "/repo/settings.json",
+                "/repo/{own}/scene.json",
+                "/repo/{own}",
+            ] {
+                assert!(
+                    !paths.is_engine_settings_file(Path::new(&own(p, &layout))),
+                    "{p}"
+                );
+            }
         }
-        for p in [
-            "/repo/settings.json",
-            "/repo/.agix/scene.json",
-            "/repo/.agix",
-        ] {
-            assert!(
-                !SensitivePaths::is_engine_settings_file(Path::new(p)),
-                "{p}"
-            );
-        }
+        assert!(!sensitive("/s").is_engine_settings_file(Path::new("/repo/.codix/settings.json")));
+    }
+
+    #[test]
+    fn the_sandbox_is_told_the_engine_directories_of_a_project() {
+        let codix = Layout::new(".codix").unwrap();
+        let paths = SensitivePaths::new(None, None, codix.clone());
+        let at: Vec<(PathBuf, bool)> = paths
+            .config_roots_in(Path::new("/nowhere/repo"))
+            .into_iter()
+            .map(|r| (r.path, r.own))
+            .collect();
+        assert_eq!(
+            at,
+            [
+                (PathBuf::from("/nowhere/repo/.codix"), true),
+                (PathBuf::from("/nowhere/repo/.agix"), false),
+                (PathBuf::from("/nowhere/repo/.claude"), false)
+            ]
+        );
+        assert_eq!(
+            paths.engine_dirs_in(Path::new("/nowhere/repo")),
+            [
+                PathBuf::from("/nowhere/repo/.codix"),
+                PathBuf::from("/nowhere/repo/.agix")
+            ]
+        );
+        assert_eq!(
+            paths.worktree_dirs_in(Path::new("/nowhere/repo")),
+            [
+                PathBuf::from("/nowhere/repo/.codix/worktrees"),
+                PathBuf::from("/nowhere/repo/.agix/worktrees")
+            ]
+        );
+        assert_eq!(
+            SensitivePaths::default().engine_dirs_in(Path::new("/nowhere/repo")),
+            [PathBuf::from("/nowhere/repo/.agix")]
+        );
     }
 
     #[test]
@@ -1173,7 +1292,8 @@ mod tests {
         .unwrap();
         symlink("../state/settings.json", elsewhere.join("state.md")).unwrap();
 
-        let files = SensitivePaths::new(Some(&state), Some(&project)).prompt_files();
+        let files =
+            SensitivePaths::new(Some(&state), Some(&project), Layout::default()).prompt_files();
         let read = |p: PathBuf| files.read_to_string(&p).map_err(|e| e.kind());
         let denied = Err(std::io::ErrorKind::PermissionDenied);
         assert_eq!(read(project.join("AGENTS.md")), Ok("guide".into()));
@@ -1191,7 +1311,8 @@ mod tests {
         let nested_state = project.join("home-state");
         std::fs::create_dir_all(&nested_state).unwrap();
         symlink("../../elsewhere/notes.md", nested_state.join("skill.md")).unwrap();
-        let files = SensitivePaths::new(Some(&nested_state), None).prompt_files_within(&project);
+        let files = SensitivePaths::new(Some(&nested_state), None, Layout::default())
+            .prompt_files_within(&project);
         assert_eq!(
             files
                 .read_to_string(&nested_state.join("skill.md"))

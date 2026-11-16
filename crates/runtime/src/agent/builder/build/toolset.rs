@@ -67,9 +67,10 @@ impl Builder {
         let (cron_store, fire_jobs_here) = match (agent_depth, self.spec.cron_store.clone()) {
             (0, Some(store)) => (Some(store), false),
             (0, None) => {
-                let _ = std::fs::create_dir_all(&settings.paths.user_data_dir);
+                let paths = settings.paths.config_paths();
+                let _ = std::fs::create_dir_all(&paths.user_data_dir);
                 let store = Arc::new(tools::cron::CronStore::load_or_default(Some(
-                    settings.paths.user_data_dir.join("scheduled_tasks.json"),
+                    paths.scheduled_tasks_file(),
                 )));
                 (Some(store), true)
             }

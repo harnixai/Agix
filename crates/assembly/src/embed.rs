@@ -65,6 +65,13 @@ pub struct EmbedConfig {
     /// next start with the same file stops what a killed run left behind;
     /// with or without an `instance`.
     pub groups_file: Option<PathBuf>,
+    /// The name of the directory the engine keeps in each project (`.agix`):
+    /// the project's settings, agents, hooks, rules, worktrees, memory. Only
+    /// this name is read; a `.agix` beside it is not, and stays guarded
+    /// against the model as another agent's configuration. One path
+    /// component of `[a-z0-9._-]` starting with `.`, not another tool's
+    /// (`base::paths::layout::OTHER_TOOLS_DIRS`).
+    pub project_dir: String,
 }
 
 impl EmbedConfig {
@@ -85,6 +92,7 @@ impl EmbedConfig {
             mcp_policy: None,
             managed_settings: None,
             groups_file: None,
+            project_dir: base::paths::DEFAULT_PROJECT_DIR.into(),
         }
     }
 
@@ -92,8 +100,7 @@ impl EmbedConfig {
     fn groups_file(&self) -> Option<PathBuf> {
         self.groups_file.clone().or_else(|| {
             let name = self.instance.as_ref()?;
-            let file = format!("{name}.json");
-            Some(self.data_root.join("daemon").join("groups").join(file))
+            Some(base::paths::StateRoot::new(&self.data_root).groups_file(name))
         })
     }
 }
@@ -124,6 +131,9 @@ pub enum EmbedError {
     /// owner: it is that process's list, not leftovers.
     #[error("{} is the process group record of the running process {owner}", .file.display())]
     GroupsHeld { owner: u32, file: PathBuf },
+    /// `EmbedConfig::project_dir` cannot name a project's directory.
+    #[error("project_dir `{name}`: {reason}")]
+    InvalidProjectDir { name: String, reason: String },
 }
 
 /// Who keeps this process's process-group record: a named instance, or the
@@ -210,7 +220,10 @@ impl Embedded {
     /// over.
     pub async fn start(config: EmbedConfig) -> Result<Embedded, EmbedError> {
         let startup = telemetry::perf::PerfCollector::new();
-        let scene = resolve_scene(&config.scene, &config.data_root.join("scenes"))?;
+        let scene = resolve_scene(
+            &config.scene,
+            &base::paths::StateRoot::new(&config.data_root).scenes_dir(),
+        )?;
         let daemon_config = daemon_config(&config, &scene.id)?;
         let socket = daemon_config.socket_path.clone();
         let instance = match &config.instance {
@@ -364,8 +377,16 @@ fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, Embe
         .cwd
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let paths = StaticDaemonPaths::with_project(config.data_root.join("scenes").join(scope), cwd)
-        .with_global(config.data_root.clone());
+    let layout = base::paths::Layout::new(&config.project_dir).map_err(|e| {
+        EmbedError::InvalidProjectDir {
+            name: e.name,
+            reason: e.reason.to_string(),
+        }
+    })?;
+    let state = base::paths::StateRoot::new(config.data_root.clone());
+    let paths = StaticDaemonPaths::with_project(state.scene_dir(scope), cwd)
+        .with_global(config.data_root.clone())
+        .with_layout(layout);
     let mut daemon_config = load_daemon_config(
         &config.model,
         config.max_tokens,
@@ -415,7 +436,7 @@ fn claim(
     Ok(Instance {
         name: name.to_string(),
         scenes,
-        daemon_root: config.data_root.join("daemon"),
+        daemon_root: base::paths::StateRoot::new(&config.data_root).daemon_dir(),
         held: std::sync::Mutex::new(Some(lock)),
     })
 }
@@ -488,7 +509,7 @@ impl Instance {
             protocol_version: discovery::INSTANCE_PROTOCOL_VERSION,
             started_at: base::clock::now_rfc3339(),
         };
-        let dir = self.daemon_root.join("instances.d");
+        let dir = self.daemon_root.join(base::paths::entry::INSTANCES);
         match discovery::write_instance_file(&dir, &self.name, &entry) {
             Ok(()) => info!(instance = %self.name, "wrote instances.d discovery entry"),
             Err(e) => warn!(
@@ -501,7 +522,10 @@ impl Instance {
 
     fn release(&self) {
         let mut held = self.held();
-        discovery::remove_instance_file(&self.daemon_root.join("instances.d"), &self.name);
+        discovery::remove_instance_file(
+            &self.daemon_root.join(base::paths::entry::INSTANCES),
+            &self.name,
+        );
         drop(held.take());
     }
 }
@@ -511,8 +535,9 @@ impl Instance {
 /// asking on every start.
 fn spawn_import_detection(pool: Arc<SessionPool>) {
     let cwd = pool.cwd().to_path_buf();
+    let layout = pool.layout();
     tokio::spawn(async move {
-        if settings::import::already_decided(&cwd).await {
+        if settings::import::already_decided(&cwd, &layout).await {
             return;
         }
         let sources = settings::import::detect_import_sources(&cwd).await;
@@ -616,6 +641,36 @@ mod tests {
             daemon_config_of(&config).socket_path,
             root.path().join("elsewhere.sock")
         );
+    }
+
+    #[test]
+    fn the_project_directory_is_the_one_the_config_names() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = EmbedConfig::new(root.path());
+        let work = root.path().join("work");
+        config.cwd = Some(work.clone());
+        assert_eq!(
+            daemon_config_of(&config).settings.paths.local_data_dir,
+            work.join(".agix")
+        );
+        config.project_dir = ".codix".into();
+        let renamed = daemon_config_of(&config);
+        assert_eq!(renamed.settings.paths.local_data_dir, work.join(".codix"));
+        assert_eq!(renamed.paths.layout().project_dir_name(), ".codix");
+        assert_eq!(
+            renamed.settings.engine_config().layout,
+            renamed.paths.layout()
+        );
+        for bad in ["../x", ".git", "a/b", ""] {
+            config.project_dir = bad.into();
+            assert!(
+                matches!(
+                    daemon_config(&config, "code"),
+                    Err(EmbedError::InvalidProjectDir { ref name, .. }) if name == bad
+                ),
+                "{bad:?}"
+            );
+        }
     }
 
     fn daemon_config_of(config: &EmbedConfig) -> DaemonConfig {

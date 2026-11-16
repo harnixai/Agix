@@ -230,31 +230,38 @@ fn macos_profile_has_balanced_parentheses() {
 #[test]
 fn macos_profile_denies_settings_json_even_without_deny_read() {
     // Settings.json write denial must be emitted unconditionally,
-    // regardless of whether credential deny-read paths are configured.
-    let o = SandboxOptions {
-        command: "ls",
-        cwd: Path::new("/tmp/work"),
-        additional_writable: &[],
-        disable: false,
-        policy: SandboxPolicy {
-            allow_read: vec![],
-            deny_read: vec![],
-            network_mode: NetworkMode::Unrestricted,
-            allowed_domains: vec![],
-            state_root: None,
-            additional_writable: Vec::new(),
-            only_additional_writable: false,
-            deny_ipc_escapes: false,
-            ..Default::default()
-        },
-    };
-    let cmd = wrap(o);
-    let profile = &cmd.spec.args[1];
-    // Must still deny writes to .agix/settings.json even when deny_read is empty
-    assert!(
-        profile.contains("(deny file-write* (literal \"/private/tmp/work/.agix/settings.json\"))"),
-        "settings.json denial must appear unconditionally"
-    );
+    // regardless of whether credential deny-read paths are configured —
+    // in the instance's own project directory and in the foreign ones.
+    for name in [".agix", ".codix"] {
+        let o = SandboxOptions {
+            command: "ls",
+            cwd: Path::new("/tmp/work"),
+            additional_writable: &[],
+            disable: false,
+            policy: SandboxPolicy {
+                allow_read: vec![],
+                deny_read: vec![],
+                network_mode: NetworkMode::Unrestricted,
+                allowed_domains: vec![],
+                state_root: None,
+                additional_writable: Vec::new(),
+                only_additional_writable: false,
+                deny_ipc_escapes: false,
+                layout: base::paths::Layout::new(name).unwrap(),
+                ..Default::default()
+            },
+        };
+        let cmd = wrap(o);
+        let profile = &cmd.spec.args[1];
+        for dir in [name, ".agix", ".claude"] {
+            assert!(
+                profile.contains(&format!(
+                    "(deny file-write* (literal \"/private/tmp/work/{dir}/settings.json\"))"
+                )),
+                "{name}: {dir}/settings.json denial must appear unconditionally"
+            );
+        }
+    }
 }
 
 /// The regular expressions of the profile's `(deny <operation> (regex …))`
@@ -351,10 +358,10 @@ fn macos_profile_protects_a_linked_scenes_files_under_their_real_path() {
     ));
 }
 
-/// Without a root it protects the conventional one, and with one only
-/// that: a redirected instance whose profile protected `$HOME/.agix`
-/// would be guarding a file nobody uses while leaving its real
-/// settings.json — where the permission rules live — writable.
+/// With a root it protects that one and no other: a redirected instance
+/// whose profile protected `$HOME/.agix` would be guarding a file nobody
+/// uses while leaving its real settings.json — where the permission rules
+/// live — writable. Without one it guesses none.
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_profile_protects_the_instance_root_it_was_given() {
@@ -362,14 +369,14 @@ fn macos_profile_protects_the_instance_root_it_was_given() {
         return;
     };
     let home_settings = base::path::resolve_physically(&home.join(".agix/settings.json"));
-    let fallback = build_macos_profile(
+    let unnamed = build_macos_profile(
         Path::new("/work/project"),
         &[],
         &Default::default(),
         &read_scope::UserDirs::of(INHERITED),
     );
-    assert!(denies(
-        &denied_patterns(&fallback, "file-write*"),
+    assert!(!denies(
+        &denied_patterns(&unnamed, "file-write*"),
         &home_settings
     ));
 
@@ -397,31 +404,37 @@ fn macos_profile_protects_the_instance_root_it_was_given() {
 #[cfg(target_os = "macos")]
 #[test]
 fn every_credential_is_unreadable_under_the_macos_profile() {
-    let state = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let root = state.path().canonicalize().unwrap();
-    let cwd = project.path().canonicalize().unwrap();
-    let policy = SandboxPolicy {
-        state_root: Some(root.clone()),
-        ..Default::default()
-    };
-    let profile = build_macos_profile(&cwd, &[], &policy, &read_scope::UserDirs::of(INHERITED));
-    let reads = denied_patterns(&profile, "file-read*");
-    let examples = mask::credential_examples(&root, &cwd.join(".agix"));
-    assert!(!examples.is_empty());
-    for (credential, path) in &examples {
-        assert!(
-            denies(&reads, path),
-            "{credential:?}: {} is readable\n{profile}",
-            path.display()
-        );
-    }
-    for p in [
-        "skills/x/SKILL.md",
-        "scenes/code/scene.json",
-        "mcp/servers.json",
-    ] {
-        assert!(!denies(&reads, &root.join(p)), "{p}");
+    for name in [".agix", ".codix"] {
+        let state = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let root = state.path().canonicalize().unwrap();
+        let cwd = project.path().canonicalize().unwrap();
+        let policy = SandboxPolicy {
+            state_root: Some(root.clone()),
+            layout: base::paths::Layout::new(name).unwrap(),
+            ..Default::default()
+        };
+        let profile = build_macos_profile(&cwd, &[], &policy, &read_scope::UserDirs::of(INHERITED));
+        let reads = denied_patterns(&profile, "file-read*");
+        for dir in [name, ".agix"] {
+            let examples = mask::credential_examples(&root, &cwd.join(dir));
+            assert!(!examples.is_empty());
+            for (credential, path) in &examples {
+                assert!(
+                    denies(&reads, path),
+                    "{name}: {credential:?}: {} is readable\n{profile}",
+                    path.display()
+                );
+            }
+        }
+        for p in [
+            "skills/x/SKILL.md",
+            "scenes/code/scene.json",
+            "mcp/servers.json",
+        ] {
+            assert!(!denies(&reads, &root.join(p)), "{p}");
+        }
+        assert!(!denies(&reads, &cwd.join(".claude/settings.local.json")));
     }
 }
 
@@ -452,7 +465,7 @@ fn macos_profile_empty_deny_read_denies_only_the_engines_own_secrets() {
         .lines()
         .filter(|l| l.contains("file-read*") && !l.contains("(literal "))
         .collect();
-    assert_eq!(reads.len(), 6, "{reads:?}");
+    assert_eq!(reads.len(), 1, "{reads:?}");
     assert!(
         reads
             .iter()

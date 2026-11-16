@@ -4,7 +4,7 @@
 //! directory including one created later or linked in from elsewhere, and
 //! the control files of a worktree made after the profile was written.
 
-use super::roots::{project_agix_dirs, write_denial_names, Roots, WorktreeParents};
+use super::roots::{write_denial_names, Roots, WorktreeParents};
 use super::sandbox_escape;
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,7 @@ pub(super) fn deny_write_rules(roots: &Roots, denied: &[String]) -> String {
 
 /// Denies writing the control files of every linked worktree's entry under
 /// a guarded git directory's `worktrees/`, and the `.git` link of every
-/// worktree under the project's `.agix/worktrees/`, whether or not they
+/// worktree under the project's `<project dir>/worktrees/`, whether or not they
 /// exist yet.
 pub(super) fn worktree_control_file_rules(parents: &WorktreeParents) -> String {
     let files = alternatives(base::paths::GIT_WORKTREE_CONTROL_FILES);
@@ -53,7 +53,7 @@ pub(super) fn worktree_control_file_rules(parents: &WorktreeParents) -> String {
         .admin
         .iter()
         .map(|dir| (dir, &files))
-        .chain(std::iter::once((&parents.links, &link)))
+        .chain(parents.links.iter().map(|dir| (dir, &link)))
         .map(|(dir, names)| {
             let regex = format!(
                 "^{}/[^/]+/({names})$",
@@ -71,7 +71,7 @@ pub(super) fn worktree_control_file_rules(parents: &WorktreeParents) -> String {
 pub(super) fn credential_read_rules(roots: &Roots) -> String {
     roots
         .paths
-        .credential_locations(&project_agix_dirs(&roots.cwd))
+        .credential_locations(&roots.paths.engine_dirs_in(&roots.cwd))
         .iter()
         .flat_map(credential_read_regexes)
         .map(|regex| format!("(deny file-read* (regex \"{}\"))\n", sandbox_escape(&regex)))

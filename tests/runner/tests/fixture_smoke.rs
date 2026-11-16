@@ -84,6 +84,7 @@ fn settings_load_resolves_project_root_and_config_from_fixture() {
         "code",
         "claude-sonnet-4-6",
         &test_runner::sections::all(),
+        Default::default(),
     );
 
     assert_eq!(

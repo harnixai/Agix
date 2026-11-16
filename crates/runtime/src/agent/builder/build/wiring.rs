@@ -132,7 +132,7 @@ impl Builder {
         let agent_depth = self.spec.agent_depth;
         // One `SessionState` per session, shared by every tool call: none of
         // its state works unless it survives from one call to the next.
-        prepare_scratchpad(&settings.paths.local_data_dir.join("scratchpad"));
+        prepare_scratchpad(&settings.paths.config_paths().scratchpad_dir());
         prepare_working_dir(&settings.paths);
         let session_env = session_env(settings, config, attended, &self.host.skill_dirs);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {

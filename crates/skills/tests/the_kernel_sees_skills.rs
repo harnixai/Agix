@@ -149,12 +149,17 @@ fn registry_drops_skills_removed_after_construction() {
 #[test]
 fn non_user_invocable_skills_are_not_commands() {
     let skill_mgr = Arc::new(skills::manager::SkillManager::new());
-    skill_mgr.register_bundled(SkillEntry {
-        name: "internal-only".into(),
-        description: "model-facing".into(),
-        user_invocable: false,
-        ..Default::default()
-    });
+    skill_mgr.load_from(std::sync::Arc::new(
+        base::interface::skill_provider::StaticSkills::new(
+            "test",
+            vec![SkillEntry {
+                name: "internal-only".into(),
+                description: "model-facing".into(),
+                user_invocable: false,
+                ..Default::default()
+            }],
+        ),
+    ));
     let registry = CommandRegistry::from_skill_catalog(skill_mgr);
     assert!(registry.resolve("internal-only").is_none());
     assert!(!registry.list().iter().any(|(n, _)| n == "internal-only"));
@@ -165,18 +170,28 @@ fn non_user_invocable_skills_are_not_commands() {
 #[test]
 fn registered_commands_shadow_skills_which_shadow_builtins() {
     let skill_mgr = Arc::new(skills::manager::SkillManager::new());
-    skill_mgr.register_bundled(SkillEntry {
-        name: "help".into(),
-        description: "skill help".into(),
-        user_invocable: true,
-        ..Default::default()
-    });
-    skill_mgr.register_bundled(SkillEntry {
-        name: "review".into(),
-        description: "skill review".into(),
-        user_invocable: true,
-        ..Default::default()
-    });
+    skill_mgr.load_from(std::sync::Arc::new(
+        base::interface::skill_provider::StaticSkills::new(
+            "test",
+            vec![SkillEntry {
+                name: "help".into(),
+                description: "skill help".into(),
+                user_invocable: true,
+                ..Default::default()
+            }],
+        ),
+    ));
+    skill_mgr.load_from(std::sync::Arc::new(
+        base::interface::skill_provider::StaticSkills::new(
+            "test",
+            vec![SkillEntry {
+                name: "review".into(),
+                description: "skill review".into(),
+                user_invocable: true,
+                ..Default::default()
+            }],
+        ),
+    ));
     let mut registry = CommandRegistry::from_skill_catalog(skill_mgr);
     registry.insert_prompt(SkillEntry {
         name: "review".into(),
@@ -209,13 +224,18 @@ fn registered_commands_shadow_skills_which_shadow_builtins() {
 #[test]
 fn skill_derived_commands_carry_named_arguments() {
     let skill_mgr = Arc::new(skills::manager::SkillManager::new());
-    skill_mgr.register_bundled(SkillEntry {
-        name: "ship".into(),
-        description: "ship it".into(),
-        arguments: Some(vec!["issue".into(), "branch".into()]),
-        user_invocable: true,
-        ..Default::default()
-    });
+    skill_mgr.load_from(std::sync::Arc::new(
+        base::interface::skill_provider::StaticSkills::new(
+            "test",
+            vec![SkillEntry {
+                name: "ship".into(),
+                description: "ship it".into(),
+                arguments: Some(vec!["issue".into(), "branch".into()]),
+                user_invocable: true,
+                ..Default::default()
+            }],
+        ),
+    ));
     let registry = CommandRegistry::from_skill_catalog(skill_mgr);
     match registry.resolve("ship").unwrap() {
         Command::Prompt { entry } => {
@@ -239,13 +259,18 @@ async fn build_uses_the_injected_skill_catalog_instead_of_scanning_disk() {
     let scene: Arc<SceneSpec> = Arc::new(scene::code::spec(scene::code::Interaction::Interactive));
 
     let catalog = skills::manager::SkillManager::new();
-    catalog.register_bundled(base::skill::SkillEntry {
-        name: "p2-injected-only".into(),
-        description: "only exists in the injected catalog".into(),
-        source: base::skill::SkillSource::User,
-        path: std::path::PathBuf::from("(test:p2-injected-only)"),
-        ..Default::default()
-    });
+    catalog.load_from(std::sync::Arc::new(
+        base::interface::skill_provider::StaticSkills::new(
+            "test",
+            vec![base::skill::SkillEntry {
+                name: "p2-injected-only".into(),
+                description: "only exists in the injected catalog".into(),
+                source: base::skill::SkillSource::User,
+                path: std::path::PathBuf::from("(test:p2-injected-only)"),
+                ..Default::default()
+            }],
+        ),
+    ));
     let catalog = Arc::new(catalog);
 
     let (agent, _event_rx, _input_tx) = Builder::new()

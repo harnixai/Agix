@@ -89,19 +89,32 @@ fn only_an_unattended_profile_refuses_the_ipc_routes() {
 #[cfg(target_os = "macos")]
 #[test]
 fn a_sandboxed_command_cannot_plant_what_runs_outside_the_sandbox() {
-    let Some(s) = UnderSandboxExec::new() else {
-        return;
-    };
+    for own in [".agix", ".codix"] {
+        let Some(s) = UnderSandboxExec::in_layout(base::paths::Layout::new(own).unwrap()) else {
+            return;
+        };
+        cannot_plant_under(&s, own);
+    }
+}
+
+/// `own` is `s`'s project directory; `.agix` and `.claude` are guarded
+/// beside it either way.
+#[cfg(target_os = "macos")]
+fn cannot_plant_under(s: &UnderSandboxExec, own: &str) {
     let state = s.state_root.display().to_string();
     let elsewhere = s.elsewhere.display().to_string();
     for command in [
         "git config x.y z".to_string(),
         "echo /tmp > .git/commondir".to_string(),
         "echo 'touch pwned' > .git/hooks/post-commit".to_string(),
+        format!("mv {own} {own}.old"),
+        format!("echo '{{}}' > {own}/mcp.local.json"),
+        format!("echo '{{}}' > {own}/settings.json"),
+        format!("mkdir {own}/mcp"),
+        format!("mkdir {own}/hooks"),
         "mv .agix .agix.old".to_string(),
-        "echo '{}' > .agix/mcp.local.json".to_string(),
         "echo '{}' > .agix/settings.json".to_string(),
-        "mkdir .agix/mcp".to_string(),
+        "mkdir .agix/hooks".to_string(),
         "echo '{}' > .claude/settings.json".to_string(),
         "mkdir .claude/hooks".to_string(),
         "mv .claude .claude.old".to_string(),
@@ -109,15 +122,16 @@ fn a_sandboxed_command_cannot_plant_what_runs_outside_the_sandbox() {
         format!("mkdir '{state}/hooks'"),
         format!("echo x > '{elsewhere}/x'"),
     ] {
-        assert!(!s.runs(&command), "`{command}` was allowed");
+        assert!(!s.runs(&command), "{own}: `{command}` was allowed");
     }
-    s.runs(&format!("rm -rf .agix; ln -s '{elsewhere}' .agix"));
-    let agix = s.project.join(".agix").symlink_metadata().unwrap();
-    assert!(agix.is_dir(), ".agix was replaced");
+    s.runs(&format!("rm -rf {own}; ln -s '{elsewhere}' {own}"));
+    let dir = s.project.join(own).symlink_metadata().unwrap();
+    assert!(dir.is_dir(), "{own} was replaced");
 
     let config = std::fs::read_to_string(s.project.join(".git").join("config")).unwrap();
     assert!(!config.contains("[x]"), "{config}");
     assert!(!s.project.join(".git").join("commondir").exists());
+    assert!(!s.project.join(own).join("settings.json").exists());
     assert!(!s.project.join(".agix").join("settings.json").exists());
     assert!(!s.state_root.join("mcp.json").exists());
 }

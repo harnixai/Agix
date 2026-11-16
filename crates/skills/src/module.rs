@@ -138,11 +138,10 @@ pub fn build_skill_manager_with_plugins(
 /// the project to be trusted. As `skills/<name>`, for `project.status`.
 pub fn project_skills_requiring_trust(settings: &LoadedSettings) -> Vec<String> {
     use crate::manager::SkillSource;
-    let Some(project) = settings.paths.project_root() else {
+    let Some(dir) = settings.paths.config_paths().project_skills_dir() else {
         return Vec::new();
     };
     let manager = SkillManager::new().reading_with(prompt_files(settings));
-    let dir = project.join(".agents").join("skills");
     if manager
         .load_dir_subdirs(&dir, SkillSource::Project)
         .is_err()
@@ -181,12 +180,10 @@ fn build_skill_manager(
     if defers {
         skill_mgr = skill_mgr.with_project_deferring();
     }
-    let project_skills_dir = settings
-        .paths
-        .project_root()
-        .map(|project| project.join(".agents").join("skills"));
-    let global_skills = settings.paths.global_data_dir.join("skills");
-    let scene_skills = settings.paths.user_data_dir.join("skills");
+    let dirs = settings.paths.config_paths();
+    let project_skills_dir = dirs.project_skills_dir();
+    let global_skills = dirs.global_skills_dir();
+    let scene_skills = dirs.user_skills_dir();
     let mut user_tiers = vec![(global_skills.clone(), base::skill::SkillTier::Global)];
     if base::path::resolve_physically(&scene_skills)
         != base::path::resolve_physically(&global_skills)
@@ -215,7 +212,10 @@ fn build_skill_manager(
     }
     // Built-ins come last and defer: a project that writes its own skill of
     // the same name means to replace the one in the binary.
-    skill_mgr.load_from(Arc::new(BundledSkills));
+    skill_mgr.load_from(Arc::new(BundledSkills::new(
+        settings.paths.layout.clone(),
+        settings.paths.global_data_dir.clone(),
+    )));
     if defers {
         loaded_count += project_skills_dir
             .iter()

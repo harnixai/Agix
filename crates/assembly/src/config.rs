@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::paths::PathSettings;
+use base::paths::{ConfigPaths, Layout, PathSettings, StateRoot, DEFAULT_STATE_DIR};
 use permissions::ruleset::RuleSet;
 use settings::{LoadedSettings, Settings};
 
@@ -41,6 +41,18 @@ pub trait DaemonPaths: Send + Sync {
             .map(PathBuf::from)
             .unwrap_or_else(|| self.config_root())
     }
+
+    /// What this instance names its directories. Default: `.agix` for a
+    /// project's.
+    fn layout(&self) -> Layout {
+        Layout::default()
+    }
+
+    /// The derived paths of a session of `scene_root` in `project`, or in
+    /// none, for the pool's code that has no session's settings at hand.
+    fn paths_for(&self, project: Option<&Path>, scene_root: PathBuf) -> ConfigPaths {
+        ConfigPaths::of(self.global_root(), scene_root, project, self.layout())
+    }
 }
 
 /// Default path provider: `$AGIX_CONFIG_HOME` (or `$HOME/.agix`) is the flat
@@ -63,6 +75,7 @@ pub struct DefaultDaemonPaths {
     global_root: PathBuf,
     config_root: PathBuf,
     project_root: PathBuf,
+    layout: Layout,
 }
 
 /// The state root a process uses when nobody names one: `AGIX_CONFIG_HOME`,
@@ -72,7 +85,7 @@ pub fn default_global_root() -> PathBuf {
     if let Ok(p) = std::env::var("AGIX_CONFIG_HOME") {
         PathBuf::from(p)
     } else if let Some(home) = base::paths::home_dir() {
-        home.join(".agix")
+        home.join(DEFAULT_STATE_DIR)
     } else {
         PathBuf::from("/tmp/agix")
     }
@@ -81,12 +94,13 @@ pub fn default_global_root() -> PathBuf {
 impl DefaultDaemonPaths {
     pub fn from_env(scope: &str) -> Self {
         let global_root = default_global_root();
-        let config_root = global_root.join("scenes").join(scope);
+        let config_root = StateRoot::new(global_root.clone()).scene_dir(scope);
         let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {
             global_root,
             config_root,
             project_root,
+            layout: Layout::default(),
         }
     }
 
@@ -97,7 +111,13 @@ impl DefaultDaemonPaths {
             global_root: config_root.clone(),
             config_root,
             project_root,
+            layout: Layout::default(),
         }
+    }
+
+    pub fn with_layout(mut self, layout: Layout) -> Self {
+        self.layout = layout;
+        self
     }
 }
 
@@ -110,6 +130,9 @@ impl DaemonPaths for DefaultDaemonPaths {
     }
     fn global_root(&self) -> PathBuf {
         self.global_root.clone()
+    }
+    fn layout(&self) -> Layout {
+        self.layout.clone()
     }
 }
 
@@ -126,25 +149,27 @@ pub struct StaticDaemonPaths {
     config_root: PathBuf,
     project_root: PathBuf,
     global_root: Option<PathBuf>,
+    layout: Layout,
 }
 
 impl StaticDaemonPaths {
     pub fn new(path: PathBuf) -> Self {
-        Self {
-            config_root: path.clone(),
-            project_root: path,
-            global_root: None,
-        }
+        Self::with_project(path.clone(), path)
     }
     pub fn with_project(config_root: PathBuf, project_root: PathBuf) -> Self {
         Self {
             config_root,
             project_root,
             global_root: None,
+            layout: Layout::default(),
         }
     }
     pub fn with_global(mut self, global_root: PathBuf) -> Self {
         self.global_root = Some(global_root);
+        self
+    }
+    pub fn with_layout(mut self, layout: Layout) -> Self {
+        self.layout = layout;
         self
     }
 }
@@ -160,6 +185,9 @@ impl DaemonPaths for StaticDaemonPaths {
         self.global_root
             .clone()
             .unwrap_or_else(|| self.config_root.clone())
+    }
+    fn layout(&self) -> Layout {
+        self.layout.clone()
     }
 }
 
@@ -258,7 +286,7 @@ impl DaemonConfig {
 
 /// Priority (low → high): global (`global_root()/settings.json`, shared by
 /// every scene) → scene (`config_root()/settings.json`) → project
-/// (`project_root()/.agix/settings.json`) — delegates entirely to
+/// (`settings.json` in `layout()`'s directory of `project_root()`) — delegates entirely to
 /// `LoadedSettings::load()`; see its doc comment for the merge algorithm.
 pub fn load_daemon_config(
     cli_model: &str,
@@ -275,6 +303,7 @@ pub fn load_daemon_config(
         global_root.clone(),
         config_root.clone(),
         Some(&project_root),
+        &paths.layout(),
         scope,
         cli_model,
         cli_max_tokens,
@@ -289,7 +318,9 @@ pub fn load_daemon_config(
         socket_path,
         lock_path,
         paths: Arc::new(
-            StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root),
+            StaticDaemonPaths::with_project(config_root, project_root)
+                .with_global(global_root)
+                .with_layout(paths.layout()),
         ),
         session_cap: 32,
         tcp_addr: None,
@@ -302,6 +333,11 @@ pub fn load_daemon_config(
         max_tokens_fallback: cli_max_tokens,
         settings,
     }
+}
+
+/// Where the process at the state root `root` leaves its crash reports.
+pub fn crashes_dir_from_root(root: &Path) -> PathBuf {
+    base::paths::StateRoot::new(root).crashes_dir()
 }
 
 pub fn socket_path_from_root(root: &Path) -> PathBuf {

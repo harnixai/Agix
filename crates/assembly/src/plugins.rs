@@ -124,6 +124,10 @@ mod packages {
             &self.policy
         }
 
+        pub fn layout(&self) -> base::paths::Layout {
+            self.paths.layout()
+        }
+
         pub fn active(&self) -> Arc<Vec<::packages::manifest::Plugin>> {
             self.active
                 .read()
@@ -264,7 +268,7 @@ mod packages {
             let global_state = ::packages::state::EnableState::new(global.clone());
             let scene_state = ::packages::state::EnableState::new(scene.clone());
             let script_faults = self.script_faults.read().unwrap_or_else(|e| e.into_inner());
-            ::packages::discover_plugins(&global, &scene)
+            ::packages::discover_plugins(&global, &scene, &self.paths.layout())
                 .iter()
                 .map(|p| {
                     let name = &p.manifest.plugin.name;
@@ -333,13 +337,18 @@ mod packages {
             version: &str,
             scope: &str,
         ) -> Result<::packages::Disclosure, String> {
-            let cache = ::packages::cache::PluginCache::new(self.tier_root(scope)?.join("cache"));
+            let cache = ::packages::cache::PluginCache::new(
+                self.tier_root(scope)?.join(base::paths::entry::CACHE),
+            );
             let manifest = cache
                 .cached_manifest(name, version)
                 .ok_or_else(|| format!("no plugin.toml in the installed package `{name}`"))?;
-            let loaded =
-                ::packages::manifest::Plugin::load(&cache.version_dir(name, version), &manifest)
-                    .map_err(|e| e.to_string())?;
+            let loaded = ::packages::manifest::Plugin::load(
+                &cache.version_dir(name, version),
+                &manifest,
+                &self.paths.layout(),
+            )
+            .map_err(|e| e.to_string())?;
             if loaded.manifest.plugin.name != name {
                 return Err(format!(
                     "the package calls itself `{}`, not `{name}`",
@@ -351,7 +360,7 @@ mod packages {
 
         pub fn cache_for(&self, scope: &str) -> Result<::packages::cache::PluginCache, String> {
             Ok(::packages::cache::PluginCache::new(
-                self.tier_root(scope)?.join("cache"),
+                self.tier_root(scope)?.join(base::paths::entry::CACHE),
             ))
         }
 
@@ -397,8 +406,8 @@ mod packages {
     /// own scene.
     fn tier_dirs(paths: &dyn DaemonPaths) -> (PathBuf, PathBuf) {
         (
-            paths.global_root().join("plugins"),
-            paths.config_root().join("plugins"),
+            base::paths::StateRoot::new(paths.global_root()).plugins_dir(),
+            paths.config_root().join(base::paths::entry::PLUGINS),
         )
     }
 
@@ -410,7 +419,9 @@ mod packages {
         let global_state = ::packages::state::EnableState::new(global.clone());
         let scene_state = ::packages::state::EnableState::new(scene.clone());
         let active: Vec<::packages::manifest::Plugin> = ::packages::discover_plugins(
-            &global, &scene,
+            &global,
+            &scene,
+            &paths.layout(),
         )
         .into_iter()
         .filter(|p| {
@@ -491,7 +502,10 @@ mod imp {
     /// Packages on disk that discovery sets aside — a disclosure over its
     /// limits, a manifest that no longer loads — and so never load, however
     /// they got into the cache.
-    struct RefusedPackagesCheck((std::path::PathBuf, std::path::PathBuf));
+    struct RefusedPackagesCheck(
+        (std::path::PathBuf, std::path::PathBuf),
+        base::paths::Layout,
+    );
 
     impl HealthCheck for RefusedPackagesCheck {
         fn name(&self) -> &str {
@@ -500,7 +514,7 @@ mod imp {
 
         fn check(&self) -> CheckResult {
             let (global, scene) = &self.0;
-            let refused = ::packages::scan_plugins(global, scene).refused;
+            let refused = ::packages::scan_plugins(global, scene, &self.1).refused;
             if refused.is_empty() {
                 return CheckResult::ok("every installed plugin loads");
             }
@@ -625,7 +639,10 @@ mod imp {
             }
             vec![
                 Arc::new(EnableStateCheck(self.packages.tier_dirs())),
-                Arc::new(RefusedPackagesCheck(self.packages.tier_dirs())),
+                Arc::new(RefusedPackagesCheck(
+                    self.packages.tier_dirs(),
+                    self.packages.layout(),
+                )),
                 Arc::new(EnableOnInstallCheck(
                     self.packages.policy().enable_on_install,
                 )),
@@ -676,9 +693,10 @@ mod imp {
                 checksum: checksum.map(str::to_string),
                 version: version.to_string(),
             };
-            let installed = ::packages::install::install(cache, name, &source)
-                .await
-                .map_err(|e| e.to_string())?;
+            let installed =
+                ::packages::install::install(cache, name, &source, &self.packages.layout())
+                    .await
+                    .map_err(|e| e.to_string())?;
             let loaded = self.packages.load_back(name, version, scope);
             let (message, disclosure) = match (installed, loaded) {
                 (::packages::install::Installed::AlreadyPresent, Ok(d)) => (

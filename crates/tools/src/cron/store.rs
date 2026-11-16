@@ -84,6 +84,11 @@ impl CronStore {
         }
     }
 
+    /// The file the durable jobs are kept in; `None` when they are not saved.
+    pub fn file_path(&self) -> Option<&Path> {
+        self.file_path.as_deref()
+    }
+
     /// Add a new cron job, belonging to no session. Returns the assigned ID.
     pub fn add(&self, cron: String, prompt: String, recurring: bool, durable: bool) -> String {
         self.add_job(NewCronJob {

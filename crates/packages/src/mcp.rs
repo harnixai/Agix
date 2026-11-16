@@ -67,7 +67,7 @@ mod tests {
 
     fn load(root: &std::path::Path, body: &str) -> Plugin {
         std::fs::write(root.join("plugin.toml"), format!("{HEAD}{body}")).unwrap();
-        Plugin::load(root, &root.join("plugin.toml")).unwrap()
+        Plugin::load(root, &root.join("plugin.toml"), &Default::default()).unwrap()
     }
 
     #[test]

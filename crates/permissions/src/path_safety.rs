@@ -3,6 +3,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use std::sync::Arc;
+
 use base::paths::{credential_dir_names, SensitivePaths, SECRET_FILE_NAMES};
 use unicode_normalization::UnicodeNormalization;
 
@@ -46,16 +48,19 @@ pub struct WritePolicy {
     /// available answer was to not run the check at all. Which is what
     /// happened.
     pub allow: Vec<PathBuf>,
+    /// The session's sensitive paths: which engine settings files are
+    /// refused.
+    pub sensitive: Arc<SensitivePaths>,
 }
 
 impl WritePolicy {
-    /// Construct a new instance.
-    pub fn new(primary_root: PathBuf) -> Self {
+    pub fn new(primary_root: PathBuf, sensitive: Arc<SensitivePaths>) -> Self {
         Self {
             primary_root,
             additional_roots: Vec::new(),
             extra_blacklist: Vec::new(),
             allow: Vec::new(),
+            sensitive,
         }
     }
 
@@ -282,9 +287,9 @@ fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), Pat
     }
 
     // The engine's own settings, by name and location — not by directory:
-    // `.agix` also holds a sub-agent's worktree, and the configuration
-    // directories in it are asked about rather than refused.
-    if SensitivePaths::is_engine_settings_file(target) {
+    // the project directory also holds a sub-agent's worktree, and the
+    // configuration directories in it are asked about rather than refused.
+    if policy.sensitive.is_engine_settings_file(target) {
         let name = target.file_name().unwrap_or_default().to_string_lossy();
         return Err(PathSafetyError::BlacklistedFilename {
             path: target.to_path_buf(),
@@ -406,7 +411,41 @@ mod tests {
     use super::*;
 
     fn policy(root: &str) -> WritePolicy {
-        WritePolicy::new(PathBuf::from(root))
+        WritePolicy::new(PathBuf::from(root), Default::default())
+    }
+
+    /// The instance's own settings files are refused in its project
+    /// directory, whatever it is called, and so are those of a foreign root
+    /// — `.agix` under a renamed layout, `.claude` under any.
+    #[test]
+    fn the_engines_settings_files_are_refused_under_every_configuration_root() {
+        for name in [".agix", ".codix"] {
+            let layout = base::paths::Layout::new(name).unwrap();
+            let sensitive = SensitivePaths::new(None, None, layout);
+            let p = WritePolicy::new(PathBuf::from("/tmp/work"), Arc::new(sensitive));
+            for target in [
+                format!("/tmp/work/{name}/settings.json"),
+                format!("/tmp/work/{name}/worktrees/a/{name}/settings.local.json"),
+                "/tmp/work/.agix/settings.json".to_string(),
+                "/tmp/work/.claude/settings.local.json".to_string(),
+            ] {
+                assert!(
+                    matches!(
+                        check_write(Path::new(&target), &p),
+                        Err(PathSafetyError::BlacklistedFilename { .. })
+                    ),
+                    "{target}"
+                );
+            }
+            for target in [
+                format!("/tmp/work/{name}/agents/reviewer.md"),
+                "/tmp/work/settings.json".to_string(),
+            ] {
+                assert!(check_write(Path::new(&target), &p).is_ok(), "{target}");
+            }
+        }
+        let default = policy("/tmp/work");
+        assert!(check_write(Path::new("/tmp/work/.codix/settings.json"), &default).is_ok());
     }
 
     #[test]
@@ -433,7 +472,7 @@ mod tests {
 
     #[test]
     fn additional_roots_extend_allowance() {
-        let p = WritePolicy::new(PathBuf::from("/tmp/work"))
+        let p = WritePolicy::new(PathBuf::from("/tmp/work"), Default::default())
             .with_additional_roots(vec![PathBuf::from("/tmp/extra")]);
         assert!(check_write(Path::new("/tmp/extra/x.txt"), &p).is_ok());
         assert!(check_write(Path::new("/tmp/work/x.txt"), &p).is_ok());
@@ -501,7 +540,7 @@ mod tests {
 
     #[test]
     fn extra_blacklist_works() {
-        let p = WritePolicy::new(PathBuf::from("/tmp/work"))
+        let p = WritePolicy::new(PathBuf::from("/tmp/work"), Default::default())
             .with_extra_blacklist(vec!["secret-config".into()]);
         let err = check_write(Path::new("/tmp/work/secret-config"), &p).unwrap_err();
         assert!(matches!(err, PathSafetyError::BlacklistedFilename { .. }));
@@ -630,7 +669,7 @@ mod tests {
         let link_path = inside.join("escape_link");
         unix::fs::symlink(&real_file, &link_path).unwrap();
 
-        let p = WritePolicy::new(inside.clone());
+        let p = WritePolicy::new(inside.clone(), Default::default());
 
         // Lexical check alone passes — the symlink path is inside workdir
         assert!(
@@ -701,7 +740,7 @@ mod tests {
         let target = link_dir.join("target.txt");
         fs::write(&target, b"should not be reachable").unwrap();
 
-        let p = WritePolicy::new(allowed_root.clone());
+        let p = WritePolicy::new(allowed_root.clone(), Default::default());
 
         // The intermediate symlink check should catch this escape
         let err = check_write(&target, &p).unwrap_err();
@@ -736,7 +775,7 @@ mod tests {
         let target = link_sub.join("file.txt");
         fs::write(&target, b"content").unwrap();
 
-        let p = WritePolicy::new(allowed_root.clone());
+        let p = WritePolicy::new(allowed_root.clone(), Default::default());
 
         assert!(
             check_write(&target, &p).is_ok(),

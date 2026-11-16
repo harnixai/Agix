@@ -504,6 +504,7 @@ fn project_settings(root: &Path) -> settings::LoadedSettings {
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     )
 }
 
@@ -565,6 +566,7 @@ async fn a_project_grant_without_a_project_is_kept_for_the_session() {
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     );
     assert_eq!(settings.paths.local_settings_file(), None);
     let perm = Policy::from_settings(&settings.permission_settings(), []);
@@ -611,6 +613,7 @@ async fn a_project_grant_in_an_untrusted_project_says_why_it_is_not_kept() {
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     );
     assert!(settings.trust().is_untrusted(), "{:?}", settings.trust());
     let perm = Policy::from_settings(&settings.permission_settings(), []);
@@ -656,6 +659,7 @@ async fn a_project_grant_in_a_repository_borrowing_the_global_tier_stays_out_of_
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     );
     let perm = Policy::from_settings(&settings.permission_settings(), []);
     let kept = perm
@@ -778,6 +782,7 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     );
 
     let perm = Policy::from_settings(&settings.permission_settings(), []);
@@ -831,6 +836,7 @@ fn with_managed(user: serde_json::Value, managed: serde_json::Value) -> settings
         "code",
         "m",
         &settings::section::Sections::none(),
+        Default::default(),
     )
     .with_managed(Some(settings::managed::from_value("it", managed)))
 }

@@ -246,12 +246,10 @@ pub(super) fn build_prompt_context<'a>(
     ctx.git_status = git_status.map(Cow::Owned);
     ctx.is_worktree = is_worktree;
     ctx.language = settings.values.language.clone().map(Cow::Owned);
-    // `local_data_dir` is already the `.agix/` dir (flat, no scope
-    // segment) — no need to prepend another `.agix/`.
     ctx.scratchpad_dir = settings
         .paths
-        .local_data_dir
-        .join("scratchpad")
+        .config_paths()
+        .scratchpad_dir()
         .to_str()
         .map(|s| Cow::Owned(s.to_string()));
     ctx.output_style_content = output_style.map(Cow::Owned);

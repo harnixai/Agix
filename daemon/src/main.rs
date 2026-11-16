@@ -305,7 +305,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let data_root = daemon::config::default_global_root();
     let listeners = listeners_from_cli(&cli)?;
     platform::crash::install(
-        data_root.join("daemon").join("crashes"),
+        daemon::config::crashes_dir_from_root(&data_root),
         "agixd",
         env!("CARGO_PKG_VERSION"),
     );

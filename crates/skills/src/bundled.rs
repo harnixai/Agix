@@ -1,8 +1,7 @@
 //! 内置 skills —— 13 个常用 prompt 模板。
 //!
 //! 不写盘、不需要用户设置；每 session 自动注入到 skill 列表。用户在
-//! `~/.agix/skills/<name>/SKILL.md`（全局默认）、`~/.agix/scenes/<scene>/skills/<name>/SKILL.md`
-//! （scene 覆盖）或 `<cwd>/.agents/skills/<name>/SKILL.md`（项目级）创建同名 skill 即覆盖
+//! 全局、scene 或项目的 skills 目录里创建同名 skill 即覆盖
 //! （disk 优先：同名时 `/<name>` slash 命中第一个 —— 即用户的）。
 //!
 //! # 技能列表
@@ -21,15 +20,16 @@
 //! | `init` | 引导用户创建新项目的 AGENTS.md 文件 |
 //! | `security-review` | 审查代码变更中的安全漏洞 |
 //! | `rename` | 重命名当前对话会话标题 |
-//! | `import` | 检测并从 Claude Code/Codex/Cursor 导入配置到 AGENTS.md/.agents/.agix |
+//! | `import` | 检测并从 Claude Code/Codex/Cursor 导入配置到 AGENTS.md 与项目配置目录 |
 //!
 //! 还有几个我们刻意不带：它们要么依赖 Anthropic SaaS / Chrome 扩展，要么是内部子流程。
 //!
 //! 一个 session 列出哪些由它的 scene 决定（`SceneSpec::bundled_skills`），还要
 //! [`required_tools`] 里的工具在这个 scene 都允许——见 `catalog::BundledAdmission`。
 
+use base::paths::{Layout, CLAUDE_DIR, PROJECT_SKILLS_DIR};
 use base::skill::{SkillEntry, SkillSource};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 返回内置 skills（in-memory；不动 disk）。排在 disk skill 之后，
 /// 所以用户的同名 disk skill 仍然在前。
@@ -90,7 +90,7 @@ pub fn bundled_skills() -> Vec<SkillEntry> {
         },
         SkillEntry {
             name: "remember".into(),
-            description: "Save a fact / preference / decision to cross-session memory (~/.agix/memory).".into(),
+            description: "Save a fact / preference / decision to cross-session memory.".into(),
             when_to_use: Some(
                 "When the user explicitly asks to remember something, or you learn a stable preference."
                     .into(),
@@ -157,7 +157,7 @@ pub fn bundled_skills() -> Vec<SkillEntry> {
         },
         SkillEntry {
             name: "import".into(),
-            description: "Detect and import configuration from Claude Code, Codex, or Cursor into this project's AGENTS.md/.agents/.agix layout.".into(),
+            description: "Detect and import configuration from Claude Code, Codex, or Cursor into this project's AGENTS.md, skills and rules.".into(),
             when_to_use: Some(
                 "When the user asks to import/migrate settings from Claude Code, Codex, or Cursor, or runs /import."
                     .into(),
@@ -182,8 +182,10 @@ pub fn required_tools(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// 把 `(bundled:<name>)` 路径形式解析回 prompt body，不读盘。
-pub fn bundled_body(name: &str) -> Option<String> {
+/// 把 `(bundled:<name>)` 路径形式解析回 prompt body，不读盘。正文里的
+/// `{project_dir}`、`{state_root}`、`{project_skills}`、`{claude_skills}` 由这个实例的
+/// 布局与状态根填成实际路径。
+pub fn bundled_body(name: &str, layout: &Layout, state_root: &Path) -> Option<String> {
     let body = match name {
         "simplify" => SIMPLIFY,
         "verify" => VERIFY,
@@ -200,7 +202,12 @@ pub fn bundled_body(name: &str) -> Option<String> {
         "import" => IMPORT,
         _ => return None,
     };
-    Some(body.to_string())
+    Some(
+        body.replace("{project_dir}", layout.project_dir_name())
+            .replace("{state_root}", &state_root.display().to_string())
+            .replace("{project_skills}", PROJECT_SKILLS_DIR)
+            .replace("{claude_skills}", &format!("{CLAUDE_DIR}/skills")),
+    )
 }
 
 const SIMPLIFY: &str = r#"# Simplify: Code Review and Cleanup
@@ -438,7 +445,7 @@ Turn the workflow you (or the user) just executed into a reusable `SKILL.md`.
 
 ## Output
 
-Write `<cwd>/.agents/skills/<kebab-name>/SKILL.md` with frontmatter:
+Write `<cwd>/{project_skills}/<kebab-name>/SKILL.md` with frontmatter:
 
 ```
 ---
@@ -471,10 +478,10 @@ Make a precise change to one of the settings.json layers without nuking adjacent
 
 1. Read the target file first. If absent, create with `{}` and proceed.
 2. Identify which layer to change (low → high priority, higher wins):
-   - Global (applies to every scene): `~/.agix/settings.json`
-   - Scene-specific override: `~/.agix/scenes/<scene>/settings.json`
-   - Project (committed): `<cwd>/.agix/settings.json`
-   - Local override (gitignored): `<cwd>/.agix/settings.local.json`
+   - Global (applies to every scene): `{state_root}/settings.json`
+   - Scene-specific override: `{state_root}/scenes/<scene>/settings.json`
+   - Project (committed): `<cwd>/{project_dir}/settings.json`
+   - Local override (gitignored): `<cwd>/{project_dir}/settings.local.json`
 3. Preserve `$schema` and any unknown fields verbatim — other tools may write fields we don't model.
 
 ## Common edits
@@ -660,7 +667,7 @@ Rename the current conversation session to a descriptive title that makes it eas
 const IMPORT: &str = r#"# Import: Migrate Config from Claude Code / Codex / Cursor
 
 Bring project configuration left behind by another agent tool into this
-engine's layout: `AGENTS.md` + `.agents/skills/` + `.agix/rules/`.
+engine's layout: `AGENTS.md` + `{project_skills}/` + `{project_dir}/rules/`.
 
 Do the work with the ordinary file tools. There is no `Import` tool — the
 detection rules and output layout change often enough that they belong here,
@@ -670,16 +677,16 @@ in text you can edit, rather than compiled into the binary.
 
 - The user runs `/import`, or asks to import/migrate settings from Claude
   Code, Codex, or Cursor
-- You notice `CLAUDE.md`, `.claude/skills/`, `.cursorrules`,
-  `.cursor/rules/*.mdc`, or an `AGENTS.md` with no `.agents/skills/`, and the
+- You notice `CLAUDE.md`, `{claude_skills}/`, `.cursorrules`,
+  `.cursor/rules/*.mdc`, or an `AGENTS.md` with no `{project_skills}/`, and the
   user has not already declined
 
 ## Process
 
 1. **Detect.** Check for each source in the project root:
-   - `claude_code` — `CLAUDE.md` exists, or `.claude/skills/` is non-empty
+   - `claude_code` — `CLAUDE.md` exists, or `{claude_skills}/` is non-empty
    - `cursor` — `.cursorrules` exists, or `.cursor/rules/*.mdc` matches
-   - `codex` — `AGENTS.md` exists but `.agents/skills/` does not
+   - `codex` — `AGENTS.md` exists but `{project_skills}/` does not
 2. **Nothing found** — say so and stop.
 3. **Ask which one.** Present what you found and let the user pick exactly
    one. Never import two sources in one pass: their `AGENTS.md` sections would
@@ -716,30 +723,34 @@ the two must be able to re-run over each other's output.
 
 **claude_code**
 - Merge `CLAUDE.md` into `AGENTS.md` under tag `CLAUDE_CODE`
-- Copy `.claude/skills/*` to `.agents/skills/*`. **Never overwrite** an
+- Copy `{claude_skills}/*` to `{project_skills}/*`. **Never overwrite** an
   existing project skill of the same name — skip it and say which you skipped
 
 **cursor**
 - Merge `.cursorrules` (plain text) into `AGENTS.md` under tag `CURSOR_RULES`
-- Convert each `.cursor/rules/*.mdc` to `.agix/rules/<name>.md`
+- Convert each `.cursor/rules/*.mdc` to `{project_dir}/rules/<name>.md`
 - An `.mdc` whose frontmatter has `alwaysApply: true` should also be
   referenced from `AGENTS.md`, so it is actually loaded
 
 **codex**
 - Nothing to migrate; Codex already uses `AGENTS.md`. Create an empty
-  `.agents/skills/` if missing and say that was all that was needed
+  `{project_skills}/` if missing and say that was all that was needed
 
 ## Don't
 
 - Don't invent a source the detection step did not find
 - Don't import a source the user did not pick
 - Don't overwrite existing project skills or rules
-- Don't touch `.agix/.imported.json` — that belongs to the automatic path
+- Don't touch `{project_dir}/.imported.json` — that belongs to the automatic path
 "#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn body_of(name: &str) -> Option<String> {
+        bundled_body(name, &Layout::default(), Path::new("/state"))
+    }
 
     #[test]
     fn thirteen_bundled_skills_present() {
@@ -789,15 +800,15 @@ mod tests {
             "rename",
             "import",
         ] {
-            assert!(bundled_body(name).is_some(), "{name} missing body");
-            let body = bundled_body(name).unwrap();
+            assert!(body_of(name).is_some(), "{name} missing body");
+            let body = body_of(name).unwrap();
             assert!(body.len() > 200, "{name} body suspiciously short");
         }
     }
 
     #[test]
     fn bundled_body_returns_none_for_unknown() {
-        assert!(bundled_body("ghost").is_none());
+        assert!(body_of("ghost").is_none());
     }
 
     #[test]
@@ -808,6 +819,34 @@ mod tests {
                 "{} path should be (bundled:...)",
                 s.name
             );
+        }
+    }
+
+    #[test]
+    fn a_body_names_the_directories_of_the_instance_that_renders_it() {
+        let state = Path::new("/state/root");
+        for name in ["default", ".codix"] {
+            let layout = if name == "default" {
+                Layout::default()
+            } else {
+                Layout::new(name).unwrap()
+            };
+            let own = layout.project_dir_name();
+            let config = bundled_body("updateConfig", &layout, state).unwrap();
+            assert!(config.contains(&format!("<cwd>/{own}/settings.local.json")));
+            assert!(config.contains("/state/root/settings.json"));
+            assert!(config.contains("/state/root/scenes/<scene>/settings.json"));
+            let import = bundled_body("import", &layout, state).unwrap();
+            assert!(import.contains(&format!("`{own}/rules/<name>.md`")));
+            assert!(import.contains(&format!("`{own}/.imported.json`")));
+            assert!(import.contains(".claude/skills/*"));
+            for body in [&config, &import] {
+                assert!(!body.contains("{project_dir}") && !body.contains("{state_root}"));
+                assert!(!body.contains("{project_skills}") && !body.contains("{claude_skills}"));
+            }
+            if own != ".agix" {
+                assert!(!config.contains(".agix") && !import.contains(".agix"));
+            }
         }
     }
 }

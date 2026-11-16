@@ -31,6 +31,9 @@ pub struct PromptContext {
     pub all_tool_names: Vec<String>,
     pub allowed_agent_types: Vec<String>,
     pub path_style: PathStyle,
+    /// The name of the instance's project directory, for a guide that tells
+    /// the model where something lives.
+    pub project_dir: String,
 }
 impl Default for PromptContext {
     fn default() -> Self {
@@ -42,6 +45,7 @@ impl Default for PromptContext {
             all_tool_names: vec![],
             allowed_agent_types: vec![],
             path_style: PathStyle::default(),
+            project_dir: crate::paths::DEFAULT_PROJECT_DIR.to_string(),
         }
     }
 }

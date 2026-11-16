@@ -1,6 +1,7 @@
 //! 会话查询：详情、列表、冷会话信息、场景与配置层说明、已服务项目的记录。
 
 use crate::session_pool::*;
+use base::paths::{entry, StateRoot};
 
 impl SessionPool {
     /// A session's recorded `session_kind`/`parent_session_id`/`resumable`,
@@ -105,16 +106,13 @@ impl SessionPool {
         }
 
         let paths = self.bindings.paths().as_ref();
+        let state_root = StateRoot::new(paths.global_root());
         let path = match tier {
-            Tier::Global => Some(paths.global_root().join("settings.json")),
-            Tier::Scene => Some(
-                paths
-                    .global_root()
-                    .join("scenes")
-                    .join(scene_id)
-                    .join("settings.json"),
-            ),
-            Tier::Project => project_root.map(|p| p.join(".agix").join("settings.json")),
+            Tier::Global => Some(state_root.settings_file()),
+            Tier::Scene => Some(state_root.scene_dir(scene_id).join(entry::SETTINGS)),
+            Tier::Project => {
+                project_root.map(|p| paths.layout().project_dir(p).join(entry::SETTINGS))
+            }
             Tier::Effective => None,
         };
 

@@ -709,10 +709,10 @@ worktree 的 `.git` 链接与 `commondir` 去找——沙箱里早先起的命�
 `refusal_rule_roots`:工作目录是 worktree 时为项目根。路径规则的 deny 与 ask 对 `cwd` 和这些根各
 判一次,哪一处命中都算;allow 只按 `cwd` 判,不因此变宽(`permissions::policy::subject`)。搜索
 工具走目录时跳过的 deny 路径(`tools::security::walk_exclusion`)同样两处都算。反过来,worktree
-里的文件是主检出里同一路径的一份拷贝:路径落在某个 `<目录>/.agix/worktrees/<名>/` 下时,把这三段
-去掉得到的 `<目录>/<其余>` 也算它的别名,deny 与 ask 在别名上命中照样算,allow 不算
-(`permissions::path_rule::main_checkout_copies`,`RuleSet::evaluate_path` 里与符号链接的别名同一处
-处理)。于是锚在项目上的规则——项目下的绝对路径,或根会话里的相对路径——对 worktree 里那一份同样
+里的文件是主检出里同一路径的一份拷贝:路径落在某个 `<目录>/<项目层目录>/worktrees/<名>/` 下时(本实例的
+项目层目录,以及不是它时的 `.agix`,§8.1),把这三段去掉得到的 `<目录>/<其余>` 也算它的别名,deny 与 ask
+在别名上命中照样算,allow 不算(`base::paths::Layout::main_checkout_copies`,`RuleSet::evaluate_path` 里与
+符号链接的别名同一处处理)。于是锚在项目上的规则——项目下的绝对路径,或根会话里的相对路径——对 worktree 里那一份同样
 成立,不论是 worktree 子 Agent 自己读,还是根会话去读一个留下的 worktree;worktree 是从仓库根建的,
 项目在仓库的子目录里时,`<仓库>/.agix/worktrees/wt/sub/x` 的别名是 `<仓库>/sub/x`,正好落在项目下。
 这只是按路径的字面:不读磁盘,也不问那里是不是真有一个 worktree。这一层不认识 worktree 的来历,只认
@@ -1249,15 +1249,16 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 模式下都生效,它的 allow 只算一条 allow 规则,它的询问是一条 ask 规则。`Builder` 没给权限时用引擎自己的
 `Policy::from_settings`,模式取自设置,缺省 `default`;同时没有问人的渠道时按 S17 拒绝。
 
-**两份敏感路径名单。** 它们都登记在 `base::paths::sensitive`:凭据在 `CREDENTIALS` 表
-(`Scope` × `Secret`),引擎配置在 `ENGINE_CONFIG_*` 一组常量;`SensitivePaths` 按会话的状态目录
+**两份敏感路径名单。** 它们都登记在 `base::paths`:凭据在 `sensitive` 的 `CREDENTIALS` 表
+(`Scope` × `Secret`),引擎配置在 `layout` 的 `ENGINE_CONFIG_*` 一组常量,配置根由会话的 `Layout` 给出(§8.1);`SensitivePaths` 按会话的状态目录
 与项目解析一次,会话内共享。权限判定与文件工具(`tools::security::read_allowed`、`Grep` / `Glob`
 的遍历、只读 `Bash` 的路径判断)问它(`is_credential`、`is_engine_settings_file` 等),`PromptFiles`
 内部也走它,两个 OS 沙箱后端从它的 `credential_locations` 生成各自的规则,不各抄一份:
 
 - **凭据**(`CREDENTIALS` 表):状态目录与各场景目录下的设置文件(`settings*.json`、
   `mcp.local*.json`,明文的 `api_key` 与 MCP headers 在里面)和 `mcp/oauth/`,状态目录下
-  daemon 的 `daemon/auth/`,项目 `.agix` 下的 `settings.local.json` / `mcp.local.json`,以及
+  daemon 的 `daemon/auth/`,项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)下的
+  `settings.local.json` / `mcp.local.json`,以及
   任何位置的 `.ssh` / `.aws` / `.gnupg`。调用里有一个字符串(路径工具的路径及其解析后的各种
   写法,shell 命令的每个词与赋值,`--flag=value` 的值)落在这里,`Policy` 就拒绝(S2),不问,
   `bypassPermissions` 下也一样;`Grep` / `Glob` 搜它上层的目录时跳过它;沙箱里的命令读不到其中
@@ -1277,9 +1278,9 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
   monorepo 子目录里起的会话,上层目录的 `AGENTS.md` 由向上查找按它自己的路径读到,不需要
   链接;子包里链向仓库别处的 skill / agent 不跟随——在仓库根起会话,或者装成用户层的 skill。
   memory 的条目只认解析后仍在各自 memory 目录里的文件,插件包里的文件只认解析后仍在包里的。
-- **引擎配置**(`base::paths::sensitive` 的 `ENGINE_CONFIG_{ROOTS,FILES,DIRS}` 与
+- **引擎配置**(`Layout::config_roots` 给出的配置根,`base::paths` 的 `ENGINE_CONFIG_{FILES,DIRS}` 与
   `PROJECT_ENGINE_CONFIG_DIRS`):
-  `.agix` / `.claude` 下除工作区之外的部分,和项目的 `.agents/skills/`(skill 的
+  项目层目录、`.agix`、`.claude` 下除本实例工作区之外的部分,和项目的 `.agents/skills/`(skill 的
   `allowed-tools` 会给自己授权)。写工具写这里要确认(工具自判的放行不算数),沙箱里只读
   (§6.2、§6.3)。读不受限。
 
@@ -2158,9 +2159,9 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 
 项目的 `.agix/` 在用户的仓库里。引擎第一次往一个设置目录写 `settings.local.json` /
 `mcp.local.json`(里面是 key 与 MCP headers),或第一次往项目 `.agix/telemetry/` 录遥测时,
-那个目录还没有 `.gitignore` 就生成一份(`base::paths::LOCAL_DATA_GITIGNORE`:
-`settings.local.json`、`mcp.local.json`、`telemetry/`)。已有的 `.gitignore` 是用户的,不覆盖,
-缺的行也不补。状态目录与场景目录写 `settings.local.json` 时同样会生成,无害。`scratchpad/`
+往那个目录的 `.gitignore` 里补上缺的引擎条目(`base::paths::local_data_gitignore`:
+`settings.local.json`、`mcp.local.json`、`telemetry/`、`tool-results/`),没有就新建。已有的
+`.gitignore` 是用户的,只追加缺的行,别的不动。状态目录与场景目录写 `settings.local.json` 时同样会生成,无害。`scratchpad/`
 自己另有一份 `*`。
 
 **会话进哪个项目目录由它自己的 `Meta.project_root` 决定**,不是由 daemon 的 cwd
@@ -2181,6 +2182,36 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 区分两类目录靠**目录名能否解析成 `SessionId`**:sanitize 后的 cwd 必然以 `-` 开头
 (绝对路径首字符是分隔符),`_no-project` 以 `_` 开头,都解析不成 base58 id。
+
+### 8.1 引擎目录与布局
+
+上表里的 `~/.agix` 是状态根,项目里的 `.agix` 是**项目层目录**;嵌入方可以给后者另起名字
+(`EmbedConfig.project_dir`,如 `.codix`,`docs/agix-sdk.md` §10)。名字只有一个来源,派生路径与
+安全判定各只有一个出口,代码里不写目录名:
+
+| 类型(`base::paths`) | 管什么 | 谁持有 |
+|---|---|---|
+| `Layout` | 项目层目录名(缺省 `.agix`,`Layout::new` 校验);由名字算出、不碰磁盘的东西:`project_dir(root)`、`worktrees_dir`、`teams_dir`、`.gitignore` 条目、配置根(`config_roots`)、worktree 别名(`main_checkout_copies`、`worktree_of`) | 按值传:`EmbedConfig` → `StaticDaemonPaths::with_layout` → `DaemonPaths::layout()` → `settings_source::read_pair` → `PathSettings.layout`,再到 `EngineConfig`、`PermissionSettings`、`SandboxPolicy`、`SensitivePaths`。没有进程级的值:一个进程里两个池可以用两个名字 |
+| `ConfigPaths` | 一个会话的三层根(状态根、场景目录、项目)与其下全部派生路径:各层的 `settings*.json`、skills / agents / hooks / rules / output-styles、memory、telemetry、`tool-results`、scratchpad、导入标记、`scheduled_tasks.json`、`mcp/oauth` | 会话的 `PathSettings::config_paths()`;池里没有会话时 `DaemonPaths::paths_for` |
+| `StateRoot` | 状态根下不随项目层名字变的目录:`scenes/`、`plugins/`、`projects/`、`sessions/`、`daemon/`(`instances.d`、`auth`、`groups`、`crashes`) | 池与 agixd 的启动代码 |
+| `SensitivePaths` | **唯一的安全判定点**:凭据(`is_credential`)、拒写的引擎设置文件(`is_engine_settings_file`)、不走静默放行的配置(`names_configuration`)、沙箱要保护的目录(`config_roots_in`、`engine_dirs_in`、`worktree_dirs_in`)、提示词读文件(`PromptFiles`) | 会话的 `SandboxSettings.paths`;门禁、写路径检查、规则别名、两个沙箱后端、hook 执行器、rewind、记忆、插件包的路径解析都问它,不各认目录名 |
+
+文件名与子目录名(`settings.json`、`hooks`、`worktrees`…)是 `base::paths::entry` 的常量,只在
+`layout.rs` 里写一次;守卫 `tests/guards/tests/engine_dirs.rs` 不许生产代码与提示词模板里再出现
+`.agix` / `.claude` 路径分量、引擎文件名或 `.join("<子目录>")` 字面量。提示词与文案里的目录按实例的
+`Layout` 渲染。
+
+**外来配置根。** 配置根是本实例的项目层目录,加上 `FOREIGN_CONFIG_ROOTS`(`.agix`、`.claude`)里不是它的
+那些。名字改成 `.codix` 后,`.agix` 不再被读,但与 `.claude` 一样受保护:写工具拒写其中的设置文件,写其中别的
+东西要问(门禁不走静默放行);沙箱里的命令写不了其中的设置文件与配置子目录(`ENGINE_CONFIG_{FILES,DIRS}`,
+Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
+"功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
+门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
+缺省名字下自己与外来去重,行为与改名之前相同。
+
+**已知边界。** 两个都不用缺省名的宿主(`.codix` 与 `.foo`)开同一个项目时,彼此不保护对方的目录;需要时
+再加一份要保护的名字表。`.agents/skills`、worktree 分支前缀 `agix/worktree-`、隔离目录前缀
+`.git.agix-quarantine-`、OAuth 的 `client_name` 等是跨工具约定或产品名,不随项目层目录名变。
 
 ---
 

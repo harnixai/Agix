@@ -11,6 +11,7 @@ use crate::dangerous::{detect_dangerous_rules, log_dangerous_warnings};
 use crate::path_rule::{self, ResolvedPath};
 use crate::shadow::{detect_shadowed_rules, log_shadow_warnings};
 use base::interface::permission::Subject;
+use base::paths::Layout;
 use base::permission::{PermissionRule, RuleBehavior};
 use std::path::{Path, PathBuf};
 
@@ -182,13 +183,14 @@ impl RuleSet {
     /// 路径类工具调用的裁决：规则内容按路径解读（见 `path_rule`），工具自己名下的
     /// 规则和 `group`（`Read` / `Edit`）名下的规则都适用。别名路径上命中的 deny /
     /// ask 同样生效，worktree 里的路径在主检出里的那一份
-    /// （`path_rule::main_checkout_copies`）也算别名；allow 只认工具真正打开的那个路径。
+    /// （`Layout::main_checkout_copies`）也算别名；allow 只认工具真正打开的那个路径。
     pub fn evaluate_path(
         &self,
         tool_name: &str,
         group: &str,
         path: &ResolvedPath,
         cwd: &Path,
+        layout: &Layout,
     ) -> RuleHit {
         let decide_for = |p: &Path| {
             self.decide(|r| {
@@ -204,7 +206,7 @@ impl RuleSet {
         };
         let copies: Vec<PathBuf> = path
             .all()
-            .flat_map(path_rule::main_checkout_copies)
+            .flat_map(|p| layout.main_checkout_copies(p))
             .collect();
         path.aliases
             .iter()
@@ -429,6 +431,7 @@ pub fn path_denial(
     rules: impl IntoIterator<Item = PermissionRule>,
     tool: &str,
     cwd: &Path,
+    layout: &Layout,
 ) -> Option<base::interface::permission::PathDenial> {
     let denying: Vec<PermissionRule> = rules
         .into_iter()
@@ -442,11 +445,11 @@ pub fn path_denial(
         return None;
     }
     let set = RuleSet { rules: denying };
-    let (tool, cwd) = (tool.to_string(), cwd.to_path_buf());
+    let (tool, cwd, layout) = (tool.to_string(), cwd.to_path_buf(), layout.clone());
     Some(std::sync::Arc::new(move |path: &Path| {
         let resolved = ResolvedPath::new(&path.to_string_lossy(), &cwd);
         matches!(
-            set.evaluate_path(&tool, "Read", &resolved, &cwd),
+            set.evaluate_path(&tool, "Read", &resolved, &cwd, &layout),
             RuleHit::Deny(_)
         )
     }))
@@ -456,8 +459,8 @@ pub fn path_denial(
 /// ([`path_rule::named_path`]). In a worktree the engine made, a path in the
 /// main checkout also comes in the worktree's spelling: [`RuleSet::evaluate_path`]
 /// judges a worktree file by its main checkout copy.
-pub fn denied_read_paths(rules: &[PermissionRule], cwd: &Path) -> Vec<PathBuf> {
-    let checkouts = path_rule::main_checkout_copies(cwd);
+pub fn denied_read_paths(rules: &[PermissionRule], cwd: &Path, layout: &Layout) -> Vec<PathBuf> {
+    let checkouts = layout.main_checkout_copies(cwd);
     let mut paths = Vec::new();
     let named = rules
         .iter()
@@ -953,14 +956,36 @@ mod tests {
             ),
         ];
         assert_eq!(
-            denied_read_paths(&rules, Path::new("/proj")),
+            denied_read_paths(&rules, Path::new("/proj"), &Layout::default()),
             [PathBuf::from("/proj/.env"), PathBuf::from("/srv/secret")]
         );
     }
 
     #[test]
     fn in_a_worktree_a_path_of_the_main_checkout_comes_in_both_spellings() {
-        let wt = Path::new("/r/.agix/worktrees/wt");
+        for name in [".agix", ".codix"] {
+            let layout = Layout::new(name).unwrap();
+            a_worktree_has_both_spellings(&layout, &format!("/r/{name}/worktrees/wt"));
+            a_worktree_has_both_spellings(&layout, "/r/.agix/worktrees/wt");
+        }
+        assert_eq!(
+            denied_read_paths(
+                &[rule(
+                    "Read",
+                    Some("/r/keys"),
+                    RuleBehavior::Deny,
+                    RuleSource::UserSettings,
+                )],
+                Path::new("/r/.codix/worktrees/wt"),
+                &Layout::default(),
+            ),
+            [PathBuf::from("/r/keys")],
+            "another instance's directory is not this one's worktrees"
+        );
+    }
+
+    fn a_worktree_has_both_spellings(layout: &Layout, wt: &str) {
+        let wt = Path::new(wt);
         let rules = [
             rule(
                 "Read",
@@ -982,7 +1007,7 @@ mod tests {
             ),
         ];
         assert_eq!(
-            denied_read_paths(&rules, wt),
+            denied_read_paths(&rules, wt, layout),
             [
                 wt.join(".env"),
                 PathBuf::from("/r/keys"),
@@ -991,7 +1016,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            denied_read_paths(&rules, Path::new("/r")),
+            denied_read_paths(&rules, Path::new("/r"), layout),
             [
                 PathBuf::from("/r/.env"),
                 PathBuf::from("/r/keys"),

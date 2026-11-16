@@ -559,3 +559,63 @@ async fn aggregation_stops_with_the_leads_call() {
     .await;
     assert_eq!(kept, sections);
 }
+
+fn layouts() -> [base::paths::Layout; 2] {
+    [
+        base::paths::Layout::default(),
+        base::paths::Layout::new(".codix").unwrap(),
+    ]
+}
+
+/// A session working in one of the project's worktrees keeps what a team
+/// writes where the rest of the session's state is — the project's
+/// directory — so the worktree holds nothing the engine put there and is
+/// not kept for it.
+#[tokio::test]
+async fn a_team_led_from_a_worktree_keeps_its_state_in_the_project() {
+    for layout in layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().to_path_buf();
+        let worktree = layout.worktrees_dir(&project).join("w");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let stages = vec![TeamStage {
+            name: "only".into(),
+            agents: vec![TeamAgentSpec {
+                label: "a".into(),
+                prompt: "0".into(),
+                agent_type: None,
+            }],
+            aggregate: None,
+        }];
+
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            worktree.clone(),
+        );
+        let mut env = base::context::SessionEnv::new(worktree.clone());
+        env.refusal_rule_roots = vec![project.clone()];
+        ctx.session = Arc::new(session_state::SessionState::for_tests_in(env));
+        let mut config = EngineConfig::defaults_for("test");
+        config.layout = layout.clone();
+        ctx.config = Arc::new(config.clone());
+
+        let registry = Arc::new(crate::registry::TeamRegistry::new());
+        let mut request = make_request(ctx, stages);
+        request.config = Arc::new(config);
+        let coordinator = DefaultCoordinator::with_delegator(Arc::new(FakeDelegator::new()))
+            .with_registry(registry.clone());
+        coordinator
+            .orchestrate(request)
+            .await
+            .expect("orchestrate ok");
+
+        let team_dir = registry.list()[0].team_dir.clone();
+        assert!(
+            team_dir.starts_with(layout.teams_dir(&project)),
+            "{}: {}",
+            layout.project_dir_name(),
+            team_dir.display()
+        );
+        assert!(!layout.project_dir(&worktree).exists());
+    }
+}

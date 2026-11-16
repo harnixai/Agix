@@ -75,7 +75,7 @@ mod tests {
 
     fn load(root: &Path, body: &str) -> Plugin {
         std::fs::write(root.join("plugin.toml"), format!("{HEAD}{body}")).unwrap();
-        Plugin::load(root, &root.join("plugin.toml")).unwrap()
+        Plugin::load(root, &root.join("plugin.toml"), &Default::default()).unwrap()
     }
 
     fn agent_body(prompt_rel: &str) -> String {

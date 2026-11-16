@@ -465,8 +465,10 @@ fn session_telemetry(
         Some(t) => Some(std::path::PathBuf::from(&t.output)),
         None => {
             let dir = &settings_snapshot.paths.local_data_dir;
-            dir.is_absolute()
-                .then(|| dir.join("telemetry").join(format!("{session_id}.jsonl")))
+            dir.is_absolute().then(|| {
+                dir.join(base::paths::entry::TELEMETRY)
+                    .join(format!("{session_id}.jsonl"))
+            })
         }
     };
     if let (true, Some(telemetry_path)) =

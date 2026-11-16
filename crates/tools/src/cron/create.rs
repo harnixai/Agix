@@ -131,10 +131,13 @@ impl Tool for CronCreateTool {
                 expires_ms,
             })
             .id;
-        let where_str = if input.durable {
-            "Persisted to ~/.agix/scenes/<scope>/scheduled_tasks.json"
-        } else {
-            "Session-only (dies when this session exits)"
+        let where_str = match (input.durable, self.store.file_path()) {
+            (true, Some(file)) => format!("Persisted to {}", file.display()),
+            (true, None) => {
+                "Not saved to disk (no scheduled-tasks file); dies when the engine exits"
+                    .to_string()
+            }
+            (false, _) => "Session-only (dies when this session exits)".to_string(),
         };
         let kind = if input.recurring {
             "recurring job"

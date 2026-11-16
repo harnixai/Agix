@@ -321,6 +321,10 @@ impl SessionPool {
         self.bindings.cwd()
     }
 
+    pub(crate) fn layout(&self) -> base::paths::Layout {
+        self.bindings.paths().layout()
+    }
+
     /// The `RunCode` budget this pool's sessions share: how many programs
     /// their conversations may run at once. Other pools have their own.
     pub fn run_slots(&self) -> Arc<tokio::sync::Semaphore> {

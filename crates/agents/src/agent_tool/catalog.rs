@@ -130,31 +130,23 @@ pub fn load_agent_types_from_dir(
 }
 
 /// The `agents/` directories a session with these settings reads, lowest
-/// first: global, scene, then the project's `.agix/agents` tagged with
+/// first: global, scene, then the project's agents directory tagged with
 /// whether the project is trusted. A session with no project tier of its own
 /// has no third.
 pub fn agent_type_dirs(settings: &LoadedSettings) -> Vec<(std::path::PathBuf, AgentTypeSource)> {
     use base::permission::ProjectTrust;
+    let paths = settings.paths.config_paths();
     let mut dirs = vec![
-        (
-            settings.paths.global_data_dir.join("agents"),
-            AgentTypeSource::User,
-        ),
-        (
-            settings.paths.user_data_dir.join("agents"),
-            AgentTypeSource::User,
-        ),
+        (paths.global_agents_dir(), AgentTypeSource::User),
+        (paths.user_agents_dir(), AgentTypeSource::User),
     ];
     let trusted = match settings.trust() {
         ProjectTrust::NoProject => None,
         ProjectTrust::Trusted => Some(true),
         ProjectTrust::Untrusted => Some(false),
     };
-    if let (Some(trusted), Some(project)) = (trusted, settings.paths.project_root()) {
-        dirs.push((
-            project.join(".agix").join("agents"),
-            AgentTypeSource::Project { trusted },
-        ));
+    if let (Some(trusted), Some(project)) = (trusted, paths.project_agents_dir()) {
+        dirs.push((project, AgentTypeSource::Project { trusted }));
     }
     dirs
 }
@@ -437,7 +429,7 @@ impl AgentCatalog {
 
 /// Render the one-line-per-type catalog injected into `AgentTool::description()`
 /// so the model can see what `subagent_type` values are actually available
-/// (built-in + any custom types loaded from `.agix/agents/`) without a
+/// (built-in + any custom types loaded from `<project dir>/agents/`) without a
 /// separate discovery call. Sorted by name for stable output.
 pub(super) fn describe_agent_types(
     agent_types: &std::collections::HashMap<String, AgentTypeDefinition>,

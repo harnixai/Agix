@@ -90,7 +90,7 @@ impl Tool for SkillTool {
         "Skill"
     }
     fn description(&self) -> &str {
-        "Execute a skill within the main conversation. Skills are loaded from ~/.agix/skills/ (global), ~/.agix/scenes/<scene>/skills/ (scene override), and <project>/.agents/skills/ (project-level). Only skills listed in the user-invocable section are available."
+        "Execute a skill within the main conversation. Skills are loaded from the global, scene and project skill directories. Only skills listed in the user-invocable section are available."
     }
     fn input_schema(&self, _: PathStyle) -> Value {
         serde_json::json!({
@@ -892,16 +892,21 @@ mod tests {
         // a short-lived test process.
         let path = dir.keep().join(format!("{name}.md"));
         std::fs::write(&path, body).unwrap();
-        mgr.register_bundled(SkillEntry {
-            name: name.into(),
-            description: format!("{name} skill"),
-            source: FrozenSkillSource::Project,
-            path,
-            disable_model_invocation,
-            context: context.map(String::from),
-            agent: agent.map(String::from),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: name.into(),
+                    description: format!("{name} skill"),
+                    source: FrozenSkillSource::Project,
+                    path,
+                    disable_model_invocation,
+                    context: context.map(String::from),
+                    agent: agent.map(String::from),
+                    ..Default::default()
+                }],
+            ),
+        ));
     }
 
     /// What a fork's request carried.
@@ -1010,14 +1015,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("uses-bash.md");
         std::fs::write(&path, "Run some commands.").unwrap();
-        mgr.register_bundled(SkillEntry {
-            name: "uses-bash".into(),
-            description: "uses-bash skill".into(),
-            source: FrozenSkillSource::Project,
-            path,
-            allowed_tools: Some(vec!["Bash(cargo test)".into()]),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "uses-bash".into(),
+                    description: "uses-bash skill".into(),
+                    source: FrozenSkillSource::Project,
+                    path,
+                    allowed_tools: Some(vec!["Bash(cargo test)".into()]),
+                    ..Default::default()
+                }],
+            ),
+        ));
 
         struct FakeBashTool;
         #[async_trait]
@@ -1113,13 +1123,18 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         let path = skill_dir.join("SKILL.md");
         std::fs::write(&path, "dir=${AGIX_SKILL_DIR} session=${AGIX_SESSION_ID}").unwrap();
-        mgr.register_bundled(SkillEntry {
-            name: "where-am-i".into(),
-            description: "where".into(),
-            source: FrozenSkillSource::User,
-            path,
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "where-am-i".into(),
+                    description: "where".into(),
+                    source: FrozenSkillSource::User,
+                    path,
+                    ..Default::default()
+                }],
+            ),
+        ));
         let info = mgr
             .list()
             .into_iter()
@@ -1153,14 +1168,19 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("py.md");
             std::fs::write(&path, "Use python.").unwrap();
-            mgr.register_bundled(SkillEntry {
-                name: "py".into(),
-                description: "py".into(),
-                source,
-                path,
-                allowed_tools: Some(vec!["Bash(python3:*)".into()]),
-                ..Default::default()
-            });
+            mgr.load_from(std::sync::Arc::new(
+                base::interface::skill_provider::StaticSkills::new(
+                    "test",
+                    vec![SkillEntry {
+                        name: "py".into(),
+                        description: "py".into(),
+                        source,
+                        path,
+                        allowed_tools: Some(vec!["Bash(python3:*)".into()]),
+                        ..Default::default()
+                    }],
+                ),
+            ));
             let info = mgr.list().into_iter().find(|s| s.name == "py").unwrap();
             let mut ctx = session_state::testing::tool_context_for_test(
                 platform::local_providers(),
@@ -1200,26 +1220,31 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("wild.md");
             std::fs::write(&path, "Anything goes.").unwrap();
-            mgr.register_bundled(SkillEntry {
-                name: "wild".into(),
-                description: "wild".into(),
-                source,
-                path,
-                allowed_tools: Some(vec![
-                    "Bash(*)".into(),
-                    "Write(**)".into(),
-                    "Edit(/**)".into(),
-                    "Write(x/../../../../../../../../**)".into(),
-                    "Edit(/U*/**)".into(),
-                    "Bash(b*)".into(),
-                    "Bash(bash:*)".into(),
-                    "WebFetch(https://*.co.uk/**)".into(),
-                    "Bash(cargo test:*)".into(),
-                    "Write(src/**)".into(),
-                    "WebFetch(https://*.example.com/**)".into(),
-                ]),
-                ..Default::default()
-            });
+            mgr.load_from(std::sync::Arc::new(
+                base::interface::skill_provider::StaticSkills::new(
+                    "test",
+                    vec![SkillEntry {
+                        name: "wild".into(),
+                        description: "wild".into(),
+                        source,
+                        path,
+                        allowed_tools: Some(vec![
+                            "Bash(*)".into(),
+                            "Write(**)".into(),
+                            "Edit(/**)".into(),
+                            "Write(x/../../../../../../../../**)".into(),
+                            "Edit(/U*/**)".into(),
+                            "Bash(b*)".into(),
+                            "Bash(bash:*)".into(),
+                            "WebFetch(https://*.co.uk/**)".into(),
+                            "Bash(cargo test:*)".into(),
+                            "Write(src/**)".into(),
+                            "WebFetch(https://*.example.com/**)".into(),
+                        ]),
+                        ..Default::default()
+                    }],
+                ),
+            ));
             let info = mgr.list().into_iter().find(|s| s.name == "wild").unwrap();
             let ctx = session_state::testing::tool_context_for_test(
                 platform::local_providers(),
@@ -1269,15 +1294,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("grabby.md");
         std::fs::write(&path, "Run whatever you like.").unwrap();
-        mgr.register_bundled(SkillEntry {
-            name: "grabby".into(),
-            description: "grabby skill".into(),
-            source,
-            path,
-            // Bare tool name = blanket grant.
-            allowed_tools: Some(vec!["Bash".into()]),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "grabby".into(),
+                    description: "grabby skill".into(),
+                    source,
+                    path,
+                    // Bare tool name = blanket grant.
+                    allowed_tools: Some(vec!["Bash".into()]),
+                    ..Default::default()
+                }],
+            ),
+        ));
 
         struct AskingBash;
         #[async_trait]
@@ -1547,15 +1577,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("bg-research.md");
         std::fs::write(&path, "Research the topic thoroughly.").unwrap();
-        mgr.register_bundled(SkillEntry {
-            name: "bg-research".into(),
-            description: "bg-research skill".into(),
-            source: FrozenSkillSource::Project,
-            path,
-            context: Some("fork".into()),
-            background: Some(true),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "bg-research".into(),
+                    description: "bg-research skill".into(),
+                    source: FrozenSkillSource::Project,
+                    path,
+                    context: Some("fork".into()),
+                    background: Some(true),
+                    ..Default::default()
+                }],
+            ),
+        ));
         let delegator = Arc::new(MockDelegator::default());
         let tool = SkillTool::new(mgr).with_delegator(delegator.clone());
 
@@ -1623,16 +1658,21 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("echo.md");
             std::fs::write(&path, "Say hi.").unwrap();
-            mgr.register_bundled(SkillEntry {
-                name: "echo".into(),
-                description: "echo".into(),
-                source: FrozenSkillSource::User,
-                path,
-                context: Some("fork".into()),
-                background: Some(background),
-                allowed_tools: Some(vec!["Bash(echo hi)".into()]),
-                ..Default::default()
-            });
+            mgr.load_from(std::sync::Arc::new(
+                base::interface::skill_provider::StaticSkills::new(
+                    "test",
+                    vec![SkillEntry {
+                        name: "echo".into(),
+                        description: "echo".into(),
+                        source: FrozenSkillSource::User,
+                        path,
+                        context: Some("fork".into()),
+                        background: Some(background),
+                        allowed_tools: Some(vec!["Bash(echo hi)".into()]),
+                        ..Default::default()
+                    }],
+                ),
+            ));
             let delegator = Arc::new(MockDelegator::default());
             let tool = SkillTool::new(mgr).with_delegator(delegator.clone());
             let mut ctx = session_state::testing::tool_context_for_test(
@@ -1728,14 +1768,19 @@ mod tests {
         std::fs::write(skill_dir.join("notes.md"), "KNOWN_MARKER_CONTENT_XYZ").unwrap();
 
         let mgr = Arc::new(crate::manager::SkillManager::new());
-        mgr.register_bundled(SkillEntry {
-            name: "bundled-notes".into(),
-            description: "has bundled notes".into(),
-            source: FrozenSkillSource::Project,
-            path: skill_dir.join("SKILL.md"),
-            files: Some(vec!["notes.md".into()]),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "bundled-notes".into(),
+                    description: "has bundled notes".into(),
+                    source: FrozenSkillSource::Project,
+                    path: skill_dir.join("SKILL.md"),
+                    files: Some(vec!["notes.md".into()]),
+                    ..Default::default()
+                }],
+            ),
+        ));
         let tool = SkillTool::new(mgr);
 
         let result = tool
@@ -1815,14 +1860,19 @@ mod tests {
         std::fs::write(skill_dir.join("notes.md"), &long_cjk).unwrap();
 
         let mgr = Arc::new(crate::manager::SkillManager::new());
-        mgr.register_bundled(SkillEntry {
-            name: "cjk-notes".into(),
-            description: "has cjk bundled notes".into(),
-            source: FrozenSkillSource::Project,
-            path: skill_dir.join("SKILL.md"),
-            files: Some(vec!["notes.md".into()]),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "cjk-notes".into(),
+                    description: "has cjk bundled notes".into(),
+                    source: FrozenSkillSource::Project,
+                    path: skill_dir.join("SKILL.md"),
+                    files: Some(vec!["notes.md".into()]),
+                    ..Default::default()
+                }],
+            ),
+        ));
         let tool = SkillTool::new(mgr);
 
         let result = tool
@@ -1866,14 +1916,19 @@ mod tests {
         .unwrap();
 
         let mgr = Arc::new(crate::manager::SkillManager::new());
-        mgr.register_bundled(SkillEntry {
-            name: "escaping-skill".into(),
-            description: "tries to escape".into(),
-            source: FrozenSkillSource::Project,
-            path: skill_dir.join("SKILL.md"),
-            files: Some(vec!["../outside.md".into()]),
-            ..Default::default()
-        });
+        mgr.load_from(std::sync::Arc::new(
+            base::interface::skill_provider::StaticSkills::new(
+                "test",
+                vec![SkillEntry {
+                    name: "escaping-skill".into(),
+                    description: "tries to escape".into(),
+                    source: FrozenSkillSource::Project,
+                    path: skill_dir.join("SKILL.md"),
+                    files: Some(vec!["../outside.md".into()]),
+                    ..Default::default()
+                }],
+            ),
+        ));
         let tool = SkillTool::new(mgr);
 
         let result = tool

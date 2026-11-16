@@ -4,15 +4,15 @@
 
 use super::fence::{fenced_secrets, fenced_sockets, is_socket};
 use super::roots::{
-    denied_for_write, git_configured, link_targets_outside, project_agix_dirs, subdirs,
-    submodules_of, write_denial_names, Roots,
+    denied_for_write, git_configured, link_targets_outside, subdirs, submodules_of,
+    write_denial_names, Roots,
 };
 use super::{
     egress, mask, multiplexer_paths, plain, read_scope, CommandEnv, Confined, Enforcement,
     NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
 };
 use base::paths::{
-    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
+    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
     PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR, STATE_ROOT_SCENE_FILES,
     STATE_ROOT_WORKING_DIRS,
 };
@@ -49,10 +49,11 @@ fn writable_by_us(dir: &Path) -> bool {
 /// The Linux shape of [`project_guard`].
 ///
 /// bwrap has no deny rule, only mounts, and a read-only bind of a file that
-/// does not exist yet is skipped rather than refused. So `.agix` — and
-/// `.claude` where it exists — is mounted read-only as a whole and its
-/// working entries are opened again one by one (a real `.agix` directory is
-/// held by [`mask_project_agix`] instead, to the same effect);
+/// does not exist yet is skipped rather than refused. So the project
+/// directory — and each foreign configuration root where it exists — is
+/// mounted read-only as a whole and its working entries are opened again one
+/// by one (an engine directory that is a real directory is held by
+/// [`mask_engine_dirs`] instead, to the same effect);
 /// a configuration file that is not there yet cannot be created because its
 /// directory is read-only. `.git` cannot be treated that way — git creates
 /// its lock files directly in it — so it is bound onto itself, which makes it
@@ -61,10 +62,10 @@ fn writable_by_us(dir: &Path) -> bool {
 /// every directory on the way down to it, is bound onto itself the same way,
 /// so that none of them can be moved aside for one with other contents.
 ///
-/// A `.git` or `.agix` no writable root reaches is read-only already, and is
-/// left alone: binding it writable would open it, and a mount point for an
-/// absent entry cannot be made on a read-only parent.
-fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
+/// A `.git` or configuration root no writable root reaches is read-only
+/// already, and is left alone: binding it writable would open it, and a mount
+/// point for an absent entry cannot be made on a read-only parent.
+fn guard_project(args: &mut Vec<String>, roots: &Roots, masked: &[PathBuf]) {
     let dot_git = roots.cwd.join(REPOSITORY_CONFIG_DIR);
     let git = match &roots.worktree_git {
         Some(linked) => {
@@ -107,17 +108,17 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
         bind(args, "--ro-bind", &git);
     }
 
-    for name in ENGINE_CONFIG_ROOTS {
-        let root = roots.cwd.join(name);
+    for root in roots.paths.config_roots_in(&roots.cwd) {
+        let root_dir = root.path;
         // Holding an absent root leaves an empty mount point behind in the
-        // project, which for `.agix` is the engine's own and for `.claude`
-        // would be litter in every project.
-        let held = *name == ".agix" || root.symlink_metadata().is_ok();
-        if !held || !roots.opens(&root) || (*name == ".agix" && agix_masked) {
+        // project, which for the instance's own directory is the engine's
+        // own and for a foreign one would be litter in every project.
+        let held = root.own || root_dir.symlink_metadata().is_ok();
+        if !held || !roots.opens(&root_dir) || masked.contains(&root_dir) {
             continue;
         }
-        read_only(args, &root);
-        for entry in working_entries(&root) {
+        read_only(args, &root_dir);
+        for entry in working_entries(&root_dir) {
             bind(args, "--bind", &entry);
         }
     }
@@ -176,25 +177,41 @@ fn working_entries(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The project's `.agix`, where it is a real directory in the sandbox,
-/// masked around the project's key files as the state root is — a key file
-/// the engine writes or rename-writes there later lands under a read-only
-/// tmpfs — with the rest bound back: its working entries and the writable
-/// roots in it writable where they are writable at all, everything else
-/// read-only, and nothing new creatable directly in it, as
-/// [`guard_project`] holds it otherwise. Whether it was masked.
-fn mask_project_agix(
+/// Each engine directory of the project ([`base::paths::SensitivePaths::engine_dirs_in`]),
+/// where it is a real directory in the sandbox, masked around the project's
+/// key files as the state root is — a key file the engine writes or
+/// rename-writes there later lands under a read-only tmpfs — with the rest
+/// bound back: its working entries and the writable roots in it writable
+/// where they are writable at all, everything else read-only, and nothing
+/// new creatable directly in it, as [`guard_project`] holds it otherwise.
+/// The ones it masked.
+fn mask_engine_dirs(
     args: &mut Vec<String>,
     roots: &Roots,
     secrets: &[base::paths::Located],
     read: &read_scope::LinuxReadScope<'_>,
+) -> Vec<PathBuf> {
+    roots
+        .paths
+        .engine_dirs_in(&roots.cwd)
+        .into_iter()
+        .filter(|dir| dir.parent() == Some(roots.cwd.as_path()))
+        .filter(|dir| mask_engine_dir(args, roots, dir, secrets, read))
+        .collect()
+}
+
+fn mask_engine_dir(
+    args: &mut Vec<String>,
+    roots: &Roots,
+    dir: &Path,
+    secrets: &[base::paths::Located],
+    read: &read_scope::LinuxReadScope<'_>,
 ) -> bool {
-    let agix = roots.cwd.join(".agix");
-    if !read.shows(&agix) || !agix.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+    if !read.shows(dir) || !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
         return false;
     }
-    let working = if roots.opens(&agix) {
-        working_entries(&agix)
+    let working = if roots.opens(dir) {
+        working_entries(dir)
     } else {
         Vec::new()
     };
@@ -204,11 +221,11 @@ fn mask_project_agix(
             roots
                 .writable
                 .iter()
-                .filter(|p| p.starts_with(&agix) && **p != agix)
+                .filter(|p| p.starts_with(dir) && *p != dir)
                 .cloned(),
         )
         .collect();
-    let plan = mask::mask_plan(&agix, secrets, &holes);
+    let plan = mask::mask_plan(dir, secrets, &holes);
     apply_mask(args, &plan, true);
     !plan.is_empty()
 }
@@ -441,7 +458,8 @@ pub(super) fn bus_paths(runtime_dir: Option<PathBuf>, bus_address: Option<&str>)
 pub(super) fn daemon_sockets(state_root: Option<&Path>) -> Vec<PathBuf> {
     let mut sockets = fenced_sockets();
     if let Some(root) = state_root {
-        let dirs = std::iter::once(root.to_path_buf()).chain(subdirs(&root.join("scenes")));
+        let dirs = std::iter::once(root.to_path_buf())
+            .chain(subdirs(&base::paths::StateRoot::new(root).scenes_dir()));
         for dir in dirs {
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 continue;
@@ -671,16 +689,18 @@ fn hide_project_and_state(
 ) {
     let (state_root_secrets, project_secrets): (Vec<_>, Vec<_>) = roots
         .paths
-        .credential_locations(&project_agix_dirs(&roots.cwd))
+        .credential_locations(&roots.paths.engine_dirs_in(&roots.cwd))
         .into_iter()
         .partition(|located| roots.state_root.as_ref() == Some(&located.base));
     expose_state_root(args, roots, &state_root_secrets, read);
-    let agix_masked = mask_project_agix(args, roots, &project_secrets, read);
-    guard_project(args, roots, agix_masked);
-    if !agix_masked {
-        for p in project_secrets.iter().flat_map(|l| l.existing()) {
-            hide(args, &p);
-        }
+    let masked = mask_engine_dirs(args, roots, &project_secrets, read);
+    guard_project(args, roots, &masked);
+    for p in project_secrets
+        .iter()
+        .filter(|l| !masked.contains(&l.base))
+        .flat_map(|l| l.existing())
+    {
+        hide(args, &p);
     }
 }
 

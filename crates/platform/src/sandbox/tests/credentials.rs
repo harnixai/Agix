@@ -147,9 +147,23 @@ fn a_sandboxed_command_reads_none_of_the_projects_keys() {
     if !a_backend_runs() {
         return;
     }
+    for (own, keys_in) in [
+        (".agix", ".agix"),
+        (".codix", ".codix"),
+        (".codix", ".agix"),
+    ] {
+        reads_none_of_the_keys_in(&base::paths::Layout::new(own).unwrap(), keys_in);
+    }
+}
+
+/// Under `layout`, the keys in the project's `keys_in`: its own directory,
+/// or a foreign `.agix`.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[allow(clippy::unwrap_used)]
+fn reads_none_of_the_keys_in(layout: &base::paths::Layout, keys_in: &str) {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");
-    let agix = project.join(".agix");
+    let agix = project.join(keys_in);
     let secret = "agix-test-secret";
     let secrets = [
         agix.join("settings.local.json"),
@@ -164,6 +178,7 @@ fn a_sandboxed_command_reads_none_of_the_projects_keys() {
         deny_read: vec![dir.path().join("nowhere")],
         allow_read: vec![project.clone()],
         state_root: Some(dir.path().join("state")),
+        layout: layout.clone(),
         ..Default::default()
     };
     let cat = |path: &Path| {
@@ -177,7 +192,8 @@ fn a_sandboxed_command_reads_none_of_the_projects_keys() {
         let (ok, shown) = cat(path);
         assert!(
             !ok && !shown.contains(secret),
-            "{} was read: {shown:?}",
+            "{}: {} was read: {shown:?}",
+            layout.project_dir_name(),
             path.display()
         );
     }
@@ -311,40 +327,47 @@ fn a_credential_written_later_stays_unreadable_where_the_project_holds_credentia
         "a scene opened as a project keeps its scene files read-only, the rest writable"
     );
 
-    let project = base.join("project");
-    write_file(&project.join(".agix/settings.json"), "fine");
-    write_file(&project.join(".agix/settings.local.json"), "{}");
-    std::fs::create_dir_all(project.join(".agix/scratchpad")).unwrap();
-    let policy = SandboxPolicy {
-        state_root: Some(base.join("elsewhere")),
-        ..Default::default()
-    };
-    let later = [
-        project.join(".agix/settings.local.json"),
-        project.join(".agix/mcp.local.json"),
-    ];
-    let saw = read_after_the_fact(&project, &policy, &later);
-    assert!(
-        !saw.contains("after-the-fact"),
-        "the project's .agix: {saw:?}"
-    );
-    assert!(
-        run_confined(
-            &project,
-            &policy,
-            &[],
-            "cat .agix/settings.json && echo x > .agix/scratchpad/n"
-        )
-        .status
-        .success(),
-        "the project's .agix keeps its other entries, the working ones writable"
-    );
-    if cfg!(target_os = "linux") {
+    for own in [".agix", ".codix"] {
+        let project = base.join("project").join(own);
+        let layout = base::paths::Layout::new(own).unwrap();
+        let in_own = |p: &str| layout.project_dir(&project).join(p);
+        write_file(&in_own("settings.json"), "fine");
+        write_file(&in_own("settings.local.json"), "{}");
+        std::fs::create_dir_all(in_own("scratchpad")).unwrap();
+        write_file(&project.join(".agix/settings.local.json"), "{}");
+        let policy = SandboxPolicy {
+            state_root: Some(base.join("elsewhere")),
+            layout: layout.clone(),
+            ..Default::default()
+        };
+        let later = [
+            in_own("settings.local.json"),
+            in_own("mcp.local.json"),
+            project.join(".agix/settings.local.json"),
+        ];
+        let saw = read_after_the_fact(&project, &policy, &later);
         assert!(
-            !run_confined(&project, &policy, &[], "echo x > .agix/new")
-                .status
-                .success(),
-            "a new entry directly in .agix was created"
+            !saw.contains("after-the-fact"),
+            "the project's {own}: {saw:?}"
         );
+        assert!(
+            run_confined(
+                &project,
+                &policy,
+                &[],
+                &format!("cat {own}/settings.json && echo x > {own}/scratchpad/n")
+            )
+            .status
+            .success(),
+            "the project's {own} keeps its other entries, the working ones writable"
+        );
+        if cfg!(target_os = "linux") {
+            assert!(
+                !run_confined(&project, &policy, &[], &format!("echo x > {own}/new"))
+                    .status
+                    .success(),
+                "a new entry directly in {own} was created"
+            );
+        }
     }
 }

@@ -216,6 +216,7 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
         paths.global_root(),
         paths.config_root(),
         Some(&paths.project_root()),
+        &paths.layout(),
         &config.settings.paths.scope,
         &config.settings.values.model.model_name,
         config.max_tokens_fallback,

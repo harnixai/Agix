@@ -88,6 +88,23 @@ pub async fn unix(
     })
 }
 
+/// Over one stream the caller already holds — its end of a pipe to a server
+/// in this process.
+pub fn stream<S>(
+    stream: S,
+    name: &'static str,
+) -> LineTransport<tokio::io::ReadHalf<S>, tokio::io::WriteHalf<S>>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite,
+{
+    let (reader, writer) = tokio::io::split(stream);
+    LineTransport {
+        reader: BufReader::new(reader),
+        writer,
+        name,
+    }
+}
+
 pub async fn tcp(
     addr: std::net::SocketAddr,
 ) -> anyhow::Result<LineTransport<tokio::net::tcp::OwnedReadHalf, tokio::net::tcp::OwnedWriteHalf>>

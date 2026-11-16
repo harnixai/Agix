@@ -24,8 +24,9 @@ impl SessionPool {
             &self.bindings.scene_root(scene_id, &startup_scene),
         ) {
             return Err(PoolError::InvalidRequest(format!(
-                "{} has no settings tier of its own (its `.agix` is the global or scene directory), so {what}; {instead}",
-                project_root.unwrap_or(self.cwd()).display()
+                "{} has no settings tier of its own (its `{}` is the global or scene directory), so {what}; {instead}",
+                project_root.unwrap_or(self.cwd()).display(),
+                self.bindings.paths().layout().project_dir_name()
             )));
         }
         let target = project_root.unwrap_or(self.cwd());

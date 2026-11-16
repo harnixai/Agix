@@ -146,6 +146,7 @@ fn left_out_by_loader(example: &Example) -> Vec<String> {
         "code",
         "model",
         &settings_sections::all(),
+        Default::default(),
     );
     let mut left_out: Vec<String> = settings
         .ignored
@@ -287,6 +288,7 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
             "code",
             "m",
             &settings_sections::all(),
+            Default::default(),
         )
     };
     let untrusted = serde_json::json!({"project_trust": {"default": "untrusted"}});

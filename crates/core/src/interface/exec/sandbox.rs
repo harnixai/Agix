@@ -70,12 +70,16 @@ pub struct SandboxPolicy {
     /// backends never follow the worktree's own links to find it, since a
     /// command may have rewritten them.
     pub worktree_git: Option<crate::paths::WorktreeGit>,
-    /// This instance's global state root. `None` falls back to `$HOME/.agix`,
-    /// which is where an instance usually lives but not where it must: a
-    /// redirected instance whose sandbox protected `$HOME/.agix` would be
-    /// guarding a file it does not use while leaving its real settings.json
-    /// writable.
+    /// This instance's global state root, whose configuration a command may
+    /// not rewrite. `None` protects no state root: the backends do not guess
+    /// `$HOME/.agix`, since a redirected instance whose sandbox protected it
+    /// would be guarding a file it does not use while leaving its real
+    /// settings.json writable. Every session's policy names one
+    /// ([`SandboxSettings::policy`]).
     pub state_root: Option<PathBuf>,
+    /// What the instance names a project's directory: the configuration
+    /// root guarded in `cwd`.
+    pub layout: crate::paths::Layout,
     /// Also refuse the ways a command can have another process act for it
     /// outside the sandbox: on macOS sending Apple events, opening apps and
     /// URLs through LaunchServices, and writing preferences through
@@ -143,6 +147,7 @@ impl SandboxPolicy {
             only_additional_writable: true,
             worktree_git: self.worktree_git.clone(),
             state_root: self.state_root.clone(),
+            layout: self.layout.clone(),
             deny_ipc_escapes: true,
             env: EnvScope::Minimal,
         }
@@ -249,6 +254,7 @@ impl SandboxSettings {
             allowed_domains: self.allowed_domains.clone(),
             egress_proxy: self.egress_proxy.clone(),
             state_root: self.paths.state_root().map(Path::to_path_buf),
+            layout: self.paths.layout().clone(),
             additional_writable: Vec::new(),
             only_additional_writable: false,
             worktree_git: self.worktree_git.clone(),

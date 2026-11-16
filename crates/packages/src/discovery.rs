@@ -9,6 +9,7 @@
 use crate::cache::PluginCache;
 use crate::disclosure::Disclosure;
 use crate::manifest::{Plugin, PluginError};
+use base::paths::Layout;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -34,21 +35,29 @@ pub struct Discovered {
 ///
 /// Missing/empty tier directories are not an error — they simply contribute
 /// nothing (matches `PluginCache`'s own tolerant-of-absence behavior).
-pub fn discover_plugins(global_plugins_dir: &Path, scene_plugins_dir: &Path) -> Vec<Plugin> {
-    scan_plugins(global_plugins_dir, scene_plugins_dir).plugins
+pub fn discover_plugins(
+    global_plugins_dir: &Path,
+    scene_plugins_dir: &Path,
+    layout: &Layout,
+) -> Vec<Plugin> {
+    scan_plugins(global_plugins_dir, scene_plugins_dir, layout).plugins
 }
 
 /// [`discover_plugins`] that also says what it set aside. The cache is read
 /// under its shared lock, so a package an install is still placing, or one
 /// that install is about to take back out, is not seen half-done.
-pub fn scan_plugins(global_plugins_dir: &Path, scene_plugins_dir: &Path) -> Discovered {
+pub fn scan_plugins(
+    global_plugins_dir: &Path,
+    scene_plugins_dir: &Path,
+    layout: &Layout,
+) -> Discovered {
     let mut by_name: HashMap<String, Plugin> = HashMap::new();
     let mut refused = Vec::new();
 
     for tier_dir in [global_plugins_dir, scene_plugins_dir] {
-        let cache = PluginCache::new(tier_dir.join("cache"));
+        let cache = PluginCache::new(tier_dir.join(base::paths::entry::CACHE));
         let _lock = cache.lock_shared();
-        let (plugins, set_aside) = load_installed_tier(&cache);
+        let (plugins, set_aside) = load_installed_tier(&cache, layout);
         refused.extend(set_aside);
         for plugin in plugins {
             by_name.insert(plugin.manifest.plugin.name.clone(), plugin);
@@ -71,7 +80,7 @@ pub fn scan_plugins(global_plugins_dir: &Path, scene_plugins_dir: &Path) -> Disc
 /// its limits, is skipped with a warning rather than failing discovery for
 /// everyone else. The limits are checked here as well as at install because
 /// a package can reach the cache without going through `plugin.install`.
-fn load_installed_tier(cache: &PluginCache) -> (Vec<Plugin>, Vec<Refused>) {
+fn load_installed_tier(cache: &PluginCache, layout: &Layout) -> (Vec<Plugin>, Vec<Refused>) {
     let root = cache.root_path();
     let mut plugins = Vec::new();
     let mut refused = Vec::new();
@@ -93,10 +102,11 @@ fn load_installed_tier(cache: &PluginCache) -> (Vec<Plugin>, Vec<Refused>) {
             let Some(manifest_path) = cache.cached_manifest(name, &version) else {
                 break;
             };
-            let loaded = Plugin::load(&path.join(&version), &manifest_path).and_then(|plugin| {
-                Disclosure::from_plugin(&plugin)?;
-                Ok(plugin)
-            });
+            let loaded =
+                Plugin::load(&path.join(&version), &manifest_path, layout).and_then(|plugin| {
+                    Disclosure::from_plugin(&plugin)?;
+                    Ok(plugin)
+                });
             let e = match loaded {
                 Ok(plugin) => {
                     plugins.push(plugin);
@@ -153,7 +163,7 @@ mod tests {
             "1.0.0",
             &format!("description = \"{long}\"\n"),
         );
-        let found = scan_plugins(global.path(), scene.path());
+        let found = scan_plugins(global.path(), scene.path(), &Default::default());
         let names: Vec<_> = found.plugins.iter().map(|p| p.name()).collect();
         assert_eq!(names, ["fine"]);
         assert_eq!(found.refused.len(), 1);
@@ -189,7 +199,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let found = scan_plugins(global.path(), scene.path());
+        let found = scan_plugins(global.path(), scene.path(), &Default::default());
         assert!(found.plugins.is_empty());
         assert_eq!(found.refused.len(), 1);
         assert!(
@@ -211,7 +221,7 @@ mod tests {
         let (g, s) = (global.path().to_path_buf(), scene.path().to_path_buf());
         let scanner = std::thread::spawn(move || {
             started_tx.send(()).unwrap();
-            scan_plugins(&g, &s).plugins.len()
+            scan_plugins(&g, &s, &Default::default()).plugins.len()
         });
         started_rx.recv().unwrap();
         cache.remove_version("p", "1.0.0").unwrap();
@@ -227,7 +237,7 @@ mod tests {
     fn empty_tiers_discover_nothing() {
         let global = TempDir::new().unwrap();
         let scene = TempDir::new().unwrap();
-        assert!(discover_plugins(global.path(), scene.path()).is_empty());
+        assert!(discover_plugins(global.path(), scene.path(), &Default::default()).is_empty());
     }
 
     #[test]
@@ -235,7 +245,7 @@ mod tests {
         let global = TempDir::new().unwrap();
         let scene = TempDir::new().unwrap();
         write_plugin(global.path(), "my-plugin", "1.0.0", "");
-        let plugins = discover_plugins(global.path(), scene.path());
+        let plugins = discover_plugins(global.path(), scene.path(), &Default::default());
         assert!(plugins
             .iter()
             .any(|p| p.manifest.plugin.name == "my-plugin"));
@@ -257,7 +267,7 @@ mod tests {
             "1.0.0",
             "description = \"scene\"\n",
         );
-        let plugins = discover_plugins(global.path(), scene.path());
+        let plugins = discover_plugins(global.path(), scene.path(), &Default::default());
         let found: Vec<_> = plugins
             .iter()
             .filter(|p| p.manifest.plugin.name == "my-plugin")
@@ -272,7 +282,7 @@ mod tests {
         let scene = TempDir::new().unwrap();
         write_plugin(global.path(), "from-global", "1.0.0", "");
         write_plugin(scene.path(), "from-scene", "1.0.0", "");
-        let names: Vec<String> = discover_plugins(global.path(), scene.path())
+        let names: Vec<String> = discover_plugins(global.path(), scene.path(), &Default::default())
             .into_iter()
             .map(|p| p.manifest.plugin.name)
             .collect();
@@ -298,7 +308,7 @@ mod tests {
             "requires_engine = \">=99\"\n",
         );
 
-        let found = scan_plugins(global.path(), scene.path());
+        let found = scan_plugins(global.path(), scene.path(), &Default::default());
         let loaded: Vec<_> = found
             .plugins
             .iter()
@@ -332,7 +342,7 @@ mod tests {
             "2.0.0",
             &format!("description = \"{long}\"\n"),
         );
-        let found = scan_plugins(global.path(), scene.path());
+        let found = scan_plugins(global.path(), scene.path(), &Default::default());
         assert!(found.plugins.is_empty());
         assert_eq!(found.refused.len(), 1);
         assert_eq!(found.refused[0].version, "2.0.0");
@@ -344,7 +354,7 @@ mod tests {
         let scene = TempDir::new().unwrap();
         write_plugin(global.path(), "my-plugin", "1.0.0", "");
         write_plugin(global.path(), "my-plugin", "2.0.0", "");
-        let plugins = discover_plugins(global.path(), scene.path());
+        let plugins = discover_plugins(global.path(), scene.path(), &Default::default());
         let found = plugins
             .iter()
             .find(|p| p.manifest.plugin.name == "my-plugin")

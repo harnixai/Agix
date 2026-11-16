@@ -1,11 +1,11 @@
+#[cfg(feature = "sandbox")]
+use super::fence::*;
 #[cfg(all(feature = "sandbox", target_os = "linux"))]
 use super::linux::*;
 #[cfg(all(feature = "sandbox", target_os = "macos"))]
 use super::macos::*;
 #[cfg(feature = "sandbox")]
 use super::*;
-#[cfg(feature = "sandbox")]
-use super::{fence::*, roots::*};
 #[cfg(all(feature = "sandbox", target_os = "macos"))]
 use base::paths::{STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS};
 
@@ -60,6 +60,7 @@ struct UnderSandboxExec {
     state_root: PathBuf,
     tmp: PathBuf,
     elsewhere: PathBuf,
+    layout: base::paths::Layout,
 }
 
 #[cfg(feature = "sandbox")]
@@ -67,6 +68,12 @@ struct UnderSandboxExec {
 #[allow(clippy::unwrap_used)]
 impl UnderSandboxExec {
     fn new() -> Option<Self> {
+        Self::in_layout(base::paths::Layout::default())
+    }
+
+    /// A project of an instance whose project directory is `layout`'s, with
+    /// `.agix` and `.claude` beside it.
+    fn in_layout(layout: base::paths::Layout) -> Option<Self> {
         let works = std::process::Command::new("sandbox-exec")
             .args(["-p", "(version 1)(allow default)", "true"])
             .status()
@@ -82,6 +89,7 @@ impl UnderSandboxExec {
         assert!(project.starts_with("/tmp"));
         std::fs::create_dir_all(project.join(".agix")).unwrap();
         std::fs::create_dir_all(project.join(".claude")).unwrap();
+        std::fs::create_dir_all(layout.project_dir(&project)).unwrap();
         for dir in STATE_ROOT_WORKING_DIRS {
             std::fs::create_dir_all(state_root.join(dir)).unwrap();
         }
@@ -103,6 +111,7 @@ impl UnderSandboxExec {
             state_root,
             tmp,
             elsewhere,
+            layout,
         })
     }
 
@@ -173,6 +182,7 @@ impl UnderSandboxExec {
             disable: false,
             policy: SandboxPolicy {
                 state_root: Some(self.state_root.clone()),
+                layout: self.layout.clone(),
                 ..policy
             },
         });

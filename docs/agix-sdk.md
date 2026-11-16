@@ -38,7 +38,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 设置从哪来：`load_daemon_config(model, max_tokens, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/.agix/settings.json`）三层合并；`model` 与 `max_tokens` 是这些层都没写时的兜底；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/Agix/managed-settings.json`）。
 
-状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。
+状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，项目层目录不叫 `.agix` 时再 `.with_layout(base::paths::Layout::new(".codix")?)`（§10 的 `project_dir`）。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。
 
 provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（加 `ANTHROPIC_BASE_URL`）建 Anthropic 客户端，环境里没有就向 `Assembly::credentials` 要 provider `"default"` 的密钥。设置里的 `providers`、`default_provider`、`task_models` 在 `assemble` 时校验，配错直接失败，不静默回退。
 
@@ -700,8 +700,11 @@ engine.shutdown().await;
 | `socket` | `--socket` | `<data_root>/scenes/<scene>/daemon.sock` |
 | `mcp_policy` / `managed_settings` | `--mcp-policy` / `--managed-settings` | 平台的路径；给了就必须存在 |
 | `groups_file` | 无（agixd 用 `instance` 的） | `None`：有 `instance` 时是 `<data_root>/daemon/groups/<名字>.json`，否则不登记 |
+| `project_dir` | 无（agixd 总是 `.agix`） | `.agix`：引擎在每个项目里的目录名 |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
+
+**`project_dir`。** 引擎在项目里放的一切——项目层设置（`settings.json`、`settings.local.json`）、agents、hooks、rules、output-styles、worktrees、团队、记忆、telemetry、`tool-results`、导入标记——都在 `<项目>/<project_dir>/` 下，提示词、`daemon.doctor`、`config.list` 报的也是这个名字。只认这一个名字，不做“先找它、找不到再读 `.agix`”。名字是一个路径分量，以 `.` 开头，只含小写字母、数字、`.`、`_`、`-`，至多 64 个字符，不能是 `.`、`..`，也不能是别的工具的目录（`.git`、`.agents`、`.claude`、`.codex`、`.cursor`、`.github`、`.vscode`、`.idea`）。要以 `.` 开头，是因为引擎启动时会清掉 `<project_dir>/worktrees/` 下认不出的目录、拒写其中的配置子目录，起成 `src`、`docs` 这类项目自己用的名字，一个笔误就是删数据；隐藏目录是工具放自己状态的惯例位置。不合法时 `start` 返回 `EmbedError::InvalidProjectDir { name, reason }`。保护跟着名字走：模型改不了它的设置文件，改其中的配置子目录要问，沙箱里的命令写不了它的设置文件与配置子目录（`ARCHITECTURE.md` §8.1）。名字不是 `.agix` 时，项目里的 `.agix` 与 `.claude` 一样作为别的代理的配置继续受保护（写工具拒写其中的设置文件、写别的要问，沙箱里写不了其中的设置文件与配置子目录，其中的 `settings.local.json` / `mcp.local.json` 仍算凭据），但不再被读。`.agents/skills` 是跨工具的约定，不随名字变；worktree 的分支前缀 `agix/worktree-` 也不变。
 
 **`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们收掉。不给就两样都不做，锁由宿主自己管。
 
@@ -729,5 +732,6 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.3.17** `EmbedConfig.project_dir` 与 `EmbedError::InvalidProjectDir`：项目层目录名由宿主定，缺省 `.agix`，行为同前。换了名字之后，项目里已有的 `.agix` 不再被读（不做回退：两个目录并存时读哪个、写哪个、信任按哪个判断都说不清），要保留里面的设置、规则、记忆由宿主自己搬到新目录；没搬之前它照样受保护，模型改不了它。没给 `managed_settings` / `mcp_policy` 的宿主读到的仍是 Agix 的平台路径。库式用法（§2–§9）里 `LoadedSettings::load*`、`ConfigPaths::new`、`PathSettings::new`、`SensitivePaths::new` 多一个布局参数，`WritePolicy::new` 改收 `Arc<SensitivePaths>`，`packages::{discover_plugins, scan_plugins}`、`packages::install::install`、`packages::manifest::Plugin::load` 多一个 `&Layout`；`DaemonPaths::layout()` 有缺省实现，外部实现不用改。
 - **0.3.16** `EmbedError::GroupsHeld`：`groups_file` 里的拥有者是另一个活着的进程。`orphans::{live_owner, stop_persisting}`。`EmbedConfig.groups_file`：进程组的回收与登记不再要 `instance`，不给 `instance` 的宿主给它一个文件就有；给了 `instance` 而不给它，行为同前。`EmbedError::GroupsInProcess`：一个进程里已有一个不带 `instance` 而登记进程组的 `Embedded` 在跑时，再起一个要登记的。
-- **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表除 `groups_file` 外）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。
+- **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表除 `groups_file`、`project_dir` 外）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。

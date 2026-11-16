@@ -161,7 +161,8 @@ impl Policy {
             };
         }
 
-        let writes_configuration = !call.facts.traits.read_only && call.named.names_configuration();
+        let writes_configuration =
+            !call.facts.traits.read_only && call.named.names_configuration(call.ctx);
         let background = call.facts.runs.is_some_and(|r| r.background);
         if contained(&call.facts.reach)
             && !background

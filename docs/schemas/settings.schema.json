@@ -379,7 +379,7 @@
         },
         {
           "const": "acceptEdits",
-          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, `.agix`, `.claude` and `.agents/skills` still ask.",
+          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
           "type": "string"
         },
         {

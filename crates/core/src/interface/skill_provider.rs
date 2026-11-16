@@ -2,11 +2,10 @@
 //!
 //! Skills arrive from three places: `SKILL.md` files under the three
 //! directory tiers, the built-ins compiled into the binary, and the tools of
-//! every connected MCP server turned into invocable skills. Each of those had
-//! its own entry point on `SkillManager` — `load_dir_subdirs`,
-//! `register_bundled`, `register_mcp_skills` — so a deployment that keeps its
-//! skills anywhere else (a database, a company-wide bundle server, a git
-//! remote) had nowhere to say so short of a fourth method on the manager.
+//! every connected MCP server turned into invocable skills. Each is a
+//! `SkillProvider` handed to `SkillManager::load_from`, so a deployment that
+//! keeps its skills anywhere else (a database, a company-wide bundle server,
+//! a git remote) adds one more source rather than a method on the manager.
 //!
 //! # A source owns its bodies too
 //!

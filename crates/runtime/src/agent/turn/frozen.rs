@@ -39,7 +39,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_paths(root: &Path) -> ConfigPaths {
-        ConfigPaths::new(root.join(".agix"), root.join(".agix"), "code")
+        ConfigPaths::new(
+            root.join(".agix"),
+            root.join(".agix"),
+            "code",
+            Default::default(),
+        )
     }
 
     fn no_git() -> EngineExec {

@@ -6,7 +6,7 @@
 //! - **Enter/ExitWorktree**：**当前 session**进 worktree（改 cwd 概念）；适合"我要在隔离环境里折腾一会儿"
 //!
 //! 会话的 cwd 不变：EnterWorktree 返回 worktree 的绝对路径，模型用绝对路径
-//! 或先 `Bash cd` 进去才写得到那里（worktree 在仓库根的 `.agix/worktrees/`
+//! 或先 `Bash cd` 进去才写得到那里（worktree 在仓库根的 `<项目层目录>/worktrees/`
 //! 下，本来就在会话可写范围内）。会话同时只有一个 active worktree；
 //! ExitWorktree `keep` 只让出它，`remove` 删目录和分支，拒绝删除时它仍是
 //! active 的。会话结束时还 active 的 worktree 留在磁盘上。
@@ -57,7 +57,7 @@ impl WorktreeRegistry {
             .map(|h| {
                 let slug = h
                     .branch()
-                    .strip_prefix("agix/worktree-")
+                    .strip_prefix(base::paths::WORKTREE_BRANCH_PREFIX)
                     .unwrap_or("?")
                     .to_string();
                 (slug, h.path().to_path_buf())
@@ -94,8 +94,11 @@ impl Tool for EnterWorktreeTool {
     fn input_schema(&self, _: PathStyle) -> Value {
         crate::input_schema::<EnterWorktreeInput>()
     }
-    async fn guide(&self, _: &PromptContext) -> Option<String> {
-        Some(include_str!("prompts/coding/worktree_enter.prompt.md").to_string())
+    async fn guide(&self, ctx: &PromptContext) -> Option<String> {
+        Some(crate::worktree::name_the_directories(
+            include_str!("prompts/coding/worktree_enter.prompt.md"),
+            &ctx.project_dir,
+        ))
     }
 
     fn spec(&self) -> ToolSpec {
@@ -110,9 +113,12 @@ impl Tool for EnterWorktreeTool {
             Err(e) => ValidationResult::err(format!("invalid input: {e}"), 2),
         }
     }
-    async fn permission_facts(&self, _: &Value, _: &ToolContext) -> PermissionFacts {
-        PermissionFacts::unknown()
-            .with_question("EnterWorktree will create a new git worktree under .agix/worktrees/")
+    async fn permission_facts(&self, _: &Value, ctx: &ToolContext) -> PermissionFacts {
+        PermissionFacts::unknown().with_question(format!(
+            "EnterWorktree will create a new git worktree under {}/{}/",
+            ctx.config.layout.project_dir_name(),
+            base::paths::entry::WORKTREES
+        ))
     }
     async fn call(
         &self,
@@ -128,8 +134,14 @@ impl Tool for EnterWorktreeTool {
             )
             .with_new_messages(vec![]));
         }
-        match crate::worktree::create_worktree(&ctx.exec, &ctx.engine_git, &ctx.cwd, &input.slug)
-            .await
+        match crate::worktree::create_worktree(
+            &ctx.exec,
+            &ctx.engine_git,
+            &ctx.cwd,
+            &input.slug,
+            &ctx.config.layout,
+        )
+        .await
         {
             Ok(handle) => {
                 let path = handle.path().to_path_buf();
@@ -249,7 +261,7 @@ impl Tool for ExitWorktreeTool {
         }
         handle.cleanup().await;
         let slug = branch
-            .strip_prefix("agix/worktree-")
+            .strip_prefix(base::paths::WORKTREE_BRANCH_PREFIX)
             .unwrap_or("?")
             .to_string();
         Ok(ToolResult::text(format!(

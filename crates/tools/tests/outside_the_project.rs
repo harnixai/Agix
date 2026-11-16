@@ -168,12 +168,20 @@ async fn an_unattended_command_runs_only_inside_the_sandbox() {
 
 #[tokio::test]
 async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
+    for name in [".agix", ".codix"] {
+        configuration_is_confirmed_in(&base::paths::Layout::new(name).unwrap(), name).await;
+    }
+}
+
+/// Under `layout`, whose project directory `own` is.
+#[allow(clippy::unwrap_used)]
+async fn configuration_is_confirmed_in(layout: &base::paths::Layout, own: &str) {
     use base::interface::permission::{
         PermissionOutcome, PermissionPolicy, PermissionRequest, ToolFacts,
     };
     let project = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project.path().join(".agix/agents")).unwrap();
-    std::fs::write(project.path().join(".agix/agents/a.md"), "x").unwrap();
+    std::fs::create_dir_all(project.path().join(own).join("agents")).unwrap();
+    std::fs::write(project.path().join(own).join("agents/a.md"), "x").unwrap();
     let registry = Arc::new(base::interface::tool::InMemoryToolRegistry::new());
     registry.register(Arc::new(tools::file_read::FileReadTool));
     registry.register(Arc::new(tools::file_write::FileWriteTool));
@@ -190,12 +198,14 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
     );
     let config = project
         .path()
-        .join(".agix/agents/a.md")
+        .join(own)
+        .join("agents/a.md")
         .display()
         .to_string();
     let scratch = project
         .path()
-        .join(".agix/scratchpad/x.txt")
+        .join(own)
+        .join("scratchpad/x.txt")
         .display()
         .to_string();
     let check = |tool: &'static str, input: serde_json::Value| {
@@ -205,6 +215,9 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
             let mut ctx =
                 session_state::testing::tool_context_for_test(platform::local_providers(), cwd);
             ctx.session = session.clone();
+            Arc::make_mut(&mut ctx.config).layout = layout.clone();
+            let paths = base::paths::SensitivePaths::new(None, Some(&ctx.cwd), layout.clone());
+            ctx.sandbox_mut().paths = Arc::new(paths);
             let facts = ToolFacts::gather(found.as_deref().unwrap(), &input, &ctx).await;
             gate.decide(&PermissionRequest::new(
                 tool,
@@ -222,7 +235,8 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
     assert!(matches!(read, PermissionOutcome::Permit { .. }), "{read:?}");
     let new_config = project
         .path()
-        .join(".agix/agents/b.md")
+        .join(own)
+        .join("agents/b.md")
         .display()
         .to_string();
     let write = check(
@@ -242,6 +256,20 @@ async fn agent_configuration_is_confirmed_before_a_write_not_a_read() {
     assert!(
         matches!(scratch, PermissionOutcome::Permit { .. }),
         "{scratch:?}"
+    );
+    let foreign = project
+        .path()
+        .join(".agix/hooks/x.sh")
+        .display()
+        .to_string();
+    let foreign = check(
+        "Write",
+        serde_json::json!({ "file_path": foreign, "content": "y" }),
+    )
+    .await;
+    assert!(
+        matches!(foreign, PermissionOutcome::Prompt { .. }),
+        "{own}: {foreign:?}"
     );
 }
 

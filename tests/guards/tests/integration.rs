@@ -10,6 +10,7 @@ mod decorators;
 mod delegation;
 mod deps;
 mod embed_surface;
+mod engine_dirs;
 mod facade;
 mod layering;
 mod module_order;

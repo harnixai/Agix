@@ -88,7 +88,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn paths(root: &Path) -> ConfigPaths {
-        ConfigPaths::new(root.join("global"), root.join(".agix"), "code")
+        ConfigPaths::new(
+            root.join("global"),
+            root.join(".agix"),
+            "code",
+            Default::default(),
+        )
     }
 
     #[tokio::test]

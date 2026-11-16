@@ -1,11 +1,11 @@
 //! The Linux shape of the project guard for linked worktrees: their entries
-//! under a git directory's `worktrees/`, the engine's `.agix/worktrees/`, and
-//! what of the git directory a command in one may write.
+//! under a git directory's `worktrees/`, the engines' `worktrees/` in the
+//! project, and what of the git directory a command in one may write.
 
-use super::super::roots::{subdirs, Roots, GIT_OBJECTS_INFO_DIR, GIT_WORKTREES_DIR};
+use super::super::roots::{subdirs, Roots, GIT_OBJECTS_INFO_DIR};
 use super::{bind, bind_over, read_only};
 use base::paths::{
-    WorktreeGit, GIT_WORKTREE_CONTROL_FILES, PROJECT_WORKTREES_DIR, REPOSITORY_CONFIG_DIR,
+    WorktreeGit, GIT_WORKTREES_DIR, GIT_WORKTREE_CONTROL_FILES, REPOSITORY_CONFIG_DIR,
 };
 use std::path::Path;
 
@@ -53,17 +53,19 @@ pub(super) fn guard_entries(
     }
 }
 
-/// The `.git` links of the engine's worktrees, read-only, and where the
-/// project is open, `.agix/worktrees/` held around them.
+/// The `.git` links of the engines' worktrees, read-only, and where the
+/// project is open, each engine directory's `worktrees/` held around them.
 pub(super) fn guard_links(args: &mut Vec<String>, roots: &Roots) {
-    let links = roots.cwd.join(".agix").join(PROJECT_WORKTREES_DIR);
-    let held =
-        roots.opens(&links) && !roots.only_additional && hold_worktree_parent(args, &links, false);
-    for worktree in subdirs(&links) {
-        if held {
-            bind(args, "--bind", &worktree);
+    for links in roots.paths.worktree_dirs_in(&roots.cwd) {
+        let held = roots.opens(&links)
+            && !roots.only_additional
+            && hold_worktree_parent(args, &links, false);
+        for worktree in subdirs(&links) {
+            if held {
+                bind(args, "--bind", &worktree);
+            }
+            bind(args, "--ro-bind-try", &worktree.join(REPOSITORY_CONFIG_DIR));
         }
-        bind(args, "--ro-bind-try", &worktree.join(REPOSITORY_CONFIG_DIR));
     }
 }
 

@@ -280,7 +280,10 @@ mod tests {
         skill(&user, name, "the user's");
         let manager = SkillManager::new();
         manager.load_dir_subdirs(&user, SkillSource::User).unwrap();
-        manager.load_from(Arc::new(crate::sources::BundledSkills));
+        manager.load_from(Arc::new(crate::sources::BundledSkills::new(
+            Default::default(),
+            "/state".into(),
+        )));
         Arc::new(manager)
     }
 

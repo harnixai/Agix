@@ -9,7 +9,7 @@ use base::context::Session;
 ///
 /// A malformed value degrades to no hooks + a `tracing::warn!` rather than
 /// failing the build — same soft-degrade philosophy as the rest of
-/// settings.json. Also wires the `.agix/hooks/` three-tier search path
+/// settings.json. Also wires the `<project dir>/hooks/` three-tier search path
 /// (project > scene > global) so `Command` hooks can reference a bare
 /// script name — see `hooks::HookRunner::with_hooks_search_dirs` docs.
 ///
@@ -66,17 +66,11 @@ pub(in crate::agent) fn build_hook_runner(
     // its `hooks/` directory goes too, or a user hook naming a script would
     // run the project's file of that name.
     let project_untrusted = settings.trust().is_untrusted();
-    let project_hooks = settings
-        .paths
-        .project_root()
-        .filter(|_| !project_untrusted)
-        .map(|project| project.join(".agix").join("hooks"));
+    let dirs = settings.paths.config_paths();
+    let project_hooks = dirs.project_hooks_dir().filter(|_| !project_untrusted);
     let hooks_search_dirs: Vec<_> = project_hooks
         .into_iter()
-        .chain([
-            settings.paths.user_data_dir.join("hooks"),
-            settings.paths.global_data_dir.join("hooks"),
-        ])
+        .chain([dirs.user_hooks_dir(), dirs.global_hooks_dir()])
         .collect();
     let prompt_executor = Arc::new(crate::hook_executors::ModelPromptHookExecutor::new(
         model,
@@ -98,7 +92,8 @@ fn agent_hook_executor(
     let cwd = settings.paths.working_dir().to_path_buf();
     let project = settings.paths.project_root().map(Into::into);
     Arc::new(
-        crate::hook_executors::DelegatorHookExecutor::new(delegator, cwd).in_worktrees_of(project),
+        crate::hook_executors::DelegatorHookExecutor::new(delegator, cwd)
+            .in_worktrees_of(project, settings.paths.layout.clone()),
     )
 }
 

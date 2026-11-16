@@ -6,8 +6,12 @@ fn a_parent_step_after_a_missing_directory_resolves_to_the_real_project() {
     let dir = tempfile::tempdir().unwrap();
     let real = std::fs::canonicalize(dir.path()).unwrap();
     let cwd = dir.path().join("missing/../proj");
-    let dirs = project_agix_dirs(&cwd);
-    assert!(dirs.contains(&real.join("proj/.agix")), "{dirs:?}");
+    for name in [".agix", ".codix"] {
+        let layout = base::paths::Layout::new(name).unwrap();
+        let dirs = base::paths::SensitivePaths::new(None, None, layout).engine_dirs_in(&cwd);
+        assert!(dirs.contains(&real.join("proj").join(name)), "{dirs:?}");
+        assert!(dirs.contains(&real.join("proj/.agix")), "{dirs:?}");
+    }
 }
 
 /// A submodule's git directory, `modules/<name>` under the git directory

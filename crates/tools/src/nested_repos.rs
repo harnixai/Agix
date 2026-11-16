@@ -226,7 +226,12 @@ async fn read_lossy(ctx: &ToolContext, path: &Path) -> String {
 /// filesystem says nothing of modes, so a hook git would skip as not
 /// executable is counted too.
 async fn hooks(ctx: &ToolContext, git_dir: &Path) -> Vec<(String, String)> {
-    let Ok(entries) = ctx.exec.filesystem.read_dir(&git_dir.join("hooks")).await else {
+    let Ok(entries) = ctx
+        .exec
+        .filesystem
+        .read_dir(&git_dir.join(base::paths::GIT_HOOKS_DIR))
+        .await
+    else {
         return Vec::new();
     };
     let mut hooks = Vec::new();
@@ -269,7 +274,8 @@ pub async fn quarantine(
 ) -> Result<PathBuf, base::interface::exec::ExecError> {
     let stamp = time::OffsetDateTime::now_utc();
     let name = format!(
-        ".git.agix-quarantine-{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+        "{}{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+        base::paths::QUARANTINE_PREFIX,
         stamp.year(),
         u8::from(stamp.month()),
         stamp.day(),
@@ -425,7 +431,7 @@ fn not_walked(name: &std::ffi::OsStr) -> bool {
     let Some(name) = name.to_str() else {
         return false;
     };
-    DIRS.contains(&name) || name.starts_with(".git.agix-quarantine-")
+    DIRS.contains(&name) || name.starts_with(base::paths::QUARANTINE_PREFIX)
 }
 
 /// The keys of a git configuration that name a program git runs, in the

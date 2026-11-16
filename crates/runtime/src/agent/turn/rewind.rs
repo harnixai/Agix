@@ -522,7 +522,7 @@ async fn preflight(
             ));
         }
     }
-    if let Some(root) = removed_worktree(fs, &target).await {
+    if let Some(root) = removed_worktree(fs, &target, policy.sensitive.layout()).await {
         return Err(issue(
             step,
             RewindIssueKind::WorktreeRemoved,
@@ -588,12 +588,12 @@ fn describe_change(expected: &After, now: &After) -> String {
 }
 
 /// The worktree `target` was written in, when that worktree is gone.
-async fn removed_worktree(fs: &dyn FileSystem, target: &Path) -> Option<PathBuf> {
-    let parts: Vec<_> = target.components().collect();
-    let at = parts
-        .windows(2)
-        .position(|w| w[0].as_os_str() == ".agix" && w[1].as_os_str() == "worktrees")?;
-    let root: PathBuf = parts.get(..at + 3)?.iter().collect();
+async fn removed_worktree(
+    fs: &dyn FileSystem,
+    target: &Path,
+    layout: &base::paths::Layout,
+) -> Option<PathBuf> {
+    let root = layout.worktree_of(target)?;
     match fs.metadata(&root).await {
         Ok(_) => None,
         Err(_) => Some(root),
@@ -689,11 +689,18 @@ mod tests {
     /// still has its settings and secrets kept from a rewind.
     #[tokio::test]
     async fn a_path_not_in_nfc_still_meets_the_deny_list() {
+        for name in [".agix", ".codix"] {
+            a_path_not_in_nfc_meets_the_deny_list_in(&base::paths::Layout::new(name).unwrap())
+                .await;
+        }
+    }
+
+    async fn a_path_not_in_nfc_meets_the_deny_list_in(layout: &base::paths::Layout) {
         let dir = tempfile::tempdir().unwrap();
         let project = std::fs::canonicalize(dir.path())
             .unwrap()
             .join("De\u{301}veloppement");
-        std::fs::create_dir_all(project.join(".agix")).unwrap();
+        std::fs::create_dir_all(layout.project_dir(&project)).unwrap();
         let store: Arc<dyn history::store::HistoryStore> =
             Arc::new(history::store::InMemoryHistoryStore::new());
         let checkpoints = Checkpoints::for_root(
@@ -703,8 +710,11 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let policy = permissions::path_safety::WritePolicy::new(project.clone());
-        for rel in [".agix/settings.json", ".env"] {
+        let sensitive = base::paths::SensitivePaths::new(None, Some(&project), layout.clone());
+        let policy =
+            permissions::path_safety::WritePolicy::new(project.clone(), Arc::new(sensitive));
+        let own = format!("{}/settings.json", layout.project_dir_name());
+        for rel in [own.as_str(), ".agix/settings.json", ".env"] {
             let step = plan::FileStep {
                 path: RecordedPath::Rel(rel.into()),
                 restore: Before::Absent,
@@ -740,5 +750,36 @@ mod tests {
         )
         .await
         .is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_write_in_a_worktree_that_is_gone_is_known_by_the_instances_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = std::fs::canonicalize(dir.path()).unwrap();
+        let fs = platform::filesystem::LocalFileSystem;
+        for name in [".agix", ".codix"] {
+            let layout = base::paths::Layout::new(name).unwrap();
+            let kept = layout.worktrees_dir(&project).join("kept");
+            std::fs::create_dir_all(&kept).unwrap();
+            let gone = layout.worktrees_dir(&project).join("gone");
+            assert_eq!(
+                removed_worktree(&fs, &gone.join("src/a.rs"), &layout).await,
+                Some(gone)
+            );
+            assert_eq!(
+                removed_worktree(&fs, &kept.join("src/a.rs"), &layout).await,
+                None
+            );
+            assert_eq!(
+                removed_worktree(&fs, &project.join("src/a.rs"), &layout).await,
+                None
+            );
+        }
+        let codix = base::paths::Layout::new(".codix").unwrap();
+        assert_eq!(
+            removed_worktree(&fs, &project.join(".agix/worktrees/x/a"), &codix).await,
+            None,
+            "another instance's worktrees are not this session's"
+        );
     }
 }

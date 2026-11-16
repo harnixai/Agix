@@ -105,7 +105,7 @@ impl SettingsDir {
             return Err(SettingsFileError::Io { path, source });
         }
         self.lock.sync();
-        if file == SETTINGS_LOCAL_FILE || file == "mcp.local.json" {
+        if file == SETTINGS_LOCAL_FILE || file == base::paths::entry::MCP_LOCAL {
             base::paths::ensure_local_data_gitignore(self.lock.dir());
         }
         Ok(())
@@ -276,7 +276,7 @@ fn append(
 #[derive(Debug, Clone)]
 pub struct LocalRules {
     path: PathBuf,
-    refusal: Option<&'static str>,
+    refusal: Option<String>,
 }
 
 impl LocalRules {
@@ -287,10 +287,10 @@ impl LocalRules {
         }
     }
 
-    pub fn refusing(path: PathBuf, reason: &'static str) -> Self {
+    pub fn refusing(path: PathBuf, reason: impl Into<String>) -> Self {
         Self {
             path,
-            refusal: Some(reason),
+            refusal: Some(reason.into()),
         }
     }
 }
@@ -301,8 +301,8 @@ impl RuleFile for LocalRules {
     }
 
     fn append_allow(&self, rule: &str, matching: GrantMatch) -> Result<bool, String> {
-        if let Some(reason) = self.refusal {
-            return Err(reason.into());
+        if let Some(reason) = &self.refusal {
+            return Err(reason.clone());
         }
         append(&self.path, AppendTarget::Allow, rule, matching).map_err(|e| e.to_string())
     }
@@ -548,6 +548,7 @@ mod tests {
             "code",
             "m",
             &crate::section::Sections::none(),
+            Default::default(),
         );
 
         let loaded: Vec<_> = settings

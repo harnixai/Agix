@@ -257,7 +257,12 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
         }
-        let plugin = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let plugin = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         (dir, plugin)
     }
 
@@ -305,7 +310,12 @@ mod tests {
             "---\ndescription: d\n---\nbody\n",
         )
         .unwrap();
-        let plugin = Plugin::load(dir.path(), &dir.path().join("plugin.toml")).unwrap();
+        let plugin = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(declared_skills(&plugin).unwrap().is_empty());
     }
 

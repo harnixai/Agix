@@ -119,8 +119,18 @@ impl SkillProvider for SkillDirectory {
     }
 }
 
-/// The skills compiled into the binary.
-pub struct BundledSkills;
+/// The skills compiled into the binary, their bodies naming the directories
+/// of the instance that lists them.
+pub struct BundledSkills {
+    layout: base::paths::Layout,
+    state_root: std::path::PathBuf,
+}
+
+impl BundledSkills {
+    pub fn new(layout: base::paths::Layout, state_root: std::path::PathBuf) -> Self {
+        Self { layout, state_root }
+    }
+}
 
 impl SkillProvider for BundledSkills {
     fn id(&self) -> &str {
@@ -132,7 +142,7 @@ impl SkillProvider for BundledSkills {
     }
 
     fn body(&self, name: &str) -> Option<String> {
-        crate::bundled::bundled_body(name).map(|s| s.to_string())
+        crate::bundled::bundled_body(name, &self.layout, &self.state_root)
     }
 }
 
@@ -314,7 +324,7 @@ mod tests {
     /// all: their entries point at a sentinel path no reader can open.
     #[test]
     fn the_built_in_source_answers_for_its_own_bodies() {
-        let bundled = BundledSkills;
+        let bundled = BundledSkills::new(Default::default(), "/state".into());
         let first = bundled
             .skills()
             .into_iter()

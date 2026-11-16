@@ -104,12 +104,25 @@ fn the_outer_wrapper_keeps_its_scratch_file_off_every_writable_root() {
 #[cfg(target_os = "linux")]
 #[test]
 fn an_absent_project_settings_file_cannot_be_created() {
+    for (own, dir) in [
+        (".agix", ".agix"),
+        (".codix", ".codix"),
+        (".codix", ".agix"),
+    ] {
+        an_absent_settings_file_cannot_be_created_in(own, dir);
+    }
+}
+
+/// In `dir` of a project whose instance's own directory is `own`.
+#[cfg(target_os = "linux")]
+#[allow(clippy::unwrap_used)]
+fn an_absent_settings_file_cannot_be_created_in(own: &str, dir: &str) {
     let project = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project.path().join(".agix").join("scratchpad")).unwrap();
-    let cmd = wrap(opts(
-        "echo '{}' > .agix/settings.local.json",
-        project.path(),
-    ));
+    std::fs::create_dir_all(project.path().join(dir).join("scratchpad")).unwrap();
+    let command = format!("echo '{{}}' > {dir}/settings.local.json");
+    let mut o = opts(&command, project.path());
+    o.policy.layout = base::paths::Layout::new(own).unwrap();
+    let cmd = wrap(o);
     if cmd.mode != SandboxMode::LinuxBwrap {
         return;
     }
@@ -117,7 +130,7 @@ fn an_absent_project_settings_file_cannot_be_created() {
         .path()
         .canonicalize()
         .unwrap()
-        .join(".agix")
+        .join(dir)
         .display()
         .to_string();
     let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
@@ -148,7 +161,7 @@ fn an_absent_project_settings_file_cannot_be_created() {
     assert!(!out.status.success());
     assert!(!project
         .path()
-        .join(".agix")
+        .join(dir)
         .join("settings.local.json")
         .exists());
 }
@@ -586,11 +599,25 @@ fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
 #[test]
 #[allow(clippy::unwrap_used)]
 fn linux_a_worktree_made_after_the_mounts_cannot_be_written() {
+    for (own, dir) in [
+        (".agix", ".agix"),
+        (".codix", ".codix"),
+        (".codix", ".agix"),
+    ] {
+        a_worktree_made_after_the_mounts_cannot_be_written_in(own, dir);
+    }
+}
+
+/// The worktrees in `dir` of a project whose instance's own directory is
+/// `own`.
+#[cfg(target_os = "linux")]
+#[allow(clippy::unwrap_used)]
+fn a_worktree_made_after_the_mounts_cannot_be_written_in(own: &str, dir: &str) {
     let project = tempfile::tempdir().unwrap();
     let root = project.path().canonicalize().unwrap();
     let make_worktree = |name: &str| {
         let admin = root.join(".git/worktrees").join(name);
-        let worktree = root.join(".agix/worktrees").join(name);
+        let worktree = root.join(dir).join("worktrees").join(name);
         std::fs::create_dir_all(&admin).unwrap();
         std::fs::create_dir_all(&worktree).unwrap();
         std::fs::write(admin.join("commondir"), "../..\n").unwrap();
@@ -607,18 +634,20 @@ fn linux_a_worktree_made_after_the_mounts_cannot_be_written() {
     };
     make_worktree("wt");
     let later = [
-        ".git/worktrees/later/commondir",
-        ".git/worktrees/later/gitdir",
-        ".git/worktrees/later/config.worktree",
-        ".agix/worktrees/later/.git",
-        ".agix/worktrees/later/planted",
+        ".git/worktrees/later/commondir".to_string(),
+        ".git/worktrees/later/gitdir".to_string(),
+        ".git/worktrees/later/config.worktree".to_string(),
+        format!("{dir}/worktrees/later/.git"),
+        format!("{dir}/worktrees/later/planted"),
     ];
     let script = format!(
         "for f in {}; do echo x > \"$f\" 2>/dev/null && echo \"wrote $f\"; done; \
          echo x > .git/worktrees/wt/index && echo index",
         later.join(" ")
     );
-    let cmd = wrap(opts(&script, &root));
+    let mut o = opts(&script, &root);
+    o.policy.layout = base::paths::Layout::new(own).unwrap();
+    let cmd = wrap(o);
     if cmd.mode != SandboxMode::LinuxBwrap {
         return;
     }
@@ -638,13 +667,13 @@ fn linux_a_worktree_made_after_the_mounts_cannot_be_written() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(stdout.trim(), "index", "{stdout}{stderr}");
+    assert_eq!(stdout.trim(), "index", "{own} {dir}: {stdout}{stderr}");
     assert_eq!(
         std::fs::read_to_string(root.join(".git/worktrees/later/commondir")).unwrap(),
         "../..\n"
     );
     assert!(!root.join(".git/worktrees/later/config.worktree").exists());
-    assert!(!root.join(".agix/worktrees/later/planted").exists());
+    assert!(!root.join(dir).join("worktrees/later/planted").exists());
 }
 
 /// A project with no `.agents` yet: the project skills directory must not

@@ -4,31 +4,11 @@
 
 use super::SandboxPolicy;
 use base::paths::{
-    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
-    GIT_WORKTREE_CONTROL_FILES, PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR,
-    REPOSITORY_CONFIG_DIR, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, GIT_CONTROL_FILES, GIT_HOOKS_DIR, GIT_WORKTREES_DIR,
+    GIT_WORKTREE_CONTROL_FILES, PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR,
+    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 use std::path::{Path, PathBuf};
-
-/// The state root to protect: the one the caller named, else the
-/// conventional `$HOME/.agix`.
-fn state_root_of(policy: &SandboxPolicy) -> Option<PathBuf> {
-    policy
-        .state_root
-        .clone()
-        .or_else(|| base::paths::home_dir().map(|h| h.join(".agix")))
-}
-
-/// The project's `.agix`, as given and as the kernel sees it.
-pub(super) fn project_agix_dirs(cwd: &Path) -> Vec<PathBuf> {
-    let given = cwd.join(".agix");
-    let real = base::path::resolve_physically(&given);
-    if real == given {
-        vec![given]
-    } else {
-        vec![given, real]
-    }
-}
 
 /// The paths a policy is written against, each with its symlinks resolved.
 ///
@@ -48,9 +28,16 @@ pub(super) struct Roots {
 impl Roots {
     pub(super) fn resolve(cwd: &Path, additional: &[PathBuf], policy: &SandboxPolicy) -> Self {
         let cwd = base::path::resolve_physically(cwd);
-        let state_root = state_root_of(policy).map(|p| base::path::resolve_physically(&p));
+        let state_root = policy
+            .state_root
+            .as_deref()
+            .map(base::path::resolve_physically);
         Self {
-            paths: base::paths::SensitivePaths::new(state_root.as_deref(), Some(&cwd)),
+            paths: base::paths::SensitivePaths::new(
+                state_root.as_deref(),
+                Some(&cwd),
+                policy.layout.clone(),
+            ),
             cwd,
             worktree_git: policy
                 .worktree_git
@@ -364,8 +351,8 @@ pub(super) struct ProjectGuard {
     pub(super) entries: Vec<PathBuf>,
     pub(super) files: Vec<PathBuf>,
     pub(super) trees: Vec<PathBuf>,
-    /// The `worktrees/` of each guarded git directory and the project's
-    /// `.agix/worktrees/`: what a worktree made after the profile was
+    /// The `worktrees/` of each guarded git directory and of each engine
+    /// directory in the project: what a worktree made after the profile was
     /// written lands in, where no fixed path names its control files yet.
     pub(super) worktree_parents: WorktreeParents,
 }
@@ -373,7 +360,7 @@ pub(super) struct ProjectGuard {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) struct WorktreeParents {
     pub(super) admin: Vec<PathBuf>,
-    pub(super) links: PathBuf,
+    pub(super) links: Vec<PathBuf>,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -385,7 +372,6 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
         .as_ref()
         .map(|g| g.dir.clone())
         .unwrap_or_else(|| base::path::resolve_physically(&git));
-    let agix_dir = base::path::resolve_physically(&cwd.join(".agix"));
 
     let mut entries = vec![git.clone()];
     if git_dir != git {
@@ -410,15 +396,14 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
     let configured = git_configured(cwd, &git_dir);
     trees.extend(configured.hooks);
     files.extend(configured.included);
-    for name in ENGINE_CONFIG_ROOTS {
-        let root = cwd.join(name);
-        let real = base::path::resolve_physically(&root);
+    for root in roots.paths.config_roots_in(cwd) {
+        let real = root.resolved;
         files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
         trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
-        if real != root {
+        if real != root.path {
             entries.push(real);
         }
-        entries.push(root);
+        entries.push(root.path);
     }
     for dir in PROJECT_ENGINE_CONFIG_DIRS {
         let mut above = cwd.to_path_buf();
@@ -433,8 +418,13 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
         trees.push(base::path::resolve_physically(&above));
     }
 
-    let links = agix_dir.join(PROJECT_WORKTREES_DIR);
-    for worktree in subdirs(&links) {
+    let links: Vec<PathBuf> = roots
+        .paths
+        .worktree_dirs_in(cwd)
+        .iter()
+        .map(|dir| base::path::resolve_physically(dir))
+        .collect();
+    for worktree in links.iter().flat_map(|dir| subdirs(dir)) {
         files.push(worktree.join(REPOSITORY_CONFIG_DIR));
     }
     ProjectGuard {
@@ -444,9 +434,6 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
         worktree_parents: WorktreeParents { admin, links },
     }
 }
-
-/// Where a git directory keeps its linked worktrees' entries.
-pub(super) const GIT_WORKTREES_DIR: &str = "worktrees";
 
 /// Where the object store names other stores to read from (`alternates`)
 /// and keeps the indexes git trusts over the objects themselves: shut to a

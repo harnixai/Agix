@@ -344,7 +344,9 @@ pub struct InstanceFile {
 
 /// Where a daemon instance writes the token it made up for its unix socket.
 pub fn unix_socket_token_path(daemon_root: &Path, instance: &str) -> PathBuf {
-    daemon_root.join("auth").join(format!("{instance}.token"))
+    daemon_root
+        .join(base::paths::entry::AUTH)
+        .join(format!("{instance}.token"))
 }
 
 /// A fresh random token, written to `path` (`0600`, in a `0700` directory)

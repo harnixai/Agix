@@ -310,6 +310,38 @@ async fn tool_own_allow_is_honoured_when_nothing_else_objects() {
     }
 }
 
+/// A contained write that names configuration — the instance's own project
+/// directory outside its working space, or a foreign root — is never let
+/// through silently, whatever the instance calls its directory.
+#[tokio::test]
+async fn a_contained_write_to_configuration_is_not_silent_in_either_layout() {
+    for name in [".agix", ".codix"] {
+        let layout = base::paths::Layout::new(name).unwrap();
+        let silent = |content: String| {
+            let layout = layout.clone();
+            async move {
+                let tool = FakeTool::new("Write").contained().matches(&content);
+                let mut ctx = ctx_with_mode(PermissionMode::Default);
+                in_layout(&mut ctx, &layout);
+                matches!(
+                    Policy::empty()
+                        .check_with(&tool, &json!({}), &ctx)
+                        .await
+                        .unwrap(),
+                    PermissionOutcome::Permit {
+                        basis: Basis::Contained,
+                        ..
+                    }
+                )
+            }
+        };
+        assert!(!silent(format!("/tmp/{name}/agents/r.md")).await, "{name}");
+        assert!(!silent("/tmp/.agix/hooks/x.sh".into()).await, "{name}");
+        assert!(!silent("/tmp/.claude/settings.json".into()).await, "{name}");
+        assert!(silent(format!("/tmp/{name}/scratchpad/x")).await, "{name}");
+    }
+}
+
 /// 用户在 settings.json 里写的 deny 规则必须压过工具的自判 Allow。
 #[tokio::test]
 async fn deny_rule_beats_self_allowing_tool() {
@@ -405,8 +437,11 @@ async fn credentials_are_refused_in_every_mode() {
             .matches(&content);
         let tool = if shell { tool.shell() } else { tool };
         let mut ctx = ctx_with_mode(mode);
-        ctx.sandbox_mut().paths =
-            std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
+        ctx.sandbox_mut().paths = std::sync::Arc::new(SensitivePaths::new(
+            Some(state.path()),
+            None,
+            Default::default(),
+        ));
         let d = Policy::empty()
             .check_with(&tool, &json!({}), &ctx)
             .await
@@ -429,7 +464,11 @@ async fn the_rest_of_the_state_root_is_not_a_credential() {
         .contained()
         .matches(&state.path().join("skills/x/SKILL.md").display().to_string());
     let mut ctx = ctx_with_mode(PermissionMode::Default);
-    ctx.sandbox_mut().paths = std::sync::Arc::new(SensitivePaths::new(Some(state.path()), None));
+    ctx.sandbox_mut().paths = std::sync::Arc::new(SensitivePaths::new(
+        Some(state.path()),
+        None,
+        Default::default(),
+    ));
     let d = Policy::empty()
         .check_with(&tool, &json!({}), &ctx)
         .await
@@ -1015,6 +1054,15 @@ fn a_worktree_session_is_refused_by_relative_rules_under_the_project_too() {
 /// where that subdirectory is in the worktree. An allow does not carry over.
 #[test]
 fn project_anchored_refusals_cover_a_worktrees_copy() {
+    for name in [".agix", ".codix"] {
+        refusals_cover_a_worktrees_copy_in(&base::paths::Layout::new(name).unwrap());
+    }
+}
+
+/// Under `layout`, with its project directory spelled where the default
+/// one is below.
+fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
+    let w = |p: &str| p.replace(".agix", layout.project_dir_name());
     let with = |behavior, tool: &str, content: &str| PermissionRule {
         source: RuleSource::ProjectSettings,
         behavior,
@@ -1025,6 +1073,7 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
         let cwd = PathBuf::from(cwd);
         let mut ctx =
             session_state::testing::tool_context_for_test(ExecProviders::in_process(), cwd.clone());
+        in_layout(&mut ctx, layout);
         ctx.session = Arc::new(SessionState::for_tests_in(base::context::SessionEnv {
             refusal_rule_roots: roots.iter().map(PathBuf::from).collect(),
             ..base::context::SessionEnv::new(cwd)
@@ -1032,7 +1081,7 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
         super::super::subject::Named::of(&subject, &ctx).hit(rules, tool, &ctx)
     };
     let read = |p: &str| Subject::ReadPath(p.into());
-    let wt = "/p/.agix/worktrees/wt";
+    let wt = &w("/p/.agix/worktrees/wt");
     let absolute = RuleSet::new(vec![with(RuleBehavior::Deny, "Read", "/p/secrets/**")]);
     let relative = RuleSet::new(vec![
         with(RuleBehavior::Deny, "Read", "secrets/**"),
@@ -1053,17 +1102,17 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
         &[],
         &relative,
         "Read",
-        read("/p/.agix/worktrees/wt/secrets/key")
+        read(&w("/p/.agix/worktrees/wt/secrets/key"))
     )));
     assert!(denied(hit(
         "/p",
         &[],
         &absolute,
         "Read",
-        read("/p/.agix/worktrees/wt/secrets/key")
+        read(&w("/p/.agix/worktrees/wt/secrets/key"))
     )));
     assert!(denied(hit(
-        "/r/.agix/worktrees/wt",
+        &w("/r/.agix/worktrees/wt"),
         &["/r/sub"],
         &relative,
         "Read",
@@ -1074,7 +1123,7 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
         &[],
         &relative,
         "Read",
-        read("/r/.agix/worktrees/wt/sub/secrets/key")
+        read(&w("/r/.agix/worktrees/wt/sub/secrets/key"))
     )));
     assert!(matches!(
         hit(
@@ -1082,7 +1131,7 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
             &[],
             &relative,
             "Edit",
-            Subject::WritePath("/p/.agix/worktrees/wt/docs/a.md".into())
+            Subject::WritePath(w("/p/.agix/worktrees/wt/docs/a.md"))
         ),
         RuleHit::Ask(_)
     ));
@@ -1092,7 +1141,7 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
             &[],
             &relative,
             "Read",
-            read("/p/.agix/worktrees/wt/src/a.rs")
+            read(&w("/p/.agix/worktrees/wt/src/a.rs"))
         ),
         RuleHit::None
     ));
@@ -1111,12 +1160,24 @@ fn project_anchored_refusals_cover_a_worktrees_copy() {
         vec![with(RuleBehavior::Deny, "Read", "secrets/**")],
         "Grep",
         std::path::Path::new("/p"),
+        layout,
     )
     .expect("a deny rule with a path");
-    assert!(walk(std::path::Path::new(
+    assert!(walk(std::path::Path::new(&w(
         "/p/.agix/worktrees/wt/secrets/key"
-    )));
-    assert!(!walk(std::path::Path::new(
+    ))));
+    assert!(!walk(std::path::Path::new(&w(
         "/p/.agix/worktrees/wt/src/a.rs"
-    )));
+    ))));
+    assert!(
+        walk(std::path::Path::new("/p/.agix/worktrees/wt/secrets/key")),
+        "a worktree under .agix is an alias whatever the instance's own name"
+    );
+}
+
+fn in_layout(ctx: &mut base::tool::ToolContext, layout: &base::paths::Layout) {
+    let config = Arc::make_mut(&mut ctx.config);
+    config.layout = layout.clone();
+    Arc::make_mut(&mut config.sandbox).paths =
+        Arc::new(base::paths::SensitivePaths::new(None, None, layout.clone()));
 }

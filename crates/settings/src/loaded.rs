@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use base::interface::config_source::{ConfigSource, Tier};
-use base::paths::{PathSettings, Workspace};
+use base::paths::{Layout, PathSettings, Workspace};
 use base::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
 
 use crate::merge::{merge_fitting, merge_json_values, read_permission_rules};
@@ -97,6 +97,10 @@ impl LoadedSettings {
     /// merged in — lower priority than every settings.json layer. This lets
     /// a caller's CLI `--model` flag act as a fallback rather than a hard
     /// override.
+    ///
+    /// `layout` is what the instance names its directories; `local_dir` is
+    /// its project directory in the project, and every session of these
+    /// settings carries it.
     pub fn load(
         global_dir: PathBuf,
         scene_dir: PathBuf,
@@ -104,6 +108,7 @@ impl LoadedSettings {
         scope: &str,
         default_model: &str,
         sections: &Sections,
+        layout: Layout,
     ) -> Self {
         let source = FileTiers::new(global_dir.clone(), scene_dir.clone(), local_dir.clone());
         Self::load_from(
@@ -114,6 +119,7 @@ impl LoadedSettings {
             scope,
             default_model,
             sections,
+            layout,
         )
     }
 
@@ -127,6 +133,7 @@ impl LoadedSettings {
         scope: &str,
         default_model: &str,
         sections: &Sections,
+        layout: Layout,
     ) -> Self {
         let scratch = global_dir.join(base::paths::STATE_ROOT_SCRATCHPAD);
         let mut loaded = Self::load(
@@ -136,6 +143,7 @@ impl LoadedSettings {
             scope,
             default_model,
             sections,
+            layout,
         );
         loaded.paths.workspace = Workspace::Scratch(scratch);
         loaded
@@ -153,6 +161,7 @@ impl LoadedSettings {
     /// they are where this scene's *data* lives, which `paths` reports and a
     /// settings file is never allowed to override — and they say which
     /// project the project tier is, and whether it is one of its own.
+    #[allow(clippy::too_many_arguments)]
     pub fn load_from(
         source: &dyn ConfigSource,
         global_dir: PathBuf,
@@ -161,6 +170,7 @@ impl LoadedSettings {
         scope: &str,
         default_model: &str,
         sections: &Sections,
+        layout: Layout,
     ) -> Self {
         let base = Settings::defaults_for(default_model);
         let mut merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
@@ -228,6 +238,7 @@ impl LoadedSettings {
             local_dir.clone(),
             Workspace::project_of(&local_dir),
             scope.to_string(),
+            layout,
         );
         paths.project_untrusted = withhold;
         let loaded = Self {

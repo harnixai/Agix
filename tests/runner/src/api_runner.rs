@@ -253,6 +253,7 @@ async fn build_agent(
             "code",
             &model_name,
             &crate::sections::all(),
+            Default::default(),
         )
     } else {
         settings::LoadedSettings::new(

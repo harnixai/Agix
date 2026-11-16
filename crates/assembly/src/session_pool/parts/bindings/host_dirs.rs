@@ -144,8 +144,11 @@ impl HostDirTable {
         self.protected.extend(spellings());
         #[cfg(feature = "skills")]
         {
-            let sensitive =
-                base::paths::SensitivePaths::new(Some(&settings.paths.global_data_dir), None);
+            let sensitive = base::paths::SensitivePaths::new(
+                Some(&settings.paths.global_data_dir),
+                None,
+                settings.paths.layout.clone(),
+            );
             let dirs = accepted
                 .iter()
                 .map(|dir| self.open(dir, &sensitive, hub))
@@ -343,16 +346,13 @@ struct Forbidden {
 impl Forbidden {
     fn of(settings: &LoadedSettings) -> Self {
         let paths = &settings.paths;
-        let config = base::paths::ConfigPaths::from_settings(paths);
+        let config = paths.config_paths();
         let sensitive = base::paths::SensitivePaths::for_paths(&config);
         let cwd = paths.working_dir().to_path_buf();
         let mut roots = vec![
-            (
-                paths.global_data_dir.join("skills"),
-                "the global skill tier",
-            ),
-            (paths.global_data_dir.join("scenes"), "the scene tiers"),
-            (paths.user_data_dir.join("skills"), "the scene's skill tier"),
+            (config.global_skills_dir(), "the global skill tier"),
+            (config.state_root().scenes_dir(), "the scene tiers"),
+            (config.user_skills_dir(), "the scene's skill tier"),
             (cwd.clone(), "the directory the session works in"),
         ];
         if let Some(project) = paths.project_root() {

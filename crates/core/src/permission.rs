@@ -16,7 +16,8 @@ pub enum PermissionMode {
     /// Allow file writes inside the project (the working directory and
     /// `sandbox.additional_directories`) and read-only calls without asking;
     /// ask about the rest, as `default` does. Writes into the project's
-    /// `.git`, `.agix`, `.claude` and `.agents/skills` still ask.
+    /// `.git`, its project directory (`.agix` unless renamed; then `.agix`
+    /// too), `.claude` and `.agents/skills` still ask.
     AcceptEdits,
     /// Ask nothing and skip the rules of the user's tiers. Credentials
     /// (`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)
@@ -112,9 +113,9 @@ pub struct PermissionRule {
 pub enum RuleSource {
     /// `~/.agix/scenes/<scope>/settings.json`
     UserSettings,
-    /// `<git-root>/.agix/settings.json`
+    /// `settings.json` in the project directory (`.agix` by default)
     ProjectSettings,
-    /// `<git-root>/.agix/settings.local.json`
+    /// `settings.local.json` in the project directory
     LocalSettings,
     /// CLI flag (`--permission-mode`, `--allow-tool` 等)
     CliArg,
@@ -240,6 +241,9 @@ pub struct PermissionSettings {
     pub managed: Option<ManagedSettings>,
     /// `None` for a session with no project: a grant lasts the session only.
     pub project_rules: Option<std::sync::Arc<dyn crate::interface::permission::RuleFile>>,
+    /// Whose worktrees a path rule also matches in, as the main checkout
+    /// holds them ([`crate::paths::Layout::main_checkout_copies`]).
+    pub layout: crate::paths::Layout,
 }
 
 /// Whether the project tier of a `LoadedSettings` is in effect as written.

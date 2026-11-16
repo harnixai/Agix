@@ -85,6 +85,7 @@ fn a_filter_the_engines_git_runs_cannot_reach_the_terminal() {
                         state.path().join(".agix"),
                         state.path().join(".agix"),
                         "code",
+                        Default::default(),
                     ),
                     &base::interface::environment::SystemEnvironment,
                     &git,
