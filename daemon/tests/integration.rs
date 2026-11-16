@@ -80,6 +80,7 @@ mod session_unsubscribe;
 mod skill_inline_commands;
 mod subagent_model;
 mod support;
+mod task_route_models;
 mod tool_progress;
 mod tool_result_diff;
 mod transport_auth;

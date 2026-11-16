@@ -1524,7 +1524,10 @@ deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `inp
 `provider` 让这个会话的对话走 `providers` 里那个厂商的 client,而不是设置里
 `task_models.main` 路由到的那个;子 Agent、压缩等其他路由任务仍按设置走。`model`
 省略时用该厂商的 `default_model`。厂商没配置、或 `model` 不在该厂商的 `models`
-白名单里 → `INVALID_PARAMS`。
+白名单里 → `INVALID_PARAMS`。对话的模型依次取:会话自己选的 `model`(`options.model` 或
+`session.setModel`);给了 `provider` 时该厂商的 `default_model`;没给时 `task_models.main`
+解析出的模型(详细写法的 `model`,简写时该厂商的 `default_model`);都没有用设置的
+`model.model_name`。
 
 #### `session.run_turn`
 

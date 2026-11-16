@@ -377,11 +377,18 @@ fn models(
             .provider_client(id)
             .ok_or_else(|| format!("provider `{id}` is not configured"))?,
     };
-    let model_name = spec.model().or_else(|| {
-        provider_id
+    let model_name = spec.model().or_else(|| match provider_id.as_deref() {
+        Some(id) => binding
+            .settings
+            .values
+            .providers
+            .get(id)
+            .and_then(|config| config.default_model.clone()),
+        None => binding
+            .task_router
             .as_ref()
-            .and_then(|id| binding.settings.values.providers.get(id))
-            .and_then(|config| config.default_model.clone())
+            .and_then(|router| router.model_name_for("main"))
+            .map(str::to_string),
     });
     let (model, task_router) = match recorder_config {
         None => (conversation_model, task_router),

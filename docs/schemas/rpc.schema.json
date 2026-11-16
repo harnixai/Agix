@@ -7093,7 +7093,7 @@
           "type": "array"
         },
         "model": {
-          "description": "The conversation's model. `None` takes the provider's `default_model`\nwhen `provider` is given, the settings' model otherwise.",
+          "description": "The conversation's model. `None` takes the provider's `default_model`\nwhen `provider` is given, else the model `task_models.main` routes to,\nelse the settings' model.",
           "type": [
             "string",
             "null"

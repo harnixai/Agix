@@ -43,7 +43,8 @@ pub struct SessionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// The conversation's model. `None` takes the provider's `default_model`
-    /// when `provider` is given, the settings' model otherwise.
+    /// when `provider` is given, else the model `task_models.main` routes to,
+    /// else the settings' model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The conversation's reasoning effort; `None` takes the settings'
