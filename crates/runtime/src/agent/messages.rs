@@ -257,6 +257,12 @@ pub struct ContextReport {
     /// Always `next_step_without_new_input`.
     pub basis: String,
     pub model: String,
+    /// The provider the session's next call is routed to, the one the
+    /// session names first; `None` when nothing routes it (no provider
+    /// configured, or no router built). The engine does not know provider
+    /// ids; the pool fills it in.
+    #[serde(default)]
+    pub provider: Option<String>,
     pub max_tokens: u32,
     pub system: Vec<SystemBlockReport>,
     pub tools: Vec<ToolReport>,

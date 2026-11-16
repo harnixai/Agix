@@ -132,6 +132,20 @@ impl ProjectBinding {
         self.task_router.as_ref()?.provider(id)
     }
 
+    /// The provider a session's main calls go to: the one it names, else the
+    /// one the conversation is routed to. Without a router the settings'
+    /// `default_provider` is not in use, so no provider is reported.
+    pub(in crate::session_pool) fn routed_provider(&self, named: Option<&str>) -> Option<String> {
+        if let Some(named) = named {
+            return Some(named.to_string());
+        }
+        let router = self.task_router.as_ref()?;
+        router
+            .provider_id_for("main")
+            .map(str::to_string)
+            .or_else(|| self.settings.values.default_provider.clone())
+    }
+
     /// Whether a session on this pair may talk to `provider` with `model`.
     ///
     /// A model is checked against the `models` allow-list of the provider it
@@ -153,14 +167,7 @@ impl ProjectBinding {
         let Some(model) = model else {
             return Ok(());
         };
-        let routed = provider
-            .map(str::to_string)
-            .or_else(|| {
-                self.task_router
-                    .as_ref()
-                    .and_then(|r| r.provider_id_for("main").map(str::to_string))
-            })
-            .or_else(|| self.settings.values.default_provider.clone());
+        let routed = self.routed_provider(provider);
         let Some(id) = routed else {
             return Ok(());
         };

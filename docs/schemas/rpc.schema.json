@@ -1585,6 +1585,14 @@
         "model": {
           "type": "string"
         },
+        "provider": {
+          "default": null,
+          "description": "The provider the session's next call is routed to, the one the\nsession names first; `None` when nothing routes it (no provider\nconfigured, or no router built). The engine does not know provider\nids; the pool fills it in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "system": {
           "items": {
             "$ref": "#/$defs/SystemBlockReport"

@@ -101,7 +101,7 @@ impl Agent {
     /// Ask the next turn's model calls for the model the session's state
     /// holds, when a host chose one: the choice outlives this engine, and
     /// every engine the session runs on reads it here.
-    fn adopt_model_choice(&mut self) {
+    pub(super) fn adopt_model_choice(&mut self) {
         let Some(model) = self.session_state.model_choice() else {
             return;
         };

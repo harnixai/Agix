@@ -302,9 +302,28 @@ impl SessionPool {
             .context_request(session_id, runtime::agent::ContextRequest::Inspect)
             .await?
         {
-            runtime::agent::ContextAnswer::Inspected(report) => Ok(report),
+            runtime::agent::ContextAnswer::Inspected(mut report) => {
+                report.provider = self.routed_provider_of(session_id).await;
+                Ok(report)
+            }
             other => Err(unexpected_answer(other)),
         }
+    }
+
+    async fn routed_provider_of(&self, session_id: &str) -> Option<String> {
+        let (project, scene) = self
+            .live
+            .with_live(session_id, |live| {
+                (
+                    live.core.project().map(std::path::Path::to_path_buf),
+                    live.core.scene().id.clone(),
+                )
+            })
+            .await?;
+        let named = self.specs.get(session_id).and_then(|spec| spec.provider());
+        self.binding_for(project.as_deref(), &scene)
+            .await
+            .routed_provider(named.as_deref())
     }
 
     /// `session.dropMessages`: the positions dropped.

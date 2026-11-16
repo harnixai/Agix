@@ -380,3 +380,17 @@ async fn a_prompt_chosen_behind_a_delete_finds_the_session_gone() {
     let entries = pool.directory.load_entries(&sid).await;
     assert_the_session_stays_deleted(&pool, &sid, entries);
 }
+
+#[tokio::test]
+async fn a_pair_with_no_router_reports_no_routed_provider_unless_one_is_named() {
+    let (pool, _dir) = test_pool().await;
+    let mut settings = (*pool.bindings.pool_settings().await).clone();
+    settings.values.default_provider = Some("ghost".into());
+    let binding = pool.bindings.binding_from(settings);
+    assert!(binding.task_router.is_none());
+    assert_eq!(binding.routed_provider(None), None);
+    assert_eq!(
+        binding.routed_provider(Some("named")).as_deref(),
+        Some("named")
+    );
+}

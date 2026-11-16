@@ -2411,7 +2411,9 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 { "session_id": "…" }
 // ← result
 { "basis": "next_step_without_new_input",
-  "model": "…", "max_tokens": 0,
+  "model": "…",                             // `session.setModel` 换上的那个,没换过就是设置路由到的
+  "provider": "…",                          // 下一次调用路由到的厂商 id;会话指名的厂商优先;没有可用的路由(没有配置厂商,或路由没建起来)时为 null
+  "max_tokens": 0,
   "system": [ { "name": "skills.catalog",   // 块名,见引擎的扩展点文档
                 "role": "user",             // system:进系统提示;user:作为对话开头的一条消息
                 "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"}

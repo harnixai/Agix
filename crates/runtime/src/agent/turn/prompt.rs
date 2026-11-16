@@ -737,6 +737,7 @@ impl Agent {
     /// memories recalled for it, anything a hook injects on submit.
     pub(super) async fn inspect_context(&mut self) -> crate::agent::ContextReport {
         use crate::agent::{ContextReport, MessagesReport, SystemBlockReport, ToolReport};
+        self.adopt_model_choice();
         let counter = self.session.token_counter().clone();
         let tokens_of = |text: &str| {
             counter.count_messages(&[ModelMessage {
@@ -781,6 +782,7 @@ impl Agent {
         ContextReport {
             basis: "next_step_without_new_input".to_string(),
             model,
+            provider: None,
             max_tokens: self.settings.values.model.max_tokens,
             system,
             tools,

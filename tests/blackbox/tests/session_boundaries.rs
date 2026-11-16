@@ -1613,3 +1613,76 @@ async fn a_host_tool_name_with_hyphens_is_accepted_and_reaches_the_host_unchange
     run.finish().await;
     Ok(())
 }
+
+async fn inspected_context(run: &mut LiveRun, session: &str) -> anyhow::Result<Value> {
+    let r = run
+        .client
+        .call("session.inspectContext", json!({ "session_id": session }))
+        .await?;
+    anyhow::ensure!(r.error.is_none(), "{r:?}");
+    Ok(r.result.unwrap_or_default())
+}
+
+async fn inspected_model(run: &mut LiveRun, session: &str) -> anyhow::Result<Value> {
+    Ok(inspected_context(run, session).await?["model"].clone())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn inspect_context_reports_the_model_set_after_the_session_started() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("inspect-after-set-model", &stub).start().await?;
+    let session = run.session().await?;
+    let before = inspected_model(&mut run, &session).await?;
+    let chosen = "switched-model-x";
+    assert_ne!(before, json!(chosen));
+    let set = run.client.session_set_model(&session, chosen).await?;
+    anyhow::ensure!(set.error.is_none(), "{set:?}");
+    let after = inspected_model(&mut run, &session).await?;
+    assert_eq!(after, json!(chosen));
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn inspect_context_reports_the_provider_the_next_call_goes_to() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let provider = |model: &str| {
+        json!({
+            "api_type": "anthropic",
+            "base_url": stub.base_url().as_str(),
+            "api_key": "stub-key",
+            "default_model": model,
+            "models": [model]
+        })
+    };
+    let mut run = stubbed("inspect-provider", &stub)
+        .settings(json!({
+            "providers": { "first": provider("model-one"), "second": provider("model-two") },
+            "default_provider": "first"
+        }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    assert_eq!(
+        {
+            let c = inspected_context(&mut run, &session).await?;
+            c["provider"].clone()
+        },
+        json!("first")
+    );
+    let set = run
+        .client
+        .call(
+            "session.setModel",
+            json!({ "session_id": session, "model": "model-two", "provider": "second" }),
+        )
+        .await?;
+    anyhow::ensure!(set.error.is_none(), "{set:?}");
+    let c = inspected_context(&mut run, &session).await?;
+    assert_eq!(
+        (&c["provider"], &c["model"]),
+        (&json!("second"), &json!("model-two"))
+    );
+    run.finish().await;
+    Ok(())
+}
