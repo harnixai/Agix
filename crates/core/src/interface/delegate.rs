@@ -74,6 +74,8 @@ pub enum Workdir {
     /// A git worktree of the parent's project, by name.
     Worktree(String),
     At(PathBuf),
+    /// A worktree the caller made, with the git directory it found then.
+    Linked(crate::paths::LinkedWorktree),
 }
 
 #[derive(Debug, Clone)]

@@ -76,6 +76,10 @@ pub struct AgentInput {
     pub description: Option<String>,
     #[serde(default, alias = "subagentType")]
     pub subagent_type: Option<String>,
+    /// Run the sub-agent in a git worktree of its own,
+    /// `.agix/worktrees/<name>` on branch `agix/worktree-<name>`. Removed
+    /// when the agent ends if nothing was left in it; otherwise kept, and the
+    /// result names its path and branch.
     #[serde(default)]
     pub worktree: Option<String>,
     #[serde(default, alias = "run_in_background", alias = "runInBackground")]
@@ -165,6 +169,26 @@ impl AgentTool {
         }
     }
 
+    async fn make_worktree(
+        &self,
+        ctx: &ToolContext,
+        slug: &str,
+    ) -> Result<tools::worktree::WorktreeHandle, base::error::ToolError> {
+        // From the project, not the working directory: a sub-agent working in
+        // a worktree would find the worktree as the repository, whose git
+        // directory a sandboxed git refuses.
+        let repo = self
+            .delegator
+            .env
+            .settings
+            .paths
+            .project_root()
+            .map_or_else(|| ctx.session.env().cwd.clone(), Path::to_path_buf);
+        create_worktree(&ctx.exec, &ctx.engine_git, &repo, slug)
+            .await
+            .map_err(|e| base::error::ToolError::Execution(anyhow!("worktree: {e}")))
+    }
+
     async fn start_in_background(
         &self,
         mut req: DelegateRequest,
@@ -173,38 +197,13 @@ impl AgentTool {
         req.mode = DelegateMode::Background {
             notify_parent: true,
         };
-        let started = match self.delegator.delegate(req).await {
-            Ok(Delegated::Started(started)) => started,
-            Ok(Delegated::Finished(_)) => {
-                return Err(base::error::ToolError::Execution(anyhow!(
-                    "a background sub-agent finished before it was started"
-                )))
-            }
-            Err(e) => {
-                if let Some(mut h) = worktree {
-                    h.cleanup().await;
-                }
-                return Err(tool_error(e));
-            }
-        };
-        if let Some(mut h) = worktree {
-            match self
-                .delegator
-                .env
-                .parent
-                .state
-                .find_running_task(&started.task_id)
-            {
-                Some(task) => {
-                    tokio::spawn(async move {
-                        task.wait_ended().await;
-                        h.cleanup().await;
-                    });
-                }
-                None => h.cleanup().await,
-            }
+        match self.delegator.dispatch(req, worktree).await {
+            Ok(Delegated::Started(started)) => Ok(bg_result(&started.task_id, "spawned")),
+            Ok(Delegated::Finished(_)) => Err(base::error::ToolError::Execution(anyhow!(
+                "a background sub-agent finished before it was started"
+            ))),
+            Err(e) => Err(tool_error(e)),
         }
-        Ok(bg_result(&started.task_id, "spawned"))
     }
 }
 
@@ -293,19 +292,11 @@ impl base::tool::Tool for AgentTool {
         }
         req.prompt = inp.prompt;
         let worktree = match &inp.worktree {
-            Some(slug) => {
-                let git = ctx.engine_git.clone();
-                match create_worktree(&ctx.exec, &git, &ctx.session.env().cwd, slug).await {
-                    Ok(h) => Some(h),
-                    Err(e) => {
-                        return Err(base::error::ToolError::Execution(anyhow!("worktree: {e}")))
-                    }
-                }
-            }
+            Some(slug) => Some(self.make_worktree(&ctx, slug).await?),
             None => None,
         };
         if let Some(h) = &worktree {
-            req.workdir = Workdir::At(h.path().to_path_buf());
+            req.workdir = Workdir::Linked(h.linked());
         }
         if inp.background {
             return self.start_in_background(req, worktree).await;
@@ -314,20 +305,28 @@ impl base::tool::Tool for AgentTool {
             req.asks = AskRoute::Refuse;
         }
         let delegated = self.delegator.delegate(req).await;
-        if let Some(mut h) = worktree {
-            h.cleanup().await;
-        }
+        let kept = match worktree {
+            Some(h) => h.remove_if_untouched().await,
+            None => None,
+        };
+        let left = kept
+            .as_ref()
+            .and_then(|kept| worktree_element(&kept_worktree_detail(kept)))
+            .map(|element| format!("\n\n{element}"))
+            .unwrap_or_default();
         Ok(match delegated {
             Ok(Delegated::Finished(outcome)) => match outcome.end {
-                DelegateEnd::Failed(e) => sub_agent_error(e),
+                DelegateEnd::Failed(e) => sub_agent_error(format!("{e}{left}")),
                 _ => {
-                    let mut result = base::tool::ToolResult::text(outcome.text);
+                    let mut result = base::tool::ToolResult::text(outcome.text + &left);
                     result.structured_content = outcome.structured;
                     result
                 }
             },
-            Ok(Delegated::Started(_)) => sub_agent_error("it was started instead of waited on"),
-            Err(e) => sub_agent_error(tool_error(e)),
+            Ok(Delegated::Started(_)) => {
+                sub_agent_error(format!("it was started instead of waited on{left}"))
+            }
+            Err(e) => sub_agent_error(format!("{}{left}", tool_error(e))),
         })
     }
 }

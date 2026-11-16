@@ -293,6 +293,59 @@ fn ordinary_work_still_runs_under_the_hardened_profile() {
     assert!(s.tmp.join("f").is_file());
 }
 
+/// A sub-agent working in a worktree of the project commits there — again,
+/// and amending — as the root session does in the project, and cannot
+/// rewrite what git runs.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_command_in_a_worktree_commits_and_cannot_plant_what_git_runs() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&s.project)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
+    let common = s.project.join(".git");
+    let runs = |command: &str| s.runs_in_worktree("wt", command);
+
+    for command in [
+        "echo b > b && git add b && git commit -qm in-the-worktree",
+        "echo c > c && git add c && git commit -qm again",
+        "git commit -q --amend -m amended",
+    ] {
+        assert!(runs(command), "`{command}` in the worktree was refused");
+    }
+    for command in [
+        "git config x.y z".to_string(),
+        format!(
+            "echo '[x]' > '{}/worktrees/wt/config.worktree'",
+            common.display()
+        ),
+        format!(
+            "echo 'touch pwned' > '{}/hooks/post-commit'",
+            common.display()
+        ),
+        format!("echo /tmp > '{}/worktrees/wt/commondir'", common.display()),
+        format!(
+            "echo /tmp/.git > '{}/worktrees/wt/gitdir'",
+            common.display()
+        ),
+        "echo gitdir: /tmp > .git".to_string(),
+    ] {
+        assert!(!runs(&command), "`{command}` was allowed");
+    }
+    let config = std::fs::read_to_string(common.join("config")).unwrap();
+    assert!(!config.contains("[x]"), "{config}");
+    assert!(!common.join("hooks/post-commit").exists());
+}
+
 /// A session's temporary directory sits in the state root, which is
 /// otherwise shut: its own is writable, a sibling session's is not.
 #[cfg(target_os = "macos")]
@@ -552,4 +605,215 @@ fn a_link_in_a_denied_directory_does_not_read_through() {
         let read = format!("cat '{}'", path.display());
         assert!(!s.run_under(&read, policy.clone()), "{}", path.display());
     }
+}
+
+/// A command confined before a sub-agent's worktree existed — a background
+/// child an earlier call left running, a parallel sub-agent's — cannot
+/// rewrite that worktree's links, and a rewrite made anyway does not widen
+/// what the sub-agent's commands may write: their git directory is the one
+/// the engine found when it made the worktree, never the one the links name.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_command_older_than_a_worktree_cannot_redirect_its_links() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&s.project)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    let victim = base::path::resolve_physically(&s.elsewhere);
+    let fake = s.tmp.join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    std::fs::write(fake.join("commondir"), format!("{}\n", victim.display())).unwrap();
+    let common = s.project.join(".git");
+    for (slug, link, planted) in [
+        ("wt1", "commondir", victim.display().to_string()),
+        ("wt2", "gitdir", "/tmp/.git".to_string()),
+        ("wt3", "link", format!("gitdir: {}", fake.display())),
+    ] {
+        let target = match link {
+            "link" => s.project.join(format!(".agix/worktrees/{slug}/.git")),
+            name => common.join(format!("worktrees/{slug}/{name}")),
+        };
+        let plant = format!("echo '{planted}' > '{}'", target.display());
+        let additional = vec![s.tmp.clone()];
+        let early = wrap(SandboxOptions {
+            command: &plant,
+            cwd: &s.project,
+            additional_writable: &additional,
+            disable: false,
+            policy: SandboxPolicy {
+                state_root: Some(s.state_root.clone()),
+                ..Default::default()
+            },
+        });
+        git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            slug,
+            &format!(".agix/worktrees/{slug}"),
+        ]);
+        let rewrote = std::process::Command::new(&early.spec.program)
+            .args(&early.spec.args)
+            .current_dir(&s.project)
+            .env("TMPDIR", &s.tmp)
+            .status()
+            .unwrap()
+            .success();
+        assert!(!rewrote, "{slug}: {} was rewritten", target.display());
+
+        std::fs::write(&target, format!("{planted}\n")).unwrap();
+        let escaped =
+            s.runs_in_worktree(slug, &format!("echo pwned > '{}/{slug}'", victim.display()));
+        assert!(!escaped, "{slug}: wrote {}", victim.join(slug).display());
+    }
+}
+
+/// On a case-insensitive volume, a worktree sub-agent's command does not
+/// reach the guarded files of the git directory by spelling their names in
+/// another case, directly or by renaming over them.
+#[cfg(target_os = "macos")]
+#[test]
+fn case_variants_of_guarded_git_files_are_refused_in_a_worktree() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&s.project)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    };
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
+    let common = s.project.join(".git");
+    let worktree = s.project.join(".agix/worktrees/wt");
+    if !common.join("CONFIG").exists() {
+        return;
+    }
+    let snapshot = |p: &std::path::Path| std::fs::read(p).ok();
+    let guarded = [
+        common.join("config"),
+        common.join("worktrees/wt/commondir"),
+        common.join("worktrees/wt/gitdir"),
+        common.join("objects/info/alternates"),
+        worktree.join(".git"),
+    ];
+    let before: Vec<_> = guarded.iter().map(|p| snapshot(p)).collect();
+    let g = common.display().to_string();
+    let w = worktree.display().to_string();
+    for cmd in [
+        format!("echo '[x]' >> '{g}/CONFIG'"),
+        format!("echo x > '{g}/objects/x.tmp' && mv -f '{g}/objects/x.tmp' '{g}/Config'"),
+        format!("echo x > '{g}/worktrees/wt/COMMONDIR'"),
+        format!(
+            "echo x > '{g}/worktrees/wt/x2.tmp' && mv -f '{g}/worktrees/wt/x2.tmp' \
+             '{g}/worktrees/wt/GitDir'"
+        ),
+        format!("echo /x > '{g}/objects/INFO/alternates'"),
+        format!("echo x > '{w}/.GIT'"),
+        format!("mkdir -p '{g}/HOOKS' && echo x > '{g}/HOOKS/post-commit'"),
+    ] {
+        s.runs_in_worktree("wt", &cmd);
+    }
+    let reached: Vec<String> = guarded
+        .iter()
+        .zip(&before)
+        .filter(|(p, b)| snapshot(p) != **b)
+        .map(|(p, _)| p.display().to_string())
+        .chain(
+            common
+                .join("hooks/post-commit")
+                .exists()
+                .then(|| "hooks/post-commit".to_string()),
+        )
+        .collect();
+    assert!(
+        s.runs_in_worktree("wt", &format!("echo ok > '{g}/objects/control'")),
+        "control: the object store is not writable at all"
+    );
+    assert!(reached.is_empty(), "rewritten: {reached:#?}");
+}
+
+/// A worktree sub-agent's command writes no more of the shared git
+/// directory than a commit on its own branch needs: not another branch's
+/// ref or reflog, `packed-refs`, `info/`, `objects/info/`, the main
+/// worktree's `HEAD` and index, or another worktree's entry.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_worktree_command_cannot_rewrite_shared_refs_or_object_plumbing() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&s.project)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["branch", "main-ish"]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "other",
+        ".agix/worktrees/other",
+    ]);
+    let common = s.project.join(".git");
+    std::fs::create_dir_all(common.join("objects/info")).unwrap();
+    std::fs::create_dir_all(common.join("info")).unwrap();
+    let main_ish = git(&["rev-parse", "main-ish"]);
+    let g = common.display().to_string();
+    let shared = [
+        "refs/heads/main-ish",
+        "refs/heads/main-ish.lock",
+        "refs/tags/planted",
+        "logs/refs/heads/main-ish",
+        "logs/HEAD",
+        "packed-refs",
+        "info/exclude",
+        "info/attributes",
+        "objects/info/alternates",
+        "HEAD",
+        "index",
+        "worktrees/other/HEAD",
+        "worktrees/other/index",
+    ];
+    let mut writable = Vec::new();
+    for rel in shared {
+        let cmd = format!("mkdir -p \"$(dirname '{g}/{rel}')\" ; echo XX >> '{g}/{rel}'");
+        s.runs_in_worktree("wt", &cmd);
+        if std::fs::read_to_string(common.join(rel)).is_ok_and(|c| c.contains("XX")) {
+            writable.push(rel);
+        }
+    }
+    assert!(
+        writable.is_empty(),
+        "a worktree sub-agent rewrote shared git state: {writable:#?}"
+    );
+    assert!(
+        s.runs_in_worktree(
+            "wt",
+            "echo b > b && git add b && git commit -qm mine && git branch -f main-ish HEAD; \
+             git rev-parse HEAD"
+        ),
+        "a commit on its own branch was refused"
+    );
+    assert_eq!(git(&["rev-parse", "main-ish"]), main_ish);
 }

@@ -85,6 +85,9 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     pub(in crate::session_pool) binding: &'a ProjectBinding,
     /// `None` for a no-project session.
     pub(in crate::session_pool) project_root: Option<&'a Path>,
+    /// The worktree of the project the session's tools work in, when not the
+    /// project itself.
+    pub(in crate::session_pool) worktree: Option<&'a base::paths::LinkedWorktree>,
     /// What the session's scripts resolve against: its project, else the
     /// pool's own directory.
     pub(in crate::session_pool) script_root: &'a Path,
@@ -174,8 +177,13 @@ impl EngineFactory {
         let options = spec.options.as_ref();
         let scene_id = scene.id.clone();
         let (model, task_router, model_name, clock) = models(session_id, binding, spec)?;
-        let settings_snapshot =
-            self.snapshot(&binding.settings, options, model_name.as_ref(), session_id);
+        let settings_snapshot = self.snapshot(
+            &binding.settings,
+            options,
+            model_name.as_ref(),
+            session_id,
+            req.worktree,
+        );
         let permission =
             resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot, options);
 
@@ -293,13 +301,14 @@ impl EngineFactory {
     }
 
     /// The pair's settings with this session's permission mode, model,
-    /// prompt timeout and scratch workspace written in, and the mode.
+    /// prompt timeout, scratch workspace and worktree written in.
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
         options: Option<&SessionOptions>,
         model_name: Option<&String>,
         session_id: &str,
+        worktree: Option<&base::paths::LinkedWorktree>,
     ) -> Arc<LoadedSettings> {
         // A prompt timeout given to the daemon overrides the setting, and the
         // wait it bounds lives in the engine, so it travels as a setting
@@ -324,6 +333,7 @@ impl EngineFactory {
                     base::paths::session_scratch_dir(&snap.paths.global_data_dir, session_id),
                 );
             }
+            snap.paths.worktree = worktree.cloned();
             Arc::new(snap)
         }
     }

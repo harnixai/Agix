@@ -1,7 +1,8 @@
 //! `EnterWorktreeTool` / `ExitWorktreeTool` —— 显式 worktree 控制。
 //!
 //! 与 AgentTool.worktree 字段的区别：
-//! - **AgentTool.worktree**：**子 agent**在 worktree 里跑；自动清理；用户场景是"派 sub-agent"
+//! - **AgentTool.worktree**：**子 agent**在 worktree 里跑；它结束时 worktree 干净才删，
+//!   否则留着并在结果里给出路径与分支；用户场景是"派 sub-agent"
 //! - **Enter/ExitWorktree**：**当前 session**进 worktree（改 cwd 概念）；适合"我要在隔离环境里折腾一会儿"
 //!
 //! 会话的 cwd 不变：EnterWorktree 返回 worktree 的绝对路径，模型用绝对路径
@@ -235,7 +236,7 @@ impl Tool for ExitWorktreeTool {
         }
 
         if !discard {
-            let unsaved = unsaved_work(&ctx, &path, &branch).await;
+            let unsaved = unsaved_work(&ctx, handle.repo_root(), &path, &branch).await;
             if !unsaved.is_empty() {
                 self.put_back(handle);
                 return Ok(ToolResult::error_text(format!(
@@ -288,14 +289,27 @@ impl ExitWorktreeTool {
 /// A `git` that could not be run at all answers "nothing", because the
 /// caller's only use for the answer is whether to refuse a removal the user
 /// asked for, and refusing on an unanswerable question strands the worktree.
-async fn unsaved_work(ctx: &ToolContext, path: &std::path::Path, branch: &str) -> Vec<String> {
+/// So git starts from the repository's root, `-C` the worktree: under bwrap
+/// a sandboxed git working in `/tmp` sees nothing there but its working
+/// directory, which from the worktree leaves out the git directory.
+async fn unsaved_work(
+    ctx: &ToolContext,
+    root: &std::path::Path,
+    path: &std::path::Path,
+    branch: &str,
+) -> Vec<String> {
     let git = (*ctx.engine_git).clone();
+    let worktree = path.to_string_lossy();
     let run = |args: Vec<String>| {
         let git = git.clone();
+        let worktree = worktree.clone();
         async move {
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let args: Vec<&str> = ["-C", worktree.as_ref()]
+                .into_iter()
+                .chain(args.iter().map(String::as_str))
+                .collect();
             let out = tokio::select! {
-                out = git.git(path, GitAccess::ReadOnly, &args, GIT_TIMEOUT) => out.ok()?,
+                out = git.git(root, GitAccess::ReadOnly, &args, GIT_TIMEOUT) => out.ok()?,
                 () = ctx.cancel.cancelled() => return None,
             };
             out.status
@@ -388,6 +402,7 @@ mod tests {
         enter: EnterWorktreeTool,
         exit: ExitWorktreeTool,
         registry: Arc<WorktreeRegistry>,
+        sandbox_state: Option<tempfile::TempDir>,
     }
 
     impl Session {
@@ -403,14 +418,37 @@ mod tests {
                 enter: EnterWorktreeTool::new(registry.clone()),
                 exit: ExitWorktreeTool::new(registry.clone()),
                 registry,
+                sandbox_state: None,
+            }
+        }
+
+        fn sandboxed() -> Self {
+            Self {
+                sandbox_state: Some(tempfile::TempDir::new().unwrap()),
+                ..Self::new()
             }
         }
 
         fn ctx(&self) -> ToolContext {
-            session_state::testing::tool_context_for_test(
+            let mut ctx = session_state::testing::tool_context_for_test(
                 platform::local_providers(),
                 self.repo.path().to_path_buf(),
-            )
+            );
+            if let Some(state) = &self.sandbox_state {
+                ctx.engine_git = Arc::new(base::engine_exec::EngineExec::new(
+                    platform::local_providers(),
+                    base::engine_exec::Confinement::Sandboxed {
+                        policy: base::interface::exec::SandboxPolicy {
+                            state_root: Some(state.path().to_path_buf()),
+                            ..Default::default()
+                        },
+                        require_enforcement: true,
+                        tmpdir: None,
+                    },
+                    base::permission::ProjectTrust::Trusted,
+                ));
+            }
+            ctx
         }
 
         async fn enter(&self, slug: &str) -> ToolResult {
@@ -484,6 +522,23 @@ mod tests {
         assert!(refused.is_error);
         assert!(text(&refused).contains("1 commit"), "{}", text(&refused));
         assert!(tree.exists());
+    }
+
+    /// The same with the session's git in the sandbox: what it says about
+    /// the worktree still reaches the refusal.
+    #[tokio::test]
+    async fn a_sandboxed_git_still_sees_what_removal_would_lose() {
+        if !crate::bash::sandbox_status().starts_with("available") {
+            return;
+        }
+        let s = Session::sandboxed();
+        let entered = s.enter("boxed").await;
+        assert!(!entered.is_error, "{}", text(&entered));
+        std::fs::write(s.tree("boxed").join("new.txt"), "x").unwrap();
+        let refused = s.exit(json!({ "action": "remove" })).await;
+        assert!(refused.is_error, "{}", text(&refused));
+        assert!(text(&refused).contains("uncommitted"), "{}", text(&refused));
+        assert!(s.tree("boxed").exists());
     }
 
     #[tokio::test]

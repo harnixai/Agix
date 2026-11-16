@@ -95,6 +95,8 @@ pub enum SessionEventPayload {
         timeout_ms: u64,
         task_id: Option<String>,
         agent_session_id: Option<String>,
+        cwd: String,
+        depth: u32,
     },
     HostToolCallResolved {
         call_id: String,
@@ -109,6 +111,8 @@ pub enum SessionEventPayload {
         timeout_ms: u64,
         task_id: Option<String>,
         agent_session_id: Option<String>,
+        cwd: String,
+        depth: u32,
     },
     HookCallResolved {
         call_id: String,
@@ -598,6 +602,8 @@ impl SessionEventPayload {
                 timeout_ms,
                 task_id,
                 agent_session_id,
+                cwd,
+                depth,
                 host: _,
             } => Self::HostToolCall {
                 call_id: call_id.clone(),
@@ -607,6 +613,8 @@ impl SessionEventPayload {
                 timeout_ms: *timeout_ms,
                 task_id: task_id.clone(),
                 agent_session_id: agent_session_id.clone(),
+                cwd: cwd.display().to_string(),
+                depth: *depth,
             },
             AgentEvent::HostToolCallResolved {
                 call_id,
@@ -624,6 +632,8 @@ impl SessionEventPayload {
                 timeout_ms,
                 task_id,
                 agent_session_id,
+                cwd,
+                depth,
                 host: _,
             } => Self::HookCall {
                 call_id: call_id.clone(),
@@ -632,6 +642,8 @@ impl SessionEventPayload {
                 timeout_ms: *timeout_ms,
                 task_id: task_id.clone(),
                 agent_session_id: agent_session_id.clone(),
+                cwd: cwd.display().to_string(),
+                depth: *depth,
             },
             AgentEvent::HostHookCallResolved {
                 call_id,

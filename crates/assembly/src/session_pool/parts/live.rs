@@ -57,6 +57,23 @@ impl LogHealth {
     }
 }
 
+/// Where a session works: its project, `None` without one, and the
+/// worktree of it that a sub-agent's sidechain brought back from its log
+/// works in.
+pub(in crate::session_pool) struct Workplace {
+    pub(in crate::session_pool) project: Option<PathBuf>,
+    pub(in crate::session_pool) worktree: Option<base::paths::LinkedWorktree>,
+}
+
+impl From<Option<PathBuf>> for Workplace {
+    fn from(project: Option<PathBuf>) -> Self {
+        Self {
+            project,
+            worktree: None,
+        }
+    }
+}
+
 /// The session itself, whichever engine runs it.
 pub(in crate::session_pool) struct SessionCore {
     id: Arc<str>,
@@ -65,6 +82,7 @@ pub(in crate::session_pool) struct SessionCore {
     scene: Arc<SceneSpec>,
     /// `None` for a no-project session.
     project: Option<PathBuf>,
+    worktree: Option<base::paths::LinkedWorktree>,
     created_at: Instant,
     state: Arc<SessionState>,
     /// Who watches this session, what it is still asking, and when it was
@@ -89,23 +107,24 @@ impl SessionCore {
     pub(in crate::session_pool) fn new(
         id: &str,
         scene: Arc<SceneSpec>,
-        project: Option<PathBuf>,
+        place: Workplace,
         naming: Naming,
     ) -> Arc<Self> {
-        Self::active_at(id, scene, project, naming, Instant::now())
+        Self::active_at(id, scene, place, naming, Instant::now())
     }
 
     pub(in crate::session_pool) fn active_at(
         id: &str,
         scene: Arc<SceneSpec>,
-        project: Option<PathBuf>,
+        place: Workplace,
         naming: Naming,
         at: Instant,
     ) -> Arc<Self> {
         Arc::new(Self {
             id: Arc::from(id),
             scene,
-            project,
+            project: place.project,
+            worktree: place.worktree,
             created_at: at,
             state: Arc::new(SessionState::new()),
             hub: Arc::new(SessionHub::active_at(at)),
@@ -133,6 +152,10 @@ impl SessionCore {
 
     pub(in crate::session_pool) fn project(&self) -> Option<&Path> {
         self.project.as_deref()
+    }
+
+    pub(in crate::session_pool) fn worktree(&self) -> Option<&base::paths::LinkedWorktree> {
+        self.worktree.as_ref()
     }
 
     pub(in crate::session_pool) fn created_at(&self) -> Instant {

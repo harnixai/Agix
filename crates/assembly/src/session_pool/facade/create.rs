@@ -3,7 +3,7 @@
 //! 先造好，再停旧的，旧的停下之后才挂新的）。
 
 use crate::session_pool::parts::factory::{Restore, SessionSeed};
-use crate::session_pool::parts::live::{EngineSlot, Naming, SessionCore};
+use crate::session_pool::parts::live::{EngineSlot, Naming, SessionCore, Workplace};
 use crate::session_pool::*;
 use base::context::Session;
 
@@ -74,7 +74,7 @@ impl SessionPool {
                 sid,
                 scene,
                 binding,
-                project_root_for_meta.clone(),
+                project_root_for_meta.clone().into(),
                 options,
                 None,
             )
@@ -95,15 +95,15 @@ impl SessionPool {
     /// — as the session that log holds, and start its first engine.
     /// `options` only take effect on a session that has no spec yet.
     ///
-    /// `binding`/`project_root_for_meta` are the already-resolved binding for
-    /// whichever project this session belongs to and the value to stamp on
-    /// `Meta.project_root` (`None` = no-project session).
+    /// `binding`/`place` are the already-resolved binding for whichever
+    /// project this session belongs to and where it works; `place.project` is
+    /// the value to stamp on `Meta.project_root` (`None` = no-project session).
     pub(in crate::session_pool) async fn create(
         &self,
         session_id: String,
         scene: Arc<SceneSpec>,
         binding: Arc<ProjectBinding>,
-        project_root_for_meta: Option<PathBuf>,
+        place: Workplace,
         options: Option<&SessionOptions>,
         log: Option<&[history::entry::EnvelopedEntry]>,
     ) -> Result<Arc<SessionCore>, CreateError> {
@@ -112,11 +112,11 @@ impl SessionPool {
         self.live.wait_until_stopped(&session_id).await?;
         let claim = self.claim_log(&session_id).await?;
         let spec = self.spec_for(&session_id, log, options, &binding).await;
-        self.directory.note_served(project_root_for_meta.as_deref());
+        self.directory.note_served(place.project.as_deref());
         let core = SessionCore::new(
             &session_id,
             scene.clone(),
-            project_root_for_meta.clone(),
+            place,
             Naming {
                 is_first_turn: true,
                 ..Naming::default()
@@ -230,7 +230,7 @@ impl SessionPool {
             resume,
             session_id.clone(),
             core.scene().id.to_string(),
-            project_root_for_meta,
+            core.project().map(Path::to_path_buf),
         ));
         info!(%session_id, "session created");
         Ok(core)
@@ -491,6 +491,7 @@ impl SessionPool {
             scene,
             binding,
             project_root: core.project(),
+            worktree: core.worktree(),
             script_root: &script_root,
             spec,
             scene_registry: self.scenes.registry(),

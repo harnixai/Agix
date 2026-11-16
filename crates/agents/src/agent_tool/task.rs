@@ -93,6 +93,9 @@ pub(crate) fn task_notification(task: &base::context::RunningTask, end: &Delegat
     if let Some(d) = detail["description"].as_str() {
         notice.push_str(&format!("<description>{d}</description>\n"));
     }
+    if let Some(worktree) = worktree_element(&detail["worktree"]) {
+        notice.push_str(&worktree);
+    }
     if let DelegateEnd::Failed(e) = end {
         notice.push_str(&format!("<error>{e}</error>\n"));
     }
@@ -107,6 +110,33 @@ pub(crate) fn task_notification(task: &base::context::RunningTask, end: &Delegat
     }
     notice.push_str("</task-notification>");
     notice
+}
+
+/// A kept worktree as its task's `detail.worktree` holds it.
+pub(crate) fn kept_worktree_detail(kept: &::tools::worktree::KeptWorktree) -> Value {
+    serde_json::json!({
+        "path": kept.path.display().to_string(),
+        "branch": kept.branch,
+        "holds": kept.holds,
+    })
+}
+
+/// How a kept worktree reads to the model, in the `Agent` result and in a
+/// background agent's notice.
+pub(crate) fn worktree_element(worktree: &Value) -> Option<String> {
+    let path = worktree["path"].as_str()?;
+    let branch = worktree["branch"].as_str()?;
+    let holds: Vec<&str> = worktree["holds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    Some(format!(
+        "<worktree>\n<path>{path}</path>\n<branch>{branch}</branch>\n<kept>it has {}; it stays \
+         until you remove it</kept>\n</worktree>\n",
+        holds.join(" and ")
+    ))
 }
 
 pub(crate) fn bg_result(task_id: &str, status: &str) -> base::tool::ToolResult {

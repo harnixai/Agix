@@ -78,6 +78,12 @@ pub const REPOSITORY_CONFIG_DIR: &str = ".git";
 /// reads its configuration from.
 pub const GIT_CONTROL_FILES: &[&str] = &["config", "config.worktree", "commondir"];
 
+/// The same in a linked worktree's entry under `<git dir>/worktrees/`, with
+/// `gitdir`, which leads back to the worktree and which git rewrites only
+/// when the worktree is moved or repaired.
+pub const GIT_WORKTREE_CONTROL_FILES: &[&str] =
+    &["config", "config.worktree", "commondir", "gitdir"];
+
 /// The directory in a git directory whose programs git runs.
 pub const GIT_HOOKS_DIR: &str = "hooks";
 

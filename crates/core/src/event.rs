@@ -186,6 +186,12 @@ pub enum AgentEvent {
         /// The sub-agent's session, when a sub-agent made the call.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_session_id: Option<String>,
+        /// As `HostCall::cwd`.
+        #[serde(default)]
+        cwd: std::path::PathBuf,
+        /// As `HostCall::depth`.
+        #[serde(default)]
+        depth: u32,
         /// The connection that provides the tool, when one does.
         #[serde(skip)]
         host: Option<crate::interface::host_call::HostId>,
@@ -210,6 +216,10 @@ pub enum AgentEvent {
         task_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_session_id: Option<String>,
+        #[serde(default)]
+        cwd: std::path::PathBuf,
+        #[serde(default)]
+        depth: u32,
         #[serde(skip)]
         host: Option<crate::interface::host_call::HostId>,
     },

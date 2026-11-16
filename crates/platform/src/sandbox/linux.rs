@@ -13,10 +13,12 @@ use super::{
 };
 use base::paths::{
     ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
-    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, REPOSITORY_CONFIG_DIR,
-    STATE_ROOT_SCENE_FILES, STATE_ROOT_WORKING_DIRS,
+    PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR, STATE_ROOT_SCENE_FILES,
+    STATE_ROOT_WORKING_DIRS,
 };
 use std::path::{Path, PathBuf};
+
+mod worktrees;
 
 pub(super) fn bind(args: &mut Vec<String>, how: &str, path: &Path) {
     let p = path.display().to_string();
@@ -63,7 +65,17 @@ fn writable_by_us(dir: &Path) -> bool {
 /// left alone: binding it writable would open it, and a mount point for an
 /// absent entry cannot be made on a read-only parent.
 fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
-    let git = roots.cwd.join(REPOSITORY_CONFIG_DIR);
+    let dot_git = roots.cwd.join(REPOSITORY_CONFIG_DIR);
+    let git = match &roots.worktree_git {
+        Some(linked) => {
+            if dot_git.symlink_metadata().is_ok_and(|m| m.is_file()) {
+                bind(args, "--ro-bind", &dot_git);
+            }
+            worktrees::guard_linked(args, roots, linked);
+            linked.dir.clone()
+        }
+        None => dot_git,
+    };
     if git.is_dir() {
         let open = roots.opens(&git);
         let submodules = submodules_of(&git);
@@ -84,11 +96,7 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
             for f in GIT_CONTROL_FILES {
                 bind(args, "--ro-bind-try", &repo.join(f));
             }
-            for worktree in subdirs(&repo.join("worktrees")) {
-                for f in GIT_CONTROL_FILES {
-                    bind(args, "--ro-bind-try", &worktree.join(f));
-                }
-            }
+            worktrees::guard_entries(args, roots, repo, open, *repo == git);
             if open {
                 read_only(args, &repo.join(GIT_HOOKS_DIR));
             } else {
@@ -114,10 +122,7 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, agix_masked: bool) {
         }
     }
     guard_project_skills(args, roots);
-    let agix = roots.cwd.join(".agix");
-    for worktree in subdirs(&agix.join(PROJECT_WORKTREES_DIR)) {
-        bind(args, "--ro-bind-try", &worktree.join(REPOSITORY_CONFIG_DIR));
-    }
+    worktrees::guard_links(args, roots);
 }
 
 fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
@@ -571,8 +576,20 @@ fn bind_writable_roots(
     } else if roots.cwd.starts_with("/tmp") && read.shows(&roots.cwd) {
         bind(args, "--ro-bind-try", &roots.cwd);
     }
+    // A worktree's git directory, read-only beneath the parts of it that
+    // are writable, is in the sandbox even where `/tmp` would hide it;
+    // its branch ref is opened by [`guard_project`].
+    let mut opened_by_the_guard = Vec::new();
+    if let Some(linked) = &roots.worktree_git {
+        if read.shows(&linked.dir) {
+            bind(args, "--ro-bind-try", &linked.dir);
+        }
+        opened_by_the_guard = vec![linked.branch_ref(), linked.branch_ref_lock()];
+    }
     for p in &roots.writable {
-        bind(args, "--bind-try", p);
+        if !opened_by_the_guard.contains(p) {
+            bind(args, "--bind-try", p);
+        }
     }
 }
 

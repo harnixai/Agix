@@ -74,6 +74,7 @@ impl SpawnTelemetry {
 pub(crate) struct SubagentPayload {
     pub(crate) session_id: String,
     pub(crate) cwd: std::path::PathBuf,
+    pub(crate) depth: u32,
     pub(crate) permission_mode: base::permission::PermissionMode,
     pub(crate) agent_type: Option<String>,
     pub(crate) stop_reason: Option<String>,
@@ -83,12 +84,14 @@ impl SubagentPayload {
     pub(crate) fn of(
         session_id: &str,
         cwd: &std::path::Path,
+        depth: u32,
         settings: &Settings,
         agent_type: Option<&str>,
     ) -> Self {
         Self {
             session_id: session_id.to_string(),
             cwd: cwd.to_path_buf(),
+            depth,
             permission_mode: settings.permission_mode,
             agent_type: agent_type.map(str::to_string),
             stop_reason: None,
@@ -121,6 +124,7 @@ impl SubagentPayload {
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_else(|| "default".into()),
         )
+        .with_depth(self.depth)
         .with_agent_type(self.agent_type.clone());
         if let (hooks::HookEvent::SubagentStop, Some(reason)) = (event, &self.stop_reason) {
             input = input.with_stop_reason(reason.clone());

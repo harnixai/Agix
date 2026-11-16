@@ -469,6 +469,184 @@ fn linux_the_hooks_path_and_included_config_are_read_only() {
     );
 }
 
+/// What a command leaves running cannot write a worktree made after it
+/// started: `.git/worktrees/` and `.agix/worktrees/` are read-only, the
+/// worktrees already in them opened again beneath and their control files
+/// shut on top. The engine's own git, which makes worktrees, is not held so.
+/// A command in a worktree has its `.git` link shut and guards the git
+/// directory the policy names.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let git = root.join(".git");
+    let admin = git.join("worktrees/wt");
+    let worktree = root.join(".agix/worktrees/wt");
+    std::fs::create_dir_all(&admin).unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+    std::fs::write(admin.join("gitdir"), "x\n").unwrap();
+    std::fs::write(
+        worktree.join(".git"),
+        format!("gitdir: {}\n", admin.display()),
+    )
+    .unwrap();
+    let args_of = |cmd: Confined| -> Vec<String> {
+        let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
+        cmd.spec.args[..end].to_vec()
+    };
+    let cmd = wrap(opts("true", &root));
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let args = args_of(cmd);
+    let shown = |p: &Path| p.display().to_string();
+    let at = |args: &[String], how: &str, p: &Path| {
+        args.windows(3)
+            .position(|w| w == [how, shown(p).as_str(), shown(p).as_str()])
+    };
+    for (parent, entry, control) in [
+        (
+            git.join("worktrees"),
+            admin.clone(),
+            admin.join("commondir"),
+        ),
+        (
+            root.join(".agix/worktrees"),
+            worktree.clone(),
+            worktree.join(".git"),
+        ),
+    ] {
+        let held = at(&args, "--ro-bind", &parent).unwrap_or_else(|| panic!("{args:?}"));
+        let reopened = at(&args, "--bind", &entry).unwrap_or_else(|| panic!("{args:?}"));
+        let shut = at(&args, "--ro-bind-try", &control).unwrap_or_else(|| panic!("{args:?}"));
+        assert!(held < reopened && reopened < shut, "{args:?}");
+    }
+
+    let writable = vec![git.clone(), root.join(".agix/worktrees")];
+    let engine = args_of(wrap(SandboxOptions {
+        command: "true",
+        cwd: &root,
+        additional_writable: &writable,
+        disable: false,
+        policy: SandboxPolicy {
+            only_additional_writable: true,
+            ..Default::default()
+        },
+    }));
+    assert!(
+        at(&engine, "--ro-bind", &git.join("worktrees")).is_none(),
+        "{engine:?}"
+    );
+    assert!(
+        at(&engine, "--ro-bind-try", &admin.join("commondir")).is_some(),
+        "{engine:?}"
+    );
+
+    let linked = worktree_git(&root, "wt");
+    let inside = args_of(wrap(SandboxOptions {
+        command: "true",
+        cwd: &worktree,
+        additional_writable: &linked.writable(),
+        disable: false,
+        policy: SandboxPolicy {
+            worktree_git: Some(linked.clone()),
+            ..Default::default()
+        },
+    }));
+    assert!(at(&inside, "--bind", &git).is_none(), "{inside:?}");
+    assert!(at(&inside, "--ro-bind-try", &git).is_some(), "{inside:?}");
+    assert!(
+        at(&inside, "--ro-bind", &worktree.join(".git")).is_some(),
+        "{inside:?}"
+    );
+    assert!(
+        at(&inside, "--ro-bind-try", &git.join("config")).is_some(),
+        "{inside:?}"
+    );
+    assert!(
+        at(&inside, "--ro-bind-try", &admin.join("gitdir")).is_some(),
+        "{inside:?}"
+    );
+    let absent = shown(&admin.join("config.worktree"));
+    assert!(
+        inside
+            .windows(3)
+            .any(|w| w == ["--ro-bind-try", "/dev/null", absent.as_str()]),
+        "{inside:?}"
+    );
+}
+
+/// The same, run: a worktree made after the command's mounts were laid
+/// shows up read-only in it, control files and `.git` link alike, while a
+/// worktree that was there keeps the entry its commits write.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_worktree_made_after_the_mounts_cannot_be_written() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let make_worktree = |name: &str| {
+        let admin = root.join(".git/worktrees").join(name);
+        let worktree = root.join(".agix/worktrees").join(name);
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+        std::fs::write(
+            admin.join("gitdir"),
+            format!("{}/.git\n", worktree.display()),
+        )
+        .unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", admin.display()),
+        )
+        .unwrap();
+    };
+    make_worktree("wt");
+    let later = [
+        ".git/worktrees/later/commondir",
+        ".git/worktrees/later/gitdir",
+        ".git/worktrees/later/config.worktree",
+        ".agix/worktrees/later/.git",
+        ".agix/worktrees/later/planted",
+    ];
+    let script = format!(
+        "for f in {}; do echo x > \"$f\" 2>/dev/null && echo \"wrote $f\"; done; \
+         echo x > .git/worktrees/wt/index && echo index",
+        later.join(" ")
+    );
+    let cmd = wrap(opts(&script, &root));
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let namespaces_work = std::process::Command::new("bwrap")
+        .args(["--ro-bind", "/", "/", "true"])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !namespaces_work {
+        return;
+    }
+    make_worktree("later");
+
+    let out = std::process::Command::new(&cmd.spec.program)
+        .args(&cmd.spec.args)
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stdout.trim(), "index", "{stdout}{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(root.join(".git/worktrees/later/commondir")).unwrap(),
+        "../..\n"
+    );
+    assert!(!root.join(".git/worktrees/later/config.worktree").exists());
+    assert!(!root.join(".agix/worktrees/later/planted").exists());
+}
+
 /// A project with no `.agents` yet: the project skills directory must not
 /// be creatable, which on Linux means `.agents` itself is held read-only.
 #[cfg(target_os = "linux")]
@@ -552,4 +730,129 @@ fn linux_a_denied_directorys_outside_link_targets_are_hidden() {
             .any(|w| w == ["--ro-bind-try", "/dev/null", &target]),
         "{args:?}"
     );
+}
+
+/// A worktree sub-agent's command commits on its own branch — again, and
+/// amending — and writes nothing else of the shared git directory: not
+/// another branch's ref or reflog, `packed-refs`, `info/`, `objects/info/`,
+/// the main worktree's `HEAD` and index, or another worktree's entry.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_worktree_command_commits_on_its_branch_and_nothing_else() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["branch", "main-ish"]);
+    for slug in ["wt", "other"] {
+        git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            &format!("agix/worktree-{slug}"),
+            &format!(".agix/worktrees/{slug}"),
+        ]);
+    }
+    let common = root.join(".git");
+    std::fs::create_dir_all(common.join("objects/info")).unwrap();
+    std::fs::create_dir_all(common.join("info")).unwrap();
+    let linked = base::paths::WorktreeGit {
+        branch: "agix/worktree-wt".into(),
+        ..worktree_git(&root, "wt")
+    };
+    let worktree = root.join(".agix/worktrees/wt");
+    let runs = |command: &str| {
+        let cmd = wrap(SandboxOptions {
+            command,
+            cwd: &worktree,
+            additional_writable: &linked.writable(),
+            disable: false,
+            policy: SandboxPolicy {
+                worktree_git: Some(linked.clone()),
+                ..Default::default()
+            },
+        });
+        if cmd.mode != SandboxMode::LinuxBwrap {
+            return None;
+        }
+        let out = std::process::Command::new(&cmd.spec.program)
+            .args(&cmd.spec.args)
+            .current_dir(&worktree)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        Some((out.status.success(), out))
+    };
+    if runs("true").is_none_or(|(ran, _)| !ran) {
+        return;
+    }
+    let commit = "git -c user.name=t -c user.email=t@t commit -q";
+    for command in [
+        format!("echo b > b && git add b && {commit} -m in-the-worktree"),
+        format!("echo c > c && git add c && {commit} -m again"),
+        format!("{commit} --amend -m amended"),
+    ] {
+        let (ran, out) = runs(&command).unwrap();
+        assert!(ran, "`{command}` was refused: {out:?}");
+    }
+    assert_eq!(
+        git(&["log", "-1", "--format=%s", "agix/worktree-wt"]).trim(),
+        "amended"
+    );
+
+    let main_ish = git(&["rev-parse", "main-ish"]);
+    let g = common.display().to_string();
+    let mut writable = Vec::new();
+    for rel in [
+        "refs/heads/main-ish",
+        "refs/heads/main-ish.lock",
+        "refs/heads/planted",
+        "refs/heads/agix/worktree-other",
+        "refs/tags/planted",
+        "logs/refs/heads/main-ish",
+        "logs/HEAD",
+        "packed-refs",
+        "info/exclude",
+        "info/attributes",
+        "objects/info/alternates",
+        "HEAD",
+        "index",
+        "config",
+        "worktrees/other/HEAD",
+        "worktrees/other/index",
+        "worktrees/wt/commondir",
+        "worktrees/wt/gitdir",
+        "worktrees/wt/config.worktree",
+    ] {
+        runs(&format!(
+            "mkdir -p \"$(dirname '{g}/{rel}')\" 2>/dev/null; echo XX >> '{g}/{rel}'"
+        ));
+        if std::fs::read_to_string(common.join(rel)).is_ok_and(|c| c.contains("XX")) {
+            writable.push(rel);
+        }
+    }
+    runs(&format!(
+        "git branch -f main-ish HEAD; mv '{g}/refs/heads/agix/worktree-other' '{g}/x'"
+    ));
+    assert!(
+        writable.is_empty(),
+        "a worktree sub-agent rewrote shared git state: {writable:#?}"
+    );
+    assert_eq!(git(&["rev-parse", "main-ish"]), main_ish);
+    assert!(common.join("refs/heads/agix/worktree-other").is_file());
 }

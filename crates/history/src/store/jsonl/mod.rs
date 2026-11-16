@@ -234,11 +234,11 @@ impl JsonlHistoryStore {
     /// The project a session is about to be created under, read off the
     /// `Meta` line that creates it.
     ///
-    /// A sidechain inherits its parent's project rather than landing in the
-    /// no-project bucket: it carries no `project_root` of its own (the engine
-    /// spawning it has no concept of one), but its transcript is anchored to
-    /// the parent's — cascade delete and the parent-child walk both look for
-    /// it there.
+    /// A sidechain records its parent's project; one that records none (its
+    /// parent has no project, or the log predates the field) inherits its
+    /// parent's home rather than landing in the no-project bucket: its
+    /// transcript is anchored to the parent's — cascade delete and the
+    /// parent-child walk both look for it there.
     async fn home_from_meta(&self, entry: &LogEntry) -> Option<Option<PathBuf>> {
         let LogEntry::Meta {
             project_root,

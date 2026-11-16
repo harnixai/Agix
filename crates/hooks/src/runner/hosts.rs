@@ -189,6 +189,7 @@ async fn ask(
         payload,
         hook.timeout,
     )
+    .made_in(&input.cwd, input.depth)
     .for_host(Some(hook.host));
     match calls.call(call, stop).await {
         HostCallEnd::Replied(HostReply::Hook(answer)) => {
@@ -415,14 +416,19 @@ mod tests {
         );
         let host = Scripted::answering(json!({}));
         routed(&r, &host);
-        fire(&r, &input("s1", "Bash")).await;
+        fire(&r, &input("s1", "Bash").with_depth(2)).await;
         let calls = host.calls();
         assert_eq!(calls.len(), 1);
+        assert_eq!(
+            (calls[0].cwd.as_path(), calls[0].depth),
+            (std::path::Path::new("/tmp"), 2)
+        );
         let HostCallKind::Hook { event, input } = &calls[0].kind else {
             panic!("not a hook call");
         };
         assert_eq!(event, "PreToolUse");
         assert_eq!(input["tool_input"]["command"], "echo rewritten");
+        assert_eq!(input["depth"], 2);
         assert_eq!(calls[0].host, Some(HostId(7)));
         assert_eq!(calls[0].tool_use_id, "toolu_1");
     }

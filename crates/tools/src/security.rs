@@ -183,11 +183,17 @@ pub fn walk_exclusion(
     root: &Path,
 ) -> impl Fn(&Path) -> bool + Send + Sync + 'static {
     let credentials = credentials(ctx).excluded_from_walk(root);
-    let denied = ctx
+    let env = ctx.session.env();
+    let denied: Vec<_> = ctx
         .path_denials
-        .as_ref()
-        .and_then(|denials| denials.denial(tool, &ctx.cwd, &[]));
-    move |path| credentials(path) || denied.as_ref().is_some_and(|denied| denied(path))
+        .iter()
+        .flat_map(|denials| {
+            std::iter::once(&ctx.cwd)
+                .chain(&env.refusal_rule_roots)
+                .filter_map(|rule_root| denials.denial(tool, rule_root, &[]))
+        })
+        .collect();
+    move |path| credentials(path) || denied.iter().any(|denied| denied(path))
 }
 
 /// Where this session's credentials are. The gate refuses a call naming

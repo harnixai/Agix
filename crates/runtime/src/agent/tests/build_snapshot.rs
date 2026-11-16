@@ -403,3 +403,111 @@ fn local_hook_runner(settings: hooks::HooksSettings) -> hooks::HookRunner {
         },
     )
 }
+
+#[tokio::test]
+async fn a_session_in_a_worktree_works_there_and_writes_what_a_commit_needs_of_the_git_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().canonicalize().unwrap();
+    let out = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git init -q . && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m i \
+             && git worktree add -q -b wt .agix/worktrees/wt",
+        ])
+        .current_dir(&repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let worktree = repo.join(".agix/worktrees/wt");
+    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = elsewhere.path().canonicalize().unwrap();
+    // What a sandboxed command could have done since the worktree was made:
+    // the links name another directory, which must not become writable.
+    std::fs::write(
+        repo.join(".git/worktrees/wt/commondir"),
+        format!("{}\n", elsewhere.display()),
+    )
+    .unwrap();
+    let env_for = |git: base::paths::WorktreeGit| {
+        let mut settings = test_settings();
+        settings.paths.workspace = base::paths::Workspace::Project(repo.clone());
+        settings.paths.worktree = Some(base::paths::LinkedWorktree {
+            dir: worktree.clone(),
+            git: Some(git),
+        });
+        let builder = builder_for(scene_deferring("wt", &[]), template_of(Vec::new()))
+            .settings(Arc::new(settings));
+        let (agent, _rx, _tx) = builder.build().expect("build should succeed");
+        let env = agent.session_state.env();
+        let sandbox = agent.config.sandbox.worktree_git.clone();
+        (env, sandbox)
+    };
+    let git = repo.join(".git");
+    let own = base::paths::WorktreeGit {
+        dir: git.clone(),
+        admin: git.join("worktrees/wt"),
+        branch: "wt".into(),
+    };
+
+    let (env, sandbox) = env_for(own.clone());
+    assert_eq!(env.cwd, worktree);
+    for dir in own.writable() {
+        assert!(
+            env.additional_writable_dirs.contains(&dir),
+            "{} missing from {:?}",
+            dir.display(),
+            env.additional_writable_dirs
+        );
+    }
+    assert!(
+        !env.additional_writable_dirs.contains(&git),
+        "the whole git directory was made writable: {:?}",
+        env.additional_writable_dirs
+    );
+    assert!(
+        env.read_directories.contains(&git),
+        "{:?}",
+        env.read_directories
+    );
+    assert_eq!(sandbox, Some(own.clone()));
+    assert!(!env
+        .additional_writable_dirs
+        .iter()
+        .any(|d| d.starts_with(&elsewhere)));
+
+    for (what, git) in [
+        (
+            "another git directory",
+            base::paths::WorktreeGit {
+                dir: elsewhere.clone(),
+                ..own.clone()
+            },
+        ),
+        (
+            "an entry outside worktrees/",
+            base::paths::WorktreeGit {
+                admin: git.join("refs"),
+                ..own.clone()
+            },
+        ),
+        (
+            "a branch climbing out of refs/heads/",
+            base::paths::WorktreeGit {
+                branch: "../../config".into(),
+                ..own.clone()
+            },
+        ),
+    ] {
+        let (env, sandbox) = env_for(git);
+        assert!(
+            !env.additional_writable_dirs
+                .iter()
+                .any(|d| d.starts_with(&elsewhere) || d.starts_with(repo.join(".git"))),
+            "{what} made something writable: {:?}",
+            env.additional_writable_dirs
+        );
+        assert_eq!(sandbox, None, "{what}");
+    }
+}

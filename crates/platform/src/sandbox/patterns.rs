@@ -1,9 +1,10 @@
 //! The macOS profile's patterns: what `sandbox-exec` matches by regular
 //! expression over a resolved path because no fixed path names it — the
 //! engine's credentials and the scene files of the state root, in every scene
-//! directory including one created later or linked in from elsewhere.
+//! directory including one created later or linked in from elsewhere, and
+//! the control files of a worktree made after the profile was written.
 
-use super::roots::{project_agix_dirs, write_denial_names, Roots};
+use super::roots::{project_agix_dirs, write_denial_names, Roots, WorktreeParents};
 use super::sandbox_escape;
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,31 @@ pub(super) fn deny_write_rules(roots: &Roots, denied: &[String]) -> String {
             let regex = format!(
                 r"^{}/(.*/)?({names})(\.[^/]*)?(/|$)",
                 regex_escape(&root.display().to_string())
+            );
+            format!(
+                "(deny file-write* (regex \"{}\"))\n",
+                sandbox_escape(&regex)
+            )
+        })
+        .collect()
+}
+
+/// Denies writing the control files of every linked worktree's entry under
+/// a guarded git directory's `worktrees/`, and the `.git` link of every
+/// worktree under the project's `.agix/worktrees/`, whether or not they
+/// exist yet.
+pub(super) fn worktree_control_file_rules(parents: &WorktreeParents) -> String {
+    let files = alternatives(base::paths::GIT_WORKTREE_CONTROL_FILES);
+    let link = regex_escape(base::paths::REPOSITORY_CONFIG_DIR);
+    parents
+        .admin
+        .iter()
+        .map(|dir| (dir, &files))
+        .chain(std::iter::once((&parents.links, &link)))
+        .map(|(dir, names)| {
+            let regex = format!(
+                "^{}/[^/]+/({names})$",
+                regex_escape(&dir.display().to_string())
             );
             format!(
                 "(deny file-write* (regex \"{}\"))\n",

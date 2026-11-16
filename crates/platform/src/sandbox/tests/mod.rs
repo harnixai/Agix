@@ -136,10 +136,39 @@ impl UnderSandboxExec {
     }
 
     fn run_under(&self, command: &str, policy: SandboxPolicy) -> bool {
-        let additional = vec![self.tmp.clone()];
+        self.run_at(&self.project, &[], command, policy)
+    }
+
+    /// `command` as a sub-agent in the worktree `.agix/worktrees/<slug>`,
+    /// on branch `<slug>`, runs it: writing what a commit there needs of the
+    /// project's git directory.
+    fn runs_in_worktree(&self, slug: &str, command: &str) -> bool {
+        let git = worktree_git(&self.project, slug);
+        self.run_at(
+            &self.project.join(".agix/worktrees").join(slug),
+            &git.writable(),
+            command,
+            SandboxPolicy {
+                worktree_git: Some(git),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// `command` with `cwd` its working directory, writing `additional` too.
+    fn run_at(
+        &self,
+        cwd: &Path,
+        additional: &[PathBuf],
+        command: &str,
+        policy: SandboxPolicy,
+    ) -> bool {
+        let additional: Vec<PathBuf> = std::iter::once(self.tmp.clone())
+            .chain(additional.iter().cloned())
+            .collect();
         let confined = wrap(SandboxOptions {
             command,
-            cwd: &self.project,
+            cwd,
             additional_writable: &additional,
             disable: false,
             policy: SandboxPolicy {
@@ -149,7 +178,7 @@ impl UnderSandboxExec {
         });
         std::process::Command::new(&confined.spec.program)
             .args(&confined.spec.args)
-            .current_dir(&self.project)
+            .current_dir(cwd)
             .env("TMPDIR", &self.tmp)
             .output()
             .unwrap()
@@ -246,4 +275,17 @@ fn run_confined(
 fn write_file(path: &Path, body: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, body).unwrap();
+}
+
+/// What the engine finds of `project`'s git directory for its worktree
+/// `.agix/worktrees/<slug>` on branch `<slug>`.
+#[cfg(feature = "sandbox")]
+#[cfg(unix)]
+fn worktree_git(project: &Path, slug: &str) -> base::paths::WorktreeGit {
+    let dir = project.join(".git");
+    base::paths::WorktreeGit {
+        admin: dir.join("worktrees").join(slug),
+        dir,
+        branch: slug.to_string(),
+    }
 }

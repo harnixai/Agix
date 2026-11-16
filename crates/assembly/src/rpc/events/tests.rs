@@ -100,7 +100,8 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
         (
             "host_tool_call",
             json!({"kind": "host_tool_call", "call_id": "hc_1", "tool_use_id": "toolu_3", "name": "HostEcho", "input": {"text": "ping"},
-                   "timeout_ms": 120000, "task_id": "a1", "agent_session_id": "sub-1"}),
+                   "timeout_ms": 120000, "task_id": "a1", "agent_session_id": "sub-1",
+                   "cwd": "/repo/.agix/worktrees/probe", "depth": 1}),
         ),
         (
             "host_tool_call_bare",
@@ -118,7 +119,7 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             "host_hook_call",
             json!({"kind": "host_hook_call", "call_id": "hk_1", "hook_event": "PreToolUse",
                    "input": {"hook_event_name": "PreToolUse", "tool_name": "Bash"}, "timeout_ms": 10000,
-                   "agent_session_id": "child"}),
+                   "agent_session_id": "child", "cwd": "/repo", "depth": 2}),
         ),
         (
             "host_hook_call_resolved",

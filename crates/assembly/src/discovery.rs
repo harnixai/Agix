@@ -268,6 +268,7 @@ pub const CAPABILITIES: &[&str] = &[
     "host_tool_provider",
     "host_hooks",
     "provider_tiers",
+    "host_call_context",
 ];
 
 /// [`CAPABILITIES`], plus those of the modules this build carries.

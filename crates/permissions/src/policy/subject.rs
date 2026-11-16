@@ -37,7 +37,15 @@ impl Named {
 
     pub(super) fn hit(&self, rules: &RuleSet, tool_name: &str, ctx: &ToolContext) -> RuleHit {
         if let (Some(group), Some(path)) = (path_rule_group(&self.subject), &self.resolved) {
-            return rules.evaluate_path(tool_name, group, path, &ctx.cwd);
+            let own = rules.evaluate_path(tool_name, group, path, &ctx.cwd);
+            return ctx
+                .session
+                .env()
+                .refusal_rule_roots
+                .iter()
+                .fold(own, |hit, root| {
+                    hit.restricted_by(rules.evaluate_path(tool_name, group, path, root).refusal())
+                });
         }
         match &self.subject {
             Subject::Shell(line) => {

@@ -142,6 +142,7 @@ impl Builder {
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
             settings.paths.working_dir().display().to_string(),
+            agent_depth,
             session_state.clone(),
         );
 
@@ -249,6 +250,7 @@ pub(super) fn session_env(
 ) -> base::context::SessionEnv {
     let cwd = settings.paths.working_dir().to_path_buf();
     let resolve = |dir: &std::path::PathBuf| cwd.join(dir);
+    let worktree_git = settings.paths.worktree_git();
     base::context::SessionEnv {
         additional_writable_dirs: settings
             .values
@@ -257,6 +259,11 @@ pub(super) fn session_env(
             .iter()
             .map(resolve)
             .chain(config.sandbox.paths.state_working_dirs())
+            .chain(
+                worktree_git
+                    .iter()
+                    .flat_map(base::paths::WorktreeGit::writable),
+            )
             .collect(),
         read_directories: settings
             .values
@@ -265,6 +272,7 @@ pub(super) fn session_env(
             .iter()
             .map(resolve)
             .chain(config.sandbox.paths.readable_state_root())
+            .chain(worktree_git.map(|git| git.dir))
             .collect(),
         read_anywhere: settings.values.sandbox.read_anywhere,
         cache_directories: settings.values.sandbox.cache_directories.paths(&cwd),
@@ -272,6 +280,14 @@ pub(super) fn session_env(
         base_mode: config.permission_mode,
         skill_dirs: skill_dirs.readable.clone(),
         protected_dirs: skill_dirs.protected.clone(),
+        refusal_rule_roots: settings
+            .paths
+            .worktree
+            .as_ref()
+            .and(settings.paths.project_root())
+            .map(std::path::Path::to_path_buf)
+            .into_iter()
+            .collect(),
         cwd,
     }
 }

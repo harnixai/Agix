@@ -30,6 +30,7 @@ pub(super) async fn pre_tool_use(
         session_id: ctx.session_id.clone(),
         cwd: ctx.cwd.display().to_string(),
         permission_mode: hook_permission_mode(ctx.session_state.permission_mode()),
+        depth: ctx.agent_depth,
         tool_name: Some(name.to_string()),
         tool_input: Some(input.clone()),
         tool_use_id: Some(ctx.tool_use_id.clone()),

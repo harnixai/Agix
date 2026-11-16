@@ -177,6 +177,7 @@ pub(super) fn lifecycle_input(ctx: &ToolExecCtx, event: hooks::HookEvent) -> hoo
         ctx.cwd.display().to_string(),
         hook_permission_mode(ctx.session_state.permission_mode()),
     )
+    .with_depth(ctx.agent_depth)
     .with_turn_id(ctx.turn_id.clone())
 }
 
@@ -606,12 +607,12 @@ async fn post_tool_use(
             session_id: ctx.session_id.clone(),
             cwd: ctx.cwd.display().to_string(),
             permission_mode: hook_permission_mode(ctx.session_state.permission_mode()),
+            depth: ctx.agent_depth,
             tool_name: Some(name.to_string()),
             tool_input: Some(input_for_post_hook.clone()),
             tool_use_id: Some(ctx.tool_use_id.clone()),
             tool_result: Some(result_json),
             is_error: Some(is_error_flag),
-            user_prompt: None,
             ..Default::default()
         };
         // Not the turn's token: the tool already ran, and a turn cancelled

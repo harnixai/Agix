@@ -44,6 +44,12 @@ You can optionally run agents in the background using the `background` parameter
 
 **IMPORTANT**: Launch multiple agents in a single message to run them in parallel. Background agents are ideal for fan-out work where you need multiple independent analyses simultaneously.
 
+## Worktree isolation
+
+Pass `worktree: "<name>"` to give the agent its own git worktree: a separate checkout of the repository at `.agix/worktrees/<name>`, on a new branch `agix/worktree-<name>` made from the project's current commit, where it can change files and commit without touching your working directory. Its tools work in that worktree; reading or writing files of your checkout asks for approval, and the project's deny and ask rules cover your checkout as well as the worktree.
+
+When the agent ends, a worktree it left as it was made — no uncommitted or untracked changes, no new commits — is removed along with its branch; files git ignores don't count and go with it. Otherwise both are kept, and the agent's result (for a background agent, its task notification) carries a `<worktree>` block with the `<path>` and `<branch>`: merge or cherry-pick the branch. Nothing removes a kept worktree or its branch for you; while it exists its name is refused, so pick another.
+
 ## Joining a persistent team (`team_name` + `name`)
 
 Only available when team coordination is enabled for this session (otherwise these two fields are rejected — check whether `TeamCreate`/`TeamList`/`TeamDelete` are in your tool list). Give both `team_name` and `name` together to talk to a **persistent** team member instead of a one-shot agent:

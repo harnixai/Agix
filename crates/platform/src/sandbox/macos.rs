@@ -154,12 +154,18 @@ fn fence_state_root(s: &mut String, roots: &Roots) {
 }
 
 fn guard_project_files(s: &mut String, roots: &Roots) {
-    let guard = project_guard(&roots.cwd);
+    let guard = project_guard(roots);
     for p in guard.entries.iter().chain(&guard.files) {
         s.push_str(&format!("(deny file-write* (literal \"{}\"))\n", quoted(p)));
     }
     for p in &guard.trees {
         s.push_str(&format!("(deny file-write* (subpath \"{}\"))\n", quoted(p)));
+    }
+    // The engine's own git makes worktrees under such a policy.
+    if !roots.only_additional {
+        s.push_str(&patterns::worktree_control_file_rules(
+            &guard.worktree_parents,
+        ));
     }
     let (config_files, config_dirs) = roots.unfenced_state_root_config();
     for p in &config_files {

@@ -117,6 +117,10 @@ const FIELDS: &[(&str, &str)] = &[
     ),
     ("SessionEnv::cwd", "Engine: from the engine's settings"),
     (
+        "SessionEnv::refusal_rule_roots",
+        "Engine: the project root when the engine's settings put it in a worktree",
+    ),
+    (
         "SessionEnv::additional_writable_dirs",
         "Engine: from the engine's settings",
     ),
@@ -153,6 +157,10 @@ const FIELDS: &[(&str, &str)] = &[
     (
         "SessionCore::project",
         "Session: the project it is bound to",
+    ),
+    (
+        "SessionCore::worktree",
+        "Session: the worktree of its project a resumed sidechain works in",
     ),
     ("SessionCore::created_at", "Session: kept across rebuilds"),
     ("SessionCore::state", "Session: the one state"),

@@ -21,7 +21,7 @@ pub(super) fn parent_settings_for_test(scope: &str) -> (LoadedSettings, std::pat
     );
     s.paths.user_data_dir = dir.clone();
     s.paths.global_data_dir = dir.clone();
-    s.paths.workspace = base::paths::Workspace::project_of(&dir);
+    s.paths.workspace = base::paths::Workspace::Project(dir.clone());
     s.paths.local_data_dir = dir.clone();
     s.paths.scope = scope.to_string();
     // Keep the turn from making an extra post-turn extraction call.
@@ -279,11 +279,16 @@ async fn subagent_transcript_is_written_as_a_linked_sidechain() {
             parent_session_id,
             session_kind,
             scene,
+            project_root,
+            cwd,
             ..
         } => {
             assert_eq!(parent_session_id.as_deref(), Some("parent-session-1"));
             assert_eq!(*session_kind, history::entry::SessionKind::Sidechain);
             assert_eq!(scene.as_deref(), Some("code"));
+            let dir = dir.display().to_string();
+            assert_eq!(project_root.as_deref(), Some(dir.as_str()));
+            assert_eq!(cwd, &dir);
         }
         other => panic!("expected LogEntry::Meta as the first entry, got {other:?}"),
     }

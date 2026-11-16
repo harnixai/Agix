@@ -16,7 +16,7 @@ fn dummy_live_session(last_active: Instant) -> LiveSession {
         core: SessionCore::active_at(
             "dummy",
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
-            None,
+            None.into(),
             Naming::default(),
             last_active,
         ),

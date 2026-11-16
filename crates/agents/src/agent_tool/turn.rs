@@ -10,8 +10,9 @@ use crate::delegate::{DelegateRun, StopReason};
 /// what makes it discoverable via `HistoryStore::child_sessions` and hidden
 /// from `session.list` by default. See docs/ARCHITECTURE.md §3.3.
 ///
-/// `project_root` is left `None` here: this crate has no per-session project
-/// identity, so there is nothing correct to stamp.
+/// `cwd` is where its tools work and `project_root` its parent's project, so
+/// a resume brings it back to the same place: a worktree is the `cwd` that
+/// is not the project (docs/ARCHITECTURE.md §3.4).
 ///
 /// Best-effort: a failure here does not fail the spawn. The sub-agent still
 /// runs and its `User`/`Assistant` entries still persist via
@@ -22,7 +23,7 @@ pub(crate) async fn write_sidechain_meta(
     parent_session_id: Option<String>,
     scene_id: &str,
     cwd: &Path,
-    settings: &Settings,
+    settings: &LoadedSettings,
 ) {
     let Ok(sid) = base::session::SessionId::parse(session_id) else {
         return;
@@ -30,8 +31,8 @@ pub(crate) async fn write_sidechain_meta(
     let meta = history::entry::LogEntry::Meta {
         cwd: cwd.display().to_string(),
         started_at: store.environment().now(),
-        model: settings.model.model_name.clone(),
-        permission_mode: serde_json::to_value(settings.permission_mode)
+        model: settings.values.model.model_name.clone(),
+        permission_mode: serde_json::to_value(settings.values.permission_mode)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "default".to_string()),
@@ -39,7 +40,10 @@ pub(crate) async fn write_sidechain_meta(
         agix_version: env!("CARGO_PKG_VERSION").to_string(),
         parent_session_id,
         scene: Some(scene_id.to_string()),
-        project_root: None,
+        project_root: settings
+            .paths
+            .project_root()
+            .map(|root| root.display().to_string()),
         session_kind: history::entry::SessionKind::Sidechain,
         schema_version: history::entry::CURRENT_META_SCHEMA_VERSION,
     };

@@ -674,6 +674,8 @@
           "event": {
             "agent_session_id": "sub-1",
             "call_id": "hc_1",
+            "cwd": "/repo/.agix/worktrees/probe",
+            "depth": 1,
             "input": {
               "text": "ping"
             },
@@ -691,6 +693,8 @@
       "event": {
         "agent_session_id": "sub-1",
         "call_id": "hc_1",
+        "cwd": "/repo/.agix/worktrees/probe",
+        "depth": 1,
         "input": {
           "text": "ping"
         },
@@ -707,6 +711,8 @@
           "event": {
             "agent_session_id": "sub-1",
             "call_id": "hc_1",
+            "cwd": "/repo/.agix/worktrees/probe",
+            "depth": 1,
             "input": {
               "text": "ping"
             },
@@ -729,6 +735,8 @@
           "event": {
             "agent_session_id": null,
             "call_id": "hc_2",
+            "cwd": "",
+            "depth": 0,
             "input": {},
             "kind": "host_tool_call",
             "name": "HostEcho",
@@ -756,6 +764,8 @@
           "event": {
             "agent_session_id": null,
             "call_id": "hc_2",
+            "cwd": "",
+            "depth": 0,
             "input": {},
             "kind": "host_tool_call",
             "name": "HostEcho",
@@ -847,6 +857,8 @@
           "event": {
             "agent_session_id": "child",
             "call_id": "hk_1",
+            "cwd": "/repo",
+            "depth": 2,
             "hook_event": "PreToolUse",
             "input": {
               "hook_event_name": "PreToolUse",
@@ -864,6 +876,8 @@
       "event": {
         "agent_session_id": "child",
         "call_id": "hk_1",
+        "cwd": "/repo",
+        "depth": 2,
         "hook_event": "PreToolUse",
         "input": {
           "hook_event_name": "PreToolUse",
@@ -879,6 +893,8 @@
           "event": {
             "agent_session_id": "child",
             "call_id": "hk_1",
+            "cwd": "/repo",
+            "depth": 2,
             "hook_event": "PreToolUse",
             "input": {
               "hook_event_name": "PreToolUse",

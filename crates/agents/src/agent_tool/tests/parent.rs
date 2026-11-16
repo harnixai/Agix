@@ -320,6 +320,7 @@ impl AgentTool {
             permission_mode: Some(permission_mode),
             seat,
             cwd,
+            git: None,
             called_from: None,
         };
         let built = d

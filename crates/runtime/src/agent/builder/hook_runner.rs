@@ -84,15 +84,22 @@ pub(in crate::agent) fn build_hook_runner(
         settings.values.model.max_tokens,
         session_id,
     ));
-    let agent_executor = Arc::new(crate::hook_executors::DelegatorHookExecutor::new(
-        delegator,
-        settings.paths.working_dir().to_path_buf(),
-    ));
     HookRunner::new(parsed, exec)
         .with_hooks_search_dirs(hooks_search_dirs)
         .with_project_untrusted(project_untrusted)
         .with_prompt_executor(prompt_executor)
-        .with_agent_executor(agent_executor)
+        .with_agent_executor(agent_hook_executor(settings, delegator))
+}
+
+fn agent_hook_executor(
+    settings: &LoadedSettings,
+    delegator: Arc<dyn base::interface::delegate::Delegator>,
+) -> Arc<crate::hook_executors::DelegatorHookExecutor> {
+    let cwd = settings.paths.working_dir().to_path_buf();
+    let project = settings.paths.project_root().map(Into::into);
+    Arc::new(
+        crate::hook_executors::DelegatorHookExecutor::new(delegator, cwd).in_worktrees_of(project),
+    )
 }
 
 pub(in crate::agent) fn hook_run_recorder(
@@ -115,12 +122,13 @@ pub(in crate::agent) fn hook_run_recorder(
     })
 }
 
-/// The session's id, cwd and permission mode, read each time a payload is
-/// built. Holds the state weakly: the closure lives in tasks and watchers that
-/// must not keep the session alive.
+/// The session's id, cwd, depth and permission mode, read each time a
+/// payload is built. Holds the state weakly: the closure lives in tasks and
+/// watchers that must not keep the session alive.
 pub(in crate::agent) fn hook_ambient(
     session_id: String,
     cwd: String,
+    depth: u32,
     state: Arc<session_state::SessionState>,
 ) -> hooks::payload::Ambient {
     let state = Arc::downgrade(&state);
@@ -130,5 +138,6 @@ pub(in crate::agent) fn hook_ambient(
             .map(|s| crate::turn::hook_permission_mode(s.permission_mode()))
             .unwrap_or_else(|| "default".into());
         hooks::HookInput::lifecycle(String::new(), session_id.clone(), cwd.clone(), mode)
+            .with_depth(depth)
     })
 }

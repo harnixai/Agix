@@ -211,7 +211,8 @@ socket_path}`)。它是单实例锁,不是发现文件,客户端不要读它,用
   `parent_session_id` 只查某个父会话的侧链。
 - **可恢复性** —— 侧链一旦写下终止标记就**不可 resume**,列表里 `resumable` 为
   `false`,强行 `session.resume` 返回 `SIDECHAIN_TERMINAL`。一个跑完的一次性任务
-  没有续跑语义;被中断的侧链没有这个标记,仍可恢复。
+  没有续跑语义;被中断的侧链没有这个标记,仍可恢复:回到父会话的项目里,在 worktree 里干活的回到
+  那个 worktree,worktree 不在了就拒绝恢复(§6.3 `session.resume`)。
 - **寿命** —— 侧链的 transcript 锚定在父会话上:
 
   | 触发 | 侧链 |
@@ -448,8 +449,10 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
   `cd` 到不是项目内字面路径之后再读的,照常询问。
 - 文件类工具用 glob(`"/etc/**"`)。匹配前两边都规整成绝对路径:相对路径按会话的
   工作目录解析,`.` / `..` 去掉,`~` 展开;符号链接解析后的路径上命中 `deny` / `ask`
-  也算。`*` 不跨 `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样
-  约束 `Write` / `NotebookEdit`。
+  也算,`<目录>/.agix/worktrees/<名>/` 下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
+  命中 `deny` / `ask` 也算——锚在项目上的规则对子 Agent worktree 里的拷贝同样成立。`*` 不跨
+  `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样约束 `Write` /
+  `NotebookEdit`。
 - `WebFetch` / `Ping` 用 URL 模式 `scheme://host[:port][/path]`(`"https://*.example.com/**"`)。
   调用的 URL 先规整(去掉 userinfo、query、fragment,主机名小写、Unicode 主机转成 punycode、去掉
   末尾的 `.`、默认端口省略,`ws` / `wss` 按 `http` / `https` 算),模式的主机同样转成 punycode,两侧
@@ -811,6 +814,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
+| `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 
@@ -2170,6 +2174,10 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 - 会话刚被关闭或驱逐,它上一个引擎在宽限期(5 秒)内还没停下 → `SESSION_BUSY`,`data` 是
   `{session_id, reason: "previous_engine", current_turn_id: null}`;过一会儿再试。两个引擎不会同时写一份转录。
   `session.run_turn` 指名这样的会话同样如此。
+- 目标是在 worktree 里干活的子 Agent 的侧链(`Agent` 的 `worktree`),而那个 worktree 已经不在、
+  不在项目所在仓库的 `.agix/worktrees/` 下、或者它的 `.git` 链接不再指回仓库的 `.git` →
+  `INTERNAL_ERROR`,消息含 "worktree" 与原因(如 "is gone")。不会在主检出里恢复它。侧链按它记下的
+  项目恢复(`project_trust` 等与父会话的项目相同),在 worktree 里干活的仍在那个 worktree 里。
 - 会话因别的原因建不回来(例如它记录的 `provider` 已经不在配置里)→ `INTERNAL_ERROR`,
   消息写明原因。同样不会换一个新 id 建会话顶替,`session.run_turn` 也一样。
 
@@ -2597,7 +2605,7 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
       "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code | mcp_task
       "status": "running",  // running | waiting | done | failed | stopped;定时任务总是 waiting;member 为 idle | running
       "started_ms": 0, "ended_ms": null,
-      "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,tag?}
+      "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,tag?,worktree?}
                             // teammate / member:{team,member};shell:{command,tool_use_id}
                             // monitor:{command,description,persistent,tool_use_id}
                             // code:{description,background,tool_use_id}(RunCode 的程序,docs/ptc.md)
@@ -2612,7 +2620,10 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
 
 `agent_session_id` 是子 Agent 的侧链会话,任务登记时就定了,`task_started` 里已经有;
 侧链在子 Agent 建成后才落盘,之前 `session.history` 读它是 `SESSION_NOT_FOUND`。`tag`
-只有 `session.startAgent` 给了才有。
+只有 `session.startAgent` 给了才有。`worktree` 只在用 `Agent` 的 `worktree` 起的后台子 Agent 结束、
+留下了它的 worktree 时才有:`{path,branch,holds}`,`holds` 是留下的原因(`"uncommitted changes"`、
+`"<n> commit(s) since it was made"`;git 读不出状态时是 `"a state git could not read"`)。原样未动的
+worktree 与分支在子 Agent 结束时已删,不记。前台子 Agent 留下的 worktree 写在 `Agent` 的结果里。
 
 `usage` 只算这个子 Agent 自己的调用,与它的侧链会话各次调用之和相等;它再起的子 Agent
 另算在它们各自的任务上。父会话 `turn_complete` 的 `usage` 也不含子 Agent(§7.2)。
@@ -3500,9 +3511,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `tool_result` | `{id,name,content,is_error,file_changes?}` | 工具返回。`Write` / `Edit` / `NotebookEdit` 带 `file_changes`(§7.5),其余没有这个键 |
 | `prompt` | `permission`:`{prompt_type,prompt_id,tool_name,message,paths[],tool_use_id?}`;`question`:`{prompt_type,prompt_id,tool_use_id,question,header,options:[{key,label}]}`;`mcp_elicitation`:`{prompt_type,prompt_id,server,mode,message,requested_schema?,url?,url_host?,tool_use_id?}` | 需宿主回答,用 `session.respondToPrompt`;`tool_use_id` 是被问的那次 `tool_use`(`question` 的 `prompt_id` 就是它)。`question` 的 `header` 可为 `null`,`options` 为空表示自由回答。`mcp_elicitation` 的 `mode` 为 `form`(带 `requested_schema`)或 `url`(带 `url` 与它的主机 `url_host`,只有 `https` 和本机的 `http` 会推到宿主,别的直接回 server `decline`);`message`、`requested_schema`、`url` 都是 **MCP server 写的**,宿主要标明来自 `server`、显示完整 URL 与 `url_host`、不自动打开 —— Agix 自己从不打开它 |
 | `prompt_resolved` | `{prompt_id,resolution,reason?}` | 那一帧 `prompt` 不再悬着:`resolution` 为 `answered`(引擎收下了一个回答,不论是哪条连接答的)或 `withdrawn`(引擎不再等)。`withdrawn` 时带 `reason`:`timed_out`(提问超时没人答)或 `cancelled`(这一轮被中断或结束、会话在关闭);`answered` 时没有这个字段。每个 `prompt` 至多一帧,推给全部订阅者,包括答题的那条连接;收到就把这个提问从界面上撤下 |
-| `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
+| `host_tool_call` | `{call_id,tool_use_id,name,input,timeout_ms,task_id,agent_session_id,cwd,depth}` | 模型调用了宿主声明的工具,等宿主用 `session.respondToolCall` 回答(§7.4)。`call_id` 是 daemon 生成的,回答用它;`tool_use_id` 是引出它的那次 `tool_use`;`input` 已按声明的 schema 校验过;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd` 是发起调用的会话的工作目录(绝对路径),`depth` 是它的委派深度(根会话 0) |
 | `host_tool_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `host_tool_call` 不再悬着:`answered`(引擎收下了一个回答)或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`no_host`(发起时没有订阅者)、`host_gone`(订阅者走光了)。每个调用一帧,推给全部订阅者,连接提供的工具再加上提供者(§7.4) |
-| `hook_call` | `{call_id,hook_event,input,timeout_ms,task_id,agent_session_id}` | 宿主经 `daemon.setHooks` 登记的 hook 触发了,等登记它的连接用 `session.respondHook` 回答(§7.6)。**只发给登记者**;`input` 是这一刻的 hook payload;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null` |
+| `hook_call` | `{call_id,hook_event,input,timeout_ms,task_id,agent_session_id,cwd,depth}` | 宿主经 `daemon.setHooks` 登记的 hook 触发了,等登记它的连接用 `session.respondHook` 回答(§7.6)。**只发给登记者**;`input` 是这一刻的 hook payload;`task_id`、`agent_session_id` 在子 Agent 发起时是它的任务与侧链会话,否则为 `null`;`cwd`、`depth` 同 `host_tool_call`,与 `input` 里的同名字段一致 |
 | `hook_call_resolved` | `{call_id,resolution,reason?}` | 那一帧 `hook_call` 不再悬着:`answered` 或 `withdrawn`,后者带 `reason`:`timed_out`、`cancelled`、`host_gone`、`no_host`。只发给登记者 |
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
@@ -3683,7 +3694,9 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
   "input":{ "text":"ping" },
   "timeout_ms":120000,
   "task_id":null,               // 子 Agent 发起时为它的任务
-  "agent_session_id":null }     // 子 Agent 发起时为它的侧链会话
+  "agent_session_id":null,      // 子 Agent 发起时为它的侧链会话
+  "cwd":"/work",                // 发起调用的会话的工作目录
+  "depth":0 }                   // 发起调用的会话的委派深度,根会话 0
 
 { "kind":"host_tool_call_resolved", "call_id":"hc_01J…",
   "resolution":"withdrawn", "reason":"timed_out" }
@@ -3725,6 +3738,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 `task_id` 与 `agent_session_id`,用父会话的 `session_id` 回答。父会话空闲时后台子 Agent 照样能
 调,这时帧的 `turn_id` 为 `null`。
 
+**工作目录与深度**:`cwd` 是发起调用的那个会话的工作目录,`depth` 是它的委派深度:根会话 0,
+它起的子 Agent 1,子 Agent 再起的 2,依此类推。在 worktree 里跑的子 Agent(`Agent` 的
+`worktree`)的 `cwd` 是那个 worktree(`<项目根>/.agix/worktrees/<名>`),宿主工具该在那里读写。
+子 Agent 结束时 worktree 若原样未动就删掉,否则连同分支 `agix/worktree-<名>` 留下(后台子 Agent
+的任务 `detail.worktree` 记着,见 §6.3 `session.tasks`),所以之后的帧里这个 `cwd` 可能已经不存在,也可能
+还在。`EnterWorktree` 不改会话的工作目录,之后的调用 `cwd` 照旧。
+
 ### 7.5 `file_changes`
 
 `Write`、`Edit`、`NotebookEdit` 的 `tool_result` 帧带它们写了什么,模型收到的文字不受影响:
@@ -3765,11 +3785,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
   "call_id":"hk_01J…",            // 回答用它
   "hook_event":"PreToolUse",
   "input":{ "hook_event_name":"PreToolUse", "session_id":"…", "cwd":"/work",
-            "permission_mode":"default", "tool_name":"Bash",
+            "permission_mode":"default", "depth":0, "tool_name":"Bash",
             "tool_input":{ "command":"git push" }, "tool_use_id":"toolu_01…" },
   "timeout_ms":10000,
   "task_id":null,                 // 子 Agent 发起时为它的任务
-  "agent_session_id":null }       // 子 Agent 发起时为它的侧链会话
+  "agent_session_id":null,        // 子 Agent 发起时为它的侧链会话
+  "cwd":"/work",                  // 同 input.cwd
+  "depth":0 }                     // 同 input.depth
 
 { "kind":"hook_call_resolved", "call_id":"hk_01J…",
   "resolution":"withdrawn", "reason":"timed_out" }
@@ -3777,9 +3799,10 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 `daemon.setHooks`(§6.1)登记过 hook 的连接收到的帧:引擎走到登记的事件,就把这一刻的 payload
 放在 `input` 里,等宿主用 `session.respondHook` 回答。`input` 的字段同设置里 hook 的 payload
-(`docs/hooks.md`「payload」):`hook_event_name`、`session_id`、`cwd`、`permission_mode`,以及
-这个事件的 `tool_name`、`tool_input`、`tool_use_id` 等。外层 `session.event` 的 `session_id`
-是根会话;子 Agent 的调用带 `agent_session_id`,而 `input.session_id` 是子 Agent 自己的。
+(`docs/hooks.md`「payload」):`hook_event_name`、`session_id`、`cwd`、`permission_mode`、`depth`,
+以及这个事件的 `tool_name`、`tool_input`、`tool_use_id` 等。外层 `session.event` 的 `session_id`
+是根会话;子 Agent 的调用带 `agent_session_id`,而 `input.session_id`、`input.cwd` 与
+`input.depth` 都是子 Agent 自己的,帧上的 `cwd`、`depth` 同它们(§7.4「工作目录与深度」)。
 
 **只发给登记的那条连接**(哪怕它没有订阅这个会话),不发给别的订阅者,`session.subscribe` 的
 待答列表里也没有。一条连接登记了 hook,就等于被交出了这个 daemon 里每个会话的每次相应工具

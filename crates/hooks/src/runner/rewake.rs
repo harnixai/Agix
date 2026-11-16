@@ -132,12 +132,7 @@ impl HookRunner {
             return Vec::new();
         }
 
-        let wake_input = HookInput::lifecycle(
-            "WakeEvent",
-            ambient.session_id,
-            ambient.cwd,
-            ambient.permission_mode,
-        );
+        let wake_input = HookInput::lifecycle_of(ambient, "WakeEvent");
 
         // Re-execute each pending hook with the wake input
         let mut responses = Vec::new();

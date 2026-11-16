@@ -44,7 +44,7 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 - **从不触发的事件会说出来。** 现在没有这样的事件;若将来有,表里会标 **从不触发**(清单是
   `hooks::UNWIRED_EVENTS`),给它配了 hook,会话建起来时记一条 warn。
 - **整棵会话树一个 runner。** 子 Agent 用父会话的 hooks:子 Agent 里的工具调用、轮次照样
-  触发配置的 hook,payload 带的是子 Agent 自己的 `session_id`、`cwd`、`permission_mode`。
+  触发配置的 hook,payload 带的是子 Agent 自己的 `session_id`、`cwd`、`permission_mode`、`depth`。
 
 ---
 
@@ -160,7 +160,9 @@ JSON。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:
 这个子 Agent 不占 `execution.max_concurrent_subagents`,模型把名额占满了照样起。它自己的事件
 (工具调用、`SubagentStart` 等)不再起 agent hook,按执行失败处理、走 `on_error`;command /
 prompt / http hook 对它照旧跑。它读的是模型写的 payload,所以只有 `Read`、`Grep`、`Glob`
-(外加 `ToolSearch`),要批准的调用直接拒、不问人。它一次性跑完就丢,不做记忆抽取。
+(外加 `ToolSearch`),要批准的调用直接拒、不问人。它一次性跑完就丢,不做记忆抽取。它在 payload 的
+`cwd` 里干活——那是项目根或项目的一个 worktree(`<项目根>/.agix/worktrees/` 下)时;判 worktree 里的
+子 Agent 的调用,它读的就是那个 worktree。别的目录不收,它照旧在根会话的工作目录里。
 
 ---
 
@@ -196,14 +198,15 @@ hook 不能被换个写法绕过去,宁可多跑一次。**文件路径(`file_pa
 
 ## payload
 
-每份 payload 都有四个字段:
+每份 payload 都有五个字段:
 
 | 字段 | 内容 |
 |---|---|
 | `hook_event_name` | 事件名,同配置里的键(`async_rewake` 的重跑是 `WakeEvent`) |
 | `session_id` | 触发这一事件的会话;子 Agent 里触发的是子 Agent 的 id |
-| `cwd` | 会话的工作目录 |
+| `cwd` | 会话的工作目录;在 worktree 里跑的子 Agent 是那个 worktree |
 | `permission_mode` | 触发时会话**当下**的权限模式:`default`、`plan`、`acceptEdits`、`bypassPermissions`、`dontAsk`、`bubble` |
+| `depth` | 会话的委派深度:根会话 0,子 Agent 逐层加 1 |
 
 其余字段按事件出现,没有的不写(不是 `null`):
 

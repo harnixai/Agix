@@ -1,6 +1,9 @@
 //! 会话恢复与重建：恢复、场景校验、空闲会话的重建与 `resume_or_create`。
 
-use crate::session_pool::parts::directory::{recorded_project, sidechain_terminal_state};
+use crate::session_pool::parts::directory::{
+    find_meta, recorded_project, sidechain_terminal_state,
+};
+use crate::session_pool::parts::live::Workplace;
 use crate::session_pool::*;
 use base::context::Session;
 
@@ -429,6 +432,9 @@ impl SessionPool {
         let _claim = self.claim_log(&sid).await?;
 
         let (binding, project_root_for_meta, scene_id) = self.binding_of_log(log).await;
+        let worktree = recorded_worktree(log, project_root_for_meta.as_deref())
+            .await
+            .map_err(|why| format!("session `{sid}` could not be brought back: {why}"))?;
 
         // The scene this session recorded, not this pool's default. Settings
         // were already resolved against the recorded scene above; handing the
@@ -450,7 +456,10 @@ impl SessionPool {
             sid.clone(),
             scene,
             binding,
-            project_root_for_meta,
+            Workplace {
+                project: project_root_for_meta,
+                worktree,
+            },
             options,
             (!log.is_empty()).then_some(log),
         )
@@ -613,6 +622,38 @@ fn active_times(core: &SessionCore) -> (Option<String>, String, String) {
         format_instant(core.created_at()),
         format_instant(core.hub().last_active()),
     )
+}
+
+/// The worktree of `project` a sub-agent's sidechain worked in, as its
+/// `Meta` recorded it: a `cwd` that is not the project. It is brought back
+/// only while it is still there and still linked to the repository; a
+/// sidechain whose worktree is not is not brought back at all, rather than
+/// in the main checkout.
+async fn recorded_worktree(
+    log: &[history::entry::EnvelopedEntry],
+    project: Option<&Path>,
+) -> Result<Option<base::paths::LinkedWorktree>, String> {
+    let (
+        Some(history::entry::LogEntry::Meta {
+            cwd,
+            session_kind: history::entry::SessionKind::Sidechain,
+            ..
+        }),
+        Some(project),
+    ) = (find_meta(log), project)
+    else {
+        return Ok(None);
+    };
+    let cwd = Path::new(cwd);
+    let same = |a: &Path, b: &Path| {
+        a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+    };
+    if same(cwd, project) {
+        return Ok(None);
+    }
+    tools::worktree::reopen_worktree(&platform::LocalFileSystem, project, cwd)
+        .await
+        .map(Some)
 }
 
 fn is_primary(log: &[history::entry::EnvelopedEntry]) -> bool {

@@ -623,7 +623,8 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 宿主的 `session.startAgent`,都构造一个 `base::interface::delegate::DelegateRequest`,交给
 `Delegator::delegate`。这是委派唯一的分派:谁来调、怎么跑,由请求里的 `DelegateMode` 决定,
 其余(类型、模型、工具收窄、拒绝规则、授予、输出 schema、工作目录、取消、询问去向、调用点)
-都在请求的字段里。
+都在请求的字段里。`delegate` 就是 agents crate 里的 `Delegator::dispatch` 不带 worktree 的那一种;
+带 `worktree` 的后台 `Agent` 直接调 `dispatch`,把 worktree 交给后台任务在结束时收尾(下文)。
 
 | 调用方 | `DelegateMode` | 返回 |
 |---|---|---|
@@ -673,6 +674,72 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 不给委派(`frozen`、`session_state`、`steering`、`run_slots`、`cron_store` 这类宿主自己的)。
 新增 `Builder` 字段不分类,守卫过不了。`inherit` 必须先于委派自己的 setter 调用——自己的
 (例如收窄后的权限)后设、覆盖继承来的。
+
+工作目录来自请求的 `workdir`。与父会话的不同时(`Agent` 的 `worktree`),它记在子会话设置的
+`PathSettings::worktree` 上:工具的工作目录、提示词里的工作目录、hook payload 与宿主调用帧的
+`cwd` 都是它,项目仍是父会话的——项目层设置、`.agix/hooks/`、信任与插件照项目根算,因为
+worktree 里没有被 `.gitignore` 掉的 `.agix`。它的可写目录另加仓库 git 目录里在 worktree 里提交
+要写的几处(`base::paths::WorktreeGit::writable`):对象库 `objects/`(其中的 `objects/info/` 除外)、
+这个 worktree 在 `worktrees/` 下那一项(其中的控制文件除外,见 §6.3)、它自己分支
+`agix/worktree-<名>` 的 ref、ref 的 `.lock` 与这个分支的 reflog。git 目录的其余部分它读得到、
+写不到:别的分支与 tag 的 ref、`packed-refs`、`info/`、主检出的 `HEAD`、索引与 reflog、别的
+worktree 那一项、配置与 hooks。所以它能 `git add`、`git commit`(含再提交与 `--amend`),动不了
+别的分支;它的分支被打包进 `packed-refs` 之后(用户自己跑过 `git gc` / `git pack-refs`)它就提交
+不了——建 worktree 时分支是松散的 ref,不是的就不给。git 目录本身另进它的可读目录。整个项目根
+不给它。
+
+这个 git 目录是 `create_worktree` 建 worktree 时得到的那个(`find_repo` 的 `--git-common-dir`),
+连同建完时 `.git` 链接指到的那一项与分支名作为 `WorktreeGit`,随 worktree 一起经
+`Workdir::Linked` 交给委派,记在 `LinkedWorktree::git`,之后不再顺着
+worktree 的 `.git` 链接与 `commondir` 去找——沙箱里早先起的命令(上一次 `Bash` 留在后台的进程、
+并行的子 Agent 的命令)可能已经改过这两个文件。收下它的每一处都核对:建完时链接要从
+`<git 目录>/worktrees/` 下直属的那一项指回这个 git 目录、分支是松散的 ref(`tools::worktree`),
+委派建设置时与用它时(`PathSettings::worktree_git`)git 目录解析后要等于 `<项目根>/.git`、那一项
+在它的 `worktrees/` 下直属、分支名不出 `refs/heads/`;不符就不给,记一条
+警告,子 Agent 只是提交不了。项目在仓库的子目录里时它不等于 `<项目根>/.git`,同样不给——根会话
+那时也写不到仓库的 git 目录。沙箱的守卫拿的也是它(`SandboxPolicy::worktree_git`),不读链接。
+
+于是这样的子 Agent 的文件工具,不问就能读的范围是 worktree 加这个 `.git`、能写的是 worktree 加
+上面那几处,主检出里的文件要审批,与它的命令能写的范围一致。它再用 `worktree` 起子 Agent 时,`create_worktree` 从项目根
+找仓库,新 worktree 与它的并列在 `<项目根>/.agix/worktrees/` 下,不嵌在它自己的 worktree 里
+(从 worktree 里找,仓库根是那个 worktree,git 目录不在 `<根>/.git`,沙箱里会被拒)。
+
+权限规则里的相对路径按会话的 `cwd` 解析,worktree 子会话的 `cwd` 是 worktree;只这样解析,项目的
+`Read(.env)` 就护不住主检出里的 `.env`(用绝对路径或 `../..` 去拿)。所以 `SessionEnv` 另带
+`refusal_rule_roots`:工作目录是 worktree 时为项目根。路径规则的 deny 与 ask 对 `cwd` 和这些根各
+判一次,哪一处命中都算;allow 只按 `cwd` 判,不因此变宽(`permissions::policy::subject`)。搜索
+工具走目录时跳过的 deny 路径(`tools::security::walk_exclusion`)同样两处都算。反过来,worktree
+里的文件是主检出里同一路径的一份拷贝:路径落在某个 `<目录>/.agix/worktrees/<名>/` 下时,把这三段
+去掉得到的 `<目录>/<其余>` 也算它的别名,deny 与 ask 在别名上命中照样算,allow 不算
+(`permissions::path_rule::main_checkout_copies`,`RuleSet::evaluate_path` 里与符号链接的别名同一处
+处理)。于是锚在项目上的规则——项目下的绝对路径,或根会话里的相对路径——对 worktree 里那一份同样
+成立,不论是 worktree 子 Agent 自己读,还是根会话去读一个留下的 worktree;worktree 是从仓库根建的,
+项目在仓库的子目录里时,`<仓库>/.agix/worktrees/wt/sub/x` 的别名是 `<仓库>/sub/x`,正好落在项目下。
+这只是按路径的字面:不读磁盘,也不问那里是不是真有一个 worktree。这一层不认识 worktree 的来历,只认
+这份根的清单与这个目录名。
+
+子 Agent 的侧链 `Meta` 记下它的 `cwd` 与父会话的项目(`project_root`)。冷恢复侧链时
+(`session.resume`,或 `run_turn` 指名它)按记下的项目建绑定,所以它还是在项目里,不会变成无项目
+会话。`cwd` 不是项目根的,是它工作过的 worktree:恢复前再核对一遍(`tools::worktree::reopen_worktree`)——
+它仍在 `<仓库>/.agix/worktrees/` 下、项目在这个仓库里、它的 `.git` 链接与 `commondir` 仍指回
+`<仓库>/.git`——通过了才把它连同这个 git 目录记进会话(`SessionCore` 的 worktree,每一代引擎的设置
+`PathSettings::worktree` 都取它),工作目录、可写目录与 `refusal_rule_roots` 于是与当初一样;git
+目录取的是 `<仓库>/.git`,不是链接里写的,照旧要等于 `<项目根>/.git` 才给。worktree 已经不在或核对
+不过的,恢复被拒,错误里写明原因,不在主检出里接着干。
+
+worktree 由 `Agent` 工具建、由它收尾(`tools::worktree::WorktreeHandle::remove_if_untouched`):
+子 Agent 结束时,worktree 里没有未提交或未跟踪的改动、HEAD 与 `agix/worktree-<名>` 分支都没有
+建它那个提交以来的新提交,才把目录与分支一起删掉;否则两样都留着,前台调用的结果末尾、后台
+子 Agent 的任务通知里各有一段 `<worktree>`(路径、分支、为什么留),后台的任务 `detail.worktree`
+也记着。git 读不出状态时同样留着。被 `.gitignore` 掉的文件不算改动,随目录一起删。起不来的
+后台子 Agent(名额满、会话在关)它的 worktree 当场按同样的规则收尾。留下的 worktree 没有别的
+路径会删:回退只报告 worktree 已被删掉的文件(`WorktreeRemoved`),会话结束与 daemon 退出不碰
+它,也没有别的路径清理;同名再起会因目录已在被拒。
+
+agent 类 hook 的子 Agent 由根会话的 delegator 起,子会话共用根会话的 `HookRunner`。它在 payload
+的 `cwd` 里干活,前提是那是项目根或 `<项目根>/.agix/worktrees/` 下直属的一个目录,否则仍在根会话的
+工作目录(`runtime::hook_executors::DelegatorHookExecutor`)——所以判 worktree 子 Agent 的调用时,
+它读的是那个 worktree。
 
 #### 深度
 
@@ -1236,7 +1303,8 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 3. **路径先规整再匹配。** 读写路径的工具,路径按会话 cwd 解析成绝对路径并去掉 `.` /
    `..`,`~` 在规则与路径两边都展开;符号链接解析后的路径算作别名——按原样写法解析的
    也算,符号链接后面的 `..` 是从链接目标往上走的,`link/../x` 落在哪里,deny 就在哪里
-   命中。别名上命中 deny / ask 照样生效,allow 只认工具真正打开的那个路径。glob 按 gitignore 约定:`*` 不跨
+   命中;引擎 worktree 里的路径在主检出里的那一份也算别名(§3.4)。别名上命中 deny / ask 照样生效,
+   allow 只认工具真正打开的那个路径。glob 按 gitignore 约定:`*` 不跨
    `/`,`**` 跨。`Read(...)` 规则同样作用于 `Grep` / `Glob`,`Edit(...)` 规则同样作用
    于 `Write` / `NotebookEdit`。
 4. **shell 命令逐段匹配。** `Bash(...)` 规则对命令行里的每一条简单命令分别匹配:认
@@ -1514,7 +1582,8 @@ strict policy 兑现不了时(没有后端,Windows,Linux 上没有 bubblewrap):`
 `Session` 跑。**未信任项目**(§6.6)里 strict 不是 `Full` 时,会话自己仓库里的 `git` 也退出只读通道、改为询问:
 仓库配置是项目作者写的,没有 strict 沙箱兜着,它起的程序就跑在沙箱外。
 
-沙箱里的命令能写的:工作目录、`sandbox.additional_directories` 与会话授予的目录、
+沙箱里的命令能写的:工作目录、`sandbox.additional_directories` 与会话授予的目录(worktree 里的
+子 Agent 还有仓库 git 目录里提交要写的几处,§3.4)、
 `sandbox.cache_directories`(见下)、状态目录下的 `scratchpad` 与 `memory`、`/dev`,以及
 会话自己的临时目录——它作为 `TMPDIR` 交给命令(`<状态目录>/tmp/<会话 id>`),别的会话的
 写不到;7 天没动过的,进程里第一次准备临时目录时清掉。
@@ -1527,7 +1596,8 @@ strict policy 兑现不了时(没有后端,Windows,Linux 上没有 bubblewrap):`
 `/tmp` 是每条命令私有、用完即弃的 tmpfs。写规则之前每个路径都先解析符号链接(macOS 的
 `/tmp` 实为 `/private/tmp`),否则规则落不到内核检查的那个路径上。
 
-可写范围之内,引擎或 git 之后会在沙箱外照着执行的东西不可写:项目的 `.git`、`.agix`、
+可写范围之内,引擎或 git 之后会在沙箱外照着执行的东西不可写(工作目录是 worktree 时,下面
+`.git` 下的各项指引擎建 worktree 时得到的那个 git 目录,§3.4):项目的 `.git`、`.agix`、
 `.claude` 这几个目录项本身(不能改名挪走或换成符号链接,不存在时也建不出来)、`.git/config`、
 `.git/config.worktree`、`.git/commondir`、`.git/hooks/`,每个子模块的 git 目录(`.git/modules/`
 下,嵌套的子模块在上一层的 `modules/` 下)里的同样几项以及通向它的各级目录(不能挪走换一个;
@@ -1535,7 +1605,16 @@ strict policy 兑现不了时(没有后端,Windows,Linux 上没有 bubblewrap):`
 (`settings.json`、`settings.local.json`、`mcp.local.json`,以及 `mcp`、`hooks`、`agents`、
 `skills`、`plugins`、`rules`、`scenes`、`policy`、`scripts`、`output-styles` 目录)、项目的
 `.agents/skills/` 连同它上面的 `.agents` 目录项(macOS 上不存在时也建不出来;`.agents` 下别的
-东西照常可写)、引擎 worktree 的 `.git` 链接;状态目录除
+东西照常可写)、各链接 worktree 在 `.git/worktrees/` 下那一项的 `config`、`config.worktree`、
+`commondir`、`gitdir`,引擎 worktree 的 `.git` 链接——这两类对命令起来之后才建的 worktree 也成立,
+免得前一条命令留在后台的进程改写之后某个子 Agent 的 worktree:macOS 用正则,Linux 把
+`.git/worktrees/`(不存在时先建一个空的)与 `.agix/worktrees/` 整个只读、已有的 worktree 逐个重新
+打开,所以沙箱里的命令自己 `git worktree add` 会失败(worktree 由引擎建:它的 git 跑在只写指定根的
+策略下,不受这两条模式约束,只受已有 worktree 的那几项约束)。worktree 子 Agent 能写的那一项里
+不存在的控制文件也建不出来(Linux 上以 `/dev/null` 挡住,留下一个空文件),`objects/info/` 不可写
+(`alternates` 会让 git 去别处读对象);它分支的 ref 在 Linux 上只能连同所在目录一起放开——git
+以改名 `.lock` 的方式改写 ref,改名到挂载点上会失败——这个目录里已有的其余条目逐个只读,于是能在
+`refs/heads/agix/` 下新建 ref,改不了已有的;状态目录除
 `scratchpad`、`memory` 与本会话的 `tmp/<会话 id>` 外整个不可写。`git add` / `git commit`、在 `.agix` 下写草稿照常可用;
 `git config`、`git remote add` 这类改仓库配置的命令在沙箱里会失败。Linux 上 `.agix`(以及已经
 存在的 `.claude`)整个只读、已有的工作目录逐个重新打开,所以其下直接新建条目也会失败;Linux
@@ -2050,7 +2129,8 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 
 **会话进哪个项目目录由它自己的 `Meta.project_root` 决定**,不是由 daemon 的 cwd
 决定 —— 一个 daemon 同时服务多个项目时,后者会把所有项目的 transcript 堆进一个
-目录。侧链没有自己的 `project_root`,跟父会话进同一个目录(级联删除按那里找)。
+目录。侧链的 `Meta` 记下父会话的项目(`project_root`),按它进项目目录;没记的(父会话无项目,
+或字段出现之前写的日志)跟父会话进同一个目录(级联删除按那里找)。
 
 sidecar 不能塞进 `projects/<cwd>/`,因为按 session id 查找时没有项目信息可用。
 两者是并列的两个维度,不是两层嵌套。**反过来,"这个会话属于哪个项目"也只有

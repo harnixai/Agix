@@ -40,7 +40,10 @@
 //! is resolved through its symlinks before a rule is written for it.
 //!
 //! Inside those, what the engine or git later acts on outside the sandbox is
-//! read-only: the project's `.git`, `.agix` and `.claude` entries themselves,
+//! read-only — where the policy names a `worktree_git` (the working
+//! directory is a linked worktree), `.git` below means its git directory,
+//! never one found by following the worktree's links: the
+//! project's `.git`, `.agix` and `.claude` entries themselves,
 //! `.git/{config,config.worktree,commondir}` and `.git/hooks/`, the hooks directory
 //! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
@@ -50,7 +53,24 @@
 //! scripts, output styles, and the saved tool results the engine exports and
 //! forks), the project's skills (`.agents/skills/`,
 //! `base::paths::PROJECT_ENGINE_CONFIG_DIRS`, and the `.agents` entry above
-//! it), and the `.git` links of the engine's worktrees.
+//! it), the control files of each linked worktree's entry under
+//! `.git/worktrees/` (`base::paths::GIT_WORKTREE_CONTROL_FILES`), and the
+//! `.git` links of the engine's worktrees — the last two for a worktree made
+//! after the command started as well, so that what it leaves running cannot
+//! rewrite those of a sub-agent's worktree made later: macOS by pattern,
+//! Linux by holding `.git/worktrees/` (made, empty, where it is absent) and
+//! `.agix/worktrees/` read-only with the worktrees already in them opened
+//! again. A command therefore cannot add a worktree of its own. Under
+//! `only_additional_writable`, the engine's own git, which adds them, is held
+//! only to the ones that exist.
+//! A command in a linked worktree writes of its git directory only what
+//! `additional_writable` names (`base::paths::WorktreeGit::writable`): the
+//! object store but its `objects/info/`, its own entry under `worktrees/`
+//! with an absent control file there shut too (on Linux by an empty file),
+//! and its branch's ref, lock and reflog. On Linux the ref is opened as the
+//! directory it is in — git renames `<ref>.lock` over it, which a bind of the
+//! file refuses — with the other entries there read-only again, and the git
+//! directory is bound read-only beneath, so that `/tmp` does not hide it.
 //! Of the state root only `scratchpad/`, `memory/` and those of
 //! `additional_writable` under `tmp/` (a session's own `TMPDIR`) stay
 //! writable. A project that lives in the state root lifts that fence; the

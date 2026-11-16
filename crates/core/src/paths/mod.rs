@@ -48,9 +48,9 @@ pub use sensitive::{
     credential_dir_names, session_scratch_dir, tool_results_dir, Credential, KeyFileNames, Located,
     PromptFiles, Scope, Secret, SensitivePaths, CREDENTIALS, ENGINE_CONFIG_DIRS,
     ENGINE_CONFIG_FILES, ENGINE_CONFIG_ROOTS, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
-    HOME_CREDENTIAL_STORES, PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR,
-    REPOSITORY_CONFIG_DIR, SECRET_FILE_NAMES, STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD,
-    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    GIT_WORKTREE_CONTROL_FILES, HOME_CREDENTIAL_STORES, PROJECT_ENGINE_CONFIG_DIRS,
+    PROJECT_WORKTREES_DIR, REPOSITORY_CONFIG_DIR, SECRET_FILE_NAMES, STATE_ROOT_SCENE_FILES,
+    STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 
 use std::path::{Path, PathBuf};
@@ -105,6 +105,66 @@ pub struct PathSettings {
     #[serde(skip)]
     #[schemars(skip)]
     pub project_untrusted: bool,
+    /// The worktree a sub-agent was given: its tools work there, while the
+    /// project stays the workspace's.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub worktree: Option<LinkedWorktree>,
+}
+
+/// A linked worktree of the project, and where in the repository's git
+/// directory a commit in it writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedWorktree {
+    pub dir: PathBuf,
+    /// As the engine found it when it made the worktree. Never re-read from
+    /// the worktree's `.git` link or the `commondir` it leads to: a
+    /// sandboxed command may have rewritten both since. `None`: nothing in
+    /// the repository's git directory is writable, so a sandboxed command
+    /// cannot commit there.
+    pub git: Option<WorktreeGit>,
+}
+
+/// The parts of the repository's git directory that a commit in one linked
+/// worktree writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeGit {
+    /// The repository's git directory.
+    pub dir: PathBuf,
+    /// The worktree's entry under `dir/worktrees/`: its `HEAD`, index and
+    /// `HEAD` reflog.
+    pub admin: PathBuf,
+    /// The branch checked out in it, e.g. `agix/worktree-x`.
+    pub branch: String,
+}
+
+impl WorktreeGit {
+    /// The loose ref of [`Self::branch`]. git rewrites it by renaming
+    /// `<ref>.lock` over it.
+    pub fn branch_ref(&self) -> PathBuf {
+        self.dir.join("refs/heads").join(&self.branch)
+    }
+
+    pub fn branch_ref_lock(&self) -> PathBuf {
+        let mut lock = self.branch_ref().into_os_string();
+        lock.push(".lock");
+        PathBuf::from(lock)
+    }
+
+    /// What a commit writes: the object store, the worktree's entry, the
+    /// branch's ref, its lock and its reflog. Nothing else in `dir` — not
+    /// the other refs, `packed-refs`, `info/` or the main worktree's files.
+    /// `objects/info/` and the entry's control files are held read-only on
+    /// top by the sandbox.
+    pub fn writable(&self) -> Vec<PathBuf> {
+        vec![
+            self.dir.join("objects"),
+            self.admin.clone(),
+            self.branch_ref(),
+            self.branch_ref_lock(),
+            self.dir.join("logs/refs/heads").join(&self.branch),
+        ]
+    }
 }
 
 /// Placeholder directories for settings that were not loaded from any — the
@@ -118,6 +178,7 @@ impl Default for PathSettings {
             workspace: Workspace::Project(PathBuf::new()),
             scope: default_scope(),
             project_untrusted: false,
+            worktree: None,
         }
     }
 }
@@ -175,6 +236,7 @@ impl PathSettings {
             workspace,
             scope,
             project_untrusted: false,
+            worktree: None,
         }
     }
 
@@ -186,9 +248,44 @@ impl PathSettings {
     /// The tools' working directory: the root a write needs no approval in,
     /// a read none either, and a sandboxed command may write.
     pub fn working_dir(&self) -> &Path {
+        if let Some(worktree) = &self.worktree {
+            return &worktree.dir;
+        }
         match &self.workspace {
             Workspace::Project(dir) | Workspace::Scratch(dir) => dir,
         }
+    }
+
+    /// `git`, resolved, when its git directory is the project's own
+    /// `<project>/.git` — the only git directory the sandbox guards for a
+    /// worktree — its entry lies directly under that directory's
+    /// `worktrees/`, and its branch stays below `refs/heads/`.
+    pub fn project_worktree_git(&self, git: &WorktreeGit) -> Option<WorktreeGit> {
+        let own = self
+            .project_root()?
+            .join(REPOSITORY_CONFIG_DIR)
+            .canonicalize()
+            .ok()?;
+        if git.dir.canonicalize().ok()? != own || !own.is_dir() {
+            return None;
+        }
+        let admin = git.admin.canonicalize().ok()?;
+        let branch_is_plain = git.branch.split('/').all(|part| {
+            !part.is_empty() && part != "." && part != ".." && !part.ends_with(".lock")
+        });
+        (admin.parent() == Some(own.join("worktrees").as_path()) && branch_is_plain).then(|| {
+            WorktreeGit {
+                dir: own,
+                admin,
+                branch: git.branch.clone(),
+            }
+        })
+    }
+
+    /// What of the repository's git directory a sandboxed command in the
+    /// session's worktree may write, while it is still the project's own.
+    pub fn worktree_git(&self) -> Option<WorktreeGit> {
+        self.project_worktree_git(self.worktree.as_ref()?.git.as_ref()?)
     }
 
     /// The project tier's `settings.local.json` — the file the interactive
@@ -390,6 +487,7 @@ mod tests {
             local_data_dir: p.local_data_dir.clone(),
             scope: "code".into(),
             project_untrusted: false,
+            worktree: None,
         };
         let back = ConfigPaths::from_settings(&carried);
         assert_eq!(back.user_data_dir, p.user_data_dir);

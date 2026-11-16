@@ -60,6 +60,13 @@ pub struct SandboxPolicy {
     /// directory. For the engine's own git, which reads the project and
     /// writes only where its bookkeeping lives.
     pub only_additional_writable: bool,
+    /// Where a working directory that is a linked worktree commits to, as
+    /// the engine checked it when it made the worktree: its git directory is
+    /// guarded as `<cwd>/.git` is otherwise, and what of it is writable is
+    /// [`crate::paths::WorktreeGit::writable`] in `additional_writable`. The
+    /// backends never follow the worktree's own links to find it, since a
+    /// command may have rewritten them.
+    pub worktree_git: Option<crate::paths::WorktreeGit>,
     /// This instance's global state root. `None` falls back to `$HOME/.agix`,
     /// which is where an instance usually lives but not where it must: a
     /// redirected instance whose sandbox protected `$HOME/.agix` would be
@@ -130,6 +137,7 @@ impl SandboxPolicy {
             ),
             additional_writable: writable,
             only_additional_writable: true,
+            worktree_git: self.worktree_git.clone(),
             state_root: self.state_root.clone(),
             deny_ipc_escapes: true,
             env: EnvScope::Minimal,
@@ -214,6 +222,9 @@ pub struct SandboxSettings {
     pub unattended_requires_network_policy: bool,
     /// `dangerously_disable_sandbox`: commands run outside the OS sandbox.
     pub disabled: bool,
+    /// [`SandboxPolicy::worktree_git`], for a session working in a linked
+    /// worktree.
+    pub worktree_git: Option<crate::paths::WorktreeGit>,
 }
 
 impl SandboxSettings {
@@ -235,6 +246,7 @@ impl SandboxSettings {
             state_root: self.paths.state_root().map(Path::to_path_buf),
             additional_writable: Vec::new(),
             only_additional_writable: false,
+            worktree_git: self.worktree_git.clone(),
             deny_ipc_escapes: false,
             read: ReadScope::Everything,
             env: EnvScope::Session,

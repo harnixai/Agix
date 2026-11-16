@@ -19,6 +19,10 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug, Clone, Default)]
 pub struct SessionEnv {
     pub cwd: PathBuf,
+    /// Directories a relative deny or ask path rule is also read against,
+    /// besides `cwd`: the project root, for a session working in one of its
+    /// worktrees. An allow is read against `cwd` alone.
+    pub refusal_rule_roots: Vec<PathBuf>,
     /// 用户级附加可写目录（`additional_directories`）—— Tool 在做路径校验时用
     pub additional_writable_dirs: Vec<PathBuf>,
     /// Directories outside the project the file tools may read without

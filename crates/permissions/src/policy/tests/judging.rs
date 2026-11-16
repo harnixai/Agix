@@ -944,3 +944,179 @@ async fn a_deny_rule_for_the_name_a_call_is_also_known_by_applies_but_an_allow_d
         "{outcome:?}"
     );
 }
+
+/// In a worktree of the project, a relative deny or ask path rule holds
+/// under the worktree and under the project root both; an allow only under
+/// the worktree.
+#[test]
+fn a_worktree_session_is_refused_by_relative_rules_under_the_project_too() {
+    let project = PathBuf::from("/p");
+    let worktree = project.join(".agix/worktrees/wt");
+    let with = |behavior, tool: &str, content: Option<&str>| PermissionRule {
+        source: RuleSource::ProjectSettings,
+        behavior,
+        tool_name: tool.into(),
+        rule_content: content.map(Into::into),
+    };
+    let rules = RuleSet::new(vec![
+        with(RuleBehavior::Allow, "Read", None),
+        with(RuleBehavior::Deny, "Read", Some(".env")),
+        with(RuleBehavior::Allow, "Edit", Some("src/**")),
+        with(RuleBehavior::Ask, "Edit", Some("docs/**")),
+    ]);
+    let hit = |roots: Vec<PathBuf>, tool: &str, subject: Subject| {
+        let mut ctx = session_state::testing::tool_context_for_test(
+            ExecProviders::in_process(),
+            worktree.clone(),
+        );
+        ctx.session = Arc::new(SessionState::for_tests_in(base::context::SessionEnv {
+            refusal_rule_roots: roots,
+            ..base::context::SessionEnv::new(worktree.clone())
+        }));
+        super::super::subject::Named::of(&subject, &ctx).hit(&rules, tool, &ctx)
+    };
+    let in_worktree = || vec![project.clone()];
+    let read = |p: &str| Subject::ReadPath(p.into());
+    let write = |p: &str| Subject::WritePath(p.into());
+
+    assert!(matches!(
+        hit(in_worktree(), "Read", read("/p/.env")),
+        RuleHit::Deny(_)
+    ));
+    assert!(matches!(
+        hit(in_worktree(), "Read", read("../../../.env")),
+        RuleHit::Deny(_)
+    ));
+    assert!(matches!(
+        hit(in_worktree(), "Read", read(".env")),
+        RuleHit::Deny(_)
+    ));
+    assert!(matches!(
+        hit(in_worktree(), "Edit", write("/p/docs/a.md")),
+        RuleHit::Ask(_)
+    ));
+    assert!(matches!(
+        hit(in_worktree(), "Edit", write("src/a.rs")),
+        RuleHit::Allow(_)
+    ));
+    assert!(matches!(
+        hit(in_worktree(), "Edit", write("/p/src/a.rs")),
+        RuleHit::None
+    ));
+    assert!(matches!(
+        hit(Vec::new(), "Read", read("/p/.env")),
+        RuleHit::Allow(_)
+    ));
+}
+
+/// A deny or ask path rule anchored at the project, absolute or relative,
+/// holds for the same path in a worktree under `<repository>/.agix/worktrees/`
+/// from any session, and for a project in a subdirectory of its repository
+/// where that subdirectory is in the worktree. An allow does not carry over.
+#[test]
+fn project_anchored_refusals_cover_a_worktrees_copy() {
+    let with = |behavior, tool: &str, content: &str| PermissionRule {
+        source: RuleSource::ProjectSettings,
+        behavior,
+        tool_name: tool.into(),
+        rule_content: Some(content.into()),
+    };
+    let hit = |cwd: &str, roots: &[&str], rules: &RuleSet, tool: &str, subject: Subject| {
+        let cwd = PathBuf::from(cwd);
+        let mut ctx =
+            session_state::testing::tool_context_for_test(ExecProviders::in_process(), cwd.clone());
+        ctx.session = Arc::new(SessionState::for_tests_in(base::context::SessionEnv {
+            refusal_rule_roots: roots.iter().map(PathBuf::from).collect(),
+            ..base::context::SessionEnv::new(cwd)
+        }));
+        super::super::subject::Named::of(&subject, &ctx).hit(rules, tool, &ctx)
+    };
+    let read = |p: &str| Subject::ReadPath(p.into());
+    let wt = "/p/.agix/worktrees/wt";
+    let absolute = RuleSet::new(vec![with(RuleBehavior::Deny, "Read", "/p/secrets/**")]);
+    let relative = RuleSet::new(vec![
+        with(RuleBehavior::Deny, "Read", "secrets/**"),
+        with(RuleBehavior::Ask, "Edit", "docs/**"),
+        with(RuleBehavior::Allow, "Read", "src/**"),
+    ]);
+
+    let denied = |hit: RuleHit| matches!(hit, RuleHit::Deny(_));
+    assert!(denied(hit(
+        wt,
+        &["/p"],
+        &absolute,
+        "Read",
+        read("secrets/key")
+    )));
+    assert!(denied(hit(
+        "/p",
+        &[],
+        &relative,
+        "Read",
+        read("/p/.agix/worktrees/wt/secrets/key")
+    )));
+    assert!(denied(hit(
+        "/p",
+        &[],
+        &absolute,
+        "Read",
+        read("/p/.agix/worktrees/wt/secrets/key")
+    )));
+    assert!(denied(hit(
+        "/r/.agix/worktrees/wt",
+        &["/r/sub"],
+        &relative,
+        "Read",
+        read("sub/secrets/key")
+    )));
+    assert!(denied(hit(
+        "/r/sub",
+        &[],
+        &relative,
+        "Read",
+        read("/r/.agix/worktrees/wt/sub/secrets/key")
+    )));
+    assert!(matches!(
+        hit(
+            "/p",
+            &[],
+            &relative,
+            "Edit",
+            Subject::WritePath("/p/.agix/worktrees/wt/docs/a.md".into())
+        ),
+        RuleHit::Ask(_)
+    ));
+    assert!(matches!(
+        hit(
+            "/p",
+            &[],
+            &relative,
+            "Read",
+            read("/p/.agix/worktrees/wt/src/a.rs")
+        ),
+        RuleHit::None
+    ));
+    assert!(matches!(
+        hit(
+            "/p",
+            &[],
+            &relative,
+            "Read",
+            read("/p/elsewhere/wt/secrets/key")
+        ),
+        RuleHit::None
+    ));
+
+    let walk = crate::ruleset::path_denial(
+        vec![with(RuleBehavior::Deny, "Read", "secrets/**")],
+        "Grep",
+        std::path::Path::new("/p"),
+    )
+    .expect("a deny rule with a path");
+    assert!(walk(std::path::Path::new(
+        "/p/.agix/worktrees/wt/secrets/key"
+    )));
+    assert!(!walk(std::path::Path::new(
+        "/p/.agix/worktrees/wt/src/a.rs"
+    )));
+}

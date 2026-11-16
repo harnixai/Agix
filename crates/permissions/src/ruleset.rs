@@ -12,7 +12,7 @@ use crate::path_rule::{self, ResolvedPath};
 use crate::shadow::{detect_shadowed_rules, log_shadow_warnings};
 use base::interface::permission::Subject;
 use base::permission::{PermissionRule, RuleBehavior};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Tools whose rule content is a path.
 pub(crate) const PATH_RULE_TOOLS: &[&str] =
@@ -67,7 +67,7 @@ impl RuleHit {
         }
     }
 
-    fn refusal(self) -> RuleHit {
+    pub(crate) fn refusal(self) -> RuleHit {
         match self {
             RuleHit::Allow(_) => RuleHit::None,
             other => other,
@@ -181,7 +181,8 @@ impl RuleSet {
 
     /// 路径类工具调用的裁决：规则内容按路径解读（见 `path_rule`），工具自己名下的
     /// 规则和 `group`（`Read` / `Edit`）名下的规则都适用。别名路径上命中的 deny /
-    /// ask 同样生效；allow 只认工具真正打开的那个路径。
+    /// ask 同样生效，worktree 里的路径在主检出里的那一份
+    /// （`path_rule::main_checkout_copies`）也算别名；allow 只认工具真正打开的那个路径。
     pub fn evaluate_path(
         &self,
         tool_name: &str,
@@ -201,8 +202,13 @@ impl RuleSet {
                 }
             })
         };
+        let copies: Vec<PathBuf> = path
+            .all()
+            .flat_map(path_rule::main_checkout_copies)
+            .collect();
         path.aliases
             .iter()
+            .chain(&copies)
             .fold(decide_for(&path.primary), |verdict, alias| {
                 verdict.restricted_by(decide_for(alias))
             })

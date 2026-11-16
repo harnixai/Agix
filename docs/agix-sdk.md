@@ -262,7 +262,7 @@ assert_eq!(said, "你好。");
 - `name` 匹配 `^[A-Za-z][A-Za-z0-9_-]{0,63}$`，不以 `mcp__` 开头；`description` 不超过 8 KiB；`input_schema` 是 `type: object`，不超过 64 KiB。
 - `timeout_ms` 取 1000 到 600000，缺省 120000；另有 `read_only`、`destructive`、`concurrency_safe`、`deferred`、`subagents`。
 
-调用到来是 `AgentEvent::HostToolCall { call_id, name, input, timeout_ms, .. }`；回答是 `HostReply::Result(ToolResult)`（结果本身可以带 `is_error`）或 `HostReply::Failed(message)`（宿主跑不了这次调用）。宿主工具和别的工具一样过权限门，所以非只读的工具先有一个 `PermissionPrompt`，答过才轮到 `HostToolCall`。没人回答的调用在超时、**所有 watcher 离开**或这一轮被取消时结束：回答期间 watcher 要一直挂着。
+调用到来是 `AgentEvent::HostToolCall { call_id, name, input, timeout_ms, cwd, depth, .. }`，`cwd` 与 `depth` 是发起调用的会话的工作目录与委派深度（根会话 0；在 worktree 里跑的子 Agent 的 `cwd` 是那个 worktree）；回答是 `HostReply::Result(ToolResult)`（结果本身可以带 `is_error`）或 `HostReply::Failed(message)`（宿主跑不了这次调用）。宿主工具和别的工具一样过权限门，所以非只读的工具先有一个 `PermissionPrompt`，答过才轮到 `HostToolCall`。没人回答的调用在超时、**所有 watcher 离开**或这一轮被取消时结束：回答期间 watcher 要一直挂着。
 
 工具也可以挂在 watcher 上而不是会话上：`pool.set_host_tools(watcher, entries)` 把这个 watcher 提供的工具登记进去（每项同 `options.host_tools`，整个替换、`[]` 撤回），此后建起来的每个会话都带它们；它们不进会话选项。这样的调用的 `HostToolCall` 一定发给提供它的 watcher，答复只认它：用 `pool.respond_tool_call_from(Some(watcher_id), &session_id, call_id, reply)` 回答（`respond_tool_call` 等于 `from = None`，答不了这类调用）。报进度用 `pool.report_tool_progress(Some(watcher_id), &session_id, call_id, update)`。`pool.set_hooks(watcher, entries)` 是同一个思路的 hook 版本（只发给登记它的 watcher、对已建好的会话立刻生效），影响面和失败语义见 `daemon_rpc_protocol.md` §6.1 的 `daemon.setHooks`。watcher 离开，它的工具与 hook 随即消失。
 

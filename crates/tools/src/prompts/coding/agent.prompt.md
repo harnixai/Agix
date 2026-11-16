@@ -62,4 +62,6 @@ You can omit `subagent_type` to fork yourself — the forked agent inherits your
 
 ## Worktree isolation
 
-Use `isolation: "worktree"` to give the agent its own git worktree — an isolated copy of the repo where it can safely make changes without affecting your working directory. The worktree is auto-cleaned if unchanged.
+Pass `worktree: "<name>"` to give the agent its own git worktree: a separate checkout of the repository at `.agix/worktrees/<name>`, on a new branch `agix/worktree-<name>` made from the project's current commit, where it can change files and commit without touching your working directory: in the repository's `.git` it writes only objects, its worktree's own index and HEAD, and its own branch's ref and reflog — not your branches, tags, `packed-refs`, `.git/info/` or `.git/config`. Its tools work in that worktree; reading or writing files of your checkout asks for approval, and the project's deny and ask rules cover your checkout as well as the worktree.
+
+When the agent ends, a worktree it left as it was made — no uncommitted or untracked changes, no new commits — is removed along with its branch; files git ignores don't count and go with it. Otherwise both are kept, and the agent's result (for a background agent, its task notification) carries a `<worktree>` block with the `<path>` and `<branch>`: merge or cherry-pick the branch. Nothing removes a kept worktree or its branch for you; while it exists its name is refused, so pick another.

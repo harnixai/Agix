@@ -9,9 +9,11 @@
 //! ## 用法
 //!
 //! ```ignore
-//! let mut handle = create_worktree(&exec, &git, repo_root, "probe").await?;
+//! let handle = create_worktree(&exec, &git, repo_root, "probe").await?;
 //! // sub-agent 在 handle.path() 跑
-//! handle.cleanup().await?;
+//! if let Some(kept) = handle.remove_if_untouched().await {
+//!     // 有未提交的改动或新提交：worktree 与分支都留着，kept 说在哪
+//! }
 //! ```
 //!
 //! ## 边界
@@ -22,9 +24,11 @@
 //!   决定要不要做）
 //! - git 必须进沙箱却进不去 → `GitRefused`，不在沙箱外跑
 //! - cleanup 失败仅 warn，不传播 —— sub-agent 主要工作已完成
+//! - `remove_if_untouched` 只删干净的：没有未提交 / 未跟踪的改动、分支与 HEAD
+//!   都没有建它以来的新提交；git 读不出状态时也留着
 
 use base::engine_exec::{EngineExec, EngineExecError, GitAccess};
-use base::interface::exec::{ExecError, ExecProviders};
+use base::interface::exec::{ExecError, ExecProviders, FileSystem};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -33,6 +37,7 @@ const SLUG_MAX_LEN: usize = 64;
 const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 const WORKTREES_SUBDIR: &str = ".agix/worktrees";
 const BRANCH_PREFIX: &str = "agix/worktree-";
+const UNREADABLE: &str = "a state git could not read";
 
 /// `WorktreeHandle` —— 创建后持有；drop 时不自动清（避免 sync drop 起 tokio
 /// runtime）。caller 必须显式 await `cleanup()`。
@@ -40,7 +45,10 @@ const BRANCH_PREFIX: &str = "agix/worktree-";
 pub struct WorktreeHandle {
     path: PathBuf,
     branch: String,
+    /// The commit the worktree was made at.
+    base: String,
     repo: Repo,
+    linked_git: Option<base::paths::WorktreeGit>,
     exec: ExecProviders,
     git: EngineExec,
     /// 若已经被 cleanup 过则 false，二次调用变 no-op
@@ -74,6 +82,76 @@ impl WorktreeHandle {
         &self.repo.root
     }
 
+    /// The worktree with what a commit in it writes of the repository's git
+    /// directory — `None` there when the worktree's links, read right after
+    /// it was made, did not lead from its entry under `worktrees/` back.
+    pub fn linked(&self) -> base::paths::LinkedWorktree {
+        base::paths::LinkedWorktree {
+            dir: self.path.clone(),
+            git: self.linked_git.clone(),
+        }
+    }
+
+    /// Removes the worktree and its branch if nothing was left in them;
+    /// otherwise leaves both on disk and says where they are and why.
+    pub async fn remove_if_untouched(mut self) -> Option<KeptWorktree> {
+        if !self.pending {
+            return None;
+        }
+        let holds = self.work_left().await;
+        if holds.is_empty() {
+            self.cleanup().await;
+            return None;
+        }
+        self.pending = false;
+        Some(KeptWorktree {
+            path: self.path.clone(),
+            branch: self.branch.clone(),
+            holds,
+        })
+    }
+
+    async fn work_left(&self) -> Vec<String> {
+        let branch = format!("refs/heads/{}", self.branch);
+        let status = [
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+        ];
+        let new_commits = ["rev-list", "--count", "HEAD", &branch, "--not", &self.base];
+        let (Ok(status), Ok(commits)) = (
+            self.git_in_worktree(&status).await,
+            self.git_in_worktree(&new_commits).await,
+        ) else {
+            return vec![UNREADABLE.to_string()];
+        };
+        let Ok(commits) = commits.trim().parse::<u64>() else {
+            return vec![UNREADABLE.to_string()];
+        };
+        let mut holds = Vec::new();
+        if !status.trim().is_empty() {
+            holds.push("uncommitted changes".to_string());
+        }
+        if commits > 0 {
+            holds.push(format!("{commits} commit(s) since it was made"));
+        }
+        holds
+    }
+
+    /// A read-only git in the worktree, started from the repository's root:
+    /// under bwrap a sandboxed git working in `/tmp` sees nothing there but
+    /// its working directory, and from the worktree that would leave out the
+    /// git directory its `.git` link leads to.
+    async fn git_in_worktree(&self, args: &[&str]) -> Result<String, WorktreeError> {
+        let path = self.path.to_string_lossy();
+        let args: Vec<&str> = ["-C", path.as_ref()]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+        run_git_capture(&self.git, &self.repo.root, &args, &[]).await
+    }
+
     /// 删除 worktree 目录 + 关联分支。失败 warn 不报错。
     /// Takes `&mut self` so callers can store the handle in an `Option` and
     /// clean up without consuming ownership.
@@ -83,7 +161,12 @@ impl WorktreeHandle {
         }
         self.pending = false;
 
-        let admin = self.admin_dir().await;
+        let admin = admin_dir(
+            self.exec.filesystem.as_ref(),
+            &self.path,
+            &self.repo.git_dir,
+        )
+        .await;
         for dir in std::iter::once(&self.path).chain(&admin) {
             if let Err(e) = self.exec.filesystem.remove_dir_all(dir).await {
                 warn!(
@@ -116,20 +199,140 @@ impl WorktreeHandle {
             );
         }
     }
+}
 
-    /// The worktree's entry under the git directory's `worktrees/`, as its
-    /// `.git` file names it — and only if it is there.
-    async fn admin_dir(&self) -> Option<PathBuf> {
-        let fs = &self.exec.filesystem;
-        let link = fs.read_to_string(&self.path.join(".git")).await.ok()?;
-        let named = link.trim().strip_prefix("gitdir:")?.trim();
-        let admin = fs.canonicalize(&self.path.join(named)).await.ok()?;
-        let worktrees = fs
-            .canonicalize(&self.repo.git_dir.join("worktrees"))
-            .await
-            .ok()?;
-        (admin.parent() == Some(worktrees.as_path())).then_some(admin)
+/// A worktree [`WorktreeHandle::remove_if_untouched`] left on disk, with its
+/// branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeptWorktree {
+    pub path: PathBuf,
+    pub branch: String,
+    /// What it holds that removing it would lose: uncommitted changes, new
+    /// commits.
+    pub holds: Vec<String>,
+}
+
+/// The entry of the worktree at `path` under `git_dir/worktrees/`, as its
+/// `.git` file names it — and only if it is there.
+async fn admin_dir(fs: &dyn FileSystem, path: &Path, git_dir: &Path) -> Option<PathBuf> {
+    let link = fs.read_to_string(&path.join(".git")).await.ok()?;
+    let named = link.trim().strip_prefix("gitdir:")?.trim();
+    let admin = fs.canonicalize(&path.join(named)).await.ok()?;
+    let worktrees = fs.canonicalize(&git_dir.join("worktrees")).await.ok()?;
+    (admin.parent() == Some(worktrees.as_path())).then_some(admin)
+}
+
+/// `repo`'s git directory, resolved, with the entry of the worktree just
+/// made at `path` and its `branch`, when the worktree is linked to it: its
+/// `.git` file names an entry directly under `worktrees/` there, that
+/// entry's `commondir` leads back, and the branch is a loose ref. Otherwise
+/// something rewrote the links, or the repository keeps its refs some other
+/// way, and the worktree gets nothing of the git directory.
+async fn linked_worktree_git(
+    exec: &ExecProviders,
+    path: &Path,
+    repo: &Repo,
+    branch: &str,
+) -> Option<base::paths::WorktreeGit> {
+    let fs = exec.filesystem.as_ref();
+    let git = match links_lead_back(fs, path, &repo.git_dir).await {
+        Some((common, admin)) => loose_branch(fs, common, admin, branch).await,
+        None => None,
+    };
+    if git.is_none() {
+        warn!(
+            worktree = %path.display(),
+            git_dir = %repo.git_dir.display(),
+            "the worktree's links do not lead back to the repository's git directory, or \
+             its branch is not a loose ref; a sandboxed sub-agent in it cannot commit"
+        );
     }
+    git
+}
+
+/// `git_dir`, resolved, and the worktree's entry in it, when the worktree at
+/// `path` is linked to it.
+async fn links_lead_back(
+    fs: &dyn FileSystem,
+    path: &Path,
+    git_dir: &Path,
+) -> Option<(PathBuf, PathBuf)> {
+    let common = fs.canonicalize(git_dir).await.ok()?;
+    let admin = admin_dir(fs, path, &common).await?;
+    let named = fs.read_to_string(&admin.join("commondir")).await.ok()?;
+    let named = fs.canonicalize(&admin.join(named.trim())).await.ok()?;
+    (named == common).then_some((common, admin))
+}
+
+/// What a commit on `branch` writes in `dir`, when `branch` is a loose ref.
+async fn loose_branch(
+    fs: &dyn FileSystem,
+    dir: PathBuf,
+    admin: PathBuf,
+    branch: &str,
+) -> Option<base::paths::WorktreeGit> {
+    let git = base::paths::WorktreeGit {
+        dir,
+        admin,
+        branch: branch.to_string(),
+    };
+    let loose = fs
+        .metadata(&git.branch_ref())
+        .await
+        .is_ok_and(|m| !m.is_dir);
+    loose.then_some(git)
+}
+
+/// The worktree at `dir` again, for a session brought back from its log
+/// that worked there: still a directory under
+/// `<repository>/.agix/worktrees/`, of a repository `project` is in, and
+/// still linked to `<repository>/.git`. That git directory is the one it
+/// carries, never one the links name, and the branch is the one the engine
+/// names after the directory, never the one the worktree's `HEAD` names.
+pub async fn reopen_worktree(
+    fs: &dyn FileSystem,
+    project: &Path,
+    dir: &Path,
+) -> Result<base::paths::LinkedWorktree, String> {
+    let not_one = || {
+        format!(
+            "{} is not a worktree of the project {}",
+            dir.display(),
+            project.display()
+        )
+    };
+    let root = dir
+        .parent()
+        .filter(|parent| parent.ends_with(WORKTREES_SUBDIR))
+        .and_then(|parent| parent.parent()?.parent())
+        .ok_or_else(not_one)?;
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(not_one)?;
+    let (project_real, root_real) = (
+        fs.canonicalize_best_effort(project).await,
+        fs.canonicalize_best_effort(root).await,
+    );
+    if !project_real.starts_with(&root_real) {
+        return Err(not_one());
+    }
+    if !fs.metadata(dir).await.is_ok_and(|m| m.is_dir) {
+        return Err(format!("its worktree {} is gone", dir.display()));
+    }
+    let git_dir = root.join(".git");
+    let (common, admin) = links_lead_back(fs, dir, &git_dir).await.ok_or_else(|| {
+        format!(
+            "its worktree {} is no longer linked to {}",
+            dir.display(),
+            git_dir.display()
+        )
+    })?;
+    let branch = format!("{BRANCH_PREFIX}{name}");
+    Ok(base::paths::LinkedWorktree {
+        dir: dir.to_path_buf(),
+        git: loose_branch(fs, common, admin, &branch).await,
+    })
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -157,7 +360,7 @@ pub enum WorktreeError {
 /// 1. 验 slug
 /// 2. 找 repo root 与 git 目录（slug 错或非 git 都 fail-fast）
 /// 3. 写 `.gitignore` 加 `.agix/`（若未存在）
-/// 4. `git worktree add -b <branch> <path> HEAD`
+/// 4. `git worktree add -b <branch> <path> <HEAD 的提交>`
 pub async fn create_worktree(
     exec: &ExecProviders,
     git: &EngineExec,
@@ -180,6 +383,10 @@ pub async fn create_worktree(
 
     ensure_gitignore_entry(exec, &repo.root, ".agix/").await;
 
+    let base = run_git_capture(git, &repo.root, &["rev-parse", "HEAD"], &[])
+        .await?
+        .trim()
+        .to_string();
     run_git(
         git,
         &repo.root,
@@ -189,7 +396,7 @@ pub async fn create_worktree(
             "-b",
             &branch,
             &path.to_string_lossy(),
-            "HEAD",
+            &base,
         ],
         &repo.bookkeeping(),
     )
@@ -201,10 +408,13 @@ pub async fn create_worktree(
         "worktree created"
     );
 
+    let linked_git = linked_worktree_git(exec, &path, &repo, &branch).await;
     Ok(WorktreeHandle {
         path,
         branch,
+        base,
         repo,
+        linked_git,
         exec: exec.clone(),
         git: git.clone(),
         pending: true,
@@ -683,6 +893,169 @@ mod tests {
         );
     }
 
+    async fn branch_exists(repo: &Path, branch: &str) -> bool {
+        run_git_capture(&direct(), repo, &["branch", "--list", branch], &[])
+            .await
+            .unwrap()
+            .contains(branch)
+    }
+
+    #[tokio::test]
+    async fn an_untouched_worktree_is_removed_with_its_branch() {
+        let repo = make_minimal_repo().await;
+        let handle = create_worktree(&exec(), &direct(), repo.path(), "clean")
+            .await
+            .unwrap();
+        let path = handle.path().to_path_buf();
+        assert_eq!(handle.remove_if_untouched().await, None);
+        assert!(!path.exists());
+        assert!(!branch_exists(repo.path(), "agix/worktree-clean").await);
+    }
+
+    #[tokio::test]
+    async fn a_worktree_with_changes_or_commits_is_kept_with_its_branch() {
+        let repo = make_minimal_repo().await;
+        let edited = create_worktree(&exec(), &direct(), repo.path(), "edited")
+            .await
+            .unwrap();
+        std::fs::write(edited.path().join("new.txt"), "untracked").unwrap();
+        let kept = edited.remove_if_untouched().await.expect("kept");
+        assert_eq!(kept.holds, ["uncommitted changes"]);
+        assert!(kept.path.join("new.txt").is_file());
+        assert!(branch_exists(repo.path(), &kept.branch).await);
+
+        let committed = create_worktree(&exec(), &direct(), repo.path(), "committed")
+            .await
+            .unwrap();
+        std::fs::write(committed.path().join("c.txt"), "c").unwrap();
+        for args in [&["add", "c.txt"][..], &["commit", "-qm", "c"]] {
+            run_git_capture(&direct(), committed.path(), args, &[])
+                .await
+                .unwrap();
+        }
+        run_git_capture(
+            &direct(),
+            committed.path(),
+            &["checkout", "-q", "--detach", "HEAD~1"],
+            &[],
+        )
+        .await
+        .unwrap();
+        let kept = committed.remove_if_untouched().await.expect("kept");
+        assert_eq!(kept.holds, ["1 commit(s) since it was made"]);
+        assert_eq!(kept.branch, "agix/worktree-committed");
+        assert!(kept.path.is_dir());
+        assert!(branch_exists(repo.path(), &kept.branch).await);
+    }
+
+    /// A worktree is reopened, with what a commit in it writes, while it
+    /// is there and its links still lead back; a project in a subdirectory of
+    /// the repository reopens it too, and anything else is refused.
+    #[tokio::test]
+    async fn a_worktree_is_reopened_only_while_it_is_still_linked_to_the_repository() {
+        let repo = make_minimal_repo().await;
+        let root = repo.path().canonicalize().unwrap();
+        let git_dir = root.join(".git");
+        let handle = create_worktree(&exec(), &direct(), &root, "again")
+            .await
+            .unwrap();
+        let dir = handle.path().to_path_buf();
+        let reopened = reopen_worktree(&platform::LocalFileSystem, &root, &dir)
+            .await
+            .unwrap();
+        assert_eq!(reopened.dir, dir);
+        let git = reopened
+            .git
+            .expect("a fresh worktree's branch is a loose ref");
+        assert_eq!(git.dir, git_dir);
+        assert_eq!(git.branch, handle.branch());
+        assert_eq!(git, handle.linked().git.unwrap());
+        assert!(
+            reopen_worktree(&platform::LocalFileSystem, &root.join("sub"), &dir)
+                .await
+                .is_ok()
+        );
+
+        let elsewhere = TempDir::new().unwrap();
+        let refused = |project: PathBuf, dir: PathBuf| async move {
+            reopen_worktree(&platform::LocalFileSystem, &project, &dir)
+                .await
+                .unwrap_err()
+        };
+        assert!(refused(elsewhere.path().to_path_buf(), dir.clone())
+            .await
+            .contains("is not a worktree of"));
+        assert!(refused(root.clone(), root.join("src"))
+            .await
+            .contains("is not a worktree of"));
+        assert!(refused(root.clone(), root.join(".agix/worktrees/never"))
+            .await
+            .contains("is gone"));
+
+        let commondir = git_dir.join("worktrees/again/commondir");
+        std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
+        assert!(refused(root.clone(), dir.clone())
+            .await
+            .contains("no longer linked"));
+        std::fs::write(&commondir, "../..\n").unwrap();
+        handle.remove_if_untouched().await;
+        assert!(refused(root.clone(), dir).await.contains("is gone"));
+    }
+
+    /// The git directory a worktree commits to is the one its links led
+    /// back to when it was made, with its entry there and its branch; a
+    /// rewritten link leads nowhere accepted.
+    #[tokio::test]
+    async fn a_worktree_carries_the_git_directory_its_links_led_back_to() {
+        let repo = make_minimal_repo().await;
+        let git_dir = repo.path().join(".git").canonicalize().unwrap();
+        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "linked")
+            .await
+            .unwrap();
+        let linked = handle.linked();
+        assert_eq!(linked.dir, handle.path());
+        assert_eq!(
+            linked.git,
+            Some(base::paths::WorktreeGit {
+                dir: git_dir.clone(),
+                admin: git_dir.join("worktrees/linked"),
+                branch: "agix/worktree-linked".into(),
+            })
+        );
+        let providers = exec();
+        let linked_git = |handle: &WorktreeHandle| {
+            let (path, repo, branch) = (
+                handle.path().to_path_buf(),
+                handle.repo.clone(),
+                handle.branch.clone(),
+            );
+            let providers = providers.clone();
+            async move { linked_worktree_git(&providers, &path, &repo, &branch).await }
+        };
+
+        let elsewhere = TempDir::new().unwrap();
+        let commondir = git_dir.join("worktrees/linked/commondir");
+        std::fs::write(&commondir, format!("{}\n", elsewhere.path().display())).unwrap();
+        assert_eq!(linked_git(&handle).await, None);
+        std::fs::write(&commondir, "../..\n").unwrap();
+        assert_eq!(linked_git(&handle).await, linked.git);
+        run_git_capture(&direct(), repo.path(), &["pack-refs", "--all"], &[])
+            .await
+            .unwrap();
+        assert_eq!(linked_git(&handle).await, None, "a packed branch");
+
+        let fake = elsewhere.path().join("linked");
+        std::fs::create_dir_all(&fake).unwrap();
+        std::fs::write(fake.join("commondir"), format!("{}\n", git_dir.display())).unwrap();
+        std::fs::write(
+            handle.path().join(".git"),
+            format!("gitdir: {}\n", fake.display()),
+        )
+        .unwrap();
+        assert_eq!(linked_git(&handle).await, None);
+        handle.cleanup().await;
+    }
+
     #[tokio::test]
     async fn create_worktree_flattens_nested_slug() {
         let repo = make_minimal_repo().await;
@@ -896,7 +1269,7 @@ mod tests {
 
     /// In a sandboxed session the worktree's git runs in the sandbox, writing
     /// only the git directory and `.agix/worktrees/`, and the worktree it
-    /// makes is one git can work in; cleanup still takes it all away.
+    /// makes is one git can work in; untouched, it goes with its branch.
     #[tokio::test]
     async fn a_sandboxed_git_still_creates_and_removes_a_working_worktree() {
         if !crate::bash::sandbox_status().starts_with("available") {
@@ -917,22 +1290,19 @@ mod tests {
             ProjectTrust::Trusted,
         );
 
-        let mut handle = create_worktree(&exec(), &git, repo.path(), "boxed")
+        let handle = create_worktree(&exec(), &git, repo.path(), "boxed")
             .await
             .unwrap();
         assert!(handle.path().join("README.md").is_file());
-        let head = run_git_capture(
-            &git,
-            handle.path(),
-            &["rev-parse", "--abbrev-ref", "HEAD"],
-            &[],
-        )
-        .await
-        .unwrap();
+        let head = handle
+            .git_in_worktree(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .await
+            .unwrap();
         assert_eq!(head.trim(), "agix/worktree-boxed");
 
-        handle.cleanup().await;
-        assert!(!handle.path().exists());
+        let path = handle.path().to_path_buf();
+        assert_eq!(handle.remove_if_untouched().await, None);
+        assert!(!path.exists());
         let direct = |args: &'static [&'static str]| {
             let root = repo.path().to_path_buf();
             async move { run_git_capture(&direct(), &root, args, &[]).await.unwrap() }

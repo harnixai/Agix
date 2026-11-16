@@ -3,7 +3,7 @@
 //! comes through — the model's `Agent` call, a team member, an `"agent"` hook,
 //! a forked skill, a host's `session.startAgent`.
 //!
-//! `Delegator::delegate` matches the mode once and exhaustively. The mode
+//! `Delegator::dispatch` matches the mode once and exhaustively. The mode
 //! decides the slot, the task and what comes back; the request decides the
 //! rest, the same way for every mode.
 
@@ -64,12 +64,33 @@ impl Delegator {
             .ok_or_else(|| DelegateError::Unsupported("the session is closing".into()))
     }
 
-    fn workdir(&self, workdir: Workdir) -> Result<std::path::PathBuf, DelegateError> {
+    async fn taken_along(
+        mode: &DelegateMode,
+        worktree: Option<::tools::worktree::WorktreeHandle>,
+    ) -> Result<Option<::tools::worktree::WorktreeHandle>, DelegateError> {
+        match worktree {
+            Some(worktree) if !matches!(mode, DelegateMode::Background { .. }) => {
+                worktree.remove_if_untouched().await;
+                Err(DelegateError::Invalid(
+                    "only a background delegate takes its worktree along".into(),
+                ))
+            }
+            worktree => Ok(worktree),
+        }
+    }
+
+    /// The delegate's working directory, and where in the repository's git
+    /// directory a worktree there commits to.
+    fn workdir(
+        &self,
+        workdir: Workdir,
+    ) -> Result<(std::path::PathBuf, Option<base::paths::WorktreeGit>), DelegateError> {
         match workdir {
-            Workdir::Inherit => Ok(self.env.parent.state.env().cwd.clone()),
-            Workdir::At(dir) => Ok(dir),
+            Workdir::Inherit => Ok((self.env.parent.state.env().cwd.clone(), None)),
+            Workdir::At(dir) => Ok((dir, None)),
+            Workdir::Linked(worktree) => Ok((worktree.dir, worktree.git)),
             Workdir::Worktree(_) => Err(DelegateError::Unsupported(
-                "a delegate's worktree is made by its caller, which removes it after".into(),
+                "a delegate's worktree is made by its caller".into(),
             )),
         }
     }
@@ -78,6 +99,37 @@ impl Delegator {
 #[async_trait]
 impl base::interface::delegate::Delegator for Delegator {
     async fn delegate(&self, req: DelegateRequest) -> Result<Delegated, DelegateError> {
+        self.dispatch(req, None).await
+    }
+
+    async fn stop_member(&self, seat: &TeamSeat) {
+        self.stop_persistent_member(seat);
+    }
+
+    fn live_members(&self) -> Vec<LiveMember> {
+        self.live_persistent_members()
+    }
+}
+
+impl Delegator {
+    /// `worktree` is the one `req.workdir` links to, for a background
+    /// delegate to take along and finish with; no other mode takes one.
+    // Boxed: inlined into `AgentTool::call`, a whole delegate run's future
+    // nests deeper than the compiler's query depth limit.
+    pub(crate) fn dispatch(
+        &self,
+        req: DelegateRequest,
+        worktree: Option<::tools::worktree::WorktreeHandle>,
+    ) -> futures::future::BoxFuture<'_, Result<Delegated, DelegateError>> {
+        Box::pin(self.dispatch_unboxed(req, worktree))
+    }
+
+    async fn dispatch_unboxed(
+        &self,
+        req: DelegateRequest,
+        worktree: Option<::tools::worktree::WorktreeHandle>,
+    ) -> Result<Delegated, DelegateError> {
+        let worktree = Self::taken_along(&req.mode, worktree).await?;
         let DelegateRequest {
             prompt,
             description,
@@ -95,6 +147,7 @@ impl base::interface::delegate::Delegator for Delegator {
             mode,
             ..
         } = req;
+        let (cwd, git) = self.workdir(workdir)?;
         let spec = Spec {
             session_id: base::id::Id::new().to_string(),
             agent_type,
@@ -103,7 +156,8 @@ impl base::interface::delegate::Delegator for Delegator {
             output_schema,
             permission_mode: None,
             seat: None,
-            cwd: self.workdir(workdir)?,
+            cwd,
+            git,
             called_from,
         };
         let stop = match stops_with {
@@ -123,16 +177,18 @@ impl base::interface::delegate::Delegator for Delegator {
                     description,
                     tag: None,
                     notify_parent,
+                    worktree,
                 };
-                self.start(spec, prompt, stop, ask, started)
+                self.start(spec, prompt, stop, ask, started).await
             }
             DelegateMode::Host { notify_parent } => {
                 let started = run::Started {
                     description,
                     tag,
                     notify_parent,
+                    worktree: None,
                 };
-                self.start(spec, prompt, stop, ask, started)
+                self.start(spec, prompt, stop, ask, started).await
             }
             DelegateMode::TeamMember {
                 seat,
@@ -162,13 +218,5 @@ impl base::interface::delegate::Delegator for Delegator {
                 self.judge(&judged_session, spec, prompt, stop, ask).await
             }
         }
-    }
-
-    async fn stop_member(&self, seat: &TeamSeat) {
-        self.stop_persistent_member(seat);
-    }
-
-    fn live_members(&self) -> Vec<LiveMember> {
-        self.live_persistent_members()
     }
 }

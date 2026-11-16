@@ -215,6 +215,7 @@ impl Tool for DeclaredHostTool {
             input,
             self.decl.timeout,
         )
+        .made_in(ctx.cwd.clone(), ctx.agent_depth)
         .for_host(self.decl.host)
         .with_progress(progress);
         match host.call(call, &ctx.cancel).await {
@@ -349,6 +350,8 @@ impl HostCalls for ChannelHostCalls {
                 timeout_ms,
                 task_id: call.task_id.clone(),
                 agent_session_id: call.agent_session_id.clone(),
+                cwd: call.cwd.clone(),
+                depth: call.depth,
                 host: call.host,
             },
             HostCallKind::Hook { event, input } => AgentEvent::HostHookCall {
@@ -358,6 +361,8 @@ impl HostCalls for ChannelHostCalls {
                 timeout_ms,
                 task_id: call.task_id.clone(),
                 agent_session_id: call.agent_session_id.clone(),
+                cwd: call.cwd.clone(),
+                depth: call.depth,
                 host: call.host,
             },
             _ => {
@@ -590,6 +595,45 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    #[tokio::test]
+    async fn a_delegates_call_goes_out_with_the_cwd_and_depth_it_was_made_in() {
+        let (events, mut rx) = bus();
+        let pending = PendingHostCalls::default();
+        let root: Arc<dyn HostCalls> = Arc::new(ChannelHostCalls::new(
+            events,
+            pending.clone(),
+            PendingHostProgress::default(),
+        ));
+        let child: Arc<dyn HostCalls> =
+            Arc::new(DelegateHostCalls::new(root, Some("t1".into()), "child"));
+        let grandchild = DelegateHostCalls::new(child, None, "grandchild");
+        let asking = tokio::spawn(async move {
+            grandchild
+                .call(
+                    call("hc_1", Duration::from_secs(60)).made_in("/repo/wt", 2),
+                    &CancellationToken::new(),
+                )
+                .await
+        });
+        asked(&pending, "hc_1").await;
+        let Some(AgentEvent::HostToolCall {
+            cwd,
+            depth,
+            task_id,
+            agent_session_id,
+            ..
+        }) = rx.recv().await
+        else {
+            panic!("no host tool call");
+        };
+        assert_eq!(cwd, std::path::PathBuf::from("/repo/wt"));
+        assert_eq!(depth, 2);
+        assert_eq!(task_id.as_deref(), Some("t1"));
+        assert_eq!(agent_session_id.as_deref(), Some("grandchild"));
+        resolve_host_call(&pending, "hc_1", End::Cancelled);
+        asking.await.unwrap();
     }
 
     /// The answer and the deadline cannot both win: whichever takes the

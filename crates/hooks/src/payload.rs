@@ -12,6 +12,8 @@ pub struct HookInput {
     pub session_id: String,
     pub cwd: String,
     pub permission_mode: String,
+    /// How many delegations deep the session is; `0` for the root.
+    pub depth: u32,
 
     // PreToolUse / PostToolUse
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,6 +124,11 @@ impl HookInput {
         }
     }
 
+    pub fn with_depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
+    }
+
     pub fn with_turn_id(mut self, turn_id: impl Into<String>) -> Self {
         self.turn_id = Some(turn_id.into());
         self
@@ -163,10 +170,17 @@ impl HookInput {
         self
     }
 
-    /// `ambient`'s session, cwd and permission mode under another event name.
+    /// `ambient`'s session, cwd, permission mode and depth under another
+    /// event name.
     pub fn from_ambient(ambient: &Ambient, event: impl Into<String>) -> Self {
-        let base = ambient();
+        Self::lifecycle_of(ambient(), event)
+    }
+
+    /// `base`'s session, cwd, permission mode and depth under another event
+    /// name.
+    pub fn lifecycle_of(base: HookInput, event: impl Into<String>) -> Self {
         Self::lifecycle(event, base.session_id, base.cwd, base.permission_mode)
+            .with_depth(base.depth)
     }
 }
 

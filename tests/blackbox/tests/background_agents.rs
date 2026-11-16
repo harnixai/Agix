@@ -2,6 +2,7 @@
 //! and a host can reach it through the daemon while it runs. A foreground one
 //! stays listed under its parent once its turn is over, and its questions
 //! reach the host inside the parent's turn, its task waiting until answered.
+//! A background one that leaves work in its worktree keeps it, and says so.
 //! An agent type in a `.agix/agents/` created after the daemon started is
 //! offered to the next session and runs.
 
@@ -97,6 +98,302 @@ async fn a_finished_background_agent_reaches_its_parents_next_call() -> anyhow::
     );
     daemon.stop().await;
     Ok(())
+}
+
+/// A background sub-agent that leaves work in its worktree leaves the
+/// worktree and its branch too; its task and the notice name them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_background_agents_kept_worktree_is_in_its_task_and_its_notice() -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.git_project("bgwt")?;
+    world.trust_project(&project)?;
+    world.write_project_settings(
+        "bgwt",
+        &json!({
+            "memory_enabled": false,
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "Bash", "action": "allow" }
+            ]
+        }),
+    )?;
+    let provider = ProviderStub::start().await?;
+    provider.script_when(
+        "PARENT-MARK",
+        [
+            Reply::Blocks(vec![Block::tool(
+                "call-1",
+                "Agent",
+                json!({
+                    "prompt": "make a file",
+                    "description": "file maker",
+                    "background": true,
+                    "worktree": "bg"
+                }),
+            )]),
+            Reply::text("started it"),
+        ],
+    );
+    provider.script([
+        Reply::calls("b1", "Bash", json!({ "command": "echo made > made.txt" })),
+        Reply::text("SUB-MADE-IT"),
+    ]);
+
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let session = client
+        .session_create(json!({ "project_root": project.to_string_lossy() }))
+        .await?;
+    client
+        .session_run_turn(&session, "PARENT-MARK make it", "t1", None)
+        .await?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let task = loop {
+        let tasks = client
+            .call("session.tasks", json!({ "session_id": session }))
+            .await?
+            .result
+            .unwrap_or_default();
+        let done = tasks["tasks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|t| t["kind"] == "agent" && t["status"] == "done")
+            .cloned();
+        if let Some(t) = done {
+            break t;
+        }
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the background agent never finished: {tasks}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let worktree = project.canonicalize()?.join(".agix/worktrees/bg");
+    assert!(worktree.join("made.txt").is_file(), "{task}");
+    let kept = &task["detail"]["worktree"];
+    assert_eq!(kept["path"], worktree.display().to_string(), "{task}");
+    assert_eq!(kept["branch"], "agix/worktree-bg", "{task}");
+    assert_eq!(kept["holds"], json!(["uncommitted changes"]), "{task}");
+
+    provider.script_when("PARENT-MARK", [Reply::text("noted")]);
+    client
+        .session_run_turn(&session, "anything new?", "t2", None)
+        .await?;
+    let last = provider.calls().last().cloned().expect("a call");
+    let body = last.body.to_string();
+    assert!(body.contains("SUB-MADE-IT"), "{body}");
+    assert!(
+        body.contains(&format!("<path>{}</path>", worktree.display()))
+            && body.contains("<branch>agix/worktree-bg</branch>"),
+        "{body}"
+    );
+    daemon.stop().await;
+    Ok(())
+}
+
+/// Background sub-agents stopped mid-run come back, on `session.resume`,
+/// under their project and where they worked: one given a worktree in that
+/// worktree, one without in the project. Once the worktree is gone, its
+/// sidechain is refused rather than brought back in the main checkout.
+#[tokio::test(flavor = "multi_thread")]
+async fn stopped_sub_agents_resume_under_their_project_and_in_their_worktree() -> anyhow::Result<()>
+{
+    let world = World::new()?;
+    let project = world.git_project("bgcut")?;
+    world.trust_project(&project)?;
+    world.write_project_settings(
+        "bgcut",
+        &json!({
+            "memory_enabled": false,
+            "permission_rules": [
+                { "tool": "Agent", "action": "allow" },
+                { "tool": "Bash", "action": "allow" }
+            ]
+        }),
+    )?;
+    let provider = ProviderStub::start().await?;
+    let agent = |id: &str, mark: &str, worktree: Option<&str>| {
+        let mut input = json!({
+            "prompt": format!("{mark} start on it"),
+            "description": mark,
+            "background": true
+        });
+        if let Some(name) = worktree {
+            input["worktree"] = json!(name);
+        }
+        Block::tool(id, "Agent", input)
+    };
+    provider.script_when(
+        "PARENT-MARK",
+        [
+            Reply::Blocks(vec![
+                agent("call-1", "WT-MARK", Some("cut")),
+                agent("call-2", "PLAIN-MARK", None),
+            ]),
+            Reply::text("started them"),
+        ],
+    );
+    let slow = || Reply::Delay(Duration::from_secs(30), Box::new(Reply::text("too late")));
+    provider.script_when(
+        "WT-MARK",
+        [
+            Reply::calls("w1", "Bash", json!({ "command": "echo wt > wip.txt" })),
+            slow(),
+        ],
+    );
+    provider.script_when(
+        "PLAIN-MARK",
+        [
+            Reply::calls("p1", "Bash", json!({ "command": "echo plain > plain.txt" })),
+            slow(),
+        ],
+    );
+
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let session = client
+        .session_create(json!({ "project_root": project.to_string_lossy() }))
+        .await?;
+    client
+        .session_run_turn(&session, "PARENT-MARK start them", "t1", None)
+        .await?;
+
+    let root = project.canonicalize()?;
+    let worktree = root.join(".agix/worktrees/cut");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let running = loop {
+        let listed = tasks_of(&mut client, &session).await?;
+        let running: Vec<serde_json::Value> = listed["tasks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| t["kind"] == "agent" && t["status"] == "running")
+            .cloned()
+            .collect();
+        let back_at_the_model = |bash_call: &str| {
+            let answered = format!("\"tool_use_id\":\"{bash_call}\"");
+            provider
+                .calls()
+                .iter()
+                .any(|call| call.body.to_string().contains(&answered))
+        };
+        if running.len() == 2 && back_at_the_model("w1") && back_at_the_model("p1") {
+            break running;
+        }
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the sub-agents never got to work: {listed}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let sidechain_of = |mark: &str| {
+        running
+            .iter()
+            .find(|t| t["detail"]["description"] == mark)
+            .and_then(|t| t["detail"]["agent_session_id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (in_worktree, plain) = (sidechain_of("WT-MARK"), sidechain_of("PLAIN-MARK"));
+    for task in &running {
+        client
+            .call(
+                "session.stopTask",
+                json!({ "session_id": session, "task_id": task["task_id"] }),
+            )
+            .await?;
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let listed = tasks_of(&mut client, &session).await?;
+        let kept = listed["tasks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|t| t["detail"]["worktree"]["path"] == worktree.display().to_string());
+        if kept {
+            break;
+        }
+        anyhow::ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the stopped sub-agent's worktree was never recorded: {listed}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    for (sidechain, mark, dir, file) in [
+        (&in_worktree, "RESUME-WT", &worktree, "wip.txt"),
+        (&plain, "RESUME-PLAIN", &root, "plain.txt"),
+    ] {
+        let resumed = client
+            .call("session.resume", json!({ "session_id": sidechain }))
+            .await?;
+        let report = resumed.result.clone().unwrap_or_default();
+        assert_eq!(report["project_trust"], "trusted", "{mark}: {resumed:?}");
+        let id = format!("{mark}-pwd");
+        provider.script_when(
+            mark,
+            [
+                Reply::calls(
+                    &id,
+                    "Bash",
+                    json!({ "command": format!("pwd -P && cat {file}") }),
+                ),
+                Reply::text("carried on"),
+            ],
+        );
+        client
+            .session_run_turn(sidechain, &format!("{mark} where are you"), mark, None)
+            .await?;
+        let last = provider.calls().last().cloned().expect("a call");
+        let result = last.body["messages"]
+            .as_array()
+            .and_then(|messages| messages.last())
+            .map(|message| message["content"].to_string())
+            .unwrap_or_default();
+        assert!(
+            result.contains(&id) && result.contains(&format!("{}\\n", dir.display())),
+            "{mark}: the resumed sub-agent did not work in {}: {result}",
+            dir.display()
+        );
+    }
+
+    client
+        .call("session.close", json!({ "session_id": in_worktree }))
+        .await?;
+    let removed = std::process::Command::new("git")
+        .args(["worktree", "remove", "--force"])
+        .arg(&worktree)
+        .current_dir(&root)
+        .output()?;
+    assert!(removed.status.success(), "{removed:?}");
+    let refused = client
+        .call("session.resume", json!({ "session_id": in_worktree }))
+        .await?;
+    let message = refused
+        .error
+        .as_ref()
+        .map(|e| e.message.clone())
+        .unwrap_or_default();
+    assert!(
+        message.contains("worktree") && message.contains("is gone"),
+        "{refused:?}"
+    );
+    daemon.stop().await;
+    Ok(())
+}
+
+async fn tasks_of(
+    client: &mut rpc_client::DaemonRpcClient,
+    session: &str,
+) -> anyhow::Result<serde_json::Value> {
+    Ok(client
+        .call("session.tasks", json!({ "session_id": session }))
+        .await?
+        .result
+        .unwrap_or_default())
 }
 
 #[tokio::test(flavor = "multi_thread")]

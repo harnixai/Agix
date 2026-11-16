@@ -213,7 +213,7 @@ Run `git diff` (or `git diff HEAD` if there are staged changes) to see what chan
 
 ## Phase 2: Launch Three Review Agents in Parallel
 
-Use the `Agent` tool to launch three agents concurrently in a single message — each in its own worktree (`worktree: "simplify-reuse"`, `"simplify-quality"`, `"simplify-efficiency"`). Pass each the full diff via the prompt so each has full context. Worktree isolation lets them run truly in parallel without stepping on each other.
+Use the `Agent` tool to launch three agents concurrently in a single message — each in its own worktree (`worktree: "simplify-reuse"`, `"simplify-quality"`, `"simplify-efficiency"`). Pass each the full diff via the prompt so each has full context, and have each report its findings rather than edit: a worktree its agent leaves untouched is removed when the agent finishes. Worktree isolation lets them run truly in parallel without stepping on each other.
 
 ### Agent 1: Code Reuse Review
 
@@ -320,19 +320,21 @@ Use the `Agent` tool with `worktree: "<unit-slug>"` to spawn each sub-agent. Eac
 - The exact files it owns
 - The mechanical rule (find-replace pattern, AST edit, etc.)
 - Instruction to run tests in its worktree before reporting
-- Instruction to NOT push or commit — just leave the worktree clean
+- Instruction to commit its change on the worktree's branch, and not to push
 
 ## Phase 3: Aggregate
 
-Wait for all to finish (the parent turn pauses on each). Read each sub-agent's report.
+Wait for all to finish (the parent turn pauses on each). Read each sub-agent's report; its result ends with a `<worktree>` block naming the worktree and branch it left. A unit whose agent changed nothing has no such block: its worktree is already gone.
 - Conflicts? Triage manually.
 - Test failures? Investigate per-unit.
 
 ## Phase 4: Land
 
 Either:
-- Open one big PR (use the `/pr` slash from your worktree-aggregated diff)
-- Open per-unit PRs (chain `/pr` once per worktree)
+- Open one big PR (merge the units' branches into one branch, then `/pr`)
+- Open per-unit PRs (chain `/pr` once per branch)
+
+Then remove the units' worktrees and branches, or tell the user they are still there.
 
 ## When NOT to use
 

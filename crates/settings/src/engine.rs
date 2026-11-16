@@ -25,10 +25,13 @@ impl LoadedSettings {
         c.max_agent_depth = settings.execution.max_agent_depth;
 
         c.permission_mode = settings.permission_mode;
-        c.sandbox = std::sync::Arc::new(sandbox_settings(
-            &settings.sandbox,
-            &base::paths::ConfigPaths::from_settings(&loaded.paths),
-        ));
+        c.sandbox = std::sync::Arc::new(SandboxSettings {
+            worktree_git: loaded.paths.worktree_git(),
+            ..sandbox_settings(
+                &settings.sandbox,
+                &base::paths::ConfigPaths::from_settings(&loaded.paths),
+            )
+        });
         c.disable_skill_shell_execution = settings.disable_skill_shell_execution;
         c.project_trust = loaded.trust();
         c.prompt_files = base::paths::PromptFiles::for_project(
@@ -137,6 +140,7 @@ pub fn sandbox_settings(
         require_enforcement: *require_enforcement,
         unattended_requires_network_policy: *unattended_requires_network_policy,
         disabled: *dangerously_disable_sandbox,
+        worktree_git: None,
     }
 }
 

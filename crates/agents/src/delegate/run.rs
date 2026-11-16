@@ -12,8 +12,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::Delegator;
 use crate::agent_tool::{
-    bg_task_id, conclude, task_notification, without_panics, OneShot, Relay, Spec,
-    HOOK_JUDGE_HAS_NO_ONE_TO_ASK, PROGRAM_HAS_NO_ONE_TO_ASK,
+    bg_task_id, conclude, kept_worktree_detail, task_notification, without_panics, OneShot, Relay,
+    Spec, HOOK_JUDGE_HAS_NO_ONE_TO_ASK, PROGRAM_HAS_NO_ONE_TO_ASK,
 };
 
 /// Where the delegate's questions go, and the deny rules and grants its
@@ -28,6 +28,9 @@ pub(super) struct Started {
     pub(super) description: Option<String>,
     pub(super) tag: Option<String>,
     pub(super) notify_parent: bool,
+    /// The worktree the delegate works in, which ends with it unless it
+    /// leaves work there.
+    pub(super) worktree: Option<::tools::worktree::WorktreeHandle>,
 }
 
 impl Delegator {
@@ -114,7 +117,7 @@ impl Delegator {
 
     /// The model's background delegate, or a host's: a task of the parent
     /// session, started at once.
-    pub(super) fn start(
+    pub(super) async fn start(
         &self,
         spec: Spec,
         prompt: String,
@@ -122,22 +125,35 @@ impl Delegator {
         ask: Ask,
         started: Started,
     ) -> Result<Delegated, DelegateError> {
-        let me = self.me()?;
-        let admission = self.limits.admit_now()?;
+        let Started {
+            description,
+            tag,
+            notify_parent,
+            worktree,
+        } = started;
+        let admitted = self.me().and_then(|me| Ok((me, self.limits.admit_now()?)));
+        let (me, admission) = match admitted {
+            Ok(admitted) => admitted,
+            Err(e) => {
+                if let Some(worktree) = worktree {
+                    worktree.remove_if_untouched().await;
+                }
+                return Err(e);
+            }
+        };
         let mut detail = serde_json::json!({
             "agent_type": spec.agent_type,
-            "description": started.description,
+            "description": description,
             "background": true,
             "agent_session_id": spec.session_id,
         });
         if let Some(call) = &spec.called_from {
             detail["tool_use_id"] = call.tool_use_id.clone().into();
         }
-        if let Some(tag) = &started.tag {
+        if let Some(tag) = &tag {
             detail["tag"] = tag.clone().into();
         }
         let mut lease = self.lease(bg_task_id(), TaskType::Agent, &stop, detail);
-        let notify_parent = started.notify_parent;
         if notify_parent {
             lease = lease.notifying(|task| task_notification(task, &DelegateEnd::Cancelled));
         }
@@ -156,6 +172,13 @@ impl Delegator {
         tokio::spawn(async move {
             let (text, end) =
                 without_panics(async move { me.run_delegate(admission, shot).await }).await;
+            if let Some(worktree) = worktree {
+                if let Some(kept) = worktree.remove_if_untouched().await {
+                    lease
+                        .task()
+                        .update_detail(|d| d["worktree"] = kept_worktree_detail(&kept));
+                }
+            }
             conclude(lease, &text, &end, notify_parent);
         });
         Ok(Delegated::Started(agent))

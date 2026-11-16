@@ -55,7 +55,9 @@ fn host_x(extra: Value) -> Value {
 struct Setup {
     settings: Value,
     skill: Option<&'static str>,
-    lean_scene: bool,
+    /// The tools of a `lean` scene to add, when one is added.
+    lean_scene: Option<&'static [&'static str]>,
+    git: bool,
 }
 
 struct Daemon {
@@ -187,10 +189,10 @@ impl Conn {
     }
 }
 
-fn lean_scene() -> SceneSpec {
+fn lean_scene(tools: &[&str]) -> SceneSpec {
     let mini = scene::mini::spec();
     let mut s = SceneSpec::new(LEAN_SCENE, "Lean", mini.prompt);
-    s.tools = ToolSurface::allowing(&["Read"]);
+    s.tools = ToolSurface::allowing(tools);
     s.token_budget = mini.token_budget;
     s
 }
@@ -209,6 +211,10 @@ impl Daemon {
         let global = dir_path.join("agix");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::create_dir_all(&global).unwrap();
+        if setup.git {
+            git_repo(&work);
+            crate::support::trust_projects_under(&global, &work);
+        }
 
         let mut settings = json!({
             "sandbox": {"dangerously_disable_sandbox": true},
@@ -217,6 +223,7 @@ impl Daemon {
                 {"tool": "HostEcho", "action": "allow"},
                 {"tool": "Agent", "action": "allow"},
                 {"tool": "Bash", "action": "allow"},
+                {"tool": "EnterWorktree", "action": "allow"},
             ],
         });
         if let Some(extra) = setup.settings.as_object() {
@@ -253,8 +260,8 @@ impl Daemon {
             model_client: Some(model.clone()),
             ..Default::default()
         };
-        if setup.lean_scene {
-            assembly.scenes = vec![Arc::new(lean_scene())];
+        if let Some(tools) = setup.lean_scene {
+            assembly.scenes = vec![Arc::new(lean_scene(tools))];
             assembly.extra_scenes = vec![LEAN_SCENE.into()];
         }
         let pool = daemon::assemble::pool(
@@ -385,6 +392,19 @@ impl Daemon {
     }
 }
 
+fn git_repo(dir: &std::path::Path) {
+    let script = "git init -q . && git -c user.name=t -c user.email=t@t \
+                  commit -q --allow-empty -m init";
+    let out = std::process::Command::new("sh")
+        .args(["-c", script])
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
 fn offers(request: &Value, name: &str) -> bool {
     request["tools"]
         .as_array()
@@ -467,6 +487,8 @@ async fn a_connections_tool_reaches_it_though_it_does_not_watch_the_session() {
     assert_eq!(call["name"], "HostX");
     assert_eq!(call["tool_use_id"], "toolu_x");
     assert_eq!(call["input"], json!({"text": "ask acme"}));
+    assert_eq!(call["cwd"], daemon.work.display().to_string(), "{call}");
+    assert_eq!(call["depth"], 0, "{call}");
     let seen_by_client = client.kind("host_tool_call").await;
     assert_eq!(seen_by_client["call_id"], call["call_id"]);
 
@@ -592,6 +614,8 @@ async fn a_sub_agent_calls_a_connections_tool_when_it_is_declared_for_sub_agents
     assert_eq!(call["task_id"], "toolu_agent", "{call}");
     let sub_session = call["agent_session_id"].as_str().expect("a sub-agent call");
     assert_ne!(sub_session, session);
+    assert_eq!(call["cwd"], daemon.work.display().to_string(), "{call}");
+    assert_eq!(call["depth"], 1, "{call}");
     provider.answer_tool(&session, &call, "hi from acme").await;
     client.response(turn).await;
 
@@ -603,9 +627,242 @@ async fn a_sub_agent_calls_a_connections_tool_when_it_is_declared_for_sub_agents
 }
 
 #[tokio::test]
+async fn a_sub_agent_in_a_worktree_calls_and_is_hooked_from_the_worktree() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        ..Setup::default()
+    })
+    .await;
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_agent",
+        json!({
+            "description": "work apart",
+            "prompt": "Call HostX",
+            "subagent_type": "general-purpose",
+            "worktree": "probe",
+        }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "HostX",
+        "toolu_inner",
+        json!({ "text": "where am I" }),
+    ));
+    daemon.model.push_turn(text_round("sub-agent over"));
+    daemon.model.push_turn(text_round("done"));
+    let provider = daemon.connect().await;
+    let client = daemon.connect().await;
+    provider
+        .provide(vec![host_x(json!({"subagents": true}))])
+        .await;
+    provider
+        .hook(vec![json!({"events": ["PreToolUse"], "tools": ["HostX"]})])
+        .await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+    let worktree = daemon
+        .work
+        .join(".agix/worktrees/probe")
+        .display()
+        .to_string();
+
+    let hook = provider.kind("hook_call").await;
+    assert_eq!(hook["cwd"], worktree, "{hook}");
+    assert_eq!(hook["depth"], 1, "{hook}");
+    assert_eq!(hook["input"]["cwd"], worktree, "{hook}");
+    assert_eq!(hook["input"]["depth"], 1, "{hook}");
+    provider
+        .answer_hook(&session, &hook, json!({"decision": "proceed"}))
+        .await;
+
+    let call = provider.kind("host_tool_call").await;
+    assert_eq!(call["cwd"], worktree, "{call}");
+    assert_eq!(call["depth"], 1, "{call}");
+    provider
+        .answer_tool(&session, &call, "in the worktree")
+        .await;
+    client.response(turn).await;
+    assert_eq!(
+        daemon.answer_to("toolu_inner"),
+        ("in the worktree".to_string(), false)
+    );
+}
+
+/// Under the sandbox: a sub-agent working in a worktree starts another in a
+/// worktree of the project, not one nested in its own, and that one commits
+/// in it; the one with the commit stays, the untouched one goes.
+#[tokio::test]
+async fn a_worktree_sub_agent_starts_its_own_in_a_worktree_of_the_project() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        settings: json!({"sandbox": {"dangerously_disable_sandbox": false}}),
+        ..Setup::default()
+    })
+    .await;
+    for (id, slug, prompt) in [
+        ("toolu_outer", "outer", "Delegate again"),
+        ("toolu_middle", "inner", "Commit, then call HostX"),
+    ] {
+        daemon.model.push_turn(tool_round(
+            "Agent",
+            id,
+            json!({
+                "description": "work apart",
+                "prompt": prompt,
+                "subagent_type": "general-purpose",
+                "worktree": slug,
+            }),
+        ));
+    }
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_commit",
+        json!({
+            "command": "echo f > f && git add f && git -c user.name=t -c user.email=t@t \
+                        commit -qm in-the-inner-worktree && git log -1 --format=%s",
+        }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "HostX",
+        "toolu_inner",
+        json!({ "text": "where am I" }),
+    ));
+    daemon.model.push_turn(text_round("inner over"));
+    daemon.model.push_turn(text_round("outer over"));
+    daemon.model.push_turn(text_round("done"));
+    let provider = daemon.connect().await;
+    let client = daemon.connect().await;
+    provider
+        .provide(vec![host_x(json!({"subagents": true}))])
+        .await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+
+    let call = provider.kind("host_tool_call").await;
+    let inner = daemon.work.join(".agix/worktrees/inner");
+    assert_eq!(call["cwd"], inner.display().to_string(), "{call}");
+    assert_eq!(call["depth"], 2, "{call}");
+    provider.answer_tool(&session, &call, "nested").await;
+    client.response(turn).await;
+    let (committed, failed) = daemon.answer_to("toolu_commit");
+    assert!(
+        !failed && committed.contains("in-the-inner-worktree"),
+        "{committed}"
+    );
+    assert_eq!(
+        daemon.answer_to("toolu_inner"),
+        ("nested".to_string(), false)
+    );
+    assert!(
+        inner.join("f").is_file(),
+        "the inner worktree holds a commit"
+    );
+    assert!(
+        !daemon.work.join(".agix/worktrees/outer").exists(),
+        "the outer worktree was left as it was made"
+    );
+}
+
+#[tokio::test]
+async fn a_call_two_delegations_down_has_depth_two() {
+    let daemon = Daemon::start().await;
+    for (id, prompt) in [
+        ("toolu_outer", "Delegate again"),
+        ("toolu_middle", "Call HostX"),
+    ] {
+        daemon.model.push_turn(tool_round(
+            "Agent",
+            id,
+            json!({
+                "description": "go down",
+                "prompt": prompt,
+                "subagent_type": "general-purpose",
+            }),
+        ));
+    }
+    daemon.model.push_turn(tool_round(
+        "HostX",
+        "toolu_inner",
+        json!({ "text": "how deep" }),
+    ));
+    daemon.model.push_turn(text_round("bottom over"));
+    daemon.model.push_turn(text_round("middle over"));
+    daemon.model.push_turn(text_round("done"));
+    let provider = daemon.connect().await;
+    let client = daemon.connect().await;
+    provider
+        .provide(vec![host_x(json!({"subagents": true}))])
+        .await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+
+    let call = provider.kind("host_tool_call").await;
+    assert_eq!(call["depth"], 2, "{call}");
+    assert_eq!(call["cwd"], daemon.work.display().to_string(), "{call}");
+    provider.answer_tool(&session, &call, "two down").await;
+    client.response(turn).await;
+    assert_eq!(
+        daemon.answer_to("toolu_inner"),
+        ("two down".to_string(), false)
+    );
+}
+
+#[tokio::test]
+async fn entering_a_worktree_leaves_the_sessions_cwd_where_it_was() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        lean_scene: Some(&["Read", "EnterWorktree"]),
+        ..Setup::default()
+    })
+    .await;
+    daemon.model.push_turn(tool_round(
+        "EnterWorktree",
+        "toolu_enter",
+        json!({ "slug": "probe" }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "HostX",
+        "toolu_x",
+        json!({ "text": "where am I" }),
+    ));
+    daemon.model.push_turn(text_round("done"));
+    let provider = daemon.connect().await;
+    let client = daemon.connect().await;
+    provider.provide(vec![host_x(json!({}))]).await;
+    provider
+        .hook(vec![json!({"events": ["PreToolUse"], "tools": ["HostX"]})])
+        .await;
+    let session = client
+        .ok("session.create", json!({"scene": LEAN_SCENE}))
+        .await["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let turn = daemon.run(&client, &session, "go").await;
+    let work = daemon.work.display().to_string();
+
+    let hook = provider.kind("hook_call").await;
+    assert_eq!(
+        (&hook["cwd"], &hook["input"]["cwd"]),
+        (&json!(work), &json!(work))
+    );
+    assert_eq!(hook["depth"], 0, "{hook}");
+    provider
+        .answer_hook(&session, &hook, json!({"decision": "proceed"}))
+        .await;
+    let call = provider.kind("host_tool_call").await;
+    assert_eq!(call["cwd"], work, "{call}");
+    provider.answer_tool(&session, &call, "still home").await;
+    client.response(turn).await;
+    let (entered, failed) = daemon.answer_to("toolu_enter");
+    assert!(!failed, "{entered}");
+    assert!(daemon.work.join(".agix/worktrees/probe").is_dir());
+}
+
+#[tokio::test]
 async fn a_scene_with_a_tool_whitelist_still_gets_a_connections_tools() {
     let daemon = Daemon::start_with(Setup {
-        lean_scene: true,
+        lean_scene: Some(&["Read"]),
         ..Setup::default()
     })
     .await;
@@ -1257,7 +1514,12 @@ async fn the_daemon_announces_what_a_connection_can_provide() {
     let conn = daemon.connect().await;
     let ping = conn.ok("daemon.ping", json!({})).await;
     let capabilities = ping["capabilities"].as_array().unwrap();
-    for name in ["host_tool_progress", "host_tool_provider", "host_hooks"] {
+    for name in [
+        "host_tool_progress",
+        "host_tool_provider",
+        "host_hooks",
+        "host_call_context",
+    ] {
         assert!(capabilities.iter().any(|c| c == name), "{name}: {ping}");
     }
 }
@@ -1335,4 +1597,286 @@ async fn connections_that_hang_up_while_their_hooks_are_being_set_block_nobody()
         room.get("result").is_some(),
         "connections that are gone take up the hook connections' places: {room}"
     );
+}
+
+/// A relative deny rule of the project covers the main checkout's file for
+/// a sub-agent working in a worktree, whether it names the file by its
+/// absolute path, climbs to it, or searches the checkout.
+#[tokio::test]
+async fn a_relative_deny_covers_the_main_checkout_for_a_worktree_sub_agent() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        settings: json!({
+            "permission_rules": [
+                {"tool": "Agent", "action": "allow"},
+                {"tool": "Read", "action": "allow"},
+                {"tool": "Read(.env)", "action": "deny"},
+            ],
+        }),
+        ..Setup::default()
+    })
+    .await;
+    std::fs::write(daemon.work.join(".env"), "SECRET=hunter2\n").unwrap();
+    let secret = daemon.work.join(".env").display().to_string();
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_agent",
+        json!({
+            "description": "work apart",
+            "prompt": "Read the env",
+            "subagent_type": "general-purpose",
+            "worktree": "probe",
+        }),
+    ));
+    for (id, path) in [
+        ("toolu_absolute", secret.as_str()),
+        ("toolu_climbing", "../../../.env"),
+    ] {
+        daemon
+            .model
+            .push_turn(tool_round("Read", id, json!({ "file_path": path })));
+    }
+    daemon.model.push_turn(tool_round(
+        "Grep",
+        "toolu_search",
+        json!({ "pattern": "SECRET", "path": daemon.work, "output_mode": "content" }),
+    ));
+    daemon.model.push_turn(text_round("sub-agent over"));
+    daemon.model.push_turn(text_round("done"));
+    let client = daemon.connect().await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+    client.response(turn).await;
+    for id in ["toolu_absolute", "toolu_climbing"] {
+        let (text, is_error) = daemon.answer_to(id);
+        assert!(
+            is_error && !text.contains("hunter2") && text.contains("Read(.env)"),
+            "{id}: the worktree sub-agent read the main checkout's denied .env: {text}"
+        );
+    }
+    let (found, _) = daemon.answer_to("toolu_search");
+    assert!(
+        !found.contains("hunter2"),
+        "the search went through .env: {found}"
+    );
+}
+
+/// A deny rule anchored at the project, absolute or relative, holds for the
+/// copy of a committed file in a worktree: for the sub-agent working there,
+/// and for the root session once the worktree is kept.
+#[tokio::test]
+async fn a_project_deny_covers_the_worktrees_copy_of_a_committed_file() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        settings: json!({
+            "permission_rules": [
+                {"tool": "Agent", "action": "allow"},
+                {"tool": "Bash", "action": "allow"},
+                {"tool": "Read", "action": "allow"},
+                {"tool": "Read({work}/secrets/**)", "action": "deny"},
+                {"tool": "Read(vault/**)", "action": "deny"},
+            ],
+        }),
+        ..Setup::default()
+    })
+    .await;
+    for (dir, body) in [
+        ("secrets", "TOKEN=hunter2\n"),
+        ("vault", "PASS=swordfish\n"),
+    ] {
+        std::fs::create_dir_all(daemon.work.join(dir)).unwrap();
+        std::fs::write(daemon.work.join(dir).join("key"), body).unwrap();
+    }
+    let commit = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git add secrets vault && git -c user.name=t -c user.email=t@t commit -qm keys",
+        ])
+        .current_dir(&daemon.work)
+        .output()
+        .unwrap();
+    assert!(commit.status.success(), "{commit:?}");
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_agent",
+        json!({
+            "description": "work apart",
+            "prompt": "Read the key",
+            "subagent_type": "general-purpose",
+            "worktree": "probe",
+        }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Read",
+        "toolu_own_copy",
+        json!({ "file_path": "secrets/key" }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_leave",
+        json!({ "command": "echo note > left.txt" }),
+    ));
+    daemon.model.push_turn(text_round("sub-agent over"));
+    daemon.model.push_turn(tool_round(
+        "Read",
+        "toolu_kept_copy",
+        json!({ "file_path": ".agix/worktrees/probe/vault/key" }),
+    ));
+    daemon.model.push_turn(text_round("done"));
+    let client = daemon.connect().await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+    client.response(turn).await;
+    assert!(daemon
+        .work
+        .join(".agix/worktrees/probe/vault/key")
+        .is_file());
+    for (id, secret, rule) in [
+        ("toolu_own_copy", "hunter2", "secrets/**"),
+        ("toolu_kept_copy", "swordfish", "Read(vault/**)"),
+    ] {
+        let (text, is_error) = daemon.answer_to(id);
+        assert!(
+            is_error && !text.contains(secret) && text.contains(rule),
+            "{id}: the worktree's copy of a denied file was read: {text}"
+        );
+    }
+}
+
+fn branch_exists(work: &std::path::Path, branch: &str) -> bool {
+    let out = std::process::Command::new("git")
+        .args(["branch", "--list", branch])
+        .current_dir(work)
+        .output()
+        .unwrap();
+    !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+}
+
+/// A worktree sub-agent's commit outlives the call: the worktree and its
+/// branch stay, and the result says where. One that left nothing behind
+/// takes its worktree and branch with it.
+#[tokio::test]
+async fn a_worktree_with_work_in_it_is_kept_and_named_and_an_idle_one_is_removed() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        ..Setup::default()
+    })
+    .await;
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_working",
+        json!({
+            "description": "work apart",
+            "prompt": "Make the file",
+            "subagent_type": "general-purpose",
+            "worktree": "probe",
+        }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_commit",
+        json!({ "command": "echo kept > made.txt && git add made.txt && git -c user.name=t -c user.email=t@t commit -qm made" }),
+    ));
+    daemon.model.push_turn(text_round("committed"));
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_idle",
+        json!({
+            "description": "look around",
+            "prompt": "Change nothing",
+            "subagent_type": "general-purpose",
+            "worktree": "idle",
+        }),
+    ));
+    daemon
+        .model
+        .push_turn(tool_round("Bash", "toolu_look", json!({ "command": "ls" })));
+    daemon.model.push_turn(text_round("nothing to do"));
+    daemon.model.push_turn(text_round("done"));
+    let client = daemon.connect().await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+    client.response(turn).await;
+    let (bash, bash_err) = daemon.answer_to("toolu_commit");
+    assert!(!bash_err, "{bash}");
+
+    let worktree = daemon.work.join(".agix/worktrees/probe");
+    assert!(worktree.join("made.txt").is_file());
+    assert!(!daemon.work.join("made.txt").exists());
+    assert!(branch_exists(&daemon.work, "agix/worktree-probe"));
+    let log = std::process::Command::new("git")
+        .args(["log", "-1", "--format=%s", "agix/worktree-probe"])
+        .current_dir(&daemon.work)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "made");
+    let (result, is_error) = daemon.answer_to("toolu_working");
+    assert!(!is_error, "{result}");
+    assert!(result.starts_with("committed"), "{result}");
+    assert!(
+        result.contains(&format!("<path>{}</path>", worktree.display()))
+            && result.contains("<branch>agix/worktree-probe</branch>")
+            && result.contains("1 commit(s) since it was made"),
+        "{result}"
+    );
+
+    assert!(!daemon.work.join(".agix/worktrees/idle").exists());
+    assert!(!branch_exists(&daemon.work, "agix/worktree-idle"));
+    let (result, _) = daemon.answer_to("toolu_idle");
+    assert_eq!(result, "nothing to do");
+}
+
+/// An agent hook judging a worktree sub-agent's call works in that worktree,
+/// where the payload's `cwd` says the call was made.
+#[tokio::test]
+async fn an_agent_hook_judges_a_worktree_sub_agents_call_in_the_worktree() {
+    let daemon = Daemon::start_with(Setup {
+        git: true,
+        settings: json!({"hooks_config": {"PreToolUse": [{
+            "type": "agent",
+            "prompt": "Judge the call",
+            "if": "Glob",
+        }]}}),
+        ..Setup::default()
+    })
+    .await;
+    daemon.model.push_turn(tool_round(
+        "Agent",
+        "toolu_agent",
+        json!({
+            "description": "work apart",
+            "prompt": "Make a file, then look",
+            "subagent_type": "general-purpose",
+            "worktree": "judged",
+        }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_make",
+        json!({ "command": "echo only in the worktree > only-here.txt" }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Glob",
+        "toolu_glob",
+        json!({ "pattern": "*.txt" }),
+    ));
+    daemon.model.push_turn(tool_round(
+        "Read",
+        "toolu_judge_read",
+        json!({ "file_path": "only-here.txt" }),
+    ));
+    daemon.model.push_turn(text_round(r#"{"ok": true}"#));
+    daemon.model.push_turn(text_round("sub-agent over"));
+    daemon.model.push_turn(text_round("done"));
+    let client = daemon.connect().await;
+    let session = daemon.session(&client, json!({})).await;
+    let turn = daemon.run(&client, &session, "go").await;
+    client.response(turn).await;
+    let (read, is_error) = daemon.answer_to("toolu_judge_read");
+    assert!(
+        !is_error && read.contains("only in the worktree"),
+        "the hook's agent did not work in the worktree: {read}"
+    );
+    let (glob, is_error) = daemon.answer_to("toolu_glob");
+    assert!(!is_error && glob.contains("only-here.txt"), "{glob}");
 }

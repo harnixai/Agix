@@ -572,6 +572,7 @@ impl Agent {
                         session_id: self.session.session_id.clone(),
                         cwd: self.settings.paths.working_dir().display().to_string(),
                         permission_mode: hook_permission_mode(self.session_state.permission_mode()),
+                        depth: self.identity.agent_depth(),
                         tool_input: Some(serde_json::json!({
                             "strategy": summary.strategy,
                             "messages_before": messages_before,
@@ -611,6 +612,7 @@ impl Agent {
                     session_id: self.session.session_id.clone(),
                     cwd: self.settings.paths.working_dir().display().to_string(),
                     permission_mode: hook_permission_mode(self.session_state.permission_mode()),
+                    depth: self.identity.agent_depth(),
                     tool_input: Some(serde_json::json!({
                         "messages_before": self.session.messages().len(),
                         "token_count": self.context_tokens(),

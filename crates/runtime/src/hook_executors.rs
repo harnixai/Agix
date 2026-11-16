@@ -19,6 +19,7 @@ use base::interface::tool_selector::{ToolPattern, ToolSelector};
 use base::prompt::PromptBlock;
 use hooks::payload::HookInput;
 use hooks::runner::{AgentHookError, AgentHookExecutor, PromptHookExecutor};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -113,7 +114,9 @@ impl PromptHookExecutor for ModelPromptHookExecutor {
 /// would need approval is refused.
 pub struct DelegatorHookExecutor {
     delegator: Arc<dyn Delegator>,
-    cwd: std::path::PathBuf,
+    cwd: PathBuf,
+    /// The project whose worktrees a payload's `cwd` may name instead.
+    project: Option<PathBuf>,
 }
 
 const HOOK_AGENT_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
@@ -126,8 +129,47 @@ fn hook_agent_tools() -> ToolSelector {
 }
 
 impl DelegatorHookExecutor {
-    pub fn new(delegator: Arc<dyn Delegator>, cwd: std::path::PathBuf) -> Self {
-        Self { delegator, cwd }
+    pub fn new(delegator: Arc<dyn Delegator>, cwd: PathBuf) -> Self {
+        Self {
+            delegator,
+            cwd,
+            project: None,
+        }
+    }
+
+    /// The agent judges a call made in `project` or one of its worktrees
+    /// where it was made, as the payload's `cwd` names it.
+    pub fn in_worktrees_of(mut self, project: Option<PathBuf>) -> Self {
+        self.project = project;
+        self
+    }
+
+    fn workdir_for(&self, payload: &HookInput) -> PathBuf {
+        let named = Path::new(&payload.cwd);
+        if payload.cwd.is_empty() || named == self.cwd {
+            return self.cwd.clone();
+        }
+        let Some(project) = &self.project else {
+            return self.cwd.clone();
+        };
+        let real = base::path::resolve_physically(named);
+        let worktrees = base::path::resolve_physically(
+            &project
+                .join(".agix")
+                .join(base::paths::PROJECT_WORKTREES_DIR),
+        );
+        if real == base::path::resolve_physically(project)
+            || (real.parent() == Some(worktrees.as_path()) && real.is_dir())
+        {
+            return named.to_path_buf();
+        }
+        tracing::warn!(
+            cwd = %payload.cwd,
+            "an agent hook's payload names a directory that is neither the project nor one \
+             of its worktrees; the hook's agent works in {} instead",
+            self.cwd.display()
+        );
+        self.cwd.clone()
     }
 }
 
@@ -151,7 +193,7 @@ impl AgentHookExecutor for DelegatorHookExecutor {
             stops_with,
         );
         req.model = model.map(str::to_string);
-        req.workdir = Workdir::At(self.cwd.clone());
+        req.workdir = Workdir::At(self.workdir_for(payload));
         req.tools = hook_agent_tools();
         req.asks = AskRoute::Refuse;
         match self.delegator.delegate(req).await {
@@ -326,5 +368,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out, "stopped");
+    }
+
+    #[derive(Default)]
+    struct WhereItRuns(std::sync::Mutex<Vec<Workdir>>);
+
+    #[async_trait::async_trait]
+    impl Delegator for WhereItRuns {
+        async fn delegate(&self, req: DelegateRequest) -> Result<Delegated, DelegateError> {
+            self.0.lock().unwrap().push(req.workdir);
+            Ok(Delegated::Finished(
+                base::interface::delegate::DelegateOutcome {
+                    text: r#"{"ok":true}"#.into(),
+                    end: DelegateEnd::Completed,
+                    structured: None,
+                    session_id: "hook-agent".into(),
+                },
+            ))
+        }
+
+        async fn stop_member(&self, _: &base::interface::delegate::TeamSeat) {}
+
+        fn live_members(&self) -> Vec<base::interface::delegate::LiveMember> {
+            Vec::new()
+        }
+    }
+
+    /// The payload's `cwd` decides where the agent works only when it is the
+    /// project or one of its worktrees.
+    #[tokio::test]
+    async fn an_agent_hook_works_where_the_call_was_made_inside_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        let worktree = project.join(".agix/worktrees/wt");
+        let elsewhere = dir.path().canonicalize().unwrap().join("elsewhere");
+        for d in [&worktree, &elsewhere, &project.join("src")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let runs = Arc::new(WhereItRuns::default());
+        let executor = DelegatorHookExecutor::new(runs.clone(), project.clone())
+            .in_worktrees_of(Some(project.clone()));
+        for cwd in [&worktree, &project, &elsewhere, &project.join("src")] {
+            let input = HookInput {
+                cwd: cwd.display().to_string(),
+                ..test_input()
+            };
+            executor
+                .execute("judge", None, &input, &CancellationToken::new())
+                .await
+                .unwrap();
+        }
+        let dirs: Vec<PathBuf> = runs
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|w| match w {
+                Workdir::At(dir) => dir.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(dirs, [worktree, project.clone(), project.clone(), project]);
     }
 }

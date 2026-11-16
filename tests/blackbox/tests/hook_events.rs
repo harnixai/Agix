@@ -860,7 +860,7 @@ async fn one_edit_fires_file_changed_once_after_sub_agents_have_run() -> anyhow:
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn every_payload_names_the_sessions_cwd_and_permission_mode() -> anyhow::Result<()> {
+async fn every_payload_names_the_sessions_cwd_permission_mode_and_depth() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
     let mut run = stubbed("payloads", &stub)
@@ -890,15 +890,22 @@ async fn every_payload_names_the_sessions_cwd_and_permission_mode() -> anyhow::R
     let wrong: Vec<String> = ledger
         .entries()
         .iter()
-        .filter(|e| e["cwd"] == "" || e["permission_mode"] == "")
+        .filter(|e| {
+            let depth = u64::from(e["session_id"] != session.as_str());
+            e["cwd"] == "" || e["permission_mode"] == "" || e["depth"] != depth
+        })
         .map(|e| {
             format!(
-                "{} cwd={} mode={}",
-                e["hook_event_name"], e["cwd"], e["permission_mode"]
+                "{} cwd={} mode={} depth={}",
+                e["hook_event_name"], e["cwd"], e["permission_mode"], e["depth"]
             )
         })
         .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
+    assert!(
+        ledger.entries().iter().any(|e| e["depth"] == 1),
+        "the sub-agent's own events were seen"
+    );
     run.finish().await;
     Ok(())
 }

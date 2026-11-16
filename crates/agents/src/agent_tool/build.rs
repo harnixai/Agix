@@ -17,6 +17,8 @@ pub(crate) struct Spec {
     pub(crate) permission_mode: Option<base::permission::PermissionMode>,
     pub(crate) seat: Option<TeamSeat>,
     pub(crate) cwd: std::path::PathBuf,
+    /// Where a worktree at `cwd` commits to, as its maker found it.
+    pub(crate) git: Option<base::paths::WorktreeGit>,
     pub(crate) called_from: Option<CallSite>,
 }
 
@@ -50,6 +52,31 @@ pub(crate) struct OneShot {
 }
 
 impl Delegator {
+    /// The parent's settings for a delegate on `model_name`, working in the
+    /// directory `spec` names.
+    fn delegate_settings(&self, spec: &Spec, model_name: Option<&str>) -> LoadedSettings {
+        let mut settings = self.sub_settings(model_name);
+        if spec.cwd != settings.paths.working_dir() {
+            let git = spec.git.as_ref().and_then(|git| {
+                let own = settings.paths.project_worktree_git(git);
+                if own.is_none() {
+                    tracing::warn!(
+                        worktree = %spec.cwd.display(),
+                        git_dir = %git.dir.display(),
+                        "the worktree's git directory is not the project's .git, or its entry \
+                         or branch lies elsewhere in it; a sandboxed sub-agent in it cannot commit"
+                    );
+                }
+                own
+            });
+            settings.paths.worktree = Some(base::paths::LinkedWorktree {
+                dir: spec.cwd.clone(),
+                git,
+            });
+        }
+        settings
+    }
+
     /// `extra_tools` join what the delegate inherits, in its registry only.
     pub(crate) async fn build_delegate(
         &self,
@@ -70,7 +97,7 @@ impl Delegator {
             .model
             .clone()
             .or_else(|| def.as_ref().and_then(|d| d.model.clone()));
-        let mut sub_settings = self.sub_settings(model_override.as_deref());
+        let mut sub_settings = self.delegate_settings(spec, model_override.as_deref());
         if let Some(d) = &def {
             apply_agent_type_overrides(&mut sub_settings.values, d);
         }
@@ -125,17 +152,9 @@ impl Delegator {
             .map_err(|e| base::error::ToolError::Execution(anyhow!("build: {e}")))?;
         let cwd = &spec.cwd;
         if let Some(store) = &history_store {
-            write_sidechain_meta(
-                store,
-                &sid,
-                parent_session_id,
-                &scene_id,
-                cwd,
-                &settings.values,
-            )
-            .await;
+            write_sidechain_meta(store, &sid, parent_session_id, &scene_id, cwd, &settings).await;
         }
-        let payload = SubagentPayload::of(&sid, cwd, &settings.values, agent_type);
+        let payload = SubagentPayload::of(&sid, cwd, depth, &settings.values, agent_type);
         Ok(Delegate {
             agent,
             event_rx,

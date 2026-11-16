@@ -4,6 +4,7 @@
 //! disconnect handling; a call that names its [`HostId`] is answered by that
 //! connection alone.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -109,6 +110,12 @@ pub struct HostCall {
     pub task_id: Option<String>,
     /// The sub-agent's own session, when a sub-agent made it.
     pub agent_session_id: Option<String>,
+    /// The working directory of the session that made it, its own and not
+    /// the root's when a sub-agent made it.
+    pub cwd: PathBuf,
+    /// How many delegations deep the session that made it is; `0` for the
+    /// root.
+    pub depth: u32,
     /// The one connection whose answer counts; `None`: any watcher's.
     pub host: Option<HostId>,
     /// Where the host's progress reports on a tool call go.
@@ -133,6 +140,8 @@ impl HostCall {
             timeout,
             task_id: None,
             agent_session_id: None,
+            cwd: PathBuf::new(),
+            depth: 0,
             host: None,
             progress: None,
         }
@@ -152,6 +161,12 @@ impl HostCall {
             },
             ..Self::tool(call_id, tool_use_id, String::new(), Value::Null, timeout)
         }
+    }
+
+    pub fn made_in(mut self, cwd: impl Into<PathBuf>, depth: u32) -> Self {
+        self.cwd = cwd.into();
+        self.depth = depth;
+        self
     }
 
     pub fn for_host(mut self, host: Option<HostId>) -> Self {
