@@ -2,7 +2,7 @@
 //!
 //! 提醒用户回来看。通知本身由派发层送出（`notification` 帧和 `Notification`
 //! hook，见 `runtime::turn` 的 `notify_host`），工具只校验输入；在 macOS 上顺带
-//! 用 osascript 在引擎所在的机器上弹一条桌面通知，失败不算错。
+//! 用 osascript 在引擎所在的机器上弹一条桌面通知，不等它结束，失败不算错。
 
 use async_trait::async_trait;
 use base::error::ToolError;
@@ -87,39 +87,84 @@ impl Tool for PushNotificationTool {
         } else {
             ""
         };
-        desktop_notification(&ctx, msg).await;
+        desktop_notification(&ctx, msg);
         Ok(ToolResult::text(format!(
             "Notification sent: {msg}{suffix}"
         )))
     }
 }
 
-/// A desktop notification on the machine the engine runs on, as well as the
-/// host's. Best effort: the host's copy is the one that counts.
+/// How long the desktop copy may take before its `osascript` is stopped.
 #[cfg(target_os = "macos")]
-async fn desktop_notification(ctx: &ToolContext, msg: &str) {
+const DESKTOP_NOTIFICATION_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The process providers an `osascript` is still showing a notification
+/// through, by address.
+#[cfg(target_os = "macos")]
+static SHOWING: std::sync::Mutex<std::collections::BTreeSet<usize>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// A desktop notification on the machine the engine runs on, as well as the
+/// host's. Best effort: the host's copy is the one that counts, so while one
+/// is still being shown through the same process provider the next is not,
+/// rather than piling up `osascript`s behind a Notification Center that does
+/// not answer.
+#[cfg(target_os = "macos")]
+fn desktop_notification(ctx: &ToolContext, msg: &str) {
+    struct Shown(usize);
+    impl Drop for Shown {
+        fn drop(&mut self) {
+            SHOWING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&self.0);
+        }
+    }
+    let provider = std::sync::Arc::as_ptr(&ctx.exec.process) as *const () as usize;
+    let first = SHOWING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(provider);
+    if !first {
+        tracing::debug!("a desktop notification is still being shown; this one is skipped");
+        return;
+    }
+    let shown = Shown(provider);
     let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
     let spec = ProcessSpec::new("osascript", &ctx.cwd).args([
         "-e".to_string(),
         format!(r#"display notification "{escaped}" with title "Agix""#),
     ]);
-    match capture(&*ctx.exec.process, spec, ctx.cancel.clone()).await {
-        Ok(output) if output.status.success => {}
-        Ok(output) => {
-            tracing::debug!(stderr = %output.stderr_lossy(), "osascript could not show the notification")
+    let process = ctx.exec.process.clone();
+    // Not awaited: `osascript` can hang for good when Notification Center
+    // does not answer, and the call would hang with it.
+    tokio::spawn(async move {
+        let _shown = shown;
+        let shown = tokio::time::timeout(
+            DESKTOP_NOTIFICATION_LIMIT,
+            capture(&*process, spec, tokio_util::sync::CancellationToken::new()),
+        )
+        .await;
+        match shown {
+            Ok(Ok(output)) if output.status.success => {}
+            Ok(Ok(output)) => {
+                tracing::debug!(stderr = %output.stderr_lossy(), "osascript could not show the notification")
+            }
+            Ok(Err(e)) => tracing::debug!(error = %e, "osascript could not be run"),
+            Err(_) => tracing::debug!("osascript did not finish showing the notification; stopped"),
         }
-        Err(e) => tracing::debug!(error = %e, "osascript could not be run"),
-    }
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn desktop_notification(_: &ToolContext, _: &str) {}
+fn desktop_notification(_: &ToolContext, _: &str) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
     use std::path::Path;
+    use std::sync::Arc;
 
     fn ctx_in(cwd: &Path) -> ToolContext {
         session_state::testing::tool_context_for_test(
@@ -195,6 +240,111 @@ mod tests {
             .validate_input(&json!({"bad": "input"}), &ctx_in(Path::new("/tmp")))
             .await;
         assert!(r.is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    struct NeverAnswers(Arc<tokio::sync::Notify>);
+
+    #[cfg(target_os = "macos")]
+    #[async_trait]
+    impl base::interface::exec::Process for NeverAnswers {
+        async fn spawn(
+            &self,
+            _: ProcessSpec,
+            _: tokio_util::sync::CancellationToken,
+        ) -> Result<Box<dyn base::interface::exec::ProcessHandle>, base::interface::exec::ExecError>
+        {
+            self.0.notify_one();
+            std::future::pending().await
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_desktop_notification_that_never_returns_does_not_hold_the_call() {
+        let asked = Arc::new(tokio::sync::Notify::new());
+        let exec = base::interface::exec::ExecProviders {
+            process: Arc::new(NeverAnswers(asked.clone())),
+            ..platform::local_providers()
+        };
+        let ctx = session_state::testing::tool_context_for_test(exec, "/tmp".into());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            PushNotificationTool.call(
+                json!({"message": "deploy ready"}),
+                ctx,
+                ProgressSender::noop("t"),
+            ),
+        )
+        .await
+        .expect("the call waited on osascript")
+        .unwrap();
+        assert!(!result.is_error);
+        asked.notified().await;
+    }
+
+    /// Spawns nothing, and says which notifications it was asked to show.
+    #[cfg(target_os = "macos")]
+    struct Recording {
+        asked: tokio::sync::mpsc::UnboundedSender<String>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    #[cfg(target_os = "macos")]
+    #[async_trait]
+    impl base::interface::exec::Process for Recording {
+        async fn spawn(
+            &self,
+            spec: ProcessSpec,
+            _: tokio_util::sync::CancellationToken,
+        ) -> Result<Box<dyn base::interface::exec::ProcessHandle>, base::interface::exec::ExecError>
+        {
+            let _ = self.asked.send(spec.args.join(" "));
+            self.release.notified().await;
+            Err(base::interface::exec::ExecError::failed("not shown"))
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn notifications_do_not_pile_up_behind_one_still_showing() {
+        let (asked, mut shown) = tokio::sync::mpsc::unbounded_channel();
+        let release = Arc::new(tokio::sync::Notify::new());
+        let exec = base::interface::exec::ExecProviders {
+            process: Arc::new(Recording {
+                asked,
+                release: release.clone(),
+            }),
+            ..platform::local_providers()
+        };
+        let notify = |message: &str| {
+            let ctx = session_state::testing::tool_context_for_test(exec.clone(), "/tmp".into());
+            let input = json!({ "message": message });
+            async move {
+                PushNotificationTool
+                    .call(input, ctx, ProgressSender::noop("t"))
+                    .await
+                    .unwrap()
+            }
+        };
+        notify("first").await;
+        assert!(shown.recv().await.unwrap().contains("first"));
+        for i in 0..5 {
+            let result = notify(&format!("while-showing-{i}")).await;
+            assert!(!result.is_error, "the host's copy still goes out");
+        }
+        release.notify_one();
+        loop {
+            notify("after").await;
+            let pace = std::time::Duration::from_millis(20);
+            if let Ok(Some(next)) = tokio::time::timeout(pace, shown.recv()).await {
+                assert!(
+                    next.contains("after"),
+                    "skipped while one was showing: {next}"
+                );
+                break;
+            }
+        }
     }
 
     #[tokio::test]
