@@ -613,3 +613,155 @@ async fn with_checkpoints_off_writes_go_through_and_there_is_nothing_to_rewind(
     run.finish().await;
     Ok(())
 }
+
+fn history_turns(history: &Value) -> Vec<String> {
+    let mut turns: Vec<String> = Vec::new();
+    for message in history["messages"].as_array().into_iter().flatten() {
+        if let Some(turn) = message["turn_id"].as_str() {
+            if turns.last().map(String::as_str) != Some(turn) {
+                turns.push(turn.to_string());
+            }
+        }
+    }
+    turns
+}
+
+fn menu_turns(menu: &Value) -> Vec<String> {
+    menu["turns"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t["turn_id"].as_str().map(str::to_string))
+        .collect()
+}
+
+async fn turns_seen(
+    run: &mut LiveRun,
+    session: &str,
+) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let seen = history(run, session).await?;
+    let menu = rpc(run, "session.checkpoints", json!({ "session_id": session })).await?;
+    Ok((history_turns(&seen), menu_turns(&menu)))
+}
+
+/// Two turns that each write a file, then a rewind to after the first. What
+/// `session.checkpoints` offers must be the turns `session.history` still
+/// shows — in memory, read back after a restart, and in the fork
+/// `fork_first` leaves.
+async fn rewind_and_compare(scope: &str, fork_first: bool) -> anyhow::Result<()> {
+    let name = format!(
+        "rewind-menu-{scope}{}",
+        if fork_first { "-fork" } else { "" }
+    );
+    let (t1, t2) = (format!("{name}-t1"), format!("{name}-t2"));
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed(&name, &stub).start().await?;
+    let (a, b) = (run.project.join("a.txt"), run.project.join("b.txt"));
+    let session = run.session().await?;
+    stub.script_when(TURN, [write("w1", &a, "a\n"), Reply::text("ONE")]);
+    run.turn(&session, "one").await?;
+    stub.script_when(TURN, [write("w2", &b, "b\n"), Reply::text("TWO")]);
+    run.turn(&session, "two").await?;
+
+    let report = rpc(
+        &mut run,
+        "session.rewind",
+        json!({ "session_id": session, "to_turn": t1, "scope": scope, "fork_first": fork_first }),
+    )
+    .await?;
+    let conversation_kept = scope == "files";
+    let expected: Vec<String> = match conversation_kept {
+        true => vec![t1.clone(), t2.clone()],
+        false => vec![t1.clone()],
+    };
+
+    let (in_history, in_menu) = turns_seen(&mut run, &session).await?;
+    assert_eq!(in_history, expected, "{scope}: history in memory");
+    assert_eq!(in_menu, in_history, "{scope}: checkpoints in memory");
+
+    let fork = report["fork_session_id"].as_str().map(str::to_string);
+    if let Some(fork) = &fork {
+        let (in_history, in_menu) = turns_seen(&mut run, fork).await?;
+        assert_eq!(
+            in_history,
+            [t1.clone(), t2.clone()],
+            "{scope}: fork history"
+        );
+        assert_eq!(in_menu, in_history, "{scope}: fork checkpoints");
+    }
+    assert_eq!(fork.is_some(), fork_first, "{report}");
+
+    run.restart().await?;
+    let (in_history, in_menu) = turns_seen(&mut run, &session).await?;
+    assert_eq!(in_history, expected, "{scope}: history after a restart");
+    assert_eq!(in_menu, in_history, "{scope}: checkpoints after a restart");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_rewind_of_both_the_menu_matches_the_history() -> anyhow::Result<()> {
+    rewind_and_compare("both", false).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_rewind_of_the_conversation_the_menu_matches_the_history() -> anyhow::Result<()> {
+    rewind_and_compare("conversation", false).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_rewind_of_the_files_alone_both_turns_stay_in_menu_and_history(
+) -> anyhow::Result<()> {
+    rewind_and_compare("files", false).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_rewind_that_forks_first_both_sessions_menus_match_their_histories(
+) -> anyhow::Result<()> {
+    rewind_and_compare("both", true).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_an_earlier_rewind_took_out_is_no_target_even_with_its_writes_on_record(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("rewind-gone", &stub).start().await?;
+    let (a, b) = (run.project.join("a.txt"), run.project.join("b.txt"));
+    let session = run.session().await?;
+    stub.script_when(TURN, [write("w1", &a, "a\n"), Reply::text("ONE")]);
+    run.turn(&session, "one").await?;
+    stub.script_when(TURN, [write("w2", &b, "b\n"), Reply::text("TWO")]);
+    run.turn(&session, "two").await?;
+    rpc(
+        &mut run,
+        "session.rewind",
+        json!({ "session_id": session, "to_turn": "rewind-gone-t1", "scope": "conversation" }),
+    )
+    .await?;
+
+    for scope in ["files", "conversation", "both"] {
+        let response = run
+            .client
+            .call(
+                "session.rewind",
+                json!({ "session_id": session, "to_turn": "rewind-gone-t2", "scope": scope,
+                        "dry_run": true }),
+            )
+            .await?;
+        let error = response.error.ok_or_else(|| {
+            anyhow::anyhow!(
+                "{scope}: a rewind to a removed turn went through: {:?}",
+                response.result
+            )
+        })?;
+        assert_eq!(i64::from(error.code), -32602, "{scope}: {}", error.message);
+        assert!(
+            error.message.contains("already rewound"),
+            "{scope}: {}",
+            error.message
+        );
+    }
+    assert_eq!(read(&b).as_deref(), Some("b\n"));
+    run.finish().await;
+    Ok(())
+}

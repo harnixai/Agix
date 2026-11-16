@@ -2585,7 +2585,10 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
   "enabled": true }                                             // 这个会话记不记 checkpoint
 ```
 
-`turns` 按时间顺序,只列没被回滚作废的轮。子 Agent 的写算在它写下时最近的那一轮里。
+`turns` 按时间顺序,只列没被回滚作废的轮:撤了对话的回滚(`scope` 为 `conversation` / `both`)之后
+被撤的轮不再列出;只撤文件(`files`)的回滚不动对话,那些轮照样列出。压缩与 `session.dropMessages`
+不影响这里:压缩前的轮在 `session.history` 里已经合成摘要,这里照样列出,回滚到它们仍然可以。
+子 Agent 的写算在它写下时最近的那一轮里。
 
 **配额。** 设置段 `checkpoints`:`enabled`(缺省 `true`;`false` 时文件工具照常写,但不记快照,
 `session.rewind` 要回文件就是 `INVALID_PARAMS`)、`max_bytes_per_file`(缺省 16 MiB,更大的文件只记

@@ -11,7 +11,7 @@ use super::{
 use crate::entry::{EnvelopedEntry, LogEntry, MessageOrigin};
 use base::id::Id;
 use base::message::ContentBlock;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CutError {
@@ -40,10 +40,11 @@ pub fn cut(
     match target {
         RewindTarget::ToTurn(turn) => {
             let tagged = |i: usize| entries[i].turn_id.as_deref() == Some(turn.as_str());
+            let in_conversation = turns_with_messages(entries, voided).contains(turn.as_str());
             match (0..entries.len()).rev().find(|&i| live(i) && tagged(i)) {
-                Some(last) => Ok(last + 1),
-                None if (0..entries.len()).any(tagged) => Err(CutError::TurnRewound(turn.clone())),
-                None => Err(CutError::NoSuchTurn(turn.clone())),
+                Some(last) if in_conversation => Ok(last + 1),
+                _ if (0..entries.len()).any(tagged) => Err(CutError::TurnRewound(turn.clone())),
+                _ => Err(CutError::NoSuchTurn(turn.clone())),
             }
         }
         RewindTarget::ToStart(_) => Ok((0..entries.len())
@@ -190,16 +191,28 @@ pub struct TurnWrite {
 
 /// The turns still in the conversation, in order.
 pub fn live_turns(entries: &[EnvelopedEntry], voided: &[bool]) -> Vec<TurnSummary> {
+    let in_conversation = turns_with_messages(entries, voided);
     let mut turns: Vec<TurnSummary> = Vec::new();
-    let mut at: HashMap<String, usize> = HashMap::new();
+    let mut at: HashMap<&str, usize> = HashMap::new();
+    let mut latest: Option<&str> = None;
     for (i, env) in entries.iter().enumerate() {
-        if env.is_sidechain || voided.get(i).copied().unwrap_or(false) {
+        if env.is_sidechain {
             continue;
         }
         if let Some(turn) = &env.turn_id {
-            let slot = *at.entry(turn.clone()).or_insert_with(|| {
+            latest = Some(turn.as_str());
+        }
+        if voided.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        if let Some(turn) = env
+            .turn_id
+            .as_deref()
+            .filter(|turn| in_conversation.contains(turn))
+        {
+            let slot = *at.entry(turn).or_insert_with(|| {
                 turns.push(TurnSummary {
-                    turn_id: turn.clone(),
+                    turn_id: turn.to_string(),
                     started_at: env.ts,
                     prompt: Vec::new(),
                     files: Vec::new(),
@@ -221,11 +234,7 @@ pub fn live_turns(entries: &[EnvelopedEntry], voided: &[bool]) -> Vec<TurnSummar
             }
         }
         if let Some(pre) = pre_of(env) {
-            let owner = match &env.turn_id {
-                Some(turn) => at.get(turn).copied(),
-                None => turns.len().checked_sub(1),
-            };
-            if let Some(owner) = owner {
+            if let Some(&owner) = latest.and_then(|turn| at.get(turn)) {
                 for file in pre.files {
                     turns[owner].files.push(TurnWrite {
                         path: file.path,
@@ -237,6 +246,27 @@ pub fn live_turns(entries: &[EnvelopedEntry], voided: &[bool]) -> Vec<TurnSummar
         }
     }
     turns
+}
+
+/// The turns that still have a message in the conversation. A rewind voids a
+/// turn's messages but not its checkpoint records — the writes did happen —
+/// so a record alone does not keep a turn on the menu.
+fn turns_with_messages<'a>(entries: &'a [EnvelopedEntry], voided: &[bool]) -> HashSet<&'a str> {
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(i, env)| {
+            !env.is_sidechain
+                && !voided.get(*i).copied().unwrap_or(false)
+                && matches!(
+                    env.entry,
+                    LogEntry::User { .. }
+                        | LogEntry::Assistant { .. }
+                        | LogEntry::ToolResult { .. }
+                )
+        })
+        .filter_map(|(_, env)| env.turn_id.as_deref())
+        .collect()
 }
 
 /// A rewind that began and neither committed nor aborted: the process ended
