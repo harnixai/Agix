@@ -79,6 +79,17 @@ impl base::interface::permission::PathDenials for DelegateRelay {
             .as_ref()?
             .denial(tool, cwd, &[extra, &self.rules].concat())
     }
+
+    fn denied_read_paths(
+        &self,
+        cwd: &std::path::Path,
+        extra: &[base::permission::PermissionRule],
+    ) -> Vec<std::path::PathBuf> {
+        self.parent_denials
+            .as_ref()
+            .map(|parent| parent.denied_read_paths(cwd, &[extra, &self.rules].concat()))
+            .unwrap_or_default()
+    }
 }
 
 /// A delegate's questions, put to the parent's host: registered in the

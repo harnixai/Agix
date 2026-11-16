@@ -16,35 +16,6 @@ use base::path::resolve_physically;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-#[cfg(target_os = "macos")]
-const SYSTEM_READ_ROOTS: &[&str] = &[
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/System",
-    "/Library/Developer/CommandLineTools",
-    "/Applications/Xcode.app/Contents/Developer",
-    "/private/etc",
-    "/private/var/db/timezone",
-    "/opt/homebrew",
-    "/usr/local",
-    "/dev",
-];
-
-#[cfg(target_os = "linux")]
-const SYSTEM_READ_ROOTS: &[&str] = &[
-    "/usr",
-    "/bin",
-    "/sbin",
-    "/lib",
-    "/lib32",
-    "/lib64",
-    "/libx32",
-    "/etc",
-    "/opt",
-    "/nix/store",
-];
-
 /// Under the home directory. git stops with "unable to access" on a
 /// configuration file that exists and cannot be read; CoreFoundation reads
 /// the user's text encoding.
@@ -110,7 +81,7 @@ pub(super) fn var(env: CommandEnv<'_>, name: &str) -> Option<OsString> {
 
 /// Everything `ReadScope::Only(scope)` lets a command read, resolved.
 pub(super) fn strict_read_roots(scope: &[PathBuf], dirs: &UserDirs) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = SYSTEM_READ_ROOTS
+    let mut roots: Vec<PathBuf> = super::SYSTEM_READ_ROOTS
         .iter()
         .map(|root| resolve_physically(Path::new(root)))
         .chain(selected_developer_dir())
@@ -298,7 +269,7 @@ impl<'a> LinuxReadScope<'a> {
         match self.scope {
             None => super::linux::bind(args, "--ro-bind", Path::new("/")),
             Some(_) => {
-                for root in SYSTEM_READ_ROOTS {
+                for root in super::SYSTEM_READ_ROOTS {
                     super::linux::bind(args, "--ro-bind-try", Path::new(root));
                 }
             }

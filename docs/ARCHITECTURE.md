@@ -1130,10 +1130,11 @@ macOS 是 `(deny network*)` 后只放开 `localhost:<代理端口>`(覆盖 `127.
 推导。后端只认 `SandboxPolicy`,并报告兑现了多少(`Enforcement`)。
 
 沙箱是**轻量限制,不是安全隔离**。已知逃逸路径写在
-`crates/platform/src/sandbox/mod.rs` 的模块头里,五条;第 3 条对引擎自己的
+`crates/platform/src/sandbox/mod.rs` 的模块头里,七条;第 3 条对引擎自己的
 git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git;第 4 条(让别的进程替命令
 在沙箱外做事)在无人值守会话里收口;第 5 条(命令在项目里埋一个嵌套仓库)由命令结束后的检查
-隔离,后端本身挡不住(都见 §6.3)。它限住的写入与读取范围见 §6.3。
+隔离,后端本身挡不住(都见 §6.3);第 7 条(macOS 上命令把可写目录里被拒读的文件改名再读)Linux
+没有。它限住的写入与读取范围见 §6.3。
 
 ---
 
@@ -1320,7 +1321,8 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
    裸 `sh`)在该工具有带内容的 deny / ask 规则时按 ask 处理(`dontAsk` 下拒绝),永远不会因此
    被放行。allow 只认原文——规整只让裁决更严。这些 `Bash(...)` 的 deny / ask 同样管住别的
    跑 shell 的工具(`Monitor`),allow 不跨工具。但 shell 上的 deny 规则不是沙箱
-   (`python3 -c 'os.remove(...)'` 里没有 `rm`),边界是 OS 沙箱。
+   (`python3 -c 'os.remove(...)'` 里没有 `rm`),边界是 OS 沙箱。点名具体路径的 `Read(...)`
+   deny 同时进沙箱(§6.3),带通配的不进。
    只读命令(`Bash` 免询问的那一类)用同一套调用解析判:行里启动的每个程序都要按名字(不带
    路径——`./ls` 跑的是那个文件)在只读名单里,读不出程序的段不算只读;包在外面的 wrapper
    只能是不改变跑什么、在哪跑的那几个(`nice`、`timeout`、`nohup`、`stdbuf`、`command`、
@@ -1548,13 +1550,46 @@ bubblewrap)就和别的未授权调用一样被拒。沙箱只限写不限网,�
 要求 `sandbox.network_mode` 是 `deny_all` / `allowlist`,否则回到 allow 规则。这个开关 0.3.x 缺省
 关(保持原来的行为),计划在后续 0.3.x 改为缺省开。沙箱在 `assembly` / `daemon` 缺省编译进来。会话的 profile 只限写,不限读——读的限制落在文件工具上(只读通道里的命令另按 strict profile 限读,见下),
 `Bash` 从环境变量里读得到什么由 §5 第 5 条决定,设置里点名的密钥都不在其中;读项目外的文件只受凭据黑名单约束:`sandbox.deny_read`(缺省是家目录下的凭据,
-`base::interface::exec::default_deny_read`)减去 `sandbox.allow_read`;另外不论怎么配,
+`base::interface::exec::default_deny_read`)减去 `sandbox.allow_read`,再加上权限规则里点名具体路径的
+`Read` deny(下一段)。`deny_read` 里的目录,里面的符号链接指到目录外的,链接指向的地方也一并拒读。
+Linux 上被拒读的目录盖一层只读的空 tmpfs,命令在里面既读不到也写不进(写返回 `EROFS`,不会写进一层
+没人看得见的 tmpfs);macOS 只拒读,写照样落到真目录里。另外不论怎么配,
 §6.1 凭据名单上引擎自己的那部分——状态目录与各场景目录下的设置文件(`settings*.json`、
 `mcp.local.json`)和 `mcp/oauth/`,状态目录下的 `daemon/auth/`,以及项目自己的
 `.agix/settings.local.json`、`.agix/mcp.local.json`(项目这一层的 key 写在这里)——都读不到,
 `allow_read` 也放不开。状态目录里别的东西(skills、memory、scratchpad、会话记录、`scene.json`、
 `daemon/instances.d/`)照常可读。`Monitor` 的脚本进同一个沙箱,
 `sandbox.require_enforcement` 对它同样生效,无人值守下的自动放行也走上面这同一条件。
+
+**`Read` deny 规则也进沙箱。** 权限层的 `Read(...)` deny 只管得住文件工具和对命令文本的静态
+分析,`python3 -c "open('.env').read()"` 绕得过去。所以会话的命令进沙箱时,它判调用用的那一套规则
+(各层设置、会话选项、委派加的 deny)里点名具体路径的 `Read` deny 也进沙箱,放在 `SandboxPolicy` 的
+`deny_read_exact`:一个文件或目录(`Read(./.env)`、`Read(/srv/secret)`、`Read(~/.aws)`),或目录后面
+只跟 `/**`(按那个目录算)。路径按权限层判这条规则时的锚解析(`permissions::path_rule::named_path`):
+相对的按 `cwd`,worktree 会话另按项目根(`refusal_rule_roots`)再解析一份,主检出里的路径另给出
+worktree 里的那一份(`main_checkout_copies` 的反方向)。
+
+它们按写出的那个路径拒:macOS 拒这个路径本身与它解析掉符号链接后的写法,Linux 遮住这个路径本身;
+与 `deny_read` 不同,目录里的符号链接不跟——`Read(./node_modules/**)` 不会把 workspace 里
+`node_modules` 链过去的包也拒掉,目录里一个指回项目的链接也不会把项目拒掉,与权限层判 `Read` 工具
+一致。`allow_read` 换什么写法(`/var/...` 对 `/private/var/...`)都放不开它们:macOS 把它们写在
+`allow_read` 的放开之后,Linux 不看 `allow_read`。
+
+不翻译的:带别的通配的(`**/*.pem`、`*.key`、`secrets/*.json`、`secrets/*`——`*` 不跨 `/`,整目录拒掉
+比规则严、花括号与字符类),要沙箱挡就写进 `sandbox.deny_read`,或写一条 `Bash(...)` 的 deny;ask,
+沙箱不会问。命令启动就要读的也不翻译,跳过并告警,那一条仍只由权限层管:规则的路径**是或包含**会话
+的工作目录、项目根、可写目录(`additional_writable_dirs`、缓存目录、会话的 `TMPDIR`)、状态目录、
+后端隐含可写的根(`/dev`、macOS 的 `DARWIN_USER_TEMP_DIR`)之一的(`Read(.)`、`Read(./**)`、祖先
+目录、`/`),或**是、包含或落在**程序加载用的系统目录(`platform::sandbox::system_read_roots`,即
+strict profile 总能读的那张表:`/usr`、`/bin`、`/System`、`/opt/homebrew`、`/etc`……)里的——否则
+shell 本身起不来。
+
+还不存在的路径照样加:macOS 的 `subpath` 认它,Linux 只遮得住命令启动时已存在的。被拒的目录同
+`deny_read`(上一段):Linux 上命令写不进,macOS 上写得进。macOS 按路径匹配,命令写得了被拒文件所在
+的目录(项目里的文件都是)时,先改名再读挡不住(`platform::sandbox` 已知逃逸第 7 条);Linux 的遮挡
+是挂载,改名带不走。沙箱关着或不可用时什么都不加。规则知识留在
+`permissions`(`PathDenials::denied_read_paths`),平台层只见路径,两者在 `tools/src/bash/sandbox.rs`
+的 `session_policy` 接上,三种 profile 都从它出发。
 
 **三种 profile。** 同一个沙箱后端按结论带出的 `ExecProfile`(§6.1 末的表)收到三份不同的
 `SandboxPolicy`,由 `tools/src/bash/sandbox.rs` 的 `policy_for_profile` 选;没有 `approval` 的调用

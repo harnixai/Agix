@@ -74,6 +74,23 @@ pub fn resolve_pattern(pattern: &str, cwd: &Path) -> String {
         .into_owned()
 }
 
+/// The one file or directory `pattern` covers, resolved as
+/// [`resolve_pattern`] resolves it: a pattern with no glob, or one whose only
+/// glob is a trailing `/**`, taken as the directory before it. `None` for any
+/// other glob, which names no single path: `dir/*` among them, which covers
+/// only what lies directly in `dir`.
+pub fn named_path(pattern: &str, cwd: &Path) -> Option<PathBuf> {
+    let named = match pattern.strip_suffix("/**") {
+        Some("") => "/",
+        Some(dir) => dir,
+        None => pattern,
+    };
+    if named.is_empty() || named.contains(['*', '?', '[', '{']) {
+        return None;
+    }
+    Some(PathBuf::from(resolve_pattern(named, cwd)))
+}
+
 /// Whether a resolved pattern covers `path`.
 pub fn matches(pattern: &str, path: &Path) -> bool {
     if has_glob(pattern) {
@@ -265,6 +282,36 @@ mod tests {
             resolve_pattern("~/.ssh/**", cwd),
             home().join(".ssh/**").to_string_lossy()
         );
+    }
+
+    #[test]
+    fn a_pattern_names_a_path_only_without_a_glob_or_with_a_trailing_double_star() {
+        let cwd = Path::new("/proj");
+        let named = |p: &str| named_path(p, cwd);
+        assert_eq!(named(".env"), Some(PathBuf::from("/proj/.env")));
+        assert_eq!(named("./.env"), Some(PathBuf::from("/proj/.env")));
+        assert_eq!(named("/srv/secret"), Some(PathBuf::from("/srv/secret")));
+        assert_eq!(named("//srv/secret"), Some(PathBuf::from("/srv/secret")));
+        assert_eq!(named("~/.aws"), Some(home().join(".aws")));
+        assert_eq!(named("secrets/**"), Some(PathBuf::from("/proj/secrets")));
+        assert_eq!(named("~/.aws/**"), Some(home().join(".aws")));
+        assert_eq!(named("./**"), Some(PathBuf::from("/proj")));
+        assert_eq!(named("/**"), Some(PathBuf::from("/")));
+        for glob in [
+            "**",
+            "**/*.pem",
+            "*.key",
+            "secrets/*.json",
+            "./secrets/*",
+            "/*",
+            "a/**/b",
+            "k?y",
+            "[ab].txt",
+            "{a,b}.txt",
+            "",
+        ] {
+            assert_eq!(named(glob), None, "{glob}");
+        }
     }
 
     #[test]

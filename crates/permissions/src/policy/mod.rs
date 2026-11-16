@@ -367,15 +367,27 @@ impl base::interface::permission::PathDenials for Policy {
         cwd: &std::path::Path,
         extra: &[PermissionRule],
     ) -> Option<base::interface::permission::PathDenial> {
-        let rules: Vec<PermissionRule> = self
-            .rules_now()
+        crate::ruleset::path_denial(self.rules_with(extra), tool, cwd)
+    }
+
+    fn denied_read_paths(
+        &self,
+        cwd: &std::path::Path,
+        extra: &[PermissionRule],
+    ) -> Vec<std::path::PathBuf> {
+        crate::ruleset::denied_read_paths(&self.rules_with(extra), cwd)
+    }
+}
+
+impl Policy {
+    fn rules_with(&self, extra: &[PermissionRule]) -> Vec<PermissionRule> {
+        self.rules_now()
             .rules()
             .iter()
             .chain(self.managed.rules.rules())
             .chain(extra)
             .cloned()
-            .collect();
-        crate::ruleset::path_denial(rules, tool, cwd)
+            .collect()
     }
 }
 

@@ -1005,3 +1005,143 @@ async fn accept_edits_asks_before_reaching_a_host_the_settings_do_not_name() {
     let o = check(&accept, "Read", json!({ "file_path": "a.txt" }), cwd).await;
     assert!(matches!(o, PermissionOutcome::Permit { .. }), "{o:?}");
 }
+
+/// A sandboxed command is held to a `Read` deny that names a file: run
+/// through the OS sandbox, `cat` of it gets nothing, and of the file beside
+/// it the contents.
+#[tokio::test]
+async fn a_sandboxed_command_cannot_read_what_a_read_deny_names() {
+    use base::interface::tool::{ProgressSender, Tool};
+    if !tools::bash::sandbox_status().starts_with("available") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::write(cwd.join("secret.txt"), "RULE-DENIED-5e1\n").unwrap();
+    std::fs::write(cwd.join("sibling.txt"), "SIBLING-READ-5e1\n").unwrap();
+    let mut ctx =
+        session_state::testing::tool_context_for_test(platform::local_providers(), cwd.clone());
+    ctx.sandbox_mut().disabled = false;
+    ctx.sandbox_mut().require_enforcement = true;
+    ctx.path_denials = Some(Arc::new(Policy::new(RuleSet::new(vec![rule(
+        RuleBehavior::Deny,
+        "Read",
+        "./secret.txt",
+    )]))));
+
+    let result = tools::bash::BashTool
+        .call(
+            json!({"command": "cat sibling.txt; cat secret.txt; echo end"}),
+            ctx,
+            ProgressSender::noop("read-deny"),
+        )
+        .await
+        .unwrap();
+    let shown = format!("{:?}", result.content);
+    assert!(
+        shown.contains("SIBLING-READ-5e1") && shown.contains("end"),
+        "{shown}"
+    );
+    assert!(!shown.contains("RULE-DENIED-5e1"), "{shown}");
+}
+
+/// What `command` shows run by `Bash` through the OS sandbox in `cwd`, under
+/// `rules` and `allow_read`; `None` where no sandbox runs here.
+#[allow(clippy::unwrap_used)]
+async fn run_sandboxed(
+    cwd: &Path,
+    rules: Vec<PermissionRule>,
+    allow_read: Vec<std::path::PathBuf>,
+    command: &str,
+) -> Option<String> {
+    use base::interface::tool::{ProgressSender, Tool};
+    if !tools::bash::sandbox_status().starts_with("available") {
+        return None;
+    }
+    let mut ctx = session_state::testing::tool_context_for_test(
+        platform::local_providers(),
+        cwd.to_path_buf(),
+    );
+    ctx.sandbox_mut().disabled = false;
+    ctx.sandbox_mut().require_enforcement = true;
+    ctx.sandbox_mut().allow_read = allow_read;
+    ctx.path_denials = Some(Arc::new(Policy::new(RuleSet::new(rules))));
+    let result = tools::bash::BashTool
+        .call(
+            json!({ "command": command }),
+            ctx,
+            ProgressSender::noop("read-deny"),
+        )
+        .await
+        .unwrap();
+    Some(format!("{:?}", result.content))
+}
+
+/// A `Read` deny names a directory as it is: a link in it that leads back to
+/// the project does not take the project with it.
+#[tokio::test]
+async fn a_read_denied_directory_linking_back_to_the_project_leaves_the_project_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir(cwd.join("nm")).unwrap();
+    std::os::unix::fs::symlink("..", cwd.join("nm/self")).unwrap();
+    std::fs::write(cwd.join("sibling.txt"), "SIBLING-READ-r1\n").unwrap();
+    let Some(shown) = run_sandboxed(
+        &cwd,
+        vec![rule(RuleBehavior::Deny, "Read", "./nm/**")],
+        Vec::new(),
+        "cat sibling.txt; echo end",
+    )
+    .await
+    else {
+        return;
+    };
+    assert!(shown.contains("SIBLING-READ-r1"), "{shown}");
+}
+
+/// `sandbox.allow_read` does not reopen what a `Read` deny names, in any
+/// spelling of it: here through macOS's `/var` -> `/private/var` link.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn allow_read_in_another_spelling_does_not_reopen_a_read_deny() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::write(cwd.join("secret.txt"), "RULE-DENIED-r2\n").unwrap();
+    let raw = dir.path().join("secret.txt");
+    assert_ne!(raw, cwd.join("secret.txt"), "tempdir is canonical here");
+    let Some(shown) = run_sandboxed(
+        &cwd,
+        vec![rule(RuleBehavior::Deny, "Read", "./secret.txt")],
+        vec![raw],
+        "cat secret.txt; echo end",
+    )
+    .await
+    else {
+        return;
+    };
+    assert!(shown.contains("end"), "{shown}");
+    assert!(!shown.contains("RULE-DENIED-r2"), "{shown}");
+}
+
+/// `Read(./node_modules/**)` in a workspace: the packages `node_modules`
+/// links to stay readable, as they are to the `Read` tool.
+#[tokio::test]
+async fn a_read_denied_node_modules_leaves_the_workspace_packages_it_links_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(cwd.join("packages/pkg")).unwrap();
+    std::fs::write(cwd.join("packages/pkg/index.js"), "WORKSPACE-PKG-r3\n").unwrap();
+    std::fs::create_dir_all(cwd.join("node_modules/@s")).unwrap();
+    std::os::unix::fs::symlink("../../packages/pkg", cwd.join("node_modules/@s/pkg")).unwrap();
+    let Some(shown) = run_sandboxed(
+        &cwd,
+        vec![rule(RuleBehavior::Deny, "Read", "./node_modules/**")],
+        Vec::new(),
+        "cat packages/pkg/index.js; echo end",
+    )
+    .await
+    else {
+        return;
+    };
+    assert!(shown.contains("WORKSPACE-PKG-r3"), "{shown}");
+}

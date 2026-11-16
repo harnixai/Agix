@@ -33,6 +33,9 @@ pub struct SandboxPolicy {
     /// Absolute paths the sandbox is **denied** read access to. Defaults
     /// include common credential stores (see [`default_deny_read`]).
     pub deny_read: Vec<PathBuf>,
+    /// Paths denied as named, under no `allow_read`: the backends deny each
+    /// path's own spellings and do not follow the links inside it.
+    pub deny_read_exact: Vec<PathBuf>,
     /// Filename segments no command may write inside a writable root: a path
     /// is refused when a component under the root equals one or begins with
     /// it followed by a dot. macOS refuses new and existing paths alike;
@@ -125,6 +128,7 @@ impl SandboxPolicy {
         Self {
             allow_read: self.allow_read.clone(),
             deny_read: self.deny_read.clone(),
+            deny_read_exact: self.deny_read_exact.clone(),
             deny_write: self.deny_write.clone(),
             network_mode: NetworkMode::DenyAll,
             allowed_domains: Vec::new(),
@@ -239,6 +243,7 @@ impl SandboxSettings {
         SandboxPolicy {
             allow_read: self.allow_read.clone(),
             deny_read,
+            deny_read_exact: Vec::new(),
             deny_write: self.deny_write.clone(),
             network_mode: self.network_mode,
             allowed_domains: self.allowed_domains.clone(),

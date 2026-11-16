@@ -95,7 +95,10 @@
 //! # What a confined command may not read
 //!
 //! The policy's `deny_read` (the credential stores in the user's home, by
-//! default) less its `allow_read`, and whatever the policy says, the
+//! default) less its `allow_read`, with the targets of the links in a
+//! denied directory that lead out of it; its `deny_read_exact` (what the
+//! session's `Read` deny rules name) whatever `allow_read` says, each path
+//! as named, no link in it followed; and whatever the policy says, the
 //! credentials of `base::paths` (`CREDENTIALS`, placed on disk by
 //! `SensitivePaths::credential_locations`): the state root's settings files
 //! and MCP OAuth tokens, its own and every scene's, the daemons' socket
@@ -104,6 +107,9 @@
 //! the state root and the project's `.agix` with the mounts of
 //! `mask::mask_plan`, which a credential written later does not climb out
 //! of, except where escape path 6 says.
+//!
+//! On Linux a denied directory is shut under an empty read-only tmpfs, so a
+//! command can neither read nor write in it; macOS denies reads only.
 //!
 //! A policy whose `read` is `ReadScope::Only` narrows that further
 //! (`read_scope`).
@@ -200,6 +206,12 @@
 //!    configuration directories a command cannot write anyway and a real
 //!    `.agix` directory are masked whole. macOS matches its denials by path
 //!    and has no such gap.
+//! 7. **A `deny_read` entry inside a writable directory, on macOS**: matched
+//!    by path, so a command that may write the directory renames the file,
+//!    or a directory above it, and reads it under the new name. The
+//!    `Read(...)` deny rules in `deny_read_exact` mostly name files in the
+//!    project, which is writable. On Linux the entry is a mount, which a
+//!    rename does not carry off.
 //!
 //! Not among them, measured on bubblewrap 0.8: `/proc` is mounted afresh for
 //! the command's PID namespace, so it shows neither the host's processes nor
@@ -234,6 +246,44 @@ mod roots;
 mod tests;
 
 pub use fence::{fence_port, fence_secret, fence_socket, Fence};
+
+/// The system directories programs load from: what a command reads to
+/// start at all, and what `ReadScope::Only` lets it read whatever its roots.
+#[cfg(target_os = "macos")]
+const SYSTEM_READ_ROOTS: &[&str] = &[
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/System",
+    "/Library/Developer/CommandLineTools",
+    "/Applications/Xcode.app/Contents/Developer",
+    "/private/etc",
+    "/private/var/db/timezone",
+    "/opt/homebrew",
+    "/usr/local",
+    "/dev",
+];
+
+#[cfg(target_os = "linux")]
+const SYSTEM_READ_ROOTS: &[&str] = &[
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
+    "/etc",
+    "/opt",
+    "/nix/store",
+];
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const SYSTEM_READ_ROOTS: &[&str] = &[];
+
+pub fn system_read_roots() -> Vec<PathBuf> {
+    SYSTEM_READ_ROOTS.iter().map(PathBuf::from).collect()
+}
 
 /// Where a confined command may write besides its working directory and the
 /// policy's `additional_writable`: device nodes, and on macOS the per-user
@@ -362,6 +412,7 @@ fn non_utf8_path<'a>(
         .chain(additional_writable.iter().map(PathBuf::as_path))
         .chain(policy.additional_writable.iter().map(PathBuf::as_path))
         .chain(policy.deny_read.iter().map(PathBuf::as_path))
+        .chain(policy.deny_read_exact.iter().map(PathBuf::as_path))
         .chain(policy.allow_read.iter().map(PathBuf::as_path))
         .chain(policy.state_root.iter().map(PathBuf::as_path))
         .chain(roots.iter().map(PathBuf::as_path))

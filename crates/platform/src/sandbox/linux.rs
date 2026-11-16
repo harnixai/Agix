@@ -362,11 +362,39 @@ fn apply_mask(args: &mut Vec<String>, plan: &[mask::Mount], read_only: bool) {
 /// Make `path` unreadable where it exists: an empty tmpfs over a directory,
 /// `/dev/null` over anything else.
 pub(super) fn hide(args: &mut Vec<String>, path: &Path) {
+    if inside_a_shut_directory(args, path) {
+        return;
+    }
     if path.is_dir() {
         args.extend(["--tmpfs".into(), path.display().to_string()]);
     } else if path.exists() {
         bind_over(args, Path::new("/dev/null"), path);
     }
+}
+
+/// [`hide`], with a directory's tmpfs read-only: what a command writes in a
+/// directory it may not read fails, rather than landing where nobody sees it.
+fn shut(args: &mut Vec<String>, path: &Path) {
+    let before = args.len();
+    hide(args, path);
+    if args.len() > before && path.is_dir() {
+        args.extend(["--remount-ro".into(), path.display().to_string()]);
+    }
+}
+
+/// Whether `path` lies below a directory `args` already shut under an empty
+/// read-only tmpfs that nothing was mounted into since: it is not there to
+/// read, and bwrap could not make a mount point for it.
+fn inside_a_shut_directory(args: &[String], path: &Path) -> bool {
+    args.windows(4).enumerate().any(|(at, w)| {
+        let dir = Path::new(&w[1]);
+        w[0] == "--tmpfs"
+            && w[2] == "--remount-ro"
+            && w[1] == w[3]
+            && path.starts_with(dir)
+            && path != dir
+            && !args[at + 4..].iter().any(|a| Path::new(a).starts_with(dir))
+    })
 }
 
 pub(super) fn bind_over(args: &mut Vec<String>, source: &Path, target: &Path) {
@@ -669,11 +697,14 @@ fn hide_denied_reads(args: &mut Vec<String>, policy: &SandboxPolicy) {
     let allow_set: std::collections::HashSet<PathBuf> = policy.allow_read.iter().cloned().collect();
     for p in &policy.deny_read {
         if !allow_set.contains(p) {
-            hide(args, p);
+            shut(args, p);
             for target in link_targets_outside(p) {
-                hide(args, &target);
+                shut(args, &target);
             }
         }
+    }
+    for p in &policy.deny_read_exact {
+        shut(args, p);
     }
 }
 

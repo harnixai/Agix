@@ -1,6 +1,7 @@
 //! What `settings.json`'s `sandbox` section says reaches the tools that act
 //! on it: the hosts `WebFetch` may reach, what a sandboxed `Bash` command may
-//! not read, and the one proxy it may connect through.
+//! not read — by the section and by the `Read` deny rules — and the one proxy
+//! it may connect through.
 
 #![cfg(feature = "web")]
 
@@ -92,26 +93,34 @@ async fn marking_proxy() -> u16 {
     port
 }
 
-#[cfg(target_os = "macos")]
 struct Daemon {
     _dir: tempfile::TempDir,
     sock: std::path::PathBuf,
+    work: std::path::PathBuf,
     model: Arc<MockAnthropicClient>,
 }
 
 /// A daemon over a global settings.json of `sandbox` with `Bash` allowed.
 #[cfg(target_os = "macos")]
 async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
+    daemon_with_rules(json!([]), sandbox).await
+}
+
+/// A daemon over a global settings.json of `sandbox`, with `Bash` allowed on
+/// top of `rules`.
+async fn daemon_with_rules(rules: Value, sandbox: Value) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let global = root.join("agix");
     let work = root.join("work");
     std::fs::create_dir_all(&global).unwrap();
     std::fs::create_dir_all(&work).unwrap();
+    let mut rules = rules.as_array().cloned().unwrap_or_default();
+    rules.push(json!({"tool": "Bash", "action": "allow"}));
     std::fs::write(
         global.join("settings.json"),
         json!({
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permission_rules": rules,
             "sandbox": sandbox,
         })
         .to_string(),
@@ -126,7 +135,7 @@ async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
         &config,
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         daemon::Assembly {
-            cwd: Some(work),
+            cwd: Some(work.clone()),
             model_client: Some(model.clone() as Arc<dyn AnthropicClient>),
             transcripts: daemon::Transcripts::Nowhere,
             ..Default::default()
@@ -142,6 +151,7 @@ async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
     Daemon {
         _dir: dir,
         sock,
+        work,
         model,
     }
 }
@@ -359,5 +369,43 @@ async fn the_sandbox_section_reaches_the_tools() {
     assert!(
         cat.contains("end") || cat.to_lowercase().contains("denied"),
         "the command neither ran nor was refused: {cat}"
+    );
+}
+
+/// A `Read` deny rule naming a file holds a sandboxed command too, where the
+/// command's text does not give the file away to the permission layer: the
+/// command runs, reads the file beside it and gets nothing of the denied one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_deny_rule_holds_a_command_that_reads_around_it() {
+    let daemon = daemon_with_rules(
+        json!([{"tool": "Read(./secret.txt)", "action": "deny"}]),
+        json!({}),
+    )
+    .await;
+    std::fs::write(daemon.work.join("secret.txt"), "RULE-SECRET-9d4\n").unwrap();
+    std::fs::write(daemon.work.join("sibling.txt"), "SIBLING-9d4\n").unwrap();
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_around",
+        json!({"command": "sh -c 'x=sec; cat ./sibling.txt ./${x}ret.txt; echo rc=$?'"}),
+    ));
+    daemon.model.push_turn(text_round("done"));
+    call(&daemon.sock, "session.run_turn", json!({"message": "read"})).await;
+
+    let shown = answers(&daemon.model, "toolu_around")
+        .first()
+        .cloned()
+        .unwrap_or_default()
+        .to_string();
+    if !tools::bash::sandbox_status().starts_with("available") {
+        return;
+    }
+    assert!(
+        shown.contains("SIBLING-9d4") && shown.contains("rc="),
+        "the command did not run: {shown}"
+    );
+    assert!(
+        !shown.contains("RULE-SECRET-9d4"),
+        "a file a Read deny names was readable to a sandboxed command: {shown}"
     );
 }

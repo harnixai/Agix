@@ -1,16 +1,89 @@
-//! Sandbox policy for shell-running tools: the session's sandbox settings narrowed to what this call's approval allows, and the confined command.
+//! Sandbox policy for shell-running tools: the session's sandbox settings and the paths its `Read` deny rules name, narrowed to what this call's approval allows, and the confined command.
 
 use base::tool::ToolContext;
+use permissions::path_rule;
 use platform::sandbox;
+use std::path::{Path, PathBuf};
 
 pub(super) fn sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
-    let settings = &ctx.config.sandbox;
-    let mut policy = settings.policy();
+    let mut policy = session_policy(ctx);
     policy.additional_writable = writable_dirs(
         &ctx.session.env(),
-        settings.session_tmp_dir(&ctx.session_id),
+        ctx.config.sandbox.session_tmp_dir(&ctx.session_id),
     );
     policy
+}
+
+/// The session's sandbox settings, with what its `Read` deny rules name
+/// outright denied as named, past `allow_read`'s reach.
+fn session_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
+    let mut policy = ctx.config.sandbox.policy();
+    policy.deny_read_exact = read_denied_by_rules(ctx);
+    policy
+}
+
+/// The paths the session's `Read` deny rules name outright, in each spelling
+/// the permission layer judges them by: from cwd, and in a worktree from the
+/// project root too. Left out, since no command could run without reading
+/// it: one that is or holds a path a command starts in or may write
+/// ([`session_roots`]), or that is, holds or lies in a system directory
+/// programs load from ([`sandbox::system_read_roots`]).
+fn read_denied_by_rules(ctx: &ToolContext) -> Vec<PathBuf> {
+    let Some(denials) = &ctx.path_denials else {
+        return Vec::new();
+    };
+    let env = ctx.session.env();
+    let rule_roots: Vec<&Path> = std::iter::once(ctx.cwd.as_path())
+        .chain(env.refusal_rule_roots.iter().map(PathBuf::as_path))
+        .collect();
+    let session = session_roots(ctx, &rule_roots);
+    let system = sandbox::system_read_roots();
+    let mut seen = Vec::new();
+    let mut denied = Vec::new();
+    for path in rule_roots
+        .iter()
+        .flat_map(|root| denials.denied_read_paths(root, &[]))
+    {
+        if seen.contains(&path) {
+            continue;
+        }
+        seen.push(path.clone());
+        let needed = session
+            .iter()
+            .chain(&system)
+            .find(|dir| within(dir, &path))
+            .or_else(|| system.iter().find(|dir| within(&path, dir)));
+        match needed {
+            Some(dir) => tracing::warn!(
+                denied = %path.display(),
+                needed = %dir.display(),
+                "a Read deny rule covers what every sandboxed command reads to start; \
+                 the sandbox leaves it to the permission layer, or no command could run"
+            ),
+            None => denied.push(path),
+        }
+    }
+    denied
+}
+
+fn within(path: &Path, root: &Path) -> bool {
+    path_rule::is_within_root_lexical(path, root) || path_rule::is_within_root_resolved(path, root)
+}
+
+/// Where a session's sandboxed command starts and what it may write: its
+/// working directory and the project's, its writable directories and
+/// `TMPDIR`, the state root, and the backends' implicit writable roots.
+fn session_roots(ctx: &ToolContext, rule_roots: &[&Path]) -> Vec<PathBuf> {
+    let env = ctx.session.env();
+    let tmp = ctx.config.sandbox.session_tmp_dir(&ctx.session_id);
+    rule_roots
+        .iter()
+        .map(|root| root.to_path_buf())
+        .chain([env.cwd.clone()])
+        .chain(writable_dirs(&env, tmp))
+        .chain(ctx.config.sandbox.paths.state_root().map(Path::to_path_buf))
+        .chain(sandbox::implicit_writable_roots(false))
+        .collect()
 }
 
 /// What a session's sandboxed commands may write besides its working
@@ -52,10 +125,10 @@ pub fn strict_sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
     let readable = crate::security::readable_roots(ctx)
         .into_iter()
         .chain(cache_directories(&ctx.session.env()));
-    let settings = &ctx.config.sandbox;
-    settings
-        .policy()
-        .strict(readable, Some(settings.session_tmp_dir(&ctx.session_id)))
+    session_policy(ctx).strict(
+        readable,
+        Some(ctx.config.sandbox.session_tmp_dir(&ctx.session_id)),
+    )
 }
 
 fn cache_directories(env: &base::context::SessionEnv) -> Vec<std::path::PathBuf> {

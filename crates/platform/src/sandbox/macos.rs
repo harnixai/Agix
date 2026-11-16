@@ -178,9 +178,6 @@ fn guard_project_files(s: &mut String, roots: &Roots) {
 
 fn read_rules(s: &mut String, policy: &SandboxPolicy, dirs: &read_scope::UserDirs) {
     s.push_str(&read_scope::macos_rules(&policy.read, dirs));
-    if policy.deny_read.is_empty() {
-        return;
-    }
     for p in policy.deny_read.iter().flat_map(|p| spellings(p)) {
         s.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quoted(&p)));
     }
@@ -202,6 +199,10 @@ fn read_rules(s: &mut String, policy: &SandboxPolicy, dirs: &read_scope::UserDir
             "(allow file-read* (subpath \"{}\"))\n",
             quoted(&p)
         ));
+    }
+    // After the re-allows, so that no `allow_read` spelling reopens them.
+    for p in policy.deny_read_exact.iter().flat_map(|p| spellings(p)) {
+        s.push_str(&format!("(deny file-read* (subpath \"{}\"))\n", quoted(&p)));
     }
 }
 

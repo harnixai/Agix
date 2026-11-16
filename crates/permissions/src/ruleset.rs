@@ -452,6 +452,32 @@ pub fn path_denial(
     }))
 }
 
+/// The paths `Read` deny rules name outright, resolved from `cwd`
+/// ([`path_rule::named_path`]). In a worktree the engine made, a path in the
+/// main checkout also comes in the worktree's spelling: [`RuleSet::evaluate_path`]
+/// judges a worktree file by its main checkout copy.
+pub fn denied_read_paths(rules: &[PermissionRule], cwd: &Path) -> Vec<PathBuf> {
+    let checkouts = path_rule::main_checkout_copies(cwd);
+    let mut paths = Vec::new();
+    let named = rules
+        .iter()
+        .filter(|r| r.behavior == RuleBehavior::Deny && r.tool_name == "Read")
+        .filter_map(|r| path_rule::named_path(r.rule_content.as_deref()?, cwd));
+    for path in named {
+        let in_worktree = checkouts
+            .iter()
+            .filter(|_| !path.starts_with(cwd))
+            .find_map(|checkout| path.strip_prefix(checkout).ok())
+            .map(|rest| cwd.join(rest));
+        for path in std::iter::once(path).chain(in_worktree) {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -871,5 +897,106 @@ mod tests {
                 "allow {content} on {url}"
             );
         }
+    }
+
+    #[test]
+    fn only_read_denies_naming_a_path_give_a_denied_read_path() {
+        let rules = [
+            rule(
+                "Read",
+                Some("./.env"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some("/srv/secret/**"),
+                RuleBehavior::Deny,
+                RuleSource::ProjectSettings,
+            ),
+            rule(
+                "Read",
+                Some("**/*.pem"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some("ask.txt"),
+                RuleBehavior::Ask,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some("ok.txt"),
+                RuleBehavior::Allow,
+                RuleSource::UserSettings,
+            ),
+            rule("Read", None, RuleBehavior::Deny, RuleSource::UserSettings),
+            rule(
+                "Edit",
+                Some("edit.txt"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Grep",
+                Some("grep.txt"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some(".env"),
+                RuleBehavior::Deny,
+                RuleSource::Session,
+            ),
+        ];
+        assert_eq!(
+            denied_read_paths(&rules, Path::new("/proj")),
+            [PathBuf::from("/proj/.env"), PathBuf::from("/srv/secret")]
+        );
+    }
+
+    #[test]
+    fn in_a_worktree_a_path_of_the_main_checkout_comes_in_both_spellings() {
+        let wt = Path::new("/r/.agix/worktrees/wt");
+        let rules = [
+            rule(
+                "Read",
+                Some(".env"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some("/r/keys"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+            rule(
+                "Read",
+                Some("/srv/x"),
+                RuleBehavior::Deny,
+                RuleSource::UserSettings,
+            ),
+        ];
+        assert_eq!(
+            denied_read_paths(&rules, wt),
+            [
+                wt.join(".env"),
+                PathBuf::from("/r/keys"),
+                wt.join("keys"),
+                PathBuf::from("/srv/x"),
+            ]
+        );
+        assert_eq!(
+            denied_read_paths(&rules, Path::new("/r")),
+            [
+                PathBuf::from("/r/.env"),
+                PathBuf::from("/r/keys"),
+                PathBuf::from("/srv/x"),
+            ]
+        );
     }
 }

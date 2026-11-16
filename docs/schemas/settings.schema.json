@@ -542,7 +542,7 @@
           "type": "array"
         },
         "allow_read": {
-          "description": "Paths to re-allow reading, on top of the built-in credential deny\ndefaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the\nentry it names; a parent directory, or a path below a denied one,\nchanges nothing.\n\nExists because those defaults are applied to `Bash`, and some of them\nsit on legitimate workflows — `npm install` against a private registry\nreads `~/.npmrc`, `docker build` reads `~/.docker/config.json`.\nThis is the way to say \"yes, that one is fine here\".",
+          "description": "Paths to re-allow reading, on top of the built-in credential deny\ndefaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the\nentry it names; a parent directory, or a path below a denied one,\nchanges nothing. Never a path a `Read(...)` deny rule names.\n\nExists because those defaults are applied to `Bash`, and some of them\nsit on legitimate workflows — `npm install` against a private registry\nreads `~/.npmrc`, `docker build` reads `~/.docker/config.json`.\nThis is the way to say \"yes, that one is fine here\".",
           "items": {
             "type": "string"
           },
@@ -619,7 +619,7 @@
           "type": "boolean"
         },
         "deny_read": {
-          "description": "Paths a sandboxed `Bash` / `Monitor` command may not read. Empty — the\ndefault — means the built-in credential list (`~/.ssh`, `~/.aws`,\n`~/.npmrc`, ...); a non-empty list replaces that list as a whole\nrather than adding to it, so repeat any of it you still want.",
+          "description": "Paths a sandboxed `Bash` / `Monitor` command may not read. Empty — the\ndefault — means the built-in credential list (`~/.ssh`, `~/.aws`,\n`~/.npmrc`, ...); a non-empty list replaces that list as a whole\nrather than adding to it, so repeat any of it you still want. The\n`Read(...)` deny rules that name a file or a directory are added on\ntop; one with any other glob (`**/*.pem`) is not, so name its files\nhere or deny them with a `Bash(...)` rule.",
           "items": {
             "type": "string"
           },

@@ -856,3 +856,77 @@ fn linux_a_worktree_command_commits_on_its_branch_and_nothing_else() {
     assert_eq!(git(&["rev-parse", "main-ish"]), main_ish);
     assert!(common.join("refs/heads/agix/worktree-other").is_file());
 }
+
+/// A path denied as named (`deny_read_exact`, what a `Read` deny rule
+/// names) is hidden as it is, under a read-only tmpfs: what a link in it
+/// leads to is not hidden with it, and `allow_read` does not reopen it.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_path_denied_as_named_is_shut_read_only_and_follows_no_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let (denied, package) = (root.join("node_modules"), root.join("packages/pkg"));
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::create_dir_all(&package).unwrap();
+    std::os::unix::fs::symlink(&package, denied.join("pkg")).unwrap();
+    let mut o = opts("true", &root);
+    o.policy.deny_read_exact = vec![denied.clone()];
+    o.policy.allow_read = vec![denied.clone()];
+    let cmd = wrap(o);
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let (d, p) = (denied.display().to_string(), package.display().to_string());
+    let args = &cmd.spec.args;
+    assert!(
+        args.windows(4)
+            .any(|w| w == ["--tmpfs", &d, "--remount-ro", &d]),
+        "{args:?}"
+    );
+    assert!(
+        !args.windows(2).any(|w| w[0] == "--tmpfs" && w[1] == p),
+        "{args:?}"
+    );
+}
+
+/// Inside the project, a directory a command may not read it may not write
+/// either: the write fails rather than landing in a tmpfs nobody sees, and
+/// the directory on the host is as it was. A file denied below it as well
+/// does not stop the command from starting.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_write_into_a_read_denied_directory_fails_and_leaves_the_host_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap();
+    let (denied, credentials) = (project.join("secrets"), project.join("creds"));
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::create_dir_all(&credentials).unwrap();
+    std::fs::write(denied.join("key"), "KEY-7c2\n").unwrap();
+    let mut o = opts(
+        "cat secrets/key; echo new > secrets/new; echo w=$?; \
+         echo new > creds/new; echo c=$?; echo end",
+        &project,
+    );
+    o.policy.deny_read = vec![credentials.clone()];
+    o.policy.deny_read_exact = vec![denied.clone(), denied.join("key")];
+    let cmd = wrap(o);
+    if cmd.mode != SandboxMode::LinuxBwrap {
+        return;
+    }
+    let out = std::process::Command::new(&cmd.spec.program)
+        .args(&cmd.spec.args)
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    let shown = String::from_utf8_lossy(&out.stdout);
+    assert!(shown.contains("end"), "{out:?}");
+    assert!(!shown.contains("KEY-7c2"), "{out:?}");
+    assert!(!shown.contains("w=0") && !shown.contains("c=0"), "{out:?}");
+    assert!(!denied.join("new").exists() && !credentials.join("new").exists());
+    assert_eq!(
+        std::fs::read_to_string(denied.join("key")).unwrap(),
+        "KEY-7c2\n"
+    );
+}

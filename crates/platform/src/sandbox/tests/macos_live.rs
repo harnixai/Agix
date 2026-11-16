@@ -607,6 +607,32 @@ fn a_link_in_a_denied_directory_does_not_read_through() {
     }
 }
 
+/// A path denied as named (`deny_read_exact`, what a `Read` deny rule
+/// names) is denied as it is: what a link in it leads to stays readable,
+/// and `allow_read` reopens it in no spelling, though it does reopen the
+/// same path where `deny_read` names it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_path_denied_as_named_follows_no_link_and_allow_read_does_not_reopen_it() {
+    let s = UnderSandboxExec::new().expect("sandbox-exec runs here");
+    let denied = s.elsewhere.join("node_modules");
+    let package = s.elsewhere.join("packages/pkg");
+    std::fs::create_dir_all(&denied).unwrap();
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("index.js"), "pkg\n").unwrap();
+    std::fs::write(denied.join("own.js"), "own\n").unwrap();
+    std::os::unix::fs::symlink(&package, denied.join("pkg")).unwrap();
+    let policy = SandboxPolicy {
+        deny_read: vec![denied.clone()],
+        deny_read_exact: vec![denied.clone()],
+        allow_read: vec![denied.clone(), base::path::resolve_physically(&denied)],
+        ..Default::default()
+    };
+    let cat = |p: &Path| format!("cat '{}'", p.display());
+    assert!(s.run_under(&cat(&package.join("index.js")), policy.clone()));
+    assert!(!s.run_under(&cat(&denied.join("own.js")), policy));
+}
+
 /// A command confined before a sub-agent's worktree existed — a background
 /// child an earlier call left running, a parallel sub-agent's — cannot
 /// rewrite that worktree's links, and a rewrite made anyway does not widen

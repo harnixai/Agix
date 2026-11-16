@@ -452,7 +452,14 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
   也算,`<目录>/.agix/worktrees/<名>/` 下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
   命中 `deny` / `ask` 也算——锚在项目上的规则对子 Agent worktree 里的拷贝同样成立。`*` 不跨
   `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样约束 `Write` /
-  `NotebookEdit`。
+  `NotebookEdit`。沙箱开着时,点名具体路径的 `Read(...)` `deny`——一个文件或目录,或目录后面只跟
+  `/**`——也进沙箱,按写出的路径拒(目录里的符号链接不跟),`sandbox.allow_read` 放不开;沙箱里的
+  `Bash` / `Monitor` 命令用 `python3 -c`、变量拼出的文件名也读不到。挡不住的:macOS 上命令写得了
+  被拒文件所在的目录时,改名再读;Linux 上命令启动之后才出现的路径。Linux 上被拒的目录命令也写不进,
+  macOS 上写得进。带别的通配的(`**/*.pem`、`secrets/*`)不加,要挡就写 `sandbox.deny_read` 或
+  `Bash(...)` 的 `deny`;`ask` 不加;是或包含工作目录、项目根、可写目录、状态目录的(`Read(./**)`),
+  以及是、包含或落在系统目录(`/usr`、`/bin`、`/etc`……)里的,不加;沙箱关着时不加。细节见
+  ARCHITECTURE.md §6.3。
 - `WebFetch` / `Ping` 用 URL 模式 `scheme://host[:port][/path]`(`"https://*.example.com/**"`)。
   调用的 URL 先规整(去掉 userinfo、query、fragment,主机名小写、Unicode 主机转成 punycode、去掉
   末尾的 `.`、默认端口省略,`ws` / `wss` 按 `http` / `https` 算),模式的主机同样转成 punycode,两侧

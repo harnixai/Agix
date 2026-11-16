@@ -628,6 +628,135 @@ fn the_strict_policy_reads_the_sessions_roots_and_writes_only_its_tmpdir() {
     assert!(!policy.deny_read.is_empty(), "the credential defaults stay");
 }
 
+fn denying_reads(ctx: &mut ToolContext, env: base::context::SessionEnv, contents: &[&str]) {
+    use base::permission::{PermissionRule, RuleBehavior, RuleSource};
+    let rules = contents
+        .iter()
+        .map(|content| {
+            let (behavior, content) = match content.strip_prefix("ask:") {
+                Some(rest) => (RuleBehavior::Ask, rest),
+                None => (RuleBehavior::Deny, *content),
+            };
+            PermissionRule {
+                source: RuleSource::ProjectSettings,
+                behavior,
+                tool_name: "Read".into(),
+                rule_content: Some(content.into()),
+            }
+        })
+        .collect();
+    ctx.session = std::sync::Arc::new(session_state::SessionState::for_tests_in(env));
+    ctx.path_denials = Some(std::sync::Arc::new(permissions::policy::Policy::new(
+        permissions::ruleset::RuleSet::new(rules),
+    )));
+}
+
+#[test]
+fn what_a_read_deny_names_outright_a_sandboxed_command_may_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().canonicalize().unwrap();
+    let mut ctx = ctx_in(&cwd);
+    denying_reads(
+        &mut ctx,
+        base::context::SessionEnv::new(cwd.clone()),
+        &[
+            "./secret.txt",
+            "/srv/keys/**",
+            "~/.config/tool",
+            "**/*.pem",
+            "secrets/*.json",
+            "./one-level/*",
+            "ask:asked.txt",
+        ],
+    );
+    ctx.sandbox_mut().allow_read = vec![PathBuf::from("/srv/keys"), PathBuf::from("/srv/open")];
+    let mut expected = vec![cwd.join("secret.txt"), PathBuf::from("/srv/keys")];
+    expected.extend(base::paths::home_dir().map(|home| home.join(".config/tool")));
+    let settings = ctx.config.sandbox.policy();
+    for policy in [
+        sandbox_policy(&ctx),
+        super::sandbox::strict_sandbox_policy(&ctx),
+    ] {
+        assert_eq!(policy.deny_read_exact, expected);
+        assert_eq!(policy.deny_read, settings.deny_read);
+        assert_eq!(policy.allow_read, settings.allow_read);
+    }
+}
+
+#[test]
+fn a_read_deny_that_holds_what_a_command_reads_to_start_is_left_to_the_permission_layer() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let (cwd, state, extra) = (root.join("work"), root.join("state"), root.join("extra"));
+    for d in [&cwd, &state, &extra] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut ctx = ctx_in(&cwd);
+    let parent = cwd.parent().unwrap().display().to_string();
+    ctx.sandbox_mut().paths =
+        std::sync::Arc::new(base::paths::SensitivePaths::new(Some(&state), Some(&cwd)));
+    let held = [
+        "./**".to_string(),
+        ".".into(),
+        "/".into(),
+        parent,
+        state.display().to_string(),
+        format!("{}/**", state.join("tmp").display()),
+        extra.display().to_string(),
+        "/usr".into(),
+        "/usr/bin".into(),
+        "/bin/**".into(),
+        "/usr/local/etc/secret".into(),
+    ];
+    let kept = [
+        "./sub/**".to_string(),
+        "/srv/secret".into(),
+        extra.join("sub/key").display().to_string(),
+    ];
+    let rules: Vec<&str> = held.iter().chain(&kept).map(String::as_str).collect();
+    denying_reads(
+        &mut ctx,
+        base::context::SessionEnv {
+            additional_writable_dirs: vec![extra.join("sub")],
+            ..base::context::SessionEnv::new(cwd.clone())
+        },
+        &rules,
+    );
+    assert!(ctx
+        .config
+        .sandbox
+        .session_tmp_dir(&ctx.session_id)
+        .starts_with(state.join("tmp")));
+    assert_eq!(
+        sandbox_policy(&ctx).deny_read_exact,
+        [
+            cwd.join("sub"),
+            PathBuf::from("/srv/secret"),
+            extra.join("sub/key"),
+        ]
+    );
+}
+
+#[test]
+fn in_a_worktree_a_read_deny_is_kept_in_the_project_and_in_the_worktree() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap();
+    let worktree = project.join(".agix/worktrees/wt");
+    let mut ctx = ctx_in(&worktree);
+    denying_reads(
+        &mut ctx,
+        base::context::SessionEnv {
+            refusal_rule_roots: vec![project.clone()],
+            ..base::context::SessionEnv::new(worktree.clone())
+        },
+        &[".env", &project.display().to_string()],
+    );
+    assert_eq!(
+        sandbox_policy(&ctx).deny_read_exact,
+        [worktree.join(".env"), project.join(".env")]
+    );
+}
+
 fn read_only(cmd: &str) -> bool {
     BashTool.call_traits(&json!({ "command": cmd })).read_only
 }

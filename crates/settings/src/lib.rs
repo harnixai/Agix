@@ -442,12 +442,15 @@ pub struct SandboxConfig {
     /// Paths a sandboxed `Bash` / `Monitor` command may not read. Empty — the
     /// default — means the built-in credential list (`~/.ssh`, `~/.aws`,
     /// `~/.npmrc`, ...); a non-empty list replaces that list as a whole
-    /// rather than adding to it, so repeat any of it you still want.
+    /// rather than adding to it, so repeat any of it you still want. The
+    /// `Read(...)` deny rules that name a file or a directory are added on
+    /// top; one with any other glob (`**/*.pem`) is not, so name its files
+    /// here or deny them with a `Bash(...)` rule.
     pub deny_read: Vec<PathBuf>,
     /// Paths to re-allow reading, on top of the built-in credential deny
     /// defaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the
     /// entry it names; a parent directory, or a path below a denied one,
-    /// changes nothing.
+    /// changes nothing. Never a path a `Read(...)` deny rule names.
     ///
     /// Exists because those defaults are applied to `Bash`, and some of them
     /// sit on legitimate workflows — `npm install` against a private registry

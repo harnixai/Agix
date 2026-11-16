@@ -542,6 +542,10 @@ pub trait PathDenials: Send + Sync {
         cwd: &std::path::Path,
         extra: &[PermissionRule],
     ) -> Option<PathDenial>;
+
+    /// The paths `Read` deny rules name outright, resolved from `cwd` as they
+    /// are judged there; a glob other than a trailing `/**` or `/*` names none.
+    fn denied_read_paths(&self, cwd: &std::path::Path, extra: &[PermissionRule]) -> Vec<PathBuf>;
 }
 
 /// Whether a deny rule covers this path.
