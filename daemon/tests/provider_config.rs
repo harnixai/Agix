@@ -425,3 +425,51 @@ async fn get_provider_reads_back_api_key_env_thinking_toggle_and_reasoning_passb
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+#[tokio::test]
+async fn get_provider_reports_whether_the_credential_has_a_value_and_never_the_value() {
+    const SET: &str = "AGIX_TEST_CRED_PRESENT_SET_7f3a";
+    const UNSET: &str = "AGIX_TEST_CRED_PRESENT_UNSET_7f3a";
+    const SECRET: &str = "sk-env-secret-value-91c4";
+    // SAFETY: test-only unique names, no other test reads them.
+    unsafe {
+        std::env::set_var(SET, SECRET);
+        std::env::remove_var(UNSET);
+    }
+    let (_server, sock, _dir, handle) = start_server().await;
+    for (id, var) in [("has_key", SET), ("no_key", UNSET)] {
+        let resp = rpc_call(
+            &sock,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"config.setProvider","params":{{"provider_id":"{id}","config":{{"api_type":"openai_compatible","base_url":"https://example.invalid/v1","api_key_env":"{var}"}}}},"id":1}}"#
+            ),
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        assert!(v["result"].is_object(), "setProvider: {v}");
+    }
+
+    for params in [r#""#, r#","params":{"include_secrets":true}"#] {
+        let resp = rpc_call(
+            &sock,
+            &format!(r#"{{"jsonrpc":"2.0","method":"config.getProvider"{params},"id":2}}"#),
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(
+            v["result"]["providers"]["has_key"]["credential_present"], true,
+            "resp: {v}"
+        );
+        assert_eq!(
+            v["result"]["providers"]["no_key"]["credential_present"], false,
+            "resp: {v}"
+        );
+        assert!(
+            !resp.contains(SECRET),
+            "the variable's value is in the reply: {resp}"
+        );
+    }
+
+    _server.shutdown_token().cancel();
+    let _ = handle.await;
+}

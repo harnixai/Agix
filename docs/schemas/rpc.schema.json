@@ -4832,6 +4832,10 @@
             "null"
           ]
         },
+        "credential_present": {
+          "description": "Whether the credential source the engine builds this provider's client\nwith yields a non-empty key. Never the key itself, whatever\n`include_secrets` says.",
+          "type": "boolean"
+        },
         "default_model": {
           "type": [
             "string",
@@ -4860,7 +4864,8 @@
       },
       "required": [
         "models",
-        "reasoning_passback"
+        "reasoning_passback",
+        "credential_present"
       ],
       "type": "object"
     },

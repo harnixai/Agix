@@ -53,6 +53,10 @@ pub struct ProviderView {
     pub models: Vec<String>,
     pub reasoning_passback: bool,
     pub thinking_toggle: Option<base::provider::ThinkingToggle>,
+    /// Whether the credential source the engine builds this provider's client
+    /// with yields a non-empty key. Never the key itself, whatever
+    /// `include_secrets` says.
+    pub credential_present: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

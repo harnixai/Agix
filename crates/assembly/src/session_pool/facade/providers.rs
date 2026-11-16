@@ -47,6 +47,7 @@ impl SessionPool {
                         models: cfg.models.clone(),
                         reasoning_passback: cfg.reasoning_passback,
                         thinking_toggle: cfg.thinking_toggle,
+                        credential_present: self.bindings.credential_present(id, cfg),
                     },
                 )
             })

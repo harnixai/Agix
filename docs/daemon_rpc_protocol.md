@@ -3005,12 +3005,12 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
   "project_root": "/Users/x/repo-b",
   "include_secrets": false }
 // ← result (getProvider)
-{ "providers": { },           // { "<id>": {api_type, base_url, api_key, api_key_env, default_model, models, reasoning_passback, thinking_toggle} }
+{ "providers": { },           // { "<id>": {api_type, base_url, api_key, api_key_env, default_model, models, reasoning_passback, thinking_toggle, credential_present} }
   "default_provider": null,
   "task_models": { } }
 ```
 
-`api_key` 默认脱敏为 `***<末 4 位>`。
+`api_key` 默认脱敏为 `***<末 4 位>`。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
 
 没配 `providers` / `task_models.main` 时用的缺省客户端(provider id `default`),密钥依次取
 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、宿主的 `CredentialSource`。都没有时 daemon 照样启动,
