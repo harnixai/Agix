@@ -8,13 +8,16 @@
 //! reader and both sandbox backends ask it instead of keeping lists of their
 //! own: the gate and the tools through [`SensitivePaths::is_credential`], the
 //! backends through [`SensitivePaths::credential_locations`], which each
-//! translates into its own mechanism.
+//! translates into its own mechanism. The credentials of a state root are
+//! also those of the other instances' state roots this machine is known to
+//! have ([`known_state_roots`]).
 
 use std::path::{Component, Path, PathBuf};
 
 use super::layout::{
-    entry, Layout, CLAUDE_CREDENTIALS, ENGINE_CONFIG_FILES, PROJECT_ENGINE_CONFIG_DIRS,
-    PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_FILES,
+    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD,
+    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 use super::ConfigPaths;
 
@@ -98,7 +101,7 @@ pub struct Credential {
 /// The directory a [`Credential`]'s secret is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
-    /// `<state root>/`.
+    /// `<state root>/`, the instance's own and each other one's.
     StateRoot,
     /// `<state root>/scenes/<any>/`, including a scene created later.
     EachSceneDir,
@@ -295,11 +298,25 @@ pub struct ConfigRootAt {
     pub own: bool,
 }
 
+/// The state roots of instances on this machine that a session's own may
+/// not be: `$HOME/.agix`, where `agixd` keeps its state unless told
+/// otherwise. Nothing on disk lists the others — an instance's
+/// `daemon/instances.d` names the daemons of its own root only.
+pub fn known_state_roots() -> Vec<PathBuf> {
+    super::home_dir()
+        .map(|home| home.join(DEFAULT_STATE_DIR))
+        .into_iter()
+        .collect()
+}
+
 /// [`CREDENTIALS`] and the working space, resolved for one session: what its
 /// state root and its project are.
 #[derive(Debug, Clone, Default)]
 pub struct SensitivePaths {
     state_root: Option<Spellings>,
+    /// Other instances' state roots: their credentials are credentials here
+    /// too, and a sandboxed command reaches no socket in them.
+    foreign_state_roots: Vec<Spellings>,
     project: Option<Spellings>,
     /// The scene directories linked in from elsewhere, as they resolve: their
     /// files are the scene's under that name too. Those linked at
@@ -313,20 +330,48 @@ pub struct SensitivePaths {
 impl SensitivePaths {
     pub fn new(state_root: Option<&Path>, project: Option<&Path>, layout: Layout) -> Self {
         let state_root = state_root.map(Spellings::of);
-        let linked_scenes = state_root
-            .iter()
-            .flat_map(|root| scene_dirs_in(&root.real))
-            .filter(|scene| scene.resolved != scene.path)
-            .map(|scene| scene.resolved)
-            .collect();
+        let linked_scenes = state_root.iter().flat_map(linked_scenes_of).collect();
         Self {
             state_root,
+            foreign_state_roots: Vec::new(),
             project: project.map(Spellings::of),
             linked_scenes,
             read_denials: Vec::new(),
             read_exemptions: Vec::new(),
             layout,
         }
+    }
+
+    /// Also guards the credentials of these other instances' state roots, as
+    /// the session's own are guarded. One that is the session's own state
+    /// root is left out.
+    pub fn with_foreign_state_roots(mut self, roots: &[PathBuf]) -> Self {
+        for root in roots {
+            let root = Spellings::of(root);
+            let own = self
+                .state_root
+                .as_ref()
+                .is_some_and(|s| s.real == root.real);
+            let known = self.foreign_state_roots.iter().any(|f| f.real == root.real);
+            if !own && !known {
+                self.linked_scenes.extend(linked_scenes_of(&root));
+                self.foreign_state_roots.push(root);
+            }
+        }
+        self
+    }
+
+    /// The other instances' state roots, as given.
+    pub fn foreign_state_roots(&self) -> Vec<PathBuf> {
+        self.foreign_state_roots
+            .iter()
+            .map(|root| root.given.clone())
+            .collect()
+    }
+
+    /// The session's own state root and the foreign ones.
+    fn every_state_root(&self) -> impl Iterator<Item = &Spellings> {
+        self.state_root.iter().chain(&self.foreign_state_roots)
     }
 
     /// The names these paths were resolved with.
@@ -368,14 +413,16 @@ impl SensitivePaths {
         &self.linked_scenes
     }
 
-    /// For a session with these roots. A session without a project has no
-    /// project here either.
+    /// For a session with these roots, and the [`known_state_roots`] that
+    /// are not its own. A session without a project has no project here
+    /// either.
     pub fn for_paths(paths: &ConfigPaths) -> Self {
         Self::new(
             Some(&paths.global_data_dir),
             paths.project_root.as_deref(),
             paths.layout.clone(),
         )
+        .with_foreign_state_roots(&known_state_roots())
     }
 
     pub fn state_root(&self) -> Option<&Path> {
@@ -411,8 +458,7 @@ impl SensitivePaths {
                     && secret.holds(&components[i + 1..])
             }),
             Scope::StateRoot | Scope::EachSceneDir => self
-                .state_root
-                .iter()
+                .every_state_root()
                 .flat_map(|root| &root.lowered)
                 .any(|root| {
                     let Some(rest) = components.strip_prefix(root.as_slice()) else {
@@ -431,7 +477,8 @@ impl SensitivePaths {
 
     /// Every [`CREDENTIALS`] entry a sandbox backend masks, placed on disk:
     /// those of the state root and its scenes under the state root as it
-    /// resolves, those of an engine directory in each of `engine_dirs`
+    /// resolves (the session's own first, then each foreign one), those of
+    /// an engine directory in each of `engine_dirs`
     /// ([`Self::engine_dirs_in`]). The `Anywhere` ones are left out — the
     /// backends reach them through `deny_read`.
     pub fn credential_locations(&self, engine_dirs: &[PathBuf]) -> Vec<Located> {
@@ -444,7 +491,7 @@ impl SensitivePaths {
             };
             match credential.scope {
                 Scope::StateRoot | Scope::EachSceneDir => {
-                    located.extend(self.state_root.as_ref().map(|root| at(&root.real)));
+                    located.extend(self.every_state_root().map(|root| at(&root.real)));
                 }
                 Scope::AnyEngineDir => located.extend(engine_dirs.iter().map(|dir| at(dir))),
                 Scope::Anywhere => {}
@@ -756,6 +803,15 @@ impl Spellings {
     }
 }
 
+/// The scene directories of `root` that are symbolic links, as they resolve.
+fn linked_scenes_of(root: &Spellings) -> Vec<PathBuf> {
+    scene_dirs_in(&root.real)
+        .into_iter()
+        .filter(|scene| scene.resolved != scene.path)
+        .map(|scene| scene.resolved)
+        .collect()
+}
+
 /// A directory in `<state root>/scenes/`, possibly a symbolic link to one
 /// elsewhere.
 struct SceneDir {
@@ -828,6 +884,41 @@ mod tests {
             "{}",
             saved.display()
         );
+    }
+
+    #[test]
+    fn another_instances_state_root_holds_credentials_as_the_own_one_does() {
+        let paths = sensitive("/state/codix").with_foreign_state_roots(&[
+            PathBuf::from("/home/u/.agix"),
+            PathBuf::from("/state/codix"),
+        ]);
+        assert_eq!(
+            paths.foreign_state_roots(),
+            [PathBuf::from("/home/u/.agix")]
+        );
+        for p in [
+            "/home/u/.agix/settings.json",
+            "/home/u/.agix/Settings.local.JSON",
+            "/home/u/.agix/scenes/code/settings.json",
+            "/home/u/.agix/mcp/oauth/x.json",
+            "/home/u/.agix/daemon/auth/desktop.token",
+            "/state/codix/settings.json",
+        ] {
+            assert!(paths.is_credential(Path::new(p)), "{p}");
+        }
+        for p in [
+            "/home/u/.agix/skills/s/SKILL.md",
+            "/home/u/.agix/daemon/instances.d/x.json",
+        ] {
+            assert!(!paths.is_credential(Path::new(p)), "{p}");
+        }
+        let bases: Vec<PathBuf> = paths
+            .credential_locations(&[])
+            .into_iter()
+            .map(|l| l.base)
+            .collect();
+        assert!(bases.contains(&PathBuf::from("/home/u/.agix")), "{bases:?}");
+        assert!(!sensitive("/state/codix").is_credential(Path::new("/home/u/.agix/settings.json")));
     }
 
     #[test]

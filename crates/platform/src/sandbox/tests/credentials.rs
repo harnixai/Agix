@@ -371,3 +371,78 @@ fn a_credential_written_later_stays_unreadable_where_the_project_holds_credentia
         }
     }
 }
+
+/// Another instance's state root on this machine is guarded as the
+/// session's own is: a command reads none of its keys and tokens, connects
+/// to no socket in it, and writes nothing in it — here even with it inside
+/// the writable project. The rest of it stays readable.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn another_instances_state_root_is_guarded_as_the_own_one() {
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    let project = base.join("p");
+    let other = project.join("h/.agix");
+    let secret = "agix-other-instance-secret";
+    let secrets = [
+        other.join("settings.json"),
+        other.join("settings.local.json"),
+        other.join("scenes/code/settings.json"),
+        other.join("mcp/oauth/server.json"),
+        other.join("daemon/auth/desktop.token"),
+    ];
+    for path in &secrets {
+        write_file(path, secret);
+    }
+    write_file(&other.join("skills/s/SKILL.md"), "fine");
+    std::fs::create_dir_all(other.join("memory")).unwrap();
+    let socket = other.join("a.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            drop(conn);
+        }
+    });
+    let policy = SandboxPolicy {
+        state_root: Some(base.join("state")),
+        foreign_state_roots: vec![other.clone()],
+        ..Default::default()
+    };
+    let run = |command: &str| {
+        let out = run_confined(&project, &policy, &[], command);
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+    for path in &secrets {
+        let (ok, shown) = run(&format!("cat '{}'", path.display()));
+        assert!(
+            !ok && !shown.contains(secret),
+            "{} was read: {shown:?}",
+            path.display()
+        );
+    }
+    assert_eq!(
+        run(&format!(
+            "cat '{}'",
+            other.join("skills/s/SKILL.md").display()
+        )),
+        (true, "fine".to_string())
+    );
+    for write in ["memory/m.md", "new.json", "skills/s/SKILL.md"] {
+        let path = other.join(write);
+        let (ok, _) = run(&format!("echo x > '{}'", path.display()));
+        assert!(!ok, "{} was written", path.display());
+    }
+    let (_, connected) = run(&format!(
+        "python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); print(\"in\")' '{}'",
+        socket.display()
+    ));
+    assert!(!connected.contains("in"), "the socket was reached");
+    assert!(run("echo x > p.txt").0, "the project stays writable");
+}

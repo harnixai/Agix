@@ -77,6 +77,10 @@ pub struct SandboxPolicy {
     /// settings.json writable. Every session's policy names one
     /// ([`SandboxSettings::policy`]).
     pub state_root: Option<PathBuf>,
+    /// Other instances' state roots on this machine
+    /// ([`crate::paths::known_state_roots`]): a command reads none of their
+    /// credentials, writes nothing in them and connects to no socket in them.
+    pub foreign_state_roots: Vec<PathBuf>,
     /// What the instance names a project's directory: the configuration
     /// root guarded in `cwd`.
     pub layout: crate::paths::Layout,
@@ -147,6 +151,7 @@ impl SandboxPolicy {
             only_additional_writable: true,
             worktree_git: self.worktree_git.clone(),
             state_root: self.state_root.clone(),
+            foreign_state_roots: self.foreign_state_roots.clone(),
             layout: self.layout.clone(),
             deny_ipc_escapes: true,
             env: EnvScope::Minimal,
@@ -254,6 +259,7 @@ impl SandboxSettings {
             allowed_domains: self.allowed_domains.clone(),
             egress_proxy: self.egress_proxy.clone(),
             state_root: self.paths.state_root().map(Path::to_path_buf),
+            foreign_state_roots: self.paths.foreign_state_roots(),
             layout: self.paths.layout().clone(),
             additional_writable: Vec::new(),
             only_additional_writable: false,

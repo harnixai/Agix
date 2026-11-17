@@ -22,6 +22,8 @@ pub(super) struct Roots {
     pub(super) only_additional: bool,
     pub(super) writable: Vec<PathBuf>,
     pub(super) state_root: Option<PathBuf>,
+    /// The policy's other instances' state roots.
+    pub(super) foreign_state_roots: Vec<PathBuf>,
     pub(super) paths: base::paths::SensitivePaths,
 }
 
@@ -32,12 +34,21 @@ impl Roots {
             .state_root
             .as_deref()
             .map(base::path::resolve_physically);
+        let paths = base::paths::SensitivePaths::new(
+            state_root.as_deref(),
+            Some(&cwd),
+            policy.layout.clone(),
+        )
+        .with_foreign_state_roots(
+            &policy
+                .foreign_state_roots
+                .iter()
+                .map(|root| base::path::resolve_physically(root))
+                .collect::<Vec<_>>(),
+        );
         Self {
-            paths: base::paths::SensitivePaths::new(
-                state_root.as_deref(),
-                Some(&cwd),
-                policy.layout.clone(),
-            ),
+            foreign_state_roots: paths.foreign_state_roots(),
+            paths,
             cwd,
             worktree_git: policy
                 .worktree_git
@@ -112,6 +123,17 @@ impl Roots {
         self.state_root
             .as_deref()
             .filter(|root| !self.only_additional && !self.project_in(root))
+    }
+
+    /// The other instances' state roots a command may write nothing in:
+    /// each but one the working directory is in, which fencing would shut
+    /// the project with.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn fenced_foreign_state_roots(&self) -> impl Iterator<Item = &Path> {
+        self.foreign_state_roots
+            .iter()
+            .map(PathBuf::as_path)
+            .filter(|root| !self.cwd.starts_with(root))
     }
 
     /// Whether the working directory is a project inside `state_root`. A

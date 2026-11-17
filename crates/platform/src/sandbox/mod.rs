@@ -103,10 +103,14 @@
 //! `SensitivePaths::credential_locations`): the state root's settings files
 //! and MCP OAuth tokens, its own and every scene's, the daemons' socket
 //! tokens under `daemon/auth/`, and the project's `.agix/settings.local.json`
-//! and `.agix/mcp.local.json`. macOS writes a pattern for each; Linux covers
-//! the state root and the project's `.agix` with the mounts of
-//! `mask::mask_plan`, which a credential written later does not climb out
-//! of, except where escape path 6 says.
+//! and `.agix/mcp.local.json`. The state root's are also those of each of
+//! the policy's `foreign_state_roots` — another instance's on this machine,
+//! such as `~/.agix` seen from an embedder's `data_root` — none of which a
+//! command can write in either, unless the working directory is inside it.
+//! macOS writes a pattern for each; Linux covers the state roots and the
+//! project's `.agix` with the mounts of `mask::mask_plan`, which a credential
+//! written later does not climb out of, except where escape path 6 says; a
+//! foreign state root's tmpfs is read-only.
 //!
 //! On Linux a denied directory is shut under an empty read-only tmpfs, so a
 //! command can neither read nor write in it; macOS denies reads only.
@@ -120,10 +124,11 @@
 //! be its host, free to add an MCP server that runs outside the sandbox, trust
 //! its own project or answer its own permission prompts. So under every
 //! policy, network open or not, a command cannot connect to a unix socket in
-//! the state root (unless the project lives there) or to one this process
-//! serves ([`fence_socket`], wherever `--socket` put it). macOS refuses the
+//! the state root (unless the project lives there), in a foreign state root,
+//! or to one this process serves ([`fence_socket`], wherever `--socket` put
+//! it). macOS refuses the
 //! connect, by resolved path; Linux mounts `/dev/null` over the socket — over
-//! each one in the state root and its scene directories, not the directories
+//! each one in a state root and its scene directories, not the directories
 //! themselves, which stay readable. macOS also refuses this process's TCP
 //! and WebSocket ports ([`fence_port`]); on Linux only `--unshare-net` cuts
 //! them off, and the egress relay will not forward to one. Under `Proxy` both

@@ -230,6 +230,48 @@ fn mask_engine_dir(
     !plan.is_empty()
 }
 
+/// Each other instance's state root that is a real directory in the
+/// sandbox and not masked already, masked around its credentials and
+/// read-only, with what of the writable roots lies in it bound back
+/// writable: a credential written there later lands under the mask, and
+/// nothing new can be made directly in it. One a writable root cannot be
+/// bound back into — the working directory is the root itself — is left to
+/// the per-file hiding of what is there now. The ones it masked.
+fn mask_foreign_state_roots(
+    args: &mut Vec<String>,
+    roots: &Roots,
+    secrets: &[base::paths::Located],
+    read: &read_scope::LinuxReadScope<'_>,
+    masked: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut done = Vec::new();
+    for root in &roots.foreign_state_roots {
+        if masked.contains(root)
+            || !read.shows(root)
+            || !root.symlink_metadata().is_ok_and(|m| m.is_dir())
+        {
+            continue;
+        }
+        let holes: Vec<PathBuf> = roots
+            .write_roots()
+            .filter(|p| p.starts_with(root))
+            .map(Path::to_path_buf)
+            .collect();
+        if !holes
+            .iter()
+            .all(|hole| mask::fits_a_hole(root, secrets, hole))
+        {
+            continue;
+        }
+        let plan = mask::mask_plan(root, secrets, &holes);
+        apply_mask(args, &plan, true);
+        if !plan.is_empty() {
+            done.push(root.clone());
+        }
+    }
+    done
+}
+
 /// The state root inside the sandbox: masked around its credentials, its
 /// working directories (or the project in it) writable again.
 fn expose_state_root(
@@ -453,11 +495,12 @@ pub(super) fn bus_paths(runtime_dir: Option<PathBuf>, bus_address: Option<&str>)
 }
 
 /// The unix sockets a command must not reach: those this process serves, and
-/// any in the state root or one of its scene directories, where daemons put
-/// theirs. bwrap cannot refuse a connect, only hide the file.
-pub(super) fn daemon_sockets(state_root: Option<&Path>) -> Vec<PathBuf> {
+/// any in a state root — the instance's own or another's — or one of its
+/// scene directories, where daemons put theirs. bwrap cannot refuse a
+/// connect, only hide the file.
+pub(super) fn daemon_sockets<'a>(state_roots: impl IntoIterator<Item = &'a Path>) -> Vec<PathBuf> {
     let mut sockets = fenced_sockets();
-    if let Some(root) = state_root {
+    for root in state_roots {
         let dirs = std::iter::once(root.to_path_buf())
             .chain(subdirs(&base::paths::StateRoot::new(root).scenes_dir()));
         for dir in dirs {
@@ -693,7 +736,14 @@ fn hide_project_and_state(
         .into_iter()
         .partition(|located| roots.state_root.as_ref() == Some(&located.base));
     expose_state_root(args, roots, &state_root_secrets, read);
-    let masked = mask_engine_dirs(args, roots, &project_secrets, read);
+    let mut masked = mask_engine_dirs(args, roots, &project_secrets, read);
+    masked.extend(mask_foreign_state_roots(
+        args,
+        roots,
+        &project_secrets,
+        read,
+        &masked,
+    ));
     guard_project(args, roots, &masked);
     for p in project_secrets
         .iter()
@@ -705,7 +755,12 @@ fn hide_project_and_state(
 }
 
 fn hide_fenced(args: &mut Vec<String>, roots: &Roots) {
-    for socket in daemon_sockets(roots.state_root.as_deref()) {
+    let state_roots = roots
+        .state_root
+        .iter()
+        .chain(&roots.foreign_state_roots)
+        .map(PathBuf::as_path);
+    for socket in daemon_sockets(state_roots) {
         bind_over(args, Path::new("/dev/null"), &socket);
     }
     for secret in fenced_secrets() {

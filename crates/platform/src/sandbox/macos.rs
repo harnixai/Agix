@@ -136,6 +136,12 @@ fn write_rules(s: &mut String, roots: &Roots) {
 }
 
 fn fence_state_root(s: &mut String, roots: &Roots) {
+    for root in roots.fenced_foreign_state_roots() {
+        s.push_str(&format!(
+            "(deny file-write* (subpath \"{}\"))\n",
+            quoted(root)
+        ));
+    }
     let Some(root) = roots.fenced_state_root() else {
         return;
     };
@@ -270,10 +276,13 @@ fn daemon_fences(s: &mut String, roots: &Roots) {
     // Last, so that no allowlist entry above reopens them. The kernel matches
     // a unix-socket connect against the socket's resolved path, so a symlink
     // or a relative name meets the same rule.
-    if let Some(root) = roots
+    let own = roots
         .state_root
         .as_deref()
-        .filter(|root| !roots.project_in(root))
+        .filter(|root| !roots.project_in(root));
+    for root in own
+        .into_iter()
+        .chain(roots.foreign_state_roots.iter().map(PathBuf::as_path))
     {
         s.push_str(&format!(
             "(deny network-outbound (remote unix-socket (subpath \"{}\")))\n",

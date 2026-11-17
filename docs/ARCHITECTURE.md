@@ -1259,7 +1259,8 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
   `mcp.local*.json`,明文的 `api_key` 与 MCP headers 在里面)和 `mcp/oauth/`,状态目录下
   daemon 的 `daemon/auth/`,项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)下的
   `settings.local.json` / `mcp.local.json`,以及
-  任何位置的 `.ssh` / `.aws` / `.gnupg`。调用里有一个字符串(路径工具的路径及其解析后的各种
+  任何位置的 `.ssh` / `.aws` / `.gnupg`。状态目录的这几项对本机别的实例的状态目录同样成立
+  (外来状态根,§8.1)。调用里有一个字符串(路径工具的路径及其解析后的各种
   写法,shell 命令的每个词与赋值,`--flag=value` 的值)落在这里,`Policy` 就拒绝(S2),不问,
   `bypassPermissions` 下也一样;`Grep` / `Glob` 搜它上层的目录时跳过它;沙箱里的命令读不到其中
   引擎自己的那部分(状态目录与各场景目录下的设置文件、`mcp/oauth/`、`daemon/auth/`、项目的
@@ -2209,6 +2210,13 @@ Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.jso
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
 门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
 缺省名字下自己与外来去重,行为与改名之前相同。
+
+**外来状态根。** 状态根不是 `~/.agix` 的实例(嵌入方的 `data_root`,或设了 `AGIX_CONFIG_HOME`)
+把 `~/.agix`(`known_state_roots`)当外来状态根,与自己的状态根一样保护:其中的设置文件、
+`mcp/oauth/`、`daemon/auth/` 算凭据(工具在任何模式下都拒读拒写,沙箱里读不到),沙箱里的命令写不了
+其中任何东西(工作目录在它里面时除外),也连不上其中的 unix socket——否则一个 Codix 会话的命令能拿
+agixd 的令牌、连上它的 socket 当宿主。本机别的实例的状态根没有地方登记(`instances.d` 只记同一状态根
+下的 daemon),所以只认缺省的这一个。
 
 **已知边界。** 两个都不用缺省名的宿主(`.codix` 与 `.foo`)开同一个项目时,彼此不保护对方的目录;需要时
 再加一份要保护的名字表。`.agents/skills` 是跨工具约定,不随项目层目录名变。

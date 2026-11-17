@@ -78,6 +78,12 @@ const HOME_READERS: &[(&str, &str)] = &[
          comes from `SandboxPolicy::state_root` alone.",
     ),
     (
+        "crates/core/src/paths/sensitive.rs",
+        "`known_state_roots`: where another instance on this machine keeps its \
+         keys by default, `~/.agix`, guarded like `~/.ssh` — a fact about the \
+         machine. The session's own state root still comes as a parameter.",
+    ),
+    (
         "crates/platform/src/sandbox/tests/macos.rs",
         "the cases build the policy a confined command gets by default, which \
          names this machine's home.",

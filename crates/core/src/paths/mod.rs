@@ -55,8 +55,8 @@ pub use layout::{
     STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 pub use sensitive::{
-    credential_dir_names, session_scratch_dir, tool_results_dir, ConfigRootAt, Credential,
-    KeyFileNames, Located, PromptFiles, Scope, Secret, SensitivePaths, CREDENTIALS,
+    credential_dir_names, known_state_roots, session_scratch_dir, tool_results_dir, ConfigRootAt,
+    Credential, KeyFileNames, Located, PromptFiles, Scope, Secret, SensitivePaths, CREDENTIALS,
     GIT_CONTROL_FILES, GIT_HOOKS_DIR, GIT_WORKTREE_CONTROL_FILES, HOME_CREDENTIAL_STORES,
     REPOSITORY_CONFIG_DIR, SECRET_FILE_NAMES,
 };
