@@ -474,3 +474,52 @@ async fn the_engines_settings_are_refused_in_every_spelling_of_their_names() -> 
     embedded.shutdown().await;
     Ok(())
 }
+
+/// A configuration root that is not there cannot be made by a sandboxed
+/// command — not `.claude`, not a foreign `.agix`, not `.agents/skills` —
+/// and holding it leaves nothing behind in the project. The prompts are
+/// answered yes, so the sandbox alone decides.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sandboxed_command_cannot_make_a_configuration_root_that_is_not_there(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let project = root.project.clone();
+    let embedded = Embedded::start(config(&root, OWN)).await?;
+    let mut client = connect(&embedded);
+    routine_replies(&stub);
+    let planted = [
+        ".claude/settings.json",
+        ".agix/settings.json",
+        ".agents/skills/s/SKILL.md",
+    ];
+    let mut replies: Vec<Reply> = planted
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let parent = Path::new(path).parent().expect("a parent").display();
+            bash(
+                &format!("b-{i}"),
+                &format!("mkdir -p {parent} && echo x > {path}"),
+            )
+        })
+        .collect();
+    replies.push(Reply::text("ABSENT-DONE"));
+    stub.script_when("ABSENT-MARK", replies);
+
+    let session = client.session_create(json!({})).await?;
+    let _asked = answer_prompts(&embedded, &session);
+    let events = client
+        .session_run_turn(&session, "ABSENT-MARK go", "t1", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    for dir in [".claude", ".agix", ".agents"] {
+        assert!(
+            project.join(dir).symlink_metadata().is_err(),
+            "{dir} is in the project: {:?}",
+            events.tool_results
+        );
+    }
+    embedded.shutdown().await;
+    Ok(())
+}

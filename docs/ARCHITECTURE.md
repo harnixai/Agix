@@ -2213,7 +2213,10 @@ Seatbelt 在不分大小写的卷上按卷的语义匹配规则(实测,`macos_li
 **外来配置根。** 配置根是本实例的项目层目录,加上 `FOREIGN_CONFIG_ROOTS`(`.agix`、`.claude`)里不是它的
 那些。名字改成 `.codix` 后,`.agix` 不再被读,但与 `.claude` 一样受保护:写工具拒写其中的设置文件,写其中别的
 东西要问(门禁不走静默放行);沙箱里的命令整个写不了它(`ConfigRootAt::shut_to_writes`,与门禁同一个判定;
-策略点名的可写根在其中时照旧可写;Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
+策略点名的可写根在其中时照旧可写;Linux 上它不存在时挂一层空的只读 tmpfs,不让命令建出它,命令的命名空间
+没了(bwrap 随命令退出,它的 PID 1 要等命令留在后台的进程都结束;被停的命令要等 `SIGKILL`)、项目里也没有别的
+沙箱命令的命名空间时再把 bwrap 留下的空挂载点删掉,项目里不留痕迹——删早了,还活着的那个命名空间里的进程就能
+建出它);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
 门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
 缺省名字下自己与外来去重,行为与改名之前相同。

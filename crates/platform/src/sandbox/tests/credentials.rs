@@ -518,3 +518,223 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         }
     }
 }
+
+/// Where a configuration root or the project's skills directory is not
+/// there, a command cannot make it and put configuration in it — the
+/// instance's own directory, a foreign root, `.agents/skills` — and the
+/// project is left as it was: no empty directory stays behind where a
+/// foreign root or `.agents` was held.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn no_command_creates_a_configuration_root_that_is_not_there() {
+    if !a_backend_runs() {
+        return;
+    }
+    for own in [".agix", ".codix"] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let policy = SandboxPolicy {
+            state_root: Some(dir.path().join("state")),
+            layout: base::paths::Layout::new(own).unwrap(),
+            ..Default::default()
+        };
+        let mut planted = vec![
+            format!("{own}/settings.json"),
+            format!("{own}/hooks/a.sh"),
+            ".claude/settings.json".to_string(),
+            ".claude/commands/c.md".to_string(),
+            ".agents/skills/s/SKILL.md".to_string(),
+        ];
+        if own != ".agix" {
+            planted.push(".agix/settings.json".to_string());
+        }
+        for path in &planted {
+            let parent = Path::new(path).parent().unwrap().display().to_string();
+            let out = run_confined(
+                &project,
+                &policy,
+                &[],
+                &format!("mkdir -p {parent} && echo x > {path}"),
+            );
+            assert!(
+                !out.status.success() && !project.join(path).exists(),
+                "{own}: {path} was created"
+            );
+        }
+        for left in [".claude", ".agents", ".agix"]
+            .into_iter()
+            .filter(|d| *d != own)
+        {
+            assert!(
+                project.join(left).symlink_metadata().is_err(),
+                "{own}: {left} was left behind"
+            );
+        }
+        assert!(
+            run_confined(&project, &policy, &[], "echo x > p.txt")
+                .status
+                .success(),
+            "{own}: the project stays writable"
+        );
+    }
+}
+
+/// A command that finishes while another runs in the same project leaves
+/// the directory the other one's sandbox holds where it is: removing it
+/// would take the other's mount away and let it make the directory.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_command_that_ends_first_leaves_the_others_held_directory_alone() {
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let policy = SandboxPolicy {
+        state_root: Some(dir.path().join("state")),
+        ..Default::default()
+    };
+    let confined = PlatformSandbox.confine(
+        ProcessSpec::new("bash", &project).args(
+            [
+                "-c",
+                "until [ -e go ]; do sleep 0.02; done; \
+                 mkdir -p .claude; echo x > .claude/settings.json; touch done",
+            ]
+            .map(String::from),
+        ),
+        &policy,
+    );
+    let mut first = std::process::Command::new(&confined.spec.program)
+        .args(&confined.spec.args)
+        .current_dir(&project)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    if cfg!(target_os = "linux") {
+        let held = (0..500).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            project.join(".claude").exists()
+        });
+        assert!(held, "the first command's sandbox never held .claude");
+    }
+    assert!(run_confined(&project, &policy, &[], "true")
+        .status
+        .success());
+    std::fs::write(project.join("go"), "").unwrap();
+    let _ = first.wait();
+    assert!(project.join("done").exists());
+    assert!(
+        !project.join(".claude/settings.json").exists(),
+        "the first command made .claude once the second removed it"
+    );
+    assert!(project.join(".claude").symlink_metadata().is_err());
+}
+
+/// A command stopped the way the engine stops one — `SIGTERM` to its group,
+/// then `SIGKILL` — keeps the directory its sandbox holds in place until
+/// that sandbox is gone, though the next command in the project ends while
+/// what the stopped one left in a session of its own still runs.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::unwrap_used)]
+async fn linux_a_stopped_command_leaves_nothing_to_make_a_directory_after_the_cleanup() {
+    use base::interface::exec::Process;
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let policy = SandboxPolicy {
+        state_root: Some(dir.path().join("state")),
+        ..Default::default()
+    };
+    let confined = PlatformSandbox.confine(
+        ProcessSpec::new("bash", &project).args(
+            [
+                "-c",
+                "setsid sh -c 'until [ -e go ]; do sleep 0.02; done; \
+                 mkdir -p .claude; echo x > .claude/settings.json; touch done' & sleep 30",
+            ]
+            .map(String::from),
+        ),
+        &policy,
+    );
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let mut stopped = crate::LocalProcess::default()
+        .spawn(confined.spec, cancel.clone())
+        .await
+        .unwrap();
+    let held = (0..500).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        project.join(".claude").exists()
+    });
+    assert!(held, "the command's sandbox never held .claude");
+    cancel.cancel();
+    let _ = stopped.wait().await;
+    let cleaned = tokio::task::spawn_blocking({
+        let (project, policy) = (project.clone(), policy.clone());
+        move || run_confined(&project, &policy, &[], "true")
+    })
+    .await
+    .unwrap();
+    assert!(cleaned.status.success());
+    std::fs::write(project.join("go"), "").unwrap();
+    let _tried = (0..250).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        project.join("done").exists()
+    });
+    assert!(
+        !project.join(".claude/settings.json").exists(),
+        "what the stopped command left running made .claude after the cleanup"
+    );
+}
+
+/// A command that ends leaving something in the background keeps the
+/// directory its sandbox holds until that is gone too: removing it when the
+/// command ends would let what still runs there make it.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_what_a_command_leaves_running_cannot_make_a_directory_once_it_ends() {
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let policy = SandboxPolicy {
+        state_root: Some(dir.path().join("state")),
+        ..Default::default()
+    };
+    let ended = run_confined(
+        &project,
+        &policy,
+        &[],
+        "(until [ -e go ]; do sleep 0.02; done; \
+         mkdir -p .claude; echo x > .claude/settings.json; touch done) >/dev/null 2>&1 &",
+    );
+    assert!(ended.status.success());
+    assert!(
+        project.join(".claude").exists(),
+        "the directory went while held"
+    );
+    std::fs::write(project.join("go"), "").unwrap();
+    let tried = (0..500).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        project.join("done").exists()
+    });
+    assert!(tried, "what the command left running never got to try");
+    assert!(!project.join(".claude/settings.json").exists());
+    let removed = (0..500).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        project.join(".claude").symlink_metadata().is_err()
+    });
+    assert!(removed, "the directory stayed once nothing held it");
+}

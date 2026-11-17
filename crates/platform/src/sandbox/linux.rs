@@ -17,7 +17,11 @@ use base::paths::{
 };
 use std::path::{Path, PathBuf};
 
+mod stdio;
 mod worktrees;
+
+use stdio::BWRAP_STDIO_INSIDE;
+pub(super) use stdio::{bwrap_stdio_outside, find_trusted_bin, trusted_bin, Cleanup};
 
 pub(super) fn bind(args: &mut Vec<String>, how: &str, path: &Path) {
     let p = path.display().to_string();
@@ -37,6 +41,25 @@ fn read_only(args: &mut Vec<String>, path: &Path) {
     }
 }
 
+/// Shut `path`, absent or an empty directory, under an empty read-only
+/// tmpfs, as [`read_only`] shuts an absent one; anything else read-only.
+/// Where bwrap has to make the mount point, or mounts over an empty
+/// directory, the path goes on `made`, for the wrapper to remove once the
+/// command is done if it is still empty ([`bwrap_stdio_outside`]): a foreign
+/// root or `.agents` held this way leaves nothing behind in the project.
+fn shut_empty(args: &mut Vec<String>, path: &Path, made: &mut Vec<PathBuf>) {
+    let empty_dir = path.symlink_metadata().is_ok_and(|m| m.is_dir())
+        && std::fs::read_dir(path).is_ok_and(|mut d| d.next().is_none());
+    let absent = path.symlink_metadata().is_err();
+    if !(empty_dir || absent && path.parent().is_some_and(writable_by_us)) {
+        read_only(args, path);
+        return;
+    }
+    let p = path.display().to_string();
+    args.extend(["--tmpfs".into(), p.clone(), "--remount-ro".into(), p]);
+    made.push(path.to_path_buf());
+}
+
 fn writable_by_us(dir: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
@@ -49,7 +72,8 @@ fn writable_by_us(dir: &Path) -> bool {
 ///
 /// bwrap has no deny rule, only mounts, and a read-only bind of a file that
 /// does not exist yet is skipped rather than refused. So the project
-/// directory — and each foreign configuration root where it exists — is
+/// directory — and each foreign configuration root, shut empty where it is
+/// not there ([`shut_empty`]) — is
 /// mounted read-only as a whole and its working entries are opened again one
 /// by one (an engine directory that is a real directory is held by
 /// [`mask_engine_dirs`] instead, to the same effect);
@@ -64,7 +88,12 @@ fn writable_by_us(dir: &Path) -> bool {
 /// A `.git` or configuration root no writable root reaches is read-only
 /// already, and is left alone: binding it writable would open it, and a mount
 /// point for an absent entry cannot be made on a read-only parent.
-fn guard_project(args: &mut Vec<String>, roots: &Roots, masked: &[PathBuf]) {
+fn guard_project(
+    args: &mut Vec<String>,
+    roots: &Roots,
+    masked: &[PathBuf],
+    made: &mut Vec<PathBuf>,
+) {
     let dot_git = roots.cwd.join(REPOSITORY_CONFIG_DIR);
     let git = match &roots.worktree_git {
         Some(linked) => {
@@ -109,23 +138,25 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, masked: &[PathBuf]) {
 
     for root in roots.paths.config_roots_in(&roots.cwd) {
         let root_dir = root.path.clone();
-        // Holding an absent root leaves an empty mount point behind in the
-        // project, which for the instance's own directory is the engine's
-        // own and for a foreign one would be litter in every project.
-        let held = root.own || root_dir.symlink_metadata().is_ok();
-        if !held || !roots.opens(&root_dir) || masked.contains(&root_dir) {
+        if !roots.opens(&root_dir) || masked.contains(&root_dir) {
             continue;
         }
-        read_only(args, &root_dir);
+        // The instance's own directory, made here when absent, is the
+        // engine's own and stays.
+        if root.own {
+            read_only(args, &root_dir);
+        } else {
+            shut_empty(args, &root_dir, made);
+        }
         for entry in working_entries(roots, &root) {
             bind(args, "--bind", &entry);
         }
     }
-    guard_project_skills(args, roots);
+    guard_project_skills(args, roots, made);
     worktrees::guard_links(args, roots);
 }
 
-fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
+fn guard_project_skills(args: &mut Vec<String>, roots: &Roots, made: &mut Vec<PathBuf>) {
     for dir in PROJECT_ENGINE_CONFIG_DIRS {
         let path = roots.cwd.join(dir);
         let above: Vec<PathBuf> = Path::new(dir)
@@ -142,7 +173,7 @@ fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
         // otherwise a command makes `.agents/skills/<name>` in a project that
         // has no `.agents` yet.
         if let Some(missing) = above.iter().rev().find(|a| a.symlink_metadata().is_err()) {
-            read_only(args, missing);
+            shut_empty(args, missing, made);
             continue;
         }
         let held = above
@@ -154,7 +185,7 @@ fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
         for a in above.iter().rev() {
             bind(args, "--bind", a);
         }
-        read_only(args, &path);
+        shut_empty(args, &path, made);
     }
 }
 
@@ -536,56 +567,6 @@ pub(super) fn daemon_sockets<'a>(state_roots: impl IntoIterator<Item = &'a Path>
     sockets
 }
 
-/// Runs bwrap (`"$@"`) with the command's stdout and stderr on fds 3 and 4,
-/// bwrap's own stdout on `/dev/null` and its stderr on an unlinked scratch
-/// file printed to stderr once bwrap exits; stdin (fd 0) passes through to
-/// bwrap and the command untouched. bwrap's PID 1 keeps fds 0–2 for as long
-/// as anything the command left in the background runs, which would hold the
-/// command's output open; it closes every other fd.
-///
-/// The scratch file is made in the host's `/tmp`, not the session `TMPDIR`
-/// that `mktemp` would otherwise pick up from the environment: the session
-/// `TMPDIR` is bound writable into the sandbox, so a process an earlier
-/// command left running there could swap the file for a symlink between
-/// `mktemp` and the `exec` that opens it, and this wrapper runs outside the
-/// sandbox. The sandbox always mounts its own tmpfs over `/tmp`, so a file in
-/// the host's `/tmp` is on no path a confined command can reach. `mktemp`,
-/// `rm` and `cat` are addressed absolutely so a writable directory earlier on
-/// `PATH` cannot stand one of them in.
-pub(super) fn bwrap_stdio_outside() -> String {
-    let mktemp = trusted_bin("mktemp");
-    let rm = trusted_bin("rm");
-    let cat = trusted_bin("cat");
-    format!(
-        "err=$({mktemp} -p /tmp 2>/dev/null) && exec 5>\"$err\" 6<\"$err\" && {rm} -f \"$err\" || exec 5>/dev/null 6</dev/null\n\
-         \"$@\" 3>&1 4>&2 >/dev/null 2>&5 5>&- 6<&-\n\
-         status=$?\n\
-         {cat} <&6 >&2\n\
-         exit \"$status\""
-    )
-}
-
-/// The absolute path of a core utility `name`, looked up in the system
-/// directories rather than `PATH` (which a command could have planted a
-/// writable entry on). Falls back to the bare name where none is found, so a
-/// deployment with its utilities elsewhere still runs, unhardened.
-pub(super) fn trusted_bin(name: &str) -> String {
-    find_trusted_bin(name).unwrap_or_else(|| name.to_string())
-}
-
-/// [`trusted_bin`] without the fallback.
-pub(super) fn find_trusted_bin(name: &str) -> Option<String> {
-    ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        .iter()
-        .map(|dir| Path::new(dir).join(name))
-        .find(|path| path.exists())
-        .map(|path| path.display().to_string())
-}
-
-/// The inside half of [`BWRAP_STDIO_OUTSIDE`]: fds 3 and 4 back to 1 and 2,
-/// then the command.
-const BWRAP_STDIO_INSIDE: &str = r#"exec 1>&3 2>&4 3>&- 4>&- && exec "$@""#;
-
 pub(super) fn linux_wrap(
     inner: ProcessSpec,
     cwd: &Path,
@@ -607,7 +588,7 @@ pub(super) fn linux_wrap(
     read.scope_mounts(&mut args);
     bind_writable_roots(&mut args, &roots, &read);
     protect_denied_writes(&mut args, &roots, &policy.deny_write);
-    hide_project_and_state(&mut args, &roots, &read);
+    let made = hide_project_and_state(&mut args, &roots, &read);
     hide_fenced(&mut args, &roots);
     hide_denied_reads(&mut args, policy);
     isolate_ipc(&mut args, policy);
@@ -633,7 +614,10 @@ pub(super) fn linux_wrap(
     args.extend(inner.args);
     let outside = [
         "-c".into(),
-        bwrap_stdio_outside(),
+        bwrap_stdio_outside(&Cleanup {
+            project: roots.cwd.clone(),
+            made,
+        }),
         "sh".into(),
         "bwrap".into(),
     ];
@@ -746,11 +730,12 @@ fn protect_denied_writes(args: &mut Vec<String>, roots: &Roots, denied: &[String
     }
 }
 
+/// The directories [`shut_empty`] made or covered, for the wrapper to remove.
 fn hide_project_and_state(
     args: &mut Vec<String>,
     roots: &Roots,
     read: &read_scope::LinuxReadScope<'_>,
-) {
+) -> Vec<PathBuf> {
     let (state_root_secrets, project_secrets): (Vec<_>, Vec<_>) = roots
         .paths
         .credential_locations(&roots.paths.engine_dirs_in(&roots.cwd))
@@ -765,7 +750,8 @@ fn hide_project_and_state(
         read,
         &masked,
     ));
-    guard_project(args, roots, &masked);
+    let mut made = Vec::new();
+    guard_project(args, roots, &masked, &mut made);
     for p in project_secrets
         .iter()
         .filter(|l| !masked.contains(&l.base))
@@ -773,6 +759,7 @@ fn hide_project_and_state(
     {
         hide(args, &p);
     }
+    made
 }
 
 fn hide_fenced(args: &mut Vec<String>, roots: &Roots) {

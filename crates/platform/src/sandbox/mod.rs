@@ -80,12 +80,16 @@
 //! state root is then guarded as the `.agix` it is — its configuration files
 //! and directories are read-only, but for one the project itself is in —
 //! and the settings and definitions of the root and every scene stay
-//! read-only either way. On Linux the own project directory, and a foreign
-//! root where it exists, is read-only as a whole and the own one's existing
-//! working entries are opened again, so a new entry directly in either
-//! cannot be created; `.agents/skills/` is read-only
-//! where `.agents` exists, and `.agents` itself is shut under an empty read-only
-//! tmpfs where it does not, leaving an empty mount point.
+//! read-only either way. On Linux the own project directory and each
+//! foreign root is read-only as a whole and the own one's existing working
+//! entries are opened again, so a new entry directly in either cannot be
+//! created; `.agents/skills/` is read-only. A foreign root, `.agents` or
+//! `.agents/skills` that is not there (or is an empty directory) is shut
+//! under an empty read-only tmpfs, and the mount point bwrap makes for it is
+//! removed again once no sandboxed command's namespace lives in the project
+//! — not when bwrap exits, which can be before what the command left behind
+//! (`linux::bwrap_stdio_outside`); the own directory's stays, as the
+//! engine's own.
 //!
 //! A policy with `only_additional_writable` leaves out the working directory,
 //! the state root's working entries and `DARWIN_USER_TEMP_DIR`: only

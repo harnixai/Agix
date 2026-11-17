@@ -37,7 +37,14 @@ fn linux_wrap_either_uses_bwrap_or_falls_back() {
 fn what_bwrap_itself_says_reaches_stderr() {
     let fake_bwrap = "echo printed >&3; echo complained >&4; echo 'bwrap: refused' >&2; exit 1";
     let out = std::process::Command::new("sh")
-        .args(["-c", &bwrap_stdio_outside(), "sh", "sh", "-c", fake_bwrap])
+        .args([
+            "-c",
+            &bwrap_stdio_outside(&Cleanup::default()),
+            "sh",
+            "sh",
+            "-c",
+            fake_bwrap,
+        ])
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), "printed\n");
