@@ -221,6 +221,7 @@ pub enum SessionEventPayload {
         entry: Value,
     },
     Rewound(crate::session_pool::api::Rewound),
+    PermissionModeChanged(session_state::ModeChange),
     SubscriptionDropped {
         reason: DropReason,
     },
@@ -313,6 +314,7 @@ impl SessionEventPayload {
         "goal_changed",
         "extension_entry",
         "rewound",
+        "permission_mode_changed",
         "subscription_dropped",
     ];
 
@@ -336,6 +338,9 @@ impl SessionEventPayload {
                 entry: entry.clone(),
             }),
             SessionEvent::Rewound(rewound) => Some(Self::Rewound(rewound.clone())),
+            SessionEvent::PermissionModeChanged(change) => {
+                Some(Self::PermissionModeChanged(*change))
+            }
             SessionEvent::EngineStopped => Some(Self::error(
                 &TurnFailure::new(
                     FailureKind::EngineStopped,

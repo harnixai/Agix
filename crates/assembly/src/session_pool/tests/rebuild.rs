@@ -25,19 +25,20 @@ pub(super) async fn builder_with_history(
     (builder, dir, store_dir)
 }
 
-async fn pool_with_history() -> (Arc<SessionPool>, tempfile::TempDir, tempfile::TempDir) {
+pub(super) async fn pool_with_history() -> (Arc<SessionPool>, tempfile::TempDir, tempfile::TempDir)
+{
     let (builder, dir, store_dir) = builder_with_history().await;
     (builder.build(), dir, store_dir)
 }
 
-async fn new_session(pool: &SessionPool) -> String {
+pub(super) async fn new_session(pool: &SessionPool) -> String {
     pool.create_session(None, ProjectSelector::Default, None)
         .await
         .expect("a session")
         .session_id
 }
 
-async fn slot_and_state(
+pub(super) async fn slot_and_state(
     pool: &SessionPool,
     sid: &str,
 ) -> (Generation, Arc<session_state::SessionState>) {
@@ -559,9 +560,9 @@ async fn every_engine_a_session_runs_on_works_in_the_sessions_directory() {
 
 /// Refuses every write while `down` is set.
 #[derive(Default)]
-struct StoreThatGoesDown {
+pub(super) struct StoreThatGoesDown {
     inner: history::store::InMemoryHistoryStore,
-    down: std::sync::atomic::AtomicBool,
+    pub(super) down: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]

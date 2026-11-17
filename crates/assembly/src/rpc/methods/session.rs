@@ -128,6 +128,12 @@ pub struct SetModelParams {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SetPermissionModeParams {
+    pub session_id: String,
+    pub mode: base::permission::PermissionMode,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SetSkillDirsParams {
     pub session_id: String,
     /// The whole set, replacing the one before; `[]` clears it.

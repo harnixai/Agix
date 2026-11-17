@@ -76,7 +76,7 @@ fn only_the_dispatch_runs_a_tool() {
 
 const PUTS_A_CALL_TO_THE_POLICY: &[(&str, &str)] = &[
     (
-        "crates/runtime/src/agent/turn/tool_permission.rs::authorize",
+        "crates/runtime/src/agent/turn/tool_permission.rs::settle",
         "the dispatch's one decision per call",
     ),
     (

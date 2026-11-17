@@ -463,7 +463,8 @@ MCP 工具与宿主工具不报路径,拦不到,同凭据位置)。沙箱的命�
 
 一个会话的 `Agent` 会被重建:它的绑定失效、janitor 回收后再被用到、daemon 重启后恢复。
 重建照的是**会话规格**,不是触发重建的那次调用碰巧带了什么:创建时的 `options`、
-`session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词、`session.setSkillDirs` 设的宿主 skill 目录。规格以 `ns = "agix.session"`、`event = "spec"`
+`session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词、`session.setSkillDirs` 设的宿主 skill 目录、
+`session.setPermissionMode` 设的 `plan` 以外的权限模式(建引擎时按当时的设置夹紧)。规格以 `ns = "agix.session"`、`event = "spec"`
 的扩展条目写进会话日志,每次变化追加一条,最后一条为准,所以跨 daemon 重启也成立。
 recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.fork` 去掉 `name`);同一进程里的重建共用同一个 recorder,录像接着写、回放接着原来的进度;daemon 重启后录像从头重写,回放要恢复时再给一次。录制时会话和它的子 Agent、起名、压缩等辅助调用进同一份录像,`session.calls` 经协议读它。
 
@@ -978,15 +979,16 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
 
   | `ns` / `event` | 谁写 | `payload` | 读回 |
   |---|---|---|---|
-  | `agix.session` / `spec` | 会话池,规格变化时 | `{options?, model?, provider?, prompt?}` | 重建、恢复时照它建引擎(§3.2.2) |
+  | `agix.session` / `spec` | 会话池,规格变化时 | `{options?, model?, provider?, prompt?, effort?, thinking_mode?, skill_dirs?, permission_mode?}` | 重建、恢复时照它建引擎(§3.2.2) |
   | `agix.goal` / `change` | 引擎与会话池,目标变化时 | `{goal}`,清除后为 `null` | 恢复时取回目标,不武装(§3.4) |
-  | `agix.session_state` / `change` | 引擎,一轮结束和引擎停下时,有变化才写 | `{plan: null \| {exit_to: <模式> \| null}, todos: [{content, status, active_form}]}` | `Agent::restore_state_from_log` 放回 `plan` 模式(`exit_to` 为 `null` 即退出到 `default`)和 todo 列表 |
+  | `agix.session_state` / `change` | 引擎,一轮结束和引擎停下时,有变化才写;宿主经 `session.setPermissionMode` 进出 `plan` 时,空闲的会话当即由引擎写,不在内存里的由会话池写 | `{plan: null \| {exit_to: <模式> \| null}, todos: [{content, status, active_form}]}` | `Agent::restore_state_from_log` 放回 `plan` 模式(`exit_to` 为 `null` 即退出到 `default`)和 todo 列表 |
   | `agix.context` / `drop`、`edit` | 会话池,宿主改上下文时 | `{at, text?, at_ms}` | 投影时套到消息上 |
   | `agix.checkpoint` / `pre`、`post` | 工具管线,文件工具写盘之前(已 sync)与之后;写在**根会话**里,子 Agent 的也是 | `pre`:`{id, files:[{path:{rel\|abs}, before:{state, sha256?, bytes?}}], tool, tool_use_id, rewind_id?, agent?}`;`post`:`{pre, ok, after:[{state, sha256?}]}` | `session.rewind` 算恢复什么、`session.checkpoints` 列每轮写了什么 |
   | `agix.rewind` / `begin`、`commit`、`abort` | 引擎,宿主回滚时 | `{rewind_id, cut_after, conversation, …}` | `commit` 且 `conversation` 时作废一段对话(见下) |
 
   `agix.session_state` 只记会话自己定下、设置里推不出来的那部分(`base::context::DurableState`)。
-  不在 `plan` 里的会话,权限模式仍由恢复时的设置与 `options` 决定,不由这条决定。
+  不在 `plan` 里的会话,权限模式由规格(`session.setPermissionMode` 设的,否则 `options` 的)按恢复时的
+  设置夹紧决定,不由这条决定。
   `ExtensionsAreVisible::all()` 不分 `ns` 地把扩展条目渲染给模型,这些也在其内——
   要让模型读到某个扩展的条目,按 `ns` 列名单
 - **模型可见即可从日志重建**。一个靠询问活着的插件来渲染条目的投影,会产出一个
@@ -1445,7 +1447,8 @@ MCP 工具不管 server 报不报 `readOnlyHint` 都询问——那是 server �
 陈述 `Inside` 用的是同一个函数,所以这几个工具的读在 `acceptEdits` 下不比 `default` 多放行。
 
 `plan` 拒绝一切非只读工具(S10),唯独离开计划模式的那一个(`ExitPlanMode`,
-`ModeStance::LeavesPlan`)照常走规则与询问:宿主批准才退出,回到进入前的模式。除此之外
+`ModeStance::LeavesPlan`)照常走规则与询问:宿主批准才退出,回到进入前的模式。判定或询问期间模式
+变过(宿主切了模式),批准作废、成拒绝,模式留在切到的那个(`SessionState::permission_mode_changes`)。除此之外
 与 `default` 相同:只读但没有陈述自含的调用(读项目外的文件、`WebFetch`、只读的 MCP 工具)
 照样询问。
 
@@ -1456,7 +1459,9 @@ MCP 工具不管 server 报不报 `readOnlyHint` 都询问——那是 server �
 (`PermissionPolicy::decide`,请求的 `delegate` 是子 Agent 的会话),父会话的规则与宿主的回答都作用于它们,输入校验看的是
 子 Agent 自己的会话状态(它读过哪些文件)。判的模式是子 Agent 自己的
 (`PermissionMode::for_delegate`):父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话是
-`bypassPermissions` 时随父会话。agent 类型 frontmatter 的 `permission_mode` 可以比父会话
+`bypassPermissions` 时随父会话。子 Agent 自己的模式起点是父会话的设置给的模式;宿主经
+`session.setPermissionMode` 给父会话切过 `plan` 以外的模式之后,起点是切到的那个(`Session::host_permission_mode`),
+已经在跑的子 Agent 不变。agent 类型 frontmatter 的 `permission_mode` 可以比父会话
 宽也可以严,插件带来的、未信任项目里的类型只能收紧(§6.6);模型在 `Agent` 调用、`TeamCreate` /
 `Agent(team_name)` 里自己要的 `permission_mode` 只能收紧。子 Agent 的询问经父会话的通道到宿主,等待上限就是会话的
 `permission_prompt_timeout`;在那里答"永久允许",记下的是这一条命令或路径,不是整个工具。

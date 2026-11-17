@@ -1,14 +1,14 @@
 //! 会话生命周期：`session.create` / `get` / `list` / `close` / `delete` / `fork` /
-//! `resume` / `rename` / `setModel` / `setPrompt` / `setSkillDirs` / `subscribe` /
-//! `unsubscribe` / `interrupt`。
+//! `resume` / `rename` / `setModel` / `setPrompt` / `setSkillDirs` /
+//! `setPermissionMode` / `subscribe` / `unsubscribe` / `interrupt`。
 
 use super::*;
 use crate::rpc::methods::session::*;
 use crate::rpc::methods::Patch;
 use crate::rpc::{read_options, RpcError};
 use crate::session_pool::api::{
-    DeleteReport, ForkReport, ModelChoice, PoolError, PromptChoice, ReasoningChange, Renamed,
-    ResumeReport, SessionCreated, SessionDetail, WatcherId,
+    DeleteReport, ForkReport, ModelChoice, PermissionModeChoice, PoolError, PromptChoice,
+    ReasoningChange, Renamed, ResumeReport, SessionCreated, SessionDetail, WatcherId,
 };
 
 rpc_methods! {
@@ -23,6 +23,7 @@ rpc_methods! {
     "session.setModel" => set_model(SetModelParams) -> ModelChoice;
     "session.setPrompt" => set_prompt(SetPromptParams) -> PromptChoice;
     "session.setSkillDirs" => set_skill_dirs(SetSkillDirsParams) -> SkillDirsSet;
+    "session.setPermissionMode" => set_permission_mode(SetPermissionModeParams) -> PermissionModeChoice;
     "session.subscribe" => subscribe(SubscribeParams) -> SubscribeResult;
     "session.unsubscribe" => unsubscribe(SessionRef) -> Unsubscribed;
     "session.interrupt" => interrupt(SessionRef) -> Interrupted;
@@ -152,6 +153,14 @@ async fn set_skill_dirs(
         skill_dirs,
         applies: crate::session_pool::api::Applies::NextTurn,
     })
+}
+
+async fn set_permission_mode(
+    s: &DaemonServer,
+    _: &Call,
+    p: SetPermissionModeParams,
+) -> Result<PermissionModeChoice, PoolError> {
+    s.pool.set_permission_mode(&p.session_id, p.mode).await
 }
 
 async fn subscribe(

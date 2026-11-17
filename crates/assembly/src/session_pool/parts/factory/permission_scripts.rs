@@ -5,7 +5,8 @@ use crate::settings_sections::ScriptBindings;
 
 /// The permission mode a session will actually run under.
 ///
-/// The caller's `options.permission_mode` is honored, but **clamped** to the
+/// The caller's mode — `session.setPermissionMode`'s, else
+/// `options.permission_mode` — is honored, but **clamped** to the
 /// daemon's configured `settings.permission_mode`: a client may tighten the
 /// mode for its own session and may not loosen it, since there is no
 /// per-method authorization on this socket (see `server/mod.rs`).
@@ -19,9 +20,9 @@ use crate::settings_sections::ScriptBindings;
 /// `bypassPermissions` result, however it was reached, into `Default`.
 pub(in crate::session_pool) fn effective_permission_mode(
     settings: &settings::LoadedSettings,
-    options: Option<&SessionOptions>,
+    requested: Option<base::permission::PermissionMode>,
 ) -> base::permission::PermissionMode {
-    let mode = requested_permission_mode(&settings.values, options);
+    let mode = clamped_permission_mode(&settings.values, requested);
     if mode == base::permission::PermissionMode::BypassPermissions && settings.bypass_disabled() {
         warn!("the managed settings disable bypassPermissions; this session runs in default mode");
         return base::permission::PermissionMode::Default;
@@ -29,11 +30,11 @@ pub(in crate::session_pool) fn effective_permission_mode(
     mode
 }
 
-fn requested_permission_mode(
+fn clamped_permission_mode(
     settings: &Settings,
-    options: Option<&SessionOptions>,
+    requested: Option<base::permission::PermissionMode>,
 ) -> base::permission::PermissionMode {
-    let Some(requested) = options.and_then(|o| o.permission_mode) else {
+    let Some(requested) = requested else {
         return settings.permission_mode;
     };
     if settings.allow_client_permission_override {

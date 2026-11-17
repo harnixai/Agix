@@ -34,6 +34,7 @@ mod sandbox_chain;
 mod session_attended;
 mod session_boundaries;
 mod session_calls;
+mod session_permission_mode;
 mod session_prompt;
 mod session_rewind;
 mod settings_take_effect;

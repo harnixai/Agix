@@ -4575,6 +4575,32 @@
         }
       ]
     },
+    "PermissionModeChoice": {
+      "description": "What `session.setPermissionMode` left the session in.",
+      "properties": {
+        "clamped": {
+          "description": "The settings held the session to a narrower mode than `requested`.",
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/PermissionMode",
+          "description": "The mode the session is in now."
+        },
+        "requested": {
+          "$ref": "#/$defs/PermissionMode"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "mode",
+        "requested",
+        "clamped"
+      ],
+      "type": "object"
+    },
     "PermissionReport": {
       "properties": {
         "mode": {
@@ -7614,6 +7640,21 @@
       ],
       "type": "object"
     },
+    "SetPermissionModeParams": {
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/PermissionMode"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "mode"
+      ],
+      "type": "object"
+    },
     "SetPromptParams": {
       "properties": {
         "append": {
@@ -9679,6 +9720,14 @@
         "$ref": "#/$defs/ModelChoice"
       }
     },
+    "session.setPermissionMode": {
+      "params": {
+        "$ref": "#/$defs/SetPermissionModeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PermissionModeChoice"
+      }
+    },
     "session.setPrompt": {
       "params": {
         "$ref": "#/$defs/SetPromptParams"
@@ -10202,6 +10251,18 @@
           "properties": {
             "kind": {
               "const": "notification"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "permission_mode_changed": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "permission_mode_changed"
             }
           },
           "required": [

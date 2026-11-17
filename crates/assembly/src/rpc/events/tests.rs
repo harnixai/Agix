@@ -382,6 +382,16 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
             )),
         ),
         (
+            "permission_mode_changed",
+            on_wire(&frame(
+                None,
+                SessionEvent::PermissionModeChanged(session_state::ModeChange {
+                    mode: base::permission::PermissionMode::Plan,
+                    source: session_state::ModeChangeSource::Host,
+                }),
+            )),
+        ),
+        (
             "subscription_dropped",
             json_of(&SessionEventNotification::subscription_dropped(SID)),
         ),

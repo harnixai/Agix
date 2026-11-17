@@ -11,10 +11,8 @@ description  = "Agix — one session's mutable state: permission mode, todos, ta
 base       = { workspace = true }
 tokio      = { workspace = true }
 tokio-util = { workspace = true }
+serde      = { workspace = true }
 serde_json = { workspace = true }
-
-[dev-dependencies]
-serde = { workspace = true }
 
 [features]
 testing = []

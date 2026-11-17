@@ -56,10 +56,10 @@ pub use rewind::{
 };
 pub use scene::{SceneCapabilities, SceneDescription, SceneReload, SceneSummary, SceneTools};
 pub use session::{
-    Applies, DeleteReport, ExistingSession, ForkReport, ModelChoice, PermissionReport,
-    PromptChoice, ReasoningChange, Renamed, ResumeReport, ResumeStatus, ScriptCall,
-    ScriptCallOutcome, ScriptReport, SessionCreated, SessionDetail, ShadowedSkill, SkillDirReport,
-    SkillDirState, TurnState,
+    Applies, DeleteReport, ExistingSession, ForkReport, ModelChoice, PermissionModeChoice,
+    PermissionReport, PromptChoice, ReasoningChange, Renamed, ResumeReport, ResumeStatus,
+    ScriptCall, ScriptCallOutcome, ScriptReport, SessionCreated, SessionDetail, ShadowedSkill,
+    SkillDirReport, SkillDirState, TurnState,
 };
 pub use settings::{
     ConfigTier, ConfigTierName, ImportRun, ModelList, ProjectStatus, ProjectTrustSet,

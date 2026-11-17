@@ -629,3 +629,32 @@ fn run_sub_applies_permission_mode_and_max_turns_override_end_to_end() {
     );
     assert_eq!(settings.values.execution.max_api_calls_per_turn, 3);
 }
+
+/// A delegate starts from the mode a host switched the parent to since it was
+/// built, not from the mode in the parent's settings.
+#[test]
+fn a_delegate_starts_from_the_mode_a_host_switched_the_parent_to() {
+    use base::permission::PermissionMode as M;
+    let state = Arc::new(session_state::SessionState::for_tests(std::env::temp_dir()));
+    let agent_tool = TestParent {
+        state: state.clone(),
+        ..TestParent::new(Arc::new(DummyModel))
+    }
+    .agent_tool();
+    assert_eq!(
+        agent_tool.sub_settings(None).values.permission_mode,
+        M::Default
+    );
+
+    state.switch_permission_mode(M::AcceptEdits);
+    assert_eq!(
+        agent_tool.sub_settings(None).values.permission_mode,
+        M::AcceptEdits
+    );
+    state.switch_permission_mode(M::Plan);
+    assert_eq!(
+        agent_tool.sub_settings(None).values.permission_mode,
+        M::AcceptEdits,
+        "in plan the delegate starts from where plan returns to; the relay holds it to plan"
+    );
+}

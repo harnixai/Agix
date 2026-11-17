@@ -1707,6 +1707,20 @@ async fn a_shell_command_that_runs_on(obs: &mut Observed) {
     obs.watched(&watch);
 }
 
+async fn a_host_switch_of_the_permission_mode(obs: &mut Observed) {
+    let h = start_code(Arc::new(OneTurnClient)).await;
+    let session = new_session(&h).await;
+    let watch = Watch::session(&h.sock, &session).await;
+    ok(
+        &h.sock,
+        "session.setPermissionMode",
+        json!({"session_id": session, "mode": "plan"}),
+    )
+    .await;
+    watch.wait_kind("permission_mode_changed").await;
+    obs.watched(&watch);
+}
+
 async fn a_goal_and_an_extension_entry(obs: &mut Observed) {
     let h = start_code(Arc::new(OneTurnClient)).await;
     let session = new_session(&h).await;
@@ -1843,6 +1857,7 @@ async fn observe_session_events() -> Observed {
     a_sub_agent_the_host_starts(&mut obs).await;
     a_shell_command_that_runs_on(&mut obs).await;
     a_goal_and_an_extension_entry(&mut obs).await;
+    a_host_switch_of_the_permission_mode(&mut obs).await;
     a_rewind_of_the_conversation(&mut obs).await;
     a_skill_that_appears_between_turns(&mut obs).await;
     a_notification_from_the_model(&mut obs).await;

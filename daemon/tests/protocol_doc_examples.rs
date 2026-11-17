@@ -875,6 +875,13 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
         serde_json::json!({"session_id": sid, "skill_dirs": [{"path": "/abs/skills"}]}),
     )
     .await;
+    verify(
+        &doc,
+        &daemon,
+        "session.setPermissionMode",
+        serde_json::json!({"session_id": sid, "mode": "plan"}),
+    )
+    .await;
     daemon
         .call(
             "session.run_turn",

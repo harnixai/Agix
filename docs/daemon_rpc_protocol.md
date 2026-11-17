@@ -389,8 +389,8 @@ glob 清单),项目自己写的忽略。三态:
 
 ### 4.5 `PermissionMode`
 
-`session.create` / `session.run_turn` / `session.resume` 的 `options.permission_mode`,
-和 settings.json 的 `permission_mode` 共用这一组取值(camelCase):
+`session.create` / `session.run_turn` / `session.resume` 的 `options.permission_mode`、
+`session.setPermissionMode` 的 `mode`,和 settings.json 的 `permission_mode` 共用这一组取值(camelCase):
 
 | 值 | 含义 |
 |---|---|
@@ -407,22 +407,26 @@ agent 类型的 frontmatter 里都收,解析出来就是 `bypassPermissions`,夹
 
 表格是按**宽松程度从严到宽**排的,这个顺序就是会话级取值被夹紧的依据:会话只能
 比 settings 更严,不能更宽,除非 settings 里开了 `allow_client_permission_override`。
+`session.setPermissionMode` 设的模式同样按这个顺序夹紧。
 
 `plan` 模式里调 `ExitPlanMode` 照常询问(`prompt_type: "permission"`、`tool_name:
 "ExitPlanMode"`,有命中的规则时按规则),是 `plan` 不拒的唯一一个非只读工具:`permit` 后
 退出,`deny` 留在 `plan`。会话中途 `EnterPlanMode` 进的 `plan`,退出后回到进入前的那个
-模式;会话一开始就是 `plan` 的,退出后是 `default`。活着的会话,`session.resume` 的
+模式;会话一开始就是 `plan` 的,退出后是 `default`。宿主经 `session.setPermissionMode` 切进
+`plan` 的同样如此;从 `plan` 切到别的模式就离开了 `plan`。活着的会话,`session.resume` 的
 `permission.mode` 报的是它此刻所在的模式。
 
 `plan` 是会话的状态,不随引擎走:在不在 `plan` 里、退出后回到哪个模式,连同 todo 列表,
 每轮结束时有变化就记进会话日志(扩展条目 `ns:"agix.session_state"`,ARCHITECTURE §4)。会话被
 驱逐(空闲超时、池子满了)后再用、daemon 重启后恢复、原地重建,回来都还在 `plan` 里,退出后
-回到进入前的那个模式。不在 `plan` 里的会话恢复时取它当时的设置与 `options` 给的模式。
+回到进入前的那个模式。不在 `plan` 里的会话恢复时取 `session.setPermissionMode` 设的模式,没设过就取
+`options` 给的,没给就取设置的,都按恢复时的设置夹紧。
 
-**越界不报错。** 经 RPC 传进来的 `permission_mode` 无论是什么,都不会被拒绝:比
+**`options` 越界不报错。** `options.permission_mode` 无论是什么,都不会被拒绝:比
 settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 日志,程序专用的 `bubble`
-也只是这样被夹掉,不会有错误响应。所以客户端拿不到"你要的模式没生效"的信号 ——
-要确认实际生效的模式,读 `session.resume` 响应里的 `permission.mode`。
+也只是这样被夹掉,不会有错误响应。要确认实际生效的模式,读 `session.resume` 响应里的
+`permission.mode`。`session.setPermissionMode` 不同:回执里的 `mode` 就是实际生效的模式,`clamped`
+说它有没有被夹窄,`bubble` 得 `INVALID_PARAMS`。
 
 ### 4.6 `PermissionRule`
 
@@ -2005,6 +2009,47 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 没停下也是 `SESSION_BUSY`,提示词不变,会话被移出内存,同 `session.setModel`。上一轮的日志没写全、
 重建前补写又失败时是 `ENGINE_ERROR`(`kind: "persist_failed"`,§7.2),提示词不变,会话照旧。`append` 与 `override`
 都没给,或类型不对 → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
+
+#### `session.setPermissionMode`
+
+```jsonc
+// → params
+{ "session_id": "…", "mode": "plan" }       // §4.5 的取值,bubble 除外
+// ← result
+{ "session_id": "…", "mode": "plan", "requested": "plan", "clamped": false }
+```
+
+切换会话的权限模式,**立即生效**:之后的每一次权限判定都按新模式,正在跑的这一轮里后面的工具调用
+也是,所以有一轮在跑时也照收,不返回 `SESSION_BUSY`。已经在等回答的询问是按切换前的模式问出的,
+答了照常算数;只有 `ExitPlanMode` 例外 —— 判定它(权限脚本、hook)或它的询问悬着时模式被切过,之后的
+`permit` 也不再改模式,模型得到一个拒绝,说模式已被切成了什么。模型在下一步读到一条提醒,说用户把模式切成了什么。
+
+夹紧同 `options.permission_mode`(§4.5):不宽于会话所在项目与场景的设置,除非设置开了
+`allow_client_permission_override`;managed 层关了 `bypassPermissions` 时它得 `default`。`mode` 是会话
+此刻所在的模式,`requested` 是请求的,`clamped` 为 `true` 表示设置把它夹窄了。`mode` 不是 §4.5 的取值、
+或是只能由程序设的 `bubble` → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`;场景不符 → `SCENE_MISMATCH`。
+写不进会话日志 → `ENGINE_ERROR`(`kind: "persist_failed"`,§7.2):`plan` 以外的模式没记进规格时,模式不变;
+进出 `plan` 没记进 `agix.session_state` 时,内存里的会话已经切过去了、按新模式判,只是日志里还没有,下一轮
+结束时引擎再写,在那之前 daemon 重启会回到切换之前;不在内存里的会话,规格与 plan 状态哪一样没写进去,哪一样就没变。空闲的会话进出 `plan` 时回复
+等引擎写完日志,最多 5 秒,没写完同样报 `persist_failed`;有一轮在跑时不等,那一轮结束时写。
+
+切到 `plan` 等于从当前模式进入 `plan`,之后模型的 `ExitPlanMode` 获准时回到那个模式;已经在 `plan`
+里就什么都不变。从 `plan` 切到别的模式就离开了 `plan`,不再记得进入前的模式。
+
+`plan` 以外的模式记进会话的规格(`agix.session/spec` 条目,优先于 `options.permission_mode`,同
+`session.setModel`;记的是夹紧后得到的模式,设置之后放宽也不会把它放宽),在不在 `plan`、退出后回到哪个记进 `agix.session_state`(§4.5);会话重建、驱逐后
+再用、daemon 重启后恢复都保持,恢复时按当时的设置重新夹紧。冷恢复时 `session.resume` 的
+`options.permission_mode` 只在会话没记下 `options` 时采用,这里设的模式仍优先于它。会话不在内存里时只改
+它的日志,不把它带回内存,下一次 `run_turn` / `session.resume` 照它来。
+
+模式变了就给订阅者推 `permission_mode_changed`(§7,`source: "host"`);模型自己 `EnterPlanMode` /
+`ExitPlanMode` 改了模式也推(`source: "model"`),`session.rewind` 回到 `plan` 里时也推(`source: "host"`)。
+切到会话已经所在的模式不推。短时间里连着变很多次时,中间几次的帧可能不推,最后一次的会推;要确认读 `session.resume` 的 `permission.mode`。
+
+子 Agent:已经在跑的子 Agent 留在它起来时的模式里,但它的每一次调用仍经父会话、按父会话此刻的模式约束
+(父会话在 `plan` 或 `dontAsk` 时取两者中更严的,父会话是 `bypassPermissions` 时随父会话,§10);此后
+起的子 Agent 从切到的模式算起(父会话在 `plan` 里时,从 `plan` 退出后要回到的那个算起),agent 类型与
+团队的 `permission_mode` 照 §10 再作用于它。
 
 #### `session.history`
 
@@ -3867,6 +3912,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `task_finished` | `{task}` | 一件报过开始的任务结束了,`task.status` 是结局;此后没有它的 `task_progress`,输出不再长,`session.taskOutput` 的 `final` 为 `true`。被停掉的任务等工作收尾后才发(§6.3 `session.stopTask`);`turn_id` 为 `null` |
 | `goal_changed` | `{goal}` | 会话目标变了(`goal` 同 `session.goal`,清除后为 `null`);`turn_id` 为 `null` |
 | `extension_entry` | `{entry}` | 宿主经 `session.appendEntry` 写了一条扩展条目(`entry` 同 `session.entries` 的条目);`turn_id` 为 `null` |
+| `permission_mode_changed` | `{mode,source}` | 会话的权限模式变了:`mode` 是变成的模式(§4.5),`source` 为 `host`(`session.setPermissionMode`,或 `session.rewind` 回到了 `plan` 里)或 `model`(模型的 `EnterPlanMode` / `ExitPlanMode`)。会话重建或恢复时按设置得到的模式不推,要知道读 `session.resume` 的 `permission.mode`。推给全部订阅者,包括发起切换的那条连接;`turn_id` 为 `null` |
 | `rewound` | `{rewind_id,scope,cut,seq,files_restored,files_skipped,overwrote_external}` | 宿主用 `session.rewind` 回滚了这个会话(`scope`、`cut` 同它的回执);`seq` 是回滚后的消息数,与 `session.history` 的 `total` 相同。收到就丢掉 `seq` 之后画出来的消息并重取 `session.history`。推给全部订阅者,包括发起的那条连接;`turn_id` 为 `null` |
 | `subscription_dropped` | `{reason}` | 这条连接对该会话的订阅被取消了(`reason` 目前只有 `"overflow"`,§5.4);不属于任何一轮,`turn_id` 为 `null`。重新 `session.subscribe` 并追平 |
 

@@ -145,24 +145,7 @@ pub(super) async fn authorize(
     let judged: std::sync::Arc<dyn base::context::Session> = ctx.session_state.clone();
     let request =
         PermissionRequest::new(name, Some(tool), input, &facts, tool_ctx, &judged).with_hook(hook);
-    let answer = match ctx.permission.policy.decide(&request).await {
-        PermissionOutcome::Prompt {
-            prompt_id,
-            message,
-            paths,
-            reason,
-            ..
-        } => {
-            let asked = Asked {
-                prompt_id,
-                message,
-                paths,
-                reason,
-            };
-            ask(ctx, name, input, &facts, tool_ctx, asked, request).await
-        }
-        decided => Answer::Decided(decided),
-    };
+    let answer = settle(ctx, name, input, &facts, tool_ctx, request).await;
     let concluded = match &answer {
         Answer::Decided(outcome) => outcome.clone(),
         Answer::Refused(reason, _) => PermissionOutcome::Deny {
@@ -217,6 +200,66 @@ pub(super) async fn authorize(
     })
     .await;
     Err(refusal.error)
+}
+
+/// The policy's answer, or, when it leaves the question open, the answer of
+/// whoever it is put to.
+async fn settle(
+    ctx: &ToolExecCtx,
+    name: &str,
+    input: &serde_json::Value,
+    facts: &base::interface::permission::ToolFacts,
+    tool_ctx: &base::tool::ToolContext,
+    request: base::interface::permission::PermissionRequest<'_>,
+) -> Answer {
+    use base::interface::permission::PermissionOutcome;
+    let mode_changes = ctx.session_state.permission_mode_changes();
+    let answer = match ctx.permission.policy.decide(&request).await {
+        PermissionOutcome::Prompt {
+            prompt_id,
+            message,
+            paths,
+            reason,
+            ..
+        } => {
+            let asked = Asked {
+                prompt_id,
+                message,
+                paths,
+                reason,
+            };
+            ask(ctx, name, input, facts, tool_ctx, asked, request).await
+        }
+        decided => Answer::Decided(decided),
+    };
+    unless_overtaken(ctx, facts, mode_changes, answer)
+}
+
+/// `answer`, except that a plan-mode exit permitted after the mode changed
+/// under it — a host switched it while the policy decided or the question
+/// was open — changes nothing: the host's switch is the later word.
+fn unless_overtaken(
+    ctx: &ToolExecCtx,
+    facts: &base::interface::permission::ToolFacts,
+    mode_changes: u64,
+    answer: Answer,
+) -> Answer {
+    use base::interface::permission::{ModeStance, Reason, Stage};
+    let overtaken = facts.stance == ModeStance::LeavesPlan
+        && matches!(&answer, Answer::Decided(outcome) if outcome.is_permit())
+        && ctx.session_state.permission_mode_changes() != mode_changes;
+    if !overtaken {
+        return answer;
+    }
+    let now = serde_json::to_value(ctx.session_state.permission_mode()).unwrap_or_default();
+    let reason = format!(
+        "the permission mode was switched to {now} while this waited for approval; \
+         it is left as switched"
+    );
+    Answer::Refused(
+        Reason::new(Stage::PlanMode, &reason),
+        Refusal::denied(reason),
+    )
 }
 
 /// The question the policy left open.

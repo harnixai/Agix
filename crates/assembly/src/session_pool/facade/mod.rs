@@ -13,6 +13,7 @@ pub(super) mod history_rpc;
 mod host_connections;
 mod import;
 mod listing;
+mod permission_mode;
 mod plugins;
 pub(super) mod providers;
 mod recording_rpc;

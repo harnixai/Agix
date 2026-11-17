@@ -116,7 +116,7 @@ impl SessionPool {
     ) -> Result<(api::ResumeReport, Vec<api::PendingAsk>), PoolError> {
         let resume_start = Instant::now();
         let settings = self.bindings.pool_settings().await;
-        let mode = effective_permission_mode(&settings, options);
+        let mode = effective_permission_mode(&settings, options.and_then(|o| o.permission_mode));
 
         // Already live: report state, touch nothing. The lock is released
         // before the (disk-reading) history lookup — `sessions` is the

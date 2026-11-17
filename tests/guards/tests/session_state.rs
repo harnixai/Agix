@@ -53,6 +53,10 @@ const FIELDS: &[(&str, &str)] = &[
         "SessionState::permission_mode",
         "Session: plan mode outlives an engine; rebased onto each engine's mode",
     ),
+    (
+        "SessionState::mode_events",
+        "Session: one forwarder per session reads it",
+    ),
     ("SessionState::todos", "Session: recorded in the log"),
     (
         "SessionState::recorded_durable",

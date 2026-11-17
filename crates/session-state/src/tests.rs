@@ -139,6 +139,86 @@ fn an_attached_engine_brings_its_env_and_mode_but_plan_mode_stays() {
 }
 
 #[test]
+fn a_host_switch_into_plan_enters_it_from_the_current_mode_and_out_of_it_forgets_that() {
+    let state = SessionState::new();
+    state.attach(attachment("/one", PermissionMode::Default, 1));
+    let mut events = state.subscribe_permission_mode();
+
+    assert!(state.switch_permission_mode(PermissionMode::AcceptEdits));
+    assert_eq!(
+        state.host_permission_mode(),
+        Some(PermissionMode::AcceptEdits)
+    );
+    assert!(state.switch_permission_mode(PermissionMode::Plan));
+    assert!(!state.switch_permission_mode(PermissionMode::Plan));
+    assert_eq!(
+        state.durable_state().plan,
+        Some(PlanState {
+            exit_to: Some(PermissionMode::AcceptEdits)
+        })
+    );
+    assert_eq!(state.exit_plan_mode(), PermissionMode::AcceptEdits);
+
+    state.enter_plan_mode();
+    assert!(state.switch_permission_mode(PermissionMode::DontAsk));
+    assert_eq!(state.durable_state().plan, None);
+    assert_eq!(state.exit_plan_mode(), PermissionMode::Default);
+
+    let seen: Vec<(PermissionMode, ModeChangeSource)> =
+        std::iter::from_fn(|| events.try_recv().ok())
+            .map(|change| (change.mode, change.source))
+            .collect();
+    assert_eq!(
+        seen,
+        [
+            (PermissionMode::AcceptEdits, ModeChangeSource::Host),
+            (PermissionMode::Plan, ModeChangeSource::Host),
+            (PermissionMode::AcceptEdits, ModeChangeSource::Model),
+            (PermissionMode::Plan, ModeChangeSource::Model),
+            (PermissionMode::DontAsk, ModeChangeSource::Host),
+            (PermissionMode::Default, ModeChangeSource::Model),
+        ]
+    );
+}
+
+/// A rewind is the host's: going back into plan, or nowhere new, is told as
+/// a switch would be.
+#[test]
+fn a_rewind_back_into_plan_is_told_as_the_hosts_change() {
+    let state = SessionState::new();
+    state.attach(attachment("/one", PermissionMode::AcceptEdits, 1));
+    let mut events = state.subscribe_permission_mode();
+    let planning = DurableState {
+        plan: Some(PlanState {
+            exit_to: Some(PermissionMode::AcceptEdits),
+        }),
+        ..Default::default()
+    };
+    state.restore_rewound_state(Some(planning.clone()));
+    state.restore_rewound_state(Some(planning));
+    assert_eq!(state.permission_mode(), PermissionMode::Plan);
+    let seen: Vec<(PermissionMode, ModeChangeSource)> =
+        std::iter::from_fn(|| events.try_recv().ok())
+            .map(|change| (change.mode, change.source))
+            .collect();
+    assert_eq!(seen, [(PermissionMode::Plan, ModeChangeSource::Host)]);
+}
+
+#[test]
+fn an_attached_engine_takes_over_from_the_hosts_choice() {
+    let state = SessionState::new();
+    state.attach(attachment("/one", PermissionMode::Default, 1));
+    state.switch_permission_mode(PermissionMode::AcceptEdits);
+    let changes = state.permission_mode_changes();
+    state.attach(attachment("/two", PermissionMode::AcceptEdits, 2));
+    assert_eq!(state.host_permission_mode(), None);
+    assert_eq!(state.permission_mode_changes(), changes);
+    state.attach(attachment("/three", PermissionMode::Default, 3));
+    assert_eq!(state.permission_mode(), PermissionMode::Default);
+    assert_ne!(state.permission_mode_changes(), changes);
+}
+
+#[test]
 fn an_engine_detaches_only_itself() {
     let state = SessionState::new();
     state.attach(attachment("/one", PermissionMode::Default, 1));

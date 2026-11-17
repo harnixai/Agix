@@ -2142,3 +2142,68 @@ async fn a_tool_that_pages_itself_is_never_saved() {
     assert_eq!(shown.lines().count(), 1_000);
     assert!(!dir.path().join("tool-results").exists());
 }
+
+/// Leaves plan mode as `ExitPlanMode` does, and records whether it ran.
+struct LeavesPlanProbe(Arc<std::sync::atomic::AtomicBool>);
+#[async_trait::async_trait]
+impl base::tool::Tool for LeavesPlanProbe {
+    fn name(&self) -> &str {
+        "LeavesPlanProbe"
+    }
+    fn spec(&self) -> base::tool::ToolSpec {
+        base::tool::ToolSpec::new().stance(base::interface::permission::ModeStance::LeavesPlan)
+    }
+    fn description(&self) -> &str {
+        "leaves plan mode (test tool)"
+    }
+    fn input_schema(&self, _: base::tool::PathStyle) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: base::tool::ToolContext,
+        _progress: base::tool::ProgressSender,
+    ) -> Result<base::tool::ToolResult, base::error::ToolError> {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(base::tool::ToolResult::text("left plan"))
+    }
+}
+
+/// Permits after a host switched the session's mode while it decided, as a
+/// permission script that awaits something might.
+struct PermitsAfterAHostSwitch(Arc<session_state::SessionState>);
+#[async_trait::async_trait]
+impl base::interface::permission::PermissionPolicy for PermitsAfterAHostSwitch {
+    async fn decide(
+        &self,
+        req: &base::interface::permission::PermissionRequest<'_>,
+    ) -> base::interface::permission::PermissionOutcome {
+        self.0
+            .switch_permission_mode(base::permission::PermissionMode::Default);
+        self.0
+            .switch_permission_mode(base::permission::PermissionMode::Plan);
+        AllowAllTestPermission.decide(req).await
+    }
+}
+
+#[tokio::test]
+async fn a_plan_exit_permitted_after_the_mode_was_switched_under_the_decision_is_refused() {
+    let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
+    tools.register(Arc::new(LeavesPlanProbe(ran.clone())));
+    let hooks_runner = Arc::new(local_hook_runner(std::collections::HashMap::new()));
+    let state = Arc::new(session_state::SessionState::for_tests(std::env::temp_dir()));
+    state.enter_plan_mode();
+    let mut ctx = test_exec_ctx_with_permission(
+        tools,
+        hooks_runner,
+        Arc::new(PermitsAfterAHostSwitch(state.clone())),
+    );
+    ctx.session_state = state;
+
+    let result = execute_tool_with_telemetry(&ctx, "LeavesPlanProbe", serde_json::json!({})).await;
+    let error = result.expect_err("the exit was let through");
+    assert!(error.contains("switched"), "{error}");
+    assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+}

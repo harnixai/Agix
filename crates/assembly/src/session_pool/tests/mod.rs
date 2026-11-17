@@ -153,6 +153,7 @@ mod import_question;
 pub(in crate::session_pool) mod mcp_for_project;
 /// Multiple scenes coexisting in one daemon process.
 mod multi_scene;
+mod permission_mode;
 mod pool_telemetry;
 mod rebuild;
 mod recorded_spec;

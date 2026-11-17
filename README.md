@@ -198,12 +198,12 @@ monitors and structured output ([table below](#tools--45-built-in)).
   [ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.6).
 
 **Host control**
-- Eighty-eight RPC methods: create, resume, fork, rebuild, rewind, export and import sessions;
+- Eighty-nine RPC methods: create, resume, fork, rebuild, rewind, export and import sessions;
   read history, the exact context of the next model call and a session's model-call
   recording; search sessions by content; answer
   permission and question prompts.
 - Start, message, stop and follow tasks, reading their output by byte offset.
-- Switch the model or prompt; manage scenes, MCP servers, plugins,
+- Switch the model, prompt or permission mode; manage scenes, MCP servers, plugins,
   schedules and which projects are trusted.
 - Provide tools and hooks from the host's own connection to every session
   (`daemon.setHostTools`, `daemon.setHooks`), report progress on host tools,
@@ -361,7 +361,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 While the turn runs, `session.event` frames stream back (text deltas, tool
 calls, tool results, prompts, task progress); the response arrives when the turn
 ends. A typical client subscribes to a session on one connection
-(`session.subscribe`) and drives it from another. Eighty-eight methods are
+(`session.subscribe`) and drives it from another. Eighty-nine methods are
 documented in [`docs/daemon_rpc_protocol.md`](docs/daemon_rpc_protocol.md) —
 sessions, history and context, tasks and sub-agents, scenes, configuration,
 project trust, MCP, plugins, scheduling — and every documented response shape is compared

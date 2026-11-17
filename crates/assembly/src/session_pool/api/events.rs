@@ -46,6 +46,8 @@ pub enum SessionEvent {
     ExtensionEntry(serde_json::Value),
     /// A host rewound the session.
     Rewound(super::Rewound),
+    /// A host or the model changed the session's permission mode.
+    PermissionModeChanged(session_state::ModeChange),
     /// The engine went away before the running turn completed.
     EngineStopped,
     /// `session.close` / `session.delete` cut the running turn off.

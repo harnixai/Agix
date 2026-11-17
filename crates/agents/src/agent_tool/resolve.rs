@@ -93,19 +93,24 @@ impl Delegator {
     }
 
     /// A sub-agent's `Settings`: the parent's, with its own model — `model_name`,
-    /// else [`Self::unnamed_delegate_model`].
+    /// else [`Self::unnamed_delegate_model`] — and the mode a host switched the
+    /// parent to since it was built.
     pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
         let c = &self.env.config;
         let model_name = match model_name {
             Some(name) => name.to_string(),
             None => self.unnamed_delegate_model(),
         };
-        settings_from_parent(
+        let mut settings = settings_from_parent(
             &self.env.settings,
             model_name,
             c.max_tokens,
             c.fallback_model.clone(),
-        )
+        );
+        if let Some(mode) = self.env.parent.state.host_permission_mode() {
+            settings.values.permission_mode = mode;
+        }
+        settings
     }
 
     /// The model of a delegate whose spawn and agent type name none: the one

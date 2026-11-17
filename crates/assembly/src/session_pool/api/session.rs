@@ -249,6 +249,17 @@ impl ReasoningChange {
     }
 }
 
+/// What `session.setPermissionMode` left the session in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PermissionModeChoice {
+    pub session_id: String,
+    /// The mode the session is in now.
+    pub mode: base::permission::PermissionMode,
+    pub requested: base::permission::PermissionMode,
+    /// The settings held the session to a narrower mode than `requested`.
+    pub clamped: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PromptChoice {
     pub session_id: String,

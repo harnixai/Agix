@@ -39,6 +39,7 @@ pub struct SessionState {
     /// 私有 + Mutex 内部可变 —— 调用方走 `permission_mode()` / `set_permission_mode()`
     /// / `enter_plan_mode()` / `exit_plan_mode()`。
     permission_mode: std::sync::Mutex<ModeSlot>,
+    mode_events: broadcast::Sender<ModeChange>,
     /// 模型自己维护的 todo 列表（TodoWrite 工具更新；/tasks 命令读取）。
     todos: std::sync::Mutex<Vec<TodoItem>>,
     /// The [`DurableState`] the session log last had; `None` once a write
@@ -74,6 +75,23 @@ pub struct SessionState {
 pub struct ReasoningChoice {
     pub effort: Option<base::interface::model::Effort>,
     pub thinking_mode: Option<base::interface::model::ThinkingMode>,
+}
+
+/// A session's permission mode changed, to `mode`, by `source`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct ModeChange {
+    pub mode: PermissionMode,
+    pub source: ModeChangeSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ModeChangeSource {
+    /// `session.setPermissionMode`.
+    Host,
+    /// `EnterPlanMode` / `ExitPlanMode`.
+    Model,
 }
 
 /// What one engine hangs on the session's state while it runs the session:
@@ -122,18 +140,36 @@ struct EngineView {
 struct ModeSlot {
     current: PermissionMode,
     before_plan: Option<PermissionMode>,
+    /// See [`Session::host_permission_mode`].
+    host_choice: Option<PermissionMode>,
+    /// How many times `current` has changed: a permission asked for under one
+    /// mode is not answered under another.
+    changes: u64,
 }
 
 impl ModeSlot {
-    /// Take up `base`, the mode an engine is configured with, unless in plan
-    /// mode: that stays on, exiting to where it would have.
-    fn rebase(&mut self, base: PermissionMode) {
-        if self.current != PermissionMode::Plan {
-            *self = ModeSlot {
-                current: base,
-                before_plan: None,
-            };
+    fn set(&mut self, current: PermissionMode, before_plan: Option<PermissionMode>) -> bool {
+        let changed = self.current != current;
+        self.current = current;
+        self.before_plan = before_plan;
+        if changed {
+            self.changes += 1;
         }
+        changed
+    }
+
+    /// Take up `base`, the mode an engine is configured with, unless in plan
+    /// mode: that stays on, exiting to where it would have. The engine's
+    /// settings already hold what a host chose.
+    fn rebase(&mut self, base: PermissionMode) {
+        self.host_choice = None;
+        if self.current != PermissionMode::Plan {
+            self.set(base, None);
+        }
+    }
+
+    fn enter_plan(&mut self) -> bool {
+        self.current != PermissionMode::Plan && self.set(PermissionMode::Plan, Some(self.current))
     }
 }
 
@@ -146,6 +182,7 @@ impl SessionState {
             env: Default::default(),
             engine: std::sync::RwLock::new(None),
             permission_mode: std::sync::Mutex::new(ModeSlot::default()),
+            mode_events: broadcast::channel(16).0,
             todos: std::sync::Mutex::new(Vec::new()),
             recorded_durable: std::sync::Mutex::new(Some(DurableState::default())),
             activated_tools: std::sync::Mutex::new(HashSet::new()),
@@ -249,8 +286,11 @@ impl SessionState {
     /// Put back the durable state a rewind returned the log to: the todos
     /// and plan mode as they were then, or none of them when the log had
     /// recorded nothing yet. Outside plan mode the mode stays as it is.
+    /// Going back into plan is the host's change of the mode.
     pub fn restore_rewound_state(&self, durable: Option<DurableState>) {
-        self.restore_durable_state(durable.unwrap_or_default());
+        if self.restore_durable_state(durable.unwrap_or_default()) {
+            self.mode_changed(PermissionMode::Plan, ModeChangeSource::Host);
+        }
     }
 
     pub fn set_model_choice(&self, model: Option<String>) {
@@ -265,6 +305,39 @@ impl SessionState {
 
     pub fn set_reasoning_choice(&self, choice: ReasoningChoice) {
         *lock(&self.reasoning_choice) = choice;
+    }
+
+    /// A host's switch to `mode`. Into plan it is entering plan from the
+    /// current mode, which `ExitPlanMode` returns to; to any other mode it
+    /// leaves plan, forgetting where that would have returned. `true` when
+    /// the mode changed.
+    pub fn switch_permission_mode(&self, mode: PermissionMode) -> bool {
+        let mut slot = self.mode_slot();
+        let changed = if mode == PermissionMode::Plan {
+            slot.enter_plan()
+        } else {
+            slot.host_choice = Some(mode);
+            slot.set(mode, None)
+        };
+        if changed {
+            self.mode_changed(mode, ModeChangeSource::Host);
+        }
+        changed
+    }
+
+    /// Counts every change of the mode; equal before and after a wait, the
+    /// mode did not change in between.
+    pub fn permission_mode_changes(&self) -> u64 {
+        self.mode_slot().changes
+    }
+
+    /// Each change a host or the model makes to the mode, as it is made.
+    pub fn subscribe_permission_mode(&self) -> broadcast::Receiver<ModeChange> {
+        self.mode_events.subscribe()
+    }
+
+    fn mode_changed(&self, mode: PermissionMode, source: ModeChangeSource) {
+        let _ = self.mode_events.send(ModeChange { mode, source });
     }
 
     /// Put back what the session log recorded: the goal, disarmed, and the
@@ -401,17 +474,15 @@ impl SessionState {
     }
 
     /// Put back what the session log recorded. Outside plan mode the session
-    /// keeps the mode it was built with.
-    fn restore_durable_state(&self, state: DurableState) {
-        if let Some(plan) = state.plan {
-            *self.mode_slot() = ModeSlot {
-                current: PermissionMode::Plan,
-                before_plan: plan.exit_to,
-            };
-        }
+    /// keeps the mode it was built with. `true` when it went into plan.
+    fn restore_durable_state(&self, state: DurableState) -> bool {
+        let entered_plan = state
+            .plan
+            .is_some_and(|plan| self.mode_slot().set(PermissionMode::Plan, plan.exit_to));
         lock(&self.todos).clone_from(&state.todos);
         self.activate_tools(state.activated_tools.clone());
         *lock(&self.recorded_durable) = Some(state);
+        entered_plan
     }
 }
 
@@ -438,24 +509,27 @@ impl Session for SessionState {
     }
 
     fn set_permission_mode(&self, mode: PermissionMode) {
-        *self.mode_slot() = ModeSlot {
-            current: mode,
-            before_plan: None,
-        };
+        self.mode_slot().set(mode, None);
     }
 
     fn enter_plan_mode(&self) {
         let mut slot = self.mode_slot();
-        if slot.current != PermissionMode::Plan {
-            slot.before_plan = Some(slot.current);
-            slot.current = PermissionMode::Plan;
+        if slot.enter_plan() {
+            self.mode_changed(slot.current, ModeChangeSource::Model);
         }
     }
 
     fn exit_plan_mode(&self) -> PermissionMode {
         let mut slot = self.mode_slot();
-        slot.current = slot.before_plan.take().unwrap_or_default();
-        slot.current
+        let to = slot.before_plan.unwrap_or_default();
+        if slot.set(to, None) {
+            self.mode_changed(to, ModeChangeSource::Model);
+        }
+        to
+    }
+
+    fn host_permission_mode(&self) -> Option<PermissionMode> {
+        self.mode_slot().host_choice
     }
 
     fn register_task(

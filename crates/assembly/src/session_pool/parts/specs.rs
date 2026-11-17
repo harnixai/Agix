@@ -30,6 +30,9 @@ pub(in crate::session_pool) struct SessionSpec {
     pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
     /// Set by `session.setSkillDirs`; over `options.skill_dirs` once set.
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
+    /// Set by `session.setPermissionMode` to a mode other than plan; over
+    /// `options.permission_mode` once set. Clamped as the session is built.
+    pub(in crate::session_pool) permission_mode: Option<base::permission::PermissionMode>,
     /// Shared by every Agent this process builds for the session, so a
     /// rebuild appends to the recording it was writing and continues a replay
     /// where it stood instead of from the first recorded call. Not persisted:
@@ -79,6 +82,15 @@ impl SessionSpec {
             .clone()
             .or_else(|| self.options.as_ref().map(|o| o.skill_dirs.clone()))
             .unwrap_or_default()
+    }
+
+    /// The mode the session asks to run in outside plan: chosen since, else
+    /// given at creation. `None` takes the settings'.
+    pub(in crate::session_pool) fn requested_permission_mode(
+        &self,
+    ) -> Option<base::permission::PermissionMode> {
+        self.permission_mode
+            .or_else(|| self.options.as_ref().and_then(|o| o.permission_mode))
     }
 
     /// The conversation's model, by the same precedence as `provider`.
@@ -133,6 +145,8 @@ pub(in crate::session_pool) struct RecordedSpec {
     pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::session_pool) permission_mode: Option<base::permission::PermissionMode>,
 }
 
 /// A present `null` is a choice taken back, not an absent one.
@@ -271,11 +285,22 @@ impl SpecStore {
     }
 
     pub(in crate::session_pool) async fn persist(&self, session_id: &str, spec: &SessionSpec) {
+        if let Err(e) = self.try_persist(session_id, spec).await {
+            warn!(%session_id, error = %e, "failed to record the session spec");
+        }
+    }
+
+    /// [`Self::persist`], saying whether the log took it.
+    pub(in crate::session_pool) async fn try_persist(
+        &self,
+        session_id: &str,
+        spec: &SessionSpec,
+    ) -> Result<(), String> {
         let Some(store) = self.history_store.as_ref() else {
-            return;
+            return Ok(());
         };
         let Ok(sid) = base::session::SessionId::parse(session_id) else {
-            return;
+            return Ok(());
         };
         let recorded = RecordedSpec {
             options: spec.options.clone().map(|mut o| {
@@ -288,18 +313,15 @@ impl SpecStore {
             effort: spec.effort,
             thinking_mode: spec.thinking_mode.clone(),
             skill_dirs: spec.skill_dirs.clone(),
+            permission_mode: spec.permission_mode,
         };
-        let Ok(payload) = serde_json::to_value(&recorded) else {
-            return;
-        };
+        let payload = serde_json::to_value(&recorded).map_err(|e| e.to_string())?;
         let entry = history::entry::LogEntry::Extension {
             ns: SPEC_NS.to_string(),
             event: SPEC_EVENT.to_string(),
             payload,
         };
-        if let Err(e) = store.append(sid, entry).await {
-            warn!(%session_id, error = %e, "failed to record the session spec");
-        }
+        store.append(sid, entry).await.map_err(|e| e.to_string())
     }
 
     /// Change this session's spec in memory only, returning it as it was and
@@ -426,6 +448,7 @@ pub(in crate::session_pool) fn recorded_in(
         effort: recorded.effort,
         thinking_mode: recorded.thinking_mode,
         skill_dirs: recorded.skill_dirs,
+        permission_mode: recorded.permission_mode,
         recorder: None,
     }
 }

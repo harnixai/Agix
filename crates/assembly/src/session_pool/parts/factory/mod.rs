@@ -179,7 +179,7 @@ impl EngineFactory {
         let (model, task_router, model_name, clock) = models(session_id, binding, spec)?;
         let settings_snapshot = self.snapshot(
             &binding.settings,
-            options,
+            spec.requested_permission_mode(),
             model_name.as_ref(),
             session_id,
             req.worktree,
@@ -305,7 +305,7 @@ impl EngineFactory {
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
-        options: Option<&SessionOptions>,
+        requested_mode: Option<base::permission::PermissionMode>,
         model_name: Option<&String>,
         session_id: &str,
         worktree: Option<&base::paths::LinkedWorktree>,
@@ -319,7 +319,7 @@ impl EngineFactory {
         // the gate, the hook payloads and `Meta` all read it from there, and a
         // snapshot still holding the settings-file mode made every one of them
         // report a mode the session was not running in.
-        let permission_mode = effective_permission_mode(base_settings, options);
+        let permission_mode = effective_permission_mode(base_settings, requested_mode);
         {
             let mut snap = base_settings.clone();
             snap.values.execution.permission_prompt_timeout_secs =

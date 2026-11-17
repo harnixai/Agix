@@ -96,7 +96,7 @@ fn session_options_cannot_loosen_an_asking_settings_default() {
         ..Default::default()
     };
     assert_eq!(
-        effective_permission_mode(&defaults(), Some(&opts)),
+        effective_permission_mode(&defaults(), opts.permission_mode),
         base::permission::PermissionMode::Default,
         "the request should clamp down to the configured mode"
     );
@@ -113,7 +113,7 @@ fn allow_client_permission_override_restores_client_wins() {
         ..Default::default()
     };
     assert_eq!(
-        effective_permission_mode(&settings, Some(&opts)),
+        effective_permission_mode(&settings, opts.permission_mode),
         base::permission::PermissionMode::BypassPermissions
     );
 }
@@ -130,7 +130,7 @@ fn a_client_may_always_tighten() {
         ..Default::default()
     };
     assert_eq!(
-        effective_permission_mode(&settings, Some(&opts)),
+        effective_permission_mode(&settings, opts.permission_mode),
         base::permission::PermissionMode::Plan
     );
 }
@@ -147,21 +147,21 @@ fn auto_and_yolo_in_session_options_clamp_and_resolve_as_bypass() {
         );
 
         assert_eq!(
-            effective_permission_mode(&defaults(), Some(&opts)),
+            effective_permission_mode(&defaults(), opts.permission_mode),
             PermissionMode::Default,
             "{spelling} must clamp like bypassPermissions"
         );
         let mut accepts_edits = defaults();
         accepts_edits.values.permission_mode = PermissionMode::AcceptEdits;
         assert_eq!(
-            effective_permission_mode(&accepts_edits, Some(&opts)),
+            effective_permission_mode(&accepts_edits, opts.permission_mode),
             PermissionMode::AcceptEdits
         );
 
         let mut bypass = defaults();
         bypass.values.permission_mode = PermissionMode::BypassPermissions;
         assert_eq!(
-            effective_permission_mode(&bypass, Some(&opts)),
+            effective_permission_mode(&bypass, opts.permission_mode),
             PermissionMode::BypassPermissions,
             "{spelling}"
         );
@@ -169,7 +169,7 @@ fn auto_and_yolo_in_session_options_clamp_and_resolve_as_bypass() {
         let mut overridable = defaults();
         overridable.values.allow_client_permission_override = true;
         assert_eq!(
-            effective_permission_mode(&overridable, Some(&opts)),
+            effective_permission_mode(&overridable, opts.permission_mode),
             PermissionMode::BypassPermissions,
             "{spelling}"
         );
@@ -183,7 +183,7 @@ fn settings_ask_default_is_overridable_per_session_without_becoming_allow_all() 
         ..Default::default()
     };
     assert_eq!(
-        effective_permission_mode(&defaults(), Some(&opts)),
+        effective_permission_mode(&defaults(), opts.permission_mode),
         base::permission::PermissionMode::DontAsk
     );
 }
@@ -209,7 +209,7 @@ fn effective_mode_prefers_session_options_then_settings_then_ask() {
         ..Default::default()
     };
     assert_eq!(
-        effective_permission_mode(&settings, Some(&opts)),
+        effective_permission_mode(&settings, opts.permission_mode),
         PermissionMode::Plan,
         "a per-session mode wins over the settings default"
     );
