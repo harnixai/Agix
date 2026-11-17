@@ -62,8 +62,8 @@ pub use session::{
 };
 pub use settings::{
     ConfigTier, ConfigTierName, ImportRun, ModelList, ProjectStatus, ProjectTrustSet,
-    ProviderConfigView, ProviderPatch, ProviderSaved, ProviderTier, ProviderView, RoutingStatus,
-    SettingsReloaded, TrustState,
+    ProviderConfigView, ProviderPatch, ProviderSaved, ProviderView, RejectKind, RoutingStatus,
+    SettingRejected, SettingsChange, SettingsReloaded, SettingsTier, SettingsWritten, TrustState,
 };
 pub use tasks::{AgentStarted, ContextReport, MessageDelivery, SessionTasks, TaskOutput};
 pub use turn::{Initiator, TurnOutcome, TurnRequest};

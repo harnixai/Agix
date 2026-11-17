@@ -1,7 +1,6 @@
 //! 会话查询：详情、列表、冷会话信息、场景与配置层说明、已服务项目的记录。
 
 use crate::session_pool::*;
-use base::paths::{entry, StateRoot};
 
 impl SessionPool {
     /// A session's recorded `session_kind`/`parent_session_id`/`resumable`,
@@ -106,35 +105,43 @@ impl SessionPool {
         }
 
         let paths = self.bindings.paths().as_ref();
-        let state_root = StateRoot::new(paths.global_root());
-        let path = match tier {
-            Tier::Global => Some(state_root.settings_file()),
-            Tier::Scene => Some(state_root.scene_dir(scene_id).join(entry::SETTINGS)),
-            Tier::Project => {
-                project_root.map(|p| paths.layout().project_dir(p).join(entry::SETTINGS))
+        let dir = match tier {
+            Tier::Global => Some(paths.global_root()),
+            Tier::Scene => {
+                let startup_scene = self.bindings.startup_scene().await;
+                Some(self.bindings.scene_root(scene_id, &startup_scene))
             }
+            Tier::Project => project_root.map(|p| paths.layout().project_dir(p)),
             Tier::Effective => None,
         };
 
         let mut managed = serde_json::Value::Null;
-        let mut value = match tier {
-            Tier::Effective => {
+        let (mut value, mut local, revision) = match (tier, dir) {
+            (Tier::Effective, _) => {
                 let settings = self.settings_for_project(project_root, scene_id).await;
                 managed = serde_json::to_value(&settings.managed).unwrap_or_default();
-                effective_settings_json(&settings)
+                (effective_settings_json(&settings), None, None)
             }
-            _ => match path {
-                Some(p) => tokio::fs::read_to_string(&p)
-                    .await
-                    .ok()
-                    .and_then(|raw| serde_json::from_str(&raw).ok())
-                    .unwrap_or(serde_json::Value::Null),
-                // `project` with no project: there is no such tier to read.
-                None => serde_json::Value::Null,
-            },
+            (_, Some(dir)) => {
+                let files = TierPaths::in_dir(&dir);
+                let read = |path: PathBuf| async move {
+                    let bytes = tokio::fs::read(&path).await.unwrap_or_default();
+                    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+                    (bytes, value)
+                };
+                let (shared_bytes, shared) = read(files.shared).await;
+                let (local_bytes, local) = read(files.local).await;
+                let revision = settings::edit::revision(&shared_bytes, &local_bytes);
+                (shared, Some(local), Some(revision))
+            }
+            // `project` with no project: there is no such tier to read.
+            (_, None) => (serde_json::Value::Null, None, None),
         };
         if !include_secrets {
             redact_settings_secrets(&mut value);
+            if let Some(local) = &mut local {
+                redact_settings_secrets(local);
+            }
         }
 
         Ok(api::ConfigTier {
@@ -142,6 +149,8 @@ impl SessionPool {
             project_root: project_root.map(|p| p.display().to_string()),
             tier,
             settings: value,
+            local,
+            revision,
             managed,
         })
     }
@@ -551,7 +560,7 @@ impl SessionPool {
 /// What `scene.describe` and `config.get {tier: "effective"}` report as the
 /// merged settings: the values, where the scene's data lives, and the rules
 /// the shared settings files contribute.
-fn effective_settings_json(settings: &LoadedSettings) -> serde_json::Value {
+pub(super) fn effective_settings_json(settings: &LoadedSettings) -> serde_json::Value {
     let mut value =
         serde_json::to_value(&settings.values).unwrap_or_else(|_| serde_json::json!({}));
     let rules: Vec<_> = settings

@@ -9,6 +9,7 @@ mod assemble_defaults;
 mod bash_read_only_lane;
 mod compaction_and_trim;
 mod config_reload_and_doctor;
+mod config_set;
 mod credentials_in_file_tools;
 mod daemon_shutdown_reply;
 mod daemon_socket_from_a_command;

@@ -1,6 +1,6 @@
 //! `config.*` 的 params，以及配置类方法共用的定位参数 [`ConfigTarget`]。
 
-use crate::session_pool::api::{ConfigTierName, ProviderTier};
+use crate::session_pool::api::{ConfigTierName, SettingsTier};
 use serde::{Deserialize, Deserializer};
 use std::path::PathBuf;
 
@@ -39,6 +39,23 @@ pub struct ConfigGetParams {
 }
 
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ConfigSetParams {
+    #[serde(flatten)]
+    pub target: ConfigTarget,
+    pub tier: SettingsTier,
+    /// Dotted settings key to the value it takes in `tier`; `null` removes
+    /// the key from the tier.
+    pub changes: serde_json::Map<String, serde_json::Value>,
+    /// Work out what the write would do, and write nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// The tier's `revision` as `config.get` read it; the write is refused
+    /// when the tier has changed since.
+    #[serde(default)]
+    pub if_revision: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct ConfigGetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,
@@ -58,7 +75,7 @@ pub struct ConfigSetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,
     #[serde(default)]
-    pub tier: ProviderTier,
+    pub tier: SettingsTier,
     /// Work out what the write would do, and write nothing.
     #[serde(default)]
     pub dry_run: bool,

@@ -2106,7 +2106,13 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 `allowed-tools`、放宽的 `permission_mode` 与沙箱都不生效。要沿用旧行为,在全局层写
 `"default": "trusted"`;`daemon.doctor` 会把因此生效的东西列出来。
 
-引擎自己改设置文件的地方——`project.trust`、`config.setProvider`、`mcp.addServer` /
+按键写设置只有一条路径:`config.set`、`config.setProvider`、`mcp.addServer` / `updateServer` 都翻成
+`settings::edit` 的改动(键路径上的设值、删除、合并;凭据字段——`settings::edit::SECRET_PATHS`——只落
+`settings.local.json`),由池里的 `write_settings_tier` 在那一层的锁下读出两个文件、套用、把写成的样子交给
+加载器合并整对设置、逐键判拒绝(值放不放得进、未受信项目会不会扣下),通过才落盘;写完让监视器认领自己写下
+的内容,再走与监视器相同的"这一层变了"(`settings_tier_changed`),不会被监视器再重载一遍。
+
+引擎自己改设置文件的地方——`project.trust`、`config.set`、`config.setProvider`、`mcp.addServer` /
 `updateServer`、权限询问里的"永久允许"——都走 `settings::file`:读改写期间锁住那一层
 的目录(进程内一把锁,unix 上跨进程靠目录上的 `flock`),写进同目录的临时文件、落盘之后改名替换,
 读的一方只会看到旧文件或新文件。等锁有上限(`base::dir_lock::DIR_LOCK_WAIT`,10 秒):超时 RPC 回 `SETTINGS_LOCKED`、

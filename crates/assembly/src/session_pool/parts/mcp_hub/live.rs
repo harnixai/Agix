@@ -215,36 +215,3 @@ pub(in crate::session_pool) fn mcp_connected_event(
         tool_count: status.tool_count,
     }
 }
-
-/// The MCP server fields that carry credentials — request headers, the
-/// process environment — which `mcp.addServer` / `mcp.updateServer` keep out
-/// of the committed `settings.json`.
-pub(in crate::session_pool) const MCP_SERVER_SECRET_KEYS: &[&str] = &["headers", "env"];
-
-pub(in crate::session_pool) fn take_mcp_server_secrets(
-    server: &mut serde_json::Value,
-) -> Vec<(String, serde_json::Value)> {
-    let Some(fields) = server.as_object_mut() else {
-        return Vec::new();
-    };
-    MCP_SERVER_SECRET_KEYS
-        .iter()
-        .filter_map(|key| fields.remove(*key).map(|value| (key.to_string(), value)))
-        .collect()
-}
-
-/// `mcp_servers` of a settings object, created as `{}` when it is missing or
-/// not an object.
-pub(in crate::session_pool) fn mcp_servers_of(
-    settings: &mut serde_json::Map<String, serde_json::Value>,
-) -> &mut serde_json::Map<String, serde_json::Value> {
-    let servers = settings
-        .entry("mcp_servers")
-        .or_insert_with(|| serde_json::json!({}));
-    if !servers.is_object() {
-        *servers = serde_json::json!({});
-    }
-    servers
-        .as_object_mut()
-        .expect("just normalized to an object")
-}

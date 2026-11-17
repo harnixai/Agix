@@ -482,50 +482,30 @@ impl SessionPool {
         config: serde_json::Value,
         must_exist: bool,
     ) -> Result<api::McpServerWritten, PoolError> {
-        use base::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
-        let settings_path = self.bindings.settings_path_of(project_root);
-        let local_path = settings_path.with_file_name(SETTINGS_LOCAL_FILE);
-        let shown = settings_path.display().to_string();
-        let server = name.to_string();
-        let local_changed = edit_settings_dir(&settings_path, move |tier| {
-            let mut project_json = tier.read(SETTINGS_FILE).map_err(|e| e.to_string())?;
-            let mut local_json = tier.read(SETTINGS_LOCAL_FILE).map_err(|e| e.to_string())?;
-            let local_before = local_json.clone();
-            let declared = [&project_json, &local_json].iter().any(|tier| {
-                tier.get("mcp_servers")
-                    .and_then(|servers| servers.get(&server))
-                    .is_some()
-            });
-            if must_exist && !declared {
-                return Err(format!("no mcp server `{server}` in {shown}"));
-            }
-
-            let mut config = config;
-            let secrets = take_mcp_server_secrets(&mut config);
-            mcp_servers_of(&mut project_json).insert(server.clone(), config);
-            // The server is replaced whole: what the local file held for it
-            // would otherwise merge over the new configuration.
-            let local_servers = mcp_servers_of(&mut local_json);
-            if secrets.is_empty() {
-                local_servers.remove(&server);
-            } else {
-                local_servers.insert(
-                    server.clone(),
-                    serde_json::Value::Object(secrets.into_iter().collect()),
-                );
-            }
-
-            let local_changed = local_json != local_before;
-            if local_changed {
-                tier.write(SETTINGS_LOCAL_FILE, &local_json)
-                    .map_err(|e| e.to_string())?;
-            }
-            tier.write(SETTINGS_FILE, &project_json)
-                .map_err(|e| e.to_string())?;
-            Ok(local_changed)
-        })
-        .await?;
-        let secrets_written_to = local_changed.then(|| local_path.display().to_string());
+        let entry = settings::edit::KeyPath::new(["mcp_servers", name]);
+        let precondition = must_exist.then(|| {
+            let (entry, server) = (entry.clone(), name.to_string());
+            let shown = self.bindings.settings_path_of(project_root);
+            Box::new(move |files: &settings::edit::TierFiles| {
+                if files.declares(&entry) {
+                    Ok(())
+                } else {
+                    Err(format!("no mcp server `{server}` in {}", shown.display()))
+                }
+            }) as Precondition
+        });
+        let edit = TierEdit {
+            precondition,
+            ..TierEdit::new(
+                api::SettingsTier::Project,
+                vec![settings::edit::EditOp::Set(entry, config)],
+            )
+        };
+        let written = self
+            .write_settings_tier(project_root, scene_id, edit)
+            .await?;
+        let settings_path = written.written_to;
+        let secrets_written_to = written.secrets_written_to.map(|p| p.display().to_string());
 
         // The written file and the cache entry are the same pair: a server
         // added to one project's settings connects for that project.

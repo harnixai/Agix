@@ -75,6 +75,9 @@ impl From<PoolError> for RpcError {
             PoolError::RewindFailed(failure) => (codes::REWIND_FAILED, Some(json!(failure))),
             PoolError::SessionExists { .. } => (codes::SESSION_EXISTS, exists_data(&e)),
             PoolError::SettingsLocked(_) => (codes::SETTINGS_LOCKED, None),
+            PoolError::SettingsConflict { .. } | PoolError::SettingsRejected { .. } => {
+                settings_write_error(&e)
+            }
             PoolError::ModelsUnsupported(_) => (codes::MODELS_UNSUPPORTED, None),
             PoolError::Internal(_) => (codes::INTERNAL_ERROR, None),
         };
@@ -83,6 +86,27 @@ impl From<PoolError> for RpcError {
             message,
             data,
         }
+    }
+}
+
+fn settings_write_error(e: &PoolError) -> (i32, Option<Value>) {
+    match e {
+        PoolError::SettingsConflict { revision } => (
+            codes::SETTINGS_CONFLICT,
+            Some(json!({ "revision": revision })),
+        ),
+        PoolError::SettingsRejected {
+            untrusted_only,
+            rejected,
+        } => (
+            if *untrusted_only {
+                codes::PROJECT_UNTRUSTED
+            } else {
+                codes::INVALID_PARAMS
+            },
+            Some(json!({ "rejected": rejected })),
+        ),
+        _ => (codes::INTERNAL_ERROR, None),
     }
 }
 

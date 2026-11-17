@@ -378,6 +378,10 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("DelegateMode", DELEGATE_ASK),
     ("Delegated", HOST_ANSWER),
     ("Divergence", SETTING),
+    (
+        "EditOp",
+        "a change to a settings tier; `settings::edit::apply` applies every variant",
+    ),
     ("Effort", SETTING),
     ("ElicitOutcome", HOST_ANSWER),
     ("Enforcement", SANDBOX),
@@ -411,6 +415,10 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "McpElicitationAnswer",
         "the spec's three elicitation actions; `mcp::elicit` maps each to the server's `ElicitResult`",
     ),
+    (
+        "KeyKind",
+        "what the settings schema says a key is: none, an object of settings, or one setting",
+    ),
     ("McpIdentity", HOST_INPUT),
     ("McpRedirect", HOST_INPUT),
     ("MemberLifetime", DELEGATE_ASK),
@@ -439,7 +447,6 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("PromptContent", HOST_INPUT),
     ("PromptDecision", HOST_ANSWER),
     ("PromptDelivery", HOST_ANSWER),
-    ("ProviderTier", HOST_INPUT),
     ("ReadScope", SANDBOX),
     ("RecorderMode", SETTING),
     ("Recovery", HOST_ANSWER),
@@ -460,6 +467,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
         "Secret",
         "a credential the sandbox masks; the mask compiler places every variant",
     ),
+    ("SettingsTier", HOST_INPUT),
     ("SkillPrecedence", HOST_INPUT),
     (
         "SkillSource",

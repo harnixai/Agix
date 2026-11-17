@@ -1,6 +1,10 @@
-//! 设置的读取与热替换：`settings`、`reload_settings`，以及重载后向宿主报告。
+//! 设置的读取与热替换：`settings`、`reload_settings`，以及"一层设置变了"之后的全部动作
+//! ——自家那一对重读、失效从那一层合出来的绑定、按需重连 MCP、向宿主报路由。监视器、
+//! `config.reload` 和写设置的核心都走这里。
 
+use crate::session_pool::parts::bindings::tier_covers;
 use crate::session_pool::*;
+use crate::watch_hub::Tier;
 
 impl SessionPool {
     /// The currently-active settings snapshot (for config-inspection RPCs).
@@ -11,11 +15,9 @@ impl SessionPool {
     /// Re-read whatever is currently on disk across all three settings.json
     /// tiers and apply it — the `config.reload` RPC's backing implementation,
     /// used when a human (or another process) hand-edited a settings.json
-    /// file directly instead of going through `config.setProvider`. Shares
-    /// `apply_reloaded_settings()` with `set_provider()`, so both entry
-    /// points converge on identical semantics (routing re-resolved,
-    /// `task_router` rebuilt, bindings marked stale so already-running
-    /// sessions recreate themselves lazily — see `run_turn`).
+    /// file directly. Routing is re-resolved, the pair's MCP servers
+    /// reconnected, and every binding marked stale so already-running
+    /// sessions recreate themselves lazily — see `run_turn`.
     pub async fn reload_settings(
         &self,
         project_root: Option<&Path>,
@@ -25,60 +27,46 @@ impl SessionPool {
             .await
     }
 
+    /// [`Self::settings_tier_changed`] of `changed` (every tier when `None`)
+    /// for the pair, every MCP server reconnected.
     pub(in crate::session_pool) async fn reload_settings_from(
         &self,
         project_root: Option<&Path>,
         scene_id: &str,
-        changed: Option<&crate::watch_hub::Tier>,
+        changed: Option<&Tier>,
     ) -> api::SettingsReloaded {
+        let project_root = project_root.unwrap_or(self.cwd());
         let (reloaded, report) = self
-            .apply_reloaded_settings(project_root, scene_id, changed)
+            .settings_tier_changed(changed, (project_root, scene_id), McpEffect::Full)
             .await;
         settings_reloaded(&reloaded.values, report)
     }
 
-    /// Re-read the three-tier merged settings.json from disk, re-resolve
-    /// `providers`/`task_models`, rebuild the pair's router from the result,
-    /// swap this daemon's own settings when it is its own pair, and invalidate
-    /// the bindings built from `changed` (every binding when `None`: an
-    /// explicit reload does not know which tier moved) so their running
-    /// sessions recreate themselves before their next turn (see `run_turn`).
-    /// Shared by `set_provider()` (called after writing a patch) and
-    /// `reload_settings()` (called directly, no patch — just "whatever's on
-    /// disk right now").
+    /// Everything a change to `changed` (every tier when `None`: an explicit
+    /// reload does not know which one moved) means, then the pair's settings
+    /// and routing as they are now. The pair's MCP connections follow `mcp`.
     ///
     /// Never fails outright — misconfiguration degrades to "keep the
     /// previous router, report why in the returned status";
     /// `resolve_task_models` is advisory.
-    pub(in crate::session_pool) async fn apply_reloaded_settings(
+    pub(in crate::session_pool) async fn settings_tier_changed(
         &self,
-        project_root: Option<&Path>,
-        scene_id: &str,
-        changed: Option<&crate::watch_hub::Tier>,
+        changed: Option<&Tier>,
+        (project_root, scene_id): (&Path, &str),
+        mcp: McpEffect,
     ) -> (Arc<LoadedSettings>, api::RoutingStatus) {
-        let project_root = project_root.unwrap_or(self.cwd());
-        // The daemon's own pair keeps a separate, hot-swappable copy —
-        // everything with no session to ask about reads it. Every other pair
-        // lives only in its binding, which the invalidation below rebuilds
-        // from disk.
-        if self
-            .bindings
-            .is_own_pair(Some(project_root), scene_id)
-            .await
-        {
-            self.bindings.reload_own(self.scenes.default_id()).await;
-        }
-
-        // The cached bindings hold the settings that were just replaced, and
-        // the skill/agent catalogs and router built from them. Dropping them
-        // is what makes a reload reach the next session.
-        self.invalidate_bindings(changed).await;
-
+        let key = (Some(project_root.to_path_buf()), scene_id.to_string());
+        self.tier_changed(changed, Some(&key), mcp == McpEffect::Full)
+            .await;
         let binding = self.binding_for(Some(project_root), scene_id).await;
         let routing = &binding.routing;
-        let (mcp_connected, mcp_failed, mcp_connecting) = self
-            .reconcile_mcp_servers(Some(project_root), scene_id, &binding.settings)
-            .await;
+        let (mcp_connected, mcp_failed, mcp_connecting) = match &mcp {
+            McpEffect::Full => {
+                self.reconcile_mcp_servers(Some(project_root), scene_id, &binding.settings)
+                    .await
+            }
+            McpEffect::None => Default::default(),
+        };
         let status = api::RoutingStatus {
             ok: routing.error.is_none(),
             warnings: routing.warnings.clone(),
@@ -89,8 +77,33 @@ impl SessionPool {
             mcp_failed,
             mcp_connecting,
         };
-
         (binding.settings.clone(), status)
+    }
+
+    /// The pool's side of `changed` having changed: this daemon's own pair
+    /// re-read when the tier is under it — it keeps a separate, hot-swappable
+    /// copy that everything with no session to ask about reads — and the
+    /// bindings merged from it dropped, so their running sessions recreate
+    /// themselves before their next turn. With `forget_mcp`, the MCP
+    /// connections built from it go too, except `keep`'s, which the caller
+    /// reconnects itself.
+    pub(in crate::session_pool) async fn tier_changed(
+        &self,
+        changed: Option<&Tier>,
+        keep: Option<&ProjectSceneKey>,
+        forget_mcp: bool,
+    ) {
+        let own = (
+            Some(self.cwd().to_path_buf()),
+            self.bindings.startup_scene().await,
+        );
+        if changed.is_none_or(|tier| tier_covers(tier, &own)) {
+            self.bindings.reload_own(self.scenes.default_id()).await;
+        }
+        self.invalidate_bindings(changed).await;
+        if let (true, Some(tier)) = (forget_mcp, changed) {
+            self.forget_mcp_built_from(tier, keep).await;
+        }
     }
 }
 

@@ -112,7 +112,7 @@ error_codes! {
     /// `session.import` with `keep_ids`: a session of the archive already
     /// exists on this daemon; nothing was written. `data.session_id` names it.
     SessionExists = -32025, SESSION_EXISTS;
-    /// `project.trust` / `config.setProvider` / `mcp.addServer` /
+    /// `project.trust` / `config.set` / `config.setProvider` / `mcp.addServer` /
     /// `mcp.updateServer`: the settings directory stayed held by another
     /// process for the whole wait, so nothing was written. Safe to retry once
     /// the holder lets go.
@@ -121,6 +121,10 @@ error_codes! {
     /// — it answered 404, 405 or 501, or with something that is not a model
     /// list — or the provider's `api_type` has no listing the engine knows.
     ModelsUnsupported = -32027, MODELS_UNSUPPORTED;
+    /// `config.set` with `if_revision`: the tier's files changed since that
+    /// revision was read, so nothing was written. `data.revision` is the
+    /// tier's revision now.
+    SettingsConflict = -32028, SETTINGS_CONFLICT;
 }
 
 #[cfg(test)]

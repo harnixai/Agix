@@ -22,6 +22,7 @@ use base::interface::exec::env::SubprocessEnvMode;
 use base::interface::exec::NetworkMode;
 use base::permission::{PermissionMode, ProjectTrust};
 
+use crate::schema::schema_keys;
 use crate::section::Sections;
 
 /// What a project no `trusted` pattern names is.
@@ -208,6 +209,22 @@ pub struct ProjectLayer {
 /// no project) resolves to.
 pub fn is_own_project_dir(project: &Path, global: &Path, scene: &Path) -> bool {
     !same_dir(project, global) && !same_dir(project, scene)
+}
+
+/// Whether `project` (a `.agix` directory) is its project's own: absent, or
+/// resolving to a directory directly in the project as that resolves — not a
+/// link into another project's, whose settings a write would change.
+pub fn stays_in_its_project(project: &Path) -> bool {
+    let Some(root) = project.parent() else {
+        return false;
+    };
+    if project.symlink_metadata().is_err() {
+        return true;
+    }
+    match (project.canonicalize(), root.canonicalize()) {
+        (Ok(dir), Ok(root)) => dir.parent() == Some(root.as_path()),
+        _ => false,
+    }
 }
 
 /// Whether `project` (a `.agix` directory) resolves to the global or scene
@@ -538,71 +555,6 @@ pub fn project_tier_gaps(schema: &Value, sections: &Sections) -> Vec<String> {
         }
     }
     gaps
-}
-
-/// The settings keys a file can hold, read off the published schema:
-/// an object with properties, or a map, is looked into; anything else —
-/// including a value that may be an object or something else — is one key.
-fn schema_keys(root: &Value) -> Vec<Vec<String>> {
-    fn resolve<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
-        while let Some(target) = node.get("$ref").and_then(Value::as_str) {
-            let Some(target) = root.pointer(target.trim_start_matches('#')) else {
-                break;
-            };
-            node = target;
-        }
-        node
-    }
-    fn walk(root: &Value, node: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
-        let node = resolve(root, node);
-        let branches: Vec<&Value> = ["anyOf", "oneOf", "allOf"]
-            .iter()
-            .flat_map(|b| node.get(*b).and_then(Value::as_array).into_iter().flatten())
-            .map(|b| resolve(root, b))
-            .filter(|b| b.get("type") != Some(&Value::from("null")))
-            .collect();
-        let alternatives = if branches.is_empty() {
-            vec![node]
-        } else {
-            branches
-        };
-        let is_section =
-            |a: &&Value| a.get("properties").is_some() || a.get("additionalProperties").is_some();
-        if !alternatives.iter().all(is_section) {
-            out.push(path.clone());
-            return;
-        }
-        for alternative in alternatives {
-            for (key, inner) in alternative
-                .get("properties")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flatten()
-            {
-                path.push(key.clone());
-                walk(root, inner, path, out);
-                path.pop();
-            }
-            match alternative.get("additionalProperties") {
-                Some(inner @ Value::Object(_)) => {
-                    path.push("*".into());
-                    walk(root, inner, path, out);
-                    path.pop();
-                }
-                Some(Value::Bool(true)) => {
-                    path.push("*".into());
-                    out.push(path.clone());
-                    path.pop();
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(root, root, &mut Vec::new(), &mut out);
-    out.sort();
-    out.dedup();
-    out
 }
 
 fn keeps(entries: &Entries, value: &Value, path: &[&str], lower: &Value) -> bool {

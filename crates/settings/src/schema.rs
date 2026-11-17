@@ -1,6 +1,8 @@
 //! The JSON Schema of a settings.json file and the list of keys a layer may
 //! hold, derived from the settings types and the registered [`Sections`].
 
+use serde_json::Value;
+
 use crate::section::Sections;
 use crate::{Settings, SettingsFile};
 
@@ -18,7 +20,7 @@ use crate::{Settings, SettingsFile};
 ///
 /// The core types give the schema; each registered section's schema is added
 /// under its key, with the section's definitions merged into `$defs`.
-pub fn settings_json_schema(sections: &Sections) -> serde_json::Value {
+pub fn settings_json_schema(sections: &Sections) -> Value {
     let mut generator = schemars::SchemaGenerator::default();
     let mut schema =
         serde_json::to_value(generator.root_schema_for::<SettingsFile>()).unwrap_or_default();
@@ -56,17 +58,14 @@ pub fn settings_json_schema(sections: &Sections) -> serde_json::Value {
 /// hold at that place, following `properties` from the root wherever the
 /// defaults have an object. Entries of lists and maps are not merged with
 /// anything, so their `required` stays.
-fn optional_where_defaulted(schema: &mut serde_json::Value, defaults: &serde_json::Value) {
+fn optional_where_defaulted(schema: &mut Value, defaults: &Value) {
     let mut found = Vec::new();
     defaulted_objects(schema, "", defaults, &mut found);
     for (pointer, defaulted) in found {
-        let Some(object) = schema
-            .pointer_mut(&pointer)
-            .and_then(serde_json::Value::as_object_mut)
-        else {
+        let Some(object) = schema.pointer_mut(&pointer).and_then(Value::as_object_mut) else {
             continue;
         };
-        if let Some(serde_json::Value::Array(required)) = object.get_mut("required") {
+        if let Some(Value::Array(required)) = object.get_mut("required") {
             required.retain(|key| key.as_str().is_none_or(|key| !defaulted.contains_key(key)));
             if required.is_empty() {
                 object.remove("required");
@@ -76,10 +75,10 @@ fn optional_where_defaulted(schema: &mut serde_json::Value, defaults: &serde_jso
 }
 
 fn defaulted_objects(
-    root: &serde_json::Value,
+    root: &Value,
     pointer: &str,
-    defaults: &serde_json::Value,
-    out: &mut Vec<(String, serde_json::Map<String, serde_json::Value>)>,
+    defaults: &Value,
+    out: &mut Vec<(String, serde_json::Map<String, Value>)>,
 ) {
     let Some(defaulted) = defaults.as_object() else {
         return;
@@ -110,10 +109,10 @@ fn defaulted_objects(
 /// schemars renders each variant as a `const`, which has no room for serde's
 /// `alias`: the spellings `Settings` accepts for `bypassPermissions` have to
 /// be added by hand or editors flag them.
-fn admit_permission_mode_aliases(schema: &mut serde_json::Value) {
+fn admit_permission_mode_aliases(schema: &mut Value) {
     let variants = schema
         .pointer_mut("/$defs/PermissionMode/oneOf")
-        .and_then(serde_json::Value::as_array_mut);
+        .and_then(Value::as_array_mut);
     for variant in variants.into_iter().flatten() {
         let Some(object) = variant.as_object_mut() else {
             continue;
@@ -131,7 +130,7 @@ fn admit_permission_mode_aliases(schema: &mut serde_json::Value) {
 /// The top-level keys of one settings file that no setting reads — a typo,
 /// or a key from another tool's settings. `$schema` is the editor's, and is
 /// not reported.
-pub fn unknown_settings_keys(layer: &serde_json::Value, sections: &Sections) -> Vec<String> {
+pub fn unknown_settings_keys(layer: &Value, sections: &Sections) -> Vec<String> {
     let known = known_core_keys();
     let Some(fields) = layer.as_object() else {
         return Vec::new();
@@ -156,6 +155,132 @@ pub(crate) fn core_keys() -> Vec<String> {
 pub(crate) fn known_core_keys() -> &'static [String] {
     static KNOWN: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(core_keys);
     &KNOWN
+}
+
+/// The settings keys a file can hold, read off the published schema:
+/// an object with properties, or a map, is looked into; anything else —
+/// including a value that may be an object or something else — is one key.
+pub(crate) fn schema_keys(root: &Value) -> Vec<Vec<String>> {
+    fn resolve<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
+        while let Some(target) = node.get("$ref").and_then(Value::as_str) {
+            let Some(target) = root.pointer(target.trim_start_matches('#')) else {
+                break;
+            };
+            node = target;
+        }
+        node
+    }
+    fn walk(root: &Value, node: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        let node = resolve(root, node);
+        let branches: Vec<&Value> = ["anyOf", "oneOf", "allOf"]
+            .iter()
+            .flat_map(|b| node.get(*b).and_then(Value::as_array).into_iter().flatten())
+            .map(|b| resolve(root, b))
+            .filter(|b| b.get("type") != Some(&Value::from("null")))
+            .collect();
+        let alternatives = if branches.is_empty() {
+            vec![node]
+        } else {
+            branches
+        };
+        let is_section =
+            |a: &&Value| a.get("properties").is_some() || a.get("additionalProperties").is_some();
+        if !alternatives.iter().all(is_section) {
+            out.push(path.clone());
+            return;
+        }
+        for alternative in alternatives {
+            for (key, inner) in alternative
+                .get("properties")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                path.push(key.clone());
+                walk(root, inner, path, out);
+                path.pop();
+            }
+            match alternative.get("additionalProperties") {
+                Some(inner @ Value::Object(_)) => {
+                    path.push("*".into());
+                    walk(root, inner, path, out);
+                    path.pop();
+                }
+                Some(Value::Bool(true)) => {
+                    path.push("*".into());
+                    out.push(path.clone());
+                    path.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut Vec::new(), &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// What a dotted key names in the settings schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyKind {
+    Unknown,
+    /// An object whose keys are settings of their own.
+    Section,
+    /// One setting, written whole.
+    Value,
+}
+
+/// The settings keys of the schema with the registered sections, to look a
+/// key up in.
+pub struct SchemaKeys(Vec<Vec<String>>);
+
+impl SchemaKeys {
+    pub fn of(sections: &Sections) -> Self {
+        Self(schema_keys(&settings_json_schema(sections)))
+    }
+
+    pub fn kind(&self, path: &[&str]) -> KeyKind {
+        let agrees = |key: &[String]| key.iter().zip(path).all(|(k, p)| k == "*" || k == p);
+        let mut kind = KeyKind::Unknown;
+        for key in &self.0 {
+            if key.len() < path.len() || !agrees(key) {
+                continue;
+            }
+            if key.len() == path.len() {
+                return KeyKind::Value;
+            }
+            kind = KeyKind::Section;
+        }
+        kind
+    }
+
+    /// The keys at or beneath `path` that no setting reads, written out as
+    /// `value` would be: a section's object is looked into key by key.
+    pub fn unknown_in(&self, path: &[&str], value: &Value) -> Vec<String> {
+        match self.kind(path) {
+            KeyKind::Unknown => vec![path.join(".")],
+            KeyKind::Value => Vec::new(),
+            KeyKind::Section => value
+                .as_object()
+                .into_iter()
+                .flatten()
+                .flat_map(|(key, inner)| {
+                    let mut beneath = path.to_vec();
+                    beneath.push(key);
+                    self.unknown_in(&beneath, inner)
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether some setting is at `path` or holds it whole.
+    pub fn holds(&self, path: &[&str]) -> bool {
+        self.0.iter().any(|key| {
+            key.len() <= path.len() && key.iter().zip(path).all(|(k, p)| k == "*" || k == p)
+        })
+    }
 }
 
 #[cfg(test)]

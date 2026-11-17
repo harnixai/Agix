@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+pub mod edit;
 mod egress;
 pub use egress::EgressProxySetting;
 mod engine;
@@ -36,8 +37,12 @@ mod tests;
 
 pub use loaded::LoadedSettings;
 pub use merge::merge_json_values;
-pub use schema::{settings_json_schema, unknown_settings_keys};
+pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
 pub use source::{read_settings_file, FileTiers};
+
+/// The keys only the global tier's files may set; the loader drops them from
+/// every other tier.
+pub const GLOBAL_ONLY_KEYS: &[&str] = &["project_trust", "network"];
 
 /// One settings.json file: the settings it overrides, and the permission rules
 /// it adds to every other tier's.

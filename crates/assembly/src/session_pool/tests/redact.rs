@@ -62,3 +62,26 @@ fn credentials_inside_urls_and_flag_arguments_are_redacted() {
         "{dumped}"
     );
 }
+
+#[test]
+fn every_setting_kept_out_of_settings_json_is_redacted_when_shown() {
+    for pattern in settings::edit::SECRET_PATHS {
+        let segments: Vec<&str> = pattern
+            .split('.')
+            .map(|s| if s == "*" { "any" } else { s })
+            .collect();
+        let leaf = match segments.last() {
+            Some(&"headers") | Some(&"env") => serde_json::json!({"K": "plain-secret-value"}),
+            _ => serde_json::json!("plain-secret-value"),
+        };
+        let mut shown = segments
+            .iter()
+            .rev()
+            .fold(leaf, |inner, key| serde_json::json!({ *key: inner }));
+        redact_settings_secrets(&mut shown);
+        assert!(
+            !shown.to_string().contains("plain-secret-value"),
+            "`{pattern}` is shown in the clear: {shown}"
+        );
+    }
+}

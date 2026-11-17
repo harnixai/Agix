@@ -12,5 +12,5 @@ pub(super) mod phase;
 pub(super) mod redact;
 pub(super) mod scenes;
 pub(super) mod scheduler;
-pub(super) mod settings_files;
+pub(super) mod settings_write;
 pub(super) mod specs;

@@ -2,15 +2,18 @@
 
 use super::*;
 use crate::rpc::methods::config::{
-    ConfigGetParams, ConfigGetProviderParams, ConfigListModelsParams, ConfigSetProviderParams,
+    ConfigGetParams, ConfigGetProviderParams, ConfigListModelsParams, ConfigSetParams,
+    ConfigSetProviderParams,
 };
 use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
-    ConfigTier, ModelList, ProviderConfigView, ProviderPatch, ProviderSaved, SettingsReloaded,
+    ConfigTier, ModelList, ProviderConfigView, ProviderPatch, ProviderSaved, SettingsChange,
+    SettingsReloaded, SettingsWritten,
 };
 
 rpc_methods! {
     "config.get" => get(ConfigGetParams) -> ConfigTier;
+    "config.set" => set(ConfigSetParams) -> SettingsWritten;
     "config.getProvider" => get_provider(ConfigGetProviderParams) -> ProviderConfigView;
     "config.setProvider" => set_provider(ConfigSetProviderParams) -> ProviderSaved;
     "config.listModels" => list_models(ConfigListModelsParams) -> ModelList;
@@ -24,6 +27,26 @@ async fn get(s: &DaemonServer, _: &Call, params: ConfigGetParams) -> Result<Conf
             params.project_root.as_deref(),
             params.tier,
             params.include_secrets,
+        )
+        .await
+}
+
+async fn set(
+    s: &DaemonServer,
+    _: &Call,
+    params: ConfigSetParams,
+) -> Result<SettingsWritten, PoolError> {
+    let (project_root, scene) = s.target_of(params.target);
+    s.pool
+        .set_settings(
+            project_root.as_deref(),
+            &scene,
+            SettingsChange {
+                tier: params.tier,
+                changes: params.changes,
+                dry_run: params.dry_run,
+                if_revision: params.if_revision,
+            },
         )
         .await
 }
@@ -80,8 +103,7 @@ async fn set_provider(
 }
 
 /// Re-reads all three settings.json tiers from disk as they are, for a
-/// person (or another process) who edited a file by hand; the same
-/// `apply_reloaded_settings` as `config.setProvider`.
+/// person (or another process) who edited a file by hand.
 async fn reload(
     s: &DaemonServer,
     _: &Call,

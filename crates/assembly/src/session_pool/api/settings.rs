@@ -18,16 +18,18 @@ pub enum ConfigTierName {
     Effective,
 }
 
-/// Which settings layer `config.setProvider` writes.
+/// Which settings layer a write goes to.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderTier {
-    #[default]
-    Project,
+pub enum SettingsTier {
     /// The state root's own, under every scene and project.
     Global,
+    /// The scene's own directory, under every project of that scene.
+    Scene,
+    #[default]
+    Project,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -38,8 +40,97 @@ pub struct ConfigTier {
     /// The tier's settings file as it sits on disk (`null` when it has none),
     /// or the merged result for `effective`.
     pub settings: serde_json::Value,
+    /// The tier's `settings.local.json` (`null` when it has none); absent for
+    /// `effective`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<serde_json::Value>,
+    /// The tier's two files as they are now, for `config.set`'s
+    /// `if_revision`; absent for `effective`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
     /// The deployment's managed layer; only `effective` has one.
     pub managed: serde_json::Value,
+}
+
+/// What `config.set` is asked to write.
+#[derive(Debug, Clone)]
+pub struct SettingsChange {
+    pub tier: SettingsTier,
+    /// Dotted key to its new value; `null` removes the key from the tier.
+    pub changes: serde_json::Map<String, serde_json::Value>,
+    pub dry_run: bool,
+    pub if_revision: Option<String>,
+}
+
+/// Why one key of a settings write is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RejectKind {
+    /// Not a dotted key, or overlapping another key of the same write.
+    BadPath,
+    UnknownKey,
+    InvalidValue,
+    /// A project that is not trusted may only add and tighten.
+    RequiresTrust,
+    /// Read from the global tier only.
+    NotAtTier,
+    /// Written by another method, named in `method`.
+    UseMethod,
+    /// Not written over RPC at all.
+    NotWritable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SettingRejected {
+    pub key: String,
+    pub kind: RejectKind,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+impl SettingRejected {
+    pub fn new(key: impl Into<String>, kind: RejectKind, reason: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            kind,
+            reason: reason.into(),
+            method: None,
+        }
+    }
+}
+
+pub(super) fn rejected_summary(rejected: &[SettingRejected]) -> String {
+    rejected
+        .iter()
+        .map(|r| format!("`{}`: {}", r.key, r.reason))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// What `config.set` wrote, or with `dry_run` would write.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SettingsWritten {
+    pub tier: SettingsTier,
+    pub dry_run: bool,
+    pub written_to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets_written_to: Option<String>,
+    /// The keys written; empty when something was refused.
+    pub changed: Vec<String>,
+    /// Only a `dry_run` reports refusals here; a write refuses with an error.
+    pub rejected: Vec<SettingRejected>,
+    /// Each key's value in the pair's merged settings afterwards, credentials
+    /// redacted.
+    pub effective: serde_json::Map<String, serde_json::Value>,
+    /// The keys written whose value in the pair's merged settings is not what
+    /// was written: a higher tier, the host or the managed layer sets them.
+    pub overridden: Vec<String>,
+    /// The tier's revision after the write (now, for `dry_run`).
+    pub revision: String,
+    #[serde(flatten)]
+    pub reloaded: SettingsReloaded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -99,7 +190,7 @@ pub struct SettingsReloaded {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderSaved {
-    pub tier: ProviderTier,
+    pub tier: SettingsTier,
     /// Nothing was written: `written_to`, `secrets_written_to` and the rest
     /// are what the write would have done.
     pub dry_run: bool,
@@ -115,7 +206,7 @@ pub struct ProviderSaved {
 /// What `set_provider` is asked to write.
 #[derive(Debug, Clone)]
 pub struct ProviderPatch {
-    pub tier: ProviderTier,
+    pub tier: SettingsTier,
     pub dry_run: bool,
     pub provider_id: String,
     pub delete: bool,

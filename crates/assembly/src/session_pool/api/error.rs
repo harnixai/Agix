@@ -95,6 +95,20 @@ pub enum PoolError {
     /// waits; nothing was written.
     #[error("{0}")]
     SettingsLocked(String),
+    /// `if_revision` names a revision the tier no longer has; nothing was
+    /// written.
+    #[error(
+        "the tier changed since revision was read; it is now {revision}, and nothing was written"
+    )]
+    SettingsConflict { revision: String },
+    /// Keys of a settings write that cannot be written; nothing was.
+    /// `untrusted_only`: each is refused only because the project is not
+    /// trusted.
+    #[error("nothing was written: {}", super::settings::rejected_summary(.rejected))]
+    SettingsRejected {
+        untrusted_only: bool,
+        rejected: Vec<super::SettingRejected>,
+    },
     /// A provider endpoint that does not list its models.
     #[error("{0}")]
     ModelsUnsupported(String),

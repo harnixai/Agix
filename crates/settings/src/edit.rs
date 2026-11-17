@@ -1,0 +1,375 @@
+//! 按层改设置文件的纯逻辑：一层是 `settings.json` 加旁边的 `settings.local.json`，
+//! 对它们按键路径套用改动（凭据字段只落 local）、算这一层内容的 revision、逐键判
+//! 一个值放不放得进它的设置。加锁、写盘、重载与信任判定由调用方做——`config.set`、
+//! `config.setProvider`、`mcp.*` 都经这里改文件。
+
+use serde_json::{Map, Value};
+
+use crate::merge::{fit, merge_json_values, read_permission_rules};
+use crate::section::Sections;
+
+/// The settings that hold credentials, with `*` for one map key: kept out of
+/// the committed `settings.json` by every writer.
+pub const SECRET_PATHS: &[&str] = &[
+    "providers.*.api_key",
+    "mcp_servers.*.headers",
+    "mcp_servers.*.env",
+    "model.auth_token",
+];
+
+/// The lists each file adds to the other files' rather than replacing them,
+/// so a tier's two files are edited apart: a change reaches `settings.json`
+/// only.
+pub const CONCATENATED_KEYS: &[&str] = &["permission_rules", "project_trust.trusted"];
+
+/// A dotted settings key, one segment per object level.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KeyPath(Vec<String>);
+
+impl KeyPath {
+    /// Segments are not empty; `*` and array indexes are not keys.
+    pub fn parse(dotted: &str) -> Result<Self, String> {
+        let segments: Vec<String> = dotted.split('.').map(String::from).collect();
+        if segments.iter().any(String::is_empty) {
+            return Err(format!("`{dotted}` is not a dotted settings key"));
+        }
+        if segments.iter().any(|s| s == "*" || s.contains('[')) {
+            return Err(format!(
+                "`{dotted}`: wildcards and list indexes are not keys; write the whole list or map"
+            ));
+        }
+        Ok(Self(segments))
+    }
+
+    /// A key whose segments are given, such as a map entry with a `.` in its
+    /// name.
+    pub fn new<S: Into<String>>(segments: impl IntoIterator<Item = S>) -> Self {
+        Self(segments.into_iter().map(Into::into).collect())
+    }
+
+    pub fn segments(&self) -> Vec<&str> {
+        self.0.iter().map(String::as_str).collect()
+    }
+
+    pub fn dotted(&self) -> String {
+        self.0.join(".")
+    }
+
+    /// Whether `other` is this key or beneath it.
+    pub fn contains(&self, other: &KeyPath) -> bool {
+        other.0.starts_with(&self.0)
+    }
+
+    pub fn overlaps(&self, other: &KeyPath) -> bool {
+        self.contains(other) || other.contains(self)
+    }
+
+    fn is_concatenated(&self) -> bool {
+        CONCATENATED_KEYS.contains(&self.dotted().as_str())
+    }
+
+    /// The parts of a value at this key that are credentials, relative to
+    /// it: `[]` when the key itself is one.
+    fn secrets_beneath(&self) -> Vec<Vec<String>> {
+        SECRET_PATHS
+            .iter()
+            .filter_map(|pattern| {
+                let pattern: Vec<&str> = pattern.split('.').collect();
+                let shared = pattern.len().min(self.0.len());
+                let agrees = pattern[..shared]
+                    .iter()
+                    .zip(&self.0)
+                    .all(|(p, k)| *p == "*" || p == k);
+                agrees.then(|| pattern[shared..].iter().map(|s| s.to_string()).collect())
+            })
+            .collect()
+    }
+}
+
+/// One change to a tier.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditOp {
+    /// The tier holds `value` at the key, replacing what either file held
+    /// there.
+    Set(KeyPath, Value),
+    /// Neither file holds the key.
+    Remove(KeyPath),
+    /// `value` merged key by key into what `settings.json` holds at the key;
+    /// what `settings.local.json` holds beside it stays unless `value` sets
+    /// a credential.
+    Merge(KeyPath, Value),
+}
+
+impl EditOp {
+    pub fn path(&self) -> &KeyPath {
+        match self {
+            Self::Set(path, _) | Self::Remove(path) | Self::Merge(path, _) => path,
+        }
+    }
+}
+
+/// A tier's two files as objects.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TierFiles {
+    pub shared: Map<String, Value>,
+    pub local: Map<String, Value>,
+}
+
+impl TierFiles {
+    /// Whether either file holds `path`.
+    pub fn declares(&self, path: &KeyPath) -> bool {
+        let segments = path.segments();
+        [&self.shared, &self.local]
+            .iter()
+            .any(|file| get(file, &segments).is_some())
+    }
+}
+
+/// Apply `ops` in order, credentials into `local`; credentials `shared`
+/// already held beneath a key an op names move to `local` too, unless
+/// `local` has its own. Whether `local` changed.
+pub fn apply(files: &mut TierFiles, ops: &[EditOp]) -> bool {
+    let local_before = files.local.clone();
+    let ops: Vec<&EditOp> = ops.iter().filter(|op| !op.path().0.is_empty()).collect();
+    for op in &ops {
+        match op {
+            EditOp::Set(path, value) => set(files, path, value.clone()),
+            EditOp::Remove(path) => {
+                take(&mut files.shared, &path.segments());
+                if !path.is_concatenated() {
+                    take(&mut files.local, &path.segments());
+                }
+            }
+            EditOp::Merge(path, value) => merge(files, path, value.clone()),
+        }
+    }
+    for op in &ops {
+        move_secrets_out(files, op.path());
+    }
+    files.local != local_before
+}
+
+fn set(files: &mut TierFiles, path: &KeyPath, mut value: Value) {
+    let segments = path.segments();
+    if path.is_concatenated() {
+        put(&mut files.shared, &segments, value);
+        return;
+    }
+    take(&mut files.local, &segments);
+    let secrets = path.secrets_beneath();
+    if secrets.iter().any(Vec::is_empty) {
+        take(&mut files.shared, &segments);
+        put(&mut files.local, &segments, value);
+        return;
+    }
+    let found = extract_all(&mut value, &secrets);
+    put(&mut files.shared, &segments, value);
+    if let Some(found) = found {
+        put(&mut files.local, &segments, found);
+    }
+}
+
+fn merge(files: &mut TierFiles, path: &KeyPath, mut value: Value) {
+    let segments = path.segments();
+    let secrets = path.secrets_beneath();
+    let found = if secrets.iter().any(Vec::is_empty) {
+        Some(std::mem::take(&mut value))
+    } else {
+        let found = extract_all(&mut value, &secrets);
+        merge_json_values(slot(&mut files.shared, &segments), value);
+        found
+    };
+    if let Some(found) = found {
+        merge_json_values(slot(&mut files.local, &segments), found);
+    }
+}
+
+fn move_secrets_out(files: &mut TierFiles, path: &KeyPath) {
+    let segments = path.segments();
+    let secrets = path.secrets_beneath();
+    let found = if secrets.iter().any(Vec::is_empty) {
+        take(&mut files.shared, &segments)
+    } else {
+        let Some(held) = get_mut(&mut files.shared, &segments) else {
+            return;
+        };
+        extract_all(held, &secrets)
+    };
+    if let Some(found) = found {
+        merge_absent(slot(&mut files.local, &segments), found);
+    }
+}
+
+/// Take every part of `value` a relative credential pattern names out of
+/// it, as one tree of the same shape.
+fn extract_all(value: &mut Value, patterns: &[Vec<String>]) -> Option<Value> {
+    let mut found: Option<Value> = None;
+    for pattern in patterns {
+        if let Some(part) = extract(value, pattern) {
+            match &mut found {
+                Some(tree) => merge_json_values(tree, part),
+                None => found = Some(part),
+            }
+        }
+    }
+    found
+}
+
+fn extract(value: &mut Value, pattern: &[String]) -> Option<Value> {
+    let (first, rest) = pattern.split_first()?;
+    let fields = value.as_object_mut()?;
+    let keys: Vec<String> = if first == "*" {
+        fields.keys().cloned().collect()
+    } else {
+        fields
+            .contains_key(first)
+            .then(|| first.clone())
+            .into_iter()
+            .collect()
+    };
+    let mut out = Map::new();
+    for key in keys {
+        let part = if rest.is_empty() {
+            fields.remove(&key)
+        } else {
+            fields.get_mut(&key).and_then(|child| extract(child, rest))
+        };
+        if let Some(part) = part {
+            out.insert(key, part);
+        }
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// `over` merged into `base`, keeping every value `base` already has.
+fn merge_absent(base: &mut Value, over: Value) {
+    match (base, over) {
+        (Value::Object(base), Value::Object(over)) => {
+            for (key, value) in over {
+                match base.get_mut(&key) {
+                    Some(existing) => merge_absent(existing, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base @ Value::Null, over) => *base = over,
+        _ => {}
+    }
+}
+
+fn get<'a>(file: &'a Map<String, Value>, segments: &[&str]) -> Option<&'a Value> {
+    let (first, rest) = segments.split_first()?;
+    let value = file.get(*first)?;
+    if rest.is_empty() {
+        return Some(value);
+    }
+    get(value.as_object()?, rest)
+}
+
+fn get_mut<'a>(file: &'a mut Map<String, Value>, segments: &[&str]) -> Option<&'a mut Value> {
+    let (first, rest) = segments.split_first()?;
+    let value = file.get_mut(*first)?;
+    if rest.is_empty() {
+        return Some(value);
+    }
+    get_mut(value.as_object_mut()?, rest)
+}
+
+/// The value at `segments`, made: each level above it an object, replacing
+/// what was not one; `null` where there was nothing.
+fn slot<'a>(file: &'a mut Map<String, Value>, segments: &[&str]) -> &'a mut Value {
+    let Some((first, rest)) = segments.split_first() else {
+        unreachable!("`apply` passes no op with an empty key")
+    };
+    let value = file.entry(first.to_string()).or_insert(Value::Null);
+    if rest.is_empty() {
+        return value;
+    }
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+    match value {
+        Value::Object(inner) => slot(inner, rest),
+        _ => unreachable!("made an object above"),
+    }
+}
+
+fn put(file: &mut Map<String, Value>, segments: &[&str], value: Value) {
+    *slot(file, segments) = value;
+}
+
+/// Remove the value at `segments`, and each object above it left empty.
+fn take(file: &mut Map<String, Value>, segments: &[&str]) -> Option<Value> {
+    let (first, rest) = segments.split_first()?;
+    if rest.is_empty() {
+        return file.remove(*first);
+    }
+    let inner = file.get_mut(*first)?.as_object_mut()?;
+    let taken = take(inner, rest)?;
+    if inner.is_empty() {
+        file.remove(*first);
+    }
+    Some(taken)
+}
+
+/// A tier's content as of its two files' bytes (a missing file is empty):
+/// what `if_revision` is compared with.
+pub fn revision(shared: &[u8], local: &[u8]) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for (tag, bytes) in [(b's', shared), (b'l', local)] {
+        let length = (bytes.len() as u64).to_le_bytes();
+        for byte in std::iter::once(&tag).chain(&length).chain(bytes) {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(PRIME);
+        }
+    }
+    format!("r1:{hash:016x}")
+}
+
+/// Whether `value` at `path`, merged over `base` (a whole settings object
+/// that reads), still reads as settings; why not. `permission_rules` is read
+/// rule by rule, as the loader reads it, and a program-only
+/// `permission_mode` is refused rather than reset.
+pub fn fits(
+    base: &Value,
+    path: &KeyPath,
+    value: &Value,
+    sections: &Sections,
+) -> Result<(), String> {
+    match path.dotted().as_str() {
+        "permission_rules" => {
+            let (_, unread) = read_permission_rules(value.clone());
+            if unread.is_empty() {
+                return Ok(());
+            }
+            let problems: Vec<String> = unread.iter().map(|(k, e)| format!("{k}: {e}")).collect();
+            return Err(problems.join("; "));
+        }
+        "permission_mode" => {
+            if let Ok(mode) =
+                serde_json::from_value::<base::permission::PermissionMode>(value.clone())
+            {
+                if !mode.is_user_settable() {
+                    return Err(format!(
+                        "permission mode {value} is program-only and cannot be set in a settings file"
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    let nested = path.0.iter().rev().fold(
+        value.clone(),
+        |inner, key| serde_json::json!({ key: inner }),
+    );
+    let mut candidate = base.clone();
+    merge_json_values(&mut candidate, nested);
+    fit(&candidate, sections)
+}
+
+#[cfg(test)]
+mod tests;

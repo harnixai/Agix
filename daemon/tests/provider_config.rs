@@ -473,3 +473,44 @@ async fn get_provider_reports_whether_the_credential_has_a_value_and_never_the_v
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+/// `tier: "scene"` writes the named scene's own settings, which that scene's
+/// pairs read and no other scene's do.
+#[tokio::test]
+async fn set_provider_writes_the_scene_tier_of_the_scene_it_names() {
+    let (_server, sock, dir, handle) = start_server().await;
+    let saved = call(
+        &sock,
+        "config.setProvider",
+        serde_json::json!({
+            "tier": "scene", "scene": "harnix", "provider_id": "scened",
+            "config": {"api_type": "anthropic", "api_key": "k"},
+            "default_provider": "scened"
+        }),
+    )
+    .await;
+    let scene_dir = dir.path().join("scenes").join("harnix");
+    assert_eq!(saved["tier"], "scene", "{saved}");
+    assert_eq!(
+        saved["written_to"],
+        serde_json::json!(scene_dir.join("settings.json").display().to_string())
+    );
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(scene_dir.join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(written["default_provider"], "scened");
+    assert!(written["providers"]["scened"].get("api_key").is_none());
+
+    let get = |scene: &str| {
+        call(
+            &sock,
+            "config.getProvider",
+            serde_json::json!({"scene": scene}),
+        )
+    };
+    assert_eq!(get("harnix").await["default_provider"], "scened");
+    assert!(get("code").await["default_provider"].is_null());
+
+    _server.shutdown_token().cancel();
+    let _ = handle.await;
+}

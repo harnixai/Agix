@@ -140,6 +140,47 @@ struct Watching {
     own: std::sync::Mutex<Vec<WatchToken>>,
 }
 
+/// Everything [`read_pair_as_if`] needs for one pair, taken from the pool.
+pub(in crate::session_pool) struct PairReader {
+    global_root: PathBuf,
+    scene_root: PathBuf,
+    project: PathBuf,
+    layout: base::paths::Layout,
+    scene: String,
+    default_model: String,
+    max_tokens_fallback: u32,
+}
+
+impl PairReader {
+    /// The pair's settings with each `(path, value)` in place of that file;
+    /// neither the host's nor the managed layer.
+    pub(in crate::session_pool) fn read_as_if(
+        &self,
+        in_memory: Vec<(PathBuf, serde_json::Value)>,
+    ) -> LoadedSettings {
+        read_pair_as_if(
+            in_memory,
+            self.global_root.clone(),
+            self.scene_root.clone(),
+            &self.project,
+            &self.layout,
+            &self.scene,
+            &self.default_model,
+            self.max_tokens_fallback,
+        )
+    }
+
+    /// The pair's directories, as the read above takes its files from them.
+    pub(in crate::session_pool) fn config_paths(&self) -> base::paths::ConfigPaths {
+        base::paths::ConfigPaths::of(
+            self.global_root.clone(),
+            self.scene_root.clone(),
+            Some(&self.project),
+            self.layout.clone(),
+        )
+    }
+}
+
 /// The host's settings for this daemon's own pair as the pool serves them:
 /// read again for `cwd` when the host read them for another project, with
 /// what the host changed in memory and `managed` on top, so the pair's project
@@ -257,41 +298,36 @@ impl BindingCache {
         self.layers.over(loaded, own)
     }
 
-    /// What `project`'s pair would be read as with each `(path, value)` of
-    /// `in_memory` in place of that settings file — the host's and managed
-    /// layers on top — and the routing it would build, from nothing it was
-    /// served by before. Nothing on disk, in the cache or in the pool's own
-    /// settings changes.
-    pub(in crate::session_pool) async fn as_if(
+    /// What reads `project`'s pair from disk with some of its files replaced,
+    /// for a caller on a blocking thread.
+    pub(in crate::session_pool) async fn pair_reader(
         &self,
         project: &Path,
         scene: &str,
-        in_memory: Vec<(PathBuf, serde_json::Value)>,
+    ) -> PairReader {
+        let startup_scene = self.startup_scene().await;
+        PairReader {
+            global_root: self.paths.global_root(),
+            scene_root: self.scene_root(scene, &startup_scene),
+            project: project.to_path_buf(),
+            layout: self.paths.layout(),
+            scene: scene.to_string(),
+            default_model: self.settings.read().await.values.model.model_name.clone(),
+            max_tokens_fallback: self.layers.max_tokens_fallback,
+        }
+    }
+
+    /// `loaded`, read by [`PairReader::read_as_if`], with the host's and
+    /// managed layers on top, and the routing it would build from nothing it
+    /// was served by before. Nothing in the cache or in the pool's own
+    /// settings changes.
+    pub(in crate::session_pool) async fn routed_as_if(
+        &self,
+        project: &Path,
+        scene: &str,
+        loaded: LoadedSettings,
     ) -> (LoadedSettings, binding::RoutingReport) {
         let own = self.is_own_pair(Some(project), scene).await;
-        let startup_scene = self.startup_scene().await;
-        let default_model = self.settings.read().await.values.model.model_name.clone();
-        let (global_root, scene_root, scene, project, fallback) = (
-            self.paths.global_root(),
-            self.scene_root(scene, &startup_scene),
-            scene.to_string(),
-            project.to_path_buf(),
-            self.layers.max_tokens_fallback,
-        );
-        let layout = self.paths.layout();
-        let loaded = off_the_runtime(move || {
-            read_pair_as_if(
-                in_memory,
-                global_root,
-                scene_root,
-                &project,
-                &layout,
-                &scene,
-                &default_model,
-                fallback,
-            )
-        })
-        .await;
         let loaded = self.layers.over(loaded, own);
         let credentials = self.credentials.clone();
         off_the_runtime(move || {
@@ -595,6 +631,15 @@ impl BindingCache {
                 WatchTarget::Skills => binding.reload_skills(),
                 WatchTarget::Agents => binding.refresh_agent_types(&plugin_agent_types),
                 _ => {}
+            }
+        }
+    }
+
+    /// See [`WatchHub::adopt_written`].
+    pub(in crate::session_pool) fn adopt_written(&self, paths: &[PathBuf]) {
+        if let Some(hub) = self.watch.hub.as_ref() {
+            for path in paths {
+                hub.adopt_written(path);
             }
         }
     }

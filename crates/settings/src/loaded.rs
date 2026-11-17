@@ -388,11 +388,10 @@ impl LayerFold<'_> {
         let mut layer_json = layer.value;
         if let Some(obj) = layer_json.as_object_mut() {
             obj.remove("paths");
-            if !is_global && obj.remove("project_trust").is_some() {
-                tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, "project_trust is read from the global tier only, ignoring it here");
-            }
-            if !is_global && obj.remove("network").is_some() {
-                tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, "network is read from the global and managed tiers only, ignoring it here");
+            for key in crate::GLOBAL_ONLY_KEYS {
+                if !is_global && obj.remove(*key).is_some() {
+                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "this key is read from the global tier only, ignoring it here");
+                }
             }
             if is_own_project {
                 for (name, server) in obj

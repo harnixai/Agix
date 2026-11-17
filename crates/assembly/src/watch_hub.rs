@@ -226,6 +226,19 @@ impl WatchHub {
         self.inner.changes_tx.subscribe()
     }
 
+    /// Take what `path` holds now as what every key watching it last saw:
+    /// the pool wrote it and has already acted on it, so its own write does
+    /// not come back as a change. A later write, by anyone, still does.
+    pub fn adopt_written(&self, path: &Path) {
+        let actual = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let now = content_hash(&actual);
+        for ((_, watched), seen) in self.inner.file_contents.lock().unwrap().iter_mut() {
+            if *watched == actual {
+                *seen = now;
+            }
+        }
+    }
+
     /// Number of distinct paths currently registered with `notify` — the
     /// quantity docs/ARCHITECTURE.md §3.2.1 bounds at `1 + M + P`. Exposed for
     /// tests to assert the O(1+M+P) invariant directly rather than only
@@ -640,6 +653,30 @@ mod tests {
         std::fs::write(&file, "{\"model\":\"b\"}").unwrap();
         let got = tokio::time::timeout(settle(), rx.recv()).await;
         assert_eq!(got.unwrap().unwrap(), key);
+    }
+
+    #[tokio::test]
+    async fn a_write_the_pool_adopted_is_not_a_change_and_the_next_one_is() {
+        let hub = WatchHub::new().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, "{}").unwrap();
+        let keys = [Tier::Global, Tier::Scene("code".into())].map(|tier| WatchKey {
+            tier,
+            target: WatchTarget::Settings,
+        });
+        let _tokens = keys.clone().map(|key| hub.subscribe(key, &file));
+
+        std::fs::write(&file, r#"{"language":"x"}"#).unwrap();
+        hub.adopt_written(&file);
+        for key in &keys {
+            assert!(!hub.inner.has_changed(key), "{key:?}");
+        }
+
+        std::fs::write(&file, r#"{"language":"y"}"#).unwrap();
+        for key in &keys {
+            assert!(hub.inner.has_changed(key), "{key:?}");
+        }
     }
 
     #[tokio::test]

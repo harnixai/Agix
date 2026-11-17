@@ -6,7 +6,8 @@ impl SessionPool {
     /// Refuses a write to `project_root`'s settings that would not land in a
     /// project's own tier: a `.agix` that resolves to the global or scene
     /// directory (a link from a repository, or a project rooted at `$HOME`)
-    /// would put it in every project, so that is `INVALID_PARAMS`. A project
+    /// would put it in every project, and one linked into another project
+    /// would change that project's, so both are `INVALID_PARAMS`. A project
     /// that is not trusted is refused with `PROJECT_UNTRUSTED`: `what` would
     /// not take effect, and `instead` is where it would.
     pub(in crate::session_pool) async fn trusted_project_tier(
@@ -16,19 +17,8 @@ impl SessionPool {
         what: &str,
         instead: &str,
     ) -> Result<(), PoolError> {
-        let startup_scene = self.bindings.startup_scene().await;
-        let written_to = self.bindings.settings_path_of(project_root);
-        if !settings::trust::is_own_project_dir(
-            written_to.parent().unwrap_or(&written_to),
-            &self.bindings.paths().global_root(),
-            &self.bindings.scene_root(scene_id, &startup_scene),
-        ) {
-            return Err(PoolError::InvalidRequest(format!(
-                "{} has no settings tier of its own (its `{}` is the global or scene directory), so {what}; {instead}",
-                project_root.unwrap_or(self.cwd()).display(),
-                self.bindings.paths().layout().project_dir_name()
-            )));
-        }
+        self.own_project_tier(project_root, scene_id, what, instead)
+            .await?;
         let target = project_root.unwrap_or(self.cwd());
         let decided = settings::trust::ProjectTrustSettings::read_global(
             &self.bindings.paths().global_root(),
@@ -38,6 +28,40 @@ impl SessionPool {
             return Err(PoolError::ProjectUntrusted(format!(
                 "{} is not trusted, so {what}; trust it first (project.trust) or {instead}",
                 target.display()
+            )));
+        }
+        Ok(())
+    }
+
+    /// The `INVALID_PARAMS` half of [`Self::trusted_project_tier`].
+    pub(in crate::session_pool) async fn own_project_tier(
+        &self,
+        project_root: Option<&Path>,
+        scene_id: &str,
+        what: &str,
+        instead: &str,
+    ) -> Result<(), PoolError> {
+        let startup_scene = self.bindings.startup_scene().await;
+        let written_to = self.bindings.settings_path_of(project_root);
+        let dir = written_to.parent().unwrap_or(&written_to);
+        if !settings::trust::is_own_project_dir(
+            dir,
+            &self.bindings.paths().global_root(),
+            &self.bindings.scene_root(scene_id, &startup_scene),
+        ) {
+            return Err(PoolError::InvalidRequest(format!(
+                "{} has no settings tier of its own (its `{}` is the global or scene directory), so {what}; {instead}",
+                project_root.unwrap_or(self.cwd()).display(),
+                self.bindings.paths().layout().project_dir_name()
+            )));
+        }
+        if !settings::trust::stays_in_its_project(dir) {
+            return Err(PoolError::InvalidRequest(format!(
+                "{}'s `{}` resolves outside the project, to {}: a write to its settings would change that directory's",
+                project_root.unwrap_or(self.cwd()).display(),
+                self.bindings.paths().layout().project_dir_name(),
+                dir.canonicalize()
+                    .map_or_else(|_| "nowhere".to_string(), |d| d.display().to_string())
             )));
         }
         Ok(())

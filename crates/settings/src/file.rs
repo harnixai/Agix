@@ -1,6 +1,6 @@
 //! Read-modify-write of the settings files the engine changes itself —
-//! `project.trust`, `config.setProvider`, `mcp.addServer` / `updateServer`
-//! and the "always allow" answer to a permission prompt.
+//! `project.trust`, `config.set`, `config.setProvider`, `mcp.addServer` /
+//! `updateServer` and the "always allow" answer to a permission prompt.
 //!
 //! [`SettingsDir::lock`] holds one tier's directory against every other
 //! writer: other threads of this process, and, on unix, other processes
@@ -115,10 +115,17 @@ impl SettingsDir {
 /// What [`SettingsDir::read`] reads, without holding the directory or creating
 /// it: for a caller that only looks at what a write would start from.
 pub fn read_object(path: &Path) -> Result<Map<String, Value>, SettingsFileError> {
+    read_object_and_bytes(path).map(|(_, fields)| fields)
+}
+
+/// [`read_object`], and the bytes it was read from (none for a missing file).
+pub fn read_object_and_bytes(
+    path: &Path,
+) -> Result<(Vec<u8>, Map<String, Value>), SettingsFileError> {
     refuse_symlink(path)?;
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), Map::new())),
         Err(source) => {
             return Err(SettingsFileError::Io {
                 path: path.to_path_buf(),
@@ -127,7 +134,7 @@ pub fn read_object(path: &Path) -> Result<Map<String, Value>, SettingsFileError>
         }
     };
     if bytes.iter().all(u8::is_ascii_whitespace) {
-        return Ok(Map::new());
+        return Ok((bytes, Map::new()));
     }
     let parsed: Value =
         serde_json::from_slice(&bytes).map_err(|source| SettingsFileError::NotJson {
@@ -135,7 +142,7 @@ pub fn read_object(path: &Path) -> Result<Map<String, Value>, SettingsFileError>
             source,
         })?;
     match parsed {
-        Value::Object(fields) => Ok(fields),
+        Value::Object(fields) => Ok((bytes, fields)),
         _ => Err(SettingsFileError::NotObject {
             path: path.to_path_buf(),
         }),

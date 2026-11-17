@@ -34,7 +34,7 @@ impl SessionPool {
     /// The pool's own `(cwd, startup scene)` pair takes its settings from the
     /// hot-swappable copy `config.reload` writes, rather than loading them
     /// again — but it is cached like every other pair, and
-    /// `apply_reloaded_settings` drops it so the next session picks the new
+    /// `settings_tier_changed` drops it so the next session picks the new
     /// ones up.
     pub(in crate::session_pool) async fn binding_for(
         &self,

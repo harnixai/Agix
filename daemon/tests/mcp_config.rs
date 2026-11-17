@@ -182,7 +182,7 @@ async fn mcp_add_server_keeps_headers_and_env_out_of_the_committed_settings() {
 /// Asked rather than reconstructed: a path built from `CARGO_MANIFEST_DIR`
 /// guesses the profile and misses a `CARGO_TARGET_DIR` override, and this
 /// test is meant to survive both.
-fn toy_mcp_server() -> PathBuf {
+pub(crate) fn toy_mcp_server() -> PathBuf {
     let out = std::process::Command::new(env!("CARGO"))
         .args([
             "build",

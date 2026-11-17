@@ -85,15 +85,11 @@ impl SessionPool {
                 Tier::Scene(scene) => scene.clone(),
                 _ => self.scene_id().to_string(),
             };
-            let reconciled = (Some(self.cwd().to_path_buf()), scene.clone());
-            self.forget_mcp_built_from(&key.tier, Some(&reconciled))
-                .await;
             self.reload_settings_from(None, &scene, Some(&key.tier))
                 .await;
         } else {
             info!(tier = ?key.tier, "settings changed on disk");
-            self.forget_mcp_built_from(&key.tier, None).await;
-            self.invalidate_bindings(Some(&key.tier)).await;
+            self.tier_changed(Some(&key.tier), None, true).await;
         }
     }
 

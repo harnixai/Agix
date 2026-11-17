@@ -3,6 +3,7 @@
 
 mod background;
 mod bindings;
+mod config_set;
 mod create;
 mod doctor;
 mod given_id;
@@ -22,6 +23,7 @@ mod search_rpc;
 mod session_import;
 mod session_ops;
 pub(super) mod settings_reload;
+mod settings_write;
 mod subscribers;
 mod tasks;
 mod teardown;

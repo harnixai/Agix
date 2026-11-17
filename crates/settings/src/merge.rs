@@ -104,7 +104,7 @@ fn merge_fitting_at(
     any_fit
 }
 
-fn fit(candidate: &serde_json::Value, sections: &Sections) -> Result<(), String> {
+pub(crate) fn fit(candidate: &serde_json::Value, sections: &Sections) -> Result<(), String> {
     use serde::Deserialize as _;
     Settings::deserialize(candidate).map_err(|e| e.to_string())?;
     for spec in sections.iter() {

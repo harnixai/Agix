@@ -950,6 +950,33 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
     // particular state of the routing, so only its shape is claimed here.
     // A provider written into the project's own settings needs the project
     // trusted first, which is what a host does.
+    let set = daemon
+        .call(
+            "config.set",
+            serde_json::json!({"tier": "global", "changes": {
+                "permission_mode": "acceptEdits",
+                "sandbox.allowed_domains": ["github.com"],
+                "telemetry_url": null,
+                "model.auth_token": "tok-doc-example"
+            }}),
+        )
+        .await;
+    assert_documented(
+        "config.set",
+        &shape_of(documented_result(&doc, "config.set")),
+        &set,
+    );
+    let tier = daemon
+        .call(
+            "config.get",
+            serde_json::json!({"scene": "code", "tier": "global"}),
+        )
+        .await;
+    assert_documented(
+        "config.get",
+        &shape_of(documented_results(&doc, "config.get")[1].clone()),
+        &tier,
+    );
     daemon
         .call(
             "project.trust",

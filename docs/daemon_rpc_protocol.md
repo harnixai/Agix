@@ -2981,7 +2981,16 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 { "scene": "code", "project_root": null, "tier": "effective",
   "settings": { },
   "managed": null }
+// ← result(tier 是 global / scene / project 时)
+{ "scene": "code", "project_root": null, "tier": "global",
+  "settings": { },                // 这一层的 settings.json
+  "local": null,                  // 同一层的 settings.local.json,没有就是 null
+  "revision": "r1:9f2c…",         // 这一层两个文件现在的样子,给 config.set 的 if_revision
+  "managed": null }
 ```
+
+`tier: "scene"` 读的是加载器为这个场景读的那个目录(daemon 启动时的场景是它的配置根,其余场景是
+全局层下的 `scenes/<id>`)。`local` 与 `revision` 只在单层读时有;文件不存在时 `revision` 按空文件算。
 
 `managed` 只在 `tier: "effective"` 时有内容:部署方的 managed 层
 (`{ "origin", "permission_rules", "disable_bypass_permissions_mode" }`,不能执行时另有
@@ -2990,7 +2999,94 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 
 **该层没有文件时 `settings` 是 `null`,不是 `{}`** —— "这层没配"和"这层配了个空的"
 是两种状态,配置界面得能区分。`tier: "project"` 而没给 `project_root` 同理。
-`tier` 取值非法 → `INVALID_PARAMS`。脱敏规则同 `scene.describe`。
+`tier` 取值非法 → `INVALID_PARAMS`。脱敏规则同 `scene.describe`,`local` 也一样脱敏。
+
+#### `config.set`
+
+把若干个设置键写进指定的一层,宿主不必自己读改写设置文件、也不必自备目录锁。
+
+```jsonc
+// → params
+{ "tier": "global",                    // 必填:global | scene | project
+  "scene": "code",                     // 可选,省略 = 这个 daemon 的场景;tier:"scene" 时写的就是它那一层
+  "project_root": "/Users/x/repo",     // 可选,省略 = 这个 daemon 自己的项目;null → INVALID_PARAMS
+  "changes": {                         // 必填,1 到 256 个键
+    "permission_mode": "acceptEdits",
+    "sandbox.allowed_domains": ["github.com"],
+    "telemetry_url": null },           // null = 从这一层删掉这个键
+  "dry_run": false,                    // 可选
+  "if_revision": "r1:9f2c…" }          // 可选:这一层的 revision 不再是它 → SETTINGS_CONFLICT
+// ← result
+{ "tier": "global", "dry_run": false,
+  "written_to": "/Users/x/.agix/settings.json",
+  "secrets_written_to": "/Users/x/.agix/settings.local.json",   // 只在改了 settings.local.json 时
+  "changed": ["permission_mode", "sandbox.allowed_domains", "telemetry_url"],
+  "rejected": [ ],                     // 只有 dry_run 才可能非空
+  "effective": { "permission_mode": "acceptEdits", "sandbox.allowed_domains": ["github.com"],
+                 "telemetry_url": null },
+  "overridden": [ ],
+  "revision": "r1:…",
+  "providers": [ ], "default_provider": null, "task_models": [ ],
+  "routing": { "ok": true, "warnings": [ ], "error": null, "router_rebuilt": false,
+               "router_error": null, "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
+```
+
+**键**是点分的设置路径:`model.model_name`、`sandbox.subprocess_env.allow`、`task_models.subagent`、
+`plugins.allow`。不支持通配,也不支持数组下标——列表整个写。同一次写里一个键是另一个的前缀
+(`sandbox` 与 `sandbox.allowed_domains`)→ 拒绝。名字里带 `.` 的 map 条目(provider id、server 名)
+经它寻址不到,它们归 `config.setProvider` 与 `mcp.*`。
+
+**值**:这一层在这个键上的值变成它——对象整个替换这一层原有的那棵(与下面几层照常合并),
+`null` 从这一层的两个文件里删掉这个键,删空的上级对象一并去掉。所以高层写不出字面的 `null` 去盖住
+下层。`permission_rules` 是各层各文件拼接的,这里只换这一层 `settings.json` 的那份,权限询问里
+"永久允许"记进 `settings.local.json` 的规则不动(`null` 同样只删 `settings.json` 的)。
+
+**密钥落 `settings.local.json`**:`providers.*.api_key`、`mcp_servers.*.headers`、
+`mcp_servers.*.env`、`model.auth_token` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
+(0600);`settings.json` 里这些键原有的值在这次写入时挪过去(local 里已有的不覆盖)。其余键一律写
+`settings.json`。
+
+**全有或全无。** 任何一个键被拒,什么都不写,`INVALID_PARAMS`(全部只因项目未受信时是
+`PROJECT_UNTRUSTED`),`data.rejected` 逐键列出理由(§9.1)。拒绝的种类(`kind`):
+
+| `kind` | 什么情况 |
+|---|---|
+| `bad_path` | 不是点分的键,或与同一次写里的另一个键重叠 |
+| `unknown_key` | 没有设置读这个键(值是对象时,对象里的键也逐个查) |
+| `invalid_value` | 值放不进这个设置(按加载器的规则判:类型、枚举、一条一条的权限规则),或 `permission_mode` 写了只能由程序设的模式 |
+| `requires_trust` | 写进未受信项目的项目层,而它会被扣下(§3.6):未受信项目只能增加与收紧,判的是写入那一刻相对下面几层 |
+| `not_at_tier` | `network.*` 只从全局层读,写在场景层 / 项目层 |
+| `use_method` | 有专门的方法,`method` 指明:`mcp_servers` → `mcp.addServer` / `mcp.updateServer`,`project_trust` → `project.trust` |
+| `not_writable` | `hooks_config`、`scripts`:它们执行代码,不经 RPC 写,宿主仍可直接改设置文件 |
+
+宿主能连上这个 socket 就能直接改这些文件,所以按键拒绝不是安全边界,而是"写下去的东西加载器会照样
+生效"的保证:手写进文件时会被加载器静默丢掉的值,在这里直接报出来。
+
+**`dry_run: true`**:做写入之前的全部检查,在内存里套用、与其余各层合并并解析路由;不拿锁、不建目录、
+不写。有键被拒时**照样成功返回**,`rejected` 列出来、`changed` 为空。路由解析不了不算拒绝,报在
+`routing` 里(真写也一样:文件照写,已经在用的路由保留)。
+
+**答复**:`effective` 是每个键写完之后在定位参数那一对 `(项目, 场景)` 合并结果里的值(密钥脱敏);
+`overridden` 列出写进去了、但这一对的生效值不是它的键——更高的层、宿主覆盖或 managed 层盖住了它
+(只对标量与列表算,`permission_rules` 不算)。`revision` 是写完之后(`dry_run`:现在)这一层的
+revision。其余字段同 `config.reload`。
+
+**并发**:两个文件在那一层目录的锁下读改写(同 `config.setProvider`),锁内重新读文件、只套用这次
+提到的键,所以两个连接同时写同一层的**不同**键都会留下;写同一个键时后到的赢。只有"先 `config.get`
+再改一个列表再整个写回"会丢别人的更新:那时带上 `config.get` 回的 `revision` 作 `if_revision`,这一层
+在这之间被改过(任何一个键、任何一个写入方)→ `SETTINGS_CONFLICT (-32028)`,`data.revision` 是现在的
+revision,什么都不写,重读再写即可。锁等满 10 秒 → `SETTINGS_LOCKED`。
+
+**写完之后**:daemon 自己那一对的设置重读,从这一层合出来的绑定作废(项目层只作废那个项目的,场景层
+那个场景的,全局层全部),已有会话在下一轮前换上新配置。改动碰到 `sandbox.subprocess_env` 或 `network`
+时这一对的 MCP server 按新配置重连,其余改动不动 MCP 连接。监视器不会把引擎自己刚写下的内容当成又一次
+改动(第一次建出文件时例外,会多重读一次)。`plugins.*` 与手改文件一样,要到 `plugin.reload` 才影响已
+加载的包。
+
+其余失败:`scene` 未注册 → `SCENE_NOT_FOUND`;`tier:"project"` 而 `project_root` 不是目录 →
+`PROJECT_NOT_FOUND`;项目层目录借用全局 / 场景层,或是指到项目之外(如链进另一个项目的 `.agix`)的符号链接
+→ `INVALID_PARAMS`(同 `config.setProvider`、写 MCP 设置的方法);
+已有的文件不是 JSON 对象或是符号链接 → `INVALID_PARAMS`,什么都不写。
 
 #### `config.reload`
 
@@ -3039,7 +3135,8 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 出来,会话不重建、照旧在原来的引擎上跑,这次 `run_turn` 返回 `INTERNAL_ERROR`(见 `session.resume`)。
 
 **多数情况下不需要显式调用**:daemon 监视每个项目的 `settings.json` /
-`settings.local.json`,改动落盘后自己重读(去抖 300ms);文件内容没变的写入不算改动。监视触发的重读知道是哪一层变了,
+`settings.local.json`,改动落盘后自己重读(去抖 300ms);文件内容没变的写入不算改动,引擎自己经
+`config.set` / `config.setProvider` / `mcp.*` 写下、已经处理过的内容也不算。监视触发的重读知道是哪一层变了,
 只作废从那一层合出来的绑定:项目层只作废同一项目的会话,场景层只作废那个场景的,全局层
 作废全部。skills、agents 目录的改动不作废任何会话,新内容就地生效。不存在的设置文件与
 skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 的 `local` 第一次写出
@@ -3054,8 +3151,9 @@ skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 
 两者都接受 `scene` / `project_root` 定位参数,语义与 `config.reload` 一致:省略 = 这个
 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
 `setProvider` 缺省写**被指定项目**的项目层目录里的 `settings.json`(`{project_root}/.agix/settings.json`,`tier:"project"`),
-`tier:"global"` 写全局层的 `settings.json`(`config.get` 的 `global` 那一份,对所有场景、所有项目生效);
-`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目层目录借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里。
+`tier:"global"` 写全局层的 `settings.json`(`config.get` 的 `global` 那一份,对所有场景、所有项目生效),
+`tier:"scene"` 写 `scene` 指的那个场景自己那一层(`config.get` 的 `scene` 那一份);
+`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目层目录借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里;链到项目之外别处(如另一个项目的 `.agix`)同样拒绝——写进去改的是那个目录的设置。
 
 **provider 路由是按 `(项目, 场景)` 解析的**:一个项目在自己的 settings 里配了
 `providers` / `task_models`,它的会话就走它自己的路由,不是 daemon 那个项目的。
@@ -3108,7 +3206,7 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 
 ```jsonc
 // setProvider 的 params
-{ "tier": "project",                                   // 可选;"project"(缺省)| "global"
+{ "tier": "project",                                   // 可选;"project"(缺省)| "scene" | "global"
   "dry_run": false,                                    // 可选;true = 只试算,不写
   "provider_id": "deepseek",
   "config": { "api_type":"openai_compatible", "base_url":"…",
@@ -3122,8 +3220,11 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 `secrets_written_to`(写了密钥时才有,即那个 settings.local.json)。`routing` 与其余字段
 报的是定位参数指的那一对(scene, 项目)写完之后的样子。
 
-只有这两层:场景层不能经它写。`config` / `task_models` 是部分补丁:只提到的键被覆盖,没提到的
-保持原样。`delete: true` 同样作用于 `tier` 指的那一层。
+`config` / `task_models` 是部分补丁:只提到的键被覆盖,没提到的保持原样。`delete: true` 同样作用于
+`tier` 指的那一层。它与 `config.set` 是同一个写入实现,`config.set` 也能写 `providers.*`、
+`default_provider`、`task_models.*`。写成的样子按加载器的规则逐键检查,加载器会丢掉的值(比如
+`models` 里既不是字符串也不是对象的一项)直接以 `INVALID_PARAMS` 拒绝,`data.rejected` 同 `config.set`,
+什么都不写。`tier:"project"` 而 `project_root` 不是目录 → `PROJECT_NOT_FOUND`(不会替它建出目录)。
 
 **密钥不进 settings.json。** `config.api_key` 写进项目层的 `settings.local.json` —— 这个
 文件按约定不提交,在 unix 上每次写都是 0600;其余字段照旧写 settings.json。settings.json 里
@@ -3132,8 +3233,9 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 
 `tier:"project"` 而目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,什么都不写:项目层的
 `providers` 在未信任时不生效。要给它配 provider,先 `project.trust`,或者用 `tier:"global"`
-配在全局层——全局层是用户自己的,不看项目信任。写全局层之后,daemon 自己那一对的设置重读,所有
-`(scene, 项目)` 的绑定作废,已有会话在下一轮前换上新配置。
+配在全局层——全局层是用户自己的,不看项目信任。写完之后 daemon 自己那一对的设置重读,从写的那一层
+合出来的 `(scene, 项目)` 绑定作废(全局层是全部,场景层是那个场景的,项目层是那个项目的),已有会话在
+下一轮前换上新配置,定位参数那一对的 MCP server 按新配置重连。
 
 **`dry_run: true`**:做写入之前的全部检查(参数、项目信任、项目层目录是否借用全局 / 场景层),
 读出那一层的两个文件、在内存里套上补丁,按会写成的样子与其余各层合并、解析 provider 路由、
@@ -3144,9 +3246,10 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 所以宿主可以先 `dry_run` 再写,确认这一对 `(项目, 场景)` 的配置能用。检查只覆盖这一对:`tier:"global"` 的改动同样会进入其他项目与场景的合并结果,它们自己那几层是否依赖这处改动,`dry_run` 不检查。真写不因路由解析不了而拒绝:
 文件照写,`routing.error` / `routing.router_error` 报原因,已经在用的路由保留。
 
-两个文件在那一层目录的锁下读改写(与 `mcp.addServer`、`project.trust`、权限询问里的"永久允许"
+两个文件在那一层目录的锁下读改写(与 `config.set`、`mcp.addServer`、`project.trust`、权限询问里的"永久允许"
 是同一把,跨进程也互斥;宿主自己改那一层的文件时对目录 `flock(LOCK_EX)` 就与引擎互斥),各自写临时文件再改名替换,先写 `settings.local.json`。
-引擎等这把锁最多 **10 秒**:宿主(或别的进程)一直握着它,`config.setProvider` / `mcp.addServer` /
+检查与写入在同一把锁里,写下去的就是检查过的内容。
+引擎等这把锁最多 **10 秒**:宿主(或别的进程)一直握着它,`config.set` / `config.setProvider` / `mcp.addServer` /
 `mcp.updateServer` / `project.trust` 以 `SETTINGS_LOCKED (-32026)` 回,消息形如
 `the settings directory <dir> is locked by another process; nothing was written`,文件原样,放手后重发即可。
 等锁的那一段不随请求取消:客户端在这 10 秒里断开或放弃了请求,锁一到手,写照样可能落盘。权限询问里的"永久允许"拿不到锁时,这一次调用与当前会话照样放行,
@@ -4031,18 +4134,19 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `execution.max_concurrent_subagents`,或委派已到最深 |
 | -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
-| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写 |
+| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set`:被拒的键全部是因为项目未受信,什么都没写,`data.rejected` 逐键列出(§9.1) |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |
-| -32026 | SETTINGS_LOCKED | `project.trust` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
+| -32026 | SETTINGS_LOCKED | `project.trust` / `config.set` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
 | -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api_type` 没有引擎知道的列法(§6.4) |
+| -32028 | SETTINGS_CONFLICT | `config.set` 带 `if_revision`:这一层在那之后被改过,什么都没写;`data.revision` 是现在的 revision(§6.4、§9.1) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
 
 ### 9.1 `error.data` 的形状
 
-**只有九个错误码带结构化 `data`**,客户端可以依赖:
+**只有十一个错误码带结构化 `data`**,客户端可以依赖:
 
 ```jsonc
 // ENGINE_ERROR
@@ -4065,6 +4169,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 // 还有 skill_dirs 通不过的检查(session.create 等建新会话时,以及 session.setSkillDirs,field 为 skill_dirs[i].path)
 // INVALID_PARAMS,session.calls / session.call 带的 generation 不是录像当前的时
 { "generation": 1763200000000 }
+
+// INVALID_PARAMS / PROJECT_UNTRUSTED,config.set 与 config.setProvider 有键被拒时(§6.4)
+{ "rejected": [ { "key": "sandbox.network_mode", "kind": "invalid_value", "reason": "…" },
+                { "key": "mcp_servers.github", "kind": "use_method", "method": "mcp.addServer", "reason": "…" } ] }
+
+// SETTINGS_CONFLICT
+{ "revision": "r1:…" }
 
 // METHOD_NOT_FOUND
 { "module": "mcp" }   // 只在方法所属的模块没有编入这个构建时;未知方法没有 data
