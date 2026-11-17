@@ -203,19 +203,20 @@ pub struct OAuthHttp {
 }
 
 impl OAuthHttp {
-    pub fn for_server(server: &Url) -> Result<Self, String> {
-        Self::build(server, AddressPolicy::for_server(server))
+    /// Requests go out with `user_agent` ([`base::paths::Layout::user_agent`]).
+    pub fn for_server(server: &Url, user_agent: &str) -> Result<Self, String> {
+        Self::build(server, AddressPolicy::for_server(server), user_agent)
     }
 
     /// For calls to `endpoint`, which the deployment configured.
-    pub fn for_configured(endpoint: &Url) -> Result<Self, String> {
-        Self::build(endpoint, AddressPolicy::configured())
+    pub fn for_configured(endpoint: &Url, user_agent: &str) -> Result<Self, String> {
+        Self::build(endpoint, AddressPolicy::configured(), user_agent)
     }
 
-    fn build(server: &Url, policy: AddressPolicy) -> Result<Self, String> {
+    fn build(server: &Url, policy: AddressPolicy, user_agent: &str) -> Result<Self, String> {
         platform::install_tls_provider();
         let mut builder = reqwest::Client::builder()
-            .user_agent(concat!("agix/", env!("CARGO_PKG_VERSION")))
+            .user_agent(user_agent)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
@@ -458,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn discovery_for_a_server_off_loopback_never_goes_out_over_plain_http() {
-        let http = OAuthHttp::for_server(&url("https://mcp.example.com/mcp")).unwrap();
+        let http = OAuthHttp::for_server(&url("https://mcp.example.com/mcp"), "agix/test").unwrap();
         let sent = tokio::time::timeout(
             Duration::from_secs(2),
             http.client()
@@ -474,7 +475,7 @@ mod tests {
     async fn a_refused_address_is_never_contacted() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let http = OAuthHttp::for_server(&url("https://mcp.example.com/mcp")).unwrap();
+        let http = OAuthHttp::for_server(&url("https://mcp.example.com/mcp"), "agix/test").unwrap();
         let target = url(&format!(
             "http://127.0.0.1:{port}/.well-known/oauth-authorization-server"
         ));

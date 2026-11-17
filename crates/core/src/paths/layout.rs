@@ -1,14 +1,16 @@
 //! The names of the engine's directories and of what is in them, and the
-//! one value that varies between instances: what a project's directory is
-//! called ([`Layout`], `.agix` unless the embedder names another).
+//! two values that vary between instances: what a project's directory is
+//! called and what the product is called ([`Layout`]: `.agix` and `Agix`
+//! unless the embedder names others).
 //!
 //! Every other module takes these names from here — the derived paths from
 //! [`super::ConfigPaths`], [`Layout`] and [`StateRoot`], the security
-//! decisions from [`super::SensitivePaths`] — so that renaming the project
-//! directory is one value carried through, not a search for literals.
-//! A `Layout` is carried by value from the pool's paths into every session's
-//! settings; there is no process-wide one, since two pools in one process
-//! may name their project directory differently.
+//! decisions from [`super::SensitivePaths`], the product's name wherever a
+//! person or the model reads it — so that renaming either is one value
+//! carried through, not a search for literals. A `Layout` is carried by value
+//! from the pool's paths into every session's settings; there is no
+//! process-wide one, since two pools in one process may name these
+//! differently.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -39,11 +41,11 @@ pub const AGENTS_DIR: &str = ".agents";
 /// A project's skills, where Codex and other agent tools look for them too.
 pub const PROJECT_SKILLS_DIR: &str = ".agents/skills";
 
-/// The branch a worktree the engine makes is checked out on, before its name.
-pub const WORKTREE_BRANCH_PREFIX: &str = "agix/worktree-";
+/// The product's name when the embedder names none.
+pub const DEFAULT_PRODUCT_NAME: &str = "Agix";
 
-/// The name a nested repository's `.git` is moved aside to, before its date.
-pub const QUARANTINE_PREFIX: &str = ".git.agix-quarantine-";
+/// Where the product of that name is published.
+pub const DEFAULT_PRODUCT_URL: &str = "https://github.com/openatta/agix";
 
 /// The directory in a git directory holding the linked worktrees' entries.
 pub const GIT_WORKTREES_DIR: &str = "worktrees";
@@ -88,6 +90,9 @@ pub mod entry {
     pub const AUTH: &str = "auth";
     pub const GROUPS: &str = "groups";
     pub const CRASHES: &str = "crashes";
+
+    pub const MANAGED_SETTINGS: &str = "managed-settings.json";
+    pub const MCP_POLICY: &str = "mcp-policy.json";
 }
 
 /// The shared, committed settings file present in every tier.
@@ -180,17 +185,27 @@ pub struct LayoutError {
     pub reason: &'static str,
 }
 
-/// The names an instance gives its directories. One per pool, carried in the
-/// pool's paths and every session's settings.
+/// Why a name cannot be the product's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`{name}` cannot name the product: {reason}")]
+pub struct ProductNameError {
+    pub name: String,
+    pub reason: &'static str,
+}
+
+/// The names an instance gives its directories and itself. One per pool,
+/// carried in the pool's paths and every session's settings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Layout {
     project_dir: Arc<str>,
+    product: Arc<str>,
 }
 
 impl Default for Layout {
     fn default() -> Self {
         Self {
             project_dir: Arc::from(DEFAULT_PROJECT_DIR),
+            product: Arc::from(DEFAULT_PRODUCT_NAME),
         }
     }
 }
@@ -245,11 +260,119 @@ impl Layout {
         }
         Ok(Self {
             project_dir: Arc::from(project_dir),
+            ..Self::default()
+        })
+    }
+
+    /// This layout under the product name `name`: an ASCII letter, then up
+    /// to 31 ASCII letters, digits, `-` or `_`. Its lowercase form is a path
+    /// component (`/etc/<name>`), a git ref component (`<name>/worktree-`)
+    /// and an HTTP token (`<name>/<version>`), all of which these characters
+    /// are safe in.
+    pub fn with_product_name(self, name: &str) -> Result<Self, ProductNameError> {
+        let refuse = |reason| {
+            Err(ProductNameError {
+                name: name.to_string(),
+                reason,
+            })
+        };
+        let mut chars = name.chars();
+        match chars.next() {
+            None => return refuse("it is empty"),
+            Some(c) if !c.is_ascii_alphabetic() => {
+                return refuse("it must start with an ASCII letter")
+            }
+            Some(_) => {}
+        }
+        if name.len() > 32 {
+            return refuse("it is longer than 32 characters");
+        }
+        if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return refuse("only ASCII letters, digits, `-` and `_` are allowed");
+        }
+        Ok(Self {
+            product: Arc::from(name),
+            ..self
         })
     }
 
     pub fn project_dir_name(&self) -> &str {
         &self.project_dir
+    }
+
+    /// The product's name as people read it: in prompts, messages, a
+    /// consent page, a notification.
+    pub fn product_name(&self) -> &str {
+        &self.product
+    }
+
+    /// The product's name where a machine reads it: lowercase.
+    pub fn product_id(&self) -> String {
+        self.product.to_ascii_lowercase()
+    }
+
+    /// `<product id>/<version>`, the `User-Agent` of the engine's requests.
+    pub fn user_agent(&self) -> String {
+        format!("{}/{}", self.product_id(), env!("CARGO_PKG_VERSION"))
+    }
+
+    /// The branch a worktree the engine makes is checked out on, before its
+    /// name: `<product id>/worktree-`.
+    pub fn worktree_branch_prefix(&self) -> String {
+        format!("{}/worktree-", self.product_id())
+    }
+
+    /// The name a nested repository's `.git` is moved aside to, before its
+    /// date: `.git.<product id>-quarantine-`.
+    pub fn quarantine_prefix(&self) -> String {
+        format!(".git.{}-quarantine-", self.product_id())
+    }
+
+    /// The product's machine-wide directory, where a deployment puts what
+    /// stands above every user and project: macOS `/Library/Application
+    /// Support/<name>`, Windows `%ProgramData%\<name>`, elsewhere
+    /// `/etc/<id>`. Only this product's: a renamed product has no reason to
+    /// read another's, and its name cannot spell a path out of the parent.
+    pub fn machine_dir(&self) -> PathBuf {
+        #[cfg(target_os = "macos")]
+        {
+            PathBuf::from("/Library/Application Support").join(self.product_name())
+        }
+        #[cfg(windows)]
+        {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "where Windows keeps machine-wide program data is a fact about this machine"
+            )]
+            let root = std::env::var_os("ProgramData")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+            root.join(self.product_name())
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            PathBuf::from("/etc").join(self.product_id())
+        }
+    }
+
+    /// `<machine dir>/managed-settings.json`: the managed settings layer.
+    pub fn managed_settings_file(&self) -> PathBuf {
+        self.machine_dir().join(entry::MANAGED_SETTINGS)
+    }
+
+    /// `<machine dir>/mcp-policy.json`: which MCP servers may connect.
+    pub fn mcp_policy_file(&self) -> PathBuf {
+        self.machine_dir().join(entry::MCP_POLICY)
+    }
+
+    /// The product as a commit or pull request the model writes credits it:
+    /// a link where it is published, else its name.
+    pub fn attribution(&self) -> String {
+        if &*self.product == DEFAULT_PRODUCT_NAME {
+            format!("[{DEFAULT_PRODUCT_NAME}]({DEFAULT_PRODUCT_URL})")
+        } else {
+            self.product.to_string()
+        }
     }
 
     /// `<project_root>/<name>`.
@@ -469,6 +592,79 @@ mod tests {
         }
         assert!(Layout::new(&"a".repeat(65)).is_err());
         assert_eq!(Layout::default().project_dir_name(), DEFAULT_PROJECT_DIR);
+    }
+
+    #[test]
+    fn a_product_name_is_a_letter_then_letters_digits_dashes_underscores() {
+        for good in ["Agix", "Codix", "x", "My-Agent_2", &"A".repeat(32)] {
+            let layout = Layout::default().with_product_name(good).unwrap();
+            assert_eq!(layout.product_name(), good);
+            assert_eq!(layout.project_dir_name(), DEFAULT_PROJECT_DIR);
+        }
+        for bad in [
+            "",
+            "1x",
+            "-x",
+            "a b",
+            "a/b",
+            "a.b",
+            "a..b",
+            "a@b",
+            "Ägix",
+            &"A".repeat(33),
+        ] {
+            assert!(Layout::default().with_product_name(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(Layout::default().product_name(), DEFAULT_PRODUCT_NAME);
+    }
+
+    #[test]
+    fn what_a_product_name_names_follows_it() {
+        let codix = Layout::new(".codix")
+            .unwrap()
+            .with_product_name("Codix")
+            .unwrap();
+        assert_eq!(codix.project_dir_name(), ".codix");
+        assert_eq!(codix.product_id(), "codix");
+        assert_eq!(
+            codix.user_agent(),
+            format!("codix/{}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(codix.worktree_branch_prefix(), "codix/worktree-");
+        assert_eq!(codix.quarantine_prefix(), ".git.codix-quarantine-");
+        assert_eq!(codix.attribution(), "Codix");
+        let agix = Layout::default();
+        assert_eq!(agix.worktree_branch_prefix(), "agix/worktree-");
+        assert_eq!(agix.quarantine_prefix(), ".git.agix-quarantine-");
+        assert_eq!(
+            agix.user_agent(),
+            format!("agix/{}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            agix.attribution(),
+            "[Agix](https://github.com/openatta/agix)"
+        );
+        for layout in [&agix, &codix] {
+            assert!(layout.machine_dir().is_absolute());
+            assert_eq!(
+                layout.managed_settings_file(),
+                layout.machine_dir().join("managed-settings.json")
+            );
+            assert_eq!(
+                layout.mcp_policy_file(),
+                layout.machine_dir().join("mcp-policy.json")
+            );
+        }
+        assert!(codix
+            .machine_dir()
+            .to_string_lossy()
+            .to_lowercase()
+            .ends_with("codix"));
+        assert!(!codix
+            .machine_dir()
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("agix"));
     }
 
     #[test]

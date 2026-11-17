@@ -11,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -38,6 +39,9 @@ pub struct LocalNetwork {
     /// Whether agent-directed egress is refused outright.
     agent_offline: bool,
     use_system_proxy: bool,
+    /// Sent as `User-Agent` where a request names none. Per network, not on
+    /// the shared clients: two pools in one process may be different products.
+    user_agent: Arc<str>,
 }
 
 impl Default for LocalNetwork {
@@ -60,7 +64,15 @@ impl LocalNetwork {
             vouched,
             agent_offline,
             use_system_proxy: use_system_proxy_now(),
+            user_agent: Arc::from(base::paths::Layout::default().user_agent()),
         }
+    }
+
+    /// Requests that name no `User-Agent` send `user_agent`
+    /// ([`base::paths::Layout::user_agent`]).
+    pub fn with_user_agent(mut self, user_agent: impl Into<Arc<str>>) -> Self {
+        self.user_agent = user_agent.into();
+        self
     }
 
     /// The egress a deployment's `sandbox.network_mode` describes, read the
@@ -349,7 +361,6 @@ fn shared_client(kind: ClientKind) -> reqwest::Client {
 fn build_client(kind: ClientKind) -> reqwest::Client {
     install_tls_provider();
     let mut b = reqwest::Client::builder()
-        .user_agent(concat!("agix/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
     let system_proxy = use_system_proxy_now();
@@ -506,6 +517,12 @@ impl Network for LocalNetwork {
                 self.client_for(&url)
             };
             let mut b = client.request(m.clone(), url.clone());
+            if !headers
+                .keys()
+                .any(|k| k.eq_ignore_ascii_case(reqwest::header::USER_AGENT.as_str()))
+            {
+                b = b.header(reqwest::header::USER_AGENT, &*self.user_agent);
+            }
             for (k, v) in &headers {
                 b = b.header(k, v);
             }
@@ -758,6 +775,46 @@ mod tests {
 
     fn ok_response(_: u16) -> String {
         "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok".into()
+    }
+
+    #[tokio::test]
+    async fn each_network_sends_its_own_user_agent_unless_the_request_names_one() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_lowercase());
+                let _ = sock.write_all(ok_response(0).as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        let url = format!("http://127.0.0.1:{port}/");
+        let agix = LocalNetwork::default();
+        let codix = LocalNetwork::default().with_user_agent("codix/1.0");
+        agix.send(HttpRequest::get(&url), Origin::Operator)
+            .await
+            .unwrap();
+        let seen = rx.recv().await.unwrap();
+        assert!(
+            seen.contains(&format!("user-agent: agix/{}", env!("CARGO_PKG_VERSION"))),
+            "{seen}"
+        );
+        codix
+            .send(HttpRequest::get(&url), Origin::Operator)
+            .await
+            .unwrap();
+        let seen = rx.recv().await.unwrap();
+        assert!(seen.contains("user-agent: codix/1.0"), "{seen}");
+        let mut named = HttpRequest::get(&url);
+        named.headers.insert("User-Agent".into(), "mine/2".into());
+        codix.send(named, Origin::Operator).await.unwrap();
+        let seen = rx.recv().await.unwrap();
+        assert_eq!(seen.matches("user-agent:").count(), 1, "{seen}");
+        assert!(seen.contains("user-agent: mine/2"), "{seen}");
     }
 
     #[tokio::test]

@@ -8,6 +8,7 @@ mod crash_recovery;
 mod daemon_surface;
 mod demo_plugins;
 mod embed_entry;
+mod embed_product_name;
 mod embed_project_dir;
 mod engine_boundaries;
 mod engine_proxy;

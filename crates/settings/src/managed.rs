@@ -1,7 +1,7 @@
 //! The deployment's settings layer — what an IT department or an unattended
 //! host puts above everything a user, a project or a plugin can write.
 //!
-//! It is read from a fixed system path ([`path`]) that the
+//! It is read from a fixed system path (`Layout::managed_settings_file`) that the
 //! user's data directory, the project and the model have no say in; a daemon
 //! started with `--managed-settings <path>` reads that file instead. Only
 //! [`MANAGED_KEYS`] may appear in it. A file that is there but cannot be
@@ -16,34 +16,11 @@
 //! holds. Semantics: `docs/ARCHITECTURE.md` §6.1.
 
 use base::permission::{ManagedSettings, PermissionRuleEntry};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The keys a managed settings file may set. `$schema` is the editor's and is
 /// accepted too.
 pub const MANAGED_KEYS: &[&str] = &["permission_rules", "disable_bypass_permissions_mode"];
-
-/// Where the managed settings live on this platform.
-pub fn path() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/Application Support/Agix/managed-settings.json")
-    }
-    #[cfg(windows)]
-    {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "where Windows keeps machine-wide program data is a fact about this machine"
-        )]
-        let root = std::env::var_os("ProgramData")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        root.join("Agix").join("managed-settings.json")
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        PathBuf::from("/etc/agix/managed-settings.json")
-    }
-}
 
 /// The file at `path`. `None` when it does not exist and `required` is
 /// false; a `required` file that does not exist is an error, so a path the

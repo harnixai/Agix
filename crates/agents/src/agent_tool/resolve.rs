@@ -184,6 +184,6 @@ impl Delegator {
         if let Some(registry) = &self.env.host.scene_registry {
             return registry.resolve(id);
         }
-        scene::builtin(id).map(Arc::new)
+        scene::builtin(id, &self.env.settings.paths.layout).map(Arc::new)
     }
 }

@@ -254,6 +254,7 @@ pub(super) fn build_prompt_context<'a>(
         .map(|s| Cow::Owned(s.to_string()));
     ctx.output_style_content = output_style.map(Cow::Owned);
     ctx.tool_results_ever_cleared = tool_results_ever_cleared;
+    ctx.layout = settings.paths.layout.clone();
     ctx
 }
 

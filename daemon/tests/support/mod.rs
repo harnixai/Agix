@@ -278,7 +278,7 @@ pub async fn start_scripted_server_holding(
     // an assembled daemon, and an assembly of their own would be one more
     // copy to keep in step with it.
     let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
+    registry.register_builtin(&Default::default());
     let agent_scene = registry.resolve(scene_id).expect("a builtin scene");
 
     let pool = daemon::assemble::pool(

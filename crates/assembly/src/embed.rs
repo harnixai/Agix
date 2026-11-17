@@ -72,6 +72,13 @@ pub struct EmbedConfig {
     /// component of `[a-z0-9._-]` starting with `.`, not another tool's
     /// (`base::paths::layout::OTHER_TOOLS_DIRS`).
     pub project_dir: String,
+    /// The product's name (`Agix`), wherever the engine names itself: the
+    /// model's prompts and the messages it reads, the `client_name` an MCP
+    /// authorization server shows, the `User-Agent` of its requests, the
+    /// branches of its worktrees and the directory its managed settings and
+    /// MCP policy are read from. Only this name's managed files are read.
+    /// An ASCII letter, then up to 31 ASCII letters, digits, `-` or `_`.
+    pub product_name: String,
 }
 
 impl EmbedConfig {
@@ -93,6 +100,7 @@ impl EmbedConfig {
             managed_settings: None,
             groups_file: None,
             project_dir: base::paths::DEFAULT_PROJECT_DIR.into(),
+            product_name: base::paths::DEFAULT_PRODUCT_NAME.into(),
         }
     }
 
@@ -134,6 +142,9 @@ pub enum EmbedError {
     /// `EmbedConfig::project_dir` cannot name a project's directory.
     #[error("project_dir `{name}`: {reason}")]
     InvalidProjectDir { name: String, reason: String },
+    /// `EmbedConfig::product_name` cannot name the product.
+    #[error("product_name `{name}`: {reason}")]
+    InvalidProductName { name: String, reason: String },
 }
 
 /// Who keeps this process's process-group record: a named instance, or the
@@ -223,6 +234,7 @@ impl Embedded {
         let scene = resolve_scene(
             &config.scene,
             &base::paths::StateRoot::new(&config.data_root).scenes_dir(),
+            &layout_of(&config)?,
         )?;
         let daemon_config = daemon_config(&config, &scene.id)?;
         let socket = daemon_config.socket_path.clone();
@@ -354,11 +366,15 @@ impl Embedded {
     }
 }
 
-/// The scene `name` names: a built-in, or a declarative scene under
-/// `user_scenes` (`<data_root>/scenes/<id>/scene.json`).
-pub(crate) fn resolve_scene(name: &str, user_scenes: &Path) -> Result<Arc<SceneSpec>, EmbedError> {
+/// The scene `name` names: a built-in (named for `layout`'s product), or a
+/// declarative scene under `user_scenes` (`<data_root>/scenes/<id>/scene.json`).
+pub(crate) fn resolve_scene(
+    name: &str,
+    user_scenes: &Path,
+    layout: &base::paths::Layout,
+) -> Result<Arc<SceneSpec>, EmbedError> {
     let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
+    registry.register_builtin(layout);
     for e in registry.register_declarative_dir(user_scenes) {
         warn!(error = %e, "a declarative scene was not loaded");
     }
@@ -372,17 +388,26 @@ pub(crate) fn resolve_scene(name: &str, user_scenes: &Path) -> Result<Arc<SceneS
     })
 }
 
+/// The project directory and product `config` names, checked.
+fn layout_of(config: &EmbedConfig) -> Result<base::paths::Layout, EmbedError> {
+    base::paths::Layout::new(&config.project_dir)
+        .map_err(|e| EmbedError::InvalidProjectDir {
+            name: e.name,
+            reason: e.reason.to_string(),
+        })?
+        .with_product_name(&config.product_name)
+        .map_err(|e| EmbedError::InvalidProductName {
+            name: e.name,
+            reason: e.reason.to_string(),
+        })
+}
+
 fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, EmbedError> {
     let cwd = config
         .cwd
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let layout = base::paths::Layout::new(&config.project_dir).map_err(|e| {
-        EmbedError::InvalidProjectDir {
-            name: e.name,
-            reason: e.reason.to_string(),
-        }
-    })?;
+    let layout = layout_of(config)?;
     let state = base::paths::StateRoot::new(config.data_root.clone());
     let paths = StaticDaemonPaths::with_project(state.scene_dir(scope), cwd)
         .with_global(config.data_root.clone())
@@ -586,16 +611,19 @@ mod tests {
     #[test]
     fn every_builtin_scene_resolves() {
         for id in ["code", "harnix", "mini"] {
-            let scene = resolve_scene(id, Path::new("/nonexistent")).expect("a builtin scene");
+            let scene = resolve_scene(id, Path::new("/nonexistent"), &Default::default())
+                .expect("a builtin scene");
             assert_eq!(scene.id.as_str(), id);
         }
     }
 
     #[test]
     fn an_unknown_scene_is_refused_with_the_known_ones() {
-        let Err(EmbedError::UnknownScene { scene, known }) =
-            resolve_scene("not-a-real-scene", Path::new("/nonexistent"))
-        else {
+        let Err(EmbedError::UnknownScene { scene, known }) = resolve_scene(
+            "not-a-real-scene",
+            Path::new("/nonexistent"),
+            &Default::default(),
+        ) else {
             panic!("an unknown scene resolved");
         };
         assert_eq!(scene, "not-a-real-scene");
@@ -616,7 +644,10 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("prompt.md"), "Sort incoming issues.").unwrap();
         assert_eq!(
-            resolve_scene("triage", root.path()).unwrap().id.as_str(),
+            resolve_scene("triage", root.path(), &Default::default())
+                .unwrap()
+                .id
+                .as_str(),
             "triage"
         );
     }
@@ -667,6 +698,34 @@ mod tests {
                 matches!(
                     daemon_config(&config, "code"),
                     Err(EmbedError::InvalidProjectDir { ref name, .. }) if name == bad
+                ),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_product_name_is_the_one_the_config_names() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = EmbedConfig::new(root.path());
+        config.cwd = Some(root.path().join("work"));
+        assert_eq!(
+            daemon_config_of(&config).paths.layout().product_name(),
+            "Agix"
+        );
+        config.product_name = "Codix".into();
+        let renamed = daemon_config_of(&config);
+        assert_eq!(renamed.paths.layout().product_name(), "Codix");
+        assert_eq!(
+            renamed.settings.engine_config().layout,
+            renamed.paths.layout()
+        );
+        for bad in ["", "1x", "a b", "a/b", "a.b"] {
+            config.product_name = bad.into();
+            assert!(
+                matches!(
+                    daemon_config(&config, "code"),
+                    Err(EmbedError::InvalidProductName { ref name, .. }) if name == bad
                 ),
                 "{bad:?}"
             );

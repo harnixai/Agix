@@ -65,7 +65,7 @@ gh pr create --title "the pr title" --body "$(cat <<'EOF'
 ## Test plan
 [Bulleted markdown checklist of TODOs for testing the pull request...]
 
-🤖 Generated with [Agix](https://github.com/openatta/agix)
+🤖 Generated with {attribution}
 EOF
 )"
 </example>

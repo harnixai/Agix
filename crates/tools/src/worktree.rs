@@ -36,7 +36,6 @@ use tracing::{debug, warn};
 
 const SLUG_MAX_LEN: usize = 64;
 const GIT_TIMEOUT: Duration = Duration::from_secs(15);
-const BRANCH_PREFIX: &str = base::paths::WORKTREE_BRANCH_PREFIX;
 const UNREADABLE: &str = "a state git could not read";
 
 /// `WorktreeHandle` —— 创建后持有；drop 时不自动清（避免 sync drop 起 tokio
@@ -334,7 +333,7 @@ pub async fn reopen_worktree(
             git_dir.display()
         )
     })?;
-    let branch = format!("{BRANCH_PREFIX}{name}");
+    let branch = format!("{}{name}", layout.worktree_branch_prefix());
     Ok(base::paths::LinkedWorktree {
         dir: dir.to_path_buf(),
         git: loose_branch(fs, common, admin, &branch).await,
@@ -381,14 +380,14 @@ pub async fn create_worktree(
     if exec.filesystem.metadata(&path).await.is_ok() {
         return Err(WorktreeError::AlreadyExists(path));
     }
-    let branch = format!("{BRANCH_PREFIX}{flat}");
+    let branch = format!("{}{flat}", layout.worktree_branch_prefix());
 
     // 父目录得先存在 git worktree add 才不报错
     if let Some(parent) = path.parent() {
         exec.filesystem.create_dir_all(parent).await?;
     }
 
-    ensure_gitignore_entry(exec, &repo.root, &layout.gitignore_entry()).await;
+    ensure_gitignore_entry(exec, &repo.root, layout).await;
 
     let base = run_git_capture(git, &repo.root, &["rev-parse", "HEAD"], &[])
         .await?
@@ -488,7 +487,7 @@ pub async fn prune_orphan_worktrees(
             Some(n) => n.to_string(),
             None => continue,
         };
-        let branch = format!("{BRANCH_PREFIX}{dir_name}");
+        let branch = format!("{}{dir_name}", layout.worktree_branch_prefix());
         if let Err(e) = exec.filesystem.remove_dir_all(&path).await {
             warn!(
                 path = %path.display(),
@@ -512,10 +511,10 @@ pub async fn prune_orphan_worktrees(
 
 /// `template` with `{project_dir}` and `{branch_prefix}` filled in: where this
 /// instance keeps worktrees and what its branches are called.
-pub fn name_the_directories(template: &str, project_dir: &str) -> String {
+pub fn name_the_directories(template: &str, layout: &Layout) -> String {
     template
-        .replace("{project_dir}", project_dir)
-        .replace("{branch_prefix}", BRANCH_PREFIX)
+        .replace("{project_dir}", layout.project_dir_name())
+        .replace("{branch_prefix}", &layout.worktree_branch_prefix())
 }
 
 /// Slug 校验：长度上限 + segment 正则 + 拒 `.` `..`
@@ -599,9 +598,10 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// 在 repo root 的 `.gitignore` 末尾追加 `entry`（带换行）；若文件不存在创建；
-/// 若 entry 已经在文件里出现一次，no-op。失败仅 warn。
-async fn ensure_gitignore_entry(exec: &ExecProviders, repo_root: &Path, entry: &str) {
+/// 在 repo root 的 `.gitignore` 末尾追加项目层目录那一行（带换行）；若文件不存在创建；
+/// 若这一行已经在文件里出现一次，no-op。失败仅 warn。
+async fn ensure_gitignore_entry(exec: &ExecProviders, repo_root: &Path, layout: &Layout) {
+    let entry = &layout.gitignore_entry();
     let path = repo_root.join(".gitignore");
     let existing = exec
         .filesystem
@@ -618,7 +618,10 @@ async fn ensure_gitignore_entry(exec: &ExecProviders, repo_root: &Path, entry: &
     if !new_content.is_empty() && !new_content.ends_with('\n') {
         new_content.push('\n');
     }
-    new_content.push_str("# agix worktrees (auto-added)\n");
+    new_content.push_str(&format!(
+        "# {} worktrees (auto-added)\n",
+        layout.product_id()
+    ));
     new_content.push_str(entry);
     if !entry.ends_with('\n') {
         new_content.push('\n');
@@ -687,13 +690,16 @@ mod tests {
             let name = layout.project_dir_name();
             let text = name_the_directories(
                 include_str!("prompts/coding/worktree_enter.prompt.md"),
-                name,
+                &layout,
             );
             assert!(
                 text.contains(&format!("`{name}/worktrees/<slug>`")),
                 "{text}"
             );
-            assert!(text.contains(&format!("`{BRANCH_PREFIX}<slug>`")), "{text}");
+            assert!(
+                text.contains(&format!("`{}<slug>`", layout.worktree_branch_prefix())),
+                "{text}"
+            );
             assert!(!text.contains('{'), "{text}");
         }
     }
@@ -942,6 +948,26 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_worktrees_branch_and_gitignore_note_carry_the_product_name() {
+        let codix = Layout::new(".codix")
+            .unwrap()
+            .with_product_name("Codix")
+            .unwrap();
+        let repo = make_minimal_repo().await;
+        let mut handle = create_worktree(&exec(), &direct(), repo.path(), "probe", &codix)
+            .await
+            .unwrap();
+        assert_eq!(handle.branch(), "codix/worktree-probe");
+        let gi = tokio::fs::read_to_string(repo.path().join(".gitignore"))
+            .await
+            .unwrap();
+        assert!(gi.contains("# codix worktrees"), "{gi:?}");
+        assert!(!gi.contains("agix"), "{gi:?}");
+        handle.cleanup().await;
+        assert!(!branch_exists(repo.path(), "codix/worktree-probe").await);
+    }
+
     async fn branch_exists(repo: &Path, branch: &str) -> bool {
         run_git_capture(&direct(), repo, &["branch", "--list", branch], &[])
             .await
@@ -1182,13 +1208,13 @@ mod tests {
         for layout in layouts() {
             let dir = TempDir::new().unwrap();
             // 第一次：写入
-            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            ensure_gitignore_entry(&exec(), dir.path(), &layout).await;
             let v1 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
                 .await
                 .unwrap();
             assert!(v1.contains(&layout.gitignore_entry()));
             // 第二次：no-op，文件不变
-            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            ensure_gitignore_entry(&exec(), dir.path(), &layout).await;
             let v2 = tokio::fs::read_to_string(dir.path().join(".gitignore"))
                 .await
                 .unwrap();
@@ -1270,7 +1296,7 @@ mod tests {
             tokio::fs::write(dir.path().join(".gitignore"), "node_modules/\n*.log\n")
                 .await
                 .unwrap();
-            ensure_gitignore_entry(&exec(), dir.path(), &layout.gitignore_entry()).await;
+            ensure_gitignore_entry(&exec(), dir.path(), &layout).await;
             let after = tokio::fs::read_to_string(dir.path().join(".gitignore"))
                 .await
                 .unwrap();

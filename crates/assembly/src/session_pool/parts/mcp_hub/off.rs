@@ -18,7 +18,7 @@ pub struct McpOptions {}
 pub(crate) struct McpSetup;
 
 impl McpOptions {
-    pub(crate) fn resolve(self, _policy_path: Option<&Path>) -> anyhow::Result<McpSetup> {
+    pub(crate) fn resolve(self, _config: &crate::config::DaemonConfig) -> anyhow::Result<McpSetup> {
         Ok(McpSetup)
     }
 }
@@ -26,7 +26,10 @@ impl McpOptions {
 pub(in crate::session_pool) struct McpHub;
 
 impl McpHub {
-    pub(in crate::session_pool) fn new(_setup: Option<McpSetup>, _user_data_dir: &Path) -> Self {
+    pub(in crate::session_pool) fn new(
+        _setup: Option<McpSetup>,
+        _paths: &base::paths::PathSettings,
+    ) -> Self {
         Self
     }
 

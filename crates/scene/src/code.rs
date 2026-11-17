@@ -116,8 +116,12 @@ pub enum Interaction {
     Unattended,
 }
 
+/// The scene's name after the product's: `<product> Code`.
+pub const TITLE: &str = "Code";
+
 pub fn spec(interaction: Interaction) -> SceneSpec {
-    let mut s = SceneSpec::new("code", "Agix Code", Arc::new(CodePrompt));
+    let name = crate::product_title(&Default::default(), TITLE);
+    let mut s = SceneSpec::new("code", name, Arc::new(CodePrompt));
     s.description = "编程场景 — 完整工具权限的通用编程 Agent".into();
     s.requires_project = true;
     s.supports_team = true;
@@ -309,7 +313,8 @@ fn build_section_registry<'a>(
         false => unattended.to_string(),
     };
 
-    sections.push(static_section("identity", identity_block));
+    let product = ctx.layout.product_name().to_string();
+    sections.push(static_section("identity", move || identity_block(&product)));
     let system_info = pick(SYSTEM_INFO_BLOCK, SYSTEM_INFO_UNATTENDED);
     sections.push(static_section("system_info", move || system_info));
     sections.push(static_section("working", || {
@@ -369,10 +374,10 @@ fn build_section_registry<'a>(
     sections
 }
 
-fn identity_block() -> String {
+fn identity_block(product: &str) -> String {
     format!(
-        "You are Agix, OpenAtta's agent for software engineering tasks. Use the instructions \
-         below and your tools to help the user.\n\n{}",
+        "You are {product}, OpenAtta's agent for software engineering tasks. Use the \
+         instructions below and your tools to help the user.\n\n{}",
         common::SAFETY_RULES
     )
 }

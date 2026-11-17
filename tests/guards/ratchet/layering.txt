@@ -10,7 +10,7 @@ fields   DaemonEvents                                            2
 fields   EngineFactory                                           9
 fields   LiveSessions                                            8
 fields   McpHub                                                  3
-fields   SceneCatalog                                            6
+fields   SceneCatalog                                            7
 fields   Scheduler                                               1
 fields   SessionDirectory                                        3
 fields   SessionPool                                             12

@@ -36,9 +36,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 ## 2. 装配一个池
 
-设置从哪来：`load_daemon_config(model, max_tokens, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/.agix/settings.json`）三层合并；`model` 与 `max_tokens` 是这些层都没写时的兜底；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/Agix/managed-settings.json`）。
+设置从哪来：`load_daemon_config(model, max_tokens, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/<项目层目录>/settings.json`，缺省 `.agix`）三层合并；`model` 与 `max_tokens` 是这些层都没写时的兜底；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/<产品名>/managed-settings.json`，缺省 `Agix`）。
 
-状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，项目层目录不叫 `.agix` 时再 `.with_layout(base::paths::Layout::new(".codix")?)`（§10 的 `project_dir`）。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。
+状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，项目层目录不叫 `.agix` 或产品名不叫 Agix 时再 `.with_layout(base::paths::Layout::new(".codix")?.with_product_name("Codix")?)`（§10 的 `project_dir` 与 `product_name`）。内建场景用 `builtin(id, &layout)` 取，`layout` 定它的展示名（`<产品名> Code`）：传池自己的 `config.paths.layout()`，名字才与池里其余地方一致。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。
 
 provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（加 `ANTHROPIC_BASE_URL`）建 Anthropic 客户端，环境里没有就向 `Assembly::credentials` 要 provider `"default"` 的密钥。设置里的 `providers`、`default_provider`、`task_models` 在 `assemble` 时校验，配错直接失败，不静默回退。
 
@@ -67,7 +67,7 @@ let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &pa
 // 记忆选取会另调一次模型，会吃掉 mock 脚本里的一条回答
 # config.settings.values.memory_enabled = false;
 
-let scene = Arc::new(builtin("code").expect("built-in scene"));
+let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 let pool = assemble(
     &config,
     scene,
@@ -114,7 +114,7 @@ use agix::prelude::*;
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 # config.settings.values.memory_enabled = false;
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let created = pool.create_session(None, ProjectSelector::Default, None).await?;
 let outcome = pool
@@ -206,7 +206,7 @@ fn answer(event: &AgentEvent) -> Option<(String, PromptAnswer)> {
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 # config.settings.values.memory_enabled = false;
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let created = pool.create_session(None, ProjectSelector::Default, None).await?;
 let session_id = created.session_id;
@@ -292,7 +292,7 @@ use agix::session::SessionOptions;
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 # config.settings.values.memory_enabled = false;
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let options = SessionOptions {
     host_tools: vec![HostToolOption {
@@ -441,7 +441,7 @@ impl Plugin for EchoPlugin {
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 # config.settings.values.memory_enabled = false;
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 let pool = assemble(
     &config,
     scene,
@@ -527,7 +527,7 @@ fn main() -> anyhow::Result<()> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
 # let paths = StaticDaemonPaths::new(state.clone());
 # let config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly::default()).await?;
         tokio::signal::ctrl_c().await?;
         let _ = tokio::time::timeout(Duration::from_secs(10), pool.shutdown_all()).await;
@@ -585,7 +585,7 @@ impl FrameSink for Frames {
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 # config.settings.values.memory_enabled = false;
-# let scene = Arc::new(builtin("code").expect("built-in scene"));
+# let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let server = DaemonServer::new(pool.clone(), CancellationToken::new());
 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -701,10 +701,13 @@ engine.shutdown().await;
 | `mcp_policy` / `managed_settings` | `--mcp-policy` / `--managed-settings` | 平台的路径；给了就必须存在 |
 | `groups_file` | 无（agixd 用 `instance` 的） | `None`：有 `instance` 时是 `<data_root>/daemon/groups/<名字>.json`，否则不登记 |
 | `project_dir` | 无（agixd 总是 `.agix`） | `.agix`：引擎在每个项目里的目录名 |
+| `product_name` | 无（agixd 总是 Agix） | `Agix`：引擎自称的产品名 |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
 
-**`project_dir`。** 引擎在项目里放的一切——项目层设置（`settings.json`、`settings.local.json`）、agents、hooks、rules、output-styles、worktrees、团队、记忆、telemetry、`tool-results`、导入标记——都在 `<项目>/<project_dir>/` 下，提示词、`daemon.doctor`、`config.list` 报的也是这个名字。只认这一个名字，不做“先找它、找不到再读 `.agix`”。名字是一个路径分量，以 `.` 开头，只含小写字母、数字、`.`、`_`、`-`，至多 64 个字符，不能是 `.`、`..`，也不能是别的工具的目录（`.git`、`.agents`、`.claude`、`.codex`、`.cursor`、`.github`、`.vscode`、`.idea`）。要以 `.` 开头，是因为引擎启动时会清掉 `<project_dir>/worktrees/` 下认不出的目录、拒写其中的配置子目录，起成 `src`、`docs` 这类项目自己用的名字，一个笔误就是删数据；隐藏目录是工具放自己状态的惯例位置。不合法时 `start` 返回 `EmbedError::InvalidProjectDir { name, reason }`。保护跟着名字走：模型改不了它的设置文件，改其中的配置子目录要问，沙箱里的命令写不了它的设置文件与配置子目录（`ARCHITECTURE.md` §8.1）。名字不是 `.agix` 时，项目里的 `.agix` 与 `.claude` 一样作为别的代理的配置继续受保护（写工具拒写其中的设置文件、写别的要问，沙箱里写不了其中的设置文件与配置子目录，其中的 `settings.local.json` / `mcp.local.json` 仍算凭据），但不再被读。`.agents/skills` 是跨工具的约定，不随名字变；worktree 的分支前缀 `agix/worktree-` 也不变。
+**`project_dir`。** 引擎在项目里放的一切——项目层设置（`settings.json`、`settings.local.json`）、agents、hooks、rules、output-styles、worktrees、团队、记忆、telemetry、`tool-results`、导入标记——都在 `<项目>/<project_dir>/` 下，提示词、`daemon.doctor`、`config.list` 报的也是这个名字。只认这一个名字，不做“先找它、找不到再读 `.agix`”。名字是一个路径分量，以 `.` 开头，只含小写字母、数字、`.`、`_`、`-`，至多 64 个字符，不能是 `.`、`..`，也不能是别的工具的目录（`.git`、`.agents`、`.claude`、`.codex`、`.cursor`、`.github`、`.vscode`、`.idea`）。要以 `.` 开头，是因为引擎启动时会清掉 `<project_dir>/worktrees/` 下认不出的目录、拒写其中的配置子目录，起成 `src`、`docs` 这类项目自己用的名字，一个笔误就是删数据；隐藏目录是工具放自己状态的惯例位置。不合法时 `start` 返回 `EmbedError::InvalidProjectDir { name, reason }`。保护跟着名字走：模型改不了它的设置文件，改其中的配置子目录要问，沙箱里的命令写不了它的设置文件与配置子目录（`ARCHITECTURE.md` §8.1）。名字不是 `.agix` 时，项目里的 `.agix` 与 `.claude` 一样作为别的代理的配置继续受保护（写工具拒写其中的设置文件、写别的要问，沙箱里写不了其中的设置文件与配置子目录，其中的 `settings.local.json` / `mcp.local.json` 仍算凭据），但不再被读。`.agents/skills` 是跨工具的约定，不随名字变；worktree 的分支前缀跟的是 `product_name`，不是它。
+
+**`product_name`。** 引擎自称的地方都用它：模型收到的提示词（`You are Codix, …`）、工具指南与报错里的产品名、Bash 指南里提交与 PR 的署名（缺省是带链接的 `[Agix](…)`，改名后只写名字）、桌面通知的标题、Cursor 规则导入时写的注释、内建场景在 `scene.list` / `scene.describe` 里的名字（`Codix Code`、`Codix Mini`，场景 id `code` / `mini` 不变）、OpenTelemetry 的 `service.name`（`<小写名>`）；MCP 动态注册的 `client_name`（授权页上显示的名字；库式用法给了 `McpOptions.oauth_client` 时用宿主的）；引擎发出的 HTTP 请求（模型、MCP OAuth、`WebFetch` 等工具、hook、插件包下载、`config.listModels`）的 `User-Agent: <小写名>/<版本>`，请求自己带了就不覆盖；worktree 的分支 `<小写名>/worktree-<名>` 与 `.gitignore` 里那行的注释、嵌套仓库被挪开的 `.git` 的新名字 `.git.<小写名>-quarantine-<时间>`；没给 `managed_settings` / `mcp_policy` 时读的平台路径（macOS `/Library/Application Support/<名>/`，Windows `%ProgramData%\<名>\`，其余 `/etc/<小写名>/`）。规则：ASCII 字母开头，其后至多 31 个 ASCII 字母、数字、`-`、`_`——小写形式要能当路径分量、git 分支名的一段和 HTTP token；不合法时 `start` 返回 `EmbedError::InvalidProductName { name, reason }`。不跟着变的是接口的名字：线上协议的 `agix.*` 方法与命名空间、`AGIX_*` 环境变量、transcript 与导出包的 `agix.` 命名空间、OpenTelemetry 的 instrumentation scope 与 `agix.*` 指标名（它们标识库，不是服务）、协议 schema 的标题、场景 id、内部的临时目录与线程名，以及 agixd 自己。
 
 **`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们收掉。不给就两样都不做，锁由宿主自己管。
 
@@ -723,7 +726,7 @@ engine.shutdown().await;
 **仍是进程级的**，两个 `Embedded` 会共用：
 
 - `network.use_system_proxy` 交给进程级的 HTTP 客户端：进程里第一次读到的设置生效，之后读到不同的只记一条 warn；两个数据根设得不同，后起的那个用不上自己的。代理变量（`HTTP(S)_PROXY`、`NO_PROXY`）也从进程环境读。
-- OpenTelemetry 导出器：第一个起它的端点就是全进程的端点。
+- OpenTelemetry 导出器：第一个起它的端点就是全进程的端点，`service.name` 也是那个池的产品名。
 - 进程组登记：见上，至多一个登记的（`InstanceInProcess` / `GroupsInProcess`）。
 - `OTEL_EXPORTER_OTLP_ENDPOINT`（设置没写端点时）与上面的凭据变量从进程环境读。
 - `AGIX_RECORD` / `AGIX_REPLAY` / `AGIX_RECORDINGS_DIR` 只对自己拿 `RecorderModel` 包模型、又不给配置的代码起作用；池里会话的录制只看 `options.recorder`。
@@ -732,6 +735,7 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.3.17** `EmbedConfig.product_name` 与 `EmbedError::InvalidProductName`：产品名由宿主定，缺省 `Agix`，行为同前。改了名字之后，Agix 名下平台路径的 managed settings 与 MCP 策略不再被读（不做回退），要沿用就把文件放进新名字的目录，或用 `managed_settings` / `mcp_policy` 点名；worktree 同样不做回退：改名之前建的分支 `agix/worktree-*` 不再被认作这个实例的 worktree 分支——孤儿清理删 `<项目层目录>/worktrees/` 下的残留目录时删的是 `<新名字>/worktree-<名>`，旧分支留在仓库里；改名前的会话恢复到它的 worktree 时也按新前缀找分支。旧分支不会被自动删，要清就自己 `git branch -D agix/worktree-<名>`。内建场景的展示名随之变成 `<名> Code` / `<名> Mini`（id 不变），OpenTelemetry 的 `service.name` 变成小写名。库式用法（§2–§9）里 `ModelFactory::build` 多一个 `network: Option<&Arc<dyn Network>>`（模型请求走的出口，带部署的 `User-Agent`；不用就忽略），`ModelFactoryRegistry::with_network`；`model_router::build_task_router` 多一个 `&Layout`；`settings::managed::path`、`mcp::policy::managed_policy_path` 删掉，平台路径只在 `Layout::{machine_dir, managed_settings_file, mcp_policy_file}`；`scene::builtin` 与 `SceneRegistry::register_builtin` 多一个 `&Layout`（按它给内建场景起名）；`telemetry_otel::{start_otel, process_exporter}` 多一个 `service` 参数；`PromptContext.project_dir` 换成 `PromptContext.layout`，`ScenePromptContext` 多一个 `layout`；`base::paths::{WORKTREE_BRANCH_PREFIX, QUARANTINE_PREFIX}` 换成 `Layout::{worktree_branch_prefix, quarantine_prefix}`；`OAuthHttp::{for_server, for_configured}` 多一个 `User-Agent` 参数，新增 `McpAuth::set_user_agent`、`platform::LocalNetwork::with_user_agent`。
 - **0.3.17** `EmbedConfig.project_dir` 与 `EmbedError::InvalidProjectDir`：项目层目录名由宿主定，缺省 `.agix`，行为同前。换了名字之后，项目里已有的 `.agix` 不再被读（不做回退：两个目录并存时读哪个、写哪个、信任按哪个判断都说不清），要保留里面的设置、规则、记忆由宿主自己搬到新目录；没搬之前它照样受保护，模型改不了它。没给 `managed_settings` / `mcp_policy` 的宿主读到的仍是 Agix 的平台路径。库式用法（§2–§9）里 `LoadedSettings::load*`、`ConfigPaths::new`、`PathSettings::new`、`SensitivePaths::new` 多一个布局参数，`WritePolicy::new` 改收 `Arc<SensitivePaths>`，`packages::{discover_plugins, scan_plugins}`、`packages::install::install`、`packages::manifest::Plugin::load` 多一个 `&Layout`；`DaemonPaths::layout()` 有缺省实现，外部实现不用改。
 - **0.3.16** `EmbedError::GroupsHeld`：`groups_file` 里的拥有者是另一个活着的进程。`orphans::{live_owner, stop_persisting}`。`EmbedConfig.groups_file`：进程组的回收与登记不再要 `instance`，不给 `instance` 的宿主给它一个文件就有；给了 `instance` 而不给它，行为同前。`EmbedError::GroupsInProcess`：一个进程里已有一个不带 `instance` 而登记进程组的 `Embedded` 在跑时，再起一个要登记的。
 - **0.3.15** 新增 `agix::embed` / `daemon::embed`：`EmbedConfig` 十三个字段（上表除 `groups_file`、`project_dir` 外）与 `EmbedConfig::new`，`EmbedError::{UnknownScene, AlreadyRunning, Startup, InstanceInProcess}`，`Embedded::{start, serve_stream, serve_unix, closed, shutdown}`。自己照抄 agixd 启动过程的宿主（`load_daemon_config` + `assemble::pool` + `DaemonServer::new`，进程内 `accept_connection` + `dispatch_public`，继承来的流自己写读循环）换成 `Embedded::start` 加 `serve_stream`；进程内连接的回复改走出站队列，往队列里塞屏障帧的做法可以删掉。同一版起 agixd 与 `assemble::pool` 没有凭据也能启动。

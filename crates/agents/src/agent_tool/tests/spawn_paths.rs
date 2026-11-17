@@ -548,7 +548,7 @@ impl base::interface::memory_contracts::RetrievalHook for KeepsEverything {}
 async fn a_delegate_is_assembled_on_its_parents_host_contracts() {
     let probe = Arc::new(CapturesHost(Default::default()));
     let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
+    registry.register_builtin(&Default::default());
     let parent = runtime::agent::HostContracts {
         scene_registry: Some(Arc::new(registry)),
         memory_retriever: Some(Arc::new(

@@ -44,6 +44,8 @@ pub(in crate::session_pool) struct SceneCatalog {
     registered: RwLock<Vec<Arc<SceneSpec>>>,
     /// Where the declarative scenes live: `<state root>/scenes/<id>/`.
     user_scenes_dir: PathBuf,
+    /// Names the built-in scenes after the product.
+    layout: base::paths::Layout,
 }
 
 fn read<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -55,9 +57,16 @@ fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 }
 
 impl SceneCatalog {
-    pub(in crate::session_pool) fn new(default: Arc<SceneSpec>, user_scenes_dir: PathBuf) -> Self {
+    /// The declarative scenes are under `paths`' state root, and the
+    /// built-in ones are named for its product.
+    pub(in crate::session_pool) fn new(
+        default: Arc<SceneSpec>,
+        paths: &dyn crate::config::DaemonPaths,
+    ) -> Self {
+        let user_scenes_dir = base::paths::StateRoot::new(paths.global_root()).scenes_dir();
+        let layout = paths.layout();
         let host = vec![default.clone()];
-        let registry = registry_of(&host, &[], &user_scenes_dir, &[]).0;
+        let registry = registry_of(&layout, &host, &[], &user_scenes_dir, &[]).0;
         let active = HashMap::from([(default.id.clone(), default.clone())]);
         Self {
             default,
@@ -66,6 +75,7 @@ impl SceneCatalog {
             host: RwLock::new(host),
             registered: RwLock::new(Vec::new()),
             user_scenes_dir,
+            layout,
         }
     }
 
@@ -145,6 +155,7 @@ impl SceneCatalog {
 
     fn registry_now(&self, plugin_scenes: &[Arc<SceneSpec>]) -> (SceneRegistry, Vec<String>) {
         registry_of(
+            &self.layout,
             &read(&self.host),
             plugin_scenes,
             &self.user_scenes_dir,
@@ -254,6 +265,7 @@ impl SceneCatalog {
 /// registered scene cannot take an id already there; one that does not load
 /// is left out, named in the returned list, and the rest load.
 fn registry_of(
+    layout: &base::paths::Layout,
     host_scenes: &[Arc<SceneSpec>],
     plugin_scenes: &[Arc<SceneSpec>],
     user_scenes: &Path,
@@ -261,7 +273,7 @@ fn registry_of(
 ) -> (SceneRegistry, Vec<String>) {
     let mut registry = SceneRegistry::new();
     let mut refused = Vec::new();
-    registry.register_builtin();
+    registry.register_builtin(layout);
     for s in host_scenes {
         registry.register(s.clone());
     }

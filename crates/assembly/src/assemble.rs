@@ -133,7 +133,7 @@ pub async fn pool(
     validate_task_router_config(config, &credentials)?;
     let client = match assembly.model_client {
         Some(client) => client,
-        None => default_anthropic_client(assembly.credentials.as_deref())?,
+        None => default_anthropic_client(assembly.credentials.as_deref(), &config.paths.layout())?,
     };
     if matches!(
         settings.values.permission_mode,
@@ -176,7 +176,7 @@ pub async fn pool(
     if let Some(customize) = assembly.customize_session {
         pool = pool.session_customizer(customize);
     }
-    pool = pool.mcp(assembly.mcp.resolve(config.mcp_policy_path.as_deref())?);
+    pool = pool.mcp(assembly.mcp.resolve(config)?);
     let pool = pool.build();
 
     for scene in assembly.scenes {
@@ -231,7 +231,7 @@ fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission:
     use settings::managed::read;
     let (path, required) = match &config.managed_settings_path {
         Some(path) => (path.clone(), true),
-        None => (settings::managed::path(), false),
+        None => (config.paths.layout().managed_settings_file(), false),
     };
     let managed = read(&path, required).or_else(|| config.settings.managed.clone());
     (path, managed)
@@ -272,6 +272,7 @@ fn validate_task_router_config(
         default_provider,
         resolved,
         credentials,
+        &config.paths.layout(),
     )
     .map_err(|e| anyhow::anyhow!("failed to build multi-provider model router: {e}"))?;
     Ok(())
@@ -286,6 +287,7 @@ fn validate_task_router_config(
 /// reach it fails with `no_credentials` before anything is sent.
 fn default_anthropic_client(
     host: Option<&dyn CredentialSource>,
+    layout: &base::paths::Layout,
 ) -> anyhow::Result<Arc<dyn AnthropicClient>> {
     let none = base::provider::ProviderConfig::default();
     let api_key = base::interface::credentials::EnvCredentials::anthropic()
@@ -323,10 +325,13 @@ fn default_anthropic_client(
         )));
     };
     let auth = AuthMode::ApiKey(api_key);
-    Ok(match base {
-        Some(base) => Arc::new(HttpAnthropicClient::with_base(auth, base)?),
-        None => Arc::new(HttpAnthropicClient::new(auth)?),
-    })
+    let client = match base {
+        Some(base) => HttpAnthropicClient::with_base(auth, base)?,
+        None => HttpAnthropicClient::new(auth)?,
+    };
+    Ok(Arc::new(client.with_network(Arc::new(
+        platform::LocalNetwork::default().with_user_agent(layout.user_agent()),
+    ))))
 }
 
 /// Transcripts under `global_dir`.

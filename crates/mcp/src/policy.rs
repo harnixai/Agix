@@ -2,7 +2,7 @@
 //! 企业身份从哪个 IdP 换。
 //!
 //! 策略来自宿主（`Assembly::mcp.policy`）或系统管理路径上的
-//! `mcp-policy.json`（[`managed_policy_path`]），从不来自用户可写的数据目录。
+//! `mcp-policy.json`（`Layout::mcp_policy_file`），从不来自用户可写的数据目录。
 //! [`McpPolicyGate`] 是会话池实际执行的那一份：每个要连的 server 先过
 //! [`McpPolicyGate::admit`]，被拒的不会起进程、不会发请求；授权服务器在任何
 //! 跳转之前过 [`McpPolicyGate::admit_authorization_server`]。策略文件读不了、
@@ -56,24 +56,6 @@ impl std::fmt::Display for McpServerRule {
             McpServerRule::Command(v) => write!(f, "{{\"command\": {v:?}}}"),
             McpServerRule::Url(v) => write!(f, "{{\"url\": {v:?}}}"),
         }
-    }
-}
-
-pub fn managed_policy_path() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/Application Support/Agix/mcp-policy.json")
-    }
-    #[cfg(windows)]
-    {
-        let root = std::env::var_os("ProgramData")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        root.join("Agix").join("mcp-policy.json")
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        PathBuf::from("/etc/agix/mcp-policy.json")
     }
 }
 
@@ -836,12 +818,5 @@ mod tests {
         let g = McpPolicyGate::load(&path, true);
         assert_eq!(g.enterprise_idp().unwrap().issuer, "https://idp");
         assert!(g.admit_authorization_server(Some("https://as")).is_ok());
-    }
-
-    #[test]
-    fn the_managed_path_is_a_system_location() {
-        let path = managed_policy_path();
-        assert!(path.is_absolute(), "{}", path.display());
-        assert!(path.ends_with("mcp-policy.json"));
     }
 }

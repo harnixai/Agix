@@ -27,6 +27,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::interface::credentials::{ConfigCredentials, CredentialSource};
+use crate::interface::exec::Network;
 use crate::interface::model::Model;
 use crate::provider::ProviderConfig;
 
@@ -45,11 +46,16 @@ pub trait ModelFactory: Send + Sync {
     /// directly: a factory that reads the field itself silently opts its
     /// protocol out of whatever the host arranged, which is exactly the bug
     /// the source exists to prevent.
+    ///
+    /// `network`, when there is one, is the egress the model's requests go
+    /// out on — it carries the deployment's `User-Agent`; `None` leaves the
+    /// factory's own.
     fn build(
         &self,
         provider_id: &str,
         config: &ProviderConfig,
         credentials: &dyn CredentialSource,
+        network: Option<&Arc<dyn Network>>,
     ) -> Result<Arc<dyn Model>, String>;
 }
 
@@ -58,6 +64,7 @@ pub trait ModelFactory: Send + Sync {
 pub struct ModelFactoryRegistry {
     by_api_type: HashMap<String, Arc<dyn ModelFactory>>,
     credentials: Arc<dyn CredentialSource>,
+    network: Option<Arc<dyn Network>>,
 }
 
 impl Default for ModelFactoryRegistry {
@@ -65,6 +72,7 @@ impl Default for ModelFactoryRegistry {
         Self {
             by_api_type: HashMap::new(),
             credentials: Arc::new(ConfigCredentials),
+            network: None,
         }
     }
 }
@@ -97,6 +105,13 @@ impl ModelFactoryRegistry {
         self
     }
 
+    /// Send every model's requests through `network`. One for the whole
+    /// registry, for the reason credentials are.
+    pub fn with_network(mut self, network: Arc<dyn Network>) -> Self {
+        self.network = Some(network);
+        self
+    }
+
     pub fn get(&self, api_type: &str) -> Option<&Arc<dyn ModelFactory>> {
         self.by_api_type.get(api_type)
     }
@@ -125,7 +140,12 @@ impl ModelFactoryRegistry {
     ) -> Result<Arc<dyn Model>, String> {
         let api_type = config.api_type.as_deref().unwrap_or("anthropic");
         match self.by_api_type.get(api_type) {
-            Some(f) => f.build(provider_id, config, self.credentials.as_ref()),
+            Some(f) => f.build(
+                provider_id,
+                config,
+                self.credentials.as_ref(),
+                self.network.as_ref(),
+            ),
             None => Err(format!(
                 "provider '{provider_id}': unrecognized api_type '{api_type}' (expected {})",
                 self.api_types()
@@ -153,6 +173,7 @@ mod tests {
             _id: &str,
             _cfg: &ProviderConfig,
             _credentials: &dyn CredentialSource,
+            _network: Option<&Arc<dyn Network>>,
         ) -> Result<Arc<dyn Model>, String> {
             Err("stub".into())
         }

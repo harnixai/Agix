@@ -27,7 +27,8 @@ impl SessionPool {
             &[roots.projects.clone(), roots.sessions.clone()],
         )?;
         let source = request.path.clone();
-        let archive = tokio::task::spawn_blocking(move || read_archive(&source))
+        let product = settings.paths.layout.product_name().to_string();
+        let archive = tokio::task::spawn_blocking(move || read_archive(&source, &product))
             .await
             .map_err(|e| PoolError::Internal(format!("the import task failed: {e}")))??;
         let target = self.placement(

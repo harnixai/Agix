@@ -390,6 +390,8 @@ struct RoutedQueue {
 pub struct SeenRequest {
     pub path: String,
     pub body: serde_json::Value,
+    /// Names lowercase.
+    pub headers: Vec<(String, String)>,
 }
 
 impl SeenRequest {
@@ -399,6 +401,13 @@ impl SeenRequest {
             .get("model")
             .and_then(|m| m.as_str())
             .unwrap_or_default()
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 
     /// The system prompt as one string. Blocks are joined so a case can ask
@@ -621,12 +630,19 @@ impl ProviderStub {
     }
 
     async fn serve_one(&self, mut sock: tokio::net::TcpStream) -> anyhow::Result<()> {
-        let Some(RawRequest { path, body, .. }) = read_request(&mut sock).await? else {
+        let Some(RawRequest {
+            path,
+            body,
+            headers,
+            ..
+        }) = read_request(&mut sock).await?
+        else {
             return Ok(());
         };
         let injected = self.failures.lock().unwrap().take(&path, &body);
         self.seen.lock().unwrap().push(SeenRequest {
             path,
+            headers,
             body: serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null),
         });
 

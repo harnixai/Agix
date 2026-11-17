@@ -313,7 +313,7 @@ fn guide_context(ctx: &ToolContext, all: &[Arc<dyn Tool>]) -> PromptContext {
     guide.session_id = ctx.session_id.clone();
     guide.all_tool_names = all.iter().map(|t| t.name().to_string()).collect();
     guide.path_style = ctx.config.path_style;
-    guide.project_dir = ctx.config.layout.project_dir_name().to_string();
+    guide.layout = ctx.config.layout.clone();
     guide
 }
 

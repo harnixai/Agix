@@ -1396,7 +1396,8 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
 一层用户改不了、用户选的模式也绕不过的规则。这就是 managed 层(`settings::managed`):
 
 - **来源。** 系统路径上的一个文件:macOS `/Library/Application Support/Agix/managed-settings.json`,
-  Linux 等 `/etc/agix/managed-settings.json`,Windows `%ProgramData%\Agix\managed-settings.json`。
+  Linux 等 `/etc/agix/managed-settings.json`,Windows `%ProgramData%\Agix\managed-settings.json`
+  (嵌入方改了产品名就是那个名字下的同一位置,只读那一份,§8.1)。
   `agixd --managed-settings <路径>`(嵌入方:`DaemonConfig::managed_settings_path`)换成别的
   文件,这个文件**必须存在**。用户数据目录、项目、模型都改不了这条路径:它只来自系统路径
   和启动参数,不从任何设置文件读。嵌入方也可以在 `ConfigSource` 里给一层
@@ -1832,7 +1833,7 @@ rust / go / java / ruby / dotnet / swift 的常见位置,开箱即用。设置�
 2. `agixd --mcp-policy <路径>`(嵌入方:`DaemonConfig::mcp_policy_path`)指定的文件。
    这个文件**必须存在**:写了路径而文件不在,按读不了处理。
 3. 系统管理路径:macOS `/Library/Application Support/Agix/mcp-policy.json`,Linux 等
-   `/etc/agix/mcp-policy.json`,Windows `%ProgramData%\Agix\mcp-policy.json`。不存在 =
+   `/etc/agix/mcp-policy.json`,Windows `%ProgramData%\Agix\mcp-policy.json`(随产品名,§8.1)。不存在 =
    没有策略,一切照旧。
 
 策略在装配时读一次,改了要重启 daemon。
@@ -2210,8 +2211,29 @@ Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.jso
 缺省名字下自己与外来去重,行为与改名之前相同。
 
 **已知边界。** 两个都不用缺省名的宿主(`.codix` 与 `.foo`)开同一个项目时,彼此不保护对方的目录;需要时
-再加一份要保护的名字表。`.agents/skills`、worktree 分支前缀 `agix/worktree-`、隔离目录前缀
-`.git.agix-quarantine-`、OAuth 的 `client_name` 等是跨工具约定或产品名,不随项目层目录名变。
+再加一份要保护的名字表。`.agents/skills` 是跨工具约定,不随项目层目录名变。
+
+**产品名。** `Layout` 里的另一个值是产品名(缺省 `Agix`,`EmbedConfig.product_name`,`Layout::with_product_name`
+校验:ASCII 字母开头,其后至多 31 个字母、数字、`-`、`_`),与目录名同一条路传、同样没有进程级的值。展示用的
+`product_name()` 进提示词(场景的身份句、`ScenePromptContext.layout`)、工具指南(`PromptContext.layout`)、报错、
+MCP 动态注册的 `client_name`、桌面通知、内建场景的展示名(`<名> Code` / `<名> Mini`,`scene::builtin` 与
+`SceneRegistry::register_builtin` 按 `Layout` 起名,场景 id 不变);小写的 `product_id()` 派生出 `user_agent()`(`<id>/<版本>`)、
+`worktree_branch_prefix()`(`<id>/worktree-`)、`quarantine_prefix()`(`.git.<id>-quarantine-`)、OpenTelemetry 的 `service.name`(标识服务,所以是宿主;
+instrumentation scope 与 `agix.*` 指标名标识库,仍是 agix;导出器是进程级的,第一个起它的池的名字生效)与
+`machine_dir()`。`User-Agent` 不放在进程共用的 reqwest 客户端上,而是每个 `LocalNetwork` 一个、请求没带才补上:
+会话的出口(`runtime::exec`)、hook、插件包下载、`config.listModels`,以及经 `ModelFactoryRegistry::with_network`
+交给模型工厂的出口都从池的 `Layout` 建;MCP OAuth 自己的客户端从 `McpAuth::set_user_agent` 取。守卫
+`engine_dirs.rs` 的 NAME-1/2/3 不许生产代码的字符串、提示词模板和工具输入类型的文档注释里出现展示用的产品名
+(协议的 `agix.*`、`AGIX_*`、内部 `agix-` 标识不算),例外逐条列明理由。
+
+**managed 层随产品名走,不放宽。** 平台路径只有一处:`Layout::machine_dir()`(macOS
+`/Library/Application Support/<名>/`,Windows `%ProgramData%\<名>\`,其余 `/etc/<id>/`;读 `ProgramData` 是 base
+里带 `#[expect]` 的机器事实),`managed_settings_file()` / `mcp_policy_file()` 在它下面,settings 与 mcp 都从这里
+取。只拼本产品的目录,改了名字就不再看 `Agix` 那一份,也不会读到任何别的路径:名字的字符集里没有路径分隔符和 `.`,拼不出
+`..` 或绝对路径。那里没有文件,与缺省名字下没有 managed 文件是同一种状态——没有 managed 层,不是一个出错的层,
+门禁照常按用户、项目各层判断;文件在但读不了或不合法仍按 §6.1 拒绝一切工具调用,MCP 策略文件读不了仍拒绝一切
+server。宿主点名的 `managed_settings` / `mcp_policy` 与产品名无关,必须存在。所以改名不会让一份本该生效的
+managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字下——这一点写在 `agix-sdk.md` 的迁移说明里。
 
 ---
 

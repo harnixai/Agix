@@ -86,7 +86,7 @@ impl SessionPool {
             Err(reason) => return Err(no_key(provider_id, &reason)),
         };
         let api_type = cfg.api_type.as_deref().unwrap_or("anthropic");
-        let network = platform::LocalNetwork::default();
+        let network = platform::LocalNetwork::default().with_user_agent(self.layout().user_agent());
         match model::catalog::list_models(api_type, cfg.base_url.as_deref(), &key, &network).await {
             Ok(listing) => Ok(api::ModelList {
                 models: listing.models,

@@ -13,12 +13,12 @@ mod status;
 mod tests;
 
 use crate::session_pool::api::DaemonEvent;
+use base::paths::PathSettings;
 use cache::McpCache;
 use mcp::manager::McpManager;
 use settings::LoadedSettings;
 use status::*;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -35,8 +35,8 @@ pub struct McpOptions {
     pub credential_store: Option<Arc<dyn mcp::oauth::McpCredentialStore>>,
     /// The client this host presents to MCP authorization servers it has no
     /// registration with: the name shown on their consent page, and its
-    /// client metadata document URL if it publishes one. `None`: "Agix",
-    /// dynamic registration only.
+    /// client metadata document URL if it publishes one. `None`: the
+    /// product's name (`EmbedConfig::product_name`), dynamic registration only.
     pub oauth_client: Option<mcp::oauth::McpOAuthClient>,
     /// The enterprise IdP whose users' identities `"grant": "enterprise"`
     /// MCP servers are authorized from (the host then supplies an identity
@@ -59,14 +59,16 @@ pub(crate) struct McpSetup {
 
 impl McpOptions {
     /// The policy is the host's when it gave one, else the file at
-    /// `policy_path` (which must exist), else the platform's managed path.
-    /// An enterprise IdP that does not validate fails the assembly.
-    pub(crate) fn resolve(self, policy_path: Option<&Path>) -> anyhow::Result<McpSetup> {
-        use mcp::policy::{managed_policy_path, McpPolicyGate};
+    /// `config.mcp_policy_path` (which must exist), else the platform's
+    /// managed path for `config`'s product. An enterprise IdP that does not
+    /// validate fails the assembly.
+    pub(crate) fn resolve(self, config: &crate::config::DaemonConfig) -> anyhow::Result<McpSetup> {
+        let policy_path = config.mcp_policy_path.as_deref();
+        use mcp::policy::McpPolicyGate;
         let policy = match (self.policy, policy_path) {
             (Some(policy), _) => McpPolicyGate::from_host(policy),
             (None, Some(path)) => McpPolicyGate::load(path, true),
-            (None, None) => McpPolicyGate::load(&managed_policy_path(), false),
+            (None, None) => McpPolicyGate::load(&config.paths.layout().mcp_policy_file(), false),
         };
         if let Some(error) = policy.error() {
             warn!(
@@ -116,9 +118,10 @@ pub(in crate::session_pool) struct McpHub {
 }
 
 impl McpHub {
-    /// `setup` is what the host decided; `None` keeps sign-ins under
-    /// `user_data_dir` and admits every server.
-    pub(in crate::session_pool) fn new(setup: Option<McpSetup>, user_data_dir: &Path) -> Self {
+    /// `setup` is what the host decided; `None` keeps sign-ins under the
+    /// user data directory and admits every server.
+    pub(in crate::session_pool) fn new(setup: Option<McpSetup>, paths: &PathSettings) -> Self {
+        let (user_data_dir, layout) = (&paths.user_data_dir, &paths.layout);
         let setup = setup.unwrap_or_else(|| McpSetup {
             credential_store: None,
             oauth_client: None,
@@ -133,10 +136,14 @@ impl McpHub {
                     .join(base::paths::entry::OAUTH),
             ),
         };
-        let auth = match setup.oauth_client {
-            Some(client) => auth.with_client(client),
-            None => auth,
-        };
+        let client = setup
+            .oauth_client
+            .unwrap_or_else(|| mcp::oauth::McpOAuthClient {
+                client_name: layout.product_name().to_string(),
+                ..Default::default()
+            });
+        let auth = auth.with_client(client);
+        auth.set_user_agent(&layout.user_agent());
         let policy = Arc::new(setup.policy);
         auth.set_policy(policy.clone());
         auth.set_enterprise_idp(setup.enterprise_idp);

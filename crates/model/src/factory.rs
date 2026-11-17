@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use base::interface::credentials::CredentialSource;
+use base::interface::exec::Network;
 use base::interface::model::Model;
 use base::interface::model_factory::{ModelFactory, ModelFactoryRegistry};
 use base::provider::ProviderConfig;
@@ -28,26 +29,26 @@ impl ModelFactory for AnthropicFactory {
         provider_id: &str,
         cfg: &ProviderConfig,
         credentials: &dyn CredentialSource,
+        network: Option<&Arc<dyn Network>>,
     ) -> Result<Arc<dyn Model>, String> {
         let api_key = credentials
             .api_key(provider_id, cfg)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?;
         let auth = AuthMode::ApiKey(api_key.expose().to_string());
-        let client: Arc<dyn AnthropicClient> = match cfg.base_url.as_deref() {
+        let client = match cfg.base_url.as_deref() {
             Some(url) if !url.is_empty() => {
                 let base = url::Url::parse(url).map_err(|e| {
                     format!("provider '{provider_id}': invalid base_url '{url}': {e}")
                 })?;
-                Arc::new(
-                    HttpAnthropicClient::with_base(auth, base)
-                        .map_err(|e| format!("provider '{provider_id}': {e}"))?,
-                )
+                HttpAnthropicClient::with_base(auth, base)
             }
-            _ => Arc::new(
-                HttpAnthropicClient::new(auth)
-                    .map_err(|e| format!("provider '{provider_id}': {e}"))?,
-            ),
-        };
+            _ => HttpAnthropicClient::new(auth),
+        }
+        .map_err(|e| format!("provider '{provider_id}': {e}"))?;
+        let client: Arc<dyn AnthropicClient> = Arc::new(match network {
+            Some(net) => client.with_network(net.clone()),
+            None => client,
+        });
         Ok(Arc::new(
             AnthropicModel::new(client).with_provenance(provider_id),
         ))
@@ -67,6 +68,7 @@ impl ModelFactory for OpenAICompatibleFactory {
         provider_id: &str,
         cfg: &ProviderConfig,
         credentials: &dyn CredentialSource,
+        network: Option<&Arc<dyn Network>>,
     ) -> Result<Arc<dyn Model>, String> {
         // Required here, unlike the Anthropic factory: there is no default
         // OpenAI-compatible host to fall back to, and guessing one produces a
@@ -83,12 +85,14 @@ impl ModelFactory for OpenAICompatibleFactory {
             .api_key(provider_id, cfg)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?;
         let default_model = cfg.default_model.clone().unwrap_or_default();
-        Ok(Arc::new(
-            crate::OpenAICompatibleModel::new(&base_url, api_key.expose(), default_model)
-                .map_err(|e| format!("provider '{provider_id}': {e}"))?
-                .with_provenance(provider_id)
-                .with_reasoning(cfg.reasoning_passback, cfg.thinking_toggle),
-        ))
+        let model = crate::OpenAICompatibleModel::new(&base_url, api_key.expose(), default_model)
+            .map_err(|e| format!("provider '{provider_id}': {e}"))?
+            .with_provenance(provider_id)
+            .with_reasoning(cfg.reasoning_passback, cfg.thinking_toggle);
+        Ok(Arc::new(match network {
+            Some(net) => model.with_network(net.clone()),
+            None => model,
+        }))
     }
 }
 
@@ -105,6 +109,7 @@ impl ModelFactory for OpenAIResponsesFactory {
         provider_id: &str,
         cfg: &ProviderConfig,
         credentials: &dyn CredentialSource,
+        network: Option<&Arc<dyn Network>>,
     ) -> Result<Arc<dyn Model>, String> {
         let base_url = cfg
             .base_url
@@ -115,11 +120,13 @@ impl ModelFactory for OpenAIResponsesFactory {
             .api_key(provider_id, cfg)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?;
         let default_model = cfg.default_model.clone().unwrap_or_default();
-        Ok(Arc::new(
-            crate::OpenAIResponsesModel::new(&base_url, api_key.expose(), default_model)
-                .map_err(|e| format!("provider '{provider_id}': {e}"))?
-                .with_provenance(provider_id),
-        ))
+        let model = crate::OpenAIResponsesModel::new(&base_url, api_key.expose(), default_model)
+            .map_err(|e| format!("provider '{provider_id}': {e}"))?
+            .with_provenance(provider_id);
+        Ok(Arc::new(match network {
+            Some(net) => model.with_network(net.clone()),
+            None => model,
+        }))
     }
 }
 

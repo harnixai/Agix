@@ -311,7 +311,7 @@ impl Plugin {
         layout: &base::paths::Layout,
     ) -> Result<Self, PluginError> {
         let raw = std::fs::read_to_string(manifest_path)?;
-        refuse_retired_sections(&raw)?;
+        refuse_retired_sections(&raw, layout.product_name())?;
         let manifest: PluginManifest = toml::from_str(&raw)?;
         validate(&manifest)?;
         warn_unknown_sections(&raw, &manifest.plugin.name);
@@ -410,17 +410,16 @@ fn unknown_sections(raw: &str) -> Vec<String> {
 /// Refused rather than warned about like an unknown section: these were written
 /// for something this build removed, so the package would install and the part
 /// its author cared about would never run.
-fn refuse_retired_sections(raw: &str) -> Result<(), PluginError> {
+fn refuse_retired_sections(raw: &str, product: &str) -> Result<(), PluginError> {
     let Ok(toml::Value::Table(table)) = raw.parse::<toml::Value>() else {
         return Ok(());
     };
     if table.contains_key("wasm") {
-        return Err(PluginError::Schema(
-            "`[[wasm]]` is not supported: Agix runs no WebAssembly components. Extend the \
+        return Err(PluginError::Schema(format!(
+            "`[[wasm]]` is not supported: {product} runs no WebAssembly components. Extend the \
              engine with a Rust plugin or a `[[script]]`; content for the embedding host \
              goes in an `x-` section"
-                .into(),
-        ));
+        )));
     }
     if table
         .get("mcp")
@@ -431,11 +430,10 @@ fn refuse_retired_sections(raw: &str) -> Result<(), PluginError> {
                 .any(|s| s.get("kind").and_then(toml::Value::as_str) == Some("dsh"))
         })
     {
-        return Err(PluginError::Schema(
-            "`[[mcp]] kind = \"dsh\"` is not supported: Agix runs no DSH bridge. Ship the \
+        return Err(PluginError::Schema(format!(
+            "`[[mcp]] kind = \"dsh\"` is not supported: {product} runs no DSH bridge. Ship the \
              plugin as a stdio MCP server and declare it with `kind = \"native\"`"
-                .into(),
-        ));
+        )));
     }
     if table
         .get("scene")
@@ -552,7 +550,7 @@ mod tests {
     use super::*;
 
     fn load_str(toml_str: &str) -> Result<PluginManifest, PluginError> {
-        refuse_retired_sections(toml_str)?;
+        refuse_retired_sections(toml_str, base::paths::DEFAULT_PRODUCT_NAME)?;
         let m: PluginManifest = toml::from_str(toml_str)?;
         validate(&m)?;
         Ok(m)

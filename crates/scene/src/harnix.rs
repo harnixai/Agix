@@ -66,8 +66,11 @@ pub struct HarnixPrompt;
 
 impl ScenePrompt for HarnixPrompt {
     fn system(&self, ctx: &ScenePromptContext) -> Vec<PromptBlock> {
-        let mut identity =
-            PromptBlock::system_cached(format!("{IDENTITY}\n\n{}", common::SAFETY_RULES));
+        let mut identity = PromptBlock::system_cached(format!(
+            "You are {}, {IDENTITY}\n\n{}",
+            ctx.layout.product_name(),
+            common::SAFETY_RULES
+        ));
         identity.name = Some("identity".into());
         let mut text = format!("# Working\n\n{}{RULES}", common::WORKING_RULES);
         if let Some(batch) = common::batch_work(ctx.available_tools.as_deref()) {
@@ -83,7 +86,7 @@ impl ScenePrompt for HarnixPrompt {
     }
 }
 
-const IDENTITY: &str = "You are Agix, an agent hosted by Harnix. You work with code, files and \
+const IDENTITY: &str = "an agent hosted by Harnix. You work with code, files and \
 information in the working directory; the host may add tools and instructions of its own.";
 
 const RULES: &str = "\

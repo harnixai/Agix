@@ -244,7 +244,7 @@ impl Agent {
         prompt_ctx.session_id = self.session.session_id.clone();
         prompt_ctx.all_tool_names = selected.iter().map(|t| t.name().to_string()).collect();
         prompt_ctx.path_style = self.config.path_style;
-        prompt_ctx.project_dir = self.config.layout.project_dir_name().to_string();
+        prompt_ctx.layout = self.config.layout.clone();
 
         let mut defs = Vec::with_capacity(selected.len());
         for t in selected {

@@ -275,7 +275,7 @@ pub async fn quarantine(
     let stamp = time::OffsetDateTime::now_utc();
     let name = format!(
         "{}{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-        base::paths::QUARANTINE_PREFIX,
+        ctx.config.layout.quarantine_prefix(),
         stamp.year(),
         u8::from(stamp.month()),
         stamp.day(),
@@ -386,6 +386,7 @@ async fn nested_git_entries(ctx: &ToolContext, root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut seen = 0usize;
     let mut level = vec![root.to_path_buf()];
+    let quarantined = ctx.config.layout.quarantine_prefix();
     for _ in 0..MAX_DEPTH {
         let mut next = Vec::new();
         for dir in level {
@@ -404,7 +405,7 @@ async fn nested_git_entries(ctx: &ToolContext, root: &Path) -> Vec<PathBuf> {
                     if entry.is_dir && dir != root {
                         found.push(entry.path);
                     }
-                } else if entry.is_dir && !not_walked(name) {
+                } else if entry.is_dir && !not_walked(name, &quarantined) {
                     next.push(entry.path);
                 }
             }
@@ -417,7 +418,7 @@ async fn nested_git_entries(ctx: &ToolContext, root: &Path) -> Vec<PathBuf> {
 /// Dependency, build and cache directories, and git directories moved aside
 /// by [`quarantine`]: large, and a repository in one is still caught by its
 /// gitlink if it is indexed.
-fn not_walked(name: &std::ffi::OsStr) -> bool {
+fn not_walked(name: &std::ffi::OsStr, quarantined: &str) -> bool {
     const DIRS: &[&str] = &[
         "node_modules",
         "bower_components",
@@ -431,7 +432,7 @@ fn not_walked(name: &std::ffi::OsStr) -> bool {
     let Some(name) = name.to_str() else {
         return false;
     };
-    DIRS.contains(&name) || name.starts_with(base::paths::QUARANTINE_PREFIX)
+    DIRS.contains(&name) || name.starts_with(quarantined)
 }
 
 /// The keys of a git configuration that name a program git runs, in the

@@ -28,7 +28,7 @@ pub struct CronCreateInput {
     /// match, then auto-delete.
     #[serde(default = "default_true")]
     pub recurring: bool,
-    /// true = persist to ~/.agix/scenes/<scope>/scheduled_tasks.json and survive
+    /// true = persist to the scene's scheduled_tasks.json and survive
     /// restarts. false (default) = in-memory only, dies when this
     /// session ends. Use true only when the user explicitly asks
     /// the task to survive across sessions.

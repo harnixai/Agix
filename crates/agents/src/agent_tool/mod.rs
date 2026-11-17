@@ -76,10 +76,10 @@ pub struct AgentInput {
     pub description: Option<String>,
     #[serde(default, alias = "subagentType")]
     pub subagent_type: Option<String>,
-    /// Run the sub-agent in a git worktree of its own,
-    /// `.agix/worktrees/<name>` on branch `agix/worktree-<name>`. Removed
-    /// when the agent ends if nothing was left in it; otherwise kept, and the
-    /// result names its path and branch.
+    /// Run the sub-agent in a git worktree of its own named `<name>`, on a
+    /// branch of its own (the tool's guide names both). Removed when the
+    /// agent ends if nothing was left in it; otherwise kept, and the result
+    /// names its path and branch.
     #[serde(default)]
     pub worktree: Option<String>,
     #[serde(default, alias = "run_in_background", alias = "runInBackground")]
@@ -253,7 +253,7 @@ impl base::tool::Tool for AgentTool {
     async fn guide(&self, ctx: &base::tool::PromptContext) -> Option<String> {
         Some(tools::worktree::name_the_directories(
             include_str!("agent_tool.prompt.md"),
-            &ctx.project_dir,
+            &ctx.layout,
         ))
     }
 

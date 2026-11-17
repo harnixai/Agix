@@ -89,8 +89,11 @@ impl Tool for BashTool {
         crate::input_schema::<BashInput>()
     }
 
-    async fn guide(&self, _: &PromptContext) -> Option<String> {
-        Some(include_str!("../prompts/coding/bash.prompt.md").to_string())
+    async fn guide(&self, ctx: &PromptContext) -> Option<String> {
+        Some(
+            include_str!("../prompts/coding/bash.prompt.md")
+                .replace("{attribution}", &ctx.layout.attribution()),
+        )
     }
 
     fn call_traits(&self, input: &Value) -> CallTraits {

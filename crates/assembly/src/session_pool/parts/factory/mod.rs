@@ -496,7 +496,7 @@ fn session_telemetry(
                 // `OnceLock` rather than per session (see `otel_sink`).
                 let mut recorders: Vec<std::sync::Arc<dyn telemetry::TelemetryRecorder>> =
                     vec![std::sync::Arc::new(rec)];
-                if let Some(otel) = otel_sink(settings_snapshot.values.telemetry_url.as_deref()) {
+                if let Some(otel) = otel_sink(settings_snapshot) {
                     recorders.push(otel);
                 }
                 let telemetry_config = telemetry::TelemetryConfig {

@@ -444,6 +444,7 @@ impl LiveProvider {
         let seen = SeenRequest {
             path: path.clone(),
             body: serde_json::from_slice(&body).unwrap_or(Value::Null),
+            headers: headers.clone(),
         };
 
         let injected = lock(&self.failures).take(&path, &body);
@@ -1270,6 +1271,7 @@ mod tests {
             request: SeenRequest {
                 path: "/v1/messages".into(),
                 body: Value::Null,
+                headers: Vec::new(),
             },
             status: 200,
             response: response.into(),

@@ -360,7 +360,8 @@ pub async fn execute_import(
             for mdc_path in mdc_files {
                 if let Ok(content) = files.read_to_string(mdc_path) {
                     if let Some(slug) = mdc_path.file_stem().and_then(|s| s.to_str()) {
-                        let (rule_body, always_apply) = convert_mdc_to_rule(&content);
+                        let (rule_body, always_apply) =
+                            convert_mdc_to_rule(&content, layout.product_name());
                         let rule_rel =
                             format!("{}/{}/{slug}.md", layout.project_dir_name(), entry::RULES);
                         let dest = cwd.join(&rule_rel);
@@ -471,7 +472,7 @@ async fn copy_skill_dirs(
 /// lazily loaded (via `AGENTS.md` references), not auto-matched by path, so
 /// there's no live glob-matching behavior to wire it into. Returns
 /// `(body, always_apply)`.
-fn convert_mdc_to_rule(content: &str) -> (String, bool) {
+fn convert_mdc_to_rule(content: &str, product: &str) -> (String, bool) {
     let (front, body) = split_frontmatter(content);
     let mut always_apply = false;
     let mut header = String::new();
@@ -481,7 +482,7 @@ fn convert_mdc_to_rule(content: &str) -> (String, bool) {
         }
         if let Some(globs) = extract_yaml_field(yaml, "globs") {
             header.push_str(&format!(
-                "<!-- globs: {globs} (imported from Cursor; not auto-matched by Agix) -->\n"
+                "<!-- globs: {globs} (imported from Cursor; not auto-matched by {product}) -->\n"
             ));
         }
         if let Some(aa) = extract_yaml_field(yaml, "alwaysApply") {

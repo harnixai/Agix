@@ -308,7 +308,7 @@ fn saved_results_of(
     }))
 }
 
-fn manifest_of(source: &mut dyn Source) -> Result<Value, ImportError> {
+fn manifest_of(source: &mut dyn Source, product: &str) -> Result<Value, ImportError> {
     let bytes = source
         .read("manifest.json")?
         .ok_or_else(|| ImportError::Invalid("the archive has no manifest.json".into()))?;
@@ -323,7 +323,7 @@ fn manifest_of(source: &mut dyn Source) -> Result<Value, ImportError> {
         Some(v) if v == u64::from(FORMAT_VERSION) => {}
         Some(v) if v > u64::from(FORMAT_VERSION) => {
             return invalid(format!(
-                "this archive is format version {v}, from a newer Agix; this one reads version {FORMAT_VERSION}"
+                "this archive is format version {v}, from a newer {product}; this one reads version {FORMAT_VERSION}"
             ))
         }
         _ => return invalid("the manifest has no readable format_version"),
@@ -337,7 +337,11 @@ fn manifest_of(source: &mut dyn Source) -> Result<Value, ImportError> {
     Ok(manifest)
 }
 
-fn session_of(source: &mut dyn Source, row: &Value) -> Result<ArchivedSession, ImportError> {
+fn session_of(
+    source: &mut dyn Source,
+    row: &Value,
+    product: &str,
+) -> Result<ArchivedSession, ImportError> {
     let sid = row["session_id"].as_str().unwrap_or_default();
     let id = SessionId::parse(sid)
         .map_err(|_| ImportError::Invalid(format!("`{sid}` is not a session id")))?;
@@ -359,7 +363,7 @@ fn session_of(source: &mut dyn Source, row: &Value) -> Result<ArchivedSession, I
             .map_err(|e| ImportError::Invalid(format!("{transcript_name} line {}: {e}", n + 1)))?;
         if entry.v > CURRENT_SCHEMA_VERSION {
             return invalid(format!(
-                "{transcript_name} line {} has schema version {}, newer than this Agix reads ({CURRENT_SCHEMA_VERSION})",
+                "{transcript_name} line {} has schema version {}, newer than this {product} reads ({CURRENT_SCHEMA_VERSION})",
                 n + 1,
                 entry.v
             ));
@@ -370,7 +374,7 @@ fn session_of(source: &mut dyn Source, row: &Value) -> Result<ArchivedSession, I
         Some(LogEntry::Meta { schema_version, .. }) if *schema_version <= CURRENT_META_SCHEMA_VERSION => {}
         Some(LogEntry::Meta { schema_version, .. }) => {
             return invalid(format!(
-                "{transcript_name} has meta schema version {schema_version}, newer than this Agix reads ({CURRENT_META_SCHEMA_VERSION})"
+                "{transcript_name} has meta schema version {schema_version}, newer than this {product} reads ({CURRENT_META_SCHEMA_VERSION})"
             ))
         }
         _ => return invalid(format!("{transcript_name} does not start with its Meta line")),
@@ -387,23 +391,24 @@ fn session_of(source: &mut dyn Source, row: &Value) -> Result<ArchivedSession, I
 }
 
 /// Read and check an archive; nothing outside the checks is done with it.
-pub(crate) fn read_archive(path: &Path) -> Result<Archive, ImportError> {
+/// `product` names this engine in what it says about an archive too new for it.
+pub(crate) fn read_archive(path: &Path, product: &str) -> Result<Archive, ImportError> {
     let mut source: Box<dyn Source> = if path.is_dir() {
         Box::new(DirSource::open(path)?)
     } else {
         Box::new(ZipSource::open(path)?)
     };
-    read_from(source.as_mut(), MAX_TOTAL_BYTES)
+    read_from(source.as_mut(), MAX_TOTAL_BYTES, product)
 }
 
 /// [`read_archive`] from `source`, reading at most `budget` bytes in all —
 /// the sizes an archive declares for its entries are its own to make up.
-fn read_from(source: &mut dyn Source, budget: u64) -> Result<Archive, ImportError> {
+fn read_from(source: &mut dyn Source, budget: u64, product: &str) -> Result<Archive, ImportError> {
     let mut source = Budgeted {
         inner: source,
         left: budget,
     };
-    let manifest = manifest_of(&mut source)?;
+    let manifest = manifest_of(&mut source, product)?;
     let rows = manifest["sessions"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         return invalid("the manifest lists no sessions");
@@ -417,7 +422,7 @@ fn read_from(source: &mut dyn Source, budget: u64) -> Result<Archive, ImportErro
     }
     let mut sessions = Vec::with_capacity(rows.len());
     for row in &rows {
-        sessions.push(session_of(&mut source, row)?);
+        sessions.push(session_of(&mut source, row, product)?);
     }
     let root = manifest["root_session_id"]
         .as_str()
@@ -638,14 +643,17 @@ mod tests {
     fn what_an_import_reads_is_bounded_in_total_not_per_read() {
         let mut twice = listed(2, 2_000);
         assert!(matches!(
-            read_from(&mut twice, u64::MAX),
+            read_from(&mut twice, u64::MAX, "Agix"),
             Err(ImportError::Invalid(_))
         ));
         assert!(twice.read < 2_000, "a session listed twice was read twice");
 
         let mut big = listed(1, 4_000);
         assert!(
-            matches!(read_from(&mut big, 2_000), Err(ImportError::Invalid(_))),
+            matches!(
+                read_from(&mut big, 2_000, "Agix"),
+                Err(ImportError::Invalid(_))
+            ),
             "a memory file over the total was read whole"
         );
     }

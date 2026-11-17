@@ -213,11 +213,11 @@ pub struct DaemonConfig {
     /// Session 空闲超时秒数，超时后自动回收（默认 3600 = 1 小时）。
     pub session_idle_timeout_secs: u64,
     /// Where to read the MCP policy instead of the platform's managed path
-    /// (`mcp::policy::managed_policy_path`). A file named here must exist.
+    /// (`Layout::mcp_policy_file`). A file named here must exist.
     /// Ignored when the host passes `Assembly::mcp`'s `policy`.
     pub mcp_policy_path: Option<PathBuf>,
     /// Where to read the deployment's managed settings instead of the
-    /// platform's path (`settings::managed::path`). A
+    /// platform's path (`Layout::managed_settings_file`). A
     /// file named here must exist.
     pub managed_settings_path: Option<PathBuf>,
     /// `--max-tokens`: the `model.max_tokens` of every project and scene

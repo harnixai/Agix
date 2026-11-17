@@ -205,7 +205,7 @@ impl Daemon {
         )?);
 
         let mut registry = scene::SceneRegistry::new();
-        registry.register_builtin();
+        registry.register_builtin(&Default::default());
         let agent_scene = registry
             .resolve(&opts.scene)
             .ok_or_else(|| anyhow::anyhow!("unknown scene `{}`", opts.scene))?;

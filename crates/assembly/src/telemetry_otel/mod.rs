@@ -212,20 +212,21 @@ impl telemetry::TelemetryRecorder for OtelExporter {
     }
 }
 
-type ProcessExporter = (String, Option<std::sync::Arc<OtelExporter>>);
+type ProcessExporter = (String, String, Option<std::sync::Arc<OtelExporter>>);
 
 static PROCESS_EXPORTER: std::sync::OnceLock<ProcessExporter> = std::sync::OnceLock::new();
 
-/// The exporter this process sends to `endpoint`, started on first use.
+/// The exporter this process sends to `endpoint` as `service`, started on
+/// first use.
 ///
 /// `start_otel` installs *global* meter and tracer providers, so it runs at
 /// most once per process however many sessions and pools ask; a later
-/// `endpoint` that differs from the first is ignored (and said so once). The
-/// exporter lives until [`shutdown_process_exporter`].
-pub fn process_exporter(endpoint: &str) -> Option<std::sync::Arc<OtelExporter>> {
+/// `endpoint` or `service` that differs from the first is ignored (and said
+/// so once). The exporter lives until [`shutdown_process_exporter`].
+pub fn process_exporter(endpoint: &str, service: &str) -> Option<std::sync::Arc<OtelExporter>> {
     static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let (started_on, exporter) = PROCESS_EXPORTER.get_or_init(|| {
-        let exporter = match start_otel(endpoint) {
+    let (started_on, started_as, exporter) = PROCESS_EXPORTER.get_or_init(|| {
+        let exporter = match start_otel(endpoint, service) {
             Ok(e) => {
                 tracing::info!(%endpoint, "OpenTelemetry exporter started");
                 Some(std::sync::Arc::new(e))
@@ -236,14 +237,18 @@ pub fn process_exporter(endpoint: &str) -> Option<std::sync::Arc<OtelExporter>> 
                 None
             }
         };
-        (endpoint.to_string(), exporter)
+        (endpoint.to_string(), service.to_string(), exporter)
     });
-    if started_on != endpoint && !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+    if (started_on != endpoint || started_as != service)
+        && !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
         tracing::warn!(
             used = %started_on,
+            used_service = %started_as,
             ignored = %endpoint,
-            "the OpenTelemetry exporter is process-wide and was started on another endpoint; \
-             this pool's endpoint is ignored"
+            ignored_service = %service,
+            "the OpenTelemetry exporter is process-wide and was started on another endpoint or \
+             service name; this pool's are ignored"
         );
     }
     exporter.clone()
@@ -252,7 +257,7 @@ pub fn process_exporter(endpoint: &str) -> Option<std::sync::Arc<OtelExporter>> 
 /// Flush and stop the process's exporter, if one was started. For the end of
 /// the process: nothing is exported after it.
 pub fn shutdown_process_exporter() {
-    if let Some((_, Some(exporter))) = PROCESS_EXPORTER.get() {
+    if let Some((_, _, Some(exporter))) = PROCESS_EXPORTER.get() {
         exporter.shutdown();
     }
 }
@@ -338,7 +343,9 @@ fn register_instruments() {
         .build();
 }
 
-pub fn start_otel(endpoint: &str) -> Result<OtelExporter, OtelError> {
+/// `service` is the `service.name` of everything exported: the product
+/// (`Layout::product_id`). The instrumentation scope stays the library's.
+pub fn start_otel(endpoint: &str, service: &str) -> Result<OtelExporter, OtelError> {
     if endpoint.is_empty() {
         return Err(OtelError::InvalidEndpoint("endpoint is empty".into()));
     }
@@ -355,7 +362,8 @@ pub fn start_otel(endpoint: &str) -> Result<OtelExporter, OtelError> {
             .map_err(|e| OtelError::InitFailed(e.to_string()))?,
     );
 
-    let resource = opentelemetry_sdk::Resource::new(vec![KeyValue::new("service.name", "agix")]);
+    let resource =
+        opentelemetry_sdk::Resource::new(vec![KeyValue::new("service.name", service.to_string())]);
 
     let trace_exporter = trace_exporter(protocol, endpoint, http_client.clone())?;
 
@@ -586,7 +594,7 @@ mod tests {
         use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
 
         let (endpoint, paths) = http_collector().await;
-        let exporter = start_otel(&endpoint).expect("an HTTP exporter starts");
+        let exporter = start_otel(&endpoint, "agix-test").expect("an HTTP exporter starts");
         let tracer_provider = exporter.tracer_provider.clone().expect("a tracer");
         let meter_provider = exporter.meter_provider.clone().expect("a meter");
         tracer_provider.tracer("agix-test").start("a-span").end();
@@ -618,7 +626,7 @@ mod tests {
 
     #[test]
     fn start_otel_returns_error_on_empty_endpoint() {
-        let result = start_otel("");
+        let result = start_otel("", "agix-test");
         assert!(result.is_err());
     }
 
@@ -626,7 +634,8 @@ mod tests {
     async fn a_session_pipeline_ending_leaves_the_shared_exporter_running() {
         use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
 
-        let exporter = std::sync::Arc::new(start_otel("http://127.0.0.1:4317").unwrap());
+        let exporter =
+            std::sync::Arc::new(start_otel("http://127.0.0.1:4317", "agix-test").unwrap());
         let config = telemetry::TelemetryConfig {
             enabled: true,
             mode: telemetry::TelemetryMode::Enabled,

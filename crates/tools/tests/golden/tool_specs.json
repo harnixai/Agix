@@ -389,7 +389,7 @@
           },
           "durable": {
             "default": false,
-            "description": "true = persist to ~/.agix/scenes/<scope>/scheduled_tasks.json and survive\nrestarts. false (default) = in-memory only, dies when this\nsession ends. Use true only when the user explicitly asks\nthe task to survive across sessions.",
+            "description": "true = persist to the scene's scheduled_tasks.json and survive\nrestarts. false (default) = in-memory only, dies when this\nsession ends. Use true only when the user explicitly asks\nthe task to survive across sessions.",
             "type": "boolean"
           },
           "prompt": {
@@ -418,7 +418,7 @@
           },
           "durable": {
             "default": false,
-            "description": "true = persist to ~/.agix/scenes/<scope>/scheduled_tasks.json and survive\nrestarts. false (default) = in-memory only, dies when this\nsession ends. Use true only when the user explicitly asks\nthe task to survive across sessions.",
+            "description": "true = persist to the scene's scheduled_tasks.json and survive\nrestarts. false (default) = in-memory only, dies when this\nsession ends. Use true only when the user explicitly asks\nthe task to survive across sessions.",
             "type": "boolean"
           },
           "prompt": {

@@ -380,7 +380,7 @@ async fn the_real_agent_tools_guide_is_reachable() {
         guide,
         tools::worktree::name_the_directories(
             include_str!("../agent_tool.prompt.md"),
-            &context.project_dir
+            &context.layout
         )
     );
     assert!(!guide.contains('{'), "{guide}");

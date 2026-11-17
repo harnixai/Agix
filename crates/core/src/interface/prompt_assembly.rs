@@ -371,6 +371,7 @@ mod tests {
             available_tools: None,
             tool_results_ever_cleared: false,
             attended: false,
+            layout: Default::default(),
         }
     }
 

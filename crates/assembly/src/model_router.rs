@@ -29,17 +29,24 @@ use std::sync::Arc;
 /// misconfigured provider (bad `api_key`/`base_url`/unsupported
 /// `api_type`) fails the whole call — same "fail at startup, not on first
 /// use" rationale as `resolve_task_models`'s hard-error paths.
+///
+/// The models' requests go out with `layout`'s `User-Agent`.
 pub fn build_task_router(
     providers_cfg: &HashMap<String, ProviderConfig>,
     default_provider: &str,
     resolved: HashMap<String, ResolvedModel>,
     credentials: &Arc<dyn CredentialSource>,
+    layout: &base::paths::Layout,
 ) -> Result<TaskRouter, String> {
     build_task_router_with(
         providers_cfg,
         default_provider,
         resolved,
-        &model::factory::builtin_registry().with_credentials(credentials.clone()),
+        &model::factory::builtin_registry()
+            .with_credentials(credentials.clone())
+            .with_network(Arc::new(
+                platform::LocalNetwork::default().with_user_agent(layout.user_agent()),
+            )),
     )
 }
 
@@ -169,8 +176,14 @@ mod tests {
             p
         });
 
-        let router =
-            build_task_router(&providers, "anthropic", HashMap::new(), &settings_only()).unwrap();
+        let router = build_task_router(
+            &providers,
+            "anthropic",
+            HashMap::new(),
+            &settings_only(),
+            &Default::default(),
+        )
+        .unwrap();
         // model_for on an unresolved task falls back to the default
         // provider — just confirming this doesn't panic/error is the point
         // (identity checks live in `base::provider`'s own tests).
@@ -185,6 +198,7 @@ mod tests {
             "anthropic",
             HashMap::new(),
             &settings_only(),
+            &Default::default(),
         ));
         assert!(err.contains("anthropic"));
     }
@@ -203,6 +217,7 @@ mod tests {
             "anthropic",
             HashMap::new(),
             &settings_only(),
+            &Default::default(),
         ));
         assert!(err.contains("broken"));
         assert!(err.contains("bedrock"));
@@ -244,6 +259,7 @@ mod tests {
                 _provider_id: &str,
                 _cfg: &ProviderConfig,
                 _credentials: &dyn base::interface::credentials::CredentialSource,
+                _network: Option<&std::sync::Arc<dyn base::interface::exec::Network>>,
             ) -> Result<std::sync::Arc<dyn base::interface::model::Model>, String> {
                 Ok(std::sync::Arc::new(Fictional))
             }
@@ -316,13 +332,25 @@ mod tests {
             p.api_key = None;
             p
         });
-        assert!(
-            build_task_router(&providers, "anthropic", HashMap::new(), &settings_only()).is_err()
-        );
+        assert!(build_task_router(
+            &providers,
+            "anthropic",
+            HashMap::new(),
+            &settings_only(),
+            &Default::default()
+        )
+        .is_err());
 
         let host: Arc<dyn CredentialSource> = Arc::new(ConfigThen(Arc::new(
             StaticCredentials::new([("vaulted".to_string(), Secret::new("sk-from-the-vault"))]),
         )));
-        assert!(build_task_router(&providers, "anthropic", HashMap::new(), &host).is_ok());
+        assert!(build_task_router(
+            &providers,
+            "anthropic",
+            HashMap::new(),
+            &host,
+            &Default::default()
+        )
+        .is_ok());
     }
 }

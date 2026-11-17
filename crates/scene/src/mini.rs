@@ -20,8 +20,12 @@ pub const TOOLS: &[&str] = &[
     "Write",
 ];
 
+/// The scene's name after the product's: `<product> Mini`.
+pub const TITLE: &str = "Mini";
+
 pub fn spec() -> SceneSpec {
-    let mut s = SceneSpec::new("mini", "Agix Mini", Arc::new(MiniPrompt));
+    let name = crate::product_title(&Default::default(), TITLE);
+    let mut s = SceneSpec::new("mini", name, Arc::new(MiniPrompt));
     s.description = "最小编码场景 — 九个常驻工具与几行提示词".into();
     s.tools = ToolSurface::allowing(TOOLS);
     s.token_budget = TokenBudget::new(150_000, 10);
@@ -33,8 +37,11 @@ pub struct MiniPrompt;
 
 impl ScenePrompt for MiniPrompt {
     fn system(&self, ctx: &ScenePromptContext) -> Vec<PromptBlock> {
-        let mut identity =
-            PromptBlock::system_cached(format!("{PROMPT}\n{}", common::SAFETY_RULES));
+        let mut identity = PromptBlock::system_cached(format!(
+            "You are {}, a software engineering agent.\n{PROMPT}\n{}",
+            ctx.layout.product_name(),
+            common::SAFETY_RULES
+        ));
         identity.name = Some("identity".into());
         vec![identity, common::session_block(ctx)]
     }
@@ -44,9 +51,7 @@ impl ScenePrompt for MiniPrompt {
     }
 }
 
-const PROMPT: &str = "\
-You are Agix, a software engineering agent.
-
+const PROMPT: &str = "
 - Read a file before editing it; change only what was asked.
 - Locate with Glob or Grep before reading; put independent tool calls in one message.
 - Verify the finished change, not every edit, and report failures as they are.

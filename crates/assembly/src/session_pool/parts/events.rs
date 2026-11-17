@@ -136,7 +136,7 @@ pub(in crate::session_pool) fn build_pool_telemetry(
     };
     let mut recorders: Vec<std::sync::Arc<dyn telemetry::TelemetryRecorder>> =
         vec![std::sync::Arc::new(rec)];
-    if let Some(otel) = otel_sink(settings.values.telemetry_url.as_deref()) {
+    if let Some(otel) = otel_sink(settings) {
         recorders.push(otel);
     }
     let config = telemetry::TelemetryConfig {

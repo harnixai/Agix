@@ -293,11 +293,11 @@ impl McpAuth {
 
         let idp_http = url::Url::parse(&idp.token_endpoint)
             .map_err(|e| format!("enterprise_idp.token_endpoint: {e}"))
-            .and_then(|u| super::http::OAuthHttp::for_configured(&u))
+            .and_then(|u| super::http::OAuthHttp::for_configured(&u, &self.shared.user_agent()))
             .map_err(failed)?;
         let server_http = url::Url::parse(url)
             .map_err(|e| e.to_string())
-            .and_then(|u| super::http::OAuthHttp::for_server(&u))
+            .and_then(|u| super::http::OAuthHttp::for_server(&u, &self.shared.user_agent()))
             .map_err(failed)?;
         let refresh;
         let request = match &identity {

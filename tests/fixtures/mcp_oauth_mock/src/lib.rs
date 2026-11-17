@@ -241,6 +241,10 @@ pub struct AsState {
     pub issued: Vec<String>,
     pub revoked: Vec<String>,
     pub requests: Vec<String>,
+    /// The `User-Agent` of each request, in order.
+    pub user_agents: Vec<String>,
+    /// The `client_name` of each dynamic registration, in order.
+    pub client_names: Vec<String>,
     counter: usize,
 }
 
@@ -368,6 +372,8 @@ impl AuthServer {
             issued: Vec::new(),
             revoked: Vec::new(),
             requests: Vec::new(),
+            user_agents: Vec::new(),
+            client_names: Vec::new(),
             counter: 0,
         }));
         let handler_state = state.clone();
@@ -405,6 +411,8 @@ impl AuthServer {
 
     fn handle(s: &mut AsState, req: Request) -> Response {
         s.requests.push(format!("{} {}", req.method, req.path));
+        s.user_agents
+            .push(req.headers.get("user-agent").cloned().unwrap_or_default());
         match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/.well-known/oauth-authorization-server") => {
                 let mut metadata = serde_json::json!({
@@ -437,6 +445,8 @@ impl AuthServer {
                     serde_json::from_value(body["redirect_uris"].clone()).unwrap_or_default();
                 let id = s.next("dyn");
                 s.registrations += 1;
+                s.client_names
+                    .push(body["client_name"].as_str().unwrap_or_default().to_string());
                 s.clients.insert(
                     id.clone(),
                     Client {

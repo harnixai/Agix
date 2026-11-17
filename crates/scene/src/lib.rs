@@ -15,6 +15,7 @@ pub mod mini;
 pub use declarative::{DeclaredScene, SceneLoadError};
 
 use base::interface::scene::SceneSpec;
+use base::paths::Layout;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -32,14 +33,23 @@ pub struct SceneInfo {
     pub supports_team: bool,
 }
 
-/// A built-in scene by id: `code` (interactive), `harnix` or `mini`.
-pub fn builtin(id: &str) -> Option<SceneSpec> {
-    match id {
-        "code" => Some(code::spec(code::Interaction::Interactive)),
-        "harnix" => Some(harnix::spec()),
-        "mini" => Some(mini::spec()),
-        _ => None,
-    }
+/// A built-in scene by id: `code` (interactive), `harnix` or `mini`, named
+/// for `layout`'s product.
+pub fn builtin(id: &str, layout: &Layout) -> Option<SceneSpec> {
+    builtins(layout).into_iter().find(|s| s.id == id)
+}
+
+/// `<product> <title>`: what `code` and `mini` are called.
+pub(crate) fn product_title(layout: &Layout, title: &str) -> String {
+    format!("{} {title}", layout.product_name())
+}
+
+fn builtins(layout: &Layout) -> [SceneSpec; 3] {
+    let mut code = code::spec(code::Interaction::Interactive);
+    code.name = product_title(layout, code::TITLE);
+    let mut mini = mini::spec();
+    mini.name = product_title(layout, mini::TITLE);
+    [code, harnix::spec(), mini]
 }
 
 /// Registry of available scenes. Populated at process startup.
@@ -99,12 +109,9 @@ impl SceneRegistry {
             .collect()
     }
 
-    pub fn register_builtin(&mut self) {
-        for spec in [
-            code::spec(code::Interaction::Interactive),
-            harnix::spec(),
-            mini::spec(),
-        ] {
+    /// The built-in scenes, named for `layout`'s product.
+    pub fn register_builtin(&mut self, layout: &Layout) {
+        for spec in builtins(layout) {
             self.register(Arc::new(spec));
         }
     }
@@ -113,6 +120,21 @@ impl SceneRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_built_in_scenes_are_named_for_the_product() {
+        let codix = Layout::default().with_product_name("Codix").unwrap();
+        assert_eq!(builtin("code", &codix).unwrap().name, "Codix Code");
+        assert_eq!(builtin("mini", &codix).unwrap().name, "Codix Mini");
+        assert_eq!(builtin("code", &codix).unwrap().id, "code");
+        assert_eq!(
+            builtin("code", &Layout::default()).unwrap().name,
+            "Agix Code"
+        );
+        let mut registry = SceneRegistry::new();
+        registry.register_builtin(&codix);
+        assert_eq!(registry.resolve("mini").unwrap().name, "Codix Mini");
+    }
 
     fn write_scene(root: &Path, id: &str) {
         let dir = root.join(id);
@@ -132,7 +154,7 @@ mod tests {
         write_scene(root.path(), "review");
 
         let mut registry = SceneRegistry::new();
-        registry.register_builtin();
+        registry.register_builtin(&Default::default());
         let refused = registry.register_declarative_dir(root.path());
 
         assert_eq!(refused.len(), 1, "{refused:?}");
@@ -143,7 +165,7 @@ mod tests {
         assert!(refused[0].to_string().contains("already registered"));
         assert_eq!(
             registry.resolve("code").unwrap().name,
-            builtin("code").unwrap().name,
+            builtin("code", &Layout::default()).unwrap().name,
             "the built-in stays in place"
         );
         assert_eq!(registry.resolve("review").unwrap().name, "review");

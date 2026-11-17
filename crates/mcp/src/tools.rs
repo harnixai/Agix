@@ -326,13 +326,13 @@ impl Tool for DispatchMcpTool {
     fn input_schema(&self, _: base::tool::PathStyle) -> Value {
         serde_json::to_value(schemars::schema_for!(DispatchMcpInput)).expect("schema")
     }
-    async fn guide(&self, _: &PromptContext) -> Option<String> {
-        Some(
-            "Introspect MCP server tools. Agix flat-mounts each MCP server's tools \
-         under `mcp__<server>__<tool>` names — call them directly, no dispatcher \
-         needed. This tool just lists what's available so you know the names."
-                .into(),
-        )
+    async fn guide(&self, ctx: &PromptContext) -> Option<String> {
+        Some(format!(
+            "Introspect MCP server tools. {} flat-mounts each MCP server's tools \
+             under `mcp__<server>__<tool>` names — call them directly, no dispatcher \
+             needed. This tool just lists what's available so you know the names.",
+            ctx.layout.product_name()
+        ))
     }
     async fn validate_input(&self, _: &Value, _: &ToolContext) -> ValidationResult {
         ValidationResult::Ok

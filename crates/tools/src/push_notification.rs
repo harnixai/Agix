@@ -133,7 +133,10 @@ fn desktop_notification(ctx: &ToolContext, msg: &str) {
     let escaped = msg.replace('\\', "\\\\").replace('"', "\\\"");
     let spec = ProcessSpec::new("osascript", &ctx.cwd).args([
         "-e".to_string(),
-        format!(r#"display notification "{escaped}" with title "Agix""#),
+        format!(
+            r#"display notification "{escaped}" with title "{}""#,
+            ctx.config.layout.product_name()
+        ),
     ]);
     let process = ctx.exec.process.clone();
     // Not awaited: `osascript` can hang for good when Notification Center

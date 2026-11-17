@@ -106,7 +106,7 @@ fn agent_type_can_name_a_scene_that_only_the_registry_knows() {
     );
 
     let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
+    registry.register_builtin(&Default::default());
     let mut alias = scene::mini::spec();
     alias.id = "plugin:demo".into();
     registry.register(Arc::new(alias));

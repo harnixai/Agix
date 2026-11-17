@@ -3,7 +3,7 @@
 
 use model::adapter::AnthropicModel;
 use model::client::AnthropicClient;
-use settings::{LoadedSettings, Settings};
+use settings::LoadedSettings;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::warn;
@@ -86,8 +86,7 @@ impl ProjectBinding {
         last_good_router: Option<Arc<base::provider::TaskRouter>>,
         credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
     ) -> Self {
-        let (task_router, routing) =
-            resolve_router(&settings.values, last_good_router, credentials);
+        let (task_router, routing) = resolve_router(&settings, last_good_router, credentials);
         // `task_models.main` is what points the conversation itself at a
         // configured provider; with none configured this is the plain
         // Anthropic client the daemon was started with.
@@ -230,10 +229,11 @@ pub(in crate::session_pool) struct RoutingReport {
 /// runtime implementation), keeps it rather than tearing working routing down
 /// over a bad edit — the failure is reported, not acted on.
 pub(super) fn resolve_router(
-    settings: &Settings,
+    loaded: &LoadedSettings,
     last_good: Option<Arc<base::provider::TaskRouter>>,
     credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
 ) -> (Option<Arc<base::provider::TaskRouter>>, RoutingReport) {
+    let settings = &loaded.values;
     let mut report = RoutingReport::default();
     if settings.providers.is_empty() {
         // No providers configured (or the last one was just deleted) —
@@ -259,6 +259,7 @@ pub(super) fn resolve_router(
                 default_provider,
                 resolved,
                 credentials,
+                &loaded.paths.layout,
             ) {
                 Ok(router) => {
                     report.router_rebuilt = true;

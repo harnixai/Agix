@@ -56,8 +56,9 @@ impl WorktreeRegistry {
             .as_ref()
             .map(|h| {
                 let slug = h
-                    .branch()
-                    .strip_prefix(base::paths::WORKTREE_BRANCH_PREFIX)
+                    .path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
                     .unwrap_or("?")
                     .to_string();
                 (slug, h.path().to_path_buf())
@@ -97,7 +98,7 @@ impl Tool for EnterWorktreeTool {
     async fn guide(&self, ctx: &PromptContext) -> Option<String> {
         Some(crate::worktree::name_the_directories(
             include_str!("prompts/coding/worktree_enter.prompt.md"),
-            &ctx.project_dir,
+            &ctx.layout,
         ))
     }
 
@@ -260,8 +261,9 @@ impl Tool for ExitWorktreeTool {
             }
         }
         handle.cleanup().await;
-        let slug = branch
-            .strip_prefix(base::paths::WORKTREE_BRANCH_PREFIX)
+        let slug = path
+            .file_name()
+            .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_string();
         Ok(ToolResult::text(format!(

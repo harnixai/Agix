@@ -295,7 +295,7 @@ impl BindingCache {
         let loaded = self.layers.over(loaded, own);
         let credentials = self.credentials.clone();
         off_the_runtime(move || {
-            let (_, routing) = binding::resolve_router(&loaded.values, None, &credentials);
+            let (_, routing) = binding::resolve_router(&loaded, None, &credentials);
             (loaded, routing)
         })
         .await

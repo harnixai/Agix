@@ -63,7 +63,7 @@ pub struct McpOAuthClient {
 impl Default for McpOAuthClient {
     fn default() -> Self {
         Self {
-            client_name: "Agix".into(),
+            client_name: base::paths::DEFAULT_PRODUCT_NAME.into(),
             client_metadata_url: None,
         }
     }
@@ -251,6 +251,7 @@ pub(crate) struct Shared {
     acquire_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     listener: RwLock<Option<AuthListener>>,
     flow_ttl: Mutex<Duration>,
+    user_agent: Mutex<Arc<str>>,
 }
 
 pub(crate) struct RecordHold {
@@ -270,6 +271,13 @@ fn lock_for(
 }
 
 impl Shared {
+    fn user_agent(&self) -> Arc<str> {
+        self.user_agent
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub(crate) async fn load(&self, key: &str) -> std::io::Result<Option<McpCredentials>> {
         let record = self.store.load(key).await?;
         if let Some(record) = &record {
@@ -541,6 +549,7 @@ impl McpAuth {
                 acquire_locks: Mutex::new(HashMap::new()),
                 listener: RwLock::new(None),
                 flow_ttl: Mutex::new(FLOW_TTL),
+                user_agent: Mutex::new(Arc::from(base::paths::Layout::default().user_agent())),
             }),
         }
     }
@@ -620,6 +629,16 @@ impl McpAuth {
         {
             tracing::warn!(error = %e, "could not store MCP authorization server metadata");
         }
+    }
+
+    /// The `User-Agent` of every request to an authorization server
+    /// ([`base::paths::Layout::user_agent`]).
+    pub fn set_user_agent(&self, user_agent: &str) {
+        *self
+            .shared
+            .user_agent
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Arc::from(user_agent);
     }
 
     /// How long a started sign-in may wait for its callback.
@@ -830,7 +849,7 @@ impl McpAuth {
         };
         let Ok(http) = Url::parse(url)
             .map_err(|e| e.to_string())
-            .and_then(|u| http::OAuthHttp::for_server(&u))
+            .and_then(|u| http::OAuthHttp::for_server(&u, &self.shared.user_agent()))
         else {
             return;
         };
@@ -1049,7 +1068,7 @@ async fn new_manager(
     key: &str,
 ) -> Result<AuthorizationManager, String> {
     let parsed = Url::parse(url).map_err(|e| format!("`{url}`: {e}"))?;
-    let http = http::OAuthHttp::for_server(&parsed)?;
+    let http = http::OAuthHttp::for_server(&parsed, &shared.user_agent())?;
     let mut manager = if http.policy().admits_private() {
         AuthorizationManager::new_allowing_private_addresses(url).await
     } else {

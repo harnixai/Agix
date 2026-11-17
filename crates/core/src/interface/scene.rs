@@ -54,6 +54,8 @@ pub struct ScenePromptContext<'a> {
     /// own, which defaults to [`SceneSpec::interactive`]. A scene with two
     /// prompts picks by it.
     pub attended: bool,
+    /// The instance's names: what the product calls itself to the model.
+    pub layout: crate::paths::Layout,
 }
 
 /// Context for building the `<system-reminder>` block.

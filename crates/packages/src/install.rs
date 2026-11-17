@@ -88,7 +88,7 @@ pub async fn install(
         )));
     }
 
-    let bytes = fetch_bytes(&source.download_url).await?;
+    let bytes = fetch_bytes(&source.download_url, layout).await?;
     let sha256 = sha256_hex(&bytes);
     if let Some(expected) = &source.checksum {
         verify_checksum(&sha256, expected)?;
@@ -196,7 +196,10 @@ fn unpack_into(
     Ok(Installed::Into(dest))
 }
 
-async fn fetch_bytes(download_url: &str) -> Result<Vec<u8>, PluginError> {
+async fn fetch_bytes(
+    download_url: &str,
+    layout: &base::paths::Layout,
+) -> Result<Vec<u8>, PluginError> {
     if let Some(path) = download_url.strip_prefix("file://") {
         let file = std::fs::File::open(path)?;
         let mut bytes = Vec::new();
@@ -208,7 +211,7 @@ async fn fetch_bytes(download_url: &str) -> Result<Vec<u8>, PluginError> {
     }
     // `Origin::Operator`: a plugin archive comes from a marketplace an
     // operator configured, not from a url the model named.
-    let net = platform::LocalNetwork::default();
+    let net = platform::LocalNetwork::default().with_user_agent(layout.user_agent());
     let mut request = base::interface::exec::HttpRequest::get(download_url);
     request.max_bytes = Some(MAX_ARCHIVE_BYTES);
     let resp = base::interface::exec::Network::send(

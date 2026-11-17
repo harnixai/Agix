@@ -22,7 +22,7 @@ impl Builder {
                 model.clone(),
                 Arc::new(delegator.clone()),
                 Some(session.session_id_str().to_string()),
-                hook_exec(exec, self.host.exec.is_some()),
+                hook_exec(exec, self.host.exec.is_some(), &settings.paths.layout),
             );
             if let Some(source) = host_hooks {
                 runner = runner.with_hosts(source);
@@ -214,13 +214,17 @@ impl Builder {
 /// goes through the host's network when the host supplied the providers; the
 /// session's own egress policy bounds where the model may reach, which is not
 /// where an operator's hook endpoint (often `localhost`) may be.
-fn hook_exec(exec: &base::interface::exec::ExecProviders, host_supplied: bool) -> hooks::HookExec {
+fn hook_exec(
+    exec: &base::interface::exec::ExecProviders,
+    host_supplied: bool,
+    layout: &base::paths::Layout,
+) -> hooks::HookExec {
     hooks::HookExec {
         process: exec.process.clone(),
         network: if host_supplied {
             exec.network.clone()
         } else {
-            Arc::new(platform::LocalNetwork::default())
+            Arc::new(platform::LocalNetwork::default().with_user_agent(layout.user_agent()))
         },
     }
 }

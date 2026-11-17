@@ -84,7 +84,7 @@ fn write_scene(root: &Path, id: &str, scene_json: &str, prompt_md: &str) {
 
 fn registry_with(root: &Path) -> scene::SceneRegistry {
     let mut registry = scene::SceneRegistry::new();
-    registry.register_builtin();
+    registry.register_builtin(&Default::default());
     let refused = registry.register_declarative_dir(root);
     assert!(refused.is_empty(), "{refused:?}");
     registry

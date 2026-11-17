@@ -31,6 +31,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("managed_settings", "Option<PathBuf>"),
     ("groups_file", "Option<PathBuf>"),
     ("project_dir", "String"),
+    ("product_name", "String"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[
@@ -41,6 +42,7 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("GroupsInProcess", "{running:PathBuf}"),
     ("GroupsHeld", "{owner:u32,file:PathBuf}"),
     ("InvalidProjectDir", "{name:String,reason:String}"),
+    ("InvalidProductName", "{name:String,reason:String}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

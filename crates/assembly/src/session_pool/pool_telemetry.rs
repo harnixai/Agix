@@ -56,7 +56,8 @@ pub(super) fn recording_location(
 }
 
 /// A `TelemetryRecorder` that forwards turn/tool events to OpenTelemetry, or
-/// `None` when no OTLP endpoint is configured.
+/// `None` when no OTLP endpoint is configured. The service is named for the
+/// settings' product.
 ///
 /// Every session gets the same process-wide exporter
 /// (`crate::telemetry_otel::process_exporter`); a session's pipeline ending
@@ -69,22 +70,29 @@ pub(super) fn recording_location(
 /// by default. Build the daemon with `--features otel` to get this.
 #[cfg(feature = "otel")]
 pub(in crate::session_pool) fn otel_sink(
-    endpoint: Option<&str>,
+    settings: &settings::LoadedSettings,
 ) -> Option<std::sync::Arc<dyn telemetry::TelemetryRecorder>> {
-    let endpoint = endpoint
-        .map(str::to_string)
+    let endpoint = settings
+        .values
+        .telemetry_url
+        .clone()
         .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
         .filter(|e| !e.trim().is_empty())?;
-    crate::telemetry_otel::process_exporter(&endpoint)
+    crate::telemetry_otel::process_exporter(&endpoint, &settings.paths.layout.product_id())
         .map(|e| e as std::sync::Arc<dyn telemetry::TelemetryRecorder>)
 }
 
 /// No-op stand-in when the `otel` feature is off.
 #[cfg(not(feature = "otel"))]
 pub(in crate::session_pool) fn otel_sink(
-    endpoint: Option<&str>,
+    settings: &settings::LoadedSettings,
 ) -> Option<std::sync::Arc<dyn telemetry::TelemetryRecorder>> {
-    if endpoint.is_some_and(|e| !e.trim().is_empty()) {
+    if settings
+        .values
+        .telemetry_url
+        .as_deref()
+        .is_some_and(|e| !e.trim().is_empty())
+    {
         warn!(
             "an OTLP endpoint is configured but this build has no OpenTelemetry support; \
              rebuild with `--features otel`"

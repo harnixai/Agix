@@ -26,10 +26,13 @@ pub(crate) fn providers_for(
         Some(ledger) => platform::local_providers_with_ledger(env, ledger.clone()),
         None => platform::local_providers_with(env),
     }
-    .with_network(Arc::new(platform::LocalNetwork::for_agent_policy(
-        config.sandbox.network_mode,
-        config.sandbox.allowed_domains.clone(),
-    )))
+    .with_network(Arc::new(
+        platform::LocalNetwork::for_agent_policy(
+            config.sandbox.network_mode,
+            config.sandbox.allowed_domains.clone(),
+        )
+        .with_user_agent(config.layout.user_agent()),
+    ))
 }
 
 /// How the engine runs its own git and helpers for the session `session_id`:
