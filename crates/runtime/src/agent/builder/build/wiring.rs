@@ -166,6 +166,7 @@ impl Builder {
             generation,
             injected: injected_state,
             env: session_env,
+            mode_ceiling: mode_ceiling(settings),
             engine_git: Arc::new(crate::exec::engine_git_for(
                 config,
                 &exec,
@@ -232,6 +233,7 @@ fn hook_exec(
 
 pub(super) fn bind_tools(
     session_env: base::context::SessionEnv,
+    ceiling: session_state::ModeCeiling,
     exec: &base::interface::exec::ExecProviders,
     generation: u64,
     tools: &Arc<InMemoryToolRegistry>,
@@ -239,11 +241,23 @@ pub(super) fn bind_tools(
     injected_state: bool,
 ) -> session_state::EngineAttachment {
     let attachment = session_state::EngineAttachment::new(session_env, exec.clone(), generation)
-        .with_tools(&(tools.clone() as Arc<dyn base::tool::ToolRegistry>));
+        .with_tools(&(tools.clone() as Arc<dyn base::tool::ToolRegistry>))
+        .with_mode_ceiling(ceiling);
     if !injected_state {
         session_state.attach(attachment.clone());
     }
     attachment
+}
+
+/// The widest mode a host could put a session in under `settings`, as the
+/// daemon clamps `options.permission_mode` and `session.setPermissionMode`.
+fn mode_ceiling(settings: &LoadedSettings) -> session_state::ModeCeiling {
+    let widest = if settings.values.allow_client_permission_override {
+        base::permission::PermissionMode::BypassPermissions
+    } else {
+        settings.values.permission_mode
+    };
+    session_state::ModeCeiling::new(widest, settings.bypass_disabled())
 }
 
 /// What this engine's settings and scene make of the session's env.

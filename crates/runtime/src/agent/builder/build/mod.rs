@@ -90,6 +90,7 @@ impl Builder {
         spawn_cron(cron.store, cron.fire_here, &input_tx);
         let attachment = bind_tools(
             state.env,
+            state.mode_ceiling,
             &state.exec,
             state.generation,
             &r.tools,

@@ -94,6 +94,41 @@ pub enum ModeChangeSource {
     Model,
 }
 
+/// The widest mode a host could put a session in under an engine's settings:
+/// the configured one, or any where clients may override it; a
+/// `bypassPermissions` the managed layer turns off is `default`. A mode the
+/// session did not get from that engine — the one plan mode returns to, as a
+/// log or an earlier engine left it — is held to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModeCeiling {
+    widest: PermissionMode,
+    bypass_disabled: bool,
+}
+
+impl ModeCeiling {
+    pub fn new(widest: PermissionMode, bypass_disabled: bool) -> Self {
+        Self {
+            widest,
+            bypass_disabled,
+        }
+    }
+
+    /// `mode` held to the ceiling; one only the engine sets is `base`, the
+    /// mode the engine is configured with, unless it is that mode.
+    fn hold(self, mode: PermissionMode, base: PermissionMode) -> PermissionMode {
+        if mode == base {
+            return mode;
+        }
+        if !mode.is_user_settable() {
+            return base;
+        }
+        match mode.min_permissive(self.widest) {
+            PermissionMode::BypassPermissions if self.bypass_disabled => PermissionMode::Default,
+            held => held,
+        }
+    }
+}
+
 /// What one engine hangs on the session's state while it runs the session:
 /// its [`SessionEnv`], the registry its tool calls dispatch against, and the
 /// providers they run on — so that a permission judging a call on this
@@ -105,6 +140,7 @@ pub struct EngineAttachment {
     tools: Option<Weak<dyn ToolRegistry>>,
     exec: ExecProviders,
     generation: u64,
+    ceiling: Option<ModeCeiling>,
 }
 
 impl EngineAttachment {
@@ -114,7 +150,13 @@ impl EngineAttachment {
             tools: None,
             exec,
             generation,
+            ceiling: None,
         }
+    }
+
+    pub fn with_mode_ceiling(mut self, ceiling: ModeCeiling) -> Self {
+        self.ceiling = Some(ceiling);
+        self
     }
 
     /// Held weakly: the registry's tools may hold this session.
@@ -145,6 +187,8 @@ struct ModeSlot {
     /// How many times `current` has changed: a permission asked for under one
     /// mode is not answered under another.
     changes: u64,
+    /// The attached engine's mode and [`ModeCeiling`].
+    bounds: Option<(PermissionMode, ModeCeiling)>,
 }
 
 impl ModeSlot {
@@ -159,12 +203,23 @@ impl ModeSlot {
     }
 
     /// Take up `base`, the mode an engine is configured with, unless in plan
-    /// mode: that stays on, exiting to where it would have. The engine's
-    /// settings already hold what a host chose.
-    fn rebase(&mut self, base: PermissionMode) {
+    /// mode: that stays on, exiting to where it would have as far as
+    /// `ceiling` allows. The engine's settings already hold what a host
+    /// chose.
+    fn rebase(&mut self, base: PermissionMode, ceiling: Option<ModeCeiling>) {
         self.host_choice = None;
+        self.bounds = ceiling.map(|ceiling| (base, ceiling));
         if self.current != PermissionMode::Plan {
             self.set(base, None);
+        } else {
+            self.before_plan = self.before_plan.map(|mode| self.held(mode));
+        }
+    }
+
+    fn held(&self, mode: PermissionMode) -> PermissionMode {
+        match self.bounds {
+            Some((base, ceiling)) => ceiling.hold(mode, base),
+            None => mode,
         }
     }
 
@@ -207,7 +262,7 @@ impl SessionState {
     /// A state with `env`, as a test needs one: no engine attached.
     pub fn for_tests_in(env: SessionEnv) -> Self {
         let state = Self::new();
-        state.mode_slot().rebase(env.base_mode);
+        state.mode_slot().rebase(env.base_mode, None);
         *write(&state.env) = Arc::new(env);
         state
     }
@@ -220,15 +275,17 @@ impl SessionState {
 
     /// Hang `engine` on this state: its [`SessionEnv`] replaces the one
     /// before, and the permission mode becomes the one it is configured with
-    /// unless the session is in plan mode.
+    /// unless the session is in plan mode, which returns to no wider than the
+    /// engine's [`ModeCeiling`].
     pub fn attach(&self, engine: EngineAttachment) {
         let EngineAttachment {
             env,
             tools,
             exec,
             generation,
+            ceiling,
         } = engine;
-        self.mode_slot().rebase(env.base_mode);
+        self.mode_slot().rebase(env.base_mode, ceiling);
         *write(&self.env) = env;
         *write(&self.engine) = Some(EngineView {
             tools,
@@ -474,11 +531,14 @@ impl SessionState {
     }
 
     /// Put back what the session log recorded. Outside plan mode the session
-    /// keeps the mode it was built with. `true` when it went into plan.
+    /// keeps the mode it was built with; plan returns to no wider than the
+    /// attached engine allows. `true` when it went into plan.
     fn restore_durable_state(&self, state: DurableState) -> bool {
-        let entered_plan = state
-            .plan
-            .is_some_and(|plan| self.mode_slot().set(PermissionMode::Plan, plan.exit_to));
+        let entered_plan = state.plan.is_some_and(|plan| {
+            let mut slot = self.mode_slot();
+            let exit_to = plan.exit_to.map(|mode| slot.held(mode));
+            slot.set(PermissionMode::Plan, exit_to)
+        });
         lock(&self.todos).clone_from(&state.todos);
         self.activate_tools(state.activated_tools.clone());
         *lock(&self.recorded_durable) = Some(state);

@@ -26,6 +26,7 @@ pub(super) struct SessionWiring {
     pub(super) generation: u64,
     pub(super) injected: bool,
     pub(super) env: base::context::SessionEnv,
+    pub(super) mode_ceiling: session_state::ModeCeiling,
     pub(super) exec: base::interface::exec::ExecProviders,
     pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
     pub(super) ambient: hooks::payload::Ambient,

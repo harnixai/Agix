@@ -990,7 +990,10 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
 
   `agix.session_state` 只记会话自己定下、设置里推不出来的那部分(`base::context::DurableState`)。
   不在 `plan` 里的会话,权限模式由规格(`session.setPermissionMode` 设的,否则 `options` 的)按恢复时的
-  设置夹紧决定,不由这条决定。
+  设置夹紧决定,不由这条决定。`exit_to` 也不照单全收:这条可能来自更宽的设置,或经 `session.import` /
+  `session.fork` 从别处来,引擎挂上会话状态时(`SessionState::attach`)与读回这条时都把它按引擎设置的
+  `session_state::ModeCeiling` 夹紧,同 `options.permission_mode`;只能由程序设的模式(`bubble`)除非就是
+  引擎自己的模式,否则换成引擎的模式。
   `ExtensionsAreVisible::all()` 不分 `ns` 地把扩展条目渲染给模型,这些也在其内——
   要让模型读到某个扩展的条目,按 `ns` 列名单
 - **模型可见即可从日志重建**。一个靠询问活着的插件来渲染条目的投影,会产出一个

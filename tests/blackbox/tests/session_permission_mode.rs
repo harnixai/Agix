@@ -403,6 +403,79 @@ async fn a_session_not_in_memory_takes_the_mode_up_when_it_comes_back() -> anyho
     Ok(())
 }
 
+async fn exit_plan(run: &mut LiveRun, stub: &ProviderStub, session: &str) -> anyhow::Result<()> {
+    let _watcher = run
+        .watch_with(session, |e| {
+            (e["tool_name"] == "ExitPlanMode").then(Answer::permit)
+        })
+        .await?;
+    stub.script([
+        Reply::calls("p1", "ExitPlanMode", json!({})),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(session, "go ahead").await?;
+    assert!(
+        events.tool_results.first().is_some_and(|r| !r.2),
+        "the exit was refused: {:?}",
+        events.tool_results
+    );
+    Ok(())
+}
+
+/// The mode plan returns to is held to the settings the session runs under
+/// now, as every other mode it is given is: an archive from a daemon that let
+/// hosts widen the mode, imported where the settings do not, and the session
+/// itself once its settings were tightened, both leave plan into `default`,
+/// not the `bypassPermissions` they entered it from.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_mode_plan_returns_to_is_held_to_the_settings_now() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("mode-exit-held", &stub)
+        .settings(json!({ "allow_client_permission_override": true }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    stub.script([Reply::text("one")]);
+    run.turn(&session, "hello").await?;
+    set_mode(&mut run, &session, "bypassPermissions").await?;
+    set_mode(&mut run, &session, "plan").await?;
+    let archives = tempfile::tempdir()?;
+    let archive = archives.path().join("planning");
+    let exported = run
+        .client
+        .call(
+            "session.export",
+            json!({ "session_id": session, "path": archive, "format": "dir" }),
+        )
+        .await?;
+    assert!(exported.error.is_none(), "{:?}", exported.error);
+
+    run.world
+        .write_project_settings("mode-exit-held", &LiveRun::base_settings())?;
+    run.restart().await?;
+    let imported = run
+        .client
+        .call("session.import", json!({ "path": archive }))
+        .await?;
+    let imported = imported.result.unwrap_or_default()["root_session_id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(!imported.is_empty(), "the archive was not imported");
+
+    for sid in [&session, &imported] {
+        assert_eq!(resumed_mode(&mut run, sid, json!({})).await?, "plan");
+        exit_plan(&mut run, &stub, sid).await?;
+        assert_eq!(
+            resumed_mode(&mut run, sid, json!({})).await?,
+            "default",
+            "{sid} left plan wider than its settings"
+        );
+    }
+    run.finish().await;
+    Ok(())
+}
+
 /// What a switch was granted is what is kept: a request the settings held
 /// narrower stays as narrow once they would allow it.
 #[tokio::test(flavor = "multi_thread")]

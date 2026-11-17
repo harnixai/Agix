@@ -419,8 +419,11 @@ agent 类型的 frontmatter 里都收,解析出来就是 `bypassPermissions`,夹
 `plan` 是会话的状态,不随引擎走:在不在 `plan` 里、退出后回到哪个模式,连同 todo 列表,
 每轮结束时有变化就记进会话日志(扩展条目 `ns:"agix.session_state"`,ARCHITECTURE §4)。会话被
 驱逐(空闲超时、池子满了)后再用、daemon 重启后恢复、原地重建,回来都还在 `plan` 里,退出后
-回到进入前的那个模式。不在 `plan` 里的会话恢复时取 `session.setPermissionMode` 设的模式,没设过就取
-`options` 给的,没给就取设置的,都按恢复时的设置夹紧。
+回到进入前的那个模式,但不宽于这时的设置:设置收紧了,或日志是 `session.import` 带进来、`session.fork`
+拷过去的,退出后要回到的模式同样按这时的设置夹紧(同 `options.permission_mode`,managed 层关了
+`bypassPermissions` 时得 `default`),只能由程序设的 `bubble` 换成会话这时按设置得到的模式。不在 `plan`
+里的会话恢复时取 `session.setPermissionMode` 设的模式,没设过就取 `options` 给的,没给就取设置的,都按
+恢复时的设置夹紧。
 
 **`options` 越界不报错。** `options.permission_mode` 无论是什么,都不会被拒绝:比
 settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 日志,程序专用的 `bubble`
@@ -2038,7 +2041,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 
 `plan` 以外的模式记进会话的规格(`agix.session/spec` 条目,优先于 `options.permission_mode`,同
 `session.setModel`;记的是夹紧后得到的模式,设置之后放宽也不会把它放宽),在不在 `plan`、退出后回到哪个记进 `agix.session_state`(§4.5);会话重建、驱逐后
-再用、daemon 重启后恢复都保持,恢复时按当时的设置重新夹紧。冷恢复时 `session.resume` 的
+再用、daemon 重启后恢复都保持,恢复时规格里的模式与 `plan` 退出后要回到的模式都按当时的设置重新夹紧。冷恢复时 `session.resume` 的
 `options.permission_mode` 只在会话没记下 `options` 时采用,这里设的模式仍优先于它。会话不在内存里时只改
 它的日志,不把它带回内存,下一次 `run_turn` / `session.resume` 照它来。
 

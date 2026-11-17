@@ -204,6 +204,71 @@ fn a_rewind_back_into_plan_is_told_as_the_hosts_change() {
     assert_eq!(seen, [(PermissionMode::Plan, ModeChangeSource::Host)]);
 }
 
+fn held_to(
+    cwd: &str,
+    base_mode: PermissionMode,
+    generation: u64,
+    widest: PermissionMode,
+    bypass_disabled: bool,
+) -> EngineAttachment {
+    attachment(cwd, base_mode, generation)
+        .with_mode_ceiling(ModeCeiling::new(widest, bypass_disabled))
+}
+
+fn planning_to(exit_to: PermissionMode) -> DurableState {
+    DurableState {
+        plan: Some(PlanState {
+            exit_to: Some(exit_to),
+        }),
+        ..Default::default()
+    }
+}
+
+/// Plan returns to no wider than the engine's settings let a host choose: a
+/// return mode an engine with wider settings left, or a log recorded, is
+/// held to them, and one only the engine sets is not taken up at all.
+#[test]
+fn the_mode_plan_returns_to_is_held_to_the_engines_settings() {
+    use PermissionMode::*;
+    let state = SessionState::new();
+    state.attach(held_to("/one", Default, 1, BypassPermissions, false));
+    state.switch_permission_mode(BypassPermissions);
+    state.switch_permission_mode(Plan);
+    state.attach(held_to("/two", Default, 2, AcceptEdits, false));
+    assert_eq!(
+        state.durable_state().plan,
+        Some(PlanState {
+            exit_to: Some(AcceptEdits)
+        }),
+        "tightened settings, rebuilt"
+    );
+    assert_eq!(state.exit_plan_mode(), AcceptEdits);
+
+    for (exit_to, widest, bypass_disabled, left_to) in [
+        (BypassPermissions, Default, false, Default),
+        (BypassPermissions, BypassPermissions, true, Default),
+        (AcceptEdits, BypassPermissions, true, AcceptEdits),
+        (Bubble, AcceptEdits, false, DontAsk),
+        (DontAsk, Default, false, DontAsk),
+    ] {
+        let restored = SessionState::new();
+        restored.attach(held_to("/r", DontAsk, 1, widest, bypass_disabled));
+        restored.restore_from_log(None, Some(planning_to(exit_to)));
+        assert_eq!(restored.exit_plan_mode(), left_to, "{exit_to:?}");
+    }
+
+    let before_an_engine = SessionState::new();
+    before_an_engine.restore_from_log(None, Some(planning_to(BypassPermissions)));
+    before_an_engine.attach(held_to("/b", Default, 1, Default, false));
+    assert_eq!(before_an_engine.exit_plan_mode(), Default);
+
+    let delegate = SessionState::new();
+    delegate.attach(held_to("/d", Bubble, 1, Default, false));
+    delegate.enter_plan_mode();
+    delegate.attach(held_to("/d", Bubble, 2, Default, false));
+    assert_eq!(delegate.exit_plan_mode(), Bubble, "its own mode is its own");
+}
+
 #[test]
 fn an_attached_engine_takes_over_from_the_hosts_choice() {
     let state = SessionState::new();
