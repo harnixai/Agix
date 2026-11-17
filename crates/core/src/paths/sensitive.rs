@@ -15,7 +15,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::layout::{
-    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES,
+    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_FILES,
     PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD,
     STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
@@ -308,13 +308,22 @@ impl ConfigRootAt {
     }
 
     /// Whether a sandboxed command may write the entry `name` directly in
-    /// this root: in the instance's own, any but the
-    /// [`ENGINE_CONFIG_FILES`] and [`ENGINE_CONFIG_DIRS`]; in a foreign one
-    /// none ([`Self::shut_to_writes`]).
+    /// this root: in the instance's own, its working space
+    /// ([`SensitivePaths::is_engine_working_entry`]), which is all the gate
+    /// leaves out of configuration there; in a foreign one none
+    /// ([`Self::shut_to_writes`]).
     pub fn writable_entry(&self, name: &str) -> bool {
-        !self.shut_to_writes()
-            && !ENGINE_CONFIG_FILES.contains(&name)
-            && !ENGINE_CONFIG_DIRS.contains(&name)
+        !self.shut_to_writes() && is_working_entry(name)
+    }
+
+    /// The working entries of this root as it resolves, whether or not they
+    /// exist: what [`Self::writable_entry`] admits.
+    pub fn working_entries(&self) -> Vec<PathBuf> {
+        WORKING_ENTRIES
+            .iter()
+            .filter(|name| self.writable_entry(name))
+            .map(|name| self.resolved.join(name))
+            .collect()
     }
 }
 
@@ -633,7 +642,7 @@ impl SensitivePaths {
     /// its prompt sends temporary files to, the memory directory it is told
     /// to write to directly, or the worktrees its sessions work in.
     pub fn is_engine_working_entry(&self, name: &str) -> bool {
-        STATE_ROOT_WORKING_DIRS.contains(&name) || name == PROJECT_WORKTREES_DIR
+        is_working_entry(name)
     }
 
     /// The state root's [`STATE_ROOT_WORKING_DIRS`]: what the tools may write
@@ -822,6 +831,14 @@ impl Spellings {
     fn spell(&self, path: &Path) -> bool {
         path.starts_with(&self.given) || path.starts_with(&self.real)
     }
+}
+
+/// The entries of the instance's own directory that are the agent's working
+/// space ([`SensitivePaths::is_engine_working_entry`]).
+const WORKING_ENTRIES: &[&str] = &[STATE_ROOT_SCRATCHPAD, entry::MEMORY, PROJECT_WORKTREES_DIR];
+
+fn is_working_entry(name: &str) -> bool {
+    WORKING_ENTRIES.contains(&name)
 }
 
 /// The scene directories of `root` that are symbolic links, as they resolve.

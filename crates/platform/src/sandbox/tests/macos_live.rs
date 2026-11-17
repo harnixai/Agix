@@ -283,8 +283,9 @@ fn a_sandboxed_command_cannot_plant_an_embedded_repositorys_configuration() {
 }
 
 /// The same profile leaves ordinary work alone: git commits, files in the
-/// project and under `.agix/`, the state root's scratchpad and memory,
-/// and the session's TMPDIR. Not under `.claude/`, a foreign root.
+/// project and in the working space of `.agix/`, the state root's
+/// scratchpad and memory, and the session's TMPDIR. Not elsewhere in
+/// `.agix/`, nor under `.claude/`, a foreign root.
 #[cfg(target_os = "macos")]
 #[test]
 fn ordinary_work_still_runs_under_the_hardened_profile() {
@@ -297,13 +298,15 @@ fn ordinary_work_still_runs_under_the_hardened_profile() {
         "git init -q nested && cd nested && echo b > b && git add b \
              && git -c user.name=T -c user.email=t@example.com commit -qm nested"
             .to_string(),
-        "echo x > notes.md && echo x > .agix/notes.txt && ! echo x > .claude/notes.txt".to_string(),
+        "echo x > notes.md && mkdir -p .agix/scratchpad && echo x > .agix/scratchpad/notes.txt \
+             && ! echo x > .agix/notes.txt && ! echo x > .claude/notes.txt"
+            .to_string(),
         format!("echo x > '{state}/scratchpad/a' && echo x > '{state}/memory/a'"),
         "test -n \"$TMPDIR\" && echo x > \"$TMPDIR/f\" && mktemp".to_string(),
     ] {
         assert!(s.runs(&command), "`{command}` was refused");
     }
-    assert!(s.project.join(".agix").join("notes.txt").is_file());
+    assert!(s.project.join(".agix/scratchpad/notes.txt").is_file());
     assert!(s.tmp.join("f").is_file());
 }
 

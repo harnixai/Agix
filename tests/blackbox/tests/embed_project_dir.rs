@@ -523,3 +523,57 @@ async fn a_sandboxed_command_cannot_make_a_configuration_root_that_is_not_there(
     embedded.shutdown().await;
     Ok(())
 }
+
+/// In the instance's own directory a sandboxed command writes only what the
+/// gate leaves out of configuration — `scratchpad/`, `memory/`,
+/// `worktrees/` — not the teams, telemetry or any other entry the engine
+/// keeps there, which the engine itself still writes. The prompts are
+/// answered yes, so the sandbox alone decides.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let own = root.project.join(OWN);
+    for dir in ["teams", "telemetry", "scratchpad", "memory"] {
+        std::fs::create_dir_all(own.join(dir))?;
+    }
+    let embedded = Embedded::start(config(&root, OWN)).await?;
+    let mut client = connect(&embedded);
+    routine_replies(&stub);
+    let refused = [
+        "teams/t.json",
+        "telemetry/x.jsonl",
+        ".imported.json",
+        "notes.md",
+    ];
+    let mut replies: Vec<Reply> = refused
+        .iter()
+        .enumerate()
+        .map(|(i, path)| bash(&format!("b-{i}"), &format!("echo x > {OWN}/{path}")))
+        .collect();
+    replies.push(bash(
+        "b-work",
+        &format!("echo x > {OWN}/scratchpad/n.md && echo x > {OWN}/memory/m.md"),
+    ));
+    replies.push(Reply::text("OWN-DONE"));
+    stub.script_when("OWN-MARK", replies);
+
+    let session = client.session_create(json!({})).await?;
+    let _asked = answer_prompts(&embedded, &session);
+    let events = client
+        .session_run_turn(&session, "OWN-MARK go", "t1", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    for path in refused {
+        assert!(
+            !own.join(path).exists(),
+            "{OWN}/{path} was written: {:?}",
+            events.tool_results
+        );
+    }
+    assert_eq!(read(own.join("scratchpad/n.md")), "x\n");
+    assert_eq!(read(own.join("memory/m.md")), "x\n");
+    embedded.shutdown().await;
+    Ok(())
+}

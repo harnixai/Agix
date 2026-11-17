@@ -2219,6 +2219,8 @@ Seatbelt 在不分大小写的卷上按卷的语义匹配规则(实测,`macos_li
 建出它);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
 门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
+沙箱与门禁用同一个判定(`ConfigRootAt::writable_entry`):本实例目录里沙箱命令也只写得了这三项,`teams/`、
+`telemetry/`、导入标记等由引擎自己(不在沙箱里)写。
 缺省名字下自己与外来去重,行为与改名之前相同。
 
 **外来状态根。** 状态根不是 `~/.agix` 的实例(嵌入方的 `data_root`,或设了 `AGIX_CONFIG_HOME`)

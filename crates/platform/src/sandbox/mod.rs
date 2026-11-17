@@ -48,13 +48,15 @@
 //! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
 //! included, and the directories leading down to them), the
-//! configuration under the instance's own project directory
+//! instance's own project directory but its working entries — `scratchpad/`,
+//! `memory/`, `worktrees/`, all the gate leaves out of configuration there
+//! (`base::paths::ConfigRootAt::writable_entry`) — with its configuration
 //! (`base::paths::ENGINE_CONFIG_*`: settings, MCP, hooks, commands, agents,
 //! skills, plugins, rules, scenes, policy, scripts, output styles, and the
-//! saved tool results the engine exports and forks), all of a foreign
-//! configuration root (`.claude`, and `.agix` under a renamed layout) but
-//! the writable roots the policy names inside it
-//! (`base::paths::ConfigRootAt::shut_to_writes`), the project's skills (`.agents/skills/`,
+//! saved tool results the engine exports and forks) read-only even inside a
+//! writable root the policy names there, all of a foreign configuration root
+//! (`.claude`, and `.agix` under a renamed layout), and in either the
+//! writable roots the policy names inside it stay writable, the project's skills (`.agents/skills/`,
 //! `base::paths::PROJECT_ENGINE_CONFIG_DIRS`, and the `.agents` entry above
 //! it), the control files of each linked worktree's entry under
 //! `.git/worktrees/` (`base::paths::GIT_WORKTREE_CONTROL_FILES`), and the

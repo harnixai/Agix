@@ -149,7 +149,7 @@ fn guard_project(
             shut_empty(args, &root_dir, made);
         }
         for entry in working_entries(roots, &root) {
-            bind(args, "--bind", &entry);
+            bind(args, "--bind-try", &entry);
         }
     }
     guard_project_skills(args, roots, made);
@@ -189,23 +189,14 @@ fn guard_project_skills(args: &mut Vec<String>, roots: &Roots, made: &mut Vec<Pa
     }
 }
 
-/// What a command may write in the configuration root `root`: its entries
-/// that [`base::paths::ConfigRootAt::writable_entry`] admits and that are not
-/// symbolic links, and in a root shut to writes the writable roots inside it,
-/// which the policy names.
+/// What a command may write in the configuration root `root`: its existing
+/// entries that [`base::paths::ConfigRootAt::writable_entry`] admits and that
+/// are not symbolic links, and the writable roots inside it, which the policy
+/// names.
 fn working_entries(roots: &Roots, root: &base::paths::ConfigRootAt) -> Vec<PathBuf> {
-    if root.shut_to_writes() {
-        return roots
-            .writable
-            .iter()
-            .filter(|w| w.starts_with(&root.path) || w.starts_with(&root.resolved))
-            .cloned()
-            .collect();
-    }
-    let Ok(entries) = std::fs::read_dir(&root.path) else {
-        return Vec::new();
-    };
-    entries
+    let existing = std::fs::read_dir(&root.path)
+        .into_iter()
+        .flatten()
         .flatten()
         .filter(|entry| {
             entry
@@ -214,8 +205,13 @@ fn working_entries(roots: &Roots, root: &base::paths::ConfigRootAt) -> Vec<PathB
                 .is_some_and(|n| root.writable_entry(n))
                 && entry.file_type().is_ok_and(|t| !t.is_symlink())
         })
-        .map(|entry| entry.path())
-        .collect()
+        .map(|entry| entry.path());
+    let named = roots
+        .writable
+        .iter()
+        .filter(|w| w.starts_with(&root.path) || w.starts_with(&root.resolved))
+        .cloned();
+    existing.chain(named).collect()
 }
 
 /// The configuration root of the project that `dir` is, as given or as it

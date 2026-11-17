@@ -451,7 +451,9 @@ fn another_instances_state_root_is_guarded_as_the_own_one() {
 /// as the gate takes every entry of one for configuration — its working
 /// entries and new entries directly in it too — but for a writable root the
 /// policy names inside it. In the instance's own root the working entries
-/// stay writable and `commands/` does not.
+/// stay writable — `scratchpad/`, `memory/`, `worktrees/`, all the gate
+/// leaves out of configuration — and nothing else in it: not `commands/`,
+/// not `teams/` or `telemetry/`, which the engine writes itself.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 #[allow(clippy::unwrap_used)]
@@ -471,7 +473,9 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         ] {
             std::fs::create_dir_all(project.join(d)).unwrap();
         }
-        std::fs::create_dir_all(project.join(own).join("scratchpad")).unwrap();
+        for entry in ["scratchpad", "teams", "telemetry"] {
+            std::fs::create_dir_all(project.join(own).join(entry)).unwrap();
+        }
         let named = project.join(".claude/named");
         std::fs::create_dir_all(&named).unwrap();
         let policy = SandboxPolicy {
@@ -511,6 +515,10 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         );
         for path in shut {
             assert!(!writes(path), "{own}: {path} was written");
+        }
+        for entry in ["teams/t.json", "telemetry/x.jsonl", "notes.md"] {
+            let path = format!("{own}/{entry}");
+            assert!(!writes(&path), "{own}: {path} was written");
         }
         let own_scratch = format!("{own}/scratchpad/n");
         for path in [own_scratch.as_str(), ".claude/named/n"] {

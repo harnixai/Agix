@@ -161,16 +161,18 @@ fn fence_state_root(s: &mut String, roots: &Roots) {
 
 fn guard_project_files(s: &mut String, roots: &Roots) {
     let guard = project_guard(roots);
-    // The writable roots the policy names inside a foreign root are opened
-    // again before the rules below, which then still hold the configuration
-    // inside them.
+    // A configuration root's working entries, where writable at all, and the
+    // writable roots the policy names inside one are opened again before the
+    // rules below, which then still hold the configuration inside them.
     for p in &guard.shut {
         s.push_str(&format!("(deny file-write* (subpath \"{}\"))\n", quoted(p)));
     }
-    let reopened = roots
-        .writable
-        .iter()
-        .filter(|w| guard.shut.iter().any(|root| w.starts_with(root)));
+    let reopened = guard.working.iter().filter(|p| roots.opens(p)).chain(
+        roots
+            .writable
+            .iter()
+            .filter(|w| guard.shut.iter().any(|root| w.starts_with(root))),
+    );
     for p in reopened {
         s.push_str(&format!(
             "(allow file-write* (subpath \"{}\"))\n",
