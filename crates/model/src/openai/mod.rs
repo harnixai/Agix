@@ -205,13 +205,7 @@ async fn send_once<T: serde::Serialize>(inner: &Inner, req: &T) -> Result<HttpSt
         return Ok(resp);
     }
     let hint = parse_retry_after(&resp.headers, SystemTime::now());
-    // Truncate: an error body can be an entire HTML error page.
-    let body = drain_to_string(resp.body).await;
-    let body = if body.len() > 4096 {
-        body.chars().take(4096).collect()
-    } else {
-        body
-    };
+    let body = crate::client::read_error_body(resp.body).await;
     let kind = crate::error::classify(Some(code), None, &body);
     Err(ModelError::new(kind, body)
         .with_status(code)
@@ -227,22 +221,6 @@ fn exec_error(e: base::interface::exec::ExecError) -> ModelError {
         base::interface::exec::ExecError::Denied(m) => ModelError::new(ModelErrorKind::Denied, m),
         other => ModelError::transport(other.to_string()),
     }
-}
-
-async fn drain_to_string(
-    mut body: futures::stream::BoxStream<
-        'static,
-        Result<Vec<u8>, base::interface::exec::ExecError>,
-    >,
-) -> String {
-    let mut buf = Vec::new();
-    while let Some(chunk) = body.next().await {
-        match chunk {
-            Ok(c) => buf.extend_from_slice(&c),
-            Err(_) => break,
-        }
-    }
-    String::from_utf8_lossy(&buf).into_owned()
 }
 
 async fn send_with_retry<T: serde::Serialize>(

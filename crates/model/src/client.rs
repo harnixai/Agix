@@ -63,13 +63,7 @@ async fn classify_response(resp: HttpStream) -> Result<HttpStream, AnthropicErro
             anthropic_headers.insert(n, value.clone());
         }
     }
-    // 截掉超长 body 防止日志爆炸
-    let body = drain_to_string(resp.body).await;
-    let body = if body.len() > 4096 {
-        body.chars().take(4096).collect()
-    } else {
-        body
-    };
+    let body = read_error_body(resp.body).await;
     use base::interface::model::ModelErrorKind;
     Err(
         match classify(Some(code), error_type(&body).as_deref(), &body) {
@@ -93,22 +87,44 @@ async fn classify_response(resp: HttpStream) -> Result<HttpStream, AnthropicErro
     )
 }
 
-/// 把一个还没读的响应体读成字符串。错误当作提前结束——这里只用于错误 body，
-/// 读到多少算多少比再报一个覆盖掉状态码的错更有用。
-async fn drain_to_string(
+/// 错误响应体最多读这么多字节、等这么久：它只用来说明错误，一个不停地流、或者流到一半
+/// 停住的 body 不该拖住这一轮。
+const ERROR_BODY_BYTES: usize = 4096;
+const ERROR_BODY_WAIT: Duration = Duration::from_secs(5);
+
+/// 把一个还没读的错误响应体读成字符串，至多 [`ERROR_BODY_BYTES`] 字节、
+/// [`ERROR_BODY_WAIT`]。读错、超时都当作提前结束——读到多少算多少比再报一个覆盖掉
+/// 状态码的错更有用。
+pub(crate) async fn read_error_body(
     mut body: futures::stream::BoxStream<
         'static,
         Result<Vec<u8>, base::interface::exec::ExecError>,
     >,
 ) -> String {
     let mut buf = Vec::new();
-    while let Some(chunk) = body.next().await {
-        match chunk {
-            Ok(c) => buf.extend_from_slice(&c),
-            Err(_) => break,
+    let _ = tokio::time::timeout(ERROR_BODY_WAIT, async {
+        while buf.len() < ERROR_BODY_BYTES {
+            match body.next().await {
+                Some(Ok(chunk)) => buf.extend_from_slice(&chunk),
+                Some(Err(_)) | None => break,
+            }
+        }
+    })
+    .await;
+    buf.truncate(ERROR_BODY_BYTES);
+    match String::from_utf8(buf) {
+        Ok(text) => text,
+        Err(e) => {
+            let valid = e.utf8_error().valid_up_to();
+            let mut bytes = e.into_bytes();
+            let cut_mid_char = bytes.len() - valid < 4
+                && std::str::from_utf8(&bytes[valid..]).is_err_and(|e| e.error_len().is_none());
+            if cut_mid_char {
+                bytes.truncate(valid);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
         }
     }
-    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// 一次 HTTP send + classify。失败时按 AnthropicError 分类返回。
@@ -422,6 +438,32 @@ impl AnthropicClient for NoCredentialsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An error body that never ends is read as far as it is worth, not
+    /// until the turn is cancelled.
+    #[tokio::test(start_paused = true)]
+    async fn an_error_body_that_never_ends_is_cut_off() {
+        let endless = futures::stream::repeat_with(|| Ok(vec![b'x'; 1024])).boxed();
+        let read = tokio::time::timeout(Duration::from_secs(60), read_error_body(endless))
+            .await
+            .expect("an endless body is not read to its end");
+        assert_eq!(read.len(), 4096);
+
+        let stalled = futures::stream::once(async { Ok(b"{\"error\":".to_vec()) })
+            .chain(futures::stream::pending())
+            .boxed();
+        let read = tokio::time::timeout(Duration::from_secs(60), read_error_body(stalled))
+            .await
+            .expect("a body that stops coming is given up on");
+        assert_eq!(read, "{\"error\":");
+
+        let cjk = futures::stream::repeat_with(|| Ok("限".as_bytes().to_vec())).boxed();
+        let read = read_error_body(cjk).await;
+        assert!(
+            read.len() <= 4096 && read.chars().all(|c| c == '限'),
+            "{read}"
+        );
+    }
 
     struct SilentNetwork(Arc<std::sync::atomic::AtomicUsize>);
 
