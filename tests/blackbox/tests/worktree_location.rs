@@ -2,7 +2,8 @@
 //! `.wkts/` at its root, the one line the engine adds to its `.gitignore`,
 //! so what the project directory holds can still be committed. The user's
 //! global settings name another directory with `worktree_dir`; the
-//! project's own settings cannot.
+//! project's own settings cannot. What the engine writes in the project
+//! directory for this machine alone is ignored there.
 
 use std::path::Path;
 
@@ -91,7 +92,20 @@ async fn a_worktree_goes_in_wkts_and_the_project_directory_stays_committable() -
     assert!(!gitignore.contains(".agix"), "{gitignore}");
 
     assert!(!ignored(&world, &repo, ".agix/settings.json")?);
+    assert!(!ignored(&world, &repo, ".agix/agents/reviewer.md")?);
     assert!(ignored(&world, &repo, ".wkts/probe/made.txt")?);
+    for local in [
+        ".agix/settings.local.json",
+        ".agix/mcp.local.json",
+        ".agix/.imported.json",
+        ".agix/memory/a-fact.md",
+        ".agix/scratchpad/notes.txt",
+        ".agix/teams/team-x/SCRATCHPAD.md",
+        ".agix/telemetry/s.jsonl",
+        ".agix/tool-results/s/r.txt",
+    ] {
+        assert!(ignored(&world, &repo, local)?, "{local} is committable");
+    }
     let added = git(&world, &repo, &["add", ".agix/settings.json"])?;
     assert!(added.status.success(), "{added:?}");
     let status = git(&world, &repo, &["status", "--porcelain"])?;

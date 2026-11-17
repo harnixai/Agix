@@ -227,7 +227,11 @@ async fn write_marker(cwd: &Path, layout: &Layout, marker: &ImportedMarker) -> s
         tokio::fs::create_dir_all(parent).await?;
     }
     let json = serde_json::to_string_pretty(marker).unwrap_or_default();
-    tokio::fs::write(path, json).await
+    tokio::fs::write(&path, json).await?;
+    if let Some(dir) = path.parent() {
+        base::paths::ensure_project_data_gitignore(dir, cwd);
+    }
+    Ok(())
 }
 
 /// Whether the **automatic** import-detection path should skip this project

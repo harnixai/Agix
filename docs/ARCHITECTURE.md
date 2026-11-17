@@ -2170,12 +2170,16 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 `state.json`、`events.jsonl`、`SCRATCHPAD.md`、`mailbox/`、`memory/`(团队共享记忆,
 格式同个人记忆)。每个阶段开始时成员读到 `memory/` 的索引;`TeamDelete` 删掉整个目录。
 
-项目的 `.agix/` 在用户的仓库里。引擎第一次往一个设置目录写 `settings.local.json` /
-`mcp.local.json`(里面是 key 与 MCP headers),或第一次往项目 `.agix/telemetry/` 录遥测时,
-往那个目录的 `.gitignore` 里补上缺的引擎条目(`base::paths::local_data_gitignore`:
-`settings.local.json`、`mcp.local.json`、`telemetry/`、`tool-results/`),没有就新建。已有的
-`.gitignore` 是用户的,只追加缺的行,别的不动。状态目录与场景目录写 `settings.local.json` 时同样会生成,无害。`scratchpad/`
-自己另有一份 `*`。
+项目的 `.agix/` 在用户的仓库里。其中只有协作者共用的东西随仓库提交(`settings.json`、agents、
+hooks、commands、rules、output-styles 等配置);引擎为这台机器、这个用户写的都不提交。有项目的
+会话建起来时,以及引擎往一个设置目录写 `settings.local.json` / `mcp.local.json`(里面是 key 与
+MCP headers)、往项目 `.agix/telemetry/` 录遥测、写导入标记时,往那个目录的 `.gitignore` 里补上缺的
+引擎条目(`base::paths::local_data_gitignore`:`settings.local.json`、`mcp.local.json`、
+`.imported.json`、`memory/`、`scratchpad/`、`teams/`、`telemetry/`、`tool-results/`),没有就新建。
+已有的 `.gitignore` 是用户的,只追加缺的行,别的不动;它是符号链接时不动,也不动它指向的文件。会话建起来与
+写导入标记时,项目层目录本身是符号链接或落在项目之外,也不写(`ensure_project_data_gitignore`)——克隆来的
+仓库能把它们指到别处。状态目录与场景目录写 `settings.local.json`
+时同样会生成,无害。`scratchpad/` 自己另有一份 `*`。引擎往项目目录里新加本地的东西,要同时进这张表。
 
 **会话进哪个项目目录由它自己的 `Meta.project_root` 决定**,不是由 daemon 的 cwd
 决定 —— 一个 daemon 同时服务多个项目时,后者会把所有项目的 transcript 堆进一个

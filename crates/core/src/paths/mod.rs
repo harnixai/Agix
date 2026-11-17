@@ -363,11 +363,22 @@ pub fn local_data_gitignore() -> Vec<String> {
 /// Make sure `dir`'s `.gitignore` has every [`local_data_gitignore`] entry,
 /// appending the ones it lacks and touching nothing else in it: in a cloned
 /// repository the file is the repository author's, and the keys and
-/// recordings the engine writes here must stay out of it all the same.
+/// recordings the engine writes here must stay out of it all the same. A
+/// `.gitignore` that is a symlink is left alone, as is what it points at.
 pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
-    use std::io::Write;
-    let path = dir.join(".gitignore");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    use std::io::{Read, Write};
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).append(true).create(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+    let Ok(mut file) = options.open(dir.join(".gitignore")) else {
+        return;
+    };
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return;
+    }
+    let existing = String::from_utf8_lossy(&bytes);
     let lacking: Vec<String> = local_data_gitignore()
         .into_iter()
         .filter(|entry| !existing.lines().any(|line| line.trim() == entry))
@@ -375,13 +386,6 @@ pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
     if lacking.is_empty() {
         return;
     }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
-        return;
-    };
     let mut added = String::new();
     if !existing.is_empty() && !existing.ends_with('\n') {
         added.push('\n');
@@ -391,6 +395,20 @@ pub fn ensure_local_data_gitignore(dir: &std::path::Path) {
         added.push('\n');
     }
     let _ = file.write_all(added.as_bytes());
+}
+
+/// [`ensure_local_data_gitignore`] for a project's directory, which a cloned
+/// repository supplies: only where `dir` is a directory of its own, not a
+/// symlink, and lies inside `project`.
+pub fn ensure_project_data_gitignore(dir: &std::path::Path, project: &std::path::Path) {
+    let own_dir = dir.symlink_metadata().is_ok_and(|m| m.is_dir());
+    let inside = match (dir.canonicalize(), project.canonicalize()) {
+        (Ok(dir), Ok(project)) => dir.starts_with(project),
+        _ => false,
+    };
+    if own_dir && inside {
+        ensure_local_data_gitignore(dir);
+    }
 }
 
 /// Unified management of AGENT persistent directory paths: the three tiers'
@@ -804,5 +822,45 @@ mod local_data_gitignore_tests {
         let before = text.clone();
         ensure_local_data_gitignore(dir.path());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gitignore_that_is_a_symlink_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, "keep\n").unwrap();
+        let data = dir.path().join(".agix");
+        std::fs::create_dir(&data).unwrap();
+        std::os::unix::fs::symlink(&victim, data.join(".gitignore")).unwrap();
+        ensure_local_data_gitignore(&data);
+        ensure_project_data_gitignore(&data, dir.path());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_directory_elsewhere_gets_no_gitignore() {
+        let project = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let linked = project.path().join(".agix");
+        std::os::unix::fs::symlink(elsewhere.path(), &linked).unwrap();
+        ensure_project_data_gitignore(&linked, project.path());
+        assert!(!elsewhere.path().join(".gitignore").exists());
+
+        let outside = project
+            .path()
+            .join("..")
+            .join(elsewhere.path().file_name().unwrap());
+        ensure_project_data_gitignore(&outside, project.path());
+        assert!(!elsewhere.path().join(".gitignore").exists());
+
+        let real = project.path().join(".codix");
+        std::fs::create_dir(&real).unwrap();
+        ensure_project_data_gitignore(&real, project.path());
+        let text = std::fs::read_to_string(real.join(".gitignore")).unwrap();
+        for entry in local_data_gitignore() {
+            assert!(text.lines().any(|l| l == entry), "{entry}: {text:?}");
+        }
     }
 }

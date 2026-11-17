@@ -159,11 +159,24 @@ pub const STATE_ROOT_SCENE_FILES: &[&str] =
     &[entry::SETTINGS, entry::SCENE_FILE, entry::SCENE_PROMPT];
 
 /// The files a project directory's `.gitignore` keeps out of the repository:
-/// the ones the engine writes keys into.
-pub const LOCAL_DATA_IGNORED_FILES: &[&str] = &[entry::SETTINGS_LOCAL, entry::MCP_LOCAL];
+/// everything the engine writes there for this machine or this user alone —
+/// the keys, and the answer to the import question. Only what a project's
+/// collaborators share is committed.
+pub const LOCAL_DATA_IGNORED_FILES: &[&str] = &[
+    entry::SETTINGS_LOCAL,
+    entry::MCP_LOCAL,
+    entry::IMPORTED_MARKER,
+];
 
-/// The directories it keeps out: telemetry recordings and saved tool results.
-pub const LOCAL_DATA_IGNORED_DIRS: &[&str] = &[entry::TELEMETRY, entry::TOOL_RESULTS];
+/// The directories it keeps out: the agent's memory, scratchpad and team
+/// records, telemetry recordings and saved tool results.
+pub const LOCAL_DATA_IGNORED_DIRS: &[&str] = &[
+    entry::MEMORY,
+    entry::SCRATCHPAD,
+    entry::TEAMS,
+    entry::TELEMETRY,
+    entry::TOOL_RESULTS,
+];
 
 /// Project directories other tools own, which an instance's cannot be: git's,
 /// the cross-tool skills directory, the other agents' configuration roots,

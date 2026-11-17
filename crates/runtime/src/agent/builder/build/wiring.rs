@@ -133,6 +133,7 @@ impl Builder {
         // One `SessionState` per session, shared by every tool call: none of
         // its state works unless it survives from one call to the next.
         prepare_scratchpad(&settings.paths.config_paths().scratchpad_dir());
+        prepare_local_data_gitignore(&settings.paths);
         prepare_working_dir(&settings.paths);
         let session_env = session_env(settings, config, attended, &self.host.skill_dirs);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
@@ -303,6 +304,17 @@ pub(super) fn prepare_working_dir(paths: &base::paths::PathSettings) {
         if dir.is_absolute() {
             let _ = std::fs::create_dir_all(dir);
         }
+    }
+}
+
+/// The project directory's `.gitignore` keeps out what the session will
+/// write there for this machine alone ([`base::paths::local_data_gitignore`]),
+/// before any of it is written. Without a project the directory is the state
+/// root, which no repository holds.
+pub(super) fn prepare_local_data_gitignore(paths: &base::paths::PathSettings) {
+    let dir = &paths.local_data_dir;
+    if let Some(project) = paths.project_root().filter(|_| dir.is_absolute()) {
+        base::paths::ensure_project_data_gitignore(dir, project);
     }
 }
 
