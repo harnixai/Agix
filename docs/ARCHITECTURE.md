@@ -466,6 +466,8 @@ MCP 工具与宿主工具不报路径,拦不到,同凭据位置)。沙箱的命�
 `session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词、`session.setSkillDirs` 设的宿主 skill 目录、
 `session.setPermissionMode` 设的 `plan` 以外的权限模式(建引擎时按当时的设置夹紧)。规格以 `ns = "agix.session"`、`event = "spec"`
 的扩展条目写进会话日志,每次变化追加一条,最后一条为准,所以跨 daemon 重启也成立。
+因为最后一条为准,宿主改规格的那几个方法都持着会话锁(`LiveSessions::with_session_lock`)改,持着锁的
+会话不被驱逐;内存里没有的规格先从日志读回再改(`SpecStore::update`),不会写出一份只有这次改动的规格。
 recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.fork` 去掉 `name`);同一进程里的重建共用同一个 recorder,录像接着写、回放接着原来的进度;daemon 重启后录像从头重写,回放要恢复时再给一次。录制时会话和它的子 Agent、起名、压缩等辅助调用进同一份录像,`session.calls` 经协议读它。
 
 重建之前先停掉旧 `Agent` 并等它收尾(有时限),然后才从盘上读 transcript——否则新

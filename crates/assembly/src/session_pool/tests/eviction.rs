@@ -1,7 +1,9 @@
 //! `eviction_tests` 原样搬来的用例。
 
 use super::*;
-use crate::session_pool::parts::live::{evict_lru, idle_session_ids, EngineSlot, Naming};
+use crate::session_pool::parts::live::{
+    evict_lru, idle_session_ids, EngineSlot, LiveSessions, Naming,
+};
 use crate::session_pool::parts::phase::Generations;
 use base::context::Session;
 use runtime::agent::InputSender;
@@ -54,7 +56,7 @@ fn evict_lru_removes_the_least_recently_active_session() {
     );
     sessions.insert("newest".to_string(), dummy_live_session(now));
 
-    evict_lru(&mut sessions);
+    evict_lru(&mut sessions, |_| false);
 
     assert_eq!(
         sessions.len(),
@@ -123,12 +125,17 @@ fn eviction_passes_over_a_session_that_is_doing_something() {
     sessions.insert("with_a_task".to_string(), with_a_task);
 
     assert!(idle_session_ids(&sessions, now, Duration::from_secs(300)).is_empty());
-    assert!(evict_lru(&mut sessions).is_none(), "every session is busy");
+    assert!(
+        evict_lru(&mut sessions, |_| false).is_none(),
+        "every session is busy"
+    );
     assert_eq!(sessions.len(), 3);
 
     sessions.insert("idle".to_string(), dummy_live_session(now));
     assert_eq!(
-        evict_lru(&mut sessions).map(|(sid, _)| sid).as_deref(),
+        evict_lru(&mut sessions, |_| false)
+            .map(|(sid, _)| sid)
+            .as_deref(),
         Some("idle")
     );
 }
@@ -143,7 +150,7 @@ fn eviction_passes_over_a_session_whose_log_lacks_what_it_holds() {
     sessions.insert("behind".to_string(), behind);
 
     assert!(idle_session_ids(&sessions, now, Duration::from_secs(300)).is_empty());
-    assert!(evict_lru(&mut sessions).is_none());
+    assert!(evict_lru(&mut sessions, |_| false).is_none());
 
     sessions["behind"].core.log().set_behind(false);
     assert_eq!(
@@ -155,7 +162,7 @@ fn eviction_passes_over_a_session_whose_log_lacks_what_it_holds() {
 #[test]
 fn evict_lru_on_empty_map_is_a_noop() {
     let mut sessions: HashMap<String, LiveSession> = HashMap::new();
-    evict_lru(&mut sessions); // must not panic
+    evict_lru(&mut sessions, |_| false); // must not panic
     assert!(sessions.is_empty());
 }
 
@@ -196,4 +203,52 @@ fn idle_session_ids_exactly_at_timeout_boundary_is_not_evicted() {
 
     let idle = idle_session_ids(&sessions, now, Duration::from_secs(300));
     assert!(idle.is_empty(), "idle: {idle:?}");
+}
+
+/// Whatever holds a session's lock is changing it: neither a full table nor
+/// the janitor takes it out of memory meanwhile.
+#[tokio::test]
+async fn a_session_whose_lock_is_held_is_not_evicted() {
+    let now = Instant::now();
+    let long_ago = now.checked_sub(Duration::from_secs(600)).unwrap();
+    let live = Arc::new(LiveSessions::new(1, Duration::from_secs(300)));
+    live.insert_evicting("held", dummy_live_session(long_ago), |_| true)
+        .await
+        .unwrap();
+    let (entered_tx, entered) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel::<()>();
+    let holder = {
+        let live = live.clone();
+        tokio::spawn(async move {
+            live.with_session_lock("held", async {
+                let _ = entered_tx.send(());
+                let _ = released.await;
+            })
+            .await
+        })
+    };
+    entered.await.unwrap();
+
+    let displaced = live
+        .insert_evicting("next", dummy_live_session(now), |_| true)
+        .await
+        .unwrap();
+    assert!(
+        displaced.evicted.is_none(),
+        "a full table evicted a session being changed"
+    );
+    let a_day_later = now + Duration::from_secs(24 * 3600);
+    let (taken, _) = live.take_idle(a_day_later).await;
+    let taken: Vec<String> = taken.into_iter().map(|(sid, _)| sid).collect();
+    assert_eq!(
+        taken,
+        ["next"],
+        "the janitor evicted a session being changed"
+    );
+
+    release.send(()).unwrap();
+    holder.await.unwrap();
+    let (taken, _) = live.take_idle(a_day_later).await;
+    let taken: Vec<String> = taken.into_iter().map(|(sid, _)| sid).collect();
+    assert_eq!(taken, ["held"]);
 }

@@ -325,17 +325,22 @@ impl SpecStore {
     }
 
     /// Change this session's spec in memory only, returning it as it was and
-    /// as it is now.
-    pub(in crate::session_pool) fn update(
+    /// as it is now. One this process does not hold is read from the log
+    /// first, so the change is made to what the session was given and never
+    /// to an empty spec standing in for it.
+    pub(in crate::session_pool) async fn update(
         &self,
         session_id: &str,
         change: impl FnOnce(&mut SessionSpec),
     ) -> (Option<SessionSpec>, SessionSpec) {
-        let mut specs = self.lock();
-        let previous = specs.get(session_id).cloned();
-        let spec = specs.entry(session_id.to_string()).or_default();
-        change(spec);
-        (previous, spec.clone())
+        loop {
+            if let Some(spec) = self.lock().get_mut(session_id) {
+                let previous = spec.clone();
+                change(spec);
+                return (Some(previous), spec.clone());
+            }
+            self.load(session_id).await;
+        }
     }
 
     /// Put back what [`Self::update`] returned as the spec before.

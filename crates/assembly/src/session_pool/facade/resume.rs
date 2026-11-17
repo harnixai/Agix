@@ -594,7 +594,7 @@ impl SessionPool {
         held: HeldSlot,
         change: impl FnOnce(&mut SessionSpec),
     ) -> Result<SessionSpec, Rebuild> {
-        let (previous, changed) = self.specs.update(sid, change);
+        let (previous, changed) = self.specs.update(sid, change).await;
         self.project_model_choice(sid).await;
         if let Err(e) = self.rebuild_holding(sid, held, None).await {
             self.specs.restore(sid, previous);

@@ -165,6 +165,7 @@ mod script_binding;
 /// pool does itself.
 mod session_listing;
 mod set_model;
+mod spec_and_eviction;
 mod steer;
 mod subscribe_resuming;
 mod turn_driver;

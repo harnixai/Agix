@@ -170,7 +170,8 @@ impl SessionPool {
     async fn record_host_mode(&self, sid: &str, mode: PermissionMode) -> Result<(), PoolError> {
         let (before, spec) = self
             .specs
-            .update(sid, |spec| spec.permission_mode = Some(mode));
+            .update(sid, |spec| spec.permission_mode = Some(mode))
+            .await;
         if before.as_ref().and_then(|spec| spec.permission_mode) == Some(mode) {
             return Ok(());
         }

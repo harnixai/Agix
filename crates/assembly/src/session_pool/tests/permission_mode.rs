@@ -8,7 +8,7 @@ use base::context::Session;
 use base::permission::PermissionMode;
 use std::sync::atomic::Ordering;
 
-fn with_effort() -> SessionOptions {
+pub(super) fn with_effort() -> SessionOptions {
     SessionOptions {
         effort: Some(base::interface::model::Effort::High),
         ..Default::default()
@@ -16,7 +16,7 @@ fn with_effort() -> SessionOptions {
 }
 
 /// Holds `sid`'s session lock until the returned sender is used.
-async fn hold_session_lock(
+pub(super) async fn hold_session_lock(
     pool: &Arc<SessionPool>,
     sid: &str,
 ) -> (
@@ -41,7 +41,7 @@ async fn hold_session_lock(
     (release, holder)
 }
 
-async fn wait_for_lock_waiter(pool: &SessionPool, sid: &str) {
+pub(super) async fn wait_for_lock_waiter(pool: &SessionPool, sid: &str) {
     for _ in 0..500 {
         if pool.live.session_lock_holders(sid).await >= 3 {
             return;

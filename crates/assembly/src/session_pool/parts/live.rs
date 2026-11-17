@@ -363,8 +363,9 @@ pub(in crate::session_pool) struct LiveSessions {
     /// critical sections against each other — see
     /// [`Self::with_session_lock`]. Entries are dropped again once nothing
     /// references them, so this stays proportional to concurrently-contended
-    /// ids, not every id this pool has ever touched.
-    session_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    /// ids, not every id this pool has ever touched. A session whose mutex
+    /// is held is not evicted: whatever holds it is changing the session.
+    session_locks: std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     cap: usize,
     idle_timeout: Duration,
     /// The engines taken out of `sessions` that may still be stopping, by
@@ -384,7 +385,7 @@ impl LiveSessions {
     pub(in crate::session_pool) fn new(cap: usize, idle_timeout: Duration) -> Self {
         Self {
             sessions: AsyncMutex::new(HashMap::new()),
-            session_locks: AsyncMutex::new(HashMap::new()),
+            session_locks: std::sync::Mutex::new(HashMap::new()),
             cap,
             idle_timeout,
             stopping: std::sync::Mutex::new(HashMap::new()),
@@ -461,7 +462,7 @@ impl LiveSessions {
         let evicted = if sessions.contains_key(sid) || sessions.len() < self.cap {
             None
         } else {
-            evict_lru(&mut sessions)
+            evict_lru(&mut sessions, |sid| self.session_lock_held(sid))
         };
         let replaced = sessions.insert(sid.to_string(), live);
         Ok(Displaced { evicted, replaced })
@@ -514,6 +515,7 @@ impl LiveSessions {
         let mut sessions = self.sessions.lock().await;
         let taken = idle_session_ids(&sessions, now, self.idle_timeout)
             .into_iter()
+            .filter(|sid| !self.session_lock_held(sid))
             .filter_map(|sid| sessions.remove_entry(&sid))
             .collect();
         (taken, sessions.len())
@@ -615,7 +617,7 @@ impl LiveSessions {
         fut: impl std::future::Future<Output = T>,
     ) -> T {
         let lock = {
-            let mut locks = self.session_locks.lock().await;
+            let mut locks = self.locks_table();
             locks
                 .entry(session_id.to_string())
                 .or_insert_with(|| Arc::new(AsyncMutex::new(())))
@@ -626,7 +628,7 @@ impl LiveSessions {
             fut.await
         };
         drop(lock);
-        let mut locks = self.session_locks.lock().await;
+        let mut locks = self.locks_table();
         if locks
             .get(session_id)
             .is_some_and(|entry| Arc::strong_count(entry) == 1)
@@ -634,6 +636,18 @@ impl LiveSessions {
             locks.remove(session_id);
         }
         result
+    }
+
+    fn locks_table(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<AsyncMutex<()>>>> {
+        self.session_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn session_lock_held(&self, sid: &str) -> bool {
+        self.locks_table()
+            .get(sid)
+            .is_some_and(|lock| lock.try_lock().is_err())
     }
 
     pub(in crate::session_pool) fn refuse_while_shutting_down(&self) -> Result<(), String> {
@@ -659,37 +673,31 @@ impl LiveSessions {
 
     #[cfg(test)]
     pub(in crate::session_pool) async fn session_lock_holders(&self, sid: &str) -> usize {
-        self.session_locks
-            .lock()
-            .await
-            .get(sid)
-            .map_or(0, Arc::strong_count)
+        self.locks_table().get(sid).map_or(0, Arc::strong_count)
     }
 
     #[cfg(test)]
     pub(in crate::session_pool) async fn session_lock_is_held(&self, sid: &str) -> bool {
-        self.session_locks
-            .lock()
-            .await
-            .get(sid)
-            .is_some_and(|lock| lock.try_lock().is_err())
+        self.session_lock_held(sid)
     }
 
     #[cfg(test)]
     pub(in crate::session_pool) async fn no_session_locks(&self) -> bool {
-        self.session_locks.lock().await.is_empty()
+        self.locks_table().is_empty()
     }
 }
 
-/// Take the least recently active idle session out of `sessions`, or `None`
-/// when every session is busy or holds what its log lacks — the pool then
-/// runs over its cap rather than cut one off or lose what it holds.
+/// Take the least recently active idle session out of `sessions` that is not
+/// `being_changed`, or `None` when every session is busy, being changed or
+/// holds what its log lacks — the pool then runs over its cap rather than cut
+/// one off or lose what it holds.
 pub(in crate::session_pool) fn evict_lru(
     sessions: &mut HashMap<String, LiveSession>,
+    being_changed: impl Fn(&str) -> bool,
 ) -> Option<(String, LiveSession)> {
     let sid = sessions
         .iter()
-        .filter(|(_, live)| live.evictable())
+        .filter(|(sid, live)| live.evictable() && !being_changed(sid))
         .min_by_key(|(_, live)| live.core.hub.last_active())
         .map(|(k, _)| k.clone())?;
     sessions.remove_entry(&sid)

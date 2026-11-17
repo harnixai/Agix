@@ -285,7 +285,7 @@ impl SessionPool {
         sid: &str,
         change: impl FnOnce(&mut SessionSpec),
     ) -> SessionSpec {
-        let spec = self.specs.update(sid, change).1;
+        let spec = self.specs.update(sid, change).await.1;
         self.project_model_choice(sid).await;
         spec
     }
@@ -325,7 +325,6 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(PoolError::session_not_found(session_id));
         }
-        self.specs.load(session_id).await;
         let change = |spec: &mut SessionSpec| {
             let mut prompt = spec.prompt().unwrap_or_default();
             change(&mut prompt);
@@ -344,7 +343,7 @@ impl SessionPool {
                         return Err(Rebuild::NotLive);
                     }
                     Err(Rebuild::NotLive) => {
-                        let spec = self.specs.update(session_id, change).1;
+                        let spec = self.specs.update(session_id, change).await.1;
                         self.specs.persist(session_id, &spec).await;
                         self.specs.release(session_id);
                         spec
@@ -380,7 +379,6 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(PoolError::session_not_found(session_id));
         }
-        self.specs.load(session_id).await;
         let change = |spec: &mut SessionSpec| spec.skill_dirs = Some(dirs.clone());
         self.live
             .with_session_lock(session_id, async {
@@ -389,7 +387,7 @@ impl SessionPool {
                         let binding = self.binding_for(core.project(), &core.scene().id).await;
                         let accepted = HostDirTable::check(&dirs, &binding.settings)
                             .map_err(PoolError::InvalidOptions)?;
-                        let spec = self.specs.update(session_id, change).1;
+                        let spec = self.specs.update(session_id, change).await.1;
                         self.specs.persist(session_id, &spec).await;
                         self.take_up_skill_dirs(&core, &spec, accepted, Vec::new(), &binding);
                     }
@@ -398,7 +396,7 @@ impl SessionPool {
                         let (binding, _, _) = self.binding_of_log(&log).await;
                         HostDirTable::check(&dirs, &binding.settings)
                             .map_err(PoolError::InvalidOptions)?;
-                        let spec = self.specs.update(session_id, change).1;
+                        let spec = self.specs.update(session_id, change).await.1;
                         self.specs.persist(session_id, &spec).await;
                         self.specs.release(session_id);
                     }
