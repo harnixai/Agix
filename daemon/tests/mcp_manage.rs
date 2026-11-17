@@ -428,6 +428,60 @@ async fn writing_a_server_for_a_pair_that_never_connected_starts_nothing() {
     let _ = handle.await;
 }
 
+/// The writes that reconnect a pair's every server — `config.setProvider`,
+/// a `config.set` touching `sandbox.subprocess_env` — connect nothing for a
+/// pair that never connected: its servers wait for its first session.
+#[tokio::test]
+async fn a_write_that_reconnects_every_server_starts_none_for_a_pair_that_never_connected() {
+    let (server, sock, dir, handle) = start_server().await;
+    let marker = dir.path().join("started.log");
+    let other = dir.path().join("other");
+    std::fs::create_dir_all(other.join(".agix")).unwrap();
+    std::fs::write(
+        other.join(".agix/settings.json"),
+        json!({"mcp_servers": {"probe": {
+            "type": "stdio", "command": "/bin/sh",
+            "args": ["-c", format!("echo started >> '{}'", marker.display())]
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+
+    let provided = call(
+        &sock,
+        "config.setProvider",
+        json!({"project_root": other, "tier": "project", "provider_id": "p",
+               "config": {"api_type": "anthropic", "api_key": "k", "default_model": "m"}}),
+    )
+    .await;
+    assert_eq!(
+        provided["routing"]["mcp_connecting"],
+        json!([]),
+        "{provided}"
+    );
+    let set = call(
+        &sock,
+        "config.set",
+        json!({"tier": "project", "project_root": other,
+               "changes": {"sandbox.subprocess_env.allow": ["LANG"]}}),
+    )
+    .await;
+    assert_eq!(
+        set["changed"],
+        json!(["sandbox.subprocess_env.allow"]),
+        "{set}"
+    );
+    let status = call(&sock, "mcp.status", json!({"project_root": other})).await;
+    assert_eq!(status["loaded"], false, "{status}");
+    assert!(
+        !marker.exists(),
+        "a write for an unconnected pair started its servers"
+    );
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}
+
 #[tokio::test]
 async fn removing_a_server_the_tier_does_not_declare_is_refused_with_the_file() {
     let (server, sock, dir, handle) = start_server().await;

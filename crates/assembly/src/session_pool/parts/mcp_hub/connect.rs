@@ -326,7 +326,10 @@ impl SessionPool {
     /// session's (`finish_mcp_connects`).
     ///
     /// Only replaces the cache entry for `(project_root, scene_id)`;
-    /// every other pair's cached connections are left untouched.
+    /// every other pair's cached connections are left untouched. Without
+    /// `connect_pair`, a pair that never connected is left so: its servers
+    /// start with its first session, as `mcp.status` and the single-server
+    /// writes leave them.
     ///
     /// Returns `(connected, failed, connecting)` server names for
     /// the reload's `RoutingStatus`.
@@ -335,8 +338,12 @@ impl SessionPool {
         project_root: Option<&Path>,
         scene_id: &str,
         settings: &settings::LoadedSettings,
+        connect_pair: bool,
     ) -> (Vec<String>, Vec<String>, Vec<String>) {
         let key = (project_root.map(Path::to_path_buf), scene_id.to_string());
+        if !connect_pair && self.mcp.cache.current(&key).is_none() {
+            return Default::default();
+        }
         let slot = self.mcp.cache.slot(&key);
         let update = slot.update().await;
         let AdmittedMcp {

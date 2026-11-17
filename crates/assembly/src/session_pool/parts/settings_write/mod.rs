@@ -63,8 +63,11 @@ pub(in crate::session_pool) async fn edit_settings_dir<R: Send + 'static>(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::session_pool) enum McpEffect {
     None,
-    /// Every server of the pairs the tier is under connects anew.
-    Full,
+    /// Every server of the pairs the tier is under connects anew; with
+    /// `connect_pair`, the pair written for connects even if it never did.
+    Full {
+        connect_pair: bool,
+    },
     /// Only this server is looked at again, wherever it is connected; with
     /// `connect_pair`, the pair written for connects whole first if it never
     /// did.

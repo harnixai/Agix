@@ -154,7 +154,9 @@ impl SessionPool {
         let (tier, dry_run) = (patch.tier, patch.dry_run);
         let edit = TierEdit {
             dry_run,
-            mcp: McpEffect::Full,
+            mcp: McpEffect::Full {
+                connect_pair: false,
+            },
             ..TierEdit::new(tier, provider_ops(patch))
         };
         let written = self

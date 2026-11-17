@@ -158,6 +158,7 @@ impl SessionPool {
         _project_root: Option<&Path>,
         _scene_id: &str,
         _settings: &settings::LoadedSettings,
+        _connect_pair: bool,
     ) -> (Vec<String>, Vec<String>, Vec<String>) {
         (Vec::new(), Vec::new(), Vec::new())
     }

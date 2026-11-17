@@ -37,7 +37,11 @@ impl SessionPool {
     ) -> api::SettingsReloaded {
         let project_root = project_root.unwrap_or(self.cwd());
         let (reloaded, report) = self
-            .settings_tier_changed(changed, (project_root, scene_id), McpEffect::Full)
+            .settings_tier_changed(
+                changed,
+                (project_root, scene_id),
+                McpEffect::Full { connect_pair: true },
+            )
             .await;
         settings_reloaded(&reloaded.values, report)
     }
@@ -56,14 +60,19 @@ impl SessionPool {
         mcp: McpEffect,
     ) -> (Arc<LoadedSettings>, api::RoutingStatus) {
         let key = (Some(project_root.to_path_buf()), scene_id.to_string());
-        self.tier_changed(changed, Some(&key), mcp == McpEffect::Full)
+        self.tier_changed(changed, Some(&key), matches!(mcp, McpEffect::Full { .. }))
             .await;
         let binding = self.binding_for(Some(project_root), scene_id).await;
         let routing = &binding.routing;
         let (mcp_connected, mcp_failed, mcp_connecting) = match &mcp {
-            McpEffect::Full => {
-                self.reconcile_mcp_servers(Some(project_root), scene_id, &binding.settings)
-                    .await
+            McpEffect::Full { connect_pair } => {
+                self.reconcile_mcp_servers(
+                    Some(project_root),
+                    scene_id,
+                    &binding.settings,
+                    *connect_pair,
+                )
+                .await
             }
             McpEffect::Server { name, connect_pair } => {
                 self.reconcile_written_mcp_server(changed, &key, name, *connect_pair)

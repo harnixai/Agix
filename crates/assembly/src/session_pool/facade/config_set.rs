@@ -36,7 +36,9 @@ impl SessionPool {
             if_revision: change.if_revision,
             dry_run: change.dry_run || refused_already,
             mcp: if touches_connections {
-                McpEffect::Full
+                McpEffect::Full {
+                    connect_pair: false,
+                }
             } else {
                 McpEffect::None
             },
