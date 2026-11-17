@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::interface::credentials::{ConfigCredentials, CredentialSource};
+use crate::interface::credentials::{ConfigCredentials, CredentialSource, Secret};
 use crate::interface::exec::Network;
 use crate::interface::model::Model;
 use crate::provider::ProviderConfig;
@@ -132,7 +132,9 @@ impl ModelFactoryRegistry {
     ///
     /// An absent `api_type` means `anthropic`, matching
     /// [`ApiType`](crate::provider::ApiType)'s serde default and the behavior
-    /// every existing settings file relies on.
+    /// every existing settings file relies on. An empty key from the source
+    /// is no key: the factory is not asked to build a client that would send
+    /// requests with it.
     pub fn build(
         &self,
         provider_id: &str,
@@ -143,7 +145,7 @@ impl ModelFactoryRegistry {
             Some(f) => f.build(
                 provider_id,
                 config,
-                self.credentials.as_ref(),
+                &NonEmpty(self.credentials.as_ref()),
                 self.network.as_ref(),
             ),
             None => Err(format!(
@@ -155,6 +157,18 @@ impl ModelFactoryRegistry {
                     .join(" or ")
             )),
         }
+    }
+}
+
+struct NonEmpty<'a>(&'a dyn CredentialSource);
+
+impl CredentialSource for NonEmpty<'_> {
+    fn api_key(&self, provider_id: &str, config: &ProviderConfig) -> Result<Secret, String> {
+        let key = self.0.api_key(provider_id, config)?;
+        if key.is_empty() {
+            return Err("its API key is empty".to_string());
+        }
+        Ok(key)
     }
 }
 

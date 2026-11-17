@@ -225,6 +225,50 @@ async fn a_host_credential_source_supplies_keys_the_settings_leave_out() {
     assert!(reloaded["routing"]["router_error"].is_null(), "{reloaded}");
 }
 
+/// A host source that answers a provider with an empty key has not supplied
+/// one: the assembly fails as it does with no key anywhere, rather than build
+/// a client that sends the prompts with an empty `x-api-key`.
+#[tokio::test]
+async fn an_empty_key_from_the_host_is_no_key() {
+    use base::interface::credentials::{CredentialSource, Secret, StaticCredentials};
+
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("work");
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"providers": {"vaulted": {"api_type": "anthropic", "default_model": "m"},
+                          "compatible": {"api_type": "openai_compatible",
+                                         "base_url": "http://127.0.0.1:9", "default_model": "m"}},
+            "default_provider": "vaulted"}"#,
+    )
+    .unwrap();
+    for provider in ["vaulted", "compatible"] {
+        let host: Arc<dyn CredentialSource> = Arc::new(StaticCredentials::new([
+            ("vaulted".to_string(), Secret::new("sk-from-the-vault")),
+            ("compatible".to_string(), Secret::new("sk-from-the-vault")),
+            (provider.to_string(), Secret::new("")),
+        ]));
+        let built = daemon::assemble::pool(
+            &config_in(dir.path()),
+            Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+            daemon::Assembly {
+                cwd: Some(cwd.clone()),
+                transcripts: daemon::Transcripts::Nowhere,
+                credentials: Some(host),
+                ..assembly()
+            },
+        )
+        .await;
+        let error = match built {
+            Ok(_) => panic!("{provider}: an empty key must fail the assembly"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(error.contains(&format!("provider '{provider}'")), "{error}");
+        assert!(error.contains("empty"), "{error}");
+    }
+}
+
 /// Session directories under a project root, however deep the sanitized-cwd
 /// naming puts them.
 fn transcripts_under(projects: &Path) -> usize {

@@ -3204,7 +3204,8 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、宿主的 `CredentialSource`。都没有时 daemon 照样启动,
 走它的每一次模型调用(主轮、子 Agent、压缩、记忆提取)都不发请求,这一轮以 `no_credentials`
 (§9.1)结束。`ANTHROPIC_BASE_URL` 指向不需要密钥的网关时也要给一个任意非空值,与 `providers`
-里配的 provider 缺 key 时建不出来一致。
+里配的 provider 缺 key 时建不出来一致。宿主的 `CredentialSource` 答空串等于没给:缺省客户端照上面不发请求,
+`providers` 里的 provider 与缺 key 一样建不出来(启动失败,运行中重建时进 `routing.router_error`)。
 
 ```jsonc
 // setProvider 的 params
