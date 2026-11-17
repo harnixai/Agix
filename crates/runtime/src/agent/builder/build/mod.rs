@@ -41,8 +41,7 @@ impl Builder {
             r.instruction_file.as_ref(),
             exec,
         )?;
-        let cron =
-            self.register_session_tools(&r.tools, &r.settings, &r.model, &r.telemetry_handle);
+        let cron = self.register_session_tools(&r, &state.state);
 
         let events = self.wire_events();
         hooks

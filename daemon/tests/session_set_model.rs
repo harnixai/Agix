@@ -481,3 +481,31 @@ async fn a_sub_agent_runs_on_the_model_its_session_was_switched_to() {
         "the sub-agent asks for the model its session now runs on"
     );
 }
+
+#[cfg(feature = "web")]
+#[tokio::test]
+async fn a_web_search_runs_on_the_model_its_session_was_switched_to() {
+    let daemon = start_daemon(0).await;
+    daemon.model.push_turn(crate::support::tool_round(
+        "WebSearch",
+        "w1",
+        serde_json::json!({"query": "SEARCH-QUERY"}),
+    ));
+    daemon.model.push_turn(one_turn());
+    daemon.model.push_turn(one_turn());
+    let session = daemon.create(serde_json::json!({})).await;
+    daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "model": CHOSEN_MODEL}),
+        )
+        .await;
+
+    daemon.turn(&session, "MSG-SEARCH").await;
+    assert_eq!(daemon.model_asked_for("MSG-SEARCH"), CHOSEN_MODEL);
+    assert_eq!(
+        daemon.model_asked_for("Perform a web search for the query: SEARCH-QUERY"),
+        CHOSEN_MODEL,
+        "the search asks the model its session now runs on"
+    );
+}

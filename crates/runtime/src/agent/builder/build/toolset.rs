@@ -5,33 +5,51 @@ use super::*;
 const STRUCTURED_OUTPUT: &str = "StructuredOutput";
 
 impl Builder {
-    pub(super) fn register_session_tools(
+    /// The model `WebSearch` searches through and the model name it asks for:
+    /// the session's own, asking for the model the conversation asks for at
+    /// the time of the search, unless `task_models.web_search` routes it.
+    fn web_search_model(
         &self,
-        tools: &Arc<InMemoryToolRegistry>,
         settings: &LoadedSettings,
         model: &Arc<dyn Model>,
         telemetry_handle: &TelemetryHandle,
-    ) -> CronWiring {
-        register_task_tools(tools);
-        let agent_depth = self.spec.agent_depth;
-        // WebSearch searches through the session's own model unless
-        // `task_models.web_search` routes it elsewhere.
-        let (search_model, search_model_name) = match self
+        session_state: &Arc<session_state::SessionState>,
+    ) -> (Arc<dyn Model>, Arc<dyn Fn() -> String + Send + Sync>) {
+        let routed = self
             .host
             .task_router
             .as_ref()
-            .and_then(|router| Some((router, router.model_name_for(WEB_SEARCH_TASK)?)))
-        {
-            Some((router, name)) => (
-                Arc::new(telemetry::model::TelemetryModel::new(
-                    router.model_for(WEB_SEARCH_TASK),
-                    telemetry_handle.clone(),
-                    settings.values.model.model_name.clone(),
-                )) as Arc<dyn Model>,
-                name.to_string(),
-            ),
-            None => (model.clone(), settings.values.model.model_name.clone()),
+            .and_then(|router| Some((router, router.model_name_for(WEB_SEARCH_TASK)?)));
+        if let Some((router, name)) = routed {
+            let name = name.to_string();
+            let model = telemetry::model::TelemetryModel::new(
+                router.model_for(WEB_SEARCH_TASK),
+                telemetry_handle.clone(),
+                settings.values.model.model_name.clone(),
+            );
+            return (Arc::new(model), Arc::new(move || name.clone()));
+        }
+        let state = Arc::downgrade(session_state);
+        let configured = settings.values.model.model_name.clone();
+        let asked_for = move || {
+            state
+                .upgrade()
+                .and_then(|state| base::context::Session::model_choice(&*state))
+                .unwrap_or_else(|| configured.clone())
         };
+        (model.clone(), Arc::new(asked_for))
+    }
+
+    pub(super) fn register_session_tools(
+        &self,
+        r: &Resolved,
+        session_state: &Arc<session_state::SessionState>,
+    ) -> CronWiring {
+        let (tools, settings, telemetry_handle) = (&r.tools, &r.settings, &r.telemetry_handle);
+        register_task_tools(tools);
+        let agent_depth = self.spec.agent_depth;
+        let (search_model, search_model_name) =
+            self.web_search_model(settings, &r.model, telemetry_handle, session_state);
         tools::register_web_search(tools, search_model, search_model_name);
 
         // Extraction runs only on a model routed for it: the session's own

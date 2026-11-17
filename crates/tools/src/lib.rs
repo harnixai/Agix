@@ -119,13 +119,13 @@ pub fn register_builtin_tools(reg: &std::sync::Arc<base::tool::InMemoryToolRegis
 pub fn register_web_search(
     reg: &std::sync::Arc<base::tool::InMemoryToolRegistry>,
     model: Arc<dyn base::interface::model::Model>,
-    model_name: String,
+    model_name: Arc<dyn Fn() -> String + Send + Sync>,
 ) {
     #[cfg(not(feature = "web"))]
     let _ = (reg, model, model_name);
     #[cfg(feature = "web")]
     reg.register(Arc::new(crate::web_search::WebSearchTool::new(Box::new(
-        crate::native_search::NativeSearchProvider::new(model, model_name),
+        crate::native_search::NativeSearchProvider::following(model, model_name),
     ))));
 }
 
@@ -278,7 +278,7 @@ mod register_builtin_tools_tests {
             reg.get("WebSearch").is_none(),
             "register_builtin_tools must stay model-free; WebSearch comes from register_web_search"
         );
-        register_web_search(&reg, Arc::new(NoSearch), "m".into());
+        register_web_search(&reg, Arc::new(NoSearch), Arc::new(|| "m".to_string()));
         let t = reg.get("WebSearch").expect("WebSearch registered");
         assert!(t.call_traits(&serde_json::Value::Null).read_only);
     }
@@ -288,7 +288,7 @@ mod register_builtin_tools_tests {
     #[tokio::test]
     async fn registered_web_search_is_invocable() {
         let reg = Arc::new(base::tool::InMemoryToolRegistry::new());
-        register_web_search(&reg, Arc::new(NoSearch), "m".into());
+        register_web_search(&reg, Arc::new(NoSearch), Arc::new(|| "m".to_string()));
         let t = reg.get("WebSearch").unwrap();
 
         let bad = t

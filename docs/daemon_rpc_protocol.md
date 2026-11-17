@@ -1932,6 +1932,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 压缩等其他路由任务的 client 仍按设置走;这个会话此后派生的子 Agent,`Agent` 调用与 agent
 类型都没指定模型、设置里也没有 `task_models.subagent`、会话本身也在 `default_provider` 上时,
 用这里换上的模型,与会话本身一致;会话在别的 provider 上时它们带设置的 `model.model_name`。
+`WebSearch` 没有 `task_models.web_search` 时经会话自己的 client 搜索,同样带这里换上的模型。
 
 `effort` / `thinking_mode` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
 这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。

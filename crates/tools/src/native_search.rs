@@ -22,25 +22,31 @@ use tokio_util::sync::CancellationToken;
 /// The most searches one `WebSearch` call lets the provider make.
 const MAX_SEARCHES: usize = 8;
 
+/// The model name a search asks for, read at each search: the session's own
+/// follows the model the session was switched to since.
+pub type ModelName = Arc<dyn Fn() -> String + Send + Sync>;
+
 pub struct NativeSearchProvider {
     model: Arc<dyn Model>,
-    model_name: String,
+    model_name: ModelName,
 }
 
 impl std::fmt::Debug for NativeSearchProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeSearchProvider")
-            .field("model_name", &self.model_name)
+            .field("model_name", &(self.model_name)())
             .finish_non_exhaustive()
     }
 }
 
 impl NativeSearchProvider {
     pub fn new(model: Arc<dyn Model>, model_name: impl Into<String>) -> Self {
-        Self {
-            model,
-            model_name: model_name.into(),
-        }
+        let name = model_name.into();
+        Self::following(model, Arc::new(move || name.clone()))
+    }
+
+    pub fn following(model: Arc<dyn Model>, model_name: ModelName) -> Self {
+        Self { model, model_name }
     }
 }
 
@@ -53,7 +59,7 @@ impl SearchProvider for NativeSearchProvider {
         session_id: &str,
     ) -> Result<SearchOutput, SearchError> {
         let params = StreamParams {
-            model: self.model_name.clone(),
+            model: (self.model_name)(),
             max_tokens: 8192,
             thinking_mode: ThinkingMode::Off,
             effort: None,
