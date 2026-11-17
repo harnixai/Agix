@@ -40,7 +40,8 @@ pub use host_connections::{
 };
 pub use mcp::{
     McpAuthDone, McpAuthStarted, McpAuthState, McpAuthStatus, McpIdentity, McpReconnected,
-    McpRedirect, McpServerRef, McpServerState, McpServerStatus, McpServerWritten,
+    McpRedirect, McpServerReconnected, McpServerRef, McpServerState, McpServerStatus,
+    McpServerWritten, McpStatusList,
 };
 pub use options::{
     ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption, TelemetryOptions,

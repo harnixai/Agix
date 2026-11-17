@@ -156,13 +156,17 @@ impl DaemonServer {
             client,
             method: info.name,
         };
-        let reply = route(self, &cx, req.params).await.unwrap_or_else(|| {
-            Err(RpcError {
-                code: codes::METHOD_NOT_FOUND,
-                message: format!("unknown: {}", cx.method),
-                data: None,
-            })
-        });
+        // Boxed so the future of a request does not nest every handler's: inlined, a
+        // caller's async block awaiting `dispatch_public` overflows rustc's layout depth limit.
+        let reply = Box::pin(route(self, &cx, req.params))
+            .await
+            .unwrap_or_else(|| {
+                Err(RpcError {
+                    code: codes::METHOD_NOT_FOUND,
+                    message: format!("unknown: {}", cx.method),
+                    data: None,
+                })
+            });
         match reply {
             Ok(result) => RpcResponse::ok(cx.id, result),
             Err(error) => RpcResponse {

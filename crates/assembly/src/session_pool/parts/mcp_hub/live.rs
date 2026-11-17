@@ -8,6 +8,7 @@
 mod auth;
 mod cache;
 mod connect;
+mod manage;
 mod status;
 #[cfg(test)]
 mod tests;
@@ -166,13 +167,24 @@ impl McpHub {
 /// `refused` names every entry not connected (invalid or denied), `denied`
 /// those that parse (the policy refuses them, or a project may not declare
 /// them as written), `invalid` those that do not; the last two are kept for
-/// `mcp.status`.
+/// `mcp.status`. `disabled` are those `mcp_enabled` turns off, refused by
+/// nobody.
 #[derive(Default)]
 pub(in crate::session_pool) struct AdmittedMcp {
     pub(in crate::session_pool) servers: HashMap<String, mcp::config::McpServerConfig>,
     pub(in crate::session_pool) denied: Vec<mcp::manager::DeniedServer>,
     pub(in crate::session_pool) invalid: Vec<mcp::manager::FailedServer>,
     pub(in crate::session_pool) refused: Vec<String>,
+    pub(in crate::session_pool) disabled: Vec<String>,
+}
+
+/// What admitting one configured server comes to.
+pub(in crate::session_pool) enum Admission {
+    /// Placed and labelled, ready to connect.
+    Admitted(Box<mcp::config::McpServerConfig>),
+    Disabled,
+    Invalid(mcp::manager::FailedServer),
+    Denied(mcp::manager::DeniedServer),
 }
 
 /// The `mcp_servers` keys the project tier's own files (`settings.json`,

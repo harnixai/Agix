@@ -65,12 +65,21 @@ pub(in crate::session_pool) enum McpEffect {
     None,
     /// Every server of the pairs the tier is under connects anew.
     Full,
+    /// Only this server is looked at again, wherever it is connected; with
+    /// `connect_pair`, the pair written for connects whole first if it never
+    /// did.
+    // Only the MCP management methods make one, and a build without `mcp` has none.
+    #[allow(dead_code)]
+    Server {
+        name: String,
+        connect_pair: bool,
+    },
 }
 
 /// A check of the tier's two files as read under the lock, before anything
-/// is applied to them.
+/// is applied to them; told where its `settings.json` is.
 pub(in crate::session_pool) type Precondition =
-    Box<dyn FnOnce(&TierFiles) -> Result<(), String> + Send>;
+    Box<dyn FnOnce(&TierFiles, &Path) -> Result<(), String> + Send>;
 
 /// One write to one settings tier of a pair.
 pub(in crate::session_pool) struct TierEdit {
@@ -196,7 +205,7 @@ pub(in crate::session_pool) fn edit_tier(
     }
     let mut files = TierFiles { shared, local };
     if let Some(check) = precondition {
-        check(&files).map_err(EditFailure::Failed)?;
+        check(&files, &paths.shared).map_err(EditFailure::Failed)?;
     }
     let shared_before = files.shared.clone();
     let local_changed = settings::edit::apply(&mut files, ops);

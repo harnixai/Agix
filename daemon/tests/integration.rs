@@ -29,6 +29,7 @@ mod managed_settings;
 mod max_tokens_fallback;
 mod max_tokens_recovery;
 mod mcp_config;
+mod mcp_manage;
 mod mcp_oauth;
 mod mcp_policy;
 mod model_rate_limit;

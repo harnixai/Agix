@@ -65,6 +65,10 @@ impl SessionPool {
                 self.reconcile_mcp_servers(Some(project_root), scene_id, &binding.settings)
                     .await
             }
+            McpEffect::Server { name, connect_pair } => {
+                self.reconcile_written_mcp_server(changed, &key, name, *connect_pair)
+                    .await
+            }
             McpEffect::None => Default::default(),
         };
         let status = api::RoutingStatus {

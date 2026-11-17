@@ -3962,11 +3962,41 @@
             "string",
             "null"
           ]
+        },
+        "tier": {
+          "$ref": "#/$defs/SettingsTier",
+          "default": "project"
         }
       },
       "required": [
         "name",
         "config"
+      ],
+      "type": "object"
+    },
+    "McpReconnectParams": {
+      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -3990,6 +4020,48 @@
         "external"
       ],
       "type": "string"
+    },
+    "McpRemoveServerParams": {
+      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/$defs/SettingsTier",
+          "default": "project"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "McpServerReconnected": {
+      "description": "The one server `mcp.reconnect` connected again.",
+      "properties": {
+        "server": {
+          "$ref": "#/$defs/McpServerStatus"
+        }
+      },
+      "required": [
+        "server"
+      ],
+      "type": "object"
     },
     "McpServerRef": {
       "description": "A sign-in flow that was cancelled, or a server that was signed out of.",
@@ -4031,6 +4103,16 @@
         {
           "const": "untrusted",
           "description": "A server the project declares, in a project that is not trusted.",
+          "type": "string"
+        },
+        {
+          "const": "disabled",
+          "description": "Turned off by `mcp_enabled` (`mcp.setEnabled`).",
+          "type": "string"
+        },
+        {
+          "const": "not_started",
+          "description": "Configured for a project and scene whose servers have not been\nconnected yet; they connect with its first session.",
           "type": "string"
         }
       ]
@@ -4078,7 +4160,7 @@
       "type": "object"
     },
     "McpServerWritten": {
-      "description": "What `mcp.addServer` / `mcp.updateServer` wrote and what is connected now.",
+      "description": "What `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` /\n`mcp.setEnabled` wrote and what is connected now.",
       "properties": {
         "secrets_written_to": {
           "description": "Set when `headers` or `env` went to the `settings.local.json` beside\n`written_to`.",
@@ -4103,6 +4185,40 @@
       ],
       "type": "object"
     },
+    "McpSetEnabledParams": {
+      "description": "The `(scene, project_root)` pair a configuration method acts on. Omitted\nmeans this daemon's own; a named `project_root` reaches another project\nthe daemon serves. `null` is refused: these methods act on the *project*\ntier, and a session with no project has none.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tier": {
+          "$ref": "#/$defs/SettingsTier",
+          "default": "project"
+        }
+      },
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "type": "object"
+    },
     "McpSetIdentityParams": {
       "description": "Exactly one of the two.",
       "properties": {
@@ -4124,7 +4240,12 @@
       "type": "object"
     },
     "McpStatusList": {
+      "description": "The MCP servers of one project and scene, as `mcp.status` reports them.",
       "properties": {
+        "loaded": {
+          "description": "The pair's servers have been connected; `false` lists what its settings\nconfigure, and nothing was started to find out.",
+          "type": "boolean"
+        },
         "servers": {
           "items": {
             "$ref": "#/$defs/McpServerStatus"
@@ -4133,6 +4254,7 @@
         }
       },
       "required": [
+        "loaded",
         "servers"
       ],
       "type": "object"
@@ -9059,14 +9181,37 @@
         "$ref": "#/$defs/McpAuthStarted"
       }
     },
+    "mcp.reconnect": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpReconnectParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpServerReconnected"
+      }
+    },
+    "mcp.removeServer": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpRemoveServerParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpServerWritten"
+      }
+    },
+    "mcp.setEnabled": {
+      "module": "mcp",
+      "params": {
+        "$ref": "#/$defs/McpSetEnabledParams"
+      },
+      "result": {
+        "$ref": "#/$defs/McpServerWritten"
+      }
+    },
     "mcp.status": {
       "module": "mcp",
       "params": {
-        "description": "no params; anything sent is ignored",
-        "type": [
-          "object",
-          "null"
-        ]
+        "$ref": "#/$defs/ConfigTarget"
       },
       "result": {
         "$ref": "#/$defs/McpStatusList"

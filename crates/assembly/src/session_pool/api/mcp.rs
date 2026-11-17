@@ -21,6 +21,11 @@ pub enum McpServerState {
     Denied,
     /// A server the project declares, in a project that is not trusted.
     Untrusted,
+    /// Turned off by `mcp_enabled` (`mcp.setEnabled`).
+    Disabled,
+    /// Configured for a project and scene whose servers have not been
+    /// connected yet; they connect with its first session.
+    NotStarted,
 }
 
 #[derive(
@@ -67,7 +72,23 @@ pub struct McpServerStatus {
     pub auth: McpAuthStatus,
 }
 
-/// What `mcp.addServer` / `mcp.updateServer` wrote and what is connected now.
+/// The MCP servers of one project and scene, as `mcp.status` reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct McpStatusList {
+    /// The pair's servers have been connected; `false` lists what its settings
+    /// configure, and nothing was started to find out.
+    pub loaded: bool,
+    pub servers: Vec<McpServerStatus>,
+}
+
+/// The one server `mcp.reconnect` connected again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct McpServerReconnected {
+    pub server: McpServerStatus,
+}
+
+/// What `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` /
+/// `mcp.setEnabled` wrote and what is connected now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpServerWritten {
     pub written_to: String,

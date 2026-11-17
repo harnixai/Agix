@@ -506,6 +506,16 @@ impl McpManager {
         }
     }
 
+    /// Take `name` out of this manager altogether: its connection, tools and
+    /// whatever state it was in, connected or not.
+    pub fn remove_server(&mut self, name: &str) {
+        self.forget(name);
+        self.configs.remove(name);
+        self.connecting.retain(|c| c.name != name);
+        self.denied.retain(|d| d.name != name);
+        self.invalid.retain(|f| f.name != name);
+    }
+
     /// Disconnect `name` until someone signs in to it again.
     pub fn demote(&mut self, name: &str) {
         let transport = self

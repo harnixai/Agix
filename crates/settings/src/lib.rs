@@ -181,6 +181,13 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub mcp_servers: HashMap<String, serde_json::Value>,
 
+    /// MCP servers turned off or back on by name, whichever tier or plugin
+    /// declares them; a server not named here is on. Tiers merge by name, so
+    /// a higher tier turns back on what a lower one turned off — except a
+    /// project that is not trusted, which may only turn servers off.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mcp_enabled: HashMap<String, bool>,
+
     /// Multi-provider LLM registry, keyed by provider id.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub providers: HashMap<String, ProviderConfig>,
@@ -719,6 +726,7 @@ impl Settings {
             project_trust: Default::default(),
             network: Default::default(),
             mcp_servers: HashMap::new(),
+            mcp_enabled: HashMap::new(),
             providers: HashMap::new(),
             default_provider: None,
             task_models: HashMap::new(),

@@ -45,8 +45,12 @@ fn not_compiled() -> PoolError {
 }
 
 impl SessionPool {
-    pub async fn mcp_status(&self) -> Vec<api::McpServerStatus> {
-        Vec::new()
+    pub async fn mcp_status(
+        &self,
+        _project_root: Option<&Path>,
+        _scene_id: &str,
+    ) -> Result<api::McpStatusList, PoolError> {
+        Err(not_compiled())
     }
 
     pub fn connect_mcp_servers_in_background(self: &Arc<Self>) {}
@@ -55,6 +59,7 @@ impl SessionPool {
         &self,
         _project_root: Option<&Path>,
         _scene_id: &str,
+        _tier: api::SettingsTier,
         _name: &str,
         _config: serde_json::Value,
     ) -> Result<api::McpServerWritten, PoolError> {
@@ -65,9 +70,40 @@ impl SessionPool {
         &self,
         _project_root: Option<&Path>,
         _scene_id: &str,
+        _tier: api::SettingsTier,
         _name: &str,
         _config: serde_json::Value,
     ) -> Result<api::McpServerWritten, PoolError> {
+        Err(not_compiled())
+    }
+
+    pub async fn remove_mcp_server(
+        &self,
+        _project_root: Option<&Path>,
+        _scene_id: &str,
+        _tier: api::SettingsTier,
+        _name: &str,
+    ) -> Result<api::McpServerWritten, PoolError> {
+        Err(not_compiled())
+    }
+
+    pub async fn set_mcp_enabled(
+        &self,
+        _project_root: Option<&Path>,
+        _scene_id: &str,
+        _tier: api::SettingsTier,
+        _name: &str,
+        _enabled: bool,
+    ) -> Result<api::McpServerWritten, PoolError> {
+        Err(not_compiled())
+    }
+
+    pub async fn mcp_reconnect(
+        &self,
+        _project_root: Option<&Path>,
+        _scene_id: &str,
+        _name: &str,
+    ) -> Result<api::McpServerReconnected, PoolError> {
         Err(not_compiled())
     }
 
@@ -122,6 +158,16 @@ impl SessionPool {
         _project_root: Option<&Path>,
         _scene_id: &str,
         _settings: &settings::LoadedSettings,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
+        (Vec::new(), Vec::new(), Vec::new())
+    }
+
+    pub(in crate::session_pool) async fn reconcile_written_mcp_server(
+        &self,
+        _changed: Option<&crate::watch_hub::Tier>,
+        _key: &ProjectSceneKey,
+        _name: &str,
+        _connect_pair: bool,
     ) -> (Vec<String>, Vec<String>, Vec<String>) {
         (Vec::new(), Vec::new(), Vec::new())
     }

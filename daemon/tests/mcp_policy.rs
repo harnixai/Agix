@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use daemon::config::{load_daemon_config, DaemonConfig, StaticDaemonPaths};
 use daemon::session_pool::api::PoolError;
+use daemon::session_pool::api::SettingsTier::Project;
 use daemon::session_pool::ProjectSelector;
 use daemon::SessionPool;
 use mcp::policy::McpPolicy;
@@ -174,8 +175,10 @@ async fn denied_in_status(pool: &SessionPool) -> Vec<(String, String)> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let denied: Vec<(String, String)> = pool
-            .mcp_status()
+            .mcp_status(None, pool.scene_id())
             .await
+            .unwrap()
+            .servers
             .iter()
             .filter(|s| s.state == daemon::session_pool::api::McpServerState::Denied)
             .map(|s| (s.name.clone(), s.error.clone().unwrap()))
@@ -321,7 +324,7 @@ async fn add_server_refuses_a_denied_server_before_writing_settings() {
 
     for name in ["blocked", "stray"] {
         let refused = pool
-            .add_mcp_server(None, "code", name, d.server(name))
+            .add_mcp_server(None, "code", Project, name, d.server(name))
             .await
             .unwrap_err();
         let PoolError::McpServerDenied(message) = refused else {
@@ -335,7 +338,7 @@ async fn add_server_refuses_a_denied_server_before_writing_settings() {
     );
     assert!(d.spawned().is_empty(), "started: {:?}", d.spawned());
 
-    pool.add_mcp_server(None, "code", "kept", d.server("kept"))
+    pool.add_mcp_server(None, "code", Project, "kept", d.server("kept"))
         .await
         .unwrap();
     assert_eq!(d.spawned(), ["kept"]);
@@ -344,7 +347,7 @@ async fn add_server_refuses_a_denied_server_before_writing_settings() {
     assert!(written["mcp_servers"]["kept"].is_object(), "{written}");
 
     let refused = pool
-        .update_mcp_server(None, "code", "blocked", d.server("blocked"))
+        .update_mcp_server(None, "code", Project, "blocked", d.server("blocked"))
         .await
         .unwrap_err();
     assert!(
@@ -372,7 +375,7 @@ async fn an_unparseable_policy_file_denies_every_server_and_doctor_says_so() {
     );
 
     let refused = pool
-        .add_mcp_server(None, "code", "kept", d.server("kept"))
+        .add_mcp_server(None, "code", Project, "kept", d.server("kept"))
         .await
         .unwrap_err();
     assert!(
@@ -542,7 +545,7 @@ async fn an_added_servers_env_is_kept_locally_and_still_expands_after_a_reload()
     let pool = d.start(None).await;
     let mut server = d.logging("local", r#"echo "local:[${OWN}]""#);
     server["env"] = serde_json::json!({"OWN": "mine"});
-    pool.add_mcp_server(None, "code", "local", server)
+    pool.add_mcp_server(None, "code", Project, "local", server)
         .await
         .unwrap();
     assert_eq!(wait_for_line(&d, "local:").await, "local:[mine]");
@@ -569,6 +572,7 @@ async fn a_server_added_over_rpc_is_the_projects_own() {
     pool.add_mcp_server(
         None,
         "code",
+        Project,
         "added",
         d.logging("added", r#"echo "added:[$AGIX_E2E_ADDED_SECRET]""#),
     )
@@ -580,6 +584,7 @@ async fn a_server_added_over_rpc_is_the_projects_own() {
         .add_mcp_server(
             None,
             "code",
+            Project,
             "remote",
             serde_json::json!({
                 "type": "streamable_http",
@@ -611,7 +616,7 @@ async fn a_projects_own_server_may_not_sign_with_a_local_key_or_spend_the_enterp
         ("ema", enterprise.clone(), "enterprise"),
     ] {
         let refused = pool
-            .add_mcp_server(None, "code", name, cfg)
+            .add_mcp_server(None, "code", Project, name, cfg)
             .await
             .unwrap_err();
         let PoolError::InvalidRequest(message) = refused else {
@@ -646,8 +651,10 @@ async fn two_servers_whose_tools_would_share_a_name_are_neither_started() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let failed = loop {
         let failed: std::collections::BTreeMap<String, String> = pool
-            .mcp_status()
+            .mcp_status(None, pool.scene_id())
             .await
+            .unwrap()
+            .servers
             .iter()
             .filter(|s| s.state == daemon::session_pool::api::McpServerState::Failed)
             .map(|s| (s.name.clone(), s.error.clone().unwrap()))

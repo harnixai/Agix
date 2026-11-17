@@ -1000,6 +1000,54 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
     assert_documented("config.setProvider", &documented, &written);
 }
 
+/// The MCP management methods against a daemon whose global tier declares
+/// servers that never connect: only the shape of each result is claimed.
+#[tokio::test]
+async fn documented_mcp_management_results_are_real() {
+    if !compiled_in("mcp") {
+        return;
+    }
+    let doc = protocol_doc();
+    let daemon = start_daemon().await;
+    let add = |name: &str| {
+        serde_json::json!({"name": name, "tier": "global",
+                           "config": {"type": "stdio", "command": "definitely-not-a-real-binary-xyz"}})
+    };
+    daemon.call("mcp.addServer", add("fs")).await;
+    daemon.call("mcp.addServer", add("github")).await;
+
+    let enabled = daemon
+        .call(
+            "mcp.setEnabled",
+            serde_json::json!({"name": "github", "tier": "global", "enabled": false}),
+        )
+        .await;
+    assert_documented(
+        "mcp.setEnabled",
+        &shape_of(documented_result(&doc, "mcp.setEnabled")),
+        &enabled,
+    );
+    let reconnected = daemon
+        .call("mcp.reconnect", serde_json::json!({"name": "fs"}))
+        .await;
+    assert_documented(
+        "mcp.reconnect",
+        &shape_of(documented_result(&doc, "mcp.reconnect")),
+        &reconnected,
+    );
+    let removed = daemon
+        .call(
+            "mcp.removeServer",
+            serde_json::json!({"name": "fs", "tier": "global"}),
+        )
+        .await;
+    assert_documented(
+        "mcp.removeServer",
+        &shape_of(documented_result(&doc, "mcp.removeServer")),
+        &removed,
+    );
+}
+
 /// Its own daemon: the example switches to a provider named `anthropic`, which
 /// has to be configured, and no turn may run after the switch — the endpoint
 /// is not there.

@@ -989,6 +989,13 @@
         "null"
       ]
     },
+    "mcp_enabled": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "MCP servers turned off or back on by name, whichever tier or plugin\ndeclares them; a server not named here is on. Tiers merge by name, so\na higher tier turns back on what a lower one turned off — except a\nproject that is not trusted, which may only turn servers off.",
+      "type": "object"
+    },
     "mcp_servers": {
       "additionalProperties": true,
       "description": "MCP server configurations, keyed by server name (merged from\nglobal/scene/project layers). `$VAR` / `${VAR}` / `${VAR:-default}`\nare expanded in a server's `command`, `args`, `env`, `url` and\n`headers` when it connects — the only place in settings that expands\nanything. Every variable of the daemon's environment read there, and\nevery `*_env` of a server's `oauth` block, counts as that server's\nsecret: no other child process inherits it (`sandbox.subprocess_env`).\nKept untyped (`serde_json::Value`\nrather than `mcp::config::McpServerConfig`) — `core` cannot depend on\n`mcp` (which already depends on `core`, for `base::paths::ConfigPaths`)\nwithout a circular dependency; downstream consumers deserialize each\nvalue into `McpServerConfig` themselves.",

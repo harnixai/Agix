@@ -543,6 +543,17 @@ async fn arrange(h: &Harness, method: &str, session_id: &str) {
             )
             .await;
         }
+        "mcp.removeServer" | "mcp.setEnabled" | "mcp.reconnect" => {
+            for name in ["fs", "github"] {
+                ok(
+                    &h.sock,
+                    "mcp.addServer",
+                    json!({"name": name, "tier": "global",
+                           "config": {"type": "stdio", "command": "definitely-not-a-real-binary-xyz"}}),
+                )
+                .await;
+            }
+        }
         "import.run" => std::fs::write(h.project.join("CLAUDE.md"), "# notes\n").unwrap(),
         "session.rewind" => {
             for turn in ["t1", "t2"] {

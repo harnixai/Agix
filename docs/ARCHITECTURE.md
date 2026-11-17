@@ -391,7 +391,7 @@ serde 的 `Option<Option<T>>` 免费区分前两者,但 `null` 与字符串的�
 | 引擎读进提示词的文件(`PromptFiles`)限定的根 | 项目根 | 没有(只读用户层的东西,仍过凭据名单) |
 | `permit_always` 的 `local` | 写进 `<项目>/.agix/settings.local.json` | 同 `session`:只在本会话生效,不写盘 |
 
-`config.*` / `project.*` / `mcp.addServer` / `mcp.updateServer` / `import.*` 这几个**作用在项目层**的方法用的是另一套
+`config.*` / `project.*` / `mcp.*`(登录的 `complete` / `cancel` / `setIdentity` 除外)/ `import.*` 这几个**作用在一对 (项目, 场景)** 的方法用的是另一套
 两态:省略 = 这个 daemon 自己的项目,给路径 = 它服务的另一个项目,**`null` 拒绝** ——
 无项目会话没有项目层可写。
 
@@ -1919,10 +1919,11 @@ HTTP;规则里写的 `ws://` / `wss://` 同样换过来):`https://*.corp.example
 **裁决**:命中任一条 `denied_servers` 就拒;否则有 `allowed_servers` 时必须命中其中一条;
 都没写就放行。deny 永远优先,和 §6.1 一样。
 
-**作用在哪里**:会话池连 MCP 的四个入口都先过同一道 `SessionPool::admit_mcp`——启动时的
+**作用在哪里**:会话池连 MCP 的每个入口都先过同一道 `SessionPool::admit_mcp`——启动时的
 连接、`config.reload`(以及设置文件变化触发的重载)后的重连、另一个项目第一次起会话时的
-连接、`mcp.addServer` / `mcp.updateServer`。插件声明的 server 在这四处都和 `mcp_servers`
-合在一起、一视同仁。被拒的 server **不起进程、不发请求**;启动与重连时发一条
+连接、`mcp.addServer` / `updateServer` / `removeServer` / `setEnabled` / `reconnect` 之后对单个 server
+的对账(`reconcile_mcp_server`)。插件声明的 server 在这些地方都和 `mcp_servers` 合在一起、一视同仁;
+`mcp_enabled` 关掉的在准入之前就略过,不连接、不发通知。被拒的 server **不起进程、不发请求**;启动与重连时发一条
 `mcp_connect_failed`(`error` 写明是哪份策略、哪条规则),在 `mcp.status` 里以
 `"state": "denied"` 列出;`mcp.addServer` / `mcp.updateServer` 在写 settings.json **之前**
 就以 `MCP_SERVER_DENIED` 拒绝。见 `daemon_rpc_protocol.md` §6.5、§8、§9。
@@ -1931,7 +1932,7 @@ HTTP;规则里写的 `ws://` / `wss://` 同样换过来):`https://*.corp.example
 宿主的代码,不是用户能改指向的配置;要管,宿主自己管。
 
 **项目层的 `$VAR` 只从 server 自己的 `env` 块取。** 项目 `.agix/settings.json`(以及
-`settings.local.json`)里声明或改写过的 server——`mcp.addServer` / `mcp.updateServer` 写的
+`settings.local.json`)里声明或改写过的 server——`mcp.addServer` / `mcp.updateServer` 以 `tier:"project"`(缺省)写的
 就是这一层,其中 `headers` 与 `env` 落在 `settings.local.json`——`command` / `args` / `url` / `headers` 里的 `$VAR` 只用它自己 `env` 块里的值
 展开,`env` 块的值本身不展开,一律不读 daemon 的进程环境;它的 `oauth` 也不能用
 `client_secret_env` / `private_key_jwt.key_env`(读的是 daemon 的环境)、
@@ -2026,6 +2027,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `permission_rules` | `deny` / `ask` 照常,`allow` 丢弃(含 `settings.local.json` 里"永久允许,本项目"记下的) |
 | `hooks_config`、`scripts` | 整段忽略;`.agix/hooks/` 也不放进 hook 命令的 `PATH`,继承的 `PATH` 里的相对条目去掉,用户层 hook 写的裸脚本名不会落到项目里的同名文件;用户层 command hook 以相对路径起的程序(`./scripts/check.sh`)、或命令里哪个相对路径的词正是项目里的文件或目录(`python3 scripts/check.py`、`node .`、`bash x.sh`、`< x.sh`)的,不跑,算 hook 失败——工作目录仍是项目,那个路径指的是仓库里的文件(`hooks.md`) |
 | `mcp_servers` | 不启动;`mcp.status` 里是 `"state": "untrusted"`;`mcp.addServer` / `mcp.updateServer` 以 `PROJECT_UNTRUSTED` 拒绝,什么都不写 |
+| `mcp_enabled` | 只能关(`false`),打开下面几层关掉的(`true`)丢弃;`mcp.setEnabled` 在未信任项目里打开以 `PROJECT_UNTRUSTED` 拒绝 |
 | `allow_client_permission_override: true`、`disable_skill_shell_execution: false` | 丢弃 |
 | `sandbox`:`dangerously_disable_sandbox` / `read_anywhere` 设为真,`require_enforcement` / `unattended_requires_network_policy` / `reap_process_groups` 设为假,`network_mode` 更松 | 丢弃 |
 | `sandbox`:`additional_directories` / `read_directories` / `allow_read` / `allow_write` / `allowed_domains`,`cache_directories` 的某一组,`subprocess_env.allow` | 只要多出下面几层没有的条目就整项丢弃;只删不加的保留 |
@@ -2091,9 +2093,9 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 `project.trust` 把项目根加进或移出全局 `settings.local.json` 的 `trusted`,之后这个项目的
 绑定与 MCP 连接重建,发 `project_trust_changed` 通知。`project.trust` 只收绝对路径,记下的是
 解析之后的真实目录,其中的 glob 元字符(`*`、`?`、`[` 等)转义掉——`Project [v2]` 这一条只
-命中它自己。往未信任项目的项目层里写配置的方法(`mcp.addServer` / `mcp.updateServer`、
-`config.setProvider`)以 `PROJECT_UNTRUSTED` 拒绝,什么都不写:写进去也不会生效;
-`config.setProvider` 的 `tier:"global"` 写全局层,不看项目信任。
+命中它自己。往未信任项目的项目层里写配置的方法(`tier:"project"` 的 `mcp.addServer` / `mcp.updateServer`、
+`config.setProvider`)以 `PROJECT_UNTRUSTED` 拒绝,什么都不写:写进去也不会生效;`config.set` 与
+`mcp.setEnabled` 逐键判,只拒会被扣下的键。它们的 `tier:"global"` / `"scene"` 写用户自己的层,不看项目信任。
 `session.create` / `session.resume` 的结果带 `project_trust` 与 `trust_source`(`default`:由
 `default` 决定;`user`:全局 `settings.json` 里的条目;`host`:全局 `settings.local.json` 里的条目,
 `project.trust` 写在这里),`project.status` 也带 `trust_source`,宿主不必另查。

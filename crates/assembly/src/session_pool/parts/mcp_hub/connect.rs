@@ -1,5 +1,5 @@
 //! MCP 连接：准入、后台首连与迟到的连接、按 `(project, scene)` 共享的 manager、会话
-//! 拿到的那一份、配置变化后的对账，以及 `mcp.addServer` / `mcp.updateServer`。
+//! 拿到的那一份，以及配置变化后整对的对账。
 
 use super::*;
 use crate::session_pool::parts::bindings::tier_covers;
@@ -134,65 +134,35 @@ impl SessionPool {
     }
 
     /// Parse the servers `settings` configure and pass each through
-    /// `admit_mcp`, a project's own after `confined_to_own_env`. Every entry
-    /// that will not be connected gets a `mcp_connect_failed` event here.
+    /// `admit_mcp`, a project's own after `confined_to_own_env`; one turned
+    /// off (`mcp_enabled`) is left out without a word. Every other entry that
+    /// will not be connected gets a `mcp_connect_failed` event here.
     pub(in crate::session_pool) fn admit_mcp_servers(
         &self,
         settings: &settings::LoadedSettings,
     ) -> AdmittedMcp {
-        let plugin_servers = self.plugins.mcp_servers();
-        let projects_own: std::collections::HashSet<String> = project_tier_mcp_servers(settings)
-            .into_iter()
-            .filter(|name| !plugin_servers.contains_key(name))
-            .collect();
         let mut admitted = AdmittedMcp::default();
         self.refuse_clashing_plugin_servers(&mut admitted);
+        let judge = McpJudge::of(self, settings);
         for (name, v) in &self.configured_mcp_servers(&settings.values) {
-            let refusal = match serde_json::from_value::<mcp::config::McpServerConfig>(v.clone()) {
-                Err(e) => {
-                    tracing::warn!(server = %name, error = %e, "invalid mcp_servers config, skipping");
-                    let error = format!("invalid config: {e}");
-                    admitted.invalid.push(mcp::manager::FailedServer {
-                        name: name.clone(),
-                        transport: "unknown",
-                        error: error.clone(),
-                    });
+            let refusal = match judge.admit(self, settings, name, v) {
+                Admission::Admitted(cfg) => {
+                    admitted.servers.insert(name.clone(), *cfg);
+                    continue;
+                }
+                Admission::Disabled => {
+                    admitted.disabled.push(name.clone());
+                    continue;
+                }
+                Admission::Invalid(failed) => {
+                    let error = failed.error.clone();
+                    admitted.invalid.push(failed);
                     error
                 }
-                Ok(cfg) => {
-                    let admitted_cfg = if projects_own.contains(name) {
-                        cfg.confined_to_own_env().inspect_err(|reason| {
-                            tracing::warn!(server = %name, %reason, "MCP server not connected");
-                        })
-                    } else {
-                        Ok(cfg.clone())
-                    }
-                    .and_then(|confined| self.admit_mcp(name, &confined).map(|()| confined));
-                    match admitted_cfg {
-                        Ok(confined) => {
-                            let tier = if plugin_servers.contains_key(name) {
-                                "plugin"
-                            } else if projects_own.contains(name) {
-                                "project"
-                            } else {
-                                "global"
-                            };
-                            admitted.servers.insert(
-                                name.clone(),
-                                self.placed_mcp_server(settings, name, confined)
-                                    .declared_in(tier),
-                            );
-                            continue;
-                        }
-                        Err(reason) => {
-                            admitted.denied.push(mcp::manager::DeniedServer {
-                                name: name.clone(),
-                                transport: cfg.transport_kind(),
-                                reason: reason.clone(),
-                            });
-                            reason
-                        }
-                    }
+                Admission::Denied(denied) => {
+                    let reason = denied.reason.clone();
+                    admitted.denied.push(denied);
+                    reason
                 }
             };
             self.emit_event(api::DaemonEvent::McpConnectFailed {
@@ -204,21 +174,16 @@ impl SessionPool {
         admitted
     }
 
-    /// Current MCP connection status for this pool's *default* project —
-    /// see `mcp::manager::McpManager::server_statuses`. A pure cache read:
-    /// unlike `mcp_for_project`, this never triggers a connect, so an
-    /// unconnected (or not-yet-connected) project just reports no servers
-    /// rather than paying for a connect attempt on a status query.
-    pub async fn mcp_status(&self) -> Vec<api::McpServerStatus> {
-        let startup_scene = self.bindings.startup_scene().await;
-        let manager = self
-            .mcp
-            .cache
-            .current(&(Some(self.cwd().to_path_buf()), startup_scene))
-            .unwrap_or_else(|| Arc::new(McpManager::empty()));
-        let mut entries = mcp_status_entries(&manager);
-        entries.extend(untrusted_mcp_entries(&*self.bindings.pool_settings().await));
-        entries
+    /// What `admit_mcp_servers` decides about the one server `name`; `None`
+    /// when `settings` configure no such server. Nothing is announced.
+    pub(in crate::session_pool) fn admit_mcp_server(
+        &self,
+        settings: &settings::LoadedSettings,
+        name: &str,
+    ) -> Option<Admission> {
+        let configured = self.configured_mcp_servers(&settings.values);
+        let value = configured.get(name)?;
+        Some(McpJudge::of(self, settings).admit(self, settings, name, value))
     }
 
     /// Connect the default project's MCP servers (`configured_mcp_servers`)
@@ -259,17 +224,31 @@ impl SessionPool {
         key: ProjectSceneKey,
         settings: &settings::LoadedSettings,
     ) -> Arc<McpManager> {
+        self.first_mcp_connect_without(key, settings, None).await
+    }
+
+    /// [`Self::first_mcp_connect`] leaving `except` out, for a caller that
+    /// connects that one itself.
+    pub(in crate::session_pool) async fn first_mcp_connect_without(
+        &self,
+        key: ProjectSceneKey,
+        settings: &settings::LoadedSettings,
+        except: Option<&str>,
+    ) -> Arc<McpManager> {
         let slot = self.mcp.cache.slot(&key);
         let update = slot.update().await;
         if let Some(existing) = update.current() {
             return existing;
         }
         let AdmittedMcp {
-            servers: admitted,
+            servers: mut admitted,
             denied,
             invalid,
             ..
         } = self.admit_mcp_servers(settings);
+        if let Some(name) = except {
+            admitted.remove(name);
+        }
         let pool = self.this.upgrade();
         let wait = pool.as_ref().map(|_| MCP_SESSION_CONNECT_WAIT);
         let (mut manager, late) = McpManager::connect_all_within(
@@ -365,6 +344,7 @@ impl SessionPool {
             denied,
             invalid,
             refused,
+            ..
         } = self.admit_mcp_servers(settings);
         let requested: std::collections::HashSet<String> = admitted.keys().cloned().collect();
         let pool = self.this.upgrade();
@@ -409,169 +389,78 @@ impl SessionPool {
         }
         (connected, failed, connecting)
     }
+}
 
-    /// Write an MCP server's configuration into the project tier — its
-    /// `headers` and `env` into the uncommitted `settings.local.json`, the
-    /// rest into settings.json — then connect it live so it's usable
-    /// immediately without a daemon restart.
-    pub async fn add_mcp_server(
-        &self,
-        project_root: Option<&Path>,
-        scene_id: &str,
-        name: &str,
-        config: serde_json::Value,
-    ) -> Result<api::McpServerWritten, PoolError> {
-        self.put_mcp_server(project_root, scene_id, name, config, false)
-            .await
-    }
+/// What admitting a server depends on besides the server: which names a
+/// plugin declares, and which the project's own tier does.
+struct McpJudge {
+    plugin_servers: std::collections::HashSet<String>,
+    projects_own: std::collections::HashSet<String>,
+}
 
-    /// `mcp.updateServer` — replace the configuration of a server the
-    /// project's settings already declare (a rotated token, a new header) and
-    /// reconnect it. Sessions on the project pick the new connection up at
-    /// their next turn.
-    pub async fn update_mcp_server(
-        &self,
-        project_root: Option<&Path>,
-        scene_id: &str,
-        name: &str,
-        config: serde_json::Value,
-    ) -> Result<api::McpServerWritten, PoolError> {
-        self.put_mcp_server(project_root, scene_id, name, config, true)
-            .await
-    }
-
-    /// Refused before anything is written when the MCP policy denies it:
-    /// a settings entry the pool would only ever deny is no use to anyone.
-    pub(in crate::session_pool) async fn put_mcp_server(
-        &self,
-        project_root: Option<&Path>,
-        scene_id: &str,
-        name: &str,
-        config: serde_json::Value,
-        must_exist: bool,
-    ) -> Result<api::McpServerWritten, PoolError> {
-        let invalid = |message: String| PoolError::InvalidRequest(message);
-        if name.trim().is_empty() {
-            return Err(invalid("name must not be empty".into()));
+impl McpJudge {
+    fn of(pool: &SessionPool, settings: &settings::LoadedSettings) -> Self {
+        let plugin_servers: std::collections::HashSet<String> =
+            pool.plugins.mcp_servers().into_keys().collect();
+        let projects_own = project_tier_mcp_servers(settings)
+            .into_iter()
+            .filter(|name| !plugin_servers.contains(name))
+            .collect();
+        Self {
+            plugin_servers,
+            projects_own,
         }
-        if !config.is_object() {
-            return Err(invalid("config must be a JSON object".into()));
-        }
-        let cfg: mcp::config::McpServerConfig = serde_json::from_value(config.clone())
-            .map_err(|e| invalid(format!("invalid mcp server config: {e}")))?;
-        self.trusted_project_tier(
-            project_root,
-            scene_id,
-            "a server declared in its settings would not start",
-            "declare the server in the global tier",
-        )
-        .await?;
-        let cfg = cfg.confined_to_own_env().map_err(invalid)?;
-        self.admit_mcp(name, &cfg)
-            .map_err(PoolError::McpServerDenied)?;
-        self.write_mcp_server(project_root, scene_id, name, &cfg, config, must_exist)
-            .await
     }
 
-    pub(in crate::session_pool) async fn write_mcp_server(
+    fn admit(
         &self,
-        project_root: Option<&Path>,
-        scene_id: &str,
+        pool: &SessionPool,
+        settings: &settings::LoadedSettings,
         name: &str,
-        cfg: &mcp::config::McpServerConfig,
-        config: serde_json::Value,
-        must_exist: bool,
-    ) -> Result<api::McpServerWritten, PoolError> {
-        let entry = settings::edit::KeyPath::new(["mcp_servers", name]);
-        let precondition = must_exist.then(|| {
-            let (entry, server) = (entry.clone(), name.to_string());
-            let shown = self.bindings.settings_path_of(project_root);
-            Box::new(move |files: &settings::edit::TierFiles| {
-                if files.declares(&entry) {
-                    Ok(())
+        value: &serde_json::Value,
+    ) -> Admission {
+        if settings.values.mcp_enabled.get(name) == Some(&false) {
+            return Admission::Disabled;
+        }
+        let cfg = match serde_json::from_value::<mcp::config::McpServerConfig>(value.clone()) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                tracing::warn!(server = %name, error = %e, "invalid mcp_servers config, skipping");
+                return Admission::Invalid(mcp::manager::FailedServer {
+                    name: name.to_string(),
+                    transport: "unknown",
+                    error: format!("invalid config: {e}"),
+                });
+            }
+        };
+        let projects_own = self.projects_own.contains(name);
+        let admitted = if projects_own {
+            cfg.confined_to_own_env().inspect_err(|reason| {
+                tracing::warn!(server = %name, %reason, "MCP server not connected");
+            })
+        } else {
+            Ok(cfg.clone())
+        }
+        .and_then(|confined| pool.admit_mcp(name, &confined).map(|()| confined));
+        match admitted {
+            Ok(confined) => {
+                let tier = if self.plugin_servers.contains(name) {
+                    "plugin"
+                } else if projects_own {
+                    "project"
                 } else {
-                    Err(format!("no mcp server `{server}` in {}", shown.display()))
-                }
-            }) as Precondition
-        });
-        let edit = TierEdit {
-            precondition,
-            ..TierEdit::new(
-                api::SettingsTier::Project,
-                vec![settings::edit::EditOp::Set(entry, config)],
-            )
-        };
-        let written = self
-            .write_settings_tier(project_root, scene_id, edit)
-            .await?;
-        let settings_path = written.written_to;
-        let secrets_written_to = written.secrets_written_to.map(|p| p.display().to_string());
-
-        // The written file and the cache entry are the same pair: a server
-        // added to one project's settings connects for that project.
-        let target = (
-            Some(project_root.unwrap_or(self.cwd()).to_path_buf()),
-            scene_id.to_string(),
-        );
-        let target_settings = self
-            .settings_for_project(target.0.as_deref(), scene_id)
-            .await;
-        let env = target_settings.values.sandbox.subprocess_env.clone();
-        let cfg = &cfg
-            .clone()
-            .run_in(target.0.as_deref().unwrap_or(self.cwd()))
-            .declared_in("project");
-        let slot = self.mcp.cache.slot(&target);
-        let (statuses, entries, failure) = {
-            let update = slot.update().await;
-            let current = update
-                .current()
-                .unwrap_or_else(|| Arc::new(McpManager::empty()));
-            let still_denied = current
-                .denied()
-                .iter()
-                .filter(|d| d.name != name)
-                .cloned()
-                .collect();
-            let still_invalid = current
-                .invalid()
-                .iter()
-                .filter(|f| f.name != name)
-                .cloned()
-                .collect();
-            let mut updated = current
-                .share()
-                .with_subprocess_env(env.clone())
-                .with_auth(Some(self.mcp.auth.clone()))
-                .with_denied(still_denied)
-                .with_invalid(still_invalid);
-            updated.refresh_tools().await;
-            updated.add_server(name, cfg).await;
-            let statuses = updated.server_statuses();
-            let entries = mcp_status_entries(&updated);
-            let failure = mcp_connect_failed_event(&updated, name);
-            update.set(Arc::new(updated));
-            (statuses, entries, failure)
-        };
-        // A running session holds its own manager, cloned from the cache when
-        // its engine was built. Marking its binding stale rebuilds it on the
-        // new connection before its next turn; nothing in flight is touched.
-        if let Some(root) = target.0 {
-            self.invalidate_bindings(Some(&crate::watch_hub::Tier::Project(root)))
-                .await;
+                    "global"
+                };
+                Admission::Admitted(Box::new(
+                    pool.placed_mcp_server(settings, name, confined)
+                        .declared_in(tier),
+                ))
+            }
+            Err(reason) => Admission::Denied(mcp::manager::DeniedServer {
+                name: name.to_string(),
+                transport: cfg.transport_kind(),
+                reason,
+            }),
         }
-
-        // Same notification contract as the startup background connect —
-        // see `connect_mcp_servers_in_background`.
-        match statuses.iter().find(|s| s.name == name) {
-            Some(s) => self.emit_event(mcp_connected_event(s)),
-            None => self.emit_event(failure),
-        }
-
-        Ok(api::McpServerWritten {
-            written_to: settings_path.display().to_string(),
-            secrets_written_to,
-            servers: entries,
-        })
     }
 }

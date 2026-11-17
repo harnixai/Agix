@@ -378,6 +378,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("hooks_config", Withheld),
         ("instruction_file", Withheld),
         ("language", Free),
+        ("mcp_enabled.*", Tighten(FalseTighter)),
         ("mcp_servers.*", Withheld),
         ("memory_enabled", Free),
         ("model.api_type", Withheld),

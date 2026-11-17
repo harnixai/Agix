@@ -150,6 +150,6 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), listed, "a method is in the table twice");
-        assert_eq!(listed, 85);
+        assert_eq!(listed, 88);
     }
 }

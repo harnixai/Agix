@@ -48,7 +48,7 @@
   `printenv` 读不到(`ARCHITECTURE.md` §5 第 5 条)。stdio server 自己 `env` 里写的照给,继承来的
   环境里没有别的 server 的密钥。确实要让命令也拿到某个变量的,写进 `sandbox.subprocess_env.allow`。
 - **项目层的 server 读不了 daemon 的环境,也用不了 daemon 的身份。** 项目
-  `.agix/settings.json` / `settings.local.json` 里声明的 server(`mcp.addServer` 写的也是这一层)
+  `.agix/settings.json` / `settings.local.json` 里声明的 server(`mcp.addServer` 缺省写的也是这一层)
   不能用 `client_secret_env`、`private_key_jwt.key_env`(读 daemon 的环境)、
   `private_key_jwt.key_file`(读本机上的私钥文件)和 `"grant": "enterprise"`(花的是宿主交来的
   企业身份),写了就不连接(`mcp_connect_failed`;`mcp.addServer` 报

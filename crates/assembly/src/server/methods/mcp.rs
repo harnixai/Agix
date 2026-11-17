@@ -4,18 +4,23 @@
 use super::*;
 use crate::rpc::methods::mcp::{
     McpAuthCancelParams, McpAuthCompleteParams, McpAuthLogoutParams, McpAuthStartParams,
-    McpPutServerParams, McpRedirectKind, McpSetIdentityParams, McpStatusList,
+    McpPutServerParams, McpReconnectParams, McpRedirectKind, McpRemoveServerParams,
+    McpSetEnabledParams, McpSetIdentityParams,
 };
+use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
-    McpAuthDone, McpAuthStarted, McpIdentity, McpReconnected, McpRedirect, McpServerRef,
-    McpServerWritten,
+    McpAuthDone, McpAuthStarted, McpIdentity, McpReconnected, McpRedirect, McpServerReconnected,
+    McpServerRef, McpServerWritten, McpStatusList,
 };
 use crate::session_pool::MCP_COMPILED;
 
 rpc_methods! {
-    "mcp.status" => status(NoParams) -> McpStatusList ["mcp", MCP_COMPILED];
+    "mcp.status" => status(ConfigTarget) -> McpStatusList ["mcp", MCP_COMPILED];
     "mcp.addServer" => add_server(McpPutServerParams) -> McpServerWritten ["mcp", MCP_COMPILED];
     "mcp.updateServer" => update_server(McpPutServerParams) -> McpServerWritten ["mcp", MCP_COMPILED];
+    "mcp.removeServer" => remove_server(McpRemoveServerParams) -> McpServerWritten ["mcp", MCP_COMPILED];
+    "mcp.setEnabled" => set_enabled(McpSetEnabledParams) -> McpServerWritten ["mcp", MCP_COMPILED];
+    "mcp.reconnect" => reconnect(McpReconnectParams) -> McpServerReconnected ["mcp", MCP_COMPILED];
     "mcp.auth.start" => auth_start(McpAuthStartParams) -> McpAuthStarted ["mcp", MCP_COMPILED];
     "mcp.auth.complete" => auth_complete(McpAuthCompleteParams) -> McpAuthDone ["mcp", MCP_COMPILED];
     "mcp.auth.cancel" => auth_cancel(McpAuthCancelParams) -> McpServerRef ["mcp", MCP_COMPILED];
@@ -27,10 +32,13 @@ fn invalid(message: impl Into<String>) -> PoolError {
     PoolError::InvalidRequest(message.into())
 }
 
-async fn status(s: &DaemonServer, _: &Call, _: NoParams) -> Result<McpStatusList, PoolError> {
-    Ok(McpStatusList {
-        servers: s.pool.mcp_status().await,
-    })
+async fn status(
+    s: &DaemonServer,
+    _: &Call,
+    target: ConfigTarget,
+) -> Result<McpStatusList, PoolError> {
+    let (project_root, scene) = s.target_of(target);
+    s.pool.mcp_status(project_root.as_deref(), &scene).await
 }
 
 async fn add_server(
@@ -40,7 +48,13 @@ async fn add_server(
 ) -> Result<McpServerWritten, PoolError> {
     let (project_root, scene) = s.target_of(params.target);
     s.pool
-        .add_mcp_server(project_root.as_deref(), &scene, &params.name, params.config)
+        .add_mcp_server(
+            project_root.as_deref(),
+            &scene,
+            params.tier,
+            &params.name,
+            params.config,
+        )
         .await
 }
 
@@ -51,7 +65,52 @@ async fn update_server(
 ) -> Result<McpServerWritten, PoolError> {
     let (project_root, scene) = s.target_of(params.target);
     s.pool
-        .update_mcp_server(project_root.as_deref(), &scene, &params.name, params.config)
+        .update_mcp_server(
+            project_root.as_deref(),
+            &scene,
+            params.tier,
+            &params.name,
+            params.config,
+        )
+        .await
+}
+
+async fn remove_server(
+    s: &DaemonServer,
+    _: &Call,
+    params: McpRemoveServerParams,
+) -> Result<McpServerWritten, PoolError> {
+    let (project_root, scene) = s.target_of(params.target);
+    s.pool
+        .remove_mcp_server(project_root.as_deref(), &scene, params.tier, &params.name)
+        .await
+}
+
+async fn set_enabled(
+    s: &DaemonServer,
+    _: &Call,
+    params: McpSetEnabledParams,
+) -> Result<McpServerWritten, PoolError> {
+    let (project_root, scene) = s.target_of(params.target);
+    s.pool
+        .set_mcp_enabled(
+            project_root.as_deref(),
+            &scene,
+            params.tier,
+            &params.name,
+            params.enabled,
+        )
+        .await
+}
+
+async fn reconnect(
+    s: &DaemonServer,
+    _: &Call,
+    params: McpReconnectParams,
+) -> Result<McpServerReconnected, PoolError> {
+    let (project_root, scene) = s.target_of(params.target);
+    s.pool
+        .mcp_reconnect(project_root.as_deref(), &scene, &params.name)
         .await
 }
 

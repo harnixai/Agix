@@ -3056,7 +3056,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 | `invalid_value` | 值放不进这个设置(按加载器的规则判:类型、枚举、一条一条的权限规则),或 `permission_mode` 写了只能由程序设的模式 |
 | `requires_trust` | 写进未受信项目的项目层,而它会被扣下(§3.6):未受信项目只能增加与收紧,判的是写入那一刻相对下面几层 |
 | `not_at_tier` | `network.*` 只从全局层读,写在场景层 / 项目层 |
-| `use_method` | 有专门的方法,`method` 指明:`mcp_servers` → `mcp.addServer` / `mcp.updateServer`,`project_trust` → `project.trust` |
+| `use_method` | 有专门的方法,`method` 指明:`mcp_servers` → `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`,`mcp_enabled` → `mcp.setEnabled`,`project_trust` → `project.trust` |
 | `not_writable` | `hooks_config`、`scripts`:它们执行代码,不经 RPC 写,宿主仍可直接改设置文件 |
 
 宿主能连上这个 socket 就能直接改这些文件,所以按键拒绝不是安全边界,而是"写下去的东西加载器会照样
@@ -3298,19 +3298,29 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 
 ### 6.5 `mcp.*` / `plugin.*` / `import.*` / `commands.*`
 
-`mcp.status` / `plugin.*` / `commands.list` **只作用于 daemon 自己的默认项目和默认场景**,
-不接受定位参数。`mcp.addServer` / `mcp.updateServer` / `mcp.auth.start` / `mcp.auth.logout` /
-`import.*` 接受 §6.4 的 `scene` / `project_root`:省略 = 这个 daemon 自己那一对,给路径 = 它
-服务的另一个项目,`null` → `INVALID_PARAMS`。`mcp.auth.complete` / `mcp.auth.cancel` 按
-`flow_id` 找到登录,不需要定位;`mcp.auth.setIdentity` 作用于这个 daemon 的全部项目。
+`plugin.*` / `commands.list` **只作用于 daemon 自己的默认项目和默认场景**,不接受定位参数。
+`mcp.status` / `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` / `mcp.setEnabled` /
+`mcp.reconnect` / `mcp.auth.start` / `mcp.auth.logout` / `import.*` 接受 §6.4 的 `scene` /
+`project_root`:省略 = 这个 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
+`mcp.auth.complete` / `mcp.auth.cancel` 按 `flow_id` 找到登录,不需要定位;`mcp.auth.setIdentity`
+作用于这个 daemon 的全部项目。
+
+写 MCP 设置的四个方法(`addServer` / `updateServer` / `removeServer` / `setEnabled`)都收 `tier`:
+`global` / `scene` / `project`,缺省 `project`,与 `config.setProvider` 一样——写定位参数那一对的那一层,
+走 `config.set` 的同一个写入实现(锁、`SETTINGS_LOCKED`、密钥落 `settings.local.json`、全有或全无)。写完
+只对**被写的那一个** server 对账:定位参数那一对当场处理并在答复里报出,这一层之下别的已经连着的对在后台
+各自处理;其余 server 的连接不动。定位参数那一对的 MCP 还没连过时,只有 `addServer` 先按它第一个会话那样把
+其余 server 连上(它要立刻试连新加的那个);`updateServer` / `removeServer` / `setEnabled` 只写文件、不启动
+任何东西,答复的 `servers` 同 `mcp.status` 对没连过的对的答法(`not_started` 等),等这一对第一个会话再连。
+`config.set` 不收 `mcp_servers.*` 与 `mcp_enabled.*`,指向这几个方法。
 
 #### `mcp.status`
 
-无参。
-
 ```jsonc
+// → params(都可选)
+{ "scene": "code", "project_root": "/Users/x/repo-b" }
 // ← result
-{ "servers": [ ] }
+{ "loaded": true, "servers": [ ] }
 // 元素:{ "name":"…", "transport":"…", "tool_count": 0, "state":"connected",
 //         "limited": "kept 200 of 300 tools; …",   // 仅当 server 的工具表被截过
 //         "auth": { "state":"authorized", "issuer":"https://…", "scopes":["…"],
@@ -3328,6 +3338,14 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 | `failed` | 没连上(进程起不来、握手失败或超时),或者配置不合法、没有启动(`error` 以 `invalid config:` 开头,`transport` 为 `unknown`);另带 `error` 说明原因 |
 | `denied` | MCP 策略(`ARCHITECTURE.md` §6.4)拒绝了它,或者它是项目自己声明的、用了项目的 server 不能用的东西(daemon 环境里的密钥、本机的密钥文件、`"grant": "enterprise"` 的企业身份);`tool_count` 为 0,另带 `error` 说明是哪份策略、哪条规则 |
 | `untrusted` | 项目自己声明的 server,项目未被信任(§3.6),没有启动;`tool_count` 为 0,另带 `error`。`project.trust` 之后启动 |
+| `disabled` | `mcp_enabled` 把它关了(`mcp.setEnabled`),没有启动;`tool_count` 为 0 |
+| `not_started` | 这一对的 MCP 还没连过(`loaded: false`),它会在这一对第一个会话时连接 |
+
+`loaded` 说这一对 `(项目, 场景)` 的 MCP 连过没有。连过的,`servers` 是连接的实际状态;没连过的
+(`loaded: false`),`servers` 只按设置列出配了什么,**不建绑定、不连接、不启动任何进程**——查未受信项目的
+状态不会执行项目里的命令:`untrusted`、`disabled`、`denied`(按当前的 MCP 策略判)、`failed`(配置不合法),
+其余是 `not_started`,`auth` 只从已存的登录记录里读。`scene` 未注册 → `SCENE_NOT_FOUND`,`project_root`
+不是目录 → `PROJECT_NOT_FOUND`。
 
 `auth` 每个元素都有,是这个 server 的授权状态(`mcp_auth.md` §2):`state` 为
 `none` / `required` / `authorizing` / `authorized` / `failed`;按需带 `issuer`、`scopes`
@@ -3340,6 +3358,7 @@ scope(403 `insufficient_scope`),现有令牌对别的请求仍然有效。
 ```jsonc
 // → params
 { "name": "fs",
+  "tier": "project",                // 可选;"project"(缺省)| "scene" | "global"
   "config": { "type": "stdio", "command": "…", "args": [], "env": {} } }
 ```
 
@@ -3351,11 +3370,12 @@ scope(403 `insufficient_scope`),现有令牌对别的请求仍然有效。
 `MCP_TOOL_TIMEOUT`,再缺省 600000),超时的请求在 server 端被取消。工具表的上限也在这里:
 `max_tools`(缺省 200,多出的丢弃)、`max_description_chars`(缺省 4096,截断)、
 `max_schema_bytes`(缺省 65536,超出的 schema 换成空对象 schema);截过就在 `mcp.status`
-对应条目的 `limited` 里写明截了什么。写进项目层 settings.json 并**立刻尝试连接**,
-所以它是项目层的 server:以项目根为工作目录启动,相对的 `command` 与参数里的相对路径按项目根
+对应条目的 `limited` 里写明截了什么。写进 `tier` 那一层的 settings.json 并**立刻尝试连接**。
+写进项目层的是项目层的 server:以项目根为工作目录启动,相对的 `command` 与参数里的相对路径按项目根
 解析;配置里的 `$VAR` 只从它自己的 `env` 块展开,不读 daemon 的环境,
 `oauth` 里的 `client_secret_env` / `private_key_jwt.key_env` 会让连接被拒(ARCHITECTURE.md
-§6.4)——密钥要么写成字面值,要么把 server 声明在全局层。成功与否都会发一条
+§6.4)——密钥要么写成字面值,要么把 server 声明在全局层。写进全局层 / 场景层的与手写在那两层一样:
+不看项目信任、不收窄环境,在那一层的目录里启动。成功与否都会发一条
 `mcp_connected` / `mcp_connect_failed` 的 `daemon.event`;要求登录的 server 发
 `mcp_auth_required`,在响应的 `servers` 里是 `state: "auth_required"`。
 
@@ -3368,18 +3388,66 @@ scope(403 `insufficient_scope`),现有令牌对别的请求仍然有效。
 `secrets_written_to` 只在改了 settings.local.json 时才有。
 配置解析不了、名字为空、已有的 settings.json / settings.local.json 不是 JSON 对象 → `INVALID_PARAMS`。
 MCP 策略拒绝这个 server → `MCP_SERVER_DENIED`,**什么都不写、不连接、不发通知**,`message`
-写明是哪份策略、哪条规则。目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,同样什么都不做:
-写进去的 server 也不会启动。
+写明是哪份策略、哪条规则。`tier:"project"` 而目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,同样什么都不做:
+写进去的 server 也不会启动;`project_root` 不是目录 → `PROJECT_NOT_FOUND`。
 
 同名的服务已经存在时是替换,不是再加一份——settings.local.json 里它原有的那部分也一起换掉,
 新配置没有 `headers` / `env` 就删掉。这个项目上正在跑的会话在下一轮之前按新连接重建,进行中的
-调用不受影响。
+调用不受影响。被 `mcp.setEnabled` 关掉的 server 替换配置之后仍是关着的。
 
 #### `mcp.updateServer`
 
-参数、响应与 `mcp.addServer` 相同。区别只在于服务必须已经在那份 settings.json(或同目录的
+参数、响应与 `mcp.addServer` 相同。区别只在于服务必须已经在那一层的 settings.json(或同目录的
 settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌、换请求头这类"改一个已有的",不会因为名字拼错而
 悄悄多出一个服务。连接立刻重建,这个项目上的会话下一轮拿到新连接。
+
+#### `mcp.removeServer`
+
+```jsonc
+// → params
+{ "name": "fs", "tier": "global" }    // tier 可选,缺省 "project"
+// ← result:同 mcp.addServer
+{ "written_to": "…", "servers": [ ] }
+```
+
+从那一层的两个文件里删掉这个 server(settings.local.json 里它的 `headers` / `env` 一起删),同一层
+`mcp_enabled` 里它的开关也一并删掉。删完断开它;别的层仍声明它(删掉项目层的覆盖,全局那份还在)时按剩下
+的配置重连,答复的 `servers` 里如实可见。那一层没有声明它 → `INVALID_PARAMS`,消息带那份 settings.json 的
+路径;它是插件包声明的,消息指向 `plugin.disable` / `mcp.setEnabled`。未受信项目可以删自己层里的 server。
+
+#### `mcp.setEnabled`
+
+```jsonc
+// → params
+{ "name": "github", "tier": "project", "enabled": false }   // tier 可选,缺省 "project"
+// ← result:同 mcp.addServer
+{ "written_to": "…", "servers": [ ] }
+```
+
+在那一层写 `mcp_enabled.<name>`(`settings.json` 里的 `{ "mcp_enabled": { "github": false } }`,没写的缺省
+开着)。开关按名字跨层合并:全局关、项目开 → 这个项目开着;对任何一层、任何插件声明的 server 都有效,
+不改变它是谁的 server。关掉的不连接、不发 `mcp_connect_failed`,`mcp.status` 里是 `disabled`。
+未受信项目只能关不能开:`enabled: true` 写进未受信项目层 → `PROJECT_UNTRUSTED`,什么都不写。
+名字既不在这一对的配置里(含插件)、也不在那一层的文件里 → `INVALID_PARAMS`。
+
+#### `mcp.reconnect`
+
+```jsonc
+// → params
+{ "name": "fs", "scene": "code", "project_root": "/repo" }   // 后两个可选
+// ← result
+{ "server": { "name": "fs", "transport": "stdio", "tool_count": 3, "state": "connected",
+              "auth": { "state": "none" } } }
+```
+
+不写文件。按这一对**当前的设置**重新判这个 server 并重连(手改了文件、监视器还没看到也照样吃到),只碰它
+一个:别的 server 的连接与进程原样不动。发一条 `mcp_connected` / `mcp_connect_failed`;这一对的会话在下一轮
+之前换上新连接,进行中的调用继续用旧的。等待登录的 server 没登录还是 `auth_required`。
+
+- 这一对的 MCP 还没连过 → `INVALID_PARAMS`(它们会在这一对第一个会话时连接);不会为一个 server 单独建出
+  "部分连接"。
+- 关着的 → `INVALID_PARAMS`(指向 `mcp.setEnabled`);策略拒绝 → `MCP_SERVER_DENIED`;未受信项目自己的
+  server → `PROJECT_UNTRUSTED`;配置里没有这个名字或配置不合法 → `INVALID_PARAMS`。
 
 #### `mcp.auth.start`
 
@@ -4086,8 +4154,8 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 | `kind` | 载荷 | 什么时候 |
 |---|---|---|
-| `mcp_connected` | `{server, transport, tool_count}` | 启动连接、`config.reload` 重连、`mcp.addServer` / `mcp.updateServer` 成功 |
-| `mcp_connect_failed` | `{server, error}` | 同上,失败时,`error` 是原因(进程起不来、握手失败、超过启动时限……)。另外,启动、重连、另一个项目第一次起会话时要连的 server 里,配置解析不了的、被 MCP 策略拒绝的(`ARCHITECTURE.md` §6.4)各发一条;会话创建时还没连完、之后在后台连上或失败的 server 也各发一条 `mcp_connected` / `mcp_connect_failed` |
+| `mcp_connected` | `{server, transport, tool_count}` | 启动连接、`config.reload` 重连、`mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`(别的层仍声明它时)/ `mcp.setEnabled`(打开时)/ `mcp.reconnect` 成功 |
+| `mcp_connect_failed` | `{server, error}` | 同上,失败时,`error` 是原因(进程起不来、握手失败、超过启动时限……)。另外,启动、重连、另一个项目第一次起会话时要连的 server 里,配置解析不了的、被 MCP 策略拒绝的(`ARCHITECTURE.md` §6.4)各发一条,`mcp_enabled` 关掉的不发;会话创建时还没连完、之后在后台连上或失败的 server 也各发一条 `mcp_connected` / `mcp_connect_failed` |
 | `mcp_auth_required` | `{server, scopes}` | 远端 server 要求登录:没有令牌、令牌被拒且刷新不了,或要求更多 scope(这时 server 保持连接);`enterprise` server 还没有可用的企业身份(宿主该调 `mcp.auth.setIdentity`)。`scopes` 是要请求的(可能为空)。同一个 server 从已登录/未涉及变成需要登录时发一次 |
 | `mcp_auth_completed` | `{server}` | 登录完成,令牌已存;随后是这个 server 的 `mcp_connected` / `mcp_connect_failed` |
 | `mcp_auth_failed` | `{server, error}` | 登录失败:授权服务器在回调里报错、换令牌失败,或 10 分钟内没完成 |
@@ -4132,13 +4200,13 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32017 | TOO_MANY_IN_FLIGHT | 这条连接同时在途的请求已达上限(§5.2) |
 | -32018 | TASK_NOT_FOUND | `session.taskOutput`:引擎不知道这个任务(没跑过、结束得早已被忘掉,或引擎不在内存里) |
 | -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `execution.max_concurrent_subagents`,或委派已到最深 |
-| -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
+| -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.reconnect`:这个 server 被策略拒绝;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
-| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set`:被拒的键全部是因为项目未受信,什么都没写,`data.rejected` 逐键列出(§9.1) |
+| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set` / `mcp.setEnabled`:被拒的键全部是因为项目未受信(`setEnabled` 是在未受信项目里打开),什么都没写,`data.rejected` 逐键列出(§9.1);`mcp.reconnect`:未受信项目自己的 server |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |
-| -32026 | SETTINGS_LOCKED | `project.trust` / `config.set` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
+| -32026 | SETTINGS_LOCKED | `project.trust` / `config.set` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` / `mcp.setEnabled`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
 | -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api_type` 没有引擎知道的列法(§6.4) |
 | -32028 | SETTINGS_CONFLICT | `config.set` 带 `if_revision`:这一层在那之后被改过,什么都没写;`data.revision` 是现在的 revision(§6.4、§9.1) |
 
@@ -4170,7 +4238,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 // INVALID_PARAMS,session.calls / session.call 带的 generation 不是录像当前的时
 { "generation": 1763200000000 }
 
-// INVALID_PARAMS / PROJECT_UNTRUSTED,config.set 与 config.setProvider 有键被拒时(§6.4)
+// INVALID_PARAMS / PROJECT_UNTRUSTED,config.set、config.setProvider 与写 MCP 设置的方法有键被拒时(§6.4、§6.5)
 { "rejected": [ { "key": "sandbox.network_mode", "kind": "invalid_value", "reason": "…" },
                 { "key": "mcp_servers.github", "kind": "use_method", "method": "mcp.addServer", "reason": "…" } ] }
 

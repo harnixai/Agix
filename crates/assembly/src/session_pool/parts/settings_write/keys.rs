@@ -26,6 +26,13 @@ const CONFIG_SET_REFUSES: &[(&str, Refusal)] = &[
         ),
     ),
     (
+        "mcp_enabled",
+        Refusal::UseMethod(
+            "mcp.setEnabled",
+            "turning a server off or on disconnects or connects it as it is written",
+        ),
+    ),
+    (
         "project_trust",
         Refusal::UseMethod(
             "project.trust",

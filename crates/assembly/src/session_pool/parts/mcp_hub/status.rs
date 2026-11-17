@@ -35,6 +35,26 @@ pub(in crate::session_pool) fn untrusted_mcp_entries(
         .collect()
 }
 
+/// A `mcp.status` entry for a server that is not connected, from what is
+/// known without starting anything.
+pub(in crate::session_pool) fn idle_mcp_entry(
+    name: &str,
+    transport: &str,
+    state: api::McpServerState,
+    error: Option<String>,
+    auth: api::McpAuthStatus,
+) -> api::McpServerStatus {
+    api::McpServerStatus {
+        name: name.to_string(),
+        transport: transport.to_string(),
+        tool_count: 0,
+        state,
+        error,
+        limited: None,
+        auth,
+    }
+}
+
 impl From<mcp::oauth::AuthFlowError> for PoolError {
     fn from(e: mcp::oauth::AuthFlowError) -> Self {
         use mcp::oauth::AuthFlowError;
