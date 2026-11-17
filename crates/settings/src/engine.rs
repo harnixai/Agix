@@ -58,20 +58,29 @@ impl LoadedSettings {
     /// "always allow" is not written where it would not hold: in a project directory
     /// that is the global or scene directory (a repository linking its
     /// project directory there, a project rooted at `$HOME`) it would allow the call in
-    /// every project, and an untrusted project's file is withheld on the next
-    /// load.
+    /// every project, in one linked into another project it would allow it
+    /// there, and an untrusted project's file is withheld on the next load.
     pub fn permission_settings(&self) -> PermissionSettings {
         let paths = &self.paths;
-        let own = crate::trust::is_own_project_dir(
+        use crate::trust::NotItsOwnTier;
+        let not_own = crate::trust::project_tier_refusal(
             &paths.local_data_dir,
             &paths.global_data_dir,
             &paths.user_data_dir,
         );
-        let refusal = if !own {
+        let refusal = if let Some(NotItsOwnTier::SharedTier) = not_own {
             Some(format!(
                 "the project's {} is the global or scene directory, where the rule would \
                  allow the call in every project",
                 paths.layout.project_dir_name()
+            ))
+        } else if let Some(NotItsOwnTier::Elsewhere(to)) = not_own {
+            Some(format!(
+                "the project's {} resolves outside it{}, where the rule would allow the call \
+                 in whatever that directory belongs to",
+                paths.layout.project_dir_name(),
+                to.map(|d| format!(", to {}", d.display()))
+                    .unwrap_or_default()
             ))
         } else if paths.project_untrusted {
             Some(

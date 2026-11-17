@@ -216,6 +216,40 @@ async fn a_sub_agents_local_permit_always_is_written_to_the_project() {
     );
 }
 
+/// A trusted project whose `.agix` links into another project's: "always
+/// allow, this project" is not written there — it would allow the call in
+/// that other project — but kept for this session, as where the project
+/// tier is the global directory.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_local_permit_always_is_not_written_through_a_project_directory_linked_elsewhere() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let theirs = elsewhere.path().join(".agix");
+    let daemon = Daemon::start(Setup::default(), |home, work| {
+        crate::support::trust_projects_under(home, work);
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::write(theirs.join("settings.json"), "{}").unwrap();
+        std::fs::remove_dir_all(work.join(".agix")).unwrap();
+        std::os::unix::fs::symlink(&theirs, work.join(".agix")).unwrap();
+    })
+    .await;
+    daemon.model.push_turn(tool_round(
+        "Bash",
+        "toolu_touch",
+        json!({"command": "touch linked-grant.txt"}),
+    ));
+    daemon.model.push_turn(text_round("done"));
+
+    let prompts = daemon.turn(|_| permit_always("local")).await;
+    assert_eq!(prompts.len(), 1, "precondition: the call asks: {prompts:?}");
+    let written = std::fs::read_to_string(theirs.join("settings.local.json")).unwrap_or_default();
+    assert!(
+        !written.contains("linked-grant.txt"),
+        "the grant landed in the other project: {written}"
+    );
+    assert!(daemon.work.join("linked-grant.txt").exists());
+}
+
 /// A sub-agent's sub-agent asks the host watching the root session, which
 /// answers it there like any other prompt.
 #[tokio::test(flavor = "multi_thread")]

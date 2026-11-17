@@ -44,25 +44,29 @@ impl SessionPool {
         let startup_scene = self.bindings.startup_scene().await;
         let written_to = self.bindings.settings_path_of(project_root);
         let dir = written_to.parent().unwrap_or(&written_to);
-        if !settings::trust::is_own_project_dir(
+        let refusal = settings::trust::project_tier_refusal(
             dir,
             &self.bindings.paths().global_root(),
             &self.bindings.scene_root(scene_id, &startup_scene),
-        ) {
-            return Err(PoolError::InvalidRequest(format!(
-                "{} has no settings tier of its own (its `{}` is the global or scene directory), so {what}; {instead}",
-                project_root.unwrap_or(self.cwd()).display(),
-                self.bindings.paths().layout().project_dir_name()
-            )));
-        }
-        if !settings::trust::stays_in_its_project(dir) {
-            return Err(PoolError::InvalidRequest(format!(
-                "{}'s `{}` resolves outside the project, to {}: a write to its settings would change that directory's",
-                project_root.unwrap_or(self.cwd()).display(),
-                self.bindings.paths().layout().project_dir_name(),
-                dir.canonicalize()
-                    .map_or_else(|_| "nowhere".to_string(), |d| d.display().to_string())
-            )));
+        );
+        let layout = self.bindings.paths().layout();
+        let (root, name) = (
+            project_root.unwrap_or(self.cwd()).display(),
+            layout.project_dir_name(),
+        );
+        match refusal {
+            None => {}
+            Some(settings::trust::NotItsOwnTier::SharedTier) => {
+                return Err(PoolError::InvalidRequest(format!(
+                    "{root} has no settings tier of its own (its `{name}` is the global or scene directory), so {what}; {instead}"
+                )))
+            }
+            Some(settings::trust::NotItsOwnTier::Elsewhere(to)) => {
+                return Err(PoolError::InvalidRequest(format!(
+                    "{root}'s `{name}` resolves outside the project, to {}: a write to its settings would change that directory's",
+                    to.map_or_else(|| "nowhere".to_string(), |d| d.display().to_string())
+                )))
+            }
         }
         Ok(())
     }

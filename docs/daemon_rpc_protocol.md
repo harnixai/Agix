@@ -511,7 +511,8 @@ bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会�
 `{"tool": "Bash(touch *.rs)", "action": "allow", "match": "exact"}`,`match: "exact"` 让之后的会话
 同样按原文比对。会话的权限不记放行时(嵌入方给了 `without_grants`),嵌入方的 `Elicitation` 收到的选项里没有 `permit_always`。
 `local` 写不下去时——项目未信任(它的 `settings.local.json` 下次加载会被扣下,先 `project.trust`)、
-项目层目录是全局或场景目录、写盘失败——放行只在本会话有效,会话收到一帧 `notification`
+项目层目录是全局或场景目录、项目层目录是指到项目之外(如另一个项目的 `.agix`)的符号链接(与 `config.set` 等写项目层的
+方法同一个判定)、写盘失败——放行只在本会话有效,会话收到一帧 `notification`
 (`status: null`)说明原因。
 
 未信任的项目(§3.6)不读它 `settings.local.json` 里的 allow 规则,`local` 写下的规则因此

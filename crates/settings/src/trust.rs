@@ -220,10 +220,30 @@ pub fn is_own_project_dir(project: &Path, global: &Path, scene: &Path) -> bool {
     !same_dir(project, global) && !same_dir(project, scene)
 }
 
+/// Why a write to the project tier at `project` (a `.agix` directory) would
+/// not land in that project's own tier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotItsOwnTier {
+    /// It is the global or scene directory: a write would reach every project.
+    SharedTier,
+    /// It resolves outside the project, to this directory (`None` where it
+    /// resolves nowhere): a write would change that directory's settings.
+    Elsewhere(Option<PathBuf>),
+}
+
+/// The one check every write to a project's own tier makes — the settings
+/// methods and "always allow, this project" alike.
+pub fn project_tier_refusal(project: &Path, global: &Path, scene: &Path) -> Option<NotItsOwnTier> {
+    if !is_own_project_dir(project, global, scene) {
+        return Some(NotItsOwnTier::SharedTier);
+    }
+    (!stays_in_its_project(project)).then(|| NotItsOwnTier::Elsewhere(project.canonicalize().ok()))
+}
+
 /// Whether `project` (a `.agix` directory) is its project's own: absent, or
 /// resolving to a directory directly in the project as that resolves — not a
 /// link into another project's, whose settings a write would change.
-pub fn stays_in_its_project(project: &Path) -> bool {
+fn stays_in_its_project(project: &Path) -> bool {
     let Some(root) = project.parent() else {
         return false;
     };
