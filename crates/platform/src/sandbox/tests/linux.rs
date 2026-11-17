@@ -138,7 +138,13 @@ fn an_absent_settings_file_cannot_be_created_in(own: &str, dir: &str) {
     let at = |pair: [&str; 2]| args.windows(2).position(|w| w == pair);
     let scratchpad = format!("{agix}/scratchpad");
     let masked = at(["--tmpfs", &agix]).unwrap_or_else(|| panic!("{args:?}"));
-    let opened = at(["--bind-try", &scratchpad]).unwrap_or_else(|| panic!("{args:?}"));
+    // A foreign root has no working space: its scratchpad stays read-only.
+    let how = if own == dir {
+        "--bind-try"
+    } else {
+        "--ro-bind-try"
+    };
+    let opened = at([how, &scratchpad]).unwrap_or_else(|| panic!("{args:?}"));
     let shut = at(["--remount-ro", &agix]).unwrap_or_else(|| panic!("{args:?}"));
     assert!(masked < opened && opened < shut, "{args:?}");
     assert!(

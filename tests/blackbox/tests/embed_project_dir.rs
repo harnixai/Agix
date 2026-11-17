@@ -374,3 +374,58 @@ async fn a_name_that_cannot_be_a_project_directory_is_refused_at_start() -> anyh
     }
     Ok(())
 }
+
+/// A sandboxed command writes nothing in a foreign configuration root — the
+/// gate takes all of one for configuration, and the sandbox holds it to
+/// that: not `.agix/memory`, not `.claude/commands`, not a new entry
+/// directly in either — while the instance's own working space stays
+/// writable. The prompts are answered yes, so the sandbox alone decides.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sandboxed_command_writes_nothing_in_a_foreign_configuration_root() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let project = root.project.clone();
+    for dir in [".agix/memory", ".claude/commands", ".claude/agents"] {
+        std::fs::create_dir_all(project.join(dir))?;
+    }
+    let embedded = Embedded::start(config(&root, OWN)).await?;
+    let mut client = connect(&embedded);
+    routine_replies(&stub);
+    let foreign = [
+        ".agix/memory/m.md",
+        ".agix/notes.md",
+        ".claude/commands/c.md",
+        ".claude/agents/a.md",
+        ".claude/notes.md",
+    ];
+    let own_scratch = format!("{OWN}/scratchpad/n.md");
+    let mut replies: Vec<Reply> = foreign
+        .iter()
+        .enumerate()
+        .map(|(i, path)| bash(&format!("b-{i}"), &format!("echo x > {path}")))
+        .collect();
+    replies.push(bash(
+        "b-own",
+        &format!("mkdir -p {OWN}/scratchpad && echo x > {own_scratch}"),
+    ));
+    replies.push(Reply::text("FOREIGN-DONE"));
+    stub.script_when("FOREIGN-MARK", replies);
+
+    let session = client.session_create(json!({})).await?;
+    let _asked = answer_prompts(&embedded, &session);
+    let events = client
+        .session_run_turn(&session, "FOREIGN-MARK go", "t1", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    for path in foreign {
+        assert!(
+            !project.join(path).exists(),
+            "{path} was written: {:?}",
+            events.tool_results
+        );
+    }
+    assert_eq!(read(project.join(&own_scratch)), "x\n");
+    embedded.shutdown().await;
+    Ok(())
+}

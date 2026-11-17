@@ -1518,8 +1518,9 @@ skill 自己的 `allowed-tools` 这时还没生效,不能给自己的命令开�
 
    最后一条**按"文件名 + 所在目录"匹配,不按目录**。`.agix` 同时是子代理 git worktree
    的落脚点,把整个目录设为拒写会否掉子代理被创建出来要做的每一次写入。`.agix` / `.claude`
-   下的配置目录(`hooks`、`agents`、`skills` …)和项目的 `.agents/skills/` 对写工具是"要确认",
-   不是"拒写";沙箱里的命令没法逐次确认,所以对它们是拒写(§6.3)。两边用同一份名单
+   下的配置目录(`hooks`、`commands`、`agents`、`skills` …)和项目的 `.agents/skills/` 对写工具是"要确认",
+   不是"拒写";沙箱里的命令没法逐次确认,所以对它们是拒写(§6.3);外来配置根里一切都算配置,
+   沙箱里整个拒写(§8.1)。两边用同一份名单
    (`base::paths::sensitive` 的 `ENGINE_CONFIG_{ROOTS,FILES,DIRS}`、`PROJECT_ENGINE_CONFIG_DIRS`,
    §6.1)。
    另外,凭据名单(§6.1)上的路径在 `Policy` 的 S2 就拒绝了,任何模式都到不了这里。
@@ -2205,8 +2206,8 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 **外来配置根。** 配置根是本实例的项目层目录,加上 `FOREIGN_CONFIG_ROOTS`(`.agix`、`.claude`)里不是它的
 那些。名字改成 `.codix` 后,`.agix` 不再被读,但与 `.claude` 一样受保护:写工具拒写其中的设置文件,写其中别的
-东西要问(门禁不走静默放行);沙箱里的命令写不了其中的设置文件与配置子目录(`ENGINE_CONFIG_{FILES,DIRS}`,
-Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
+东西要问(门禁不走静默放行);沙箱里的命令整个写不了它(`ConfigRootAt::shut_to_writes`,与门禁同一个判定;
+策略点名的可写根在其中时照旧可写;Linux 只在它存在时才挂);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
 门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
 缺省名字下自己与外来去重,行为与改名之前相同。

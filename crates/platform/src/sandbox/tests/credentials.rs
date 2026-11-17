@@ -446,3 +446,75 @@ fn another_instances_state_root_is_guarded_as_the_own_one() {
     assert!(!connected.contains("in"), "the socket was reached");
     assert!(run("echo x > p.txt").0, "the project stays writable");
 }
+
+/// A foreign configuration root is shut to a command's writes as a whole,
+/// as the gate takes every entry of one for configuration — its working
+/// entries and new entries directly in it too — but for a writable root the
+/// policy names inside it. In the instance's own root the working entries
+/// stay writable and `commands/` does not.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
+    if !a_backend_runs() {
+        return;
+    }
+    for own in [".agix", ".codix"] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        let layout = base::paths::Layout::new(own).unwrap();
+        for d in [
+            ".agix/memory",
+            ".agix/scratchpad",
+            ".claude/commands",
+            ".claude/memory",
+        ] {
+            std::fs::create_dir_all(project.join(d)).unwrap();
+        }
+        std::fs::create_dir_all(project.join(own).join("scratchpad")).unwrap();
+        let named = project.join(".claude/named");
+        std::fs::create_dir_all(&named).unwrap();
+        let policy = SandboxPolicy {
+            state_root: Some(dir.path().join("state")),
+            layout: layout.clone(),
+            additional_writable: vec![named.clone()],
+            ..Default::default()
+        };
+        let writes = |path: &str| {
+            run_confined(
+                &project,
+                &policy,
+                &[],
+                &format!("echo x > '{}'", project.join(path).display()),
+            )
+            .status
+            .success()
+        };
+        let mut shut = vec![
+            ".claude/commands/c.md",
+            ".claude/memory/m.md",
+            ".claude/new.md",
+        ];
+        if own != ".agix" {
+            shut.extend([".agix/memory/m.md", ".agix/scratchpad/n", ".agix/new.md"]);
+        }
+        let own_commands = format!("{own}/commands");
+        let created = run_confined(
+            &project,
+            &policy,
+            &[],
+            &format!("mkdir -p {own_commands} && echo x > {own_commands}/c.md"),
+        );
+        assert!(
+            !created.status.success() && !project.join(&own_commands).join("c.md").exists(),
+            "{own}: {own_commands}/c.md was written"
+        );
+        for path in shut {
+            assert!(!writes(path), "{own}: {path} was written");
+        }
+        let own_scratch = format!("{own}/scratchpad/n");
+        for path in [own_scratch.as_str(), ".claude/named/n"] {
+            assert!(writes(path), "{own}: {path} was not writable");
+        }
+    }
+}

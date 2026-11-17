@@ -15,7 +15,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::layout::{
-    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_FILES,
+    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES,
     PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD,
     STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
@@ -296,6 +296,26 @@ pub struct ConfigRootAt {
     /// The instance's own project directory: held even when absent, its
     /// working entries left writable.
     pub own: bool,
+}
+
+impl ConfigRootAt {
+    /// Whether a sandboxed command may write nothing in this root but what
+    /// the policy itself names writable: a foreign root, every entry of
+    /// which the gate takes for configuration
+    /// ([`SensitivePaths::names_configuration`]).
+    pub fn shut_to_writes(&self) -> bool {
+        !self.own
+    }
+
+    /// Whether a sandboxed command may write the entry `name` directly in
+    /// this root: in the instance's own, any but the
+    /// [`ENGINE_CONFIG_FILES`] and [`ENGINE_CONFIG_DIRS`]; in a foreign one
+    /// none ([`Self::shut_to_writes`]).
+    pub fn writable_entry(&self, name: &str) -> bool {
+        !self.shut_to_writes()
+            && !ENGINE_CONFIG_FILES.contains(&name)
+            && !ENGINE_CONFIG_DIRS.contains(&name)
+    }
 }
 
 /// The state roots of instances on this machine that a session's own may

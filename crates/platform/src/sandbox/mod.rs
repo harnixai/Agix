@@ -48,10 +48,13 @@
 //! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
 //! included, and the directories leading down to them), the
-//! configuration under `.agix/` and `.claude/` (`base::paths::ENGINE_CONFIG_*`:
-//! settings, MCP, hooks, agents, skills, plugins, rules, scenes, policy,
-//! scripts, output styles, and the saved tool results the engine exports and
-//! forks), the project's skills (`.agents/skills/`,
+//! configuration under the instance's own project directory
+//! (`base::paths::ENGINE_CONFIG_*`: settings, MCP, hooks, commands, agents,
+//! skills, plugins, rules, scenes, policy, scripts, output styles, and the
+//! saved tool results the engine exports and forks), all of a foreign
+//! configuration root (`.claude`, and `.agix` under a renamed layout) but
+//! the writable roots the policy names inside it
+//! (`base::paths::ConfigRootAt::shut_to_writes`), the project's skills (`.agents/skills/`,
 //! `base::paths::PROJECT_ENGINE_CONFIG_DIRS`, and the `.agents` entry above
 //! it), the control files of each linked worktree's entry under
 //! `.git/worktrees/` (`base::paths::GIT_WORKTREE_CONTROL_FILES`), and the
@@ -77,9 +80,10 @@
 //! state root is then guarded as the `.agix` it is — its configuration files
 //! and directories are read-only, but for one the project itself is in —
 //! and the settings and definitions of the root and every scene stay
-//! read-only either way. On Linux `.agix`, and `.claude` where it exists, is read-only as
-//! a whole and its existing working entries are opened again, so a new entry
-//! directly in it cannot be created either; `.agents/skills/` is read-only
+//! read-only either way. On Linux the own project directory, and a foreign
+//! root where it exists, is read-only as a whole and the own one's existing
+//! working entries are opened again, so a new entry directly in either
+//! cannot be created; `.agents/skills/` is read-only
 //! where `.agents` exists, and `.agents` itself is shut under an empty read-only
 //! tmpfs where it does not, leaving an empty mount point.
 //!

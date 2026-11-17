@@ -64,6 +64,7 @@ pub mod entry {
     pub const SKILLS: &str = "skills";
     pub const AGENTS: &str = "agents";
     pub const HOOKS: &str = "hooks";
+    pub const COMMANDS: &str = "commands";
     pub const RULES: &str = "rules";
     pub const OUTPUT_STYLES: &str = "output-styles";
     pub const PLUGINS: &str = "plugins";
@@ -127,10 +128,13 @@ pub const ENGINE_CONFIG_FILES: &[&str] =
     &[entry::SETTINGS, entry::SETTINGS_LOCAL, entry::MCP_LOCAL];
 
 /// Directories directly in a configuration root that configure the engine or
-/// that it acts on unsandboxed, guarded with everything under them.
+/// that it acts on unsandboxed, guarded with everything under them. With
+/// `commands`, which the engine does not read but Claude Code reads its slash
+/// commands from.
 pub const ENGINE_CONFIG_DIRS: &[&str] = &[
     entry::MCP,
     entry::HOOKS,
+    entry::COMMANDS,
     entry::AGENTS,
     entry::SKILLS,
     entry::PLUGINS,

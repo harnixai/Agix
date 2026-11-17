@@ -373,6 +373,9 @@ pub(super) struct ProjectGuard {
     pub(super) entries: Vec<PathBuf>,
     pub(super) files: Vec<PathBuf>,
     pub(super) trees: Vec<PathBuf>,
+    /// The foreign configuration roots, shut to writes as a whole
+    /// ([`base::paths::ConfigRootAt::shut_to_writes`]).
+    pub(super) shut: Vec<PathBuf>,
     /// The `worktrees/` of each guarded git directory and of each engine
     /// directory in the project: what a worktree made after the profile was
     /// written lands in, where no fixed path names its control files yet.
@@ -418,10 +421,14 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
     let configured = git_configured(cwd, &git_dir);
     trees.extend(configured.hooks);
     files.extend(configured.included);
+    let mut shut = Vec::new();
     for root in roots.paths.config_roots_in(cwd) {
-        let real = root.resolved;
+        let real = root.resolved.clone();
         files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
         trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
+        if root.shut_to_writes() {
+            shut.push(real.clone());
+        }
         if real != root.path {
             entries.push(real);
         }
@@ -453,6 +460,7 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
         entries,
         files,
         trees,
+        shut,
         worktree_parents: WorktreeParents { admin, links },
     }
 }

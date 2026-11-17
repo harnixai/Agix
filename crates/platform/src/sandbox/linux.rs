@@ -12,9 +12,8 @@ use super::{
     NetworkMode, ProcessSpec, SandboxMode, SandboxPolicy,
 };
 use base::paths::{
-    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
-    PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR, STATE_ROOT_SCENE_FILES,
-    STATE_ROOT_WORKING_DIRS,
+    GIT_CONTROL_FILES, GIT_HOOKS_DIR, PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR,
+    STATE_ROOT_SCENE_FILES, STATE_ROOT_WORKING_DIRS,
 };
 use std::path::{Path, PathBuf};
 
@@ -109,7 +108,7 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, masked: &[PathBuf]) {
     }
 
     for root in roots.paths.config_roots_in(&roots.cwd) {
-        let root_dir = root.path;
+        let root_dir = root.path.clone();
         // Holding an absent root leaves an empty mount point behind in the
         // project, which for the instance's own directory is the engine's
         // own and for a foreign one would be litter in every project.
@@ -118,7 +117,7 @@ fn guard_project(args: &mut Vec<String>, roots: &Roots, masked: &[PathBuf]) {
             continue;
         }
         read_only(args, &root_dir);
-        for entry in working_entries(&root_dir) {
+        for entry in working_entries(roots, &root) {
             bind(args, "--bind", &entry);
         }
     }
@@ -159,22 +158,43 @@ fn guard_project_skills(args: &mut Vec<String>, roots: &Roots) {
     }
 }
 
-/// The entries of a configuration root `root` that are not configuration
-/// and not symbolic links: what a command may write in it.
-fn working_entries(root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root) else {
+/// What a command may write in the configuration root `root`: its entries
+/// that [`base::paths::ConfigRootAt::writable_entry`] admits and that are not
+/// symbolic links, and in a root shut to writes the writable roots inside it,
+/// which the policy names.
+fn working_entries(roots: &Roots, root: &base::paths::ConfigRootAt) -> Vec<PathBuf> {
+    if root.shut_to_writes() {
+        return roots
+            .writable
+            .iter()
+            .filter(|w| w.starts_with(&root.path) || w.starts_with(&root.resolved))
+            .cloned()
+            .collect();
+    }
+    let Ok(entries) = std::fs::read_dir(&root.path) else {
         return Vec::new();
     };
     entries
         .flatten()
         .filter(|entry| {
-            let configures = entry.file_name().to_str().is_some_and(|n| {
-                ENGINE_CONFIG_FILES.contains(&n) || ENGINE_CONFIG_DIRS.contains(&n)
-            });
-            !configures && entry.file_type().is_ok_and(|t| !t.is_symlink())
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|n| root.writable_entry(n))
+                && entry.file_type().is_ok_and(|t| !t.is_symlink())
         })
         .map(|entry| entry.path())
         .collect()
+}
+
+/// The configuration root of the project that `dir` is, as given or as it
+/// resolves.
+fn config_root_at(roots: &Roots, dir: &Path) -> Option<base::paths::ConfigRootAt> {
+    roots
+        .paths
+        .config_roots_in(&roots.cwd)
+        .into_iter()
+        .find(|root| root.path == dir || root.resolved == dir)
 }
 
 /// Each engine directory of the project ([`base::paths::SensitivePaths::engine_dirs_in`]),
@@ -210,12 +230,11 @@ fn mask_engine_dir(
     if !read.shows(dir) || !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
         return false;
     }
-    let working = if roots.opens(dir) {
-        working_entries(dir)
-    } else {
-        Vec::new()
+    let working = match config_root_at(roots, dir) {
+        Some(root) if roots.opens(dir) => working_entries(roots, &root),
+        _ => Vec::new(),
     };
-    let holes: Vec<PathBuf> = working
+    let mut holes: Vec<PathBuf> = working
         .into_iter()
         .chain(
             roots
@@ -225,6 +244,8 @@ fn mask_engine_dir(
                 .cloned(),
         )
         .collect();
+    holes.sort();
+    holes.dedup();
     let plan = mask::mask_plan(dir, secrets, &holes);
     apply_mask(args, &plan, true);
     !plan.is_empty()
