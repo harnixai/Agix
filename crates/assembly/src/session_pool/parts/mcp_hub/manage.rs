@@ -348,6 +348,22 @@ impl SessionPool {
         name: &str,
         force: bool,
     ) -> Option<api::McpServerStatus> {
+        let (status, event) = self.reconcile_unannounced(key, name, force).await?;
+        if let Some(event) = event {
+            self.emit_event(event);
+        }
+        status
+    }
+
+    /// [`Self::reconcile_mcp_server`] handing back the event that announces
+    /// what came of it instead of sending it; `None` when the pair has no
+    /// connections.
+    pub(in crate::session_pool) async fn reconcile_unannounced(
+        &self,
+        key: &ProjectSceneKey,
+        name: &str,
+        force: bool,
+    ) -> Option<(Option<api::McpServerStatus>, Option<api::DaemonEvent>)> {
         let slot = self.mcp.cache.existing(key)?;
         let settings = self.settings_for_project(key.0.as_deref(), &key.1).await;
         let admission = self.admit_mcp_server(&settings, name);
@@ -364,11 +380,8 @@ impl SessionPool {
             update.set(Arc::new(updated));
             (entries, event)
         };
-        if let Some(event) = event {
-            self.emit_event(event);
-        }
         self.invalidate_mcp_keys(std::slice::from_ref(key)).await;
-        entries
+        let status = entries
             .into_iter()
             .find(|s| s.name == name)
             .or_else(|| {
@@ -380,7 +393,8 @@ impl SessionPool {
                 untrusted_mcp_entries(&settings)
                     .into_iter()
                     .find(|s| s.name == name)
-            })
+            });
+        Some((status, event))
     }
 
     /// What a write that touched only `name` does to connections: the pair it

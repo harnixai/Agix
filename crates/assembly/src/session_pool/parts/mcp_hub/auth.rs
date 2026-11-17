@@ -82,70 +82,48 @@ impl SessionPool {
     }
 
     /// [`Self::reconnect_mcp_servers`] for the servers `pick` names in each
-    /// cached manager.
+    /// cached manager, each through [`Self::reconcile_mcp_server`]: admitted
+    /// again from the pair's settings and connected anew, its other servers
+    /// left as they are. At most one event per server, however many pairs
+    /// have it: the best outcome among them, as [`after_sign_in`] tells it.
     pub(in crate::session_pool) async fn reconnect_mcp_where(
         &self,
         pick: impl Fn(&McpManager) -> Vec<String>,
     ) -> Vec<String> {
-        let mut touched = Vec::new();
-        let mut outcomes: HashMap<String, Result<mcp::manager::ServerStatus, Option<String>>> =
-            HashMap::new();
+        let mut outcomes: HashMap<String, Option<Reconnected>> = HashMap::new();
         for (key, slot) in self.mcp.cache.slots() {
-            let update = slot.update().await;
-            let Some(manager) = update.current() else {
+            let Some(manager) = slot.current() else {
                 continue;
             };
-            let names = pick(&manager);
-            if names.is_empty() {
-                continue;
-            }
-            let mut updated = manager.share();
-            for name in &names {
-                if let Some(cfg) = updated.config_of(name).cloned() {
-                    updated.add_server(name, &cfg).await;
-                }
-            }
-            updated.refresh_tools().await;
-            let statuses = updated.server_statuses();
-            for name in names {
-                let outcome = match statuses.iter().find(|s| s.name == name) {
-                    Some(status) => Ok(status.clone()),
-                    None => Err(updated
-                        .failed()
-                        .iter()
-                        .find(|f| f.name == name)
-                        .map(|f| f.error.clone())),
+            for name in pick(&manager) {
+                let Some((status, event)) = self.reconcile_unannounced(&key, &name, true).await
+                else {
+                    continue;
                 };
-                let telling = |o: &Result<_, Option<String>>| match o {
-                    Ok(_) => 2,
-                    Err(Some(_)) => 1,
-                    Err(None) => 0,
+                let outcome = event.map(|event| Reconnected {
+                    state: status.map(|s| s.state),
+                    event,
+                });
+                let telling = |o: &Option<Reconnected>| match o {
+                    Some(Reconnected {
+                        event: api::DaemonEvent::McpConnected { .. },
+                        ..
+                    }) => 2,
+                    Some(_) => 1,
+                    None => 0,
                 };
-                let seen = outcomes.entry(name).or_insert(Err(None));
+                let seen = outcomes.entry(name).or_insert(None);
                 if telling(&outcome) > telling(seen) {
                     *seen = outcome;
                 }
             }
-            update.set(Arc::new(updated));
-            touched.push(key);
         }
-        self.invalidate_mcp_keys(&touched).await;
         let mut names: Vec<String> = outcomes.keys().cloned().collect();
         names.sort();
-        for (name, outcome) in outcomes {
-            self.emit_event(match outcome {
-                Ok(s) => mcp_connected_event(&s),
-                Err(error) => api::DaemonEvent::McpConnectFailed {
-                    server: name,
-                    error: match error {
-                        Some(error) => format!("connect failed after authorizing: {error}"),
-                        None => {
-                            "connect failed after authorizing — see mcp.status and the daemon log"
-                                .into()
-                        }
-                    },
-                },
-            });
+        for outcome in outcomes.into_values() {
+            if let Some(event) = after_sign_in(outcome) {
+                self.emit_event(event);
+            }
         }
         names
     }
@@ -320,5 +298,71 @@ impl SessionPool {
         Ok(api::McpServerRef {
             server: name.to_string(),
         })
+    }
+}
+
+/// How a server signed in to came out of being reconnected in one pair.
+struct Reconnected {
+    state: Option<api::McpServerState>,
+    event: api::DaemonEvent,
+}
+
+/// What the host is told of a server once it is signed in and reconnected:
+/// nothing when every pair has turned it off or dropped it since; a refusal
+/// by the policy as it is; a connection that failed as one that failed after
+/// authorizing.
+fn after_sign_in(outcome: Option<Reconnected>) -> Option<api::DaemonEvent> {
+    let Reconnected { state, event } = outcome?;
+    match event {
+        api::DaemonEvent::McpConnectFailed { server, error }
+            if !matches!(
+                state,
+                Some(api::McpServerState::Denied | api::McpServerState::Untrusted)
+            ) =>
+        {
+            Some(api::DaemonEvent::McpConnectFailed {
+                server,
+                error: format!("connect failed after authorizing: {error}"),
+            })
+        }
+        other => Some(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failed(error: &str) -> api::DaemonEvent {
+        api::DaemonEvent::McpConnectFailed {
+            server: "docs".into(),
+            error: error.into(),
+        }
+    }
+
+    fn error_of(event: Option<api::DaemonEvent>) -> Option<String> {
+        match event? {
+            api::DaemonEvent::McpConnectFailed { error, .. } => Some(error),
+            other => panic!("expected mcp_connect_failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_server_turned_off_while_signing_in_is_not_reported_as_failing() {
+        assert!(after_sign_in(None).is_none());
+        assert_eq!(
+            error_of(after_sign_in(Some(Reconnected {
+                state: Some(api::McpServerState::Failed),
+                event: failed("refused"),
+            }))),
+            Some("connect failed after authorizing: refused".into())
+        );
+        assert_eq!(
+            error_of(after_sign_in(Some(Reconnected {
+                state: Some(api::McpServerState::Denied),
+                event: failed("the MCP policy denies it"),
+            }))),
+            Some("the MCP policy denies it".into())
+        );
     }
 }

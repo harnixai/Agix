@@ -79,7 +79,10 @@
 
 需要登录的 server 不提供工具(`mcp.status` 里它的 `state` 是 `auth_required`,`tool_count`
 为 0);模型在系统提示的 MCP 部分看到一句短说明:这个 server 要用户先登录。登录完成后只
-重连这一个 server,会话在下一轮之前拿到它的工具。
+重连这一个 server(与 `mcp.reconnect` 同一条路径:按每一对现在的设置重新准入再连),会话在下一轮之前拿到它的工具。
+结果按各对里最好的一个发一条通知:连上是 `mcp_connected`;连不上是 `mcp_connect_failed`,`error` 以
+`connect failed after authorizing:` 开头;被策略拒绝的照原样报拒绝的理由;登录期间它在所有对里都被
+关掉(`mcp.setEnabled`)或删掉了,就不发。
 
 ## 3. 登录流程
 
@@ -240,7 +243,7 @@ MCP server 各登录一次,企业 IdP 决定谁能用哪个 server。
 | `kind` | 载荷 | 什么时候 |
 |---|---|---|
 | `mcp_auth_required` | `{server, scopes}` | server 需要登录(含需要更多 scope、`enterprise` server 在等身份) |
-| `mcp_auth_completed` | `{server}` | 登录完成,随后是这个 server 的 `mcp_connected` |
+| `mcp_auth_completed` | `{server}` | 登录完成,随后是这个 server 的 `mcp_connected` 或 `mcp_connect_failed`(§2) |
 | `mcp_auth_failed` | `{server, error}` | 登录失败或过期 |
 
 错误码:请求本身不对(没有这个 server、server 不用 OAuth、流程不存在或已结束、redirect
