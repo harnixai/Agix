@@ -359,6 +359,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | PIPE-1..4 | 一条工具管线：`Tool::call` 只被 `call_tool` 调、权限只经 `authorize`、`ToolContext` 只在一处造且字段都有读写方、沙箱只有三份类型 | syn | `tests/guards/tests/tool_pipeline.rs` |
 | A1..A8 | 接口面：权限 trait 只有判与授、缺省方法不互相递归、工具不持 `dyn Tool`、契约无线程局部状态、公开枚举 `#[non_exhaustive]`、嵌入方构造的结构体、设置类型不带加载结果、不留 `#[deprecated]` | syn | `tests/guards/tests/api_surface.rs` |
 | 无编号 | 嵌入入口 `assembly::embed` 只增不改：`EmbedConfig` 的字段只加不改且 `#[non_exhaustive]`，`EmbedError` 的变体只加不改，`Embedded` 的方法签名、derive 与 trait 实现不变；入口不读进程环境 | syn | `tests/guards/tests/embed_surface.rs` |
+| DIR-1..3、NAME-1..3 | 引擎目录与产品名只在一处命名：生产代码里不拼 `.agix` 或其中的条目（路径经 `ConfigPaths` / `StateRoot` / `Layout`），不写死 `Agix`（取自 `Layout::product_name`）；提示词与工具说明同样不写死，工具入参的文档注释也不点名产品 | syn | `tests/guards/tests/engine_dirs.rs` |
 | 无编号 | 门面 `agix` 不含逻辑：按条目再导出而不是整个 crate、每条只导出一次、prelude 只列主题模块、导出总数钉住 | syn | `tests/guards/tests/facade.rs` |
 | DEC-1 | 包装器重写被包装 trait 的每个缺省方法（或登记理由） | syn | `tests/guards/tests/decorators.rs` |
 | ORD-1 | 读了前面模块产物的模块在 `Module::after` 里声明它 | syn | `tests/guards/tests/module_order.rs` |

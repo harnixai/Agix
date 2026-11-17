@@ -486,8 +486,15 @@ sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
 ```
 
 Task keys `main`, `subagent`, `compact`, `memory`, `web_search` and `web_fetch`
-route each kind of call; a session can also choose its own provider. `WebSearch`
-searches through the session's own model (the provider's built-in search) unless
+route each kind of call; a session can also choose its own provider. A conversation's
+model is, in order: the session's own `model`, the session's chosen provider's
+`default_model`, the model of `task_models.main`, then `model.model_name`. A sub-agent's:
+the `Agent` call's (or `session.startAgent`'s) `model`, the agent type's `model`, the model of
+`task_models.subagent`, then the session's current model. A task with no `task_models` entry
+(sub-agents, compaction, memory, titles) runs on `default_provider`'s client, with the session's
+model when the session is on that provider and `model.model_name` when it is not. `WebSearch`
+searches through the session's own model (the provider's built-in search; after
+`session.setModel`, the new one) unless
 `task_models.web_search` names another provider. `WebFetch` returns the page as
 plain text in windows of up to 50,000 characters, read on with `offset` / `limit`
 (each continuation fetches the page again); only when `task_models.web_fetch`
