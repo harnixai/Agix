@@ -41,3 +41,4 @@ mod skills_and_memory;
 mod stream_recovery;
 mod team_lifecycle;
 mod turn_throughput;
+mod worktree_location;

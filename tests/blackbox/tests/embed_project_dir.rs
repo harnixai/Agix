@@ -1,8 +1,9 @@
 //! An embedder that names its own project directory (`EmbedConfig.project_dir`
 //! = `.codix`), over `Embedded::serve_stream`: every file the engine keeps in
 //! the project lands under that name and none under `.agix` — written files,
-//! a sub-agent's worktree, an "always, this project" rule, a team, memory, an
-//! import, telemetry — and the protection follows the name: the model cannot
+//! an "always, this project" rule, a team, memory, an import, telemetry — but
+//! a sub-agent's worktree, which goes in `.wkts/` and is all the repository's
+//! `.gitignore` gains; and the protection follows the name: the model cannot
 //! rewrite `.codix`'s settings or hooks, nor a foreign `.agix`'s, and a
 //! worktree's copy of a file the project denies is denied too. A name that
 //! cannot be a project directory is refused at start.
@@ -245,7 +246,7 @@ async fn a_renamed_project_directory_holds_everything_the_engine_keeps_and_is_gu
     assert!(imported.error.is_none(), "{imported:?}");
 
     routine_replies(&stub);
-    let worktree = own.join("worktrees/wt");
+    let worktree = project.join(".wkts/wt");
     stub.script_when(
         MAIN,
         [
@@ -321,9 +322,10 @@ async fn a_renamed_project_directory_holds_everything_the_engine_keeps_and_is_gu
         "{:?}",
         events.tool_results
     );
-    assert!(read(project.join(".gitignore"))
-        .lines()
-        .any(|l| l == format!("{OWN}/")));
+    let gitignore = read(project.join(".gitignore"));
+    assert!(gitignore.lines().any(|l| l == ".wkts/"), "{gitignore}");
+    assert!(!gitignore.contains(OWN), "{gitignore}");
+    assert!(!own.join("worktrees").exists());
     assert!(
         stub.calls()
             .iter()
@@ -571,9 +573,9 @@ async fn a_sandboxed_command_cannot_make_a_configuration_root_that_is_not_there(
 }
 
 /// In the instance's own directory a sandboxed command writes only what the
-/// gate leaves out of configuration — `scratchpad/`, `memory/`,
-/// `worktrees/` — not the teams, telemetry or any other entry the engine
-/// keeps there, which the engine itself still writes. The prompts are
+/// gate leaves out of configuration — `scratchpad/`, `memory/` — not the
+/// teams, telemetry, a `worktrees/` or any other entry the engine keeps
+/// there, which the engine itself still writes. The prompts are
 /// answered yes, so the sandbox alone decides.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
@@ -581,7 +583,7 @@ async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
     let stub = ProviderStub::start().await?;
     let root = root(&stub)?;
     let own = root.project.join(OWN);
-    for dir in ["teams", "telemetry", "scratchpad", "memory"] {
+    for dir in ["teams", "telemetry", "scratchpad", "memory", "worktrees/w"] {
         std::fs::create_dir_all(own.join(dir))?;
     }
     let embedded = Embedded::start(config(&root, OWN)).await?;
@@ -592,6 +594,7 @@ async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
         "telemetry/x.jsonl",
         ".imported.json",
         "notes.md",
+        "worktrees/w/x",
     ];
     let mut replies: Vec<Reply> = refused
         .iter()

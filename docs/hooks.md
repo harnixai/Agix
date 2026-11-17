@@ -163,7 +163,7 @@ JSON。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:
 (工具调用、`SubagentStart` 等)不再起 agent hook,按执行失败处理、走 `on_error`;command /
 prompt / http hook 对它照旧跑。它读的是模型写的 payload,所以只有 `Read`、`Grep`、`Glob`
 (外加 `ToolSearch`),要批准的调用直接拒、不问人。它一次性跑完就丢,不做记忆抽取。它在 payload 的
-`cwd` 里干活——那是项目根或项目的一个 worktree(`<项目根>/.agix/worktrees/` 下)时;判 worktree 里的
+`cwd` 里干活——那是项目根或项目的一个 worktree(仓库根的 worktree 目录下,缺省 `<项目根>/.wkts/`)时;判 worktree 里的
 子 Agent 的调用,它读的就是那个 worktree。别的目录不收,它照旧在根会话的工作目录里。
 
 ---

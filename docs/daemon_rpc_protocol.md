@@ -449,7 +449,7 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
   `cd` 到不是项目内字面路径之后再读的,照常询问。
 - 文件类工具用 glob(`"/etc/**"`)。匹配前两边都规整成绝对路径:相对路径按会话的
   工作目录解析,`.` / `..` 去掉,`~` 展开;符号链接解析后的路径上命中 `deny` / `ask`
-  也算,`<目录>/<项目层目录>/worktrees/<名>/` 下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
+  也算,`<目录>/<worktree 目录>/<名>/`(缺省 `.wkts`,设置 `worktree_dir`)下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
   命中 `deny` / `ask` 也算——锚在项目上的规则对子 Agent worktree 里的拷贝同样成立。`*` 不跨
   `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样约束 `Write` /
   `NotebookEdit`。沙箱开着时,点名具体路径的 `Read(...)` `deny`——一个文件或目录,或目录后面只跟
@@ -2241,7 +2241,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   `{session_id, reason: "previous_engine", current_turn_id: null}`;过一会儿再试。两个引擎不会同时写一份转录。
   `session.run_turn` 指名这样的会话同样如此。
 - 目标是在 worktree 里干活的子 Agent 的侧链(`Agent` 的 `worktree`),而那个 worktree 已经不在、
-  不在项目所在仓库的项目层目录(缺省 `.agix`)的 `worktrees/` 下、或者它的 `.git` 链接不再指回仓库的 `.git` →
+  不直属于项目所在仓库根的 worktree 目录(缺省 `.wkts`)、或者它的 `.git` 链接不再指回仓库的 `.git` →
   `INTERNAL_ERROR`,消息含 "worktree" 与原因(如 "is gone")。不会在主检出里恢复它。侧链按它记下的
   项目恢复(`project_trust` 等与父会话的项目相同),在 worktree 里干活的仍在那个 worktree 里。
 - 会话因别的原因建不回来(例如它记录的 `provider` 已经不在配置里)→ `INTERNAL_ERROR`,
@@ -3064,7 +3064,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 | `unknown_key` | 没有设置读这个键(值是对象时,对象里的键也逐个查) |
 | `invalid_value` | 值放不进这个设置(按加载器的规则判:类型、枚举、一条一条的权限规则),或 `permission_mode` 写了只能由程序设的模式 |
 | `requires_trust` | 写进未受信项目的项目层,而它会被扣下(§3.6):未受信项目只能增加与收紧,判的是写入那一刻相对下面几层 |
-| `not_at_tier` | `network.*` 只从全局层读,写在场景层 / 项目层 |
+| `not_at_tier` | `network.*` 只从全局层读,写在场景层 / 项目层;`worktree_dir` 不从项目层读,写在项目层 |
 | `use_method` | 有专门的方法,`method` 指明:`mcp_servers` → `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`,`mcp_enabled` → `mcp.setEnabled`,`project_trust` → `project.trust` |
 | `not_writable` | `hooks_config`、`scripts`:它们执行代码,不经 RPC 写,宿主仍可直接改设置文件 |
 
@@ -4076,7 +4076,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 **工作目录与深度**:`cwd` 是发起调用的那个会话的工作目录,`depth` 是它的委派深度:根会话 0,
 它起的子 Agent 1,子 Agent 再起的 2,依此类推。在 worktree 里跑的子 Agent(`Agent` 的
-`worktree`)的 `cwd` 是那个 worktree(`<项目根>/<项目层目录>/worktrees/<名>`,缺省 `.agix`),宿主工具该在那里读写。
+`worktree`)的 `cwd` 是那个 worktree(`<仓库根>/<worktree 目录>/<名>`,缺省 `.wkts`),宿主工具该在那里读写。
 子 Agent 结束时 worktree 若原样未动就删掉,否则连同分支 `agix/worktree-<名>` 留下(后台子 Agent
 的任务 `detail.worktree` 记着,见 §6.3 `session.tasks`),所以之后的帧里这个 `cwd` 可能已经不存在,也可能
 还在。`EnterWorktree` 不改会话的工作目录,之后的调用 `cwd` 照旧。

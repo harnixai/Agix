@@ -1,7 +1,8 @@
 //! The names of the engine's directories and of what is in them, and the
-//! two values that vary between instances: what a project's directory is
-//! called and what the product is called ([`Layout`]: `.agix` and `Agix`
-//! unless the embedder names others).
+//! values that vary between instances: what a project's directory is called,
+//! what the product is called, and what the repository directory the
+//! engine's worktrees go in is called ([`Layout`]: `.agix`, `Agix` and
+//! `.wkts` unless the embedder or the user's settings name others).
 //!
 //! Every other module takes these names from here — the derived paths from
 //! [`super::ConfigPaths`], [`Layout`] and [`StateRoot`], the security
@@ -50,6 +51,10 @@ pub const DEFAULT_PRODUCT_URL: &str = "https://github.com/openatta/agix";
 /// The directory in a git directory holding the linked worktrees' entries.
 pub const GIT_WORKTREES_DIR: &str = "worktrees";
 
+/// The directory at a repository's root that the engine's worktrees go in
+/// when the settings name none.
+pub const DEFAULT_WORKTREES_DIR: &str = ".wkts";
+
 /// Entries of an engine directory: the state root, a scene directory, a
 /// project directory.
 pub mod entry {
@@ -78,7 +83,6 @@ pub mod entry {
     pub const MEMORY: &str = "memory";
     pub const SCRATCHPAD: &str = "scratchpad";
     pub const TMP: &str = "tmp";
-    pub const WORKTREES: &str = "worktrees";
     pub const TEAMS: &str = "teams";
     pub const TELEMETRY: &str = "telemetry";
     pub const TOOL_RESULTS: &str = "tool-results";
@@ -115,11 +119,6 @@ pub const STATE_ROOT_SCRATCHPAD: &str = entry::SCRATCHPAD;
 /// `<state root>/tmp/<session>`: the session's sandboxed commands may write
 /// their own and no other.
 pub const STATE_ROOT_SESSION_TMP: &str = entry::TMP;
-
-/// The directory in a project directory that holds the git worktrees
-/// `EnterWorktree` creates: project work checked out elsewhere, not
-/// configuration, so it is outside [`ENGINE_CONFIG_DIRS`].
-pub const PROJECT_WORKTREES_DIR: &str = entry::WORKTREES;
 
 /// Files in a configuration root that configure the engine. The write tools
 /// refuse them anywhere under such a directory, a sandboxed command directly
@@ -189,6 +188,14 @@ pub struct LayoutError {
     pub reason: &'static str,
 }
 
+/// Why a name cannot be the worktrees directory's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`{name}` cannot name the worktrees directory: {reason}")]
+pub struct WorktreesDirError {
+    pub name: String,
+    pub reason: &'static str,
+}
+
 /// Why a name cannot be the product's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("`{name}` cannot name the product: {reason}")]
@@ -203,6 +210,7 @@ pub struct ProductNameError {
 pub struct Layout {
     project_dir: Arc<str>,
     product: Arc<str>,
+    worktrees: Arc<str>,
 }
 
 impl Default for Layout {
@@ -210,7 +218,30 @@ impl Default for Layout {
         Self {
             project_dir: Arc::from(DEFAULT_PROJECT_DIR),
             product: Arc::from(DEFAULT_PRODUCT_NAME),
+            worktrees: Arc::from(DEFAULT_WORKTREES_DIR),
         }
+    }
+}
+
+/// Why `name` is not one path component of at most 64 characters, each
+/// `allowed` (else `charset` says why), that starts with `.`.
+fn not_hidden_component(
+    name: &str,
+    allowed: fn(char) -> bool,
+    charset: &'static str,
+) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("it is empty")
+    } else if name.len() > 64 {
+        Some("it is longer than 64 characters")
+    } else if !name.chars().all(allowed) {
+        Some(charset)
+    } else if name == "." || name == ".." {
+        Some("it is not a directory of its own")
+    } else if !name.starts_with('.') {
+        Some("it must start with `.`, as a directory a project does not use for its own files")
+    } else {
+        None
     }
 }
 
@@ -226,46 +257,77 @@ impl Layout {
     /// One path component of `[a-z0-9._-]`, at most 64 long: the
     /// configuration checks split shell text on any other character, and a
     /// lowercase-only name is the same directory on every filesystem. It
-    /// starts with `.`: the engine deletes what it does not recognize under
-    /// `<name>/worktrees/` and refuses writes to its configuration
+    /// starts with `.`: the engine refuses writes to its configuration
     /// subdirectories, which a project's own `src` or `docs` must never be
     /// subject to, and a hidden directory is where tools keep their state.
-    /// Not `.`, `..`, nor a directory that is another tool's
-    /// ([`OTHER_TOOLS_DIRS`]).
+    /// Not `.`, `..`, a directory that is another tool's
+    /// ([`OTHER_TOOLS_DIRS`]), nor [`DEFAULT_WORKTREES_DIR`].
     pub fn new(project_dir: &str) -> Result<Self, LayoutError> {
-        let refuse = |reason| {
-            Err(LayoutError {
+        let lowercase = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
+        let reason = not_hidden_component(
+            project_dir,
+            lowercase,
+            "only lowercase letters, digits, `.`, `_` and `-` are allowed",
+        )
+        .or_else(|| {
+            OTHER_TOOLS_DIRS
+                .contains(&project_dir)
+                .then_some("that directory belongs to another tool")
+        })
+        .or_else(|| {
+            (project_dir == DEFAULT_WORKTREES_DIR)
+                .then_some("that is where the engine's worktrees go")
+        });
+        match reason {
+            Some(reason) => Err(LayoutError {
                 name: project_dir.to_string(),
                 reason,
-            })
-        };
-        if project_dir.is_empty() {
-            return refuse("it is empty");
+            }),
+            None => Ok(Self {
+                project_dir: Arc::from(project_dir),
+                ..Self::default()
+            }),
         }
-        if project_dir.len() > 64 {
-            return refuse("it is longer than 64 characters");
-        }
-        if !project_dir
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
-        {
-            return refuse("only lowercase letters, digits, `.`, `_` and `-` are allowed");
-        }
-        if project_dir == "." || project_dir == ".." {
-            return refuse("it is not a directory of its own");
-        }
-        if !project_dir.starts_with('.') {
-            return refuse(
-                "it must start with `.`, as a directory a project does not use for its own files",
-            );
-        }
-        if OTHER_TOOLS_DIRS.contains(&project_dir) {
-            return refuse("that directory belongs to another tool");
-        }
-        Ok(Self {
-            project_dir: Arc::from(project_dir),
-            ..Self::default()
+    }
+
+    /// This layout with its worktrees in `<repository>/<name>/`: one path
+    /// component of ASCII letters, digits, `.`, `_` and `-`, at most 64 long,
+    /// starting with `.` — the repository's `.gitignore` ignores it, every
+    /// entry in it counts as a copy of the main checkout, and the sandbox
+    /// keeps commands from adding, renaming or removing those entries, none
+    /// of which a project's own `src` must be subject to. Not `.`, `..`, a
+    /// configuration root ([`Self::config_roots`]), a directory another tool
+    /// owns ([`OTHER_TOOLS_DIRS`]) nor anything starting with `.git`, which
+    /// git and the forges keep their files under, compared without case: a
+    /// worktree in one would sit inside configuration the sandbox shuts.
+    pub fn with_worktrees_dir(self, name: &str) -> Result<Self, WorktreesDirError> {
+        let ascii = |c: char| c.is_ascii_alphanumeric() || "._-".contains(c);
+        let folded = super::fold_case(name);
+        let reason = not_hidden_component(
+            name,
+            ascii,
+            "only ASCII letters, digits, `.`, `_` and `-` are allowed",
+        )
+        .or_else(|| {
+            self.config_roots()
+                .any(|root| root.name == folded)
+                .then_some("that directory is a configuration root")
         })
+        .or_else(|| {
+            (OTHER_TOOLS_DIRS.contains(&folded.as_str())
+                || folded.starts_with(super::REPOSITORY_CONFIG_DIR))
+            .then_some("that directory belongs to another tool")
+        });
+        match reason {
+            Some(reason) => Err(WorktreesDirError {
+                name: name.to_string(),
+                reason,
+            }),
+            None => Ok(Self {
+                worktrees: Arc::from(name),
+                ..self
+            }),
+        }
     }
 
     /// This layout under the product name `name`: an ASCII letter, then up
@@ -302,6 +364,11 @@ impl Layout {
 
     pub fn project_dir_name(&self) -> &str {
         &self.project_dir
+    }
+
+    /// The name of the repository directory the engine's worktrees go in.
+    pub fn worktrees_dir_name(&self) -> &str {
+        &self.worktrees
     }
 
     /// The product's name as people read it: in prompts, messages, a
@@ -384,9 +451,18 @@ impl Layout {
         project_root.join(&*self.project_dir)
     }
 
-    /// `<repo_root>/<name>/worktrees`: where the engine's worktrees live.
+    /// `<repo_root>/<worktrees dir>`: where the engine makes its worktrees.
     pub fn worktrees_dir(&self, repo_root: &Path) -> PathBuf {
-        self.project_dir(repo_root).join(PROJECT_WORKTREES_DIR)
+        repo_root.join(&*self.worktrees)
+    }
+
+    /// The directories at a repository's root that hold the engine's
+    /// worktrees: this layout's, then [`DEFAULT_WORKTREES_DIR`] when that is
+    /// not it — where the worktrees made before the settings named another
+    /// directory, or by an instance whose settings name none, are.
+    pub fn worktrees_dir_names(&self) -> impl Iterator<Item = &str> {
+        let own: &str = &self.worktrees;
+        std::iter::once(own).chain((own != DEFAULT_WORKTREES_DIR).then_some(DEFAULT_WORKTREES_DIR))
     }
 
     /// `<dir>/<name>/teams`.
@@ -394,9 +470,9 @@ impl Layout {
         self.project_dir(dir).join(entry::TEAMS)
     }
 
-    /// The repository `.gitignore` line keeping the project directory out.
+    /// The repository `.gitignore` line keeping the worktrees directory out.
     pub fn gitignore_entry(&self) -> String {
-        format!("{}/", self.project_dir)
+        format!("{}/", self.worktrees)
     }
 
     /// The configuration roots the engine guards in a directory: its own
@@ -415,8 +491,8 @@ impl Layout {
         )
     }
 
-    /// The directories an engine of this family writes a project's keys and
-    /// worktrees to: the instance's own, and `.agix` when that is not it.
+    /// The directories an engine of this family writes a project's keys to:
+    /// the instance's own, and `.agix` when that is not it.
     pub fn engine_dir_names(&self) -> impl Iterator<Item = &str> {
         let own: &str = &self.project_dir;
         std::iter::once(own).chain((own != DEFAULT_PROJECT_DIR).then_some(DEFAULT_PROJECT_DIR))
@@ -429,32 +505,35 @@ impl Layout {
     }
 
     /// What `path` names inside a git worktree an engine made,
-    /// `<repo>/<engine dir>/worktrees/<w>/<rest>`, as the main checkout holds
-    /// it: `<repo>/<rest>`, and for a worktree made inside another, each
-    /// checkout out to the main one. Nothing is read from disk: without case.
+    /// `<repo>/<worktrees dir>/<w>/<rest>` for any of
+    /// [`Self::worktrees_dir_names`], as the main checkout holds it:
+    /// `<repo>/<rest>`, and for a worktree made inside another, each checkout
+    /// out to the main one. Nothing is read from disk: without case.
     pub fn main_checkout_copies(&self, path: &Path) -> Vec<PathBuf> {
-        let lowered = |c: &Component<'_>| super::fold_case(&c.as_os_str().to_string_lossy());
         let mut copies = Vec::new();
         let mut current: Vec<Component<'_>> = path.components().collect();
-        while let Some(at) = current.windows(3).rposition(|w| {
-            self.engine_dir_names().any(|dir| lowered(&w[0]) == dir)
-                && lowered(&w[1]) == PROJECT_WORKTREES_DIR
-                && matches!(w[2], Component::Normal(_))
-        }) {
-            current.drain(at..at + 3);
+        while let Some(at) = current.windows(2).rposition(|w| self.opens_a_worktree(w)) {
+            current.drain(at..at + 2);
             copies.push(current.iter().collect());
         }
         copies
     }
 
-    /// `<repo>/<name>/worktrees/<w>` when `path` is in one of this
-    /// instance's worktrees, the outermost when they nest.
+    /// `<repo>/<worktrees dir>/<w>` when `path` is in one of the engine's
+    /// worktrees, the outermost when they nest.
     pub fn worktree_of(&self, path: &Path) -> Option<PathBuf> {
         let parts: Vec<Component<'_>> = path.components().collect();
-        let at = parts.windows(2).position(|w| {
-            w[0].as_os_str() == &*self.project_dir && w[1].as_os_str() == PROJECT_WORKTREES_DIR
-        })?;
-        Some(parts.get(..at + 3)?.iter().collect())
+        let at = parts.windows(2).position(|w| self.opens_a_worktree(w))?;
+        Some(parts.get(..at + 2)?.iter().collect())
+    }
+
+    fn opens_a_worktree(&self, pair: &[Component<'_>]) -> bool {
+        let [Component::Normal(dir), Component::Normal(_)] = pair else {
+            return false;
+        };
+        let dir = super::fold_case(&dir.to_string_lossy());
+        self.worktrees_dir_names()
+            .any(|name| super::fold_case(name) == dir)
     }
 }
 
@@ -555,10 +634,16 @@ impl AsRef<Path> for StateRoot {
 
 /// The two layouts every test of a security decision runs under: the
 /// default, where `.agix` is both the instance's own and the foreign root,
-/// and a renamed one, where they differ.
+/// and a renamed one, where they differ and the worktrees are elsewhere.
 #[cfg(test)]
 pub(crate) fn test_layouts() -> [Layout; 2] {
-    [Layout::default(), Layout::new(".codix").unwrap()]
+    [
+        Layout::default(),
+        Layout::new(".codix")
+            .unwrap()
+            .with_worktrees_dir(".trees")
+            .unwrap(),
+    ]
 }
 
 #[cfg(test)]
@@ -596,7 +681,85 @@ mod tests {
             assert!(Layout::new(bad).is_err(), "{bad:?}");
         }
         assert!(Layout::new(&"a".repeat(65)).is_err());
+        assert!(Layout::new(DEFAULT_WORKTREES_DIR).is_err());
         assert_eq!(Layout::default().project_dir_name(), DEFAULT_PROJECT_DIR);
+    }
+
+    #[test]
+    fn a_worktrees_dir_is_one_hidden_component_of_no_configuration_root() {
+        for good in [
+            ".wkts",
+            ".trees",
+            ".Trees",
+            ".work_trees-2",
+            &format!(".{}", "a".repeat(63)),
+        ] {
+            let layout = Layout::default().with_worktrees_dir(good).unwrap();
+            assert_eq!(layout.worktrees_dir_name(), good);
+            assert_eq!(layout.project_dir_name(), DEFAULT_PROJECT_DIR);
+        }
+        let codix = Layout::new(".codix").unwrap();
+        for bad in [
+            "",
+            ".",
+            "..",
+            "wkts",
+            "a/b",
+            ".a/b",
+            "../x",
+            ".a b",
+            ".a\\b",
+            ".x$y",
+            ".tr\u{e9}es",
+            ".git",
+            ".GIT",
+            ".gitignore",
+            ".gitmodules",
+            ".GitAttributes",
+            ".git-blame-ignore-revs",
+            ".gitlab",
+            ".agix",
+            ".AGIX",
+            ".claude",
+            ".Claude",
+            ".agents",
+            ".github",
+            ".vscode",
+            ".idea",
+            ".codex",
+            ".cursor",
+            &format!(".{}", "a".repeat(64)),
+        ] {
+            assert!(
+                Layout::default().with_worktrees_dir(bad).is_err(),
+                "{bad:?}"
+            );
+            assert!(codix.clone().with_worktrees_dir(bad).is_err(), "{bad:?}");
+        }
+        assert!(codix.clone().with_worktrees_dir(".codix").is_err());
+        assert!(codix.clone().with_worktrees_dir(".Codix").is_err());
+        assert!(Layout::default().with_worktrees_dir(".codix").is_ok());
+        assert_eq!(
+            Layout::default().worktrees_dir_name(),
+            DEFAULT_WORKTREES_DIR
+        );
+        let named = Layout::new(".codix")
+            .unwrap()
+            .with_product_name("Codix")
+            .unwrap()
+            .with_worktrees_dir(".trees")
+            .unwrap();
+        assert_eq!(
+            (named.project_dir_name(), named.product_name()),
+            (".codix", "Codix")
+        );
+        assert_eq!(
+            named
+                .with_product_name("Other")
+                .unwrap()
+                .worktrees_dir_name(),
+            ".trees"
+        );
     }
 
     #[test]
@@ -708,66 +871,95 @@ mod tests {
     fn the_derived_paths_follow_the_name() {
         for layout in test_layouts() {
             let name = layout.project_dir_name().to_string();
+            let worktrees = layout.worktrees_dir_name().to_string();
             let root = Path::new("/repo");
             assert_eq!(layout.project_dir(root), root.join(&name));
-            assert_eq!(
-                layout.worktrees_dir(root),
-                root.join(&name).join("worktrees")
-            );
+            assert_eq!(layout.worktrees_dir(root), root.join(&worktrees));
             assert_eq!(layout.teams_dir(root), root.join(&name).join("teams"));
-            assert_eq!(layout.gitignore_entry(), format!("{name}/"));
+            assert_eq!(layout.gitignore_entry(), format!("{worktrees}/"));
             assert!(layout.is_own_dir_component(&name.to_uppercase()));
         }
+        assert_eq!(
+            Layout::default().worktrees_dir(Path::new("/repo")),
+            Path::new("/repo/.wkts")
+        );
+        assert_eq!(Layout::default().gitignore_entry(), ".wkts/");
+        assert_eq!(
+            Layout::default().worktrees_dir_names().collect::<Vec<_>>(),
+            [".wkts"]
+        );
+        assert_eq!(
+            Layout::default()
+                .with_worktrees_dir(".trees")
+                .unwrap()
+                .worktrees_dir_names()
+                .collect::<Vec<_>>(),
+            [".trees", ".wkts"]
+        );
     }
 
     #[test]
     fn a_path_in_a_worktree_has_its_main_checkout_copies() {
         for layout in test_layouts() {
-            let name = layout.project_dir_name();
-            let nested = format!("/repo/{name}/worktrees/a/{name}/worktrees/b/src/x.rs");
+            let wk = layout.worktrees_dir_name();
+            let nested = format!("/repo/{wk}/a/{wk}/b/src/x.rs");
             assert_eq!(
                 layout.main_checkout_copies(Path::new(&nested)),
                 [
-                    PathBuf::from(format!("/repo/{name}/worktrees/a/src/x.rs")),
+                    PathBuf::from(format!("/repo/{wk}/a/src/x.rs")),
                     PathBuf::from("/repo/src/x.rs")
                 ]
             );
             assert_eq!(
                 layout.worktree_of(Path::new(&nested)),
-                Some(PathBuf::from(format!("/repo/{name}/worktrees/a")))
+                Some(PathBuf::from(format!("/repo/{wk}/a")))
             );
-            let upper = format!("/repo/{}/WorkTrees/a/src/x.rs", name.to_uppercase());
+            let upper = format!("/repo/{}/a/src/x.rs", wk.to_uppercase());
             assert_eq!(
                 layout.main_checkout_copies(Path::new(&upper)),
                 [PathBuf::from("/repo/src/x.rs")]
             );
+            assert_eq!(
+                layout.worktree_of(Path::new(&upper)),
+                Some(PathBuf::from(format!("/repo/{}/a", wk.to_uppercase())))
+            );
             assert!(layout
-                .main_checkout_copies(Path::new(&format!("/repo/{name}/worktrees")))
+                .main_checkout_copies(Path::new(&format!("/repo/{wk}")))
                 .is_empty());
             assert_eq!(layout.worktree_of(Path::new("/repo/src/x.rs")), None);
             assert_eq!(
-                layout.main_checkout_copies(Path::new(&format!("/repo/{name}/worktrees/wt"))),
+                layout.main_checkout_copies(Path::new(&format!("/repo/{wk}/wt"))),
                 [PathBuf::from("/repo")]
             );
-            assert!(layout
-                .main_checkout_copies(Path::new(&format!("/repo/{name}/sessions/s/x")))
-                .is_empty());
-            assert!(layout
-                .main_checkout_copies(Path::new("/repo/src/a"))
-                .is_empty());
+            let own = layout.project_dir_name();
+            for not_one in [
+                format!("/repo/{own}/sessions/s/x"),
+                format!("/repo/{own}/worktrees/a/x"),
+                "/repo/src/a".to_string(),
+                "/repo/wkts/a/x".to_string(),
+            ] {
+                assert!(
+                    layout.main_checkout_copies(Path::new(&not_one)).is_empty(),
+                    "{not_one}"
+                );
+                assert_eq!(layout.worktree_of(Path::new(&not_one)), None, "{not_one}");
+            }
         }
-        let codix = Layout::new(".codix").unwrap();
+        let trees = Layout::new(".codix")
+            .unwrap()
+            .with_worktrees_dir(".trees")
+            .unwrap();
         assert_eq!(
-            codix.main_checkout_copies(Path::new("/repo/.agix/worktrees/a/x")),
-            [PathBuf::from("/repo/x")],
-            "a worktree an agixd made is still an alias of the main checkout"
+            trees.main_checkout_copies(Path::new("/repo/.wkts/a/.trees/b/x")),
+            [PathBuf::from("/repo/.wkts/a/x"), PathBuf::from("/repo/x")],
+            "a worktree made under the default directory is still an alias of the main checkout"
         );
         assert_eq!(
-            codix.worktree_of(Path::new("/repo/.agix/worktrees/a/x")),
-            None
+            trees.worktree_of(Path::new("/repo/.wkts/a/x")),
+            Some(PathBuf::from("/repo/.wkts/a"))
         );
         assert!(Layout::default()
-            .main_checkout_copies(Path::new("/repo/.codix/worktrees/a/x"))
+            .main_checkout_copies(Path::new("/repo/.trees/a/x"))
             .is_empty());
     }
 

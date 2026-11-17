@@ -496,7 +496,7 @@ fn linux_the_hooks_path_and_included_config_are_read_only() {
 }
 
 /// What a command leaves running cannot write a worktree made after it
-/// started: `.git/worktrees/` and `.agix/worktrees/` are read-only, the
+/// started: `.git/worktrees/` and `.wkts/` are read-only, the
 /// worktrees already in them opened again beneath and their control files
 /// shut on top. The engine's own git, which makes worktrees, is not held so.
 /// A command in a worktree has its `.git` link shut and guards the git
@@ -509,7 +509,7 @@ fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
     let root = project.path().canonicalize().unwrap();
     let git = root.join(".git");
     let admin = git.join("worktrees/wt");
-    let worktree = root.join(".agix/worktrees/wt");
+    let worktree = root.join(".wkts/wt");
     std::fs::create_dir_all(&admin).unwrap();
     std::fs::create_dir_all(&worktree).unwrap();
     std::fs::write(admin.join("commondir"), "../..\n").unwrap();
@@ -539,11 +539,7 @@ fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
             admin.clone(),
             admin.join("commondir"),
         ),
-        (
-            root.join(".agix/worktrees"),
-            worktree.clone(),
-            worktree.join(".git"),
-        ),
+        (root.join(".wkts"), worktree.clone(), worktree.join(".git")),
     ] {
         let held = at(&args, "--ro-bind", &parent).unwrap_or_else(|| panic!("{args:?}"));
         let reopened = at(&args, "--bind", &entry).unwrap_or_else(|| panic!("{args:?}"));
@@ -551,7 +547,7 @@ fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
         assert!(held < reopened && reopened < shut, "{args:?}");
     }
 
-    let writable = vec![git.clone(), root.join(".agix/worktrees")];
+    let writable = vec![git.clone(), root.join(".wkts")];
     let engine = args_of(wrap(SandboxOptions {
         command: "true",
         cwd: &root,
@@ -612,25 +608,54 @@ fn linux_a_worktree_made_later_is_read_only_to_an_earlier_command() {
 #[test]
 #[allow(clippy::unwrap_used)]
 fn linux_a_worktree_made_after_the_mounts_cannot_be_written() {
-    for (own, dir) in [
-        (".agix", ".agix"),
-        (".codix", ".codix"),
-        (".codix", ".agix"),
+    let trees = base::paths::Layout::new(".codix")
+        .unwrap()
+        .with_worktrees_dir(".trees")
+        .unwrap();
+    for (layout, dir) in [
+        (base::paths::Layout::default(), ".wkts"),
+        (trees.clone(), ".trees"),
+        (trees, ".wkts"),
     ] {
-        a_worktree_made_after_the_mounts_cannot_be_written_in(own, dir);
+        a_worktree_made_after_the_mounts_cannot_be_written_in(&layout, dir, true);
     }
 }
 
-/// The worktrees in `dir` of a project whose instance's own directory is
-/// `own`.
+/// The same where no worktree, and so no worktrees directory, was there yet
+/// when the mounts were laid: the absent directory is shut, so the command
+/// can neither make it nor write the first worktree the engine adds to it.
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn linux_a_first_worktree_made_after_the_mounts_cannot_be_written() {
+    let trees = base::paths::Layout::new(".codix")
+        .unwrap()
+        .with_worktrees_dir(".trees")
+        .unwrap();
+    for (layout, dir) in [
+        (base::paths::Layout::default(), ".wkts"),
+        (trees.clone(), ".trees"),
+        (trees, ".wkts"),
+    ] {
+        a_worktree_made_after_the_mounts_cannot_be_written_in(&layout, dir, false);
+    }
+}
+
+/// The worktrees in `<project>/<dir>` under `layout`; `existing` says
+/// whether one was there before the command started.
 #[cfg(target_os = "linux")]
 #[allow(clippy::unwrap_used)]
-fn a_worktree_made_after_the_mounts_cannot_be_written_in(own: &str, dir: &str) {
+fn a_worktree_made_after_the_mounts_cannot_be_written_in(
+    layout: &base::paths::Layout,
+    dir: &str,
+    existing: bool,
+) {
+    let own = layout.worktrees_dir_name();
     let project = tempfile::tempdir().unwrap();
     let root = project.path().canonicalize().unwrap();
     let make_worktree = |name: &str| {
         let admin = root.join(".git/worktrees").join(name);
-        let worktree = root.join(dir).join("worktrees").join(name);
+        let worktree = root.join(dir).join(name);
         std::fs::create_dir_all(&admin).unwrap();
         std::fs::create_dir_all(&worktree).unwrap();
         std::fs::write(admin.join("commondir"), "../..\n").unwrap();
@@ -645,13 +670,16 @@ fn a_worktree_made_after_the_mounts_cannot_be_written_in(own: &str, dir: &str) {
         )
         .unwrap();
     };
-    make_worktree("wt");
+    std::fs::create_dir(root.join(".git")).unwrap();
+    if existing {
+        make_worktree("wt");
+    }
     let later = [
         ".git/worktrees/later/commondir".to_string(),
         ".git/worktrees/later/gitdir".to_string(),
         ".git/worktrees/later/config.worktree".to_string(),
-        format!("{dir}/worktrees/later/.git"),
-        format!("{dir}/worktrees/later/planted"),
+        format!("{dir}/later/.git"),
+        format!("{dir}/later/planted"),
     ];
     let script = format!(
         "for f in {}; do echo x > \"$f\" 2>/dev/null && echo \"wrote $f\"; done; \
@@ -659,7 +687,7 @@ fn a_worktree_made_after_the_mounts_cannot_be_written_in(own: &str, dir: &str) {
         later.join(" ")
     );
     let mut o = opts(&script, &root);
-    o.policy.layout = base::paths::Layout::new(own).unwrap();
+    o.policy.layout = layout.clone();
     let cmd = wrap(o);
     if cmd.mode != SandboxMode::LinuxBwrap {
         return;
@@ -680,13 +708,14 @@ fn a_worktree_made_after_the_mounts_cannot_be_written_in(own: &str, dir: &str) {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(stdout.trim(), "index", "{own} {dir}: {stdout}{stderr}");
+    let expected = if existing { "index" } else { "" };
+    assert_eq!(stdout.trim(), expected, "{own} {dir}: {stdout}{stderr}");
     assert_eq!(
         std::fs::read_to_string(root.join(".git/worktrees/later/commondir")).unwrap(),
         "../..\n"
     );
     assert!(!root.join(".git/worktrees/later/config.worktree").exists());
-    assert!(!root.join(dir).join("worktrees/later/planted").exists());
+    assert!(!root.join(dir).join("later/planted").exists());
 }
 
 /// A project with no `.agents` yet: the project skills directory must not
@@ -806,7 +835,7 @@ fn linux_a_worktree_command_commits_on_its_branch_and_nothing_else() {
             "-q",
             "-b",
             &format!("agix/worktree-{slug}"),
-            &format!(".agix/worktrees/{slug}"),
+            &format!(".wkts/{slug}"),
         ]);
     }
     let common = root.join(".git");
@@ -816,7 +845,7 @@ fn linux_a_worktree_command_commits_on_its_branch_and_nothing_else() {
         branch: "agix/worktree-wt".into(),
         ..worktree_git(&root, "wt")
     };
-    let worktree = root.join(".agix/worktrees/wt");
+    let worktree = root.join(".wkts/wt");
     let runs = |command: &str| {
         let cmd = wrap(SandboxOptions {
             command,

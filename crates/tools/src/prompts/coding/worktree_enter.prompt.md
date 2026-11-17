@@ -17,6 +17,6 @@ Use this tool ONLY when the user explicitly asks to work in a worktree. This too
 
 ## Behavior
 
-- Creates a new git worktree at `{project_dir}/worktrees/<slug>` in the repository root, on a new branch `{branch_prefix}<slug>` that starts from your current local HEAD (uncommitted changes in the main checkout are not carried over)
+- Creates a new git worktree at `{worktrees_dir}/<slug>` in the repository root, on a new branch `{branch_prefix}<slug>` that starts from your current local HEAD (uncommitted changes in the main checkout are not carried over)
 - The session's working directory does NOT change: relative paths and new shell commands still resolve against the original directory. Use the absolute worktree path the tool returns for file operations, and `cd` into it in Bash commands
 - Use ExitWorktree to end the worktree session (keep or remove). A worktree still active when the session ends is left on disk

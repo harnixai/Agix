@@ -565,6 +565,7 @@ A few switches whose effect the rest of this README does not mention:
 | `sandbox.network_mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, `allowlist` (`sandbox.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux), or `proxy` — to filter by domain, put a proxy in front |
 | `sandbox.egress_proxy` | none | under `proxy`, the only address a sandboxed command may connect to (`"127.0.0.1:3128"`, or `{"http", "socks", "no_proxy"}`), named to it in `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; macOS holds a proxy off this machine only to its port, Linux needs `socat` and cuts the network without it |
 | `network.use_system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`; `false` connects directly. Global / managed tier only (a scene or project that sets it is ignored), applied at daemon start; unrelated to the sandboxed commands' network above |
+| `worktree_dir` | `.wkts` | the directory at the repository root that `EnterWorktree` and `Agent`'s `worktree` put git worktrees in (`<repo>/.wkts/<name>`), and the one line added to the repository's `.gitignore`; one path component starting with `.`, not starting with `.git`, and not a configuration directory or another tool's. Global / scene tier only: a project's own settings cannot move it |
 
 | Variable | Purpose |
 |---|---|

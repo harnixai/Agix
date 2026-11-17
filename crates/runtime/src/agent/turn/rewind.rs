@@ -753,12 +753,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_write_in_a_worktree_that_is_gone_is_known_by_the_instances_directory() {
+    async fn a_write_in_a_worktree_that_is_gone_is_known_by_the_worktrees_directory() {
         let dir = tempfile::tempdir().unwrap();
         let project = std::fs::canonicalize(dir.path()).unwrap();
         let fs = platform::filesystem::LocalFileSystem;
-        for name in [".agix", ".codix"] {
-            let layout = base::paths::Layout::new(name).unwrap();
+        for layout in [
+            base::paths::Layout::default(),
+            base::paths::Layout::new(".codix")
+                .unwrap()
+                .with_worktrees_dir(".trees")
+                .unwrap(),
+        ] {
             let kept = layout.worktrees_dir(&project).join("kept");
             std::fs::create_dir_all(&kept).unwrap();
             let gone = layout.worktrees_dir(&project).join("gone");
@@ -775,11 +780,13 @@ mod tests {
                 None
             );
         }
-        let codix = base::paths::Layout::new(".codix").unwrap();
-        assert_eq!(
-            removed_worktree(&fs, &project.join(".agix/worktrees/x/a"), &codix).await,
-            None,
-            "another instance's worktrees are not this session's"
-        );
+        let default = base::paths::Layout::default();
+        for not_one in [".agix/worktrees/x/a", ".trees/x/a"] {
+            assert_eq!(
+                removed_worktree(&fs, &project.join(not_one), &default).await,
+                None,
+                "{not_one} is not where this session's worktrees go"
+            );
+        }
     }
 }

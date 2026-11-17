@@ -747,7 +747,7 @@ fn a_read_deny_that_holds_what_a_command_reads_to_start_is_left_to_the_permissio
 fn in_a_worktree_a_read_deny_is_kept_in_the_project_and_in_the_worktree() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().canonicalize().unwrap();
-    let worktree = project.join(".agix/worktrees/wt");
+    let worktree = project.join(".wkts/wt");
     let mut ctx = ctx_in(&worktree);
     denying_reads(
         &mut ctx,

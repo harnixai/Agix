@@ -100,7 +100,8 @@ impl LoadedSettings {
     ///
     /// `layout` is what the instance names its directories; `local_dir` is
     /// its project directory in the project, and every session of these
-    /// settings carries it.
+    /// settings carries it, with its worktrees where the global and scene
+    /// tiers' `worktree_dir` puts them ([`Self::place_worktrees`]).
     pub fn load(
         global_dir: PathBuf,
         scene_dir: PathBuf,
@@ -195,6 +196,7 @@ impl LoadedSettings {
         let withhold = project_layer.trust.is_untrusted();
         let mut fold = LayerFold {
             sections,
+            layout: &layout,
             tiers,
             withhold,
             global_dir: &global_dir,
@@ -241,7 +243,7 @@ impl LoadedSettings {
             layout,
         );
         paths.project_untrusted = withhold;
-        let loaded = Self {
+        let mut loaded = Self {
             values,
             paths,
             rules: loaded_rules,
@@ -250,11 +252,10 @@ impl LoadedSettings {
             ignored,
             project_layer,
         };
-        if managed.is_some() {
-            loaded.with_managed(managed)
-        } else {
-            loaded
+        if let Err(e) = loaded.place_worktrees() {
+            tracing::warn!(error = %e, "worktree_dir is not allowed, the worktrees stay where they were");
         }
+        loaded.with_managed(managed)
     }
 
     /// Put the deployment's layer on top of these settings, replacing any
@@ -279,6 +280,19 @@ impl LoadedSettings {
         self.paths.project_untrusted = layer.trust.is_untrusted();
         self.project_layer = layer;
         self
+    }
+
+    /// Put `paths.layout`'s worktrees where `values.worktree_dir` names, the
+    /// default when it names none. A name the layout does not allow leaves
+    /// both as they were.
+    pub fn place_worktrees(&mut self) -> Result<(), base::paths::WorktreesDirError> {
+        let name = self
+            .values
+            .worktree_dir
+            .as_deref()
+            .unwrap_or(base::paths::DEFAULT_WORKTREES_DIR);
+        self.paths.layout = self.paths.layout.clone().with_worktrees_dir(name)?;
+        Ok(())
     }
 
     /// Whether the project tier is in effect as written.
@@ -367,6 +381,7 @@ impl TierView {
 
 struct LayerFold<'a> {
     sections: &'a Sections,
+    layout: &'a Layout,
     tiers: TierView,
     withhold: bool,
     global_dir: &'a std::path::Path,
@@ -399,11 +414,8 @@ impl LayerFold<'_> {
         let mut layer_json = layer.value;
         if let Some(obj) = layer_json.as_object_mut() {
             obj.remove("paths");
-            for key in crate::GLOBAL_ONLY_KEYS {
-                if !is_global && obj.remove(*key).is_some() {
-                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "this key is read from the global tier only, ignoring it here");
-                }
-            }
+            drop_keys_not_read_from(layer.tier, is_global, &layer.origin, obj);
+            self.refuse_a_worktrees_dir_not_allowed(&layer.origin, layer.tier, obj);
             if is_own_project {
                 for (name, server) in obj
                     .get("mcp_servers")
@@ -460,6 +472,29 @@ impl LayerFold<'_> {
                 error,
             });
         }
+    }
+
+    fn refuse_a_worktrees_dir_not_allowed(
+        &mut self,
+        origin: &str,
+        tier: Tier,
+        obj: &mut serde_json::Map<String, serde_json::Value>,
+    ) {
+        let Some(name) = obj.get("worktree_dir").and_then(|v| v.as_str()) else {
+            return;
+        };
+        let Err(e) = self.layout.clone().with_worktrees_dir(name) else {
+            return;
+        };
+        obj.remove("worktree_dir");
+        let error = e.to_string();
+        tracing::warn!(layer = tier.name(), origin = %origin, error, "settings value does not fit its setting, ignoring it");
+        self.ignored.push(IgnoredValue {
+            tier: tier.name(),
+            origin: origin.to_string(),
+            key: "worktree_dir".into(),
+            error,
+        });
     }
 
     fn take_permission_rules(
@@ -520,6 +555,37 @@ impl LayerFold<'_> {
                     base::interface::exec::env::variables_an_mcp_server_reads(server),
                 );
             }
+        }
+    }
+}
+
+/// `obj`, a layer of `tier`, without the keys that tier is not read for:
+/// [`crate::GLOBAL_ONLY_KEYS`] unless it is the global tier,
+/// [`crate::NOT_FROM_PROJECT_KEYS`] in a project's own.
+fn drop_keys_not_read_from(
+    tier: Tier,
+    is_global: bool,
+    origin: &str,
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    for key in crate::GLOBAL_ONLY_KEYS {
+        if !is_global && obj.remove(*key).is_some() {
+            tracing::warn!(
+                layer = tier.name(),
+                origin,
+                key,
+                "this key is read from the global tier only, ignoring it here"
+            );
+        }
+    }
+    for key in crate::NOT_FROM_PROJECT_KEYS {
+        if tier == Tier::Project && !is_global && obj.remove(*key).is_some() {
+            tracing::warn!(
+                layer = tier.name(),
+                origin,
+                key,
+                "a project's own settings cannot set this key, ignoring it"
+            );
         }
     }
 }

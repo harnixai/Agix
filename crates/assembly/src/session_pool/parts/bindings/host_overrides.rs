@@ -45,7 +45,13 @@ impl HostOverrides {
         };
         settings::merge_json_values(&mut merged, layer.clone());
         match serde_json::from_value::<Settings>(merged) {
-            Ok(values) => settings.values = values,
+            Ok(values) => {
+                let disk = std::mem::replace(&mut settings.values, values);
+                if let Err(e) = settings.place_worktrees() {
+                    tracing::warn!(error = %e, "the host's worktree_dir is not allowed; left out");
+                    settings.values.worktree_dir = disk.worktree_dir;
+                }
+            }
             Err(e) => tracing::warn!(error = %e, "the host's settings do not apply here; left out"),
         }
         settings

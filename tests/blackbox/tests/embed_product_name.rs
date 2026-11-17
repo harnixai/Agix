@@ -170,10 +170,7 @@ async fn run(product: Option<&str>, project_dir: &str) -> anyhow::Result<Seen> {
             Reply::text("MAIN-DONE"),
         ],
     );
-    let made = root
-        .project
-        .join(project_dir)
-        .join("worktrees/probe/made.txt");
+    let made = root.project.join(".wkts/probe/made.txt");
     stub.script_when(
         SUB,
         [

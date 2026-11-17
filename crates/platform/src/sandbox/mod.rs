@@ -48,8 +48,8 @@
 //! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
 //! included, and the directories leading down to them), the
-//! instance's own project directory but its working entries — `scratchpad/`,
-//! `memory/`, `worktrees/`, all the gate leaves out of configuration there
+//! instance's own project directory but its working entries — `scratchpad/`
+//! and `memory/`, all the gate leaves out of configuration there
 //! (`base::paths::ConfigRootAt::writable_entry`) — with its configuration
 //! (`base::paths::ENGINE_CONFIG_*`: settings, MCP, hooks, commands, agents,
 //! skills, plugins, rules, scenes, policy, scripts, output styles, and the
@@ -60,12 +60,16 @@
 //! `base::paths::PROJECT_ENGINE_CONFIG_DIRS`, and the `.agents` entry above
 //! it), the control files of each linked worktree's entry under
 //! `.git/worktrees/` (`base::paths::GIT_WORKTREE_CONTROL_FILES`), and the
-//! `.git` links of the engine's worktrees — the last two for a worktree made
-//! after the command started as well, so that what it leaves running cannot
-//! rewrite those of a sub-agent's worktree made later: macOS by pattern,
-//! Linux by holding `.git/worktrees/` (made, empty, where it is absent) and
-//! `.agix/worktrees/` read-only with the worktrees already in them opened
-//! again. A command therefore cannot add a worktree of its own. Under
+//! `.git` links of the engine's worktrees (in the project's worktrees
+//! directories, `.wkts/` unless the settings name another —
+//! `base::paths::SensitivePaths::worktree_dirs_in`) — the last two for a
+//! worktree made after the command started as well, so that what it leaves
+//! running cannot rewrite those of a sub-agent's worktree made later: macOS
+//! by pattern, with the worktrees directory and each worktree directly in it
+//! held in place, Linux by holding `.git/worktrees/` (made, empty, where it
+//! is absent) and the worktrees directory read-only with the worktrees
+//! already in it opened again. A command therefore cannot add a worktree of
+//! its own, nor move one aside to rewrite its link. Under
 //! `only_additional_writable`, the engine's own git, which adds them, is held
 //! only to the ones that exist.
 //! A command in a linked worktree writes of its git directory only what
@@ -99,8 +103,8 @@
 //! still apply inside them. The engine's own git runs under such a policy in
 //! every session whose commands are sandboxed (`base::engine_exec`), so a
 //! filter driver or other program a repository's configuration names runs
-//! confined, writing at most the git directory and `.agix/worktrees/` when it
-//! creates a worktree, and only the session's `TMPDIR` otherwise.
+//! confined, writing at most the git directory and the worktrees directory
+//! when it creates a worktree, and only the session's `TMPDIR` otherwise.
 //!
 //! # What a confined command may not read
 //!

@@ -450,6 +450,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("task_models.*", Tighten(ProviderDefinedBelow)),
         ("telemetry_enabled", Tighten(TrueTighter)),
         ("telemetry_url", Withheld),
+        ("worktree_dir", Withheld),
     ]
 };
 

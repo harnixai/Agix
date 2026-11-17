@@ -501,6 +501,24 @@ async fn a_global_only_key_is_refused_below_the_global_tier() {
             None
         )]
     );
+    let in_the_project = call_frame(
+        &sock,
+        "config.set",
+        json!({"tier": "project", "changes": {"worktree_dir": ".trees"}}),
+    )
+    .await;
+    assert_eq!(
+        rejected_kinds(&in_the_project["error"]["data"]["rejected"]),
+        [("worktree_dir".into(), "not_at_tier".into(), None)],
+        "{in_the_project}"
+    );
+    let in_the_scene = call_frame(
+        &sock,
+        "config.set",
+        json!({"tier": "scene", "changes": {"worktree_dir": ".trees"}}),
+    )
+    .await;
+    assert!(in_the_scene["error"].is_null(), "{in_the_scene}");
     let unknown = call_frame(
         &sock,
         "config.set",

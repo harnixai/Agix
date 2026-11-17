@@ -1,13 +1,13 @@
 //! The Linux shape of the project guard for linked worktrees: their entries
-//! under a git directory's `worktrees/`, the engines' `worktrees/` in the
-//! project, and what of the git directory a command in one may write.
+//! under a git directory's `worktrees/`, the engine's worktrees directories
+//! in the project, and what of the git directory a command in one may write.
 
 use super::super::roots::{subdirs, Roots, GIT_OBJECTS_INFO_DIR};
-use super::{bind, bind_over, read_only};
+use super::{bind, bind_over, read_only, shut_empty};
 use base::paths::{
     WorktreeGit, GIT_WORKTREES_DIR, GIT_WORKTREE_CONTROL_FILES, REPOSITORY_CONFIG_DIR,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What a command in the linked worktree may write of its git directory
 /// beyond the binds of `additional_writable`: its branch ref, and none of
@@ -53,13 +53,18 @@ pub(super) fn guard_entries(
     }
 }
 
-/// The `.git` links of the engines' worktrees, read-only, and where the
-/// project is open, each engine directory's `worktrees/` held around them.
-pub(super) fn guard_links(args: &mut Vec<String>, roots: &Roots) {
+/// The `.git` links of the engine's worktrees, read-only, and where the
+/// project is open, each worktrees directory held around them; one not there
+/// yet is shut empty ([`shut_empty`]), so that the command can neither make
+/// it nor write the first worktree the engine adds to it.
+pub(super) fn guard_links(args: &mut Vec<String>, roots: &Roots, made: &mut Vec<PathBuf>) {
     for links in roots.paths.worktree_dirs_in(&roots.cwd) {
-        let held = roots.opens(&links)
-            && !roots.only_additional
-            && hold_worktree_parent(args, &links, false);
+        let guarded = roots.opens(&links) && !roots.only_additional;
+        if guarded && links.symlink_metadata().is_err() {
+            shut_empty(args, &links, made);
+            continue;
+        }
+        let held = guarded && hold_worktree_parent(args, &links, false);
         for worktree in subdirs(&links) {
             if held {
                 bind(args, "--bind", &worktree);

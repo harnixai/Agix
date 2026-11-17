@@ -5,6 +5,7 @@
 //! that chose another name, and, worse, leaves the model free to write where
 //! the engine reads its configuration (DIR-1, DIR-2). Prompts and tool
 //! descriptions that name a directory tell the model to do the same (DIR-3).
+//! The worktrees directory (`.wkts`) is the user's to name in the same way.
 //!
 //! The way out is always a method: `ConfigPaths` for a session, `StateRoot`
 //! for the pool's state root, `Layout` when only the name is at hand.
@@ -50,7 +51,7 @@ const ENGINE_FILES: &[&str] = &[
 
 fn mentions_engine_dir(s: &str) -> bool {
     let bytes = s.as_bytes();
-    for name in [".agix", ".claude"] {
+    for name in [".agix", ".claude", ".wkts"] {
         let mut from = 0;
         while let Some(i) = s[from..].find(name) {
             let start = from + i;

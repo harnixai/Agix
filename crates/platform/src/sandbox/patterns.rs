@@ -44,21 +44,33 @@ pub(super) fn deny_write_rules(roots: &Roots, denied: &[String]) -> String {
 
 /// Denies writing the control files of every linked worktree's entry under
 /// a guarded git directory's `worktrees/`, and the `.git` link of every
-/// worktree under the project's `<project dir>/worktrees/`, whether or not they
-/// exist yet.
+/// worktree in the project's worktrees directories, whether or not they
+/// exist yet. Those directories are ordinary project space, so they and the
+/// worktrees directly in them are held too: moved aside and back, a
+/// worktree's `.git` link would be rewritten on a path no rule names, and a
+/// directory replaced by a symbolic link would send the engine's next
+/// worktree elsewhere.
 pub(super) fn worktree_control_file_rules(parents: &WorktreeParents) -> String {
     let files = alternatives(base::paths::GIT_WORKTREE_CONTROL_FILES);
     let link = regex_escape(base::paths::REPOSITORY_CONFIG_DIR);
-    parents
+    let controls = parents
         .admin
         .iter()
         .map(|dir| (dir, &files))
         .chain(parents.links.iter().map(|dir| (dir, &link)))
         .map(|(dir, names)| {
-            let regex = format!(
+            format!(
                 "^{}/[^/]+/({names})$",
                 regex_escape(&dir.display().to_string())
-            );
+            )
+        });
+    let worktrees = parents
+        .links
+        .iter()
+        .map(|dir| format!("^{}(/[^/]+)?$", regex_escape(&dir.display().to_string())));
+    controls
+        .chain(worktrees)
+        .map(|regex| {
             format!(
                 "(deny file-write* (regex \"{}\"))\n",
                 sandbox_escape(&regex)

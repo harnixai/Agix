@@ -328,7 +328,7 @@ fn a_command_in_a_worktree_commits_and_cannot_plant_what_git_runs() {
         assert!(out.status.success(), "git {args:?}: {out:?}");
     };
     git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".wkts/wt"]);
     let common = s.project.join(".git");
     let runs = |command: &str| s.runs_in_worktree("wt", command);
 
@@ -681,7 +681,7 @@ fn a_command_older_than_a_worktree_cannot_redirect_its_links() {
         ("wt3", "link", format!("gitdir: {}", fake.display())),
     ] {
         let target = match link {
-            "link" => s.project.join(format!(".agix/worktrees/{slug}/.git")),
+            "link" => s.project.join(format!(".wkts/{slug}/.git")),
             name => common.join(format!("worktrees/{slug}/{name}")),
         };
         let plant = format!("echo '{planted}' > '{}'", target.display());
@@ -702,7 +702,7 @@ fn a_command_older_than_a_worktree_cannot_redirect_its_links() {
             "-q",
             "-b",
             slug,
-            &format!(".agix/worktrees/{slug}"),
+            &format!(".wkts/{slug}"),
         ]);
         let rewrote = std::process::Command::new(&early.spec.program)
             .args(&early.spec.args)
@@ -738,9 +738,9 @@ fn case_variants_of_guarded_git_files_are_refused_in_a_worktree() {
         assert!(out.status.success(), "git {args:?}: {out:?}");
     };
     git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".wkts/wt"]);
     let common = s.project.join(".git");
-    let worktree = s.project.join(".agix/worktrees/wt");
+    let worktree = s.project.join(".wkts/wt");
     if !common.join("CONFIG").exists() {
         return;
     }
@@ -809,15 +809,8 @@ fn a_worktree_command_cannot_rewrite_shared_refs_or_object_plumbing() {
     };
     git(&["commit", "-q", "--allow-empty", "-m", "init"]);
     git(&["branch", "main-ish"]);
-    git(&["worktree", "add", "-q", "-b", "wt", ".agix/worktrees/wt"]);
-    git(&[
-        "worktree",
-        "add",
-        "-q",
-        "-b",
-        "other",
-        ".agix/worktrees/other",
-    ]);
+    git(&["worktree", "add", "-q", "-b", "wt", ".wkts/wt"]);
+    git(&["worktree", "add", "-q", "-b", "other", ".wkts/other"]);
     let common = s.project.join(".git");
     std::fs::create_dir_all(common.join("objects/info")).unwrap();
     std::fs::create_dir_all(common.join("info")).unwrap();

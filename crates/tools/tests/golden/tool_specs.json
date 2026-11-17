@@ -852,8 +852,8 @@
     "code_result": null,
     "description": "Create an isolated git worktree and switch the session into it",
     "guide": {
-      "bytes": 1424,
-      "fnv1a": "b71315ad9f422593"
+      "bytes": 1414,
+      "fnv1a": "27e545bade9b7c7c"
     },
     "input_schema": {
       "absolute": {

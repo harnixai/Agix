@@ -990,7 +990,7 @@ async fn a_deny_rule_for_the_name_a_call_is_also_known_by_applies_but_an_allow_d
 #[test]
 fn a_worktree_session_is_refused_by_relative_rules_under_the_project_too() {
     let project = PathBuf::from("/p");
-    let worktree = project.join(".agix/worktrees/wt");
+    let worktree = project.join(".wkts/wt");
     let with = |behavior, tool: &str, content: Option<&str>| PermissionRule {
         source: RuleSource::ProjectSettings,
         behavior,
@@ -1023,7 +1023,7 @@ fn a_worktree_session_is_refused_by_relative_rules_under_the_project_too() {
         RuleHit::Deny(_)
     ));
     assert!(matches!(
-        hit(in_worktree(), "Read", read("../../../.env")),
+        hit(in_worktree(), "Read", read("../../.env")),
         RuleHit::Deny(_)
     ));
     assert!(matches!(
@@ -1049,7 +1049,7 @@ fn a_worktree_session_is_refused_by_relative_rules_under_the_project_too() {
 }
 
 /// A deny or ask path rule anchored at the project, absolute or relative,
-/// holds for the same path in a worktree under `<repository>/.agix/worktrees/`
+/// holds for the same path in a worktree under `<repository>/.wkts/`
 /// from any session, and for a project in a subdirectory of its repository
 /// where that subdirectory is in the worktree. An allow does not carry over.
 #[test]
@@ -1081,7 +1081,7 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
         super::super::subject::Named::of(&subject, &ctx).hit(rules, tool, &ctx)
     };
     let read = |p: &str| Subject::ReadPath(p.into());
-    let wt = &w("/p/.agix/worktrees/wt");
+    let wt = &w("/p/.wkts/wt");
     let absolute = RuleSet::new(vec![with(RuleBehavior::Deny, "Read", "/p/secrets/**")]);
     let relative = RuleSet::new(vec![
         with(RuleBehavior::Deny, "Read", "secrets/**"),
@@ -1102,17 +1102,17 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
         &[],
         &relative,
         "Read",
-        read(&w("/p/.agix/worktrees/wt/secrets/key"))
+        read(&w("/p/.wkts/wt/secrets/key"))
     )));
     assert!(denied(hit(
         "/p",
         &[],
         &absolute,
         "Read",
-        read(&w("/p/.agix/worktrees/wt/secrets/key"))
+        read(&w("/p/.wkts/wt/secrets/key"))
     )));
     assert!(denied(hit(
-        &w("/r/.agix/worktrees/wt"),
+        &w("/r/.wkts/wt"),
         &["/r/sub"],
         &relative,
         "Read",
@@ -1123,7 +1123,7 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
         &[],
         &relative,
         "Read",
-        read(&w("/r/.agix/worktrees/wt/sub/secrets/key"))
+        read(&w("/r/.wkts/wt/sub/secrets/key"))
     )));
     assert!(matches!(
         hit(
@@ -1131,7 +1131,7 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
             &[],
             &relative,
             "Edit",
-            Subject::WritePath(w("/p/.agix/worktrees/wt/docs/a.md"))
+            Subject::WritePath(w("/p/.wkts/wt/docs/a.md"))
         ),
         RuleHit::Ask(_)
     ));
@@ -1141,7 +1141,7 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
             &[],
             &relative,
             "Read",
-            read(&w("/p/.agix/worktrees/wt/src/a.rs"))
+            read(&w("/p/.wkts/wt/src/a.rs"))
         ),
         RuleHit::None
     ));
@@ -1163,14 +1163,10 @@ fn refusals_cover_a_worktrees_copy_in(layout: &base::paths::Layout) {
         layout,
     )
     .expect("a deny rule with a path");
-    assert!(walk(std::path::Path::new(&w(
-        "/p/.agix/worktrees/wt/secrets/key"
-    ))));
-    assert!(!walk(std::path::Path::new(&w(
-        "/p/.agix/worktrees/wt/src/a.rs"
-    ))));
+    assert!(walk(std::path::Path::new(&w("/p/.wkts/wt/secrets/key"))));
+    assert!(!walk(std::path::Path::new(&w("/p/.wkts/wt/src/a.rs"))));
     assert!(
-        walk(std::path::Path::new("/p/.agix/worktrees/wt/secrets/key")),
+        walk(std::path::Path::new("/p/.wkts/wt/secrets/key")),
         "a worktree under .agix is an alias whatever the instance's own name"
     );
 }

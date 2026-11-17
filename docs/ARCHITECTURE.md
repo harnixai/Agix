@@ -677,8 +677,8 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 
 工作目录来自请求的 `workdir`。与父会话的不同时(`Agent` 的 `worktree`),它记在子会话设置的
 `PathSettings::worktree` 上:工具的工作目录、提示词里的工作目录、hook payload 与宿主调用帧的
-`cwd` 都是它,项目仍是父会话的——项目层设置、`.agix/hooks/`、信任与插件照项目根算,因为
-worktree 里没有被 `.gitignore` 掉的 `.agix`。它的可写目录另加仓库 git 目录里在 worktree 里提交
+`cwd` 都是它,项目仍是父会话的——项目层设置、`.agix/hooks/`、信任与插件照项目根算;worktree
+里检出的 `.agix` 只是提交进仓库的那一份,不当项目层读。它的可写目录另加仓库 git 目录里在 worktree 里提交
 要写的几处(`base::paths::WorktreeGit::writable`):对象库 `objects/`(其中的 `objects/info/` 除外)、
 这个 worktree 在 `worktrees/` 下那一项(其中的控制文件除外,见 §6.3)、它自己分支
 `agix/worktree-<名>` 的 ref、ref 的 `.lock` 与这个分支的 reflog。git 目录的其余部分它读得到、
@@ -701,7 +701,7 @@ worktree 的 `.git` 链接与 `commondir` 去找——沙箱里早先起的命�
 
 于是这样的子 Agent 的文件工具,不问就能读的范围是 worktree 加这个 `.git`、能写的是 worktree 加
 上面那几处,主检出里的文件要审批,与它的命令能写的范围一致。它再用 `worktree` 起子 Agent 时,`create_worktree` 从项目根
-找仓库,新 worktree 与它的并列在 `<项目根>/.agix/worktrees/` 下,不嵌在它自己的 worktree 里
+找仓库,新 worktree 与它的并列在 `<项目根>/.wkts/` 下,不嵌在它自己的 worktree 里
 (从 worktree 里找,仓库根是那个 worktree,git 目录不在 `<根>/.git`,沙箱里会被拒)。
 
 权限规则里的相对路径按会话的 `cwd` 解析,worktree 子会话的 `cwd` 是 worktree;只这样解析,项目的
@@ -709,19 +709,19 @@ worktree 的 `.git` 链接与 `commondir` 去找——沙箱里早先起的命�
 `refusal_rule_roots`:工作目录是 worktree 时为项目根。路径规则的 deny 与 ask 对 `cwd` 和这些根各
 判一次,哪一处命中都算;allow 只按 `cwd` 判,不因此变宽(`permissions::policy::subject`)。搜索
 工具走目录时跳过的 deny 路径(`tools::security::walk_exclusion`)同样两处都算。反过来,worktree
-里的文件是主检出里同一路径的一份拷贝:路径落在某个 `<目录>/<项目层目录>/worktrees/<名>/` 下时(本实例的
-项目层目录,以及不是它时的 `.agix`,§8.1),把这三段去掉得到的 `<目录>/<其余>` 也算它的别名,deny 与 ask
+里的文件是主检出里同一路径的一份拷贝:路径落在某个 `<目录>/<worktree 目录>/<名>/` 下时(会话的
+worktree 目录,以及不是它时的缺省 `.wkts`,§8.1),把这两段去掉得到的 `<目录>/<其余>` 也算它的别名,deny 与 ask
 在别名上命中照样算,allow 不算(`base::paths::Layout::main_checkout_copies`,`RuleSet::evaluate_path` 里与
 符号链接的别名同一处处理)。于是锚在项目上的规则——项目下的绝对路径,或根会话里的相对路径——对 worktree 里那一份同样
 成立,不论是 worktree 子 Agent 自己读,还是根会话去读一个留下的 worktree;worktree 是从仓库根建的,
-项目在仓库的子目录里时,`<仓库>/.agix/worktrees/wt/sub/x` 的别名是 `<仓库>/sub/x`,正好落在项目下。
+项目在仓库的子目录里时,`<仓库>/.wkts/wt/sub/x` 的别名是 `<仓库>/sub/x`,正好落在项目下。
 这只是按路径的字面:不读磁盘,也不问那里是不是真有一个 worktree。这一层不认识 worktree 的来历,只认
 这份根的清单与这个目录名。
 
 子 Agent 的侧链 `Meta` 记下它的 `cwd` 与父会话的项目(`project_root`)。冷恢复侧链时
 (`session.resume`,或 `run_turn` 指名它)按记下的项目建绑定,所以它还是在项目里,不会变成无项目
 会话。`cwd` 不是项目根的,是它工作过的 worktree:恢复前再核对一遍(`tools::worktree::reopen_worktree`)——
-它仍在 `<仓库>/.agix/worktrees/` 下、项目在这个仓库里、它的 `.git` 链接与 `commondir` 仍指回
+它仍直属于 `<仓库>/` 下的 worktree 目录(按恢复时绑定的设置,含缺省 `.wkts`)、项目在这个仓库里、它的 `.git` 链接与 `commondir` 仍指回
 `<仓库>/.git`——通过了才把它连同这个 git 目录记进会话(`SessionCore` 的 worktree,每一代引擎的设置
 `PathSettings::worktree` 都取它),工作目录、可写目录与 `refusal_rule_roots` 于是与当初一样;git
 目录取的是 `<仓库>/.git`,不是链接里写的,照旧要等于 `<项目根>/.git` 才给。worktree 已经不在或核对
@@ -737,7 +737,7 @@ worktree 由 `Agent` 工具建、由它收尾(`tools::worktree::WorktreeHandle::
 它,也没有别的路径清理;同名再起会因目录已在被拒。
 
 agent 类 hook 的子 Agent 由根会话的 delegator 起,子会话共用根会话的 `HookRunner`。它在 payload
-的 `cwd` 里干活,前提是那是项目根或 `<项目根>/.agix/worktrees/` 下直属的一个目录,否则仍在根会话的
+的 `cwd` 里干活,前提是那是项目根或 `<项目根>/` 下 worktree 目录(会话的与缺省 `.wkts`)里直属的一个目录,否则仍在根会话的
 工作目录(`runtime::hook_executors::DelegatorHookExecutor`)——所以判 worktree 子 Agent 的调用时,
 它读的是那个 worktree。
 
@@ -1723,7 +1723,7 @@ git 依赖、测试里建临时仓库一起弄坏,而且在别处建好再挪进
 `exec.process`:会话的命令进沙箱(没有
 `dangerously_disable_sandbox`)时,它也进同一个沙箱,不论有人值守与否——仓库配置让 git 去
 跑的 filter driver 之类因此同样受约束。这时它只能写会话的 `TMPDIR`,创建 worktree 时再加
-git 目录与 `.agix/worktrees/`,工作目录本身不可写,网络不通。沙箱兑现不了时照
+git 目录与仓库根下的 worktree 目录(缺省 `.wkts/`),工作目录本身不可写,网络不通。沙箱兑现不了时照
 `sandbox.require_enforcement` 办:要求就不跑,当作没有 git 信息(状态不显示,worktree 创建报错),
 不要求就和 `Bash` 一样在沙箱外跑——未信任项目(§6.6)除外:它的仓库配置是项目作者写的,在沙箱外跑
 就是让那些程序不受约束地起来,`admit_git` 对它拒绝,会话状态里的分支名改为直接读 `.git/HEAD`(`read_head`),
@@ -1817,9 +1817,10 @@ rust / go / java / ruby / dotnet / swift 的常见位置,开箱即用。设置�
 (`"python": []` 去掉这一组),写新组名就是加一组,没提到的组保持缺省。这些目录只对 `Bash`
 放开,文件工具写不到。
 
-`.agix` 下的路径缺省要人确认(它是 agent 的配置),只有 `scratchpad`、`memory` 与 `worktrees`
-三处除外:前两处是提示词让模型去写的工作区,`worktrees` 下是 `EnterWorktree` 建的工作树,
-里面是项目本身的工作(工作树里自己的 `.agix`、`.claude`、`.git` 照旧要确认)。项目的
+`.agix` 下的路径缺省要人确认(它是 agent 的配置),只有 `scratchpad`、`memory` 两处除外:
+它们是提示词让模型去写的工作区。`EnterWorktree` 与 `Agent` 建的工作树不在 `.agix` 里,在仓库根的
+worktree 目录(缺省 `.wkts/`,§8.1),是项目本身的工作(工作树里自己的 `.agix`、`.claude`、`.git`
+照旧要确认)。项目的
 `.agents/skills/` 下的写入同样要确认,`.agents` 下别的路径不要。
 
 ### 6.4 MCP 策略
@@ -2203,14 +2204,14 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 | 类型(`base::paths`) | 管什么 | 谁持有 |
 |---|---|---|
-| `Layout` | 项目层目录名(缺省 `.agix`,`Layout::new` 校验);由名字算出、不碰磁盘的东西:`project_dir(root)`、`worktrees_dir`、`teams_dir`、`.gitignore` 条目、配置根(`config_roots`)、worktree 别名(`main_checkout_copies`、`worktree_of`) | 按值传:`EmbedConfig` → `StaticDaemonPaths::with_layout` → `DaemonPaths::layout()` → `settings_source::read_pair` → `PathSettings.layout`,再到 `EngineConfig`、`PermissionSettings`、`SandboxPolicy`、`SensitivePaths`。没有进程级的值:一个进程里两个池可以用两个名字 |
+| `Layout` | 项目层目录名(缺省 `.agix`,`Layout::new` 校验)与 worktree 目录名(缺省 `.wkts`,`Layout::with_worktrees_dir` 校验);由名字算出、不碰磁盘的东西:`project_dir(root)`、`worktrees_dir`、`teams_dir`、仓库 `.gitignore` 条目、配置根(`config_roots`)、worktree 别名(`main_checkout_copies`、`worktree_of`) | 按值传:`EmbedConfig` → `StaticDaemonPaths::with_layout` → `DaemonPaths::layout()` → `settings_source::read_pair` → `LoadedSettings::load_from`(按全局 / 场景层的 `worktree_dir` 定 worktree 目录)→ `PathSettings.layout`,再到 `EngineConfig`、`PermissionSettings`、`SandboxPolicy`、`SensitivePaths`。没有进程级的值:一个进程里两个池可以用两个名字,一个池里两个会话也可以有两个 worktree 目录 |
 | `ConfigPaths` | 一个会话的三层根(状态根、场景目录、项目)与其下全部派生路径:各层的 `settings*.json`、skills / agents / hooks / rules / output-styles、memory、telemetry、`tool-results`、scratchpad、导入标记、`scheduled_tasks.json`、`mcp/oauth` | 会话的 `PathSettings::config_paths()`;池里没有会话时 `DaemonPaths::paths_for` |
 | `StateRoot` | 状态根下不随项目层名字变的目录:`scenes/`、`plugins/`、`projects/`、`sessions/`、`daemon/`(`instances.d`、`auth`、`groups`、`crashes`) | 池与 agixd 的启动代码 |
 | `SensitivePaths` | **唯一的安全判定点**:凭据(`is_credential`)、拒写的引擎设置文件(`is_engine_settings_file`)、不走静默放行的配置(`names_configuration`)、沙箱要保护的目录(`config_roots_in`、`engine_dirs_in`、`worktree_dirs_in`)、提示词读文件(`PromptFiles`) | 会话的 `SandboxSettings.paths`;门禁、写路径检查、规则别名、两个沙箱后端、hook 执行器、rewind、记忆、插件包的路径解析都问它,不各认目录名 |
 
-文件名与子目录名(`settings.json`、`hooks`、`worktrees`…)是 `base::paths::entry` 的常量,只在
+文件名与子目录名(`settings.json`、`hooks`、`rules`…)是 `base::paths::entry` 的常量,只在
 `layout.rs` 里写一次;守卫 `tests/guards/tests/engine_dirs.rs` 不许生产代码与提示词模板里再出现
-`.agix` / `.claude` 路径分量、引擎文件名或 `.join("<子目录>")` 字面量。提示词与文案里的目录按实例的
+`.agix` / `.claude` / `.wkts` 路径分量、引擎文件名或 `.join("<子目录>")` 字面量。提示词与文案里的目录按实例的
 `Layout` 渲染。
 
 **大小写。** macOS 缺省的 APFS 不分大小写,`.CODIX/Settings.json` 就是 `.codix/settings.json`。`SensitivePaths`
@@ -2228,10 +2229,25 @@ Seatbelt 在不分大小写的卷上按卷的语义匹配规则(实测,`macos_li
 沙箱命令的命名空间时再把 bwrap 留下的空挂载点删掉,项目里不留痕迹——删早了,还活着的那个命名空间里的进程就能
 建出它);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
-门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/`、`worktrees/` 写入不问),外来根里一切都算配置。
-沙箱与门禁用同一个判定(`ConfigRootAt::writable_entry`):本实例目录里沙箱命令也只写得了这三项,`teams/`、
+门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/` 写入不问),外来根里一切都算配置。
+沙箱与门禁用同一个判定(`ConfigRootAt::writable_entry`):本实例目录里沙箱命令也只写得了这两项,`teams/`、
 `telemetry/`、导入标记等由引擎自己(不在沙箱里)写。
 缺省名字下自己与外来去重,行为与改名之前相同。
+
+**worktree 目录。** 引擎建的 worktree 在仓库根的 `<worktree 目录>/<名>`,缺省 `.wkts`;第一次建
+worktree 时往仓库根的 `.gitignore` 加的只有 `<worktree 目录>/` 这一行(它是符号链接时不加),不是项目层目录——项目层的
+`settings.json`、agents、rules、hooks 与嵌入方放在那里的文件照常能提交。名字由设置的 `worktree_dir`
+改,只从全局层与场景层读:项目自己的设置文件改不了它(加载时丢掉并告警,`config.set` 写项目层以
+`not_at_tier` 拒绝),克隆来的仓库不能把引擎的 worktree 引到别处。名字是一个以 `.` 开头的路径分量,
+不能是配置根或别的工具的目录(`with_worktrees_dir`,不分大小写);不合法的值丢掉、记进
+`LoadedSettings::ignored`,用下面一层的或缺省的。认 worktree 的地方(规则别名、rewind、hook 执行器、
+恢复侧链、沙箱)只认两个名字:会话当前的目录与缺省的 `.wkts`。从缺省改成别的名字,`.wkts` 下已有的
+worktree 照样受保护;从一个自定义名字改成另一个,旧名字下的 worktree 不再被认作引擎的(不受保护,也不算
+主检出的别名),改名之前先把它们删掉或 `git worktree move` 到新目录。它在项目
+空间里,不在受保护的配置根里,所以沙箱另外把它钉住:macOS 上目录本身和其中直属的每个 worktree
+都不许被沙箱里的命令改名、删除或新建;Linux 上它只读、已有的 worktree 再绑回可写,还不存在时与不存在的
+外来配置根一样挂一层空的只读 tmpfs,命令建不出它,也就写不了引擎之后在其中建的第一个 worktree,事后删掉
+空挂载点。引擎自己的 git(只写点名的可写根)不受这些限制。引擎建 worktree 前它是符号链接就拒绝。项目层目录里的 `worktrees/` 不是 worktree 目录,是普通的配置。
 
 **外来状态根。** 状态根不是 `~/.agix` 的实例(嵌入方的 `data_root`,或设了 `AGIX_CONFIG_HOME`)
 把 `~/.agix`(`known_state_roots`)当外来状态根,与自己的状态根一样保护:其中的设置文件、

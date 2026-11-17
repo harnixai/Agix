@@ -963,25 +963,33 @@ mod tests {
 
     #[test]
     fn in_a_worktree_a_path_of_the_main_checkout_comes_in_both_spellings() {
-        for name in [".agix", ".codix"] {
-            let layout = Layout::new(name).unwrap();
-            a_worktree_has_both_spellings(&layout, &format!("/r/{name}/worktrees/wt"));
-            a_worktree_has_both_spellings(&layout, "/r/.agix/worktrees/wt");
+        for layout in [
+            Layout::default(),
+            Layout::new(".codix")
+                .unwrap()
+                .with_worktrees_dir(".trees")
+                .unwrap(),
+        ] {
+            let wk = layout.worktrees_dir_name();
+            a_worktree_has_both_spellings(&layout, &format!("/r/{wk}/wt"));
+            a_worktree_has_both_spellings(&layout, "/r/.wkts/wt");
         }
-        assert_eq!(
-            denied_read_paths(
-                &[rule(
-                    "Read",
-                    Some("/r/keys"),
-                    RuleBehavior::Deny,
-                    RuleSource::UserSettings,
-                )],
-                Path::new("/r/.codix/worktrees/wt"),
-                &Layout::default(),
-            ),
-            [PathBuf::from("/r/keys")],
-            "another instance's directory is not this one's worktrees"
-        );
+        for not_worktrees in ["/r/.trees/wt", "/r/.agix/worktrees/wt"] {
+            assert_eq!(
+                denied_read_paths(
+                    &[rule(
+                        "Read",
+                        Some("/r/keys"),
+                        RuleBehavior::Deny,
+                        RuleSource::UserSettings,
+                    )],
+                    Path::new(not_worktrees),
+                    &Layout::default(),
+                ),
+                [PathBuf::from("/r/keys")],
+                "{not_worktrees} is not where this session's worktrees go"
+            );
+        }
     }
 
     fn a_worktree_has_both_spellings(layout: &Layout, wt: &str) {

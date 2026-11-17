@@ -140,8 +140,8 @@ impl DelegatorHookExecutor {
     }
 
     /// The agent judges a call made in `project` or one of its worktrees
-    /// ([`base::paths::Layout::worktrees_dir`]) where it was made, as the
-    /// payload's `cwd` names it.
+    /// ([`base::paths::Layout::worktrees_dir_names`]) where it was made, as
+    /// the payload's `cwd` names it.
     pub fn in_worktrees_of(
         mut self,
         project: Option<PathBuf>,
@@ -161,9 +161,13 @@ impl DelegatorHookExecutor {
             return self.cwd.clone();
         };
         let real = base::path::resolve_physically(named);
-        let worktrees = base::path::resolve_physically(&self.layout.worktrees_dir(project));
+        let in_a_worktrees_dir = |parent: &Path| {
+            self.layout
+                .worktrees_dir_names()
+                .any(|name| base::path::resolve_physically(&project.join(name)) == parent)
+        };
         if real == base::path::resolve_physically(project)
-            || (real.parent() == Some(worktrees.as_path()) && real.is_dir())
+            || (real.parent().is_some_and(in_a_worktrees_dir) && real.is_dir())
         {
             return named.to_path_buf();
         }
@@ -403,8 +407,12 @@ mod tests {
     #[tokio::test]
     async fn an_agent_hook_works_where_the_call_was_made_inside_the_project() {
         for name in [".agix", ".codix"] {
-            an_agent_hook_works_inside_the_project_in(&base::paths::Layout::new(name).unwrap())
-                .await;
+            let layout = base::paths::Layout::new(name).unwrap();
+            an_agent_hook_works_inside_the_project_in(&layout).await;
+            an_agent_hook_works_inside_the_project_in(
+                &layout.with_worktrees_dir(".trees").unwrap(),
+            )
+            .await;
         }
     }
 
@@ -412,14 +420,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().canonicalize().unwrap().join("project");
         let worktree = layout.worktrees_dir(&project).join("wt");
+        let made_before = project.join(base::paths::DEFAULT_WORKTREES_DIR).join("old");
+        let not_one = layout.project_dir(&project).join("worktrees").join("wt");
         let elsewhere = dir.path().canonicalize().unwrap().join("elsewhere");
-        for d in [&worktree, &elsewhere, &project.join("src")] {
+        for d in [
+            &worktree,
+            &made_before,
+            &not_one,
+            &elsewhere,
+            &project.join("src"),
+        ] {
             std::fs::create_dir_all(d).unwrap();
         }
         let runs = Arc::new(WhereItRuns::default());
         let executor = DelegatorHookExecutor::new(runs.clone(), project.clone())
             .in_worktrees_of(Some(project.clone()), layout.clone());
-        for cwd in [&worktree, &project, &elsewhere, &project.join("src")] {
+        for cwd in [
+            &worktree,
+            &made_before,
+            &project,
+            &not_one,
+            &elsewhere,
+            &project.join("src"),
+        ] {
             let input = HookInput {
                 cwd: cwd.display().to_string(),
                 ..test_input()
@@ -439,6 +462,16 @@ mod tests {
                 other => panic!("{other:?}"),
             })
             .collect();
-        assert_eq!(dirs, [worktree, project.clone(), project.clone(), project]);
+        assert_eq!(
+            dirs,
+            [
+                worktree,
+                made_before,
+                project.clone(),
+                project.clone(),
+                project.clone(),
+                project
+            ]
+        );
     }
 }

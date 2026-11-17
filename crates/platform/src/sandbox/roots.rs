@@ -378,9 +378,11 @@ pub(super) struct ProjectGuard {
     /// [`base::paths::ConfigRootAt::working_entries`]).
     pub(super) shut: Vec<PathBuf>,
     pub(super) working: Vec<PathBuf>,
-    /// The `worktrees/` of each guarded git directory and of each engine
-    /// directory in the project: what a worktree made after the profile was
-    /// written lands in, where no fixed path names its control files yet.
+    /// The `worktrees/` of each guarded git directory and the engine's
+    /// worktrees directories in the project
+    /// ([`base::paths::SensitivePaths::worktree_dirs_in`]): what a worktree
+    /// made after the profile was written lands in, where no fixed path names
+    /// its control files yet.
     pub(super) worktree_parents: WorktreeParents,
 }
 

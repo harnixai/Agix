@@ -109,7 +109,7 @@ async fn enter_and_write(
         .await?;
     let entered = results_of(&events, "EnterWorktree");
     assert!(entered.iter().any(|(_, _, failed)| !failed), "{entered:?}");
-    let tree = run.project.join(".agix/worktrees").join(slug);
+    let tree = run.project.join(".wkts").join(slug);
     assert_eq!(
         std::fs::read_to_string(tree.join("feature.txt"))
             .ok()
@@ -208,7 +208,7 @@ async fn keeping_a_worktree_leaves_it_on_disk_and_the_session_can_enter_another(
             ),
         )
         .await?;
-    let kept = run.project.join(".agix/worktrees/keep-a");
+    let kept = run.project.join(".wkts/keep-a");
     assert_eq!(
         std::fs::read_to_string(kept.join("kept.txt"))
             .ok()
@@ -221,7 +221,7 @@ async fn keeping_a_worktree_leaves_it_on_disk_and_the_session_can_enter_another(
         entered.len() >= 2 && !entered[1].2,
         "once exited, the session can enter another worktree: {entered:?}"
     );
-    assert!(run.project.join(".agix/worktrees/next-b").exists());
+    assert!(run.project.join(".wkts/next-b").exists());
     assert!(kept.exists(), "keep leaves the worktree on disk");
     run.finish().await;
     Ok(())
@@ -242,7 +242,7 @@ async fn a_worktree_outside_a_git_repository_is_refused() -> anyhow::Result<()> 
         !entered.is_empty() && entered.iter().all(|(_, _, failed)| *failed),
         "{entered:?}"
     );
-    assert!(!run.project.join(".agix/worktrees").exists());
+    assert!(!run.project.join(".wkts").exists());
     run.finish().await;
     Ok(())
 }

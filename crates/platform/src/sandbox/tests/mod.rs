@@ -148,13 +148,13 @@ impl UnderSandboxExec {
         self.run_at(&self.project, &[], command, policy)
     }
 
-    /// `command` as a sub-agent in the worktree `.agix/worktrees/<slug>`,
+    /// `command` as a sub-agent in the worktree `.wkts/<slug>`,
     /// on branch `<slug>`, runs it: writing what a commit there needs of the
     /// project's git directory.
     fn runs_in_worktree(&self, slug: &str, command: &str) -> bool {
         let git = worktree_git(&self.project, slug);
         self.run_at(
-            &self.project.join(".agix/worktrees").join(slug),
+            &self.project.join(".wkts").join(slug),
             &git.writable(),
             command,
             SandboxPolicy {
@@ -288,7 +288,7 @@ fn write_file(path: &Path, body: &str) {
 }
 
 /// What the engine finds of `project`'s git directory for its worktree
-/// `.agix/worktrees/<slug>` on branch `<slug>`.
+/// `.wkts/<slug>` on branch `<slug>`.
 #[cfg(feature = "sandbox")]
 #[cfg(unix)]
 fn worktree_git(project: &Path, slug: &str) -> base::paths::WorktreeGit {

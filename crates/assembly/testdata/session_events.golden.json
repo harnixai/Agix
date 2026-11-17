@@ -674,7 +674,7 @@
           "event": {
             "agent_session_id": "sub-1",
             "call_id": "hc_1",
-            "cwd": "/repo/.agix/worktrees/probe",
+            "cwd": "/repo/.wkts/probe",
             "depth": 1,
             "input": {
               "text": "ping"
@@ -693,7 +693,7 @@
       "event": {
         "agent_session_id": "sub-1",
         "call_id": "hc_1",
-        "cwd": "/repo/.agix/worktrees/probe",
+        "cwd": "/repo/.wkts/probe",
         "depth": 1,
         "input": {
           "text": "ping"
@@ -711,7 +711,7 @@
           "event": {
             "agent_session_id": "sub-1",
             "call_id": "hc_1",
-            "cwd": "/repo/.agix/worktrees/probe",
+            "cwd": "/repo/.wkts/probe",
             "depth": 1,
             "input": {
               "text": "ping"

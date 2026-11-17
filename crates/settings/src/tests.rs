@@ -973,6 +973,81 @@ mod project_trust {
     }
 
     #[test]
+    fn the_worktrees_go_where_the_users_own_tiers_say() {
+        for layout in layouts() {
+            let tiers = Tiers::new(&layout);
+            write_settings(&tiers.global, "{}");
+            let unset = tiers.load();
+            assert_eq!(unset.paths.layout.worktrees_dir_name(), ".wkts");
+            assert_eq!(unset.engine_config().layout, unset.paths.layout);
+
+            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
+            let global = tiers.load();
+            assert_eq!(global.paths.layout.worktrees_dir_name(), ".trees");
+            assert_eq!(
+                global.paths.layout.project_dir_name(),
+                layout.project_dir_name()
+            );
+            assert_eq!(global.engine_config().layout, global.paths.layout);
+            assert_eq!(global.permission_settings().layout, global.paths.layout);
+            assert_eq!(
+                global.engine_config().sandbox.paths.layout(),
+                &global.paths.layout
+            );
+
+            write_settings(&tiers.scene, r#"{"worktree_dir": ".scene-trees"}"#);
+            assert_eq!(
+                tiers.load().paths.layout.worktrees_dir_name(),
+                ".scene-trees"
+            );
+        }
+    }
+
+    #[test]
+    fn a_project_cannot_move_the_worktrees() {
+        for layout in layouts() {
+            let tiers = Tiers::new(&layout);
+            write_settings(&tiers.global, "{}");
+            trust_project(&tiers.global, &tiers.project_dir());
+            let elsewhere = r#"{"worktree_dir": ".elsewhere"}"#;
+            write_settings(&tiers.project_dir(), elsewhere);
+            write_local_settings(&tiers.project_dir(), elsewhere);
+            let settings = tiers.load();
+            assert_eq!(settings.paths.layout.worktrees_dir_name(), ".wkts");
+            assert_eq!(settings.values.worktree_dir, None);
+
+            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
+            trust_project(&tiers.global, &tiers.project_dir());
+            assert_eq!(tiers.load().paths.layout.worktrees_dir_name(), ".trees");
+        }
+    }
+
+    #[test]
+    fn a_worktrees_dir_not_allowed_is_ignored_with_a_warning() {
+        for layout in layouts() {
+            let tiers = Tiers::new(&layout);
+            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
+            for bad in ["wkts", "../x", ".git", ".claude", layout.project_dir_name()] {
+                write_settings(&tiers.scene, &format!(r#"{{"worktree_dir": "{bad}"}}"#));
+                let settings = tiers.load();
+                assert_eq!(
+                    settings.paths.layout.worktrees_dir_name(),
+                    ".trees",
+                    "{bad}"
+                );
+                assert_eq!(settings.values.worktree_dir.as_deref(), Some(".trees"));
+                assert_eq!(ignored_keys(&settings), ["worktree_dir"], "{bad}");
+                assert_eq!(settings.ignored[0].tier, "scene");
+            }
+            write_settings(&tiers.global, r#"{"worktree_dir": 5}"#);
+            write_settings(&tiers.scene, "{}");
+            let settings = tiers.load();
+            assert_eq!(settings.paths.layout.worktrees_dir_name(), ".wkts");
+            assert_eq!(ignored_keys(&settings), ["worktree_dir"]);
+        }
+    }
+
+    #[test]
     fn an_untrusted_project_cannot_loosen_permissions() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);

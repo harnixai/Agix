@@ -289,7 +289,7 @@ async fn the_gate_honours_a_configured_exemption() {
     );
 }
 
-/// A sub-agent's worktree lives at `<repo>/.agix/worktrees/<slug>` and is its
+/// A sub-agent's worktree lives at `<repo>/.wkts/<slug>` and is its
 /// cwd. Guarding the `.agix` directory by name denied every write the
 /// sub-agent was created to make — while the thing actually worth guarding is
 /// the settings file, which is one name in that directory rather than all of

@@ -412,7 +412,7 @@ async fn a_session_in_a_worktree_works_there_and_writes_what_a_commit_needs_of_t
         .args([
             "-c",
             "git init -q . && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m i \
-             && git worktree add -q -b wt .agix/worktrees/wt",
+             && git worktree add -q -b wt .wkts/wt",
         ])
         .current_dir(&repo)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -420,7 +420,7 @@ async fn a_session_in_a_worktree_works_there_and_writes_what_a_commit_needs_of_t
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let worktree = repo.join(".agix/worktrees/wt");
+    let worktree = repo.join(".wkts/wt");
     let elsewhere = tempfile::tempdir().unwrap();
     let elsewhere = elsewhere.path().canonicalize().unwrap();
     // What a sandboxed command could have done since the worktree was made:

@@ -1,6 +1,6 @@
 //! `config.set` 收哪些键：有专门方法的键族指过去，可执行配置不收，只从全局层读的键
-//! 只能写全局层，schema 里没有的键不收。值本身放不放得进、未受信项目收不收，由写入
-//! 核心按加载器判。
+//! 只能写全局层，不从项目层读的键不写项目层，schema 里没有的键不收。值本身放不放得进、
+//! 未受信项目收不收，由写入核心按加载器判。
 
 use settings::edit::KeyPath;
 use settings::{KeyKind, SchemaKeys};
@@ -97,6 +97,13 @@ pub(in crate::session_pool) fn refusal(
             dotted,
             RejectKind::NotAtTier,
             format!("`{}` is read from the global tier only", segments[0]),
+        ));
+    }
+    if tier == SettingsTier::Project && settings::NOT_FROM_PROJECT_KEYS.contains(&segments[0]) {
+        return Some(SettingRejected::new(
+            dotted,
+            RejectKind::NotAtTier,
+            format!("`{}` is not read from a project's settings", segments[0]),
         ));
     }
     None

@@ -46,7 +46,7 @@ You can optionally run agents in the background using the `background` parameter
 
 ## Worktree isolation
 
-Pass `worktree: "<name>"` to give the agent its own git worktree: a separate checkout of the repository at `{project_dir}/worktrees/<name>`, on a new branch `{branch_prefix}<name>` made from the project's current commit, where it can change files and commit without touching your working directory. Its tools work in that worktree; reading or writing files of your checkout asks for approval, and the project's deny and ask rules cover your checkout as well as the worktree.
+Pass `worktree: "<name>"` to give the agent its own git worktree: a separate checkout of the repository at `{worktrees_dir}/<name>` in its root, on a new branch `{branch_prefix}<name>` made from the project's current commit, where it can change files and commit without touching your working directory. Its tools work in that worktree; reading or writing files of your checkout asks for approval, and the project's deny and ask rules cover your checkout as well as the worktree.
 
 When the agent ends, a worktree it left as it was made — no uncommitted or untracked changes, no new commits — is removed along with its branch; files git ignores don't count and go with it. Otherwise both are kept, and the agent's result (for a background agent, its task notification) carries a `<worktree>` block with the `<path>` and `<branch>`: merge or cherry-pick the branch. Nothing removes a kept worktree or its branch for you; while it exists its name is refused, so pick another.
 

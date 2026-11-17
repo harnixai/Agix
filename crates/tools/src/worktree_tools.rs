@@ -6,8 +6,8 @@
 //! - **Enter/ExitWorktree**：**当前 session**进 worktree（改 cwd 概念）；适合"我要在隔离环境里折腾一会儿"
 //!
 //! 会话的 cwd 不变：EnterWorktree 返回 worktree 的绝对路径，模型用绝对路径
-//! 或先 `Bash cd` 进去才写得到那里（worktree 在仓库根的 `<项目层目录>/worktrees/`
-//! 下，本来就在会话可写范围内）。会话同时只有一个 active worktree；
+//! 或先 `Bash cd` 进去才写得到那里（worktree 在仓库根的 worktree 目录下，缺省
+//! `.wkts/`，本来就在会话可写范围内）。会话同时只有一个 active worktree；
 //! ExitWorktree `keep` 只让出它，`remove` 删目录和分支，拒绝删除时它仍是
 //! active 的。会话结束时还 active 的 worktree 留在磁盘上。
 
@@ -116,9 +116,8 @@ impl Tool for EnterWorktreeTool {
     }
     async fn permission_facts(&self, _: &Value, ctx: &ToolContext) -> PermissionFacts {
         PermissionFacts::unknown().with_question(format!(
-            "EnterWorktree will create a new git worktree under {}/{}/",
-            ctx.config.layout.project_dir_name(),
-            base::paths::entry::WORKTREES
+            "EnterWorktree will create a new git worktree under {}/ at the repository root",
+            ctx.config.layout.worktrees_dir_name()
         ))
     }
     async fn call(
@@ -484,7 +483,7 @@ mod tests {
         }
 
         fn tree(&self, slug: &str) -> std::path::PathBuf {
-            self.repo.path().join(".agix/worktrees").join(slug)
+            self.repo.path().join(".wkts").join(slug)
         }
     }
 

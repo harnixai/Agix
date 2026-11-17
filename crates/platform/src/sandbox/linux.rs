@@ -46,7 +46,7 @@ fn read_only(args: &mut Vec<String>, path: &Path) {
 /// Where bwrap has to make the mount point, or mounts over an empty
 /// directory, the path goes on `made`, for the wrapper to remove once the
 /// command is done if it is still empty ([`bwrap_stdio_outside`]): a foreign
-/// root or `.agents` held this way leaves nothing behind in the project.
+/// root, `.agents` or worktrees directory held so leaves nothing behind.
 fn shut_empty(args: &mut Vec<String>, path: &Path, made: &mut Vec<PathBuf>) {
     let empty_dir = path.symlink_metadata().is_ok_and(|m| m.is_dir())
         && std::fs::read_dir(path).is_ok_and(|mut d| d.next().is_none());
@@ -153,7 +153,7 @@ fn guard_project(
         }
     }
     guard_project_skills(args, roots, made);
-    worktrees::guard_links(args, roots);
+    worktrees::guard_links(args, roots, made);
 }
 
 fn guard_project_skills(args: &mut Vec<String>, roots: &Roots, made: &mut Vec<PathBuf>) {

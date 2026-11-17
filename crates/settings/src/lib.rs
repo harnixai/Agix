@@ -44,6 +44,10 @@ pub use source::{read_settings_file, FileTiers};
 /// every other tier.
 pub const GLOBAL_ONLY_KEYS: &[&str] = &["project_trust", "network"];
 
+/// The keys a project's own files may not set; the loader drops them from the
+/// project tier.
+pub const NOT_FROM_PROJECT_KEYS: &[&str] = &["worktree_dir"];
+
 /// One settings.json file: the settings it overrides, and the permission rules
 /// it adds to every other tier's.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -207,6 +211,16 @@ pub struct Settings {
     /// User language preference (e.g. "zh-CN", "ja").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+
+    /// The directory at a repository's root the engine's git worktrees go
+    /// in, which is also the line it adds to that repository's `.gitignore`:
+    /// one path component starting with `.`, not starting with `.git`, not a
+    /// configuration root nor another tool's directory
+    /// (`base::paths::Layout::with_worktrees_dir`). Unset, `.wkts`. Read from
+    /// the global and scene tiers only — a project's own files cannot move
+    /// it; a name that is not allowed is ignored with a warning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_dir: Option<String>,
 
     /// The module-owned keys (`team`, `plugins`, `scripts`) of the sections
     /// the build registered — see [`section::Sections`]; read one with
@@ -707,6 +721,7 @@ impl Settings {
             default_provider: None,
             task_models: HashMap::new(),
             language: None,
+            worktree_dir: None,
             sections: BTreeMap::new(),
         }
     }

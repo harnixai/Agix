@@ -1184,6 +1184,13 @@
         "string",
         "null"
       ]
+    },
+    "worktree_dir": {
+      "description": "The directory at a repository's root the engine's git worktrees go\nin, which is also the line it adds to that repository's `.gitignore`:\none path component starting with `.`, not starting with `.git`, not a\nconfiguration root nor another tool's directory\n(`base::paths::Layout::with_worktrees_dir`). Unset, `.wkts`. Read from\nthe global and scene tiers only — a project's own files cannot move\nit; a name that is not allowed is ignored with a warning.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "title": "SettingsFile",

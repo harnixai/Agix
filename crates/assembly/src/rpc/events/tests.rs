@@ -101,7 +101,7 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             "host_tool_call",
             json!({"kind": "host_tool_call", "call_id": "hc_1", "tool_use_id": "toolu_3", "name": "HostEcho", "input": {"text": "ping"},
                    "timeout_ms": 120000, "task_id": "a1", "agent_session_id": "sub-1",
-                   "cwd": "/repo/.agix/worktrees/probe", "depth": 1}),
+                   "cwd": "/repo/.wkts/probe", "depth": 1}),
         ),
         (
             "host_tool_call_bare",

@@ -16,8 +16,8 @@ use std::path::{Component, Path, PathBuf};
 
 use super::layout::{
     entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_FILES,
-    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_WORKTREES_DIR, STATE_ROOT_SCRATCHPAD,
-    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    PROJECT_ENGINE_CONFIG_DIRS, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP,
+    STATE_ROOT_WORKING_DIRS,
 };
 use super::ConfigPaths;
 
@@ -561,12 +561,12 @@ impl SensitivePaths {
             .collect()
     }
 
-    /// The directories of the engines' worktrees in `dir`, the instance's
-    /// own first: a `.git` link in one leads git somewhere.
+    /// The engine's worktrees directories in `dir`, the configured one first
+    /// ([`Layout::worktrees_dir_names`]): a `.git` link in one leads git.
     pub fn worktree_dirs_in(&self, dir: &Path) -> Vec<PathBuf> {
         self.layout
-            .engine_dir_names()
-            .map(|name| dir.join(name).join(PROJECT_WORKTREES_DIR))
+            .worktrees_dir_names()
+            .map(|name| dir.join(name))
             .collect()
     }
 
@@ -623,8 +623,8 @@ impl SensitivePaths {
     }
 
     /// Whether `abs` is one of the [`ENGINE_CONFIG_FILES`] anywhere under a
-    /// configuration root — by name and location, not by directory: the
-    /// project directory also holds a sub-agent's worktree. Without case, as
+    /// configuration root — by name and location, not by directory: a
+    /// worktree's checkout has configuration roots of its own. Without case, as
     /// [`Self::is_credential`]: an absent name has no true spelling to take.
     pub fn is_engine_settings_file(&self, abs: &Path) -> bool {
         let components = lowered_components(abs);
@@ -639,8 +639,8 @@ impl SensitivePaths {
 
     /// Whether this entry directly in the instance's own directory is the
     /// agent's working space rather than its configuration: the scratchpad
-    /// its prompt sends temporary files to, the memory directory it is told
-    /// to write to directly, or the worktrees its sessions work in.
+    /// its prompt sends temporary files to, or the memory directory it is
+    /// told to write to directly.
     pub fn is_engine_working_entry(&self, name: &str) -> bool {
         is_working_entry(name)
     }
@@ -835,7 +835,7 @@ impl Spellings {
 
 /// The entries of the instance's own directory that are the agent's working
 /// space ([`SensitivePaths::is_engine_working_entry`]).
-const WORKING_ENTRIES: &[&str] = &[STATE_ROOT_SCRATCHPAD, entry::MEMORY, PROJECT_WORKTREES_DIR];
+const WORKING_ENTRIES: &[&str] = &[STATE_ROOT_SCRATCHPAD, entry::MEMORY];
 
 fn is_working_entry(name: &str) -> bool {
     WORKING_ENTRIES.contains(&name)
@@ -908,6 +908,7 @@ mod tests {
     /// `p` with `{own}` spelled as the layout's project directory.
     fn own(p: &str, layout: &Layout) -> String {
         p.replace("{own}", layout.project_dir_name())
+            .replace("{wk}", layout.worktrees_dir_name())
     }
 
     #[test]
@@ -1309,18 +1310,19 @@ mod tests {
                 "/Users/me/{own}/memory/MEMORY.md",
                 "cd /repo\nS=/repo/{own}/scratchpad\nmkdir -p \"$S\"",
                 "printf x > \"$d/{own}/scratchpad\"",
-                "/repo/{own}/worktrees/feat-a/feature.txt",
-                "cd /repo/{own}/worktrees/feat-a && git add -A",
+                "/repo/{wk}/feat-a/feature.txt",
+                "cd /repo/{wk}/feat-a && git add -A",
             ] {
                 assert!(!paths.names_configuration(&own(p, &layout)), "{p}");
             }
             for p in [
                 "/repo/{own}/agents/reviewer.md",
                 "/repo/{own}/scratchpad.md",
-                "/repo/{own}/worktrees/feat-a/{own}/agents/reviewer.md",
-                "/repo/{own}/worktrees/feat-a/.agix/agents/reviewer.md",
-                "/repo/{own}/worktrees/feat-a/.claude/settings.json",
-                "/repo/{own}/worktrees/feat-a/.git",
+                "/repo/{own}/worktrees/feat-a/feature.txt",
+                "/repo/{wk}/feat-a/{own}/agents/reviewer.md",
+                "/repo/{wk}/feat-a/.agix/agents/reviewer.md",
+                "/repo/{wk}/feat-a/.claude/settings.json",
+                "/repo/{wk}/feat-a/.git",
                 "/repo/.claude/scratchpad/x",
             ] {
                 assert!(paths.names_configuration(&own(p, &layout)), "{p}");
@@ -1338,10 +1340,7 @@ mod tests {
     #[test]
     fn what_the_gate_treats_as_working_space_the_sandbox_leaves_writable() {
         let paths = SensitivePaths::default();
-        for name in STATE_ROOT_WORKING_DIRS
-            .iter()
-            .chain([&PROJECT_WORKTREES_DIR])
-        {
+        for name in STATE_ROOT_WORKING_DIRS {
             assert!(paths.is_engine_working_entry(name), "{name}");
             assert!(
                 !ENGINE_CONFIG_DIRS.contains(name) && !ENGINE_CONFIG_FILES.contains(name),
@@ -1358,7 +1357,7 @@ mod tests {
                 "/repo/{own}/settings.json",
                 "/repo/.agix/settings.json",
                 "/repo/.claude/settings.local.json",
-                "/repo/{own}/worktrees/a/{own}/mcp.local.json",
+                "/repo/{wk}/a/{own}/mcp.local.json",
                 "/repo/{own}/agents/settings.json",
                 "/repo/{OWN}/Settings.json",
                 "/repo/.Agix/SETTINGS.LOCAL.JSON",
@@ -1386,7 +1385,10 @@ mod tests {
 
     #[test]
     fn the_sandbox_is_told_the_engine_directories_of_a_project() {
-        let codix = Layout::new(".codix").unwrap();
+        let codix = Layout::new(".codix")
+            .unwrap()
+            .with_worktrees_dir(".trees")
+            .unwrap();
         let paths = SensitivePaths::new(None, None, codix.clone());
         let at: Vec<(PathBuf, bool)> = paths
             .config_roots_in(Path::new("/nowhere/repo"))
@@ -1411,13 +1413,17 @@ mod tests {
         assert_eq!(
             paths.worktree_dirs_in(Path::new("/nowhere/repo")),
             [
-                PathBuf::from("/nowhere/repo/.codix/worktrees"),
-                PathBuf::from("/nowhere/repo/.agix/worktrees")
+                PathBuf::from("/nowhere/repo/.trees"),
+                PathBuf::from("/nowhere/repo/.wkts")
             ]
         );
         assert_eq!(
             SensitivePaths::default().engine_dirs_in(Path::new("/nowhere/repo")),
             [PathBuf::from("/nowhere/repo/.agix")]
+        );
+        assert_eq!(
+            SensitivePaths::default().worktree_dirs_in(Path::new("/nowhere/repo")),
+            [PathBuf::from("/nowhere/repo/.wkts")]
         );
     }
 

@@ -660,11 +660,7 @@ async fn a_sub_agent_in_a_worktree_calls_and_is_hooked_from_the_worktree() {
         .await;
     let session = daemon.session(&client, json!({})).await;
     let turn = daemon.run(&client, &session, "go").await;
-    let worktree = daemon
-        .work
-        .join(".agix/worktrees/probe")
-        .display()
-        .to_string();
+    let worktree = daemon.work.join(".wkts/probe").display().to_string();
 
     let hook = provider.kind("hook_call").await;
     assert_eq!(hook["cwd"], worktree, "{hook}");
@@ -739,7 +735,7 @@ async fn a_worktree_sub_agent_starts_its_own_in_a_worktree_of_the_project() {
     let turn = daemon.run(&client, &session, "go").await;
 
     let call = provider.kind("host_tool_call").await;
-    let inner = daemon.work.join(".agix/worktrees/inner");
+    let inner = daemon.work.join(".wkts/inner");
     assert_eq!(call["cwd"], inner.display().to_string(), "{call}");
     assert_eq!(call["depth"], 2, "{call}");
     provider.answer_tool(&session, &call, "nested").await;
@@ -758,7 +754,7 @@ async fn a_worktree_sub_agent_starts_its_own_in_a_worktree_of_the_project() {
         "the inner worktree holds a commit"
     );
     assert!(
-        !daemon.work.join(".agix/worktrees/outer").exists(),
+        !daemon.work.join(".wkts/outer").exists(),
         "the outer worktree was left as it was made"
     );
 }
@@ -856,7 +852,7 @@ async fn entering_a_worktree_leaves_the_sessions_cwd_where_it_was() {
     client.response(turn).await;
     let (entered, failed) = daemon.answer_to("toolu_enter");
     assert!(!failed, "{entered}");
-    assert!(daemon.work.join(".agix/worktrees/probe").is_dir());
+    assert!(daemon.work.join(".wkts/probe").is_dir());
 }
 
 #[tokio::test]
@@ -1630,7 +1626,7 @@ async fn a_relative_deny_covers_the_main_checkout_for_a_worktree_sub_agent() {
     ));
     for (id, path) in [
         ("toolu_absolute", secret.as_str()),
-        ("toolu_climbing", "../../../.env"),
+        ("toolu_climbing", "../../.env"),
     ] {
         daemon
             .model
@@ -1720,17 +1716,14 @@ async fn a_project_deny_covers_the_worktrees_copy_of_a_committed_file() {
     daemon.model.push_turn(tool_round(
         "Read",
         "toolu_kept_copy",
-        json!({ "file_path": ".agix/worktrees/probe/vault/key" }),
+        json!({ "file_path": ".wkts/probe/vault/key" }),
     ));
     daemon.model.push_turn(text_round("done"));
     let client = daemon.connect().await;
     let session = daemon.session(&client, json!({})).await;
     let turn = daemon.run(&client, &session, "go").await;
     client.response(turn).await;
-    assert!(daemon
-        .work
-        .join(".agix/worktrees/probe/vault/key")
-        .is_file());
+    assert!(daemon.work.join(".wkts/probe/vault/key").is_file());
     for (id, secret, rule) in [
         ("toolu_own_copy", "hunter2", "secrets/**"),
         ("toolu_kept_copy", "swordfish", "Read(vault/**)"),
@@ -1800,7 +1793,7 @@ async fn a_worktree_with_work_in_it_is_kept_and_named_and_an_idle_one_is_removed
     let (bash, bash_err) = daemon.answer_to("toolu_commit");
     assert!(!bash_err, "{bash}");
 
-    let worktree = daemon.work.join(".agix/worktrees/probe");
+    let worktree = daemon.work.join(".wkts/probe");
     assert!(worktree.join("made.txt").is_file());
     assert!(!daemon.work.join("made.txt").exists());
     assert!(branch_exists(&daemon.work, "agix/worktree-probe"));
@@ -1820,7 +1813,7 @@ async fn a_worktree_with_work_in_it_is_kept_and_named_and_an_idle_one_is_removed
         "{result}"
     );
 
-    assert!(!daemon.work.join(".agix/worktrees/idle").exists());
+    assert!(!daemon.work.join(".wkts/idle").exists());
     assert!(!branch_exists(&daemon.work, "agix/worktree-idle"));
     let (result, _) = daemon.answer_to("toolu_idle");
     assert_eq!(result, "nothing to do");

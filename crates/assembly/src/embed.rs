@@ -66,11 +66,12 @@ pub struct EmbedConfig {
     /// with or without an `instance`.
     pub groups_file: Option<PathBuf>,
     /// The name of the directory the engine keeps in each project (`.agix`):
-    /// the project's settings, agents, hooks, rules, worktrees, memory. Only
-    /// this name is read; a `.agix` beside it is not, and stays guarded
-    /// against the model as another agent's configuration. One path
-    /// component of `[a-z0-9._-]` starting with `.`, not another tool's
-    /// (`base::paths::layout::OTHER_TOOLS_DIRS`).
+    /// the project's settings, agents, hooks, rules, memory. Only this name
+    /// is read; a `.agix` beside it is not, and stays guarded against the
+    /// model as another agent's configuration. One path component of
+    /// `[a-z0-9._-]` starting with `.`, not another tool's
+    /// (`base::paths::layout::OTHER_TOOLS_DIRS`) nor the worktrees
+    /// directory's default (`base::paths::DEFAULT_WORKTREES_DIR`).
     pub project_dir: String,
     /// The product's name (`Agix`), wherever the engine names itself: the
     /// model's prompts and the messages it reads, the `client_name` an MCP

@@ -451,9 +451,10 @@ fn another_instances_state_root_is_guarded_as_the_own_one() {
 /// as the gate takes every entry of one for configuration — its working
 /// entries and new entries directly in it too — but for a writable root the
 /// policy names inside it. In the instance's own root the working entries
-/// stay writable — `scratchpad/`, `memory/`, `worktrees/`, all the gate
-/// leaves out of configuration — and nothing else in it: not `commands/`,
-/// not `teams/` or `telemetry/`, which the engine writes itself.
+/// stay writable — `scratchpad/` and `memory/`, all the gate leaves out of
+/// configuration — and nothing else in it: not `commands/`, not `teams/` or
+/// `telemetry/`, which the engine writes itself, nor a `worktrees/`, which
+/// the engine's worktrees are not in.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 #[allow(clippy::unwrap_used)]
@@ -473,7 +474,7 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         ] {
             std::fs::create_dir_all(project.join(d)).unwrap();
         }
-        for entry in ["scratchpad", "teams", "telemetry"] {
+        for entry in ["scratchpad", "teams", "telemetry", "worktrees/w"] {
             std::fs::create_dir_all(project.join(own).join(entry)).unwrap();
         }
         let named = project.join(".claude/named");
@@ -516,7 +517,12 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         for path in shut {
             assert!(!writes(path), "{own}: {path} was written");
         }
-        for entry in ["teams/t.json", "telemetry/x.jsonl", "notes.md"] {
+        for entry in [
+            "teams/t.json",
+            "telemetry/x.jsonl",
+            "notes.md",
+            "worktrees/w/x",
+        ] {
             let path = format!("{own}/{entry}");
             assert!(!writes(&path), "{own}: {path} was written");
         }
@@ -524,6 +530,69 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         for path in [own_scratch.as_str(), ".claude/named/n"] {
             assert!(writes(path), "{own}: {path} was not writable");
         }
+    }
+}
+
+/// The engine's worktrees directory is ordinary project space, yet a
+/// command can neither move it nor a worktree in it aside — and rewrite a
+/// worktree's `.git` link where no rule names it — nor add a directory of
+/// its own there or rewrite a link in place. Inside a worktree it writes as
+/// anywhere in the project.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_command_cannot_move_the_worktrees_aside_or_rewrite_their_links() {
+    if !a_backend_runs() {
+        return;
+    }
+    for layout in [
+        base::paths::Layout::default(),
+        base::paths::Layout::new(".codix")
+            .unwrap()
+            .with_worktrees_dir(".trees")
+            .unwrap(),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        let wt = layout.worktrees_dir(&project).join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: /nowhere\n").unwrap();
+        let policy = SandboxPolicy {
+            state_root: Some(dir.path().join("state")),
+            layout: layout.clone(),
+            ..Default::default()
+        };
+        let runs = |command: &str| {
+            run_confined(&project, &policy, &[], command)
+                .status
+                .success()
+        };
+        let wk = layout.worktrees_dir_name();
+        for command in [
+            format!("mv {wk} moved"),
+            format!("mv {wk}/wt {wk}/other"),
+            format!("mv {wk}/wt moved"),
+            format!("mkdir {wk}/planted"),
+            format!("echo 'gitdir: /tmp' > {wk}/wt/.git"),
+            format!("rm -rf {wk}/wt"),
+        ] {
+            assert!(!runs(&command), "{wk}: `{command}` was allowed");
+        }
+        assert_eq!(
+            std::fs::read_to_string(wt.join(".git")).unwrap(),
+            "gitdir: /nowhere\n"
+        );
+        // Across Linux's bind mounts `mv` falls back to copying, so a copy
+        // may appear; what matters is that nothing left its place.
+        for gone in [format!("{wk}/other"), format!("{wk}/planted")] {
+            assert!(!project.join(&gone).exists(), "{gone}");
+        }
+        assert!(
+            runs(&format!(
+                "echo x > {wk}/wt/f && mkdir -p {wk}/wt/src && echo y > {wk}/wt/src/a"
+            )),
+            "{wk}: a worktree's files were not writable"
+        );
     }
 }
 

@@ -447,8 +447,8 @@ impl SessionPool {
         let _claim = self.claim_log(&sid).await?;
 
         let (binding, project_root_for_meta, scene_id) = self.binding_of_log(log).await;
-        let layout = self.bindings.paths().layout();
-        let worktree = recorded_worktree(log, project_root_for_meta.as_deref(), &layout)
+        let layout = &binding.settings.paths.layout;
+        let worktree = recorded_worktree(log, project_root_for_meta.as_deref(), layout)
             .await
             .map_err(|why| format!("session `{sid}` could not be brought back: {why}"))?;
 

@@ -170,7 +170,7 @@ async fn a_background_agents_kept_worktree_is_in_its_task_and_its_notice() -> an
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    let worktree = project.canonicalize()?.join(".agix/worktrees/bg");
+    let worktree = project.canonicalize()?.join(".wkts/bg");
     assert!(worktree.join("made.txt").is_file(), "{task}");
     let kept = &task["detail"]["worktree"];
     assert_eq!(kept["path"], worktree.display().to_string(), "{task}");
@@ -261,7 +261,7 @@ async fn stopped_sub_agents_resume_under_their_project_and_in_their_worktree() -
         .await?;
 
     let root = project.canonicalize()?;
-    let worktree = root.join(".agix/worktrees/cut");
+    let worktree = root.join(".wkts/cut");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let running = loop {
         let listed = tasks_of(&mut client, &session).await?;

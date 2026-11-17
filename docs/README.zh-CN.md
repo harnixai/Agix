@@ -457,6 +457,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `sandbox.network_mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all`、`allowlist`(`sandbox.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网)或 `proxy`——要按域名过滤,在前面放一个代理 |
 | `sandbox.egress_proxy` | 无 | `proxy` 模式下沙箱里的命令唯一能连的地址(`"127.0.0.1:3128"`,或 `{"http", "socks", "no_proxy"}`),经 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 告诉命令;代理不在本机时 macOS 只能按端口限,Linux 要 `socat`,没有就整个断网 |
 | `network.use_system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`;`false` 直连。只认全局 / 托管层(scene、项目层写了会被忽略),daemon 启动时生效;与上面沙箱命令的出网无关 |
+| `worktree_dir` | `.wkts` | `EnterWorktree` 与 `Agent` 的 `worktree` 把 git worktree 建在仓库根的这个目录下(`<仓库>/.wkts/<名>`),仓库的 `.gitignore` 也只加这一行;一个以 `.` 开头的路径分量,不能以 `.git` 开头,也不能是配置目录或别的工具的目录。只认全局 / 场景层:项目自己的设置改不了它 |
 
 | 变量 | 作用 |
 |---|---|

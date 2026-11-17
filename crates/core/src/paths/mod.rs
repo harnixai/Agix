@@ -47,11 +47,11 @@ pub mod layout;
 mod sensitive;
 
 pub use layout::{
-    entry, ConfigRoot, Layout, LayoutError, ProductNameError, StateRoot, AGENTS_DIR, CLAUDE_DIR,
-    DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_URL, DEFAULT_PROJECT_DIR, DEFAULT_STATE_DIR,
-    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, FOREIGN_CONFIG_ROOTS, GIT_WORKTREES_DIR,
-    LOCAL_DATA_IGNORED_DIRS, LOCAL_DATA_IGNORED_FILES, PROJECT_ENGINE_CONFIG_DIRS,
-    PROJECT_SKILLS_DIR, PROJECT_WORKTREES_DIR, SETTINGS_FILE, SETTINGS_LOCAL_FILE,
+    entry, ConfigRoot, Layout, LayoutError, ProductNameError, StateRoot, WorktreesDirError,
+    AGENTS_DIR, CLAUDE_DIR, DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_URL, DEFAULT_PROJECT_DIR,
+    DEFAULT_STATE_DIR, DEFAULT_WORKTREES_DIR, ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES,
+    FOREIGN_CONFIG_ROOTS, GIT_WORKTREES_DIR, LOCAL_DATA_IGNORED_DIRS, LOCAL_DATA_IGNORED_FILES,
+    PROJECT_ENGINE_CONFIG_DIRS, PROJECT_SKILLS_DIR, SETTINGS_FILE, SETTINGS_LOCAL_FILE,
     STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 pub use sensitive::{
@@ -725,6 +725,7 @@ mod tests {
     fn the_project_tiers_paths_are_in_the_layouts_directory() {
         for layout in layout::test_layouts() {
             let name = layout.project_dir_name().to_string();
+            let layout_worktrees = layout.worktrees_dir_name().to_string();
             let project = Path::new("/repo");
             let p = ConfigPaths::of(
                 PathBuf::from("/state"),
@@ -746,7 +747,10 @@ mod tests {
                 Some(own.join("output-styles"))
             );
             assert_eq!(p.imported_marker(), Some(own.join(".imported.json")));
-            assert_eq!(p.worktrees_dir(), Some(own.join("worktrees")));
+            assert_eq!(
+                p.worktrees_dir(),
+                Some(project.join(layout_worktrees.as_str()))
+            );
             assert_eq!(p.telemetry_dir(), own.join("telemetry"));
             assert_eq!(p.scratchpad_dir(), own.join("scratchpad"));
             assert_eq!(p.project_skills_dir(), Some(project.join(".agents/skills")));
