@@ -439,11 +439,23 @@ fn redirect_target(from: &url::Url, resp: &reqwest::Response) -> Option<url::Url
     from.join(location).ok()
 }
 
-fn strip_credentials(headers: &mut BTreeMap<String, String>) {
+/// What of the caller's headers follows a redirect to another origin: only
+/// these, which describe the request rather than who sends it. A credential
+/// travels under whatever name the service picked (`x-api-key`, `api-key`, an
+/// MCP server's own header), so the others stay behind.
+fn keep_across_origins(headers: &mut BTreeMap<String, String>) {
     headers.retain(|k, _| {
-        !matches!(
+        matches!(
             k.to_ascii_lowercase().as_str(),
-            "authorization" | "cookie" | "proxy-authorization"
+            "accept"
+                | "accept-encoding"
+                | "accept-language"
+                | "content-type"
+                | "user-agent"
+                | "anthropic-version"
+                | "anthropic-beta"
+                | "openai-beta"
+                | "mcp-protocol-version"
         )
     });
 }
@@ -545,11 +557,8 @@ impl Network for LocalNetwork {
                         method = "GET".into();
                         body = None;
                     }
-                    // Scheme as well as host: a redirect from `https` to
-                    // `http` on the same host would otherwise put the
-                    // Authorization header on the wire in plaintext.
-                    if next.host_str() != url.host_str() || next.scheme() != url.scheme() {
-                        strip_credentials(&mut headers);
+                    if next.origin() != url.origin() {
+                        keep_across_origins(&mut headers);
                     }
                     url = next;
                     continue;

@@ -252,6 +252,53 @@ async fn list_models_answers_what_each_endpoint_lists_asked_with_the_configured_
     assert_eq!(unknown["error"]["code"], INVALID_PARAMS, "{unknown}");
 }
 
+static REDIRECTED_TO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn redirect_route(path: &str) -> String {
+    let to = format!("{}{path}", REDIRECTED_TO.get().expect("the target is up"));
+    format!(
+        "HTTP/1.1 302 Found\r\nlocation: {to}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    )
+}
+
+/// An endpoint that redirects to another origin — here the same address on
+/// another port — does not get the key passed along: neither Anthropic's
+/// `x-api-key` nor the OpenAI-compatible `Authorization`.
+#[tokio::test]
+async fn a_redirect_to_another_origin_does_not_carry_the_key() {
+    let target = Stub::start(catalog_route).await;
+    REDIRECTED_TO.set(target.base.clone()).unwrap();
+    let gateway = Stub::start(redirect_route).await;
+    let served = daemon_with(json!({
+        "anth": provider("anthropic", format!("{}/anthropic", gateway.base), "k-anth", json!([])),
+        "oai": provider("openai_compatible", format!("{}/openai/v1", gateway.base), "k-oai", json!([])),
+    }))
+    .await;
+
+    for id in ["anth", "oai"] {
+        let listed =
+            crate::support::call(&served.sock, "config.listModels", json!({"provider": id})).await;
+        assert!(listed["models"].is_array(), "{id}: {listed}");
+    }
+    let asked = gateway.seen();
+    assert!(
+        asked
+            .iter()
+            .any(|s| s.header("x-api-key") == Some("k-anth")),
+        "{asked:?}"
+    );
+    let seen = target.seen();
+    assert!(seen.len() >= 2, "{seen:?}");
+    for request in &seen {
+        assert_eq!(request.header("x-api-key"), None, "{request:?}");
+        assert_eq!(request.header("authorization"), None, "{request:?}");
+        assert!(
+            request.header("anthropic-version").is_some() || request.path.starts_with("/openai"),
+            "{request:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn an_endpoint_that_does_not_list_models_is_models_unsupported() {
     let stub = Stub::start(not_found_route).await;

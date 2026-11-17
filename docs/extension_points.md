@@ -711,7 +711,9 @@ ledger(`platform::local_providers_with_ledger`)。
 `is_internal_address` 判为内部的地址上,`allowed_domains` 点名的主机除外;一个运维者写下、
 内容却来自外面的端点(HTTP hook)用 `HttpRequest::public_only` 要同样的待遇;
 `internal_target` 再放开它自己的那个主机与端口(HTTP hook 的 `allow_local`),别的每一跳照旧。
-自己实现 `Network` 的,这几条也要在重定向的每一跳上查。
+自己实现 `Network` 的,这几条也要在重定向的每一跳上查;跳到别的源(协议、主机、端口任一个不同)时,
+调用方给的头只留描述请求本身的(`content-type`、`accept*`、`user-agent`、`anthropic-version` 这类),
+凭据不管叫什么名字(`authorization`、`x-api-key`、MCP server 自己的头)都不跟过去。
 
 运维者自己的流量也是经同一套契约建起来的,但宿主目前还换不掉那些 client 用的
 provider——模型、OAuth、遥测和 registry 的 client 各造各的。所以换掉这个点管得住
