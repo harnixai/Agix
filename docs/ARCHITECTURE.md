@@ -2056,7 +2056,8 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 
 一个值类型不对(`"language": 5`、`"network_mode": 42`)时,`LoadedSettings::load` 只丢掉这个值并
 warn,`daemon.doctor` 的 `settings.tiers` 报 `degraded`、在那一层的 `ignored_values` 里列出;
-同一个文件里其余的值和别的层照常。整个对象的值都不对时报这个对象本身。这对信任与否都一样:
+同一个文件里其余的值和别的层照常。键是被丢的那个值自己的键:对象里的值都不对时逐个报,这里根本放不下
+对象时才报这个对象本身。只能由程序设的 `permission_mode` 也这样丢掉并列出。这对信任与否都一样:
 一处拼错不会让全局层的 hook、沙箱设置跟着失效。`permission_rules` 逐条读:一条写错的规则只丢它
 自己(`ignored_values` 里的键是 `permission_rules[0]` 这样带下标),同一层的 deny 照常生效。
 
@@ -2081,11 +2082,11 @@ warn,`daemon.doctor` 的 `settings.tiers` 报 `degraded`、在那一层的 `igno
 `/home/u/work/../../tmp/x`。`project_trust` 只从全局层读,场景层、项目层里写的忽略并记一条
 warn。全局层 `settings.json` 与 `settings.local.json` 的
 `trusted` 清单相加,不是后者盖前者。合并时的判定结果在 `LoadedSettings::trust`、`LoadedSettings::requires_trust`:
-信任状态、命中的那条、以及项目层里哪些东西要信任才生效(`requires_trust`)。
+信任状态、命中的那条、以及项目层里哪些东西要信任才生效(`requires_trust`;`withheld()` 另带每一条所在的文件)。
 
 `LoadedSettings` 是加载的结果,不是 `Settings` 的别名:`values` 是合并后的值(`Settings`),`paths` 是本场景
 数据的位置,`rules` 带层归属的权限规则,`managed` 是部署方的托管层,`ignored` 是被丢掉的值;项目层的
-判定结果是私有字段,只经 `trust()` / `requires_trust()` / `project_mcp_servers()` 读,装配层写不出对它的访问。
+判定结果是私有字段,只经 `trust()` / `requires_trust()` / `withheld()` / `project_mcp_servers()` 读,装配层写不出对它的访问。
 `LoadedSettings` 没有 `Deref`:只读值的函数收 `&Settings`,调用方传 `&loaded.values`;持有方读
 `loaded.values.x` 与 `loaded.paths.x`。
 
@@ -2111,7 +2112,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 按键写设置只有一条路径:`config.set`、`config.setProvider`、`mcp.addServer` / `updateServer` 都翻成
 `settings::edit` 的改动(键路径上的设值、删除、合并;凭据字段——`settings::edit::SECRET_PATHS`——只落
 `settings.local.json`),由池里的 `write_settings_tier` 在那一层的锁下读出两个文件、套用、把写成的样子交给
-加载器合并整对设置、逐键判拒绝(值放不放得进、未受信项目会不会扣下),通过才落盘;写完让监视器认领自己写下
+加载器合并整对设置、逐键判拒绝(加载器的 `ignored` 与 `withheld()` 里落在这次写的文件、这个键上的条目),通过才落盘;写完让监视器认领自己写下
 的内容,再走与监视器相同的"这一层变了"(`settings_tier_changed`),不会被监视器再重载一遍。
 
 引擎自己改设置文件的地方——`project.trust`、`config.set`、`config.setProvider`、`mcp.addServer` /

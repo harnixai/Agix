@@ -368,3 +368,42 @@ async fn recreating_a_stale_session_at_capacity_does_not_evict_an_unrelated_sess
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+/// `daemon.doctor` names the key a settings value was left out at, even when
+/// it is the only one in its file.
+#[tokio::test]
+async fn doctor_names_the_key_of_a_value_left_out_of_the_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agix")).unwrap();
+    std::fs::write(
+        dir.path().join(".agix/settings.json"),
+        r#"{"sandbox": {"network_mode": "open"}}"#,
+    )
+    .unwrap();
+    let (server, sock, _dir, handle) = start_server_in(dir).await;
+    let doctor = call(&sock, "daemon.doctor", serde_json::json!({})).await;
+    let tiers = doctor["health"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "settings.tiers")
+        .unwrap_or_else(|| panic!("no settings.tiers check: {doctor}"))["details"]
+        .clone();
+    let project = tiers
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["tier"] == "project")
+        .unwrap()
+        .clone();
+    let keys: Vec<&str> = project["ignored_values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["sandbox.network_mode"], "{project}");
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}

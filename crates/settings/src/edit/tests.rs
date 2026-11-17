@@ -1,4 +1,5 @@
 use super::*;
+use crate::section::Sections;
 use serde_json::json;
 
 fn files(shared: Value, local: Value) -> TierFiles {
@@ -242,26 +243,6 @@ fn a_revision_follows_both_files_bytes() {
     assert_ne!(r, revision(b"{ }", b""));
     assert_ne!(r, revision(b"", b"{}"));
     assert_ne!(revision(b"ab", b"c"), revision(b"a", b"bc"));
-}
-
-#[test]
-fn a_value_is_judged_by_its_setting() {
-    let sections = Sections::none();
-    let base = serde_json::to_value(crate::Settings::defaults_for("m")).unwrap();
-    assert!(fits(&base, &key("language"), &json!("zh-CN"), &sections).is_ok());
-    assert!(fits(
-        &base,
-        &key("sandbox.network_mode"),
-        &json!("open"),
-        &sections
-    )
-    .is_err());
-    assert!(fits(&base, &key("memory_enabled"), &json!("yes"), &sections).is_err());
-    assert!(fits(&base, &key("permission_mode"), &json!("plan"), &sections).is_ok());
-    assert!(fits(&base, &key("permission_mode"), &json!("bubble"), &sections).is_err());
-    let rules = json!([{"tool": "Bash(rm", "action": "deny"}]);
-    let refused = fits(&base, &key("permission_rules"), &rules, &sections).unwrap_err();
-    assert!(refused.contains("permission_rules[0]"), "{refused}");
 }
 
 #[test]

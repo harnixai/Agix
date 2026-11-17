@@ -1385,3 +1385,98 @@ fn model_settings_debug_does_not_print_the_token() {
     let dumped = format!("{:?} {:?}", settings.model, settings);
     assert!(!dumped.contains("sk-secret-token-1234"), "{dumped}");
 }
+
+fn load_global(file: &str) -> LoadedSettings {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("settings.json"), file).unwrap();
+    LoadedSettings::load(
+        dir.path().to_path_buf(),
+        dir.path().join("scene"),
+        dir.path().join("project"),
+        "code",
+        "m",
+        &Sections::none(),
+        Default::default(),
+    )
+}
+
+fn ignored_keys(settings: &LoadedSettings) -> Vec<&str> {
+    settings.ignored.iter().map(|v| v.key.as_str()).collect()
+}
+
+#[test]
+fn a_value_left_out_is_reported_at_its_own_key_even_alone_in_its_file() {
+    let alone = load_global(r#"{"sandbox": {"network_mode": "open"}}"#);
+    assert_eq!(ignored_keys(&alone), ["sandbox.network_mode"]);
+
+    let both = load_global(r#"{"sandbox": {"network_mode": "open", "read_anywhere": "yes"}}"#);
+    assert_eq!(
+        ignored_keys(&both),
+        ["sandbox.network_mode", "sandbox.read_anywhere"]
+    );
+}
+
+#[test]
+fn an_object_where_a_value_belongs_is_reported_as_that_value() {
+    let settings = load_global(r#"{"sandbox": {"allowed_domains": {"a": 1}}, "language": "x"}"#);
+    assert_eq!(ignored_keys(&settings), ["sandbox.allowed_domains"]);
+    assert_eq!(settings.values.language.as_deref(), Some("x"));
+}
+
+#[test]
+fn a_program_only_permission_mode_is_left_out_and_reported_with_its_file() {
+    let settings = load_global(r#"{"permission_mode": "bubble", "language": "x"}"#);
+    assert_eq!(ignored_keys(&settings), ["permission_mode"]);
+    assert!(settings.ignored[0].origin.ends_with("settings.json"));
+    assert_eq!(settings.values.permission_mode, PermissionMode::Default);
+    assert_eq!(settings.values.language.as_deref(), Some("x"));
+}
+
+#[test]
+fn what_an_untrusted_project_holds_back_names_the_file_it_is_in() {
+    let root = tempfile::tempdir().unwrap();
+    let (state, project) = (root.path().join("state"), root.path().join("repo/.agix"));
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("settings.json"),
+        r#"{"permission_mode": "bypassPermissions"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("settings.local.json"),
+        r#"{"permission_rules": [{"tool": "Bash", "action": "allow"}]}"#,
+    )
+    .unwrap();
+    let settings = LoadedSettings::load(
+        state.clone(),
+        state.join("scenes/code"),
+        project.clone(),
+        "code",
+        "m",
+        &Sections::none(),
+        Default::default(),
+    );
+    let withheld: Vec<(&str, String)> = settings
+        .withheld()
+        .iter()
+        .map(|w| (w.key.as_str(), w.origin.clone()))
+        .collect();
+    assert_eq!(
+        withheld,
+        [
+            (
+                "permission_mode",
+                project.join("settings.json").display().to_string()
+            ),
+            (
+                "permission_rules.allow(Bash)",
+                project.join("settings.local.json").display().to_string()
+            ),
+        ]
+    );
+    assert_eq!(
+        settings.requires_trust(),
+        ["permission_mode", "permission_rules.allow(Bash)"]
+    );
+}

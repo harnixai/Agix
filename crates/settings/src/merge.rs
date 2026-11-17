@@ -55,7 +55,8 @@ fn rule_text_problem(tool: &str) -> Option<&'static str> {
 /// Merge `over` into `merged` — a settings object that deserializes — one
 /// value at a time, leaving out each value that would stop the result from
 /// deserializing. Returns the dotted keys left out, with why. An object
-/// whose values all fail is reported as itself rather than value by value.
+/// whose values all fail is reported value by value, unless an object has
+/// no place there at all — then it is the value left out.
 pub(crate) fn merge_fitting(
     merged: &mut serde_json::Value,
     over: serde_json::Value,
@@ -97,14 +98,30 @@ fn merge_fitting_at(
         any_fit |= merge_fitting_at(merged, path, value, sections, ignored);
         path.pop();
     }
-    if !any_fit {
+    if !any_fit && !fits_at(merged, path, serde_json::json!({}), sections) {
         ignored.truncate(before);
         ignored.push((path.join("."), error));
     }
     any_fit
 }
 
-pub(crate) fn fit(candidate: &serde_json::Value, sections: &Sections) -> Result<(), String> {
+/// Whether `over` at `path`, merged into `merged`, still reads.
+fn fits_at(
+    merged: &serde_json::Value,
+    path: &[String],
+    over: serde_json::Value,
+    sections: &Sections,
+) -> bool {
+    let nested = path
+        .iter()
+        .rev()
+        .fold(over, |inner, key| serde_json::json!({ key: inner }));
+    let mut candidate = merged.clone();
+    merge_json_values(&mut candidate, nested);
+    fit(&candidate, sections).is_ok()
+}
+
+fn fit(candidate: &serde_json::Value, sections: &Sections) -> Result<(), String> {
     use serde::Deserialize as _;
     Settings::deserialize(candidate).map_err(|e| e.to_string())?;
     for spec in sections.iter() {

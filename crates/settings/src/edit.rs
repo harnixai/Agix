@@ -1,12 +1,11 @@
 //! 按层改设置文件的纯逻辑：一层是 `settings.json` 加旁边的 `settings.local.json`，
-//! 对它们按键路径套用改动（凭据字段只落 local）、算这一层内容的 revision、逐键判
-//! 一个值放不放得进它的设置。加锁、写盘、重载与信任判定由调用方做——`config.set`、
-//! `config.setProvider`、`mcp.*` 都经这里改文件。
+//! 对它们按键路径套用改动（凭据字段只落 local）、算这一层内容的 revision。值放不放得
+//! 进、加锁、写盘、重载与信任判定由调用方做——`config.set`、`config.setProvider`、
+//! `mcp.*` 都经这里改文件。
 
 use serde_json::{Map, Value};
 
-use crate::merge::{fit, merge_json_values, read_permission_rules};
-use crate::section::Sections;
+use crate::merge::merge_json_values;
 
 /// The settings that hold credentials, with `*` for one map key: kept out of
 /// the committed `settings.json` by every writer.
@@ -64,7 +63,8 @@ impl KeyPath {
         self.contains(other) || other.contains(self)
     }
 
-    fn is_concatenated(&self) -> bool {
+    /// Whether this is one of [`CONCATENATED_KEYS`].
+    pub fn is_concatenated(&self) -> bool {
         CONCATENATED_KEYS.contains(&self.dotted().as_str())
     }
 
@@ -328,47 +328,6 @@ pub fn revision(shared: &[u8], local: &[u8]) -> String {
         }
     }
     format!("r1:{hash:016x}")
-}
-
-/// Whether `value` at `path`, merged over `base` (a whole settings object
-/// that reads), still reads as settings; why not. `permission_rules` is read
-/// rule by rule, as the loader reads it, and a program-only
-/// `permission_mode` is refused rather than reset.
-pub fn fits(
-    base: &Value,
-    path: &KeyPath,
-    value: &Value,
-    sections: &Sections,
-) -> Result<(), String> {
-    match path.dotted().as_str() {
-        "permission_rules" => {
-            let (_, unread) = read_permission_rules(value.clone());
-            if unread.is_empty() {
-                return Ok(());
-            }
-            let problems: Vec<String> = unread.iter().map(|(k, e)| format!("{k}: {e}")).collect();
-            return Err(problems.join("; "));
-        }
-        "permission_mode" => {
-            if let Ok(mode) =
-                serde_json::from_value::<base::permission::PermissionMode>(value.clone())
-            {
-                if !mode.is_user_settable() {
-                    return Err(format!(
-                        "permission mode {value} is program-only and cannot be set in a settings file"
-                    ));
-                }
-            }
-        }
-        _ => {}
-    }
-    let nested = path.0.iter().rev().fold(
-        value.clone(),
-        |inner, key| serde_json::json!({ key: inner }),
-    );
-    let mut candidate = base.clone();
-    merge_json_values(&mut candidate, nested);
-    fit(&candidate, sections)
 }
 
 #[cfg(test)]

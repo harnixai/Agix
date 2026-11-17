@@ -186,6 +186,16 @@ pub struct TrustDecision {
     pub source: TrustSource,
 }
 
+/// A project-tier setting that takes effect only in a trusted project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Withheld {
+    /// Dotted (`hooks_config`, `mcp_servers.github`,
+    /// `permission_rules.allow(Bash)`).
+    pub key: String,
+    /// The file it is in.
+    pub origin: String,
+}
+
 /// What `LoadedSettings::load_from` found in the project tier.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProjectLayer {
@@ -196,9 +206,8 @@ pub struct ProjectLayer {
     /// `None` when there is no project tier.
     pub source: Option<TrustSource>,
     /// The project-tier settings that take effect only while the project is
-    /// trusted, as dotted keys (`hooks_config`, `mcp_servers.github`,
-    /// `permission_rules.allow(Bash)`). Withheld while it is not.
-    pub requires_trust: Vec<String>,
+    /// trusted. Withheld while it is not.
+    pub requires_trust: Vec<Withheld>,
     /// The project tier's own `mcp_servers` entries, both of its files
     /// merged — whether or not they were withheld.
     pub mcp_servers: BTreeMap<String, Value>,

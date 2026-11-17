@@ -729,3 +729,35 @@ async fn a_write_that_does_not_touch_mcp_does_not_restart_its_servers() {
     server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+/// What the tier's `settings.local.json` holds beside a list `config.set`
+/// writes to `settings.json` is not held against the write: an "always
+/// allow" recorded there does not refuse deny rules written here.
+#[tokio::test]
+async fn an_allow_recorded_beside_the_list_does_not_refuse_a_deny_written_to_it() {
+    let (server, sock, _dir, handle) = start_server().await;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let project = elsewhere.path().join("repo");
+    std::fs::create_dir_all(project.join(".agix")).unwrap();
+    std::fs::write(
+        project.join(".agix/settings.local.json"),
+        r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
+    )
+    .unwrap();
+    let written = call(
+        &sock,
+        "config.set",
+        json!({"tier": "project", "project_root": project, "changes": {
+            "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]
+        }}),
+    )
+    .await;
+    assert_eq!(written["changed"], json!(["permission_rules"]), "{written}");
+    assert_eq!(
+        read(&project.join(".agix/settings.json"))["permission_rules"][0]["action"],
+        "deny"
+    );
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}

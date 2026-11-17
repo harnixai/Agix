@@ -219,7 +219,7 @@ pub(in crate::session_pool) fn edit_tier(
             serde_json::Value::Object(files.local.clone()),
         ),
     ]);
-    let rejected = judge(&loaded, ops, judge_trust);
+    let rejected = judge(&loaded, ops, paths, judge_trust);
     let Some(dir) = dir.filter(|_| rejected.is_empty()) else {
         return Ok(TierEdited {
             local_changed,
@@ -244,20 +244,38 @@ pub(in crate::session_pool) fn edit_tier(
     })
 }
 
-/// Each changed key whose value does not read as its setting, and — when
-/// the tier is an untrusted project's — each one the loader withheld.
-fn judge(loaded: &LoadedSettings, ops: &[EditOp], judge_trust: bool) -> Vec<SettingRejected> {
-    let sections = crate::settings_sections::all();
-    let base = serde_json::to_value(&loaded.values).unwrap_or_default();
+/// Each changed key the loader left out of the files as edited, and — when
+/// the tier is an untrusted project's — each one it withheld. Only what is in
+/// a file the op writes counts: a concatenated list is written to
+/// `settings.json` alone, so what `settings.local.json` holds beside it is
+/// not the op's.
+fn judge(
+    loaded: &LoadedSettings,
+    ops: &[EditOp],
+    paths: &TierPaths,
+    judge_trust: bool,
+) -> Vec<SettingRejected> {
+    let (shared, local) = (
+        paths.shared.display().to_string(),
+        paths.local.display().to_string(),
+    );
     let untrusted = judge_trust && loaded.trust().is_untrusted();
     let mut rejected = Vec::new();
-    for op in ops {
+    for op in ops.iter().filter(|op| !matches!(op, EditOp::Remove(_))) {
         let path = op.path();
-        let value = match op {
-            EditOp::Set(_, value) | EditOp::Merge(_, value) => Some(value),
-            EditOp::Remove(_) => None,
-        };
-        if let Some(Err(reason)) = value.map(|v| settings::edit::fits(&base, path, v, &sections)) {
+        let writes =
+            |origin: &str| origin == shared || (!path.is_concatenated() && origin == local);
+        let refused = |key: &str| path.overlaps(&key_of(key));
+        if let Some(left_out) = loaded
+            .ignored
+            .iter()
+            .find(|v| writes(&v.origin) && refused(&v.key))
+        {
+            let reason = if left_out.key == path.dotted() {
+                left_out.error.clone()
+            } else {
+                format!("`{}`: {}", left_out.key, left_out.error)
+            };
             rejected.push(SettingRejected::new(
                 path.dotted(),
                 RejectKind::InvalidValue,
@@ -265,29 +283,19 @@ fn judge(loaded: &LoadedSettings, ops: &[EditOp], judge_trust: bool) -> Vec<Sett
             ));
             continue;
         }
-        if !untrusted {
-            continue;
-        }
-        let withheld = if path.dotted() == "permission_rules" {
-            value
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|rules| rules.iter().any(|r| r["action"] == "allow"))
-                .then(|| "an allow rule".to_string())
-        } else {
-            loaded
-                .requires_trust()
-                .iter()
-                .find(|key| path.overlaps(&withheld_key(key)))
-                .map(|key| format!("`{key}`"))
-        };
-        if let Some(what) = withheld {
+        let withheld = loaded
+            .withheld()
+            .iter()
+            .find(|w| untrusted && writes(&w.origin) && refused(&w.key));
+        if let Some(withheld) = withheld {
             rejected.push(SettingRejected::new(
                 path.dotted(),
                 RejectKind::RequiresTrust,
                 format!(
-                    "the project is not trusted, and {what} takes effect in a project's own \
+                    "the project is not trusted, and `{}` takes effect in a project's own \
                      settings only once it is (project.trust); an untrusted project may only add \
-                     and tighten"
+                     and tighten",
+                    withheld.key
                 ),
             ));
         }
@@ -295,9 +303,10 @@ fn judge(loaded: &LoadedSettings, ops: &[EditOp], judge_trust: bool) -> Vec<Sett
     rejected
 }
 
-/// A `requires_trust` entry as a key: `permission_rules.allow(Bash)` is
+/// The settings key a loader report names: `permission_rules[0]` and
+/// `permission_rules.allow(Bash)` are about `permission_rules` and
 /// `permission_rules.allow`.
-fn withheld_key(entry: &str) -> KeyPath {
-    let key = entry.split('(').next().unwrap_or(entry);
+fn key_of(reported: &str) -> KeyPath {
+    let key = reported.split(['(', '[']).next().unwrap_or(reported);
     KeyPath::new(key.split('.').filter(|segment| !segment.is_empty()))
 }

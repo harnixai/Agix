@@ -254,7 +254,7 @@ fn project_trust_report(
     plugin_agent_types: &[base::agent_type::AgentTypeDefinition],
 ) -> api::ProjectStatus {
     #[cfg_attr(not(any(feature = "agents", feature = "skills")), allow(unused_mut))]
-    let mut requires_trust = settings.requires_trust().to_vec();
+    let mut requires_trust = settings.requires_trust();
     #[cfg(feature = "agents")]
     requires_trust.extend(agents::agent_tool::project_agent_types_requiring_trust(
         settings,

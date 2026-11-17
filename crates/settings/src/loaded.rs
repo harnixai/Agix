@@ -224,7 +224,7 @@ impl LoadedSettings {
         let mut seen = std::collections::HashSet::new();
         project_layer
             .requires_trust
-            .retain(|key| seen.insert(key.clone()));
+            .retain(|w| seen.insert((w.key.clone(), w.origin.clone())));
 
         // Every merge step above was checked to deserialize.
         let mut values: Settings = serde_json::from_value(merged_json).unwrap_or(base);
@@ -301,7 +301,18 @@ impl LoadedSettings {
     /// The project-tier settings that take effect only while the project is
     /// trusted, as dotted keys (`hooks_config`, `mcp_servers.github`,
     /// `permission_rules.allow(Bash)`). Withheld while it is not.
-    pub fn requires_trust(&self) -> &[String] {
+    pub fn requires_trust(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.project_layer
+            .requires_trust
+            .iter()
+            .filter(|w| seen.insert(w.key.as_str()))
+            .map(|w| w.key.clone())
+            .collect()
+    }
+
+    /// [`requires_trust`](Self::requires_trust) with the file each came from.
+    pub fn withheld(&self) -> &[trust::Withheld] {
         &self.project_layer.requires_trust
     }
 
@@ -411,7 +422,29 @@ impl LayerFold<'_> {
                 if self.withhold && !gated.is_empty() {
                     tracing::warn!(origin = %layer.origin, withheld = ?gated, "project is not trusted; settings only a trusted project may set are ignored");
                 }
-                self.project_layer.requires_trust.extend(gated);
+                self.project_layer
+                    .requires_trust
+                    .extend(gated.into_iter().map(|key| trust::Withheld {
+                        key,
+                        origin: layer.origin.clone(),
+                    }));
+            }
+            if let Some(mode) = obj
+                .get("permission_mode")
+                .and_then(|v| serde_json::from_value::<PermissionMode>(v.clone()).ok())
+                .filter(|mode| !mode.is_user_settable())
+            {
+                obj.remove("permission_mode");
+                let error = format!(
+                    "permission mode {mode:?} is program-only and cannot be set in a settings file"
+                );
+                tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, error, "settings value does not fit its setting, ignoring it");
+                self.ignored.push(IgnoredValue {
+                    tier: layer.tier.name(),
+                    origin: layer.origin.clone(),
+                    key: "permission_mode".into(),
+                    error,
+                });
             }
             if let Some(rules) = obj.remove("permission_rules") {
                 self.take_permission_rules(&layer.origin, layer.tier, layer.machine_local, rules);
@@ -448,9 +481,10 @@ impl LayerFold<'_> {
         }
         for rule in rules {
             if self.tiers.is_own_project(tier) && rule.action == RuleBehavior::Allow {
-                self.project_layer
-                    .requires_trust
-                    .push(format!("permission_rules.allow({})", rule.tool));
+                self.project_layer.requires_trust.push(trust::Withheld {
+                    key: format!("permission_rules.allow({})", rule.tool),
+                    origin: origin.to_string(),
+                });
                 if self.withhold {
                     continue;
                 }
