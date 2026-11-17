@@ -88,7 +88,8 @@ impl PermissionMode {
     /// The mode a delegate (sub-agent, team member) runs in when the session
     /// that spawned it is in `self`: its own, wider or narrower — except that a
     /// planning parent holds it to plan, a parent that asks nobody holds it to
-    /// `dontAsk`, and a parent that bypasses takes it along.
+    /// `dontAsk`, and a parent that bypasses takes it along, unless it may only
+    /// tighten (`Delegate::mode_under`).
     pub fn for_delegate(self, delegate: Self) -> Self {
         match self {
             Self::Plan | Self::DontAsk => delegate.min_permissive(self),

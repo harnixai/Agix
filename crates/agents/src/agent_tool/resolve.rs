@@ -40,19 +40,35 @@ impl Delegator {
         Some(parent.granted(Some(&def.mcp_servers)))
     }
 
-    /// How the delegate `delegate_id` asks about its calls: of the parent's
-    /// policy, with `rules` — its deny rules and the grants it starts with —
-    /// besides; its questions go to the parent's host as `task`'s, or are
-    /// refused for the reason `no_one_to_ask` gives.
+    /// How the delegate `spec` describes asks about its calls: of the
+    /// parent's policy, with `rules` — its deny rules and the grants it starts
+    /// with — besides; its questions go to the parent's host as `task`'s, or
+    /// are refused for the reason `no_one_to_ask` gives.
+    pub(crate) fn relay_of(
+        &self,
+        spec: &Spec,
+        task: Option<Arc<base::context::RunningTask>>,
+        no_one_to_ask: Option<&'static str>,
+        rules: Vec<base::permission::PermissionRule>,
+    ) -> Relay {
+        let agent_type = spec.agent_type.as_deref();
+        self.relay(&spec.session_id, agent_type, task, no_one_to_ask, rules)
+    }
+
+    /// [`Self::relay_of`] the delegate `delegate_id`, of `agent_type`.
     pub(crate) fn relay(
         &self,
         delegate_id: &str,
+        agent_type: Option<&str>,
         task: Option<Arc<base::context::RunningTask>>,
         no_one_to_ask: Option<&'static str>,
         rules: Vec<base::permission::PermissionRule>,
     ) -> Relay {
         let env = &self.env;
         let turn_grants = Arc::new(TurnGrants::default());
+        let tightens_only = agent_type
+            .and_then(|name| self.agent_type_def(name))
+            .is_some_and(|def| def.permission_mode.is_some() && !def.source.may_loosen());
         let relay = Arc::new(DelegateRelay {
             parent: env.host.permission.policy.clone(),
             parent_denials: env.host.permission.path_denials.clone(),
@@ -60,6 +76,7 @@ impl Delegator {
             no_one_to_ask,
             rules,
             turn_grants: turn_grants.clone(),
+            tightens_only,
         });
         Relay {
             permission: PermissionSet {

@@ -234,6 +234,43 @@ async fn a_delegate_is_judged_in_its_own_mode_held_to_plan_and_taken_along_by_by
     assert_eq!(session.permission_mode(), PermissionMode::Plan);
 }
 
+/// A delegate that may only tighten is held to the session's mode, whatever
+/// it is: a session that bypasses does not take it along, and one narrower
+/// than the delegate holds it there.
+#[tokio::test]
+async fn a_delegate_that_may_only_tighten_is_held_to_the_sessions_mode_not_taken_along() {
+    let perm = empty();
+    let write = fake("Write", false);
+    let session = session(PermissionMode::BypassPermissions);
+    let delegate: Arc<dyn Session> =
+        Arc::new(SessionState::for_tests(std::path::PathBuf::from("/tmp")));
+    let input = json!({});
+    let judged = |tightens_only: bool| {
+        let (perm, write, input, session, delegate) = (&perm, &write, &input, &session, &delegate);
+        async move {
+            let (ctx, facts) = call_in(Some(write), input, delegate).await;
+            let mut judged_as = Delegate::of(delegate);
+            judged_as.tightens_only = tightens_only;
+            let req = PermissionRequest::new("Write", Some(write), input, &facts, &ctx, session)
+                .for_delegate(judged_as);
+            perm.decide(&req).await
+        }
+    };
+
+    delegate.set_permission_mode(PermissionMode::Plan);
+    assert!(matches!(
+        judged(false).await,
+        PermissionOutcome::Permit { .. }
+    ));
+    assert!(matches!(judged(true).await, PermissionOutcome::Deny { .. }));
+    session.set_permission_mode(PermissionMode::Default);
+    delegate.set_permission_mode(PermissionMode::AcceptEdits);
+    assert!(matches!(
+        judged(true).await,
+        PermissionOutcome::Prompt { .. }
+    ));
+}
+
 struct HandIn;
 
 #[async_trait2]

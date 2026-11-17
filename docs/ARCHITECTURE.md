@@ -1463,8 +1463,10 @@ MCP 工具不管 server 报不报 `readOnlyHint` 都询问——那是 server �
 子 Agent 与团队成员的每次调用都交给父会话的权限策略判
 (`PermissionPolicy::decide`,请求的 `delegate` 是子 Agent 的会话),父会话的规则与宿主的回答都作用于它们,输入校验看的是
 子 Agent 自己的会话状态(它读过哪些文件)。判的模式是子 Agent 自己的
-(`PermissionMode::for_delegate`):父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话是
-`bypassPermissions` 时随父会话。子 Agent 自己的模式起点是父会话的设置给的模式;宿主经
+(`Delegate::mode_under`):父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话是
+`bypassPermissions` 时随父会话(`PermissionMode::for_delegate`)。只能收紧的 agent 类型(插件带来的、
+未信任项目里的)自己写了 `permission_mode` 的,每次调用都取它与父会话此刻模式中更严的那个,父会话
+`bypassPermissions` 也不带它走(`Delegate::tightens_only`,经一层层转发的父会话都照此判)。子 Agent 自己的模式起点是父会话的设置给的模式;宿主经
 `session.setPermissionMode` 给父会话切过 `plan` 以外的模式之后,起点是切到的那个(`Session::host_permission_mode`),
 已经在跑的子 Agent 不变。agent 类型 frontmatter 的 `permission_mode` 可以比父会话
 宽也可以严,插件带来的、未信任项目里的类型只能收紧(§6.6);模型在 `Agent` 调用、`TeamCreate` /

@@ -500,6 +500,10 @@ pub struct Delegate<'a> {
     /// only the question the mode would put — never a deny, an ask rule, or
     /// a question only a person may answer.
     pub rules: &'a [PermissionRule],
+    /// The delegate may only be stricter than each session relaying it: an
+    /// agent type that may not loosen (`AgentTypeSource::may_loosen`) named
+    /// its mode. A session that bypasses does not take it along.
+    pub tightens_only: bool,
 }
 
 impl<'a> Delegate<'a> {
@@ -517,6 +521,16 @@ impl<'a> Delegate<'a> {
             session,
             mode,
             rules,
+            tightens_only: false,
+        }
+    }
+
+    /// The mode its call is judged in, relayed through a session in `parent`.
+    pub fn mode_under(&self, parent: PermissionMode) -> PermissionMode {
+        if self.tightens_only {
+            self.mode.min_permissive(parent)
+        } else {
+            parent.for_delegate(self.mode)
         }
     }
 }

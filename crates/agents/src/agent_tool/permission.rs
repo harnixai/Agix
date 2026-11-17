@@ -34,6 +34,8 @@ pub(crate) struct DelegateRelay {
     pub(crate) rules: Vec<base::permission::PermissionRule>,
     /// What the delegate granted itself since its turn began.
     pub(crate) turn_grants: Arc<TurnGrants>,
+    /// See `Delegate::tightens_only`.
+    pub(crate) tightens_only: bool,
 }
 
 pub(crate) const PROGRAM_HAS_NO_ONE_TO_ASK: &str =
@@ -48,16 +50,19 @@ pub(crate) const HOOK_JUDGE_HAS_NO_ONE_TO_ASK: &str =
 impl PermissionPolicy for DelegateRelay {
     async fn decide(&self, req: &PermissionRequest<'_>) -> PermissionOutcome {
         let own = req.session.permission_mode();
-        let (session, mode, inner) = match req.delegate {
+        let (session, mode, inner, tightens_only) = match req.delegate {
             Some(delegate) => (
                 delegate.session,
-                own.for_delegate(delegate.mode),
+                delegate.mode_under(own),
                 delegate.rules,
+                delegate.tightens_only || self.tightens_only,
             ),
-            None => (req.session, own, &[][..]),
+            None => (req.session, own, &[][..], self.tightens_only),
         };
         let rules = [inner, &self.rules, &self.turn_grants.now()].concat();
-        let mut relayed = req.for_delegate(Delegate::new(session, mode, &rules));
+        let mut delegate = Delegate::new(session, mode, &rules);
+        delegate.tightens_only = tightens_only;
+        let mut relayed = req.for_delegate(delegate);
         relayed.session = &self.parent_session;
         if let Some(why) = self.no_one_to_ask {
             if relayed.attendance != Attendance::Unattended {

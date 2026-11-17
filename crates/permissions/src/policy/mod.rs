@@ -252,12 +252,12 @@ impl Policy {
     }
 
     /// The mode the call is judged in: the session's live one, held over a
-    /// delegate's as `PermissionMode::for_delegate` says, and never
+    /// delegate's as `Delegate::mode_under` says, and never
     /// `bypassPermissions` while the managed layer turns it off.
     fn mode_for(&self, req: &PermissionRequest<'_>) -> PermissionMode {
         let own = req.session.permission_mode();
         let mode = match req.delegate {
-            Some(delegate) => own.for_delegate(delegate.mode),
+            Some(delegate) => delegate.mode_under(own),
             None => own,
         };
         match mode {

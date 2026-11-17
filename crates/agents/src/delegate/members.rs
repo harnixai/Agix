@@ -264,7 +264,7 @@ impl Delegator {
                 &spec,
                 depth,
                 Vec::new(),
-                self.relay(&spec.session_id, None, None, Vec::new()),
+                self.relay_of(&spec, None, None, Vec::new()),
                 true,
             )
             .await

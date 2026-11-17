@@ -41,7 +41,7 @@ impl Delegator {
         ask: &Ask,
     ) -> Relay {
         let no_one_to_ask = (ask.asks == AskRoute::Refuse).then_some(PROGRAM_HAS_NO_ONE_TO_ASK);
-        self.relay(&spec.session_id, task, no_one_to_ask, ask.rules.clone())
+        self.relay_of(spec, task, no_one_to_ask, ask.rules.clone())
     }
 
     fn lease(
@@ -254,8 +254,8 @@ impl Delegator {
         let _running = self.limits.hook_agents.enter(spec.session_id.clone());
         let session_id = spec.session_id.clone();
         let shot = OneShot {
-            relay: self.relay(
-                &spec.session_id,
+            relay: self.relay_of(
+                &spec,
                 None,
                 (ask.asks == AskRoute::Refuse).then_some(HOOK_JUDGE_HAS_NO_ONE_TO_ASK),
                 ask.rules,

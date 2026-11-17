@@ -882,3 +882,59 @@ async fn an_agent_types_stricter_mode_asks_and_its_question_waits_only_the_sessi
     run.finish_allowing_refusals().await;
     Ok(())
 }
+
+/// A sub-agent type that may only tighten — an untrusted project's, as a
+/// plugin's — stays as strict as it says under a parent that bypasses: the
+/// parent's `bypassPermissions` does not take it along, at its spawn or
+/// after a host switched the parent there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bypassing_parent_does_not_take_along_a_type_that_may_only_tighten() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("tighten-only", &stub)
+        .untrusted()
+        .before_start(|world, _| {
+            world.write_global_settings(&json!({ "allow_client_permission_override": true }))
+        })
+        .start()
+        .await?;
+    run.write_file(
+        ".agix/agents/planner.md",
+        "---\ndescription: Plans only\npermission_mode: plan\n---\nPlan.\n",
+    )?;
+    let session = run.session().await?;
+    let switched = run
+        .client
+        .call(
+            "session.setPermissionMode",
+            json!({ "session_id": session, "mode": "bypassPermissions" }),
+        )
+        .await?;
+    assert_eq!(
+        switched.result.unwrap_or_default()["mode"],
+        "bypassPermissions"
+    );
+    stub.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "prompt": "write the file", "description": "writer",
+                        "subagent_type": "planner" }),
+            ),
+            Reply::text("done"),
+        ],
+    );
+    stub.script([
+        write("s1", "planned.txt", "from the planner"),
+        Reply::text("wrote"),
+    ]);
+    run.turn(&session, "PARENT-MARK delegate").await?;
+    assert!(
+        run.read_file("planned.txt").is_none(),
+        "a plan-mode type that may only tighten wrote under a bypassing parent"
+    );
+    run.finish().await;
+    Ok(())
+}

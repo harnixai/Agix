@@ -2050,7 +2050,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 切到会话已经所在的模式不推。短时间里连着变很多次时,中间几次的帧可能不推,最后一次的会推;要确认读 `session.resume` 的 `permission.mode`。
 
 子 Agent:已经在跑的子 Agent 留在它起来时的模式里,但它的每一次调用仍经父会话、按父会话此刻的模式约束
-(父会话在 `plan` 或 `dontAsk` 时取两者中更严的,父会话是 `bypassPermissions` 时随父会话,§10);此后
+(父会话在 `plan` 或 `dontAsk` 时取两者中更严的,父会话是 `bypassPermissions` 时随父会话,只能收紧的 agent
+类型除外,§10);此后
 起的子 Agent 从切到的模式算起(父会话在 `plan` 里时,从 `plan` 退出后要回到的那个算起),agent 类型与
 团队的 `permission_mode` 照 §10 再作用于它。
 
@@ -4408,7 +4409,8 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 `permission_mode: "bubble"` 不是另一条路:子 Agent 的询问无论它是什么模式,到宿主的都是
 上面这条父会话的 `prompt` 帧,团队成员也一样。判的模式是子 Agent 自己的:agent 类型的 `permission_mode` 可以比父会话宽(插件带来的类型
 只能更严),团队的 `permission_mode` 只能更严;父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话
-是 `bypassPermissions` 时随父会话。它的询问等多久同父会话的(`--permission-prompt-timeout`);答 `permit_always`
+是 `bypassPermissions` 时随父会话。插件带来的、未信任项目里的 agent 类型写了 `permission_mode` 的不随:每次
+调用都取它与父会话此刻模式中更严的那个,父会话起它之后被切成 `bypassPermissions` 也一样。它的询问等多久同父会话的(`--permission-prompt-timeout`);答 `permit_always`
 记下的是这一条命令或路径。
 
 宿主自己已做沙箱、不需要第二层权限时显式声明放行:任意层 settings.json 的
