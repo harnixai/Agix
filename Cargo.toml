@@ -38,7 +38,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.18-2026111701"
+version = "0.3.18-2026111702"
 edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
