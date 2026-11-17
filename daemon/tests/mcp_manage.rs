@@ -97,6 +97,48 @@ async fn a_server_is_added_to_and_removed_from_the_global_tier() {
     let _ = handle.await;
 }
 
+/// A token in a server's arguments or its URL's query is not in `headers`
+/// or `env`, so it is written to `settings.json`: the answer warns, naming
+/// the server and not the token.
+#[tokio::test]
+async fn a_token_in_a_servers_arguments_or_url_is_written_with_a_warning() {
+    let (server, sock, _dir, handle) = start_server().await;
+    let mut in_args = bogus();
+    in_args["args"] = json!(["--token", "s3cr3t-in-args"]);
+    let in_url = json!({"type": "streamable_http",
+                        "url": "https://mcp.invalid/mcp?api_key=s3cr3t-in-url"});
+    for (name, config) in [("argued", in_args), ("linked", in_url)] {
+        let added = call(
+            &sock,
+            "mcp.addServer",
+            json!({"name": name, "tier": "global", "config": config}),
+        )
+        .await;
+        let warnings = added["warnings"].as_array().cloned().unwrap_or_default();
+        assert_eq!(warnings.len(), 1, "{name}: {added}");
+        assert!(
+            warnings[0]
+                .as_str()
+                .unwrap()
+                .contains(&format!("mcp_servers.{name}")),
+            "{added}"
+        );
+        assert!(!added.to_string().contains("s3cr3t"), "{added}");
+    }
+    let mut clean = bogus();
+    clean["env"] = json!({"TOKEN": "s3cr3t-in-env"});
+    let added = call(
+        &sock,
+        "mcp.addServer",
+        json!({"name": "clean", "tier": "global", "config": clean}),
+    )
+    .await;
+    assert!(added.get("warnings").is_none(), "{added}");
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}
+
 #[tokio::test]
 async fn a_server_turned_off_is_reported_disabled_until_turned_back_on() {
     let (server, sock, dir, handle) = start_server().await;

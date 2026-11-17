@@ -85,3 +85,24 @@ fn every_setting_kept_out_of_settings_json_is_redacted_when_shown() {
         );
     }
 }
+
+#[test]
+fn a_password_in_a_urls_userinfo_is_redacted_and_the_rest_kept() {
+    let mut settings = serde_json::json!({
+        "telemetry_url": "https://agent:hunter2@collector.example/v1?x=1",
+        "sandbox": {"egress_proxy": "http://u:pw-1234@proxy:3128"},
+        "plain": "https://user@host/path",
+        "args": ["--url=https://a:b-secret@h/p"]
+    });
+    redact_settings_secrets(&mut settings);
+    assert_eq!(
+        settings["telemetry_url"],
+        "https://agent:***@collector.example/v1?x=1"
+    );
+    assert_eq!(
+        settings["sandbox"]["egress_proxy"],
+        "http://u:***@proxy:3128"
+    );
+    assert_eq!(settings["plain"], "https://user@host/path");
+    assert!(!settings.to_string().contains("b-secret"), "{settings}");
+}

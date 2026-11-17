@@ -115,6 +115,7 @@ impl SessionPool {
             revision: edited.revision,
             loaded,
             routing,
+            warnings: edited.warnings,
         })
     }
 

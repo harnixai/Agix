@@ -129,6 +129,10 @@ pub struct SettingsWritten {
     pub overridden: Vec<String>,
     /// The tier's revision after the write (now, for `dry_run`).
     pub revision: String,
+    /// The keys written whose value in `settings.json` carries a credential,
+    /// each said without it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     #[serde(flatten)]
     pub reloaded: SettingsReloaded,
 }
@@ -199,6 +203,10 @@ pub struct ProviderSaved {
     /// beside `written_to`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets_written_to: Option<String>,
+    /// The provider settings written whose value in `settings.json` carries
+    /// a credential, each said without it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     #[serde(flatten)]
     pub reloaded: SettingsReloaded,
 }

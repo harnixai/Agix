@@ -114,6 +114,7 @@ pub(in crate::session_pool) struct TierWritten {
     pub(in crate::session_pool) revision: String,
     pub(in crate::session_pool) loaded: std::sync::Arc<LoadedSettings>,
     pub(in crate::session_pool) routing: api::RoutingStatus,
+    pub(in crate::session_pool) warnings: Vec<String>,
 }
 
 /// The tier's files after the edit, as read from or written to disk.
@@ -124,6 +125,8 @@ pub(in crate::session_pool) struct TierEdited {
     /// The pair as the edited files make it, with neither the host's nor the
     /// managed layer.
     pub(in crate::session_pool) loaded: LoadedSettings,
+    /// Each changed key whose value in `settings.json` carries a credential.
+    pub(in crate::session_pool) warnings: Vec<String>,
 }
 
 pub(in crate::session_pool) enum EditFailure {
@@ -220,12 +223,14 @@ pub(in crate::session_pool) fn edit_tier(
         ),
     ]);
     let rejected = judge(&loaded, ops, paths, judge_trust);
+    let warnings = credentials_in_shared(&files, ops, &paths.shared);
     let Some(dir) = dir.filter(|_| rejected.is_empty()) else {
         return Ok(TierEdited {
             local_changed,
             rejected,
             revision: current,
             loaded,
+            warnings,
         });
     };
     if local_changed {
@@ -241,7 +246,37 @@ pub(in crate::session_pool) fn edit_tier(
         rejected,
         revision: settings::edit::revision(&shared_bytes, &local_bytes),
         loaded,
+        warnings,
     })
+}
+
+/// A warning for each key the ops set whose value, as `settings.json` holds
+/// it, carries a credential: [`settings::edit::SECRET_PATHS`] moves whole
+/// keys to `settings.local.json`, not a password inside a URL or a token
+/// among a server's arguments.
+fn credentials_in_shared(files: &TierFiles, ops: &[EditOp], shared: &Path) -> Vec<String> {
+    ops.iter()
+        .filter(|op| !matches!(op, EditOp::Remove(_)))
+        .filter_map(|op| {
+            let segments = op.path().segments();
+            let (first, below) = segments.split_first()?;
+            let mut value = files.shared.get(*first)?;
+            for segment in below {
+                value = value.get(*segment)?;
+            }
+            let last = segments.last()?;
+            crate::session_pool::holds_credential(last, value).then(|| {
+                format!(
+                    "`{}` in {} carries what looks like a credential (a password or token in a \
+                     URL, a token among arguments, or a key named like one); settings.json is the \
+                     file that is shared or committed, unlike settings.local.json beside it. An \
+                     MCP server takes credentials in `headers` or `env`, which are kept there",
+                    op.path().dotted(),
+                    shared.display()
+                )
+            })
+        })
+        .collect()
 }
 
 /// Each changed key the loader left out of the files as edited, and — when

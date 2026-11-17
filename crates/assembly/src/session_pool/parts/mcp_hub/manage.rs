@@ -174,6 +174,7 @@ impl SessionPool {
             written_to: written.written_to.display().to_string(),
             secrets_written_to: written.secrets_written_to.map(|p| p.display().to_string()),
             servers: self.mcp_status(Some(root), scene_id).await?.servers,
+            warnings: written.warnings,
         })
     }
 

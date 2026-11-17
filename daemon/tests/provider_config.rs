@@ -514,3 +514,44 @@ async fn set_provider_writes_the_scene_tier_of_the_scene_it_names() {
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
+
+/// A password in a provider's `base_url` is not the `api_key` the writer
+/// moves to `settings.local.json`: the answer warns, naming the provider and
+/// not the password, as `config.set` does.
+#[tokio::test]
+async fn a_password_in_a_providers_base_url_is_written_with_a_warning() {
+    let (server, sock, _dir, handle) = start_server().await;
+    let saved = call(
+        &sock,
+        "config.setProvider",
+        serde_json::json!({"tier": "global", "provider_id": "gw",
+            "config": {"api_type": "anthropic", "api_key": "k-in-local",
+                       "base_url": "https://agent:hunter2-pass@gw.invalid/",
+                       "default_model": "m"}}),
+    )
+    .await;
+    let warnings = saved["warnings"].as_array().cloned().unwrap_or_default();
+    assert_eq!(warnings.len(), 1, "{saved}");
+    assert!(
+        warnings[0].as_str().unwrap().contains("providers.gw"),
+        "{saved}"
+    );
+    assert!(!saved.to_string().contains("hunter2-pass"), "{saved}");
+    let shown = call(&sock, "config.getProvider", serde_json::json!({})).await;
+    assert_eq!(
+        shown["providers"]["gw"]["base_url"], "https://agent:***@gw.invalid/",
+        "{shown}"
+    );
+
+    let clean = call(
+        &sock,
+        "config.setProvider",
+        serde_json::json!({"tier": "global", "provider_id": "plain",
+            "config": {"api_type": "anthropic", "api_key": "k-in-local", "default_model": "m"}}),
+    )
+    .await;
+    assert!(clean.get("warnings").is_none(), "{clean}");
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}

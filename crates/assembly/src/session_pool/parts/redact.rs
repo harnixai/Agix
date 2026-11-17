@@ -25,7 +25,7 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
                         }
                     }
                     serde_json::Value::String(s) if s.contains("://") => {
-                        *s = base::text::scrub_secrets(s);
+                        *s = scrub_url(s);
                     }
                     other => redact_settings_secrets(other),
                 }
@@ -43,7 +43,7 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
                         secret_follows =
                             !s.contains('=') && names_a_secret(&s.to_ascii_lowercase());
                         if s.contains('=') || s.contains("://") {
-                            *s = base::text::scrub_secrets(s);
+                            *s = scrub_url(s);
                         }
                     }
                     other => {
@@ -55,6 +55,45 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
         }
         _ => {}
     }
+}
+
+/// Whether `value`, written under `key`, carries a credential the redaction
+/// would mask: a secret-named key, a password or token in a URL, a token
+/// after a `--token`-like argument.
+pub(in crate::session_pool) fn holds_credential(key: &str, value: &serde_json::Value) -> bool {
+    let original = serde_json::Value::Object(serde_json::Map::from_iter([(
+        key.to_string(),
+        value.clone(),
+    )]));
+    let mut shown = original.clone();
+    redact_settings_secrets(&mut shown);
+    shown != original
+}
+
+/// [`base::text::scrub_secrets`], and the password of each URL's userinfo
+/// (`https://user:***@host`).
+pub(in crate::session_pool) fn scrub_url(text: &str) -> String {
+    let scrubbed = base::text::scrub_secrets(text);
+    let mut out = String::with_capacity(scrubbed.len());
+    let mut rest = scrubbed.as_str();
+    while let Some(at) = rest.find("://") {
+        let (head, tail) = rest.split_at(at + 3);
+        out.push_str(head);
+        let end = tail
+            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
+            .unwrap_or(tail.len());
+        let (authority, after) = tail.split_at(end);
+        match authority
+            .rsplit_once('@')
+            .and_then(|(userinfo, host)| Some((userinfo.split_once(':')?.0, host)))
+        {
+            Some((user, host)) => out.push_str(&format!("{user}:***@{host}")),
+            None => out.push_str(authority),
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 fn names_a_secret(lowercase_flag: &str) -> bool {

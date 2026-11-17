@@ -41,7 +41,13 @@ impl SessionPool {
                     id.clone(),
                     api::ProviderView {
                         api_type: cfg.api_type.clone(),
-                        base_url: cfg.base_url.clone(),
+                        base_url: cfg.base_url.as_deref().map(|url| {
+                            if include_secrets {
+                                url.to_string()
+                            } else {
+                                scrub_url(url)
+                            }
+                        }),
                         api_key,
                         api_key_env: cfg.api_key_env.clone(),
                         default_model: cfg.default_model.clone(),
@@ -173,6 +179,7 @@ impl SessionPool {
             dry_run,
             written_to: written.written_to.display().to_string(),
             secrets_written_to: written.secrets_written_to.map(|p| p.display().to_string()),
+            warnings: written.warnings,
             reloaded: settings_reloaded(&written.loaded.values, written.routing),
         })
     }

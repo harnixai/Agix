@@ -4175,6 +4175,13 @@
           },
           "type": "array"
         },
+        "warnings": {
+          "description": "Set when the configuration written to `settings.json` carries a\ncredential outside `headers` and `env`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "written_to": {
           "type": "string"
         }
@@ -5178,6 +5185,13 @@
         },
         "tier": {
           "$ref": "#/$defs/SettingsTier"
+        },
+        "warnings": {
+          "description": "The provider settings written whose value in `settings.json` carries\na credential, each said without it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "written_to": {
           "type": "string"
@@ -7785,6 +7799,13 @@
         },
         "tier": {
           "$ref": "#/$defs/SettingsTier"
+        },
+        "warnings": {
+          "description": "The keys written whose value in `settings.json` carries a credential,\neach said without it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "written_to": {
           "type": "string"

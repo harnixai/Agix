@@ -227,6 +227,41 @@ async fn credentials_land_in_the_local_file_and_read_back_redacted() {
     let _ = handle.await;
 }
 
+/// A credential inside a value — a password in a URL — is not a key the
+/// writer moves to `settings.local.json`: it lands in `settings.json`, and
+/// the answer says so without repeating it; read back, it is masked.
+#[tokio::test]
+async fn a_credential_inside_a_value_is_written_with_a_warning_and_read_back_masked() {
+    let (server, sock, _dir, handle) = start_server().await;
+    let written = call(
+        &sock,
+        "config.set",
+        json!({"tier": "global", "changes": {
+            "telemetry_url": "https://agent:hunter2-pass@collector.invalid/v1",
+            "language": "en"
+        }}),
+    )
+    .await;
+    let warnings = written["warnings"].as_array().cloned().unwrap_or_default();
+    assert_eq!(warnings.len(), 1, "{written}");
+    assert!(
+        warnings[0].as_str().unwrap().contains("telemetry_url"),
+        "{written}"
+    );
+    assert!(!written.to_string().contains("hunter2-pass"), "{written}");
+
+    let clean = call(
+        &sock,
+        "config.set",
+        json!({"tier": "global", "changes": {"language": "ja"}}),
+    )
+    .await;
+    assert!(clean.get("warnings").is_none(), "{clean}");
+
+    server.shutdown_token().cancel();
+    let _ = handle.await;
+}
+
 #[tokio::test]
 async fn one_refused_key_refuses_the_write_and_each_says_why() {
     let (server, sock, dir, handle) = start_server().await;

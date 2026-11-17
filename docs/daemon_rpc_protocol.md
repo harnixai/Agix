@@ -3028,6 +3028,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
                  "telemetry_url": null },
   "overridden": [ ],
   "revision": "r1:…",
+  // "warnings": [ "…" ],              // 只在写进 settings.json 的值里看得出凭据时,见下
   "providers": [ ], "default_provider": null, "task_models": [ ],
   "routing": { "ok": true, "warnings": [ ], "error": null, "router_rebuilt": false,
                "router_error": null, "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
@@ -3046,7 +3047,12 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 **密钥落 `settings.local.json`**:`providers.*.api_key`、`mcp_servers.*.headers`、
 `mcp_servers.*.env` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
 (0600);`settings.json` 里这些键原有的值在这次写入时挪过去(local 里已有的不覆盖)。其余键一律写
-`settings.json`。
+`settings.json`。挪的是整个键,不看值:URL 里的密码(`https://u:p@host`)或查询参数里的 token
+(`?api_key=…`)、MCP server `args` 里 `--token` 后面的值、`url` 等字段照样写进 `settings.json`——
+看值猜凭据会把同事要用的配置悄悄挪进不提交的文件,所以不做。这些情况答复里带 `warnings`:每个这样的键一句,
+不复述值,判据与 `config.get` 的脱敏相同(密钥形状的键名、URL 里的密码与带 token / key / secret / password
+字样的参数、`--token` 一类参数后的值)。凭据该放的位置是 MCP server 的 `headers` / `env`(自动落 local),
+或者手写进 `settings.local.json`。
 
 **全有或全无。** 任何一个键被拒,什么都不写,`INVALID_PARAMS`(全部只因项目未受信时是
 `PROJECT_UNTRUSTED`),`data.rejected` 逐键列出理由(§9.1)。拒绝的种类(`kind`):
@@ -3171,7 +3177,7 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
   "task_models": { } }
 ```
 
-`api_key` 默认脱敏为 `***<末 4 位>`。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
+`api_key` 默认脱敏为 `***<末 4 位>`,`base_url` 里的密码默认换成 `***`(`https://u:***@host`)。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
 
 `models` 的每一项是模型 id 字符串,或一个对象,两种写法可以混用;读回时原样是写进去的形状:
 
@@ -3220,7 +3226,8 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 ```
 
 响应是 `config.reload` 的结果再加 `tier`、`dry_run`、`written_to`(写入的 settings.json)和
-`secrets_written_to`(写了密钥时才有,即那个 settings.local.json)。`routing` 与其余字段
+`secrets_written_to`(写了密钥时才有,即那个 settings.local.json),以及 `warnings`(写进 settings.json 的
+provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同 `config.set` 的 `warnings`)。`routing` 与其余字段
 报的是定位参数指的那一对(scene, 项目)写完之后的样子。
 
 `config` / `task_models` 是部分补丁:只提到的键被覆盖,没提到的保持原样。`delete: true` 同样作用于
@@ -3387,8 +3394,10 @@ scope(403 `insufficient_scope`),现有令牌对别的请求仍然有效。
 之后才是这个 server 的配置,`$VAR` 照样从 `env` 块展开。settings.json 里这个 server 已有的
 `headers` / `env`(早先版本写进去的)在这次写入时一并替换掉。
 
-响应:`{ "written_to": "<路径>", "secrets_written_to": "<路径>", "servers": [ <同 mcp.status 的元素> ] }`,
-`secrets_written_to` 只在改了 settings.local.json 时才有。
+响应:`{ "written_to": "<路径>", "secrets_written_to": "<路径>", "servers": [ <同 mcp.status 的元素> ], "warnings": [ "…" ] }`,
+`secrets_written_to` 只在改了 settings.local.json 时才有;`warnings` 只在写进 settings.json 的那部分配置里
+看得出凭据时才有(`url` 里的密码或 token、`args` 里 `--token` 之后的值,判据同 `config.set` 的 `warnings`),
+那部分不会被挪进 settings.local.json——改成 `headers` / `env`。
 配置解析不了、名字为空、已有的 settings.json / settings.local.json 不是 JSON 对象 → `INVALID_PARAMS`。
 MCP 策略拒绝这个 server → `MCP_SERVER_DENIED`,**什么都不写、不连接、不发通知**,`message`
 写明是哪份策略、哪条规则。`tier:"project"` 而目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,同样什么都不做:

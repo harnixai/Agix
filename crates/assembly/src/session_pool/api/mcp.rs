@@ -97,6 +97,10 @@ pub struct McpServerWritten {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets_written_to: Option<String>,
     pub servers: Vec<McpServerStatus>,
+    /// Set when the configuration written to `settings.json` carries a
+    /// credential outside `headers` and `env`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Where a sign-in's browser comes back to.
