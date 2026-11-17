@@ -455,6 +455,7 @@ mod tests {
 
     /// A directory outside the OS temporary directory, where a sandboxed
     /// command could write and a host skill directory may therefore not be.
+    #[cfg(feature = "skills")]
     fn scratch() -> tempfile::TempDir {
         let exe = std::env::current_exe().unwrap();
         let target = exe.ancestors().nth(3).unwrap().join("tmp");
@@ -513,6 +514,7 @@ mod tests {
         assert_eq!(accepted.len(), 2, "{accepted:?}");
     }
 
+    #[cfg(feature = "skills")]
     fn skill(dir: &Path, name: &str) {
         std::fs::create_dir_all(dir.join(name)).unwrap();
         std::fs::write(
