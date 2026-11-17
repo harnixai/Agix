@@ -180,7 +180,7 @@ async fn credentials_land_in_the_local_file_and_read_back_redacted() {
         &sock,
         "config.set",
         json!({"tier": "global", "changes": {
-            "model.auth_token": "token-123456",
+            "providers.q": {"api_key": "token-123456", "base_url": "https://q.example"},
             "providers.p.api_key": "key-abcdef"
         }}),
     )
@@ -195,13 +195,13 @@ async fn credentials_land_in_the_local_file_and_read_back_redacted() {
         "{written}"
     );
     let committed = read(&shared);
-    assert!(
-        committed["model"].get("auth_token").is_none(),
+    assert_eq!(
+        committed["providers"],
+        json!({"q": {"base_url": "https://q.example"}}),
         "{committed}"
     );
-    assert!(committed.get("providers").is_none(), "{committed}");
     let machine = read(&local);
-    assert_eq!(machine["model"]["auth_token"], "token-123456");
+    assert_eq!(machine["providers"]["q"]["api_key"], "token-123456");
     assert_eq!(machine["providers"]["p"]["api_key"], "key-abcdef");
     #[cfg(unix)]
     {
@@ -209,7 +209,7 @@ async fn credentials_land_in_the_local_file_and_read_back_redacted() {
         let mode = std::fs::metadata(&local).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "settings.local.json is {mode:o}");
     }
-    assert_ne!(written["effective"]["model.auth_token"], "token-123456");
+    assert_eq!(written["effective"]["providers.p.api_key"], "***cdef");
 
     let tier = call(
         &sock,
@@ -217,7 +217,10 @@ async fn credentials_land_in_the_local_file_and_read_back_redacted() {
         json!({"scene": "code", "tier": "global"}),
     )
     .await;
-    assert_eq!(tier["local"]["model"]["auth_token"], "***3456", "{tier}");
+    assert_eq!(
+        tier["local"]["providers"]["q"]["api_key"], "***3456",
+        "{tier}"
+    );
     assert_eq!(tier["local"]["providers"]["p"]["api_key"], "***cdef");
 
     server.shutdown_token().cancel();
@@ -466,12 +469,13 @@ async fn a_global_only_key_is_refused_below_the_global_tier() {
     let unknown = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "global", "changes": {"sandbox.nope": 1, "paths": {}}}),
+        json!({"tier": "global", "changes": {"sandbox.nope": 1, "paths": {}, "model.auth_token": "t"}}),
     )
     .await;
     assert_eq!(
         rejected_kinds(&unknown["error"]["data"]["rejected"]),
         [
+            ("model.auth_token".into(), "unknown_key".into(), None),
             ("paths".into(), "unknown_key".into(), None),
             ("sandbox.nope".into(), "unknown_key".into(), None),
         ],

@@ -263,7 +263,6 @@ async fn build_agent(
     };
     settings.values.model.api_type = ApiType::Anthropic;
     settings.values.model.base_url = String::new();
-    settings.values.model.auth_token = String::new();
     settings.values.model.model_name = model_name.clone();
     settings.values.model.max_tokens = 2000;
     settings.values.model.thinking_mode = ThinkingMode::Off;

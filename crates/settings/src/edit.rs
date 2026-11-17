@@ -13,7 +13,6 @@ pub const SECRET_PATHS: &[&str] = &[
     "providers.*.api_key",
     "mcp_servers.*.headers",
     "mcp_servers.*.env",
-    "model.auth_token",
 ];
 
 /// The lists each file adds to the other files' rather than replacing them,

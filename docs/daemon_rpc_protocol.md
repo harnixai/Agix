@@ -3043,7 +3043,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 "永久允许"记进 `settings.local.json` 的规则不动(`null` 同样只删 `settings.json` 的)。
 
 **密钥落 `settings.local.json`**:`providers.*.api_key`、`mcp_servers.*.headers`、
-`mcp_servers.*.env`、`model.auth_token` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
+`mcp_servers.*.env` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
 (0600);`settings.json` 里这些键原有的值在这次写入时挪过去(local 里已有的不覆盖)。其余键一律写
 `settings.json`。
 
@@ -3777,7 +3777,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `sandbox.<键>`(含 `sandbox.cache_directories.<组>`、`sandbox.subprocess_env.allow`) | 放宽沙箱的值 |
 | `providers.<id>` | 项目设置里的一个 provider(新加的,或改写已有的) |
 | `default_provider`、`task_models.<任务>` | 指向项目自己的 provider(下面几层没有的) |
-| `model.base_url`、`model.auth_token` | 项目设置里的模型端点与令牌 |
+| `model.base_url` | 项目设置里的模型端点 |
 | `telemetry_url`、`recorder`、`instruction_file` | 遥测送到哪里、录像写到哪里、读进提示词的文件 |
 | `plugins.enabled`、`plugins.allow` | 比下面几层放进更多插件的值 |
 | `agents/<名字>` | 替换同名类型、或要求比会话更松的模式 / 更高的调用上限的项目 agent 类型 |

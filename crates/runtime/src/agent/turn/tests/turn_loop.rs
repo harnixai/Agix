@@ -17,7 +17,6 @@ use std::sync::Arc;
 fn prompt_context_includes_os() {
     let mut values = settings::Settings::defaults_for("test-model");
     values.model.base_url = "https://api.example.com".into();
-    values.model.auth_token = "test".into();
     values.model.max_tokens = 4096;
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;

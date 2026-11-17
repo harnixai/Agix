@@ -81,7 +81,6 @@ impl Model for RecordingAnswerModel {
 fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     let mut settings = Settings::defaults_for("test-model");
     settings.model.base_url = "https://api.example.com".into();
-    settings.model.auth_token = "test".into();
     settings.model.max_tokens = 4096;
     settings.model.thinking_mode = ThinkingMode::Off;
     settings.model.effort = None;

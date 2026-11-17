@@ -2034,7 +2034,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `sandbox`:`deny_read` / `deny_write`、`subprocess_env.mode` | 少了下面几层有的条目(或从 `allowlist` 改回 `inherit`)就丢弃;`deny_read` 非空会替换内建的凭据清单,所以下面几层没写时项目也只能不写 |
 | `providers` | 整段不要:改一个已有 provider 的 `base_url`,用户全局层的 `api_key` 就会跟着发过去;新 provider 的 `api_key_env` 能把 daemon 的任意环境变量当 key 发出去 |
 | `default_provider`、`task_models.<任务>` | 指向项目自己的 provider(下面几层没有的)时丢弃;选下面几层已有的照常 |
-| `model.base_url`、`model.auth_token`、`model.api_type` | 丢弃 |
+| `model.base_url`、`model.api_type` | 丢弃 |
 | `telemetry_enabled: false` | 丢弃:项目不能关掉审计记录 |
 | `telemetry_url`、`recorder` | 丢弃:一个把遥测送到项目指定的地址,一个把宿主请求的录像写到项目指定的目录 |
 | `prompt_override` | 丢弃:它整个替换系统提示词(追加用的 `prompt_append` 照常) |

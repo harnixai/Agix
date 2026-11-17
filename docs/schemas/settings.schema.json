@@ -228,9 +228,6 @@
         "api_type": {
           "$ref": "#/$defs/ApiType"
         },
-        "auth_token": {
-          "type": "string"
-        },
         "base_url": {
           "type": "string"
         },

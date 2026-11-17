@@ -957,7 +957,7 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
                 "permission_mode": "acceptEdits",
                 "sandbox.allowed_domains": ["github.com"],
                 "telemetry_url": null,
-                "model.auth_token": "tok-doc-example"
+                "providers.doc.api_key": "sk-doc-example"
             }}),
         )
         .await;

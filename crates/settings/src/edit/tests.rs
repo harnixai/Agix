@@ -108,7 +108,7 @@ fn a_credential_goes_to_the_local_file_wherever_it_is_written() {
     let local_changed = apply(
         &mut tier,
         &[
-            EditOp::Set(key("model.auth_token"), json!("t")),
+            EditOp::Set(key("mcp_servers.s.env"), json!({"T": "t"})),
             EditOp::Set(
                 key("providers"),
                 json!({"p": {"api_key": "k", "base_url": "u"}}),
@@ -122,7 +122,7 @@ fn a_credential_goes_to_the_local_file_wherever_it_is_written() {
     );
     assert_eq!(
         Value::Object(tier.local),
-        json!({"model": {"auth_token": "t"}, "providers": {"p": {"api_key": "k"}}})
+        json!({"mcp_servers": {"s": {"env": {"T": "t"}}}, "providers": {"p": {"api_key": "k"}}})
     );
 }
 

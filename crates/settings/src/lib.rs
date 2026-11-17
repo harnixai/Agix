@@ -239,12 +239,11 @@ pub struct IgnoredValue {
 pub const DEFAULT_MAX_TOKENS: u32 = 32_000;
 
 /// LLM model configuration for a single provider.
-#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
 pub struct ModelSettings {
     pub api_type: ApiType,
     pub base_url: String,
-    pub auth_token: String,
     /// Resolved model name (upper layer already resolved slot → name).
     pub model_name: String,
     pub max_tokens: u32,
@@ -260,28 +259,6 @@ pub struct ModelSettings {
     /// Unset, the model's documented limit, looked up by its name.
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
-}
-
-impl std::fmt::Debug for ModelSettings {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelSettings")
-            .field("api_type", &self.api_type)
-            .field("base_url", &self.base_url)
-            .field(
-                "auth_token",
-                &if self.auth_token.is_empty() {
-                    ""
-                } else {
-                    "***"
-                },
-            )
-            .field("model_name", &self.model_name)
-            .field("max_tokens", &self.max_tokens)
-            .field("thinking_mode", &self.thinking_mode)
-            .field("effort", &self.effort)
-            .field("fallback_model", &self.fallback_model)
-            .finish()
-    }
 }
 
 /// Execution constraints.
@@ -700,7 +677,6 @@ impl Settings {
             model: ModelSettings {
                 api_type: ApiType::Anthropic,
                 base_url: String::new(),
-                auth_token: String::new(),
                 model_name: model_name.to_string(),
                 max_tokens: DEFAULT_MAX_TOKENS,
                 thinking_mode: ThinkingMode::On,

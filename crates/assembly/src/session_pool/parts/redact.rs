@@ -3,7 +3,7 @@
 /// Redact every credential-shaped field in a settings blob.
 ///
 /// Walks by key name rather than by type, because the same secrets appear at
-/// several depths (`providers.<id>.api_key`, `model.auth_token`) and a
+/// several depths (`providers.<id>.api_key`, an MCP server's `headers`) and a
 /// settings shape that grows a new provider field should not silently start
 /// returning it in the clear. Key names match case-insensitively, and every
 /// string under a `headers` or `env` object is redacted whatever its key: an

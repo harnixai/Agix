@@ -469,7 +469,7 @@ async fn a_project_skill_linked_to_a_credential_reads_it_into_the_model() {
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         std::fs::write(
             work.join(".agix/settings.local.json"),
-            json!({"model": {"auth_token": SECRET}}).to_string(),
+            json!({"providers": {"p": {"api_key": SECRET}}}).to_string(),
         )
         .unwrap();
         std::fs::create_dir_all(work.join(".agents/skills")).unwrap();
@@ -520,7 +520,7 @@ async fn a_linked_agents_md_reads_a_credential_into_the_prompt() {
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         std::fs::write(
             work.join(".agix/settings.local.json"),
-            json!({"model": {"auth_token": SECRET}}).to_string(),
+            json!({"providers": {"p": {"api_key": SECRET}}}).to_string(),
         )
         .unwrap();
         std::os::unix::fs::symlink(".agix/settings.local.json", work.join("AGENTS.md")).unwrap();

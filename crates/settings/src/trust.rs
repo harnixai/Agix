@@ -391,7 +391,6 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("mcp_servers.*", Withheld),
         ("memory_enabled", Free),
         ("model.api_type", Withheld),
-        ("model.auth_token", Withheld),
         ("model.base_url", Withheld),
         ("model.effort", Free),
         ("model.fallback_model", Free),
