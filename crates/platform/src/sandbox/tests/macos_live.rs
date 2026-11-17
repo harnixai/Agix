@@ -857,3 +857,27 @@ fn a_worktree_command_cannot_rewrite_shared_refs_or_object_plumbing() {
     );
     assert_eq!(git(&["rev-parse", "main-ish"]), main_ish);
 }
+
+/// The filesystem ignores case, and so does the profile: another spelling of
+/// a guarded name is the guarded file, refused as it is, whether it exists
+/// or not. Skipped on a case-sensitive volume, where it is another file.
+#[cfg(target_os = "macos")]
+#[test]
+fn another_spelling_of_a_guarded_name_is_refused_as_well() {
+    let Some(s) = UnderSandboxExec::new() else {
+        return;
+    };
+    std::fs::write(s.project.join("probe"), "").unwrap();
+    if !s.project.join("PROBE").exists() {
+        return;
+    }
+    for command in [
+        "echo x > .AGIX/Settings.json",
+        "echo x > .agix/SETTINGS.LOCAL.JSON",
+        "mkdir -p .Agix/HOOKS && echo x > .Agix/HOOKS/a.sh",
+        "echo x > .CLAUDE/notes.md",
+        "echo x > .GIT/Config",
+    ] {
+        assert!(!s.runs(command), "`{command}` was let through");
+    }
+}

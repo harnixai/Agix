@@ -615,16 +615,17 @@ impl SensitivePaths {
 
     /// Whether `abs` is one of the [`ENGINE_CONFIG_FILES`] anywhere under a
     /// configuration root — by name and location, not by directory: the
-    /// project directory also holds a sub-agent's worktree.
+    /// project directory also holds a sub-agent's worktree. Without case, as
+    /// [`Self::is_credential`]: an absent name has no true spelling to take.
     pub fn is_engine_settings_file(&self, abs: &Path) -> bool {
-        let Some(name) = abs.file_name().and_then(|n| n.to_str()) else {
+        let components = lowered_components(abs);
+        let Some((name, dirs)) = components.split_last() else {
             return false;
         };
-        ENGINE_CONFIG_FILES.contains(&name)
-            && abs.components().any(|c| {
-                matches!(c, Component::Normal(d)
-                    if self.layout.config_roots().any(|root| d == root.name))
-            })
+        ENGINE_CONFIG_FILES.contains(&name.as_str())
+            && dirs
+                .iter()
+                .any(|d| self.layout.config_roots().any(|root| *d == root.name))
     }
 
     /// Whether this entry directly in the instance's own directory is the
@@ -1315,7 +1316,11 @@ mod tests {
                 "/repo/.claude/settings.local.json",
                 "/repo/{own}/worktrees/a/{own}/mcp.local.json",
                 "/repo/{own}/agents/settings.json",
+                "/repo/{OWN}/Settings.json",
+                "/repo/.Agix/SETTINGS.LOCAL.JSON",
+                "/repo/.CLAUDE/settings.json",
             ] {
+                let p = &p.replace("{OWN}", &layout.project_dir_name().to_uppercase());
                 assert!(
                     paths.is_engine_settings_file(Path::new(&own(p, &layout))),
                     "{p}"

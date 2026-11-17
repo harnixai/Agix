@@ -429,3 +429,48 @@ async fn a_sandboxed_command_writes_nothing_in_a_foreign_configuration_root() ->
     embedded.shutdown().await;
     Ok(())
 }
+
+/// On a filesystem that ignores case, `.CODIX/settings.local.json` is the
+/// instance's own key file and `.Claude/SETTINGS.JSON` Claude Code's
+/// settings: the write tool refuses every spelling of the engines' settings
+/// as it does the usual one, under a rule that allows `Write`, where the
+/// directory exists and where it does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_engines_settings_are_refused_in_every_spelling_of_their_names() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let project = root.project.clone();
+    std::fs::create_dir_all(project.join(".claude"))?;
+    let embedded = Embedded::start(config(&root, OWN)).await?;
+    let mut client = connect(&embedded);
+    routine_replies(&stub);
+    std::fs::create_dir_all(project.join(OWN))?;
+    let spellings = [
+        ".codix/Settings.json",
+        ".CODIX/MCP.local.json",
+        ".Agix/settings.json",
+        ".Claude/SETTINGS.JSON",
+        ".Env",
+    ];
+    let mut replies: Vec<Reply> = spellings
+        .iter()
+        .enumerate()
+        .map(|(i, path)| write(&format!("w-{i}"), &project.join(path), "{}"))
+        .collect();
+    replies.push(Reply::text("CASE-DONE"));
+    stub.script_when("CASE-MARK", replies);
+
+    let session = client.session_create(json!({})).await?;
+    let _asked = answer_prompts(&embedded, &session);
+    let events = client
+        .session_run_turn(&session, "CASE-MARK go", "t1", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    for path in spellings {
+        let (out, is_error) = result_of_write(&events, &project.join(path));
+        assert!(is_error, "{path} was written: {out}");
+        assert!(!project.join(path).exists(), "{path} exists");
+    }
+    embedded.shutdown().await;
+    Ok(())
+}

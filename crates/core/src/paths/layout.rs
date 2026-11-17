@@ -431,13 +431,14 @@ impl Layout {
     /// What `path` names inside a git worktree an engine made,
     /// `<repo>/<engine dir>/worktrees/<w>/<rest>`, as the main checkout holds
     /// it: `<repo>/<rest>`, and for a worktree made inside another, each
-    /// checkout out to the main one. Nothing is read from disk.
+    /// checkout out to the main one. Nothing is read from disk: without case.
     pub fn main_checkout_copies(&self, path: &Path) -> Vec<PathBuf> {
+        let lowered = |c: &Component<'_>| c.as_os_str().to_string_lossy().to_lowercase();
         let mut copies = Vec::new();
         let mut current: Vec<Component<'_>> = path.components().collect();
         while let Some(at) = current.windows(3).rposition(|w| {
-            self.engine_dir_names().any(|dir| w[0].as_os_str() == dir)
-                && w[1].as_os_str() == PROJECT_WORKTREES_DIR
+            self.engine_dir_names().any(|dir| lowered(&w[0]) == dir)
+                && lowered(&w[1]) == PROJECT_WORKTREES_DIR
                 && matches!(w[2], Component::Normal(_))
         }) {
             current.drain(at..at + 3);
@@ -734,6 +735,11 @@ mod tests {
             assert_eq!(
                 layout.worktree_of(Path::new(&nested)),
                 Some(PathBuf::from(format!("/repo/{name}/worktrees/a")))
+            );
+            let upper = format!("/repo/{}/WorkTrees/a/src/x.rs", name.to_uppercase());
+            assert_eq!(
+                layout.main_checkout_copies(Path::new(&upper)),
+                [PathBuf::from("/repo/src/x.rs")]
             );
             assert!(layout
                 .main_checkout_copies(Path::new(&format!("/repo/{name}/worktrees")))

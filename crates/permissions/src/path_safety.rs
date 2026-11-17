@@ -297,9 +297,10 @@ fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), Pat
         });
     }
 
+    // Without case: on a case-insensitive filesystem `.ENV` is `.env`.
     for c in target.components() {
         if let Component::Normal(name) = c {
-            let s = name.to_string_lossy();
+            let s = name.to_string_lossy().to_lowercase();
             let hit = SECRET_FILE_NAMES
                 .iter()
                 .copied()
@@ -307,7 +308,10 @@ fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), Pat
                 .chain(GUARDED_FILENAMES.iter().copied())
                 .map(|b| b.to_string())
                 .chain(policy.extra_blacklist.iter().cloned())
-                .find(|b| s == *b || s.starts_with(&format!("{b}.")));
+                .find(|b| {
+                    let b = b.to_lowercase();
+                    s == b || s.starts_with(&format!("{b}."))
+                });
             if let Some(matched) = hit {
                 return Err(PathSafetyError::BlacklistedFilename {
                     path: target.to_path_buf(),
@@ -512,6 +516,10 @@ mod tests {
             "/tmp/work/.env.local",
             "/tmp/work/.env.production",
             "/tmp/work/sub/.env",
+            "/tmp/work/.ENV",
+            "/tmp/work/.Env.Local",
+            "/tmp/work/CARGO.LOCK",
+            "/tmp/work/.SSH/id_rsa",
         ] {
             let err = check_write(Path::new(bad), &p).unwrap_err();
             assert!(
