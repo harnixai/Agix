@@ -2215,8 +2215,9 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 **大小写。** macOS 缺省的 APFS 不分大小写,`.CODIX/Settings.json` 就是 `.codix/settings.json`。`SensitivePaths`
 与 `Layout::main_checkout_copies` 的名字判定一律不分大小写(项目层目录名本身只许小写),写路径检查的
-文件名黑名单也一样:已存在的路径工具会先解析成磁盘上的真实名字,还不存在的那一段没有真实名字可取,
-只能这样比。代价是区分大小写的文件系统上 `.AGIX/settings.json` 也按引擎设置拒写。沙箱后端不用改:
+文件名黑名单也一样。"不分大小写"按 APFS 的完整大小写折叠比(`base::paths::fold_case`),不是 `to_lowercase`:
+APFS 把 `ſ` 当 `s`、`ß` 当 `ss`、`ﬁ` 当 `fi`,`.agentſ/ſkills` 就是 `.agents/skills`。
+已存在的路径工具会先解析成磁盘上的真实名字,还不存在的那一段没有真实名字可取,只能这样比。代价是区分大小写的文件系统上 `.AGIX/settings.json` 也按引擎设置拒写。沙箱后端不用改:
 Seatbelt 在不分大小写的卷上按卷的语义匹配规则(实测,`macos_live` 有用例),Linux 常见的文件系统区分大小写。
 
 **外来配置根。** 配置根是本实例的项目层目录,加上 `FOREIGN_CONFIG_ROOTS`(`.agix`、`.claude`)里不是它的

@@ -622,7 +622,7 @@ fn denied_read_suffixes() -> &'static [Vec<String>] {
                     .and_then(|h| p.strip_prefix(h).ok())
                     .unwrap_or(p.as_path());
                 rel.components()
-                    .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+                    .map(|c| base::paths::fold_case(&c.as_os_str().to_string_lossy()))
                     .collect::<Vec<String>>()
             })
             .filter(|components| !components.is_empty())
@@ -640,7 +640,7 @@ fn path_arg_hits_denied_read(token: &str) -> bool {
     let components: Vec<String> = cleaned
         .split('/')
         .filter(|c| !c.is_empty() && *c != "." && *c != ".." && *c != "~")
-        .map(|c| c.to_lowercase())
+        .map(base::paths::fold_case)
         .collect();
     if components.is_empty() {
         return false;

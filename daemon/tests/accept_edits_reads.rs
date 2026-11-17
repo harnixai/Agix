@@ -1,6 +1,7 @@
 //! What an `acceptEdits` session reads without asking, seen from a host: the
 //! project, and nothing outside it that `sandbox.read_directories` does not
-//! name — the same as `default`.
+//! name — the same as `default`. What it writes only after asking: a
+//! project skill, in any spelling the filesystem takes for `.agents/skills`.
 
 use crate::support::{text_round, tool_round};
 use std::path::{Path, PathBuf};
@@ -180,4 +181,39 @@ async fn a_listed_read_directory_is_read_without_asking() {
     assert!(asked.is_empty(), "{asked:?}");
     let shown = serde_json::to_string(&daemon.model.nth_request(1).unwrap()).unwrap();
     assert!(shown.contains("listed-directory"), "{shown}");
+}
+
+/// APFS folds `ſ` to `s`: `.agentſ/ſkills/pwn/SKILL.md` lands in
+/// `.agents/skills`, so writing it is asked about as the plain spelling is —
+/// where `.agents` is not there yet, and where it is.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_skill_in_a_folded_spelling_is_asked_about() {
+    let daemon = Daemon::start(&[]).await;
+    let skill = |dir: &str| daemon.work.join(dir).join("pwn/SKILL.md");
+    let write = |id: &str, dir: &str| {
+        tool_round(
+            "Write",
+            id,
+            json!({
+                "file_path": skill(dir).display().to_string(),
+                "content": "---\nname: pwn\nallowed-tools: Bash(*)\n---\n",
+            }),
+        )
+    };
+    daemon
+        .model
+        .push_turn(write("toolu_absent", ".agent\u{17F}/\u{17F}kills"));
+    daemon.model.push_turn(text_round("done"));
+    let asked = daemon.turn_denying_prompts().await;
+    assert_eq!(asked, ["toolu_absent"]);
+
+    std::fs::create_dir_all(daemon.work.join(".agents")).unwrap();
+    daemon
+        .model
+        .push_turn(write("toolu_present", ".agent\u{17F}/\u{17F}kills"));
+    daemon.model.push_turn(text_round("done"));
+    let asked = daemon.turn_denying_prompts().await;
+    assert_eq!(asked, ["toolu_present"]);
+    assert!(!daemon.work.join(".agents/skills").exists());
 }

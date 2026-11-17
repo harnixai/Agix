@@ -425,7 +425,7 @@ impl Layout {
     /// Whether a path component, compared without case, is the instance's
     /// own project directory.
     pub fn is_own_dir_component(&self, component: &str) -> bool {
-        component.to_lowercase() == *self.project_dir
+        super::fold_case(component) == *self.project_dir
     }
 
     /// What `path` names inside a git worktree an engine made,
@@ -433,7 +433,7 @@ impl Layout {
     /// it: `<repo>/<rest>`, and for a worktree made inside another, each
     /// checkout out to the main one. Nothing is read from disk: without case.
     pub fn main_checkout_copies(&self, path: &Path) -> Vec<PathBuf> {
-        let lowered = |c: &Component<'_>| c.as_os_str().to_string_lossy().to_lowercase();
+        let lowered = |c: &Component<'_>| super::fold_case(&c.as_os_str().to_string_lossy());
         let mut copies = Vec::new();
         let mut current: Vec<Component<'_>> = path.components().collect();
         while let Some(at) = current.windows(3).rposition(|w| {

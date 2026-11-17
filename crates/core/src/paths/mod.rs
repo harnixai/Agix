@@ -79,6 +79,31 @@ pub fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// `text` compared without case the way a case-insensitive filesystem
+/// compares names: lowercased, and each character whose full case folding is
+/// ASCII written as that folding.
+///
+/// `to_lowercase` alone is not enough: APFS folds `ſ` to `s`, `ß` to `ss`
+/// and `ﬁ` to `fi`, which lowercasing leaves as they are, so `.agentſ/ſkills`
+/// opens `.agents/skills` there while comparing unequal here.
+pub fn fold_case(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\u{17F}' => folded.push('s'),
+            '\u{DF}' | '\u{1E9E}' => folded.push_str("ss"),
+            '\u{FB00}' => folded.push_str("ff"),
+            '\u{FB01}' => folded.push_str("fi"),
+            '\u{FB02}' => folded.push_str("fl"),
+            '\u{FB03}' => folded.push_str("ffi"),
+            '\u{FB04}' => folded.push_str("ffl"),
+            '\u{FB05}' | '\u{FB06}' => folded.push_str("st"),
+            _ => folded.extend(c.to_lowercase()),
+        }
+    }
+    folded
+}
+
 /// Path configuration for data directories.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]

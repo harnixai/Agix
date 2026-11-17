@@ -272,7 +272,7 @@ impl Located {
                             .filter(|e| {
                                 e.file_name()
                                     .to_str()
-                                    .is_some_and(|n| names.admits(&n.to_lowercase()))
+                                    .is_some_and(|n| names.admits(&super::fold_case(n)))
                             })
                             .map(|e| e.path()),
                     );
@@ -586,7 +586,7 @@ impl SensitivePaths {
     /// instance's own directory has working space: in a foreign root every
     /// entry is configuration.
     pub fn names_configuration(&self, text: &str) -> bool {
-        let lowered = text.to_lowercase();
+        let lowered = super::fold_case(text);
         let components: Vec<&str> = lowered.split('/').collect();
         // In a shell command the name runs on into whatever follows it.
         let name_in = |component: &str| {
@@ -885,7 +885,7 @@ fn absolute_lexically(path: &Path) -> PathBuf {
 fn lowered_components(path: &Path) -> Vec<String> {
     path.components()
         .filter_map(|c| match c {
-            Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+            Component::Normal(name) => Some(super::fold_case(&name.to_string_lossy())),
             _ => None,
         })
         .collect()
@@ -1271,6 +1271,33 @@ mod tests {
                 assert!(!paths.names_configuration(p), "{p}");
             }
         }
+    }
+
+    #[test]
+    fn names_a_case_insensitive_filesystem_folds_onto_configuration_are_configuration() {
+        let ops = in_layout(&Layout::new(".ops").unwrap());
+        for p in [
+            "/repo/.agent\u{17F}/\u{17F}kills/x/SKILL.md",
+            "/repo/.agents/\u{17F}kills/x/SKILL.md",
+            "/repo/.op\u{17F}/hooks/h.sh",
+        ] {
+            assert!(ops.names_configuration(p), "{p}");
+        }
+        for p in [
+            "/repo/.op\u{17F}/\u{17F}ettings.json",
+            "/repo/.claude/\u{17F}ettings.j\u{17F}on",
+            "/repo/.agix/\u{17F}etting\u{17F}.json",
+        ] {
+            assert!(ops.is_engine_settings_file(Path::new(p)), "{p}");
+        }
+        assert!(Layout::new(".ops")
+            .unwrap()
+            .is_own_dir_component(".op\u{17F}"));
+        assert!(!ops.names_configuration("/repo/stra\u{DF}e/x.md"));
+        assert_eq!(
+            super::super::fold_case("Gi\u{FB06}/CON\u{FB01}G/\u{1E9E}"),
+            "gist/config/ss"
+        );
     }
 
     #[test]

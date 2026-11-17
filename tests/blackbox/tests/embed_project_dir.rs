@@ -475,6 +475,52 @@ async fn the_engines_settings_are_refused_in_every_spelling_of_their_names() -> 
     Ok(())
 }
 
+/// APFS folds `ſ` to `s`, so `.codix/ſettings.json` is `.codix/settings.json`
+/// there: under a rule that allows `Write`, the write tool refuses the
+/// engines' settings in the spellings only case folding equates.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_engines_settings_are_refused_in_spellings_the_filesystem_folds_onto_them(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let project = root.project.clone();
+    let embedded = Embedded::start(config(&root, OWN)).await?;
+    let mut client = connect(&embedded);
+    routine_replies(&stub);
+    std::fs::create_dir_all(project.join(OWN))?;
+    let spellings = [
+        ".codix/\u{17F}ettings.json",
+        ".Claude/\u{17F}ettings.j\u{17F}on",
+    ];
+    let mut replies: Vec<Reply> = spellings
+        .iter()
+        .enumerate()
+        .map(|(i, path)| write(&format!("f-{i}"), &project.join(path), "{}"))
+        .collect();
+    replies.push(Reply::text("FOLD-DONE"));
+    stub.script_when("FOLD-MARK", replies);
+
+    let session = client.session_create(json!({})).await?;
+    let events = client
+        .session_run_turn(&session, "FOLD-MARK go", "t1", None)
+        .await?;
+    assert!(events.turn_complete, "{events:?}");
+    for path in spellings {
+        let (out, is_error) = result_of_write(&events, &project.join(path));
+        assert!(is_error, "{path} was written: {out}");
+    }
+    for path in [
+        ".agents/skills/pwn",
+        ".codix/settings.json",
+        ".claude/settings.json",
+    ] {
+        assert!(!project.join(path).exists(), "{path} exists");
+    }
+    embedded.shutdown().await;
+    Ok(())
+}
+
 /// A configuration root that is not there cannot be made by a sandboxed
 /// command — not `.claude`, not a foreign `.agix`, not `.agents/skills` —
 /// and holding it leaves nothing behind in the project. The prompts are

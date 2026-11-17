@@ -151,7 +151,7 @@ fn candidates(subject: &Subject, resolved: Option<&ResolvedPath>) -> Vec<String>
 /// A system file, or a destructive command line, that every mode consulting
 /// rules refuses. A substring match is what is wanted here.
 pub(super) fn is_path_bypass_immune(content: &str) -> bool {
-    let lowered = content.to_lowercase();
+    let lowered = base::paths::fold_case(content);
     if lowered.contains('/') {
         for sys_path in &["/etc/passwd", "/etc/shadow", "/etc/ssh/"] {
             if lowered.contains(sys_path) {

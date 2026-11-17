@@ -300,7 +300,7 @@ fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), Pat
     // Without case: on a case-insensitive filesystem `.ENV` is `.env`.
     for c in target.components() {
         if let Component::Normal(name) = c {
-            let s = name.to_string_lossy().to_lowercase();
+            let s = base::paths::fold_case(&name.to_string_lossy());
             let hit = SECRET_FILE_NAMES
                 .iter()
                 .copied()
@@ -309,7 +309,7 @@ fn check_denied_locations(target: &Path, policy: &WritePolicy) -> Result<(), Pat
                 .map(|b| b.to_string())
                 .chain(policy.extra_blacklist.iter().cloned())
                 .find(|b| {
-                    let b = b.to_lowercase();
+                    let b = base::paths::fold_case(b);
                     s == b || s.starts_with(&format!("{b}."))
                 });
             if let Some(matched) = hit {
