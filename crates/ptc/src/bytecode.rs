@@ -4,12 +4,13 @@
 //! Only bytecode this user's engine wrote is ever read: QuickJS does not
 //! verify bytecode, and a crafted file can corrupt the host's memory, which is
 //! why a package may not bring any. The file name is the SHA-256 of the
-//! engine's version and the exact text compiled — predictable, so what keeps
-//! a planted file out is that the directory is this user's alone (0700, files
-//! 0600) and a file or directory anyone else could have written is neither
-//! read nor written. The directory keeps the [`KEPT`] most recently used
-//! entries. rquickjs exposes compiling and loading only for modules, and an
-//! entry runs as a script, hence the calls into QuickJS itself.
+//! engine's version, the QuickJS build and the exact text compiled —
+//! predictable, so what keeps a planted file out is that the directory is
+//! this user's alone (0700, files 0600) and a file or directory anyone else
+//! could read or write is neither read nor written. The directory keeps the
+//! [`KEPT`] most recently used entries. rquickjs exposes compiling and
+//! loading only for modules, and an entry runs as a script, hence the calls
+//! into QuickJS itself.
 
 use rquickjs::{qjs, Ctx};
 use sha2::{Digest, Sha256};
@@ -17,6 +18,7 @@ use std::ffi::CString;
 use std::fs::Metadata;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const EXTENSION: &str = "qjsbc";
 
@@ -26,13 +28,50 @@ pub(crate) const KEPT: usize = 64;
 /// Where the bytecode of `source` compiled under `filename` is kept in `dir`.
 pub(crate) fn cache_file(dir: &Path, filename: &str, source: &str) -> PathBuf {
     let mut hash = Sha256::new();
-    hash.update(env!("CARGO_PKG_VERSION").as_bytes());
-    hash.update([0]);
-    hash.update(filename.as_bytes());
-    hash.update([0]);
-    hash.update(source.as_bytes());
+    for part in [env!("CARGO_PKG_VERSION"), quickjs_build(), filename, source] {
+        hash.update(part.as_bytes());
+        hash.update([0]);
+    }
     dir.join(format!("{}.{EXTENSION}", hex::encode(hash.finalize())))
 }
+
+/// The QuickJS this process runs: its version, and a digest of the bytecode
+/// it writes for [`PROBE`]. Two builds under one engine version — another
+/// rquickjs in a lockfile — can carry QuickJS sources that number opcodes or
+/// predefined atoms differently, and must not read each other's entries.
+fn quickjs_build() -> &'static str {
+    static BUILD: OnceLock<String> = OnceLock::new();
+    BUILD.get_or_init(|| {
+        // SAFETY: JS_GetVersion returns a static NUL-terminated string.
+        let version = unsafe { std::ffi::CStr::from_ptr(qjs::JS_GetVersion()) };
+        let probe = rquickjs::Runtime::new()
+            .and_then(|runtime| rquickjs::Context::full(&runtime))
+            .and_then(|context| context.with(|ctx| compile(&ctx, PROBE, "probe.js")))
+            .map(|bytes| hex::encode(Sha256::digest(bytes)))
+            .unwrap_or_else(|e| format!("unprobed: {e}"));
+        format!(
+            "QuickJS {} {} {probe}",
+            version.to_string_lossy(),
+            std::env::consts::ARCH
+        )
+    })
+}
+
+/// A script whose bytecode touches many opcodes and predefined atoms.
+const PROBE: &str = r#"
+async function* probe(a, ...rest) {
+  outer: for (let i = 0n; ; i++) { if (i > 2n) break outer; else continue; }
+  for await (const x of rest) yield x?.length ?? a;
+  const { b = [1, 2], ...c } = { c: /x+/gu, d: `t${a}` };
+  class K extends Array { #p = 1; static s() { return super.prototype; } get g() { return this.#p; } }
+  try { throw new TypeError(`${typeof b} ${void 0} ${b instanceof K} ${"p" in c}`); }
+  catch { delete c.c; } finally { a **= 2; a >>>= 1; a ||= !a; }
+  switch (a) { case 1: a = -a; break; default: a = ~a; }
+  return [new Proxy({}, {}), Symbol.iterator, Reflect, JSON, Math, Promise, Map, Set, WeakRef,
+    globalThis, arguments, new.target, Object.keys, Array.from, String.raw, Number.isNaN,
+    Date.now, BigInt, ArrayBuffer, Uint8Array, DataView, Atomics, Error, RangeError];
+}
+"#;
 
 /// Compile `source` as a script without running it.
 pub(crate) fn compile(ctx: &Ctx<'_>, source: &str, filename: &str) -> rquickjs::Result<Vec<u8>> {
@@ -196,11 +235,11 @@ fn owned(meta: &Metadata) -> bool {
     meta.uid() == unsafe { libc::geteuid() }
 }
 
-/// This user's, and writable by nobody else.
+/// This user's, and readable and writable by nobody else.
 #[cfg(unix)]
 fn private(meta: &Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    owned(meta) && meta.permissions().mode() & 0o022 == 0
+    owned(meta) && meta.permissions().mode() & 0o077 == 0
 }
 
 #[cfg(unix)]
@@ -334,9 +373,54 @@ mod tests {
     }
 
     #[test]
+    fn the_key_names_the_quickjs_build_not_only_the_engine_version() {
+        let dir = Path::new("/cache");
+        let mut hash = Sha256::new();
+        hash.update(env!("CARGO_PKG_VERSION").as_bytes());
+        hash.update([0]);
+        hash.update(b"cmd.js");
+        hash.update([0]);
+        hash.update(b"main()");
+        let by_engine_version = dir.join(format!("{}.{EXTENSION}", hex::encode(hash.finalize())));
+        assert_ne!(cache_file(dir, "cmd.js", "main()"), by_engine_version);
+    }
+
+    #[test]
+    fn the_quickjs_build_is_probed() {
+        let build = quickjs_build();
+        // SAFETY: JS_GetVersion returns a static NUL-terminated string.
+        let version = unsafe { std::ffi::CStr::from_ptr(qjs::JS_GetVersion()) };
+        assert!(build.contains(&*version.to_string_lossy()), "{build}");
+        assert!(!build.contains("unprobed"), "{build}");
+    }
+
+    #[test]
+    fn an_entry_or_directory_others_can_read_is_not_this_users_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        store(&file, b"compiled");
+        chmod(&file, 0o640).unwrap();
+        assert_eq!(load(&file), None);
+        chmod(&file, 0o604).unwrap();
+        assert_eq!(load(&file), None);
+        chmod(&file, 0o600).unwrap();
+        chmod(&dir, 0o750).unwrap();
+        assert_eq!(load(&file), None);
+        std::fs::remove_file(&file).unwrap();
+        store(&file, b"again");
+        assert!(
+            !file.exists(),
+            "nothing is written into a readable directory"
+        );
+        chmod(&dir, 0o700).unwrap();
+    }
+
+    #[test]
     fn pruning_keeps_the_most_recently_used() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path();
+        chmod(dir, 0o700).unwrap();
         let now = std::time::SystemTime::now();
         let files: Vec<_> = (0..5)
             .map(|i| {
