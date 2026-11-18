@@ -2600,6 +2600,7 @@ dependencies = [
  "base",
  "hex",
  "js-lib",
+ "libc",
  "platform",
  "rquickjs",
  "schemars",

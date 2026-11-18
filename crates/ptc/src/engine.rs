@@ -228,7 +228,7 @@ fn start_command<'js>(
     match &command.cache_dir {
         Some(dir) => {
             let file = crate::bytecode::cache_file(dir, &command.filename, &wrapped);
-            let kept = std::fs::read(&file).ok().and_then(|bytes| {
+            let kept = crate::bytecode::load(&file).and_then(|bytes| {
                 match crate::bytecode::run(ctx, &bytes) {
                     crate::bytecode::Loaded::Ran(ran) => Some(ran),
                     crate::bytecode::Loaded::Unreadable => None,

@@ -1,18 +1,27 @@
 //! A command's entry compiled to QuickJS bytecode and kept on this machine,
 //! so a run after the first loads it instead of parsing the source again.
 //!
-//! Only bytecode this process wrote is ever read: QuickJS does not verify
-//! bytecode, and a crafted file can corrupt the host's memory, which is why a
-//! package may not bring any. The file name is the SHA-256 of the engine's
-//! version and the exact text compiled, so a changed entry or another engine
-//! version names a different file. rquickjs exposes compiling and loading only
-//! for modules, and an entry runs as a script, hence the calls into QuickJS
-//! itself.
+//! Only bytecode this user's engine wrote is ever read: QuickJS does not
+//! verify bytecode, and a crafted file can corrupt the host's memory, which is
+//! why a package may not bring any. The file name is the SHA-256 of the
+//! engine's version and the exact text compiled — predictable, so what keeps
+//! a planted file out is that the directory is this user's alone (0700, files
+//! 0600) and a file or directory anyone else could have written is neither
+//! read nor written. The directory keeps the [`KEPT`] most recently used
+//! entries. rquickjs exposes compiling and loading only for modules, and an
+//! entry runs as a script, hence the calls into QuickJS itself.
 
 use rquickjs::{qjs, Ctx};
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
+use std::fs::Metadata;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+const EXTENSION: &str = "qjsbc";
+
+/// How many compiled entries a cache directory keeps.
+pub(crate) const KEPT: usize = 64;
 
 /// Where the bytecode of `source` compiled under `filename` is kept in `dir`.
 pub(crate) fn cache_file(dir: &Path, filename: &str, source: &str) -> PathBuf {
@@ -22,7 +31,7 @@ pub(crate) fn cache_file(dir: &Path, filename: &str, source: &str) -> PathBuf {
     hash.update(filename.as_bytes());
     hash.update([0]);
     hash.update(source.as_bytes());
-    dir.join(format!("{}.qjsbc", hex::encode(hash.finalize())))
+    dir.join(format!("{}.{EXTENSION}", hex::encode(hash.finalize())))
 }
 
 /// Compile `source` as a script without running it.
@@ -90,22 +99,264 @@ pub(crate) fn run(ctx: &Ctx<'_>, bytes: &[u8]) -> Loaded {
     }
 }
 
+/// The bytecode kept at `file`, when it and its directory are this user's
+/// alone; marked used, so pruning keeps it.
+pub(crate) fn load(file: &Path) -> Option<Vec<u8>> {
+    if !private(&std::fs::symlink_metadata(file.parent()?).ok()?) {
+        return None;
+    }
+    let seen = std::fs::symlink_metadata(file).ok()?;
+    if !seen.is_file() || !private(&seen) {
+        return None;
+    }
+    let mut opened = std::fs::File::open(file).ok()?;
+    if !same_file(&seen, &opened.metadata().ok()?) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    opened.read_to_end(&mut bytes).ok()?;
+    let _ = opened.set_modified(std::time::SystemTime::now());
+    Some(bytes)
+}
+
 /// Keep `bytes` at `file`, replacing it whole or not at all: another process
-/// may be reading or writing the same entry.
+/// may be reading or writing the same entry. Nothing is written into a
+/// directory, or over a file, that is not this user's alone.
 pub(crate) fn store(file: &Path, bytes: &[u8]) {
     let Some(dir) = file.parent() else {
         return;
     };
+    if let Err(e) = write_private(dir, file, bytes) {
+        tracing::warn!(file = %file.display(), error = %e, "the compiled command is not kept");
+    }
+    prune(dir, KEPT);
+}
+
+fn write_private(dir: &Path, file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let not_ours = |what: &Path| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("{} is not this user's alone", what.display()),
+        )
+    };
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match private_dir_builder().create(dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    if !private(&std::fs::symlink_metadata(dir)?) {
+        return Err(not_ours(dir));
+    }
+    if let Ok(existing) = std::fs::symlink_metadata(file) {
+        if !existing.is_file() || !owned(&existing) {
+            return Err(not_ours(file));
+        }
+    }
     let staged = dir.join(format!(
         ".{}.{}",
         file.file_name().and_then(|n| n.to_str()).unwrap_or("entry"),
         std::process::id()
     ));
-    let written = std::fs::create_dir_all(dir)
-        .and_then(|()| std::fs::write(&staged, bytes))
+    let _ = std::fs::remove_file(&staged);
+    let written = private_file_options()
+        .open(&staged)
+        .and_then(|mut f| f.write_all(bytes))
         .and_then(|()| std::fs::rename(&staged, file));
-    if let Err(e) = written {
+    if written.is_err() {
         let _ = std::fs::remove_file(&staged);
-        tracing::warn!(file = %file.display(), error = %e, "the compiled command is not kept");
+    }
+    written
+}
+
+/// Remove all but the `keep` most recently used entries in `dir`.
+pub(crate) fn prune(dir: &Path, keep: usize) {
+    let Ok(listed) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = listed
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == EXTENSION))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    if entries.len() <= keep {
+        return;
+    }
+    entries.sort_by_key(|(used, _)| std::cmp::Reverse(*used));
+    for (_, path) in entries.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(unix)]
+fn owned(meta: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    meta.uid() == unsafe { libc::geteuid() }
+}
+
+/// This user's, and writable by nobody else.
+#[cfg(unix)]
+fn private(meta: &Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    owned(meta) && meta.permissions().mode() & 0o022 == 0
+}
+
+#[cfg(unix)]
+fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    (a.dev(), a.ino()) == (b.dev(), b.ino())
+}
+
+#[cfg(unix)]
+fn private_dir_builder() -> std::fs::DirBuilder {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder
+}
+
+#[cfg(unix)]
+fn private_file_options() -> std::fs::OpenOptions {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    options
+}
+
+#[cfg(not(unix))]
+fn owned(_: &Metadata) -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+fn private(_: &Metadata) -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+fn same_file(_: &Metadata, _: &Metadata) -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+fn private_dir_builder() -> std::fs::DirBuilder {
+    std::fs::DirBuilder::new()
+}
+
+#[cfg(not(unix))]
+fn private_file_options() -> std::fs::OpenOptions {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    options
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &Path) -> std::io::Result<u32> {
+        Ok(std::fs::metadata(path)?.permissions().mode() & 0o777)
+    }
+
+    fn chmod(path: &Path, mode: u32) -> std::io::Result<()> {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+
+    #[test]
+    fn a_stored_entry_is_private_and_loads_back() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("cache/.bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        store(&file, b"compiled");
+        assert_eq!(mode(&dir).unwrap(), 0o700);
+        assert_eq!(mode(&file).unwrap(), 0o600);
+        assert_eq!(load(&file).as_deref(), Some(&b"compiled"[..]));
+    }
+
+    #[test]
+    fn a_file_others_could_write_is_not_read() {
+        let root = tempfile::tempdir().unwrap();
+        let file = cache_file(root.path(), "cmd.js", "main()");
+        chmod(root.path(), 0o700).unwrap();
+        store(&file, b"compiled");
+        chmod(&file, 0o620).unwrap();
+        assert_eq!(load(&file), None);
+        chmod(&file, 0o602).unwrap();
+        assert_eq!(load(&file), None);
+    }
+
+    #[test]
+    fn a_directory_others_could_write_is_neither_read_nor_written() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        store(&file, b"compiled");
+        chmod(&dir, 0o777).unwrap();
+        assert_eq!(load(&file), None);
+        std::fs::remove_file(&file).unwrap();
+        store(&file, b"again");
+        assert!(!file.exists(), "nothing is written into a shared directory");
+        chmod(&dir, 0o700).unwrap();
+    }
+
+    #[test]
+    fn a_link_in_place_of_an_entry_is_not_followed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        store(&file, b"compiled");
+        let elsewhere = root.path().join("elsewhere");
+        std::fs::write(&elsewhere, b"planted").unwrap();
+        chmod(&elsewhere, 0o600).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+        assert_eq!(load(&file), None);
+        store(&file, b"compiled");
+        assert_eq!(std::fs::read(&elsewhere).unwrap(), b"planted");
+    }
+
+    #[test]
+    fn someone_elses_entry_or_directory_is_not_this_users() {
+        let root = tempfile::tempdir().unwrap();
+        let meta = std::fs::metadata(root.path()).unwrap();
+        assert!(owned(&meta));
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let me = unsafe { libc::geteuid() };
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(meta.uid(), me);
+        if me != 0 {
+            let root_owned = std::fs::metadata("/").unwrap();
+            assert!(!owned(&root_owned) && !private(&root_owned));
+        }
+    }
+
+    #[test]
+    fn pruning_keeps_the_most_recently_used() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        let now = std::time::SystemTime::now();
+        let files: Vec<_> = (0..5)
+            .map(|i| {
+                let file = cache_file(dir, "cmd.js", &format!("main{i}()"));
+                store(&file, b"x");
+                let at = now - std::time::Duration::from_secs(100 - i);
+                std::fs::File::options()
+                    .write(true)
+                    .open(&file)
+                    .unwrap()
+                    .set_modified(at)
+                    .unwrap();
+                file
+            })
+            .collect();
+        load(&files[0]).unwrap();
+        std::fs::write(dir.join("unrelated.txt"), b"kept").unwrap();
+        prune(dir, 3);
+        let left: Vec<bool> = files.iter().map(|f| f.exists()).collect();
+        assert_eq!(left, [true, false, false, true, true]);
+        assert!(dir.join("unrelated.txt").exists());
     }
 }

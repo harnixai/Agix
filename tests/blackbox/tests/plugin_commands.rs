@@ -4,7 +4,9 @@
 //! `/notes …`, with only what the RPC, the session frames, the model's
 //! requests and the project directory show.
 
-use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply, SeenRequest};
+use blackbox::{
+    Answer, LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply, SeenRequest,
+};
 use serde_json::{json, Value};
 use test_runner::plugin_fixture::{
     file_url, package_dir, package_ext, zip_with_entries, Entry, EXT_PACKAGE, EXT_PACKAGE_VERSION,
@@ -689,6 +691,79 @@ async fn a_command_in_a_sub_agent_is_held_to_the_same_scope() -> anyhow::Result<
     let (note, refused) = tool_result_text(&stub, "c2").expect("the child ran cfgw note");
     assert!(!refused, "{note}");
     assert!(run.read_file("cfg/note.md").is_some());
+    run.finish().await;
+    Ok(())
+}
+
+/// The compiled entries are read without verification, so nothing a session
+/// runs may plant one: a sandboxed `Bash` command cannot write the cache
+/// directory, and `Write` is not let through to it without a person, even in
+/// `acceptEdits`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_cannot_plant_compiled_entries_in_the_bytecode_cache() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_notes(
+        "ext-bytecode-cache",
+        &stub,
+        json!({
+            "permission_mode": "acceptEdits",
+            "permission_rules": [{ "tool": "Bash", "action": "allow" }]
+        }),
+    )
+    .await?;
+    let cache = run.world.global_root().join("plugins/cache/.bytecode");
+    stub.script([
+        Reply::calls("warm", "RunExt", json!({ "command": "notes help" })),
+        Reply::text("warmed"),
+    ]);
+    let session = run.session().await?;
+    run.turn(&session, "warm the cache").await?;
+    let kept: Vec<_> = std::fs::read_dir(&cache)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "qjsbc"))
+        .collect();
+    assert_eq!(kept.len(), 1, "the first run keeps its entry: {kept:?}");
+    let entry = &kept[0];
+    let compiled = std::fs::read(entry)?;
+
+    let planted = cache.join("planted.qjsbc");
+    let bash = format!(
+        "printf x > {planted}; printf x > {entry}; echo end",
+        planted = planted.display(),
+        entry = entry.display()
+    );
+    stub.script([
+        Reply::calls("b", "Bash", json!({ "command": bash })),
+        Reply::calls(
+            "w",
+            "Write",
+            json!({ "file_path": cache.join("written.qjsbc").to_string_lossy(), "content": "x" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("the person says no")))
+        .await?;
+    let events = run.turn(&session, "plant").await?;
+    let asked: Vec<Value> = watcher
+        .asked()
+        .iter()
+        .map(|a| a.prompt["event"]["tool_name"].clone())
+        .collect();
+    assert_eq!(asked, [json!("Write")], "only the Write is put to a person");
+    drop(watcher);
+    let bash = result_of(&events, "Bash");
+    assert!(bash[0].1.contains("end"), "the command ran: {bash:?}");
+    assert!(!planted.exists(), "a sandboxed command wrote the cache");
+    assert_eq!(
+        std::fs::read(entry)?,
+        compiled,
+        "a sandboxed command rewrote an entry"
+    );
+    let write = result_of(&events, "Write");
+    assert!(write[0].2, "{write:?}");
+    assert!(!cache.join("written.qjsbc").exists());
     run.finish().await;
     Ok(())
 }
