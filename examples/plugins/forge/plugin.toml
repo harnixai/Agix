@@ -1,0 +1,38 @@
+# forge — 规格驱动开发的插件样例（docs/forge.md）：需求、规格与变更流程放在项目的 forge/ 下，
+# 模型经 RunExt 跑 `forge` 命令读写，每个阶段一个 skill，守卫脚本拦下对 forge/ 的直接读写。
+# 复制它做自己的插件时，改 [plugin] name 与 [[command]] name，换掉 forge.js 里的领域代码。
+
+[plugin]
+name = "forge"
+version = "0.1.0"
+api_version = "0.1"
+description = "需求、规格与变更流程：模型用命令读写结构化数据，不直接读写文件"
+
+[[command]]
+name = "forge"
+entry = "forge.js:main"
+description = "需求、规格与变更流程（forge help）"
+read_only = ["help", "req list", "req get", "spec list", "spec get", "spec coverage",
+             "flow list", "flow show", "flow next"]
+writes = ["forge/**"]
+
+[skills]
+dir = "skills"
+
+[[agent]]
+name = "forge-verifier"
+description = "逐条核对一次变更的验收标准，只读"
+prompt = "agents/forge-verifier.md"
+allowed_tools = ["Read", "Grep", "Glob", "RunExt"]
+permission_mode = "plan"
+max_turns = 30
+
+[[script]]
+point = "tool.around"
+entry = "scripts/guard.js:onAround"
+timeout_ms = 1000
+
+[[script]]
+point = "prompt.block"
+entry = "scripts/rules.js:onBlock"
+timeout_ms = 1000
