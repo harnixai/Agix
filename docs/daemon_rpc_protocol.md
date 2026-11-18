@@ -2733,6 +2733,7 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
                             // teammate / member:{team,member};shell:{command,tool_use_id}
                             // monitor:{command,description,persistent,tool_use_id}
                             // code:{description,background,tool_use_id}(RunCode 的程序,docs/ptc.md)
+                            // ext:{description,command,background,tool_use_id}(RunExt 的命令,docs/runext.md;command 是带引号规整后的命令行,background 总是 false)
                             // cron:{cron,prompt,recurring,durable,expires_ms}
                             // mcp_task:{server,tool,tool_use_id,mcp_task_id,mcp_status,status_message?,poll_interval_ms?,ttl_ms?}
       "usage": { },         // agent / teammate:它自己的模型调用到此刻的合计(§3.5 四字段)

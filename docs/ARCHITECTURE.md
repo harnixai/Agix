@@ -124,7 +124,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `skills` | 模块 | skill 目录与 `Skill` 工具 |
 | `script-host` | 模块 | 脚本载体:配额与账本(`ScriptCarrier`)、九个点的适配器、QuickJS 引擎 |
 | `js-lib` | 契约 | 每个内嵌 QuickJS 运行时都装的全局 `agix`(`docs/agix_js.md`):YAML、glob、路径、JSON Schema、SHA-256、UUID、参数解析;纯计算,不碰 I/O;只被 `script-host`(`quickjs` feature)与 `ptc` 依赖 |
-| `ptc` | 内核 | `RunCode`:模型写的一次性程序,在内嵌的 QuickJS 里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
+| `ptc` | 内核 | `RunCode`:模型写的一次性程序,与 `RunExt`:插件包声明的命令(`docs/runext.md`),在同一套内嵌 QuickJS 运行时里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
 | `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
 | `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |
 | `agix` | 外壳 | 嵌入门面:按主题再导出嵌入方用到的类型与函数,自身不含逻辑(`tests/guards/tests/facade.rs`);用法见 `agix-sdk.md` |
@@ -896,7 +896,7 @@ plan 模式的那一次调用)、`short_description`、`callable_from_code`、`c
 | 词 | 含义 |
 |---|---|
 | **Agent** | 执行实体:自己的上下文与步进循环(一轮之内「调模型 → 调工具」直到结束);会话的主 Agent 与常驻团队成员另有输入循环(`Agent::run`),一次性子 Agent 跑完一轮即止。都是线程池上的一个 tokio 任务 |
-| **Task**(运行任务) | 在跑的工作的句柄:状态、输出、取消、收件箱。类型有 agent / shell / monitor / teammate / cron / code(`RunCode` 的程序);`TaskOutput` / `TaskWait` / `TaskStop` / `TaskMessage`、`session.tasks`、`task_*` 事件说的都是它 |
+| **Task**(运行任务) | 在跑的工作的句柄:状态、输出、取消、收件箱。类型有 agent / shell / monitor / teammate / cron / code(`RunCode` 的程序)/ ext(`RunExt` 的命令);`TaskOutput` / `TaskWait` / `TaskStop` / `TaskMessage`、`session.tasks`、`task_*` 事件说的都是它 |
 | **Todo** | 记账清单(`TodoWrite`),不执行任何东西 |
 | **Event / Message** | Agent 之间、Agent 与宿主之间的全部交互:输入通道与收件箱进,`AgentEvent` 与 `session.event` 出 |
 
@@ -1181,10 +1181,11 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 | `Reach` | 含义 | 谁这么说 |
 |---|---|---|
 | `SessionOnly` | 只动会话自己的状态:待办、任务、信箱、计划、目标 | `Sleep`、`Task*`、目标类工具、`ExitPlanMode`、`AskUserQuestion`、`ToolSearch` 等 |
-| `Delegates` | 起别的调用,每个子调用各自再判 | `Agent`、`Skill`、`RunCode` |
+| `Delegates` | 起别的调用,每个子调用各自再判 | `Agent`、`Skill`、`RunCode`、只读调用的 `RunExt` |
 | `Operator` | 只到运维配置的端点 | `WebSearch` |
 | `Inside` | 落在会话免询问的根之内(读按可读根,写按可写根) | 根内的 `Read` / `Grep` / `Glob` / `Write` / `Edit` / `NotebookEdit`;只读通道里的 `Bash`、根内只读的 `Monitor` |
 | `Outside` | 根之外的路径 | 根外的文件工具 |
+| `EditsProject` | 跑模型没写的代码,它至多改项目之内的文件:除非模式接受编辑,否则询问 | 会写的 `RunExt` 命令 |
 | `Host { listed }` | 模型选的主机;`listed` 表示 `sandbox.allowed_domains` 点了名 | `WebFetch`、`Ping` |
 | `Server` | MCP server 的工具;它对自己的说法(`readOnlyHint`)不算数 | MCP 适配器 |
 | `Persists(..)` | 留下一个之后会自己动作的东西 | durable `CronCreate` |
@@ -1327,7 +1328,8 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
    `pathconf(_PC_CASE_SENSITIVE)`,`permissions::path_rule::is_case_insensitive`),规则与路径两边都按
    `base::paths::fold_case` 折叠再比:`Edit(secret/**)` 盖得住磁盘上的 `Secret/`,也盖得住
    模型写的 `SECRET/x`。这对 deny、ask、allow 一样——那里 `SRC/x` 就是 `src/x`,是同一个文件。
-   区分大小写的卷(Linux 常见的文件系统、区分大小写的 APFS)照原样比,allow 不会因此变宽。
+   探测只在 macOS 上做(其它平台一律当作区分大小写),区分大小写的卷(区分大小写的 APFS)照原样比,
+   allow 不会因此变宽。
    插件命令的 `writes` 与 skill 的路径收窄不折叠:只会更严。
 4. **shell 命令逐段匹配。** `Bash(...)` 规则对命令行里的每一条简单命令分别匹配:认
    引号,切 `&&` `||` `;` `|` `&` 与换行,`$(...)`、`<(...)`、反引号里的命令单独算一段。
@@ -1536,7 +1538,7 @@ skill 自己的 `allowed-tools` 这时还没生效,不能给自己的命令开�
    比对和真正的写入用的是同一个路径。存在的最深一级前缀交给文件系统解析,其余部分逐级接上,
    遇到指向尚不存在之处的链接照它的目标接着走——写入会跟着它落到那里。`Write` / `Edit` /
    `NotebookEdit` 写的就是权限判定时这样解析出的位置(`PermissionFacts::lands_at`,经
-   `Approval::landing` 交给 `call`,不在 `call` 里重新解析),`Edit` 与 `NotebookEdit` 也从那里读;
+   `Approval.landing` 交给 `call`,不在 `call` 里重新解析),`Edit` 与 `NotebookEdit` 也从那里读;
    写的时候从 `/` 起逐级打开目录,整条路径上哪一级都不跟随符号链接
    (`FileSystem::write_resolved`,本机用 `openat` + `O_NOFOLLOW`)。判定之后才换上去的链接——
    在目标处还是在上级目录——让写入失败,而不是把它带到别处:

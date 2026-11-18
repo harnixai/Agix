@@ -160,6 +160,8 @@ record of this run — versions, environment and every round:
   reporting back with a notification.
 - `RunCode`: a JavaScript program (embedded QuickJS) that calls the
   session's tools, sub-agents included.
+- `RunExt`: runs a command an installed plugin brings, as one command line
+  (`forge spec list`); the plugin's JavaScript does the mechanical work.
 
 **Multi-agent**
 - The `Agent` tool with typed agents: foreground or background, with their
@@ -169,9 +171,9 @@ record of this run — versions, environment and every round:
 - Concurrency and depth limits, and permissions, hooks and budgets that
   follow delegation.
 
-**Tools** — 45 built in: files, shell, web, tasks, planning, goals,
+**Tools** — 46 built in: files, shell, web, tasks, planning, goals,
 scheduling, git worktrees, skills, teams, MCP, questions, notifications,
-monitors and structured output ([table below](#tools--45-built-in)).
+monitors and structured output ([table below](#tools--46-built-in)).
 
 **Context**
 - An LLM summary first, then cheaper fallbacks, behind a predictive
@@ -288,7 +290,7 @@ outside a Rust build:
 | Route | Reaches | Cost |
 |---|---|---|
 | **Scripts** (QuickJS, default) | nine points: four that write the prompt, two around a tool call, two around a model call, memory recall | a `.js` file and one line of config; microseconds per call |
-| **Plugin packages** | MCP servers, scripts, a declarative scene, agent types, skills | a zip with a `plugin.toml`; everything it will show the model is disclosed at install |
+| **Plugin packages** | MCP servers, scripts, a declarative scene, agent types, skills, commands the model runs through `RunExt` | a zip with a `plugin.toml`; everything it will show the model is disclosed at install |
 | **Hooks** | Twenty-nine named moments in a turn (`HookEvent` (29)), four backends: command, prompt, HTTP, agent | observe, rewrite an input, block a tool call, end a turn |
 
 And anything that speaks MCP is already an extension. Scripts run in the same
@@ -442,7 +444,7 @@ sight. It is the one Rust surface 0.x keeps stable ([`docs/agix-sdk.md`](docs/ag
 
 ## Capabilities
 
-### Tools — 45 built in
+### Tools — 46 built in
 
 | Category | Tools |
 |---|---|
@@ -458,7 +460,7 @@ sight. It is the one Rust surface 0.x keeps stable ([`docs/agix-sdk.md`](docs/ag
 | **Team members** (given only to a team's members) | `SendMessage` `ReadMail` `ListPeers` `TeamMemorySave` `TeamMemoryRead` |
 | **Protocol** | `MCP` `ListMcpResources` `ReadMcpResource`, plus one `mcp__<server>__<tool>` per discovered MCP tool |
 | **Interaction** | `AskUserQuestion` `PushNotification` `Monitor` `StructuredOutput` |
-| **Programs** | `RunCode` (a JavaScript program that calls the session's tools; only its return value comes back) |
+| **Programs** | `RunCode` (a JavaScript program that calls the session's tools; only its return value comes back), `RunExt` (a command line an installed plugin answers; present when one declares a command) |
 | **Editor / Meta / Diagnostics** | `NotebookEdit` · `ToolSearch` · `Ping` `Sleep` |
 
 `tools::register_builtin_tools` installs the 21 self-contained ones; the rest
@@ -611,6 +613,9 @@ recording proxy. How each layer works and how to run it:
 | [docs/extending_quickjs.md](docs/extending_quickjs.md) | writing script extensions |
 | [docs/plugin_packages.md](docs/plugin_packages.md) | the plugin package format, install and trust |
 | [docs/ptc.md](docs/ptc.md) | `RunCode`: what a model's program can call, its permissions, limits and prompt |
+| [docs/runext.md](docs/runext.md) | `RunExt`: plugin commands — declaring them, the command line, permissions and `writes`, limits, slash form |
+| [docs/agix_js.md](docs/agix_js.md) | the `agix` global in embedded scripts: every function, its limits and error codes |
+| [docs/forge.md](docs/forge.md) | `forge`, the sample plugin: requirements, specs and a change flow as plugin commands |
 | [docs/mcp_auth.md](docs/mcp_auth.md) | OAuth for remote MCP servers: configuration, sign-in flows, RPCs and events, credential storage, security |
 | [docs/schemas/settings.schema.json](docs/schemas/settings.schema.json) | the generated schema of `settings.json` |
 | [docs/benchmark/](docs/benchmark/compare_dsh.md) | the comparison against DeepSeek Harness: setup, the six tasks, what is measured and how, and the record of each run |

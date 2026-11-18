@@ -171,7 +171,7 @@ tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, 
 ## 6. 提示词
 
 `RunCode` 常驻，描述每次请求都带，所以只放够用的部分（约 1.2K 字符）：用途、什么时候用、
-脚本环境一句话，加上本会话可调工具的调用形状（不含各工具的一句话说明；`Agent` 不列，
+脚本环境一句话（含 `agix` 有哪几组），加上本会话可调工具的调用形状（不含各工具的一句话说明；`Agent` 不列，
 脚本里用 `agent()`）：
 
 ```
@@ -182,7 +182,8 @@ sub-agent. For a single task or a few calls, call the tools directly.
 
 A script (QuickJS, ES2023, top-level await; no require/import or Node/browser APIs).
 tools.<Name>(input) and callTool(name, input) return Promises that reject on failure;
-log(text) reports progress. End with `return <JSON value>`.
+log(text) reports progress; agix.yaml, agix.glob, agix.path, agix.json and agix.hash are pure
+helpers. End with `return <JSON value>`.
 
 Callable here (MCP tools too, with callTool; the guide has the rest):
   tools.Read({file_path, limit?, offset?, pages?}) → a text file: {content, totalLines, truncated}, …

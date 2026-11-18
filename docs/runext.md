@@ -79,7 +79,7 @@ web) get what the session's rules allow without asking``，不写文件的把 `m
 命令。**它不是 shell**：未加引号的 `|`、`>`、`<`、`;`、`&`（含 `&&`、`||`）、`` ` ``、通配符
 `*`、`?`、`[`、换行，以及后面紧跟着任何非空白字符的 `$`（`$VAR`、`${…}`、`$(…)`、`$?`、`$5`、
 `$$`、`$'…'` 都算）整条拒绝；双引号里也一样拒绝 `` ` `` 与这样的 `$`（双引号里的 `?`、`[` 原样），
-单引号里一切原样。单独的 `$`（后面是空白或行尾）照收。错误说明"RunExt 不是 shell，参数原样传给
+单引号里一切原样。单独的 `$`（后面是空白或行尾，双引号里也可以是收尾的 `"`）照收。错误说明"RunExt 不是 shell，参数原样传给
 命令；大段内容放进 `input`"。
 
 命令名不认识时，错误列出已装的命令。这两种错误在权限检查之前报（输入校验），不会去问人。
@@ -165,7 +165,8 @@ function `main` ``。
 - 写到 `writes` 之内的 `Write` / `Edit` / `NotebookEdit`：这次调用已经被授权，放行——调用级的
   授权回答的是模式要问的那个问题（与委托给子 Agent 的 `allowed-tools` 同一套），deny 规则、ask
   规则、凭据与受保护路径仍然胜出。这份授权只给这次调用自己的子调用，模型自己的调用看不到。
-- 写到 `writes` 之外的（包括经符号链接写出去的）：**直接失败**，不去问会话。
+- 写到 `writes` 之外的（包括经符号链接写出去的）：**直接失败**，不去问会话。会话对项目内的写入本来不问，交给会话判定的话，`writes` 之外、项目之内的写入会成功，
+  `writes` 就不设限了，「不写就是不写任何文件」与披露里的 `may write …` 也不成立。
 - 写到配置路径的：**直接失败**，不论 `writes` 怎么写、这次调用是否已被批准。配置路径是会话
   会当作配置来问的那些（`.git/` 里的一切，含 hooks 与 config；`.agix/` 等配置根里工作区以外的
   条目；项目的 skill 目录），按写入路径的每一种写法（含经符号链接解析后的）判断。命令是装好后
@@ -179,7 +180,7 @@ function `main` ``。
   不问就放行的命令），命令经 `Bash` 能写的就不限于 `writes`；沙箱照常约束那条命令。
 - 只读调用里的写入一律失败：子调用写文件，或跑一条不是只读的命令，就失败——声明了只读的子
   命令写了文件，是插件的缺陷，不是授权问题。其它工具（MCP 工具等）在只读调用里照常按会话的
-  判定走，plan 模式下由 plan 模式拦下。
+  判定走（走远端后端的只读子命令，如 `forge req list`，不该因此被拦），plan 模式下由 plan 模式拦下。
 
 从 `RunCode` 里调 `RunExt` 时，那次 `RunExt` 调用本身也是程序的子调用：会写的子命令要询问就
 失败，要有 `RunExt(...)` 的 allow 规则或 `acceptEdits`。
@@ -217,7 +218,8 @@ function `main` ``。
 包里只收源码。QuickJS 读字节码时不做校验，一段构造过的字节码能破坏宿主进程的内存；字节码还绑定
 QuickJS 的确切版本，引擎一升级就失效；安装时的披露也读不了它。
 
-引擎在一个入口**第一次运行时**把它编译成字节码，缓存在这一层插件缓存的 `.bytecode/` 目录里
+引擎在一个入口**第一次运行时**把它编译成字节码（不在发现插件时：发现在 `crates/packages`，那里不跑 QuickJS，
+而每次重新扫描都去编译用不到的命令只是白花启动时间），缓存在这一层插件缓存的 `.bytecode/` 目录里
 （`<层>/plugins/cache/.bytecode/<sha256>.qjsbc`），文件名是引擎版本、QuickJS 构建、入口文件名
 与要编译的源码的 SHA-256。QuickJS 构建是它的版本号加上它为一段固定探测脚本写出的字节码的摘要：
 同一个引擎版本换了 rquickjs（开发时 `cargo update`、SDK 嵌入方自己的 lockfile），操作码或预定义
@@ -309,29 +311,8 @@ my-plugin/
 | 运行时（线程、限额、取消、`tools.*` 桥）拆成 `RunCode` 与 `RunExt` 共用 | `crates/ptc` |
 | `agix` 基础库 | `crates/js-lib`（`agix_js.md` §5） |
 | `[[command]]` 的解析、校验、披露、同名处理、字节码缓存 | `crates/packages` |
-| 命令表交给会话（`Builder::ext_commands`，子 Agent 经 `HostContracts` 继承） | `crates/assembly` |
+| 命令表交给会话（`crates/assembly` 把它交给 `Builder::ext_commands`，子 Agent 经 `HostContracts` 继承） | `crates/runtime`、`crates/assembly` |
 | 注册 `RunExt`（会话最后的工具表里有它才有 `/name`）；斜杠命令 | `crates/runtime` |
 | 调用级的写入授权 | `crates/permissions`（`write_scope`、`Reach::EditsProject`），与插件 skill 的 `allowed-tools` 同一套收窄；子调用的拦截在 `crates/runtime`（`Caller::Command`） |
 | 代码调用的 `Read` 交回原文、不去重 | `crates/tools/src/file_read.rs`（看 `ToolContext::from_code`） |
 | `tool.around` 输入加 `via`、`plugin`、`projectRoot` | `crates/script-host/src/adapters/tool_around.rs` |
-
-## 14. 与最初设计的出入
-
-实现时按代码的实际情况改了几处，记在这里：
-
-- **`writes` 之外的写入直接失败**，不按会话判定。会话在项目内的写入本来不问（`Reach::Inside`
-  直接放行），照最初的写法，`writes` 之外、项目之内的写入会成功，`writes` 就不设限了；"不写
-  就是不写任何文件"与披露里的 "may write …" 也就不成立。
-- **只读调用里的"写入"**定为写文件或跑一条不是只读的命令；MCP 等其它工具照常按会话判定，免得
-  走远端后端的只读子命令（`forge req list`）被拦。
-- **命令行**：双引号里会被 shell 展开的 `$`、`` ` `` 也拒绝；单独的 `&` 与换行同样拒绝；`$` 后面
-  跟着非空白字符就拒绝（`$5`、`$$` 也算），不去区分 shell 会不会展开；`?`、`[` 与 `*` 一样按通配符
-  拒绝。
-- **入口包在异步函数里求值**（顶层 `await` 由此而来），顶层声明因此不是全局属性；入口函数也可以
-  挂在 `globalThis` 上（打包产物那样）。
-- **字节码在第一次运行时编译**，不在发现插件时：发现在 `crates/packages`，那里不跑 QuickJS，而且
-  每次重新扫描都编译用不到的命令只是白花启动时间。
-- **`via` 多两个值**：`"user"`（用户敲的 `/name`）、`"skill"`（skill 的内联命令）。
-- **结果**：失败时列的是这次运行里成功了的不可并行子调用（写入都在其中），而不只是写入；
-  `Error` 以外的异常带名字与调用栈。
-

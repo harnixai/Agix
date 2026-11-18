@@ -220,8 +220,11 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 **用例名不要以 `schedule-`、`cron-` 开头，也不要形如 `goal-<n>-<n>`。** `turn` 的 `turn_id` 是
 `<用例名>-t<n>`，而 daemon 按这几种形式认出自己开的轮，客户端用这种 id 会被拒（`INVALID_PARAMS`）。
 
-引擎自己的几道缝——录像回放、遥测、流式执行、策略否决、恢复策略、压缩——在 `engine_boundaries.rs`
-里用桩写成确定性的用例，跑在 `integration` 里。`skills_and_memory.rs` 同样用桩钉住
+引擎自己的几道缝——录像回放、遥测、流式执行、策略否决、恢复策略、压缩，以及程序（`RunCode`）读到的东西
+（`Read` 交回原文与被截断的对象、MCP 的 `structuredContent`、基础库里算不完的调用不卡住这一轮）——在
+`engine_boundaries.rs` 里用桩写成确定性的用例，跑在 `integration` 里。`permission_bounds.rs` 钉住权限的边界
+（不分大小写的卷上规则盖住各种大小写的路径、经悬空符号链接写出项目要问、项目里尚未建出的目录下的读取不问）。
+`mcp_project_root.rs` 钉住 MCP 服务怎么知道自己服务哪个项目（`roots` 与 `AGIX_PROJECT_ROOT`，远端服务两样都没有）。`skills_and_memory.rs` 同样用桩钉住
 `/name` 展开项目 skill(执行 `` !`cmd` ``、不带 frontmatter)、两轮之间新加的 skill 在下一轮
 发 `skills_changed`、项目 `.agix/memory/` 的索引与全局的一起进提示词。`plugin_commands.rs` 用
 `tests/fixtures/ext_plugin` 钉住 `RunExt` 本身（授权、`writes`、`via`、斜杠形式）；`forge.rs` 用桩把
@@ -309,6 +312,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 | `crates/ptc/src/tests.rs` 的 `the_limits_table_in_the_doc_is_the_default_limits` | `ptc.md` 的限额表与 `ptc::Limits::default()` 一致 |
 | `tests/guards/tests/architecture_doc.rs`（G9） | `ARCHITECTURE.md` §1 的 crate 表、"用 platform 的 crate"、分层图里的模块一行，与 `deps.rs` 的 `CRATES`、`MAY_USE_PLATFORM` 和实现了 `Module` 的 crate 一致 |
 | `crates/assembly/tests/settings_schema.rs` 的 `settings_schema_matches_committed_file` | `docs/schemas/settings.schema.json` 由 `settings` crate 的核心 `Settings` 加 `assembly::settings_sections::all()` 登记的各模块段生成（重新生成：`cargo test -p assembly --test settings_schema write_settings_schema -- --ignored`；CI 的 ignored 那一步跑） |
+| `crates/js-lib/tests/doc.rs` | `agix_js.md` §3 的成员清单与装进运行时的 `agix` 一致 |
 | `daemon/tests/readme_matches_the_code.rs` | `README.md` 与 `docs/README.zh-CN.md` 里可数的那些声称——workspace 成员数、RPC 方法数、扩展点数、hook 事件数、遥测事件类型数、内建工具数，以及工具表里每个名字都还实装着 |
 
 **每个 RPC 方法都得有人调。** 上面那两条盯的是「文档和 dispatch 说的是同一批方法」，

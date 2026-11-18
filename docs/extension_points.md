@@ -1125,7 +1125,8 @@ Builder::new().tool_middleware(Arc::new(Deadline));
 包装按注册顺序嵌套,先注册的在最外面。
 
 `ToolCall::via` 说这次调用是谁发起的:`model`、`RunCode`(程序的子调用)、`RunExt:<命令名>`
-(插件命令的子调用)、`user`(用户敲的 `/name` 插件命令)、`skill`(skill 的内联命令)。
+(插件命令的子调用)、`user`(用户敲的 `/name` 插件命令)、`skill`(skill 的内联命令)。`plugin` 是
+`RunExt:<命令名>` 时命令所在的包名(其余为 `None`),`project_root` 是会话有项目时的工作目录。
 
 daemon 的嵌入方碰不到 `Builder`——会话引擎是池子建的。`Assembly { customize_session:
 Some(..), .. }` 交给池子一个 `SessionCustomizer`:每建一次会话引擎,池子把配好的
@@ -1505,7 +1506,7 @@ JavaScript 在 `RunCode` 那套运行时上跑(`runext.md`)。嵌入方要管的
   命中 `read_only` 前缀的按只读工具,其余在 `default` 下问一次、`acceptEdits` 放行。命令的子
   调用只能写包声明的 `writes`,只读调用里不能写。
 - **宿主看得见**:每次运行是一件 `kind:"ext"` 的任务;子调用照常过 hook、中间件与遥测,
-  `tool.around` 的输入带 `via`(`RunExt:<命令名>`)与 `plugin`(包名)。`/name` 的输出以
+  `tool.around` 的输入带 `via`(`RunExt:<命令名>`)、`plugin`(包名)与 `projectRoot`。`/name` 的输出以
   `text_delta` 交给宿主,不进对话。
 
 ---

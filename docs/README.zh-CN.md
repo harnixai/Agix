@@ -114,6 +114,7 @@ DSH 不在本仓库里。怎么装、怎么自己跑这个对比,以及每个任
 - 定时任务;带校验的计划模式;待办清单。
 - 后台跑的 shell 命令、监视器、子 Agent 和程序,结束时都发通知回来。
 - `RunCode`:一段调用会话工具(包括子 Agent)的 JavaScript 程序,跑在内嵌的 QuickJS 里。
+- `RunExt`:跑插件带来的命令,模型写一行命令行(`forge spec list`),插件的 JavaScript 做机械的那部分。
 
 **多 Agent**
 - `Agent` 工具,带类型的 Agent:前台或后台,各有自己的模型和工具,结果按 JSON Schema 校验。
@@ -121,7 +122,7 @@ DSH 不在本仓库里。怎么装、怎么自己跑这个对比,以及每个任
 - 子 Agent 跑在挂在父会话下的侧链会话里。
 - 并发和深度上限;权限、hook、预算随委派传下去。
 
-**工具**——45 个内建:文件、shell、web、任务、计划、目标、定时、git worktree、skill、团队、
+**工具**——46 个内建:文件、shell、web、任务、计划、目标、定时、git worktree、skill、团队、
 MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 
 **上下文**
@@ -210,7 +211,7 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 途径 | 够到什么 | 代价 |
 |---|---|---|
 | **脚本**(QuickJS,默认) | 九个点:四个写提示词、两个围着工具调用、两个围着模型调用、记忆召回 | 一个 `.js` 文件加一行配置;每次调用微秒级 |
-| **插件包** | MCP 服务器、脚本、声明式场景、agent 类型、skill | 一个带 `plugin.toml` 的 zip;要给模型看的文本安装时全部披露 |
+| **插件包** | MCP 服务器、脚本、声明式场景、agent 类型、skill、模型经 `RunExt` 跑的命令 | 一个带 `plugin.toml` 的 zip;要给模型看的文本安装时全部披露 |
 | **Hooks** | 一轮里的二十九个时点、四种后端:命令、提示词、HTTP、agent | 观察、改写输入、拦下工具调用、结束一轮 |
 
 另外,任何说 MCP 的东西本来就是扩展。脚本和 `RunCode` 跑在同一套内嵌 QuickJS 里:限额
@@ -354,7 +355,7 @@ let pool = agix::pool::assemble(
 
 ## 能力
 
-### 工具——45 个内建
+### 工具——46 个内建
 
 | 类别 | 工具 |
 |---|---|
@@ -370,7 +371,7 @@ let pool = agix::pool::assemble(
 | **团队成员**(只发给团队成员) | `SendMessage` `ReadMail` `ListPeers` `TeamMemorySave` `TeamMemoryRead` |
 | **协议** | `MCP` `ListMcpResources` `ReadMcpResource`,另外每个发现的 MCP 工具一个 `mcp__<server>__<tool>` |
 | **交互** | `AskUserQuestion` `PushNotification` `Monitor` `StructuredOutput` |
-| **程序** | `RunCode`(一段调用本会话工具的 JavaScript 程序,只把返回值交回) |
+| **程序** | `RunCode`(一段调用本会话工具的 JavaScript 程序,只把返回值交回)、`RunExt`(已装插件回答的一行命令;有插件声明了命令才有) |
 | **编辑 / 元 / 诊断** | `NotebookEdit` · `ToolSearch` · `Ping` `Sleep` |
 
 `tools::register_builtin_tools` 装上其中 21 个自给自足的;其余需要会话状态,由 builder
@@ -500,6 +501,9 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | [extending_quickjs.md](extending_quickjs.md) | 写脚本扩展 |
 | [plugin_packages.md](plugin_packages.md) | 插件包的格式、安装与信任 |
 | [ptc.md](ptc.md) | `RunCode`:模型写的程序能调什么、权限、限额与提示词 |
+| [runext.md](runext.md) | `RunExt`:插件命令——声明、命令行、权限与 `writes`、限额、斜杠形式 |
+| [agix_js.md](agix_js.md) | 内嵌脚本里的全局 `agix`:每个函数、限额与错误码 |
+| [forge.md](forge.md) | 样例插件 `forge`:需求、规格与变更流程做成插件命令 |
 | [mcp_auth.md](mcp_auth.md) | 远端 MCP server 的 OAuth:配置、登录流程、RPC 与通知、凭据存储、安全 |
 | [schemas/settings.schema.json](schemas/settings.schema.json) | 生成的 `settings.json` schema |
 | [benchmark/](benchmark/compare_dsh.md) | 与 DeepSeek Harness 的对比测试:准备、六个任务、量什么与怎么量,以及每次测试的记录 |
