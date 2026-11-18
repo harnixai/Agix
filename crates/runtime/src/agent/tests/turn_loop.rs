@@ -611,7 +611,7 @@ async fn a_program_reads_files_through_the_sessions_own_tools() {
     let (content, is_error) = run_code_result(
         "const texts = await Promise.all(['a.txt', 'b.txt'].map(f =>
             tools.Read({file_path: args.dir + '/' + f})));
-         return texts.map(t => t.includes('alpha') ? 'a' : t.includes('beta') ? 'b' : '?');",
+         return texts.map(t => t.content.includes('alpha') ? 'a' : t.content.includes('beta') ? 'b' : '?');",
         serde_json::json!({"dir": dir.path()}),
         None,
     )

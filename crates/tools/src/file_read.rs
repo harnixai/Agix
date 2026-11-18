@@ -49,7 +49,10 @@ impl Tool for FileReadTool {
         ToolSpec::new()
             .pages_itself()
             .callable_from_code(true)
-            .code_result("text, each line prefixed with its number and a tab")
+            .code_result(
+                "a text file: {content, totalLines, truncated}, the text as it is with no line \
+                 numbers, every line unless offset/limit; other files as the model sees them",
+            )
             .concurrency_safe(true)
             .read_only(true)
     }
@@ -123,10 +126,10 @@ impl Tool for FileReadTool {
 
         let path = resolve_path(&input.file_path, &ctx.cwd);
 
-        // 文件未变化且相同范围时跳过重新读取。
-        if ctx
-            .session
-            .check_read_dedup_with_range(&path, input.offset, input.limit)
+        if !ctx.from_code
+            && ctx
+                .session
+                .check_read_dedup_with_range(&path, input.offset, input.limit)
         {
             let msg = if ctx.session.is_consecutive_read(&path) {
                 "[file unchanged] Use the previous content."
@@ -152,15 +155,25 @@ impl Tool for FileReadTool {
         ) => r};
 
         match result {
+            Ok(tool_result) if ctx.from_code => {
+                // The program saw the file and the model did not: Edit/Write may
+                // follow, but the model's next Read must not be answered from cache.
+                ctx.session.record_write(&path);
+                Ok(tool_result)
+            }
             Ok(tool_result) => {
-                // 记录本次读取(含偏移范围)，供去重与 Edit/Write 做 staleness 检测。
                 ctx.session
                     .record_read_with_range(&path, input.offset, input.limit);
                 Ok(tool_result)
             }
-            Err(ToolError::Execution(e)) if e.to_string().contains("not found") => Ok(
-                ToolResult::text(format!("(no such file) {path}", path = path.display())),
-            ),
+            Err(ToolError::Execution(e)) if e.to_string().contains("not found") => {
+                let missing = format!("(no such file) {path}", path = path.display());
+                if ctx.from_code {
+                    Err(ToolError::exec(missing))
+                } else {
+                    Ok(ToolResult::text(missing))
+                }
+            }
             Err(e) => Err(e),
         }
     }
@@ -279,7 +292,10 @@ async fn read_file_to_text(
         ))
     })?;
 
-    // Empty file warning.
+    if ctx.from_code {
+        return Ok(text_for_code(content, input.offset, input.limit));
+    }
+
     if content.trim().is_empty() {
         return Ok(ToolResult::text(
             "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>",
@@ -565,6 +581,29 @@ fn estimate_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         return Some((w.min(10000), h.min(10000)));
     }
     None
+}
+
+fn text_for_code(content: String, offset: Option<usize>, limit: Option<usize>) -> ToolResult {
+    let total = content.lines().count();
+    let skip = offset.unwrap_or(1).max(1) - 1;
+    let take = limit.unwrap_or(usize::MAX);
+    let window = if skip == 0 && take >= total {
+        content
+    } else {
+        content
+            .split_inclusive('\n')
+            .skip(skip)
+            .take(take)
+            .collect::<String>()
+    };
+    let truncated = skip.saturating_add(take) < total;
+    let mut result = ToolResult::text(window.clone());
+    result.structured_content = Some(serde_json::json!({
+        "content": window,
+        "totalLines": total,
+        "truncated": truncated,
+    }));
+    result
 }
 
 fn format_with_line_numbers(
@@ -903,6 +942,86 @@ mod tests {
             resolve_path("/etc/hosts", &cwd),
             PathBuf::from("/etc/hosts")
         );
+    }
+
+    async fn read_from_code(input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let mut ctx = ctx.clone();
+        ctx.from_code = true;
+        FileReadTool
+            .call(input, ctx, ProgressSender::noop("t"))
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_program_gets_the_text_itself_even_after_the_model_read_it() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("notes.txt");
+        let text = "one\r\n\ttwo\nthree";
+        tokio::fs::write(&p, text).await.unwrap();
+        let ctx = ctx_in(dir.path());
+        assert!(read_text(&p, ctx.clone()).await.contains("     1\tone"));
+
+        let r = read_from_code(json!({"file_path": p.to_string_lossy()}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            r.structured_content,
+            Some(json!({"content": text, "totalLines": 3, "truncated": false}))
+        );
+        let again = read_from_code(json!({"file_path": p.to_string_lossy()}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(again.structured_content, r.structured_content);
+    }
+
+    #[tokio::test]
+    async fn a_programs_window_is_whole_lines_of_the_text() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("w.txt");
+        tokio::fs::write(&p, "a\nb\nc\nd\n").await.unwrap();
+        let ctx = ctx_in(dir.path());
+        let window = |offset: usize, limit: usize| json!({"file_path": p.to_string_lossy(), "offset": offset, "limit": limit});
+        let r = read_from_code(window(2, 2), &ctx).await.unwrap();
+        assert_eq!(
+            r.structured_content,
+            Some(json!({"content": "b\nc\n", "totalLines": 4, "truncated": true}))
+        );
+        let r = read_from_code(window(3, 10), &ctx).await.unwrap();
+        assert_eq!(
+            r.structured_content,
+            Some(json!({"content": "c\nd\n", "totalLines": 4, "truncated": false}))
+        );
+        let r = read_from_code(window(9, 1), &ctx).await.unwrap();
+        assert_eq!(
+            r.structured_content,
+            Some(json!({"content": "", "totalLines": 4, "truncated": false}))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_program_reading_a_missing_file_fails() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("nope.txt");
+        let ctx = ctx_in(dir.path());
+        let err = read_from_code(json!({"file_path": missing.to_string_lossy()}), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no such file"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_programs_read_lets_it_edit_but_does_not_count_as_the_models() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("e.txt");
+        tokio::fs::write(&p, "body\n").await.unwrap();
+        let ctx = ctx_in(dir.path());
+        assert!(ctx.session.check_read_staleness(&p).is_some());
+        read_from_code(json!({"file_path": p.to_string_lossy()}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(ctx.session.check_read_staleness(&p), None);
+        let model = read_text(&p, ctx.clone()).await;
+        assert!(model.contains("     1\tbody"), "{model}");
     }
 
     #[tokio::test]

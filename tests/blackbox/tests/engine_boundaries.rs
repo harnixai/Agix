@@ -784,3 +784,54 @@ async fn a_programs_sub_call_progress_names_a_tool_use_the_host_saw() -> anyhow:
     run.finish().await;
     Ok(())
 }
+
+/// A program reading a file gets the file — its text, without the line
+/// numbers or the "unchanged since you read it" note the model gets — even
+/// when the model has just read the same file itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_reading_a_file_the_model_already_read_gets_its_text() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("program-read", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    let text = "ALPHA first line\n\tsecond: indented\nlast line, no newline";
+    let path = run.write_file("notes.txt", text)?;
+    let path = path.to_string_lossy().to_string();
+    stub.script([
+        Reply::calls("direct-read", "Read", json!({ "file_path": path })),
+        Reply::calls(
+            "program",
+            "RunCode",
+            json!({
+                "description": "read the notes",
+                "code": format!("return await tools.Read({{ file_path: {} }});", json!(path))
+            }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "read the notes twice").await?;
+
+    let (_, direct, _) = result_of(&events, "Read").expect("the model's Read");
+    assert!(
+        direct.contains("     1\tALPHA first line"),
+        "the model still sees numbered lines: {direct}"
+    );
+    let (_, program, failed) = result_of(&events, "RunCode").expect("the program's result");
+    assert!(!failed, "{program}");
+    let read: Value = serde_json::Deserializer::from_str(program)
+        .into_iter()
+        .next()
+        .and_then(Result::ok)
+        .unwrap_or_else(|| panic!("the program's result does not start with JSON: {program}"));
+    assert_eq!(
+        read,
+        json!({ "content": text, "totalLines": 3, "truncated": false }),
+        "{program}"
+    );
+    run.finish().await;
+    Ok(())
+}

@@ -2248,7 +2248,7 @@
         "subject": "ReadPath(\"/work/project/src/lib.rs\")"
       }
     ],
-    "code_result": "text, each line prefixed with its number and a tab",
+    "code_result": "a text file: {content, totalLines, truncated}, the text as it is with no line numbers, every line unless offset/limit; other files as the model sees them",
     "description": "Read a file (text/image/PDF) with optional line range.",
     "guide": {
       "bytes": 1839,

@@ -38,6 +38,7 @@
 | `notify(text)` | 告诉发起它的 Agent 一件事；只在后台运行时送达，一次运行至多 10 条。前台运行时 Agent 正在等结果，它退化为 `log`：进日志，随结果交回 |
 | `stopRequested()` | 是否有人要求它停（`TaskStop`）。长循环里查一下，交回已有的部分结果 |
 | `messages()` | 取出别人经 `TaskMessage` 发给它的消息（字符串数组），取过即清 |
+| `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析，纯计算（`agix_js.md`） |
 
 标准库都在：`JSON`、`Math`、`Date`、`RegExp`、`Map` / `Set`、`Promise`（含 `all` /
 `allSettled`）、数组与字符串方法。
@@ -85,7 +86,7 @@ return reviews.map((r, i) => ({ module: args.modules[i], ...(r.status === "fulfi
 
 ```
 tools.Glob({pattern, path?, …}) → {paths: string[], more: number} — Find files …
-tools.Read({file_path, offset?, limit?}) → text, each line prefixed with its number and a tab — …
+tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, truncated}, the text as it is … — …
 ```
 
 给程序用的结构化结果不改变模型直接调用时看到的文本：
@@ -95,7 +96,7 @@ tools.Read({file_path, offset?, limit?}) → text, each line prefixed with its n
 | `Glob` | `{paths, more}`：路径按修改时间新→旧，`more` 是被 `max_results` 截掉的个数 |
 | `Grep` | `files_with_matches`（缺省）：`{files}`；`count`：`{counts: {路径: 次数}}`；`content`：文本，每行一处 `路径:行` |
 | `Bash` | `{stdout, stderr, exit_code}`；退出码非零则 reject，错误里带输出 |
-| `Read` | 文本，每行前是行号与制表符 |
+| `Read` | 文本文件：`{content, totalLines, truncated}`，原文，不带行号；不给 `offset` / `limit` 就是全文，`truncated` 说窗口后面还有没有行。不做「文件未变」的去重，模型刚读过的文件程序照样拿到原文；程序读过不算模型读过，模型再读拿到的仍是全文。文件不存在则 reject。图片、PDF、notebook 与模型看到的相同 |
 | `agent()` | 子 Agent 的最终文本；给了 `schema` 时是校验过的对象 |
 
 没声明的工具给文本，与直接调用时相同。脚本里调了不存在的 `tools.Foo`，得到的是
@@ -178,7 +179,7 @@ tools.<Name>(input) and callTool(name, input) return Promises that reject on fai
 log(text) reports progress. End with `return <JSON value>`.
 
 Callable here (MCP tools too, with callTool; the guide has the rest):
-  tools.Read({file_path, limit?, offset?, pages?}) → text, each line prefixed with …
+  tools.Read({file_path, limit?, offset?, pages?}) → a text file: {content, totalLines, truncated}, …
   …
 ```
 
