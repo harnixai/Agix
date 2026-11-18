@@ -6,7 +6,7 @@
 //! ```text
 //! mcp-toy-server [--transport stdio|http|sse] [--port N] [--port-file PATH]
 //!                [--calls PATH] [--name NAME] [--resources DIR] [--mute] [--liar]
-//!                [--max-protocol VERSION] [--task]
+//!                [--max-protocol VERSION] [--task] [--store DIR]
 //! ```
 //!
 //! - `http` / `sse` 在 127.0.0.1 上起 streamable HTTP，绑定后先在 stdout 第一行打出
@@ -29,6 +29,8 @@
 //!   轮询、`tasks/update` 回答、`tasks/cancel` 协作式取消）；没声明或没开 `--task` 时
 //!   同步跑完。任务建起记 `work:task <id>`，收到取消记 `work:cancel-requested`，真的停下
 //!   记 `work:cancelled`，其余 `work:done` / `work:failed` / `work:sync`。
+//! - `--store DIR`：另外提供 `items_query` / `items_get` / `items_put`，一个按 `kind`（`req`、
+//!   `spec`）存在 `DIR/<kind>.json` 里的结构化存储，是 `docs/forge.md`「后端」里团队需求库的替身。
 //!
 //! 工具：`ping`、`echo`、`slow`（可取消）、`crash`（进程直接退出）、`big`（指定字节数）、
 //! `ask`（向用户问一个问题：`mode` 为 `form` 问颜色、`url` 让人打开一个页面；协商到
@@ -37,6 +39,8 @@
 //! `work`（`steps` 步、每步 `step_ms`，`fail` 让它最后失败、`ask` 在第一步后问一个问题、
 //! `code` 原样写进结果文本）。收到的每个回答原样记一行
 //! `ask <json>`，并作为结果文本 `answer: <json>` 返回。
+//! `where` 报出它从 `roots/list` 拿到的根（客户端没提供 roots 时报出来）、环境变量
+//! `AGIX_PROJECT_ROOT` 与自己的工作目录；`touch_in_root` 在第一个根下写一个标记文件。
 //! 资源：`toy://notes/readme.md`、`toy://unicode`、`toy://big`，以及 `--resources` 的。
 //! 提示词：`greet`（`name` 必填、`style` 可选）、`mark`（无参数）。
 
@@ -59,6 +63,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::task_manager::{TaskExit, TaskManager, TaskOptions};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler, ServiceExt};
+use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 const BIG_RESOURCE_BYTES: usize = 200_000;
@@ -77,6 +82,7 @@ struct Options {
     liar: bool,
     max_protocol: Option<ProtocolVersion>,
     task: bool,
+    store: Option<PathBuf>,
 }
 
 fn parse_args() -> anyhow::Result<Options> {
@@ -91,6 +97,7 @@ fn parse_args() -> anyhow::Result<Options> {
         liar: false,
         max_protocol: None,
         task: false,
+        store: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -111,6 +118,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 opts.max_protocol = Some(serde_json::from_value(serde_json::json!(value()?))?)
             }
             "--task" => opts.task = true,
+            "--store" => opts.store = Some(value()?.into()),
             other => anyhow::bail!("unknown argument {other}"),
         }
     }
@@ -129,6 +137,8 @@ struct State {
     liar: bool,
     max_protocol: Option<ProtocolVersion>,
     task: bool,
+    store: Option<PathBuf>,
+    store_lock: std::sync::Mutex<()>,
     tasks: TaskManager,
     asking: tokio::sync::watch::Sender<usize>,
     answered: tokio::sync::watch::Sender<usize>,
@@ -148,6 +158,37 @@ impl State {
             // moment, and `writeln!` splits a line over writes that interleave.
             let _ = f.write_all(format!("{}\t{what}\n", self.name).as_bytes());
         }
+    }
+
+    fn store_file(&self, kind: &str) -> Result<PathBuf, ErrorData> {
+        let dir = self
+            .store
+            .as_ref()
+            .ok_or_else(|| ErrorData::invalid_request("started without --store", None))?;
+        match kind {
+            "req" | "spec" => Ok(dir.join(format!("{kind}.json"))),
+            other => Err(ErrorData::invalid_params(
+                format!("kind is req or spec, not {other}"),
+                None,
+            )),
+        }
+    }
+
+    fn load(&self, kind: &str) -> Result<Vec<serde_json::Value>, ErrorData> {
+        match std::fs::read_to_string(self.store_file(kind)?) {
+            Ok(text) => serde_json::from_str(&text)
+                .map_err(|e| ErrorData::internal_error(format!("{kind}.json: {e}"), None)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
+    }
+
+    fn save(&self, kind: &str, items: &[serde_json::Value]) -> Result<(), ErrorData> {
+        let path = self.store_file(kind)?;
+        let text = serde_json::to_string_pretty(items).unwrap_or_default();
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))
+            .and_then(|()| std::fs::write(&path, text))
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))
     }
 
     fn file_resources(&self) -> Vec<(String, PathBuf)> {
@@ -235,7 +276,42 @@ struct WorkRequest {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct Empty {}
 
-// `#[tool_router]`/`#[tool_handler]` build `Self::tool_router()` per dispatch
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct TouchRequest {
+    #[schemars(description = "file name to create directly under the first root")]
+    name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct QueryRequest {
+    #[schemars(description = "req or spec")]
+    kind: String,
+    #[schemars(description = "top-level fields every returned item must equal")]
+    filter: Option<serde_json::Map<String, serde_json::Value>>,
+    #[schemars(description = "top-level fields to return (all when absent)")]
+    fields: Option<Vec<String>>,
+    #[schemars(description = "most items to return (default 50)")]
+    limit: Option<usize>,
+    #[schemars(description = "next_cursor of the previous page")]
+    cursor: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct GetRequest {
+    #[schemars(description = "req or spec")]
+    kind: String,
+    id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct PutRequest {
+    #[schemars(description = "req or spec")]
+    kind: String,
+    #[schemars(description = "the item; one without `id` is given the next free one")]
+    item: serde_json::Map<String, serde_json::Value>,
+}
+
+// `#[tool_router]`/`#[tool_handler]` build the router (`Self::router`) per dispatch
 // rather than reading a stored router, so the only field is the shared state.
 #[derive(Clone)]
 struct ToyServer {
@@ -358,6 +434,254 @@ impl ToyServer {
             .collect();
         self.put_all(&asked, responses, &context, !one_by_one).await
     }
+
+    #[tool(
+        name = "where",
+        description = "Report the roots this server got from the client, the AGIX_PROJECT_ROOT \
+                       variable and the server's working directory, as JSON."
+    )]
+    async fn where_am_i(
+        &self,
+        Parameters(Empty {}): Parameters<Empty>,
+        InputResponses(responses): InputResponses,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.state.record("where");
+        let roots = match ask_roots(responses, &context).await? {
+            Roots::Asking(round) => return Ok(round),
+            Roots::Got(uris) => json!({ "roots": uris }),
+            Roots::Unoffered(why) => json!({ "roots": null, "roots_error": why }),
+        };
+        let mut report = roots;
+        report["env"] = json!(std::env::var("AGIX_PROJECT_ROOT").ok());
+        report["cwd"] = json!(std::env::current_dir()
+            .map(|d| d.to_string_lossy().into_owned())
+            .ok());
+        Ok(CallToolResult::success(vec![ContentBlock::text(report.to_string())]).into())
+    }
+
+    #[tool(
+        description = "Create the file `name` directly under the first root the client gave, and \
+                       report its path."
+    )]
+    async fn touch_in_root(
+        &self,
+        Parameters(TouchRequest { name }): Parameters<TouchRequest>,
+        InputResponses(responses): InputResponses,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.state.record("touch_in_root");
+        let fail = |why: String| Ok(CallToolResult::error(vec![ContentBlock::text(why)]).into());
+        let first = match ask_roots(responses, &context).await? {
+            Roots::Asking(round) => return Ok(round),
+            Roots::Got(uris) => uris.into_iter().next(),
+            Roots::Unoffered(why) => return fail(why),
+        };
+        let Some(root) = first.as_deref().and_then(path_of_file_uri) else {
+            return fail(format!("no file root to write under (roots: {first:?})"));
+        };
+        if name.is_empty() || name.contains(['/', '\\']) || name == ".." || name == "." {
+            return fail(format!("`{name}` is not a plain file name"));
+        }
+        let path = root.join(&name);
+        std::fs::write(&path, format!("touched by {}\n", self.state.name))
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let text = path.to_string_lossy().into_owned();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]).into())
+    }
+}
+
+#[tool_router(router = store_router)]
+impl ToyServer {
+    #[tool(description = "List the items of `kind` that match `filter`, a page at a time.")]
+    fn items_query(
+        &self,
+        Parameters(q): Parameters<QueryRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.state.record("items_query");
+        let items = self.state.load(&q.kind)?;
+        let start: usize = match q.cursor.as_deref() {
+            Some(c) => c
+                .parse()
+                .map_err(|_| ErrorData::invalid_params(format!("bad cursor {c}"), None))?,
+            None => 0,
+        };
+        let matching: Vec<serde_json::Value> = items
+            .into_iter()
+            .filter(|item| {
+                q.filter
+                    .iter()
+                    .flatten()
+                    .all(|(k, v)| item.get(k) == Some(v))
+            })
+            .collect();
+        let limit = q.limit.unwrap_or(50).max(1);
+        let page: Vec<serde_json::Value> = matching
+            .iter()
+            .skip(start)
+            .take(limit)
+            .map(|item| project_fields(item, q.fields.as_deref()))
+            .collect();
+        let mut out = json!({ "items": page });
+        if start + limit < matching.len() {
+            out["next_cursor"] = json!((start + limit).to_string());
+        }
+        Ok(CallToolResult::structured(out))
+    }
+
+    #[tool(description = "The item of `kind` with this `id`.")]
+    fn items_get(
+        &self,
+        Parameters(GetRequest { kind, id }): Parameters<GetRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.state.record("items_get");
+        let item = self
+            .state
+            .load(&kind)?
+            .into_iter()
+            .find(|item| item["id"] == json!(id))
+            .ok_or_else(|| ErrorData::invalid_params(format!("no {kind} {id}"), None))?;
+        Ok(CallToolResult::structured(json!({ "item": item })))
+    }
+
+    #[tool(
+        description = "Store `item` under `kind`, replacing the item with its `id`; one without \
+                       an `id` is given the next free one. Answers with the stored item."
+    )]
+    fn items_put(
+        &self,
+        Parameters(PutRequest { kind, mut item }): Parameters<PutRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.state.record("items_put");
+        let _one_writer = self
+            .state
+            .store_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut items = self.state.load(&kind)?;
+        if !item.get("id").is_some_and(serde_json::Value::is_string) {
+            item.insert("id".into(), json!(next_id(&kind, &item, &items)));
+        }
+        let item = serde_json::Value::Object(item);
+        match items.iter_mut().find(|old| old["id"] == item["id"]) {
+            Some(old) => *old = item.clone(),
+            None => items.push(item.clone()),
+        }
+        items.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+        self.state.save(&kind, &items)?;
+        Ok(CallToolResult::structured(json!({ "item": item })))
+    }
+}
+
+impl ToyServer {
+    fn router(&self) -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        match self.state.store {
+            Some(_) => Self::tool_router() + Self::store_router(),
+            None => Self::tool_router(),
+        }
+    }
+}
+
+enum Roots {
+    Got(Vec<String>),
+    Unoffered(String),
+    /// A 2026-07-28 client is asked in an `input_required` round.
+    Asking(CallToolResponse),
+}
+
+#[expect(
+    deprecated,
+    reason = "roots are deprecated by SEP-2577, and what this server is for is asking for them"
+)]
+async fn ask_roots(
+    responses: Option<rmcp::model::InputResponses>,
+    context: &RequestContext<RoleServer>,
+) -> Result<Roots, ErrorData> {
+    let offered = context
+        .client_capabilities()
+        .is_some_and(|caps| caps.roots.is_some());
+    if !offered {
+        return Ok(Roots::Unoffered(
+            "the client offers no roots capability".into(),
+        ));
+    }
+    let listed: serde_json::Value = if is_modern(context) {
+        let Some(responses) = responses else {
+            let ask = InputRequest::ListRoots(Default::default());
+            let round =
+                InputRequiredResult::from_input_requests([("roots".to_string(), ask)].into());
+            return Ok(Roots::Asking(round.into()));
+        };
+        responses.get("roots").cloned().unwrap_or_default()
+    } else {
+        match context.peer.list_roots().await {
+            Ok(listed) => serde_json::to_value(listed).unwrap_or_default(),
+            Err(e) => return Ok(Roots::Unoffered(format!("roots/list failed: {e}"))),
+        }
+    };
+    let Some(roots) = listed["roots"].as_array() else {
+        return Ok(Roots::Unoffered(format!("roots/list answered {listed}")));
+    };
+    Ok(Roots::Got(
+        roots
+            .iter()
+            .filter_map(|r| r["uri"].as_str().map(str::to_string))
+            .collect(),
+    ))
+}
+
+/// The local path a `file://` URI names, percent-decoded.
+fn path_of_file_uri(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = || std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok();
+        match (bytes[i], hex().and_then(|h| u8::from_str_radix(h, 16).ok())) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    Some(PathBuf::from(String::from_utf8(out).ok()?))
+}
+
+fn project_fields(item: &serde_json::Value, fields: Option<&[String]>) -> serde_json::Value {
+    match (fields, item.as_object()) {
+        (Some(fields), Some(obj)) => serde_json::Value::Object(
+            obj.iter()
+                .filter(|(k, _)| fields.iter().any(|f| f == *k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        ),
+        _ => item.clone(),
+    }
+}
+
+/// `R-001`, `R-002`, … for requirements; `S-<capability>-001` for a spec item
+/// that names its capability, `S-001` otherwise.
+fn next_id(
+    kind: &str,
+    item: &serde_json::Map<String, serde_json::Value>,
+    items: &[serde_json::Value],
+) -> String {
+    let prefix = match (kind, item.get("capability").and_then(|c| c.as_str())) {
+        ("req", _) => "R-".to_string(),
+        (_, Some(capability)) => format!("S-{capability}-"),
+        _ => "S-".to_string(),
+    };
+    let highest = items
+        .iter()
+        .filter_map(|i| i["id"].as_str()?.strip_prefix(&prefix)?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("{prefix}{:03}", highest + 1)
 }
 
 /// What `ask` puts to the user in each mode.
@@ -536,7 +860,7 @@ async fn gather(point: &tokio::sync::watch::Sender<usize>, n: usize) {
     let _ = point.subscribe().wait_for(|arrived| *arrived >= n).await;
 }
 
-#[tool_handler]
+#[tool_handler(router = self.router())]
 impl ServerHandler for ToyServer {
     fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder()
@@ -612,7 +936,7 @@ impl ServerHandler for ToyServer {
                 });
             return Ok(CallToolResponse::Task(self.work_as_task(args)));
         }
-        Self::tool_router()
+        self.router()
             .call(ToolCallContext::new(self, request, context))
             .await
     }
@@ -778,6 +1102,8 @@ async fn main() -> anyhow::Result<()> {
         liar: opts.liar,
         max_protocol: opts.max_protocol.clone(),
         task: opts.task,
+        store: opts.store.clone(),
+        store_lock: std::sync::Mutex::new(()),
         tasks: TaskManager::new(),
         asking: tokio::sync::watch::Sender::new(0),
         answered: tokio::sync::watch::Sender::new(0),
