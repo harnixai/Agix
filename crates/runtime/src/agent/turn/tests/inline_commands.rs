@@ -30,6 +30,7 @@ fn turn_in(cwd: &std::path::Path, rules: Vec<PermissionRule>, with_bash: bool) -
         tool_use_id: "toolu_skill".into(),
         tools: Arc::new(tools),
         cwd: cwd.to_path_buf(),
+        project_root: Some(cwd.to_path_buf()),
         session_id: "test-session".into(),
         turn_no: 1,
         agent_depth: 0,

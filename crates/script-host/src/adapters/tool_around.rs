@@ -16,12 +16,17 @@ use base::interface::tool_middleware::{
 /// # What the script is given
 ///
 /// ```json
-/// { "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model" }
+/// { "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model",
+///   "plugin": null, "projectRoot": "/home/me/app" }
 /// ```
 ///
 /// `via` says who made the call: `"model"`, `"RunCode"` for a program's
 /// sub-call, `"RunExt:<command>"` for a plugin command's, `"user"` for a
 /// plugin command typed as `/name`, `"skill"` for a skill's inline command.
+/// `plugin` names the package of a `RunExt:<command>` call and is `null`
+/// otherwise: another package may have taken the command's name.
+/// `projectRoot` is the directory the session works in when it has a project
+/// (a worktree's, for a session in one) and `null` without one.
 ///
 /// # What it may return
 ///
@@ -152,6 +157,8 @@ impl ToolMiddleware for ToolAroundScript {
             "tool": call.name,
             "input": call.input,
             "via": call.via,
+            "plugin": call.plugin,
+            "projectRoot": call.project_root,
         });
 
         let directed = match self.carrier.call(&self.entry, input).await {
@@ -253,6 +260,8 @@ mod tests {
         let chain = vec![wrapper(engine)];
         let mut call = call();
         call.via = "RunExt:forge".into();
+        call.plugin = Some("forge".into());
+        call.project_root = Some("/work/app".into());
         let _ = dispatch_through(&chain, call, CancellationToken::new(), |_| async {
             Ok(ToolAnswer::text("the file"))
         })
@@ -263,6 +272,8 @@ mod tests {
                 "tool": "Read",
                 "input": {"file_path": "a.txt"},
                 "via": "RunExt:forge",
+                "plugin": "forge",
+                "projectRoot": "/work/app",
             })]
         );
     }
@@ -428,7 +439,13 @@ mod tests {
         let _ = run(engine, Arc::new(AtomicUsize::new(0))).await;
         assert_eq!(
             *seen.lock().unwrap(),
-            serde_json::json!({"tool": "Read", "input": {"file_path": "a.txt"}, "via": "model"})
+            serde_json::json!({
+                "tool": "Read",
+                "input": {"file_path": "a.txt"},
+                "via": "model",
+                "plugin": null,
+                "projectRoot": null,
+            })
         );
     }
 }

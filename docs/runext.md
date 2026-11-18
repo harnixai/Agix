@@ -172,8 +172,10 @@ function `main` ``。
 失败，要有 `RunExt(...)` 的 allow 规则或 `acceptEdits`。
 
 `PreToolUse` / `PostToolUse` hook、`tool.around` 脚本、中间件、遥测看得到每一次子调用。
-`tool.around` 的输入带 `via`：`"model"`、`"RunCode"` 或 `"RunExt:<命令名>"`，插件的守卫脚本据此
-放行自己的命令、拦下模型的直接读写（`forge.md`「护栏」）。另有两个值：用户敲的 `/name` 那次
+`tool.around` 的输入带 `via`：`"model"`、`"RunCode"` 或 `"RunExt:<命令名>"`，`via` 是后者时
+`plugin` 是命令所在的包名（命令名可能被别的包占了，守卫要两样都核对），`projectRoot` 是会话的
+工作目录（没有项目时为 `null`）。插件的守卫脚本据此放行自己的命令、拦下模型的直接读写
+（`forge.md`「护栏」）。另有两个值：用户敲的 `/name` 那次
 `RunExt` 调用本身是 `"user"`（模型写出的 `/name` 是 `"model"`，§10），skill 的内联命令是
 `"skill"`。
 
@@ -297,7 +299,7 @@ my-plugin/
 | 注册 `RunExt`（会话最后的工具表里有它才有 `/name`）；斜杠命令 | `crates/runtime` |
 | 调用级的写入授权 | `crates/permissions`（`write_scope`、`Reach::EditsProject`），与插件 skill 的 `allowed-tools` 同一套收窄；子调用的拦截在 `crates/runtime`（`Caller::Command`） |
 | 代码调用的 `Read` 交回原文、不去重 | `crates/tools/src/file_read.rs`（看 `ToolContext::from_code`） |
-| `tool.around` 输入加 `via` | `crates/script-host/src/adapters/tool_around.rs` |
+| `tool.around` 输入加 `via`、`plugin`、`projectRoot` | `crates/script-host/src/adapters/tool_around.rs` |
 
 ## 14. 与最初设计的出入
 

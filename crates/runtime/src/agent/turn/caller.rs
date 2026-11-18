@@ -38,6 +38,14 @@ impl Caller {
             Self::Person => "user".into(),
         }
     }
+
+    /// The package whose command made the call, as `tool.around` is told.
+    pub(crate) fn plugin(&self) -> Option<String> {
+        match self {
+            Self::Command(calls) => Some(calls.plugin.clone()),
+            _ => None,
+        }
+    }
 }
 
 /// What one run of a plugin command's calls are held to: a read-only run
@@ -46,6 +54,7 @@ impl Caller {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CommandCalls {
     pub command: String,
+    pub plugin: String,
     pub read_only: bool,
     /// The globs as the package declares them, for what a refusal says.
     pub declared: Vec<String>,
@@ -70,6 +79,7 @@ impl CommandCalls {
         Self {
             grants: writes.grants(),
             command: scope.command,
+            plugin: scope.plugin,
             read_only: scope.read_only,
             declared: scope.writes,
             writes,

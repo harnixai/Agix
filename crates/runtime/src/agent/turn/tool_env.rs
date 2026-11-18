@@ -264,6 +264,11 @@ impl Agent {
             tool_use_id: String::new(),
             tools: Arc::clone(self.tooling.tools()),
             cwd: self.settings.paths.working_dir().to_path_buf(),
+            project_root: self
+                .settings
+                .paths
+                .project_root()
+                .map(|_| self.settings.paths.working_dir().to_path_buf()),
             session_id: self.session.session_id.clone(),
             turn_no: self.session.turn_count,
             agent_depth: self.identity.agent_depth(),

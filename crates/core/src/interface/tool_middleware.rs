@@ -93,13 +93,16 @@ impl ToolAnswer {
 
 /// The call being made, as a wrapper may see it. Read-only by design — see
 /// the module docs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolCall {
     pub name: String,
     pub input: serde_json::Value,
-    /// Who made the call: `model`, `RunCode`, `RunExt:<command>`, `user` for a
-    /// `/name` plugin command, `skill` for a skill's inline command.
+    /// Who made the call: `model`, `RunCode`, `RunExt:<command>` of the package
+    /// `plugin`, `user` for a `/name` plugin command, `skill` for a skill's inline command.
     pub via: String,
+    pub plugin: Option<String>,
+    /// The session's working directory (a worktree's, in one) if it has a project.
+    pub project_root: Option<std::path::PathBuf>,
 }
 
 impl ToolCall {
@@ -109,6 +112,7 @@ impl ToolCall {
             name: name.into(),
             input,
             via: "model".into(),
+            ..Default::default()
         }
     }
 }

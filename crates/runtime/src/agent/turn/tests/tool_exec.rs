@@ -152,6 +152,7 @@ pub(super) fn test_exec_ctx_with_permission(
         tool_use_id: "toolu_test".into(),
         tools,
         cwd: std::env::temp_dir(),
+        project_root: None,
         session_id: "test-session".into(),
         turn_no: 1,
         agent_depth: 0,

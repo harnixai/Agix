@@ -22,6 +22,8 @@ pub(crate) struct ToolExecCtx {
     pub tool_use_id: String,
     pub tools: Arc<dyn base::tool::ToolRegistry>,
     pub cwd: std::path::PathBuf,
+    /// `cwd` when the session has a project, as `tool.around` is told.
+    pub project_root: Option<std::path::PathBuf>,
     pub session_id: String,
     pub turn_no: u32,
     /// Forwarded into every `ToolContext` this turn builds — see
@@ -269,6 +271,8 @@ pub(crate) async fn execute_tool_with_telemetry(
         name: name.to_string(),
         input: input.clone(),
         via: ctx.caller.via(),
+        plugin: ctx.caller.plugin(),
+        project_root: ctx.project_root.clone(),
     };
     base::interface::tool_middleware::dispatch_through(
         &chain,

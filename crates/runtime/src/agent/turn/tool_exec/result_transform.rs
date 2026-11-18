@@ -27,6 +27,8 @@ pub(in crate::agent::turn) fn apply_result_transformers(
         name: name.to_string(),
         input: input.clone(),
         via: ctx.caller.via(),
+        plugin: ctx.caller.plugin(),
+        project_root: ctx.project_root.clone(),
     };
     // A transformer that turns a plain answer into a failure gets the
     // engine-level treatment that has always meant: the call is an `Err`,

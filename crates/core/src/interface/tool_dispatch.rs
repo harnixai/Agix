@@ -29,13 +29,13 @@ pub struct SubCallAnswer {
     pub reported_failure: bool,
 }
 
-/// What the sub-calls of one plugin command's run are held to: they are
-/// that command's (`via` `RunExt:<command>`), a read-only run writes nothing,
-/// and the files a write run may change are `writes`, globs relative to the
-/// project root.
+/// What the sub-calls of one plugin command's run are held to: they are that
+/// command's, a read-only run writes nothing, and the files a write run may
+/// change are `writes`, globs relative to the project root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandScope {
     pub command: String,
+    pub plugin: String,
     pub read_only: bool,
     pub writes: Vec<String>,
 }

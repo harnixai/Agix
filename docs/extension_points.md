@@ -1505,8 +1505,8 @@ JavaScript 在 `RunCode` 那套运行时上跑(`runext.md`)。嵌入方要管的
   命中 `read_only` 前缀的按只读工具,其余在 `default` 下问一次、`acceptEdits` 放行。命令的子
   调用只能写包声明的 `writes`,只读调用里不能写。
 - **宿主看得见**:每次运行是一件 `kind:"ext"` 的任务;子调用照常过 hook、中间件与遥测,
-  `tool.around` 的输入带 `via`(`RunExt:<命令名>`)。`/name` 的输出以 `text_delta` 交给宿主,
-  不进对话。
+  `tool.around` 的输入带 `via`(`RunExt:<命令名>`)与 `plugin`(包名)。`/name` 的输出以
+  `text_delta` 交给宿主,不进对话。
 
 ---
 

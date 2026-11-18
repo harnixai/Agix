@@ -276,18 +276,30 @@ function onVariable(ctx) {
 一次工具调用一次,在派发之前、权限闸门之外。程序与插件命令的子调用也各过一次。
 
 ```json
-{ "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model" }
+{ "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model",
+  "plugin": null, "projectRoot": "/home/me/app" }
 ```
 
-`via` 是这次调用由谁发起:`"model"`(模型直接调)、`"RunCode"`(模型写的程序里的子调用)、
-`"RunExt:<命令名>"`(插件命令的子调用,`runext.md`)、`"user"`(用户敲的 `/name` 插件命令那次
-`RunExt` 本身)、`"skill"`(skill 正文里的内联命令)。插件可以据此只放行自己命令的读写、拦下
-模型对同一批文件的直接读写:
+`via` 是这次调用由谁发起:`"model"`(模型直接调,包括模型写进子 Agent prompt 里的 `/name`)、
+`"RunCode"`(模型写的程序里的子调用)、`"RunExt:<命令名>"`(插件命令的子调用,`runext.md`)、
+`"user"`(用户敲的 `/name` 插件命令那次 `RunExt` 本身)、`"skill"`(skill 正文里的内联命令)。
+
+`plugin` 是 `via` 为 `"RunExt:<命令名>"` 时那条命令所在的插件包名,其余为 `null`。命令名归哪个包
+是装了什么决定的(同名时按包名排序先到的占着,`runext.md` §2),只看 `via` 的守卫会放行另一个包
+抢先占了这个名字的命令,所以要同时核对包名。
+
+`projectRoot` 是会话有项目时的工作目录(绝对路径;会话在 worktree 里就是那个 worktree,与
+`RunExt` 的 `ctx.projectRoot` 相同),没有项目时为 `null`。守卫拿它把相对的受保护目录锚定到
+本项目,而不是匹配路径里任何一段同名目录。
+
+插件可以据此只放行自己命令的读写、拦下模型对同一批文件的直接读写:
 
 ```js
 function onAround(call) {
   const path = String((call.input && call.input.file_path) || "");
-  if (call.tool === "Read" && path.includes("guarded/") && !String(call.via).startsWith("RunExt:")) {
+  const guarded = call.projectRoot !== null && path.startsWith(`${call.projectRoot}/guarded/`);
+  const ours = call.via === "RunExt:notes" && call.plugin === "notes-plugin";
+  if (call.tool === "Read" && guarded && !ours) {
     return { action: "deny", reason: `guarded/ is read through the notes command` };
   }
   return null;

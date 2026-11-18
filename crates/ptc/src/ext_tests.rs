@@ -141,6 +141,7 @@ async fn main_gets_argv_input_and_ctx_and_its_value_comes_back_as_json() {
         fake.scopes.lock().unwrap().as_slice(),
         [CommandScope {
             command: "forge".into(),
+            plugin: "forge-plugin".into(),
             read_only: true,
             writes: vec![],
         }]
