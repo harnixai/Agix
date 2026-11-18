@@ -29,6 +29,7 @@ mod openai_responses;
 mod other_instances;
 mod package_trust;
 mod permission_bounds;
+mod plugin_commands;
 mod project_trust_untrusted;
 mod provider_tiers;
 mod sandbox_chain;

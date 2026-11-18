@@ -1,0 +1,22 @@
+# notes-plugin — the plugin command fixture: a `notes` command run through
+# `RunExt`, and a `tool.around` guard that tells the command's own reads from
+# the model's. `tests/blackbox/tests/plugin_commands.rs` installs it.
+
+[plugin]
+name = "notes-plugin"
+version = "1.0.0"
+api_version = "0.1"
+description = "Keeps notes under notes/"
+
+[[command]]
+name = "notes"
+entry = "notes.js:main"
+description = "Keep short notes under notes/"
+read_only = ["help", "list", "peek", "read-guarded"]
+writes = ["notes/**"]
+
+[[script]]
+point = "tool.around"
+entry = "guard.js:onAround"
+timeout_ms = 2000
+calls_per_turn = 1000

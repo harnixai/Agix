@@ -1,4 +1,5 @@
-//! 把 `examples/plugins/quickjs/`（示例插件包 `demo-quickjs` 的源码）或用例现造的
+//! 把 `examples/plugins/quickjs/`（示例插件包 `demo-quickjs` 的源码）、
+//! `tests/fixtures/ext_plugin/`（带 `[[command]]` 的 `notes-plugin`）或用例现造的
 //! 插件目录打成 zip，给 `plugin.install` RPC 用。
 //!
 //! 为什么不直接提交一个 .zip：未打包的目录 diff 可读、可 review；打包是纯机械
@@ -12,6 +13,18 @@ pub const DEMO_PACKAGE_VERSION: &str = "1.0.0";
 
 pub fn demo_package_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/quickjs")
+}
+
+pub const EXT_PACKAGE: &str = "notes-plugin";
+pub const EXT_PACKAGE_VERSION: &str = "1.0.0";
+
+pub fn ext_package_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/ext_plugin")
+}
+
+/// 打包 `ext_package_dir()`，返回 `(zip 绝对路径, sha256 hex 校验和)`。
+pub fn package_ext(out_dir: &Path) -> anyhow::Result<(PathBuf, String)> {
+    package_dir(&ext_package_dir(), out_dir, EXT_PACKAGE)
 }
 
 /// 打包 `demo_package_dir()`，返回 `(zip 绝对路径, sha256 hex 校验和)`。
