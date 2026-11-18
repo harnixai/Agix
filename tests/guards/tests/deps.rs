@@ -38,6 +38,7 @@ use Tier::*;
 
 pub(crate) const CRATES: &[(&str, Tier)] = &[
     ("base", Contract),
+    ("js-lib", Contract),
     ("platform", Machine),
     ("model", K1),
     ("memory", K1),

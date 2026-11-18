@@ -242,6 +242,7 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 内核 | `permissions` · `hooks` · `telemetry` | 规则引擎、生命周期 hooks、遥测与录制 |
 | 内核 | `settings` · `memory` · `prompt-files` · `session-state` | 设置分层与项目信任、文件式记忆、读进提示词的 markdown(`SKILL.md`、`AGENTS.md`、规则)、一个会话的可变状态 |
 | 内核 | `ptc` | `RunCode`:模型写的程序,在内嵌的 QuickJS 里跑([`ptc.md`](ptc.md)) |
+| 基础库 | `js-lib` | 每个内嵌 QuickJS 都有的全局 `agix`:YAML、glob、路径、JSON Schema([`agix_js.md`](agix_js.md)) |
 | 模块 | `agents` · `team` | `Agent` 工具、agent 类型、团队 |
 | 模块 | `mcp` | MCP 客户端与工具适配、MCP OAuth 授权 |
 | 模块 | `skills` | skill 目录与 `Skill` 工具 |
@@ -251,8 +252,8 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 | 外壳 | `agix` | 嵌入门面:按主题再导出,自身不含逻辑 |
 | 外壳 | `daemon` | `agixd` 二进制 |
 
-`crates/` 下 25 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
-工作区共 34 个成员。
+`crates/` 下 26 个 crate,加上 `daemon/`、七个测试成员与 `examples/plugins/rust` 的示例插件,
+工作区共 35 个成员。
 
 ---
 

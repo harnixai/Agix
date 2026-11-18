@@ -39,8 +39,9 @@ Node 或浏览器的 API。
 - **规则在前，数据在后**：`glob.test(pattern, path)`、`json.validate(schema, value)`。
 - **全部同步。** 纯计算没有理由返回 Promise。
 - **输入输出都是普通的 JSON 值与字符串**，不返回类实例。路径一律 POSIX 写法（`/`）。
-- **出错抛 `AgixError`**（`Error` 的子类），带 `code`，形如 `yaml.syntax`；"校验不通过"不算出错，
-  以返回值表达。
+- **出错抛 `AgixError`**（`Error` 的子类，`e.name === "AgixError"`），带 `code`，形如 `yaml.syntax`；
+  "校验不通过"不算出错，以返回值表达。参数类型不对（该传字符串的传了数字）抛 `TypeError`，同 Node。
+- 嵌套超过 127 层的值报错（`yaml.depth`、`json.depth`），与引擎读 JSON 的上限相同。
 
 ## 3. 函数
 
@@ -58,15 +59,19 @@ Node 或浏览器的 API。
 | `parseFrontmatter(text) → { data, body }` | 拆出文首 `---` 包起来的 YAML 与其后的正文；没有 frontmatter 时 `data` 为 `null`、`body` 是全文 |
 | `stringifyFrontmatter(data, body) → text` | 反过来；`data` 为 `null` 时只有正文 |
 
-- YAML 1.2 core schema。结果只有 JSON 能表达的值：键必须是字符串，没有日期类型（日期就是字符串），
-  超出 ±2⁵³ 的整数报错（`yaml.number_range`），自定义 tag 报错（`yaml.tag`）。
-- 锚点与别名展开，展开后的节点数有上限，防"十亿笑声"（`yaml.alias_limit`）。
+- YAML 1.2 core schema。结果只有 JSON 能表达的值：没有日期类型（日期就是字符串），
+  超出 ±2⁵³ 的整数与 `.inf`、`.nan` 报错（`yaml.number_range`），core schema 以外的 tag 报错（`yaml.tag`）。
+- 键是字符串：标量键一律按字面取（`1: a` 的键是 `"1"`），映射或序列作键报错（`yaml.key`），
+  重复的键报错（`yaml.duplicate_key`）。
+- 锚点与别名展开，经别名展开的节点数（十万）与字节数（8 MiB）有上限，防"十亿笑声"（`yaml.alias_limit`）。
 - 多文档的输入报错（`yaml.multiple_documents`）。
 - `stringify` 的输出：块风格、缩进 2、键按插入顺序、不折行、只在必要时加引号、以换行结尾。
   `undefined`、函数、非有限数报错（`yaml.unrepresentable`）。
-- frontmatter 的起止行是单独一行的 `---`；接受 BOM 与 CRLF。`stringifyFrontmatter` 不改正文的
-  任何一个字节，`parseFrontmatter(stringifyFrontmatter(d, b)).body === b`。
-- 语法错误的 `AgixError` 带 `line`、`column`。
+- frontmatter 的起止行是单独一行的 `---`；接受 BOM 与 CRLF。起始行之后没有结束行报 `yaml.syntax`；
+  frontmatter 为空时 `data` 为 `{}`。`stringifyFrontmatter` 不改正文的任何一个字节，
+  `parseFrontmatter(stringifyFrontmatter(d, b)).body === b`；`data` 为 `null` 而正文以 `---` 行开头时
+  读回来会被当成 frontmatter，所以报 `yaml.unrepresentable`。
+- 语法错误的 `AgixError` 带 `line`、`column`（都从 1 起；frontmatter 里的错误按全文计行）。
 
 ### `agix.glob`
 
@@ -87,7 +92,9 @@ Node `path.posix` 里不依赖当前目录、不碰文件系统的那几个，�
 `extname(p)`、`isAbsolute(p)`。
 
 没有 `resolve`：它要一个当前目录，脚本里的"当前目录"由载体以参数给出（`RunExt` 的
-`ctx.projectRoot`），不是一个隐含的全局状态。只做字面处理，不解析符号链接。
+`ctx.projectRoot`），不是一个隐含的全局状态。同样的原因，`relative` 的答案要靠当前目录才定得下来时
+——一个绝对一个相对，或相对路径用 `..` 爬出了起点——抛 `path.relative`，其余情况与 Node 相同。
+只做字面处理，不解析符号链接。
 
 ### `agix.json`
 
@@ -98,6 +105,7 @@ Node `path.posix` 里不依赖当前目录、不碰文件系统的那几个，�
 - 缺省按 draft 2020-12；schema 里写了 `$schema` 的按它（draft 4、6、7、2019-09）。
 - `format` 参与校验（`date-time`、`date`、`time`、`email`、`uri`、`uuid` 等）。
 - `$ref` 只解析 schema 内部的；指到外部的抛 `json.external_ref`——这里不联网也不读文件。
+- `schema` 与 `value` 按 `JSON.stringify` 的语义取值（`undefined` 的属性略去，`NaN` 成 `null`）。
 - schema 本身不合法抛 `json.schema`。
 
 ### `agix.hash`
@@ -123,7 +131,9 @@ Node `path.posix` 里不依赖当前目录、不碰文件系统的那几个，�
 
 Node `util.parseArgs` 的子集：`config.options` 每项 `{ type: "string" | "boolean", short?, multiple?, default? }`，
 `config.allowPositionals` 缺省 `true`。总是严格模式：不认识的选项抛 `cli.unknown_option`，缺值抛
-`cli.missing_value`，消息里带选项名，命令可以直接把它交回模型。
+`cli.missing_value`（下一个参数以 `-` 开头也算缺值，要传这样的值写 `--name=-x`），布尔选项带了值抛
+`cli.unexpected_value`，不收位置参数时出现位置参数抛 `cli.unexpected_positional`，`config` 本身写错抛
+`cli.config`。消息里带选项名，命令可以直接把它交回模型。
 
 ```js
 function main(argv, input, ctx) {
@@ -150,8 +160,8 @@ function main(argv, input, ctx) {
 | 内容 | 位置 |
 |---|---|
 | 绑定的实现（Rust 函数、注册、`AgixError`） | 新 crate `crates/js-lib`，`ptc` 与 `script-host` 都依赖它 |
-| `agix.cli` 等用 JS 写更自然的部分 | 同一 crate 里的一段 JS；进程第一次用到时编译成字节码缓存在内存里，此后每个运行时直接加载 |
-| YAML | 一个维护中的纯 Rust YAML 实现（不用已归档的 `serde_yaml`），落地时按维护状况选定；行为以 §3 为准 |
+| `agix.cli` 等用 JS 写更自然的部分 | 同一 crate 里的一个 JS 模块；进程第一次用到时编译成字节码缓存在内存里，此后每个运行时直接加载 |
+| YAML | `saphyr-parser`（`yaml-rust2` 的后继，纯 Rust，过 YAML 测试集）只出事件流；core schema 解析、别名展开与上限、输出都在 `js-lib` 里，行为以 §3 为准 |
 | glob、JSON Schema、SHA-256、UUID | 工作区已有的 `globset`、`jsonschema`、`sha2`、`uuid`（加 `v7` 特性） |
 | 装进运行时 | 三个载体创建上下文时第一件事装 `agix`，深度冻结，之后才求值用户代码 |
 

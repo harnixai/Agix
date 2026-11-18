@@ -9,6 +9,7 @@ members = [
     "crates/model",
     "crates/hooks",
     "crates/packages",
+    "crates/js-lib",
     "crates/script-host",
     "crates/ptc",
     "crates/telemetry",
@@ -79,7 +80,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Common
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 semver = "1"
 jsonschema = { version = "0.49", default-features = false }
 # QuickJS bindings — the script carrier's engine. See crates/script-host.
@@ -120,6 +121,7 @@ memory   = { path = "crates/memory" }
 prompt-files = { path = "crates/prompt-files" }
 hooks    = { path = "crates/hooks" }
 packages = { path = "crates/packages" }
+js-lib = { path = "crates/js-lib" }
 script-host = { path = "crates/script-host" }
 ptc = { path = "crates/ptc" }
 telemetry = { path = "crates/telemetry" }

@@ -321,6 +321,7 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | kernel | `permissions` · `hooks` · `telemetry` | rule engine, lifecycle hooks, telemetry and the recorder |
 | kernel | `settings` · `memory` · `prompt-files` · `session-state` | settings tiers and project trust, file-based memory, the markdown files read into the prompt (`SKILL.md`, `AGENTS.md`, rules), one session's mutable state |
 | kernel | `ptc` | `RunCode`: the model's programs, run in an embedded QuickJS ([`docs/ptc.md`](docs/ptc.md)) |
+| library | `js-lib` | the `agix` global every embedded QuickJS gets: YAML, glob, paths, JSON Schema ([`docs/agix_js.md`](docs/agix_js.md)) |
 | module | `agents` · `team` | the `Agent` tool, agent types, teams |
 | module | `mcp` | MCP client and tool adapters, MCP OAuth authorization |
 | module | `skills` | skill catalog and the `Skill` tool |
@@ -330,8 +331,8 @@ does not carry answers `METHOD_NOT_FOUND` naming the module.
 | shell | `agix` | the embedding facade: re-exports by theme, no logic of its own |
 | shell | `daemon` | the `agixd` binary |
 
-25 crates under `crates/`, plus `daemon/`, the seven test members and the
-example plugin in `examples/plugins/rust` — 34 workspace members in total.
+26 crates under `crates/`, plus `daemon/`, the seven test members and the
+example plugin in `examples/plugins/rust` — 35 workspace members in total.
 
 ---
 

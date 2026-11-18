@@ -37,6 +37,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
  本机    platform ───────── 执行层的本机实现(进程、文件、网络、OS 沙箱)、崩溃钩子、进程身份
            │
  契约    core(包名 base)── 内核面向外的 trait、共享数据类型与纯判定
+         js-lib ─────────── 内嵌 QuickJS 的全局 agix,不依赖任何第一方 crate,只随 JS 引擎编入
 ```
 
 **依赖方向**(`tests/guards/tests/deps.rs` 检查):
@@ -58,7 +59,7 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 - `platform` 只依赖契约,契约不依赖它。用它的是真要碰本机的 crate——`tools`、`runtime`、
   `model`、`mcp`、`packages`、`assembly`、`agix`、`daemon`,清单与
   各自的理由在 `MAY_USE_PLATFORM`;`scene`、`history`、`session`、`compaction`、
-  `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`prompt-files`、`session-state`、`team`、`skills`、`script-host`、`agents` 只经契约,测试里用到的除外。
+  `telemetry`、`hooks`、`ptc`、`permissions`、`settings`、`memory`、`prompt-files`、`session-state`、`team`、`skills`、`script-host`、`agents`、`js-lib` 只经契约,测试里用到的除外。
   子 Agent 要的执行层是父会话的那一套,随 `HostContracts` 经 `Builder::inherit` 交给子会话,自己不碰本机。
 - 内核与模块不能带模块命名的 feature,也不转发模块 feature;模块开关只在 `assembly`
   里以 `dep:<模块>` 的形式出现。`wasmtime` 一类的运行时任何成员都不依赖。
@@ -122,6 +123,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `mcp` | 模块 | MCP 连接、工具适配器、资源工具、prompt 命令、OAuth 授权 |
 | `skills` | 模块 | skill 目录与 `Skill` 工具 |
 | `script-host` | 模块 | 脚本载体:配额与账本(`ScriptCarrier`)、九个点的适配器、QuickJS 引擎 |
+| `js-lib` | 契约 | 每个内嵌 QuickJS 运行时都装的全局 `agix`(`docs/agix_js.md`):YAML、glob、路径、JSON Schema、SHA-256、UUID、参数解析;纯计算,不碰 I/O;只被 `script-host`(`quickjs` feature)与 `ptc` 依赖 |
 | `ptc` | 内核 | `RunCode`:模型写的一次性程序,在内嵌的 QuickJS 里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
 | `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
 | `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |

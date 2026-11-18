@@ -1,0 +1,22 @@
+[package]
+name = "js-lib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Agix — the `agix` global every embedded JavaScript runtime gets: YAML, glob, path, JSON Schema, SHA-256, UUID, argument parsing"
+
+[dependencies]
+rquickjs     = { workspace = true }
+saphyr-parser = "0.3"
+globset      = { workspace = true }
+jsonschema   = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+sha2         = { workspace = true }
+hex          = { workspace = true }
+uuid         = { workspace = true }
+
+[dev-dependencies]
+rquickjs = { workspace = true, features = ["futures"] }
+tokio    = { workspace = true, features = ["macros", "rt"] }

@@ -56,6 +56,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/assembly/src/embed.rs", "RECORDER", OsResource, "the one embed engine this process runs that records its process groups: it owns ORPHANS' file on disk, of which the process has one"),
     ("crates/assembly/src/telemetry_otel/mod.rs", "PROCESS_EXPORTER", OsResource, "the OpenTelemetry exporter installs process-wide providers; see assemble::pool"),
     ("crates/history/src/lock.rs", "HELD", OsResource, "the session-log locks this process holds: an flock belongs to an open file, so every pool writing one state directory must share the one open file per log"),
+    ("crates/js-lib/src/lib.rs", "COMPILED", Constant, "the script base library's bytecode, compiled once from source built into the binary"),
     ("crates/ptc/src/engine.rs", "ORIGIN", Constant, "the epoch of a monotonic clock, fixed on first read"),
     ("crates/tools/src/push_notification.rs", "SHOWING", OsResource, "the desktop notifications still being shown, by process provider: the machine has one Notification Center, which every pool's osascript waits on"),
     ("crates/settings/src/schema.rs", "KNOWN", Constant, "the settings keys, derived once from the schema"),
