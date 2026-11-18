@@ -276,22 +276,7 @@ async fn read_file_to_text(
         .map(ToolResult::text);
     }
 
-    if metadata.len > max_bytes {
-        return Err(ToolError::Validation(format!(
-            "file too large ({} bytes); cap is {} bytes. Use Grep / Glob or pass a smaller window.",
-            metadata.len, max_bytes
-        )));
-    }
-
-    let content = String::from_utf8(fs.read(path).await?).map_err(|_| {
-        ToolError::Validation(format!(
-            "file is not valid UTF-8 (possible binary file): {}. \
-             Use Bash with `file {}` to inspect the type.",
-            path.display(),
-            path.display()
-        ))
-    })?;
-
+    let content = read_utf8(fs, path, &metadata, max_bytes).await?;
     if ctx.from_code {
         return Ok(text_for_code(content, input.offset, input.limit));
     }
@@ -308,6 +293,28 @@ async fn read_file_to_text(
         input.limit.unwrap_or(default_lines),
         max_line_chars,
     )))
+}
+
+async fn read_utf8(
+    fs: &dyn FileSystem,
+    path: &Path,
+    metadata: &Metadata,
+    max_bytes: u64,
+) -> Result<String, ToolError> {
+    if metadata.len > max_bytes {
+        return Err(ToolError::Validation(format!(
+            "file too large ({} bytes); cap is {} bytes. Use Grep / Glob or pass a smaller window.",
+            metadata.len, max_bytes
+        )));
+    }
+    String::from_utf8(fs.read(path).await?).map_err(|_| {
+        ToolError::Validation(format!(
+            "file is not valid UTF-8 (possible binary file): {}. \
+             Use Bash with `file {}` to inspect the type.",
+            path.display(),
+            path.display()
+        ))
+    })
 }
 
 /// Read an image as a real image block plus a cheap human-readable header.

@@ -67,7 +67,7 @@ fn    crates/settings/src/loaded.rs                              LoadedSettings:
 fn    crates/skills/src/bundled.rs                               bundled_skills                         135
 fn    crates/tools/src/bash/paths.rs                             path_args_stay_within                  111
 fn    crates/tools/src/file_edit.rs                              perform_edits_structured               82
-fn    crates/tools/src/file_read.rs                              read_file_to_text                      97
+fn    crates/tools/src/file_read.rs                              read_file_to_text                      85
 fn    crates/tools/src/monitor.rs                                Watch::run                             83
 fn    crates/tools/src/tool_search.rs                            ToolSearchTool::call                   100
 fn    crates/tools/src/tool_search.rs                            render                                 92
