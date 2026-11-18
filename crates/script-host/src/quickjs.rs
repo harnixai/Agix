@@ -68,6 +68,7 @@ fn run_blocking(
         rquickjs::Context::full(&runtime).map_err(|e| ScriptError::Failed(e.to_string()))?;
 
     context.with(|ctx| {
+        js_lib::install(&ctx).map_err(|e| script_error(&ctx, e, deadline))?;
         let source = wrap(&code, &entry);
         let func: rquickjs::Function = ctx
             .eval(source.as_bytes())

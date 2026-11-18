@@ -130,6 +130,18 @@ JSON 解析好了。你返回的东西会被序列化回 JSON。什么都不返�
 脚本够不到自己以外的**任何**东西。没有 `require`,没有 `process`,没有 `fetch`,
 没有 `XMLHttpRequest`,没有文件系统,没有网络。`Date` 能用。输入进去,输出出来。
 
+全局 `agix` 在你的代码求值之前就装好了:YAML 与 frontmatter、glob、路径、JSON Schema、
+SHA-256、UUID、参数解析,全是同步的纯计算,同样不碰 I/O,清单与语义见
+[`agix_js.md`](agix_js.md)。glob 在这里匹配的结果和 `Glob` 工具、权限规则里的一样:
+
+```js
+function onAssemble(blocks) {
+  var fm = agix.yaml.parseFrontmatter(blocks[0].content);
+  // fm.data 是 frontmatter 解析出的对象,fm.body 是其后的正文,一个字节不差
+  return blocks;
+}
+```
+
 ## 九个点
 
 每一节讲这个点什么时候触发、你的函数收到什么、能返回什么。这里引用的每一个 fixture

@@ -29,9 +29,10 @@
 //!
 //! # What a script can reach
 //!
-//! Nothing. No filesystem, no network, no clock beyond `Date`, no host
-//! bindings at all. A script gets its input and returns its output, both as
-//! JSON. The limits bound what a script costs; they are not a security
+//! No filesystem, no network, no clock beyond `Date`, no host bindings. A
+//! script gets its input and returns its output, both as JSON, and has the
+//! pure functions of the global `agix` (`js-lib`, docs/agix_js.md) to work
+//! on them with. The limits bound what a script costs; they are not a security
 //! boundary against hostile code, so trust follows where a script came from.
 
 pub mod adapters;
@@ -116,6 +117,32 @@ mod tests {
         assert!(
             matches!(&err, ScriptError::Failed(m) if m.contains("deliberate")),
             "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agix_is_there_and_still_no_io() {
+        let out = call(
+            "function f() {\n\
+               var e; try { agix.yaml.parse('a: [1'); } catch (x) { e = x; }\n\
+               return [agix.glob.test('src/**/*.rs', 'src/a/b.rs'), e.name, e.code,\n\
+                       typeof require, typeof fetch, typeof process];\n\
+             }",
+            "f",
+            serde_json::json!({}),
+        )
+        .await
+        .expect("the script runs");
+        assert_eq!(
+            out,
+            serde_json::json!([
+                true,
+                "AgixError",
+                "yaml.syntax",
+                "undefined",
+                "undefined",
+                "undefined"
+            ])
         );
     }
 
@@ -778,6 +805,42 @@ mod binding_tests {
             .find(|b| b.name.as_deref() == Some(names::SKILLS_CATALOG))
             .expect("still there");
         assert_eq!(skills.content, "skills: (curated)");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bound_script_reads_yaml_with_agix() {
+        let project = tempdir();
+        std::fs::write(
+            project.join("prompt.js"),
+            "function onAssemble(blocks) {\n\
+               var doc = agix.yaml.parseFrontmatter('---\\nskills: [lint, test]\\n---\\nbody');\n\
+               return blocks.map(function (b) {\n\
+                 if (b.name === 'skills.catalog') {\n\
+                   b.content = 'skills: ' + doc.data.skills.join(', ') + ' ' + agix.path.extname('x.md');\n\
+                 }\n\
+                 return b;\n\
+               });\n\
+             }",
+        )
+        .unwrap();
+
+        let registry = InMemoryPromptRegistry::new();
+        let engine: Arc<dyn ScriptEngine> = Arc::new(QuickJsEngine::new());
+        bind(engine, &[binding("prompt.js")], &project)
+            .expect("the binding is valid")
+            .apply_to_registry(registry.as_ref());
+
+        let out = base::interface::prompt_assembly::run_async_assembly_hooks(
+            prompt(),
+            &registry.async_assembly_hooks(),
+            &ctx(),
+        )
+        .await;
+        let skills = out
+            .iter()
+            .find(|b| b.name.as_deref() == Some(names::SKILLS_CATALOG))
+            .expect("still there");
+        assert_eq!(skills.content, "skills: lint, test .md");
     }
 
     /// A script outside the project did not come from the operator, so it may
