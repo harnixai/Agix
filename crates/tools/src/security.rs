@@ -34,7 +34,7 @@ pub async fn resolve_write_target(raw: &str, cwd: &Path, fs: &dyn FileSystem) ->
     if !contains_path_traversal(&joined) {
         return lexical;
     }
-    let physical = resolve_physically(&joined, fs).await;
+    let physical = fs.canonicalize_best_effort(&joined).await;
     if fs.canonicalize_best_effort(&lexical).await == physical {
         lexical
     } else {
@@ -42,27 +42,16 @@ pub async fn resolve_write_target(raw: &str, cwd: &Path, fs: &dyn FileSystem) ->
     }
 }
 
-/// `path`'s deepest prefix that exists, resolved by `fs`, with the rest put
-/// back on lexically. The rest does not exist, so it holds no symlink a
-/// lexical `..` could misjudge.
-async fn resolve_physically(path: &Path, fs: &dyn FileSystem) -> PathBuf {
-    let parts: Vec<Component> = path.components().collect();
-    for split in (1..=parts.len()).rev() {
-        let prefix: PathBuf = parts[..split].iter().collect();
-        if let Ok(mut out) = fs.canonicalize(&prefix).await {
-            for part in &parts[split..] {
-                match part {
-                    Component::ParentDir => {
-                        out.pop();
-                    }
-                    Component::CurDir => {}
-                    other => out.push(other),
-                }
-            }
-            return out;
-        }
-    }
-    base::path::normalize_lexically(path)
+/// Write `bytes` where a write to `path` lands — its symlinks followed as
+/// [`write_facts`] followed them — without following a symlink found there
+/// by the time the file is opened, which the check never saw.
+pub(crate) async fn write_where_it_lands(
+    fs: &dyn FileSystem,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), base::interface::exec::ExecError> {
+    let landing = fs.canonicalize_best_effort(path).await;
+    fs.write_not_following(&landing, bytes).await
 }
 
 /// The write policy for this call, with every root resolved by the same

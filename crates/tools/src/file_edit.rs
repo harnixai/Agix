@@ -338,7 +338,7 @@ async fn perform_edits_structured(
         total_replacements += if replace_all { count } else { 1 };
     }
 
-    fs.write_str(path, &current).await?;
+    crate::security::write_where_it_lands(fs, path, current.as_bytes()).await?;
 
     let (diff_text, diff_payload) = render_diff(&original, &current, shown_path);
     let summary = format!(

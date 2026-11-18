@@ -938,3 +938,35 @@ async fn a_bypassing_parent_does_not_take_along_a_type_that_may_only_tighten() -
     run.finish().await;
     Ok(())
 }
+
+/// A cloned project can commit a symlink to a file that does not exist yet.
+/// The model's `Write` through it is a write where the link points, outside
+/// the project, so `default` asks; refused, nothing is created there.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_through_a_dangling_symlink_out_of_the_project_is_asked_about() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("perm-dangling-link", &stub).start().await?;
+    let outside = run.world.root().join("outside");
+    std::fs::create_dir_all(&outside)?;
+    std::fs::create_dir_all(run.project.join("forge"))?;
+    std::os::unix::fs::symlink(outside.join("new.txt"), run.project.join("forge/notes.md"))?;
+    stub.script([
+        write("w1", "forge/notes.md", "planted"),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("NOT-OUTSIDE")))
+        .await?;
+    run.turn(&session, "take a note").await?;
+    assert_eq!(prompted_tools(&watcher), ["Write"]);
+    assert!(
+        !outside.join("new.txt").exists(),
+        "the write followed the link out of the project"
+    );
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}

@@ -265,6 +265,46 @@ async fn a_command_writes_inside_its_scope_only_and_a_read_only_one_writes_nothi
     Ok(())
 }
 
+/// A symlink the project commits inside `notes/` to a file that does not
+/// exist yet outside it: writing through it is outside `notes/**`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_cannot_write_through_a_dangling_symlink_out_of_its_scope() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = with_notes(
+        "ext-dangling",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let outside = run.world.root().join("outside");
+    std::fs::create_dir_all(&outside)?;
+    std::fs::create_dir_all(run.project.join("notes"))?;
+    std::os::unix::fs::symlink(outside.join("new.txt"), run.project.join("notes/x.md"))?;
+    stub.script([
+        Reply::calls(
+            "add",
+            "RunExt",
+            json!({ "command": "notes add x", "input": { "body": "planted" } }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "take a note").await?;
+    let results = result_of(&events, "RunExt");
+    assert!(
+        results[0].2 && results[0].1.contains("may write only notes/**"),
+        "{results:?}"
+    );
+    assert!(
+        !outside.join("new.txt").exists(),
+        "the command wrote through the link out of the project"
+    );
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn shell_syntax_and_unknown_commands_are_refused_unrun() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;

@@ -24,27 +24,57 @@ pub fn normalize_lexically(p: &Path) -> PathBuf {
     out
 }
 
+/// How many symbolic links a resolution follows before it takes a loop for
+/// one, as the OS does (`SYMLOOP_MAX`).
+pub const MAX_LINK_HOPS: u32 = 40;
+
 /// Where `path` lands on this machine's disk: its deepest prefix that exists,
 /// resolved by the OS, with the rest put back on lexically. The rest does not
-/// exist, so it holds no symlink a lexical `..` could misjudge.
+/// exist, so it holds no symlink a lexical `..` could misjudge — except its
+/// first name, a link the OS cannot resolve because what it points at does
+/// not exist yet, which a write follows and so is followed here.
 pub fn resolve_physically(path: &Path) -> PathBuf {
-    let parts: Vec<Component> = path.components().collect();
-    for split in (1..=parts.len()).rev() {
-        let prefix: PathBuf = parts[..split].iter().collect();
-        if let Ok(mut out) = std::fs::canonicalize(&prefix) {
-            for part in &parts[split..] {
-                match part {
-                    Component::ParentDir => {
-                        out.pop();
-                    }
-                    Component::CurDir => {}
-                    other => out.push(other),
-                }
-            }
-            return out;
+    let mut wanted = path.to_path_buf();
+    for _ in 0..=MAX_LINK_HOPS {
+        let parts: Vec<Component> = wanted.components().collect();
+        let Some((split, out)) = (1..=parts.len()).rev().find_map(|split| {
+            let prefix: PathBuf = parts[..split].iter().collect();
+            Some((split, std::fs::canonicalize(prefix).ok()?))
+        }) else {
+            return normalize_lexically(&wanted);
+        };
+        let rest = &parts[split..];
+        match first_below(&out, rest)
+            .and_then(|(link, after)| Some(out.join(std::fs::read_link(link).ok()?).join(after)))
+        {
+            Some(next) => wanted = next,
+            None => return put_back(out, rest),
         }
     }
-    normalize_lexically(path)
+    wanted
+}
+
+/// When `rest` starts with a name: that name under the resolved `out` — a
+/// link the OS could not resolve, if it is one — and the rest after it.
+pub fn first_below(out: &Path, rest: &[Component]) -> Option<(PathBuf, PathBuf)> {
+    let (Component::Normal(name), after) = rest.split_first()? else {
+        return None;
+    };
+    Some((out.join(name), after.iter().collect()))
+}
+
+/// `rest` put onto the resolved `out` lexically.
+pub fn put_back(mut out: PathBuf, rest: &[Component]) -> PathBuf {
+    for part in rest {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// djb2 hash constant for initial value.
@@ -134,6 +164,40 @@ mod tests {
         std::os::unix::fs::symlink(real.join("target/inner"), real.join("link")).unwrap();
         let got = resolve_physically(&real.join("link/../x"));
         assert_eq!(got, real.join("target/x"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn physical_resolution_follows_a_dangling_symlink_and_a_chain_of_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(real.join("forge")).unwrap();
+        std::os::unix::fs::symlink("../.git/hooks/pre-commit", real.join("forge/h")).unwrap();
+        assert_eq!(
+            resolve_physically(&real.join("forge/h")),
+            real.join(".git/hooks/pre-commit")
+        );
+        std::os::unix::fs::symlink(real.join("forge/h"), real.join("chained")).unwrap();
+        assert_eq!(
+            resolve_physically(&real.join("chained")),
+            real.join(".git/hooks/pre-commit")
+        );
+        std::os::unix::fs::symlink(real.join("absent"), real.join("dir-link")).unwrap();
+        assert_eq!(
+            resolve_physically(&real.join("dir-link/new.txt")),
+            real.join("absent/new.txt")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn physical_resolution_of_a_symlink_loop_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(dir.path()).unwrap();
+        std::os::unix::fs::symlink(real.join("b"), real.join("a")).unwrap();
+        std::os::unix::fs::symlink(real.join("a"), real.join("b")).unwrap();
+        let got = resolve_physically(&real.join("a"));
+        assert!(got == real.join("a") || got == real.join("b"), "{got:?}");
     }
 
     #[test]

@@ -109,38 +109,50 @@ pub trait FileSystem: Send + Sync {
         self.metadata(&resolved).await
     }
 
-    /// The resolved form of a path that may not exist yet.
+    /// What the symbolic link at `path` points at, as written in the link.
+    /// Provided, for a provider with no links: it fails.
+    async fn read_link(&self, path: &Path) -> Result<PathBuf, ExecError> {
+        Err(ExecError::failed(format!(
+            "{}: this filesystem has no symbolic links",
+            path.display()
+        )))
+    }
+
+    /// The resolved form of a path that may not exist yet: its deepest prefix
+    /// that exists, resolved by [`canonicalize`](Self::canonicalize), with
+    /// the rest put back on.
     ///
-    /// A write policy has to be checked against a path that has already had
-    /// its symlinks resolved, but the file being created has no symlinks to
-    /// resolve. Falling back to the resolved parent plus the final component
-    /// answers the question the policy actually asks — "where would this land"
-    /// — for both cases.
+    /// A write policy has to be checked against where the write lands. The
+    /// rest does not exist, so it has no symlinks — except a link whose
+    /// target does not exist yet, which `canonicalize` cannot resolve and a
+    /// write follows; that one is followed here with
+    /// [`read_link`](Self::read_link).
     async fn canonicalize_best_effort(&self, path: &Path) -> PathBuf {
-        // Walk up to the deepest ancestor that exists, resolve that, and put
-        // the rest back on. Stopping at the immediate parent is not enough for
-        // the case this mostly serves — a file about to be created, often in a
-        // directory about to be created with it — and the difference matters
-        // when an ancestor is a symlink: an unresolved target compared against
-        // a resolved root looks like it is somewhere it is not.
-        let mut unresolved: Vec<std::ffi::OsString> = Vec::new();
-        let mut cursor = path;
-        loop {
-            if let Ok(resolved) = self.canonicalize(cursor).await {
-                let mut out = resolved;
-                for part in unresolved.iter().rev() {
-                    out.push(part);
+        use crate::path::{first_below, put_back, MAX_LINK_HOPS};
+        let mut wanted = path.to_path_buf();
+        for _ in 0..=MAX_LINK_HOPS {
+            let parts: Vec<std::path::Component> = wanted.components().collect();
+            let mut found = None;
+            for split in (1..=parts.len()).rev() {
+                let prefix: PathBuf = parts[..split].iter().collect();
+                if let Ok(out) = self.canonicalize(&prefix).await {
+                    found = Some((split, out));
+                    break;
                 }
-                return out;
             }
-            let Some(name) = cursor.file_name() else {
-                return path.to_path_buf();
+            let Some((split, out)) = found else {
+                return wanted;
             };
-            unresolved.push(name.to_os_string());
-            match cursor.parent() {
-                Some(p) if !p.as_os_str().is_empty() => cursor = p,
-                _ => return path.to_path_buf(),
+            let rest = &parts[split..];
+            let target = match first_below(&out, rest) {
+                Some((link, after)) => self.read_link(&link).await.ok().map(|t| (t, after)),
+                None => None,
+            };
+            match target {
+                Some((target, after)) => wanted = out.join(target).join(after),
+                None => return put_back(out, rest),
             }
         }
+        wanted
     }
 }

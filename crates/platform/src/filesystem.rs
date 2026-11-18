@@ -128,6 +128,12 @@ impl FileSystem for LocalFileSystem {
             .await
             .map_err(|e| failed(path, e))
     }
+
+    async fn read_link(&self, path: &Path) -> Result<PathBuf, ExecError> {
+        tokio::fs::read_link(path)
+            .await
+            .map_err(|e| failed(path, e))
+    }
 }
 
 #[cfg(test)]

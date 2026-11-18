@@ -131,9 +131,7 @@ impl Tool for NotebookEditTool {
         // 写回（pretty-print 让 git diff 可读）
         let new_content = serde_json::to_string_pretty(&nb)
             .map_err(|e| ToolError::exec(format!("serialize: {e}")))?;
-        ctx.exec
-            .filesystem
-            .write_str(path, &new_content)
+        crate::security::write_where_it_lands(&*ctx.exec.filesystem, path, new_content.as_bytes())
             .await
             .map_err(|e| ToolError::exec(format!("write: {e}")))?;
 

@@ -175,14 +175,15 @@ async fn prior_content(fs: &dyn FileSystem, path: &Path) -> Prior {
 }
 
 async fn write_file(fs: &dyn FileSystem, path: &Path, content: &str) -> Result<usize, ToolError> {
-    if let Some(parent) = path.parent() {
+    let landing = fs.canonicalize_best_effort(path).await;
+    if let Some(parent) = landing.parent() {
         if !parent.as_os_str().is_empty() && fs.metadata_following_symlinks(parent).await.is_err() {
             fs.create_dir_all(parent)
                 .await
                 .map_err(|e| ToolError::Validation(format!("cannot create parent dir: {e}")))?;
         }
     }
-    fs.write_str(path, content).await?;
+    fs.write_not_following(&landing, content.as_bytes()).await?;
     Ok(content.len())
 }
 
@@ -415,6 +416,55 @@ mod tests {
         assert!(tool.call_traits(&Value::Null).destructive);
         assert!(!tool.call_traits(&Value::Null).concurrency_safe);
         assert_eq!(tool.name(), "Write");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dangling_symlink_out_of_the_project_is_a_write_outside_it() {
+        let dir = TempDir::new().unwrap();
+        let project = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        tokio::fs::create_dir_all(project.join("forge"))
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink(outside.join("new.txt"), project.join("forge/notes.md"))
+            .unwrap();
+        let reach = FileWriteTool
+            .permission_facts(
+                &json!({"file_path": "forge/notes.md", "content": "x"}),
+                &ctx_in(&project),
+            )
+            .await
+            .reach;
+        assert!(matches!(reach, Reach::Outside), "got {reach:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_inside_the_project_is_written_through_to_its_target() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        tokio::fs::write(root.join("AGENTS.md"), "old")
+            .await
+            .unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", root.join("CLAUDE.md")).unwrap();
+        let ctx = ctx_in(root);
+        let input = json!({"file_path": "CLAUDE.md", "content": "new"});
+        let reach = FileWriteTool.permission_facts(&input, &ctx).await.reach;
+        assert!(matches!(reach, Reach::Inside), "got {reach:?}");
+        FileWriteTool
+            .call(input, ctx, ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+            "new"
+        );
+        assert!(root
+            .join("CLAUDE.md")
+            .symlink_metadata()
+            .unwrap()
+            .is_symlink());
     }
 
     /// A filesystem that reports one path as living somewhere else, the way a

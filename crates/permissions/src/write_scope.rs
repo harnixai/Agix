@@ -146,6 +146,28 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_is_judged_by_where_it_points() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(root.join("forge")).unwrap();
+        std::os::unix::fs::symlink("../.git/hooks/pre-commit", root.join("forge/h")).unwrap();
+        std::os::unix::fs::symlink(outside.join("new.txt"), root.join("forge/notes.md")).unwrap();
+        let paths = base::paths::SensitivePaths::new(None, Some(&root), Default::default());
+        assert!(
+            WriteScope::reaches_configuration("forge/h", &root, &paths),
+            "a link to a hook not yet written reaches .git"
+        );
+        let (scope, _) = WriteScope::new(&globs(&["forge/**"]), &root);
+        assert!(
+            !scope.covers("forge/notes.md", &root),
+            "a link to a file not yet written outside the project is not inside the scope"
+        );
+        assert!(scope.covers("forge/plain.md", &root));
+    }
+
     #[test]
     fn no_globs_cover_nothing() {
         let dir = tempfile::tempdir().unwrap();
