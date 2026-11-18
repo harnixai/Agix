@@ -104,6 +104,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_multi_agent.rs` | 主控 + 三个不同模型的后台 worker，每个 worker 里多个后台任务；人为制造一个任务失败、一个 worker 故障，修复后重跑，主控汇总 |
 | `live_host.rs` | 宿主那一侧：父会话空闲时 `session.startAgent` 起修复子 agent，宿主边看边答它的询问（询问期间任务是 `waiting`）、有 deny 规则护着的测试脚本保持原样、用量与代理记下的相等，父会话正在跑一轮时再起一个评审子 agent（`notify_parent: false`）；旁观连接跟着一次构建收 `task_progress`，`daemon.event` 看见每一轮，重启引擎后同一项目两种路径写法的会话各列一次；宿主停掉跑飞的命令、这一轮照常收尾；宿主场景的 `extra_tools` 在前台和后台子 agent 里都能用；宿主改写用户消息、去掉工具结果、写扩展条目，`inspectContext` 报的工具与随后真实请求带的逐个同名；宿主在 `options.host_tools` 里声明 `HostLookup`，模型调用它时 `host_tool_call` 帧到达宿主，宿主用 `session.respondToolCall` 交回只有宿主知道的值，模型把它写进了文件；一条没订阅这个会话的连接经 `daemon.setHostTools` 提供 `HostNote`、经 `daemon.setHooks` 登记只看 `Bash` 的 `PreToolUse` hook：`host_tool_call` 与 `hook_call` 都到了它手上、hook 只问到 `Bash`，它拦下的 `touch` 没有跑，模型读到 `Blocked by PreToolUse hook:` 的理由并报出 `HostNote` 的值 |
 | `live_plugins.rs` | `examples/plugins` 的两个样例：`demo-rust` 编进 daemon、`demo-quickjs` 经 `plugin.install` 装上。`!stamp` 快捷方式展开成 `DemoStamp` 调用；报告里有只有异步提示词钩子读得到的通知、只有工具算得出的指纹，没有被结果改写遮掉的密钥；`generated/` 下的写入被脚本拒绝；`demo-auditor` 子 Agent 用插件的工具交回指纹；`session.get` 的 `health` 报出插件的计数，脚本零失败；`demo-quickjs` 停用、启用、重扫、卸载之后新建的会话各自有或没有它的提示块与 `generated/` 守卫，它的场景跟着进出 `scene.list`，停用前建的会话保持原样 |
+| `live_forge.rs` | `examples/plugins/forge` 经 `plugin.install` 装上：空项目里 `/forge-propose` 一段需求、之后每轮 `/forge-next`，模型按阶段做出只用标准库的 Rust 命令行程序 `ledger`，测试框架自己跑 `cargo build` / `cargo test` 通过，`/forge flow show`（不经模型）里变更已归档、每条验收都有通过记录、需求是 `done`，代理记下的请求里没有一次对 `forge/` 的直接读写成功；`flow.auto` 加 `stop_before: [apply]` 时一条消息走到 apply 前停下；需求放在 toy 的 `--store` 后端，`forge/reqs` 不存在；直接读 `forge/` 被拒时理由里有该用的命令；装与不装 forge 做同一个小库，打出调用次数与 prompt token（不断言） |
 | `live_programs.rs` | `RunCode` 的三种用法：一个程序经 `agent()` 并行起四个子 Agent、按 schema 收回结果再合并写盘（只有输入文件里有的封签一路传上来）；后台运行的程序边跑边推 `log()` 行，结束时以通知回到会话，模型据此交回结果；`acceptEdits` 下 deny 规则在程序里照样拦住写入，程序看得见拒绝 |
 | `live_unattended.rs` | `harnix` 场景、缺省权限、无人值守：项目内 Edit 与沙箱里的 Bash 照常做完，往实例授权的根之外写被拒绝且没有任何询问发给宿主；`AskUserQuestion` 与计划模式连名字都不出现；Bash 的重定向与 `cp` 往授权根之外（不在本机临时目录下）写，被 OS 沙箱挡住，同样没有询问 |
 | `live_mcp.rs` | toy MCP server 那一套：宿主打断一轮时进行中的 `slow` 在 server 那头被取消；一个 server 中途 `crash`，调用报错、另一个 server 照常、它自己下一次调用又连回来；超过 5 万字符的 `big` 结果只有截断后的头到达模型，4 万字符的整段到达；`ListMcpResources` / `ReadMcpResource` 读到运行时写进资源的令牌、unicode 资源原样、20 万字节的资源不整段进模型，`@toy:<uri>` 引用把资源内联进那条消息（大资源带截断标记）而不调工具；`mcp.addServer` 后同一会话下一轮就能用、`mcp.updateServer` 后调用落到新进程；streamable HTTP 与 SSE 两种传输（另起的 daemon，shell 设了代理也直连本机）；`--mcp-policy` 拒绝的 server（含插件声明的 `<插件>-mcp-<名字>`）在 `mcp.status` 里是 `denied`、工具从未出现在请求里、进程从未起过、`mcp.addServer` 它得 `-32020` 且 settings.json 不变；插件声明的 server 在 `config.reload` 之后新会话照样能用；模型让插件声明的 toy 用 `touch_in_root` 写一个标记，标记落在会话的项目里、不在包目录（server 从 roots 得知项目）；toy 的 `ask` 经 `mcp_elicitation` 询问向用户问颜色，宿主作答（`prompt_types` 里没列它时是拒绝），模型复述出用户选的那个；`--task` 的 toy 把 `work` 转成任务，模型等到它完成并把结果里的令牌原样说出来，宿主看到 `kind:"mcp_task"` 的 `task_finished` 为 `done` |
@@ -189,7 +190,7 @@ let mut run = LiveRun::builder("perm")
 `McpToy::spawn_http(&args)` 起 streamable HTTP 版，`.config("streamable_http" | "sse")` 指向它；
 toy server 的工具、资源、提示词和参数（`--calls` 记调用、`--resources` 把目录变成资源、
 `ask` / `ask_twice` 向用户提问并把收到的回答记成 `ask <json>`、`--max-protocol 2025-11-25` 扮成
-不认 `server/discover` 的老 server 改发 `elicitation/create`、`work` 是几步的慢任务，`--task` 让它在客户端声明 tasks 扩展时以任务运行（可轮询、可取消、带进度，`ask` 参数让任务中途提问，取消记 `work:cancel-requested` / `work:cancelled`）、`tests/blackbox/tests/mcp_tasks.rs` 用它；`where` 报出拿到的 roots、`AGIX_PROJECT_ROOT` 与工作目录，`touch_in_root` 在第一个根下写文件，`tests/blackbox/tests/mcp_project_root.rs` 用它；`--store DIR` 是 forge 远端后端的替身）写在
+不认 `server/discover` 的老 server 改发 `elicitation/create`、`work` 是几步的慢任务，`--task` 让它在客户端声明 tasks 扩展时以任务运行（可轮询、可取消、带进度，`ask` 参数让任务中途提问，取消记 `work:cancel-requested` / `work:cancelled`）、`tests/blackbox/tests/mcp_tasks.rs` 用它；`where` 报出拿到的 roots、`AGIX_PROJECT_ROOT` 与工作目录，`touch_in_root` 在第一个根下写文件，`tests/blackbox/tests/mcp_project_root.rs` 用它；`--store DIR` 是 forge 远端后端的替身，`tests/blackbox/tests/forge.rs` 与 `live_forge.rs` 用它）写在
 `tests/fixtures/mcp_toy_server/src/main.rs` 的文件头。daemon 连回环地址上的 MCP server（以及它的
 OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 `OAuthWorld::start()` 起一个只认自己授权服务器所发令牌的 streamable HTTP MCP server（工具 `echo`，
@@ -222,7 +223,10 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 引擎自己的几道缝——录像回放、遥测、流式执行、策略否决、恢复策略、压缩——在 `engine_boundaries.rs`
 里用桩写成确定性的用例，跑在 `integration` 里。`skills_and_memory.rs` 同样用桩钉住
 `/name` 展开项目 skill(执行 `` !`cmd` ``、不带 frontmatter)、两轮之间新加的 skill 在下一轮
-发 `skills_changed`、项目 `.agix/memory/` 的索引与全局的一起进提示词。
+发 `skills_changed`、项目 `.agix/memory/` 的索引与全局的一起进提示词。`plugin_commands.rs` 用
+`tests/fixtures/ext_plugin` 钉住 `RunExt` 本身（授权、`writes`、`via`、斜杠形式）；`forge.rs` 用桩把
+`examples/plugins/forge` 从安装走到归档（每个写子命令问一次、plan 模式、守卫、`mcp` 后端与本地答得
+一样、`RunCode` 批量、`/forge` 不经模型），是 `live_forge.rs` 的桩层对应。
 
 **提示词写成操作步骤。** 用例要验证的是产品能力，不是模型的规划能力，所以让模型做什么、
 用哪个工具、失败了怎么办都写明。用例里的「操作员」是测试代码：它盯着 `runs.log` 和

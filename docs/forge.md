@@ -24,15 +24,14 @@ examples/plugins/forge/
 ```
 
 `forge.js` 内部分几段：命令分发、本地后端（`forge/` 下的 Markdown 文件）、远端后端（经
-`callTool` 调会话里配好的 MCP 服务）、规格条目的解析与改写。frontmatter 的 JSON Schema 作为常量
-写在文件里。
+`callTool` 调会话里配好的 MCP 服务）、规格条目的解析与改写、变更流程。frontmatter 与命令
+`input` 的 JSON Schema 作为常量写在文件里。
 
 ```toml
 [plugin]
 name = "forge"
 version = "0.1.0"
 api_version = "0.1"
-requires_engine = ">=0.3.19"
 description = "需求、规格与变更流程：模型用命令读写结构化数据，不直接读写文件"
 
 [[command]]
@@ -80,9 +79,13 @@ forge/                       # 随项目提交
 ├── changes/C-003/
 │   ├── change.md            # 阶段、历史、计划清单、验收记录
 │   ├── delta.md             # 这次变更对规格的增、改、删
-│   └── design.md            # 可选
+│   └── design.md            # 可选，flow plan 的 input.design
 └── archive/C-001/           # 归档后的变更
 ```
+
+命令只能新建和改写文件，删不了（`RunExt` 的子调用里没有删除文件的工具）。所以归档时变更
+复制进 `archive/`，`changes/C-001/` 里的文件改写成一行指向 `archive/` 的说明（`change.md` 的
+frontmatter 是 `{id, archived: true}`），列表与读取都跳过它们；要清掉用 `git rm -r`。
 
 每个文件是 YAML frontmatter 加 Markdown 正文。frontmatter 是程序读写的结构化部分，正文是模型
 写的内容，程序只存不改。读写用 `agix.yaml.parseFrontmatter` / `stringifyFrontmatter`，正文逐字节
@@ -120,7 +123,12 @@ reqs: R-001
 ```
 
 条目以 `## S-<能力>-<序号> 标题` 开头，下面一行 `reqs:`，正文，`### 验收` 下每条 `- [A<n>]`。
-程序按这个格式解析和改写，模型通过命令交来的是条目的正文与验收列表。
+程序按这个格式解析和改写，模型通过命令交来的是条目的正文与验收列表。规格文件的正文由程序重写
+（条目之前的段落原样保留），需求与变更的正文逐字节保留。
+
+**增量** `changes/C-003/delta.md`：frontmatter 是 `{change, add: [S-…], modify: [S-…], remove: [S-…]}`，
+正文是 `add` 与 `modify` 的完整条目，格式同上——`modify` 交来的只是改了的字段，写进增量时已和
+现行条目合成完整的一条，归档就是用它整条替换。
 
 **变更** `changes/C-003/change.md`
 
@@ -144,7 +152,8 @@ verification: []
 ### 编号
 
 `R-<三位序号>`、`S-<能力>-<三位序号>`、`C-<三位序号>`、计划项 `P<n>`、验收项 `A<n>`，由程序分配，
-取现有最大序号加一。模型从不自己编号。
+取现有最大序号加一（规格条目还要避开其它未归档变更的增量里已经分出去的）；`mcp` 后端的需求由
+服务分配。模型从不自己编号，命令行里的编号也先按格式校验。
 
 ### 后端
 
@@ -156,9 +165,11 @@ specs: { backend: local }
 # 需求放在团队的需求系统里：
 # reqs: { backend: mcp, server: reqdb }
 flow:
-  auto: false
-  stop_before: [apply]
+  auto: false               # 缺省 false
+  stop_before: [apply]      # 缺省 []
 ```
+
+没有 `config.yaml` 时两组都是本地、手动推进。它是人写的文件，命令只读不写。
 
 `mcp` 后端经 `callTool("mcp__<server>__…")` 调会话里配好的 MCP 服务，连接、登录由 Agix 管。服务
 要提供三个工具：
@@ -169,7 +180,23 @@ flow:
 | `items_get` | `{ kind, id }` | `{ item }` |
 | `items_put` | `{ kind, item }` | `{ item }`（带服务分配的 `id`） |
 
-`kind` 是 `req` 或 `spec`。变更（流程状态）总是本地的：它属于这个仓库的这次开发。
+`kind` 是 `req` 或 `spec`。`req` 的条目就是需求的 frontmatter 加 `body`；`spec` 的条目是
+`{id, capability, title, reqs, body, criteria: [{id, text}]}`，删除的条目写成 `removed: true`，列表
+里不再出现。服务交回的条目同样按 schema 校验。变更（流程状态）总是本地的：它属于这个仓库的这次
+开发。
+
+命令里的 MCP 调用按会话的判定走、询问即失败（`runext.md` §6），所以用 `mcp` 后端要给这三个工具
+一条 allow 规则：
+
+```json
+"permission_rules": [
+  { "tool": "mcp__reqdb__items_query", "action": "allow" },
+  { "tool": "mcp__reqdb__items_get", "action": "allow" },
+  { "tool": "mcp__reqdb__items_put", "action": "allow" }
+]
+```
+
+plan 模式下 MCP 工具照样被拦，远端那一组的只读子命令在 plan 模式下用不了。
 
 ## 3. 命令
 
@@ -185,21 +212,27 @@ flow:
 | `forge spec list [--capability c]` | ✓ | 条目列表 |
 | `forge spec get <id>` | ✓ | 一个条目，含验收 |
 | `forge spec coverage` | ✓ | 没有规格的已接受需求、没有需求的规格条目、验收未通过的 |
-| `forge flow new` | | `input: { title, reqs?, body }`，建变更，进入 `propose` |
+| `forge flow new` | | `input: { title, reqs?, body }`，建变更，进入 `propose`；关联的需求从 `proposed` 变成 `accepted` |
 | `forge flow list` / `flow show <id>` | ✓ | 变更列表；一次变更的阶段、计划、验收 |
 | `forge flow next <id>` | ✓ | 下一阶段、该用哪个 skill、自动模式下要不要停 |
-| `forge flow delta <id>` | | `input: { add: [...], modify: [...], remove: [...] }`，写规格增量 |
-| `forge flow plan <id>` | | `input: { items: [...] }`，写计划清单 |
-| `forge flow check <id> <P#>` | | 勾掉一个计划项 |
-| `forge flow verify <id>` | | `input: { results: [{ spec, criterion, pass, note }] }`，记验收结果 |
-| `forge flow advance <id>` | | 进入下一阶段，记历史 |
+| `forge flow delta <id>` | | `input: { add: [{capability, title, body, criteria, reqs?}], modify: [{id, …改了的字段}], remove: [id] }`，写规格增量；再交一次整个替换。`spec` 到 `verify` 之间都能写 |
+| `forge flow plan <id>` | | `input: { items: [...], design? }`，写计划清单（同样整个替换，文字没变的项保留勾选）；`design` 写进 `design.md` |
+| `forge flow check <id> <P#>...` | | 勾掉计划项，一次可以几个 |
+| `forge flow verify <id>` | | `input: { results: [{ spec, criterion, pass, note }] }`，记验收结果；有不通过的，变更回到 `apply` |
+| `forge flow advance <id>` | | 进入下一阶段，记历史；结果带着 `flow next` 的那几项 |
 | `forge flow archive <id>` | | 把增量合进现行规格、关联需求标为 `done`、变更移入 `archive/` |
 
 列表默认只给编号、标题、状态等短字段，正文要 `get`。选项用 `agix.cli.parseArgs` 解析；参数错了，
-错误消息就是这条命令的用法。
+错误消息就是这条命令的用法；`--help` 在哪一组都给那一组的用法。`input` 按约定是对象，模型常把它
+写成 JSON 或 YAML 的文本，命令照收（`agix.yaml.parse` 两种都读）。
 
-`advance` 只因结构错误拒绝（编号不存在、计划为空就进 `apply`、没有验收记录就进 `archive`），
-不因内容好坏拒绝。
+`advance` 只因结构错误拒绝（没有增量就进 `plan`、计划为空就进 `apply`、还有没勾掉的计划项就进
+`verify`、有验收项没有通过记录就进 `archive`、`archive` 阶段要用 `flow archive`），不因内容好坏
+拒绝。
+
+`flow next` 与 `advance` 交回 `{change, stage, skill, auto, continue, say}`：`stage` 是变更现在
+所处、接下来要做的阶段，`skill` 是它的 skill，`continue` 说自动模式下要不要接着做，`say` 是给
+模型的一句话（接着调哪个 skill，或者停下、告诉用户在等什么）。
 
 ## 4. 阶段
 
@@ -214,13 +247,17 @@ flow:
 
 另有 `/forge-req`：不走流程，单独整理需求（录入、改状态、查覆盖）。
 
-每个阶段的 skill 正文写三件事：这一阶段要做什么、用哪几条命令、做完调 `forge flow advance`。
-命令的完整用法不进 skill，要时 `forge help`。
+每个阶段的 skill 正文写三件事：这一阶段要做什么、用哪几条命令、做完调 `forge flow advance` 并照它的
+`say` 做。命令的完整用法不进 skill，要时 `forge help`。
+
+`verify` 阶段由模型先自己跑一遍测试，再把变更号和测试结果交给 `forge-verifier`；子 agent 在
+plan 模式下只读，`forge flow show` 拿到验收项，逐条找证据，交回 `{results: [...]}`，模型原样交给
+`flow verify`。
 
 **手动**：用户按顺序调 skill，或者 `/forge-next C-003`——它调 `flow next` 再展开对应的 skill。
 
-**自动**：`config.yaml` 里 `flow.auto: true`。每个 skill 的最后一步是 `flow next`；它说可以继续，
-就接着展开下一个阶段的 skill；到 `stop_before` 里的阶段停下，告诉用户在等什么。
+**自动**：`config.yaml` 里 `flow.auto: true`。每个 skill 的最后一步是 `flow advance`；它的结果说可以
+继续，就接着用 Skill 工具展开下一个阶段的 skill；到 `stop_before` 里的阶段停下，告诉用户在等什么。
 
 ## 5. 程序与模型的分工
 
@@ -229,14 +266,20 @@ flow:
 
 模型做的，程序不做：和用户谈需求、写规格正文与验收标准、拆计划、写代码、判断验收是否通过。
 
-批量的机械活，模型写一个 `RunCode` 程序循环调 `RunExt`：一次导入三十条需求、把一批需求改成
-`accepted`，都是一次工具调用。
+批量的机械活：一次导入三十条需求是一次 `forge req add`（`input.items`）；把一批需求改成
+`accepted`，模型写一个 `RunCode` 程序循环调 `RunExt`，一次工具调用。程序里调会写的子命令要有
+`RunExt(forge req:*)` 这样的 allow 规则（程序不能询问），没有就逐条调。
 
 ## 6. 护栏
 
-`scripts/guard.js` 绑在 `tool.around` 上：`via` 是 `"model"` 或 `"RunCode"`，且路径落在
-`forge/` 下的 `Read`、`Write`、`Edit`、`Glob`、`Grep`，拒绝，理由里写该用哪条 `forge` 命令；
-`via` 是 `"RunExt:forge"` 的放行。模型因此拿不到散文式的数据文件，也改不坏它们的结构。
+`scripts/guard.js` 绑在 `tool.around` 上：`via` 是 `"model"` 或 `"RunCode"`，且路径（`file_path`、
+`path`、`Glob` 的 `pattern`、`Grep` 的 `glob`）落在 `forge/` 下的 `Read`、`Write`、`Edit`、`Glob`、
+`Grep`，以及参数里写到 `forge/` 下路径的 `Bash`，拒绝，理由里写该用哪条 `forge` 命令；`via` 是
+`"RunExt:forge"` 的放行，用户敲的 `/forge`（`"user"`）也放行。匹配用 `agix.glob.test`，和权限规则
+是同一套 glob。模型因此拿不到散文式的数据文件，也改不坏它们的结构。
+
+`tool.around` 的输入不带项目根，绝对路径按 `**/forge/**` 认：项目本身放在一个叫 `forge` 的目录
+里时，守卫会把整个项目当成 `forge/`。
 
 `scripts/rules.js` 在 `prompt.block` 加一行：这个项目的需求、规格、变更都在 forge 里，用
 `RunExt` 的 `forge` 命令读写，不要直接打开 `forge/` 下的文件。
@@ -245,26 +288,41 @@ flow:
 
 ## 7. 测试
 
-**桩层**（`tests/blackbox`，CI 每次 push 都跑）：
+**桩层**（`tests/blackbox/tests/forge.rs`，CI 每次 push 都跑）：从 `examples/plugins/forge` 现打包、
+`plugin.install`，模型那端是桩。
 
-- 打包、`plugin.install`，`plugin.list` 与披露里有 `forge` 命令和它的写入范围
-- 模型桩经 `RunExt` 走完 propose → archive：文件落在项目的 `forge/` 下，归档后现行规格含增量
-- 只读子命令在 plan 模式下可用；写入子命令在 `default` 下询问一次
-- `writes` 之外的写入失败；包里带字节码拒装
-- 模型桩直接 `Read` `forge/` 被守卫拒绝，`RunExt` 自己的读写不受影响
-- `reqs` 切到 `mcp` 后端（toy 服务的 `--store` 模式），同一组命令结果一致
-- `RunCode` 循环调 `RunExt` 批量改状态
+- 披露里有 `forge` 命令与它的写入范围、八个 skill、`forge-verifier` 的提示词；`plugin.list` 报出
+  命令的 `read_only` 与 `writes`，脚本没有故障
+- 模型桩经 `RunExt` 走完 propose → archive：需求是 `done` 且关联了条目与变更，`specs/` 里是合并后的
+  条目，`archive/` 下有变更与验收记录；`default` 下每个写子命令问一次，只读的不问，命令自己的写入
+  不再问；提示词里有规矩那一行
+- 自动模式：`advance` 到 `spec` 时 `continue` 为真，到 `stop_before` 的 `apply` 时停；计划为空时
+  `advance` 拒绝
+- plan 模式下只读子命令可用，写子命令被拒，什么都不问
+- 人手改坏的文件按文件与字段报错；不认识的选项交回那一组的用法；不是编号的参数被拒
+- 模型桩直接 `Read`、`Glob`、`Grep`、`Bash`、`Write` `forge/` 与程序里的 `Read`，都被守卫拒绝且
+  理由里有命令，没有询问；`RunExt` 自己的读不受影响
+- `reqs` 切到 `mcp` 后端（toy 服务的 `--store` 模式）：同一组命令的结果与本地后端相同，需求在
+  store 里，`forge/reqs` 不存在，变更仍在本地
+- `RunCode` 循环调 `RunExt` 批量改状态；`input` 以 JSON 文本交来照样收
 - `/forge req list` 不经模型、不进对话
+- 把 `writes` 收窄到 `forge/reqs/**` 的副本开不了变更；带字节码的副本拒装
 
-**LIVE**（`live_forge.rs`，Flash，不开 bypass）：
+**LIVE**（`tests/blackbox/tests/live_forge.rs`，Flash，`default` 模式由宿主批准，不开 bypass）：
 
-- 手动：从一段需求走到归档——在一个空项目里，按阶段做出一个只用标准库、几百行的 Rust 命令行程序。
-  断言只看外部结果：测试框架自己跑 `cargo test` 通过；`forge/` 里需求是 `done`、规格含这次的条目、
-  变更在 `archive/` 下且每条验收都有记录；模型没有成功直接读写过 `forge/`
-- 自动：`stop_before: [apply]` 时停在 apply 前，等用户
-- 需求走远端后端
-- 模型读 `forge/` 被拒后改用命令
-- 对比（只出报告）：同一件事，装与不装 forge，比较 prompt token 与轮数
+- 手动：在空项目里 `/forge-propose` 一段需求（`ledger`，一个只用标准库、读 CSV 记账文件的命令行
+  程序，四个子命令），之后每轮 `/forge-next C-001`，直到归档。断言只看外部结果：测试框架自己在
+  项目里跑 `cargo build` 与 `cargo test` 通过；Rust 代码在 150 到 3000 行之间；`/forge flow show`
+  （不经模型）里变更是 `done`，每个条目都在 `specs/` 里、每条验收都有通过的记录；关联的需求是
+  `done`；代理记下的请求里，没有一次对 `forge/` 的直接读写成功过（子 agent 的也算）
+- 自动：`flow.auto: true`、`stop_before: [apply]` 时，一条 `/forge-propose` 走到 `apply` 前停下：
+  有增量、有计划，计划项一个都没勾
+- 需求走远端后端：`/forge-req` 录三条、改一条状态，store 里是三条且一条 `accepted`，`forge/reqs`
+  不存在
+- 让模型直接打开 `forge/` 下的文件：它要是试了，被拒的理由里有该用的命令；答案里的口令只能经命令
+  拿到
+- 对比（只出报告）：同一个小库（`roman`），装 forge（自动模式一条消息）与不装，打出调用次数与
+  prompt token
 
 ## 8. 打包
 

@@ -8,9 +8,11 @@ Agix 的插件只有两种:**编译进宿主的 Rust 插件**,和**跑在内嵌 
 |---|---|
 | `examples/plugins/rust/` | `demo-rust`,一个 Rust 插件。`Registrar` 的 16 个注册方法全部用到,每个做一件小事 |
 | `examples/plugins/quickjs/` | `demo-quickjs`,一个插件包。九个可绑定的点各绑一个脚本,另带一个 agent 类型和一个场景 |
+| `examples/plugins/forge/` | `forge`,一个带命令的插件包:`[[command]]` 维护需求、规格与变更流程,每个阶段一个 skill,一个只读子 agent,`tool.around` 守卫与 `prompt.block`。设计见 `forge.md`,写法见下面「以 forge 为例」 |
 
-这两个样例有测试跑着:`tests/blackbox/tests/demo_plugins.rs` 用模型桩逐项断言,每次 push 都跑;
-`tests/blackbox/tests/live_plugins.rs` 让真实模型把它们用一遍(LIVE 层,见 `tests/README.md`)。
+这些样例有测试跑着:`tests/blackbox/tests/demo_plugins.rs` 与 `forge.rs` 用模型桩逐项断言,每次 push
+都跑;`tests/blackbox/tests/live_plugins.rs` 与 `live_forge.rs` 让真实模型把它们用一遍(LIVE 层,见
+`tests/README.md`)。
 
 ## 选哪一种
 
@@ -223,6 +225,39 @@ examples/plugins/quickjs/
 `tests/fixtures/ext_plugin/`(一个 `notes` 命令加一个用 `via` 守护目录的 `tool.around` 脚本),
 完整的样例是 `forge`(`forge.md`)。
 
+### 以 forge 为例
+
+`examples/plugins/forge/` 是写插件命令的参照:一个命令、一组 skill、一个守卫,不需要构建。按它
+的顺序看:
+
+1. **声明**。`plugin.toml` 的 `[[command]]` 写 `entry`、单行 `description`(进 `RunExt` 的工具
+   描述)、`read_only`(只读子命令的前缀:plan 模式下可用、不询问、可以并行)和 `writes`
+   (`["forge/**"]`:命令只能写这里,之外的写入直接失败)。会写的子命令在 `default` 下每次调用
+   问一次,调用里的写入不再问。
+2. **入口**。`forge.js` 顶层的 `main(argv, input, ctx)` 按前两个词分发;选项用
+   `agix.cli.parseArgs` 解析,出错时把那一组的用法拼进 `Error` 抛出——模型读到的就是用法,下一次
+   就写对了。`input` 按约定是对象,但模型常把它写成 JSON 文本,入口先用 `agix.yaml.parse` 把文本
+   读成对象。返回对象,引擎序列化成 JSON 交给模型;抛 `Error` 时模型只看到消息。
+3. **读写文件**。经 `tools.Glob` / `tools.Read` / `tools.Write`,和模型调用时同一条路径、同一套
+   权限。forge 每次运行先 `Glob` 一遍 `forge/**`,只读列出来的文件;改一个已有文件之前在这次运行里
+   读过它(`Write` 要求如此)。命令删不了文件,要"移动"就复制再改写原处。
+4. **校验**。frontmatter 与 `input` 的 JSON Schema 写成常量,读进来、写出去之前都过
+   `agix.json.validate`,错误里写文件名和 `instancePath`;人手改坏的文件在第一个命令就报出来。
+5. **远端**。`callTool("mcp__<server>__items_query", …)` 调会话里配好的 MCP 服务,连接与登录由
+   引擎管。命令里的 MCP 调用询问即失败,要用户给这几个工具 allow 规则。
+6. **守卫与规矩**。`scripts/guard.js` 在 `tool.around` 上看 `via`:模型与 `RunCode` 对 `forge/`
+   的直接读写拒绝并说该用哪条命令,`RunExt:forge` 放行;`scripts/rules.js` 在 `prompt.block` 加
+   一行规矩。两者都只靠 `agix.glob` 这类纯函数。
+7. **skill 与命令分工**。skill 写模型要判断、要写作的那部分和要调的几条命令;编号、状态、推进、
+   合并都在命令里。命令交回一句 `say`("接着展开 forge-spec"或"停下告诉用户"),skill 只写
+   "照它说的做",流程规则因此只有命令里一份。
+8. **测试**。`tests/blackbox/tests/forge.rs` 用 `test_runner::plugin_fixture::package_forge` 从目录
+   现打包,模型桩按顺序答出 `RunExt` 调用,断言只看工具结果、询问帧和盘上的文件;
+   `live_forge.rs` 让真实模型按 skill 走一遍。
+
+拿它做自己的插件:复制目录,改 `[plugin] name` 与 `[[command]] name`,换掉 `forge.js` 里的领域代码,
+留下 `types/`(`runext.d.ts`、`agix.d.ts`),文件头写 `// @ts-check` 引用它们,编辑器就能检查。
+
 ## 叠在一起
 
 同一个点上两层都有贡献时,顺序由层决定,跟交给 `Builder` 的先后无关:
@@ -250,6 +285,9 @@ examples/plugins/quickjs/
 ```sh
 cargo test -p demo-rust-plugin                                    # 样例自己的单元测试
 cargo test -p blackbox --test integration demo_plugins::              # 模型桩,两个样例一起
+cargo test -p blackbox --test integration forge::                     # 模型桩,forge
 cargo test -p blackbox --features real-model --test real_model \
   live_plugins:: -- --nocapture                                    # 真实模型,要 .env
+cargo test -p blackbox --features real-model --test real_model \
+  live_forge:: -- --nocapture                                      # 真实模型按 forge 的流程做一个 Rust 程序
 ```
