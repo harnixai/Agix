@@ -253,7 +253,7 @@ impl SessionPool {
         let wait = pool.as_ref().map(|_| MCP_SESSION_CONNECT_WAIT);
         let (mut manager, late) = McpManager::connect_all_within(
             admitted,
-            settings.values.sandbox.subprocess_env.clone(),
+            mcp_launch(settings, key.0.as_deref()),
             Some(self.mcp.auth.clone()),
             wait,
         )
@@ -358,7 +358,7 @@ impl SessionPool {
         let wait = pool.as_ref().map(|_| MCP_SESSION_CONNECT_WAIT);
         let (manager, late) = McpManager::connect_all_within(
             admitted,
-            settings.values.sandbox.subprocess_env.clone(),
+            mcp_launch(settings, project_root),
             Some(self.mcp.auth.clone()),
             wait,
         )
@@ -396,6 +396,15 @@ impl SessionPool {
         }
         (connected, failed, connecting)
     }
+}
+
+/// The pair's servers start under its settings' `sandbox.subprocess_env`, and
+/// are told the pair's project.
+fn mcp_launch(
+    settings: &settings::LoadedSettings,
+    project_root: Option<&Path>,
+) -> mcp::project::McpLaunch {
+    mcp::project::McpLaunch::new(settings.values.sandbox.subprocess_env.clone(), project_root)
 }
 
 /// What admitting a server depends on besides the server: which names a

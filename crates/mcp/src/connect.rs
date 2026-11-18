@@ -87,9 +87,10 @@ pub struct StdioMcpClient {
     /// Where an older server's own question finds the call it belongs to;
     /// shared by every connection this client makes.
     route: Arc<crate::elicit::ElicitRoute>,
-    /// The environment policy a stdio server's process starts under, kept
-    /// for the same reason: a reconnect must not start it under another.
-    env_policy: base::interface::exec::SubprocessEnv,
+    /// The environment policy a stdio server's process starts under and the
+    /// project it serves, kept for the same reason: a reconnect must not
+    /// start it under another.
+    launch: crate::project::McpLaunch,
     /// The owning pool's authorization state, for remote servers that use
     /// OAuth.
     auth: Option<Arc<crate::oauth::McpAuth>>,
@@ -116,33 +117,26 @@ impl StdioMcpClient {
         config: &McpServerConfig,
         sink: Option<crate::notify::NotificationSink>,
     ) -> Result<Arc<Self>, McpError> {
-        Self::connect_with_env(
-            server_name,
-            config,
-            sink,
-            base::interface::exec::SubprocessEnv::default(),
-            None,
-        )
-        .await
+        Self::connect_with_env(server_name, config, sink, Default::default(), None).await
     }
 
-    /// Connect, starting a stdio server's process under `env_policy` — the
-    /// `sandbox.subprocess_env` of the settings the server was declared in —
-    /// and authorizing a remote server through `auth`.
+    /// Connect, starting a stdio server's process as `launch` says and
+    /// authorizing a remote server through `auth`.
     pub async fn connect_with_env(
         server_name: &str,
         config: &McpServerConfig,
         sink: Option<crate::notify::NotificationSink>,
-        env_policy: base::interface::exec::SubprocessEnv,
+        launch: crate::project::McpLaunch,
         auth: Option<Arc<crate::oauth::McpAuth>>,
     ) -> Result<Arc<Self>, McpError> {
         let route = Arc::<crate::elicit::ElicitRoute>::default();
         let wiring = crate::notify::HandlerWiring {
             sink: sink.clone(),
             route: route.clone(),
+            project: launch.project_root().map(Into::into),
         };
         let spawned =
-            spawn_service_within(server_name, config, wiring, &env_policy, auth.as_deref()).await?;
+            spawn_service_within(server_name, config, wiring, &launch, auth.as_deref()).await?;
         let instructions = spawned
             .service
             .peer_info()
@@ -158,7 +152,7 @@ impl StdioMcpClient {
             consecutive_failures: AtomicU32::new(0),
             sink,
             route,
-            env_policy,
+            launch,
             auth,
             authorized: spawned.authorized.into(),
         }))
@@ -303,12 +297,13 @@ impl StdioMcpClient {
         let wiring = crate::notify::HandlerWiring {
             sink: self.sink.clone(),
             route: self.route.clone(),
+            project: self.launch.project_root().map(Into::into),
         };
         match spawn_service_within(
             &self.server_name,
             &self.config,
             wiring,
-            &self.env_policy,
+            &self.launch,
             self.auth.as_deref(),
         )
         .await
@@ -380,6 +375,7 @@ impl StdioMcpClient {
         taken: &AtomicBool,
     ) -> Result<McpCallResult, McpError> {
         let svc = self.service().await?;
+        let scope = &scope.serving(self.launch.project_root());
         let in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();
@@ -663,13 +659,13 @@ async fn spawn_service_within(
     server_name: &str,
     config: &McpServerConfig,
     wiring: crate::notify::HandlerWiring,
-    env_policy: &base::interface::exec::SubprocessEnv,
+    launch: &crate::project::McpLaunch,
     auth: Option<&crate::oauth::McpAuth>,
 ) -> Result<Spawned, McpError> {
     let limit = config.timeouts().startup();
     tokio::time::timeout(
         limit,
-        spawn_service(server_name, config, wiring, env_policy, auth),
+        spawn_service(server_name, config, wiring, launch, auth),
     )
     .await
     .unwrap_or(Err(McpError::Timeout {
@@ -684,7 +680,7 @@ async fn spawn_service(
     server_name: &str,
     config: &McpServerConfig,
     wiring: crate::notify::HandlerWiring,
-    env_policy: &base::interface::exec::SubprocessEnv,
+    launch: &crate::project::McpLaunch,
     auth: Option<&crate::oauth::McpAuth>,
 ) -> Result<Spawned, McpError> {
     if let Ok(declared) = serde_json::to_value(config) {
@@ -727,7 +723,7 @@ async fn spawn_service(
                 &env,
                 working_dir.as_deref(),
                 wiring,
-                env_policy,
+                launch,
             )
             .await
             .map(Spawned::from)
@@ -775,7 +771,7 @@ async fn spawn_stdio_service(
     env: &std::collections::HashMap<String, String>,
     working_dir: Option<&std::path::Path>,
     wiring: crate::notify::HandlerWiring,
-    env_policy: &base::interface::exec::SubprocessEnv,
+    launch: &crate::project::McpLaunch,
 ) -> Result<
     rmcp::service::RunningService<rmcp::RoleClient, crate::notify::NotifyingHandler>,
     McpError,
@@ -787,10 +783,11 @@ async fn spawn_stdio_service(
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
     }
-    platform::apply_subprocess_env(env_policy, &mut cmd);
+    platform::apply_subprocess_env(&launch.subprocess_env, &mut cmd);
     for (k, v) in env {
         cmd.env(k, v);
     }
+    launch.tell_project(&mut cmd);
     let mut cmd = process_wrap::tokio::CommandWrap::from(cmd);
     // A session of its own, which leads a group of its own too: no
     // controlling terminal to push input into (`TIOCSTI` on `/dev/tty`), and
@@ -1655,7 +1652,8 @@ done
     }
 
     /// A stdio server is a child process like any other, and starts under the
-    /// environment policy of the settings it was declared in.
+    /// environment policy of the settings it was declared in; the project it
+    /// serves is told to it whatever that policy keeps.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_stdio_server_starts_under_the_env_policy_it_was_given() {
@@ -1675,7 +1673,8 @@ done
         };
         // The script answers no handshake, so the connect fails — after the
         // process has run, which is all this needs.
-        let _ = StdioMcpClient::connect_with_env("probe", &cfg, None, policy, None).await;
+        let launch = crate::project::McpLaunch::new(policy, Some(dir.path()));
+        let _ = StdioMcpClient::connect_with_env("probe", &cfg, None, launch, None).await;
 
         let mut seen = String::new();
         for _ in 0..100 {
@@ -1689,6 +1688,11 @@ done
         assert!(
             !seen.contains("CARGO_MANIFEST_DIR="),
             "an allowlist policy passed the host's environment through: {seen}"
+        );
+        let project = dir.path().canonicalize().unwrap();
+        assert!(
+            seen.contains(&format!("AGIX_PROJECT_ROOT={}\n", project.display())),
+            "the server was not told its project: {seen}"
         );
     }
 
@@ -1717,14 +1721,8 @@ done
             timeouts: Default::default(),
             working_dir: None,
         };
-        let _ = StdioMcpClient::connect_with_env(
-            "probe",
-            &cfg,
-            None,
-            base::interface::exec::SubprocessEnv::default(),
-            None,
-        )
-        .await;
+        let _ =
+            StdioMcpClient::connect_with_env("probe", &cfg, None, Default::default(), None).await;
 
         let mut seen = String::new();
         for _ in 0..100 {
@@ -1739,6 +1737,10 @@ done
         assert!(
             !seen.contains(&format!("{OWN}=")),
             "the variable its env reads was inherited as well: {seen}"
+        );
+        assert!(
+            !seen.contains("AGIX_PROJECT_ROOT="),
+            "a server serving no project was told one: {seen}"
         );
     }
 
@@ -1772,7 +1774,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: None,
             authorized: false.into(),
         };
@@ -1797,7 +1799,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: None,
             authorized: false.into(),
         };
@@ -1831,7 +1833,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: Some(auth.clone()),
             authorized: false.into(),
         };
@@ -1869,7 +1871,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: None,
             authorized: false.into(),
         };
@@ -1948,7 +1950,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: None,
             authorized: false.into(),
         };
@@ -2005,7 +2007,7 @@ done
             consecutive_failures: AtomicU32::new(0),
             sink: None,
             route: Default::default(),
-            env_policy: Default::default(),
+            launch: Default::default(),
             auth: None,
             authorized: false.into(),
         };
@@ -2029,7 +2031,7 @@ done
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
                 route: Default::default(),
-                env_policy: Default::default(),
+                launch: Default::default(),
                 auth: None,
                 authorized: false.into(),
             }),
@@ -2059,7 +2061,7 @@ done
                 consecutive_failures: AtomicU32::new(0),
                 sink: None,
                 route: Default::default(),
-                env_policy: Default::default(),
+                launch: Default::default(),
                 auth: None,
                 authorized: false.into(),
             }),

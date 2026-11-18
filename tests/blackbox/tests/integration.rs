@@ -22,6 +22,7 @@ mod import_sources;
 mod large_tool_results;
 mod mcp_boundaries;
 mod mcp_elicitation;
+mod mcp_project_root;
 mod mcp_tasks;
 mod minimal_tier;
 mod openai_responses;

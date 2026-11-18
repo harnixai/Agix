@@ -175,6 +175,7 @@ impl Tool for McpToolAdapter {
                 cancel: ctx.cancel.clone(),
                 listed,
             }),
+            ..Default::default()
         };
         let result = tokio::select! {
             biased;

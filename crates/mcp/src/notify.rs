@@ -16,13 +16,16 @@
 //!
 //! The handler also declares that this client answers elicitation, and takes
 //! an older server's own `elicitation/create` to [`crate::elicit::ElicitRoute`].
+//!
+//! And it declares roots, answering an older server's own `roots/list` with
+//! the project the connection serves (see `crate::project`).
 
 use crate::elicit::ElicitRoute;
 use crate::manager::McpNotification;
 use rmcp::handler::client::ClientHandler;
 use rmcp::model::{
     ClientConfig, ElicitRequestParams, ElicitResult, ElicitationCapability,
-    FormElicitationCapability, UrlElicitationCapability,
+    FormElicitationCapability, RootsCapabilities, UrlElicitationCapability,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleClient};
 use std::collections::HashMap;
@@ -37,16 +40,18 @@ pub type NotificationSink = Arc<dyn Fn(McpNotification) + Send + Sync>;
 pub struct HandlerWiring {
     pub sink: Option<NotificationSink>,
     pub route: Arc<ElicitRoute>,
+    pub project: Option<std::path::PathBuf>,
 }
 
 /// The client handler rmcp drives for one connection. Everything but the
-/// list-changed notifications and elicitation keeps `ClientHandler`'s default
-/// behavior.
+/// list-changed notifications, elicitation and roots keeps `ClientHandler`'s
+/// default behavior.
 #[derive(Clone)]
 pub struct NotifyingHandler {
     server: String,
     sink: Option<NotificationSink>,
     route: Arc<ElicitRoute>,
+    project: Option<std::path::PathBuf>,
     keep: Option<Arc<dyn Send + Sync>>,
 }
 
@@ -56,6 +61,7 @@ impl NotifyingHandler {
             server: server.into(),
             sink: wiring.sink,
             route: wiring.route,
+            project: wiring.project,
             keep: None,
         }
     }
@@ -87,6 +93,7 @@ impl ClientHandler for NotifyingHandler {
                 .with_form(FormElicitationCapability::new().with_schema_validation(true))
                 .with_url(UrlElicitationCapability::new()),
         );
+        info.capabilities.roots = Some(RootsCapabilities::default());
         info.capabilities
             .extensions
             .get_or_insert_with(Default::default)
@@ -103,6 +110,17 @@ impl ClientHandler for NotifyingHandler {
         _context: RequestContext<RoleClient>,
     ) -> Result<ElicitResult, rmcp::ErrorData> {
         Ok(self.route.answer(&self.server, request).await)
+    }
+
+    #[expect(
+        deprecated,
+        reason = "roots are deprecated by SEP-2577 but still answered"
+    )]
+    async fn list_roots(
+        &self,
+        _context: RequestContext<RoleClient>,
+    ) -> Result<rmcp::model::ListRootsResult, rmcp::ErrorData> {
+        Ok(crate::project::roots_of(self.project.as_deref()))
     }
 
     fn on_tool_list_changed(
@@ -192,6 +210,13 @@ mod tests {
     fn the_client_declares_the_tasks_extension() {
         let handler = NotifyingHandler::silent("demo");
         assert!(handler.get_info().capabilities.supports_tasks());
+    }
+
+    #[test]
+    fn the_client_declares_roots_and_not_sampling() {
+        let caps = NotifyingHandler::silent("demo").get_info().capabilities;
+        assert!(caps.roots.is_some());
+        assert!(caps.sampling.is_none());
     }
 
     fn recorder() -> (NotificationSink, Arc<Mutex<Vec<McpNotification>>>) {

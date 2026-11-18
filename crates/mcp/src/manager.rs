@@ -74,8 +74,8 @@ pub struct McpManager {
     seen: HashMap<String, crate::notify::ListEpochs>,
     /// Shared MCP output cache.
     output_cache: Arc<Mutex<McpOutputCache>>,
-    /// What a stdio server this manager starts gets for an environment.
-    subprocess_env: base::interface::exec::SubprocessEnv,
+    /// How a server this manager starts is started, and for which project.
+    launch: crate::project::McpLaunch,
     /// The owning pool's authorization state, handed to every connection.
     auth: Option<Arc<crate::oauth::McpAuth>>,
     /// Every server this manager was asked to connect, connected or not, so
@@ -106,7 +106,7 @@ impl McpManager {
             announcements: crate::notify::Announcements::new(),
             seen: HashMap::new(),
             output_cache: Arc::new(Mutex::new(McpOutputCache::new())),
-            subprocess_env: base::interface::exec::SubprocessEnv::default(),
+            launch: Default::default(),
             auth: None,
             configs: HashMap::new(),
             denied: Vec::new(),
@@ -134,27 +134,21 @@ impl McpManager {
     /// 使用并发连接——最多 3 个 server 同时连。
     /// 单个 server 失败不整体失败 —— warn + skip。
     pub async fn connect_all(servers: HashMap<String, McpServerConfig>) -> Self {
-        Self::connect_all_with(
-            servers,
-            base::interface::exec::SubprocessEnv::default(),
-            None,
-        )
-        .await
+        Self::connect_all_with(servers, Default::default(), None).await
     }
 
-    /// `connect_all`, with stdio servers started under `env` (the
-    /// `sandbox.subprocess_env` of the settings they were declared in) and
-    /// remote servers authorized through `auth` — the owning pool's, so pools
-    /// in one process never share tokens. A server that asks for a sign-in
-    /// is kept as [`PendingServer`] rather than connected.
+    /// `connect_all`, with servers started as `launch` says and remote
+    /// servers authorized through `auth` — the owning pool's, so pools in one
+    /// process never share tokens. A server that asks for a sign-in is kept
+    /// as [`PendingServer`] rather than connected.
     ///
     /// Waits for every server; each is bounded by its startup limit.
     pub async fn connect_all_with(
         servers: HashMap<String, McpServerConfig>,
-        env: base::interface::exec::SubprocessEnv,
+        launch: crate::project::McpLaunch,
         auth: Option<Arc<crate::oauth::McpAuth>>,
     ) -> Self {
-        let (mut manager, late) = Self::connect_all_within(servers, env, auth, None).await;
+        let (mut manager, late) = Self::connect_all_within(servers, launch, auth, None).await;
         if let Some(mut late) = late {
             while let Some(outcome) = late.next().await {
                 manager.absorb(outcome);
@@ -165,7 +159,7 @@ impl McpManager {
 
     /// Start every stdio server this manager adds later under `env`.
     pub fn with_subprocess_env(mut self, env: base::interface::exec::SubprocessEnv) -> Self {
-        self.subprocess_env = env;
+        self.launch.subprocess_env = env;
         self
     }
 
@@ -181,7 +175,7 @@ impl McpManager {
     /// for [`Self::absorb`]. `None` waits for all of them.
     pub async fn connect_all_within(
         mut servers: HashMap<String, McpServerConfig>,
-        subprocess_env: base::interface::exec::SubprocessEnv,
+        launch: crate::project::McpLaunch,
         auth: Option<Arc<crate::oauth::McpAuth>>,
         wait: Option<Duration>,
     ) -> (Self, Option<LateConnects>) {
@@ -204,7 +198,7 @@ impl McpManager {
             announcements: announcements.clone(),
             seen: HashMap::new(),
             output_cache: cache.clone(),
-            subprocess_env: subprocess_env.clone(),
+            launch: launch.clone(),
             auth: auth.clone(),
             configs: servers.clone(),
             denied: Vec::new(),
@@ -230,7 +224,7 @@ impl McpManager {
                     let link = ServerLink {
                         cache: cache.clone(),
                         announcements: announcements.clone(),
-                        subprocess_env: subprocess_env.clone(),
+                        launch: launch.clone(),
                         auth: auth.clone(),
                     };
                     set.spawn(async move {
@@ -357,7 +351,7 @@ impl McpManager {
             name,
             cfg,
             Some(link.announcements.sink()),
-            link.subprocess_env.clone(),
+            link.launch.clone(),
             link.auth.clone(),
         )
         .await?;
@@ -471,7 +465,7 @@ impl McpManager {
         let link = ServerLink {
             cache: self.output_cache.clone(),
             announcements: self.announcements.clone(),
-            subprocess_env: self.subprocess_env.clone(),
+            launch: self.launch.clone(),
             auth: self.auth.clone(),
         };
         match Self::connect_one(name, cfg, &link).await {
@@ -549,7 +543,7 @@ impl McpManager {
             announcements: self.announcements.clone(),
             seen: self.seen.clone(),
             output_cache: Arc::new(Mutex::new(McpOutputCache::new())),
-            subprocess_env: self.subprocess_env.clone(),
+            launch: self.launch.clone(),
             auth: self.auth.clone(),
             configs: self.configs.clone(),
             denied: self.denied.clone(),
@@ -594,7 +588,7 @@ impl McpManager {
                 .map(|(name, epochs)| (name.clone(), *epochs))
                 .collect(),
             output_cache: self.output_cache.clone(),
-            subprocess_env: self.subprocess_env.clone(),
+            launch: self.launch.clone(),
             auth: self.auth.clone(),
             configs: self
                 .configs
@@ -1094,7 +1088,7 @@ async fn try_prompts_of(client: &McpClientHandle) -> Option<Vec<McpPromptEntry>>
 struct ServerLink {
     cache: Arc<Mutex<McpOutputCache>>,
     announcements: Arc<crate::notify::Announcements>,
-    subprocess_env: base::interface::exec::SubprocessEnv,
+    launch: crate::project::McpLaunch,
     auth: Option<Arc<crate::oauth::McpAuth>>,
 }
 

@@ -474,6 +474,7 @@ mod tests {
                 cancel: cancel.clone(),
                 listed: Default::default(),
             }),
+            ..Default::default()
         };
         (session, scope, cancel)
     }

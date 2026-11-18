@@ -58,11 +58,22 @@ pub trait McpElicitor: Send + Sync {
 }
 
 /// What one `tools/call` carries down to the connection. With no elicitor,
-/// every question is answered `cancel`.
+/// every question is answered `cancel`. `project` is the connection's, set by
+/// the connection: it answers a server asking for roots.
 #[derive(Clone, Default)]
 pub struct McpCallScope {
     pub elicitor: Option<Arc<dyn McpElicitor>>,
     pub tasks: Option<crate::tasks::McpTaskHost>,
+    pub(crate) project: Option<std::path::PathBuf>,
+}
+
+impl McpCallScope {
+    pub(crate) fn serving(&self, project: Option<&std::path::Path>) -> Self {
+        Self {
+            project: project.map(std::path::Path::to_path_buf),
+            ..self.clone()
+        }
+    }
 }
 
 type Asker = Option<Arc<dyn McpElicitor>>;
@@ -280,14 +291,20 @@ pub(crate) async fn answer_input_requests(
             );
             continue;
         }
-        let InputRequest::Elicitation(request) = request else {
-            return Err(McpError::RmcpService(format!(
-                "MCP server `{server}` asked for sampling or roots, which this client does not \
-                 offer"
-            )));
+        let answer = match request {
+            InputRequest::Elicitation(request) => serde_json::to_value(elicit_result(
+                elicit(server, request.params, scope.elicitor.as_deref()).await,
+            ))?,
+            InputRequest::ListRoots(_) => {
+                serde_json::to_value(crate::project::roots_of(scope.project.as_deref()))?
+            }
+            _ => {
+                return Err(McpError::RmcpService(format!(
+                    "MCP server `{server}` asked for sampling, which this client does not offer"
+                )))
+            }
         };
-        let answer = elicit(server, request.params, scope.elicitor.as_deref()).await;
-        responses.insert(key, serde_json::to_value(elicit_result(answer))?);
+        responses.insert(key, answer);
     }
     Ok(responses)
 }
@@ -554,7 +571,7 @@ mod tests {
         use rmcp::model::{InputRequiredResult, Task, TaskStatus};
         let scope = McpCallScope {
             elicitor: Some(accepting()),
-            tasks: None,
+            ..Default::default()
         };
         let mut sent: Vec<CallToolRequestParams> = Vec::new();
         let result = call_with_rounds("demo", CallToolRequestParams::new("ask"), &scope, |p| {
