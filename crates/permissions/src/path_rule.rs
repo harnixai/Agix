@@ -103,6 +103,40 @@ pub fn matches(pattern: &str, path: &Path) -> bool {
     path.starts_with(Path::new(pattern))
 }
 
+/// Whether the volume `path` is on — its deepest prefix that exists — tells
+/// names apart only by case, as macOS's default APFS does: `Secret/x` and
+/// `secret/x` are one file there. `false` wherever the system cannot say.
+pub fn is_case_insensitive(path: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Some(existing) = path.ancestors().find(|p| p.exists()) else {
+            return false;
+        };
+        let Ok(name) = std::ffi::CString::new(existing.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `name` is a NUL-terminated path; `pathconf` only reads it.
+        unsafe { libc::pathconf(name.as_ptr(), libc::_PC_CASE_SENSITIVE) == 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// [`matches`] as the volume `path` is on compares names: without case
+/// ([`base::paths::fold_case`] on both sides) where that volume does not tell
+/// them apart by case, so a rule covers the file whatever case it is named in.
+pub fn matches_on_volume(pattern: &str, path: &Path, case_insensitive: bool) -> bool {
+    if !case_insensitive {
+        return matches(pattern, path);
+    }
+    let folded = base::paths::fold_case(&path.to_string_lossy());
+    matches(&base::paths::fold_case(pattern), Path::new(&folded))
+}
+
 /// Whether `pattern` reaches less under gitignore-style `*` than under a `*`
 /// that crosses `/`: true for any lone `*` in a pattern that has path segments
 /// (`/a/*` covers `/a/b` but not `/a/b/c`). Rule files written for the wider
@@ -311,6 +345,26 @@ mod tests {
         assert!(matches("/proj/secret", Path::new("/proj/secret")));
         assert!(matches("/proj/secret", Path::new("/proj/secret/key")));
         assert!(!matches("/proj/secret", Path::new("/proj/secrets")));
+    }
+
+    #[test]
+    fn case_insensitivity_is_the_volumes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Probe"), "").unwrap();
+        let folds = dir.path().join("probe").exists();
+        assert_eq!(is_case_insensitive(dir.path()), folds);
+        assert_eq!(is_case_insensitive(&dir.path().join("missing/x")), folds);
+    }
+
+    #[test]
+    fn a_case_insensitive_volume_matches_without_case_and_any_other_with_it() {
+        let path = Path::new("/proj/Secret/Stra\u{DF}e.txt");
+        for pattern in ["/proj/secret/**", "/proj/SECRET", "**/strasse.txt"] {
+            assert!(matches_on_volume(pattern, path, true), "{pattern}");
+            assert!(!matches_on_volume(pattern, path, false), "{pattern}");
+        }
+        assert!(matches_on_volume("/proj/Secret/**", path, false));
+        assert!(!matches_on_volume("/proj/secrets/**", path, true));
     }
 
     #[test]

@@ -607,6 +607,70 @@ fn team_of_one(prompt: &str, mode: &str) -> Reply {
     )
 }
 
+/// On a volume that does not tell `Secret/` from `secret/` — macOS's default
+/// APFS — a deny rule naming one spelling covers the directory whatever case
+/// it has on disk or in the call; an allow covers it too, being the same file.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rule_covers_every_case_of_its_path_on_a_case_insensitive_volume() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("case-fold", &stub)
+        .settings(json!({
+            "permission_mode": "default",
+            "permission_rules": [
+                { "tool": "Write", "action": "allow" },
+                { "tool": "Edit(secret/**)", "action": "deny" },
+                { "tool": "Read(secret/**)", "action": "deny" },
+                { "tool": "Edit(src/**)", "action": "ask" }
+            ]
+        }))
+        .options(|o| o.prompt_timeout(Duration::from_secs(2)))
+        .start()
+        .await?;
+    run.write_file("Secret/kept.txt", "SECRET-CONTENT")?;
+    run.write_file("src/lib.rs", "")?;
+    if run.read_file("secret/kept.txt").is_none() {
+        eprintln!("the test directory is on a case-sensitive volume; nothing to check");
+        run.finish().await;
+        return Ok(());
+    }
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("NOT-HERE")))
+        .await?;
+    stub.script([
+        write("w1", "Secret/x.txt", "x"),
+        write("w2", "secret/y.txt", "y"),
+        write("w3", "SECRET/z.txt", "z"),
+        Reply::calls("r1", "Read", json!({ "file_path": "Secret/kept.txt" })),
+        Reply::calls("r2", "Read", json!({ "file_path": "sEcReT/kept.txt" })),
+        write("w4", "SRC/asked.rs", "x"),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "write the files").await?;
+    for name in ["x.txt", "y.txt", "z.txt"] {
+        assert!(
+            run.read_file(&format!("Secret/{name}")).is_none(),
+            "{name} landed in Secret/: {:?}",
+            events.tool_results
+        );
+    }
+    let reads: Vec<_> = events
+        .tool_results
+        .iter()
+        .filter(|(name, ..)| name == "Read")
+        .collect();
+    assert_eq!(reads.len(), 2, "{:?}", events.tool_results);
+    for read in reads {
+        assert!(read.2 && !read.1.contains("SECRET-CONTENT"), "{read:?}");
+    }
+    assert!(run.read_file("src/asked.rs").is_none());
+    assert_eq!(prompted_tools(&watcher), ["Write"], "SRC/ is src/: asked");
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_team_member_is_held_to_the_parents_deny_rules() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;

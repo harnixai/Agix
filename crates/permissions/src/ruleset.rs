@@ -184,6 +184,7 @@ impl RuleSet {
     /// 规则和 `group`（`Read` / `Edit`）名下的规则都适用。别名路径上命中的 deny /
     /// ask 同样生效，worktree 里的路径在主检出里的那一份
     /// （`Layout::main_checkout_copies`）也算别名；allow 只认工具真正打开的那个路径。
+    /// 路径所在的卷不分大小写时，规则与路径都折叠大小写再比。
     pub fn evaluate_path(
         &self,
         tool_name: &str,
@@ -193,14 +194,19 @@ impl RuleSet {
         layout: &Layout,
     ) -> RuleHit {
         let decide_for = |p: &Path| {
+            let case_insensitive = path_rule::is_case_insensitive(p);
             self.decide(|r| {
                 if !(matches_tool_name(&r.tool_name, tool_name) || r.tool_name == group) {
                     return None;
                 }
                 match &r.rule_content {
                     None => Some(0),
-                    Some(rc) => path_rule::matches(&path_rule::resolve_pattern(rc, cwd), p)
-                        .then_some(rc.len() as i32),
+                    Some(rc) => path_rule::matches_on_volume(
+                        &path_rule::resolve_pattern(rc, cwd),
+                        p,
+                        case_insensitive,
+                    )
+                    .then_some(rc.len() as i32),
                 }
             })
         };

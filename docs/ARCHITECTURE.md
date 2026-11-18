@@ -1323,6 +1323,12 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
    allow 只认工具真正打开的那个路径。glob 按 gitignore 约定:`*` 不跨
    `/`,`**` 跨。`Read(...)` 规则同样作用于 `Grep` / `Glob`,`Edit(...)` 规则同样作用
    于 `Write` / `NotebookEdit`。
+   **大小写跟着卷走。** 路径所在的卷不分大小写时(macOS 缺省的 APFS,按路径存在的最深一级问
+   `pathconf(_PC_CASE_SENSITIVE)`,`permissions::path_rule::is_case_insensitive`),规则与路径两边都按
+   `base::paths::fold_case` 折叠再比:`Edit(secret/**)` 盖得住磁盘上的 `Secret/`,也盖得住
+   模型写的 `SECRET/x`。这对 deny、ask、allow 一样——那里 `SRC/x` 就是 `src/x`,是同一个文件。
+   区分大小写的卷(Linux 常见的文件系统、区分大小写的 APFS)照原样比,allow 不会因此变宽。
+   插件命令的 `writes` 与 skill 的路径收窄不折叠:只会更严。
 4. **shell 命令逐段匹配。** `Bash(...)` 规则对命令行里的每一条简单命令分别匹配:认
    引号,切 `&&` `||` `;` `|` `&` 与换行,`$(...)`、`<(...)`、反引号里的命令单独算一段。
    任一段命中 deny 即拒;allow 要每一段都被放行,或者整行原样等于一条不带通配的 allow

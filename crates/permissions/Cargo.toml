@@ -16,6 +16,10 @@ globset       = { workspace = true }
 tracing       = { workspace = true }
 unicode-normalization = { workspace = true }
 uuid          = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc          = { workspace = true }
+
 [dev-dependencies]
 session-state = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
