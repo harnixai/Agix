@@ -234,7 +234,7 @@ examples/plugins/quickjs/
    描述)、`read_only`(只读子命令的前缀:plan 模式下可用、不询问、可以并行)和 `writes`
    (`["forge/**"]`:命令只能写这里,之外的写入直接失败)。会写的子命令在 `default` 下每次调用
    问一次,调用里的写入不再问。`read_only` 按前缀整词匹配,看用法的 `--help` 写法也要列进去,
-   否则 `forge flow archive --help` 也会问。
+   否则 `forge flow archive --help` 也会问;只敲 `forge` 给用法,所以也列了 `""`(不带参数的调用)。
 2. **入口**。`forge.js` 顶层的 `main(argv, input, ctx)` 按前两个词分发;选项用
    `agix.cli.parseArgs` 解析,出错时把那一组的用法拼进 `Error` 抛出——模型读到的就是用法,下一次
    就写对了。查子命令用 `Object.hasOwn`,`forge req constructor` 才不会摸到对象原型上的东西。

@@ -203,6 +203,7 @@ async fn a_read_only_subcommand_runs_in_plan_mode_and_a_write_one_does_not() -> 
     run.write_file("notes/kept.md", "kept")?;
     stub.script([
         Reply::calls("list", "RunExt", json!({ "command": "notes list" })),
+        Reply::calls("bare", "RunExt", json!({ "command": "notes" })),
         Reply::calls(
             "add",
             "RunExt",
@@ -223,7 +224,11 @@ async fn a_read_only_subcommand_runs_in_plan_mode_and_a_write_one_does_not() -> 
         "{results:?}"
     );
     assert!(
-        results[1].2 && results[1].1.contains("plan mode"),
+        !results[1].2 && results[1].1.contains("usage: notes"),
+        "the bare command is declared read-only: {results:?}"
+    );
+    assert!(
+        results[2].2 && results[2].1.contains("plan mode"),
         "{results:?}"
     );
     assert!(run.read_file("notes/planned.md").is_none());

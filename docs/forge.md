@@ -38,7 +38,7 @@ description = "需求、规格与变更流程：模型用命令读写结构化�
 name = "forge"
 entry = "forge.js:main"
 description = "需求、规格与变更流程（forge help）"
-read_only = ["help", "--help", "req list", "req get", "req --help", "req add --help", "req update --help",
+read_only = ["", "help", "--help", "req list", "req get", "req --help", "req add --help", "req update --help",
              "spec", "flow list", "flow show", "flow next", "flow --help", "flow new --help",
              "flow delta --help", "flow plan --help", "flow check --help", "flow verify --help",
              "flow advance --help", "flow archive --help"]
@@ -240,8 +240,8 @@ plan 模式下 MCP 工具照样被拦，远端那一组的只读子命令在 pla
 
 列表默认只给编号、标题、状态等短字段，正文要 `get`。选项用 `agix.cli.parseArgs` 解析；选项或
 参数个数错了，错误消息里带这一组的用法；`--help` 在哪一组都给那一组的用法。`read_only` 把
-`--help` 的这几种写法都列上了，看用法不询问，plan 模式下也行；只敲一个 `forge` 也给用法，但
-`read_only` 的前缀不能是空串，这一次按会写的子命令判定（`default` 下会问一次）。`input` 按约定是
+`--help` 的这几种写法都列上了，看用法不询问，plan 模式下也行；只敲一个 `forge` 也给用法，
+`read_only` 里的空串 `""` 就是这种不带参数的调用，同样不询问。`input` 按约定是
 对象，模型常把它写成 JSON 或 YAML 的文本，命令照收（先按 JSON 读，不是 JSON 再按 YAML）。
 
 `advance` 只因结构错误拒绝（没有增量就进 `plan`、计划为空就进 `apply`、还有没勾掉的计划项就进

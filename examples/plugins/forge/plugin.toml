@@ -12,7 +12,7 @@ description = "需求、规格与变更流程：模型用命令读写结构化�
 name = "forge"
 entry = "forge.js:main"
 description = "需求、规格与变更流程（forge help）"
-read_only = ["help", "--help", "req list", "req get", "req --help", "req add --help", "req update --help",
+read_only = ["", "help", "--help", "req list", "req get", "req --help", "req add --help", "req update --help",
              "spec", "flow list", "flow show", "flow next", "flow --help", "flow new --help",
              "flow delta --help", "flow plan --help", "flow check --help", "flow verify --help",
              "flow advance --help", "flow archive --help"]

@@ -26,7 +26,8 @@ pub struct ExtCommand {
     pub file: PathBuf,
     /// The function the entry file defines that the command calls.
     pub function: String,
-    /// Argument prefixes, whole words each, that make a call read-only.
+    /// Argument prefixes, whole words each, that make a call read-only; `""`
+    /// is the call with no arguments.
     pub read_only: Vec<String>,
     /// Globs relative to the project root that the command may write.
     pub writes: Vec<String>,
@@ -36,13 +37,15 @@ pub struct ExtCommand {
 
 impl ExtCommand {
     /// Whether a call with `args` is read-only: they start with one of the
-    /// `read_only` prefixes, word for word.
+    /// `read_only` prefixes, word for word, or there are none and `""` is
+    /// one of them.
     pub fn is_read_only(&self, args: &[String]) -> bool {
         self.read_only.iter().any(|prefix| {
             let words: Vec<&str> = prefix.split_whitespace().collect();
-            !words.is_empty()
-                && words.len() <= args.len()
-                && words.iter().zip(args).all(|(w, a)| *w == a)
+            if words.is_empty() {
+                return args.is_empty();
+            }
+            words.len() <= args.len() && words.iter().zip(args).all(|(w, a)| *w == a)
         })
     }
 }
@@ -79,6 +82,13 @@ mod tests {
         assert!(!c.is_read_only(&args("spec")));
         assert!(!c.is_read_only(&args("helpme")));
         assert!(!c.is_read_only(&[]));
-        assert!(!command(&[""]).is_read_only(&args("anything")));
+    }
+
+    #[test]
+    fn an_empty_prefix_is_the_call_with_no_arguments_only() {
+        let bare = command(&[""]);
+        assert!(bare.is_read_only(&[]));
+        assert!(!bare.is_read_only(&args("anything")));
+        assert!(!bare.is_read_only(&args("help")));
     }
 }

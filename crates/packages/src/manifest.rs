@@ -168,7 +168,8 @@ pub struct CommandDef {
     /// `<file>:<function>`, the file relative to the plugin root.
     pub entry: String,
     pub description: String,
-    /// Argument prefixes, whole words each, that make a call read-only.
+    /// Argument prefixes, whole words each, that make a call read-only; `""`
+    /// is the call with no arguments.
     #[serde(default)]
     pub read_only: Vec<String>,
     /// Globs relative to the project root that the command may write.
@@ -632,9 +633,11 @@ fn validate_command(c: &CommandDef) -> Result<(), PluginError> {
     }
     if c.read_only
         .iter()
-        .any(|p| p.split_whitespace().next().is_none())
+        .any(|p| !p.is_empty() && p.split_whitespace().next().is_none())
     {
-        return Err(schema("has an empty `read_only` prefix".into()));
+        return Err(schema(
+            "has a blank `read_only` prefix; `\"\"` is the call with no arguments".into(),
+        ));
     }
     for glob in &c.writes {
         if let Some(why) = unscoped_write(glob) {
@@ -685,7 +688,7 @@ mod tests {
         let with = |body: &str| load_str(&format!("{MINIMAL}\n[[command]]\n{body}\n"));
         let m = with(
             "name = \"forge\"\nentry = \"forge.js:main\"\ndescription = \"specs\"\n\
-             read_only = [\"help\", \"spec list\"]\nwrites = [\"forge/**\"]",
+             read_only = [\"\", \"help\", \"spec list\"]\nwrites = [\"forge/**\"]",
         )
         .unwrap();
         assert_eq!(m.command[0].file(), "forge.js");
@@ -698,6 +701,7 @@ mod tests {
             ("name = \"x\"\nentry = \"f.js:a-b\"\ndescription = \"d\"", "identifier"),
             ("name = \"x\"\nentry = \"../f.js:main\"\ndescription = \"d\"", "inside the package"),
             ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"a\\nb\"", "one-line"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nread_only = [\" \"]", "blank `read_only`"),
             ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"**\"]", "whole project"),
             ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"*.md\"]", "whole project"),
             ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"/etc/**\"]", "not relative"),

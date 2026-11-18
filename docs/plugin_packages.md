@@ -71,7 +71,7 @@ dir = "skills"
 name = "forge"                       # 1–32 个小写字母、数字、`-`,字母开头,不与内建斜杠命令重名
 entry = "forge.js:main"              # <文件>:<函数>,文件相对插件根目录,必须是源码
 description = "需求、规格与变更流程"   # 单行,进 RunExt 的工具描述——披露
-read_only = ["help", "spec list"]    # 参数以这些整词前缀开头的调用算只读
+read_only = ["", "help", "spec list"]  # 参数以这些整词前缀开头的调用算只读;"" 是不带参数的调用
 writes = ["forge/**"]                # 能写的范围,glob 相对项目根;不写就是不写文件
 
 # ── 写给宿主的段 ──

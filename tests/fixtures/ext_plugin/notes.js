@@ -1,11 +1,12 @@
 // @ts-check
-// `notes help | list | peek | read-guarded | add <title> | escape`.
+// `notes [help] | list | peek | read-guarded | add <title> | escape`.
 
 const USAGE = "usage: notes help | list | add <title> (body in input.body) | escape";
 
 async function main(argv, input, ctx) {
   const [sub, ...rest] = argv;
   switch (sub) {
+    case undefined:
     case "help":
       return USAGE;
     case "list": {

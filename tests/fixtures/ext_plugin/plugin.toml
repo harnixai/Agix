@@ -12,7 +12,7 @@ description = "Keeps notes under notes/"
 name = "notes"
 entry = "notes.js:main"
 description = "Keep short notes under notes/"
-read_only = ["help", "list", "peek", "read-guarded"]
+read_only = ["", "help", "list", "peek", "read-guarded"]
 writes = ["notes/**"]
 
 [[script]]
