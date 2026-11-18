@@ -346,8 +346,16 @@ fn the_command_line_is_split_by_shell_quoting_without_a_shell() {
         ["forge", r#"say "hi""#, "its"]
     );
     assert_eq!(
-        ok("forge '$HOME | *' costs $5 a=b"),
-        ["forge", "$HOME | *", "costs", "$5", "a=b"]
+        ok("forge '$HOME | * ? [x]' costs 5 $ a=b \"a ? [b] $\""),
+        [
+            "forge",
+            "$HOME | * ? [x]",
+            "costs",
+            "5",
+            "$",
+            "a=b",
+            "a ? [b] $"
+        ]
     );
     assert_eq!(ok("forge ''"), ["forge", ""]);
     for line in [
@@ -367,6 +375,16 @@ fn the_command_line_is_split_by_shell_quoting_without_a_shell() {
         "forge \"`id`\"",
         "forge \"$HOME\"",
         "forge a\nrm x",
+        "forge costs $5",
+        "forge $0",
+        "forge $$",
+        "forge $!",
+        "forge $-",
+        "forge x$'a'",
+        "forge \"$5\"",
+        "forge \"pid $$\"",
+        "forge a?b",
+        "forge [ab].md",
     ] {
         let e = split_command_line(line).unwrap_err();
         assert!(e.contains("not a shell"), "{line}: {e}");

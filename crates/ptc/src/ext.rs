@@ -387,7 +387,7 @@ impl Tool for RunExtTool {
 /// `line` cut into words by the shell's quoting rules — single quotes,
 /// double quotes, backslash escapes — refusing whatever a shell would have
 /// acted on instead of passing along: pipes, redirection, command separators,
-/// substitutions, variables and `*`.
+/// substitutions, variables and globs.
 pub fn split_command_line(line: &str) -> Result<Vec<String>, String> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -426,7 +426,13 @@ pub fn split_command_line(line: &str) -> Result<Vec<String>, String> {
                             None => return Err("a double quote is not closed".into()),
                         },
                         Some('`') => return Err(NOT_A_SHELL.into()),
-                        Some('$') if expands(chars.peek()) => return Err(NOT_A_SHELL.into()),
+                        Some('$')
+                            if chars
+                                .peek()
+                                .is_some_and(|&c| c != '"' && !c.is_whitespace()) =>
+                        {
+                            return Err(NOT_A_SHELL.into())
+                        }
                         Some(c) => word.push(c),
                         None => return Err("a double quote is not closed".into()),
                     }
@@ -440,8 +446,12 @@ pub fn split_command_line(line: &str) -> Result<Vec<String>, String> {
                     None => word.push('\\'),
                 }
             }
-            '|' | '>' | '<' | ';' | '&' | '`' | '*' | '\n' | '\r' => return Err(NOT_A_SHELL.into()),
-            '$' if expands(chars.peek()) => return Err(NOT_A_SHELL.into()),
+            '|' | '>' | '<' | ';' | '&' | '`' | '*' | '?' | '[' | '\n' | '\r' => {
+                return Err(NOT_A_SHELL.into())
+            }
+            '$' if chars.peek().is_some_and(|c| !c.is_whitespace()) => {
+                return Err(NOT_A_SHELL.into())
+            }
             c => {
                 in_word = true;
                 word.push(c);
@@ -452,11 +462,6 @@ pub fn split_command_line(line: &str) -> Result<Vec<String>, String> {
         words.push(word);
     }
     Ok(words)
-}
-
-/// Whether a `$` followed by `next` is one a shell would expand.
-fn expands(next: Option<&char>) -> bool {
-    next.is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '_' | '{' | '(' | '?' | '@' | '#'))
 }
 
 /// `word` as it would be written back on a command line.
