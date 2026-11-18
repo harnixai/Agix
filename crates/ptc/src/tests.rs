@@ -858,3 +858,10 @@ fn the_limits_table_in_the_doc_is_the_default_limits() {
     assert_eq!(d.stop_grace, Duration::from_secs(10));
     assert!(doc.contains("10 秒宽限"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_has_the_agix_library() {
+    let (r, _) = run("return agix.yaml.parse('a: 1\\nb: [x, y]');").await;
+    assert!(!r.is_error, "{}", text(&r));
+    assert_eq!(r.structured_content, Some(json!({"a": 1, "b": ["x", "y"]})));
+}

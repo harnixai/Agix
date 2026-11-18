@@ -120,7 +120,9 @@ agent(prompt, {type, schema, label, model}) → Promise (an object when schema i
 args; log(text) / console.log — shown to the user as progress and handed back to you with \
 the result (the last 4,000 characters); notify(text) to tell the conversation something while running \
 in the background; stopRequested() — wrap up and return what you have when true; messages() \
-— notes sent to this run with TaskMessage. End with `return <JSON value>`.
+— notes sent to this run with TaskMessage; pure helpers: agix.yaml (parse, stringify, \
+parseFrontmatter), agix.glob (test, filter), agix.path, agix.json.validate (JSON Schema), \
+agix.hash.sha256, agix.uuid (v4, v7), agix.cli.parseArgs. End with `return <JSON value>`.
 
 Calls go through the same permission checks as direct calls; one that would need the user's \
 approval fails instead of asking — make that call directly. Limits: 5 minutes (60 once a \
@@ -137,7 +139,8 @@ a single task or a few calls, call the tools directly.
 
 A script (QuickJS, ES2023, top-level await; no require/import or Node/browser APIs). \
 tools.<Name>(input) and callTool(name, input) return Promises that reject on failure; log(text) \
-reports progress. End with `return <JSON value>`.";
+reports progress; agix.yaml, agix.glob, agix.path, agix.json and agix.hash are pure helpers. \
+End with `return <JSON value>`.";
 
 fn describe(callable: &[CallableTool]) -> String {
     let mut out = format!(

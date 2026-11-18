@@ -321,7 +321,8 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
         bridge.set("args", Function::new(ctx.clone(), move || args.clone())?)?;
     }
     ctx.globals().set("__host", bridge)?;
-    ctx.eval::<(), _>(PRELUDE)
+    ctx.eval::<(), _>(PRELUDE)?;
+    js_lib::install(ctx)
 }
 
 fn stopped_answer() -> String {

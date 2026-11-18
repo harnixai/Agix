@@ -408,3 +408,15 @@ fn the_description_lists_each_installed_command_on_its_own_line() {
         .ends_with("Installed:\n  forge — requirements and specs"));
     assert!(tool.spec().callable_from_code && tool.spec().needs_dispatch);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_has_the_agix_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = RunExtTool::new(vec![command(
+        dir.path(),
+        "function main() { return agix.yaml.parse('status: draft'); }",
+    )]);
+    let (r, _) = run(&tool, json!({"command": "forge help"})).await;
+    assert!(!r.is_error, "{}", text(&r));
+    assert_eq!(r.structured_content, Some(json!({"status": "draft"})));
+}
