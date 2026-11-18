@@ -13,7 +13,7 @@ const CHANGE_ID = "^C-[0-9]{3,}$";
 const CAPABILITY = "^[a-z0-9][a-z0-9-]*$";
 
 const str = (pattern) => (pattern ? { type: "string", pattern } : { type: "string" });
-const text = { type: "string", minLength: 1 };
+const text = str("\\S");
 const arrayOf = (items, minItems = 0) => ({ type: "array", items, minItems });
 const ids = (pattern) => arrayOf(str(pattern));
 /** @param {object} properties @param {string[]} required */
@@ -432,6 +432,31 @@ function renderEntry(e) {
   return `## ${e.id} ${e.title}\nreqs: ${e.reqs.join(", ")}\n\n${e.body ? e.body + "\n\n" : ""}${CRITERIA_HEAD}\n${criteria}`;
 }
 
+/** @param {Entry} e */
+const sameFields = (e) => JSON.stringify([e.id, e.capability, e.title, e.reqs, e.body, e.criteria.map((c) => [c.id, c.text])]);
+
+/**
+ * An entry is kept as Markdown, so one whose text would read back as something else (a body line
+ * that looks like an entry heading or the criteria heading) is refused before it is written.
+ * @param {Entry} e
+ */
+function storable(e) {
+  check(SCHEMA.entry, e, e.id);
+  let back = [];
+  try {
+    back = parseEntries(renderEntry(e), e.id).entries;
+  } catch {
+    back = [];
+  }
+  if (back.length !== 1 || sameFields(back[0]) !== sameFields(e)) {
+    throw new Error(
+      `${e.id} would not read back as written: a body line that starts with "## S-" or reads "${CRITERIA_HEAD}" ` +
+        "is taken for an entry heading or the criteria; reword those lines (put criteria in `criteria`).",
+    );
+  }
+  return e;
+}
+
 /** @param {string} t */
 const oneLine = (t) => t.replace(/\s+/g, " ").trim();
 /** @param {string[]} texts */
@@ -597,11 +622,11 @@ async function flowDelta(id, input) {
     const prefix = `S-${a.capability}-`;
     const sid = `${prefix}${pad(nextNumber(taken, prefix))}`;
     taken.push(sid);
-    return { id: sid, capability: a.capability, title: oneLine(a.title), reqs: a.reqs || change.reqs, body: a.body.trim(), criteria: numbered(a.criteria) };
+    return storable({ id: sid, capability: a.capability, title: oneLine(a.title), reqs: a.reqs || change.reqs, body: a.body.trim(), criteria: numbered(a.criteria) });
   });
   const modify = (input.modify || []).map((m) => {
     const old = byId(m.id);
-    return { ...old, title: oneLine(m.title || old.title), reqs: m.reqs || old.reqs, body: (m.body !== undefined ? m.body : old.body).trim(), criteria: m.criteria ? numbered(m.criteria) : old.criteria };
+    return storable({ ...old, title: oneLine(m.title || old.title), reqs: m.reqs || old.reqs, body: (m.body !== undefined ? m.body : old.body).trim(), criteria: m.criteria ? numbered(m.criteria) : old.criteria });
   });
   const remove = (input.remove || []).map((sid) => byId(sid).id);
   if (!add.length && !modify.length && !remove.length) throw new Error("the delta is empty: give add, modify or remove");
