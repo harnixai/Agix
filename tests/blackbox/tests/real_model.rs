@@ -9,6 +9,7 @@ mod live_basics;
 mod live_commands;
 mod live_context;
 mod live_extensions;
+mod live_forge;
 mod live_hooks;
 mod live_host;
 mod live_mcp;
