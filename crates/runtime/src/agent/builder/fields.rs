@@ -55,6 +55,8 @@ pub(super) struct HostSetup {
     pub(super) attended: Option<bool>,
     /// See [`Builder::skill_dirs`].
     pub(super) skill_dirs: super::host::HostSkillDirs,
+    /// See [`Builder::ext_commands`].
+    pub(super) ext_commands: Vec<base::command::ExtCommand>,
 }
 
 impl HostSetup {
@@ -83,6 +85,7 @@ impl HostSetup {
             modules: Vec::new(),
             attended: None,
             skill_dirs: Default::default(),
+            ext_commands: Vec::new(),
         }
     }
 }

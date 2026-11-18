@@ -94,7 +94,7 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     pub(in crate::session_pool) spec: &'a SessionSpec,
     pub(in crate::session_pool) scene_registry: Arc<scene::SceneRegistry>,
     pub(in crate::session_pool) cron_store: Arc<tools::cron::CronStore>,
-    pub(in crate::session_pool) package_scripts: Vec<crate::plugins::PackageScripts>,
+    pub(in crate::session_pool) packages: crate::plugins::SessionPackages,
     pub(in crate::session_pool) mcp_module: Option<Arc<dyn runtime::module::Module>>,
     pub(in crate::session_pool) process_groups: Option<Arc<platform::GroupLedger>>,
     /// The session's host skill directories, and every session's.
@@ -213,10 +213,10 @@ impl EngineFactory {
         }
         builder = builder.scene_registry(req.scene_registry);
         let (mut builder, script_ledger, script_faults) = bind_session_scripts(
-            builder,
+            builder.ext_commands(req.packages.commands),
             &settings_snapshot,
             req.script_root,
-            &req.package_scripts,
+            &req.packages.scripts,
         );
 
         if let Some(module) = req.mcp_module {

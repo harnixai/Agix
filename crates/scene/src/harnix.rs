@@ -22,6 +22,7 @@ pub const TOOLS: &[&str] = &[
     "Grep",
     "Read",
     "RunCode",
+    "RunExt",
     "Skill",
     "TaskMessage",
     "TaskOutput",

@@ -50,14 +50,7 @@ impl Builder {
             settings,
             scene,
             model,
-            rules,
-            environment,
-            permission,
-            telemetry_handle: telemetry,
-            memory_store,
-            instruction_provider,
             modules,
-            attended,
             ..
         } = resolved;
         // Dispatch looks tools up in the registry, so a grant's adapters live
@@ -67,26 +60,7 @@ impl Builder {
         }
         {
             let session_id = session.session_id_str().to_string();
-            let host = HostContracts {
-                exec: exec.clone(),
-                token_counter: session.token_counter().clone(),
-                rules: rules.clone(),
-                environment: environment.clone(),
-                permission: permission.clone(),
-                history_store: self.host.history_store.clone(),
-                telemetry: telemetry.clone(),
-                task_router: self.host.task_router.clone(),
-                scene_registry: self.host.scene_registry.clone(),
-                memory_store: memory_store.clone(),
-                memory_retriever: self.host.memory_retriever.clone(),
-                retrieval_hooks: self.host.retrieval_hooks.clone(),
-                instruction_provider: instruction_provider.clone(),
-                plugins: self.host.plugins.clone(),
-                modules: modules.to_vec(),
-                host_layers,
-                attended: *attended,
-                skill_dirs: self.host.skill_dirs.clone(),
-            };
+            let host = self.host_contracts(resolved, session, exec, host_layers);
             let mut cx = crate::module::SessionContext {
                 tools,
                 template_tools: template,
@@ -122,13 +96,51 @@ impl Builder {
         Ok(mcp_slot.unwrap_or_else(|| Box::new(base::interface::mcp_servers::NoMcpServers)))
     }
 
+    /// `tools` is the session's final registry: a plugin command is a `/name`
+    /// only where `RunExt` is there to run it.
+    /// What this session resolved for the host, as every module and
+    /// delegate is shown it.
+    fn host_contracts(
+        &self,
+        resolved: &Resolved,
+        session: &Transcript,
+        exec: &base::interface::exec::ExecProviders,
+        host_layers: HostLayers,
+    ) -> HostContracts {
+        HostContracts {
+            exec: exec.clone(),
+            token_counter: session.token_counter().clone(),
+            rules: resolved.rules.clone(),
+            environment: resolved.environment.clone(),
+            permission: resolved.permission.clone(),
+            history_store: self.host.history_store.clone(),
+            telemetry: resolved.telemetry_handle.clone(),
+            task_router: self.host.task_router.clone(),
+            scene_registry: self.host.scene_registry.clone(),
+            memory_store: resolved.memory_store.clone(),
+            memory_retriever: self.host.memory_retriever.clone(),
+            retrieval_hooks: self.host.retrieval_hooks.clone(),
+            instruction_provider: resolved.instruction_provider.clone(),
+            plugins: self.host.plugins.clone(),
+            modules: resolved.modules.to_vec(),
+            host_layers,
+            attended: resolved.attended,
+            skill_dirs: self.host.skill_dirs.clone(),
+            ext_commands: self.host.ext_commands.clone(),
+        }
+    }
+
     pub(super) fn command_registry(
         &self,
         skill_catalog: &crate::module::LateSkillCatalog,
         mcp: &dyn base::interface::mcp_servers::McpServers,
+        tools: &dyn base::tool::ToolRegistry,
     ) -> Arc<crate::commands::CommandRegistry> {
         let mut registry =
             crate::commands::CommandRegistry::from_skill_catalog(Arc::new(skill_catalog.clone()));
+        if tools.get(crate::commands::EXT_TOOL_NAME).is_some() {
+            registry.register_ext_commands(&self.host.ext_commands);
+        }
         let mcp_prompts = mcp.prompt_commands();
         if !mcp_prompts.is_empty() {
             tracing::info!(

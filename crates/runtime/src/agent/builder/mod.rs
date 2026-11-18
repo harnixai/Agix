@@ -219,6 +219,14 @@ impl Builder {
         self
     }
 
+    /// The commands enabled plugin packages declare: with one or more, the
+    /// session has `RunExt` and each command as `/name args`, as do its
+    /// delegates.
+    pub fn ext_commands(mut self, commands: Vec<base::command::ExtCommand>) -> Self {
+        self.host.ext_commands = commands;
+        self
+    }
+
     /// The host's skill directories: the ones this session lists, which its
     /// file tools and sandbox read without asking, and every one any session
     /// lists, under which no tool writes in any permission mode. Both are

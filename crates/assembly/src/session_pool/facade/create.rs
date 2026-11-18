@@ -578,7 +578,7 @@ impl SessionPool {
             spec,
             scene_registry: self.scenes.registry(),
             cron_store: self.scheduler.store(),
-            package_scripts: self.plugins.script_bindings(),
+            packages: self.plugins.for_session(),
             mcp_module,
             process_groups: binding
                 .settings

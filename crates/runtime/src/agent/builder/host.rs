@@ -40,6 +40,8 @@ pub struct HostContracts {
     /// scene — see [`Builder::attended`].
     pub attended: bool,
     pub skill_dirs: HostSkillDirs,
+    /// See [`Builder::ext_commands`].
+    pub ext_commands: Vec<base::command::ExtCommand>,
 }
 
 /// The host's skill directories as the permission checks see them — see
@@ -110,6 +112,7 @@ impl Builder {
                 },
             attended,
             skill_dirs,
+            ext_commands,
         } = host;
         self.host.exec = Some(exec);
         self.host.token_counter = Some(token_counter);
@@ -134,6 +137,7 @@ impl Builder {
         self.host.compactor = compactor;
         self.host.attended = Some(attended);
         self.host.skill_dirs = skill_dirs;
+        self.host.ext_commands = ext_commands;
         self
     }
 }

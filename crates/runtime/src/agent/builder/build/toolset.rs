@@ -113,6 +113,7 @@ impl Builder {
         questions_answered: bool,
     ) -> Result<SessionTools, EngineError> {
         let tools = &registry;
+        self.register_run_ext(tools);
         let host_tools = crate::host_tools::declared_tools(&self.spec.host_tools)?;
         let host_names = admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
@@ -178,6 +179,23 @@ impl Builder {
             tools: registry,
             policy: tool_policy,
         })
+    }
+}
+
+impl Builder {
+    /// `RunExt`, when enabled packages bring commands: ahead of the tools
+    /// admitted with a collision check, so none of them can take its name.
+    fn register_run_ext(&self, tools: &InMemoryToolRegistry) {
+        #[cfg(feature = "ptc")]
+        if !self.host.ext_commands.is_empty() {
+            let run_ext = ptc::RunExtTool::new(self.host.ext_commands.clone());
+            tools.register(Arc::new(match self.spec.run_slots.clone() {
+                Some(slots) => run_ext.with_run_slots(slots),
+                None => run_ext,
+            }));
+        }
+        #[cfg(not(feature = "ptc"))]
+        let _ = tools;
     }
 }
 

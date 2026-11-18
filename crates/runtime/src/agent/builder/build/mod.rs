@@ -66,8 +66,6 @@ impl Builder {
             mcp: mcp_slot,
             checkpoints: checkpoints.as_ref(),
         })?;
-        let command_registry = self.command_registry(&skill_catalog, mcp.as_ref());
-
         let plugin_tools = plugins.take_tools();
         let surface = self.finalize_tools(
             r.tools,
@@ -78,6 +76,8 @@ impl Builder {
             questions_answered,
         )?;
         r.tools = surface.tools;
+        let command_registry =
+            self.command_registry(&skill_catalog, mcp.as_ref(), r.tools.as_ref());
 
         spawn_task_hooks(
             &hooks.hooks,

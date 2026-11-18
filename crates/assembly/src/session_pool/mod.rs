@@ -337,13 +337,24 @@ impl SessionPool {
     /// `/name args` as the `message` of `session.run_turn`, which already
     /// intercepts and runs it (see `runtime::turn::process_turn`).
     pub async fn list_commands(&self) -> Vec<api::CommandInfo> {
-        self.default_binding()
-            .await
-            .commands
-            .list_detailed()
-            .into_iter()
-            .map(api::CommandInfo::from)
-            .collect()
+        let mut commands = self.default_binding().await.commands.list_detailed();
+        if runtime::PTC_ENABLED {
+            for command in self.plugins.commands() {
+                if commands.iter().any(|c| c.name == command.name) {
+                    continue;
+                }
+                commands.push(runtime::commands::CommandInfo {
+                    name: command.name,
+                    description: command.description,
+                    kind: "ext",
+                    source: "plugin",
+                    tier: None,
+                    dir: None,
+                });
+            }
+            commands.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        commands.into_iter().map(api::CommandInfo::from).collect()
     }
 
     /// The slash commands `session_id` resolves: its scene's built-ins, its

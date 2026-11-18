@@ -1,8 +1,9 @@
 //! Slash command system — intercept `/name args` before the LLM.
 //!
-//! Supports two command types:
+//! Supports three command types:
 //! - **Prompt**: expand skill content, replace user message, continue to LLM
 //! - **Local**: answered by the agent itself, skip LLM
+//! - **Ext**: a plugin package's command, run through `RunExt`, skip LLM
 //!
 //! Architecture:
 //! ```text
@@ -17,6 +18,9 @@ use base::interface::skill_catalog::{SkillCatalog, SkillExpansion};
 use base::skill::SkillEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// The tool a plugin command runs through, typed or called by the model.
+pub const EXT_TOOL_NAME: &str = "RunExt";
 
 /// Result of parsing a `/name args` string.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +77,10 @@ pub enum Command {
     },
     /// Local command: answered by the agent itself, skip LLM.
     Local { description: String },
+    /// A plugin package's command (`[[command]]`): run through `RunExt` with
+    /// the arguments as its command line; the output goes to the host, not
+    /// the model.
+    Ext { description: String, plugin: String },
 }
 
 impl Command {
@@ -81,6 +89,7 @@ impl Command {
             Command::Prompt { entry } => &entry.description,
             Command::McpPrompt { description, .. } => description,
             Command::Local { description, .. } => description,
+            Command::Ext { description, .. } => description,
         }
     }
 
@@ -114,6 +123,9 @@ pub struct CommandRegistry {
     /// entry in the skill catalog.
     registered: HashMap<String, Command>,
     skills: Option<Arc<dyn SkillCatalog>>,
+    /// Plugin commands, below skills: a skill of the same name takes the
+    /// slash form.
+    ext: HashMap<String, Command>,
 }
 
 /// Skill-derived slash commands only exist for `user_invocable` skills.
@@ -130,6 +142,7 @@ impl CommandRegistry {
             builtin: HashMap::new(),
             registered: HashMap::new(),
             skills: None,
+            ext: HashMap::new(),
         }
     }
 
@@ -165,6 +178,19 @@ impl CommandRegistry {
                     command: p.command.clone(),
                     description: p.description.clone(),
                     argument_hint: p.argument_hint.clone(),
+                },
+            );
+        }
+    }
+
+    /// Register each plugin command as `/name args`.
+    pub fn register_ext_commands(&mut self, commands: &[base::command::ExtCommand]) {
+        for c in commands {
+            self.ext.insert(
+                c.name.clone(),
+                Command::Ext {
+                    description: c.description.clone(),
+                    plugin: c.plugin.clone(),
                 },
             );
         }
@@ -209,7 +235,10 @@ impl CommandRegistry {
         {
             return Some(cmd);
         }
-        self.builtin.get(name).cloned()
+        self.ext
+            .get(name)
+            .or_else(|| self.builtin.get(name))
+            .cloned()
     }
 
     /// The body a skill-derived command expands to: asked of the live skill
@@ -271,6 +300,7 @@ impl CommandRegistry {
     /// tiers overwrite by name — the same result `resolve` gives.
     fn merged(&self) -> HashMap<String, Command> {
         let mut out = self.builtin.clone();
+        out.extend(self.ext.iter().map(|(k, v)| (k.clone(), v.clone())));
         if let Some(skills) = self.skills.as_ref() {
             for skill in skills.list() {
                 let name = skill.name.clone();
@@ -352,6 +382,14 @@ impl CommandRegistry {
                     tier: None,
                     dir: None,
                 },
+                Command::Ext { description, .. } => CommandInfo {
+                    name: name.clone(),
+                    description: description.clone(),
+                    kind: "ext",
+                    source: "plugin",
+                    tier: None,
+                    dir: None,
+                },
             })
             .collect();
         entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -367,8 +405,9 @@ impl CommandRegistry {
 pub struct CommandInfo {
     pub name: String,
     pub description: String,
-    /// `"prompt"` (expands a skill body, continues to the LLM) or `"local"`
-    /// (executes immediately, no LLM turn).
+    /// `"prompt"` (expands a skill body, continues to the LLM), `"local"`
+    /// (executes immediately, no LLM turn), `"mcp-prompt"`, or `"ext"` (a
+    /// plugin command run through `RunExt`, no LLM turn).
     pub kind: &'static str,
     /// Where the command came from: `"builtin"`, `"user"`, `"project"`, or
     /// `"plugin"`.
@@ -383,11 +422,9 @@ pub struct CommandInfo {
 impl Default for CommandRegistry {
     fn default() -> Self {
         let mut registry = Self::new();
-        registry.insert_local("help", "List all available slash commands");
-        registry.insert_local("skills", "List all available skills");
-        registry.insert_local("clear", "Clear the current session context");
-        registry.insert_local("compact", "Trigger context compaction now");
-        registry.insert_local("cost", "Show the tokens and calls this session has spent");
+        for (name, description) in base::command::BUILTIN_COMMANDS {
+            registry.insert_local(name, description);
+        }
         registry
     }
 }
@@ -504,6 +541,48 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);
+    }
+
+    fn ext_command(name: &str) -> base::command::ExtCommand {
+        base::command::ExtCommand {
+            name: name.into(),
+            description: "requirements and specs".into(),
+            plugin: "forge".into(),
+            plugin_version: "1.0.0".into(),
+            root: std::path::PathBuf::new(),
+            file: std::path::PathBuf::new(),
+            function: "main".into(),
+            read_only: Vec::new(),
+            writes: Vec::new(),
+            bytecode_dir: None,
+        }
+    }
+
+    #[test]
+    fn a_plugin_command_is_a_slash_command_below_a_skill_of_its_name() {
+        let mut registry = CommandRegistry::default();
+        registry.register_ext_commands(&[ext_command("forge"), ext_command("review")]);
+        registry.insert_prompt(SkillEntry {
+            name: "review".into(),
+            description: "Review a diff".into(),
+            source: base::skill::SkillSource::Plugin,
+            user_invocable: true,
+            ..Default::default()
+        });
+        assert!(matches!(
+            registry.resolve("forge"),
+            Some(Command::Ext { .. })
+        ));
+        assert!(matches!(
+            registry.resolve("review"),
+            Some(Command::Prompt { .. })
+        ));
+        let forge = registry
+            .list_detailed()
+            .into_iter()
+            .find(|c| c.name == "forge")
+            .unwrap();
+        assert_eq!((forge.kind, forge.source), ("ext", "plugin"));
     }
 
     fn mcp_prompt_entry() -> base::interface::mcp_servers::McpPromptCommand {

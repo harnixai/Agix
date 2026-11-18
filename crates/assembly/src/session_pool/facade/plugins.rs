@@ -49,11 +49,47 @@ impl SessionPool {
 
     async fn plugin_infos(&self) -> Vec<api::PluginInfo> {
         let mut listed = self.plugins.list();
-        let mut conflicts = self.default_binding().await.modules.skill_conflicts();
+        let binding = self.default_binding().await;
+        let mut conflicts = binding.modules.skill_conflicts();
+        let mut command_conflicts = self.command_conflicts(&binding.commands);
         for entry in &mut listed {
             entry.skill_conflicts = conflicts.remove(&entry.name).unwrap_or_default();
+            entry.command_conflicts = command_conflicts.remove(&entry.name).unwrap_or_default();
         }
         listed
+    }
+
+    /// Package commands whose name another holds, by package: an earlier
+    /// package's command of the name, or a skill that takes its `/name`.
+    fn command_conflicts(
+        &self,
+        commands: &runtime::commands::CommandRegistry,
+    ) -> std::collections::HashMap<String, Vec<api::CommandConflict>> {
+        let mut out: std::collections::HashMap<String, Vec<api::CommandConflict>> =
+            Default::default();
+        for (command, kept, refused) in self.plugins.command_clashes() {
+            out.entry(refused).or_default().push(api::CommandConflict {
+                command,
+                shadowed_by: api::CommandShadow::Plugin,
+                plugin: Some(kept),
+                path: None,
+            });
+        }
+        for command in self.plugins.commands() {
+            if let Some(runtime::commands::Command::Prompt { entry }) =
+                commands.resolve(&command.name)
+            {
+                out.entry(command.plugin)
+                    .or_default()
+                    .push(api::CommandConflict {
+                        command: command.name,
+                        shadowed_by: api::CommandShadow::Skill,
+                        plugin: None,
+                        path: Some(entry.path.display().to_string()),
+                    });
+            }
+        }
+        out
     }
 
     fn require_plugins(&self) -> Result<(), PoolError> {

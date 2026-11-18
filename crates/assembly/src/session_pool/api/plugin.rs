@@ -47,6 +47,42 @@ pub struct SkillConflict {
     pub plugin: Option<String>,
 }
 
+/// A command a package adds (`[[command]]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginCommand {
+    pub name: String,
+    pub description: String,
+    /// Argument prefixes that make a call read-only.
+    pub read_only: Vec<String>,
+    /// Globs relative to the project that the command may write.
+    pub writes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CommandShadow {
+    /// An earlier package (by name) declares the command: this one is not
+    /// registered.
+    Plugin,
+    /// A skill has the name and takes the `/name` form; `RunExt` still runs
+    /// the command.
+    Skill,
+}
+
+/// A package command whose name another holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CommandConflict {
+    pub command: String,
+    pub shadowed_by: CommandShadow,
+    /// The package that has the command, when `shadowed_by` is `plugin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The skill's `SKILL.md`, when `shadowed_by` is `skill`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginInfo {
     pub name: String,
@@ -63,6 +99,8 @@ pub struct PluginInfo {
     pub script_faults: Vec<String>,
     pub skills: Vec<String>,
     pub skill_conflicts: Vec<SkillConflict>,
+    pub commands: Vec<PluginCommand>,
+    pub command_conflicts: Vec<CommandConflict>,
 }
 
 /// A piece of text that will reach the model, and where it came from.
@@ -81,6 +119,7 @@ pub struct PluginDisclosure {
     pub capabilities: Vec<String>,
     pub scene: Option<String>,
     pub skills: Vec<String>,
+    pub commands: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub model_visible: Vec<VisibleText>,
     pub inert: bool,

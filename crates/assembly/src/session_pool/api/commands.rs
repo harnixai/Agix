@@ -38,6 +38,9 @@ pub enum CommandKind {
     Prompt,
     #[serde(rename = "mcp-prompt")]
     McpPrompt,
+    /// A plugin command, run through `RunExt`; no model turn.
+    #[serde(rename = "ext")]
+    Ext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -58,6 +61,7 @@ impl From<runtime::commands::CommandInfo> for CommandInfo {
         let kind = match info.kind {
             "local" => CommandKind::Local,
             "prompt" => CommandKind::Prompt,
+            "ext" => CommandKind::Ext,
             _ => CommandKind::McpPrompt,
         };
         let source = match info.source {

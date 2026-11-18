@@ -8,6 +8,10 @@
 //! the feature the same API answers that there are no plugins, so the rest of
 //! the daemon needs no conditional compilation of its own.
 
+#[cfg(feature = "plugin-packages")]
+mod commands;
+#[cfg(feature = "plugin-packages")]
+mod health;
 mod policy;
 
 pub use policy::PluginsConfig;
@@ -55,6 +59,12 @@ pub struct PackageScripts {
     pub name: String,
     pub root: std::path::PathBuf,
     pub bindings: Vec<base::interface::script::ScriptBinding>,
+}
+
+/// What the active packages hand a session as it is built.
+pub struct SessionPackages {
+    pub scripts: Vec<PackageScripts>,
+    pub commands: Vec<base::command::ExtCommand>,
 }
 
 /// One active package's skills, each with the body it expands to.
@@ -194,6 +204,15 @@ mod packages {
                 .collect()
         }
 
+        /// See [`super::commands::kept`].
+        pub fn commands(&self) -> Vec<base::command::ExtCommand> {
+            super::commands::kept(&self.active())
+        }
+
+        pub fn command_clashes(&self) -> Vec<(String, String, String)> {
+            super::commands::clashes(&self.active())
+        }
+
         /// Every active package's `[[script]]` declarations, as bindings the
         /// carrier can take.
         pub fn script_bindings(&self) -> Vec<PackageScripts> {
@@ -275,6 +294,7 @@ mod packages {
                     let skills: Vec<String> = ::packages::skills::declared_skills(p)
                         .map(|skills| skills.into_iter().map(|s| s.entry.name).collect())
                         .unwrap_or_default();
+                    let commands = super::commands::listed(p);
                     let permitted = self.policy().permits(name);
                     PluginInfo {
                         name: name.clone(),
@@ -299,6 +319,8 @@ mod packages {
                             .unwrap_or_default(),
                         skills,
                         skill_conflicts: Vec::new(),
+                        commands,
+                        command_conflicts: Vec::new(),
                     }
                 })
                 .collect()
@@ -449,6 +471,7 @@ fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::Plugin
         capabilities: d.capabilities.clone(),
         scene: d.scene.clone(),
         skills: d.skills.clone(),
+        commands: d.commands.clone(),
         mcp_servers: d.mcp_servers.clone(),
         model_visible: d
             .model_visible
@@ -464,108 +487,9 @@ fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::Plugin
 
 #[cfg(feature = "plugin-packages")]
 mod imp {
+    use super::health::{EnableOnInstallCheck, EnableStateCheck, RefusedPackagesCheck};
     use super::*;
     use base::agent_type::AgentTypeDefinition;
-    use base::interface::health::{CheckResult, HealthCheck};
-
-    /// `daemon.doctor`'s view of the two `enabled.json` files: a tier whose
-    /// file cannot be read holds every package in it disabled, and nothing
-    /// else would say why.
-    struct EnableStateCheck((std::path::PathBuf, std::path::PathBuf));
-
-    impl HealthCheck for EnableStateCheck {
-        fn name(&self) -> &str {
-            "plugins.enable_state"
-        }
-
-        fn check(&self) -> CheckResult {
-            let (global, scene) = &self.0;
-            let faults: Vec<serde_json::Value> = [("global", global), ("scene", scene)]
-                .into_iter()
-                .filter_map(|(tier, root)| {
-                    ::packages::state::EnableState::new(root.clone())
-                        .fault()
-                        .map(|fault| serde_json::json!({"tier": tier, "fault": fault}))
-                })
-                .collect();
-            if faults.is_empty() {
-                CheckResult::ok("plugin enable state reads")
-            } else {
-                CheckResult::degraded(
-                    "an unreadable enabled.json holds every plugin in its tier disabled",
-                )
-                .with_details(serde_json::json!({"tiers": faults}))
-            }
-        }
-    }
-
-    /// Packages on disk that discovery sets aside — a disclosure over its
-    /// limits, a manifest that no longer loads — and so never load, however
-    /// they got into the cache.
-    struct RefusedPackagesCheck(
-        (std::path::PathBuf, std::path::PathBuf),
-        base::paths::Layout,
-    );
-
-    impl HealthCheck for RefusedPackagesCheck {
-        fn name(&self) -> &str {
-            "plugins.refused"
-        }
-
-        fn check(&self) -> CheckResult {
-            let (global, scene) = &self.0;
-            let refused = ::packages::scan_plugins(global, scene, &self.1).refused;
-            if refused.is_empty() {
-                return CheckResult::ok("every installed plugin loads");
-            }
-            let details: Vec<serde_json::Value> = refused
-                .iter()
-                .map(|r| {
-                    serde_json::json!({
-                        "name": r.name,
-                        "version": r.version,
-                        "reason": r.reason,
-                    })
-                })
-                .collect();
-            CheckResult::degraded(format!(
-                "{} installed plugin(s) are refused on loading and not active: {}",
-                refused.len(),
-                refused
-                    .iter()
-                    .map(|r| r.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-            .with_details(serde_json::json!({"refused": details}))
-        }
-    }
-
-    /// Says which way `plugins.enable_on_install` is set, and, while it is
-    /// still `true`, that its default is planned to change.
-    struct EnableOnInstallCheck(bool);
-
-    impl HealthCheck for EnableOnInstallCheck {
-        fn name(&self) -> &str {
-            "plugins.enable_on_install"
-        }
-
-        fn check(&self) -> CheckResult {
-            let details = serde_json::json!({"enable_on_install": self.0});
-            if self.0 {
-                CheckResult::ok(
-                    "plugin.install enables a package as soon as it is installed; \
-                     plugins.enable_on_install is planned to default to false in a later \
-                     0.3.x release, after which the host must call plugin.enable",
-                )
-            } else {
-                CheckResult::ok(
-                    "plugin.install leaves a package disabled until the host calls plugin.enable",
-                )
-            }
-            .with_details(details)
-        }
-    }
 
     pub struct PluginSubsystem {
         packages: super::packages::Packages,
@@ -617,8 +541,19 @@ mod imp {
             self.packages.mcp_key_clashes()
         }
 
-        pub fn script_bindings(&self) -> Vec<PackageScripts> {
-            self.packages.script_bindings()
+        pub fn for_session(&self) -> SessionPackages {
+            SessionPackages {
+                scripts: self.packages.script_bindings(),
+                commands: self.packages.commands(),
+            }
+        }
+
+        pub fn commands(&self) -> Vec<base::command::ExtCommand> {
+            self.packages.commands()
+        }
+
+        pub fn command_clashes(&self) -> Vec<(String, String, String)> {
+            self.packages.command_clashes()
         }
 
         pub fn note_script_faults(&self, faults: Vec<(String, String)>) {
@@ -796,7 +731,16 @@ mod imp {
         pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
             Vec::new()
         }
-        pub fn script_bindings(&self) -> Vec<PackageScripts> {
+        pub fn for_session(&self) -> SessionPackages {
+            SessionPackages {
+                scripts: Vec::new(),
+                commands: Vec::new(),
+            }
+        }
+        pub fn commands(&self) -> Vec<base::command::ExtCommand> {
+            Vec::new()
+        }
+        pub fn command_clashes(&self) -> Vec<(String, String, String)> {
             Vec::new()
         }
         pub fn note_script_faults(&self, _faults: Vec<(String, String)>) {}

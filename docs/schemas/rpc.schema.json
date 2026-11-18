@@ -1088,6 +1088,36 @@
       ],
       "type": "object"
     },
+    "CommandConflict": {
+      "description": "A package command whose name another holds.",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "path": {
+          "description": "The skill's `SKILL.md`, when `shadowed_by` is `skill`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plugin": {
+          "description": "The package that has the command, when `shadowed_by` is `plugin`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shadowed_by": {
+          "$ref": "#/$defs/CommandShadow"
+        }
+      },
+      "required": [
+        "command",
+        "shadowed_by"
+      ],
+      "type": "object"
+    },
     "CommandInfo": {
       "properties": {
         "description": {
@@ -1146,6 +1176,11 @@
           "const": "prompt",
           "description": "Expands a skill body and goes on to the model.",
           "type": "string"
+        },
+        {
+          "const": "ext",
+          "description": "A plugin command, run through `RunExt`; no model turn.",
+          "type": "string"
         }
       ]
     },
@@ -1162,6 +1197,20 @@
         "commands"
       ],
       "type": "object"
+    },
+    "CommandShadow": {
+      "oneOf": [
+        {
+          "const": "plugin",
+          "description": "An earlier package (by name) declares the command: this one is not\nregistered.",
+          "type": "string"
+        },
+        {
+          "const": "skill",
+          "description": "A skill has the name and takes the `/name` form; `RunExt` still runs\nthe command.",
+          "type": "string"
+        }
+      ]
     },
     "CommandSource": {
       "oneOf": [
@@ -4664,10 +4713,48 @@
         }
       ]
     },
+    "PluginCommand": {
+      "description": "A command a package adds (`[[command]]`).",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Argument prefixes that make a call read-only.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "writes": {
+          "description": "Globs relative to the project that the command may write.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "read_only",
+        "writes"
+      ],
+      "type": "object"
+    },
     "PluginDisclosure": {
       "description": "What a plugin will put into the model's context and start, shown before\nanyone depends on it.",
       "properties": {
         "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "commands": {
           "items": {
             "type": "string"
           },
@@ -4712,6 +4799,7 @@
         "version",
         "capabilities",
         "skills",
+        "commands",
         "mcp_servers",
         "model_visible",
         "inert"
@@ -4720,6 +4808,18 @@
     },
     "PluginInfo": {
       "properties": {
+        "command_conflicts": {
+          "items": {
+            "$ref": "#/$defs/CommandConflict"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/PluginCommand"
+          },
+          "type": "array"
+        },
         "description": {
           "type": "string"
         },
@@ -4771,7 +4871,9 @@
         "root",
         "script_faults",
         "skills",
-        "skill_conflicts"
+        "skill_conflicts",
+        "commands",
+        "command_conflicts"
       ],
       "type": "object"
     },

@@ -1,5 +1,6 @@
 //! Mini scene — the smallest working coding agent: nine tools, all resident,
-//! and a prompt of a few lines. Unattended, like harnix.
+//! and a prompt of a few lines; `RunExt` too where a plugin brings commands.
+//! Unattended, like harnix.
 
 use crate::common;
 use base::interface::scene::{
@@ -15,6 +16,7 @@ pub const TOOLS: &[&str] = &[
     "Glob",
     "Grep",
     "Read",
+    "RunExt",
     "Skill",
     "ToolSearch",
     "Write",
@@ -68,9 +70,9 @@ mod tests {
     use base::interface::tool::ToolOrigin;
 
     #[test]
-    fn nine_tools_none_deferred() {
+    fn nine_tools_and_run_ext_none_deferred() {
         let mini = spec();
-        assert_eq!(mini.tools.allow.as_ref().map(Vec::len), Some(9));
+        assert_eq!(mini.tools.allow.as_ref().map(Vec::len), Some(10));
         assert!(!mini.interactive);
         assert!(mini.tools.deferred.is_empty());
         assert!(!mini.permits_tool("WebFetch", &ToolOrigin::Builtin));

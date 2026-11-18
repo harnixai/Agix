@@ -82,6 +82,7 @@ const INHERITED: &[(&str, &str)] = &[
     ("compactor", "host_layers.compactor"),
     ("attended", "attended"),
     ("skill_dirs", "skill_dirs"),
+    ("ext_commands", "ext_commands"),
 ];
 
 /// Decided per delegate by whoever spawns it.
