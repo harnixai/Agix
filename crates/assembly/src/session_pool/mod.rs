@@ -332,13 +332,23 @@ impl SessionPool {
     }
 
     /// Full slash command catalog — built-in locals + skill-derived
-    /// (see `build_shared_commands`) — for the
+    /// (see `build_shared_commands`), and plugin commands when the daemon's
+    /// scene has `RunExt` to run them — for the
     /// `commands.list` RPC. Executing one is not a separate RPC: send
     /// `/name args` as the `message` of `session.run_turn`, which already
     /// intercepts and runs it (see `runtime::turn::process_turn`).
     pub async fn list_commands(&self) -> Vec<api::CommandInfo> {
-        let mut commands = self.default_binding().await.commands.list_detailed();
-        if runtime::PTC_ENABLED {
+        let scene = self.bindings.startup_scene().await;
+        let mut commands = self
+            .binding_for(Some(self.cwd()), &scene)
+            .await
+            .commands
+            .list_detailed();
+        let runs_ext = self
+            .scenes
+            .resolve(Some(&scene))
+            .is_some_and(|spec| runtime::commands::scene_runs_ext_commands(&spec));
+        if runtime::PTC_ENABLED && runs_ext {
             for command in self.plugins.commands() {
                 if commands.iter().any(|c| c.name == command.name) {
                     continue;

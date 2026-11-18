@@ -894,3 +894,44 @@ async fn tool_around_tells_a_command_of_the_same_name_from_another_package() -> 
     run.finish().await;
     Ok(())
 }
+
+/// A scene whose tools leave out `RunExt` cannot run a plugin command, so
+/// `commands.list` does not offer one there — for a daemon started in such a
+/// scene and for a session in it.
+#[tokio::test(flavor = "multi_thread")]
+async fn commands_list_leaves_out_commands_a_scene_without_run_ext_cannot_run() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("ext-scene", &stub)
+        .mode(blackbox::Mode::Spawned)
+        .options(|o| o.scene("bare"))
+        .before_start(|world, _| {
+            world.write_declarative_scene("bare", &["Read"], "Bare scene.\n")?;
+            Ok(())
+        })
+        .start()
+        .await?;
+    let (archive, _) = package_ext(run.world.root())?;
+    let installed = install(&mut run, &archive, EXT_PACKAGE).await?;
+    assert_eq!(installed["success"], true, "{installed}");
+    let session = run.session().await?;
+
+    let names = |listed: Option<Value>| -> Vec<Value> {
+        listed.unwrap_or_default()["commands"]
+            .as_array()
+            .map(|all| all.iter().map(|c| c["name"].clone()).collect())
+            .unwrap_or_default()
+    };
+    let daemon_wide = names(run.client.call("commands.list", json!({})).await?.result);
+    assert!(daemon_wide.contains(&json!("help")), "{daemon_wide:?}");
+    assert!(!daemon_wide.contains(&json!("notes")), "{daemon_wide:?}");
+    let in_session = names(
+        run.client
+            .call("commands.list", json!({ "session_id": session }))
+            .await?
+            .result,
+    );
+    assert!(!in_session.contains(&json!("notes")), "{in_session:?}");
+    run.finish().await;
+    Ok(())
+}

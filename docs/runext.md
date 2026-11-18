@@ -245,7 +245,8 @@ return open.items.length;
 用户输入 `/forge spec list`，走同一个入口：同样的解析、同样的权限（用户亲手发起，算作已批准这条
 命令：本来要问的不再问；deny 规则、plan 模式的拒绝照样生效；`writes` 之外照样失败），结果作为
 本地命令的输出交给宿主（`text_delta`，这一轮以 `command_executed` 结束），**不经过模型、不进
-对话**。`commands.list` 里它的 `kind` 是 `ext`、`source` 是 `plugin`。斜杠形式与 skill 同名时
+对话**。`commands.list` 里它的 `kind` 是 `ext`、`source` 是 `plugin`；场景的工具表里没有 `RunExt` 时
+（不带 `session_id` 看 daemon 的场景，带了看那个会话的）不列。斜杠形式与 skill 同名时
 skill 胜出，记进 `command_conflicts`（`{"command", "shadowed_by": "skill", "path"}`）；
 `RunExt` 照样能跑这条命令。命令名不能取内建斜杠命令（`help`、`skills`、`clear`、`compact`、
 `cost`）的名字，安装时拒。

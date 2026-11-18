@@ -22,6 +22,15 @@ use std::sync::Arc;
 /// The tool a plugin command runs through, typed or called by the model.
 pub const EXT_TOOL_NAME: &str = "RunExt";
 
+/// Whether a session in `scene` gets `RunExt` when packages bring commands,
+/// so can run them typed as `/name`.
+pub fn scene_runs_ext_commands(scene: &base::interface::scene::SceneSpec) -> bool {
+    scene
+        .tools
+        .selector()
+        .admits(EXT_TOOL_NAME, &base::interface::tool::ToolOrigin::Builtin)
+}
+
 /// Result of parsing a `/name args` string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlashCommand {
