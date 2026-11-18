@@ -152,6 +152,9 @@ MCP 连接由 mcp 模块交给会话独占(`provide_mcp`),和原先会话独占 
 `MCP_SESSION_CONNECT_WAIT`(10 秒),没连完的 server 在后台接着连,结果并进缓存后作废这个
 项目的绑定,会话在下一轮之前重建到新连接上。每个 server 的起进程加握手、每个请求都有时限
 (`mcp::config::McpLimits`);工具调用断在途中只报错不重发(`mcp/src/connect.rs` 模块头)。
+本机启动的 stdio server 知道自己在服务哪个项目:客户端声明 `roots`、以连接所属项目的根(解析过符号链接)
+作答,并在它的环境里设 `AGIX_PROJECT_ROOT`(没有项目时为空列表、不设变量);远端 server 不声明 `roots`,
+不把本机路径交出去(`mcp/src/project.rs`)。
 工具与 prompt 的名字由 `mcp::naming` 从 server 名与工具名造出,保证符合模型 API 的
 `^[a-zA-Z0-9_-]{1,64}$`,权限规则按这个名字写。
 
