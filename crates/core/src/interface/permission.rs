@@ -132,6 +132,9 @@ pub struct PermissionFacts {
     /// A second name the call answers to for deny rules: a tool that acts on
     /// one MCP server's behalf is also `mcp__<server>`.
     pub also_named: Option<String>,
+    /// Where a write the call makes lands, as judged: the call writes there
+    /// or nowhere.
+    pub lands_at: Option<std::path::PathBuf>,
 }
 
 impl PermissionFacts {
@@ -148,6 +151,7 @@ impl PermissionFacts {
             question: None,
             relays: None,
             also_named: None,
+            lands_at: None,
         }
     }
 
@@ -170,6 +174,11 @@ impl PermissionFacts {
         self.also_named = Some(name.into());
         self
     }
+
+    pub fn landing_at(mut self, path: std::path::PathBuf) -> Self {
+        self.lands_at = Some(path);
+        self
+    }
 }
 
 /// Everything the permission policy reads about one call: the tool's spec,
@@ -186,6 +195,7 @@ pub struct ToolFacts {
     pub question: Option<String>,
     pub relays: Option<Relays>,
     pub also_named: Option<String>,
+    pub lands_at: Option<std::path::PathBuf>,
 }
 
 impl ToolFacts {
@@ -204,6 +214,7 @@ impl ToolFacts {
             question: facts.question,
             relays: facts.relays,
             also_named: facts.also_named,
+            lands_at: facts.lands_at,
         }
     }
 
@@ -219,6 +230,7 @@ impl ToolFacts {
             question: None,
             relays: None,
             also_named: None,
+            lands_at: None,
         }
     }
 }

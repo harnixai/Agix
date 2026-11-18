@@ -113,9 +113,14 @@ impl Tool for FileWriteTool {
         )
         .await;
 
+        let landing = crate::security::landing(&path, &ctx).await;
         let result = run_with_cancel(&ctx.cancel, async {
-            let before = prior_content(&*ctx.exec.filesystem, &path).await;
-            let bytes = write_file(&*ctx.exec.filesystem, &path, &input.content).await?;
+            let before = prior_content(&*ctx.exec.filesystem, &landing).await;
+            ctx.exec
+                .filesystem
+                .write_resolved(&landing, input.content.as_bytes(), true)
+                .await?;
+            let bytes = input.content.len();
             Ok::<_, ToolError>((bytes, before))
         })
         .await?;
@@ -172,19 +177,6 @@ async fn prior_content(fs: &dyn FileSystem, path: &Path) -> Prior {
         Ok(content) => Prior::Read(content),
         Err(_) => Prior::Unread(metadata.len),
     }
-}
-
-async fn write_file(fs: &dyn FileSystem, path: &Path, content: &str) -> Result<usize, ToolError> {
-    let landing = fs.canonicalize_best_effort(path).await;
-    if let Some(parent) = landing.parent() {
-        if !parent.as_os_str().is_empty() && fs.metadata_following_symlinks(parent).await.is_err() {
-            fs.create_dir_all(parent)
-                .await
-                .map_err(|e| ToolError::Validation(format!("cannot create parent dir: {e}")))?;
-        }
-    }
-    fs.write_not_following(&landing, content.as_bytes()).await?;
-    Ok(content.len())
 }
 
 #[cfg(test)]

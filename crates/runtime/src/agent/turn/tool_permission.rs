@@ -181,7 +181,7 @@ pub(super) async fn authorize(
         }) => {
             return Ok(Authorized {
                 by_person: basis == Basis::Person,
-                approval: Approval::new(basis, profile),
+                approval: Approval::new(basis, profile).landing_at(facts.lands_at.clone()),
                 obligations,
                 facts,
             })

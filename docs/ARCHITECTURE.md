@@ -1529,8 +1529,11 @@ skill 自己的 `allowed-tools` 这时还没生效,不能给自己的命令开�
    路径里有 `..` 而且跟在符号链接后面时,取文件系统解析出的真实位置,检查、读后再写的
    比对和真正的写入用的是同一个路径。存在的最深一级前缀交给文件系统解析,其余部分逐级接上,
    遇到指向尚不存在之处的链接照它的目标接着走——写入会跟着它落到那里。`Write` / `Edit` /
-   `NotebookEdit` 写的就是这样解析出的位置,打开时不再跟随末级的符号链接
-   (`O_NOFOLLOW`),检查之后才换上去的链接让写入失败,而不是把它带到别处:
+   `NotebookEdit` 写的就是权限判定时这样解析出的位置(`PermissionFacts::lands_at`,经
+   `Approval::landing` 交给 `call`,不在 `call` 里重新解析),`Edit` 与 `NotebookEdit` 也从那里读;
+   写的时候从 `/` 起逐级打开目录,整条路径上哪一级都不跟随符号链接
+   (`FileSystem::write_resolved`,本机用 `openat` + `O_NOFOLLOW`)。判定之后才换上去的链接——
+   在目标处还是在上级目录——让写入失败,而不是把它带到别处:
    - 凭据(`.env*` / `id_rsa` / `.ssh` / `.aws` / `.netrc` …)
    - 不该被随手改的生成物与会被别的工具照着执行的文件(`.gitignore` / `Cargo.lock` /
      `package-lock.json` / `.envrc`)

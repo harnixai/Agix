@@ -196,11 +196,12 @@ impl Tool for FileEditTool {
             crate::security::resolve_write_target(&file_path, &ctx.cwd, &*ctx.exec.filesystem)
                 .await;
 
+        let landing = crate::security::landing(&path, &ctx).await;
         let outcome = run_with_cancel(
             &ctx.cancel,
             perform_edits_structured(
                 &*ctx.exec.filesystem,
-                &path,
+                (&path, &landing),
                 &ctx.config.path_style.render(&path, &ctx.cwd),
                 &edits,
             ),
@@ -272,18 +273,15 @@ struct PerformOutcome {
     contents: (String, String),
 }
 
-/// Apply N edits atomically. Each edit runs against the
-/// in-memory result of the previous one. If any edit fails (no match, or
-/// non-unique without replace_all), the file is **not** written and an
-/// error is returned describing which edit failed and why.
-async fn perform_edits_structured(
+/// The text of the file an edit lands on, refused when it is a directory,
+/// over 1 GiB or not UTF-8.
+async fn read_for_edit(
     fs: &dyn FileSystem,
     path: &Path,
-    shown_path: &str,
-    edits: &[SingleEdit],
-) -> Result<PerformOutcome, ToolError> {
+    landing: &Path,
+) -> Result<String, ToolError> {
     let metadata = fs
-        .metadata_following_symlinks(path)
+        .metadata_following_symlinks(landing)
         .await
         .map_err(|e| match e {
             ExecError::Failed(_) => {
@@ -298,7 +296,6 @@ async fn perform_edits_structured(
         )));
     }
 
-    // File size limit (1 GiB).
     const MAX_EDIT_BYTES: u64 = 1024 * 1024 * 1024;
     if metadata.len > MAX_EDIT_BYTES {
         return Err(ToolError::Validation(format!(
@@ -307,10 +304,21 @@ async fn perform_edits_structured(
         )));
     }
 
-    let original = String::from_utf8(fs.read(path).await?).map_err(|_| {
-        ToolError::Validation(format!("file is not valid UTF-8: {}", path.display()))
-    })?;
+    String::from_utf8(fs.read(landing).await?)
+        .map_err(|_| ToolError::Validation(format!("file is not valid UTF-8: {}", path.display())))
+}
 
+/// Apply N edits atomically. Each edit runs against the
+/// in-memory result of the previous one. If any edit fails (no match, or
+/// non-unique without replace_all), the file is **not** written and an
+/// error is returned describing which edit failed and why.
+async fn perform_edits_structured(
+    fs: &dyn FileSystem,
+    (path, landing): (&Path, &Path),
+    shown_path: &str,
+    edits: &[SingleEdit],
+) -> Result<PerformOutcome, ToolError> {
+    let original = read_for_edit(fs, path, landing).await?;
     let mut current = original.clone();
     let mut total_replacements: usize = 0;
     for (idx, edit) in edits.iter().enumerate() {
@@ -338,7 +346,8 @@ async fn perform_edits_structured(
         total_replacements += if replace_all { count } else { 1 };
     }
 
-    crate::security::write_where_it_lands(fs, path, current.as_bytes()).await?;
+    fs.write_resolved(landing, current.as_bytes(), false)
+        .await?;
 
     let (diff_text, diff_payload) = render_diff(&original, &current, shown_path);
     let summary = format!(

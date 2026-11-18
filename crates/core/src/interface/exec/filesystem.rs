@@ -78,6 +78,36 @@ pub trait FileSystem: Send + Sync {
         self.write(path, bytes).await
     }
 
+    /// Write `bytes` to `path` — absolute, its symlinks already resolved —
+    /// following no symlink on the way: a component that is one by the time
+    /// it is reached fails the write instead of taking it elsewhere. With
+    /// `create_parents`, missing directories on the way are made.
+    ///
+    /// Provided as checks then a write; a provider that can walk the path
+    /// from directory to directory without following links should.
+    async fn write_resolved(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        create_parents: bool,
+    ) -> Result<(), ExecError> {
+        for dir in path.ancestors().skip(1) {
+            if self.metadata(dir).await.is_ok_and(|m| m.is_symlink) {
+                return Err(ExecError::failed(format!(
+                    "{}: {} is a symlink",
+                    path.display(),
+                    dir.display()
+                )));
+            }
+        }
+        if let Some(parent) = path.parent().filter(|_| create_parents) {
+            if self.metadata(parent).await.is_err() {
+                self.create_dir_all(parent).await?;
+            }
+        }
+        self.write_not_following(path, bytes).await
+    }
+
     /// The file's sha256 as lowercase hex, hashed without holding the file.
     /// `None` for a provider that cannot, which the caller answers by
     /// reading — and so only for files it can afford to read.

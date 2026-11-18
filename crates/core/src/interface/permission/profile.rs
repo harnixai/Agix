@@ -58,10 +58,22 @@ impl ExecProfile {
 pub struct Approval {
     pub basis: Basis,
     pub profile: ExecProfile,
+    /// Where the call's write was judged to land
+    /// ([`PermissionFacts::lands_at`](super::PermissionFacts::lands_at)).
+    pub landing: Option<std::path::PathBuf>,
 }
 
 impl Approval {
     pub fn new(basis: Basis, profile: ExecProfile) -> Self {
-        Self { basis, profile }
+        Self {
+            basis,
+            profile,
+            landing: None,
+        }
+    }
+
+    pub fn landing_at(mut self, landing: Option<std::path::PathBuf>) -> Self {
+        self.landing = landing;
+        self
     }
 }

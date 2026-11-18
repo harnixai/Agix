@@ -65,6 +65,31 @@ impl FileSystem for LocalFileSystem {
         written.map_err(|e| failed(path, e))
     }
 
+    #[cfg(unix)]
+    async fn write_resolved(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        create_parents: bool,
+    ) -> Result<(), ExecError> {
+        let (owned, bytes) = (path.to_path_buf(), bytes.to_vec());
+        tokio::task::spawn_blocking(move || {
+            unlinked::write(&owned, &bytes, create_parents).map_err(|e| {
+                if e.raw_os_error() == Some(libc::ELOOP) {
+                    ExecError::failed(format!(
+                        "{}: a symlink took the place of a directory or of the file \
+                         after the path was checked",
+                        owned.display()
+                    ))
+                } else {
+                    failed(&owned, e)
+                }
+            })
+        })
+        .await
+        .map_err(|e| ExecError::failed(format!("{}: {e}", path.display())))?
+    }
+
     async fn create_dir_all(&self, path: &Path) -> Result<(), ExecError> {
         tokio::fs::create_dir_all(path)
             .await
@@ -136,6 +161,112 @@ impl FileSystem for LocalFileSystem {
     }
 }
 
+/// Opening a path one directory at a time, from `/`, following no symlink.
+#[cfg(unix)]
+mod unlinked {
+    use std::ffi::{CString, OsStr};
+    use std::io::{Error, ErrorKind, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Component, Path};
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const DIR_FLAGS: libc::c_int = libc::O_PATH | libc::O_DIRECTORY;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    const DIR_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_DIRECTORY;
+
+    pub(super) fn write(path: &Path, bytes: &[u8], create_parents: bool) -> std::io::Result<()> {
+        let mut components = path.components();
+        if components.next() != Some(Component::RootDir) {
+            return Err(not_resolved(path));
+        }
+        let names = components
+            .map(|c| match c {
+                Component::Normal(name) => c_name(name),
+                _ => Err(not_resolved(path)),
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let Some((file, dirs)) = names.split_last() else {
+            return Err(not_resolved(path));
+        };
+        let mut dir = open_at(libc::AT_FDCWD, c"/", DIR_FLAGS, 0)?;
+        for name in dirs {
+            let opened = open_at(dir.as_raw_fd(), name, DIR_FLAGS | libc::O_NOFOLLOW, 0)
+                .map_err(|e| as_link_refusal(&dir, name, e));
+            dir = match opened {
+                Err(e) if e.kind() == ErrorKind::NotFound && create_parents => {
+                    // SAFETY: `dir` is an open directory and `name` a NUL-terminated name.
+                    if unsafe { libc::mkdirat(dir.as_raw_fd(), name.as_ptr(), 0o777) } != 0 {
+                        let e = Error::last_os_error();
+                        if e.kind() != ErrorKind::AlreadyExists {
+                            return Err(e);
+                        }
+                    }
+                    open_at(dir.as_raw_fd(), name, DIR_FLAGS | libc::O_NOFOLLOW, 0)?
+                }
+                opened => opened?,
+            };
+        }
+        let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_NOFOLLOW;
+        let file = open_at(dir.as_raw_fd(), file, flags, 0o666)?;
+        std::fs::File::from(file).write_all(bytes)
+    }
+
+    fn open_at(
+        dir: libc::c_int,
+        name: &std::ffi::CStr,
+        flags: libc::c_int,
+        mode: libc::c_uint,
+    ) -> std::io::Result<OwnedFd> {
+        // SAFETY: `name` is NUL-terminated; a non-negative result is a
+        // descriptor nothing else owns.
+        let fd = unsafe { libc::openat(dir, name.as_ptr(), flags | libc::O_CLOEXEC, mode) };
+        if fd < 0 {
+            return Err(Error::last_os_error());
+        }
+        // SAFETY: as above.
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
+    /// macOS answers a directory open that meets a symlink with `ENOTDIR`;
+    /// told apart from a file on the way, it is `ELOOP` as on Linux.
+    fn as_link_refusal(dir: &OwnedFd, name: &std::ffi::CStr, e: Error) -> Error {
+        if e.raw_os_error() != Some(libc::ENOTDIR) {
+            return e;
+        }
+        // SAFETY: `stat` is plain old data the call fills in.
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: `dir` is open, `name` NUL-terminated, `stat` writable.
+        let found = unsafe {
+            libc::fstatat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                &mut stat,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        if found == 0 && stat.st_mode & libc::S_IFMT == libc::S_IFLNK {
+            Error::from_raw_os_error(libc::ELOOP)
+        } else {
+            e
+        }
+    }
+
+    fn c_name(name: &OsStr) -> std::io::Result<CString> {
+        CString::new(name.as_bytes()).map_err(|e| Error::new(ErrorKind::InvalidInput, e))
+    }
+
+    fn not_resolved(path: &Path) -> Error {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "{} is not an absolute path with its links resolved",
+                path.display()
+            ),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +294,39 @@ mod tests {
         LocalFileSystem.remove_file(&link).await.unwrap();
         assert!(std::fs::symlink_metadata(&link).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "kept");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_resolved_write_follows_no_symlink_on_the_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let (real, outside) = (root.join("real"), root.join("outside"));
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("dir-link")).unwrap();
+        std::os::unix::fs::symlink(outside.join("f"), real.join("file-link")).unwrap();
+        let fs = LocalFileSystem;
+
+        fs.write_resolved(&real.join("a/b/new.txt"), b"x", true)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(real.join("a/b/new.txt")).unwrap(), b"x");
+        assert!(fs
+            .write_resolved(&real.join("c/new.txt"), b"x", false)
+            .await
+            .is_err());
+        assert!(!real.join("c").exists());
+
+        for (through, created) in [
+            (root.join("dir-link/x"), outside.join("x")),
+            (root.join("dir-link/sub/x"), outside.join("sub")),
+            (real.join("file-link"), outside.join("f")),
+        ] {
+            let e = fs.write_resolved(&through, b"x", true).await.unwrap_err();
+            assert!(e.to_string().contains("symlink"), "{e}");
+            assert!(!created.exists(), "{}", through.display());
+        }
     }
 
     #[tokio::test]

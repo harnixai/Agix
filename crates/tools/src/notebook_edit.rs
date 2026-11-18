@@ -110,12 +110,13 @@ impl Tool for NotebookEditTool {
         )
         .await;
         let path = target.as_path();
+        let landing = crate::security::landing(path, &ctx).await;
 
         // 读 + 解析
         let content = ctx
             .exec
             .filesystem
-            .read_to_string(path)
+            .read_to_string(&landing)
             .await
             .map_err(|e| ToolError::exec(format!("read {}: {e}", input.file_path)))?;
         let mut nb: Value = serde_json::from_str(&content)
@@ -131,7 +132,9 @@ impl Tool for NotebookEditTool {
         // 写回（pretty-print 让 git diff 可读）
         let new_content = serde_json::to_string_pretty(&nb)
             .map_err(|e| ToolError::exec(format!("serialize: {e}")))?;
-        crate::security::write_where_it_lands(&*ctx.exec.filesystem, path, new_content.as_bytes())
+        ctx.exec
+            .filesystem
+            .write_resolved(&landing, new_content.as_bytes(), false)
             .await
             .map_err(|e| ToolError::exec(format!("write: {e}")))?;
 
@@ -517,7 +520,7 @@ mod tests {
                 LocalFileSystem.metadata(path).await
             }
             async fn canonicalize(&self, path: &Path) -> Result<PathBuf, ExecError> {
-                Ok(path.to_path_buf())
+                LocalFileSystem.canonicalize(path).await
             }
         }
 

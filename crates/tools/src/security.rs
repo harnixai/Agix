@@ -42,16 +42,13 @@ pub async fn resolve_write_target(raw: &str, cwd: &Path, fs: &dyn FileSystem) ->
     }
 }
 
-/// Write `bytes` where a write to `path` lands — its symlinks followed as
-/// [`write_facts`] followed them — without following a symlink found there
-/// by the time the file is opened, which the check never saw.
-pub(crate) async fn write_where_it_lands(
-    fs: &dyn FileSystem,
-    path: &Path,
-    bytes: &[u8],
-) -> Result<(), base::interface::exec::ExecError> {
-    let landing = fs.canonicalize_best_effort(path).await;
-    fs.write_not_following(&landing, bytes).await
+/// Where a write to `path` lands: where the permission check judged it to,
+/// or — for a call nothing judged — where it resolves now.
+pub(crate) async fn landing(path: &Path, ctx: &base::tool::ToolContext) -> PathBuf {
+    match ctx.approval.as_ref().and_then(|a| a.landing.clone()) {
+        Some(judged) => judged,
+        None => ctx.exec.filesystem.canonicalize_best_effort(path).await,
+    }
 }
 
 /// The write policy for this call, with every root resolved by the same
@@ -99,14 +96,15 @@ pub async fn write_facts(
     let target = resolve_write_target(file_path, &ctx.cwd, fs).await;
     let resolved = fs.canonicalize_best_effort(&target).await;
     let policy = write_policy(ctx).await;
-    match check_write_for(Path::new(file_path), &resolved, &policy) {
+    let facts = match check_write_for(Path::new(file_path), &resolved, &policy) {
         Ok(()) => PermissionFacts::new(subject, Reach::Inside),
         Err(PathSafetyError::OutsideAllowedRoots { .. }) => {
             PermissionFacts::new(subject, Reach::Outside)
                 .with_question(format!("{tool} outside the project requires confirmation"))
         }
         Err(err) => PermissionFacts::new(subject, Reach::Refused(format!("{err:?}"))),
-    }
+    };
+    facts.landing_at(resolved)
 }
 
 /// What a read-only tool says about reading `target`: `Inside` where
