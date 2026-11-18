@@ -233,21 +233,27 @@ examples/plugins/quickjs/
 1. **声明**。`plugin.toml` 的 `[[command]]` 写 `entry`、单行 `description`(进 `RunExt` 的工具
    描述)、`read_only`(只读子命令的前缀:plan 模式下可用、不询问、可以并行)和 `writes`
    (`["forge/**"]`:命令只能写这里,之外的写入直接失败)。会写的子命令在 `default` 下每次调用
-   问一次,调用里的写入不再问。
+   问一次,调用里的写入不再问。`read_only` 按前缀整词匹配,看用法的 `--help` 写法也要列进去,
+   否则 `forge flow archive --help` 也会问。
 2. **入口**。`forge.js` 顶层的 `main(argv, input, ctx)` 按前两个词分发;选项用
    `agix.cli.parseArgs` 解析,出错时把那一组的用法拼进 `Error` 抛出——模型读到的就是用法,下一次
-   就写对了。`input` 按约定是对象,但模型常把它写成 JSON 文本,入口先用 `agix.yaml.parse` 把文本
-   读成对象。返回对象,引擎序列化成 JSON 交给模型;抛 `Error` 时模型只看到消息。
+   就写对了。查子命令用 `Object.hasOwn`,`forge req constructor` 才不会摸到对象原型上的东西。
+   `input` 按约定是对象,但模型常把它写成 JSON 或 YAML 文本,入口先 `JSON.parse`、不行再
+   `agix.yaml.parse`。返回对象,引擎序列化成 JSON 交给模型;抛 `Error` 时模型只看到消息。
 3. **读写文件**。经 `tools.Glob` / `tools.Read` / `tools.Write`,和模型调用时同一条路径、同一套
    权限。forge 每次运行先 `Glob` 一遍 `forge/**`,只读列出来的文件;改一个已有文件之前在这次运行里
    读过它(`Write` 要求如此)。命令删不了文件,要"移动"就复制再改写原处。
 4. **校验**。frontmatter 与 `input` 的 JSON Schema 写成常量,读进来、写出去之前都过
    `agix.json.validate`,错误里写文件名和 `instancePath`;人手改坏的文件在第一个命令就报出来。
+   数据存成 Markdown 时,写之前把它渲染再解析一遍,读回来不一样就拒——模型写的正文里总会有
+   一行恰好像结构。几个变更改同一份数据时,记下写增量那一刻的哈希,合并前核对,别让后合并的
+   悄悄覆盖先合并的;合并先核对完再动手写,中途失败的能重跑。
 5. **远端**。`callTool("mcp__<server>__items_query", …)` 调会话里配好的 MCP 服务,连接与登录由
    引擎管。命令里的 MCP 调用询问即失败,要用户给这几个工具 allow 规则。
 6. **守卫与规矩**。`scripts/guard.js` 在 `tool.around` 上看 `via`:模型与 `RunCode` 对 `forge/`
    的直接读写拒绝并说该用哪条命令,`RunExt:forge` 放行;`scripts/rules.js` 在 `prompt.block` 加
-   一行规矩。两者都只靠 `agix.glob` 这类纯函数。
+   一行规矩。两者都只靠 `agix.path` 这类纯函数。守卫是给合作的模型的提醒,不是边界——shell
+   换个写法就绕过去了;它能拦住的是模型顺手的那一下,数据的完整性靠命令自己校验(`forge.md` §6)。
 7. **skill 与命令分工**。skill 写模型要判断、要写作的那部分和要调的几条命令;编号、状态、推进、
    合并都在命令里。命令交回一句 `say`("接着展开 forge-spec"或"停下告诉用户"),skill 只写
    "照它说的做",流程规则因此只有命令里一份。
