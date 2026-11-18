@@ -1,57 +1,105 @@
-//! One RunCode program from admission to outcome: takes a run slot, wires the
-//! host the script talks to, runs the engine beside the call dispatcher, and
-//! turns how it ended into the text and value the model sees.
+//! One script from admission to how it ended, shared by `RunCode` and
+//! `RunExt`: takes a run slot, wires the host the script talks to, runs the
+//! engine beside the call dispatcher, and watches the clock, the turn and a
+//! stop. Each tool turns the ending into what the model reads.
 
-use super::*;
+use crate::calls::{Allowed, CallLog, Dispatcher};
+use crate::engine::{self, Host, ProgramHost, Run, Script, ScriptEnd};
+use crate::{take_one, Limits, StopCause};
+use base::context::{RunningTask, Session};
+use base::interface::tool_dispatch::ToolDispatch;
+use serde_json::Value;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{mpsc, Semaphore};
+use tokio_util::sync::CancellationToken;
 
-fn not_started(why: &str) -> Outcome {
-    Outcome {
-        text: format!("The program did not start: {why}."),
-        value: None,
-        is_error: true,
+/// What runs: the model's program, or a plugin command.
+pub(crate) enum Front {
+    Program {
+        code: String,
+        args: Option<Value>,
+        background: bool,
+    },
+    Command(engine::CommandScript),
+}
+
+/// Where a script runs and what holds it back.
+pub(crate) struct Launch<'a> {
+    pub dispatch: Arc<dyn ToolDispatch>,
+    pub task: &'a Arc<RunningTask>,
+    pub session: &'a Arc<dyn Session>,
+    pub limits: &'a Limits,
+    pub allowed: Allowed,
+    pub run_slots: Option<&'a Arc<Semaphore>>,
+    pub turn_cancel: CancellationToken,
+}
+
+/// How a script ended, with what it did on the way.
+pub(crate) struct Ended {
+    pub end: ScriptEnd,
+    pub calls: Arc<CallLog>,
+    pub log: Arc<Mutex<ProgramLog>>,
+    pub cause: Arc<StopCause>,
+    pub deadline: Arc<AtomicU64>,
+}
+
+impl Ended {
+    /// Why a stopped script stopped.
+    pub(crate) fn why_stopped(&self) -> String {
+        self.cause.get().unwrap_or_else(|| {
+            if engine::now_ms() >= self.deadline.load(Ordering::Relaxed) {
+                "it ran out of time".to_string()
+            } else {
+                "it was stopped".to_string()
+            }
+        })
+    }
+
+    pub(crate) fn log_tail(&self) -> String {
+        self.log.lock().unwrap_or_else(|e| e.into_inner()).tail()
     }
 }
 
-async fn acquire_run_slot(
-    run_slots: Option<&Arc<Semaphore>>,
-    turn_cancel: &CancellationToken,
-    task: &RunningTask,
-) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, Outcome> {
-    let Some(slots) = run_slots else {
-        return Ok(None);
-    };
-    tokio::select! {
-        slot = slots.clone().acquire_owned() => match slot {
-            Ok(slot) => Ok(Some(slot)),
-            Err(_) => Err(not_started("no program can run in this process any more")),
-        },
-        _ = turn_cancel.cancelled() => Err(not_started("the turn was interrupted")),
-        _ = task.cancel.cancelled() => Err(not_started("it was stopped")),
-    }
-}
+/// `Err` says why it did not start.
+pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, String> {
+    let Launch {
+        dispatch,
+        task,
+        session,
+        limits,
+        allowed,
+        run_slots,
+        turn_cancel,
+    } = launch;
+    let _slot = acquire_run_slot(run_slots, &turn_cancel, task).await?;
+    let started = engine::now_ms();
+    let deadline = Arc::new(AtomicU64::new(started + limits.time.as_millis() as u64));
+    let hard_stop = CancellationToken::new();
+    let stop_requested = Arc::new(AtomicBool::new(false));
+    let cause = Arc::new(StopCause::default());
+    let calls_log = Arc::new(CallLog::default());
 
-struct HostWiring {
-    calls: mpsc::UnboundedSender<CallRequest>,
-    program_log: Arc<Mutex<ProgramLog>>,
-    stop_requested: Arc<AtomicBool>,
-    messages: Arc<Mutex<Vec<String>>>,
-    notices: u32,
-    background: bool,
-}
+    let watchers = CancellationToken::new();
+    spawn_watchers(
+        task,
+        &turn_cancel,
+        &deadline,
+        &hard_stop,
+        &stop_requested,
+        &cause,
+        &watchers,
+        limits,
+    );
 
-fn build_host(
-    wiring: HostWiring,
-    task: &Arc<RunningTask>,
-    session: &Arc<dyn Session>,
-    args: Option<&Value>,
-) -> Host {
+    let (calls_tx, calls_rx) = mpsc::unbounded_channel();
+    let program_log = Arc::new(Mutex::new(ProgramLog::new(limits.log_chars)));
+    let (script, program) = script_of(front, task, session, &program_log, limits);
     let log_task = task.clone();
-    let (log_buffer, notify_log) = (wiring.program_log.clone(), wiring.program_log);
-    let notices_left = Arc::new(AtomicU32::new(wiring.notices));
-    let (notify_task, notify_session) = (task.clone(), session.clone());
-    let background = wiring.background;
-    Host {
-        calls: wiring.calls,
+    let log_buffer = program_log.clone();
+    let host = Host {
+        calls: calls_tx,
         log: Arc::new(move |text: String| {
             log_task.append_output(&format!("{text}\n"));
             log_buffer
@@ -59,6 +107,127 @@ fn build_host(
                 .unwrap_or_else(|e| e.into_inner())
                 .push(&text);
         }),
+        stop_requested: stop_requested.clone(),
+        program,
+    };
+
+    let dispatcher = tokio::spawn(
+        Dispatcher {
+            dispatch,
+            task: task.clone(),
+            limits: limits.clone(),
+            allowed,
+            deadline: deadline.clone(),
+            started,
+            hard_stop: hard_stop.clone(),
+            cause: cause.clone(),
+            log: calls_log.clone(),
+        }
+        .run(calls_rx),
+    );
+
+    let end = engine::spawn(Run {
+        script,
+        host,
+        memory_limit: limits.memory_bytes,
+        deadline_ms: deadline.clone(),
+        hard_stop: hard_stop.clone(),
+    })
+    .await
+    .unwrap_or(ScriptEnd::Stopped);
+    hard_stop.cancel();
+    watchers.cancel();
+    wind_down(dispatcher, task, limits).await;
+    Ok(Ended {
+        end,
+        calls: calls_log,
+        log: program_log,
+        cause,
+        deadline,
+    })
+}
+
+/// Give the sub-calls still running the grace period, then abandon them.
+async fn wind_down(
+    mut dispatcher: tokio::task::JoinHandle<()>,
+    task: &RunningTask,
+    limits: &Limits,
+) {
+    if tokio::time::timeout(limits.stop_grace, &mut dispatcher)
+        .await
+        .is_err()
+    {
+        // Dropping the dispatcher's JoinSet aborts every sub-call still in it.
+        dispatcher.abort();
+        task.append_output(&format!(
+            "(sub-calls still running {}s after the script ended were abandoned)\n",
+            limits.stop_grace.as_secs()
+        ));
+    }
+    task.report_progress();
+}
+
+fn script_of(
+    front: Front,
+    task: &Arc<RunningTask>,
+    session: &Arc<dyn Session>,
+    program_log: &Arc<Mutex<ProgramLog>>,
+    limits: &Limits,
+) -> (Script, Option<ProgramHost>) {
+    match front {
+        Front::Program {
+            code,
+            args,
+            background,
+        } => {
+            let messages = Arc::new(Mutex::new(Vec::new()));
+            let _ = task.inbox.set(Arc::new(CodeInbox(messages.clone())));
+            let program = program_host(
+                task,
+                session,
+                program_log,
+                messages,
+                limits.notices,
+                background,
+                args.as_ref(),
+            );
+            (Script::Program(code), Some(program))
+        }
+        Front::Command(command) => (Script::Command(command), None),
+    }
+}
+
+async fn acquire_run_slot(
+    run_slots: Option<&Arc<Semaphore>>,
+    turn_cancel: &CancellationToken,
+    task: &RunningTask,
+) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, String> {
+    let Some(slots) = run_slots else {
+        return Ok(None);
+    };
+    tokio::select! {
+        slot = slots.clone().acquire_owned() => match slot {
+            Ok(slot) => Ok(Some(slot)),
+            Err(_) => Err("no script can run in this process any more".into()),
+        },
+        _ = turn_cancel.cancelled() => Err("the turn was interrupted".into()),
+        _ = task.cancel.cancelled() => Err("it was stopped".into()),
+    }
+}
+
+fn program_host(
+    task: &Arc<RunningTask>,
+    session: &Arc<dyn Session>,
+    program_log: &Arc<Mutex<ProgramLog>>,
+    messages: Arc<Mutex<Vec<String>>>,
+    notices: u32,
+    background: bool,
+    args: Option<&Value>,
+) -> ProgramHost {
+    let notify_log = program_log.clone();
+    let notices_left = Arc::new(AtomicU32::new(notices));
+    let (notify_task, notify_session) = (task.clone(), session.clone());
+    ProgramHost {
         notify: Arc::new(move |text: String| {
             notify_task.append_output(&format!("[notify] {text}\n"));
             if !background {
@@ -76,168 +245,169 @@ fn build_host(
                 );
             }
         }),
-        stop_requested: wiring.stop_requested,
-        messages: wiring.messages,
+        messages,
         args: args.map(Value::to_string).unwrap_or_else(|| "{}".into()),
     }
 }
 
-fn run_summary(calls_log: &CallLog, program_log: &Mutex<ProgramLog>) -> String {
-    let made = calls_log.made.load(Ordering::SeqCst);
-    let failed = calls_log.failed.load(Ordering::SeqCst);
-    format!(
-        "({made} tool calls, {failed} failed){}",
-        program_log.lock().unwrap_or_else(|e| e.into_inner()).tail()
-    )
+/// What the script logged, keeping only as much of the end as the result
+/// can show.
+pub(crate) struct ProgramLog {
+    pub(crate) text: String,
+    dropped: bool,
+    keep_chars: usize,
 }
 
-fn outcome_of(
-    ended: ScriptEnd,
-    summary: &str,
-    calls_log: &CallLog,
-    limits: &Limits,
-    cause: &StopCause,
-    deadline: &AtomicU64,
-) -> Outcome {
-    match ended {
-        ScriptEnd::Returned(json) => {
-            let value = serde_json::from_str::<Value>(&json).ok();
-            let (text, cut) = truncate(&json, limits.result_chars);
-            let note = if cut {
-                format!(" — result cut at {} characters", limits.result_chars)
-            } else {
-                String::new()
-            };
-            Outcome {
-                text: format!("{text}\n{summary}{note}"),
-                value: if cut { None } else { value },
-                is_error: false,
-            }
+impl ProgramLog {
+    pub(crate) fn new(keep_chars: usize) -> Self {
+        Self {
+            text: String::new(),
+            dropped: false,
+            keep_chars,
         }
-        ScriptEnd::Threw(message) => Outcome {
-            text: format!(
-                "The program threw:\n{}\n{summary}{}\n\
-                 The full guide to what a program can use: ToolSearch select:RunCode.",
-                cut_note(&message, limits.result_chars),
-                completed_calls(calls_log)
-            ),
-            value: None,
-            is_error: true,
-        },
-        ScriptEnd::Stopped => {
-            let why = cause.get().unwrap_or_else(|| {
-                if engine::now_ms() >= deadline.load(Ordering::Relaxed) {
-                    "it ran out of time".to_string()
-                } else {
-                    "it was stopped".to_string()
-                }
-            });
-            Outcome {
-                text: format!(
-                    "The program did not finish: {why}.\n{summary}{}",
-                    completed_calls(calls_log)
-                ),
-                value: None,
-                is_error: true,
+    }
+
+    pub(crate) fn push(&mut self, line: &str) {
+        self.text.push_str(line);
+        self.text.push('\n');
+        let keep_bytes = self.keep_chars.saturating_mul(4).max(1);
+        if self.text.len() > keep_bytes.saturating_mul(2) {
+            let mut cut = self.text.len() - keep_bytes;
+            while !self.text.is_char_boundary(cut) {
+                cut += 1;
             }
+            self.text.drain(..cut);
+            self.dropped = true;
         }
+    }
+
+    /// The end of it, for the result.
+    pub(crate) fn tail(&self) -> String {
+        log_tail(&self.text, self.keep_chars, self.dropped)
+    }
+}
+
+pub(crate) fn log_tail(log: &str, max_chars: usize, dropped: bool) -> String {
+    if log.trim().is_empty() {
+        return String::new();
+    }
+    let total = log.chars().count();
+    let (tail, note) = if total > max_chars || dropped {
+        (
+            log.chars()
+                .skip(total.saturating_sub(max_chars))
+                .collect::<String>(),
+            format!(" (last {max_chars} characters)"),
+        )
+    } else {
+        (log.to_string(), String::new())
+    };
+    format!("\nLog{note}:\n{}", tail.trim_end())
+}
+
+struct CodeInbox(Arc<Mutex<Vec<String>>>);
+
+impl std::fmt::Debug for CodeInbox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CodeInbox")
+    }
+}
+
+impl base::context::TaskInbox for CodeInbox {
+    fn deliver(&self, message: String) -> Result<(), String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(message);
+        Ok(())
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn execute(
-    input: RunCodeInput,
-    dispatch: Arc<dyn ToolDispatch>,
+fn spawn_watchers(
     task: &Arc<RunningTask>,
-    session: &Arc<dyn Session>,
+    turn_cancel: &CancellationToken,
+    deadline: &Arc<AtomicU64>,
+    hard_stop: &CancellationToken,
+    stop_requested: &Arc<AtomicBool>,
+    cause: &Arc<StopCause>,
+    done: &CancellationToken,
     limits: &Limits,
-    run_slots: Option<&Arc<Semaphore>>,
-    turn_cancel: CancellationToken,
-    background: bool,
-) -> Outcome {
-    let _slot = match acquire_run_slot(run_slots, &turn_cancel, task).await {
-        Ok(slot) => slot,
-        Err(outcome) => return outcome,
-    };
-    let started = engine::now_ms();
-    let deadline = Arc::new(AtomicU64::new(started + limits.time.as_millis() as u64));
-    let hard_stop = CancellationToken::new();
-    let stop_requested = Arc::new(AtomicBool::new(false));
-    let cause = Arc::new(StopCause::default());
-    let messages = Arc::new(Mutex::new(Vec::new()));
-    let _ = task.inbox.set(Arc::new(CodeInbox(messages.clone())));
-    let calls_log = Arc::new(CallLog {
-        entries: Mutex::new(Vec::new()),
-        failed: AtomicU32::new(0),
-        made: AtomicU32::new(0),
-    });
-
-    let watchers = CancellationToken::new();
-    spawn_watchers(
-        task,
-        &turn_cancel,
-        &deadline,
-        &hard_stop,
-        &stop_requested,
-        &cause,
-        &watchers,
-        limits,
-    );
-
-    let (calls_tx, calls_rx) = mpsc::unbounded_channel();
-    let program_log = Arc::new(Mutex::new(ProgramLog::new(limits.log_chars)));
-    let host = build_host(
-        HostWiring {
-            calls: calls_tx,
-            program_log: program_log.clone(),
-            stop_requested: stop_requested.clone(),
-            messages,
-            notices: limits.notices,
-            background,
-        },
-        task,
-        session,
-        input.args.as_ref(),
-    );
-
-    let mut dispatcher = tokio::spawn(dispatch_calls(
-        calls_rx,
-        dispatch,
-        task.clone(),
-        limits.clone(),
-        deadline.clone(),
-        started,
-        hard_stop.clone(),
-        cause.clone(),
-        calls_log.clone(),
-    ));
-
-    let ended = engine::spawn(Run {
-        code: input.code,
-        host,
-        memory_limit: limits.memory_bytes,
-        deadline_ms: deadline.clone(),
-        hard_stop: hard_stop.clone(),
-    })
-    .await
-    .unwrap_or(ScriptEnd::Stopped);
-    hard_stop.cancel();
-    watchers.cancel();
-    if tokio::time::timeout(limits.stop_grace, &mut dispatcher)
-        .await
-        .is_err()
+) {
     {
-        // Dropping the dispatcher's JoinSet aborts every sub-call still in it.
-        dispatcher.abort();
-        task.append_output(&format!(
-            "(sub-calls still running {}s after the program ended were abandoned)\n",
-            limits.stop_grace.as_secs()
-        ));
+        let (task_cancel, hard_stop, stop_requested, cause, done, grace) = (
+            task.cancel.clone(),
+            hard_stop.clone(),
+            stop_requested.clone(),
+            cause.clone(),
+            done.clone(),
+            limits.stop_grace,
+        );
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = done.cancelled() => return,
+                _ = task_cancel.cancelled() => {}
+            }
+            stop_requested.store(true, Ordering::SeqCst);
+            tokio::select! {
+                _ = done.cancelled() => {}
+                _ = tokio::time::sleep(grace) => {
+                    cause.set(format!("it was asked to stop and did not wrap up within {}s", grace.as_secs()));
+                    hard_stop.cancel();
+                }
+            }
+        });
     }
-    task.report_progress();
-
-    let summary = run_summary(&calls_log, &program_log);
-    let outcome = outcome_of(ended, &summary, &calls_log, limits, &cause, &deadline);
-    task.append_output(&format!("{}\n", outcome.text));
-    outcome
+    {
+        let (turn_cancel, hard_stop, cause, done) = (
+            turn_cancel.clone(),
+            hard_stop.clone(),
+            cause.clone(),
+            done.clone(),
+        );
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = done.cancelled() => {}
+                _ = turn_cancel.cancelled() => {
+                    cause.set("the turn was interrupted");
+                    hard_stop.cancel();
+                }
+            }
+        });
+    }
+    {
+        let (deadline, hard_stop, cause, done) = (
+            deadline.clone(),
+            hard_stop.clone(),
+            cause.clone(),
+            done.clone(),
+        );
+        tokio::spawn(async move {
+            loop {
+                let left = deadline
+                    .load(Ordering::Relaxed)
+                    .saturating_sub(engine::now_ms());
+                if left == 0 {
+                    cause.set("it ran out of time");
+                    hard_stop.cancel();
+                    return;
+                }
+                tokio::select! {
+                    _ = done.cancelled() => return,
+                    _ = tokio::time::sleep(Duration::from_millis(left.min(1_000))) => {}
+                }
+            }
+        });
+    }
+    {
+        let (task, done) = (task.clone(), done.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = done.cancelled() => return,
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => task.report_progress(),
+                }
+            }
+        });
+    }
 }

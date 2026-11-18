@@ -1,5 +1,6 @@
 //! The QuickJS side of a run: one thread, one single-threaded async runtime,
-//! one script. Tool calls leave through a channel and come back as resolved
+//! one script — the model's program, or a plugin command's entry and the call
+//! into it. Tool calls leave through a channel and come back as resolved
 //! promises, so `Promise.all` in the script is real concurrency on the
 //! engine's own runtime.
 
@@ -7,6 +8,7 @@ use rquickjs::prelude::Async;
 use rquickjs::{
     AsyncContext, AsyncRuntime, CatchResultExt, CaughtError, Function, Object, Promise,
 };
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -26,24 +28,81 @@ pub(crate) struct CallRequest {
 pub(crate) struct Host {
     pub calls: mpsc::UnboundedSender<CallRequest>,
     pub log: Arc<dyn Fn(String) + Send + Sync>,
-    pub notify: Arc<dyn Fn(String) + Send + Sync>,
     pub stop_requested: Arc<AtomicBool>,
+    /// What only a model's program has: `agent`, `notify`, `messages`, `args`.
+    pub program: Option<ProgramHost>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ProgramHost {
+    pub notify: Arc<dyn Fn(String) + Send + Sync>,
     pub messages: Arc<Mutex<Vec<String>>>,
     pub args: String,
+}
+
+/// What the script is.
+pub(crate) enum Script {
+    /// The model's program, run as the body of an async function.
+    Program(String),
+    Command(CommandScript),
+}
+
+/// A plugin command's entry file and the call into it.
+pub(crate) struct CommandScript {
+    /// The entry's file name, as errors name it.
+    pub filename: String,
+    pub source: String,
+    pub function: String,
+    /// `[argv, input, ctx]` as JSON.
+    pub call: String,
+    /// Where the entry's bytecode is kept; `None` parses it every run.
+    pub cache_dir: Option<PathBuf>,
+}
+
+impl CommandScript {
+    /// The entry inside an async function, so it may `await` at its top
+    /// level, resolving to the function it defines. Its own first line stays
+    /// line one, so line numbers in errors match the file.
+    fn wrapped(&self) -> String {
+        let f = &self.function;
+        format!(
+            "globalThis.__agixEntry = (async () => {{ {}\n;return typeof {f} === \"undefined\" ? \
+             undefined : {f}; }})();",
+            self.source
+        )
+    }
+
+    /// Calls the entry's function and settles to `{"text":…}` for a string,
+    /// `{"value":…}` for anything else.
+    fn driver(&self) -> String {
+        format!(
+            "(async () => {{ const f = await globalThis.__agixEntry; delete globalThis.__agixEntry; \
+             if (typeof f !== \"function\") throw new Error({missing}); \
+             const [argv, input, ctx] = JSON.parse({call}); \
+             const r = await f(argv, input, Object.freeze(ctx)); \
+             return JSON.stringify(typeof r === \"string\" ? {{ text: r }} : \
+             {{ value: r === undefined ? null : r }}); }})()",
+            missing = serde_json::Value::String(format!(
+                "{} defines no function `{}`",
+                self.filename, self.function
+            )),
+            call = serde_json::Value::String(self.call.clone()),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScriptEnd {
     /// The script's return value, as JSON text.
     Returned(String),
-    /// What it threw, with its stack when there is one.
+    /// What it threw, explained.
     Threw(String),
     /// Stopped from outside: out of time or memory, or told to.
     Stopped,
 }
 
 pub(crate) struct Run {
-    pub code: String,
+    pub script: Script,
     pub host: Host,
     pub memory_limit: usize,
     /// [`now_ms`] after which the script is interrupted; moved later when it
@@ -64,7 +123,7 @@ pub(crate) fn now_ms() -> u64 {
 pub(crate) fn spawn(run: Run) -> oneshot::Receiver<ScriptEnd> {
     let (done, ended) = oneshot::channel();
     let spawned = std::thread::Builder::new()
-        .name("agix-runcode".into())
+        .name("agix-script".into())
         .spawn(move || {
             let end = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -119,8 +178,7 @@ async fn evaluate(run: Run) -> ScriptEnd {
     };
 
     let host = run.host;
-    let code = run.code;
-    let source = wrap(&code);
+    let script = run.script;
     let deadline = run.deadline_ms.clone();
     let stopped = run.hard_stop.clone();
     let end = context
@@ -128,15 +186,25 @@ async fn evaluate(run: Run) -> ScriptEnd {
             if let Err(e) = install(&ctx, host) {
                 return ScriptEnd::Threw(format!("could not set up the script globals: {e}"));
             }
-            let evaluated: rquickjs::Result<Promise> =
-                ctx.eval_with_options(source, eval_options());
-            let promise = match evaluated.catch(&ctx) {
+            let (started, source, style) = match &script {
+                Script::Program(code) => (
+                    ctx.eval_with_options(wrap(code), eval_options("code.js")),
+                    code.as_str(),
+                    Style::Program,
+                ),
+                Script::Command(command) => (
+                    start_command(&ctx, command),
+                    command.source.as_str(),
+                    Style::Command,
+                ),
+            };
+            let promise: Promise = match started.catch(&ctx) {
                 Ok(p) => p,
-                Err(e) => return ScriptEnd::Threw(explain(e, &code)),
+                Err(e) => return ScriptEnd::Threw(explain(e, source, style)),
             };
             match promise.into_future::<String>().await.catch(&ctx) {
                 Ok(json) => ScriptEnd::Returned(json),
-                Err(e) => ScriptEnd::Threw(explain(e, &code)),
+                Err(e) => ScriptEnd::Threw(explain(e, source, style)),
             }
         })
         .await;
@@ -150,11 +218,49 @@ async fn evaluate(run: Run) -> ScriptEnd {
     }
 }
 
-fn eval_options() -> rquickjs::context::EvalOptions {
+/// Evaluate a command's entry — from bytecode this machine kept, compiling
+/// and keeping it when there is none — and start the call into it.
+fn start_command<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    command: &CommandScript,
+) -> rquickjs::Result<Promise<'js>> {
+    let wrapped = command.wrapped();
+    match &command.cache_dir {
+        Some(dir) => {
+            let file = crate::bytecode::cache_file(dir, &command.filename, &wrapped);
+            let kept = std::fs::read(&file).ok().and_then(|bytes| {
+                match crate::bytecode::run(ctx, &bytes) {
+                    crate::bytecode::Loaded::Ran(ran) => Some(ran),
+                    crate::bytecode::Loaded::Unreadable => None,
+                }
+            });
+            match kept {
+                Some(ran) => ran?,
+                None => {
+                    let bytes = crate::bytecode::compile(ctx, &wrapped, &command.filename)?;
+                    crate::bytecode::store(&file, &bytes);
+                    match crate::bytecode::run(ctx, &bytes) {
+                        crate::bytecode::Loaded::Ran(ran) => ran?,
+                        crate::bytecode::Loaded::Unreadable => {
+                            ctx.eval_with_options::<(), _>(
+                                wrapped,
+                                eval_options(&command.filename),
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+        None => ctx.eval_with_options::<(), _>(wrapped, eval_options(&command.filename))?,
+    }
+    ctx.eval_with_options(command.driver(), eval_options("<runext>"))
+}
+
+fn eval_options(filename: &str) -> rquickjs::context::EvalOptions {
     let mut options = rquickjs::context::EvalOptions::default();
     options.global = true;
     options.strict = false;
-    options.filename = Some("code.js".into());
+    options.filename = Some(filename.into());
     options
 }
 
@@ -191,27 +297,29 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
         "log",
         Function::new(ctx.clone(), move |text: String| log(text))?,
     )?;
-    let notify = host.notify.clone();
-    bridge.set(
-        "notify",
-        Function::new(ctx.clone(), move |text: String| notify(text))?,
-    )?;
     let stop = host.stop_requested.clone();
     bridge.set(
         "stopRequested",
         Function::new(ctx.clone(), move || stop.load(Ordering::Relaxed))?,
     )?;
-    let inbox = host.messages.clone();
-    bridge.set(
-        "messages",
-        Function::new(ctx.clone(), move || {
-            let taken: Vec<String> =
-                std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
-            serde_json::to_string(&taken).unwrap_or_else(|_| "[]".into())
-        })?,
-    )?;
-    let args = host.args.clone();
-    bridge.set("args", Function::new(ctx.clone(), move || args.clone())?)?;
+    if let Some(program) = host.program {
+        let notify = program.notify.clone();
+        bridge.set(
+            "notify",
+            Function::new(ctx.clone(), move |text: String| notify(text))?,
+        )?;
+        let inbox = program.messages.clone();
+        bridge.set(
+            "messages",
+            Function::new(ctx.clone(), move || {
+                let taken: Vec<String> =
+                    std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
+                serde_json::to_string(&taken).unwrap_or_else(|_| "[]".into())
+            })?,
+        )?;
+        let args = program.args.clone();
+        bridge.set("args", Function::new(ctx.clone(), move || args.clone())?)?;
+    }
     ctx.globals().set("__host", bridge)?;
     ctx.eval::<(), _>(PRELUDE)
 }
@@ -220,37 +328,58 @@ fn stopped_answer() -> String {
     r#"{"ok":false,"error":"the run is stopping; no more calls are made"}"#.to_string()
 }
 
+/// Whose script an error is explained for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Style {
+    /// The model's: the message and where, since it wrote every line.
+    Program,
+    /// A command's: a plain `Error` is the command talking to the model, so
+    /// its message alone; anything else is a defect, reported with its stack.
+    Command,
+}
+
 /// An exception as the model should read it: the message, where, and what to
 /// do instead when it reached for something that is not here.
-fn explain(e: CaughtError<'_>, code: &str) -> String {
+fn explain(e: CaughtError<'_>, source: &str, style: Style) -> String {
     match e {
         CaughtError::Exception(ex) => {
             let message = ex.message().unwrap_or_default();
             let stack = ex.stack().unwrap_or_default();
-            let syntax_error = ex
-                .get::<_, String>("name")
-                .is_ok_and(|n| n == "SyntaxError");
-            if let Some(line) = syntax_error
-                .then(|| module_statement_line(code, &stack))
-                .flatten()
-            {
-                return format!(
-                    "line {line} uses import/export, but this runs as a script: there are no \
-                     modules here. Drop it and use tools.* (or callTool) for any I/O."
-                );
+            let name = ex.get::<_, String>("name").unwrap_or_default();
+            if style == Style::Program {
+                if let Some(line) = (name == "SyntaxError")
+                    .then(|| module_statement_line(source, &stack))
+                    .flatten()
+                {
+                    return format!(
+                        "line {line} uses import/export, but this runs as a script: there are no \
+                         modules here. Drop it and use tools.* (or callTool) for any I/O."
+                    );
+                }
+                if message.starts_with("could not load module") {
+                    return format!(
+                        "{message}: there are no modules here — use tools.* (or callTool) for any I/O"
+                    );
+                }
             }
-            if message.starts_with("could not load module") {
-                return format!(
-                    "{message}: there are no modules here — use tools.* (or callTool) for any I/O"
-                );
+            if style == Style::Command && name == "Error" {
+                return message;
             }
+            let message = if style == Style::Command && !name.is_empty() {
+                format!("{name}: {message}")
+            } else {
+                message
+            };
             if stack.trim().is_empty() {
                 message
             } else {
                 format!("{message}\n{}", stack.trim_end())
             }
         }
-        CaughtError::Value(v) => format!("{v:?}"),
+        CaughtError::Value(v) => match v.as_string().and_then(|s| s.to_string().ok()) {
+            Some(text) => text,
+            None => format!("{v:?}"),
+        },
         CaughtError::Error(e) => e.to_string(),
     }
 }

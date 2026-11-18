@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Agix — RunCode: the model writes a JavaScript program that calls the session's tools"
+description = "Agix — RunCode and RunExt: JavaScript that calls the session's tools, written by the model or brought by a plugin"
 
 [dependencies]
 base        = { workspace = true }
@@ -15,10 +15,14 @@ serde       = { workspace = true }
 serde_json  = { workspace = true }
 tokio       = { workspace = true }
 tokio-util  = { workspace = true }
+tracing     = { workspace = true }
+sha2        = { workspace = true }
+hex         = { workspace = true }
 
 [dev-dependencies]
 session-state = { workspace = true, features = ["testing"] }
 platform = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full", "macros", "rt-multi-thread"] }
 
 [lints.clippy]

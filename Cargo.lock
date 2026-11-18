@@ -2598,14 +2598,18 @@ version = "0.3.18-2026111702"
 dependencies = [
  "async-trait",
  "base",
+ "hex",
  "platform",
  "rquickjs",
  "schemars",
  "serde",
  "serde_json",
  "session-state",
+ "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

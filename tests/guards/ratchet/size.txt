@@ -46,8 +46,7 @@ fn    crates/model/src/types.rs                                  MessagesRequest
 fn    crates/packages/src/manifest.rs                            validate                               95
 fn    crates/platform/src/process.rs                             LocalProcess::spawn                    82
 fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
-fn    crates/ptc/src/lib.rs                                      dispatch_calls                         93
-fn    crates/ptc/src/lib.rs                                      spawn_watchers                         87
+fn    crates/ptc/src/run.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
 fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      87
 fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         105
