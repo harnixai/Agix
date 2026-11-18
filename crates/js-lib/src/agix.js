@@ -136,14 +136,24 @@ function patterns(pattern) {
   throw new TypeError(`pattern must be a string or an array of strings, got ${typeName(pattern)}`);
 }
 
+const GLOB_SLICE = 1000;
+
 function makeGlob(native) {
   const test = guarded((pattern, path) => native.globTest(patterns(pattern), needString("path", path)));
   const filter = guarded((pattern, paths) => {
     if (!isArray(paths) || !paths.every((p) => typeof p === "string")) {
       throw new TypeError(`paths must be an array of strings, got ${typeName(paths)}`);
     }
-    const hits = native.globMatches(patterns(pattern), paths);
-    return paths.filter((_, i) => hits[i]);
+    // In slices, so a script time limit can stop a long list between them:
+    // it does not reach into a native call.
+    const list = patterns(pattern);
+    const out = [];
+    for (let at = 0; at < paths.length; at += GLOB_SLICE) {
+      const slice = paths.slice(at, at + GLOB_SLICE);
+      const hits = native.globMatches(list, slice);
+      for (let i = 0; i < slice.length; i++) if (hits[i]) out.push(slice[i]);
+    }
+    return out;
   });
   return { test, filter };
 }

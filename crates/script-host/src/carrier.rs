@@ -126,8 +126,9 @@ impl ScriptCarrier {
     ///
     /// The quota is the same counter, so a script bound at both a
     /// synchronous and an asynchronous point shares one budget rather than
-    /// getting two. The clock is the engine's, for the reason given on
-    /// [`ScriptEngine::eval_blocking`]: there is no future here to time out.
+    /// getting two. The clock is the engine's, as
+    /// [`ScriptEngine::eval_blocking`] requires: there is no future here to
+    /// time out.
     ///
     /// Called from a runtime worker, the worker is handed off for the length
     /// of the call, so a slow script holds one thread rather than every task

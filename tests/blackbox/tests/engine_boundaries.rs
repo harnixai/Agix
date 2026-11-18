@@ -835,3 +835,52 @@ async fn a_program_reading_a_file_the_model_already_read_gets_its_text() -> anyh
     run.finish().await;
     Ok(())
 }
+
+/// A program handing the base library work that would never finish — a
+/// recursive schema whose two branches each recurse on the same value —
+/// gets an error back instead of holding the turn and its run slot.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_cannot_pin_its_thread_inside_the_base_library() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("program-runaway-native", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    let code = r##"let v = 1; for (let i = 0; i < 60; i++) v = [v];
+        const twice = { type: "array", items: { $ref: "#" } };
+        return agix.json.validate({ anyOf: [twice, twice] }, v);"##;
+    stub.script([
+        Reply::calls(
+            "runaway",
+            "RunCode",
+            json!({ "description": "validate", "code": code }),
+        ),
+        Reply::calls(
+            "after",
+            "RunCode",
+            json!({ "description": "after", "code": "return 'AFTER-RAN';" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = tokio::time::timeout(
+        Duration::from_secs(120),
+        run.turn(&session, "validate the value"),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("the turn is still waiting on the program"))??;
+    let failed: Vec<&(String, String, bool)> = events
+        .tool_results
+        .iter()
+        .filter(|(name, _, _)| name == "RunCode")
+        .collect();
+    assert_eq!(failed.len(), 2, "{:?}", events.tool_results);
+    let (_, runaway, is_error) = failed[0];
+    assert!(*is_error, "{runaway}");
+    assert!(runaway.contains("more than 1,000,000 times"), "{runaway}");
+    assert!(failed[1].1.contains("AFTER-RAN"), "{:?}", failed[1]);
+    run.finish().await;
+    Ok(())
+}

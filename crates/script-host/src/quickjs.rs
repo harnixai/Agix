@@ -40,6 +40,22 @@ impl QuickJsEngine {
     }
 }
 
+/// How long past its timeout a script is waited for. The interrupt only
+/// reaches JavaScript; one inside a native call ends when that call returns,
+/// and its caller does not wait for that.
+const ABANDON_AFTER: Duration = Duration::from_millis(100);
+
+fn abandoned(id: &str, limits: &ScriptLimits) -> ScriptError {
+    tracing::warn!(
+        script = %id,
+        "a script still running past its timeout was abandoned; its thread ends when the \
+         native call it is in returns"
+    );
+    ScriptError::TimedOut {
+        after: limits.timeout,
+    }
+}
+
 /// Wrap the operator's code so the whole exchange is one call with strings on
 /// both sides.
 ///
@@ -83,6 +99,15 @@ fn run_blocking(
     context.with(|ctx| {
         let aliases: Vec<&str> = library_alias.into_iter().collect();
         js_lib::install_as(&ctx, &aliases).map_err(|e| script_error(&ctx, e, deadline))?;
+        #[cfg(test)]
+        ctx.globals()
+            .set(
+                "__blockFor",
+                rquickjs::Function::new(ctx.clone(), |ms: u64| {
+                    std::thread::sleep(Duration::from_millis(ms))
+                }),
+            )
+            .map_err(|e| script_error(&ctx, e, deadline))?;
         let source = wrap(&code, &entry);
         let func: rquickjs::Function = ctx
             .eval(source.as_bytes())
@@ -146,21 +171,25 @@ impl base::interface::script::ScriptEngine for QuickJsEngine {
         // JavaScript is synchronous and CPU-bound. On an ordinary task it
         // would hold a runtime worker for its whole execution; a script that
         // spins would hold one until its deadline.
-        let joined = tokio::task::spawn_blocking(move || {
-            run_blocking(
-                code,
-                entry,
-                input,
-                deadline,
-                memory_limit_bytes,
-                library_alias.as_deref(),
-            )
-        })
+        let joined = tokio::time::timeout(
+            limits.timeout + ABANDON_AFTER,
+            tokio::task::spawn_blocking(move || {
+                run_blocking(
+                    code,
+                    entry,
+                    input,
+                    deadline,
+                    memory_limit_bytes,
+                    library_alias.as_deref(),
+                )
+            }),
+        )
         .await;
 
         let out = match joined {
-            Ok(result) => result?,
-            Err(e) => {
+            Ok(Ok(result)) => result?,
+            Err(_) => return Err(abandoned(&id, limits)),
+            Ok(Err(e)) => {
                 tracing::warn!(script = %id, error = %e, "script task did not finish");
                 return Err(ScriptError::Failed(format!("script task failed: {e}")));
             }
@@ -171,10 +200,8 @@ impl base::interface::script::ScriptEngine for QuickJsEngine {
         })
     }
 
-    /// QuickJS is synchronous; the asynchronous path above exists only to keep
-    /// a CPU-bound interpreter off a runtime worker. From a synchronous hook
-    /// point there is no worker to protect and nothing to hand off to, so this
-    /// is the same interpreter run on the calling thread.
+    /// The same interpreter on a thread of its own, which the calling hook
+    /// point waits for until the timeout and no longer.
     fn eval_blocking(
         &self,
         script: &ScriptSource,
@@ -184,14 +211,27 @@ impl base::interface::script::ScriptEngine for QuickJsEngine {
     ) -> Result<serde_json::Value, ScriptError> {
         let input = serde_json::to_string(&input)
             .map_err(|e| ScriptError::Failed(format!("input is not serializable: {e}")))?;
-        let out = run_blocking(
-            script.code.clone(),
-            entry.to_string(),
-            input,
-            Instant::now() + limits.timeout,
-            self.memory_limit_bytes,
-            self.library_alias.as_deref(),
-        )?;
+        let (code, entry) = (script.code.clone(), entry.to_string());
+        let deadline = Instant::now() + limits.timeout;
+        let memory_limit_bytes = self.memory_limit_bytes;
+        let library_alias = self.library_alias.clone();
+        let (done, ended) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("agix-hook-script".into())
+            .spawn(move || {
+                let _ = done.send(run_blocking(
+                    code,
+                    entry,
+                    input,
+                    deadline,
+                    memory_limit_bytes,
+                    library_alias.as_deref(),
+                ));
+            })
+            .map_err(|e| ScriptError::Failed(format!("could not start the script thread: {e}")))?;
+        let out = ended
+            .recv_timeout(limits.timeout + ABANDON_AFTER)
+            .map_err(|_| abandoned(&script.id, limits))??;
         serde_json::from_str(&out).map_err(|e| {
             ScriptError::Failed(format!("script returned something that is not JSON: {e}"))
         })

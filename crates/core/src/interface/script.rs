@@ -164,13 +164,9 @@ pub trait ScriptEngine: Send + Sync {
     ///
     /// Most hook points are synchronous by contract and always will be: a
     /// prompt variable provider is a plain `Fn`, a tool-result transformer
-    /// takes `&self` and returns nothing. A script bound to one of those has
-    /// to run somewhere, and the only honest answer is the calling thread.
-    ///
-    /// That is affordable because a script's clock is enforced inside the
-    /// interpreter rather than by a future that can be dropped — the deadline
-    /// travels with `limits`, so the worst case is one thread held for
-    /// `limits.timeout`, not until the script decides to stop. An engine
+    /// takes `&self` and returns nothing. The calling thread waits for the
+    /// script, so an engine must not let it wait much past `limits.timeout`,
+    /// whatever the script is doing. An engine
     /// whose work is genuinely asynchronous should not implement this; the
     /// default refuses rather than blocking a runtime from inside itself.
     fn eval_blocking(

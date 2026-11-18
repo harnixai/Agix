@@ -228,6 +228,30 @@ mod tests {
         assert_eq!(fine_out, Ok(serde_json::json!({"ok": true})));
     }
 
+    /// A hook point calls on its own thread; a script stuck where no
+    /// interrupt reaches — inside a native call — still gives that thread
+    /// back at its timeout.
+    #[test]
+    fn a_blocking_call_returns_at_its_timeout_even_from_native_code() {
+        let (done, ended) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let out = QuickJsEngine::new().eval_blocking(
+                &script("function f() { __blockFor(600000); return 1; }"),
+                "f",
+                serde_json::json!({}),
+                &ScriptLimits {
+                    timeout: Duration::from_millis(50),
+                    ..Default::default()
+                },
+            );
+            let _ = done.send(out);
+        });
+        let out = ended
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the hook thread waited for the native call");
+        assert!(matches!(out, Err(ScriptError::TimedOut { .. })), "{out:?}");
+    }
+
     /// Nothing survives a call. Two calls to the same carrier cannot see each
     /// other's globals, which is what makes one session's script unable to
     /// leave anything for another's.

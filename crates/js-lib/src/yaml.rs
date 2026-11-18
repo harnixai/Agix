@@ -95,7 +95,21 @@ struct Loader {
     root: Option<Value>,
 }
 
+/// The longest text `parse` reads: parsing is native code, which no script
+/// time limit interrupts, so its input is what bounds its time.
+pub(crate) const MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
+
 pub(crate) fn parse(text: &str) -> Result<Value, Failure> {
+    if text.len() > MAX_INPUT_BYTES {
+        return Err(Failure::new(
+            "yaml.too_large",
+            format!(
+                "the text is {} bytes; at most {} MiB is parsed",
+                text.len(),
+                MAX_INPUT_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
     let mut loader = Loader::default();
     for next in Parser::new_from_str(text) {
         let (event, at) = next.map_err(|e| scan_failure(&e))?;

@@ -324,6 +324,13 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
     }
     ctx.globals().set("__host", bridge)?;
     ctx.eval::<(), _>(PRELUDE)?;
+    #[cfg(test)]
+    ctx.globals().set(
+        "__blockFor",
+        Function::new(ctx.clone(), |ms: u64| {
+            std::thread::sleep(std::time::Duration::from_millis(ms))
+        })?,
+    )?;
     let aliases: Vec<&str> = host.library_aliases.iter().map(String::as_str).collect();
     js_lib::install_as(ctx, &aliases)
 }

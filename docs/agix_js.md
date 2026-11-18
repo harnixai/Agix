@@ -38,6 +38,9 @@ Node 或浏览器的 API。
   `util.parseArgs` 的子集；返回布尔的匹配叫 `test`，同 `RegExp.prototype.test`。
 - **规则在前，数据在后**：`glob.test(pattern, path)`、`json.validate(schema, value)`。
 - **全部同步。** 纯计算没有理由返回 Promise。
+- **代价有界。** YAML、glob、JSON Schema 是原生实现，脚本的时限打断不了一次原生调用，所以
+  它们按输入设了上限（§3 各节），正常的输入远在其内；`glob.filter` 把长列表分段交给原生实现，
+  段与段之间可以被打断。万一一次调用仍停不下来，载体到时不再等它（`ptc.md`、`extending_quickjs.md`）。
 - **输入输出都是普通的 JSON 值与字符串**，不返回类实例。路径一律 POSIX 写法（`/`）。
 - **出错抛 `AgixError`**（`Error` 的子类，`e.name === "AgixError"`），带 `code`，形如 `yaml.syntax`；
   "校验不通过"不算出错，以返回值表达。参数类型不对（该传字符串的传了数字）抛 `TypeError`，同 Node。
@@ -69,6 +72,7 @@ Node 或浏览器的 API。
   重复的键报错（`yaml.duplicate_key`）。
 - 锚点与别名展开，经别名展开的节点数（十万）与字节数（8 MiB）有上限，防"十亿笑声"（`yaml.alias_limit`）。
 - 多文档的输入报错（`yaml.multiple_documents`）。
+- `parse` 至多读 8 MiB 的文本，更长的报 `yaml.too_large`（`parseFrontmatter` 按 frontmatter 那段算）。
 - `stringify` 的输出：块风格、缩进 2、键按插入顺序、不折行、只在必要时加引号、以换行结尾。
   `undefined`、函数、非有限数报错（`yaml.unrepresentable`）。
 - frontmatter 的起止行是单独一行的 `---`；接受 BOM 与 CRLF。起始行之后没有结束行报 `yaml.syntax`；
@@ -86,7 +90,8 @@ Node 或浏览器的 API。
 
 `pattern` 是一个字符串或字符串数组（任一匹配即可）。语义与 `Glob` 工具、权限规则相同：`*`、`?`
 不跨 `/`，`**` 跨目录，支持 `{a,b}` 与 `[abc]`，大小写敏感，`.` 开头的名字不特殊对待。按字符串
-匹配，不碰文件系统：相对的模式配相对的路径，绝对的配绝对的。模式写错抛 `glob.pattern`。
+匹配，不碰文件系统：相对的模式配相对的路径，绝对的配绝对的。模式写错抛 `glob.pattern`；单个模式
+长于 4,096 字符、一次调用的模式合计长于 16,384 字符，同样抛 `glob.pattern`。
 
 ### `agix.path`
 
@@ -111,6 +116,10 @@ Node `path.posix` 里不依赖当前目录、不碰文件系统的那几个，�
 - `$ref` 只解析 schema 内部的；指到外部的抛 `json.external_ref`——这里不联网也不读文件。
 - `schema` 与 `value` 按 `JSON.stringify` 的语义取值（`undefined` 的属性略去，`NaN` 成 `null`）。
 - schema 本身不合法抛 `json.schema`。
+- 校验前先数一遍代价：把 schema 的各部分套到值的各部分上，`anyOf` 等的每个分支、
+  `patternProperties` 的每个模式都算，超过一百万次（或一路引用嵌套超过 1,024 层）抛
+  `json.too_complex`，不开始校验。两个分支都对同一处递归的 schema 代价随深度指数增长，
+  会在这里被拒；普通的递归 schema（树、链表）不受影响。
 
 ### `agix.hash`
 

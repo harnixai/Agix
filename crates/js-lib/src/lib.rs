@@ -306,7 +306,24 @@ fn yaml_stringify(ctx: Ctx<'_>, json: String) -> rquickjs::Result<String> {
     yaml::stringify(&value).map_err(|f| f.throw(&ctx))
 }
 
+/// The longest glob pattern, and the most pattern text one call compiles.
+const MAX_PATTERN_CHARS: usize = 4_096;
+const MAX_PATTERNS_CHARS: usize = 16_384;
+
 fn globs(patterns: &[String]) -> Result<Vec<globset::GlobMatcher>, Failure> {
+    let lengths = patterns.iter().map(|p| p.chars().count());
+    if lengths.clone().any(|n| n > MAX_PATTERN_CHARS) {
+        return Err(Failure::new(
+            "glob.pattern",
+            format!("a pattern is longer than {MAX_PATTERN_CHARS} characters"),
+        ));
+    }
+    if lengths.sum::<usize>() > MAX_PATTERNS_CHARS {
+        return Err(Failure::new(
+            "glob.pattern",
+            format!("the patterns are longer than {MAX_PATTERNS_CHARS} characters together"),
+        ));
+    }
     patterns
         .iter()
         .map(|p| {

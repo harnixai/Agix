@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 /// What runs: the model's program, or a plugin command.
@@ -129,15 +129,14 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         .run(calls_rx),
     );
 
-    let end = engine::spawn(Run {
+    let ended = engine::spawn(Run {
         script,
         host,
         memory_limit: limits.memory_bytes,
         deadline_ms: deadline.clone(),
         hard_stop: hard_stop.clone(),
-    })
-    .await
-    .unwrap_or(ScriptEnd::Stopped);
+    });
+    let end = until_cut_off(ended, &hard_stop, task).await;
     hard_stop.cancel();
     watchers.cancel();
     wind_down(dispatcher, task, limits).await;
@@ -148,6 +147,35 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         cause,
         deadline,
     })
+}
+
+/// How long a script that was cut off has to stop before it is left behind.
+/// The interrupt only reaches JavaScript: one inside a native call stops
+/// when that call returns, which may be never, and until then its caller
+/// and its run slot would wait with it.
+const ABANDON_AFTER: Duration = Duration::from_secs(1);
+
+async fn until_cut_off(
+    mut ended: oneshot::Receiver<ScriptEnd>,
+    hard_stop: &CancellationToken,
+    task: &RunningTask,
+) -> ScriptEnd {
+    tokio::select! {
+        end = &mut ended => return end.unwrap_or(ScriptEnd::Stopped),
+        _ = hard_stop.cancelled() => {}
+    }
+    match tokio::time::timeout(ABANDON_AFTER, ended).await {
+        Ok(end) => end.unwrap_or(ScriptEnd::Stopped),
+        Err(_) => {
+            tracing::warn!(
+                task = %task.task_id,
+                "a script still running {}s after it was cut off was abandoned; its thread \
+                 ends when the native call it is in returns",
+                ABANDON_AFTER.as_secs()
+            );
+            ScriptEnd::Stopped
+        }
+    }
 }
 
 /// Give the sub-calls still running the grace period, then abandon them.

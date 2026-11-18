@@ -933,3 +933,69 @@ async fn no_global_a_program_has_can_become_the_librarys_alias() {
         }
     }
 }
+
+/// A script inside a native call no interrupt reaches — `__blockFor` stands
+/// for a library function that runs away — is cut off at its time limit
+/// anyway, and the slot it held is free for the next run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_stuck_in_native_code_is_abandoned_at_its_time_limit() {
+    let slots = Arc::new(Semaphore::new(1));
+    let tool = RunCodeTool::new(
+        &[],
+        Limits {
+            time: Duration::from_secs(1),
+            stop_grace: Duration::from_secs(1),
+            ..limits()
+        },
+        Library::default(),
+    )
+    .with_run_slots(slots.clone());
+    let call = |code: &'static str| {
+        let mut ctx = session_state::testing::tool_context_for_test(
+            platform::local_providers(),
+            "/tmp".into(),
+        );
+        ctx.dispatch = Some(Arc::new(Fake::default()));
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            tool.call(json!({ "code": code }), ctx, ProgressSender::noop("t")),
+        )
+    };
+    let stuck = call("__blockFor(600000); return 1;")
+        .await
+        .expect("the run waited for the native call")
+        .unwrap();
+    assert!(stuck.is_error);
+    assert!(text(&stuck).contains("ran out of time"), "{}", text(&stuck));
+    let next = call("return 2;")
+        .await
+        .expect("the stuck run kept its slot")
+        .unwrap();
+    assert!(!next.is_error, "{}", text(&next));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_turn_does_not_wait_for_a_stuck_native_call() {
+    let mut ctx =
+        session_state::testing::tool_context_for_test(platform::local_providers(), "/tmp".into());
+    ctx.dispatch = Some(Arc::new(Fake::default()));
+    let turn = ctx.cancel.clone();
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
+    let running = tokio::spawn(async move {
+        tool.call(
+            json!({ "code": "log('blocking'); __blockFor(600000); return 1;" }),
+            ctx,
+            ProgressSender::noop("t"),
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    turn.cancel();
+    let r = tokio::time::timeout(Duration::from_secs(30), running)
+        .await
+        .expect("the interrupted run waited for the native call")
+        .unwrap()
+        .unwrap();
+    assert!(r.is_error);
+    assert!(text(&r).contains("interrupted"), "{}", text(&r));
+}

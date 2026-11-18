@@ -607,3 +607,71 @@ fn an_alias_is_a_lowercase_name_no_script_already_has() {
         });
     }
 }
+
+/// `body` on a thread of its own, given `budget` to finish in.
+fn within(budget: std::time::Duration, body: &'static str) -> Value {
+    let (done, ended) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(run(body));
+    });
+    ended
+        .recv_timeout(budget)
+        .unwrap_or_else(|_| panic!("still running after {budget:?}: {body}"))
+}
+
+#[test]
+fn json_validate_refuses_a_schema_whose_cost_explodes() {
+    let out = within(
+        std::time::Duration::from_secs(5),
+        r##"let v = 1; for (let i = 0; i < 40; i++) v = [v];
+           const twice = { type: "array", items: { $ref: "#" } };
+           return agix.json.validate({ anyOf: [twice, twice] }, v);"##,
+    );
+    assert_eq!(out["err"]["code"], "json.too_complex", "{out}");
+    let out = within(
+        std::time::Duration::from_secs(5),
+        r##"return agix.json.validate({ $ref: "#" }, 1);"##,
+    );
+    assert_eq!(out["err"]["code"], "json.too_complex", "{out}");
+}
+
+#[test]
+fn json_validate_still_takes_recursive_schemas_that_do_not_explode() {
+    assert_eq!(
+        ok(r##"
+            const tree = { type: "object", properties: {
+                name: { type: "string" },
+                left: { $ref: "#" }, right: { $ref: "#" },
+                children: { type: "array", items: { $ref: "#/$defs/node" } } },
+              $defs: { node: { $ref: "#" } } };
+            let t = { name: "leaf" };
+            for (let i = 0; i < 100; i++) t = { name: "n" + i, left: t, children: [{ name: "c" }] };
+            return [agix.json.validate(tree, t).valid, agix.json.validate(tree, { left: { name: 1 } }).valid];
+        "##),
+        json!([true, false])
+    );
+    assert_eq!(
+        ok("return agix.json.validate({ type: 'array', items: { type: 'integer' } }, Array(100000).fill(1)).valid;"),
+        json!(true)
+    );
+}
+
+#[test]
+fn glob_and_yaml_refuse_inputs_past_their_bounds() {
+    assert_eq!(
+        code("agix.glob.test('a'.repeat(5000), 'a');"),
+        "glob.pattern"
+    );
+    assert_eq!(
+        code("agix.glob.filter(Array(5).fill('b'.repeat(4000)), ['a']);"),
+        "glob.pattern"
+    );
+    assert_eq!(
+        ok("return agix.glob.filter('**/*.rs', Array.from({ length: 20000 }, (_, i) => `src/${i}.rs`)).length;"),
+        json!(20000)
+    );
+    assert_eq!(
+        code("agix.yaml.parse('a: ' + 'x'.repeat(9 * 1024 * 1024));"),
+        "yaml.too_large"
+    );
+}
