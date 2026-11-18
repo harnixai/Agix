@@ -38,7 +38,7 @@ calls_per_turn = 1000                   # 可选;默认 1000,来自包的不能�
 [[mcp]]
 name = "github"
 kind = "native"                # 必须给 `config`
-config = "mcp/github.json"     # stdio server 以插件根目录为工作目录启动,相对的 command 与路径在那里解析
+config = "mcp/github.json"     # stdio server 以插件根目录为工作目录启动,相对的 command 与路径在那里解析;服务哪个项目见「包里的 MCP 服务器」
 
 # ── 插件自己拥有的场景 ──
 # 一个声明式场景目录(scene.json + prompt.md),格式见 extension_points.md「声明式场景」;
@@ -123,6 +123,26 @@ manifest 里出现引擎不认识的顶级段,不拒,但打一条 WARN 说它"�
   `extending_quickjs.md` 里有。
 - **来自包的脚本绑定逐条降级。** 一条兑现不了的绑定只让它自己消失,原因进 `plugin.list`
   的 `script_faults`。运维自己写在 `settings.json` 里的 `scripts` 仍是全有或全无。
+
+## 包里的 MCP 服务器
+
+一个 daemon 同时服务多个项目,stdio 服务又以插件根目录为工作目录启动,所以服务不能拿工作目录
+当项目。引擎按 (项目, 场景) 各连一份,每条连接服务的项目是确定的,用两种方式告诉服务(对
+`settings.json` 里声明的服务也一样):
+
+- **MCP `roots`**:客户端声明 `roots` 能力,`roots/list` 答这个项目根,一个 `file://` URI;
+  无项目会话(`project_root: null`)答空列表。2026-07-28 的服务在 `input_required` 里要,更早的
+  自己发 `roots/list`,答的都一样。
+- **环境变量 `AGIX_PROJECT_ROOT`**(只对 stdio 服务):项目根的绝对路径;无项目时没有这个变量,
+  daemon 自己的环境里有也不传。它在 `sandbox.subprocess_env` 与服务自己的 `env` 之后设,
+  allowlist 拿不掉它,配置也改不了它。
+
+项目根是解析过符号链接的路径,同一个目录经链接或另一种写法打开,服务看到的是同一个;会话在
+worktree 里时给的也是项目根。
+
+服务自己的文件读写不经过 Agix:权限检查只管模型对它的那次工具调用,调用进了服务,它读哪里、
+写哪里,引擎看不见也拦不住。服务应当把写入限在 roots 之内;装包的人要知道,它的进程有启动它的
+用户的全部权限。
 
 ## 包里的 skill
 

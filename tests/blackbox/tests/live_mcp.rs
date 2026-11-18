@@ -3,8 +3,9 @@
 //! budget, resources read by tool and by `@` reference, a prompt run as a
 //! slash command, a server added and then changed at runtime, the HTTP and
 //! SSE transports, the enterprise policy (with a plugin's server among the
-//! denied), a plugin's server across `config.reload`, and a tool whose server
-//! asks the user something, and a tool the server runs as a task.
+//! denied), a plugin's server across `config.reload` and writing into the
+//! session's project, a tool whose server asks the user something, and a tool
+//! the server runs as a task.
 
 use std::path::Path;
 use std::time::Duration;
@@ -760,6 +761,51 @@ async fn a_plugins_mcp_server_survives_a_config_reload() -> anyhow::Result<()> {
             .count(),
         2
     );
+    run.finish().await;
+    Ok(())
+}
+
+/// A plugin's server runs in its package and learns the session's project
+/// from the client: the marker the model has it write lands in the project.
+#[tokio::test(flavor = "multi_thread")]
+async fn live_model_has_a_plugins_server_write_into_the_sessions_project() -> anyhow::Result<()> {
+    let server = McpToy::stdio_config(&["--name", "kit"])?;
+    let mut run = LiveRun::builder("mcp-plugin-root")
+        .before_start(move |world, _| install_plugin_server(world, "kit", "tools", &server))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    let marker = format!("marker-{}.txt", nonce());
+    let events = run
+        .turn(
+            &session,
+            &format!(
+                "Call the mcp__kit-mcp-tools__touch_in_root tool with name {marker} (if it is not \
+                 in your tool list, find it with ToolSearch). Reply with the path it returned."
+            ),
+        )
+        .await?;
+    assert!(
+        results_of(&events, "mcp__kit-mcp-tools__touch_in_root")
+            .iter()
+            .any(|(_, _, failed)| !failed),
+        "{:?}",
+        events.tool_results
+    );
+    let package = run
+        .world
+        .global_root()
+        .join("plugins")
+        .join("cache")
+        .join("kit")
+        .join("1.0.0");
+    assert!(
+        run.project.join(&marker).is_file(),
+        "no {marker} in the project; in the package: {}",
+        package.join(&marker).exists()
+    );
+    assert!(!package.join(&marker).exists());
     run.finish().await;
     Ok(())
 }
