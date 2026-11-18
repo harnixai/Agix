@@ -16,11 +16,16 @@ use rquickjs::{qjs, Ctx};
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
 use std::fs::Metadata;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 const EXTENSION: &str = "qjsbc";
+
+/// How old a staging file has to be before pruning takes it for one a crashed
+/// run left, rather than one another run is still writing.
+const STAGING_ABANDONED: Duration = Duration::from_secs(3600);
 
 /// How many compiled entries a cache directory keeps.
 pub(crate) const KEPT: usize = 64;
@@ -193,32 +198,34 @@ fn write_private(dir: &Path, file: &Path, bytes: &[u8]) -> std::io::Result<()> {
             return Err(not_ours(file));
         }
     }
-    let staged = dir.join(format!(
-        ".{}.{}",
-        file.file_name().and_then(|n| n.to_str()).unwrap_or("entry"),
-        std::process::id()
-    ));
-    let _ = std::fs::remove_file(&staged);
-    let written = private_file_options()
-        .open(&staged)
-        .and_then(|mut f| f.write_all(bytes))
-        .and_then(|()| std::fs::rename(&staged, file));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&staged);
-    }
-    written
+    let opts = base::fs::WriteOpts {
+        mode: Some(0o600),
+        fsync: false,
+    };
+    base::fs::write_atomic(file, bytes, opts)
 }
 
-/// Remove all but the `keep` most recently used entries in `dir`.
+/// Remove all but the `keep` most recently used entries in `dir`, and the
+/// staging files runs that never finished left.
 pub(crate) fn prune(dir: &Path, keep: usize) {
     let Ok(listed) = std::fs::read_dir(dir) else {
         return;
     };
-    let mut entries: Vec<_> = listed
-        .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == EXTENSION))
-        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
-        .collect();
+    let staging = format!(".{EXTENSION}.");
+    let mut entries = Vec::new();
+    for entry in listed.flatten() {
+        let Some(used) = entry.metadata().ok().and_then(|m| m.modified().ok()) else {
+            continue;
+        };
+        let path = entry.path();
+        if path.extension().is_some_and(|x| x == EXTENSION) {
+            entries.push((used, path));
+        } else if entry.file_name().to_string_lossy().contains(&staging)
+            && used.elapsed().is_ok_and(|age| age > STAGING_ABANDONED)
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
     if entries.len() <= keep {
         return;
     }
@@ -256,14 +263,6 @@ fn private_dir_builder() -> std::fs::DirBuilder {
     builder
 }
 
-#[cfg(unix)]
-fn private_file_options() -> std::fs::OpenOptions {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true).mode(0o600);
-    options
-}
-
 #[cfg(not(unix))]
 fn owned(_: &Metadata) -> bool {
     true
@@ -282,13 +281,6 @@ fn same_file(_: &Metadata, _: &Metadata) -> bool {
 #[cfg(not(unix))]
 fn private_dir_builder() -> std::fs::DirBuilder {
     std::fs::DirBuilder::new()
-}
-
-#[cfg(not(unix))]
-fn private_file_options() -> std::fs::OpenOptions {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    options
 }
 
 #[cfg(all(test, unix))]
@@ -414,6 +406,57 @@ mod tests {
             "nothing is written into a readable directory"
         );
         chmod(&dir, 0o700).unwrap();
+    }
+
+    #[test]
+    fn concurrent_stores_of_one_entry_leave_it_whole_and_no_staging_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        let bytes: Vec<u8> = (0..(2 << 20)).map(|i: u32| (i % 251) as u8).collect();
+        for _ in 0..10 {
+            std::thread::scope(|scope| {
+                for _ in 0..8 {
+                    scope.spawn(|| store(&file, &bytes));
+                }
+            });
+            assert!(
+                std::fs::read(&file).unwrap() == bytes,
+                "a torn entry was installed"
+            );
+        }
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(left, [file]);
+    }
+
+    #[test]
+    fn a_stale_staging_file_is_pruned_and_a_fresh_one_kept() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".bytecode");
+        let file = cache_file(&dir, "cmd.js", "main()");
+        store(&file, b"compiled");
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        let stale = dir.join(format!(".{name}.1.0"));
+        let fresh = dir.join(format!(".{name}.2.0"));
+        std::fs::write(&stale, b"half").unwrap();
+        std::fs::write(&fresh, b"half").unwrap();
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        store(&cache_file(&dir, "cmd.js", "other()"), b"compiled");
+        assert!(!stale.exists(), "a staging file a crash left is removed");
+        assert!(
+            fresh.exists(),
+            "a staging file being written may be another run's"
+        );
     }
 
     #[test]
