@@ -1,4 +1,5 @@
 //! 把 `examples/plugins/quickjs/`（示例插件包 `demo-quickjs` 的源码）、
+//! `examples/plugins/forge/`（规格驱动开发的样例 `forge`）、
 //! `tests/fixtures/ext_plugin/`（带 `[[command]]` 的 `notes-plugin`）或用例现造的
 //! 插件目录打成 zip，给 `plugin.install` RPC 用。
 //!
@@ -13,6 +14,18 @@ pub const DEMO_PACKAGE_VERSION: &str = "1.0.0";
 
 pub fn demo_package_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/quickjs")
+}
+
+pub const FORGE_PACKAGE: &str = "forge";
+pub const FORGE_PACKAGE_VERSION: &str = "0.1.0";
+
+pub fn forge_package_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/forge")
+}
+
+/// 打包 `forge_package_dir()`，返回 `(zip 绝对路径, sha256 hex 校验和)`。
+pub fn package_forge(out_dir: &Path) -> anyhow::Result<(PathBuf, String)> {
+    package_dir(&forge_package_dir(), out_dir, FORGE_PACKAGE)
 }
 
 pub const EXT_PACKAGE: &str = "notes-plugin";

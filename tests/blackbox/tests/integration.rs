@@ -12,6 +12,7 @@ mod embed_product_name;
 mod embed_project_dir;
 mod engine_boundaries;
 mod engine_proxy;
+mod forge;
 mod four_project_pipeline;
 mod harness;
 mod hook_events;
