@@ -1,10 +1,11 @@
 //! Agix — plugin packages: the manifest format, finding installed packages,
 //! the versioned cache, installing and enabling, what a package declares
-//! (agent types, scenes, MCP servers, skills), and the disclosure an installer
-//! shows.
+//! (agent types, scenes, MCP servers, skills, commands), and the disclosure an
+//! installer shows.
 
 pub mod agents;
 pub mod cache;
+pub mod commands;
 pub mod disclosure;
 pub mod discovery;
 pub mod install;

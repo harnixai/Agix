@@ -39,6 +39,8 @@ pub struct Disclosure {
     pub scene: Option<String>,
     /// Names of the skills it ships.
     pub skills: Vec<String>,
+    /// Names of the commands it adds.
+    pub commands: Vec<String>,
     /// MCP servers it will start: declared name and kind, then the command
     /// line or URL it resolves to. Environment variables and headers are
     /// listed by name only, since their values are typically credentials.
@@ -126,6 +128,8 @@ impl Disclosure {
             d.push_skill(&skill)?;
         }
 
+        d.push_commands(plugin)?;
+
         Ok(d)
     }
 
@@ -176,6 +180,26 @@ impl Disclosure {
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
+        }
+        Ok(())
+    }
+
+    /// A command runs the package's own JavaScript and writes where it says;
+    /// its description reaches the model in `RunExt`'s.
+    fn push_commands(&mut self, plugin: &Plugin) -> Result<(), PluginError> {
+        for command in crate::commands::declared_commands(plugin)? {
+            self.push_text(
+                &format!("command `{}` description", command.name),
+                &command.description,
+                MAX_DESCRIPTION_CHARS,
+            )?;
+            let writes = match command.writes.as_slice() {
+                [] => "writes no files".to_string(),
+                globs => format!("may write {}", globs.join(", ")),
+            };
+            self.capabilities
+                .push(format!("adds command `{}` that {writes}", command.name));
+            self.commands.push(command.name);
         }
         Ok(())
     }
@@ -290,6 +314,30 @@ mod tests {
             d.capabilities
         );
         assert!(!d.is_inert(), "a package that runs code is not inert");
+    }
+
+    #[test]
+    fn a_command_is_disclosed_with_what_it_may_write() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("forge.js"), "function main() {}").unwrap();
+        let p = load(
+            dir.path(),
+            "\n[[command]]\nname = \"forge\"\nentry = \"forge.js:main\"\n\
+             description = \"specs and changes\"\nwrites = [\"forge/**\"]\n\
+             [[command]]\nname = \"peek\"\nentry = \"forge.js:main\"\ndescription = \"look\"\n",
+        );
+        let d = Disclosure::from_plugin(&p).unwrap();
+        assert_eq!(d.commands, ["forge", "peek"]);
+        assert!(d
+            .capabilities
+            .contains(&"adds command `forge` that may write forge/**".to_string()));
+        assert!(d
+            .capabilities
+            .contains(&"adds command `peek` that writes no files".to_string()));
+        assert!(d.model_visible.contains(&VisibleText {
+            origin: "command `forge` description".into(),
+            text: "specs and changes".into(),
+        }));
     }
 
     /// The prompt is the payload a sandbox cannot inspect, so the installer

@@ -26,6 +26,7 @@ pub const KNOWN_SECTIONS: &[&str] = &[
     "scene",
     "agent",
     "skills",
+    "command",
 ];
 
 /// Top-level sections addressed to whoever embeds the engine, not to the
@@ -64,6 +65,9 @@ pub struct PluginManifest {
     /// `skills/` directory with no `[skills]` section contributes nothing.
     #[serde(default)]
     pub skills: Option<SkillsSection>,
+    /// Commands this package adds, each run through `RunExt` and as `/name`.
+    #[serde(default)]
+    pub command: Vec<CommandDef>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -154,6 +158,32 @@ pub struct SceneSection {
 pub struct SkillsSection {
     /// A directory of `<name>/SKILL.md` skills, relative to the plugin root.
     pub dir: PathBuf,
+}
+
+/// A command this package adds (`docs/runext.md`).
+#[derive(Debug, Deserialize, Clone)]
+#[non_exhaustive]
+pub struct CommandDef {
+    pub name: String,
+    /// `<file>:<function>`, the file relative to the plugin root.
+    pub entry: String,
+    pub description: String,
+    /// Argument prefixes, whole words each, that make a call read-only.
+    #[serde(default)]
+    pub read_only: Vec<String>,
+    /// Globs relative to the project root that the command may write.
+    #[serde(default)]
+    pub writes: Vec<String>,
+}
+
+impl CommandDef {
+    pub fn file(&self) -> &str {
+        self.entry.rsplit_once(':').map_or("", |(f, _)| f)
+    }
+
+    pub fn function(&self) -> &str {
+        self.entry.rsplit_once(':').map_or("", |(_, f)| f)
+    }
 }
 
 /// A plugin-declared agent type.
@@ -517,15 +547,9 @@ fn validate(m: &PluginManifest) -> Result<(), PluginError> {
         }
     }
 
-    for a in &m.agent {
-        if !inside_package(&a.prompt) {
-            return Err(PluginError::Schema(format!(
-                "agent `{}` prompt `{}` must name a file inside the package",
-                a.name,
-                a.prompt.display()
-            )));
-        }
-    }
+    validate_agents(&m.agent)?;
+
+    validate_commands(&m.command)?;
 
     for s in &m.mcp {
         let Some(config) = &s.config else {
@@ -545,9 +569,151 @@ fn validate(m: &PluginManifest) -> Result<(), PluginError> {
     Ok(())
 }
 
+fn validate_agents(agents: &[AgentDef]) -> Result<(), PluginError> {
+    for a in agents {
+        if !inside_package(&a.prompt) {
+            return Err(PluginError::Schema(format!(
+                "agent `{}` prompt `{}` must name a file inside the package",
+                a.name,
+                a.prompt.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_commands(commands: &[CommandDef]) -> Result<(), PluginError> {
+    let mut names = std::collections::HashSet::new();
+    for c in commands {
+        validate_command(c)?;
+        if !names.insert(c.name.as_str()) {
+            return Err(PluginError::Schema(format!(
+                "command `{}` is declared twice",
+                c.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_command(c: &CommandDef) -> Result<(), PluginError> {
+    let schema = |what: String| PluginError::Schema(format!("command `{}` {what}", c.name));
+    let name_fits = c.name.len() <= 32
+        && c.name.starts_with(|ch: char| ch.is_ascii_lowercase())
+        && c.name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-');
+    if !name_fits {
+        return Err(schema(
+            "must be 1–32 lowercase ASCII letters, digits or `-`, starting with a letter".into(),
+        ));
+    }
+    if base::command::BUILTIN_COMMANDS
+        .iter()
+        .any(|(builtin, _)| *builtin == c.name)
+    {
+        return Err(schema("takes the name of a built-in slash command".into()));
+    }
+    let (file, function) = (c.file(), c.function());
+    if file.is_empty() || !is_identifier(function) {
+        return Err(schema(format!(
+            "entry `{}` is not `<file>:<function>` with a JavaScript identifier",
+            c.entry
+        )));
+    }
+    if !inside_package(Path::new(file)) {
+        return Err(schema(format!(
+            "entry `{}` must name a file inside the package",
+            c.entry
+        )));
+    }
+    if c.description.trim().is_empty() || c.description.contains(['\n', '\r']) {
+        return Err(schema("needs a one-line description".into()));
+    }
+    if c.read_only
+        .iter()
+        .any(|p| p.split_whitespace().next().is_none())
+    {
+        return Err(schema("has an empty `read_only` prefix".into()));
+    }
+    for glob in &c.writes {
+        if let Some(why) = unscoped_write(glob) {
+            return Err(schema(format!(
+                "`writes` `{glob}` {why}; write a glob relative to the project, below a \
+                 directory in it (`data/**`)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Why a `writes` glob would reach beyond the project as written. Where it
+/// lands once resolved against a project is checked again where it is used.
+fn unscoped_write(glob: &str) -> Option<&'static str> {
+    let glob = glob.trim();
+    if glob.is_empty() {
+        return Some("is empty");
+    }
+    if Path::new(glob).is_absolute() || glob.starts_with('~') || glob.starts_with('\\') {
+        return Some("is not relative to the project");
+    }
+    if glob.split(['/', '\\']).any(|part| part == "..") {
+        return Some("climbs out with `..`");
+    }
+    let literal = glob
+        .split('/')
+        .take_while(|part| !part.contains(['*', '?', '[', '{']))
+        .filter(|part| !part.is_empty() && *part != ".")
+        .count();
+    (literal == 0).then_some("covers the whole project")
+}
+
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_command_is_named_and_scoped_or_refused() {
+        let with = |body: &str| load_str(&format!("{MINIMAL}\n[[command]]\n{body}\n"));
+        let m = with(
+            "name = \"forge\"\nentry = \"forge.js:main\"\ndescription = \"specs\"\n\
+             read_only = [\"help\", \"spec list\"]\nwrites = [\"forge/**\"]",
+        )
+        .unwrap();
+        assert_eq!(m.command[0].file(), "forge.js");
+        assert_eq!(m.command[0].function(), "main");
+        assert!(unknown_sections(&format!("{MINIMAL}\n[[command]]\nname = \"x\"\n")).is_empty());
+        for (body, says) in [
+            ("name = \"Forge\"\nentry = \"f.js:main\"\ndescription = \"d\"", "lowercase"),
+            ("name = \"help\"\nentry = \"f.js:main\"\ndescription = \"d\"", "built-in"),
+            ("name = \"x\"\nentry = \"f.js\"\ndescription = \"d\"", "<file>:<function>"),
+            ("name = \"x\"\nentry = \"f.js:a-b\"\ndescription = \"d\"", "identifier"),
+            ("name = \"x\"\nentry = \"../f.js:main\"\ndescription = \"d\"", "inside the package"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"a\\nb\"", "one-line"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"**\"]", "whole project"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"*.md\"]", "whole project"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"/etc/**\"]", "not relative"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"a/../../b\"]", "`..`"),
+        ] {
+            let e = with(body).unwrap_err().to_string();
+            assert!(e.contains(says), "{body}: {e}");
+        }
+        let twice = load_str(&format!(
+            "{MINIMAL}\n[[command]]\nname = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\n\
+             [[command]]\nname = \"x\"\nentry = \"g.js:main\"\ndescription = \"d\"\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("declared twice"), "{twice}");
+    }
 
     fn load_str(toml_str: &str) -> Result<PluginManifest, PluginError> {
         refuse_retired_sections(toml_str, base::paths::DEFAULT_PRODUCT_NAME)?;
