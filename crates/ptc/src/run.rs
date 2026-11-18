@@ -5,7 +5,7 @@
 
 use crate::calls::{Allowed, CallLog, Dispatcher};
 use crate::engine::{self, Host, ProgramHost, Run, Script, ScriptEnd};
-use crate::{take_one, Limits, StopCause};
+use crate::{take_one, Library, Limits, StopCause};
 use base::context::{RunningTask, Session};
 use base::interface::tool_dispatch::ToolDispatch;
 use serde_json::Value;
@@ -31,6 +31,7 @@ pub(crate) struct Launch<'a> {
     pub task: &'a Arc<RunningTask>,
     pub session: &'a Arc<dyn Session>,
     pub limits: &'a Limits,
+    pub library: &'a Library,
     pub allowed: Allowed,
     pub run_slots: Option<&'a Arc<Semaphore>>,
     pub turn_cancel: CancellationToken,
@@ -69,6 +70,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         task,
         session,
         limits,
+        library,
         allowed,
         run_slots,
         turn_cancel,
@@ -109,6 +111,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         }),
         stop_requested: stop_requested.clone(),
         program,
+        library_aliases: library.aliases().into_iter().map(str::to_string).collect(),
     };
 
     let dispatcher = tokio::spawn(

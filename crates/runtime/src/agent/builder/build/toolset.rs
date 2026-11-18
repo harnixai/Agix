@@ -103,17 +103,19 @@ impl Builder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn finalize_tools(
         &self,
         registry: Arc<InMemoryToolRegistry>,
         scene: &Arc<SceneSpec>,
+        layout: &base::paths::Layout,
         plugin_tools: Vec<Arc<dyn base::tool::Tool>>,
         plugin_tool_owners: &std::collections::HashMap<String, crate::plugin::ToolOwner>,
         attended: bool,
         questions_answered: bool,
     ) -> Result<SessionTools, EngineError> {
         let tools = &registry;
-        self.register_run_ext(tools);
+        self.register_run_ext(tools, layout);
         let host_tools = crate::host_tools::declared_tools(&self.spec.host_tools)?;
         let host_names = admit_extra_tools(tools, scene, host_tools, plugin_tools)?;
 
@@ -163,7 +165,7 @@ impl Builder {
         // one delegation down.
         #[cfg(feature = "ptc")]
         if self.spec.agent_depth == 0 && tool_policy.scene_permits(ptc::TOOL_NAME) {
-            tools.register(run_code_for(tools.as_ref(), self.spec.run_slots.clone()));
+            tools.register(self.run_code_for(tools.as_ref(), layout));
         }
 
         if host_schema.is_some() && tools.get(STRUCTURED_OUTPUT).is_none() {
@@ -185,17 +187,18 @@ impl Builder {
 impl Builder {
     /// `RunExt`, when enabled packages bring commands: ahead of the tools
     /// admitted with a collision check, so none of them can take its name.
-    fn register_run_ext(&self, tools: &InMemoryToolRegistry) {
+    fn register_run_ext(&self, tools: &InMemoryToolRegistry, layout: &base::paths::Layout) {
         #[cfg(feature = "ptc")]
         if !self.host.ext_commands.is_empty() {
-            let run_ext = ptc::RunExtTool::new(self.host.ext_commands.clone());
+            let run_ext = ptc::RunExtTool::new(self.host.ext_commands.clone())
+                .with_library(ptc::Library::for_product(layout.product_name()));
             tools.register(Arc::new(match self.spec.run_slots.clone() {
                 Some(slots) => run_ext.with_run_slots(slots),
                 None => run_ext,
             }));
         }
         #[cfg(not(feature = "ptc"))]
-        let _ = tools;
+        let _ = (tools, layout);
     }
 }
 

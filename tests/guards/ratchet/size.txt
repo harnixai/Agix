@@ -48,7 +48,7 @@ fn    crates/prompt-files/src/lib.rs                             parse_skill_fil
 fn    crates/ptc/src/run.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
 fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      87
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         105
+fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         106
 fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   99
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       86

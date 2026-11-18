@@ -8,7 +8,7 @@
 use crate::calls::{cut_note, Allowed};
 use crate::engine::{CommandScript, ScriptEnd};
 use crate::run::{execute, Ended, Front, Launch};
-use crate::{default_run_slots, truncate, Limits};
+use crate::{default_run_slots, truncate, Library, Limits};
 use async_trait::async_trait;
 use base::command::ExtCommand;
 use base::context::TaskType;
@@ -46,6 +46,7 @@ pub struct RunExtTool {
     commands: BTreeMap<String, ExtCommand>,
     description: String,
     limits: Limits,
+    library: Library,
     run_slots: Arc<Semaphore>,
 }
 
@@ -64,6 +65,16 @@ pipes, redirection, variables or globbing.";
 const NOT_A_SHELL: &str = "RunExt is not a shell: the arguments go to the command as \
 written. Drop pipes, redirection, `;`, `&&`, variables, substitutions and globs; put long \
 content in `input`.";
+
+/// The entry file as errors name it: relative to its package.
+fn entry_name(command: &ExtCommand) -> String {
+    command
+        .file
+        .strip_prefix(&command.root)
+        .unwrap_or(&command.file)
+        .to_string_lossy()
+        .into_owned()
+}
 
 /// A command line resolved to the command it names.
 struct Parsed<'a> {
@@ -87,12 +98,20 @@ impl RunExtTool {
             commands,
             description,
             limits: Limits::for_commands(),
+            library: Library::default(),
             run_slots: default_run_slots(),
         }
     }
 
     pub fn with_run_slots(mut self, slots: Arc<Semaphore>) -> Self {
         self.run_slots = slots;
+        self
+    }
+
+    /// Commands also find the base library under `library`'s alias; what
+    /// the model reads about commands is their own.
+    pub fn with_library(mut self, library: Library) -> Self {
+        self.library = library;
         self
     }
 
@@ -169,12 +188,6 @@ impl RunExtTool {
             Ok(source) => source,
             Err(e) => return ToolResult::error_text(e),
         };
-        let filename = command
-            .file
-            .strip_prefix(&command.root)
-            .unwrap_or(&command.file)
-            .to_string_lossy()
-            .into_owned();
         let call = json!([
             parsed.args,
             input,
@@ -200,7 +213,7 @@ impl RunExtTool {
         );
         let slots = self.slots_for(ctx);
         let front = Front::Command(CommandScript {
-            filename,
+            filename: entry_name(command),
             source,
             function: command.function.clone(),
             call: call.to_string(),
@@ -211,6 +224,7 @@ impl RunExtTool {
             task: scope.task(),
             session: &ctx.session,
             limits: &self.limits,
+            library: &self.library,
             allowed: COMMAND_CALLS,
             run_slots: slots.as_ref(),
             turn_cancel: ctx.cancel.clone(),

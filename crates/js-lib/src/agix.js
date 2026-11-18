@@ -432,8 +432,11 @@ function makeCli() {
 
 let installed = false;
 
-export default function install(native, version) {
+export default function install(native, version, aliases) {
   if (installed) fail("agix.installed", "agix is already installed in this runtime");
+  for (const name of aliases) {
+    if (name in globalThis) fail("agix.alias", `${name} is already a global`);
+  }
   installed = true;
   const agix = {
     version,
@@ -446,10 +449,8 @@ export default function install(native, version) {
     cli: makeCli(),
   };
   deepFreeze(AgixError);
-  defineProperty(globalThis, "agix", {
-    value: deepFreeze(agix),
-    writable: false,
-    enumerable: false,
-    configurable: false,
-  });
+  const value = deepFreeze(agix);
+  for (const name of ["agix", ...aliases]) {
+    defineProperty(globalThis, name, { value, writable: false, enumerable: false, configurable: false });
+  }
 }

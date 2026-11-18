@@ -215,6 +215,11 @@ const NAMES_THE_PRODUCT: &[(&str, &str)] = &[
          metrics come from; `service.name` is the product's.",
     ),
     (
+        "crates/js-lib/src/lib.rs: agix",
+        "the script base library's global, an API plugin authors write against; a renamed \
+         product also gets it under its own name and the model is told only that one.",
+    ),
+    (
         "crates/assembly/src/config.rs: /tmp/agix",
         "agixd's state root when the process has no home: agixd's own, like its socket.",
     ),

@@ -5,7 +5,7 @@
 use crate::calls::{cut_note, Allowed};
 use crate::engine::ScriptEnd;
 use crate::run::{execute, Ended, Front, Launch};
-use crate::{default_run_slots, first_line, truncate, Limits};
+use crate::{default_run_slots, first_line, truncate, Library, Limits};
 use async_trait::async_trait;
 use base::context::{RunningStatus, RunningTask, TaskType};
 use base::error::ToolError;
@@ -44,13 +44,14 @@ pub struct RunCodeTool {
     description: String,
     guide: String,
     limits: Limits,
+    library: Library,
     run_slots: Arc<Semaphore>,
 }
 
 impl RunCodeTool {
     /// `RunCode` for a session whose registry is `tools`: its description
     /// lists the tools a program may call there.
-    pub fn for_registry(tools: &dyn ToolRegistry) -> Self {
+    pub fn for_registry(tools: &dyn ToolRegistry, library: Library) -> Self {
         let mut callable: Vec<CallableTool> = tools
             .list()
             .into_iter()
@@ -69,14 +70,15 @@ impl RunCodeTool {
             })
             .collect();
         callable.sort_by(|a, b| a.name.cmp(&b.name));
-        Self::new(&callable, Limits::default())
+        Self::new(&callable, Limits::default(), library)
     }
 
-    pub fn new(callable: &[CallableTool], limits: Limits) -> Self {
+    pub fn new(callable: &[CallableTool], limits: Limits, library: Library) -> Self {
         Self {
-            description: describe(callable),
-            guide: guide(callable),
+            description: describe(callable, library.shown()),
+            guide: guide(callable, library.shown()),
             limits,
+            library,
             run_slots: default_run_slots(),
         }
     }
@@ -120,9 +122,7 @@ agent(prompt, {type, schema, label, model}) → Promise (an object when schema i
 args; log(text) / console.log — shown to the user as progress and handed back to you with \
 the result (the last 4,000 characters); notify(text) to tell the conversation something while running \
 in the background; stopRequested() — wrap up and return what you have when true; messages() \
-— notes sent to this run with TaskMessage; pure helpers: agix.yaml (parse, stringify, \
-parseFrontmatter), agix.glob (test, filter), agix.path, agix.json.validate (JSON Schema), \
-agix.hash.sha256, agix.uuid (v4, v7), agix.cli.parseArgs. End with `return <JSON value>`.
+— notes sent to this run with TaskMessage{helpers}. End with `return <JSON value>`.
 
 Calls go through the same permission checks as direct calls; one that would need the user's \
 approval fails instead of asking — make that call directly. Limits: 5 minutes (60 once a \
@@ -139,12 +139,20 @@ a single task or a few calls, call the tools directly.
 
 A script (QuickJS, ES2023, top-level await; no require/import or Node/browser APIs). \
 tools.<Name>(input) and callTool(name, input) return Promises that reject on failure; log(text) \
-reports progress; agix.yaml, agix.glob, agix.path, agix.json and agix.hash are pure helpers. \
-End with `return <JSON value>`.";
+reports progress{helpers}. End with `return <JSON value>`.";
 
-fn describe(callable: &[CallableTool]) -> String {
+/// `{helpers}` in [`INTRO`] and [`SUMMARY`]: the base library's helpers under
+/// `global`, or nothing when the model is told of none.
+fn with_helpers(text: &str, global: Option<&str>, helpers: impl Fn(&str) -> String) -> String {
+    text.replace("{helpers}", &global.map(helpers).unwrap_or_default())
+}
+
+fn describe(callable: &[CallableTool], library: Option<&str>) -> String {
+    let summary = with_helpers(SUMMARY, library, |g| {
+        format!("; {g}.yaml, {g}.glob, {g}.path, {g}.json and {g}.hash are pure helpers")
+    });
     let mut out = format!(
-        "{SUMMARY}\n\nCallable here (MCP tools too, with callTool; the guide has the rest):"
+        "{summary}\n\nCallable here (MCP tools too, with callTool; the guide has the rest):"
     );
     for tool in callable.iter().filter(|t| t.name != "Agent") {
         out.push_str("\n  ");
@@ -153,8 +161,15 @@ fn describe(callable: &[CallableTool]) -> String {
     out
 }
 
-fn guide(callable: &[CallableTool]) -> String {
-    let mut out = format!("{INTRO}\n\nTools callable here (MCP tools too, by name with callTool):");
+fn guide(callable: &[CallableTool], library: Option<&str>) -> String {
+    let intro = with_helpers(INTRO, library, |g| {
+        format!(
+            "; pure helpers: {g}.yaml (parse, stringify, parseFrontmatter), {g}.glob (test, \
+             filter), {g}.path, {g}.json.validate (JSON Schema), {g}.hash.sha256, {g}.uuid (v4, \
+             v7), {g}.cli.parseArgs"
+        )
+    });
+    let mut out = format!("{intro}\n\nTools callable here (MCP tools too, by name with callTool):");
     for tool in callable {
         out.push_str("\n  ");
         out.push_str(&signature(tool));
@@ -250,9 +265,10 @@ impl RunCodeTool {
                 "tool_use_id": ctx.tool_use_id,
             }),
         );
-        let (session, limits, slots) = (
+        let (session, limits, library, slots) = (
             ctx.session.clone(),
             self.limits.clone(),
+            self.library.clone(),
             self.slots_for(ctx),
         );
         tokio::spawn(async move {
@@ -263,6 +279,7 @@ impl RunCodeTool {
                     task: &task,
                     session: &session,
                     limits: &limits,
+                    library: &library,
                     allowed: PROGRAM_CALLS,
                     run_slots: slots.as_ref(),
                     turn_cancel: cancel,
@@ -415,6 +432,7 @@ impl Tool for RunCodeTool {
                 task: scope.task(),
                 session: &ctx.session,
                 limits: &self.limits,
+                library: &self.library,
                 allowed: PROGRAM_CALLS,
                 run_slots: slots.as_ref(),
                 turn_cancel: ctx.cancel.clone(),

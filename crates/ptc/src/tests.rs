@@ -88,12 +88,21 @@ fn limits() -> Limits {
 }
 
 async fn run_with(code: &str, args: Value, limits: Limits) -> (ToolResult, Arc<Fake>, ToolContext) {
+    run_in(code, args, limits, Library::default()).await
+}
+
+async fn run_in(
+    code: &str,
+    args: Value,
+    limits: Limits,
+    library: Library,
+) -> (ToolResult, Arc<Fake>, ToolContext) {
     let fake = Arc::new(Fake::default());
     let mut ctx =
         session_state::testing::tool_context_for_test(platform::local_providers(), "/tmp".into());
     ctx.tool_use_id = "toolu_code".into();
     ctx.dispatch = Some(fake.clone());
-    let tool = RunCodeTool::new(&[], limits);
+    let tool = RunCodeTool::new(&[], limits, library);
     let result = tool
         .call(
             json!({"code": code, "args": args, "description": "test"}),
@@ -309,7 +318,8 @@ async fn runs_beyond_the_thread_cap_wait_for_a_slot() {
         );
         ctx.tool_use_id = id.into();
         ctx.dispatch = Some(fake.clone());
-        let tool = RunCodeTool::new(&[], limits()).with_run_slots(slots.clone());
+        let tool =
+            RunCodeTool::new(&[], limits(), Library::default()).with_run_slots(slots.clone());
         async move {
             tool.call(
                 json!({"code": "await tools.Echo({text: 'x', delay_ms: 300}); return 1;"}),
@@ -340,7 +350,8 @@ async fn a_run_inside_a_sub_agent_does_not_wait_for_a_slot() {
     ctx.tool_use_id = "toolu_nested".into();
     ctx.agent_depth = 1;
     ctx.dispatch = Some(Arc::new(Fake::default()));
-    let tool = RunCodeTool::new(&[], limits()).with_run_slots(Arc::new(Semaphore::new(0)));
+    let tool = RunCodeTool::new(&[], limits(), Library::default())
+        .with_run_slots(Arc::new(Semaphore::new(0)));
     let r = tokio::time::timeout(
         Duration::from_secs(20),
         tool.call(json!({"code": "return 1;"}), ctx, ProgressSender::noop("t")),
@@ -389,7 +400,7 @@ async fn a_stop_request_lets_the_program_wrap_up() {
     ctx.tool_use_id = "toolu_stop".into();
     ctx.dispatch = Some(fake.clone());
     let session = ctx.session.clone();
-    let tool = RunCodeTool::new(&[], limits());
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
     let running = tokio::spawn(async move {
         tool.call(
             json!({"code": "let n = 0;
@@ -418,7 +429,7 @@ async fn messages_sent_to_the_task_reach_the_program() {
     ctx.tool_use_id = "toolu_msg".into();
     ctx.dispatch = Some(fake.clone());
     let session = ctx.session.clone();
-    let tool = RunCodeTool::new(&[], limits());
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
     let running = tokio::spawn(async move {
         tool.call(
             json!({"code": "for (let i = 0; i < 100; i++) {
@@ -479,6 +490,7 @@ async fn a_background_run_ends_when_the_session_does() {
             stop_grace: Duration::from_secs(60),
             ..limits()
         },
+        Library::default(),
     );
     let started = tool
         .call(
@@ -516,7 +528,7 @@ async fn a_task_stop_on_a_background_run_still_gets_the_grace_period() {
         session_state::testing::tool_context_for_test(platform::local_providers(), "/tmp".into());
     ctx.dispatch = Some(fake.clone());
     let session = ctx.session.clone();
-    let tool = RunCodeTool::new(&[], limits());
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
     let started = tool
         .call(
             json!({"code": "let n = 0;
@@ -673,6 +685,7 @@ async fn the_description_lists_call_shapes_and_the_guide_says_the_rest() {
             },
         ],
         Limits::default(),
+        Library::default(),
     );
     let d = tool.description();
     assert!(
@@ -700,7 +713,7 @@ async fn the_description_lists_call_shapes_and_the_guide_says_the_rest() {
 #[tokio::test]
 async fn run_code_delegates() {
     use base::interface::permission::{PermissionFacts, Reach, Subject};
-    let tool = RunCodeTool::new(&[], limits());
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
     let input = json!({ "code": "1", "description": "x" });
     let ctx =
         session_state::testing::tool_context_for_test(platform::local_providers(), "/tmp".into());
@@ -785,7 +798,7 @@ async fn a_background_program_delivers_at_most_ten_notices() {
     ctx.tool_use_id = "toolu_notices".into();
     ctx.dispatch = Some(fake);
     let session = ctx.session.clone();
-    let tool = RunCodeTool::new(&[], limits());
+    let tool = RunCodeTool::new(&[], limits(), Library::default());
     let started = tool
         .call(
             json!({"code": "for (let i = 0; i < 15; i++) notify('n' + i); return 1;",
@@ -864,4 +877,59 @@ async fn a_program_has_the_agix_library() {
     let (r, _) = run("return agix.yaml.parse('a: 1\\nb: [x, y]');").await;
     assert!(!r.is_error, "{}", text(&r));
     assert_eq!(r.structured_content, Some(json!({"a": 1, "b": ["x", "y"]})));
+}
+
+#[tokio::test]
+async fn the_model_is_told_the_library_under_the_products_own_name() {
+    let prompt = base::tool::PromptContext::default();
+    for (product, shown) in [
+        ("Agix", Some("agix")),
+        ("Codix", Some("codix")),
+        ("Tools", None),
+    ] {
+        let tool = RunCodeTool::new(&[], limits(), Library::for_product(product));
+        let guide = tool.guide(&prompt).await.expect("a guide");
+        for text in [tool.description(), guide.as_str()] {
+            match shown {
+                Some(name) => {
+                    assert!(text.contains(&format!("{name}.yaml")), "{product}: {text}");
+                    let others = text.matches("agix.").count();
+                    assert_eq!(others > 0, name == "agix", "{product}: {text}");
+                }
+                None => assert!(!text.contains(".yaml"), "{product}: {text}"),
+            }
+            assert!(text.contains("End with `return <JSON value>`."), "{text}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_renamed_products_program_has_the_library_under_both_names() {
+    let (r, _, _) = run_in(
+        "return [codix === agix, codix.yaml.parse('a: 1').a];",
+        json!({}),
+        limits(),
+        Library::for_product("Codix"),
+    )
+    .await;
+    assert!(!r.is_error, "{}", text(&r));
+    assert_eq!(r.structured_content, Some(json!([true, 1])));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_global_a_program_has_can_become_the_librarys_alias() {
+    let (r, _) = run("const names = []; \
+         for (let o = globalThis; o; o = Object.getPrototypeOf(o)) \
+           names.push(...Object.getOwnPropertyNames(o)); \
+         return names;")
+    .await;
+    let names = r.structured_content.expect("the global names");
+    for name in names.as_array().unwrap().iter().filter_map(Value::as_str) {
+        if name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            assert_eq!(js_lib::alias_for(name), None, "{name}");
+        }
+    }
 }

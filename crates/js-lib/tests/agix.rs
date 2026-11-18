@@ -548,3 +548,62 @@ async fn the_async_runtime_installs_the_same_library() {
         .await;
     assert_eq!(out, r#"{"a":[1,2]}"#);
 }
+
+#[test]
+fn an_alias_is_the_same_frozen_object() {
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        js_lib::install_as(&ctx, &["codix"]).unwrap();
+        let seen: String = ctx
+            .eval(
+                r#"
+                "use strict";
+                const d = Object.getOwnPropertyDescriptor(globalThis, "codix");
+                let reassigned;
+                try { codix = {}; reassigned = "changed"; } catch (e) { reassigned = e.name; }
+                JSON.stringify([codix === agix, Object.isFrozen(codix.yaml), d.writable,
+                    d.configurable, reassigned, codix.yaml.parse("a: 1").a])
+                "#,
+            )
+            .unwrap();
+        assert_eq!(seen, r#"[true,true,false,false,"TypeError",1]"#);
+    });
+}
+
+#[test]
+fn an_alias_is_a_lowercase_name_no_script_already_has() {
+    assert_eq!(js_lib::alias_for("Codix").as_deref(), Some("codix"));
+    assert_eq!(js_lib::alias_for("My-Tool_2").as_deref(), Some("mytool2"));
+    for product in [
+        "Agix",
+        "a-gix",
+        "2fast",
+        "-_-",
+        "Tools",
+        "Console",
+        "Fs",
+        "New",
+        "Escape",
+        "Constructor",
+    ] {
+        assert_eq!(js_lib::alias_for(product), None, "{product}");
+    }
+    for name in [
+        "Codix",
+        "co-dix",
+        "",
+        "agix",
+        "tools",
+        "class",
+        "escape",
+        "constructor",
+    ] {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            assert!(js_lib::install_as(&ctx, &[name]).is_err(), "{name}");
+            assert!(ctx.eval::<bool, _>("typeof agix === 'undefined'").unwrap());
+        });
+    }
+}

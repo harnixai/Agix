@@ -10,6 +10,8 @@ pub struct QuickJsEngine {
     /// Ceiling on a single runtime's heap. Independent of the per-call
     /// timeout: a script can exhaust memory quickly or slowly.
     memory_limit_bytes: usize,
+    /// A renamed product's second name for the base library.
+    library_alias: Option<String>,
 }
 
 impl Default for QuickJsEngine {
@@ -18,6 +20,7 @@ impl Default for QuickJsEngine {
             // Generous for string work, small enough that a script cannot
             // starve the process it is a guest in.
             memory_limit_bytes: 16 * 1024 * 1024,
+            library_alias: None,
         }
     }
 }
@@ -25,6 +28,15 @@ impl Default for QuickJsEngine {
 impl QuickJsEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Scripts of the product called `product` also find `agix` under the
+    /// name [`js_lib::alias_for`] gives it.
+    pub fn for_product(product: &str) -> Self {
+        Self {
+            library_alias: js_lib::alias_for(product),
+            ..Self::default()
+        }
     }
 }
 
@@ -57,6 +69,7 @@ fn run_blocking(
     input: String,
     deadline: Instant,
     memory_limit_bytes: usize,
+    library_alias: Option<&str>,
 ) -> Result<String, ScriptError> {
     let runtime = rquickjs::Runtime::new().map_err(|e| ScriptError::Failed(e.to_string()))?;
     runtime.set_memory_limit(memory_limit_bytes);
@@ -68,7 +81,8 @@ fn run_blocking(
         rquickjs::Context::full(&runtime).map_err(|e| ScriptError::Failed(e.to_string()))?;
 
     context.with(|ctx| {
-        js_lib::install(&ctx).map_err(|e| script_error(&ctx, e, deadline))?;
+        let aliases: Vec<&str> = library_alias.into_iter().collect();
+        js_lib::install_as(&ctx, &aliases).map_err(|e| script_error(&ctx, e, deadline))?;
         let source = wrap(&code, &entry);
         let func: rquickjs::Function = ctx
             .eval(source.as_bytes())
@@ -127,12 +141,20 @@ impl base::interface::script::ScriptEngine for QuickJsEngine {
         // the carrier's `timeout` cannot reach inside a running interpreter.
         let deadline = Instant::now() + limits.timeout;
         let memory_limit_bytes = self.memory_limit_bytes;
+        let library_alias = self.library_alias.clone();
 
         // JavaScript is synchronous and CPU-bound. On an ordinary task it
         // would hold a runtime worker for its whole execution; a script that
         // spins would hold one until its deadline.
         let joined = tokio::task::spawn_blocking(move || {
-            run_blocking(code, entry, input, deadline, memory_limit_bytes)
+            run_blocking(
+                code,
+                entry,
+                input,
+                deadline,
+                memory_limit_bytes,
+                library_alias.as_deref(),
+            )
         })
         .await;
 
@@ -168,6 +190,7 @@ impl base::interface::script::ScriptEngine for QuickJsEngine {
             input,
             Instant::now() + limits.timeout,
             self.memory_limit_bytes,
+            self.library_alias.as_deref(),
         )?;
         serde_json::from_str(&out).map_err(|e| {
             ScriptError::Failed(format!("script returned something that is not JSON: {e}"))

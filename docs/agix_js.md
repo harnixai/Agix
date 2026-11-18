@@ -42,6 +42,10 @@ Node 或浏览器的 API。
 - **出错抛 `AgixError`**（`Error` 的子类，`e.name === "AgixError"`），带 `code`，形如 `yaml.syntax`；
   "校验不通过"不算出错，以返回值表达。参数类型不对（该传字符串的传了数字）抛 `TypeError`，同 Node。
 - 嵌套超过 127 层的值报错（`yaml.depth`、`json.depth`），与引擎读 JSON 的上限相同。
+- **改了产品名的嵌入方**（`Layout` 的产品名不是 Agix），同一个冻结对象还挂在产品名的小写形式下：
+  只取 ASCII 字母和数字，如 `Codix` → `codix`。三处载体都装这个别名，`agix` 照常可用；模型读到的
+  （`RunCode` 的工具描述与指南）只写别名。产品名化出的名字不以字母开头、是保留字、或与脚本已有的
+  全局名（`tools`、`console`、`Math`……）重名时不装别名，模型读到的文字里也不提这些辅助函数。
 
 ## 3. 函数
 

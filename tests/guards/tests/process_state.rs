@@ -57,6 +57,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/assembly/src/telemetry_otel/mod.rs", "PROCESS_EXPORTER", OsResource, "the OpenTelemetry exporter installs process-wide providers; see assemble::pool"),
     ("crates/history/src/lock.rs", "HELD", OsResource, "the session-log locks this process holds: an flock belongs to an open file, so every pool writing one state directory must share the one open file per log"),
     ("crates/js-lib/src/lib.rs", "COMPILED", Constant, "the script base library's bytecode, compiled once from source built into the binary"),
+    ("crates/js-lib/src/lib.rs", "NAMES", Constant, "the globals a fresh QuickJS context defines, listed once"),
     ("crates/ptc/src/engine.rs", "ORIGIN", Constant, "the epoch of a monotonic clock, fixed on first read"),
     ("crates/ptc/src/bytecode.rs", "BUILD", Constant, "the QuickJS build linked into the binary, probed once for the bytecode cache key"),
     ("crates/tools/src/push_notification.rs", "SHOWING", OsResource, "the desktop notifications still being shown, by process provider: the machine has one Notification Center, which every pool's osascript waits on"),

@@ -147,6 +147,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_renamed_products_scripts_also_have_it_under_its_name() {
+        let out = QuickJsEngine::for_product("Codix")
+            .eval(
+                &script("function f() { return [codix === agix, codix.path.basename('a/b.md')]; }"),
+                "f",
+                serde_json::json!({}),
+                &ScriptLimits::default(),
+            )
+            .await
+            .expect("the script runs");
+        assert_eq!(out, serde_json::json!([true, "b.md"]));
+    }
+
+    #[tokio::test]
     async fn a_syntax_error_is_a_failure_not_a_panic() {
         let err = call("function f( {", "f", serde_json::json!({}))
             .await
@@ -418,6 +432,12 @@ pub mod bindings {
     #[cfg(feature = "quickjs")]
     pub fn engine() -> Arc<dyn ScriptEngine> {
         Arc::new(crate::QuickJsEngine::new())
+    }
+
+    /// [`engine`], for the product called `product`.
+    #[cfg(feature = "quickjs")]
+    pub fn engine_for(product: &str) -> Arc<dyn ScriptEngine> {
+        Arc::new(crate::QuickJsEngine::for_product(product))
     }
 
     /// Everything a host does to honor a `scripts` section: pick the engine,

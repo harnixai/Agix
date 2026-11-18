@@ -2,7 +2,9 @@
 //! pure functions for YAML, glob, paths, JSON Schema, SHA-256, UUIDs and
 //! argument parsing, matching what the engine itself does with the same
 //! formats. `install` puts it, deeply frozen, into one context; the script
-//! carrier and `RunCode` / `RunExt` call it before any user code runs.
+//! carrier and `RunCode` / `RunExt` call it before any user code runs. A
+//! product an embedder renames also finds it under the global
+//! [`alias_for`] its name gives.
 
 mod json_schema;
 mod value;
@@ -95,7 +97,151 @@ fn bytecode() -> Result<&'static [u8], String> {
         .map_err(Clone::clone)
 }
 
+/// The global every carrier installs.
+pub const GLOBAL: &str = "agix";
+
+const RESERVED_WORDS: &[&str] = &[
+    "arguments",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "eval",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+];
+
+/// What the carriers put on `globalThis` themselves, `RunCode`'s and
+/// `RunExt`'s stand-ins for missing Node APIs included.
+const CARRIER_GLOBALS: &[&str] = &[
+    "agent",
+    "args",
+    "callTool",
+    "console",
+    "exports",
+    "fetch",
+    "fs",
+    "log",
+    "messages",
+    "module",
+    "notify",
+    "process",
+    "require",
+    "stopRequested",
+    "tools",
+];
+
+/// Every name a fresh context already resolves on `globalThis`, its
+/// prototype chain included.
+fn standard_globals() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let listed = (|| {
+            let runtime = rquickjs::Runtime::new().ok()?;
+            let context = rquickjs::Context::full(&runtime).ok()?;
+            context.with(|ctx| {
+                ctx.eval::<Vec<String>, _>(
+                    "const names = [];                      for (let o = globalThis; o; o = Object.getPrototypeOf(o))                        names.push(...Object.getOwnPropertyNames(o));                      names",
+                )
+                .ok()
+            })
+        })();
+        listed.unwrap_or_default()
+    })
+}
+
+/// Why `name` cannot be a second name of the library.
+fn refuse_alias(name: &str) -> Option<&'static str> {
+    if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        return Some("it must start with a lowercase ASCII letter");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
+        return Some("only lowercase ASCII letters and digits are allowed");
+    }
+    if name == GLOBAL {
+        return Some("it is the library's own name");
+    }
+    if RESERVED_WORDS.contains(&name) {
+        return Some("it is a JavaScript reserved word");
+    }
+    if CARRIER_GLOBALS.contains(&name) || standard_globals().iter().any(|g| g == name) {
+        return Some("a script already has a global of that name");
+    }
+    None
+}
+
+/// The second global a product called `product` finds the library under:
+/// its name's ASCII letters and digits, lowercase. `None` when that is
+/// `agix` itself or not a name a script could be given.
+pub fn alias_for(product: &str) -> Option<String> {
+    let name: String = product
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    refuse_alias(&name).is_none().then_some(name)
+}
+
 pub fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    install_as(ctx, &[])
+}
+
+/// [`install`], with the same frozen object also bound to each of `aliases`.
+pub fn install_as(ctx: &Ctx<'_>, aliases: &[&str]) -> rquickjs::Result<()> {
+    if let Some((name, why)) = aliases
+        .iter()
+        .find_map(|name| refuse_alias(name).map(|why| (name, why)))
+    {
+        return Err(Exception::throw_type(
+            ctx,
+            &format!("`{name}` cannot name the script base library: {why}"),
+        ));
+    }
     let code = bytecode().map_err(|e| {
         Exception::throw_internal(
             ctx,
@@ -116,7 +262,7 @@ pub fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         }
     }
     let build: Function = module.namespace()?.get("default")?;
-    build.call::<_, ()>((natives(ctx)?, version()))
+    build.call::<_, ()>((natives(ctx)?, version(), aliases.to_vec()))
 }
 
 fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {

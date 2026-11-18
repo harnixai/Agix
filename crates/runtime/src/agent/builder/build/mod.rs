@@ -70,6 +70,7 @@ impl Builder {
         let surface = self.finalize_tools(
             r.tools,
             &r.scene,
+            &r.settings.paths.layout,
             plugin_tools,
             &plugins.tool_owners,
             r.attended,
