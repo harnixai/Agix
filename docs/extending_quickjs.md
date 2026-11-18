@@ -273,10 +273,25 @@ function onVariable(ctx) {
 
 ### `tool.around` — 一次工具调用前的一个决定
 
-一次工具调用一次,在派发之前、权限闸门之外。
+一次工具调用一次,在派发之前、权限闸门之外。程序与插件命令的子调用也各过一次。
 
 ```json
-{ "tool": "Read", "input": { "file_path": "/etc/hosts" } }
+{ "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model" }
+```
+
+`via` 是这次调用由谁发起:`"model"`(模型直接调)、`"RunCode"`(模型写的程序里的子调用)、
+`"RunExt:<命令名>"`(插件命令的子调用,`runext.md`)、`"user"`(用户敲的 `/name` 插件命令那次
+`RunExt` 本身)、`"skill"`(skill 正文里的内联命令)。插件可以据此只放行自己命令的读写、拦下
+模型对同一批文件的直接读写:
+
+```js
+function onAround(call) {
+  const path = String((call.input && call.input.file_path) || "");
+  if (call.tool === "Read" && path.includes("guarded/") && !String(call.via).startsWith("RunExt:")) {
+    return { action: "deny", reason: `guarded/ is read through the notes command` };
+  }
+  return null;
+}
 ```
 
 返回下面之一,返回别的都表示"照常来":

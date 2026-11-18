@@ -832,6 +832,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
+| `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
 
 #### `daemon.status`
 
@@ -2725,7 +2726,7 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
 { "active": true,           // 引擎是否在内存里;不在时只有定时任务
   "tasks": [
     { "task_id": "…",
-      "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code | mcp_task
+      "kind": "agent",      // agent | teammate | member | shell | monitor | cron | code | ext | mcp_task
       "status": "running",  // running | waiting | done | failed | stopped;定时任务总是 waiting;member 为 idle | running
       "started_ms": 0, "ended_ms": null,
       "detail": { },        // agent:{agent_type,description,background,tool_use_id,agent_session_id,tag?,worktree?}
@@ -3605,11 +3606,19 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 //        "root": "/…/plugins/cache/<name>/<version>",
 //        "script_faults": [],
 //        "skills": [ "tour" ],
-//        "skill_conflicts": [ ] }
+//        "skill_conflicts": [ ],
+//        "commands": [ ],
+//        "command_conflicts": [ ] }
 // skill_conflicts 元素:
 //   { "skill": "tour", "shadowed_by": "user|project|plugin",
 //     "path": "/…/skills/tour/SKILL.md",
 //     "plugin": "…" }                       // 只在 shadowed_by 为 plugin 时有
+// commands 元素:
+//   { "name": "forge", "description": "…", "read_only": ["help", "spec list"], "writes": ["forge/**"] }
+// command_conflicts 元素:
+//   { "command": "forge", "shadowed_by": "plugin|skill",
+//     "plugin": "…",                        // 只在 shadowed_by 为 plugin 时有
+//     "path": "/…/skills/forge/SKILL.md" }  // 只在 shadowed_by 为 skill 时有
 ```
 
 列出磁盘上的全部插件及启用状态,包括已停用的。`settings.plugins.allow` 非空时,不在名单里的包照常列出,
@@ -3626,6 +3635,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 磁盘上的同名 skill、或按包名排在前面的另一个包的同名 skill 占着这个名字时,它被遮住,
 `skill_conflicts` 各记一条——`shadowed_by` 是占着名字的那份的来源,`path` 是它的
 `SKILL.md`,另一个包时 `plugin` 给出包名。按这个 daemon 自己的项目和场景算;停用的包没有冲突。
+
+`commands` 是包的 `[[command]]`(`runext.md`):命令名、描述、只读前缀与能写的范围。两个
+启用着的包声明同名命令时按包名先到的保留,后到的不注册,它的 `command_conflicts` 记一条
+`shadowed_by: "plugin"`、`plugin` 是占着名字的包;一个 skill 与命令同名时 `/名字` 归 skill
+(`RunExt` 照样能跑),记 `shadowed_by: "skill"`、`path` 是那个 `SKILL.md`。
 
 #### `plugin.install`
 
@@ -3662,9 +3676,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 装完即启用;设为 `false` 时,新装的包(这一层没有它的启用记录)装完保持禁用,宿主读过
 披露后要显式调 `plugin.enable`,包才会往会话里贡献东西。已经有启用记录的名字(包括升级
 同名包)保持原状。`disclosure` 是这个插件会往模型上下文里塞的文本(含它带的 skill 的
-描述与正文)、它带的 skill 名(`skills`)和它要起的 MCP 服务器(命令行或地址),让调用方
+描述与正文)、它带的 skill 名(`skills`)与命令名(`commands`)和它要起的 MCP 服务器(命令行或地址),让调用方
 在依赖它之前先看见;字段见 `plugin_packages.md`。包里有一个 `SKILL.md` 校验不过,同样在
-改名之前被拒,报 `INVALID_PARAMS`,消息里写明是哪个 skill、哪一项。
+改名之前被拒,报 `INVALID_PARAMS`,消息里写明是哪个 skill、哪一项;`[[command]]` 的入口不是
+源码(QuickJS 字节码)同样拒装。
 
 #### `plugin.uninstall`
 
@@ -3715,7 +3730,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 // ← result
 { "commands": [ ] }
 // 元素:{ "name":"…", "description":"…",
-//        "kind":"prompt|local|mcp-prompt",   prompt = 展开后继续问模型,local = 直接执行,mcp-prompt = MCP server 的 prompt
+//        "kind":"prompt|local|mcp-prompt|ext",   prompt = 展开后继续问模型,local = 直接执行,mcp-prompt = MCP server 的 prompt,ext = 插件命令(经 RunExt 跑,不问模型,source 为 plugin)
 //        "source":"builtin|user|project|plugin|host|mcp",
 //        "tier":"global|scene",              仅 source 为 user 且来自磁盘上的用户层目录时有:global = {global}/skills,scene = 场景层的 skills
 //        "dir":"/abs/…" }                    文件来源的 skill 所在目录的绝对路径;builtin、内建 skill、mcp 没有
@@ -3724,6 +3739,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 给了 `session_id`,返回这个会话自己的命令表(它的 skill 视图,含宿主目录里的 skill;场景的 `bundled_skills`
 没列的内建也不在其中;MCP 的 prompt 建会话时登记,之后的走实时的 MCP 回退)。只有内存里的会话:
 否则 `SESSION_NOT_FOUND`,消息指向先 `session.resume`。
+
+`kind:"ext"` 的命令发 `/名字 参数` 给 `session.run_turn`:参数就是命令行的其余部分,用户敲下即算
+批准(本来要问的不再问,deny 与 plan 模式照样拒),输出以 `text_delta` 推出,这一轮的
+`stop_reason` 是 `command_executed`,不调模型、不进对话。同名 skill 存在时 `/名字` 是 skill。
 
 #### `import.list`
 

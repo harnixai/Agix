@@ -249,8 +249,8 @@ async fn call(&self, input: Value, ctx: ToolContext, progress: ProgressSender)
 
 #### 让模型写的程序也能调你的工具
 
-`RunCode`(`ptc.md`)里的程序经 `tools.<Name>(input)` 调本会话的工具。一个工具能不能
-这样被调,由它自己声明:
+`RunCode`(`ptc.md`)里的程序、`RunExt` 跑的插件命令(`runext.md`)经 `tools.<Name>(input)`
+调本会话的工具。一个工具能不能这样被调,由它自己声明:
 
 ```rust
 impl Tool for FileTicketTool {
@@ -403,7 +403,7 @@ Builder::new().scene(Arc::new(scene));
 |---|---|---|
 | `scene::code::spec(interaction)` | 完整参考:几乎全部工具,不常用的延迟加载,分节提示词 | `Interaction::Interactive`(缺省)或 `Interaction::Unattended` |
 | `scene::harnix::spec()` | 精简版:宿主会话的缺省场景,常用工具集,短提示词,文件工具用相对路径 | 无人值守 |
-| `scene::mini::spec()` | 最小骨架:九个工具全部常驻,几行提示词,没有 `RunCode` | 无人值守 |
+| `scene::mini::spec()` | 最小骨架:九个工具全部常驻(有插件命令时另加 `RunExt`),几行提示词,没有 `RunCode` | 无人值守 |
 
 在内建场景上改出自己的,改字段即可,其余照旧:
 
@@ -1124,6 +1124,9 @@ Builder::new().tool_middleware(Arc::new(Deadline));
 
 包装按注册顺序嵌套,先注册的在最外面。
 
+`ToolCall::via` 说这次调用是谁发起的:`model`、`RunCode`(程序的子调用)、`RunExt:<命令名>`
+(插件命令的子调用)、`user`(用户敲的 `/name` 插件命令)、`skill`(skill 的内联命令)。
+
 daemon 的嵌入方碰不到 `Builder`——会话引擎是池子建的。`Assembly { customize_session:
 Some(..), .. }` 交给池子一个 `SessionCustomizer`:每建一次会话引擎,池子把配好的
 `Builder` 和一个 `SessionCtx`(会话 id、scene、项目、是不是续着已有历史)交给它,
@@ -1450,7 +1453,7 @@ match agent.delegator().delegate(req).await? {
 
 ---
 
-## 引擎自带、宿主要接上的两项能力
+## 引擎自带、宿主要接上的几项能力
 
 它们不是扩展点,但嵌入方要决定怎么接。
 
@@ -1489,6 +1492,21 @@ match agent.delegator().delegate(req).await? {
   与每次子调用的摘要,`session.stopTask` 停得掉;后台运行结束时以通知回到会话。
 - **权限**:不为 `RunCode` 另立放行规则。用户选了"改文件前先问我",程序里的写入就失败,
   而不是绕过去。
+
+### `RunExt`(插件命令)
+
+插件包的 `[[command]]` 经 `RunExt` 跑:模型写一行命令行,或用户敲 `/name args`,包里的
+JavaScript 在 `RunCode` 那套运行时上跑(`runext.md`)。嵌入方要管的:
+
+- **开关**:要 `ptc` 与 `plugin-packages` 两个特性(能力位 `runext`);会话里至少有一个启用着
+  的命令才注册 `RunExt`,场景白名单与 deny 规则照常生效。嵌入方用 `Builder::ext_commands`
+  自己交命令表也行,子 Agent 经 `HostContracts` 继承它。
+- **授权**:调用这条命令是授权点,规则写成 `RunExt(<命令行>)`,匹配同 `Bash` 的 `prefix:*`;
+  命中 `read_only` 前缀的按只读工具,其余在 `default` 下问一次、`acceptEdits` 放行。命令的子
+  调用只能写包声明的 `writes`,只读调用里不能写。
+- **宿主看得见**:每次运行是一件 `kind:"ext"` 的任务;子调用照常过 hook、中间件与遥测,
+  `tool.around` 的输入带 `via`(`RunExt:<命令名>`)。`/name` 的输出以 `text_delta` 交给宿主,
+  不进对话。
 
 ---
 

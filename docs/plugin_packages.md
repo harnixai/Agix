@@ -2,7 +2,7 @@
 
 插件包是一个带 `plugin.toml` 的目录,打成 zip 安装。它本身不带要跑的代码运行时:包里
 声明的东西——MCP 服务器、绑到扩展点上的 QuickJS 脚本、一个声明式场景、agent 类型、一组
-skill——都由引擎里已有的部分兑现。安装时,一切会到达模型的文本都摆到安装者面前。
+skill、经 `RunExt` 跑的命令——都由引擎里已有的部分兑现。安装时,一切会到达模型的文本都摆到安装者面前。
 
 包方案是 `daemon` 的 `plugin-packages` feature,默认开启。不开时 `plugin.*` 这些 RPC 返回
 `PLUGINS_DISABLED`(`-32016`)。脚本怎么写见 `extending_quickjs.md`;引擎的全部扩展点见
@@ -64,6 +64,15 @@ scene = "plugin:github-tools"  # 让这个 agent 的子代理跑在插件的场�
 # 附带的参考文件放在同一个子目录里。只有写了这一段的包才带 skill(见下面「包里的 skill」)。
 [skills]
 dir = "skills"
+
+# ── 命令 ──
+# 模型经 `RunExt` 调、用户敲 `/forge …` 的命令,JavaScript 跑在引擎的 QuickJS 里;见下面「包里的命令」。
+[[command]]
+name = "forge"                       # 1–32 个小写字母、数字、`-`,字母开头,不与内建斜杠命令重名
+entry = "forge.js:main"              # <文件>:<函数>,文件相对插件根目录,必须是源码
+description = "需求、规格与变更流程"   # 单行,进 RunExt 的工具描述——披露
+read_only = ["help", "spec list"]    # 参数以这些整词前缀开头的调用算只读
+writes = ["forge/**"]                # 能写的范围,glob 相对项目根;不写就是不写文件
 
 # ── 写给宿主的段 ──
 # `x-` 开头的顶级段:引擎不读、不执行、不警告;宿主自己约定它的形状。
@@ -206,6 +215,35 @@ my-plugin/
 skill 展开用的正文是包加载时读进来、披露过的那份,不是调用时再去 cache 里读;`files:` 的参考
 文件照常在调用时读。
 
+## 包里的命令
+
+`[[command]]` 让模型写一行命令行(`forge spec list --status draft`)、用户敲 `/forge spec list`,
+引擎在内嵌的 QuickJS 里跑包带来的 JavaScript,结果交回。工具、权限、限额、脚本里有什么见
+`runext.md`;这里只说包这一侧。
+
+- **入口只收源码。** `entry` 的文件解析后必须在包里(符号链接指出去的拒),至多 4 MiB,
+  是 UTF-8 文本;带 NUL 或不是 UTF-8 的——QuickJS 字节码——安装时拒装,发现时不加载。
+  字节码不经校验,构造过的能破坏宿主内存。引擎第一次跑一个入口时在本机把它编译成字节码,
+  存在这一层 cache 的 `.bytecode/` 下,文件名是引擎版本加入口源码的 SHA-256;入口或引擎变了
+  就是另一个文件。
+- **`writes` 在两处收窄。** 安装时拒绝绝对路径、`~`、带 `..` 的、以及第一段就是通配(`**`、
+  `*.md`,覆盖整个项目)的;用到时再按插件 skill 的 `allowed-tools` 路径规则解析到会话的项目
+  里,经符号链接越出项目的那一条不生效。
+- **同名。** 两个启用着的包声明了同名命令,按包名排序先到的保留,后到的不注册;一个 skill 与
+  命令同名时 `/名字` 归 skill,`RunExt` 照样能跑这条命令。两种情况都记进 `plugin.list` 那个包
+  的 `command_conflicts`:
+
+```json
+{"name":"zz-twin", "commands":[{"name":"notes","description":"…","read_only":[],"writes":[]}],
+ "command_conflicts":[
+   {"command":"notes", "shadowed_by":"plugin", "plugin":"notes-plugin"}]}
+{"name":"notes-plugin", "command_conflicts":[
+   {"command":"notes", "shadowed_by":"skill", "path":"/proj/.agents/skills/notes/SKILL.md"}]}
+```
+
+- **生命周期跟着包走。** 启用着的包的命令进新建的会话(子 Agent 跟着它的会话);已经在跑的会话
+  不变。会话里至少有一个命令才有 `RunExt`。
+
 ## 打包与安装
 
 压缩包就是插件目录的一个普通 zip,`plugin.toml` 在根上;`tests/runner/src/plugin_fixture.rs`
@@ -241,7 +279,7 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 - zip 里带 `..` 或绝对路径的条目跳过,不解压。
 
 其余的生命周期:`plugin.list`(每个已安装的插件连同启用状态、`root`、`skills` 与
-`skill_conflicts`,包括被禁用的)、
+`skill_conflicts`、`commands` 与 `command_conflicts`,包括被禁用的)、
 `plugin.enable` / `plugin.disable`(按层持久化在 `enabled.json`;scene 层压过 global,没设过
 的算启用)、`plugin.uninstall`(`version` 可选,不给就全删)、`plugin.reload`。
 
@@ -277,20 +315,25 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 
 ```json
 {"plugin":"github-tools","version":"1.2.0",
- "capabilities":["run its own JavaScript at the `tool.result` extension point"],
+ "capabilities":["run its own JavaScript at the `tool.result` extension point",
+                 "adds command `forge` that may write forge/**"],
  "scene":"plugin:github-tools",
  "skills":["triage"],
+ "commands":["forge"],
  "mcp_servers":["github (native): runs `npx -y github-mcp`; env: GITHUB_TOKEN"],
  "model_visible":[{"origin":"plugin description","text":"GitHub tools"},
                   {"origin":"agent `pr-reviewer` system prompt","text":"…"},
                   {"origin":"skill `triage` description","text":"Triage new issues"},
-                  {"origin":"skill `triage` body","text":"…"}],
+                  {"origin":"skill `triage` body","text":"…"},
+                  {"origin":"command `forge` description","text":"需求、规格与变更流程"}],
  "inert":false}
 ```
 
 `[[script]]` 列在 `capabilities` 里:它是宿主进程里的代码,跑在一个能改写模型读到什么的
 点上,没有东西把它和宿主隔开。skill 的正文里有 `` !`cmd` `` / ` ```! ` 块的、`allowed-tools`
-非空的,也各记一条能力。
+非空的,也各记一条能力。每个 `[[command]]` 一条:``adds command `<名字>` that may write
+<writes>``,不写文件的是 ``… that writes no files``;它的 `description` 进 `model_visible`
+(来处 ``command `<名字>` description``),`commands` 是包带的命令名。
 
 `model_visible` 列出每一段会一字不差到达模型的文本——插件描述、agent 描述与提示词、场景
 描述与提示词、skill 的 `description` / `when_to_use` / 正文 / `files:` 参考文件(来处写成
@@ -305,6 +348,7 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 `plugin.install` 就返回错误,包不会进 cache;扫描时也按同样的上限,超限的包不加载。
 
 `inert: true` 表示这个包不声明能力、没有场景、没有 MCP 服务器、没有任何对模型可见的文本。
+带命令的包总有能力条目,不会是 inert。
 
 ## 信任
 
@@ -322,6 +366,9 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
   `https://*.co.uk/**`、`https://*.github.io/**` 不生效),见 `ARCHITECTURE.md` §6.1;正文里的 `` !`cmd` `` 和模型的一次 `Bash` 调用一样先过会话的权限规则,
   要询问的不跑。项目信任管的是项目自己的 `.agents/skills/`,不改变包里 skill 的这些规则;
   未信任项目的 `.agents/skills/` 仍按磁盘层压过包里的同名 skill(它的命令不跑、授权不给)。
+- 包带的命令(`[[command]]`)跑在宿主进程的 QuickJS 里,它的每一次子调用照常过权限规则;调用
+  命令是授权点(会写的在 `default` 下问一次),授权只盖到这次调用自己写进 `writes` 的文件,
+  `writes` 之外的写入直接失败,见 `runext.md` §6。
 - 用户没信任的项目,它自己的配置按同一条规则对待(`ARCHITECTURE.md` §6.6):克隆来的仓库
   和下载来的包一样,只能新增、只能收紧。
 - `settings.json` 的 `plugins` 段是部署级开关:`{"plugins": {"enabled": false}}` 一个都不

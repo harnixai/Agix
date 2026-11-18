@@ -80,6 +80,7 @@ return reviews.map((r, i) => ({ module: args.modules[i], ...(r.status === "fulfi
 | `Bash` `Edit` `Write` `NotebookEdit`（照常过权限） | `TodoWrite`、`Goal*`、计划模式（改的是会话本身） |
 | `Agent`（脚本里经 `agent()` 用） | `Skill`、`ToolSearch`、`RunCode` 自己 |
 | MCP 工具（`mcp__*`） | `Team*`、`Task*`、`Monitor`、`Cron*`、`PushNotification`、`StructuredOutput`、worktree |
+| `RunExt`（插件命令，`runext.md` §9；会写的子命令询问即失败，要事先允许） | |
 
 使用指南里列出本会话可调的那些，一行一个签名，由各工具的 schema 与它声明的返回形状
 （`ToolSpec::code_result`）生成；场景过滤掉的不出现（工具描述里只列调用形状，见 §6）：
@@ -98,6 +99,7 @@ tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, 
 | `Bash` | `{stdout, stderr, exit_code}`；退出码非零则 reject，错误里带输出 |
 | `Read` | 文本文件：`{content, totalLines, truncated}`，原文，不带行号；不给 `offset` / `limit` 就是全文，`truncated` 说窗口后面还有没有行。不做「文件未变」的去重，模型刚读过的文件程序照样拿到原文；程序读过不算模型读过，模型再读拿到的仍是全文。文件不存在则 reject。图片、PDF、notebook 与模型看到的相同 |
 | `agent()` | 子 Agent 的最终文本；给了 `schema` 时是校验过的对象 |
+| `RunExt` | 命令返回的值本身：对象，或它返回的字符串 |
 
 没声明的工具给文本，与直接调用时相同。脚本里调了不存在的 `tools.Foo`，得到的是
 「Foo 在这里不可用，可用的有……」，不是 `undefined is not a function`。
