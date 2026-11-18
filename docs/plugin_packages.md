@@ -228,7 +228,10 @@ skill 展开用的正文是包加载时读进来、披露过的那份,不是调�
   就是另一个文件。
 - **`writes` 在两处收窄。** 安装时拒绝绝对路径、`~`、带 `..` 的、以及第一段就是通配(`**`、
   `*.md`,覆盖整个项目)的;用到时再按插件 skill 的 `allowed-tools` 路径规则解析到会话的项目
-  里,经符号链接越出项目的那一条不生效。
+  里,经符号链接越出项目的那一条不生效。**配置路径不在任何命令的 `writes` 之内**:写到 `.git/`
+  (git 的 hooks 与 config)、`.agix/` 等配置根里非工作区的条目、项目的 skill 目录这类会话
+  会当作配置来问的地方(`SensitivePaths::names_configuration`),无论 `writes` 怎么写都直接
+  失败——命令是装好后无人盯着运行的代码,写一个 git hook 就等于在下一次提交时执行代码。
 - **同名。** 两个启用着的包声明了同名命令,按包名排序先到的保留,后到的不注册;一个 skill 与
   命令同名时 `/名字` 归 skill,`RunExt` 照样能跑这条命令。两种情况都记进 `plugin.list` 那个包
   的 `command_conflicts`:
@@ -368,7 +371,7 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
   未信任项目的 `.agents/skills/` 仍按磁盘层压过包里的同名 skill(它的命令不跑、授权不给)。
 - 包带的命令(`[[command]]`)跑在宿主进程的 QuickJS 里,它的每一次子调用照常过权限规则;调用
   命令是授权点(会写的在 `default` 下问一次),授权只盖到这次调用自己写进 `writes` 的文件,
-  `writes` 之外的写入直接失败,见 `runext.md` §6。
+  `writes` 之外的写入与对配置路径的写入直接失败,见 `runext.md` §6。
 - 用户没信任的项目,它自己的配置按同一条规则对待(`ARCHITECTURE.md` §6.6):克隆来的仓库
   和下载来的包一样,只能新增、只能收紧。
 - `settings.json` 的 `plugins` 段是部署级开关:`{"plugins": {"enabled": false}}` 一个都不

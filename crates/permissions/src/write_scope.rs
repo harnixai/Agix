@@ -54,6 +54,20 @@ impl WriteScope {
                 .all(|alias| inside(alias, &self.lexical) || inside(alias, &self.physical))
     }
 
+    /// Whether writing `raw` from `cwd` reaches configuration under any of
+    /// its spellings ([`base::paths::SensitivePaths::names_configuration`]).
+    /// No scope covers it: a command is installed code nobody watches, and
+    /// a git hook it writes runs with the next commit.
+    pub fn reaches_configuration(
+        raw: &str,
+        cwd: &Path,
+        paths: &base::paths::SensitivePaths,
+    ) -> bool {
+        ResolvedPath::new(raw, cwd)
+            .all()
+            .any(|p| paths.names_configuration(&p.to_string_lossy()))
+    }
+
     /// An `Edit(...)` allow per glob: what a delegated grant takes.
     pub fn grants(&self) -> Vec<PermissionRule> {
         self.lexical
@@ -109,6 +123,26 @@ mod tests {
                 !scope.covers("forge/link/main.rs", root),
                 "a link out of the scope is not inside it"
             );
+        }
+    }
+
+    #[test]
+    fn configuration_is_reached_by_any_spelling_of_a_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let paths = base::paths::SensitivePaths::new(None, Some(root), Default::default());
+        let reaches = |raw: &str| WriteScope::reaches_configuration(raw, root, &paths);
+        assert!(reaches(".git/hooks/pre-commit"));
+        assert!(reaches("forge/../.git/config"));
+        assert!(reaches(".agix/agents/a.md"));
+        assert!(!reaches("forge/a.yaml"));
+        assert!(!reaches(".github/workflows/ci.yml"));
+        #[cfg(unix)]
+        {
+            std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+            std::fs::create_dir_all(root.join("forge")).unwrap();
+            std::os::unix::fs::symlink(root.join(".git/hooks"), root.join("forge/h")).unwrap();
+            assert!(reaches("forge/h/pre-commit"), "a link into .git reaches it");
         }
     }
 

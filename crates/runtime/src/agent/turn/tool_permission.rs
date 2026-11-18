@@ -152,7 +152,7 @@ pub(super) async fn authorize(
                 judged.permission_mode(),
                 &calls.grants,
             ));
-            calls.refusal(name, &facts, &tool_ctx.cwd)
+            calls.refusal(name, &facts, tool_ctx)
         }
         _ => None,
     };

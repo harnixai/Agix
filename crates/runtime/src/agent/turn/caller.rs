@@ -77,13 +77,13 @@ impl CommandCalls {
     }
 
     /// Why a call is refused before the session's permission is asked: a
-    /// read-only run that would change something, or a write outside
-    /// `writes`.
+    /// read-only run that would change something, a write of configuration,
+    /// or a write outside `writes`.
     pub(crate) fn refusal(
         &self,
         name: &str,
         facts: &base::interface::permission::ToolFacts,
-        cwd: &std::path::Path,
+        tool_ctx: &base::tool::ToolContext,
     ) -> Option<String> {
         use base::interface::permission::Subject;
         let writes_a_file = matches!(facts.subject, Subject::WritePath(_));
@@ -98,6 +98,18 @@ impl CommandCalls {
         let Subject::WritePath(path) = &facts.subject else {
             return None;
         };
+        let cwd = &tool_ctx.cwd;
+        if permissions::write_scope::WriteScope::reaches_configuration(
+            path,
+            cwd,
+            &tool_ctx.config.sandbox.paths,
+        ) {
+            return Some(format!(
+                "{path} is configuration, and configuration paths are never writable by a \
+                 plugin command, whatever its `writes` say; `{}` cannot write it",
+                self.command
+            ));
+        }
         if self.writes.covers(path, cwd) {
             return None;
         }
