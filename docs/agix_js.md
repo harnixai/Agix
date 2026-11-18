@@ -1,0 +1,158 @@
+# `agix`：脚本里的基础库
+
+Agix 里跑 JavaScript 的地方有三处，三处都有一个全局对象 `agix`，带着一组纯计算的函数：
+
+| 载体 | 谁写的代码 | 文档 |
+|---|---|---|
+| 扩展点上的脚本（`[[script]]`、`settings.json` 的 `scripts`） | 运维者、插件包 | `extending_quickjs.md` |
+| `RunCode` | 模型 | `ptc.md` |
+| `RunExt` 跑的插件命令（`[[command]]`） | 插件包 | `runext.md` |
+
+有了它，写插件的人不必各自打包一份 YAML 解析器、glob 匹配、JSON Schema 校验；更要紧的是，
+脚本里的匹配与解析和引擎自己用的是同一套实现——一条 glob 在脚本里匹配的结果，和 `Glob` 工具、
+权限规则里的一样。
+
+`agix` 在运行时创建时就装好，不进提示词，不占上下文；`RunCode` 的工具描述里只有一行提到它，
+完整清单在它的使用指南里（`ToolSearch select:RunCode`）。
+
+## 1. 收录原则
+
+一个函数进 `agix`，下面四条都要满足：
+
+1. **纯计算，不碰 I/O。** 不读写文件、不联网、不起进程、不看时钟以外的环境。所以它能出现在
+   "够不到任何 I/O"的扩展点脚本里而不破坏那条约束；读写文件只走 `tools.*`。
+2. **和引擎的行为要一致。** 引擎自己也做这件事（glob、YAML、JSON Schema……），脚本各打包一份库
+   会和引擎对不上。
+3. **几乎每个结构化数据类的扩展都用得上。** 只有一个插件用得上的，留在那个插件里。
+4. **格式与语义稳定。** 进来就是契约，只增不改（§4）。
+
+明确不收：文件、网络、进程、定时器；Markdown 语法树、模板引擎这类大而各有取舍的东西；任何仿
+Node 或浏览器的 API。
+
+## 2. 命名约定
+
+- **一个全局 `agix`，下面一层命名空间，再下面是函数。** 命名空间是小写名词，说的是格式或领域
+  （`yaml`、`glob`、`json`）；函数是 camelCase 的动词。不再往下嵌套。
+- **有家喻户晓的同名 API 就照它的名字和语义来，语义不同就不借它的名字。**
+  `parse` / `stringify` 同 `JSON`；`agix.path` 同 Node 的 `path.posix`；`agix.cli.parseArgs` 是 Node
+  `util.parseArgs` 的子集；返回布尔的匹配叫 `test`，同 `RegExp.prototype.test`。
+- **规则在前，数据在后**：`glob.test(pattern, path)`、`json.validate(schema, value)`。
+- **全部同步。** 纯计算没有理由返回 Promise。
+- **输入输出都是普通的 JSON 值与字符串**，不返回类实例。路径一律 POSIX 写法（`/`）。
+- **出错抛 `AgixError`**（`Error` 的子类），带 `code`，形如 `yaml.syntax`；"校验不通过"不算出错，
+  以返回值表达。
+
+## 3. 函数
+
+### `agix.version`
+
+字符串，引擎版本的 `x.y.z`。插件包要求某个版本以上，在 `plugin.toml` 写 `requires_engine`；
+脚本里要兼容更早的引擎，按成员是否存在判断（`if (agix.uuid?.v7)`）。
+
+### `agix.yaml`
+
+| 函数 | 说明 |
+|---|---|
+| `parse(text) → value` | 一个 YAML 文档解析成 JSON 值 |
+| `stringify(value) → text` | JSON 值写成 YAML |
+| `parseFrontmatter(text) → { data, body }` | 拆出文首 `---` 包起来的 YAML 与其后的正文；没有 frontmatter 时 `data` 为 `null`、`body` 是全文 |
+| `stringifyFrontmatter(data, body) → text` | 反过来；`data` 为 `null` 时只有正文 |
+
+- YAML 1.2 core schema。结果只有 JSON 能表达的值：键必须是字符串，没有日期类型（日期就是字符串），
+  超出 ±2⁵³ 的整数报错（`yaml.number_range`），自定义 tag 报错（`yaml.tag`）。
+- 锚点与别名展开，展开后的节点数有上限，防"十亿笑声"（`yaml.alias_limit`）。
+- 多文档的输入报错（`yaml.multiple_documents`）。
+- `stringify` 的输出：块风格、缩进 2、键按插入顺序、不折行、只在必要时加引号、以换行结尾。
+  `undefined`、函数、非有限数报错（`yaml.unrepresentable`）。
+- frontmatter 的起止行是单独一行的 `---`；接受 BOM 与 CRLF。`stringifyFrontmatter` 不改正文的
+  任何一个字节，`parseFrontmatter(stringifyFrontmatter(d, b)).body === b`。
+- 语法错误的 `AgixError` 带 `line`、`column`。
+
+### `agix.glob`
+
+| 函数 | 说明 |
+|---|---|
+| `test(pattern, path) → boolean` | `path` 是否匹配 |
+| `filter(pattern, paths) → string[]` | 匹配的那些，保持原顺序 |
+
+`pattern` 是一个字符串或字符串数组（任一匹配即可）。语义与 `Glob` 工具、权限规则相同：`*`、`?`
+不跨 `/`，`**` 跨目录，支持 `{a,b}` 与 `[abc]`，大小写敏感，`.` 开头的名字不特殊对待。按字符串
+匹配，不碰文件系统：相对的模式配相对的路径，绝对的配绝对的。模式写错抛 `glob.pattern`。
+
+### `agix.path`
+
+Node `path.posix` 里不依赖当前目录、不碰文件系统的那几个，语义相同：
+
+`join(...parts)`、`normalize(p)`、`relative(from, to)`、`dirname(p)`、`basename(p, ext?)`、
+`extname(p)`、`isAbsolute(p)`。
+
+没有 `resolve`：它要一个当前目录，脚本里的"当前目录"由载体以参数给出（`RunExt` 的
+`ctx.projectRoot`），不是一个隐含的全局状态。只做字面处理，不解析符号链接。
+
+### `agix.json`
+
+| 函数 | 说明 |
+|---|---|
+| `validate(schema, value) → { valid, errors }` | `errors` 每项 `{ instancePath, schemaPath, message }`，路径是 JSON Pointer；至多 100 项 |
+
+- 缺省按 draft 2020-12；schema 里写了 `$schema` 的按它（draft 4、6、7、2019-09）。
+- `format` 参与校验（`date-time`、`date`、`time`、`email`、`uri`、`uuid` 等）。
+- `$ref` 只解析 schema 内部的；指到外部的抛 `json.external_ref`——这里不联网也不读文件。
+- schema 本身不合法抛 `json.schema`。
+
+### `agix.hash`
+
+| 函数 | 说明 |
+|---|---|
+| `sha256(input) → string` | 小写十六进制。`input` 是字符串（按 UTF-8）或 `Uint8Array` |
+
+### `agix.uuid`
+
+| 函数 | 说明 |
+|---|---|
+| `v4() → string` | 随机 UUID |
+| `v7() → string` | 按时间有序的 UUID，适合当记录的键 |
+
+小写、带连字符。这一组是唯一不确定的函数：随机数与时钟，仍不碰 I/O。
+
+### `agix.cli`
+
+| 函数 | 说明 |
+|---|---|
+| `parseArgs(argv, config) → { values, positionals }` | 解析命令行参数 |
+
+Node `util.parseArgs` 的子集：`config.options` 每项 `{ type: "string" | "boolean", short?, multiple?, default? }`，
+`config.allowPositionals` 缺省 `true`。总是严格模式：不认识的选项抛 `cli.unknown_option`，缺值抛
+`cli.missing_value`，消息里带选项名，命令可以直接把它交回模型。
+
+```js
+function main(argv, input, ctx) {
+  const [group, verb, ...rest] = argv;
+  if (group === "req" && verb === "list") {
+    const { values } = agix.cli.parseArgs(rest, {
+      options: { status: { type: "string" }, priority: { type: "string" } },
+      allowPositionals: false,
+    });
+    // …
+  }
+}
+```
+
+## 4. 稳定性
+
+- 只增不改：已有的名字不改名、不改语义、不删。要换语义就起一个新名字，旧的留着。
+- `api_version` 不变的前提下，新增的成员随引擎版本出现；插件以 `requires_engine` 声明下限。
+- 加一个函数要同时做完五件事：本文一节；`types/agix.d.ts`；作者用的 Node 替身；三个载体里各一条
+  用例；`agix` 的成员清单与本文对账的守卫测试跟着过。
+
+## 5. 实现
+
+| 内容 | 位置 |
+|---|---|
+| 绑定的实现（Rust 函数、注册、`AgixError`） | 新 crate `crates/js-lib`，`ptc` 与 `script-host` 都依赖它 |
+| `agix.cli` 等用 JS 写更自然的部分 | 同一 crate 里的一段 JS；进程第一次用到时编译成字节码缓存在内存里，此后每个运行时直接加载 |
+| YAML | 一个维护中的纯 Rust YAML 实现（不用已归档的 `serde_yaml`），落地时按维护状况选定；行为以 §3 为准 |
+| glob、JSON Schema、SHA-256、UUID | 工作区已有的 `globset`、`jsonschema`、`sha2`、`uuid`（加 `v7` 特性） |
+| 装进运行时 | 三个载体创建上下文时第一件事装 `agix`，深度冻结，之后才求值用户代码 |
+
+`agix` 不随 `scripts` / `ptc` 特性以外的东西出现：没有 JavaScript 引擎的构建里也没有它。
