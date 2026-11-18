@@ -40,7 +40,11 @@ pub type NotificationSink = Arc<dyn Fn(McpNotification) + Send + Sync>;
 pub struct HandlerWiring {
     pub sink: Option<NotificationSink>,
     pub route: Arc<ElicitRoute>,
+    /// The project the server is told of; `None` for a remote server too.
     pub project: Option<std::path::PathBuf>,
+    /// Whether the client offers `roots`: only to a local process, never to a
+    /// remote server.
+    pub offers_roots: bool,
 }
 
 /// The client handler rmcp drives for one connection. Everything but the
@@ -52,6 +56,7 @@ pub struct NotifyingHandler {
     sink: Option<NotificationSink>,
     route: Arc<ElicitRoute>,
     project: Option<std::path::PathBuf>,
+    offers_roots: bool,
     keep: Option<Arc<dyn Send + Sync>>,
 }
 
@@ -62,6 +67,7 @@ impl NotifyingHandler {
             sink: wiring.sink,
             route: wiring.route,
             project: wiring.project,
+            offers_roots: wiring.offers_roots,
             keep: None,
         }
     }
@@ -93,7 +99,9 @@ impl ClientHandler for NotifyingHandler {
                 .with_form(FormElicitationCapability::new().with_schema_validation(true))
                 .with_url(UrlElicitationCapability::new()),
         );
-        info.capabilities.roots = Some(RootsCapabilities::default());
+        if self.offers_roots {
+            info.capabilities.roots = Some(RootsCapabilities::default());
+        }
         info.capabilities
             .extensions
             .get_or_insert_with(Default::default)
@@ -213,10 +221,16 @@ mod tests {
     }
 
     #[test]
-    fn the_client_declares_roots_and_not_sampling() {
-        let caps = NotifyingHandler::silent("demo").get_info().capabilities;
+    fn the_client_declares_roots_to_a_local_server_only_and_never_sampling() {
+        let local = HandlerWiring {
+            offers_roots: true,
+            ..Default::default()
+        };
+        let caps = NotifyingHandler::new("demo", local).get_info().capabilities;
         assert!(caps.roots.is_some());
         assert!(caps.sampling.is_none());
+        let remote = NotifyingHandler::silent("demo").get_info().capabilities;
+        assert!(remote.roots.is_none());
     }
 
     fn recorder() -> (NotificationSink, Arc<Mutex<Vec<McpNotification>>>) {

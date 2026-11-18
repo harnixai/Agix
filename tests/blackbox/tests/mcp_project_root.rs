@@ -312,3 +312,50 @@ async fn a_project_opened_through_a_symlink_reports_its_resolved_root() -> anyho
     run.finish().await;
     Ok(())
 }
+
+/// A remote server is not handed this machine's paths: over HTTP the client
+/// offers no roots, at either protocol generation, while a stdio server in
+/// the same session still learns the project.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_remote_server_is_offered_no_roots() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let remote = McpToy::spawn_http(&["--name", "remote"]).await?;
+    let older = McpToy::spawn_http(&["--name", "older", "--max-protocol", "2025-11-25"]).await?;
+    let local = McpToy::stdio_config(&["--name", "local"])?;
+    let mut run = stubbed("mcp-root-remote", &stub)
+        .settings(json!({ "mcp_servers": {
+            "remote": remote.config("streamable_http"),
+            "older": older.config("streamable_http"),
+            "local": local,
+        } }))
+        .start()
+        .await?;
+    let session = run.session().await?;
+    let _host = run.watch(&session, true).await?;
+    stub.script([
+        Reply::calls("r1", "mcp__remote__where", json!({})),
+        Reply::calls("r2", "mcp__older__where", json!({})),
+        Reply::calls("l1", "mcp__local__where", json!({})),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&session, "where are you").await?;
+    for tool in ["mcp__remote__where", "mcp__older__where"] {
+        let report = where_report(&events, tool);
+        assert_eq!(report["roots"], Value::Null, "{tool}: {report}");
+        assert!(
+            !report
+                .to_string()
+                .contains(&*canonical(&run.project).to_string_lossy()),
+            "{tool} learned the project: {report}"
+        );
+    }
+    assert_serves(
+        &where_report(&events, "mcp__local__where"),
+        &run.project,
+        "the stdio server",
+    );
+    run.finish().await;
+    remote.stop().await;
+    older.stop().await;
+    Ok(())
+}

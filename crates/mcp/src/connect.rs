@@ -133,7 +133,8 @@ impl StdioMcpClient {
         let wiring = crate::notify::HandlerWiring {
             sink: sink.clone(),
             route: route.clone(),
-            project: launch.project_root().map(Into::into),
+            project: launch.project_for(config).map(Into::into),
+            offers_roots: crate::project::offers_roots(config),
         };
         let spawned =
             spawn_service_within(server_name, config, wiring, &launch, auth.as_deref()).await?;
@@ -297,7 +298,8 @@ impl StdioMcpClient {
         let wiring = crate::notify::HandlerWiring {
             sink: self.sink.clone(),
             route: self.route.clone(),
-            project: self.launch.project_root().map(Into::into),
+            project: self.launch.project_for(&self.config).map(Into::into),
+            offers_roots: crate::project::offers_roots(&self.config),
         };
         match spawn_service_within(
             &self.server_name,
@@ -375,7 +377,7 @@ impl StdioMcpClient {
         taken: &AtomicBool,
     ) -> Result<McpCallResult, McpError> {
         let svc = self.service().await?;
-        let scope = &scope.serving(self.launch.project_root());
+        let scope = &scope.serving(self.launch.project_for(&self.config));
         let in_flight = self.route.enter(scope.elicitor.clone());
         let req = CallToolRequestParams::new(tool_name.to_string()).with_arguments(args);
         let limit = self.config.timeouts().tool();

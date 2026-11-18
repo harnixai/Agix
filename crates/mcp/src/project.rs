@@ -1,6 +1,7 @@
 //! The project a connection serves, as its server learns it: the `roots` the
 //! client lists (the project root as one `file://` URI, none without a
-//! project) and, for a stdio server, the `AGIX_PROJECT_ROOT` variable. A pool
+//! project) and the `AGIX_PROJECT_ROOT` variable, both for a stdio server
+//! only — a remote server is told neither. A pool
 //! connects servers per (project, scene), so every connection serves exactly
 //! one project, or none.
 
@@ -35,6 +36,12 @@ impl McpLaunch {
         self.project_root.as_deref()
     }
 
+    /// The project `config`'s server learns of: a remote server is not handed
+    /// this machine's paths.
+    pub(crate) fn project_for(&self, config: &crate::config::McpServerConfig) -> Option<&Path> {
+        self.project_root().filter(|_| offers_roots(config))
+    }
+
     /// Set after the server's own `env`: what the variable says is the
     /// project, whatever a configuration or the daemon's environment holds.
     pub(crate) fn tell_project(&self, cmd: &mut tokio::process::Command) {
@@ -43,6 +50,12 @@ impl McpLaunch {
             None => cmd.env_remove(PROJECT_ROOT_ENV),
         };
     }
+}
+
+/// Whether the client offers `roots` to `config`'s server: only to a process
+/// this machine starts, never to one reached over the network.
+pub(crate) fn offers_roots(config: &crate::config::McpServerConfig) -> bool {
+    matches!(config, crate::config::McpServerConfig::Stdio { .. })
 }
 
 /// `roots/list` as this client answers it for a connection serving `project`.
