@@ -404,13 +404,18 @@ async fn a_write_call_is_put_to_the_mode_with_its_scope_in_the_question() {
         .await;
     assert_eq!(
         facts.subject,
-        base::interface::permission::Subject::Opaque("forge flow archive 'C 1'".into())
+        base::interface::permission::Subject::Opaque("forge flow archive C 1".into())
     );
     assert_eq!(
         facts.reach,
         base::interface::permission::Reach::EditsProject
     );
-    assert!(facts.question.unwrap().contains("may write forge/**"));
+    let question = facts.question.unwrap();
+    assert!(
+        question.contains("Run `forge flow archive 'C 1'`"),
+        "{question}"
+    );
+    assert!(question.contains("may write forge/**"), "{question}");
     let read = tool
         .permission_facts(&json!({"command": "forge spec list"}), &ctx)
         .await;

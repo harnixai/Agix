@@ -935,3 +935,39 @@ async fn commands_list_leaves_out_commands_a_scene_without_run_ext_cannot_run() 
     run.finish().await;
     Ok(())
 }
+
+/// Rules are matched against the words the command gets, not the way the
+/// line quoted them: a deny on `notes add x` stops `notes add 'x '` too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deny_rule_holds_however_the_line_quotes_the_words() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_notes(
+        "ext-quoted",
+        &stub,
+        json!({
+            "permission_mode": "acceptEdits",
+            "permission_rules": [{ "tool": "RunExt(notes add x:*)", "action": "deny" }]
+        }),
+    )
+    .await?;
+    stub.script([
+        Reply::calls("spaced", "RunExt", json!({ "command": "notes add 'x '" })),
+        Reply::calls("joined", "RunExt", json!({ "command": "notes 'add  x'" })),
+        Reply::calls("plain", "RunExt", json!({ "command": "notes add \"x\"" })),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "add x").await?;
+    let results = result_of(&events, "RunExt");
+    assert_eq!(results.len(), 3, "{:?}", events.tool_results);
+    for result in &results {
+        assert!(
+            result.2 && result.1.to_lowercase().contains("denied"),
+            "{results:?}"
+        );
+    }
+    assert!(run.read_file("notes/x .md").is_none());
+    assert!(run.read_file("notes/x.md").is_none());
+    run.finish().await;
+    Ok(())
+}

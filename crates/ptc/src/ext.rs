@@ -81,9 +81,12 @@ struct Parsed<'a> {
     command: &'a ExtCommand,
     args: Vec<String>,
     read_only: bool,
-    /// The words requoted where needed: what permission rules are matched
-    /// against.
+    /// The words requoted where needed: what the person is shown.
     line: String,
+    /// The words with every run of whitespace, in them or between them, as
+    /// one space and no quotes: what permission rules are matched against,
+    /// so that quoting a word differently does not slip past a deny.
+    rule_line: String,
 }
 
 impl RunExtTool {
@@ -142,6 +145,11 @@ impl RunExtTool {
             line: words
                 .iter()
                 .map(|w| requote(w))
+                .collect::<Vec<_>>()
+                .join(" "),
+            rule_line: words
+                .iter()
+                .flat_map(|w| w.split_whitespace())
                 .collect::<Vec<_>>()
                 .join(" "),
         })
@@ -351,7 +359,7 @@ impl Tool for RunExtTool {
         let Some(parsed) = input["command"].as_str().and_then(|l| self.parse(l).ok()) else {
             return PermissionFacts::unknown();
         };
-        let subject = Subject::Opaque(parsed.line.clone());
+        let subject = Subject::Opaque(parsed.rule_line.clone());
         if parsed.read_only {
             return PermissionFacts::new(subject, Reach::Delegates);
         }

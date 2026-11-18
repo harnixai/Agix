@@ -82,8 +82,9 @@ writes = ["forge/**"]                # 这个命令能写的范围，相对项�
 
 命令名不认识时，错误列出已装的命令。这两种错误在权限检查之前报（输入校验），不会去问人。
 
-权限规则匹配的是切好的词重新拼起来的那一行：词之间一个空格，含空白或引号的词用单引号包起来
-（`forge req add 'two words'`）。
+权限规则匹配的是切好的词拼成的一行：不带引号，词里词间的每一段空白都算一个空格
+（`forge flow 'archive '`、`forge  flow "archive"` 都按 `forge flow archive` 匹配），同一组词怎么
+加引号都撞得上同一条规则。询问时给人看的是带引号的写法（`forge req add 'two words'`）。
 
 ## 4. 脚本里有什么
 
@@ -145,6 +146,10 @@ function `main` ``。
 "allow": ["RunExt(forge spec:*)", "RunExt(forge req list:*)"],
 "ask":   ["RunExt(forge flow archive:*)"]
 ```
+
+规则按子命令的路径写，匹配的是命令名后面的词序（§3）。引擎不解析命令的选项：写在子命令前面的
+选项（`forge --x flow archive`）会让 `RunExt(forge flow archive:*)` 匹配不到，所以命令不应在子命令
+之前收选项——这是写命令的约定（forge 不收），不是引擎替它守的。
 
 没有规则命中时：
 
