@@ -29,6 +29,17 @@ pub struct SubCallAnswer {
     pub reported_failure: bool,
 }
 
+/// What the sub-calls of one plugin command's run are held to: they are
+/// that command's (`via` `RunExt:<command>`), a read-only run writes nothing,
+/// and the files a write run may change are `writes`, globs relative to the
+/// project root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandScope {
+    pub command: String,
+    pub read_only: bool,
+    pub writes: Vec<String>,
+}
+
 #[async_trait]
 pub trait ToolDispatch: Send + Sync {
     /// The tools a sub-call may name.
@@ -45,4 +56,10 @@ pub trait ToolDispatch: Send + Sync {
         input: Value,
         cancel: CancellationToken,
     ) -> Result<SubCallAnswer, String>;
+
+    /// The same dispatch for one plugin command's sub-calls. `None` where
+    /// this dispatch cannot run a command's calls.
+    fn for_command(&self, _scope: CommandScope) -> Option<std::sync::Arc<dyn ToolDispatch>> {
+        None
+    }
 }

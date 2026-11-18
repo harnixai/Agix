@@ -35,6 +35,10 @@ use session_state::SessionState;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+fn parsed(text: &str, behavior: RuleBehavior) -> PermissionRule {
+    crate::rule::parse_rule_string(text, RuleSource::ProjectSettings, behavior).unwrap()
+}
+
 fn rule(source: base::permission::RuleSource, tool: &str) -> PermissionRule {
     PermissionRule {
         source,
@@ -115,6 +119,7 @@ struct FakeTool {
 enum Own {
     Contained,
     ListedHost,
+    EditsProject,
     Refused(&'static str),
     Unknown,
 }
@@ -149,6 +154,10 @@ impl FakeTool {
     }
     fn listed_host(mut self) -> Self {
         self.own = Own::ListedHost;
+        self
+    }
+    fn edits_project(mut self) -> Self {
+        self.own = Own::EditsProject;
         self
     }
     fn refused(mut self, reason: &'static str) -> Self {
@@ -212,6 +221,7 @@ impl Tool for FakeTool {
             Own::Contained if self.shell => PermissionFacts::new(subject, Reach::Inside),
             Own::Contained => PermissionFacts::new(subject, Reach::SessionOnly),
             Own::ListedHost => PermissionFacts::new(subject, Reach::Host { listed: true }),
+            Own::EditsProject => PermissionFacts::new(subject, Reach::EditsProject),
             Own::Refused(reason) => {
                 PermissionFacts::new(subject, Reach::Refused(reason.to_string()))
             }
@@ -764,6 +774,61 @@ async fn accept_edits_allows_a_write_the_tool_allowed_and_asks_for_one_it_did_no
             tool.match_content
         );
     }
+}
+
+/// A plugin command that writes is asked about in `default`, let through by
+/// `acceptEdits`, refused by `plan`; an allow rule or a deny rule on its
+/// command line decides it in any of them.
+#[tokio::test]
+async fn a_program_editing_the_project_is_asked_about_unless_edits_are_accepted() {
+    let tool = FakeTool::new("RunExt")
+        .matches("forge flow archive C-1")
+        .edits_project();
+    let outcome = |mode| {
+        let tool = tool.clone();
+        async move {
+            Policy::empty()
+                .check_with(&tool, &json!({}), &ctx_with_mode(mode))
+                .await
+                .unwrap()
+        }
+    };
+    assert!(matches!(
+        outcome(PermissionMode::Default).await,
+        PermissionOutcome::Prompt { .. }
+    ));
+    assert!(matches!(
+        outcome(PermissionMode::AcceptEdits).await,
+        PermissionOutcome::Permit { .. }
+    ));
+    assert!(matches!(
+        outcome(PermissionMode::Plan).await,
+        PermissionOutcome::Deny { .. }
+    ));
+    let ctx = ctx_with_mode(PermissionMode::Default);
+    let allowed = Policy::new(RuleSet::new(vec![parsed(
+        "RunExt(forge flow:*)",
+        RuleBehavior::Allow,
+    )]))
+    .check_with(&tool, &json!({}), &ctx)
+    .await
+    .unwrap();
+    assert!(
+        matches!(allowed, PermissionOutcome::Permit { .. }),
+        "{allowed:?}"
+    );
+    let ctx = ctx_with_mode(PermissionMode::AcceptEdits);
+    let denied = Policy::new(RuleSet::new(vec![parsed(
+        "RunExt(forge flow archive:*)",
+        RuleBehavior::Deny,
+    )]))
+    .check_with(&tool, &json!({}), &ctx)
+    .await
+    .unwrap();
+    assert!(
+        matches!(denied, PermissionOutcome::Deny { .. }),
+        "{denied:?}"
+    );
 }
 
 /// A read that reaches only a host the settings list is let through; a

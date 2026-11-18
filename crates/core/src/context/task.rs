@@ -17,6 +17,8 @@ pub enum TaskType {
     Monitor,
     /// A program the model wrote (`RunCode`).
     Code,
+    /// A plugin command run through `RunExt`.
+    Ext,
     /// A persistent team member, alive between the messages it is handed;
     /// each message it runs is a `Teammate` task of its own.
     Member,
@@ -34,6 +36,7 @@ impl TaskType {
             TaskType::CronJob => "cron",
             TaskType::Monitor => "monitor",
             TaskType::Code => "code",
+            TaskType::Ext => "ext",
             TaskType::Member => "member",
             TaskType::McpTask => "mcp_task",
         }
@@ -48,6 +51,7 @@ impl TaskType {
             TaskType::CronJob => "cj",
             TaskType::Monitor => "mo",
             TaskType::Code => "cd",
+            TaskType::Ext => "ext",
             TaskType::Member => "member",
             TaskType::McpTask => "mcp",
         }
@@ -237,7 +241,11 @@ impl RunningTask {
     pub fn streams_output(&self) -> bool {
         matches!(
             self.task_type,
-            TaskType::Shell | TaskType::Monitor | TaskType::Code | TaskType::McpTask
+            TaskType::Shell
+                | TaskType::Monitor
+                | TaskType::Code
+                | TaskType::Ext
+                | TaskType::McpTask
         )
     }
 

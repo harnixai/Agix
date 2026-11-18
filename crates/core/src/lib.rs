@@ -1,6 +1,7 @@
 //! Agix foundation — types, traits, and context shared by all crates.
 
 pub mod agent_type;
+pub mod command;
 pub mod error;
 pub mod event;
 pub mod id;

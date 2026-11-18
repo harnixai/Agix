@@ -374,6 +374,9 @@ fn by_mode(call: &Call<'_>, writes_configuration: bool) -> Verdict {
         {
             Verdict::Permit(Basis::AcceptEdits)
         }
+        PermissionMode::AcceptEdits if facts.reach == Reach::EditsProject => {
+            Verdict::Permit(Basis::AcceptEdits)
+        }
         // A `DontAsk` call got here only with an allow rule, which let it
         // through above; refusing keeps it closed if that order changes.
         PermissionMode::DontAsk => {

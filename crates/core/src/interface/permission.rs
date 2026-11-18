@@ -74,6 +74,9 @@ pub enum Reach {
     Inside,
     /// A path outside those roots.
     Outside,
+    /// Runs code the model did not write that may change files inside the
+    /// project only: asked about unless the mode accepts edits.
+    EditsProject,
     /// A host the model chose; `listed` when `sandbox.allowed_domains` names it.
     Host {
         listed: bool,

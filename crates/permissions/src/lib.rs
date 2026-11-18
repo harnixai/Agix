@@ -12,3 +12,4 @@ pub mod rule_string;
 pub mod ruleset;
 pub mod shadow;
 pub mod shell;
+pub mod write_scope;
