@@ -379,8 +379,9 @@ async fn read_only_subcommands_run_in_plan_mode_and_write_ones_do_not() -> anyho
     Ok(())
 }
 
-/// A hand-broken file is reported by file and field; a wrong option gets the
-/// group's usage back.
+/// A hand-broken file is reported by file and field, as is a file whose
+/// name disagrees with what it holds; a wrong option gets the group's usage
+/// back.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_broken_file_and_a_wrong_option_are_reported_precisely() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
@@ -390,6 +391,12 @@ async fn a_broken_file_and_a_wrong_option_are_reported_precisely() -> anyhow::Re
             "forge/reqs/R-001.md",
             &REQ.replace("status: proposed", "status: maybe"),
         )?;
+        world.write_project_file("forge-broken", "forge/reqs/R-003.md", REQ)?;
+        world.write_project_file(
+            "forge-broken",
+            "forge/specs/ledger.md",
+            "---\ncapability: report\n---\n",
+        )?;
         Ok(())
     }))
     .await?;
@@ -397,6 +404,8 @@ async fn a_broken_file_and_a_wrong_option_are_reported_precisely() -> anyhow::Re
         forge("g", "forge req get R-001", Value::Null),
         forge("o", "forge req list --bogus", Value::Null),
         forge("x", "forge req get ../secret", Value::Null),
+        forge("n", "forge req get R-003", Value::Null),
+        forge("s", "forge spec list", Value::Null),
         Reply::text("done"),
     ]);
     let session = run.session().await?;
@@ -414,6 +423,12 @@ async fn a_broken_file_and_a_wrong_option_are_reported_precisely() -> anyhow::Re
     );
     let id = results[2].as_ref().expect_err("not an id");
     assert!(id.contains("is not a requirement id"), "{id}");
+    let named = results[3].as_ref().expect_err("id and file name differ");
+    assert!(named.contains("its id is R-001"), "{named}");
+    let spec = results[4]
+        .as_ref()
+        .expect_err("capability and file name differ");
+    assert!(spec.contains("the file name says ledger"), "{spec}");
     run.finish().await;
     Ok(())
 }
@@ -590,6 +605,623 @@ async fn requirements_on_an_mcp_backend_answer_as_the_local_ones() -> anyhow::Re
     assert_eq!(stored[0]["status"], "accepted", "{stored}");
     assert_eq!(stored[0]["changes"], json!(["C-001"]), "{stored}");
     assert_eq!(stored[1]["priority"], "low", "{stored}");
+    run.finish().await;
+    Ok(())
+}
+
+/// Specs kept on an MCP backend: the whole flow lands its entries in the
+/// toy's store, nothing under `forge/specs`, and `spec get` reads them back.
+#[tokio::test(flavor = "multi_thread")]
+async fn specs_on_an_mcp_backend_take_the_merged_entries() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let store = tempfile::tempdir()?;
+    let toy = McpToy::stdio_config(&[
+        "--name",
+        "specdb",
+        "--store",
+        &store.path().to_string_lossy(),
+    ])?;
+    let allow: Vec<Value> = ["items_query", "items_get", "items_put"]
+        .iter()
+        .map(|t| json!({ "tool": format!("mcp__specdb__{t}"), "action": "allow" }))
+        .collect();
+    let mut run = with_forge_from(
+        stubbed("forge-specdb", &stub)
+            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .before_start(move |world, _| {
+                world.write_global_settings(
+                    &json!({ "mcp_servers": { "specdb": toy }, "permission_rules": allow }),
+                )?;
+                world.write_project_file(
+                    "forge-specdb",
+                    "forge/config.yaml",
+                    "specs: { backend: mcp, server: specdb }\n",
+                )?;
+                Ok(())
+            }),
+    )
+    .await?;
+    let mut script = whole_flow();
+    script.pop();
+    script.extend([
+        forge("get", "forge spec get S-ledger-001", Value::Null),
+        forge("list", "forge spec list", Value::Null),
+        Reply::text("done"),
+    ]);
+    stub.script(script);
+    let session = run.session().await?;
+    let out = all_ok(&ran(&run.turn(&session, "build the totals").await?));
+    assert_eq!(
+        out[14]["specs"]["added"],
+        json!(["S-ledger-001"]),
+        "{}",
+        out[14]
+    );
+    assert_eq!(out[15]["title"], "Totals per category", "{}", out[15]);
+    assert_eq!(out[15]["criteria"][1]["id"], "A2", "{}", out[15]);
+    assert_eq!(out[16]["items"][0]["criteria"], 2, "{}", out[16]);
+    let stored: Value =
+        serde_json::from_str(&std::fs::read_to_string(store.path().join("spec.json"))?)?;
+    assert_eq!(stored[0]["id"], "S-ledger-001", "{stored}");
+    assert!(
+        !run.project.join("forge/specs").exists(),
+        "specs stay remote"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// From `propose` to the `archive` stage: `delta` written, a one-item plan
+/// checked, and every criterion in `passes` verified as passing.
+fn up_to_archive(id: &str, delta: Value, passes: &[(&str, &str)]) -> Vec<Reply> {
+    let advance = |n: u32| {
+        forge(
+            &format!("{id}-a{n}"),
+            &format!("forge flow advance {id}"),
+            Value::Null,
+        )
+    };
+    let results: Vec<Value> = passes
+        .iter()
+        .map(|(spec, criterion)| json!({ "spec": spec, "criterion": criterion, "pass": true }))
+        .collect();
+    let mut steps = vec![
+        advance(1),
+        forge(&format!("{id}-d"), &format!("forge flow delta {id}"), delta),
+        advance(2),
+        forge(
+            &format!("{id}-p"),
+            &format!("forge flow plan {id}"),
+            json!({ "items": ["Do it"] }),
+        ),
+        advance(3),
+        forge(
+            &format!("{id}-k"),
+            &format!("forge flow check {id} P1"),
+            Value::Null,
+        ),
+        advance(4),
+    ];
+    if !results.is_empty() {
+        steps.push(forge(
+            &format!("{id}-v"),
+            &format!("forge flow verify {id}"),
+            json!({ "results": results }),
+        ));
+    }
+    steps.push(advance(5));
+    steps
+}
+
+fn new_change(id: &str, reqs: Value) -> Reply {
+    forge(
+        &format!("{id}-new"),
+        "forge flow new",
+        json!({ "title": format!("Change {id}"), "reqs": reqs, "body": "Why.\n" }),
+    )
+}
+
+fn ledger_entry(title: &str, criteria: &[&str]) -> Value {
+    json!({ "capability": "ledger", "title": title, "body": format!("{title}, in words."),
+            "criteria": criteria })
+}
+
+/// One turn of scripted forge calls that must all succeed.
+async fn setup(
+    run: &mut LiveRun,
+    stub: &ProviderStub,
+    session: &str,
+    mut steps: Vec<Reply>,
+) -> anyhow::Result<Vec<Value>> {
+    steps.push(Reply::text("set up"));
+    stub.script(steps);
+    Ok(all_ok(&ran(&run.turn(session, "set up").await?)))
+}
+
+/// A body line that reads as an entry heading or as the criteria heading,
+/// and a blank title, would not survive the Markdown round trip and are
+/// refused, as is a delta naming one entry twice or written at propose; a
+/// later delta of another change is not held up by any of them.
+#[tokio::test(flavor = "multi_thread")]
+async fn spec_text_that_would_not_read_back_is_refused() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge(
+        "forge-roundtrip",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let session = run.session().await?;
+    let entry = |title: &str, body: &str| {
+        json!({ "add": [{ "capability": "ledger", "title": title, "body": body,
+                          "criteria": ["Prints the total"] }] })
+    };
+    stub.script([
+        new_change("C-001", json!([])),
+        forge("early", "forge flow delta C-001", entry("Totals", "x")),
+        forge("a", "forge flow advance C-001", Value::Null),
+        forge(
+            "heading",
+            "forge flow delta C-001",
+            entry("Totals", "a\n## S-ledger-900 x\nb"),
+        ),
+        forge(
+            "criteria",
+            "forge flow delta C-001",
+            entry("Totals", "a\n### 验收\nnot a criterion"),
+        ),
+        forge("blank", "forge flow delta C-001", entry("  ", "x")),
+        forge(
+            "twice",
+            "forge flow delta C-001",
+            json!({ "remove": ["S-ledger-001", "S-ledger-001"] }),
+        ),
+        new_change("C-002", json!([])),
+        forge("a2", "forge flow advance C-002", Value::Null),
+        forge("other", "forge flow delta C-002", entry("Totals", "Fine.")),
+        Reply::text("done"),
+    ]);
+    let results = ran(&run.turn(&session, "spec").await?);
+    let refused = |i: usize| -> String {
+        results[i]
+            .clone()
+            .expect_err(&format!("call {i} is refused: {results:?}"))
+    };
+    assert!(refused(1).contains("is at propose"), "{}", refused(1));
+    for i in [3, 4] {
+        assert!(refused(i).contains("would not read back"), "{}", refused(i));
+    }
+    assert!(refused(5).contains("/add/0/title"), "{}", refused(5));
+    assert!(refused(6).contains("more than once"), "{}", refused(6));
+    let other = results[9].as_ref().expect("another change's delta");
+    assert_eq!(other["add"], json!(["S-ledger-001"]), "{other}");
+    assert!(
+        run.read_file("forge/changes/C-001/delta.md").is_none(),
+        "nothing refused was written"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// A failed criterion sends the change back to apply; once the delta is
+/// sent again with a changed entry, that entry's passes are gone and the
+/// change cannot leave verify until it is verified again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_or_a_changed_delta_means_verifying_again() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge(
+        "forge-reverify",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let session = run.session().await?;
+    let delta = json!({ "add": [ledger_entry("Totals", &["Sums", "Empty prints nothing"])] });
+    let mut steps = vec![new_change("C-001", json!([]))];
+    steps.extend(up_to_archive("C-001", delta, &[]));
+    steps.pop();
+    setup(&mut run, &stub, &session, steps).await?;
+
+    let result = |criterion: &str, pass: bool| json!({ "spec": "S-ledger-001", "criterion": criterion, "pass": pass });
+    stub.script([
+        forge(
+            "fail",
+            "forge flow verify C-001",
+            json!({ "results": [result("A1", true), result("A2", false)] }),
+        ),
+        forge("back", "forge flow advance C-001", Value::Null),
+        forge(
+            "twice",
+            "forge flow verify C-001",
+            json!({ "results": [result("A1", true), result("A1", true)] }),
+        ),
+        forge(
+            "pass",
+            "forge flow verify C-001",
+            json!({ "results": [result("A1", true), result("A2", true)] }),
+        ),
+        forge(
+            "redelta",
+            "forge flow delta C-001",
+            json!({ "add": [ledger_entry("Totals", &["Sums", "An empty file prints 0.00"])] }),
+        ),
+        forge("stale", "forge flow advance C-001", Value::Null),
+        forge("show", "forge flow show C-001", Value::Null),
+        Reply::text("done"),
+    ]);
+    let results = ran(&run.turn(&session, "verify").await?);
+    let failed = results[0].as_ref().expect("verify with a failure");
+    assert_eq!(failed["stage"], "apply", "{failed}");
+    assert_eq!(failed["failed"], json!(["S-ledger-001 A2"]), "{failed}");
+    assert_eq!(results[1].as_ref().expect("advance")["stage"], "verify");
+    let twice = results[2].as_ref().expect_err("a criterion twice");
+    assert!(twice.contains("more than once"), "{twice}");
+    assert_eq!(results[3].as_ref().expect("all pass")["failed"], json!([]));
+    let redelta = results[4].as_ref().expect("the delta again");
+    assert!(
+        redelta["say"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("S-ledger-001"),
+        "{redelta}"
+    );
+    let stale = results[5].as_ref().expect_err("passes of the old text");
+    assert!(
+        stale.contains("criteria without a passing record"),
+        "{stale}"
+    );
+    let shown = results[6].as_ref().expect("show");
+    assert_eq!(
+        shown["delta"]["add"][0]["criteria"][1]["verified"],
+        Value::Null,
+        "{shown}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// Two open changes modify the same entry: the second to archive is
+/// refused rather than overwriting the first, sends its delta again on top
+/// of the current entry, verifies again and archives both edits. A removed
+/// entry's id is not handed out again, and an archive with a modify and a
+/// remove merges both.
+#[tokio::test(flavor = "multi_thread")]
+async fn changes_to_one_entry_do_not_overwrite_each_other() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge(
+        "forge-two",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let session = run.session().await?;
+    let both = [("S-ledger-001", "A1"), ("S-ledger-002", "A1")];
+    let mut steps = vec![
+        forge(
+            "r",
+            "forge req add",
+            json!({ "title": "Ledger", "body": "Totals.\n" }),
+        ),
+        new_change("C-001", json!(["R-001"])),
+    ];
+    steps.extend(up_to_archive(
+        "C-001",
+        json!({ "add": [ledger_entry("Totals", &["Sums"]), ledger_entry("Months", &["Per month"])] }),
+        &both,
+    ));
+    steps.push(forge("x1", "forge flow archive C-001", Value::Null));
+    setup(&mut run, &stub, &session, steps).await?;
+    let mut steps = vec![new_change("C-002", json!([]))];
+    steps.extend(up_to_archive(
+        "C-002",
+        json!({ "modify": [{ "id": "S-ledger-001", "body": "Sums by category." }],
+                "remove": ["S-ledger-002"] }),
+        &[("S-ledger-001", "A1")],
+    ));
+    steps.push(new_change("C-003", json!([])));
+    steps.extend(up_to_archive(
+        "C-003",
+        json!({ "modify": [{ "id": "S-ledger-001", "title": "Totals per category" }] }),
+        &[("S-ledger-001", "A1")],
+    ));
+    setup(&mut run, &stub, &session, steps).await?;
+
+    stub.script([
+        forge("x2", "forge flow archive C-002", Value::Null),
+        forge("x3", "forge flow archive C-003", Value::Null),
+        forge(
+            "again",
+            "forge flow delta C-003",
+            json!({ "modify": [{ "id": "S-ledger-001", "title": "Totals per category" }] }),
+        ),
+        forge(
+            "v3",
+            "forge flow verify C-003",
+            json!({ "results": [{ "spec": "S-ledger-001", "criterion": "A1", "pass": true }] }),
+        ),
+        forge("a3", "forge flow advance C-003", Value::Null),
+        forge("x3b", "forge flow archive C-003", Value::Null),
+        new_change("C-004", json!([])),
+        forge("a4", "forge flow advance C-004", Value::Null),
+        forge(
+            "d4",
+            "forge flow delta C-004",
+            json!({ "add": [ledger_entry("Export", &["Writes CSV"])] }),
+        ),
+        Reply::text("done"),
+    ]);
+    let results = ran(&run.turn(&session, "archive").await?);
+    let merged = results[0].as_ref().expect("archive C-002");
+    assert_eq!(
+        merged["specs"]["modified"],
+        json!(["S-ledger-001"]),
+        "{merged}"
+    );
+    assert_eq!(
+        merged["specs"]["removed"],
+        json!(["S-ledger-002"]),
+        "{merged}"
+    );
+    let refused = results[1]
+        .as_ref()
+        .expect_err("C-003 was written against the old entry");
+    assert!(
+        refused.contains("S-ledger-001 changed after its delta was written")
+            && refused.contains("forge flow delta C-003"),
+        "{refused}"
+    );
+    let again = results[2].as_ref().expect("the delta again");
+    assert_eq!(again["stage"], "verify", "{again}");
+    assert_eq!(
+        results[5].as_ref().expect("archive C-003")["stage"],
+        "done",
+        "{results:?}"
+    );
+    let added = results[8].as_ref().expect("a new entry");
+    assert_eq!(
+        added["add"],
+        json!(["S-ledger-003"]),
+        "a removed id stays used: {added}"
+    );
+
+    let spec = run.read_file("forge/specs/ledger.md").unwrap_or_default();
+    assert!(
+        spec.contains("## S-ledger-001 Totals per category\n")
+            && spec.contains("Sums by category."),
+        "both edits are kept: {spec}"
+    );
+    assert!(!spec.contains("S-ledger-002"), "{spec}");
+    run.finish().await;
+    Ok(())
+}
+
+/// An archive that stopped part way — the entry it removes already gone,
+/// the archived copy of the change already written — runs again to the end.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archive_that_stopped_part_way_runs_again() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge(
+        "forge-retry",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let session = run.session().await?;
+    let mut steps = vec![new_change("C-001", json!([]))];
+    steps.extend(up_to_archive(
+        "C-001",
+        json!({ "add": [ledger_entry("Totals", &["Sums"]), ledger_entry("Months", &["Per month"])] }),
+        &[("S-ledger-001", "A1"), ("S-ledger-002", "A1")],
+    ));
+    steps.push(forge("x1", "forge flow archive C-001", Value::Null));
+    steps.push(new_change("C-002", json!([])));
+    steps.extend(up_to_archive(
+        "C-002",
+        json!({ "modify": [{ "id": "S-ledger-001", "body": "Sums by category." }],
+                "remove": ["S-ledger-002"] }),
+        &[("S-ledger-001", "A1")],
+    ));
+    setup(&mut run, &stub, &session, steps).await?;
+
+    let spec = run.read_file("forge/specs/ledger.md").unwrap_or_default();
+    let cut = spec.find("\n\n## S-ledger-002").expect("the second entry");
+    std::fs::write(
+        run.project.join("forge/specs/ledger.md"),
+        format!("{}\n", &spec[..cut]),
+    )?;
+    let open = run
+        .read_file("forge/changes/C-002/change.md")
+        .unwrap_or_default();
+    std::fs::create_dir_all(run.project.join("forge/archive/C-002"))?;
+    std::fs::write(run.project.join("forge/archive/C-002/change.md"), open)?;
+
+    stub.script([
+        forge("x2", "forge flow archive C-002", Value::Null),
+        Reply::text("done"),
+    ]);
+    let results = ran(&run.turn(&session, "archive again").await?);
+    let done = results[0].as_ref().expect("the archive finishes");
+    assert_eq!(done["stage"], "done", "{done}");
+    let spec = run.read_file("forge/specs/ledger.md").unwrap_or_default();
+    assert!(
+        spec.contains("Sums by category.") && !spec.contains("S-ledger-002"),
+        "{spec}"
+    );
+    let archived = run
+        .read_file("forge/archive/C-002/change.md")
+        .unwrap_or_default();
+    assert!(archived.contains("stage: done"), "{archived}");
+    run.finish().await;
+    Ok(())
+}
+
+/// Coverage reads the archived changes only, in the order they were
+/// archived: a failure recorded by a change still open does not undo a
+/// pass that is already current.
+#[tokio::test(flavor = "multi_thread")]
+async fn coverage_counts_what_was_archived() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge(
+        "forge-coverage",
+        &stub,
+        json!({ "permission_mode": "acceptEdits" }),
+    )
+    .await?;
+    let session = run.session().await?;
+    let mut unowned = ledger_entry("Months", &["Per month"]);
+    unowned["reqs"] = json!([]);
+    let mut steps = vec![
+        forge(
+            "r",
+            "forge req add",
+            json!({ "items": [{ "title": "Totals", "body": "x" }, { "title": "Export", "body": "y" }] }),
+        ),
+        forge("u", "forge req update R-002 --status accepted", Value::Null),
+        new_change("C-001", json!(["R-001"])),
+    ];
+    steps.extend(up_to_archive(
+        "C-001",
+        json!({ "add": [ledger_entry("Totals", &["Sums"]), unowned] }),
+        &[("S-ledger-001", "A1"), ("S-ledger-002", "A1")],
+    ));
+    steps.push(forge("x1", "forge flow archive C-001", Value::Null));
+    steps.push(new_change("C-002", json!([])));
+    steps.extend(up_to_archive(
+        "C-002",
+        json!({ "modify": [{ "id": "S-ledger-001", "body": "Sums by category." }] }),
+        &[],
+    ));
+    steps.pop();
+    steps.push(forge(
+        "v2",
+        "forge flow verify C-002",
+        json!({ "results": [{ "spec": "S-ledger-001", "criterion": "A1", "pass": false }] }),
+    ));
+    setup(&mut run, &stub, &session, steps).await?;
+
+    stub.script([
+        forge("cov", "forge spec coverage", Value::Null),
+        Reply::text("done"),
+    ]);
+    let out = all_ok(&ran(&run.turn(&session, "coverage").await?));
+    assert_eq!(
+        out[0],
+        json!({
+            "accepted_without_specs": [{ "id": "R-002", "title": "Export",
+                                         "status": "accepted", "priority": "medium" }],
+            "entries_without_reqs": ["S-ledger-002"],
+            "criteria_not_passed": [],
+        })
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// The guard keeps to the project's `forge/`: a `forge` directory elsewhere
+/// is readable, a differently cased `Forge/` and a shell command naming the
+/// directory are refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_guard_refuses_forge_and_nothing_else() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge_from(
+        stubbed("forge-guard-edges", &stub).before_start(|world, _| {
+            world.write_project_file("forge-guard-edges", "forge/reqs/R-001.md", REQ)?;
+            world.write_project_file("forge-guard-edges", "src/forge/mod.rs", "pub fn f() {}\n")?;
+            Ok(())
+        }),
+    )
+    .await?;
+    stub.script([
+        Reply::calls("own", "Read", json!({ "file_path": "src/forge/mod.rs" })),
+        Reply::calls(
+            "cased",
+            "Write",
+            json!({ "file_path": "Forge/reqs/R-009.md", "content": "x" }),
+        ),
+        Reply::calls(
+            "rm",
+            "Bash",
+            json!({ "command": "rm -r forge", "description": "remove" }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let watcher = run.watch(&session, true).await?;
+    let events = run.turn(&session, "tidy up").await?;
+    let result = |tool: &str| {
+        events
+            .tool_results
+            .iter()
+            .find(|(name, _, _)| name == tool)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {tool} result: {:?}", events.tool_results))
+    };
+    let (_, text, failed) = result("Read");
+    assert!(!failed && text.contains("pub fn f"), "{text}");
+    for tool in ["Write", "Bash"] {
+        let (_, text, failed) = result(tool);
+        assert!(
+            failed && text.contains("forge/ is kept by the forge command"),
+            "{tool}: {text}"
+        );
+    }
+    assert!(run.read_file("forge/reqs/R-001.md").is_some());
+    assert!(run.read_file("forge/reqs/R-009.md").is_none());
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}
+
+/// Help is read-only wherever `--help` is written, so plan mode allows it;
+/// a missing argument gets the usage back; files under `reqs/` that are not
+/// requirements are skipped; an inherited property name is not a command.
+#[tokio::test(flavor = "multi_thread")]
+async fn help_and_odd_input_are_answered_plainly() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_forge_from(
+        stubbed("forge-odd", &stub)
+            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .before_start(|world, _| {
+                world.write_project_file("forge-odd", "forge/reqs/R-001.md", REQ)?;
+                world.write_project_file("forge-odd", "forge/reqs/README.md", "Requirements.\n")?;
+                Ok(())
+            }),
+    )
+    .await?;
+    stub.script([
+        forge("h1", "forge --help", Value::Null),
+        forge("h2", "forge flow archive --help", Value::Null),
+        forge("count", "forge flow show", Value::Null),
+        forge("list", "forge req list", Value::Null),
+        Reply::text("done"),
+    ]);
+    let planning = run
+        .session_with(json!({ "options": { "permission_mode": "plan" } }))
+        .await?;
+    let results = ran(&run.turn(&planning, "help").await?);
+    let help = results[0].as_ref().expect("forge --help in plan mode");
+    assert!(help.to_string().contains("forge flow archive"), "{help}");
+    assert!(results[1].is_ok(), "{results:?}");
+    let count = results[2].as_ref().expect_err("no change id");
+    assert!(
+        count.contains("expected 1 argument") && count.contains("forge flow show <C-id>"),
+        "{count}"
+    );
+    let listed = results[3].as_ref().expect("README.md is not a requirement");
+    assert_eq!(
+        listed["items"].as_array().map(Vec::len),
+        Some(1),
+        "{listed}"
+    );
+
+    stub.script([
+        forge("proto", "forge req constructor", Value::Null),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let results = ran(&run.turn(&session, "odd").await?);
+    let unknown = results[0].as_ref().expect_err("not a command");
+    assert!(unknown.contains("unknown command"), "{unknown}");
     run.finish().await;
     Ok(())
 }

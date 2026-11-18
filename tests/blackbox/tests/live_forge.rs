@@ -284,15 +284,26 @@ async fn live_forge_auto_mode_stops_before_apply() -> anyhow::Result<()> {
     .await?;
     let session = run.session().await?;
     let host = run.watch(&session, true).await?;
-    step(
+    let first = step(
         &mut run,
         &session,
         "/forge-propose A Rust library crate `slug` in this project's root with one function \
          `slugify(&str) -> String`: lowercase ASCII letters and digits are kept, every other run \
-         of characters becomes a single `-`, and no `-` at either end.",
+         of characters becomes a single `-`, and no `-` at either end. Decide anything open \
+         yourself; don't ask.",
     )
     .await?;
-    let id = changes(&run.project).into_iter().next().expect("a change");
+    if changes(&run.project).is_empty() {
+        eprintln!(
+            "[live forge-auto] no change after the first turn; it said: {}",
+            first.text
+        );
+        step(&mut run, &session, "Decide it yourself and go on.").await?;
+    }
+    let id = changes(&run.project)
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("propose opened no change"))?;
     assert_eq!(stage(&run.project, &id), "apply", "stopped before apply");
     let shown = forge(&mut run, &session, &format!("flow show {id}")).await?;
     let plan = shown["plan"].as_array().cloned().unwrap_or_default();
@@ -409,12 +420,26 @@ async fn live_forge_direct_reads_are_refused_and_the_command_answers() -> anyhow
     let refused: Vec<&(String, String, bool)> = events
         .tool_results
         .iter()
-        .filter(|(name, text, failed)| name == "Read" && *failed && text.contains("forge/"))
+        .filter(|(_, text, failed)| *failed && text.contains("forge/ is kept by the forge command"))
         .collect();
     eprintln!("[live forge-guard] direct reads refused: {}", refused.len());
     for (_, text, _) in &refused {
         assert!(text.contains("forge req get"), "{text}");
     }
+    let carried: Vec<&String> = events
+        .tool_results
+        .iter()
+        .filter(|(_, text, _)| text.contains(&word))
+        .map(|(name, _, _)| name)
+        .collect();
+    let through_command = events.tool_results.iter().any(|(name, text, failed)| {
+        name == "RunExt" && !failed && text.contains(&word) && text.contains("R-001")
+    });
+    assert!(
+        through_command && carried.iter().all(|name| *name == "RunExt"),
+        "the code word comes from `forge req get` alone: {:?}",
+        events.tool_results
+    );
     assert!(events.text.contains(&word), "{}", events.text);
     assert!(direct_forge_access(&run).is_empty());
     drop(host);
