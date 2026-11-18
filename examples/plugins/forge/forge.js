@@ -55,7 +55,13 @@ const SCHEMA = {
     ["id", "title", "stage", "reqs", "history", "plan", "verification"],
   ),
   archived: loose({ id: str(CHANGE_ID), archived: { const: true } }, ["id", "archived"]),
-  delta: closed({ change: str(CHANGE_ID), add: ids(SPEC_ID), modify: ids(SPEC_ID), remove: ids(SPEC_ID) }, ["change", "add", "modify", "remove"]),
+  delta: closed(
+    {
+      change: str(CHANGE_ID), add: ids(SPEC_ID), modify: ids(SPEC_ID), remove: ids(SPEC_ID),
+      base: { type: "object", propertyNames: str(SPEC_ID), additionalProperties: str("^[0-9a-f]{64}$") },
+    },
+    ["change", "add", "modify", "remove", "base"],
+  ),
 };
 
 const reqInput = closed({ title: text, priority: PRIORITY, body: str() }, ["title", "body"]);
@@ -170,6 +176,9 @@ function need(id, pattern, what) {
   return id;
 }
 
+/** @param {string[]} list */
+const repeated = (list) => [...new Set(list.filter((x, i) => list.indexOf(x) !== i))];
+
 const now = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 const pad = (n) => String(n).padStart(3, "0");
 /** @param {string[]} taken @param {string} prefix */
@@ -183,6 +192,8 @@ const abs = (rel) => agix.path.join(ROOT, DIR, rel);
 
 /** @type {Set<string> | null} */
 let existing = null;
+/** @type {Set<string>} */
+const readThisRun = new Set();
 
 /**
  * The files under forge/, relative to it, from one Glob per run. Reads go only to files listed
@@ -202,13 +213,16 @@ async function readText(rel) {
   if (!(await files()).has(rel)) return null;
   const read = await tools.Read({ file_path: abs(rel) });
   if (read.truncated) throw new Error(`forge/${rel} is longer than one read returns`);
+  readThisRun.add(rel);
   return read.content;
 }
 
-/** @param {string} rel @param {string} content */
+/** Write replaces a file only once this run has read it. @param {string} rel @param {string} content */
 async function writeText(rel, content) {
+  if ((await files()).has(rel) && !readThisRun.has(rel)) await readText(rel);
   await tools.Write({ file_path: abs(rel), content });
   (await files()).add(rel);
+  readThisRun.add(rel);
 }
 
 /** Files under forge/ matching `pattern`, relative to forge/. @param {string} pattern */
@@ -367,6 +381,7 @@ async function specFile(capability) {
 
 const reqsOf = async () => store((await config()).reqs, "req");
 const specsOf = async () => store((await config()).specs, "spec");
+/** @param {Store} specs */
 const liveEntries = async (specs) => (await specs.all()).filter((e) => !e.removed);
 
 const ENTRY_HEAD = /^## (S-[a-z0-9][a-z0-9-]*-[0-9]{3,}) (.+)$/;
@@ -432,6 +447,9 @@ function renderEntry(e) {
   return `## ${e.id} ${e.title}\nreqs: ${e.reqs.join(", ")}\n\n${e.body ? e.body + "\n\n" : ""}${CRITERIA_HEAD}\n${criteria}`;
 }
 
+/** What a delta records of the entry it modifies or removes, to see at archive whether it changed since. @param {Entry} e */
+const fingerprint = (e) => agix.hash.sha256(renderEntry(e));
+
 /** @param {Entry} e */
 const sameFields = (e) => JSON.stringify([e.id, e.capability, e.title, e.reqs, e.body, e.criteria.map((c) => [c.id, c.text])]);
 
@@ -491,7 +509,8 @@ async function reqUpdate(rest, input) {
 }
 
 async function coverage() {
-  const [reqs, entries, changes] = await Promise.all([(await reqsOf()).all(), liveEntries(await specsOf()), allChanges()]);
+  const [reqs, entries, all] = await Promise.all([(await reqsOf()).all(), liveEntries(await specsOf()), allChanges()]);
+  const changes = all.map((c) => c.change);
   const cited = new Set(entries.flatMap((e) => e.reqs));
   const passed = new Set();
   for (const c of changes.sort((a, b) => a.id.localeCompare(b.id))) {
@@ -528,26 +547,46 @@ async function loadChange(id, archived = false) {
 /** @param {any} change @param {string} body */
 const saveChange = (change, body) => writeDoc(`changes/${change.id}/change.md`, SCHEMA.change, change, body);
 
+/** Every change, open (`where: "changes"`) or archived (`where: "archive"`). */
 async function allChanges() {
-  const files = [...(await list("changes/*/change.md")), ...(await list("archive/*/change.md"))];
-  const docs = await Promise.all(files.map((f) => readDoc(f, { type: "object" })));
-  return files
-    .map((f, i) => ({ f, data: docs[i] && docs[i].data }))
-    .filter(({ data }) => data && !data.archived)
-    .map(({ f, data }) => (check(SCHEMA.change, data, `forge/${f}`), data));
+  const found = [...(await list("changes/*/change.md")), ...(await list("archive/*/change.md"))];
+  const docs = await Promise.all(found.map((f) => readDoc(f, { type: "object" })));
+  const changes = [];
+  for (const [i, f] of found.entries()) {
+    const data = docs[i] && docs[i].data;
+    if (!data || data.archived) continue;
+    check(SCHEMA.change, data, `forge/${f}`);
+    changes.push({ change: data, where: f.split("/")[0] });
+  }
+  return changes;
 }
 
 /** @param {string} id */
 async function loadDelta(id, where = "changes") {
   const doc = await readDoc(`${where}/${id}/delta.md`, SCHEMA.delta);
-  if (!doc) return { add: [], modify: [], remove: [], body: "" };
+  if (!doc) return { add: [], modify: [], remove: [], base: {} };
   const { entries } = parseEntries(doc.body, `forge/${where}/${id}/delta.md`);
-  const pick = (list) => list.map((sid) => {
+  const pick = (sids) => sids.map((sid) => {
     const e = entries.find((x) => x.id === sid);
     if (!e) throw new Error(`forge/${where}/${id}/delta.md lists ${sid} but has no entry for it`);
     return e;
   });
-  return { add: pick(doc.data.add), modify: pick(doc.data.modify), remove: doc.data.remove, body: doc.body };
+  return { add: pick(doc.data.add), modify: pick(doc.data.modify), remove: doc.data.remove, base: doc.data.base };
+}
+
+/**
+ * Spec ids no new entry may take: every entry the backend has (removed ones too) and every id
+ * any other change's delta names, open or archived, so a removed id is never handed out again.
+ * @param {string} own @param {Store} specs
+ */
+async function takenSpecIds(own, specs) {
+  const taken = (await specs.all()).map((e) => e.id);
+  for (const { change, where } of await allChanges()) {
+    if (change.id === own) continue;
+    const delta = await readDoc(`${where}/${change.id}/delta.md`, SCHEMA.delta);
+    if (delta) taken.push(...delta.data.add, ...delta.data.modify, ...delta.data.remove);
+  }
+  return taken;
 }
 
 /** @param {any} change @param {{flow: {auto: boolean, stopBefore: string[]}}} cfg */
@@ -603,15 +642,18 @@ async function flowShow(id) {
 /** @param {string} id @param {any} input */
 async function flowDelta(id, input) {
   check(INPUT.delta, input, "input");
-  const { change } = await loadChange(id);
-  if (change.stage === "propose" || change.stage === "archive") {
-    throw new Error(`${id} is at ${change.stage}; the delta is written from the spec stage until verify`);
-  }
+  const modifyIds = (input.modify || []).map((m) => m.id);
+  const removeIds = input.remove || [];
+  const twice = repeated([...modifyIds, ...removeIds]);
+  if (twice.length) throw new Error(`a delta modifies or removes an entry once; listed more than once: ${twice.join(", ")}`);
+  if (!(input.add || []).length && !modifyIds.length && !removeIds.length) throw new Error("the delta is empty: give add, modify or remove");
+  const { change, body } = await loadChange(id);
+  if (change.stage === "propose") throw new Error(`${id} is at propose; the delta is written from the spec stage on (forge flow advance ${id})`);
+
   const specs = await specsOf();
   const current = await liveEntries(specs);
-  const others = (await allChanges()).filter((c) => c.id !== id && c.stage !== "done");
-  const pending = (await Promise.all(others.map((c) => loadDelta(c.id)))).flatMap((d) => d.add.map((e) => e.id));
-  const taken = [...current.map((e) => e.id), ...pending];
+  const taken = await takenSpecIds(id, specs);
+  /** @param {string} sid @returns {Entry} */
   const byId = (sid) => {
     const e = current.find((x) => x.id === sid);
     if (!e) throw new Error(`no spec entry ${sid} to modify or remove; forge spec list shows them`);
@@ -624,19 +666,37 @@ async function flowDelta(id, input) {
     taken.push(sid);
     return storable({ id: sid, capability: a.capability, title: oneLine(a.title), reqs: a.reqs || change.reqs, body: a.body.trim(), criteria: numbered(a.criteria) });
   });
+  /** @type {Record<string, string>} */
+  const base = {};
   const modify = (input.modify || []).map((m) => {
     const old = byId(m.id);
-    return storable({ ...old, title: oneLine(m.title || old.title), reqs: m.reqs || old.reqs, body: (m.body !== undefined ? m.body : old.body).trim(), criteria: m.criteria ? numbered(m.criteria) : old.criteria });
+    base[old.id] = fingerprint(old);
+    return storable({
+      id: old.id,
+      capability: old.capability,
+      title: oneLine(m.title ?? old.title),
+      reqs: m.reqs ?? old.reqs,
+      body: (m.body ?? old.body).trim(),
+      criteria: m.criteria ? numbered(m.criteria) : old.criteria.map((c) => ({ id: c.id, text: oneLine(c.text) })),
+    });
   });
-  const remove = (input.remove || []).map((sid) => byId(sid).id);
-  if (!add.length && !modify.length && !remove.length) throw new Error("the delta is empty: give add, modify or remove");
+  for (const sid of removeIds) base[sid] = fingerprint(byId(sid));
 
-  const body = [...add, ...modify].map(renderEntry).join("\n\n") + "\n";
-  const data = { change: id, add: add.map((e) => e.id), modify: modify.map((e) => e.id), remove };
-  // Write refuses to replace a file this run has not read.
-  await readText(`changes/${id}/delta.md`);
-  await writeDoc(`changes/${id}/delta.md`, SCHEMA.delta, data, body);
-  return { change: id, add: data.add, modify: data.modify, remove, criteria: [...add, ...modify].map((e) => ({ spec: e.id, criteria: e.criteria.map((c) => c.id) })) };
+  const before = await loadDelta(id);
+  const written = new Map([...before.add, ...before.modify].map((e) => [e.id, renderEntry(e)]));
+  const unchanged = new Set([...add, ...modify].filter((e) => written.get(e.id) === renderEntry(e)).map((e) => e.id));
+  const stale = [...new Set(change.verification.map((v) => v.spec).filter((spec) => !unchanged.has(spec)))];
+
+  const data = { change: id, add: add.map((e) => e.id), modify: modify.map((e) => e.id), remove: removeIds, base };
+  await writeDoc(`changes/${id}/delta.md`, SCHEMA.delta, data, [...add, ...modify].map(renderEntry).join("\n\n") + "\n");
+  const result = { change: id, stage: change.stage, add: data.add, modify: data.modify, remove: removeIds, criteria: [...add, ...modify].map((e) => ({ spec: e.id, criteria: e.criteria.map((c) => c.id) })) };
+  if (!stale.length) return result;
+
+  change.verification = change.verification.filter((v) => unchanged.has(v.spec));
+  if (change.stage === "archive") enter(change, "verify");
+  await saveChange(change, body);
+  const back = change.stage === "verify" ? `; ${id} is at verify` : "";
+  return { ...result, stage: change.stage, say: `${stale.join(", ")} changed, so their verification results were dropped${back}. Verify them again.` };
 }
 
 /** @param {string} id @param {any} input */
@@ -646,11 +706,7 @@ async function flowPlan(id, input) {
   const before = new Map(change.plan.map((p) => [p.text, p.done]));
   change.plan = input.items.map((t, i) => ({ id: `P${i + 1}`, text: t.trim(), done: before.get(t.trim()) === true }));
   await saveChange(change, body);
-  if (typeof input.design === "string") {
-    // Write refuses to replace a file this run has not read.
-    await readText(`changes/${id}/design.md`);
-    await writeText(`changes/${id}/design.md`, input.design);
-  }
+  if (typeof input.design === "string") await writeText(`changes/${id}/design.md`, input.design);
   return { change: id, plan: change.plan };
 }
 
@@ -722,35 +778,72 @@ async function flowAdvance(id) {
   return { change: id, from, ...nextStep(change, await config()) };
 }
 
+/**
+ * What archiving still has to write. Every entry the delta modifies or removes must still be the
+ * one the delta was written against; one already written as the delta has it was merged by an
+ * earlier archive of this change that stopped part way.
+ * @param {string} id @param {Store} specs @param {Awaited<ReturnType<typeof loadDelta>>} delta
+ */
+async function stillToMerge(id, specs, delta) {
+  const live = new Map((await liveEntries(specs)).map((e) => [e.id, e]));
+  const put = [...delta.add];
+  const remove = [];
+  const stale = [];
+  for (const e of delta.modify) {
+    const current = live.get(e.id);
+    const seen = current && fingerprint(current);
+    if (seen === fingerprint(e)) continue;
+    if (seen === delta.base[e.id]) put.push(e);
+    else stale.push(e.id);
+  }
+  for (const sid of delta.remove) {
+    const current = live.get(sid);
+    if (!current) continue;
+    if (fingerprint(current) === delta.base[sid]) remove.push(current);
+    else stale.push(sid);
+  }
+  if (stale.length) {
+    throw new Error(
+      `${id} stays at archive: ${stale.join(", ")} changed after its delta was written (another change was archived). ` +
+        `Read the current entries (forge spec get <S-id>) and send the delta again (forge flow delta ${id}); ` +
+        "entries whose text changes go back to verify.",
+    );
+  }
+  return { put, remove };
+}
+
 /** @param {string} id */
 async function flowArchive(id) {
   const { change, body } = await loadChange(id);
   if (change.stage !== "archive") throw new Error(`${id} is at ${change.stage}; it is archived after verify (forge flow advance ${id})`);
   const delta = await loadDelta(id);
-  const [specs, reqs] = [await specsOf(), await reqsOf()];
-  for (const e of [...delta.add, ...delta.modify]) await specs.put(e);
-  for (const sid of delta.remove) await specs.put({ ...(await specs.get(sid)), removed: true });
+  const specs = await specsOf();
+  const reqs = await reqsOf();
+  const merge = await stillToMerge(id, specs, delta);
+  for (const e of merge.put) await specs.put(e);
+  for (const e of merge.remove) await specs.put({ ...e, removed: true });
 
-  const done = [];
+  const merged = [...delta.add, ...delta.modify];
   for (const rid of change.reqs) {
     const req = await reqs.get(rid);
-    const cited = [...delta.add, ...delta.modify].filter((e) => e.reqs.includes(rid)).map((e) => e.id);
+    const cited = merged.filter((e) => e.reqs.includes(rid)).map((e) => e.id);
     await reqs.put({ ...req, status: "done", specs: [...new Set([...(req.specs || []), ...cited])], changes: [...new Set([...(req.changes || []), id])] });
-    done.push(rid);
   }
 
   enter(change, "done");
-  const files = ["delta.md", "design.md"];
-  const copies = await Promise.all(files.map((f) => readText(`changes/${id}/${f}`)));
+  const extras = ["delta.md", "design.md"];
+  const copies = [];
+  for (const f of extras) copies.push(await readText(`changes/${id}/${f}`));
+  for (const [i, f] of extras.entries()) {
+    if (copies[i] !== null) await writeText(`archive/${id}/${f}`, copies[i]);
+  }
   await writeDoc(`archive/${id}/change.md`, SCHEMA.change, change, body);
   const moved = `Moved to forge/archive/${id}/. forge cannot delete files; remove this directory with git rm -r.\n`;
-  for (const [i, f] of files.entries()) {
-    if (copies[i] === null) continue;
-    await writeText(`archive/${id}/${f}`, copies[i]);
-    await writeText(`changes/${id}/${f}`, moved);
-  }
   await writeDoc(`changes/${id}/change.md`, SCHEMA.archived, { id, archived: true }, moved);
-  return { change: id, stage: "done", specs: { added: delta.add.map((e) => e.id), modified: delta.modify.map((e) => e.id), removed: delta.remove }, reqs_done: done, archived_to: `forge/archive/${id}` };
+  for (const [i, f] of extras.entries()) {
+    if (copies[i] !== null) await writeText(`changes/${id}/${f}`, moved);
+  }
+  return { change: id, stage: "done", specs: { added: delta.add.map((e) => e.id), modified: delta.modify.map((e) => e.id), removed: delta.remove }, reqs_done: change.reqs, archived_to: `forge/archive/${id}` };
 }
 
 /** @type {Record<string, Record<string, (rest: string[], input: any) => Promise<unknown>>>} */
@@ -786,7 +879,7 @@ const COMMANDS = {
     new: (rest, input) => (args(rest, [], 0), flowNew(input)),
     async list(rest) {
       args(rest, [], 0);
-      return { items: (await allChanges()).map((c) => ({ id: c.id, title: c.title, stage: c.stage })) };
+      return { items: (await allChanges()).map(({ change }) => ({ id: change.id, title: change.title, stage: change.stage })) };
     },
     show: (rest) => flowShow(args(rest, [], 1).ids[0]),
     async next(rest) {
