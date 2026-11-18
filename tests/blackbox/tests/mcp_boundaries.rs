@@ -1558,3 +1558,46 @@ async fn the_mcp_tool_lists_each_servers_tools_under_their_callable_names() -> a
     run.finish().await;
     Ok(())
 }
+
+/// A tool that answers with `structuredContent` hands a program the object,
+/// while the model still reads the fenced text.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_gets_the_structured_content_an_mcp_tool_answers_with() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let store = tempfile::tempdir()?;
+    let toy = McpToy::stdio_config(&["--name", "db", "--store", &store.path().to_string_lossy()])?;
+    let mut run = stubbed("mcp-structured", &stub)
+        .settings(json!({
+            "mcp_servers": { "db": toy },
+            "permission_rules": [
+                { "tool": "RunCode", "action": "allow" },
+                { "tool": "mcp__db__items_put", "action": "allow" }
+            ]
+        }))
+        .start()
+        .await?;
+    let code = r#"
+        const r = await tools.mcp__db__items_put({ kind: "req", item: { title: "t" } });
+        return typeof r === "object" ? `object ${r.item.id}` : `${typeof r}: ${r}`;
+    "#;
+    stub.script([
+        Reply::calls("program", "RunCode", json!({ "code": code })),
+        Reply::calls(
+            "direct",
+            "mcp__db__items_put",
+            json!({ "kind": "req", "item": { "title": "u" } }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "store one").await?;
+    let program = result_of(&events, "RunCode").expect("the program ran");
+    assert!(!program.2 && program.1.contains("object "), "{program:?}");
+    let direct = result_of(&events, "mcp__db__items_put").expect("the direct call ran");
+    assert!(
+        !direct.2 && direct.1.contains("<external-content"),
+        "the model's view stays fenced text: {direct:?}"
+    );
+    run.finish().await;
+    Ok(())
+}

@@ -24,7 +24,11 @@ fn result_bytes(result: &McpCallResult) -> usize {
             McpContent::Image { data, .. } => data.len(),
             McpContent::Other(v) => v.to_string().len(),
         })
-        .sum()
+        .sum::<usize>()
+        + result
+            .structured
+            .as_ref()
+            .map_or(0, |v| v.to_string().len())
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +126,7 @@ mod tests {
             content: vec![McpContent::Text(text.to_string())],
             is_error: false,
             meta: None,
+            structured: None,
         }
     }
 

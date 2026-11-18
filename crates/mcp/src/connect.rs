@@ -408,6 +408,7 @@ impl StdioMcpClient {
             content: content_blocks,
             is_error: result.is_error.unwrap_or(false),
             meta: None,
+            structured: result.structured_content.clone(),
         })
     }
 

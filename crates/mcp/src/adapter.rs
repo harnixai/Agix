@@ -284,6 +284,15 @@ fn object_schema(schema: Value) -> Value {
 /// `ModelContentBlock::Image` — a single-image result is the *common* shape
 /// for screenshot/diagram MCP servers.
 fn into_tool_result(result: McpCallResult) -> ToolResult {
+    let structured = result.structured.clone();
+    let r = content_into_tool_result(result);
+    match structured {
+        Some(v) => r.with_structured(v),
+        None => r,
+    }
+}
+
+fn content_into_tool_result(result: McpCallResult) -> ToolResult {
     let is_error = result.is_error;
     let has_image = result
         .content
@@ -448,6 +457,7 @@ mod tests {
                 content: vec![McpContent::Text("hi".into())],
                 is_error: false,
                 meta: None,
+                structured: None,
             },
         );
         let adapter = McpToolAdapter::new(client.clone(), meta("echo"));
@@ -467,6 +477,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn structured_content_rides_beside_the_text() {
+        let client = Arc::new(MockMcpClient::new("test", vec![meta("put")]));
+        let mut answer = text("{\"id\":1}", false);
+        answer.structured = Some(json!({"id": 1}));
+        client.push_response("put", answer);
+        let adapter = McpToolAdapter::new(client, meta("put"));
+        let r = adapter
+            .call(json!({}), ctx(), ProgressSender::noop("t"))
+            .await
+            .unwrap();
+        assert_eq!(r.structured_content, Some(json!({"id": 1})));
+        assert!(matches!(r.content, ToolResultContent::Text(ref s) if s == "{\"id\":1}"));
+    }
+
+    #[tokio::test]
     async fn is_error_propagates() {
         let client = Arc::new(MockMcpClient::new("test", vec![meta("fail")]));
         client.push_response(
@@ -475,6 +500,7 @@ mod tests {
                 content: vec![McpContent::Text("oops".into())],
                 is_error: true,
                 meta: None,
+                structured: None,
             },
         );
         let adapter = McpToolAdapter::new(client, meta("fail"));
@@ -490,6 +516,7 @@ mod tests {
             content: vec![McpContent::Text(t.into())],
             is_error,
             meta: None,
+            structured: None,
         }
     }
 
@@ -573,6 +600,7 @@ mod tests {
                 ],
                 is_error: false,
                 meta: None,
+                structured: None,
             },
         );
         let adapter = McpToolAdapter::new(client, meta("multi"));
@@ -598,6 +626,7 @@ mod tests {
                 }],
                 is_error: false,
                 meta: None,
+                structured: None,
             },
         );
         let adapter = McpToolAdapter::new(client, meta("img"));
@@ -637,6 +666,7 @@ mod tests {
                 ],
                 is_error: false,
                 meta: None,
+                structured: None,
             },
         );
         let adapter = McpToolAdapter::new(client, meta("shot"));
