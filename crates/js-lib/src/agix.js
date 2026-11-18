@@ -17,7 +17,6 @@ class AgixError extends Error {
     }
   }
 }
-defineProperty(AgixError.prototype, "name", { value: "AgixError" });
 
 const fail = (code, message, extra) => {
   throw new AgixError(code, message, extra);
@@ -448,6 +447,10 @@ export default function install(native, version, aliases) {
     if (name in globalThis) fail("agix.alias", `${name} is already a global`);
   }
   installed = true;
+  const shown = aliases.length > 0 ? aliases[0] : "agix";
+  const errorName = `${shown[0].toUpperCase()}${shown.slice(1)}Error`;
+  defineProperty(AgixError, "name", { value: errorName });
+  defineProperty(AgixError.prototype, "name", { value: errorName });
   const agix = {
     version,
     yaml: makeYaml(native),

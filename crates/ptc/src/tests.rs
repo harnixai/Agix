@@ -936,6 +936,37 @@ async fn a_renamed_products_program_has_the_library_under_both_names() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_renamed_products_helpers_fail_under_its_name() {
+    let caught = "try { codix.yaml.parse('a: [1'); } \
+         catch (e) { return [String(e), e.name, e.constructor.name, e.stack ?? '']; }";
+    let (r, _, _) = run_in(caught, json!({}), limits(), Library::for_product("Codix")).await;
+    let seen = text(&r)
+        + &r.structured_content
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+    assert!(!seen.to_lowercase().contains("agix"), "{seen}");
+    assert!(seen.contains("CodixError: "), "{seen}");
+
+    let (r, _, _) = run_in(
+        "codix.yaml.parse('a: [1');",
+        json!({}),
+        limits(),
+        Library::for_product("Codix"),
+    )
+    .await;
+    assert!(r.is_error);
+    assert!(!text(&r).to_lowercase().contains("agix"), "{}", text(&r));
+
+    let (r, _) =
+        run("try { agix.yaml.parse('a: [1'); } catch (e) { return [e.name, e.constructor.name]; }")
+            .await;
+    assert_eq!(
+        r.structured_content,
+        Some(json!(["AgixError", "AgixError"]))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn no_global_a_program_has_can_become_the_librarys_alias() {
     let (r, _) = run("const names = []; \
          for (let o = globalThis; o; o = Object.getPrototypeOf(o)) \

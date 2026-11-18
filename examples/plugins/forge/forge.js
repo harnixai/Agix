@@ -124,7 +124,7 @@ async function main(argv, input, ctx) {
   try {
     return await verbs[verb](rest, inputObject(input));
   } catch (e) {
-    const cli = e && e.name === "AgixError" && String(e.code).startsWith("cli.");
+    const cli = e && typeof e.code === "string" && e.code.startsWith("cli.");
     if (cli || e instanceof UsageError) throw new Error(`${e.message}\n\n${USAGE[group]}`);
     throw e;
   }

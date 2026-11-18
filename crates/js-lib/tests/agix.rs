@@ -572,6 +572,25 @@ fn an_alias_is_the_same_frozen_object() {
 }
 
 #[test]
+fn errors_are_named_after_the_alias() {
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        js_lib::install_as(&ctx, &["codix"]).unwrap();
+        let seen: String = ctx
+            .eval(
+                r#"
+                let e;
+                try { codix.yaml.parse("a: [1"); } catch (x) { e = x; }
+                JSON.stringify([e.name, e.constructor.name, String(e).split(":")[0], e instanceof Error])
+                "#,
+            )
+            .unwrap();
+        assert_eq!(seen, r#"["CodixError","CodixError","CodixError",true]"#);
+    });
+}
+
+#[test]
 fn an_alias_is_a_lowercase_name_no_script_already_has() {
     assert_eq!(js_lib::alias_for("Codix").as_deref(), Some("codix"));
     assert_eq!(js_lib::alias_for("My-Tool_2").as_deref(), Some("mytool2"));

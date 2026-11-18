@@ -150,14 +150,19 @@ mod tests {
     async fn a_renamed_products_scripts_also_have_it_under_its_name() {
         let out = QuickJsEngine::for_product("Codix")
             .eval(
-                &script("function f() { return [codix === agix, codix.path.basename('a/b.md')]; }"),
+                &script(
+                    "function f() {\n\
+                       var e; try { codix.yaml.parse('a: [1'); } catch (x) { e = x; }\n\
+                       return [codix === agix, codix.path.basename('a/b.md'), e.name];\n\
+                     }",
+                ),
                 "f",
                 serde_json::json!({}),
                 &ScriptLimits::default(),
             )
             .await
             .expect("the script runs");
-        assert_eq!(out, serde_json::json!([true, "b.md"]));
+        assert_eq!(out, serde_json::json!([true, "b.md", "CodixError"]));
     }
 
     #[tokio::test]
