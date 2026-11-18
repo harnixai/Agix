@@ -944,10 +944,10 @@ mod binding_tests {
         let bound = bind(engine, &[b], &project).expect("the binding is valid");
         assert_eq!(bound.tool_results.len(), 1);
 
-        let call = base::interface::tool_middleware::ToolCall {
-            name: "Read".into(),
-            input: serde_json::json!({"path": "a.txt"}),
-        };
+        let call = base::interface::tool_middleware::ToolCall::new(
+            "Read",
+            serde_json::json!({"path": "a.txt"}),
+        );
         let mut draft = ToolResultDraft {
             text: "hello".into(),
             images: Vec::new(),
@@ -976,10 +976,7 @@ mod binding_tests {
 
         let engine: Arc<dyn ScriptEngine> = Arc::new(QuickJsEngine::new());
         let bound = bind(engine, &[b], &project).unwrap();
-        let call = base::interface::tool_middleware::ToolCall {
-            name: "Read".into(),
-            input: serde_json::json!({}),
-        };
+        let call = base::interface::tool_middleware::ToolCall::new("Read", serde_json::json!({}));
         let mut draft = ToolResultDraft {
             text: "untouched".into(),
             images: Vec::new(),
@@ -1255,10 +1252,10 @@ mod binding_tests {
         let dispatched = Arc::new(AtomicUsize::new(0));
         let outcome = |path: &str| {
             let chain = bound.tool_middleware.clone();
-            let call = base::interface::tool_middleware::ToolCall {
-                name: "Read".into(),
-                input: serde_json::json!({"file_path": path}),
-            };
+            let call = base::interface::tool_middleware::ToolCall::new(
+                "Read",
+                serde_json::json!({"file_path": path}),
+            );
             let dispatched = dispatched.clone();
             async move {
                 base::interface::tool_middleware::dispatch_through(
@@ -1593,10 +1590,7 @@ mod package_binding_tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out.tool_results.len(), 2);
 
-        let call = ToolCall {
-            name: "Read".into(),
-            input: serde_json::json!({}),
-        };
+        let call = ToolCall::new("Read", serde_json::json!({}));
         for transformer in &out.tool_results {
             let mut draft = ToolResultDraft {
                 text: "hello".into(),

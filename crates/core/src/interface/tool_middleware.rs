@@ -97,6 +97,20 @@ impl ToolAnswer {
 pub struct ToolCall {
     pub name: String,
     pub input: serde_json::Value,
+    /// Who made the call: `model`, `RunCode`, `RunExt:<command>`, `user` for a
+    /// `/name` plugin command, `skill` for a skill's inline command.
+    pub via: String,
+}
+
+impl ToolCall {
+    /// A call the model made.
+    pub fn new(name: impl Into<String>, input: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            input,
+            via: "model".into(),
+        }
+    }
 }
 
 /// The conditions the call runs under, as a wrapper may change them.
@@ -214,10 +228,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn call() -> ToolCall {
-        ToolCall {
-            name: "Probe".into(),
-            input: serde_json::json!({}),
-        }
+        ToolCall::new("Probe", serde_json::json!({}))
     }
 
     async fn run(

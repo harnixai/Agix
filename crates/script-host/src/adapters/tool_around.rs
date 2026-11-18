@@ -16,8 +16,12 @@ use base::interface::tool_middleware::{
 /// # What the script is given
 ///
 /// ```json
-/// { "tool": "Read", "input": { "file_path": "/etc/hosts" } }
+/// { "tool": "Read", "input": { "file_path": "/etc/hosts" }, "via": "model" }
 /// ```
+///
+/// `via` says who made the call: `"model"`, `"RunCode"` for a program's
+/// sub-call, `"RunExt:<command>"` for a plugin command's, `"user"` for a
+/// plugin command typed as `/name`, `"skill"` for a skill's inline command.
 ///
 /// # What it may return
 ///
@@ -147,6 +151,7 @@ impl ToolMiddleware for ToolAroundScript {
         let input = serde_json::json!({
             "tool": call.name,
             "input": call.input,
+            "via": call.via,
         });
 
         let directed = match self.carrier.call(&self.entry, input).await {
@@ -220,10 +225,7 @@ mod tests {
     }
 
     fn call() -> ToolCall {
-        ToolCall {
-            name: "Read".into(),
-            input: serde_json::json!({"file_path": "a.txt"}),
-        }
+        ToolCall::new("Read", serde_json::json!({"file_path": "a.txt"}))
     }
 
     async fn run(engine: Arc<dyn ScriptEngine>, dispatched: Arc<AtomicUsize>) -> ToolOutcome {
@@ -236,6 +238,33 @@ mod tests {
             }
         })
         .await
+    }
+
+    #[tokio::test]
+    async fn the_script_is_told_who_made_the_call() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let engine: Arc<dyn ScriptEngine> = Arc::new(FnScriptEngine(
+            move |_s: &ScriptSource, _e: &str, input: serde_json::Value| {
+                record.lock().unwrap().push(input);
+                async { Ok(serde_json::Value::Null) }
+            },
+        ));
+        let chain = vec![wrapper(engine)];
+        let mut call = call();
+        call.via = "RunExt:forge".into();
+        let _ = dispatch_through(&chain, call, CancellationToken::new(), |_| async {
+            Ok(ToolAnswer::text("the file"))
+        })
+        .await;
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            [serde_json::json!({
+                "tool": "Read",
+                "input": {"file_path": "a.txt"},
+                "via": "RunExt:forge",
+            })]
+        );
     }
 
     /// The acceptance case: a script refuses a call, and the tool never runs.
@@ -399,7 +428,7 @@ mod tests {
         let _ = run(engine, Arc::new(AtomicUsize::new(0))).await;
         assert_eq!(
             *seen.lock().unwrap(),
-            serde_json::json!({"tool": "Read", "input": {"file_path": "a.txt"}})
+            serde_json::json!({"tool": "Read", "input": {"file_path": "a.txt"}, "via": "model"})
         );
     }
 }

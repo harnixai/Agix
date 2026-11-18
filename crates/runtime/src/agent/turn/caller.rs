@@ -1,0 +1,114 @@
+//! Who made a tool call — the model, a program, a plugin command, a skill's
+//! inline command, or the user typing a plugin command — and what a plugin
+//! command's own calls are held to.
+
+use std::sync::Arc;
+
+/// Who made a call: what can be asked about it, whether the host hears its
+/// progress, and how its result is fenced follow from this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Caller {
+    Model,
+    /// A `RunCode` program — see `ToolContext::from_code`.
+    Code,
+    /// A plugin command run through `RunExt`, whose calls are held to what
+    /// it was run as.
+    Command(Arc<CommandCalls>),
+    /// A skill's `` !`cmd` ``, expanded by a `Skill` call or a `/name` command.
+    InlineCommand,
+    /// A plugin command the user typed as `/name args`: typing it is their
+    /// approval of it.
+    Person,
+}
+
+impl Caller {
+    /// Code rather than the model made the call: its result goes back to
+    /// that code.
+    pub(crate) fn is_code(&self) -> bool {
+        matches!(self, Self::Code | Self::Command(_))
+    }
+
+    /// Who made the call, as `tool.around` is told.
+    pub(crate) fn via(&self) -> String {
+        match self {
+            Self::Model => "model".into(),
+            Self::Code => "RunCode".into(),
+            Self::Command(calls) => format!("RunExt:{}", calls.command),
+            Self::InlineCommand => "skill".into(),
+            Self::Person => "user".into(),
+        }
+    }
+}
+
+/// What one run of a plugin command's calls are held to: a read-only run
+/// writes nothing; a write run writes inside `writes` only, where its
+/// invocation stands in for the question the mode would put.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CommandCalls {
+    pub command: String,
+    pub read_only: bool,
+    /// The globs as the package declares them, for what a refusal says.
+    pub declared: Vec<String>,
+    pub writes: permissions::write_scope::WriteScope,
+    pub grants: Vec<base::permission::PermissionRule>,
+}
+
+impl CommandCalls {
+    pub(crate) fn new(
+        scope: base::interface::tool_dispatch::CommandScope,
+        root: &std::path::Path,
+    ) -> Self {
+        let (writes, dropped) = permissions::write_scope::WriteScope::new(&scope.writes, root);
+        if !dropped.is_empty() {
+            tracing::warn!(
+                command = %scope.command,
+                dropped = ?dropped,
+                "ignoring `writes` globs that reach beyond the project; scope them to a \
+                 directory inside it"
+            );
+        }
+        Self {
+            grants: writes.grants(),
+            command: scope.command,
+            read_only: scope.read_only,
+            declared: scope.writes,
+            writes,
+        }
+    }
+
+    /// Why a call is refused before the session's permission is asked: a
+    /// read-only run that would change something, or a write outside
+    /// `writes`.
+    pub(crate) fn refusal(
+        &self,
+        name: &str,
+        facts: &base::interface::permission::ToolFacts,
+        cwd: &std::path::Path,
+    ) -> Option<String> {
+        use base::interface::permission::Subject;
+        let writes_a_file = matches!(facts.subject, Subject::WritePath(_));
+        let runs_a_writer = facts.runs.is_some() && !facts.traits.read_only;
+        if self.read_only && (writes_a_file || runs_a_writer) {
+            return Some(format!(
+                "`{}` ran as a read-only subcommand, and {name} would change something; a \
+                 read-only subcommand that writes is a defect of the plugin",
+                self.command
+            ));
+        }
+        let Subject::WritePath(path) = &facts.subject else {
+            return None;
+        };
+        if self.writes.covers(path, cwd) {
+            return None;
+        }
+        let scope = if self.declared.is_empty() {
+            "writes no files".to_string()
+        } else {
+            format!("may write only {}", self.declared.join(", "))
+        };
+        Some(format!(
+            "the command `{}` {scope}, and {path} is outside that",
+            self.command
+        ))
+    }
+}

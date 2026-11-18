@@ -1,6 +1,6 @@
 //! 工具调用上下文的唯一构造点，子调用与内联命令的分发，会话快照的采集。
 
-use super::tool_exec::{execute_tool_with_telemetry, Caller, ToolExecCtx};
+use super::tool_exec::{execute_tool_with_telemetry, Caller, CommandCalls, ToolExecCtx};
 use super::tool_result::PendingToolImage;
 use crate::agent::Agent;
 use base::context::Session;
@@ -26,8 +26,8 @@ pub(crate) async fn collect_frozen(
 }
 
 /// Calls a tool makes on its session's behalf, through the same dispatch as
-/// the model's own calls: a `RunCode` program's sub-calls, and a skill's
-/// `` !`cmd` ``. Each runs under its own tool-use id derived from the
+/// the model's own calls: a `RunCode` program's or a plugin command's
+/// sub-calls, and a skill's `` !`cmd` ``. Each runs under its own tool-use id derived from the
 /// caller's and cannot ask a person anything. Neither reports progress: the
 /// host never saw a `tool_use` under a derived id.
 pub(super) struct SubCallDispatcher {
@@ -141,6 +141,15 @@ impl base::interface::tool_dispatch::ToolDispatch for SubCallDispatcher {
         }
         self.dispatch(name, input, cancel).await
     }
+
+    fn for_command(
+        &self,
+        scope: base::interface::tool_dispatch::CommandScope,
+    ) -> Option<Arc<dyn base::interface::tool_dispatch::ToolDispatch>> {
+        let mut ctx = self.ctx.clone();
+        ctx.caller = Caller::Command(Arc::new(CommandCalls::new(scope, &ctx.cwd)));
+        Some(Arc::new(Self::new(ctx)))
+    }
 }
 
 #[async_trait::async_trait]
@@ -176,17 +185,24 @@ impl base::interface::elicitation::Elicitation for NoAsking {
 /// that reads `unattended` to decide it.
 pub(crate) fn attendance_of(
     session: &session_state::SessionState,
-    caller: Caller,
+    caller: &Caller,
 ) -> base::interface::permission::Attendance {
     use base::interface::permission::Attendance;
+    if matches!(caller, Caller::Person) {
+        return Attendance::Attended;
+    }
     if session.env().unattended {
         return Attendance::Unattended;
     }
     match caller {
-        Caller::Model => Attendance::Attended,
+        Caller::Model | Caller::Person => Attendance::Attended,
         Caller::Code => Attendance::NoOneToAsk(
             "this call needs the user's approval, which a program cannot ask for — make this \
              call directly instead of from code",
+        ),
+        Caller::Command(_) => Attendance::NoOneToAsk(
+            "this call needs the user's approval, which a plugin command cannot ask for — run \
+             it directly instead",
         ),
         Caller::InlineCommand => Attendance::NoOneToAsk(
             "it needs the user's approval, which a skill's inline command cannot ask for; run \
@@ -220,7 +236,7 @@ pub(super) fn tool_context_for(
         Arc::new(SubCallDispatcher::for_code(ctx))
             as Arc<dyn base::interface::tool_dispatch::ToolDispatch>
     });
-    tool_ctx.from_code = ctx.caller == Caller::Code;
+    tool_ctx.from_code = ctx.caller.is_code();
     tool_ctx.confinement = crate::exec::confinement_of(
         &ctx.session_state,
         &ctx.config,
@@ -229,7 +245,7 @@ pub(super) fn tool_context_for(
         &ctx.session_id,
     );
     tool_ctx.engine_git = Arc::clone(&ctx.engine_git);
-    tool_ctx.attendance = attendance_of(&ctx.session_state, ctx.caller);
+    tool_ctx.attendance = attendance_of(&ctx.session_state, &ctx.caller);
     tool_ctx.turn = ctx.turn.clone();
     tool_ctx.inline_commands = Some(Arc::new(SubCallDispatcher::for_inline_commands(ctx)));
     tool_ctx.path_denials = ctx.permission.path_denials.clone();
@@ -271,6 +287,19 @@ impl Agent {
             turn: Arc::clone(&self.turn.scope),
             checkpoints: self.tooling.checkpoints().cloned(),
         }
+    }
+
+    /// What a plugin command the user typed runs with: their call, under
+    /// `tool_use_id`, which no round's batch holds.
+    pub(super) fn typed_command_ctx(
+        &self,
+        cancel: &CancellationToken,
+        tool_use_id: String,
+    ) -> ToolExecCtx {
+        let mut ctx = self.tool_exec_ctx(cancel, &Arc::default(), &Arc::default());
+        ctx.tool_use_id = tool_use_id;
+        ctx.caller = Caller::Person;
+        ctx
     }
 
     /// The context of something the turn runs outside any tool call: a

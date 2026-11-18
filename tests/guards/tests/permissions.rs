@@ -170,8 +170,9 @@ const PERMITS: &[(&str, &str)] = &[
         "the policy, which is where a call is let through",
     ),
     (
-        "crates/runtime/src/agent/turn/tool_permission.rs::ask",
-        "the answering step: the person the runtime asked approved the call",
+        "crates/runtime/src/agent/turn/tool_permission.rs::permitted_by_person",
+        "the answering step: the person the runtime asked approved the call, or typed the \
+         plugin command it is",
     ),
 ];
 

@@ -305,6 +305,9 @@ impl Agent {
                 crate::commands::Command::Local { .. } => {
                     return Some(self.run_local_command(&sc.name, &sc.args, cancel).await);
                 }
+                crate::commands::Command::Ext { .. } => {
+                    return Some(self.run_ext_command(sc, cancel).await);
+                }
             }
         }
         None
@@ -373,6 +376,41 @@ impl Agent {
             "cost" => self.handle_cost_command(),
             _ => format!("Unknown local command: {name}"),
         };
+        self.answer_locally(result_text, cancel).await
+    }
+
+    /// `/name args` for a plugin command: `RunExt` with the line as its
+    /// command, as the user's own call — its question is answered by their
+    /// typing it. What it prints is the host's, not the conversation's.
+    async fn run_ext_command(
+        &mut self,
+        sc: &crate::commands::SlashCommand,
+        cancel: &CancellationToken,
+    ) -> Result<TurnOutcome, TurnError> {
+        let ctx = self.typed_command_ctx(cancel, format!("slash-{}", self.current_turn_id));
+        let line = if sc.args.is_empty() {
+            sc.name.clone()
+        } else {
+            format!("{} {}", sc.name, sc.args)
+        };
+        let outcome = super::tool_exec::execute_tool_with_telemetry(
+            &ctx,
+            crate::commands::EXT_TOOL_NAME,
+            serde_json::json!({ "command": line }),
+        )
+        .await;
+        let text = match outcome {
+            Ok(answer) => answer.text,
+            Err(error) => error,
+        };
+        self.answer_locally(text, cancel).await
+    }
+
+    async fn answer_locally(
+        &mut self,
+        result_text: String,
+        cancel: &CancellationToken,
+    ) -> Result<TurnOutcome, TurnError> {
         self.emit(AgentEvent::TextDelta {
             text: result_text,
             turn_id: self.current_turn_id.clone(),

@@ -98,6 +98,7 @@ pub(super) fn fence_external(
             | Reach::Delegates
             | Reach::Operator
             | Reach::Inside
+            | Reach::EditsProject
             | Reach::Persists(_)
             | Reach::Refused(_)
             | Reach::Unknown,

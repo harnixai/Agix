@@ -134,10 +134,7 @@ mod tests {
     use std::sync::Arc;
 
     fn call() -> ToolCall {
-        ToolCall {
-            name: "Bash".into(),
-            input: serde_json::json!({"command": "env"}),
-        }
+        ToolCall::new("Bash", serde_json::json!({"command": "env"}))
     }
 
     fn draft(text: &str) -> ToolResultDraft {

@@ -13,6 +13,7 @@ use base::event::AgentEvent;
 use std::sync::Arc;
 
 mod result_transform;
+pub(crate) use super::caller::{Caller, CommandCalls};
 pub(in crate::agent::turn) use result_transform::apply_result_transformers;
 
 /// Context bundle for tool execution — owned to survive async closures.
@@ -87,17 +88,6 @@ pub(crate) struct ToolExecCtx {
     /// Where a file tool's write is recorded before it happens; `None` when
     /// the session keeps no checkpoints.
     pub checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
-}
-
-/// Who made a call: what can be asked about it, whether the host hears its
-/// progress, and how its result is fenced follow from this.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Caller {
-    Model,
-    /// A `RunCode` program — see `ToolContext::from_code`.
-    Code,
-    /// A skill's `` !`cmd` ``, expanded by a `Skill` call or a `/name` command.
-    InlineCommand,
 }
 
 /// Deliver a host's answer to the `execute_tool_inner` call awaiting it.
@@ -278,6 +268,7 @@ pub(crate) async fn execute_tool_with_telemetry(
     let call = base::interface::tool_middleware::ToolCall {
         name: name.to_string(),
         input: input.clone(),
+        via: ctx.caller.via(),
     };
     base::interface::tool_middleware::dispatch_through(
         &chain,
@@ -357,7 +348,7 @@ fn fence_what_came_back(
     facts: &base::interface::permission::ToolFacts,
     outcome: &mut base::interface::tool_middleware::ToolOutcome,
 ) {
-    let from_code = ctx.caller == Caller::Code;
+    let from_code = ctx.caller.is_code();
     if !from_code && super::spill::reads_a_saved_result(ctx, name, input) {
         fence_saved_result(name, outcome);
     } else {
@@ -528,7 +519,7 @@ async fn call_tool(
             },
         ));
     let tool_start = std::time::Instant::now();
-    let (progress, gate) = match (&ctx.events, ctx.caller) {
+    let (progress, gate) = match (&ctx.events, &ctx.caller) {
         (Some(events), Caller::Model) => {
             let gate = ProgressGate::new(&ctx.tool_use_id, name, &ctx.turn_id, events.clone());
             let sender = base::tool::ProgressSender::with_callback(

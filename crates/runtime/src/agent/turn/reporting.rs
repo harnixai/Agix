@@ -138,6 +138,7 @@ impl Agent {
             Some(Command::Local { .. }) => "local",
             Some(Command::Prompt { .. }) => "prompt",
             Some(Command::McpPrompt { .. }) => "mcp_prompt",
+            Some(Command::Ext { .. }) => "ext",
             None if self.tooling.mcp().has_prompt_command(&command.name) => "mcp_prompt",
             None => "unknown",
         };

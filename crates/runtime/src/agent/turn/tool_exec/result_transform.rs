@@ -26,6 +26,7 @@ pub(in crate::agent::turn) fn apply_result_transformers(
     let call = base::interface::tool_middleware::ToolCall {
         name: name.to_string(),
         input: input.clone(),
+        via: ctx.caller.via(),
     };
     // A transformer that turns a plain answer into a failure gets the
     // engine-level treatment that has always meant: the call is an `Err`,

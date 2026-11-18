@@ -143,9 +143,26 @@ pub(super) async fn authorize(
     let started = std::time::Instant::now();
     let facts = ToolFacts::gather(tool.as_ref(), input, tool_ctx).await;
     let judged: std::sync::Arc<dyn base::context::Session> = ctx.session_state.clone();
-    let request =
+    let mut request =
         PermissionRequest::new(name, Some(tool), input, &facts, tool_ctx, &judged).with_hook(hook);
-    let answer = settle(ctx, name, input, &facts, tool_ctx, request).await;
+    let refused_for_command = match &ctx.caller {
+        Caller::Command(calls) => {
+            request = request.for_delegate(base::interface::permission::Delegate::new(
+                &judged,
+                judged.permission_mode(),
+                &calls.grants,
+            ));
+            calls.refusal(name, &facts, &tool_ctx.cwd)
+        }
+        _ => None,
+    };
+    let answer = match refused_for_command {
+        Some(why) => Answer::Refused(
+            base::interface::permission::Reason::new(Stage::ToolRefusal, &why),
+            Refusal::denied(why),
+        ),
+        None => settle(ctx, name, input, &facts, tool_ctx, request).await,
+    };
     let concluded = match &answer {
         Answer::Decided(outcome) => outcome.clone(),
         Answer::Refused(reason, _) => PermissionOutcome::Deny {
@@ -215,6 +232,9 @@ async fn settle(
     use base::interface::permission::PermissionOutcome;
     let mode_changes = ctx.session_state.permission_mode_changes();
     let answer = match ctx.permission.policy.decide(&request).await {
+        PermissionOutcome::Prompt { .. } if ctx.caller == Caller::Person => {
+            Answer::Decided(permitted_by_person(facts, tool_ctx))
+        }
         PermissionOutcome::Prompt {
             prompt_id,
             message,
@@ -351,7 +371,7 @@ async fn ask(
     asked: Asked,
     request: base::interface::permission::PermissionRequest<'_>,
 ) -> Answer {
-    use base::interface::permission::{Basis, ExecProfile, Obligations, PermissionOutcome, Reason};
+    use base::interface::permission::Reason;
     if let Some(settled) = settled_by_hook(ctx, name, input, &asked, request).await {
         return settled;
     }
@@ -404,12 +424,7 @@ async fn ask(
             return Answer::Cancelled { waited_ms: waited.elapsed().as_millis() as u64 };
         }
     };
-    let profile = ExecProfile::for_permit(&Basis::Person, facts.runs, tool_ctx.attendance);
-    let permitted = Answer::Decided(PermissionOutcome::Permit {
-        basis: Basis::Person,
-        profile,
-        obligations: Obligations::after(facts.runs, profile),
-    });
+    let permitted = Answer::Decided(permitted_by_person(facts, tool_ctx));
     match outcome.answer_as::<crate::agent::PermissionDecision>() {
         Some(crate::agent::PermissionDecision::Permit) => permitted,
         Some(crate::agent::PermissionDecision::PermitAlways { scope }) => {
@@ -429,6 +444,19 @@ async fn ask(
                 reason,
             })
         }
+    }
+}
+
+fn permitted_by_person(
+    facts: &base::interface::permission::ToolFacts,
+    tool_ctx: &base::tool::ToolContext,
+) -> base::interface::permission::PermissionOutcome {
+    use base::interface::permission::{Basis, ExecProfile, Obligations, PermissionOutcome};
+    let profile = ExecProfile::for_permit(&Basis::Person, facts.runs, tool_ctx.attendance);
+    PermissionOutcome::Permit {
+        basis: Basis::Person,
+        profile,
+        obligations: Obligations::after(facts.runs, profile),
     }
 }
 
