@@ -32,6 +32,7 @@ examples/plugins/forge/
 name = "forge"
 version = "0.1.0"
 api_version = "0.1"
+requires_engine = ">=0.3.19"
 description = "需求、规格与变更流程：模型用命令读写结构化数据，不直接读写文件"
 
 [[command]]
