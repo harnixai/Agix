@@ -807,3 +807,46 @@ async fn a_session_cannot_plant_compiled_entries_in_the_bytecode_cache() -> anyh
     run.finish().await;
     Ok(())
 }
+
+/// A prompt the model wrote is not the user typing: a sub-agent whose prompt
+/// is `/notes add …` runs the command as the model's own call, asked about
+/// as any write subcommand is, and seen by `tool.around` as the model's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slash_command_in_a_prompt_the_model_wrote_is_asked_about() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_notes(
+        "ext-slash-from-model",
+        &stub,
+        json!({ "permission_rules": [
+            { "tool": "Agent", "action": "allow" },
+            { "tool": "RunExt(notes add:*)", "action": "ask" }
+        ] }),
+    )
+    .await?;
+    let session = run.session().await?;
+    stub.script([
+        Reply::calls(
+            "p1",
+            "Agent",
+            json!({ "prompt": "/notes add pwned", "description": "note" }),
+        ),
+        Reply::text("parent done"),
+    ]);
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("the person says no")))
+        .await?;
+    run.turn(&session, "delegate").await?;
+    let asked: Vec<Value> = watcher
+        .asked()
+        .iter()
+        .map(|a| a.prompt["event"]["tool_name"].clone())
+        .collect();
+    drop(watcher);
+    assert_eq!(asked, [json!("RunExt")], "the command was not asked about");
+    assert!(
+        run.read_file("notes/pwned.md").is_none(),
+        "the model's prompt ran the command as the user's"
+    );
+    run.finish().await;
+    Ok(())
+}

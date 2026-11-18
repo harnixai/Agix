@@ -289,8 +289,9 @@ impl Agent {
         }
     }
 
-    /// What a plugin command the user typed runs with: their call, under
-    /// `tool_use_id`, which no round's batch holds.
+    /// What a plugin command given as `/name args` runs with, under
+    /// `tool_use_id`, which no round's batch holds: the user's own call when
+    /// a person wrote this turn, otherwise the model's, decided as any.
     pub(super) fn typed_command_ctx(
         &self,
         cancel: &CancellationToken,
@@ -298,8 +299,17 @@ impl Agent {
     ) -> ToolExecCtx {
         let mut ctx = self.tool_exec_ctx(cancel, &Arc::default(), &Arc::default());
         ctx.tool_use_id = tool_use_id;
-        ctx.caller = Caller::Person;
+        if self.turn_written_by_a_person() {
+            ctx.caller = Caller::Person;
+        }
         ctx
+    }
+
+    /// Whether this turn's text came from the person at the host. A
+    /// sub-agent's or team member's turns are what a model wrote; a goal
+    /// round, a cron or scheduled job's are the engine's.
+    pub(super) fn turn_written_by_a_person(&self) -> bool {
+        turn_written_by_a_person(self.identity.agent_depth(), &self.current_turn_id)
     }
 
     /// The context of something the turn runs outside any tool call: a
@@ -314,5 +324,25 @@ impl Agent {
         let mut ctx = self.tool_exec_ctx(cancel, &Arc::default(), &Arc::default());
         ctx.tool_use_id = tool_use_id;
         tool_context_for(&ctx, None)
+    }
+}
+
+fn turn_written_by_a_person(agent_depth: u32, turn_id: &str) -> bool {
+    agent_depth == 0
+        && base::context::goal::TurnOrigin::from_turn_id(turn_id)
+            == base::context::goal::TurnOrigin::Human
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turn_written_by_a_person;
+
+    #[test]
+    fn only_a_root_turn_the_host_sent_is_written_by_a_person() {
+        assert!(turn_written_by_a_person(0, "7f0c2a1e-turn"));
+        assert!(!turn_written_by_a_person(1, "7f0c2a1e-turn"));
+        assert!(!turn_written_by_a_person(0, "cron-job1"));
+        assert!(!turn_written_by_a_person(0, "schedule-job1-x"));
+        assert!(!turn_written_by_a_person(0, "goal-3-2-x"));
     }
 }

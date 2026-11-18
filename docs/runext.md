@@ -174,7 +174,8 @@ function `main` ``。
 `PreToolUse` / `PostToolUse` hook、`tool.around` 脚本、中间件、遥测看得到每一次子调用。
 `tool.around` 的输入带 `via`：`"model"`、`"RunCode"` 或 `"RunExt:<命令名>"`，插件的守卫脚本据此
 放行自己的命令、拦下模型的直接读写（`forge.md`「护栏」）。另有两个值：用户敲的 `/name` 那次
-`RunExt` 调用本身是 `"user"`，skill 的内联命令是 `"skill"`。
+`RunExt` 调用本身是 `"user"`（模型写出的 `/name` 是 `"model"`，§10），skill 的内联命令是
+`"skill"`。
 
 ## 7. 执行与限额
 
@@ -246,6 +247,12 @@ return open.items.length;
 skill 胜出，记进 `command_conflicts`（`{"command", "shadowed_by": "skill", "path"}`）；
 `RunExt` 照样能跑这条命令。命令名不能取内建斜杠命令（`help`、`skills`、`clear`、`compact`、
 `cost`）的名字，安装时拒。
+
+只有人写的那一轮才算用户亲手发起：根会话里宿主送来的消息（`session.send` 等）。一轮的正文出自
+模型或引擎时——子 Agent 的 prompt、团队成员收到的消息、发给后台 Agent 的消息、cron 与定时任务
+触发的、goal 的自动轮——`/name` 照样解析、照样跑，但算模型自己的 `RunExt` 调用：按 §6 判定，
+该问就问（子 Agent 里经父会话的宿主问），无人值守按场景的缺省；`tool.around` 看到的 `via` 是
+`"model"`。否则模型写一句 `Agent({prompt: "/notes add …"})` 就能绕过 ask 规则。
 
 ## 11. 编写与打包
 

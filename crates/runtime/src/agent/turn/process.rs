@@ -380,8 +380,10 @@ impl Agent {
     }
 
     /// `/name args` for a plugin command: `RunExt` with the line as its
-    /// command, as the user's own call — its question is answered by their
-    /// typing it. What it prints is the host's, not the conversation's.
+    /// command. Typed by the user, it is their own call — its question is
+    /// answered by their typing it; in a turn a model or the engine wrote,
+    /// it is decided as the model's call. What it prints is the turn's
+    /// answer, not the conversation's.
     async fn run_ext_command(
         &mut self,
         sc: &crate::commands::SlashCommand,
