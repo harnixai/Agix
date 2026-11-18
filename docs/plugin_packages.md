@@ -323,7 +323,7 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 ```json
 {"plugin":"github-tools","version":"1.2.0",
  "capabilities":["run its own JavaScript at the `tool.result` extension point",
-                 "adds command `forge` that may write forge/**"],
+                 "adds command `forge` that may write forge/** through the file tools; its other calls (Bash, MCP, web) get what the session's rules allow without asking"],
  "scene":"plugin:github-tools",
  "skills":["triage"],
  "commands":["forge"],
@@ -339,7 +339,10 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 `[[script]]` 列在 `capabilities` 里:它是宿主进程里的代码,跑在一个能改写模型读到什么的
 点上,没有东西把它和宿主隔开。skill 的正文里有 `` !`cmd` `` / ` ```! ` 块的、`allowed-tools`
 非空的,也各记一条能力。每个 `[[command]]` 一条:``adds command `<名字>` that may write
-<writes>``,不写文件的是 ``… that writes no files``;它的 `description` 进 `model_visible`
+<writes> through the file tools; its other calls (Bash, MCP, web) get what the session's rules
+allow without asking``,不写文件的把 `may write <writes>` 换成 `writes no files`。`writes` 只管住
+命令经 `Write` / `Edit` / `NotebookEdit` 的写入;它调的 `Bash`、MCP 工具按会话的规则走,会话不问就
+放行的(比如有一条 `Bash` 的 allow 规则),命令也能做(`runext.md` §6)。它的 `description` 进 `model_visible`
 (来处 ``command `<名字>` description``),`commands` 是包带的命令名。
 
 `model_visible` 列出每一段会一字不差到达模型的文本——插件描述、agent 描述与提示词、场景

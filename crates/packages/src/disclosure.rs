@@ -197,8 +197,11 @@ impl Disclosure {
                 [] => "writes no files".to_string(),
                 globs => format!("may write {}", globs.join(", ")),
             };
-            self.capabilities
-                .push(format!("adds command `{}` that {writes}", command.name));
+            self.capabilities.push(format!(
+                "adds command `{}` that {writes} through the file tools; its other calls \
+                 (Bash, MCP, web) get what the session's rules allow without asking",
+                command.name
+            ));
             self.commands.push(command.name);
         }
         Ok(())
@@ -328,12 +331,14 @@ mod tests {
         );
         let d = Disclosure::from_plugin(&p).unwrap();
         assert_eq!(d.commands, ["forge", "peek"]);
-        assert!(d
-            .capabilities
-            .contains(&"adds command `forge` that may write forge/**".to_string()));
-        assert!(d
-            .capabilities
-            .contains(&"adds command `peek` that writes no files".to_string()));
+        let others = "; its other calls (Bash, MCP, web) get what the session's rules allow \
+                      without asking";
+        assert!(d.capabilities.contains(&format!(
+            "adds command `forge` that may write forge/** through the file tools{others}"
+        )));
+        assert!(d.capabilities.contains(&format!(
+            "adds command `peek` that writes no files through the file tools{others}"
+        )));
         assert!(d.model_visible.contains(&VisibleText {
             origin: "command `forge` description".into(),
             text: "specs and changes".into(),

@@ -51,7 +51,7 @@ entry = "forge.js:main"         # <文件>:<函数>，文件相对插件根目�
 description = "需求、规格与变更流程"   # 进工具描述——安装时披露
 read_only = ["help", "req list", "req get", "spec list", "spec get", "spec coverage",
              "flow show", "flow next"]
-writes = ["forge/**"]                # 这个命令能写的范围，相对项目根
+writes = ["forge/**"]                # 这个命令经文件工具能写的范围，相对项目根
 ```
 
 | 字段 | 规则 |
@@ -60,14 +60,16 @@ writes = ["forge/**"]                # 这个命令能写的范围，相对项�
 | `entry` | 必须在包内，解析后不经符号链接指到包外；文件必须是 UTF-8 文本的 JavaScript（不含 NUL），至多 4 MiB。**包里带来的 QuickJS 字节码一律拒装**（§8）。`<函数>` 是 JavaScript 标识符 |
 | `description` | 单行，至多 500 字符，同其它披露文本 |
 | `read_only` | 子命令前缀：命令行的参数部分以其中一项开头（整词匹配）时，这次调用算只读（§6）。空串不收 |
-| `writes` | glob，相对项目根，收窄规则同插件 skill 的 `allowed-tools` 路径：解析后必须在项目之内，`**`、`../` 越出、绝对路径不生效（`ARCHITECTURE.md` §6.1）。配置路径（`.git/**`、`.agix/agents/**` 之类）写进来也不生效（§6）。不写就是不写任何文件。安装时就拒绝绝对路径、`~`、带 `..` 的和第一段就是通配的（`**`、`*.md`）；用到时再按会话的项目解析一次，经符号链接越出项目的那一条不生效 |
+| `writes` | 命令经文件工具（`Write`、`Edit`、`NotebookEdit`）能写的范围，glob，相对项目根，收窄规则同插件 skill 的 `allowed-tools` 路径：解析后必须在项目之内，`**`、`../` 越出、绝对路径不生效（`ARCHITECTURE.md` §6.1）。配置路径（`.git/**`、`.agix/agents/**` 之类）写进来也不生效（§6）。不写就是经文件工具不写任何文件。安装时就拒绝绝对路径、`~`、带 `..` 的和第一段就是通配的（`**`、`*.md`）；用到时再按会话的项目解析一次，经符号链接越出项目的那一条不生效 |
 
 **同名**：两个启用着的包声明了同名命令，按包名排序先到的保留，后到的不注册，`plugin.list` 在
 那个包的 `command_conflicts` 里写明被谁占着（`{"command", "shadowed_by": "plugin", "plugin"}`）。
 同一个包里声明两次同名命令拒装。
 
 **披露**：`plugin.install` 的 `disclosure.capabilities` 每个命令一条
-（``adds command `forge` that may write forge/**``，不写文件的是 ``… that writes no files``），
+（``adds command `forge` that may write forge/** through the file tools; its other calls (Bash, MCP,
+web) get what the session's rules allow without asking``，不写文件的把 `may write …` 换成
+`writes no files`：`writes` 只约束文件工具，§6），
 `description` 进 `model_visible`（来处 ``command `forge` description``），`disclosure.commands`
 列出命令名。`plugin.list` 每个包带 `commands`（`name`、`description`、`read_only`、`writes`）。
 
@@ -168,8 +170,13 @@ function `main` ``。
   会当作配置来问的那些（`.git/` 里的一切，含 hooks 与 config；`.agix/` 等配置根里工作区以外的
   条目；项目的 skill 目录），按写入路径的每一种写法（含经符号链接解析后的）判断。命令是装好后
   无人盯着运行的代码，写一个 `.git/hooks/pre-commit` 就是在下一次提交时执行代码；要改配置，
-  由模型自己发起那次写入，照常询问。子 Agent 里跑的命令同样如此。
+  由模型自己发起那次写入，照常询问。子 Agent 里跑的命令同样如此。别的工具会执行的文件——
+  `.husky/` 里的钩子、`.vscode/tasks.json`、`Makefile`、`package.json` 的 scripts——不是配置路径，
+  `writes` 写进来就能写；`.envrc` 例外，它对任何写入都受保护（不论谁写都被拒，除非
+  `sandbox.allow_write` 放开）。装包时看 `writes`，要把这类路径当作"能让别的程序执行代码"来看。
 - 项目内的读取照常允许；其它工具（`Bash`、`WebFetch`、MCP 工具）按会话的判定走，询问即失败。
+  所以 `writes` 是文件工具的边界，不是命令能做什么的边界：会话里有 `Bash` 的 allow 规则（或场景
+  不问就放行的命令），命令经 `Bash` 能写的就不限于 `writes`；沙箱照常约束那条命令。
 - 只读调用里的写入一律失败：子调用写文件，或跑一条不是只读的命令，就失败——声明了只读的子
   命令写了文件，是插件的缺陷，不是授权问题。其它工具（MCP 工具等）在只读调用里照常按会话的
   判定走，plan 模式下由 plan 模式拦下。
