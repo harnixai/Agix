@@ -2,7 +2,7 @@
 /// <reference path="types/runext.d.ts" />
 /// <reference path="types/agix.d.ts" />
 // forge 命令（docs/forge.md）：需求、规格与变更流程。模型经 RunExt 调，用户可以直接 /forge …。
-// 依次是：frontmatter 的 schema、命令分发与用法、forge/ 下的文件、需求与规格的两种后端
+// 依次是：frontmatter 与 input 的 schema、命令分发与用法、forge/ 下的文件、需求与规格的两种后端
 // （本地 Markdown、经 callTool 调的 MCP 服务）、规格条目的解析与改写、变更流程。
 
 const DIR = "forge";
@@ -11,6 +11,7 @@ const REQ_ID = "^R-[0-9]{3,}$";
 const SPEC_ID = "^S-[a-z0-9][a-z0-9-]*-[0-9]{3,}$";
 const CHANGE_ID = "^C-[0-9]{3,}$";
 const CAPABILITY = "^[a-z0-9][a-z0-9-]*$";
+const SERVER = "^[A-Za-z0-9_-]+$";
 
 const str = (pattern) => (pattern ? { type: "string", pattern } : { type: "string" });
 const text = str("\\S");
@@ -22,7 +23,7 @@ const loose = (properties, required = []) => ({ type: "object", properties, requ
 
 const PRIORITY = { enum: ["high", "medium", "low"] };
 const backend = {
-  ...closed({ backend: { enum: ["local", "mcp"] }, server: text }, ["backend"]),
+  ...closed({ backend: { enum: ["local", "mcp"] }, server: str(SERVER) }, ["backend"]),
   if: { properties: { backend: { const: "mcp" } } },
   then: { required: ["server"] },
 };
@@ -101,10 +102,13 @@ forge flow advance <C-id>         moves to the next stage
 forge flow archive <C-id>         merges the delta into the specs, marks the reqs done, moves the change to archive/`,
 };
 
-const help = (group) =>
-  group && USAGE[group]
-    ? USAGE[group]
-    : `forge keeps this project's requirements, specs and changes under forge/.\n\n${Object.values(USAGE).join("\n\n")}\n\nforge help <req|spec|flow> for one group.`;
+/** @param {string} [group] */
+function help(group) {
+  if (group && Object.hasOwn(USAGE, group)) return USAGE[group];
+  return `forge keeps this project's requirements, specs and changes under forge/.\n\n${Object.values(USAGE).join("\n\n")}\n\nforge help <req|spec|flow> for one group.`;
+}
+
+class UsageError extends Error {}
 
 /** @type {string} */
 let ROOT = "";
@@ -113,16 +117,15 @@ let ROOT = "";
 async function main(argv, input, ctx) {
   ROOT = ctx.projectRoot;
   const [group, verb, ...rest] = argv;
-  if (!group || group === "help") return help(verb);
-  if (argv.includes("--help") || argv.includes("-h")) return help(group);
-  const handler = COMMANDS[group] && COMMANDS[group][verb];
-  if (!handler) throw new Error(`unknown command: forge ${argv.join(" ")}\n\n${help(group)}`);
+  if (!group || group === "help" || group === "--help") return help(verb);
+  if (argv.includes("--help")) return help(group);
+  const verbs = Object.hasOwn(COMMANDS, group) ? COMMANDS[group] : {};
+  if (!Object.hasOwn(verbs, verb)) throw new Error(`unknown command: forge ${argv.join(" ")}\n\n${help(group)}`);
   try {
-    return await handler(rest, inputObject(input));
+    return await verbs[verb](rest, inputObject(input));
   } catch (e) {
-    if (e && e.name === "AgixError" && String(e.code).startsWith("cli.")) {
-      throw new Error(`${e.message}\n\n${USAGE[group]}`);
-    }
+    const cli = e && e.name === "AgixError" && String(e.code).startsWith("cli.");
+    if (cli || e instanceof UsageError) throw new Error(`${e.message}\n\n${USAGE[group]}`);
     throw e;
   }
 }
@@ -131,17 +134,24 @@ async function main(argv, input, ctx) {
 function inputObject(input) {
   if (input === null || input === undefined) return {};
   let value = input;
-  if (typeof input === "string") {
-    try {
-      value = agix.yaml.parse(input);
-    } catch (e) {
-      throw new Error(`input must be an object (JSON); the text given does not parse: ${e.message}`);
-    }
-  }
+  if (typeof input === "string") value = parseText(input);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("input must be an object, such as {\"title\": \"…\", \"body\": \"…\"}");
   }
   return value;
+}
+
+/** @param {string} input */
+function parseText(input) {
+  try {
+    return JSON.parse(input);
+  } catch {
+    try {
+      return agix.yaml.parse(input);
+    } catch (e) {
+      throw new Error(`input must be an object (JSON); the text given does not parse: ${e.message}`);
+    }
+  }
 }
 
 /**
@@ -154,10 +164,11 @@ function args(rest, names, positionals) {
   const options = {};
   for (const n of names) options[n] = { type: "string" };
   const parsed = agix.cli.parseArgs(rest, { options, allowPositionals: positionals !== 0 });
-  const many = positionals < 0 && parsed.positionals.length >= -positionals;
-  if (!many && parsed.positionals.length !== positionals) {
+  const got = parsed.positionals.length;
+  const enough = positionals < 0 ? got >= -positionals : got === positionals;
+  if (!enough) {
     const want = positionals < 0 ? `at least ${-positionals}` : String(positionals);
-    throw new Error(`expected ${want} argument${positionals === 1 ? "" : "s"}, got ${parsed.positionals.length}`);
+    throw new UsageError(`expected ${want} argument${positionals === 1 ? "" : "s"}, got ${got}`);
   }
   return { ...parsed.values, ids: parsed.positionals };
 }
@@ -199,18 +210,20 @@ const readThisRun = new Set();
  * The files under forge/, relative to it, from one Glob per run. Reads go only to files listed
  * here: a Read of a path whose directory does not exist yet can be judged outside the project.
  */
-async function files() {
+async function forgeFiles() {
   if (!existing) {
     const found = await tools.Glob({ pattern: `${DIR}/**`, path: ROOT, respect_gitignore: false, max_results: 100000 });
-    const marker = `${DIR}/`;
-    existing = new Set(found.paths.map((p) => p.slice(p.lastIndexOf(marker) + marker.length)));
+    if (found.more) throw new Error(`forge/ holds more than ${found.paths.length} files, more than forge reads`);
+    const top = agix.path.join(ROOT, DIR);
+    const relative = found.paths.map((p) => agix.path.relative(top, agix.path.isAbsolute(p) ? p : agix.path.join(ROOT, p)));
+    existing = new Set(relative.filter((p) => !p.startsWith("..")));
   }
   return existing;
 }
 
 /** @param {string} rel @returns {Promise<string | null>} */
 async function readText(rel) {
-  if (!(await files()).has(rel)) return null;
+  if (!(await forgeFiles()).has(rel)) return null;
   const read = await tools.Read({ file_path: abs(rel) });
   if (read.truncated) throw new Error(`forge/${rel} is longer than one read returns`);
   readThisRun.add(rel);
@@ -219,15 +232,15 @@ async function readText(rel) {
 
 /** Write replaces a file only once this run has read it. @param {string} rel @param {string} content */
 async function writeText(rel, content) {
-  if ((await files()).has(rel) && !readThisRun.has(rel)) await readText(rel);
+  if ((await forgeFiles()).has(rel) && !readThisRun.has(rel)) await readText(rel);
   await tools.Write({ file_path: abs(rel), content });
-  (await files()).add(rel);
+  (await forgeFiles()).add(rel);
   readThisRun.add(rel);
 }
 
 /** Files under forge/ matching `pattern`, relative to forge/. @param {string} pattern */
 async function list(pattern) {
-  return agix.glob.filter(pattern, [...(await files())]).sort();
+  return agix.glob.filter(pattern, [...(await forgeFiles())]).sort();
 }
 
 /** @param {string} rel @param {object} schema */
@@ -282,24 +295,36 @@ function store(where, kind) {
   return kind === "req" ? localReqs : localSpecs;
 }
 
+/**
+ * callTool gives an MCP tool's structured result; for a tool that has none, its text, which may
+ * be fenced as external content.
+ * @param {unknown} answer
+ */
+function toolValue(answer) {
+  if (typeof answer !== "string") return answer;
+  const fenced = /^<external-content[^>]*>\n([\s\S]*?)\n<\/external-content>/.exec(answer);
+  try {
+    return JSON.parse(fenced ? fenced[1] : answer);
+  } catch {
+    return undefined;
+  }
+}
+
 /** @param {string} server @param {"req" | "spec"} kind @returns {Store} */
 function remoteStore(server, kind) {
+  const label = `${kind} backend \`${server}\``;
   const call = async (tool, payload) => {
     let answer;
     try {
       answer = await callTool(`mcp__${server}__items_${tool}`, { kind, ...payload });
     } catch (e) {
-      throw new Error(`${kind} backend \`${server}\` (items_${tool}): ${e.message}`);
+      throw new Error(`${label} (items_${tool}): ${e.message}`);
     }
-    // MCP results reach code as their text today; the JSON is in it, maybe fenced.
-    if (typeof answer !== "string") return answer;
-    const fenced = /^<external-content[^>]*>\n([\s\S]*?)\n<\/external-content>/.exec(answer);
-    const json = fenced ? fenced[1] : answer;
-    try {
-      return JSON.parse(json);
-    } catch {
-      throw new Error(`${kind} backend \`${server}\` (items_${tool}) answered with no JSON: ${answer.slice(0, 200)}`);
+    const value = toolValue(answer);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error(`${label} (items_${tool}) answered with no JSON object: ${String(answer).slice(0, 200)}`);
     }
+    return /** @type {any} */ (value);
   };
   const valid = (item) => {
     check(kind === "req" ? SCHEMA.req : SCHEMA.entry, item, `${kind} ${item && item.id} from \`${server}\``);
@@ -308,16 +333,23 @@ function remoteStore(server, kind) {
   return {
     async all() {
       const items = [];
+      const cursors = new Set();
       let cursor;
       do {
         const page = await call("query", cursor ? { cursor } : {});
+        if (!Array.isArray(page.items)) throw new Error(`${label} (items_query) answered without an items list`);
         items.push(...page.items);
         cursor = page.next_cursor;
+        if (cursor && cursors.has(cursor)) throw new Error(`${label} (items_query) gave the cursor ${cursor} twice`);
+        cursors.add(cursor);
       } while (cursor);
       return items.map(valid);
     },
     async get(id) {
-      return valid((await call("get", { id })).item);
+      need(id, kind === "req" ? REQ_ID : SPEC_ID, kind === "req" ? "a requirement id (R-001)" : "a spec entry id (S-report-001)");
+      const item = valid((await call("get", { id })).item);
+      if (item.id !== id) throw new Error(`${label} answered ${item.id} when asked for ${id}`);
+      return item;
     },
     async put(item) {
       return valid((await call("put", { item })).item);
@@ -325,20 +357,24 @@ function remoteStore(server, kind) {
   };
 }
 
+const reqFiles = async () => (await list("reqs/*.md")).filter((f) => new RegExp(REQ_ID).test(agix.path.basename(f, ".md")));
+
 /** @type {Store} */
 const localReqs = {
   async all() {
-    const files = await list("reqs/*.md");
-    return Promise.all(files.map((f) => localReqs.get(agix.path.basename(f, ".md"))));
+    const found = await reqFiles();
+    return Promise.all(found.map((f) => localReqs.get(agix.path.basename(f, ".md"))));
   },
   async get(id) {
-    const doc = await readDoc(`reqs/${need(id, REQ_ID, "a requirement id (R-001)")}.md`, SCHEMA.req);
+    const rel = `reqs/${need(id, REQ_ID, "a requirement id (R-001)")}.md`;
+    const doc = await readDoc(rel, SCHEMA.req);
     if (!doc) throw new Error(`no requirement ${id}`);
+    if (doc.data.id !== id) throw new Error(`forge/${rel}: its id is ${doc.data.id}, the file name says ${id}`);
     return { specs: [], changes: [], ...doc.data, body: doc.body };
   },
   async put(req) {
     if (!req.id) {
-      const taken = (await list("reqs/*.md")).map((f) => agix.path.basename(f, ".md"));
+      const taken = (await reqFiles()).map((f) => agix.path.basename(f, ".md"));
       req = { ...req, id: `R-${pad(nextNumber(taken, "R-"))}` };
     }
     const { body, ...data } = req;
@@ -350,8 +386,8 @@ const localReqs = {
 /** @type {Store} */
 const localSpecs = {
   async all() {
-    const files = await list("specs/*.md");
-    const docs = await Promise.all(files.map((f) => specFile(agix.path.basename(f, ".md"))));
+    const found = (await list("specs/*.md")).map((f) => agix.path.basename(f, ".md"));
+    const docs = await Promise.all(found.filter((c) => new RegExp(CAPABILITY).test(c)).map(specFile));
     return docs.flatMap((d) => d.entries);
   },
   async get(id) {
@@ -361,10 +397,9 @@ const localSpecs = {
   },
   async put(entry) {
     const file = await specFile(entry.capability);
-    const rest = file.entries.filter((e) => e.id !== entry.id);
-    const entries = entry.removed ? rest : file.entries.some((e) => e.id === entry.id)
-      ? file.entries.map((e) => (e.id === entry.id ? entry : e))
-      : [...rest, entry];
+    const at = file.entries.findIndex((e) => e.id === entry.id);
+    const entries = file.entries.filter((e) => e.id !== entry.id);
+    if (!entry.removed) entries.splice(at < 0 ? entries.length : at, 0, entry);
     const body = [file.preamble, ...entries.map(renderEntry)].filter(Boolean).join("\n\n") + "\n";
     await writeDoc(`specs/${entry.capability}.md`, SCHEMA.specFile, { capability: entry.capability }, body);
     return entry;
@@ -376,7 +411,12 @@ async function specFile(capability) {
   const rel = `specs/${capability}.md`;
   const doc = await readDoc(rel, SCHEMA.specFile);
   if (!doc) return { preamble: "", entries: /** @type {Entry[]} */ ([]) };
-  return parseEntries(doc.body, `forge/${rel}`);
+  const where = `forge/${rel}`;
+  if (doc.data.capability !== capability) throw new Error(`${where}: capability is ${doc.data.capability}, the file name says ${capability}`);
+  const parsed = parseEntries(doc.body, where);
+  const stray = parsed.entries.find((e) => e.capability !== capability);
+  if (stray) throw new Error(`${where}: ${stray.id} belongs in specs/${stray.capability}.md`);
+  return parsed;
 }
 
 const reqsOf = async () => store((await config()).reqs, "req");
@@ -505,16 +545,22 @@ async function reqUpdate(rest, input) {
   if (priority !== undefined) req.priority = priority;
   if (title !== undefined) req.title = title;
   if (typeof input.body === "string") req.body = input.body;
+  check(SCHEMA.req, req, id);
   return { updated: shortReq(await reqs.put(req)) };
 }
 
-async function coverage() {
-  const [reqs, entries, all] = await Promise.all([(await reqsOf()).all(), liveEntries(await specsOf()), allChanges()]);
-  const changes = all.map((c) => c.change);
+/** When a change was archived: the time it entered `done`. @param {any} change */
+const archivedAt = (change) => (change.history.findLast((h) => h.stage === "done") || { at: "" }).at;
+
+async function specCoverage() {
+  const reqs = await (await reqsOf()).all();
+  const entries = await liveEntries(await specsOf());
+  const archived = (await allChanges()).filter((c) => c.where === "archive").map((c) => c.change);
+  archived.sort((a, b) => archivedAt(a).localeCompare(archivedAt(b)) || a.id.localeCompare(b.id));
   const cited = new Set(entries.flatMap((e) => e.reqs));
   const passed = new Set();
-  for (const c of changes.sort((a, b) => a.id.localeCompare(b.id))) {
-    for (const v of c.verification || []) {
+  for (const c of archived) {
+    for (const v of c.verification) {
       const key = `${v.spec} ${v.criterion}`;
       if (v.pass) passed.add(key);
       else passed.delete(key);
@@ -595,11 +641,9 @@ function nextStep(change, cfg) {
   if (stage === "done") return { change: id, stage, skill: null, continue: false, say: `${id} is done and archived.` };
   const skill = `forge-${stage}`;
   const go = cfg.flow.auto && !cfg.flow.stopBefore.includes(stage);
-  const say = go
-    ? `Auto mode: go on now — call the Skill tool with skill "${skill}" and args "${id}".`
-    : cfg.flow.auto
-      ? `Auto mode stops before ${stage}. Stop here and tell the user ${id} is ready for the ${stage} stage and waits for them (/forge-next ${id}).`
-      : `Stop here and tell the user ${id} is at the ${stage} stage; /forge-next ${id} continues.`;
+  let say = `Stop here and tell the user ${id} is at the ${stage} stage; /forge-next ${id} continues.`;
+  if (go) say = `Auto mode: go on now — call the Skill tool with skill "${skill}" and args "${id}".`;
+  else if (cfg.flow.auto) say = `Auto mode stops before ${stage}. Stop here and tell the user ${id} is ready for the ${stage} stage and waits for them (/forge-next ${id}).`;
   return { change: id, stage, skill, auto: cfg.flow.auto, continue: go, say };
 }
 
@@ -726,20 +770,24 @@ async function flowCheck(id, items) {
 /** @param {string} id @param {any} input */
 async function flowVerify(id, input) {
   check(INPUT.verify, input, "input");
+  const keys = input.results.map((r) => `${r.spec} ${r.criterion}`);
+  const twice = repeated(keys);
+  if (twice.length) throw new Error(`one result per criterion; given more than once: ${twice.join(", ")}`);
   const { change, body } = await loadChange(id);
   if (change.stage !== "verify") throw new Error(`${id} is at ${change.stage}; results are recorded at the verify stage`);
   const delta = await loadDelta(id);
   const criteria = [...delta.add, ...delta.modify].flatMap((e) => e.criteria.map((c) => `${e.id} ${c.id}`));
-  for (const r of input.results) {
-    if (!criteria.includes(`${r.spec} ${r.criterion}`)) throw new Error(`${r.spec} ${r.criterion} is not a criterion of ${id}; they are: ${criteria.join(", ")}`);
+  for (const key of keys) {
+    if (!criteria.includes(key)) throw new Error(`${key} is not a criterion of ${id}; they are: ${criteria.join(", ")}`);
   }
   const at = now();
-  const kept = change.verification.filter((v) => !input.results.some((r) => r.spec === v.spec && r.criterion === v.criterion));
+  const kept = change.verification.filter((v) => !keys.includes(`${v.spec} ${v.criterion}`));
   change.verification = [...kept, ...input.results.map((r) => ({ ...r, at }))];
   const latest = (key) => change.verification.find((v) => `${v.spec} ${v.criterion}` === key);
   const failed = criteria.filter((k) => latest(k) && !latest(k).pass);
   const missing = criteria.filter((k) => !latest(k));
-  let say = missing.length ? `Still unverified: ${missing.join(", ")}.` : `Every criterion passed: forge flow advance ${id}.`;
+  let say = `Every criterion passed: forge flow advance ${id}.`;
+  if (missing.length) say = `Still unverified: ${missing.join(", ")}.`;
   if (failed.length) {
     enter(change, "apply");
     say = `${failed.length} criteria failed (${failed.join(", ")}); ${id} is back at apply. Fix them, then advance to verify again.`;
@@ -856,9 +904,13 @@ const COMMANDS = {
       return { items };
     },
     async get(rest) {
-      return (await reqsOf()).get(args(rest, [], 1).ids[0]);
+      const [id] = args(rest, [], 1).ids;
+      return (await reqsOf()).get(id);
     },
-    add: (rest, input) => (args(rest, [], 0), reqAdd(input)),
+    async add(rest, input) {
+      args(rest, [], 0);
+      return reqAdd(input);
+    },
     update: reqUpdate,
   },
   spec: {
@@ -869,31 +921,50 @@ const COMMANDS = {
       return { items };
     },
     async get(rest) {
-      const entry = await (await specsOf()).get(args(rest, [], 1).ids[0]);
+      const [id] = args(rest, [], 1).ids;
+      const entry = await (await specsOf()).get(id);
       if (entry.removed) throw new Error(`${entry.id} was removed`);
       return entry;
     },
-    coverage: (rest) => (args(rest, [], 0), coverage()),
+    async coverage(rest) {
+      args(rest, [], 0);
+      return specCoverage();
+    },
   },
   flow: {
-    new: (rest, input) => (args(rest, [], 0), flowNew(input)),
+    async new(rest, input) {
+      args(rest, [], 0);
+      return flowNew(input);
+    },
     async list(rest) {
       args(rest, [], 0);
       return { items: (await allChanges()).map(({ change }) => ({ id: change.id, title: change.title, stage: change.stage })) };
     },
-    show: (rest) => flowShow(args(rest, [], 1).ids[0]),
+    async show(rest) {
+      return flowShow(args(rest, [], 1).ids[0]);
+    },
     async next(rest) {
       const { change } = await loadChange(args(rest, [], 1).ids[0], true);
       return nextStep(change, await config());
     },
-    delta: (rest, input) => flowDelta(args(rest, [], 1).ids[0], input),
-    plan: (rest, input) => flowPlan(args(rest, [], 1).ids[0], input),
-    check: (rest) => {
+    async delta(rest, input) {
+      return flowDelta(args(rest, [], 1).ids[0], input);
+    },
+    async plan(rest, input) {
+      return flowPlan(args(rest, [], 1).ids[0], input);
+    },
+    async check(rest) {
       const [id, ...items] = args(rest, [], -2).ids;
       return flowCheck(id, items);
     },
-    verify: (rest, input) => flowVerify(args(rest, [], 1).ids[0], input),
-    advance: (rest) => flowAdvance(args(rest, [], 1).ids[0]),
-    archive: (rest) => flowArchive(args(rest, [], 1).ids[0]),
+    async verify(rest, input) {
+      return flowVerify(args(rest, [], 1).ids[0], input);
+    },
+    async advance(rest) {
+      return flowAdvance(args(rest, [], 1).ids[0]);
+    },
+    async archive(rest) {
+      return flowArchive(args(rest, [], 1).ids[0]);
+    },
   },
 };

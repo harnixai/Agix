@@ -1,5 +1,5 @@
 # forge — 规格驱动开发的插件样例（docs/forge.md）：需求、规格与变更流程放在项目的 forge/ 下，
-# 模型经 RunExt 跑 `forge` 命令读写，每个阶段一个 skill，守卫脚本拦下对 forge/ 的直接读写。
+# 模型经 RunExt 跑 `forge` 命令读写，每个阶段一个 skill，守卫脚本提醒模型别直接读写 forge/。
 # 复制它做自己的插件时，改 [plugin] name 与 [[command]] name，换掉 forge.js 里的领域代码。
 
 [plugin]
@@ -12,8 +12,10 @@ description = "需求、规格与变更流程：模型用命令读写结构化�
 name = "forge"
 entry = "forge.js:main"
 description = "需求、规格与变更流程（forge help）"
-read_only = ["help", "req list", "req get", "spec list", "spec get", "spec coverage",
-             "flow list", "flow show", "flow next"]
+read_only = ["help", "--help", "req list", "req get", "req --help", "req add --help", "req update --help",
+             "spec", "flow list", "flow show", "flow next", "flow --help", "flow new --help",
+             "flow delta --help", "flow plan --help", "flow check --help", "flow verify --help",
+             "flow advance --help", "flow archive --help"]
 writes = ["forge/**"]
 
 [skills]
