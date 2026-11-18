@@ -970,3 +970,31 @@ async fn a_write_through_a_dangling_symlink_out_of_the_project_is_asked_about() 
     run.finish().await;
     Ok(())
 }
+
+/// A file under a directory that does not exist yet is inside the project
+/// however the project's own path is spelled (`/var` → `/private/var` on
+/// macOS): the model's `Read` of it is not asked about, it just finds nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_under_a_missing_directory_of_the_project_is_not_asked_about() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("perm-missing-dir", &stub).start().await?;
+    let missing = run.project.join("missing-dir/x");
+    stub.script([
+        Reply::calls(
+            "r1",
+            "Read",
+            json!({ "file_path": missing.to_string_lossy() }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let watcher = run
+        .watch_with(&session, |_| Some(Answer::deny("INSIDE")))
+        .await?;
+    run.turn(&session, "read it").await?;
+    assert_eq!(prompted_tools(&watcher), Vec::<String>::new());
+    drop(watcher);
+    run.finish().await;
+    Ok(())
+}

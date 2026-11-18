@@ -145,7 +145,7 @@ impl Builder {
                 let project_root = settings
                     .paths
                     .project_root()
-                    .map(permissions::path_rule::canonicalize_best_effort);
+                    .map(base::path::resolve_physically);
                 crate::checkpoint::Checkpoints::for_root(
                     store,
                     session.session_id_str(),

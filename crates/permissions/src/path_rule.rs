@@ -140,21 +140,6 @@ fn expand_home(raw: &str) -> Option<PathBuf> {
     Some(base::paths::home_dir()?.join(rest))
 }
 
-/// `p` resolved by the OS; when it does not exist, its parent resolved with
-/// the file name put back, and failing that `p` as given.
-pub fn canonicalize_best_effort(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| {
-        if let Some(parent) = p.parent() {
-            let parent_ok = parent
-                .canonicalize()
-                .unwrap_or_else(|_| parent.to_path_buf());
-            parent_ok.join(p.file_name().unwrap_or_default())
-        } else {
-            p.to_path_buf()
-        }
-    })
-}
-
 /// Whether `target` is `root` or beneath it, comparing whole components as
 /// written (`/a/b2` is not under `/a/b`). Nothing is resolved: a caller
 /// holding a spelling that may pass through a symlink resolves both sides
@@ -169,10 +154,10 @@ pub fn is_within_root_lexical(target: &Path, root: &Path) -> bool {
 }
 
 /// Whether `path` is `root` or beneath it once both go through
-/// [`canonicalize_best_effort`]: a symlink out of `root` counts as outside,
+/// [`base::path::resolve_physically`]: a symlink out of `root` counts as outside,
 /// and `/tmp/x` is inside `/private/tmp` on macOS.
 pub fn is_within_root_resolved(path: &Path, root: &Path) -> bool {
-    canonicalize_best_effort(path).starts_with(canonicalize_best_effort(root))
+    base::path::resolve_physically(path).starts_with(base::path::resolve_physically(root))
 }
 
 #[cfg(test)]
@@ -301,6 +286,24 @@ mod tests {
         assert!(!is_within_root_lexical(&root.join("proj2/x"), &proj));
         assert!(!is_within_root_resolved(&root.join("proj2/x"), &proj));
         assert!(is_within_root_resolved(&proj.join("new/file"), &proj));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_under_a_missing_directory_of_a_project_reached_through_a_link_is_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("real/proj")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+        let proj = root.join("alias/proj");
+        assert!(is_within_root_resolved(&proj.join("missing-dir/x"), &proj));
+        assert!(is_within_root_resolved(&proj.join("a/b/c"), &proj));
+        std::os::unix::fs::symlink(root.join("outside/new.txt"), root.join("real/proj/out"))
+            .unwrap();
+        assert!(
+            !is_within_root_resolved(&proj.join("out"), &proj),
+            "a dangling link out of the project is outside it"
+        );
     }
 
     #[test]
