@@ -884,3 +884,52 @@ async fn a_program_cannot_pin_its_thread_inside_the_base_library() -> anyhow::Re
     run.finish().await;
     Ok(())
 }
+
+/// A program reading a file longer than one call hands over still gets
+/// `Read`'s object — its `content` cut to fit and `truncated` set — never
+/// the bare text in its place, which a read-modify-write would write back
+/// short.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_reading_a_large_file_gets_a_truncated_object() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("program-read-large", &stub)
+        .settings(json!({
+            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+        }))
+        .start()
+        .await?;
+    let line = format!("{}\n", "x".repeat(99));
+    let path = run.write_file("large.txt", &line.repeat(3_000))?;
+    let code = format!(
+        "const r = await tools.Read({{ file_path: {} }});
+         return typeof r === 'string' ? {{ kind: 'string' }}
+           : {{ kind: typeof r, truncated: r.truncated, totalLines: r.totalLines,
+               chars: r.content.length, wholeLines: r.content.endsWith('\\n') }};",
+        json!(path.to_string_lossy())
+    );
+    stub.script([
+        Reply::calls(
+            "program",
+            "RunCode",
+            json!({ "description": "read it", "code": code }),
+        ),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "read the large file").await?;
+    let (_, program, failed) = result_of(&events, "RunCode").expect("the program's result");
+    assert!(!failed, "{program}");
+    let read: Value = serde_json::Deserializer::from_str(program)
+        .into_iter()
+        .next()
+        .and_then(Result::ok)
+        .unwrap_or_else(|| panic!("the program's result does not start with JSON: {program}"));
+    assert_eq!(read["kind"], "object", "{program}");
+    assert_eq!(read["truncated"], true, "{program}");
+    assert_eq!(read["totalLines"], 3_000, "{program}");
+    assert_eq!(read["wholeLines"], true, "{program}");
+    let chars = read["chars"].as_u64().unwrap_or_default();
+    assert!((100_000..200_000).contains(&chars), "{program}");
+    run.finish().await;
+    Ok(())
+}

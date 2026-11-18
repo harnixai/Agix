@@ -97,7 +97,7 @@ tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, 
 | `Glob` | `{paths, more}`：路径按修改时间新→旧，`more` 是被 `max_results` 截掉的个数 |
 | `Grep` | `files_with_matches`（缺省）：`{files}`；`count`：`{counts: {路径: 次数}}`；`content`：文本，每行一处 `路径:行` |
 | `Bash` | `{stdout, stderr, exit_code}`；退出码非零则 reject，错误里带输出 |
-| `Read` | 文本文件：`{content, totalLines, truncated}`，原文，不带行号；不给 `offset` / `limit` 就是全文，`truncated` 说窗口后面还有没有行。不做「文件未变」的去重，模型刚读过的文件程序照样拿到原文；程序读过不算模型读过，模型再读拿到的仍是全文。文件不存在则 reject。图片、PDF、notebook 与模型看到的相同 |
+| `Read` | 文本文件：`{content, totalLines, truncated}`，原文，不带行号；不给 `offset` / `limit` 就是全文，`truncated` 说窗口后面还有没有行；全文超出单个结果的上限（§5 限额）时 `content` 截到放得下的整行、`truncated` 为真。不做「文件未变」的去重，模型刚读过的文件程序照样拿到原文；程序读过不算模型读过，模型再读拿到的仍是全文。文件不存在则 reject。图片、PDF、notebook 与模型看到的相同 |
 | `agent()` | 子 Agent 的最终文本；给了 `schema` 时是校验过的对象 |
 | `RunExt` | 命令返回的值本身：对象，或它返回的字符串 |
 
@@ -160,7 +160,7 @@ tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, 
 | 子调用总数 | 1,000 |
 | `agent()` 次数 | 100 |
 | 同时在跑的子调用 | 8 |
-| 交回脚本的单个工具结果 | 200,000 字符（超出截断并注明；结构化结果序列化后超出的，改交截断的文本；错误信息同样截断） |
+| 交回脚本的单个工具结果 | 200,000 字符（文本超出截断并注明；结构化结果序列化后超出的不改交文本：带布尔 `truncated` 与字符串 `content` 的（如 `Read`）把 `content` 截到放得下的整行、`truncated` 置真，其余这次调用 reject 并说明；错误信息同样截断） |
 | 返回值 | 50,000 字符 |
 | 脚本内存 | 64 MB |
 | 代码长度 | 100,000 字符 |

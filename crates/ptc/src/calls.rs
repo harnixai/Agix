@@ -196,11 +196,10 @@ impl Dispatcher {
                         .unwrap_or_else(|e| e.into_inner())
                         .push(label);
                 }
-                let value = answer
-                    .structured
-                    .filter(|v| v.to_string().chars().count() <= max_chars)
-                    .unwrap_or_else(|| Value::String(cut_note(&answer.text, max_chars)));
-                serde_json::json!({"ok": true, "value": value}).to_string()
+                match handed_over(answer.structured, &answer.text, max_chars) {
+                    Ok(value) => serde_json::json!({"ok": true, "value": value}).to_string(),
+                    Err(e) => answer_err(&e),
+                }
             }
             Ok(answer) => fail(log, task, &label, &answer.text, max_chars),
             Err(e) => fail(log, task, &label, &e, max_chars),
@@ -251,6 +250,63 @@ fn brief(input: &Value) -> String {
 }
 
 /// `text` cut at `max_chars`, saying so when it was.
+/// What a script gets for a call that worked: the structured result when
+/// there is one, else the text. A structured result longer than `max_chars`
+/// as JSON keeps its shape: one that says whether it is `truncated` has its
+/// `content` cut to fit, and any other is an error — a script that expects
+/// an object never gets text instead.
+fn handed_over(structured: Option<Value>, text: &str, max_chars: usize) -> Result<Value, String> {
+    let Some(mut value) = structured else {
+        return Ok(Value::String(cut_note(text, max_chars)));
+    };
+    let size = json_chars(&value);
+    if size <= max_chars {
+        return Ok(value);
+    }
+    let says_truncated = value.get("truncated").is_some_and(Value::is_boolean);
+    match value.get("content").and_then(Value::as_str) {
+        Some(content) if says_truncated => {
+            let content = content.to_string();
+            value["content"] = Value::String(String::new());
+            value["truncated"] = Value::Bool(true);
+            let room = max_chars.saturating_sub(json_chars(&value));
+            value["content"] = Value::String(fitted(&content, room).to_string());
+            Ok(value)
+        }
+        _ => Err(format!(
+            "the result is {size} characters as JSON, more than the {max_chars} a script \
+             gets from one call; ask for less (a range, a filter)"
+        )),
+    }
+}
+
+fn json_chars(value: &Value) -> usize {
+    value.to_string().chars().count()
+}
+
+/// The longest start of `text` whose JSON string escape is at most `room`
+/// characters, ending at a line end when it has one.
+fn fitted(text: &str, room: usize) -> &str {
+    let mut used = 0;
+    let mut end = 0;
+    for (at, c) in text.char_indices() {
+        used += match c {
+            '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 2,
+            c if (c as u32) < 0x20 => 6,
+            _ => 1,
+        };
+        if used > room {
+            break;
+        }
+        end = at + c.len_utf8();
+    }
+    let kept = &text[..end];
+    match kept.rfind('\n') {
+        Some(line_end) if end < text.len() => &kept[..=line_end],
+        _ => kept,
+    }
+}
+
 pub(crate) fn cut_note(text: &str, max_chars: usize) -> String {
     base::text::truncate_chars(
         text,

@@ -122,7 +122,8 @@ function `main` ``。
 ### 从代码里读写文件
 
 - `tools.Read` 在代码调用时交回 `{ content, totalLines, truncated }`：原文，不带行号，不做
-  "文件未变"的去重。模型直接调用 `Read` 看到的不变。
+  "文件未变"的去重。超出单个结果的上限（§7）时仍是这个对象：`content` 截到放得下的整行，
+  `truncated` 为真，余下的用 `offset` 再读。模型直接调用 `Read` 看到的不变。
 - `tools.Write` / `tools.Edit` 与模型调用时规则相同，包括"写已有文件前要读过、且读过之后没被
   改过"。命令改一个文件前先读它，正好满足。
 

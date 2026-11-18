@@ -63,6 +63,15 @@ impl ToolDispatch for Fake {
                 structured: None,
                 reported_failure: false,
             }),
+            "Read" => Ok(SubCallAnswer {
+                text: "ignored".into(),
+                structured: Some(json!({
+                    "content": input["text"],
+                    "totalLines": input["text"].as_str().unwrap_or_default().lines().count(),
+                    "truncated": false,
+                })),
+                reported_failure: false,
+            }),
             "Data" | "Agent" => Ok(SubCallAnswer {
                 text: "ignored".into(),
                 structured: Some(json!({"n": 7, "input": input})),
@@ -601,7 +610,9 @@ async fn failures_thrown_messages_and_oversized_results_are_cut() {
     let (r, _, _) = run_with(
         "const out = {};
          try { await tools.Fail({text: 'e'.repeat(5000)}); } catch (e) { out.error = e.message.length; }
-         out.data = typeof (await tools.Data({pad: 'p'.repeat(5000)}));
+         try { await tools.Data({pad: 'p'.repeat(5000)}); } catch (e) { out.data = e.message.includes('more than the 100'); }
+         const read = await tools.Read({text: 'line\\n'.repeat(5) + '\"'.repeat(50) + '\\n'});
+         out.read = [typeof read, read.truncated, read.totalLines, read.content];
          return out;",
         json!({}),
         small.clone(),
@@ -609,7 +620,15 @@ async fn failures_thrown_messages_and_oversized_results_are_cut() {
     .await;
     let v = r.structured_content.clone().expect("an object");
     assert!(v["error"].as_u64().unwrap() < 150, "{v}");
-    assert_eq!(v["data"], "string", "too big to hand over as an object");
+    assert_eq!(
+        v["data"], true,
+        "too big to hand over as an object, and not handed over as text: {v}"
+    );
+    assert_eq!(
+        v["read"],
+        json!(["object", true, 6, "line\nline\nline\nline\nline\n"]),
+        "a result that says whether it is truncated keeps its shape, cut at a line end"
+    );
 
     let (r, _, _) = run_with("throw new Error('t'.repeat(5000));", json!({}), small).await;
     assert!(r.is_error);
