@@ -3792,6 +3792,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 带回来。不开新一轮、不进对话、不排进输入队列,可以和正在跑的一轮同时进行。调用登记为会话的一件
 `kind:"ext"` 任务(`detail`:`{description, function, via:"host", background:false, tool_use_id}`),
 `session.tasks` 看得到,`session.stopTask` 让它停下(函数可以借 `stopRequested()` 收尾)。
+会话正在重建或回滚时不起调用,报 `SESSION_BUSY`(`reason` 为 `rebuilding` / `rewinding`)。
 
 **不带 `session_id`**:在 `cwd` 下用 daemon 的场景、这个目录的工具与规则跑,引擎是临时的:
 不写日志、不进 `session.list`、不连 MCP、不发会话事件,调用结束(成功、失败或取消)就收掉。

@@ -6,6 +6,7 @@
 use crate::session_pool::parts::factory::{Restore, SessionSeed};
 use crate::session_pool::parts::host_calls::HostCallHold;
 use crate::session_pool::parts::live::{Naming, SessionCore};
+use crate::session_pool::parts::phase::{SessionOp, SessionPhase};
 use crate::session_pool::parts::specs::SessionSpec;
 use crate::session_pool::*;
 use api::{
@@ -122,8 +123,10 @@ impl SessionPool {
     }
 
     /// The engine `id` runs on, brought into memory if it is not, and the
-    /// session counted busy with the call until the hold is dropped.
-    async fn session_runner(
+    /// session counted busy with the call until the hold is dropped. A call
+    /// runs beside a turn, but not while the session is being rebuilt or
+    /// rewound.
+    pub(in crate::session_pool) async fn session_runner(
         &self,
         id: &str,
     ) -> Result<(Arc<dyn HostToolRunner>, HostCallHold), PoolError> {
@@ -131,12 +134,17 @@ impl SessionPool {
             return Err(PoolError::no_session(id));
         }
         self.with_live_ensured(id, None, |live| {
+            if let SessionPhase::Rebuilding | SessionPhase::Exclusive(SessionOp::Rewind) =
+                live.turn.phase
+            {
+                return live.turn.busy(id).map(PoolError::SessionBusy).map(Err);
+            }
             let runner = live.engine.host_tool_runner.clone()?;
-            Some((runner, live.core.host_calls().hold()))
+            Some(Ok((runner, live.core.host_calls().hold())))
         })
         .await?
         .flatten()
-        .ok_or_else(|| PoolError::no_session(id))
+        .ok_or_else(|| PoolError::no_session(id))?
     }
 
     /// One call on an engine of its own in `dir`: the default scene's tools

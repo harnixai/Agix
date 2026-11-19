@@ -112,6 +112,51 @@ async fn a_prompt_change_is_refused_while_a_turn_runs_or_a_rebuild_holds_the_ses
     assert_ne!(rebuilt, generation, "an idle session is rebuilt");
 }
 
+/// A host call runs beside a turn, but not on a session being rebuilt (its
+/// engine is about to stop) or rewound (its files are being put back).
+#[tokio::test]
+async fn a_host_call_is_refused_while_a_rebuild_or_a_rewind_holds_the_session() {
+    use crate::session_pool::parts::phase::SessionOp;
+    let (pool, _dir, _store) = pool_with_history().await;
+    let sid = new_session(&pool).await;
+    let with_turn = |change: fn(&mut TurnSlot)| {
+        let pool = &pool;
+        let sid = &sid;
+        async move {
+            pool.live
+                .with_live_mut(sid, |live| change(&mut live.turn))
+                .await
+                .unwrap()
+        }
+    };
+    let refused = |result: Result<_, PoolError>| match result {
+        Err(PoolError::SessionBusy(busy)) => busy.reason,
+        Err(e) => panic!("{e}"),
+        Ok(_) => panic!("a host call took a session another operation holds"),
+    };
+
+    with_turn(|turn| turn.begin_rebuild().unwrap()).await;
+    assert_eq!(
+        refused(pool.session_runner(&sid).await),
+        BusyReason::Rebuilding
+    );
+    with_turn(|turn| assert!(turn.abort_rebuild())).await;
+
+    with_turn(|turn| turn.begin_exclusive(SessionOp::Rewind).unwrap()).await;
+    assert_eq!(
+        refused(pool.session_runner(&sid).await),
+        BusyReason::Rewinding
+    );
+    with_turn(|turn| assert!(turn.end_exclusive(SessionOp::Rewind))).await;
+
+    with_turn(|turn| {
+        turn.claim(RunningTurn::new("t1".into(), Initiator::Client, None))
+            .unwrap();
+    })
+    .await;
+    assert!(pool.session_runner(&sid).await.is_ok(), "beside a turn");
+}
+
 #[tokio::test]
 async fn a_prompt_set_on_a_session_out_of_memory_leaves_no_spec_behind() {
     let (pool, _dir, _store) = pool_with_history().await;
