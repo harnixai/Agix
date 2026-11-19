@@ -116,7 +116,7 @@ pub enum RuleSource {
     ProjectSettings,
     /// `settings.local.json` in the project directory
     LocalSettings,
-    /// CLI flag (`--permission-mode`, `--allow-tool` 等)
+    /// 设置的 `cli` 层：`agixd --set permissions.allow=…` 或 `EmbedConfig::settings`
     CliArg,
     /// 会话内通过 `/permissions` 命令设置
     Session,

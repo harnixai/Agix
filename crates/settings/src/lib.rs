@@ -48,8 +48,8 @@ pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
 pub use source::{read_settings_file, FileTiers};
 
-/// The keys only the global tier's files may set; the loader drops them from
-/// every other tier.
+/// The keys only the global tier's files (and the `cli` layer) may set; the
+/// loader drops them from every other tier.
 pub const GLOBAL_ONLY_KEYS: &[&str] = &["app"];
 
 /// One settings.json file, and what the settings tiers say once merged. Every

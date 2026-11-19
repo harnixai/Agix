@@ -50,6 +50,8 @@ pub struct LoadedSettings {
     /// The model every tier of the built-in provider is: the daemon's
     /// `--model`.
     pub default_model: String,
+    /// The `cli` tier's layers as given, merged; `None` without one.
+    pub cli_layer: Option<serde_json::Value>,
     project_layer: ProjectLayer,
 }
 
@@ -76,6 +78,7 @@ impl LoadedSettings {
             mcp_server_dirs: HashMap::new(),
             ignored: Vec::new(),
             provider_origins: BTreeMap::new(),
+            cli_layer: None,
             project_layer: ProjectLayer::default(),
         };
         loaded.settle_providers();
@@ -104,7 +107,8 @@ impl LoadedSettings {
     /// way": unless the global tier's `app` block trusts the project root
     /// (`local_dir`'s parent), what in it could loosen anything is held back
     /// before it merges — see [`trust`]. `app` itself is read from the global
-    /// tier only. The decision, and what it
+    /// tier only, and from a `cli` layer, which is read as the global tier is.
+    /// The decision, and what it
     /// held back, is [`trust`](Self::trust) and
     /// [`requires_trust`](Self::requires_trust).
     ///
@@ -159,8 +163,33 @@ impl LoadedSettings {
         sections: &Sections,
         layout: Layout,
     ) -> Self {
+        let source = FileTiers::new(global_dir.clone(), scene_dir.clone(), global_dir.clone());
+        Self::load_without_project_from(
+            &source,
+            global_dir,
+            scene_dir,
+            scope,
+            default_model,
+            sections,
+            layout,
+        )
+    }
+
+    /// [`load_without_project`](Self::load_without_project) with the layers
+    /// coming from `source`, whose project tier, if any, is the global
+    /// directory's.
+    pub fn load_without_project_from(
+        source: &dyn ConfigSource,
+        global_dir: PathBuf,
+        scene_dir: PathBuf,
+        scope: &str,
+        default_model: &str,
+        sections: &Sections,
+        layout: Layout,
+    ) -> Self {
         let scratch = global_dir.join(base::paths::STATE_ROOT_SCRATCHPAD);
-        let mut loaded = Self::load(
+        let mut loaded = Self::load_from(
+            source,
             global_dir.clone(),
             scene_dir,
             global_dir,
@@ -201,12 +230,8 @@ impl LoadedSettings {
         seed_section_defaults(&mut merged_json, sections);
 
         let layers = source.layers();
-        let own_project = trust::is_own_project_dir(&local_dir, &global_dir, &scene_dir);
-        let tiers = TierView {
-            own_project,
-            scene_is_global: trust::same_dir(&scene_dir, &global_dir),
-            project_is_global: !own_project && trust::same_dir(&local_dir, &global_dir),
-        };
+        let tiers = TierView::of(&global_dir, &scene_dir, &local_dir);
+        let own_project = tiers.own_project;
 
         let project_trust = ProjectTrustSettings::from_layers(
             layers
@@ -234,6 +259,7 @@ impl LoadedSettings {
             mcp_secret_vars: Vec::new(),
             providers: Vec::new(),
             provider_origins: BTreeMap::new(),
+            cli_layer: None,
         };
         for layer in layers {
             fold.apply(layer);
@@ -247,12 +273,10 @@ impl LoadedSettings {
             mcp_server_dirs,
             mcp_secret_vars,
             provider_origins,
+            cli_layer,
             ..
         } = fold;
-        let mut seen = std::collections::HashSet::new();
-        project_layer
-            .requires_trust
-            .retain(|w| seen.insert((w.key.clone(), w.origin.clone())));
+        project_layer.dedup_requires_trust();
 
         // Every merge step above was checked to deserialize.
         let mut values: Settings = serde_json::from_value(merged_json).unwrap_or(base);
@@ -278,6 +302,7 @@ impl LoadedSettings {
             ignored,
             provider_origins,
             default_model: default_model.to_string(),
+            cli_layer,
             project_layer,
         };
         loaded.settle_providers();
@@ -393,9 +418,22 @@ struct TierView {
 }
 
 impl TierView {
+    fn of(
+        global_dir: &std::path::Path,
+        scene_dir: &std::path::Path,
+        local_dir: &std::path::Path,
+    ) -> Self {
+        let own_project = trust::is_own_project_dir(local_dir, global_dir, scene_dir);
+        Self {
+            own_project,
+            scene_is_global: trust::same_dir(scene_dir, global_dir),
+            project_is_global: !own_project && trust::same_dir(local_dir, global_dir),
+        }
+    }
+
     fn is_global(&self, tier: Tier) -> bool {
         match tier {
-            Tier::Global => true,
+            Tier::Global | Tier::Cli => true,
             Tier::Scene => self.scene_is_global,
             Tier::Project => self.project_is_global,
             Tier::Managed => false,
@@ -424,6 +462,7 @@ struct LayerFold<'a> {
     mcp_secret_vars: Vec<String>,
     providers: Vec<ProviderConfig>,
     provider_origins: BTreeMap<String, ProviderOrigin>,
+    cli_layer: Option<serde_json::Value>,
 }
 
 impl LayerFold<'_> {
@@ -435,6 +474,12 @@ impl LayerFold<'_> {
                 None => this,
             });
             return;
+        }
+        if layer.tier == Tier::Cli {
+            merge_json_values(
+                self.cli_layer.get_or_insert(serde_json::json!({})),
+                layer.value.clone(),
+            );
         }
         warn_of_keys_not_read(&layer, self.sections);
         let is_global = self.tiers.is_global(layer.tier);
@@ -663,7 +708,7 @@ fn mcp_servers_declared(
 }
 
 /// `obj`, a layer of `tier`, without the keys that tier is not read for:
-/// [`crate::GLOBAL_ONLY_KEYS`] unless it is the global tier.
+/// [`crate::GLOBAL_ONLY_KEYS`] unless it is read as the global tier.
 fn drop_keys_not_read_from(
     tier: Tier,
     is_global: bool,

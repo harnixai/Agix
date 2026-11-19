@@ -25,7 +25,6 @@ use runtime::agent::{Agent, Builder, EventReceiver, InputSender};
 use settings::LoadedSettings;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use telemetry::file_recorder::FileRecorder;
 use telemetry::recorder::RecorderModel;
 use tracing::warn;
@@ -41,10 +40,6 @@ pub(in crate::session_pool) struct EngineFactory {
     host_policy: Option<Arc<dyn PermissionPolicy>>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
     customize: Option<SessionCustomizer>,
-    /// How long a `kind:"prompt"` permission ask may sit unanswered before
-    /// the engine answers it with a `Deny`, over the settings' own value.
-    /// `Duration::ZERO` waits forever.
-    permission_prompt_timeout: Option<Duration>,
     history_store: Option<Arc<dyn history::store::HistoryStore>>,
     scripts: ScriptShares,
     background_hooks: hooks::BackgroundHooks,
@@ -122,7 +117,7 @@ pub(in crate::session_pool) struct BuiltEngine {
     /// subsystem's fault records.
     pub(in crate::session_pool) script_faults: Vec<(String, String)>,
     /// The settings the engine was built with: the pair's, with this
-    /// session's mode, model and prompt timeout written in.
+    /// session's mode and model written in.
     pub(in crate::session_pool) settings: Arc<LoadedSettings>,
 }
 
@@ -132,7 +127,6 @@ impl EngineFactory {
         host_policy: Option<Arc<dyn PermissionPolicy>>,
         rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
         customize: Option<SessionCustomizer>,
-        permission_prompt_timeout: Option<Duration>,
         history_store: Option<Arc<dyn history::store::HistoryStore>>,
         host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
     ) -> Self {
@@ -141,7 +135,6 @@ impl EngineFactory {
             host_policy,
             rust_plugins,
             customize,
-            permission_prompt_timeout,
             history_store,
             scripts: ScriptShares {
                 run_slots: runtime::agent::default_run_slots(),
@@ -183,17 +176,6 @@ impl EngineFactory {
     /// Where every session's notify-only hooks run, drained at shutdown.
     pub(in crate::session_pool) fn background_hooks(&self) -> &hooks::BackgroundHooks {
         &self.background_hooks
-    }
-
-    /// The prompt timeout, in seconds, of a session on `settings`.
-    pub(in crate::session_pool) fn permission_prompt_timeout_secs(
-        &self,
-        settings: &LoadedSettings,
-    ) -> u64 {
-        self.permission_prompt_timeout
-            .map_or(settings.values.permissions.prompt_timeout_secs, |timeout| {
-                timeout.as_secs()
-            })
     }
 
     pub(in crate::session_pool) fn build(
@@ -340,7 +322,7 @@ impl EngineFactory {
     }
 
     /// The pair's settings with this session's permission mode, model,
-    /// prompt timeout, scratch workspace and worktree written in.
+    /// scratch workspace and worktree written in.
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
@@ -349,11 +331,6 @@ impl EngineFactory {
         session_id: &str,
         worktree: Option<&base::paths::LinkedWorktree>,
     ) -> Arc<LoadedSettings> {
-        // A prompt timeout given to the daemon overrides the setting, and the
-        // wait it bounds lives in the engine, so it travels as a setting
-        // rather than as a daemon-side wrapper around the permission.
-        // `Settings` is behind an `Arc`, so override on a private clone rather
-        // than in place.
         // The mode is decided once and written into the snapshot as well:
         // the gate, the hook payloads and `Meta` all read it from there, and a
         // snapshot still holding the settings-file mode made every one of them
@@ -361,8 +338,6 @@ impl EngineFactory {
         let permission_mode = effective_permission_mode(base_settings, requested_mode);
         {
             let mut snap = base_settings.clone();
-            snap.values.permissions.prompt_timeout_secs =
-                self.permission_prompt_timeout_secs(base_settings);
             snap.values.permissions.mode = permission_mode;
             if let Some(name) = model_name {
                 snap.values.model.model_name = name.clone();

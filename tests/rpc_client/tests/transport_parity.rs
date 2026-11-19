@@ -232,7 +232,7 @@ impl Harness {
         let sock = dir.path().join("parity.sock");
         let config = load_daemon_config(
             "claude-sonnet-4-6",
-            2000,
+            None,
             Some(&sock),
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),

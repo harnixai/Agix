@@ -63,7 +63,7 @@ async fn serve(
     std::fs::create_dir_all(&cwd).unwrap();
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.to_path_buf()),

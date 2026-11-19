@@ -66,7 +66,7 @@ async fn a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
     let sock = dir.path().join("agix.sock");
     let paths =
         StaticDaemonPaths::with_project(scene_root, work.clone()).with_global(global.clone());
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
@@ -142,7 +142,7 @@ async fn bash_turn_in(dir: &std::path::Path, work: &std::path::Path, command: &s
     let sock = dir.join("agix.sock");
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
@@ -261,7 +261,7 @@ async fn serve_with_probe_skill(
     let sock = dir.join("agix.sock");
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(

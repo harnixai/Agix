@@ -193,7 +193,9 @@ impl Daemon {
         let socket = world.socket();
         let config = load_daemon_config(
             provider.model(),
-            settings::DEFAULT_MAX_TOKENS,
+            Some(serde_json::json!({
+                "permissions": {"prompt_timeout_secs": opts.prompt_timeout.as_secs()}
+            })),
             Some(&socket),
             &opts.scene,
             &paths,
@@ -224,7 +226,6 @@ impl Daemon {
             agent_scene,
             daemon::Assembly {
                 cwd: Some(opts.project.clone()),
-                permission_prompt_timeout: Some(opts.prompt_timeout),
                 model_client: Some(client),
                 credentials: Some(crate::stub_credentials().0),
                 extra_scenes: opts.host.scenes.iter().map(|s| s.id.clone()).collect(),

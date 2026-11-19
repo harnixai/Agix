@@ -13,6 +13,9 @@ pub enum ConfigTierName {
     Global,
     Scene,
     Project,
+    /// The settings given on the command line (`agixd --set`) or by the
+    /// embedder (`EmbedConfig::settings`).
+    Cli,
     #[default]
     Effective,
 }
@@ -37,14 +40,15 @@ pub struct ConfigTier {
     pub project_root: Option<String>,
     pub tier: ConfigTierName,
     /// The tier's settings file as it sits on disk (`null` when it has none),
-    /// or the merged result for `effective`.
+    /// the `cli` layer (`null` without one), or the merged result for
+    /// `effective`.
     pub settings: serde_json::Value,
     /// The tier's `settings.local.json` (`null` when it has none); absent for
-    /// `effective`.
+    /// `cli` and `effective`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<serde_json::Value>,
     /// The tier's two files as they are now, for `config.set`'s
-    /// `if_revision`; absent for `effective`.
+    /// `if_revision`; absent for `cli` and `effective`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
     /// The deployment's managed layer; only `effective` has one.

@@ -220,9 +220,9 @@ pub struct DaemonConfig {
     /// platform's path (`Layout::managed_settings_file`). A
     /// file named here must exist.
     pub managed_settings_path: Option<PathBuf>,
-    /// `--max-tokens`: the `model.max_tokens` of every project and scene
-    /// whose settings files leave it unset.
-    pub max_tokens_fallback: u32,
+    /// The `cli` settings layer (`agixd --set`), over the files of every
+    /// project and scene. `settings` was read with it.
+    pub cli_settings: Option<serde_json::Value>,
     pub settings: LoadedSettings,
 }
 
@@ -277,7 +277,7 @@ impl DaemonConfig {
             session_idle_timeout_secs: 3600,
             mcp_policy_path: None,
             managed_settings_path: None,
-            max_tokens_fallback: settings::DEFAULT_MAX_TOKENS,
+            cli_settings: None,
             settings: LoadedSettings::new(
                 Settings::defaults_for("claude-sonnet-4-6"),
                 PathSettings::default(),
@@ -288,11 +288,12 @@ impl DaemonConfig {
 
 /// Priority (low → high): global (`global_root()/settings.json`, shared by
 /// every scene) → scene (`config_root()/settings.json`) → project
-/// (`settings.json` in `layout()`'s directory of `project_root()`) — delegates entirely to
-/// `LoadedSettings::load()`; see its doc comment for the merge algorithm.
+/// (`settings.json` in `layout()`'s directory of `project_root()`) → `cli_settings`
+/// — delegates entirely to `LoadedSettings::load_from()`; see its doc comment
+/// for the merge algorithm.
 pub fn load_daemon_config(
     cli_model: &str,
-    cli_max_tokens: u32,
+    cli_settings: Option<serde_json::Value>,
     cli_socket: Option<&Path>,
     scope: &str,
     paths: &dyn DaemonPaths,
@@ -308,7 +309,7 @@ pub fn load_daemon_config(
         &paths.layout(),
         scope,
         cli_model,
-        cli_max_tokens,
+        cli_settings.as_ref(),
     );
 
     let socket_path = cli_socket
@@ -332,7 +333,7 @@ pub fn load_daemon_config(
         session_idle_timeout_secs: 3600,
         mcp_policy_path: None,
         managed_settings_path: None,
-        max_tokens_fallback: cli_max_tokens,
+        cli_settings,
         settings,
     }
 }
@@ -448,10 +449,17 @@ mod tests {
     }
 
     #[test]
-    fn load_daemon_config_cli_fallback_when_no_settings() {
+    fn load_daemon_config_cli_settings_override_every_file() {
         let dir = tempfile::tempdir().unwrap();
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
-        let config = load_daemon_config("cli-model", 5000, None, "code", &paths);
+        write_settings(dir.path(), r#"{"model": {"max_tokens": 1000}}"#);
+        let config = load_daemon_config(
+            "cli-model",
+            Some(serde_json::json!({"model": {"max_tokens": 5000}})),
+            None,
+            "code",
+            &paths,
+        );
         assert_eq!(config.settings.values.model.model_name, "cli-model");
         assert_eq!(config.settings.values.model.max_tokens, 5000);
     }
@@ -469,7 +477,7 @@ mod tests {
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),
         );
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
         assert_eq!(config.settings.values.model.max_tokens, 3000);
     }
 
@@ -489,7 +497,7 @@ mod tests {
         )
         .with_global(global_dir.path().to_path_buf());
 
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
         assert_eq!(config.settings.values.model.max_tokens, 3000); // scene overrides global
     }
 
@@ -508,7 +516,7 @@ mod tests {
         )
         .with_global(global_dir.path().to_path_buf());
 
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
 
         assert_eq!(config.paths.global_root(), global_dir.path());
         assert_ne!(config.paths.global_root(), config.paths.config_root());
@@ -522,7 +530,7 @@ mod tests {
         // No scene-level or project-level settings.json at all.
         let paths = StaticDaemonPaths::new(config_dir.path().to_path_buf())
             .with_global(global_dir.path().to_path_buf());
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
         assert_eq!(config.settings.values.model.max_tokens, 1000);
     }
 
@@ -555,7 +563,7 @@ mod tests {
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),
         );
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
 
         let values = &config.settings.values;
         let ids: Vec<&str> = values.providers.iter().map(|p| p.id.as_str()).collect();
@@ -596,7 +604,7 @@ mod tests {
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),
         );
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
 
         // Generic recursive JSON merge: both layers set the same
         // `PreToolUse` array key, so the project layer's array (a
@@ -614,7 +622,7 @@ mod tests {
     fn load_daemon_config_hooks_absent_by_default() {
         let dir = tempfile::tempdir().unwrap();
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
         assert!(config.settings.values.hooks.is_none());
     }
 
@@ -631,7 +639,7 @@ mod tests {
             }"#,
         );
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
-        let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
+        let config = load_daemon_config("cli-model", None, None, "code", &paths);
         assert_eq!(config.settings.rules.len(), 1);
         assert_eq!(config.settings.rules[0].rule.tool, "Bash(git push:*)");
     }

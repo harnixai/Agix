@@ -916,7 +916,9 @@ summary 为 `did not answer within 5s`,报告不再等它;panic 的检查同样�
 `false` 时是 `ok`,`details.enabled` 为 `false`。
 
 `settings_tiers` 依次是全局层、每个激活场景的场景层(`scene` 是哪个场景;daemon 启动的场景在前,
-其余按 id 排)、项目层。场景层里只有启动场景那一项带 `ignored_values`,其余的只报存在、能否解析与
+其余按 id 排)、项目层,daemon 带着 `cli` 层(`agixd --set`、`EmbedConfig.settings`)时最后还有一项
+`{ "tier":"cli", "path":"cli", "exists":true, "parses":true, …, "keys":[ "permissions.mode" ] }`:`keys` 是这一层
+设的键(点分),值用 `config.get {tier:"cli"}` 读。场景层里只有启动场景那一项带 `ignored_values`,其余的只报存在、能否解析与
 `unknown_keys`;哪一层读不了时 `summary` 写作 `scene (<id>)`。
 
 `settings_tiers[].unknown_keys` 是那份文件里没有任何设置读的顶层键(拼错的、别的工具的),
@@ -932,7 +934,8 @@ MCP 开关、项目信任)时是 `failing`——它不再读,那道保护就没�
 (`sandbox.network.mode`),一个对象里的值都不对时逐个报它们自己的键,只有这里根本不该是对象时才报
 这个对象本身(`web.allowed_domains` 写成了对象);`permissions.mode` 写了只能由程序设的模式也列在
 这里;`permissions` 的规则串逐条读,读不出来的一条是 `permissions.allow[0]` 这样带下标。被丢的只是这个值,同一个文件里
-其余的值和别的层照常生效。有这样的值时 `settings.tiers` 是 `degraded`,`summary` 列出
+其余的值和别的层照常生效。`cli` 层的值在 daemon 自己那一对上放不进时 daemon 根本起不来,别的项目上放不进的
+(与那个项目的设置合起来才不对)照样丢掉,`tier` 与 `origin` 都是 `cli`。有这样的值时 `settings.tiers` 是 `degraded`,`summary` 列出
 `<层> (<键>)`。
 
 `providers.ok` 只说明配置**形状**解析得通(每个 `tiers` 里的模型都在它的 `models` 里、`model.order` 里的每个 id 都指向一个存在
@@ -1311,7 +1314,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 读成"一个工具都不给",正好相反。`deferred` 是"先只报名字,`ToolSearch` 取到 schema
 才展开"的那批工具。
 
-`settings` 是三层合并后的完整结果,**不带溯源信息** —— merge 之后不保留每个字段来自
+`settings` 是各层(三层设置文件与 `cli` 层)合并后的完整结果,**不带溯源信息** —— merge 之后不保留每个字段来自
 哪层。要看某一层的原样内容用 `config.get` 的 `tier`。
 
 `include_secrets` 默认 `false`:`api_key` / `auth_token` / `token` / `secret` /
@@ -2949,7 +2952,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 的会话的提问不可能是"已经完成了")。`prompt_type` 为 `host_tool_call` → `INVALID_PARAMS`:
 宿主工具的调用用 `session.respondToolCall` 回答;`hook_call` 同理,用 `session.respondHook`。
 
-未在 `--permission-prompt-timeout`(没给时取设置 `permissions.prompt_timeout_secs`,
+未在设置 `permissions.prompt_timeout_secs`(`agixd --permission-prompt-timeout` 是它的简写,
 默认 300 秒)内回答的提问**失败关闭**:权限提问按拒绝
 处理,turn 带着一条 error `tool_result` 继续;模型的提问以"用户没有回答"作为
 `AskUserQuestion` 的结果交还模型;MCP server 的询问回 server `cancel`。都不会挂死。
@@ -3046,7 +3049,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 ```jsonc
 // → params
 { "scene": "code", "project_root": null,
-  "tier": "effective",            // global | scene | project | effective,默认 effective
+  "tier": "effective",            // global | scene | project | cli | effective,默认 effective
   "include_secrets": false }
 // ← result
 { "scene": "code", "project_root": null, "tier": "effective",
@@ -3061,7 +3064,14 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 ```
 
 `tier: "scene"` 读的是加载器为这个场景读的那个目录(daemon 启动时的场景是它的配置根,其余场景是
-全局层下的 `scenes/<id>`)。`local` 与 `revision` 只在单层读时有;文件不存在时 `revision` 按空文件算。
+全局层下的 `scenes/<id>`)。`local` 与 `revision` 只在读 global / scene / project 时有;文件不存在时
+`revision` 按空文件算。
+
+`tier: "cli"` 读的是 `cli` 层——`agixd --set KEY=VALUE`(及其简写 `--max-tokens`、
+`--permission-prompt-timeout`)或嵌入方的 `EmbedConfig.settings`——原样:`settings` 是这一层的 JSON 对象,
+没有这一层时是 `null`;不带 `local` 与 `revision`,`managed` 为 `null`。这一层叠在每一对 `(项目, 场景)` 的
+三层设置文件之上,按全局层的规矩合并(`app` 照收,不受项目信任门禁),`permissions` 的规则列表与各层的
+并列生效;`config.reload` 重读的是它下面的文件,它本身不变。`config.set` 不写它。
 
 `managed` 只在 `tier: "effective"` 时有内容:部署方的 managed 层
 (`{ "origin", "permissions": { "allow"?, "allow_exact"?, "ask"?, "deny"?, "disable_bypass" } }`,不能执行时另有
@@ -4526,12 +4536,12 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 daemon 会话的默认权限模式是 **`default`(ask)**,不是放行一切。
 
 工具调用触发询问时,daemon 推送 `session.event {kind:"prompt"}` 并**阻塞该次工具
-调用**,直到:收到 `session.respondToPrompt`;或超过 `--permission-prompt-timeout`
-(没给时取设置 `permissions.prompt_timeout_secs`,默认 300 秒)→ **按拒绝处理**;或会话被关闭 → 按拒绝处理。
+调用**,直到:收到 `session.respondToPrompt`;或超过设置 `permissions.prompt_timeout_secs`
+(`agixd --permission-prompt-timeout` 是它的简写,默认 300 秒)→ **按拒绝处理**;或会话被关闭 → 按拒绝处理。
 
 超时**永远失败关闭**,不会自动放行 —— 无人应答不等于同意。
 
-模型的提问(`prompt_type:"question"`,§7)用同一个 `--permission-prompt-timeout` 计时(0 为
+模型的提问(`prompt_type:"question"`,§7)用同一个 `permissions.prompt_timeout_secs` 计时(0 为
 不限);超时、会话关闭或宿主 `decline`,模型都从 `AskUserQuestion` 的结果里读到用户没有回答,
 不会把沉默当成回答。子 Agent 没有 `AskUserQuestion`。
 
@@ -4553,7 +4563,7 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 上面这条父会话的 `prompt` 帧,团队成员也一样。判的模式是子 Agent 自己的:agent 类型的 `permission_mode` 可以比父会话宽(插件带来的类型
 只能更严),团队的 `permission_mode` 只能更严;父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话
 是 `bypassPermissions` 时随父会话。插件带来的、未信任项目里的 agent 类型写了 `permission_mode` 的不随:每次
-调用都取它与父会话此刻模式中更严的那个,父会话起它之后被切成 `bypassPermissions` 也一样。它的询问等多久同父会话的(`--permission-prompt-timeout`);答 `permit_always`
+调用都取它与父会话此刻模式中更严的那个,父会话起它之后被切成 `bypassPermissions` 也一样。它的询问等多久同父会话的(`permissions.prompt_timeout_secs`);答 `permit_always`
 记下的是这一条命令或路径。
 
 宿主自己已做沙箱、不需要第二层权限时显式声明放行:任意层 settings.json 的

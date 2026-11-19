@@ -63,7 +63,7 @@ async fn an_unsubscribed_connection_gets_no_more_frames_while_another_still_does
     model.push_turn(text_round("second"));
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

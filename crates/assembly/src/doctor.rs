@@ -1,7 +1,8 @@
 //! `daemon.doctor` — read-only configuration/wiring diagnostics.
 //!
 //! Re-inspects the same three settings.json tiers `LoadedSettings::load()` already
-//! merged at startup, but reports per-tier existence/parse status instead of
+//! merged at startup, and the `cli` layer above them, but reports per-tier
+//! existence/parse status instead of
 //! just logging a warning and moving on — useful for a user (or an IDE
 //! plugin) asking "why isn't my provider config taking effect?" without
 //! grepping daemon logs.
@@ -37,6 +38,9 @@ struct TierStatus {
     /// Values in this tier's files that do not fit their setting, left out
     /// of the merge — see `LoadedSettings::ignored`.
     ignored_values: Vec<settings::IgnoredValue>,
+    /// For the `cli` tier, the settings it sets, dotted.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    keys: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -60,73 +64,103 @@ fn guards_something(old: &str) -> bool {
     .any(|prefix| old.starts_with(prefix))
 }
 
-fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
-    let path = dir.join(base::paths::entry::SETTINGS);
-    let path_str = path.display().to_string();
-    if !path.exists() {
-        return TierStatus {
+impl TierStatus {
+    fn absent(tier: &'static str, path: String) -> Self {
+        TierStatus {
             tier,
             scene: None,
-            path: path_str,
+            path,
             exists: false,
             parses: true,
             error: None,
             unknown_keys: Vec::new(),
             renamed_keys: Vec::new(),
             ignored_values: Vec::new(),
-        };
+            keys: Vec::new(),
+        }
     }
-    match std::fs::read_to_string(&path) {
-        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(value) => TierStatus {
-                tier,
-                scene: None,
-                path: path_str,
-                exists: true,
-                parses: true,
-                error: None,
-                unknown_keys: settings::unknown_settings_keys(
-                    &value,
-                    &crate::settings_sections::all(),
-                ),
-                renamed_keys: settings::renamed::old_keys_in(&value)
-                    .into_iter()
-                    .map(|(old, new)| RenamedKey { old, new })
-                    .collect(),
-                ignored_values: Vec::new(),
-            },
-            Err(e) => TierStatus {
-                tier,
-                scene: None,
-                path: path_str,
-                exists: true,
-                parses: false,
-                error: Some(format!("invalid JSON: {e}")),
-                unknown_keys: Vec::new(),
-                renamed_keys: Vec::new(),
-                ignored_values: Vec::new(),
-            },
-        },
-        Err(e) => TierStatus {
-            tier,
-            scene: None,
-            path: path_str,
+
+    fn unreadable(tier: &'static str, path: String, error: String) -> Self {
+        TierStatus {
             exists: true,
             parses: false,
-            error: Some(format!("read error: {e}")),
-            unknown_keys: Vec::new(),
-            renamed_keys: Vec::new(),
-            ignored_values: Vec::new(),
-        },
+            error: Some(error),
+            ..Self::absent(tier, path)
+        }
+    }
+
+    fn read(tier: &'static str, path: String, value: &serde_json::Value) -> Self {
+        TierStatus {
+            exists: true,
+            unknown_keys: settings::unknown_settings_keys(value, &crate::settings_sections::all()),
+            renamed_keys: settings::renamed::old_keys_in(value)
+                .into_iter()
+                .map(|(old, new)| RenamedKey { old, new })
+                .collect(),
+            ..Self::absent(tier, path)
+        }
     }
 }
 
-/// The settings.json tiers — global, each active scene's, project: is each
-/// one there, does it parse, and does every value in it fit its setting?
+fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
+    let path = dir.join(base::paths::entry::SETTINGS);
+    let path_str = path.display().to_string();
+    if !path.exists() {
+        return TierStatus::absent(tier, path_str);
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(value) => TierStatus::read(tier, path_str, &value),
+            Err(e) => TierStatus::unreadable(tier, path_str, format!("invalid JSON: {e}")),
+        },
+        Err(e) => TierStatus::unreadable(tier, path_str, format!("read error: {e}")),
+    }
+}
+
+fn inspect_cli_layer(layer: &serde_json::Value) -> TierStatus {
+    let name = base::interface::config_source::Tier::Cli.name();
+    TierStatus {
+        keys: settings_set_in(layer),
+        ..TierStatus::read(name, name.to_string(), layer)
+    }
+}
+
+/// The settings `layer` sets, dotted: its objects are looked into as far as
+/// the schema has settings beneath them.
+fn settings_set_in(layer: &serde_json::Value) -> Vec<String> {
+    fn walk(
+        keys: &settings::SchemaKeys,
+        path: &mut Vec<String>,
+        value: &serde_json::Value,
+        out: &mut Vec<String>,
+    ) {
+        let segments: Vec<&str> = path.iter().map(String::as_str).collect();
+        let section = segments.is_empty() || keys.kind(&segments) == settings::KeyKind::Section;
+        match value.as_object() {
+            Some(fields) if section => {
+                for (key, inner) in fields {
+                    path.push(key.clone());
+                    walk(keys, path, inner, out);
+                    path.pop();
+                }
+            }
+            _ => out.push(path.join(".")),
+        }
+    }
+    let keys = settings::SchemaKeys::of(&crate::settings_sections::all());
+    let mut out = Vec::new();
+    walk(&keys, &mut Vec::new(), layer, &mut out);
+    out
+}
+
+/// The settings.json tiers — global, each active scene's, project — and the
+/// `cli` layer when there is one: is each one there, does it parse, and does
+/// every value in it fit its setting?
 pub struct SettingsTiersCheck {
     global: PathBuf,
     scenes: Vec<(String, PathBuf)>,
     project: PathBuf,
+    cli: Option<serde_json::Value>,
     ignored: Vec<settings::IgnoredValue>,
 }
 
@@ -152,6 +186,7 @@ impl SettingsTiersCheck {
             global: paths.global_root(),
             scenes,
             project: settings.paths.layout.project_dir(&project),
+            cli: settings.cli_layer.clone(),
             ignored: settings.ignored.clone(),
         }
     }
@@ -165,6 +200,7 @@ impl SettingsTiersCheck {
             });
         }
         tiers.push(inspect_tier("project", &self.project));
+        tiers.extend(self.cli.as_ref().map(inspect_cli_layer));
         let loaded_scene = self.scenes.first().map(|(scene, _)| scene.as_str());
         for tier in tiers
             .iter_mut()

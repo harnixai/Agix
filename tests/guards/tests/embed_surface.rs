@@ -21,10 +21,11 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("scene", "String"),
     ("scenes", "Vec<String>"),
     ("model", "String"),
-    ("max_tokens", "u32"),
+    ("max_tokens", "Option<u32>"),
     ("session_cap", "usize"),
     ("session_idle_timeout", "Duration"),
     ("permission_prompt_timeout", "Option<Duration>"),
+    ("settings", "Option<serde_json::Value>"),
     ("instance", "Option<String>"),
     ("socket", "Option<PathBuf>"),
     ("mcp_policy", "Option<PathBuf>"),
@@ -50,6 +51,7 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("InvalidProductName", "{name:String,reason:String}"),
     ("InvalidEngineName", "{name:String,reason:String}"),
     ("InvalidHostLibrary", "{namespace:String,reason:String}"),
+    ("InvalidSetting", "{key:String,reason:String}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

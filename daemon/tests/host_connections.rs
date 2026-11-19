@@ -247,7 +247,7 @@ impl Daemon {
 
         let paths =
             StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
-        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
         let mut assembly = daemon::Assembly {
             cwd: Some(work.clone()),

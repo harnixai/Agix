@@ -93,13 +93,14 @@ impl Daemon {
             json!({ "hooks": hooks, "memory": {"enabled": false} }).to_string(),
         )
         .unwrap();
-        let config = load_daemon_config(
+        let mut config = load_daemon_config(
             "claude-sonnet-4-6",
-            2000,
+            None,
             Some(&sock),
             "code",
             &StaticDaemonPaths::new(root.clone()),
         );
+        config.settings.values.permissions.prompt_timeout_secs = QUESTION_TIMEOUT.as_secs();
         let store: Arc<dyn history::store::HistoryStore> = Arc::new(
             history::store::JsonlHistoryStore::with_roots(
                 &root,
@@ -116,7 +117,6 @@ impl Daemon {
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
             daemon::Assembly {
                 cwd: Some(root.clone()),
-                permission_prompt_timeout: Some(QUESTION_TIMEOUT),
                 model_client: Some(client as Arc<dyn AnthropicClient>),
                 transcripts: daemon::Transcripts::In(store),
                 ..Default::default()

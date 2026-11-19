@@ -31,7 +31,7 @@ async fn a_host_scene_is_served_and_survives_being_turned_off() {
     std::fs::create_dir_all(&cwd).unwrap();
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -107,7 +107,7 @@ async fn a_declarative_scene_under_the_state_root_is_served() {
     std::fs::create_dir_all(&cwd).unwrap();
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -172,7 +172,7 @@ async fn scenes_can_be_added_while_the_daemon_runs() {
     std::fs::create_dir_all(&cwd).unwrap();
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

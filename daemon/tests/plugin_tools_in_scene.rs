@@ -168,7 +168,7 @@ async fn an_admitted_plugin_tool_passes_the_scene_whitelist_and_the_rest_do_not(
     std::fs::create_dir_all(&cwd).unwrap();
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -302,7 +302,7 @@ async fn a_tool_works_where_the_session_does_on_every_engine_it_runs_on() {
     std::fs::create_dir_all(&cwd).unwrap();
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

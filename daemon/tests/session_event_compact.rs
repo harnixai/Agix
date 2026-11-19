@@ -120,7 +120,7 @@ async fn a_compacted_turn_says_so_on_the_wire() {
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use daemon::embed::{EmbedConfig, Embedded};
+use daemon::embed::{EmbedConfig, EmbedError, Embedded};
 use tracing::info;
 
 const HELP: &str = "\
@@ -21,8 +21,15 @@ Options:
       --session-cap <N>            Maximum concurrent sessions [default: 32]
       --session-idle-timeout <SECS>
                                    Session idle timeout in seconds [default: 3600]
+      --set <KEY=VALUE>            Set the settings key KEY over every settings file of every
+                                   project and scene (e.g. --set permissions.mode=plan,
+                                   --set 'files.read_dirs=[\"/data\"]'); VALUE is read as JSON,
+                                   else as a string. Repeatable; a later one wins. A key no
+                                   setting reads, an old key or a value that does not fit
+                                   refuses to start
       --model <NAME>               Model name for sessions [default: claude-sonnet-4-6]
-      --max-tokens <N>             Max tokens per turn [default: 32000]
+      --max-tokens <N>             Max tokens per model call: --set model.max_tokens=N
+                                   [default: model.max_tokens, else 32000]
       --listen <ADDR>              Bind a TCP listener at ADDR (e.g. 127.0.0.1:7878);
                                    requires --token or AGIX_DAEMON_TOKEN
       --listen-ws <ADDR>           Bind a WebSocket listener at a loopback ADDR
@@ -39,7 +46,8 @@ Options:
                                    [default: the active scenes, sorted and comma-joined]
       --permission-prompt-timeout <SECS>
                                    Seconds a permission prompt may go unanswered before it is
-                                   denied (0 = wait forever)
+                                   denied (0 = wait forever):
+                                   --set permissions.prompt_timeout_secs=SECS
                                    [default: permissions.prompt_timeout_secs, else 300]
       --worker-threads <N>         Async worker threads [env: AGIX_WORKER_THREADS]
                                    [default: the number of CPU cores]
@@ -69,8 +77,9 @@ struct Cli {
     /// Model name for sessions
     model: String,
 
-    /// Max tokens per turn
-    max_tokens: u32,
+    /// `--set`, `--max-tokens` and `--permission-prompt-timeout`, in the
+    /// order given.
+    settings: Vec<Assignment>,
 
     /// Bind a TCP listener at this addr (e.g. 127.0.0.1:7878).
     /// Requires --token or AGIX_DAEMON_TOKEN env.
@@ -117,16 +126,6 @@ struct Cli {
     /// `code,harnix,mini`. See `default_instance_name()`.
     instance: Option<String>,
 
-    /// Seconds a permission prompt may go unanswered before the daemon
-    /// denies it on the client's behalf (0 = wait forever).
-    ///
-    /// The engine itself waits indefinitely for `session.respondToPrompt`, so a
-    /// client that never implements it would otherwise hang its
-    /// `session.run_turn` call forever. The timeout fails *closed* — it
-    /// denies the tool call, never approves it — and the turn then continues
-    /// normally with an error `tool_result`.
-    permission_prompt_timeout: Option<u64>,
-
     /// Async worker threads; `None` leaves tokio's default of one per CPU
     /// core. Blocking work (file I/O, searches, scripts) runs on its own pool
     /// whatever this is.
@@ -143,6 +142,68 @@ struct Cli {
 
     /// The unix socket requires `daemon.auth` as TCP does.
     unix_socket_auth: bool,
+}
+
+/// One settings key the command line sets.
+#[derive(Debug, Clone, PartialEq)]
+struct Assignment {
+    /// The flag as given, for an error about it.
+    given: String,
+    key: settings::edit::KeyPath,
+    value: serde_json::Value,
+}
+
+impl Assignment {
+    /// `KEY=VALUE`, VALUE read as JSON, else taken as a string.
+    fn parse(text: &str) -> Result<Self, lexopt::Error> {
+        let Some((key, value)) = text.split_once('=') else {
+            return Err(format!("invalid value '{text}' for '--set': expected KEY=VALUE").into());
+        };
+        let key = settings::edit::KeyPath::parse(key)
+            .map_err(|e| format!("invalid value '{text}' for '--set': {e}"))?;
+        let value = serde_json::from_str(value)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+        Ok(Self {
+            given: format!("--set {text}"),
+            key,
+            value,
+        })
+    }
+
+    fn shorthand(flag: &str, given: impl std::fmt::Display, key: &str, value: u64) -> Self {
+        Self {
+            given: format!("--{flag} {given}"),
+            key: settings::edit::KeyPath::new(key.split('.')),
+            value: value.into(),
+        }
+    }
+
+    /// Whether `dotted`, a key an error names, is this one's, beneath it or
+    /// above it.
+    fn covers(&self, dotted: &str) -> bool {
+        let own = self.key.dotted();
+        dotted == own
+            || dotted.starts_with(&format!("{own}."))
+            || dotted.starts_with(&format!("{own}["))
+            || own.starts_with(&format!("{dotted}."))
+    }
+}
+
+/// The settings `assignments` set, each over those before it; `None` when
+/// there are none.
+fn settings_layer(assignments: &[Assignment]) -> Option<serde_json::Value> {
+    if assignments.is_empty() {
+        return None;
+    }
+    let mut layer = serde_json::json!({});
+    for assignment in assignments {
+        let nested = assignment.key.segments().iter().rev().fold(
+            assignment.value.clone(),
+            |inner, segment| serde_json::json!({ *segment: inner }),
+        );
+        settings::merge_json_values(&mut layer, nested);
+    }
+    Some(layer)
 }
 
 fn number<T: std::str::FromStr>(parser: &mut lexopt::Parser, flag: &str) -> Result<T, lexopt::Error>
@@ -201,14 +262,13 @@ impl Cli {
             session_cap: 32,
             session_idle_timeout: 3600,
             model: "claude-sonnet-4-6".into(),
-            max_tokens: settings::DEFAULT_MAX_TOKENS,
+            settings: Vec::new(),
             listen: None,
             listen_ws: None,
             token: None,
             scene: "code".into(),
             scenes: Vec::new(),
             instance: None,
-            permission_prompt_timeout: None,
             worker_threads: None,
             mcp_policy: None,
             managed_settings: None,
@@ -223,7 +283,18 @@ impl Cli {
                     cli.session_idle_timeout = number(&mut parser, "session-idle-timeout")?
                 }
                 Long("model") => cli.model = parser.value()?.string()?,
-                Long("max-tokens") => cli.max_tokens = number(&mut parser, "max-tokens")?,
+                Long("set") => cli
+                    .settings
+                    .push(Assignment::parse(&parser.value()?.string()?)?),
+                Long("max-tokens") => {
+                    let n: u32 = number(&mut parser, "max-tokens")?;
+                    cli.settings.push(Assignment::shorthand(
+                        "max-tokens",
+                        n,
+                        "model.max_tokens",
+                        n.into(),
+                    ))
+                }
                 Long("listen") => cli.listen = Some(parser.value()?.string()?),
                 Long("listen-ws") => cli.listen_ws = Some(parser.value()?.string()?),
                 Long("token") => cli.token = Some(parser.value()?.string()?),
@@ -238,8 +309,13 @@ impl Cli {
                 ),
                 Long("instance") => cli.instance = Some(parser.value()?.string()?),
                 Long("permission-prompt-timeout") => {
-                    cli.permission_prompt_timeout =
-                        Some(number(&mut parser, "permission-prompt-timeout")?)
+                    let secs: u64 = number(&mut parser, "permission-prompt-timeout")?;
+                    cli.settings.push(Assignment::shorthand(
+                        "permission-prompt-timeout",
+                        secs,
+                        "permissions.prompt_timeout_secs",
+                        secs,
+                    ))
                 }
                 Long("worker-threads") => {
                     cli.worker_threads = Some(worker_threads(&parser.value()?.string()?)?)
@@ -309,7 +385,13 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         "agixd",
         env!("CARGO_PKG_VERSION"),
     );
-    let embedded = Arc::new(Embedded::start(embed_config(&cli, data_root)).await?);
+    let embedded = match Embedded::start(embed_config(&cli, data_root)).await {
+        Ok(embedded) => Arc::new(embedded),
+        Err(EmbedError::InvalidSetting { key, reason }) => {
+            anyhow::bail!("{}: {reason}", setting_named(&cli, &key))
+        }
+        Err(e) => return Err(e.into()),
+    };
     spawn_shutdown_handler(embedded.clone());
     let served = daemon::agixd::serve(&embedded, listeners).await;
     embedded.shutdown().await;
@@ -324,18 +406,24 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The flag that set `key`, the last one when several did.
+fn setting_named(cli: &Cli, key: &str) -> String {
+    cli.settings
+        .iter()
+        .rev()
+        .find(|assignment| assignment.covers(key))
+        .map_or_else(|| format!("--set {key}"), |a| a.given.clone())
+}
+
 fn embed_config(cli: &Cli, data_root: PathBuf) -> EmbedConfig {
     let mut config = EmbedConfig::new(data_root);
     config.cwd = Some(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     config.scene = cli.scene.clone();
     config.scenes = cli.scenes.clone();
     config.model = cli.model.clone();
-    config.max_tokens = cli.max_tokens;
+    config.settings = settings_layer(&cli.settings);
     config.session_cap = cli.session_cap;
     config.session_idle_timeout = std::time::Duration::from_secs(cli.session_idle_timeout);
-    config.permission_prompt_timeout = cli
-        .permission_prompt_timeout
-        .map(std::time::Duration::from_secs);
     config.instance = Some(
         cli.instance
             .clone()
@@ -473,9 +561,8 @@ mod tests {
         assert_eq!(cli.session_cap, 32);
         assert_eq!(cli.session_idle_timeout, 3600);
         assert_eq!(cli.model, "claude-sonnet-4-6");
-        assert_eq!(cli.max_tokens, 32_000);
+        assert!(cli.settings.is_empty());
         assert_eq!(cli.scene, "code");
-        assert_eq!(cli.permission_prompt_timeout, None);
         assert!(cli.socket.is_none() && cli.instance.is_none() && cli.scenes.is_empty());
         assert_eq!(cli.worker_threads, None);
         assert_eq!(cli.mcp_policy, None);
@@ -559,6 +646,60 @@ mod tests {
         assert!(parse_err(&["--session-cap", "many"]));
         assert!(parse_err(&["--model"]));
         assert!(parse_err(&["stray"]));
+    }
+
+    #[test]
+    fn set_reads_json_else_a_string_and_the_shorthands_are_set() {
+        let cli = parse(&[
+            "--set",
+            "permissions.mode=plan",
+            "--set=files.read_dirs=[\"/data\"]",
+            "--max-tokens",
+            "50",
+            "--set",
+            "turn.max_model_calls=3",
+            "--permission-prompt-timeout=7",
+            "--set",
+            "model.max_tokens=60",
+            "--set",
+            "prompt.language=a=b",
+        ]);
+        assert_eq!(
+            settings_layer(&cli.settings),
+            Some(serde_json::json!({
+                "permissions": {"mode": "plan", "prompt_timeout_secs": 7},
+                "files": {"read_dirs": ["/data"]},
+                "model": {"max_tokens": 60},
+                "turn": {"max_model_calls": 3},
+                "prompt": {"language": "a=b"},
+            }))
+        );
+        assert_eq!(
+            settings_layer(&parse(&["--max-tokens", "9"]).settings),
+            settings_layer(&parse(&["--set", "model.max_tokens=9"]).settings)
+        );
+        assert_eq!(
+            setting_named(&cli, "model.max_tokens"),
+            "--set model.max_tokens=60"
+        );
+        assert_eq!(
+            setting_named(&cli, "files.read_dirs[0]"),
+            "--set files.read_dirs=[\"/data\"]"
+        );
+        assert_eq!(
+            setting_named(&cli, "permissions.prompt_timeout_secs"),
+            "--permission-prompt-timeout 7"
+        );
+        assert_eq!(setting_named(&cli, "turn"), "--set turn.max_model_calls=3");
+        assert_eq!(setting_named(&cli, "web"), "--set web");
+        assert_eq!(settings_layer(&parse(&[]).settings), None);
+
+        let parse_err =
+            |args: &[&str]| Cli::parse_from(args.iter().map(std::ffi::OsString::from)).is_err();
+        assert!(parse_err(&["--set", "permissions.mode"]));
+        assert!(parse_err(&["--set", "permissions..mode=plan"]));
+        assert!(parse_err(&["--set", "=plan"]));
+        assert!(parse_err(&["--max-tokens", "-1"]));
     }
 
     #[test]

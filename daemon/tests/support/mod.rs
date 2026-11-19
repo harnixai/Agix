@@ -246,13 +246,14 @@ pub async fn start_scripted_server_holding(
     let (client, seen) = ScriptedClient::new(rounds);
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         scene_id,
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     config.session_cap = session_cap;
-    let Seed(settings, rules) = settings.into();
+    let Seed(mut settings, rules) = settings.into();
+    settings.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
     config.settings.values = settings;
     config.settings.default_model = config.settings.values.model.model_name.clone();
     config.settings.settle_providers();
@@ -288,7 +289,6 @@ pub async fn start_scripted_server_holding(
         agent_scene,
         daemon::Assembly {
             cwd: Some(cwd.clone()),
-            permission_prompt_timeout: Some(prompt_timeout),
             model_client: Some(client),
             transcripts: daemon::Transcripts::In(store.clone()),
             ..Default::default()
@@ -338,7 +338,7 @@ pub async fn start_server_without_history() -> (
     let (client, _seen) = ScriptedClient::new(vec![text_round("x")]);
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -488,7 +488,6 @@ impl base::interface::permission::PermissionPolicy for PermitAll {
 pub struct Serving {
     pub scene: &'static str,
     pub model: &'static str,
-    pub max_tokens: u32,
     pub session_cap: Option<usize>,
     pub history: bool,
     /// Provider id → API key, as a host's credential source would answer.
@@ -500,7 +499,6 @@ impl Default for Serving {
         Self {
             scene: "code",
             model: "claude-sonnet-4-6",
-            max_tokens: 2000,
             session_cap: None,
             history: false,
             keys: &[],
@@ -532,7 +530,7 @@ pub async fn serve_permitting_all(
 
     let mut config = load_daemon_config(
         serving.model,
-        serving.max_tokens,
+        None,
         Some(&sock),
         serving.scene,
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -1034,7 +1032,7 @@ pub async fn start_server_serving(
 
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -1124,7 +1122,7 @@ pub async fn start_server_with_history(
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

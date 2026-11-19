@@ -88,7 +88,7 @@ impl Daemon {
         let sock = dir.path().join("trust.sock");
         let paths = StaticDaemonPaths::with_project(home.clone(), configured_project)
             .with_global(home.clone());
-        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
 
         let pool = daemon::assemble::pool(
@@ -986,43 +986,6 @@ async fn doctor_lists_the_project_settings_of_the_directory_the_daemon_works_in(
         "{check}"
     );
     assert_eq!(project["parses"], false, "{check}");
-}
-
-/// A reload of the daemon's own settings keeps the `--max-tokens` fallback
-/// when no settings file sets it.
-#[tokio::test]
-async fn a_reload_keeps_the_max_tokens_fallback() {
-    let daemon = Daemon::start(json!({}), json!({})).await;
-    assert_eq!(
-        daemon.effective().await["model"]["max_tokens"],
-        2000,
-        "the fallback before any reload"
-    );
-
-    daemon.ok("config.reload", json!({})).await;
-
-    let settings = daemon.effective().await;
-    assert_eq!(settings["model"]["max_tokens"], 2000, "{settings}");
-}
-
-/// `--max-tokens` is the fallback of every pair whose settings files leave
-/// `max_tokens` unset — not only the daemon's own, and not the value the
-/// daemon's own files happened to set.
-#[tokio::test]
-async fn every_pair_falls_back_to_the_max_tokens_given_on_the_command_line() {
-    let daemon = Daemon::start(json!({}), json!({"model": {"max_tokens": 5000}})).await;
-    assert_eq!(daemon.effective().await["model"]["max_tokens"], 5000);
-
-    let other = daemon.work.parent().unwrap().join("other");
-    std::fs::create_dir_all(&other).unwrap();
-    let settings = daemon
-        .ok(
-            "config.get",
-            json!({"project_root": other, "scene": "code"}),
-        )
-        .await["settings"]
-        .clone();
-    assert_eq!(settings["model"]["max_tokens"], 2000, "{settings}");
 }
 
 /// `scene.list` counts the sessions in memory, whether or not they have a

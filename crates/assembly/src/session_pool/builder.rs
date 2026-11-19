@@ -15,9 +15,8 @@ pub(crate) struct SessionPoolBuilder {
     paths: Arc<dyn crate::config::DaemonPaths>,
     credentials: Arc<dyn base::interface::credentials::CredentialSource>,
     managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
+    cli_settings: Option<serde_json::Value>,
     host_overrides: HostOverrides,
-    max_tokens_fallback: u32,
-    permission_prompt_timeout: Option<Duration>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
     host_libraries: Vec<base::command::HostLibrary>,
     host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
@@ -50,9 +49,8 @@ impl SessionPool {
             paths,
             credentials: Arc::new(base::interface::credentials::ConfigCredentials),
             managed: None,
+            cli_settings: None,
             host_overrides: HostOverrides::default(),
-            max_tokens_fallback: settings::DEFAULT_MAX_TOKENS,
-            permission_prompt_timeout: None,
             rust_plugins: Vec::new(),
             host_libraries: Vec::new(),
             host_js_libs: Arc::from([]),
@@ -86,27 +84,17 @@ impl SessionPoolBuilder {
 
     /// What `config.settings` — the settings the host handed over, before the
     /// managed layer — sets differently from `on_disk`, the same pair read
-    /// from disk: laid over every settings this pool loads from disk, so a
-    /// value the host set in memory reaches every project and survives a
-    /// reload. The rules the host added stay on this daemon's own pair. The
-    /// config's `max_tokens_fallback` is every pair's when its settings files
-    /// leave `max_tokens` unset.
+    /// from disk with the config's `cli_settings`: laid over every settings
+    /// this pool loads from disk, so a value the host set in memory reaches
+    /// every project and survives a reload. The rules the host added stay on
+    /// this daemon's own pair. `cli_settings` is read with every pair's files.
     pub(crate) fn host_changes(
         mut self,
         on_disk: &LoadedSettings,
         config: &crate::config::DaemonConfig,
     ) -> Self {
         self.host_overrides = HostOverrides::between(on_disk, &config.settings);
-        self.max_tokens_fallback = config.max_tokens_fallback;
-        self
-    }
-
-    /// How long an unanswered permission prompt may block a turn before the
-    /// daemon denies it on the client's behalf, over every session's
-    /// `permissions.prompt_timeout_secs`; `None` leaves that setting
-    /// to decide. `Duration::ZERO` waits forever, the engine's own behavior.
-    pub(crate) fn permission_prompt_timeout(mut self, timeout: Option<Duration>) -> Self {
-        self.permission_prompt_timeout = timeout;
+        self.cli_settings = config.cli_settings.clone();
         self
     }
 
@@ -142,8 +130,7 @@ impl SessionPoolBuilder {
 
     pub(crate) fn build(self) -> Arc<SessionPool> {
         let (managed, settings) = managed_layer(self.managed, self.settings, self.paths.as_ref());
-        let layers =
-            parts::bindings::Layers::new(self.host_overrides, managed, self.max_tokens_fallback);
+        let layers = parts::bindings::Layers::new(self.cli_settings, self.host_overrides, managed);
         let settings =
             parts::bindings::own_settings_in(&self.cwd, settings, self.paths.as_ref(), &layers);
         let mcp = McpHub::new(self.mcp, &settings.paths);
@@ -175,7 +162,6 @@ impl SessionPoolBuilder {
             self.host_policy,
             self.rust_plugins,
             self.customize,
-            self.permission_prompt_timeout,
             self.history_store.clone(),
             self.host_js_libs,
         );

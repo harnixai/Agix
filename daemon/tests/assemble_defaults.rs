@@ -26,7 +26,7 @@ fn offline_client() -> Arc<dyn AnthropicClient> {
 fn config_in(dir: &Path) -> DaemonConfig {
     load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.to_path_buf()),

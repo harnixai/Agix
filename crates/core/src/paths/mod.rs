@@ -524,13 +524,13 @@ impl ConfigPaths {
 
     /// The directory of a settings tier: the state root, the scene
     /// directory, the project directory. `None` for the project tier
-    /// without a project, and for the managed tier, which is a file.
+    /// without a project, the `cli` one, and the managed one, which is a file.
     pub fn tier_dir(&self, tier: Tier) -> Option<PathBuf> {
         match tier {
             Tier::Global => Some(self.global_data_dir.clone()),
             Tier::Scene => Some(self.user_data_dir.clone()),
             Tier::Project => self.project_dir().map(Path::to_path_buf),
-            Tier::Managed => None,
+            Tier::Cli | Tier::Managed => None,
         }
     }
 

@@ -16,7 +16,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use base::interface::credentials::CredentialSource;
 use base::interface::permission::PermissionPolicy;
@@ -48,10 +47,6 @@ pub struct Assembly {
     /// `extra_scenes` is read, so they can be named there; otherwise they are
     /// available to `scene.activate`.
     pub scenes: Vec<Arc<SceneSpec>>,
-    /// How long an unanswered permission prompt may block a turn, over every
-    /// session's `permissions.prompt_timeout_secs`. Left at
-    /// `None` the settings decide, and 300 seconds when they say nothing either.
-    pub permission_prompt_timeout: Option<Duration>,
     /// Where model calls go. `None` builds an Anthropic client keyed from
     /// `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`, else from `credentials`
     /// asked for provider `"default"`.
@@ -184,7 +179,6 @@ pub async fn pool(
         history_store,
         config.paths.clone(),
     )
-    .permission_prompt_timeout(assembly.permission_prompt_timeout)
     .credentials(credentials)
     .managed_settings(managed_path, managed)
     .host_changes(&own_settings_on_disk(config), config)
@@ -255,8 +249,8 @@ async fn register_host_plugins(pool: &SessionPool, dirs: &[PathBuf]) -> anyhow::
 }
 
 /// The daemon's own pair's settings as they are on disk, read the way
-/// `load_daemon_config` read them — `--max-tokens` fallback included — so
-/// what differs from `config.settings` is what the host changed afterwards.
+/// `load_daemon_config` read them — the `cli` layer included — so what
+/// differs from `config.settings` is what the host changed afterwards.
 fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
     let paths = &config.paths;
     crate::settings_source::read_pair(
@@ -266,7 +260,7 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
         &paths.layout(),
         &config.settings.paths.scope,
         &config.settings.default_model,
-        config.max_tokens_fallback,
+        config.cli_settings.as_ref(),
     )
 }
 

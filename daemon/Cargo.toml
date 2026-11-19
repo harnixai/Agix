@@ -21,6 +21,7 @@ anyhow        = { workspace = true }
 tracing       = { workspace = true }
 tracing-subscriber = { workspace = true }
 lexopt        = "0.3"
+serde_json    = { workspace = true }
 assembly      = { workspace = true }
 # Only for the extension-point docs test, which reads the carrier's bindable points.
 script-host   = { workspace = true, optional = true }
@@ -33,7 +34,6 @@ telemetry     = { workspace = true }
 session-state = { workspace = true, features = ["testing"] }
 history       = { workspace = true }
 time          = { workspace = true }
-serde_json    = { workspace = true }
 model         = { workspace = true, features = ["testing"] }
 permissions   = { workspace = true }
 hooks         = { workspace = true }

@@ -37,7 +37,7 @@ async fn serve_with_probe_skill(
     let sock = dir.join("agix.sock");
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(

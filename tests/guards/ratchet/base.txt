@@ -1,4 +1,4 @@
 # kind  crate  ceiling
 # base production lines only go down:
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration base::
-lines  crates/core  21892
+lines  crates/core  21895

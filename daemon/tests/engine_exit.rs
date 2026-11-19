@@ -46,7 +46,7 @@ async fn an_engine_that_dies_mid_turn_closes_its_session_as_engine_stopped_and_i
     )?;
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(root.clone()),
@@ -170,7 +170,7 @@ async fn a_turn_queued_behind_an_engine_that_dies_runs_on_the_session_resumed() 
     )?;
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(root.clone()),

@@ -126,7 +126,7 @@ async fn daemon_with_rules(deny: Value, sandbox: Value) -> Daemon {
     .unwrap();
     let sock = root.join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
@@ -291,7 +291,7 @@ async fn the_sandbox_and_web_sections_reach_the_tools() {
 
     let sock = dir.join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
-    let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(

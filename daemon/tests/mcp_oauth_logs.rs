@@ -91,7 +91,7 @@ async fn no_token_is_ever_logged() {
     let sock = root.join("d.sock");
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(root.clone()),

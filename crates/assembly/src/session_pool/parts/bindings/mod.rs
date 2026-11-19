@@ -1,6 +1,6 @@
 //! 设置与绑定 `BindingCache`：守护进程自己那一对的设置（`config.reload` 热替换的那份），
 //! 每个 `(project, scene)` 对的 [`ProjectBinding`]，以及看着它们来源文件的监视。
-//! 宿主覆盖层和托管设置层只在这里叠加。
+//! `cli` 层随每次读盘读进；宿主覆盖层和托管设置层只在这里叠加。
 //!
 //! 锁序：`bindings` 在前，`last_good_routers` 在后（都是 tokio `Mutex`）；`settings`
 //! 是 tokio `RwLock`，只在取值或替换的那一下持有；`epochs`、`watch.own` 和宿主目录表
@@ -70,26 +70,22 @@ struct Cache {
 
 /// What is laid over every settings this pool loads from disk, in order.
 pub(in crate::session_pool) struct Layers {
+    /// The `cli` layer, read with the files of every pair.
+    cli: Option<serde_json::Value>,
     /// What the host changed on this daemon's own pair's settings before
     /// handing them over. Every other pair, and this one reloaded from disk,
     /// would otherwise lose it.
     host: HostOverrides,
     managed: ManagedLayer,
-    /// `--max-tokens`: a pair's `model.max_tokens` when no settings file sets it.
-    max_tokens_fallback: u32,
 }
 
 impl Layers {
     pub(in crate::session_pool) fn new(
+        cli: Option<serde_json::Value>,
         host: HostOverrides,
         managed: ManagedLayer,
-        max_tokens_fallback: u32,
     ) -> Self {
-        Self {
-            host,
-            managed,
-            max_tokens_fallback,
-        }
+        Self { cli, host, managed }
     }
 
     /// `loaded` with what the host changed in memory, then the managed layer;
@@ -148,7 +144,7 @@ pub(in crate::session_pool) struct PairReader {
     layout: base::paths::Layout,
     scene: String,
     default_model: String,
-    max_tokens_fallback: u32,
+    cli: Option<serde_json::Value>,
 }
 
 impl PairReader {
@@ -166,7 +162,7 @@ impl PairReader {
             &self.layout,
             &self.scene,
             &self.default_model,
-            self.max_tokens_fallback,
+            self.cli.as_ref(),
         )
     }
 
@@ -202,7 +198,7 @@ pub(in crate::session_pool) fn own_settings_in(
         &paths.layout(),
         &host.paths.scope,
         &host.default_model,
-        layers.max_tokens_fallback,
+        layers.cli.as_ref(),
     );
     Arc::new(layers.over(loaded, true))
 }
@@ -275,12 +271,12 @@ impl BindingCache {
     async fn load_pair_as(&self, project: Option<&Path>, scene: &str, own: bool) -> LoadedSettings {
         let startup_scene = self.startup_scene().await;
         let default_model = self.settings.read().await.default_model.clone();
-        let (global_root, scene_root, scene, project, fallback) = (
+        let (global_root, scene_root, scene, project, cli) = (
             self.paths.global_root(),
             self.scene_root(scene, &startup_scene),
             scene.to_string(),
             project.map(Path::to_path_buf),
-            self.layers.max_tokens_fallback,
+            self.layers.cli.clone(),
         );
         let layout = self.paths.layout();
         let loaded = off_the_runtime(move || {
@@ -291,7 +287,7 @@ impl BindingCache {
                 &layout,
                 &scene,
                 &default_model,
-                fallback,
+                cli.as_ref(),
             )
         })
         .await;
@@ -313,7 +309,7 @@ impl BindingCache {
             layout: self.paths.layout(),
             scene: scene.to_string(),
             default_model: self.settings.read().await.default_model.clone(),
-            max_tokens_fallback: self.layers.max_tokens_fallback,
+            cli: self.layers.cli.clone(),
         }
     }
 

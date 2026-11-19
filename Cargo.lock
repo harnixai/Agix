@@ -384,7 +384,6 @@ dependencies = [
  "runtime",
  "scene",
  "serde_json",
- "settings",
  "tempfile",
  "test-runner",
  "tokio",

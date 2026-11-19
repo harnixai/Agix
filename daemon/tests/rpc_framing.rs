@@ -495,7 +495,7 @@ async fn commands_list_tells_a_global_skill_from_a_scene_skill_and_says_where_it
 
     let sock = dir.path().join("agix.sock");
     let paths = StaticDaemonPaths::with_project(scene_root, work.clone()).with_global(global);
-    let config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+    let config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
     let pool = daemon::assemble::pool(
         &config,
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),

@@ -393,7 +393,7 @@ impl SessionPool {
             permission: api::PermissionReport {
                 mode,
                 prompts: prompts_enabled,
-                prompt_timeout_secs: self.factory.permission_prompt_timeout_secs(&settings),
+                prompt_timeout_secs: settings.values.permissions.prompt_timeout_secs,
             },
         }
     }

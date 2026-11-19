@@ -1,19 +1,23 @@
 //! The one way the assembly reads a (project, scene) pair's settings from disk,
 //! and the same read with some of its files replaced by what a write would put
-//! there. Reading a project's is opening it: what an older engine left
-//! directly in its project directory is moved into `state/` first.
+//! there; both with the `cli` layer above the files. Reading a project's is
+//! opening it: what an older engine left directly in its project directory is
+//! moved into `state/` first.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use base::interface::config_source::{Chain, InMemoryLayers, Tier};
 use base::paths::{Layout, PROJECT_STATE_ENTRIES};
 
-use settings::LoadedSettings;
+use settings::{FileTiers, LoadedSettings};
 
-/// The three tiers merged, then `--max-tokens` where no tier set it; the
-/// project tier is `layout`'s directory in `project`. The only
-/// place in the assembly, with [`read_pair_as_if`], that calls `LoadedSettings::load*`. It also hands
+/// The three tiers merged, then `cli` over them; the project tier is
+/// `layout`'s directory in `project`. The only place in the assembly, with
+/// [`read_pair_as_if`], that calls `LoadedSettings::load*`. It also hands
 /// `app.system_proxy` to the process-wide HTTP clients; a later read
 /// that disagrees is the `config.reload` of a setting that needs a restart.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn read_pair(
     global_root: PathBuf,
     scene_root: PathBuf,
@@ -21,23 +25,31 @@ pub(crate) fn read_pair(
     layout: &Layout,
     scene: &str,
     default_model: &str,
-    max_tokens_fallback: u32,
+    cli: Option<&serde_json::Value>,
 ) -> LoadedSettings {
     let sections = crate::settings_sections::all();
-    if let Some(root) = project {
-        move_into_state(root, layout, [&global_root, &scene_root]);
-    }
-    let mut loaded = match project {
-        Some(root) => LoadedSettings::load(
+    let local_dir = match project {
+        Some(root) => {
+            move_into_state(root, layout, [&global_root, &scene_root]);
+            layout.project_dir(root)
+        }
+        None => global_root.clone(),
+    };
+    let files = FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone());
+    let source = with_cli(files, cli);
+    let loaded = match project {
+        Some(_) => LoadedSettings::load_from(
+            &source,
             global_root,
             scene_root,
-            layout.project_dir(root),
+            local_dir,
             scene,
             default_model,
             &sections,
             layout.clone(),
         ),
-        None => LoadedSettings::load_without_project(
+        None => LoadedSettings::load_without_project_from(
+            &source,
             global_root,
             scene_root,
             scene,
@@ -46,9 +58,41 @@ pub(crate) fn read_pair(
             layout.clone(),
         ),
     };
-    fall_back_max_tokens(&mut loaded, max_tokens_fallback);
     platform::configure_system_proxy(loaded.values.app.system_proxy);
     loaded
+}
+
+/// `files`, with `cli` as one layer above them.
+fn with_cli(files: FileTiers, cli: Option<&serde_json::Value>) -> Chain {
+    let above = cli.map_or_else(InMemoryLayers::new, |layer| {
+        InMemoryLayers::new().with(Tier::Cli, false, Tier::Cli.name(), layer.clone())
+    });
+    Chain(vec![Arc::new(files), Arc::new(above)])
+}
+
+/// Why `layer` cannot be the `cli` layer of settings: the first key in it no
+/// setting reads — an old one named with what replaced it — else the first of
+/// its values that `loaded`, read with it, left out. As `(dotted key, reason)`.
+pub(crate) fn cli_layer_refusal(
+    layer: &serde_json::Value,
+    loaded: &LoadedSettings,
+) -> Option<(String, String)> {
+    if !layer.is_object() {
+        return Some((String::new(), "the settings are not a JSON object".into()));
+    }
+    let keys = settings::SchemaKeys::of(&crate::settings_sections::all());
+    if let Some(key) = keys.unknown_in(&[], layer).into_iter().next() {
+        let reason = match settings::renamed::renamed_to(&key) {
+            Some(new) => format!("renamed to `{new}`; `{key}` is no longer read"),
+            None => format!("no setting reads `{key}`"),
+        };
+        return Some((key, reason));
+    }
+    loaded
+        .ignored
+        .iter()
+        .find(|ignored| ignored.tier == Tier::Cli.name())
+        .map(|ignored| (ignored.key.clone(), ignored.error.clone()))
 }
 
 /// [`read_pair`] of a project with each `(path, value)` of `in_memory` read in
@@ -63,14 +107,15 @@ pub(crate) fn read_pair_as_if(
     layout: &Layout,
     scene: &str,
     default_model: &str,
-    max_tokens_fallback: u32,
+    cli: Option<&serde_json::Value>,
 ) -> LoadedSettings {
     let local_dir = layout.project_dir(project);
-    let source = in_memory.into_iter().fold(
-        settings::FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone()),
+    let files = in_memory.into_iter().fold(
+        FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone()),
         |source, (path, value)| source.with_contents(path, value),
     );
-    let mut loaded = LoadedSettings::load_from(
+    let source = with_cli(files, cli);
+    LoadedSettings::load_from(
         &source,
         global_root,
         scene_root,
@@ -79,9 +124,7 @@ pub(crate) fn read_pair_as_if(
         default_model,
         &crate::settings_sections::all(),
         layout.clone(),
-    );
-    fall_back_max_tokens(&mut loaded, max_tokens_fallback);
-    loaded
+    )
 }
 
 /// Each of [`PROJECT_STATE_ENTRIES`] lying directly in `project`'s project
@@ -140,12 +183,6 @@ fn move_into_state(project: &Path, layout: &Layout, state_roots: [&Path; 2]) {
         if let Err(e) = std::fs::rename(&from, &to) {
             tracing::warn!(from = %from.display(), to = %to.display(), error = %e, "could not move into the project's state directory; the old copy is not read");
         }
-    }
-}
-
-fn fall_back_max_tokens(loaded: &mut LoadedSettings, max_tokens_fallback: u32) {
-    if loaded.values.model.max_tokens == settings::DEFAULT_MAX_TOKENS {
-        loaded.values.model.max_tokens = max_tokens_fallback;
     }
 }
 

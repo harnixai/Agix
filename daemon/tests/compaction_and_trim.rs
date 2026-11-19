@@ -138,7 +138,7 @@ async fn start(pre_compact: &str) -> Host {
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

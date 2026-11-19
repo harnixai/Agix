@@ -288,7 +288,12 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 ——每个文档里写的响应形状都有测试拿真实 daemon 的回答对照。
 
 常用参数:`--scene` / `--scenes`(服务哪些场景)、`--listen` / `--listen-ws` 加
-`--token`(带认证的 TCP / WebSocket)、`--unix-socket-auth`(unix socket 也要认证)、`--session-cap`、`--worker-threads`、`--permission-prompt-timeout`、`--mcp-policy`、`--managed-settings`。
+`--token`(带认证的 TCP / WebSocket)、`--unix-socket-auth`(unix socket 也要认证)、`--session-cap`、`--worker-threads`、`--mcp-policy`、`--managed-settings`,
+以及 `--set KEY=VALUE`:在所有设置文件之上设任何一个设置(`--set permissions.mode=plan`、
+`--set 'files.read_dirs=["/data"]'`、`--set turn.max_model_calls=50`;值先按 JSON 读,读不了按字符串;
+可重复)。`--max-tokens N` 就是 `--set model.max_tokens=N`,`--permission-prompt-timeout N` 就是
+`--set permissions.prompt_timeout_secs=N`。没有设置读的键、旧键、放不进的值让 daemon 在启动时就退出,
+报出是哪个 `--set`。
 每个运行中的 daemon 在 `~/.agix/daemon/instances.d/` 下写一个发现文件,客户端按场景
 找到它,不用拼路径。
 
@@ -323,7 +328,7 @@ ANTHROPIC_API_KEY=... cargo run --release -p runtime --example minimal -- "列�
 
 ```rust
 let pool = agix::pool::assemble(
-    &agix::pool::load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
+    &agix::pool::load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths),
     Arc::new(agix::scenes::code::spec(agix::scenes::code::Interaction::Interactive)),
     agix::pool::Assembly { scenes: vec![my_scene], ..Default::default() },
 )
@@ -458,7 +463,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 
 配置按层叠加,优先级从低到高:内建默认 → `~/.agix/settings.json` →
 `~/.agix/scenes/<scene>/settings.json` → `<项目>/.agix/settings.json`,每层可再带一个
-`settings.local.json`,优先于它旁边的文件。完整的配置面是生成的
+`settings.local.json`,优先于它旁边的文件 → `cli` 层(`agixd --set`,或嵌入方的
+`EmbedConfig.settings`),叠在每个项目、每个场景之上。完整的配置面是生成的
 [JSON Schema](schemas/settings.schema.json)。值按字面取:`$VAR` / `${VAR}` / `${VAR:-默认}`
 只在 MCP server 的 `command`、`args`、`env`、`url`、`headers` 里展开。引擎不再读的旧键会被忽略,
 加载时的告警会指出取代它的新键。
@@ -470,7 +476,9 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 - `permissions` 的规则列表(`allow`、`allow_exact`、`ask`、`deny`)不合并:各层的规则并列生效,
   deny 压过任何 allow。
 - `hooks` 按事件合并:某一层列了某个事件,就替换低层对这个事件的列表。`mcp.servers` 按名字、按字段合并。
-- `app` 只认全局层;scene、项目层写了会被忽略并告警。
+- `app` 只认全局层(和 `cli` 层);scene、项目层写了会被忽略并告警。
+- `cli` 层按全局层的规矩合并,不受项目信任限制;`config.reload` 重读的是它下面的文件。
+  `config.get {tier:"cli"}` 和 `daemon.doctor` 把它报成 `cli`。
 - 部署的 managed 文件只许写 `permissions`(规则列表和 `disable_bypass`),优先于所有层。
 - 用户没信任的项目只能收紧(见工作区信任):`providers`、`hooks`、`mcp.servers` 条目、
   `prompt.instruction_files`、`prompt.override`、`sandbox.network.proxy`、`telemetry.otlp_endpoint`、

@@ -75,7 +75,7 @@ impl Daemon {
 
         let sock = dir.path().join("default.sock");
         let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home);
-        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
         let pool = daemon::assemble::pool(
             &config,

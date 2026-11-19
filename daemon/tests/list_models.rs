@@ -38,18 +38,24 @@ pub(crate) struct Stub {
 
 impl Stub {
     pub(crate) async fn start(route: fn(&str) -> String) -> Self {
+        Self::answering(move |request| route(&request.path)).await
+    }
+
+    /// An endpoint that answers each request with what `route` makes of it.
+    pub(crate) async fn answering(route: impl Fn(&Seen) -> String + Send + Sync + 'static) -> Self {
+        let route = Arc::new(route);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
         let record = seen.clone();
         tokio::spawn(async move {
             while let Ok((mut sock, _)) = listener.accept().await {
-                let record = record.clone();
+                let (record, route) = (record.clone(), route.clone());
                 tokio::spawn(async move {
                     let Some(request) = read_request(&mut sock).await else {
                         return;
                     };
-                    let response = route(&request.path);
+                    let response = route(&request);
                     record.lock().unwrap().push(request);
                     let _ = sock.write_all(response.as_bytes()).await;
                     let _ = sock.shutdown().await;

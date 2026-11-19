@@ -42,7 +42,7 @@ async fn start_tcp_server(
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -236,7 +236,7 @@ async fn serve_tcp_listener_bails_without_a_token_even_when_called_directly() {
         Arc::new(HttpAnthropicClient::new(AuthMode::ApiKey("test-key".into())).unwrap());
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

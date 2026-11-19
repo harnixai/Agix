@@ -79,7 +79,7 @@ async fn the_retry(project_settings: Option<serde_json::Value>) -> model::types:
 
     let mut config = load_daemon_config(
         MODEL,
-        CONFIGURED_MAX_TOKENS,
+        Some(serde_json::json!({"model": {"max_tokens": CONFIGURED_MAX_TOKENS}})),
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

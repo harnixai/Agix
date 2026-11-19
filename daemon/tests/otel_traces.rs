@@ -145,7 +145,7 @@ async fn a_turn_with_a_tool_call_reaches_the_collector_as_spans() {
 
     let mut config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         Some(&sock),
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),

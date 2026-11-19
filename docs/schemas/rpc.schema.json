@@ -1504,7 +1504,7 @@
     "ConfigTier": {
       "properties": {
         "local": {
-          "description": "The tier's `settings.local.json` (`null` when it has none); absent for\n`effective`."
+          "description": "The tier's `settings.local.json` (`null` when it has none); absent for\n`cli` and `effective`."
         },
         "managed": {
           "description": "The deployment's managed layer; only `effective` has one."
@@ -1516,7 +1516,7 @@
           ]
         },
         "revision": {
-          "description": "The tier's two files as they are now, for `config.set`'s\n`if_revision`; absent for `effective`.",
+          "description": "The tier's two files as they are now, for `config.set`'s\n`if_revision`; absent for `cli` and `effective`.",
           "type": [
             "string",
             "null"
@@ -1526,7 +1526,7 @@
           "type": "string"
         },
         "settings": {
-          "description": "The tier's settings file as it sits on disk (`null` when it has none),\nor the merged result for `effective`."
+          "description": "The tier's settings file as it sits on disk (`null` when it has none),\nthe `cli` layer (`null` without one), or the merged result for\n`effective`."
         },
         "tier": {
           "$ref": "#/$defs/ConfigTierName"
@@ -1542,13 +1542,22 @@
     },
     "ConfigTierName": {
       "description": "Which settings layer `config.get` reads.",
-      "enum": [
-        "global",
-        "scene",
-        "project",
-        "effective"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "global",
+            "scene",
+            "project",
+            "effective"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "cli",
+          "description": "The settings given on the command line (`agixd --set`) or by the\nembedder (`EmbedConfig::settings`).",
+          "type": "string"
+        }
+      ]
     },
     "ContentBlock": {
       "description": "内容块。`type` 字段做 enum tag。\n\n字段名 / 取值与 Anthropic API 一致；外部 JSON 直传可读。",
@@ -6729,7 +6738,7 @@
         },
         {
           "const": "cliArg",
-          "description": "CLI flag (`--permission-mode`, `--allow-tool` 等)",
+          "description": "设置的 `cli` 层：`agixd --set permissions.allow=…` 或 `EmbedConfig::settings`",
           "type": "string"
         },
         {

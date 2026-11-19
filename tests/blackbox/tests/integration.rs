@@ -12,6 +12,7 @@ mod embed_entry;
 mod embed_host_libraries;
 mod embed_product_name;
 mod embed_project_dir;
+mod embed_settings;
 mod engine_boundaries;
 mod engine_proxy;
 mod forge;

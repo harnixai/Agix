@@ -212,6 +212,15 @@ pub struct ProjectLayer {
     pub mcp_servers: BTreeMap<String, Value>,
 }
 
+impl ProjectLayer {
+    /// `requires_trust` with each key of each file once.
+    pub(crate) fn dedup_requires_trust(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.requires_trust
+            .retain(|w| seen.insert((w.key.clone(), w.origin.clone())));
+    }
+}
+
 /// Whether `project` (a `.agix` directory) is a project tier of its own,
 /// rather than the global or scene directory a project rooted at `$HOME` (or
 /// no project) resolves to.

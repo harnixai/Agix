@@ -160,6 +160,7 @@ fn source_of(rule: &base::permission::LoadedRule) -> RuleSource {
     match rule.tier {
         Tier::Global | Tier::Scene => RuleSource::UserSettings,
         Tier::Project => RuleSource::ProjectSettings,
+        Tier::Cli => RuleSource::CliArg,
         Tier::Managed => RuleSource::PolicySettings,
     }
 }

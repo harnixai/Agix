@@ -36,7 +36,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 ## 2. 装配一个池
 
-设置从哪来：`load_daemon_config(model, max_tokens, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/<项目层目录>/settings.json`，缺省 `.agix`）三层合并；`model` 与 `max_tokens` 是这些层都没写时的兜底；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/<产品名>/managed-settings.json`，缺省 `Agix`）。
+设置从哪来：`load_daemon_config(model, cli_settings, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/<项目层目录>/settings.json`，缺省 `.agix`）三层合并，`cli_settings`（`Option<serde_json::Value>`，agixd 的 `--set`）作为 `cli` 层叠在三层之上，池以后读每一对 `(项目, 场景)` 的设置都带上它（`DaemonConfig::cli_settings`）；它不做启动校验，放不进的值像文件里的一样丢掉并记进 `ignored`（层名 `cli`），要启动时就拒绝用 §10 的 `EmbedConfig.settings`；`model` 是内建 provider 三档的模型；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/<产品名>/managed-settings.json`，缺省 `Agix`）。
 
 状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，引擎名、项目层目录或产品名不是缺省的时再 `.with_layout(base::paths::Layout::default().with_engine("codix")?.with_product_name("Codix")?)`（§10 的 `engine`、`project_dir` 与 `product`；只改目录用 `Layout::new(".codix")?`）。内建场景用 `builtin(id, &layout)` 取，`layout` 定它的展示名（`<产品名> Code`）：传池自己的 `config.paths.layout()`，名字才与池里其余地方一致。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。`UnderGlobalRoot` 按设置 `app.history`（或 `Assembly::history`，给了就以它为准）决定受信项目的会话是否放进项目（`ARCHITECTURE.md` §8.2）；自己建 `JsonlHistoryStore` 交给 `In` 的，要同样的行为就 `.with_project_history(policy)`，`policy` 实现 `agix::history::ProjectHistory`（项目的历史目录、新会话进不进项目、项目此刻是否受信），不给则一律放全局、也不读索引放进项目的会话。交给 `In` 的存储若是包装另一个存储（加观察、加缓存），`HistoryStore` 上有缺省实现的方法都要转发给里面那个，`history::store::ObservedHistoryStore` 是照着写的样例；漏了 `sidecar_locator`，会话就没有会话记忆与提醒；漏了 `history_dirs_for`，导入导出仍避开设置里的全局历史根，却挡不住项目里的 `state/history`；漏了 `checkpoint_objects`，`session.checkpoints`/`session.rewind` 无从恢复。转发要用的类型（`HistoryError`、`SidecarLocator`、`ProjectHistory` 等）都在 `agix::history` 下。
 
@@ -45,7 +45,6 @@ provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或
 模块清单不由嵌入方传：由编入的 feature 决定。要加 Rust 能力用 `Assembly::plugins`（§6）。`Assembly` 其余字段：
 
 - `cwd`：缺省项目；`scenes` 与 `extra_scenes`：自定义场景与要额外启用的场景名。
-- `permission_prompt_timeout`：缺省读设置 `permissions.prompt_timeout_secs`，再缺省 300 秒，超时拒绝。
 - `host_policy`：它的 deny 在任何模式下都成立。
 - `customize_session`：每次建或重建会话都应用；`mcp`：MCP 的登录存储、OAuth 客户端与策略。
 - `js_libs`：给插件代码的宿主 JS 库，见 §10「宿主 JS 库」；不合规的装配失败。
@@ -70,7 +69,7 @@ use agix::prelude::*;
 # std::fs::create_dir_all(&work)?;
 # let mock = Arc::new(model::mock::MockAnthropicClient::new());
 let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 // 记忆选取会另调一次模型，会吃掉 mock 脚本里的一条回答
 # config.settings.values.memory.enabled = false;
 
@@ -119,7 +118,7 @@ use agix::prelude::*;
 # let mock = Arc::new(model::mock::MockAnthropicClient::new());
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-# let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
@@ -211,7 +210,7 @@ fn answer(event: &AgentEvent) -> Option<(String, PromptAnswer)> {
 # let mock = Arc::new(model::mock::MockAnthropicClient::new());
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-# let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
@@ -297,7 +296,7 @@ use agix::session::SessionOptions;
 # mock.push_tool_use("toolu_1", "lookup", serde_json::json!({ "key": "answer" }));
 # mock.push_text("查到了");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-# let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
@@ -446,7 +445,7 @@ impl Plugin for EchoPlugin {
 # let mock = Arc::new(model::mock::MockAnthropicClient::new());
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-# let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 let pool = assemble(
@@ -533,7 +532,7 @@ fn main() -> anyhow::Result<()> {
 
     tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
 # let paths = StaticDaemonPaths::new(state.clone());
-# let config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly::default()).await?;
         tokio::signal::ctrl_c().await?;
@@ -591,7 +590,7 @@ impl FrameSink for Frames {
 # mock.push_text("经 RPC。");
 # mock.push_text("经 Rust。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-# let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
+# let mut config = load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths);
 # config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
@@ -701,9 +700,11 @@ engine.shutdown().await;
 | `data_root` | `AGIX_CONFIG_HOME`（否则 `~/.agix`） | 必给 |
 | `cwd` | 进程的工作目录 | `None`：本进程的工作目录 |
 | `scene` / `scenes` | `--scene` / `--scenes` | `code` / 无 |
-| `model` / `max_tokens` | `--model` / `--max-tokens` | 与 agixd 相同 |
+| `model` | `--model` | `claude-sonnet-4-6`：内建 provider 三档的模型 |
+| `settings` | `--set KEY=VALUE` | `None`：叠在每一对设置文件之上的 `cli` 层，见下 |
+| `max_tokens` | `--max-tokens` | `None`：`settings` 里的 `model.max_tokens`，给了就压过 `settings` 里写的 |
 | `session_cap` / `session_idle_timeout` | `--session-cap` / `--session-idle-timeout` | 32 / 3600 秒 |
-| `permission_prompt_timeout` | `--permission-prompt-timeout` | `None`：按设置，再缺省 300 秒 |
+| `permission_prompt_timeout` | `--permission-prompt-timeout` | `None`：`settings` 里的 `permissions.prompt_timeout_secs`（按整秒），给了就压过 `settings` 里写的；都没有时按设置文件，再缺省 300 秒 |
 | `instance` | `--instance`（agixd 总有一个） | `None` |
 | `socket` | `--socket` | `<data_root>/scenes/<scene>/daemon.sock` |
 | `mcp_policy` / `managed_settings` | `--mcp-policy` / `--managed-settings` | 平台的路径；给了就必须存在 |
@@ -725,6 +726,8 @@ engine.shutdown().await;
 **嵌入方自己的本机状态。** 项目里给宿主留的位置是 `base::paths::Layout::host_state_dir(project_root)`：`<项目>/<project_dir>/state/<product 的小写>/`（Codix 是 `.codix/state/codix/`）。宿主自己建、自己读写，引擎不读不写；它随 `state/` 那一行不进仓库，也和 `state/` 的其余部分一样受保护：模型的写工具写进去要问（没人可问的会话里拒），沙箱里的命令写不了，策略点名的可写根在 `state/` 里时也写不了它。整个 `state/` 是 `Layout::project_state_dir(project_root)`；会话的设置里有 `PathSettings::project_state_dir()`（无项目时 `None`）。
 
 **`engine`。** 引擎在脚本与文件名里的名字：三处 JS 载体（`RunCode`、插件命令、`[[script]]`）里基础库唯一的全局（缺省 `agix`；改成 `foo` 后脚本里只有 `foo`，没有 `agix`），基础库错误的名字 `<首字母大写>Error`（`FooError`），`RunCode` 工具描述与指南里写的 `foo.yaml`、`foo.glob`……（`agix_js.md` §2）；`project_dir` 的缺省 `.<engine>`；沙箱与写工具当作本机另一个实例的状态目录来守的 `~/.<engine>`（`~/.agix` 照守，同机的 agixd 用它）。规则：`[a-z][a-z0-9]*`，至多 16 个字符，不能是 JavaScript 保留字，不能与脚本已有的全局重名（载体放的 `tools`、`console`、`fs`……，新上下文里的 `escape`、`atob`……），`.<engine>` 也要是合法的 `project_dir`（所以不能是 `git`、`claude`、`codex`、`wkts` 这类）；不合法时 `start` 返回 `EmbedError::InvalidEngineName { name, reason }`。用 `agix.*` 写的插件在改了引擎名的嵌入方里调不到基础库，`daemon.doctor` 的 `plugins.engine_name` 点名这些包（只看源码文本）。不跟着变的：`agix.*` RPC 方法与命名空间、`AGIX_*` 环境变量、transcript 命名空间、OpenTelemetry scope 与指标名、agixd、crate 名，以及 `data_root`（必给，不从引擎名推）。库式用法：`base::paths::Layout::default().with_engine("foo")?`（同时把项目层目录设成 `.foo`，要别的名字在它之后 `.with_project_dir(..)?`），`Layout::engine()`，`DEFAULT_ENGINE`，`EngineNameError`；脚本全局名的规则是 `js_lib::check_global_name`（即 `base::interface::script::check_global_name`）。
+
+**`settings`。** 一个设置键组成的 JSON 对象（`json!({"permissions": {"mode": "plan"}, "turn": {"max_model_calls": 50}})`），与 agixd 的 `--set` 是同一个东西：作为 `cli` 层叠在每一对 `(项目, 场景)` 的设置文件之上，`config.reload` 之后照样在。它按全局层的规矩合并——`app` 照收，不受项目信任门禁——`permissions` 的规则列表与各层的并列生效，对每一对都加上。`max_tokens`、`permission_prompt_timeout` 写进它对应的键。`start` 时对守护进程自己那一对查一遍：有没有设置读的键、旧键（`reason` 里给出新键名）、放不进的值，或者它不是对象，就返回 `EmbedError::InvalidSetting { key, reason }`，`key` 是点分的键（不是对象时为空）。`config.get {tier:"cli"}` 返回这一层，`daemon.doctor` 的 `settings_tiers` 里有一项 `tier: "cli"`。
 
 **`history`。** 会话的转录、会话记忆、metadata、checkpoint 副本与输入历史放在哪。`Global`（agixd 的缺省）放在 `<data_root>/projects/` 与 `<data_root>/sessions/<id>/`。`Project` 让**受信**项目的新会话整份放进 `<项目>/<project_dir>/state/history/<id>/`（git worktree 里的会话放进主仓库的这个目录），`<data_root>/sessions/<id>/` 只留一份索引（`index.json`：项目根、会话目录与谱系）和写者锁；不受信的项目、无项目的会话照旧放全局，子 Agent 与同一项目的分叉跟着父会话。类型是 `agix::embed::HistoryLocation`（即 `settings::HistoryLocation`）。不给时读全局设置 `app.history`（只认全局层，场景层、项目层写了忽略并告警）。已经放在任一处的历史原地照读、不迁移，两种位置并存以索引为准，所以中途改这个值不会丢会话。只读索引登记过的项目内会话：克隆来的仓库自带的 `state/history/` 不会被当成谁的历史；项目被取消信任后，它里面的历史不读，`session.resume` 等报 `PROJECT_UNTRUSTED`。项目整个搬了家，在新位置打开它（`cwd` 是它，或有会话建在它上面）时索引跟过去。导出不能写进、导入不能读自项目的历史目录。细节在 `ARCHITECTURE.md` §8.2。
 
@@ -838,6 +841,9 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.3.22**
+  - 设置覆盖（#96）：新增 `EmbedConfig.settings: Option<serde_json::Value>`（缺省 `None`）与 `EmbedError::InvalidSetting { key, reason }`。`EmbedConfig.max_tokens` 由 `u32`（设置没写时的兜底）改为 `Option<u32>`（压过设置，缺省 `None`）：原来写 `config.max_tokens = n` 的改成 `Some(n)`，它现在也压过设置文件里写的 `model.max_tokens`。`permission_prompt_timeout` 不变，同样写进 `cli` 层。agixd 的 `--max-tokens` 随之是覆盖，不再是兜底。
+  - 库式用法：`load_daemon_config` 的第二个参数由 `max_tokens: u32` 改为 `cli_settings: Option<serde_json::Value>`，`DaemonConfig::max_tokens_fallback` 换成 `DaemonConfig::cli_settings`；`Assembly::permission_prompt_timeout` 删掉，写进 `cli_settings` 的 `permissions.prompt_timeout_secs`（或 `config.settings.values.permissions.prompt_timeout_secs`）；`base::interface::config_source::Tier` 多一个变体 `Cli`（名字 `cli`，规则来源 `RuleSource::CliArg`），对它穷举 `match` 的要补；`LoadedSettings::cli_layer` 与 `LoadedSettings::load_without_project_from`；`config.get` 的 `tier` 多一个 `cli`（`ConfigTierName::Cli`）。
 - **0.3.21**
   - 新增 `EmbedConfig.credentials: Option<HostCredentials>`（缺省 `None`）与类型 `agix::embed::HostCredentials`：给 `api_key_env` 指名的变量在环境里没有的 provider 提供密钥；库式用法是 `Assembly::credentials`。
   - 设置按块重排，旧键不再读（读到时告警里给出新键名，对照表是 `settings::renamed::RENAMED_KEYS`）：`Settings` 上的字段随之变成 `permissions`、`files`、`turn`、`agents`、`prompt`、`app`、`web` 等块，`providers` 是带 `id` 的列表，`model.order` 排 provider、`model.tasks` 写档位。下面 0.3.20 条目里的 `history.location`、`worktree_dir` 现在是 `app.history`、`app.worktree_dir`。

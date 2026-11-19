@@ -372,7 +372,14 @@ against a real daemon's answer by a test.
 
 Useful flags: `--scene` / `--scenes` (which scenes to serve), `--listen` /
 `--listen-ws` with `--token` (TCP / WebSocket, authenticated), `--unix-socket-auth` (the unix socket authenticates too), `--session-cap`,
-`--worker-threads`, `--permission-prompt-timeout`, `--mcp-policy`, `--managed-settings`. Each running daemon writes a discovery file
+`--worker-threads`, `--mcp-policy`, `--managed-settings`, and `--set KEY=VALUE`
+for any setting over every settings file (`--set permissions.mode=plan`,
+`--set 'files.read_dirs=["/data"]'`, `--set turn.max_model_calls=50`; the value
+is read as JSON, else as a string; repeatable). `--max-tokens N` is
+`--set model.max_tokens=N` and `--permission-prompt-timeout N` is
+`--set permissions.prompt_timeout_secs=N`. A key no setting reads, an old key
+or a value that does not fit stops the daemon at startup, naming the `--set`.
+Each running daemon writes a discovery file
 under `~/.agix/daemon/instances.d/`, so a client finds it by scene instead of
 by path.
 
@@ -408,7 +415,7 @@ settings tiers, routing, history layout and modules, and your own scenes:
 
 ```rust
 let pool = agix::pool::assemble(
-    &agix::pool::load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths),
+    &agix::pool::load_daemon_config("claude-sonnet-4-6", None, None, "code", &paths),
     Arc::new(agix::scenes::code::spec(agix::scenes::code::Interaction::Interactive)),
     agix::pool::Assembly { scenes: vec![my_scene], ..Default::default() },
 )
@@ -576,7 +583,8 @@ systemd, decides which background commands to stop.
 Configuration is layered, lowest priority first: built-in defaults →
 `~/.agix/settings.json` → `~/.agix/scenes/<scene>/settings.json` →
 `<project>/.agix/settings.json`, each with an optional `settings.local.json`
-that outranks the file beside it. The full surface is the generated
+that outranks the file beside it → the `cli` layer (`agixd --set`, or an
+embedder's `EmbedConfig.settings`), over every project and scene. The full surface is the generated
 [JSON Schema](docs/schemas/settings.schema.json). Values are taken literally:
 `$VAR` / `${VAR}` / `${VAR:-default}` are expanded only inside an MCP server's
 `command`, `args`, `env`, `url` and `headers`. A key the engine no longer reads
@@ -593,8 +601,11 @@ How layers combine:
   allow.
 - `hooks` merge per event: a layer that lists an event replaces the lower
   layers' list for it. `mcp.servers` merge by name and field.
-- `app` is read from the global layer only; a scene or project that sets it is
-  ignored with a warning.
+- `app` is read from the global layer (and the `cli` one) only; a scene or
+  project that sets it is ignored with a warning.
+- The `cli` layer merges like the global one; it is not gated by project trust,
+  and `config.reload` reads the files again beneath it. `config.get
+  {tier:"cli"}` and `daemon.doctor` report it as `cli`.
 - A deployment's managed file may hold only `permissions` (the rule lists and
   `disable_bypass`); it outranks every layer.
 - A project the user has not trusted can only tighten (see Workspace trust):

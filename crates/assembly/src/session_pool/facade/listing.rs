@@ -84,7 +84,8 @@ impl SessionPool {
     }
 
     /// `config.get {scene, project_root, tier}` — one settings tier as it
-    /// sits on disk, or `effective` for the merged result.
+    /// sits on disk, the `cli` layer as given, or `effective` for the merged
+    /// result.
     ///
     /// A tier that has no file reads as `null`, which is the honest answer:
     /// "nothing at this layer" and "an empty object here" are different
@@ -112,7 +113,7 @@ impl SessionPool {
                 Some(self.bindings.scene_root(scene_id, &startup_scene))
             }
             Tier::Project => project_root.map(|p| paths.layout().project_dir(p)),
-            Tier::Effective => None,
+            Tier::Cli | Tier::Effective => None,
         };
 
         let mut managed = serde_json::Value::Null;
@@ -124,6 +125,11 @@ impl SessionPool {
                     .as_ref()
                     .map_or(serde_json::Value::Null, settings::managed::report);
                 (effective_settings_json(&settings), None, None)
+            }
+            (Tier::Cli, _) => {
+                let settings = self.settings_for_project(project_root, scene_id).await;
+                let layer = settings.cli_layer.clone();
+                (layer.unwrap_or(serde_json::Value::Null), None, None)
             }
             (_, Some(dir)) => {
                 let files = TierPaths::in_dir(&dir);

@@ -567,6 +567,71 @@ fn a_managed_layer_with_a_key_it_may_not_set_merges_nothing() {
     assert!(error.contains("model"), "{error}");
 }
 
+#[test]
+fn a_cli_layer_is_above_the_project_and_read_as_the_global_tier() {
+    use base::interface::config_source::{InMemoryLayers, Tier};
+
+    let source = InMemoryLayers::new()
+        .with(
+            Tier::Project,
+            false,
+            "project",
+            serde_json::json!({"turn": {"max_model_calls": 9}, "permissions": {"deny": ["Read"]}}),
+        )
+        .with(
+            Tier::Cli,
+            false,
+            "cli",
+            serde_json::json!({
+                "turn": {"max_model_calls": 2},
+                "app": {"history": "project"},
+                "permissions": {"deny": ["Write"]},
+                "memory": {"enabled": 5},
+            }),
+        );
+    let root = tempfile::tempdir().unwrap();
+    let settings = LoadedSettings::load_from(
+        &source,
+        root.path().join("global"),
+        root.path().join("scene"),
+        root.path().join("project"),
+        "code",
+        "m",
+        &Sections::none(),
+        Default::default(),
+    );
+
+    assert_eq!(settings.values.turn.max_model_calls, 2);
+    assert_eq!(settings.values.app.history, crate::HistoryLocation::Project);
+    let rules: Vec<_> = shared_rules(&settings)
+        .iter()
+        .map(|r| (r.rule.tool.clone(), r.tier))
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            ("Read".to_string(), Tier::Project),
+            ("Write".to_string(), Tier::Cli)
+        ]
+    );
+    assert_eq!(settings.ignored.len(), 1, "{:?}", settings.ignored);
+    assert_eq!(
+        (
+            settings.ignored[0].tier,
+            settings.ignored[0].origin.as_str()
+        ),
+        ("cli", "cli")
+    );
+    assert_eq!(settings.ignored[0].key, "memory.enabled");
+    assert_eq!(
+        settings
+            .cli_layer
+            .as_ref()
+            .map(|l| &l["turn"]["max_model_calls"]),
+        Some(&serde_json::json!(2))
+    );
+}
+
 /// The same configuration, once from six files and
 /// once from a source that never touches a disk, has to produce the same
 /// `Settings` — including the two rules that are not part of the generic

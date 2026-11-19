@@ -84,9 +84,10 @@ impl Daemon {
         let sock = dir.path().join("managed.sock");
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = PermissionMode::BypassPermissions;
+        config.settings.values.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
         let managed = managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -105,7 +106,6 @@ impl Daemon {
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
             daemon::Assembly {
                 cwd: Some(work.clone()),
-                permission_prompt_timeout: Some(prompt_timeout),
                 model_client: Some(client as Arc<dyn AnthropicClient>),
                 transcripts: daemon::Transcripts::Nowhere,
                 ..Default::default()

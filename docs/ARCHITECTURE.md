@@ -448,6 +448,16 @@ MCP 连接、脚本绑定的 root、记忆目录、transcript 目录。
 变化:macOS 的 FSEvents 会把监视开始前不久的写入补报过来,照原样再写一遍也会报,这些都不作废
 绑定。
 
+**命令行给的设置是每一对最上面的一层。** `agixd --set KEY=VALUE`(`--max-tokens`、
+`--permission-prompt-timeout` 是它的简写)与嵌入方的 `EmbedConfig.settings` 合成 `cli` 层
+(`Tier::Cli`),`settings_source::read_pair` 把它排在三层设置文件之上,读进每一对 `(项目, 场景)`,与文件走
+同一条合并:按全局层的规矩合(`app` 照收,不受项目信任门禁),`permissions` 规则列表与各层并列生效、来源记为
+`CliArg`,放不进的值进 `ignored_values`、层名 `cli`。它是每次读盘的一部分,所以绑定作废、`config.reload`
+之后照样在;宿主在内存里改过的值(`HostOverrides`)与 managed 层仍叠在它上面。启动时对守护进程自己那一对
+查一次:没有设置读的键、旧键、放不进的值让 `Embedded::start` 返回 `EmbedError::InvalidSetting`,agixd
+非零退出并报出是哪个 `--set`。`config.get {tier:"cli"}` 返回这一层,`daemon.doctor` 的 `settings_tiers`
+里有一项 `tier: "cli"`,列出它设的键。
+
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
 `(项目, 场景)` 的会话共享;宿主按会话给的目录(`options.skill_dirs` / `session.setSkillDirs`)不进
 绑定,而是每个会话一个 `skills::host::HostSkillLayer`(一组 `HostSkillDir`,各自带自己的 skill 与监视
@@ -1346,10 +1356,10 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
    用户自己设置里的 deny,插件贡献的、客户端经 RPC 传进来的 allow 也一样。要"大范围
    禁止、小范围例外",写法是 `dontAsk` 模式加只列允许范围的 allow,而不是一条宽 deny
    加一条窄 allow。
-2. **各层的规则并存。** 全局、scene、项目三层(以及各自的 `settings.local.json`)与部署方
-   的 managed 层的 `permissions` 规则列表拼在一起生效,不像普通设置项那样后层盖前层。每条
-   规则记着自己来自哪一层——全局与 scene 层是 `UserSettings`,项目层是 `ProjectSettings`,
-   local 是 `LocalSettings`,managed 层是 `PolicySettings`——只用来报出命中的是哪一条
+2. **各层的规则并存。** 全局、scene、项目三层(以及各自的 `settings.local.json`)、`cli` 层
+   (`agixd --set`,§3.2.1)与部署方的 managed 层的 `permissions` 规则列表拼在一起生效,不像普通
+   设置项那样后层盖前层。每条规则记着自己来自哪一层——全局与 scene 层是 `UserSettings`,项目层是
+   `ProjectSettings`,local 是 `LocalSettings`,`cli` 层是 `CliArg`,managed 层是 `PolicySettings`——只用来报出命中的是哪一条
    (几条同样具体时先报 managed 层的)。
 3. **路径先规整再匹配。** 读写路径的工具,路径按会话 cwd 解析成绝对路径并去掉 `.` /
    `..`,`~` 在规则与路径两边都展开;符号链接解析后的路径算作别名——按原样写法解析的
@@ -1519,7 +1529,7 @@ MCP 工具不管 server 报不报 `readOnlyHint` 都询问——那是 server �
 已经在跑的子 Agent 不变。agent 类型 frontmatter 的 `permission_mode` 可以比父会话
 宽也可以严,插件带来的、未信任项目里的类型只能收紧(§6.6);模型在 `Agent` 调用、`TeamCreate` /
 `Agent(team_name)` 里自己要的 `permission_mode` 只能收紧。子 Agent 的询问经父会话的通道到宿主,等待上限就是会话的
-`permission_prompt_timeout`;在那里答"永久允许",记下的是这一条命令或路径,不是整个工具。
+`permissions.prompt_timeout_secs`;在那里答"永久允许",记下的是这一条命令或路径,不是整个工具。
 
 skill 正文里的 `` !`cmd` `` 在送给模型之前执行,同样先过会话的 `PreToolUse` hook 与权限策略
 (按一次 `Bash` 调用判,hook 收到的 `tool_name` 是 `Bash`、`tool_input` 是 `{"command": …}`):

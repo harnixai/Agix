@@ -101,7 +101,7 @@ impl Daemon {
         crate::support::trust_projects_under(self.root(), self.root());
         load_daemon_config(
             "claude-sonnet-4-6",
-            2000,
+            None,
             None,
             "code",
             &StaticDaemonPaths::new(self.root().to_path_buf()),

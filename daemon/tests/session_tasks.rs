@@ -41,9 +41,9 @@ impl Daemon {
     /// (`--permission-prompt-timeout`, zero for no limit) before they are
     /// given up on.
     async fn start_asking(model: Arc<dyn AnthropicClient>, prompt_timeout: Duration) -> Self {
-        Self::start_configured(model, &[], |settings, assembly| {
+        Self::start_configured(model, &[], |settings, _| {
             settings.permissions.mode = base::permission::PermissionMode::Default;
-            assembly.permission_prompt_timeout = Some(prompt_timeout);
+            settings.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
         })
         .await
     }
@@ -59,7 +59,7 @@ impl Daemon {
         std::fs::create_dir_all(&cwd).unwrap();
         let mut config = load_daemon_config(
             "claude-sonnet-4-6",
-            2000,
+            None,
             Some(&sock),
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),

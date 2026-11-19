@@ -63,8 +63,9 @@ impl Daemon {
         let sock = dir.path().join("symlink.sock");
         let paths = StaticDaemonPaths::with_project(global_dir.clone(), repo.clone())
             .with_global(global_dir.clone());
-        let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
+        config.settings.values.permissions.prompt_timeout_secs = 30;
         let rounds = VecDeque::from([
             tool_round("Skill", "skill-1", json!({"skill": "py"})),
             tool_round("Bash", "bash-1", json!({"command": "python3 -c 1"})),
@@ -75,7 +76,6 @@ impl Daemon {
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
             daemon::Assembly {
                 cwd: Some(repo.clone()),
-                permission_prompt_timeout: Some(Duration::from_secs(30)),
                 model_client: Some(
                     Arc::new(Scripted(StdMutex::new(rounds))) as Arc<dyn AnthropicClient>
                 ),

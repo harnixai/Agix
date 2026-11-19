@@ -48,7 +48,7 @@ async fn start_ws_server(
         Arc::new(HttpAnthropicClient::new(AuthMode::ApiKey("test-key".into())).unwrap());
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
@@ -233,7 +233,7 @@ async fn serving_without_a_token_fails_instead_of_refusing_everyone_forever() {
         Arc::new(HttpAnthropicClient::new(AuthMode::ApiKey("test-key".into())).unwrap());
     let config = load_daemon_config(
         "claude-sonnet-4-6",
-        2000,
+        None,
         None,
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
