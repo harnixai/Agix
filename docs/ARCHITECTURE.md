@@ -2376,8 +2376,8 @@ managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字�
 索引,再看全局 metadata(老会话),都没有就是存储自己的项目(那时一个存储只服务一个项目)。读写、
 列表、跨项目搜索、谱系、级联删除、会话记忆(`HistoryStore::sidecar_locator`)、checkpoint 副本
 都经它;导入导出的根检查用设置里的全局历史根加上 `HistoryStore::history_dirs_for` 答的目录,存储不答也挡得住全局根。项目的布局、新会话进不进项目、项目
-此刻是否受信,是宿主经 `ProjectHistory` 回答的(装配层的 `ProjectHistoryPolicy`,信任每次从全局
-层的 `project_trust` 读)。
+此刻是否受信,是宿主经 `ProjectHistory` 回答的(装配层的 `ProjectHistoryPolicy`,信任取自全局
+层的 `project_trust`,两个设置文件任一变了就重读,一次列表不再每个会话各读一遍)。
 
 **防植入。** 克隆来的仓库可以自带 `.agix/state/history/`。只有全局索引登记过、且索引指向的正是
 那个目录的会话才被认:项目里多出来的 id 不进列表、搜索、谱系,resume 找不到,它的会话记忆与

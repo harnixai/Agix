@@ -1,10 +1,13 @@
 //! The engine's side of keeping history in projects: a project's history
 //! directory (a worktree's is its main checkout's), whether a new session goes
 //! there (`history.location` and the project's trust), and whether a project
-//! is trusted now — read from the global tier's `project_trust` every time, so
-//! that taking trust back stops reads at once.
+//! is trusted now — the global tier's `project_trust`, read again whenever
+//! either of its files has changed since, so that taking trust back stops
+//! reads at once while a listing does not read both files once per session.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use base::paths::{entry, Layout};
 use history::placement::{ProjectHistory, ProjectHistoryDir};
@@ -14,7 +17,12 @@ pub(crate) struct ProjectHistoryPolicy {
     location: HistoryLocation,
     layout: Layout,
     global_dir: PathBuf,
+    trust: Mutex<Option<(Stamps, settings::trust::ProjectTrustSettings)>>,
 }
+
+/// Each global settings file's identity, length and modification time;
+/// `None` for one that is not there.
+type Stamps = [Option<(u64, u64, SystemTime)>; 2];
 
 impl ProjectHistoryPolicy {
     pub(crate) fn new(location: HistoryLocation, layout: Layout, global_dir: PathBuf) -> Self {
@@ -22,7 +30,19 @@ impl ProjectHistoryPolicy {
             location,
             layout,
             global_dir,
+            trust: Mutex::default(),
         }
+    }
+
+    fn stamps(&self) -> Stamps {
+        [base::paths::SETTINGS_FILE, base::paths::SETTINGS_LOCAL_FILE].map(|file| {
+            let meta = std::fs::metadata(self.global_dir.join(file)).ok()?;
+            #[cfg(unix)]
+            let identity = std::os::unix::fs::MetadataExt::ino(&meta);
+            #[cfg(not(unix))]
+            let identity = 0;
+            Some((identity, meta.len(), meta.modified().ok()?))
+        })
     }
 
     /// The project at `root` made ready to hold history: its project
@@ -104,10 +124,16 @@ impl ProjectHistory for ProjectHistoryPolicy {
     }
 
     fn trusted(&self, root: &Path) -> bool {
-        !settings::trust::ProjectTrustSettings::read_global(&self.global_dir)
-            .decide(root)
-            .trust
-            .is_untrusted()
+        let stamps = self.stamps();
+        let mut cached = self.trust.lock().unwrap_or_else(|e| e.into_inner());
+        let fresh = matches!(&*cached, Some((seen, _)) if *seen == stamps);
+        if !fresh {
+            let read = settings::trust::ProjectTrustSettings::read_global(&self.global_dir);
+            *cached = Some((stamps, read));
+        }
+        cached
+            .as_ref()
+            .is_some_and(|(_, trust)| !trust.decide(root).trust.is_untrusted())
     }
 }
 
@@ -157,6 +183,33 @@ mod tests {
 
         std::fs::write(global.join(base::paths::SETTINGS_FILE), "{}").unwrap();
         assert!(!keeps.trusted(&root));
+    }
+
+    #[test]
+    fn trust_taken_back_or_given_is_seen_at_the_next_question() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let (a, b) = (base.join("aaaa"), base.join("bbbb"));
+        let global = base.join("global");
+        std::fs::create_dir_all(&global).unwrap();
+        let p = policy(HistoryLocation::Project, &global, &[&a]);
+        for _ in 0..3 {
+            assert!(p.trusted(&a) && !p.trusted(&b));
+        }
+        let settings = global.join(base::paths::SETTINGS_FILE);
+        let text = std::fs::read_to_string(&settings).unwrap();
+        std::fs::write(&settings, text.replace("aaaa", "bbbb")).unwrap();
+        assert!(!p.trusted(&a) && p.trusted(&b));
+        let local = global.join(base::paths::SETTINGS_LOCAL_FILE);
+        std::fs::write(
+            &local,
+            serde_json::json!({"project_trust": {"trusted": [a.display().to_string()]}})
+                .to_string(),
+        )
+        .unwrap();
+        assert!(p.trusted(&a));
+        std::fs::remove_file(&local).unwrap();
+        assert!(!p.trusted(&a));
     }
 
     #[test]
