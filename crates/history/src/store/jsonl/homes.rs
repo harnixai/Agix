@@ -197,6 +197,7 @@ impl Homes {
 
     fn find(&self, session: SessionId) -> Result<Home, HistoryError> {
         if let Some(index) = SessionIndex::read(&self.sessions_root, session)? {
+            self.check_shape(session, &index)?;
             let index = self.follow_move(session, index);
             let project = match read_metadata(index.history_dir(), session) {
                 Some(metadata) => project_of(&metadata),
@@ -238,11 +239,33 @@ impl Homes {
         }
     }
 
+    /// An index is taken only when its `dir` is the session's directory in
+    /// its project's history directory.
+    fn check_shape(&self, session: SessionId, index: &SessionIndex) -> Result<(), HistoryError> {
+        let Some(projects) = &self.projects else {
+            return Ok(());
+        };
+        let expected = projects
+            .history_of(&index.project_root)
+            .map(|found| found.dir.join(session.to_string()));
+        if expected.as_ref() == Some(&index.dir) {
+            return Ok(());
+        }
+        Err(HistoryError::Path(format!(
+            "the index of session {session} puts it in {}, which is not its project's history directory",
+            index.dir.display()
+        )))
+    }
+
     /// `index`, pointed at where its project is now when the project it
     /// names is gone and a project opened here holds the session — a trusted
     /// one, and only for an id the index already has.
+    ///
+    /// "Gone" is the project root missing from a directory that is there: a
+    /// volume not mounted, a network share not reachable or a directory not
+    /// readable says nothing about where the project is, and the index stays.
     fn follow_move(&self, session: SessionId, index: SessionIndex) -> SessionIndex {
-        if index.dir.exists() || index.project_root.exists() {
+        if !not_found(&index.dir) || !gone_from_its_parent(&index.project_root) {
             return index;
         }
         let Some(projects) = &self.projects else {
@@ -394,6 +417,14 @@ impl Homes {
             })
             .collect()
     }
+}
+
+fn not_found(path: &Path) -> bool {
+    matches!(path.symlink_metadata(), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn gone_from_its_parent(path: &Path) -> bool {
+    not_found(path) && path.parent().is_some_and(Path::is_dir)
 }
 
 fn make_own_dir(index: &SessionIndex) -> std::io::Result<()> {

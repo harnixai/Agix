@@ -145,27 +145,31 @@ impl HistoryStore for JsonlHistoryStore {
         self.read_lineage(root, &logs, lengths).await
     }
 
-    /// The transcript goes, then a project's directory for the session, then
-    /// the global sidecar with its index. The writer lock is held throughout
-    /// so no other process can start writing in between.
+    /// The transcript goes — for a session kept in its project, its whole
+    /// directory there — then the global sidecar with its index. An index
+    /// that names no directory this store would keep the session in takes
+    /// only the global entry with it. The writer lock is held throughout so
+    /// no other process can start writing in between.
     async fn delete(&self, session: SessionId) -> Result<(), HistoryError> {
         let writer = self.writer_lock(session).await?;
         let mut log = self.log_of(session).lock_owned().await;
-        let (jsonl_path, home) = self.session_path_of(session, Access::Write).await?;
-        let in_project = home.index().map(|index| index.dir.clone());
+        let files = match self.session_path_of(session, Access::Write).await {
+            Ok((jsonl_path, home)) => match home.index() {
+                Some(index) => Files::Kept(index.dir.clone(), index.project_root.clone()),
+                None => Files::Global(jsonl_path),
+            },
+            Err(HistoryError::Path(e)) => {
+                tracing::warn!(%session, error = %e, "deleting only the global entry of a session whose index names nowhere");
+                Files::None
+            }
+            Err(e) => return Err(e),
+        };
         let sidecar = session_sidecar_dir(&self.homes.sessions_root, &session);
         blocking(move || {
-            match std::fs::remove_file(&jsonl_path) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(HistoryError::Io(e)),
-            }
-            if let Some(dir) = in_project {
-                match std::fs::remove_dir_all(&dir) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(HistoryError::Io(e)),
-                }
+            match files {
+                Files::Global(jsonl_path) => ignore_not_found(std::fs::remove_file(&jsonl_path))?,
+                Files::Kept(dir, project_root) => remove_kept_dir(&dir, &project_root)?,
+                Files::None => {}
             }
             log.len_after_last_append = None;
             writer.remove_sidecar(&sidecar).map_err(HistoryError::Io)
@@ -403,4 +407,35 @@ impl JsonlHistoryStore {
         }
         Ok(())
     }
+}
+
+enum Files {
+    Global(PathBuf),
+    Kept(PathBuf, PathBuf),
+    None,
+}
+
+fn ignore_not_found(result: std::io::Result<()>) -> Result<(), HistoryError> {
+    match result {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(HistoryError::Io(e)),
+        _ => Ok(()),
+    }
+}
+
+/// `dir`, a session's directory in its project, removed only while it still
+/// resolves to a directory inside `project_root`: a `state/` replaced by a
+/// link since would otherwise take the removal somewhere else.
+fn remove_kept_dir(dir: &Path, project_root: &Path) -> Result<(), HistoryError> {
+    let real = match dir.canonicalize() {
+        Ok(real) => real,
+        Err(e) => return ignore_not_found(Err(e)),
+    };
+    let inside = project_root
+        .canonicalize()
+        .is_ok_and(|root| real.starts_with(root));
+    if !inside || !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        tracing::warn!(dir = %dir.display(), "a session's directory no longer lies inside its project; it is left where it is");
+        return Ok(());
+    }
+    ignore_not_found(std::fs::remove_dir_all(&real))
 }

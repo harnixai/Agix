@@ -384,6 +384,76 @@ async fn a_project_that_moved_does_not_take_over_an_id_its_index_lacks() {
 }
 
 #[tokio::test]
+async fn a_project_out_of_reach_is_not_taken_for_one_that_moved() {
+    let world = World::new();
+    let project = world.project("p");
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    let s = start(&store, &project).await;
+    drop(store);
+    let mut index = SessionIndex::read(&world.roots().sessions, s)
+        .unwrap()
+        .unwrap();
+    let unmounted = Path::new("/agix-unmounted-volume-for-a-test/p");
+    index.project_root = unmounted.to_path_buf();
+    index.dir = history_dir(unmounted).join(s.to_string());
+    index.write(&world.roots().sessions).unwrap();
+
+    let copy = world.store(&project, Some(Projects::new(true))).await;
+    assert!(copy.load(s).await.is_err());
+    assert_eq!(
+        SessionIndex::read(&world.roots().sessions, s).unwrap(),
+        Some(index)
+    );
+}
+
+#[tokio::test]
+async fn an_index_naming_a_directory_outside_its_projects_history_is_not_followed() {
+    let world = World::new();
+    let project = world.project("p");
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    let s = start(&store, &project).await;
+    drop(store);
+    let mut index = SessionIndex::read(&world.roots().sessions, s)
+        .unwrap()
+        .unwrap();
+    let outside = world.project("elsewhere").join(s.to_string());
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::copy(
+        index.dir.join(format!("{s}.jsonl")),
+        outside.join(format!("{s}.jsonl")),
+    )
+    .unwrap();
+    index.dir = outside.clone();
+    index.write(&world.roots().sessions).unwrap();
+
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    assert!(store.load(s).await.is_err());
+    let _ = store.delete(s).await;
+    assert!(outside.join(format!("{s}.jsonl")).is_file());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deleting_does_not_follow_a_state_directory_swapped_for_a_link() {
+    let world = World::new();
+    let project = world.project("p");
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    let s = start(&store, &project).await;
+    drop(store);
+    let elsewhere = world.project("elsewhere");
+    std::fs::rename(project.join(".agix/state"), elsewhere.join("state")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.join("state"), project.join(".agix/state")).unwrap();
+
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    let _ = store.delete(s).await;
+    assert!(elsewhere
+        .join("state/history")
+        .join(s.to_string())
+        .join(format!("{s}.jsonl"))
+        .is_file());
+}
+
+#[tokio::test]
 async fn a_global_session_is_read_as_before_once_sessions_go_to_projects() {
     let world = World::new();
     let project = world.project("p");
