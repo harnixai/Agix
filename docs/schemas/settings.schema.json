@@ -73,7 +73,7 @@
           ]
         },
         "tool_result_inline_chars": {
-          "description": "A tool result longer than this many characters is saved to a file in\nthe session's scratchpad and the model gets its head, its tail and the\npath (default 30,000; `0` keeps every result in the conversation).\n`Read`, `WebFetch` and `TaskOutput` page their own results and are\nnever saved.",
+          "description": "A tool result longer than this many characters is saved to a file in\nthe project's `state/tool-results/` and the model gets its head, its\ntail and the path (default 30,000; `0` keeps every result in the\nconversation).\n`Read`, `WebFetch` and `TaskOutput` page their own results and are\nnever saved.",
           "format": "uint",
           "minimum": 0,
           "type": [

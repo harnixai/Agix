@@ -499,7 +499,7 @@ fn session_telemetry(
     // The caller's `output` only chooses *where*, and
     // `telemetry_enabled: false` in settings.json opts out.
     //
-    // `TELEMETRY_DIR/<session-id>.jsonl` under the local data dir keeps
+    // `<session-id>.jsonl` in the project's `state/telemetry/` keeps
     // one file per session, next to the transcripts, so a recording is
     // findable by session id without the caller having had to plan for
     // it in advance.
@@ -512,11 +512,11 @@ fn session_telemetry(
     let telemetry_path = match options.and_then(|o| o.telemetry.as_ref()) {
         Some(t) => Some(std::path::PathBuf::from(&t.output)),
         None => {
-            let dir = &settings_snapshot.paths.local_data_dir;
-            dir.is_absolute().then(|| {
-                dir.join(base::paths::entry::TELEMETRY)
-                    .join(format!("{session_id}.jsonl"))
-            })
+            let paths = settings_snapshot.paths.config_paths();
+            paths
+                .local_data_dir
+                .is_absolute()
+                .then(|| paths.telemetry_dir().join(format!("{session_id}.jsonl")))
         }
     };
     if let (true, Some(telemetry_path)) =

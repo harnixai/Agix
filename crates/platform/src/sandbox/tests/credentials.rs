@@ -333,7 +333,7 @@ fn a_credential_written_later_stays_unreadable_where_the_project_holds_credentia
         let in_own = |p: &str| layout.project_dir(&project).join(p);
         write_file(&in_own("settings.json"), "fine");
         write_file(&in_own("settings.local.json"), "{}");
-        std::fs::create_dir_all(in_own("scratchpad")).unwrap();
+        std::fs::create_dir_all(in_own("state/scratchpad")).unwrap();
         write_file(&project.join(".agix/settings.local.json"), "{}");
         let policy = SandboxPolicy {
             state_root: Some(base.join("elsewhere")),
@@ -355,7 +355,7 @@ fn a_credential_written_later_stays_unreadable_where_the_project_holds_credentia
                 &project,
                 &policy,
                 &[],
-                &format!("cat {own}/settings.json && echo x > {own}/scratchpad/n")
+                &format!("cat {own}/settings.json && echo x > {own}/state/scratchpad/n")
             )
             .status
             .success(),
@@ -451,10 +451,12 @@ fn another_instances_state_root_is_guarded_as_the_own_one() {
 /// as the gate takes every entry of one for configuration — its working
 /// entries and new entries directly in it too — but for a writable root the
 /// policy names inside it. In the instance's own root the working entries
-/// stay writable — `scratchpad/` and `memory/`, all the gate leaves out of
-/// configuration — and nothing else in it: not `commands/`, not `teams/` or
-/// `telemetry/`, which the engine writes itself, nor a `worktrees/`, which
-/// the engine's worktrees are not in.
+/// of its `state/` stay writable — `state/scratchpad/` and `state/memory/`,
+/// all the gate leaves out of configuration — and nothing else in it: not
+/// `commands/`, not `state/teams/`, `state/telemetry/` or
+/// `state/tool-results/`, which the engine writes itself, not the
+/// embedder's `state/<product id>/`, not a `scratchpad/` directly in the
+/// root, nor a `worktrees/`, which the engine's worktrees are not in.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 #[allow(clippy::unwrap_used)]
@@ -474,7 +476,17 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         ] {
             std::fs::create_dir_all(project.join(d)).unwrap();
         }
-        for entry in ["scratchpad", "teams", "telemetry", "worktrees/w"] {
+        let host = format!("state/{}", layout.product_id());
+        for entry in [
+            "scratchpad",
+            "memory",
+            "state/scratchpad",
+            "state/teams",
+            "state/telemetry",
+            "state/tool-results",
+            host.as_str(),
+            "worktrees/w",
+        ] {
             std::fs::create_dir_all(project.join(own).join(entry)).unwrap();
         }
         let named = project.join(".claude/named");
@@ -517,16 +529,22 @@ fn a_foreign_configuration_root_is_shut_to_writes_as_a_whole() {
         for path in shut {
             assert!(!writes(path), "{own}: {path} was written");
         }
+        let in_host = format!("{host}/x");
         for entry in [
-            "teams/t.json",
-            "telemetry/x.jsonl",
+            "state/teams/t.json",
+            "state/telemetry/x.jsonl",
+            "state/tool-results/r.txt",
+            "state/notes.md",
+            in_host.as_str(),
+            "scratchpad/n",
+            "memory/m.md",
             "notes.md",
             "worktrees/w/x",
         ] {
             let path = format!("{own}/{entry}");
             assert!(!writes(&path), "{own}: {path} was written");
         }
-        let own_scratch = format!("{own}/scratchpad/n");
+        let own_scratch = format!("{own}/state/scratchpad/n");
         for path in [own_scratch.as_str(), ".claude/named/n"] {
             assert!(writes(path), "{own}: {path} was not writable");
         }

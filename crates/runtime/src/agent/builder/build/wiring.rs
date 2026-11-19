@@ -64,10 +64,10 @@ impl Builder {
     ) -> Arc<base::context::EngineConfig> {
         Arc::new({
             let mut c = settings.engine_config();
-            let own_dir = &settings.paths.local_data_dir;
+            let paths = settings.paths.config_paths();
             c.tool_results.dir = self.spec.tool_results_dir.clone().or_else(|| {
-                (self.spec.agent_depth == 0 && own_dir.is_absolute())
-                    .then(|| base::paths::tool_results_dir(own_dir, session_id))
+                (self.spec.agent_depth == 0 && paths.local_data_dir.is_absolute())
+                    .then(|| paths.tool_results_dir(session_id))
             });
             c.path_style = settings.values.path_style.unwrap_or(scene.path_style);
             c.deferred_tools = Arc::new(

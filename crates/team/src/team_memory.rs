@@ -1,7 +1,7 @@
 //! Team shared memory: what a `TeamCreate` team's members learn and want the
 //! rest of the team to know.
 //!
-//! Lives at `<project>/<project dir>/teams/<team_id>/memory/`, next to the team's
+//! Lives at `<project>/<project dir>/state/teams/<team_id>/memory/`, next to the team's
 //! scratchpad and state, so `TeamDelete` removing the team directory takes it
 //! along. The format is the personal-memory one (`MEMORY.md` index plus one
 //! `.md` file per fact). Members reach it through [`TeamMemorySaveTool`] and

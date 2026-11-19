@@ -385,8 +385,9 @@ pub struct CompactionConfig {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cached_microcompact: bool,
     /// A tool result longer than this many characters is saved to a file in
-    /// the session's scratchpad and the model gets its head, its tail and the
-    /// path (default 30,000; `0` keeps every result in the conversation).
+    /// the project's `state/tool-results/` and the model gets its head, its
+    /// tail and the path (default 30,000; `0` keeps every result in the
+    /// conversation).
     /// `Read`, `WebFetch` and `TaskOutput` page their own results and are
     /// never saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]

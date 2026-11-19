@@ -29,9 +29,10 @@
 //!   (override) — a scene-specific entry with the same name wins.
 //! - **Global + project only, no scene tier** (history/state-shaped):
 //!   `memory/`, `sessions/`, `recordings/`. Present at `~/.agix/<resource>/`
-//!   (used when there's no specific project — reserved for a future
-//!   no-project/desktop mode, not yet exercised by `daemon`) and
-//!   `<cwd>/.agix/<resource>/` (project, used today). Deliberately **not**
+//!   and, for what a project keeps of its own, under the project
+//!   directory's `state/` (`<cwd>/.agix/state/<resource>/`), which holds
+//!   everything the engine writes there for this machine alone and which
+//!   the project's `.gitignore` keeps out whole. Deliberately **not**
 //!   scene-scoped: a scene's tool/system-prompt config has no bearing on
 //!   which project a session or memory file belongs to, so borrowing across
 //!   scenes would be a correctness hazard (e.g. resuming a session recorded
@@ -51,9 +52,9 @@ pub use layout::{
     WorktreesDirError, AGENTS_DIR, CLAUDE_DIR, DEFAULT_ENGINE, DEFAULT_PRODUCT_NAME,
     DEFAULT_PRODUCT_URL, DEFAULT_PROJECT_DIR, DEFAULT_STATE_DIR, DEFAULT_WORKTREES_DIR,
     ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, FOREIGN_CONFIG_ROOTS, GIT_WORKTREES_DIR,
-    LOCAL_DATA_IGNORED_DIRS, LOCAL_DATA_IGNORED_FILES, PROJECT_ENGINE_CONFIG_DIRS,
-    PROJECT_SKILLS_DIR, SETTINGS_FILE, SETTINGS_LOCAL_FILE, STATE_ROOT_SCENE_FILES,
-    STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    LOCAL_CONFIG_FILES, PROJECT_ENGINE_CONFIG_DIRS, PROJECT_SKILLS_DIR, PROJECT_STATE_ENGINE_DIRS,
+    PROJECT_STATE_ENTRIES, SETTINGS_FILE, SETTINGS_LOCAL_FILE, STATE_RESERVED_NAMES,
+    STATE_ROOT_SCENE_FILES, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 pub use sensitive::{
     credential_dir_names, known_state_roots, session_scratch_dir, tool_results_dir, ConfigRootAt,
@@ -348,16 +349,21 @@ impl PathSettings {
         self.project_root()
             .map(|_| self.local_data_dir.join(SETTINGS_LOCAL_FILE))
     }
+
+    /// The project directory's `state/` ([`Layout::project_state_dir`]),
+    /// `None` without a project.
+    pub fn project_state_dir(&self) -> Option<PathBuf> {
+        self.project_root()
+            .map(|_| self.local_data_dir.join(entry::STATE))
+    }
 }
 
 /// What a data directory's `.gitignore` keeps out of the repository the
-/// directory sits in, one line each: [`LOCAL_DATA_IGNORED_FILES`] and
-/// [`LOCAL_DATA_IGNORED_DIRS`].
+/// directory sits in, one line each: `state/` and the
+/// [`LOCAL_CONFIG_FILES`].
 pub fn local_data_gitignore() -> Vec<String> {
-    LOCAL_DATA_IGNORED_FILES
-        .iter()
-        .map(|file| file.to_string())
-        .chain(LOCAL_DATA_IGNORED_DIRS.iter().map(|dir| format!("{dir}/")))
+    std::iter::once(format!("{}/", entry::STATE))
+        .chain(LOCAL_CONFIG_FILES.iter().map(|file| file.to_string()))
         .collect()
 }
 
@@ -608,9 +614,7 @@ impl ConfigPaths {
         self.user_data_dir.join(entry::PLUGINS)
     }
 
-    /// Cross-scene memory root — used when there's no specific project open
-    /// (reserved for future no-project/desktop use; today sessions always
-    /// have a project, so `local_memory_dir()` is what's actually read).
+    /// The state root's memory, the user's across every project.
     pub fn global_memory_dir(&self) -> PathBuf {
         self.global_data_dir.join(entry::MEMORY)
     }
@@ -619,21 +623,34 @@ impl ConfigPaths {
         self.global_data_dir.join(entry::RECORDINGS)
     }
 
+    /// The project directory's `state/`, `None` without a project.
+    pub fn project_state_dir(&self) -> Option<PathBuf> {
+        self.project_dir().map(|dir| dir.join(entry::STATE))
+    }
+
+    /// Where this machine's data of the session's place is: the project
+    /// directory's `state/`, and without a project the state root, which
+    /// has no `state/` of its own.
+    pub fn local_state_dir(&self) -> PathBuf {
+        self.project_state_dir()
+            .unwrap_or_else(|| self.local_data_dir.clone())
+    }
+
     pub fn local_memory_dir(&self) -> PathBuf {
-        self.local_data_dir.join(entry::MEMORY)
+        self.local_state_dir().join(entry::MEMORY)
     }
 
     pub fn scratchpad_dir(&self) -> PathBuf {
-        self.local_data_dir.join(entry::SCRATCHPAD)
+        self.local_state_dir().join(entry::SCRATCHPAD)
     }
 
     pub fn telemetry_dir(&self) -> PathBuf {
-        self.local_data_dir.join(entry::TELEMETRY)
+        self.local_state_dir().join(entry::TELEMETRY)
     }
 
-    /// [`tool_results_dir`] under the project tier's root.
+    /// [`tool_results_dir`] under [`Self::local_state_dir`].
     pub fn tool_results_dir(&self, session_id: &str) -> PathBuf {
-        tool_results_dir(&self.local_data_dir, session_id)
+        tool_results_dir(&self.local_state_dir(), session_id)
     }
 
     /// The scene's `scheduled_tasks.json`.
@@ -648,7 +665,8 @@ impl ConfigPaths {
     /// Where the import records that its question was answered, `None`
     /// without a project.
     pub fn imported_marker(&self) -> Option<PathBuf> {
-        self.tier_entry(Tier::Project, entry::IMPORTED_MARKER)
+        self.project_state_dir()
+            .map(|dir| dir.join(entry::IMPORTED_MARKER))
     }
 
     /// The teams of a session working in `cwd` ([`Layout::teams_dir`]).
@@ -737,7 +755,7 @@ mod tests {
             p.global_recordings_dir(),
             p.global_data_dir.join("recordings")
         );
-        assert_eq!(p.local_memory_dir(), p.local_data_dir.join("memory"));
+        assert_eq!(p.local_memory_dir(), p.local_data_dir.join("state/memory"));
     }
 
     #[test]
@@ -765,13 +783,16 @@ mod tests {
                 p.project_output_styles_dir(),
                 Some(own.join("output-styles"))
             );
-            assert_eq!(p.imported_marker(), Some(own.join(".imported.json")));
+            assert_eq!(p.project_state_dir(), Some(own.join("state")));
+            assert_eq!(p.imported_marker(), Some(own.join("state/.imported.json")));
             assert_eq!(
                 p.worktrees_dir(),
                 Some(project.join(layout_worktrees.as_str()))
             );
-            assert_eq!(p.telemetry_dir(), own.join("telemetry"));
-            assert_eq!(p.scratchpad_dir(), own.join("scratchpad"));
+            assert_eq!(p.telemetry_dir(), own.join("state/telemetry"));
+            assert_eq!(p.scratchpad_dir(), own.join("state/scratchpad"));
+            assert_eq!(p.local_memory_dir(), own.join("state/memory"));
+            assert_eq!(p.tool_results_dir("s"), own.join("state/tool-results/s"));
             assert_eq!(p.project_skills_dir(), Some(project.join(".agents/skills")));
             assert_eq!(
                 p.settings_local_file(Tier::Scene),
@@ -788,6 +809,31 @@ mod tests {
         assert_eq!(none.project_dir(), None);
         assert_eq!(none.settings_file(Tier::Project), None);
         assert_eq!(none.local_data_dir, PathBuf::from("/state"));
+        assert_eq!(none.project_state_dir(), None);
+        assert_eq!(none.imported_marker(), None);
+        assert_eq!(none.local_state_dir(), PathBuf::from("/state"));
+        assert_eq!(none.scratchpad_dir(), PathBuf::from("/state/scratchpad"));
+        assert_eq!(none.local_memory_dir(), PathBuf::from("/state/memory"));
+        assert_eq!(
+            none.tool_results_dir("s"),
+            PathBuf::from("/state/tool-results/s")
+        );
+    }
+
+    #[test]
+    fn a_projects_state_dir_is_only_there_with_a_project() {
+        let mut settings = PathSettings {
+            local_data_dir: PathBuf::from("/repo/.agix"),
+            workspace: Workspace::Project(PathBuf::from("/repo")),
+            ..PathSettings::default()
+        };
+        assert_eq!(
+            settings.project_state_dir(),
+            Some(PathBuf::from("/repo/.agix/state"))
+        );
+        settings.local_data_dir = PathBuf::from("/state");
+        settings.workspace = Workspace::Scratch(PathBuf::from("/state/scratchpad/sessions/s"));
+        assert_eq!(settings.project_state_dir(), None);
     }
 }
 
@@ -818,7 +864,11 @@ mod local_data_gitignore_tests {
             "{text:?}"
         );
         assert_eq!(text.matches("settings.local.json").count(), 1, "{text:?}");
-        assert!(text.contains("mcp.local.json\n") && text.contains("telemetry/\n"));
+        assert!(text.contains("mcp.local.json\n") && text.contains("state/\n"));
+        assert_eq!(
+            local_data_gitignore(),
+            ["state/", "settings.local.json", "mcp.local.json"]
+        );
 
         let before = text.clone();
         ensure_local_data_gitignore(dir.path());

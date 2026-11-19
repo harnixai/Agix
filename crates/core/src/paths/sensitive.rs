@@ -20,6 +20,9 @@ use super::layout::{
 };
 use super::ConfigPaths;
 
+mod config_root;
+pub use config_root::ConfigRootAt;
+
 /// The repository's own configuration: confirmed like the engine's rather
 /// than refused — `git` plumbing through `Bash` is normal work, and a
 /// blanket deny on any path containing a `.git` component blocks far more
@@ -285,47 +288,6 @@ impl Located {
     }
 }
 
-/// A configuration root in a directory, as [`SensitivePaths::config_roots_in`]
-/// gives it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigRootAt {
-    pub path: PathBuf,
-    /// `path` with its symbolic links resolved.
-    pub resolved: PathBuf,
-    /// The instance's own project directory: held even when absent, its
-    /// working entries left writable.
-    pub own: bool,
-}
-
-impl ConfigRootAt {
-    /// Whether a sandboxed command may write nothing in this root but what
-    /// the policy itself names writable: a foreign root, every entry of
-    /// which the gate takes for configuration
-    /// ([`SensitivePaths::names_configuration`]).
-    pub fn shut_to_writes(&self) -> bool {
-        !self.own
-    }
-
-    /// Whether a sandboxed command may write the entry `name` directly in
-    /// this root: in the instance's own, its working space
-    /// ([`SensitivePaths::is_engine_working_entry`]), which is all the gate
-    /// leaves out of configuration there; in a foreign one none
-    /// ([`Self::shut_to_writes`]).
-    pub fn writable_entry(&self, name: &str) -> bool {
-        !self.shut_to_writes() && is_working_entry(name)
-    }
-
-    /// The working entries of this root as it resolves, whether or not they
-    /// exist: what [`Self::writable_entry`] admits.
-    pub fn working_entries(&self) -> Vec<PathBuf> {
-        WORKING_ENTRIES
-            .iter()
-            .filter(|name| self.writable_entry(name))
-            .map(|name| self.resolved.join(name))
-            .collect()
-    }
-}
-
 /// The state roots of instances on this machine that a session's own may
 /// not be: `$HOME/<name>` for each of `layout`'s [`Layout::state_dir_names`].
 /// Nothing on disk lists the others — an instance's `daemon/instances.d`
@@ -581,8 +543,9 @@ impl SensitivePaths {
     /// gate does not let the tool's own `Allow` through for them.
     ///
     /// Matched by whole component — `.github` is not `.git`. Only the
-    /// instance's own directory has working space: in a foreign root every
-    /// entry is configuration.
+    /// instance's own directory has working space, `state/scratchpad` and
+    /// `state/memory` in a project's and `scratchpad` and `memory` in the
+    /// session's state root: in a foreign root every entry is configuration.
     pub fn names_configuration(&self, text: &str) -> bool {
         let lowered = super::fold_case(text);
         let components: Vec<&str> = lowered.split('/').collect();
@@ -603,21 +566,43 @@ impl SensitivePaths {
                 && above.iter().zip(rest).all(|(d, c)| d == c)
                 && name_in(rest[above.len()]) == *last
         };
+        let working_at = |at: usize| {
+            components
+                .get(at)
+                .is_some_and(|next| self.is_engine_working_entry(&name_in(next)))
+        };
+        let working_below = |i: usize| {
+            (self.state_root_ends_at(&components[..=i]) && working_at(i + 1))
+                || (components.get(i + 1) == Some(&entry::STATE) && working_at(i + 2))
+        };
         lowered.contains('/')
             && components.iter().enumerate().any(|(i, component)| {
                 let config_root = *component == REPOSITORY_CONFIG_DIR
-                    || self.layout.config_roots().any(|root| {
-                        *component == root.name
-                            && !(root.own
-                                && components.get(i + 1).is_some_and(|next| {
-                                    self.is_engine_working_entry(&name_in(next))
-                                }))
-                    });
+                    || self
+                        .layout
+                        .config_roots()
+                        .any(|root| *component == root.name && !(root.own && working_below(i)));
                 config_root
                     || PROJECT_ENGINE_CONFIG_DIRS
                         .iter()
                         .any(|dir| opens_dir(&components[i..], dir))
             })
+    }
+
+    /// Whether `spelled`, the lowered text up to a component split on `/`,
+    /// ends at the session's state root spelled absolutely: what comes
+    /// before the root's first component is the start of the text or ends
+    /// in something no name holds, as `S=` or a quote does in a command.
+    fn state_root_ends_at(&self, spelled: &[&str]) -> bool {
+        let name_char = |c: char| c.is_alphanumeric() || "._-".contains(c);
+        self.state_root.iter().flat_map(|s| &s.lowered).any(|root| {
+            let Some(at) = spelled.len().checked_sub(root.len() + 1) else {
+                return false;
+            };
+            !root.is_empty()
+                && !spelled[at].ends_with(name_char)
+                && spelled[at + 1..].iter().zip(root).all(|(s, r)| s == r)
+        })
     }
 
     /// Whether `abs` is one of the [`ENGINE_CONFIG_FILES`] anywhere under a
@@ -635,10 +620,11 @@ impl SensitivePaths {
                 .any(|d| self.layout.config_roots().any(|root| *d == root.name))
     }
 
-    /// Whether this entry directly in the instance's own directory is the
-    /// agent's working space rather than its configuration: the scratchpad
-    /// its prompt sends temporary files to, or the memory directory it is
-    /// told to write to directly.
+    /// Whether this entry directly in the `state/` of the instance's own
+    /// directory, or directly in the state root, is the agent's working
+    /// space rather than its configuration: the scratchpad its prompt sends
+    /// temporary files to, or the memory directory it is told to write to
+    /// directly.
     pub fn is_engine_working_entry(&self, name: &str) -> bool {
         is_working_entry(name)
     }
@@ -711,11 +697,11 @@ pub fn session_scratch_dir(state_root: &Path, session_id: &str) -> PathBuf {
         .join(session_dir_name(session_id))
 }
 
-/// Where a session's oversized tool results are saved, `<state root>/tool-results/<session>`:
-/// outside [`STATE_ROOT_WORKING_DIRS`], as the engine writes there unsandboxed.
-pub fn tool_results_dir(state_root: &Path, session_id: &str) -> PathBuf {
-    state_root
-        .join(entry::TOOL_RESULTS)
+/// Where a session's oversized tool results are saved, `<dir>/tool-results/<session>`
+/// for the state root or a project's `state/`: outside
+/// [`STATE_ROOT_WORKING_DIRS`], as the engine writes there unsandboxed.
+pub fn tool_results_dir(dir: &Path, session_id: &str) -> PathBuf {
+    dir.join(entry::TOOL_RESULTS)
         .join(session_dir_name(session_id))
 }
 
@@ -831,12 +817,8 @@ impl Spellings {
     }
 }
 
-/// The entries of the instance's own directory that are the agent's working
-/// space ([`SensitivePaths::is_engine_working_entry`]).
-const WORKING_ENTRIES: &[&str] = &[STATE_ROOT_SCRATCHPAD, entry::MEMORY];
-
 fn is_working_entry(name: &str) -> bool {
-    WORKING_ENTRIES.contains(&name)
+    STATE_ROOT_WORKING_DIRS.contains(&name)
 }
 
 /// The scene directories of `root` that are symbolic links, as they resolve.
@@ -893,7 +875,7 @@ fn lowered_components(path: &Path) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::paths::layout::test_layouts;
-    use crate::paths::ENGINE_CONFIG_DIRS;
+    use crate::paths::{ENGINE_CONFIG_DIRS, STATE_RESERVED_NAMES};
 
     fn sensitive(state_root: &str) -> SensitivePaths {
         SensitivePaths::new(Some(Path::new(state_root)), None, Layout::default())
@@ -1317,16 +1299,32 @@ mod tests {
         for layout in test_layouts() {
             let paths = in_layout(&layout);
             for p in [
-                "/repo/{own}/scratchpad/cases.txt",
-                "/Users/me/{own}/memory/MEMORY.md",
-                "cd /repo\nS=/repo/{own}/scratchpad\nmkdir -p \"$S\"",
-                "printf x > \"$d/{own}/scratchpad\"",
+                "/repo/{own}/state/scratchpad/cases.txt",
+                "/repo/{own}/state/memory/MEMORY.md",
+                "/repo/{wk}/a/{own}/state/scratchpad/x",
+                "cd /repo\nS=/repo/{own}/state/scratchpad\nmkdir -p \"$S\"",
+                "printf x > \"$d/{own}/state/scratchpad\"",
                 "/repo/{wk}/feat-a/feature.txt",
                 "cd /repo/{wk}/feat-a && git add -A",
             ] {
                 assert!(!paths.names_configuration(&own(p, &layout)), "{p}");
             }
             for p in [
+                "/repo/{own}/scratchpad/cases.txt",
+                "/repo/{own}/memory/MEMORY.md",
+                "/Users/me/{own}/memory/MEMORY.md",
+                "/repo/{own}/state",
+                "/repo/{own}/state/",
+                "/repo/{own}/state/notes.md",
+                "/repo/{own}/state/scratchpad.md",
+                "/repo/{own}/state/tool-results/s/r.txt",
+                "/repo/{own}/state/telemetry/s.jsonl",
+                "/repo/{own}/state/teams/t/team.json",
+                "/repo/{own}/state/history/s/transcript.jsonl",
+                "/repo/{own}/state/.imported.json",
+                "/repo/{own}/state/codix/x",
+                "/repo/{own}/state/agix/x",
+                "echo x > \"$d/{own}/state\";x/scratchpad",
                 "/repo/{own}/agents/reviewer.md",
                 "/repo/{own}/scratchpad.md",
                 "/repo/{own}/worktrees/feat-a/feature.txt",
@@ -1340,11 +1338,77 @@ mod tests {
             }
         }
         let codix = in_layout(&Layout::new(".codix").unwrap());
-        for p in ["/repo/.agix/scratchpad/x", "/repo/.agix/worktrees/a/f.txt"] {
+        for p in [
+            "/repo/.agix/scratchpad/x",
+            "/repo/.agix/state/scratchpad/x",
+            "/repo/.agix/worktrees/a/f.txt",
+        ] {
             assert!(
                 codix.names_configuration(p),
                 "a foreign .agix has no working space: {p}"
             );
+        }
+    }
+
+    #[test]
+    fn the_state_roots_working_space_is_directly_in_it() {
+        for layout in test_layouts() {
+            let root = own("/Users/me/{own}", &layout);
+            let paths = SensitivePaths::new(Some(Path::new(&root)), None, layout.clone());
+            for p in [
+                "/Users/me/{own}/memory/MEMORY.md",
+                "/Users/me/{own}/scratchpad/sessions/s/x",
+                "/Users/me/{own}/state/scratchpad/x",
+                "S=/Users/me/{own}/scratchpad/x",
+                "echo x > \"/Users/ME/{own}/memory/a.md\"",
+            ] {
+                assert!(!paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+            for p in [
+                "/Users/me/{own}/settings.json",
+                "/Users/me/{own}/tool-results/s/x",
+                "/Users/you/{own}/memory/MEMORY.md",
+                "/x/Users/me/{own}/memory/MEMORY.md",
+                "x/Users/me/{own}/memory/MEMORY.md",
+                "/repo/{own}/memory/MEMORY.md",
+            ] {
+                assert!(paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+        }
+    }
+
+    /// 项目层 `state/` 下沙箱命令能写的只有 `scratchpad` 与 `memory` 两项：其余子项、
+    /// 嵌入方的命名空间、`state/` 本身与项目层目录里的旧位置都写不了；外来的配置根一项也写不了。
+    #[test]
+    fn only_scratchpad_and_memory_in_state_are_writable() {
+        let codix = Layout::new(".codix")
+            .unwrap()
+            .with_product_name("Codix")
+            .unwrap();
+        let roots = SensitivePaths::new(None, None, codix.clone())
+            .config_roots_in(Path::new("/nowhere/repo"));
+        let own = roots.iter().find(|r| r.own).unwrap();
+        assert_eq!(own.state_dir(), Path::new("/nowhere/repo/.codix/state"));
+        assert_eq!(
+            own.working_entries(),
+            [
+                PathBuf::from("/nowhere/repo/.codix/state/scratchpad"),
+                PathBuf::from("/nowhere/repo/.codix/state/memory")
+            ]
+        );
+        let mut writable: Vec<&str> = STATE_RESERVED_NAMES
+            .iter()
+            .copied()
+            .chain([entry::IMPORTED_MARKER, entry::STATE, "codix", "notes.md"])
+            .filter(|name| own.writable_state_entry(name))
+            .collect();
+        writable.sort_unstable();
+        assert_eq!(writable, [entry::MEMORY, entry::SCRATCHPAD]);
+        for foreign in roots.iter().filter(|r| !r.own) {
+            assert!(foreign.working_entries().is_empty(), "{:?}", foreign.path);
+            assert!(STATE_ROOT_WORKING_DIRS
+                .iter()
+                .all(|name| !foreign.writable_state_entry(name)));
         }
     }
 

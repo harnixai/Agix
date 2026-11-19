@@ -457,7 +457,7 @@ pub enum AgentEvent {
     TeamProgress {
         /// Team name as given to `TeamCreate`.
         team: String,
-        /// Generated team id (also the `.agix/teams/<id>/` directory name).
+        /// Generated team id (also the `<project dir>/state/teams/<id>/` directory name).
         team_id: String,
         /// Stage name.
         stage: String,

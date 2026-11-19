@@ -4,9 +4,10 @@
 
 use super::SandboxPolicy;
 use base::paths::{
-    ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, GIT_CONTROL_FILES, GIT_HOOKS_DIR, GIT_WORKTREES_DIR,
-    GIT_WORKTREE_CONTROL_FILES, PROJECT_ENGINE_CONFIG_DIRS, REPOSITORY_CONFIG_DIR,
-    STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
+    entry, ENGINE_CONFIG_DIRS, ENGINE_CONFIG_FILES, GIT_CONTROL_FILES, GIT_HOOKS_DIR,
+    GIT_WORKTREES_DIR, GIT_WORKTREE_CONTROL_FILES, PROJECT_ENGINE_CONFIG_DIRS,
+    PROJECT_STATE_ENGINE_DIRS, REPOSITORY_CONFIG_DIR, STATE_ROOT_SESSION_TMP,
+    STATE_ROOT_WORKING_DIRS,
 };
 use std::path::{Path, PathBuf};
 
@@ -426,10 +427,14 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
     trees.extend(configured.hooks);
     files.extend(configured.included);
     let (mut shut, mut working) = (Vec::new(), Vec::new());
+    let host_state = roots.paths.layout().product_id();
     for root in roots.paths.config_roots_in(cwd) {
         let real = root.resolved.clone();
+        let state = real.join(entry::STATE);
         files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
         trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
+        trees.extend(PROJECT_STATE_ENGINE_DIRS.iter().map(|d| state.join(d)));
+        trees.push(state.join(&host_state));
         working.extend(root.working_entries());
         shut.push(real.clone());
         if real != root.path {

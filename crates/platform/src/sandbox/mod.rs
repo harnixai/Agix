@@ -48,12 +48,14 @@
 //! `core.hooksPath` names and the files `.git/config` includes, the same in
 //! the git directory of every submodule under `.git/modules/` (nested ones
 //! included, and the directories leading down to them), the
-//! instance's own project directory but its working entries — `scratchpad/`
-//! and `memory/`, all the gate leaves out of configuration there
-//! (`base::paths::ConfigRootAt::writable_entry`) — with its configuration
-//! (`base::paths::ENGINE_CONFIG_*`: settings, MCP, hooks, commands, agents,
-//! skills, plugins, rules, scenes, policy, scripts, output styles, and the
-//! saved tool results the engine exports and forks) read-only even inside a
+//! instance's own project directory but its working entries —
+//! `state/scratchpad/` and `state/memory/`, all the gate leaves out of
+//! configuration there (`base::paths::ConfigRootAt::writable_state_entry`) —
+//! with its configuration (`base::paths::ENGINE_CONFIG_*`: settings, MCP,
+//! hooks, commands, agents, skills, plugins, rules, scenes, policy, scripts,
+//! output styles), what in `state/` the engine exports, forks and resumes
+//! from (`base::paths::PROJECT_STATE_ENGINE_DIRS`: saved tool results,
+//! history) and the embedder's `state/<product id>/` read-only even inside a
 //! writable root the policy names there, all of a foreign configuration root
 //! (`.claude`, and `.agix` under a renamed layout), and in either the
 //! writable roots the policy names inside it stay writable, the project's skills (`.agents/skills/`,

@@ -254,7 +254,7 @@ async fn a_renamed_project_directory_holds_everything_the_engine_keeps_and_is_gu
             bash("b-always", ALWAYS),
             write(
                 "w-memory",
-                &own.join("memory/MEMORY.md"),
+                &own.join("state/memory/MEMORY.md"),
                 &format!("- [{PROJECT_MEMORY}](note.md) — the project's\n"),
             ),
             write("w-settings", &own.join("settings.json"), "{}"),
@@ -332,9 +332,11 @@ async fn a_renamed_project_directory_holds_everything_the_engine_keeps_and_is_gu
             .all(|c| !c.body.to_string().contains(SECRET)),
         "the worktree's copy of a denied file reached the model"
     );
-    let teams: Vec<_> = std::fs::read_dir(own.join("teams"))?.flatten().collect();
+    let teams: Vec<_> = std::fs::read_dir(own.join("state/teams"))?
+        .flatten()
+        .collect();
     assert_eq!(teams.len(), 1, "{teams:?}");
-    assert!(own.join(".imported.json").is_file());
+    assert!(own.join("state/.imported.json").is_file());
     assert!(read(own.join("rules/style.md")).contains("CURSOR-MDC-RULE"));
     assert!(read(project.join("AGENTS.md")).contains(&format!("{OWN}/rules/style.md")));
 
@@ -351,7 +353,7 @@ async fn a_renamed_project_directory_holds_everything_the_engine_keeps_and_is_gu
     assert!(next_call.system_contains(PROJECT_MEMORY));
 
     embedded.shutdown().await;
-    let telemetry: Vec<_> = std::fs::read_dir(own.join("telemetry"))?
+    let telemetry: Vec<_> = std::fs::read_dir(own.join("state/telemetry"))?
         .flatten()
         .collect();
     assert!(!telemetry.is_empty());
@@ -401,7 +403,7 @@ async fn a_sandboxed_command_writes_nothing_in_a_foreign_configuration_root() ->
         ".claude/agents/a.md",
         ".claude/notes.md",
     ];
-    let own_scratch = format!("{OWN}/scratchpad/n.md");
+    let own_scratch = format!("{OWN}/state/scratchpad/n.md");
     let mut replies: Vec<Reply> = foreign
         .iter()
         .enumerate()
@@ -409,7 +411,7 @@ async fn a_sandboxed_command_writes_nothing_in_a_foreign_configuration_root() ->
         .collect();
     replies.push(bash(
         "b-own",
-        &format!("mkdir -p {OWN}/scratchpad && echo x > {own_scratch}"),
+        &format!("mkdir -p {OWN}/state/scratchpad && echo x > {own_scratch}"),
     ));
     replies.push(Reply::text("FOREIGN-DONE"));
     stub.script_when("FOREIGN-MARK", replies);
@@ -573,26 +575,38 @@ async fn a_sandboxed_command_cannot_make_a_configuration_root_that_is_not_there(
 }
 
 /// In the instance's own directory a sandboxed command writes only what the
-/// gate leaves out of configuration — `scratchpad/`, `memory/` — not the
-/// teams, telemetry, a `worktrees/` or any other entry the engine keeps
-/// there, which the engine itself still writes. The prompts are
-/// answered yes, so the sandbox alone decides.
+/// gate leaves out of configuration — `state/scratchpad/`, `state/memory/` —
+/// not the teams, telemetry, saved tool results, the embedder's
+/// `state/<product id>/`, a `worktrees/` or any other entry the engine keeps
+/// there, which the engine itself still writes. The prompts are answered
+/// yes, so the sandbox alone decides.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let root = root(&stub)?;
     let own = root.project.join(OWN);
-    for dir in ["teams", "telemetry", "scratchpad", "memory", "worktrees/w"] {
+    for dir in [
+        "state/teams",
+        "state/telemetry",
+        "state/tool-results",
+        "state/agix",
+        "state/scratchpad",
+        "state/memory",
+        "worktrees/w",
+    ] {
         std::fs::create_dir_all(own.join(dir))?;
     }
     let embedded = Embedded::start(config(&root, OWN)).await?;
     let mut client = connect(&embedded);
     routine_replies(&stub);
     let refused = [
-        "teams/t.json",
-        "telemetry/x.jsonl",
-        ".imported.json",
+        "state/teams/t.json",
+        "state/telemetry/x.jsonl",
+        "state/tool-results/r.txt",
+        "state/agix/x",
+        "state/.imported.json",
+        "state/notes.md",
         "notes.md",
         "worktrees/w/x",
     ];
@@ -603,7 +617,7 @@ async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
         .collect();
     replies.push(bash(
         "b-work",
-        &format!("echo x > {OWN}/scratchpad/n.md && echo x > {OWN}/memory/m.md"),
+        &format!("echo x > {OWN}/state/scratchpad/n.md && echo x > {OWN}/state/memory/m.md"),
     ));
     replies.push(Reply::text("OWN-DONE"));
     stub.script_when("OWN-MARK", replies);
@@ -621,8 +635,8 @@ async fn a_sandboxed_command_writes_only_the_working_space_of_the_own_directory(
             events.tool_results
         );
     }
-    assert_eq!(read(own.join("scratchpad/n.md")), "x\n");
-    assert_eq!(read(own.join("memory/m.md")), "x\n");
+    assert_eq!(read(own.join("state/scratchpad/n.md")), "x\n");
+    assert_eq!(read(own.join("state/memory/m.md")), "x\n");
     embedded.shutdown().await;
     Ok(())
 }

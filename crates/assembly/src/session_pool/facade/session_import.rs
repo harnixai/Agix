@@ -110,10 +110,11 @@ impl SessionPool {
         };
         let project = target.project_root.as_deref().map(PathBuf::from);
         let binding = self.binding_for(project.as_deref(), &scene).await;
-        let local = &binding.settings.paths.local_data_dir;
-        local
+        let paths = binding.settings.paths.config_paths();
+        paths
+            .local_data_dir
             .is_absolute()
-            .then(|| base::paths::tool_results_dir(local, &new_root.to_string()))
+            .then(|| paths.tool_results_dir(&new_root.to_string()))
     }
 
     /// The archive's saved tool results written under the new root session:

@@ -452,11 +452,12 @@ impl SessionPool {
         copied: &[history::entry::EnvelopedEntry],
         left_out: &[bool],
     ) -> Option<ForkedResults> {
-        let local = &settings.paths.local_data_dir;
+        let paths = settings.paths.config_paths();
         let from = self.saved_results_dir(session_id).await?;
-        let to = local
+        let to = paths
+            .local_data_dir
             .is_absolute()
-            .then(|| base::paths::tool_results_dir(local, &new_sid.to_string()))?;
+            .then(|| paths.tool_results_dir(&new_sid.to_string()))?;
         let wanted = runtime::saved_results::marked_in(
             copied
                 .iter()

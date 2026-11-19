@@ -532,7 +532,7 @@ impl Builder {
 
     /// Where this session saves a tool result too long for the conversation.
     /// A delegate is handed its root session's; left unset, a root session
-    /// (depth 0) uses its own under the project's scratchpad, and any other
+    /// (depth 0) uses its own under the project's `state/tool-results/`, and any other
     /// session saves nothing.
     pub fn tool_results_dir(mut self, dir: Option<PathBuf>) -> Self {
         self.spec.tool_results_dir = dir;

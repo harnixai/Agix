@@ -136,24 +136,42 @@ fn cannot_plant_under(s: &UnderSandboxExec, own: &str) {
     assert!(!s.state_root.join("mcp.json").exists());
 }
 
-/// The engine writes and reads `.agix/tool-results/` outside the sandbox:
-/// export packs what it holds, fork links it, resume deletes from it.
+/// The engine writes and reads `.agix/state/tool-results/` outside the
+/// sandbox: export packs what it holds, fork links it, resume deletes from
+/// it. The same holds under a writable root the policy names in `state/`.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_sandboxed_command_cannot_plant_a_saved_tool_result() {
     let Some(s) = UnderSandboxExec::new() else {
         return;
     };
-    std::fs::create_dir_all(s.project.join(".agix/tool-results/s")).unwrap();
+    std::fs::create_dir_all(s.project.join(".agix/state/tool-results/s")).unwrap();
     let elsewhere = s.elsewhere.display().to_string();
     for command in [
-        format!("ln -s '{elsewhere}/secret' .agix/tool-results/s/k.txt"),
-        "echo forged > .agix/tool-results/s/f.txt".to_string(),
-        "mkdir .agix/tool-results/t".to_string(),
-        "mv .agix/tool-results .agix/tool-results.old".to_string(),
+        format!("ln -s '{elsewhere}/secret' .agix/state/tool-results/s/k.txt"),
+        "echo forged > .agix/state/tool-results/s/f.txt".to_string(),
+        "mkdir .agix/state/tool-results/t".to_string(),
+        "mkdir .agix/state/history".to_string(),
+        "mkdir .agix/state/agix".to_string(),
+        "mv .agix/state/tool-results .agix/state/tool-results.old".to_string(),
+        "mv .agix/state .agix/state.old".to_string(),
     ] {
         assert!(!s.runs(&command), "`{command}` was allowed");
     }
+    let named = [s.project.join(".agix/state")];
+    let under_named =
+        |command: &str| s.run_at(&s.project, &named, command, SandboxPolicy::default());
+    for command in [
+        "echo forged > .agix/state/tool-results/s/f.txt",
+        "mkdir -p .agix/state/history/s",
+        "mkdir -p .agix/state/agix/x",
+    ] {
+        assert!(!under_named(command), "`{command}` was allowed");
+    }
+    assert!(
+        under_named("echo x > .agix/state/notes.md"),
+        "the named root stays writable"
+    );
 }
 
 /// The filesystem here compares names without case, so a protected file
@@ -298,15 +316,17 @@ fn ordinary_work_still_runs_under_the_hardened_profile() {
         "git init -q nested && cd nested && echo b > b && git add b \
              && git -c user.name=T -c user.email=t@example.com commit -qm nested"
             .to_string(),
-        "echo x > notes.md && mkdir -p .agix/scratchpad && echo x > .agix/scratchpad/notes.txt \
-             && ! echo x > .agix/notes.txt && ! echo x > .claude/notes.txt"
+        "echo x > notes.md && mkdir -p .agix/state/scratchpad \
+             && echo x > .agix/state/scratchpad/notes.txt && mkdir -p .agix/state/memory \
+             && ! echo x > .agix/notes.txt && ! echo x > .agix/state/notes.txt \
+             && ! mkdir .agix/scratchpad && ! echo x > .claude/notes.txt"
             .to_string(),
         format!("echo x > '{state}/scratchpad/a' && echo x > '{state}/memory/a'"),
         "test -n \"$TMPDIR\" && echo x > \"$TMPDIR/f\" && mktemp".to_string(),
     ] {
         assert!(s.runs(&command), "`{command}` was refused");
     }
-    assert!(s.project.join(".agix/scratchpad/notes.txt").is_file());
+    assert!(s.project.join(".agix/state/scratchpad/notes.txt").is_file());
     assert!(s.tmp.join("f").is_file());
 }
 

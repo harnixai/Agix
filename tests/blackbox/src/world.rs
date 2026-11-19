@@ -142,13 +142,13 @@ impl World {
         history::path::project_dir(&self.global_root().join("projects"), &canonical)
     }
 
-    /// `project`'s own memory tier, `<project>/.agix/memory`: the memory
+    /// `project`'s own memory tier, `<project>/.agix/state/memory`: the memory
     /// store reads it beside the global one (a name here shadows the same
     /// name there) and automatic extraction files project-scoped memories in
     /// it. Not the directory the prompt sends the model to — that is
     /// [`global_memory_dir`](Self::global_memory_dir).
     pub fn memory_dir(&self, project: &Path) -> PathBuf {
-        project.join(".agix").join("memory")
+        project.join(".agix/state/memory")
     }
 
     /// `<global>/memory`, the directory the system prompt's `# Memory`

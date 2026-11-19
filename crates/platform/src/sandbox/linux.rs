@@ -189,23 +189,18 @@ fn guard_project_skills(args: &mut Vec<String>, roots: &Roots, made: &mut Vec<Pa
     }
 }
 
-/// What a command may write in the configuration root `root`: its existing
-/// entries that [`base::paths::ConfigRootAt::writable_entry`] admits and that
-/// are not symbolic links, and the writable roots inside it, which the policy
-/// names.
+/// What a command may write in the configuration root `root`: the existing
+/// directories in its `state/` that
+/// [`base::paths::ConfigRootAt::writable_state_entry`] admits, neither they
+/// nor `state/` symbolic links, and the writable roots inside it, which the
+/// policy names.
 fn working_entries(roots: &Roots, root: &base::paths::ConfigRootAt) -> Vec<PathBuf> {
-    let existing = std::fs::read_dir(&root.path)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|n| root.writable_entry(n))
-                && entry.file_type().is_ok_and(|t| !t.is_symlink())
-        })
-        .map(|entry| entry.path());
+    let state = root.state_dir();
+    let existing = STATE_ROOT_WORKING_DIRS
+        .iter()
+        .filter(|name| root.writable_state_entry(name) && !state.is_symlink())
+        .map(|name| state.join(name))
+        .filter(|entry| entry.symlink_metadata().is_ok_and(|m| m.is_dir()));
     let named = roots
         .writable
         .iter()

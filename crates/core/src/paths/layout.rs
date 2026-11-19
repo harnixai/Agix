@@ -92,6 +92,8 @@ pub mod entry {
     pub const TEAMS: &str = "teams";
     pub const TELEMETRY: &str = "telemetry";
     pub const TOOL_RESULTS: &str = "tool-results";
+    pub const STATE: &str = "state";
+    pub const HISTORY: &str = "history";
     pub const SESSIONS: &str = "sessions";
     pub const PROJECTS: &str = "projects";
     pub const RECORDINGS: &str = "recordings";
@@ -113,9 +115,10 @@ pub const SETTINGS_FILE: &str = entry::SETTINGS;
 /// same tier, overriding it.
 pub const SETTINGS_LOCAL_FILE: &str = entry::SETTINGS_LOCAL;
 
-/// The state root's subdirectories that are the agent's own working space
-/// rather than configuration: the only parts of it the agent's tools and its
-/// sandboxed commands may write.
+/// The subdirectories of the state root, and of a project directory's
+/// `state/`, that are the agent's own working space rather than
+/// configuration: the only parts of them the agent's tools and its sandboxed
+/// commands may write.
 pub const STATE_ROOT_WORKING_DIRS: &[&str] = &[STATE_ROOT_SCRATCHPAD, entry::MEMORY];
 
 /// The state root's scratchpad, one of [`STATE_ROOT_WORKING_DIRS`].
@@ -164,24 +167,44 @@ pub const PROJECT_ENGINE_CONFIG_DIRS: &[&str] = &[PROJECT_SKILLS_DIR];
 pub const STATE_ROOT_SCENE_FILES: &[&str] =
     &[entry::SETTINGS, entry::SCENE_FILE, entry::SCENE_PROMPT];
 
-/// The files a project directory's `.gitignore` keeps out of the repository:
-/// everything the engine writes there for this machine or this user alone —
-/// the keys, and the answer to the import question. Only what a project's
-/// collaborators share is committed.
-pub const LOCAL_DATA_IGNORED_FILES: &[&str] = &[
-    entry::SETTINGS_LOCAL,
-    entry::MCP_LOCAL,
-    entry::IMPORTED_MARKER,
-];
+/// The files of a project directory outside its `state/` that its
+/// `.gitignore` keeps out of the repository along with `state/`: one user's
+/// own configuration and keys, which stay beside the shared settings where
+/// people look for them. Only what a project's collaborators share is
+/// committed.
+pub const LOCAL_CONFIG_FILES: &[&str] = &[entry::SETTINGS_LOCAL, entry::MCP_LOCAL];
 
-/// The directories it keeps out: the agent's memory, scratchpad and team
-/// records, telemetry recordings and saved tool results.
-pub const LOCAL_DATA_IGNORED_DIRS: &[&str] = &[
+/// What the engine keeps in a project directory's `state/` and an older
+/// engine kept directly in the project directory: opening the project moves
+/// each found there into `state/`.
+pub const PROJECT_STATE_ENTRIES: &[&str] = &[
     entry::MEMORY,
     entry::SCRATCHPAD,
     entry::TEAMS,
     entry::TELEMETRY,
     entry::TOOL_RESULTS,
+    entry::IMPORTED_MARKER,
+];
+
+/// The directories in a project's `state/` the engine acts on unsandboxed —
+/// it exports, forks and resumes from them — guarded with everything under
+/// them even inside a writable root the sandbox policy names there.
+pub const PROJECT_STATE_ENGINE_DIRS: &[&str] = &[entry::TOOL_RESULTS, entry::HISTORY];
+
+/// The names the engine has, or keeps for itself, in a project's `state/`.
+/// No product's id may be one: `state/<product id>/` is the embedder's
+/// ([`Layout::host_state_dir`]).
+pub const STATE_RESERVED_NAMES: &[&str] = &[
+    entry::MEMORY,
+    entry::SCRATCHPAD,
+    entry::TEAMS,
+    entry::TELEMETRY,
+    entry::TOOL_RESULTS,
+    entry::HISTORY,
+    "imported",
+    entry::SESSIONS,
+    entry::CACHE,
+    entry::TMP,
 ];
 
 /// Project directories other tools own, which an instance's cannot be: git's,
@@ -401,9 +424,10 @@ impl Layout {
 
     /// This layout under the product name `name`: an ASCII letter, then up
     /// to 31 ASCII letters, digits, `-` or `_`. Its lowercase form is a path
-    /// component (`/etc/<name>`), a git ref component (`<name>/worktree-`)
-    /// and an HTTP token (`<name>/<version>`), all of which these characters
-    /// are safe in.
+    /// component (`/etc/<name>`, `state/<name>`), a git ref component
+    /// (`<name>/worktree-`) and an HTTP token (`<name>/<version>`), all of
+    /// which these characters are safe in, and none of
+    /// [`STATE_RESERVED_NAMES`].
     pub fn with_product_name(self, name: &str) -> Result<Self, ProductNameError> {
         let refuse = |reason| {
             Err(ProductNameError {
@@ -424,6 +448,11 @@ impl Layout {
         }
         if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             return refuse("only ASCII letters, digits, `-` and `_` are allowed");
+        }
+        if STATE_RESERVED_NAMES.contains(&name.to_ascii_lowercase().as_str()) {
+            return refuse(
+                "the engine keeps its own state under that name in a project's `state/`",
+            );
         }
         Ok(Self {
             product: Arc::from(name),
@@ -549,9 +578,22 @@ impl Layout {
         std::iter::once(own).chain((own != DEFAULT_WORKTREES_DIR).then_some(DEFAULT_WORKTREES_DIR))
     }
 
-    /// `<dir>/<name>/teams`.
+    /// `<project_root>/<name>/state`: what the engine keeps in the project
+    /// for this machine alone, all of it out of the repository.
+    pub fn project_state_dir(&self, project_root: &Path) -> PathBuf {
+        self.project_dir(project_root).join(entry::STATE)
+    }
+
+    /// `<project_root>/<name>/state/<product id>`: the embedder's own state
+    /// in the project, which the engine never writes and guards as it
+    /// guards its own.
+    pub fn host_state_dir(&self, project_root: &Path) -> PathBuf {
+        self.project_state_dir(project_root).join(self.product_id())
+    }
+
+    /// `<dir>/<name>/state/teams`.
     pub fn teams_dir(&self, dir: &Path) -> PathBuf {
-        self.project_dir(dir).join(entry::TEAMS)
+        self.project_state_dir(dir).join(entry::TEAMS)
     }
 
     /// The repository `.gitignore` line keeping the worktrees directory out.
@@ -871,6 +913,38 @@ mod tests {
     }
 
     #[test]
+    fn a_product_id_is_none_of_the_names_the_engine_keeps_in_state() {
+        for reserved in STATE_RESERVED_NAMES
+            .iter()
+            .filter(|n| !n.starts_with('.') && !n.contains('-'))
+        {
+            let capitalised = format!("{}{}", reserved[..1].to_uppercase(), &reserved[1..]);
+            for name in [reserved.to_string(), capitalised, reserved.to_uppercase()] {
+                assert!(
+                    Layout::default().with_product_name(&name).is_err(),
+                    "{name}"
+                );
+            }
+        }
+        for name in ["Tool-Results", "History", "Imported"] {
+            assert!(Layout::default().with_product_name(name).is_err(), "{name}");
+        }
+        for entry in PROJECT_STATE_ENTRIES
+            .iter()
+            .chain(PROJECT_STATE_ENGINE_DIRS)
+        {
+            let id = entry.trim_start_matches('.').trim_end_matches(".json");
+            assert!(STATE_RESERVED_NAMES.contains(&id), "{entry}");
+        }
+        assert!(!STATE_RESERVED_NAMES.contains(&DEFAULT_PRODUCT_NAME.to_ascii_lowercase().as_str()));
+        let codix = Layout::default().with_product_name("Codix").unwrap();
+        assert_eq!(
+            codix.host_state_dir(Path::new("/repo")),
+            Path::new("/repo/.agix/state/codix")
+        );
+    }
+
+    #[test]
     fn an_engine_name_is_a_lowercase_script_global_and_names_the_project_directory() {
         let agix = Layout::default();
         assert_eq!(agix.engine(), DEFAULT_ENGINE);
@@ -1009,7 +1083,15 @@ mod tests {
             let root = Path::new("/repo");
             assert_eq!(layout.project_dir(root), root.join(&name));
             assert_eq!(layout.worktrees_dir(root), root.join(&worktrees));
-            assert_eq!(layout.teams_dir(root), root.join(&name).join("teams"));
+            assert_eq!(
+                layout.project_state_dir(root),
+                root.join(&name).join("state")
+            );
+            assert_eq!(layout.teams_dir(root), root.join(&name).join("state/teams"));
+            assert_eq!(
+                layout.host_state_dir(root),
+                root.join(&name).join("state").join(layout.product_id())
+            );
             assert_eq!(layout.gitignore_entry(), format!("{worktrees}/"));
             assert!(layout.is_own_dir_component(&name.to_uppercase()));
         }

@@ -321,7 +321,8 @@ async fn tool_own_allow_is_honoured_when_nothing_else_objects() {
 }
 
 /// A contained write that names configuration — the instance's own project
-/// directory outside its working space, or a foreign root — is never let
+/// directory outside its working space (`state/scratchpad`, `state/memory`),
+/// or a foreign root — is never let
 /// through silently, whatever the instance calls its directory.
 #[tokio::test]
 async fn a_contained_write_to_configuration_is_not_silent_in_either_layout() {
@@ -348,7 +349,20 @@ async fn a_contained_write_to_configuration_is_not_silent_in_either_layout() {
         assert!(!silent(format!("/tmp/{name}/agents/r.md")).await, "{name}");
         assert!(!silent("/tmp/.agix/hooks/x.sh".into()).await, "{name}");
         assert!(!silent("/tmp/.claude/settings.json".into()).await, "{name}");
-        assert!(silent(format!("/tmp/{name}/scratchpad/x")).await, "{name}");
+        assert!(!silent(format!("/tmp/{name}/scratchpad/x")).await, "{name}");
+        assert!(
+            !silent(format!("/tmp/{name}/state/tool-results/s/x")).await,
+            "{name}"
+        );
+        assert!(!silent(format!("/tmp/{name}/state/agix/x")).await, "{name}");
+        assert!(
+            silent(format!("/tmp/{name}/state/scratchpad/x")).await,
+            "{name}"
+        );
+        assert!(
+            silent(format!("/tmp/{name}/state/memory/m.md")).await,
+            "{name}"
+        );
     }
 }
 

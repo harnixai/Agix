@@ -211,7 +211,7 @@ struct ImportedMarker {
 }
 
 fn marker_path(cwd: &Path, layout: &Layout) -> PathBuf {
-    layout.project_dir(cwd).join(entry::IMPORTED_MARKER)
+    layout.project_state_dir(cwd).join(entry::IMPORTED_MARKER)
 }
 
 async fn load_marker(cwd: &Path, layout: &Layout) -> ImportedMarker {
@@ -228,9 +228,7 @@ async fn write_marker(cwd: &Path, layout: &Layout, marker: &ImportedMarker) -> s
     }
     let json = serde_json::to_string_pretty(marker).unwrap_or_default();
     tokio::fs::write(&path, json).await?;
-    if let Some(dir) = path.parent() {
-        base::paths::ensure_project_data_gitignore(dir, cwd);
-    }
+    base::paths::ensure_project_data_gitignore(&layout.project_dir(cwd), cwd);
     Ok(())
 }
 
@@ -648,7 +646,7 @@ mod tests {
             assert!(dir
                 .path()
                 .join(layout.project_dir_name())
-                .join(".imported.json")
+                .join("state/.imported.json")
                 .is_file());
             let other = Layout::new(if layout == Layout::default() {
                 ".codix"

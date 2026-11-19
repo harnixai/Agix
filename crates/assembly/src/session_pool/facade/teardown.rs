@@ -187,10 +187,11 @@ impl SessionPool {
         };
         let project = facts.project_root.map(PathBuf::from);
         let binding = self.binding_for(project.as_deref(), &scene).await;
-        let local = &binding.settings.paths.local_data_dir;
-        local
+        let paths = binding.settings.paths.config_paths();
+        paths
+            .local_data_dir
             .is_absolute()
-            .then(|| base::paths::tool_results_dir(local, &root))
+            .then(|| paths.tool_results_dir(&root))
     }
 
     async fn remove_saved_tool_results(&self, dir: Option<PathBuf>) {

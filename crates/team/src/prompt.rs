@@ -5,7 +5,7 @@
 pub struct WorkerContext<'a> {
     /// Team name as given to `TeamCreate`.
     pub team: &'a str,
-    /// Generated team id (also the `.agix/teams/<id>/` directory name).
+    /// Generated team id (also the `<project dir>/state/teams/<id>/` directory name).
     pub team_id: &'a str,
     /// This worker's label within the team.
     pub label: &'a str,

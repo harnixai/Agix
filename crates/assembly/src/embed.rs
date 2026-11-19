@@ -79,7 +79,10 @@ pub struct EmbedConfig {
     /// authorization server shows, the `User-Agent` of its requests, the
     /// branches of its worktrees and the directory its managed settings and
     /// MCP policy are read from. Only this name's managed files are read.
-    /// An ASCII letter, then up to 31 ASCII letters, digits, `-` or `_`.
+    /// An ASCII letter, then up to 31 ASCII letters, digits, `-` or `_`,
+    /// whose lowercase form is none of the names the engine keeps in a
+    /// project's `state/` (`base::paths::STATE_RESERVED_NAMES`):
+    /// `state/<that form>/` is the host's (`base::paths::Layout::host_state_dir`).
     pub product: String,
     /// The engine's name in scripts and file names (`agix`): the global the
     /// script base library is under, its errors' name (`<Engine>Error`), the

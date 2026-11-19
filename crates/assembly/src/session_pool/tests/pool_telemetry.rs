@@ -46,7 +46,7 @@ async fn telemetry_disabled_yields_a_noop_handle_even_with_an_absolute_dir() {
     settings.paths.local_data_dir = dir.path().to_path_buf();
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let _handle = build_pool_telemetry(&settings);
-    assert!(!dir.path().join("telemetry").join("pool.jsonl").exists());
+    assert!(!dir.path().join("state/telemetry/pool.jsonl").exists());
 }
 
 #[tokio::test]
@@ -82,7 +82,7 @@ async fn absolute_dir_and_telemetry_enabled_persists_events_to_pool_jsonl() {
     // `FileRecorder` writes synchronously, but the event still has to
     // cross the channel to the fan-out task first — poll briefly rather
     // than assume it has landed the instant `record()` returns.
-    let path = dir.path().join("telemetry").join("pool.jsonl");
+    let path = dir.path().join("state/telemetry/pool.jsonl");
     let content = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -114,7 +114,7 @@ async fn recording_into_the_project_keeps_the_recordings_out_of_git() {
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let _handle = build_pool_telemetry(&settings);
     let ignored = std::fs::read_to_string(dir.path().join(".agix").join(".gitignore")).unwrap();
-    assert!(ignored.lines().any(|l| l == "telemetry/"), "{ignored}");
+    assert!(ignored.lines().any(|l| l == "state/"), "{ignored}");
     assert!(
         ignored.lines().any(|l| l == "settings.local.json"),
         "{ignored}"
@@ -127,7 +127,7 @@ async fn recording_into_the_project_keeps_the_recordings_out_of_git() {
     let _handle = build_pool_telemetry(&settings);
     let merged = std::fs::read_to_string(mine.path().join(".gitignore")).unwrap();
     assert_eq!(merged.lines().next(), Some("mine"), "{merged}");
-    assert!(merged.lines().any(|l| l == "telemetry/"), "{merged}");
+    assert!(merged.lines().any(|l| l == "state/"), "{merged}");
     let _handle = build_pool_telemetry(&settings);
     assert_eq!(
         std::fs::read_to_string(mine.path().join(".gitignore")).unwrap(),

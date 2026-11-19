@@ -89,7 +89,7 @@ impl UnderSandboxExec {
         assert!(project.starts_with("/tmp"));
         std::fs::create_dir_all(project.join(".agix")).unwrap();
         std::fs::create_dir_all(project.join(".claude")).unwrap();
-        std::fs::create_dir_all(layout.project_dir(&project)).unwrap();
+        std::fs::create_dir_all(layout.project_state_dir(&project)).unwrap();
         for dir in STATE_ROOT_WORKING_DIRS {
             std::fs::create_dir_all(state_root.join(dir)).unwrap();
         }

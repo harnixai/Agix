@@ -339,7 +339,7 @@ async fn an_untrusted_projects_inline_limit_is_ignored() -> anyhow::Result<()> {
         !seen.contains("Output too long"),
         "the project's limit applied: {seen}"
     );
-    assert!(!run.project.join(".agix/tool-results").exists());
+    assert!(!run.project.join(".agix/state/tool-results").exists());
 
     trust(&mut run).await?;
     let seen = echo_hello(&mut run, &stub).await?;

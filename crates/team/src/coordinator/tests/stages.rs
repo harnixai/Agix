@@ -321,7 +321,7 @@ async fn a_later_stage_sees_what_an_earlier_stage_saved_to_team_memory() {
 
 /// `orchestrate()` records the team in the shared registry (so
 /// `TeamList` can see it), and `cleanup_team()` actually removes both the
-/// registry entry and the on-disk `.agix/teams/{id}/` directory. A
+/// registry entry and the on-disk `.agix/state/teams/{id}/` directory. A
 /// second `cleanup_team()` call for the same
 /// name must error instead of silently "succeeding" again.
 #[tokio::test]

@@ -386,7 +386,7 @@ mod tests {
         tier.write(SETTINGS_LOCAL_FILE, &obj(json!({"providers": {}})))
             .unwrap();
         let ignored = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-        for line in ["settings.local.json", "mcp.local.json", "telemetry/"] {
+        for line in ["settings.local.json", "mcp.local.json", "state/"] {
             assert!(ignored.lines().any(|l| l == line), "{ignored}");
         }
 

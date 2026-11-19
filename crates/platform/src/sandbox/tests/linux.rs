@@ -125,7 +125,7 @@ fn an_absent_project_settings_file_cannot_be_created() {
 #[allow(clippy::unwrap_used)]
 fn an_absent_settings_file_cannot_be_created_in(own: &str, dir: &str) {
     let project = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project.path().join(dir).join("scratchpad")).unwrap();
+    std::fs::create_dir_all(project.path().join(dir).join("state/scratchpad")).unwrap();
     let command = format!("echo '{{}}' > {dir}/settings.local.json");
     let mut o = opts(&command, project.path());
     o.policy.layout = base::paths::Layout::new(own).unwrap();
@@ -143,15 +143,14 @@ fn an_absent_settings_file_cannot_be_created_in(own: &str, dir: &str) {
     let end = cmd.spec.args.iter().position(|a| a == "--").unwrap();
     let args = &cmd.spec.args[..end];
     let at = |pair: [&str; 2]| args.windows(2).position(|w| w == pair);
-    let scratchpad = format!("{agix}/scratchpad");
     let masked = at(["--tmpfs", &agix]).unwrap_or_else(|| panic!("{args:?}"));
-    // A foreign root has no working space: its scratchpad stays read-only.
-    let how = if own == dir {
-        "--bind-try"
+    // A foreign root has no working space: its `state/` is bound back read-only whole.
+    let (how, opened) = if own == dir {
+        ("--bind-try", format!("{agix}/state/scratchpad"))
     } else {
-        "--ro-bind-try"
+        ("--ro-bind-try", format!("{agix}/state"))
     };
-    let opened = at([how, &scratchpad]).unwrap_or_else(|| panic!("{args:?}"));
+    let opened = at([how, &opened]).unwrap_or_else(|| panic!("{args:?}"));
     let shut = at(["--remount-ro", &agix]).unwrap_or_else(|| panic!("{args:?}"));
     assert!(masked < opened && opened < shut, "{args:?}");
     assert!(

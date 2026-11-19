@@ -104,7 +104,7 @@ impl DaemonEvents {
 
 /// The pool-level telemetry handle: the per-session pipeline's shape
 /// (`FileRecorder` plus the OTel sink when one is configured), writing to one
-/// shared `<local_data_dir>/telemetry/pool.jsonl`. A no-op when telemetry is
+/// shared `pool.jsonl` in the project's `state/telemetry/`. A no-op when telemetry is
 /// off or `local_data_dir` is not an absolute path.
 pub(in crate::session_pool) fn build_pool_telemetry(
     settings: &settings::LoadedSettings,
@@ -123,7 +123,11 @@ pub(in crate::session_pool) fn build_pool_telemetry(
         // whatever the process's working directory happens to be.
         return telemetry::TelemetryHandle::noop();
     }
-    let path = dir.join(base::paths::entry::TELEMETRY).join("pool.jsonl");
+    let path = settings
+        .paths
+        .config_paths()
+        .telemetry_dir()
+        .join("pool.jsonl");
     let rec = match telemetry::file_recorder::FileRecorder::new(&path) {
         Ok(rec) => {
             base::paths::ensure_local_data_gitignore(dir);

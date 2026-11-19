@@ -97,12 +97,14 @@ async fn a_worktree_goes_in_wkts_and_the_project_directory_stays_committable() -
     for local in [
         ".agix/settings.local.json",
         ".agix/mcp.local.json",
-        ".agix/.imported.json",
-        ".agix/memory/a-fact.md",
-        ".agix/scratchpad/notes.txt",
-        ".agix/teams/team-x/SCRATCHPAD.md",
-        ".agix/telemetry/s.jsonl",
-        ".agix/tool-results/s/r.txt",
+        ".agix/state/.imported.json",
+        ".agix/state/memory/a-fact.md",
+        ".agix/state/scratchpad/notes.txt",
+        ".agix/state/teams/team-x/SCRATCHPAD.md",
+        ".agix/state/telemetry/s.jsonl",
+        ".agix/state/tool-results/s/r.txt",
+        ".agix/state/history/s/transcript.jsonl",
+        ".agix/state/agix/runs.json",
     ] {
         assert!(ignored(&world, &repo, local)?, "{local} is committable");
     }

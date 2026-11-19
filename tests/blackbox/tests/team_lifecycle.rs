@@ -177,7 +177,7 @@ async fn a_merged_stage_still_reports_its_failed_member() -> anyhow::Result<()> 
             "the merged stage lost its failed member: {event}"
         );
     }
-    let log = std::fs::read_dir(run.project.join(".agix/teams"))?
+    let log = std::fs::read_dir(run.project.join(".agix/state/teams"))?
         .flatten()
         .map(|e| std::fs::read_to_string(e.path().join("events.jsonl")))
         .collect::<Result<String, _>>()?;
@@ -219,7 +219,7 @@ async fn interrupt(run: &mut LiveRun, session: &str) -> anyhow::Result<Value> {
 }
 
 fn team_dirs(project: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(project.join(".agix/teams"))
+    std::fs::read_dir(project.join(".agix/state/teams"))
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
         .unwrap_or_default()
 }
