@@ -287,7 +287,7 @@ impl Tool for FileTicketTool {
 let mut factories = model::factory::builtin_registry();
 factories.register(Arc::new(MyProtocolFactory));
 let router = assembly::model_router::build_task_router_with(
-    &settings, &builtin, &factories,
+    &settings, &builtin, &factories, state_root.join("quota"),
 )?;
 ```
 

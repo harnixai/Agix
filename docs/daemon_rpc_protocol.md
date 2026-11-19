@@ -3247,7 +3247,7 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
   "tasks": { } }              // model.tasks:每类调用要的档位
 ```
 
-`base_url` 里的密码与查询串默认换成 `***`(`https://u:***@host`);`include_secrets: true` 时原样给出。`quota` 是写进设置的上限;有 `quota` 的 provider 还带 `usage`:此刻所在的日、周、月各自已用的 token(未命中缓存的输入加缓存写入加输出,缓存命中不计)、上限与起始日(按本机时区,周从周一、月从 1 号)。`defined_in` 是定义这一项的设置文件,内建的没有。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(`api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
+`base_url` 里的密码与查询串默认换成 `***`(`https://u:***@host`);`include_secrets: true` 时原样给出。`quota` 是写进设置的上限;有 `quota` 的 provider 还带 `usage`:此刻所在的日、周、月各自已用的 token(未命中缓存的输入加缓存写入加输出,缓存命中不计)、上限与起始日(按本机时区,周从周一、月从 1 号)。用量记录文件读不出(不是 JSON、数值不对)时 `usage.error` 写明是哪个文件,这个 provider 按用尽算、文件不覆盖,修好或删掉后恢复。`defined_in` 是定义这一项的设置文件,内建的没有。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(`api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
 
 `models` 的每一项是模型 id 字符串,或一个对象,两种写法可以混用;读回时原样是写进去的形状:
 
@@ -3281,6 +3281,10 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 (§9.1)结束。`ANTHROPIC_BASE_URL` 指向不需要密钥的网关时也要给一个任意非空值,与 `providers`
 里配的 provider 缺 key 时建不出来一致。宿主的 `CredentialSource` 答空串等于没给:缺省客户端照上面不发请求,
 `providers` 里的 provider 与缺 key 一样建不出来(启动失败,运行中重建时进 `routing.router_error`)。
+
+一对 `(项目, 场景)` 合并后的设置里定义了 provider、却解析不通(写错的 `api`、`tiers` 不在 `models` 里、
+`model.order` 引用没定义的 id 等),而这一对之前没有能用的路由时,在这一对上 `session.create` 得
+`INVALID_PARAMS`,消息里是原因,不会改用内建的 `anthropic`;之前有过能用的路由就继续用它。
 
 ```jsonc
 // setProvider 的 params

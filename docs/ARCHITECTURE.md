@@ -2126,8 +2126,9 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 一个值类型不对(`prompt.language: 5`、`sandbox.network.mode: 42`)时,`LoadedSettings::load` 只丢掉这个值并
 warn,`daemon.doctor` 的 `settings.tiers` 报 `degraded`、在那一层的 `ignored_values` 里列出;
 同一个文件里其余的值和别的层照常。键是被丢的那个值自己的键:对象里的值都不对时逐个报,这里根本放不下
-对象时才报这个对象本身。只能由程序设的 `permissions.mode`(`bubble`)也这样丢掉并列出。这对信任与否都一样:
-一处拼错不会让全局层的 hook、沙箱设置跟着失效。`permissions` 的规则串逐条读:一条写错的规则只丢它
+对象时才报这个对象本身。只能由程序设的 `permissions.mode`(`bubble`)也这样丢掉并列出。一处拼错不会让全局层的 hook、
+沙箱设置跟着失效。未受信的项目层例外:受限的键写成不对的类型(`mcp.servers.<名>.enabled: null`)按放宽算,
+在 `requires_trust` 里列出而不是进 `ignored_values`。`permissions` 的规则串逐条读:一条写错的规则只丢它
 自己(`ignored_values` 里的键是 `permissions.allow[0]` 这样带下标),同一层的 deny 照常生效。
 
 **信任是项目根的属性,存在全局层,项目自己改不了**:

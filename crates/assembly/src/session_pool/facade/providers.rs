@@ -190,7 +190,6 @@ impl SessionPool {
             tier,
             dry_run,
             written_to: written.written_to.display().to_string(),
-            secrets_written_to: written.secrets_written_to.map(|p| p.display().to_string()),
             warnings: written.warnings,
             reloaded: settings_reloaded(&written.loaded.values, written.routing),
         })

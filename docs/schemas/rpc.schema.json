@@ -5586,7 +5586,7 @@
     "ProviderSaved": {
       "properties": {
         "dry_run": {
-          "description": "Nothing was written: `written_to`, `secrets_written_to` and the rest\nare what the write would have done.",
+          "description": "Nothing was written: `written_to` and the rest are what the write\nwould have done.",
           "type": "boolean"
         },
         "order": {
@@ -5603,13 +5603,6 @@
         },
         "routing": {
           "$ref": "#/$defs/RoutingStatus"
-        },
-        "secrets_written_to": {
-          "description": "Set when a credential was written, to the `settings.local.json`\nbeside `written_to`.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "tier": {
           "$ref": "#/$defs/SettingsTier"

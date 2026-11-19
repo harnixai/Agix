@@ -155,14 +155,8 @@ impl SettingsTiersCheck {
             ignored: settings.ignored.clone(),
         }
     }
-}
 
-impl HealthCheck for SettingsTiersCheck {
-    fn name(&self) -> &str {
-        "settings.tiers"
-    }
-
-    fn check(&self) -> CheckResult {
+    fn tiers(&self) -> Vec<TierStatus> {
         let mut tiers = vec![inspect_tier("global", &self.global)];
         for (scene, dir) in &self.scenes {
             tiers.push(TierStatus {
@@ -183,6 +177,17 @@ impl HealthCheck for SettingsTiersCheck {
                 .cloned()
                 .collect();
         }
+        tiers
+    }
+}
+
+impl HealthCheck for SettingsTiersCheck {
+    fn name(&self) -> &str {
+        "settings.tiers"
+    }
+
+    fn check(&self) -> CheckResult {
+        let tiers = self.tiers();
         let label = |t: &TierStatus| match &t.scene {
             Some(scene) => format!("scene ({scene})"),
             None => t.tier.to_string(),

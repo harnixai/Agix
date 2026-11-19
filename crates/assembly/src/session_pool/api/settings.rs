@@ -207,14 +207,10 @@ pub struct SettingsReloaded {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderSaved {
     pub tier: SettingsTier,
-    /// Nothing was written: `written_to`, `secrets_written_to` and the rest
-    /// are what the write would have done.
+    /// Nothing was written: `written_to` and the rest are what the write
+    /// would have done.
     pub dry_run: bool,
     pub written_to: String,
-    /// Set when a credential was written, to the `settings.local.json`
-    /// beside `written_to`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secrets_written_to: Option<String>,
     /// The provider settings written whose value in `settings.json` carries
     /// a credential, each said without it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
