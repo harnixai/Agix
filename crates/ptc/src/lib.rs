@@ -1,6 +1,8 @@
 //! Embedded JavaScript that calls this session's tools, in two front-ends on
 //! one runtime: `RunCode` runs a program the model writes (`docs/ptc.md`),
 //! `RunExt` runs a command an installed plugin brings (`docs/runext.md`).
+//! `PluginCall` runs a plugin's function for the host the way `RunExt` runs a
+//! command, outside the model's tools.
 //!
 //! Sub-calls go through the session's own dispatch (`ToolContext::dispatch`):
 //! the same validation, hooks, middleware, telemetry and permission checks as
@@ -13,11 +15,13 @@ mod calls;
 mod code;
 mod engine;
 mod ext;
+mod function;
 mod host_libs;
 mod run;
 
 pub use code::{RunCodeInput, RunCodeTool, TOOL_NAME};
 pub use ext::{split_command_line, RunExtInput, RunExtTool, EXT_TOOL_NAME};
+pub use function::{PluginCallInput, PluginCallTool, PLUGIN_CALL_TOOL_NAME};
 pub use host_libs::HostLibraries;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -157,6 +161,8 @@ pub(crate) fn take_one(left: &AtomicU32) -> bool {
 
 #[cfg(test)]
 mod ext_tests;
+#[cfg(test)]
+mod function_tests;
 #[cfg(test)]
 mod host_libs_tests;
 #[cfg(test)]

@@ -16,7 +16,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-/// What runs: the model's program, or a plugin command.
+/// What runs: the model's program, a plugin command, or a plugin function
+/// the host called.
 pub(crate) enum Front {
     Program {
         code: String,
@@ -24,6 +25,7 @@ pub(crate) enum Front {
         background: bool,
     },
     Command(engine::CommandScript),
+    Function(engine::CommandScript),
 }
 
 /// Where a script runs and what holds it back.
@@ -230,7 +232,7 @@ fn script_of(
             );
             (Script::Program(code), Some(program))
         }
-        Front::Command(command) => (Script::Command(command), None),
+        Front::Command(command) | Front::Function(command) => (Script::Command(command), None),
     }
 }
 

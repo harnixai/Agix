@@ -266,26 +266,32 @@ impl RunExtTool {
     }
 
     async fn entry_source(&self, command: &ExtCommand) -> Result<String, String> {
-        let bytes = tokio::fs::read(&command.file).await.map_err(|e| {
-            format!(
-                "the plugin `{}` is missing its entry {}: {e}",
-                command.plugin,
-                command.file.display()
-            )
-        })?;
-        if bytes.len() > self.limits.code_chars {
-            return Err(format!(
-                "the entry of `{}` is larger than {} bytes",
-                command.name, self.limits.code_chars
-            ));
-        }
-        String::from_utf8(bytes).map_err(|_| {
-            format!(
-                "the entry of `{}` is not UTF-8 JavaScript source",
-                command.name
-            )
-        })
+        let max = self.limits.code_chars;
+        read_entry(&command.file, &command.plugin, &command.name, max).await
     }
+}
+
+/// The source of `plugin`'s entry `file`, for its command or function
+/// `name`: at most `max_bytes`, and UTF-8.
+pub(crate) async fn read_entry(
+    file: &std::path::Path,
+    plugin: &str,
+    name: &str,
+    max_bytes: usize,
+) -> Result<String, String> {
+    let bytes = tokio::fs::read(file).await.map_err(|e| {
+        format!(
+            "the plugin `{plugin}` is missing its entry {}: {e}",
+            file.display()
+        )
+    })?;
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "the entry of `{name}` is larger than {max_bytes} bytes"
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| format!("the entry of `{name}` is not UTF-8 JavaScript source"))
 }
 
 fn text_of(result: &ToolResult) -> String {

@@ -2603,6 +2603,7 @@ dependencies = [
  "base",
  "hex",
  "js-lib",
+ "jsonschema",
  "libc",
  "platform",
  "rquickjs",

@@ -61,7 +61,8 @@ pub(crate) struct CommandScript {
     pub filename: String,
     pub source: String,
     pub function: String,
-    /// `[argv, input, ctx]` as JSON.
+    /// The arguments as a JSON array, `ctx` last: `[argv, input, ctx]` for a
+    /// command, `[input, ctx]` for a function.
     pub call: String,
     /// Where the entry's bytecode is kept; `None` parses it every run.
     pub cache_dir: Option<PathBuf>,
@@ -86,8 +87,8 @@ impl CommandScript {
         format!(
             "(async () => {{ const f = await globalThis.__agixEntry; delete globalThis.__agixEntry; \
              if (typeof f !== \"function\") throw new Error({missing}); \
-             const [argv, input, ctx] = JSON.parse({call}); \
-             const r = await f(argv, input, Object.freeze(ctx)); \
+             const args = JSON.parse({call}); args.push(Object.freeze(args.pop())); \
+             const r = await f(...args); \
              return JSON.stringify(typeof r === \"string\" ? {{ text: r }} : \
              {{ value: r === undefined ? null : r }}); }})()",
             missing = serde_json::Value::String(format!(

@@ -9,6 +9,7 @@ description = "Agix — RunCode and RunExt: JavaScript that calls the session's 
 [dependencies]
 base        = { workspace = true }
 js-lib      = { workspace = true }
+jsonschema  = { workspace = true }
 async-trait = { workspace = true }
 rquickjs    = { workspace = true, features = ["futures"] }
 schemars    = { workspace = true }
