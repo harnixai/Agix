@@ -17,6 +17,7 @@ mod engine_proxy;
 mod forge;
 mod four_project_pipeline;
 mod harness;
+mod history_location;
 mod hook_events;
 mod host_agents;
 mod host_skill_dirs;
