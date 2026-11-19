@@ -687,6 +687,30 @@ fn project_in(root: &Path) -> anyhow::Result<std::path::PathBuf> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn with_no_provider_configured_a_function_still_runs_in_a_directory() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let project = project_in(&root)?;
+    let package = root.join("host-xflow");
+    write_package(&package)?;
+    let embedded = embedded_with(&root, &package, Vec::new()).await?;
+
+    let call = PluginCall::new(
+        "xflow.check",
+        json!({ "change": "c5" }),
+        PluginCallTarget::Project(project),
+    );
+    let result = embedded
+        .pool()
+        .call_plugin(call, tokio_util::sync::CancellationToken::new())
+        .await?;
+    assert!(result.ok, "a function asks no model: {result:?}");
+    assert_eq!(result.value.unwrap_or_default()["gate"], "amber");
+    embedded.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn shutting_down_stops_a_call_running_in_a_directory_and_what_it_started(
 ) -> anyhow::Result<()> {
     use base::interface::host_js::{HostCallContext, HostJsLib};
@@ -765,6 +789,71 @@ fn running_command(command: &str) -> bool {
         .args(["-f", command])
         .output()
         .is_ok_and(|out| out.status.success())
+}
+
+const LATER_MANIFEST: &str = r#"
+[plugin]
+name = "later"
+version = "1.0.0"
+api_version = "0.1"
+
+[[function]]
+name = "schedule"
+entry = "later.js:schedule"
+description = "schedules a job"
+"#;
+
+const LATER_JS: &str = r#"
+async function schedule(input, ctx) {
+  try {
+    await tools.CronCreate({ cron: "*/5 * * * *", prompt: "ping", recurring: true });
+    return "scheduled";
+  } catch (e) {
+    return `refused: ${e.message || e}`;
+  }
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_in_no_session_schedules_nothing_for_a_session_that_is_not_there(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("fn-cron", &stub).start().await?;
+    let source = tempfile::tempdir()?;
+    std::fs::write(source.path().join("plugin.toml"), LATER_MANIFEST)?;
+    std::fs::write(source.path().join("later.js"), LATER_JS)?;
+    let (archive, _) = package_dir(source.path(), run.world.root(), "later")?;
+    let installed = ok(run
+        .client
+        .call(
+            "plugin.install",
+            json!({ "name": "later", "version": "1.0.0", "download_url": file_url(&archive) }),
+        )
+        .await?)?;
+    assert_eq!(installed["success"], true, "{installed}");
+
+    let params = in_dir(
+        &run,
+        "later.schedule",
+        json!({ "writes": true, "permission_rules": [
+            { "source": "session", "behavior": "allow", "tool_name": "CronCreate" }
+        ] }),
+    );
+    let result = call(&mut run, params).await?;
+    let jobs = ok(run.client.call("schedule.list", json!({})).await?)?;
+    assert_eq!(
+        jobs["jobs"],
+        json!([]),
+        "no job is left on a session that is not there: {jobs} ({result})"
+    );
+    assert!(
+        result["value"]
+            .as_str()
+            .is_some_and(|v| v.starts_with("refused") && v.contains("CronCreate")),
+        "{result}"
+    );
+    run.finish().await;
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
