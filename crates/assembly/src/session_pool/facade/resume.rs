@@ -155,11 +155,11 @@ impl SessionPool {
                 // no continuation semantics — reject before touching engine
                 // state.
                 self.live.wait_until_stopped(session_id).await?;
-                let log = match self.directory.read_log(session_id).await {
+                let log = match self.directory.read_log_or_refuse(session_id).await {
                     Ok(log) => log,
                     Err(e) => {
                         self.record_refused_resume(session_id, "unreadable", resume_start);
-                        return Err(PoolError::Internal(e));
+                        return Err(e);
                     }
                 };
                 if let Some((parent_session_id, state)) = sidechain_terminal_state(&log) {

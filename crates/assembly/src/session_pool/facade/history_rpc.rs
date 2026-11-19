@@ -74,8 +74,7 @@ impl SessionPool {
             PoolError::InvalidRequest(format!("invalid session_id `{}`: {e}", request.session_id))
         })?;
         let settings = self.bindings.pool_settings().await;
-        let roots = history::path::HistoryRoots::under(&settings.paths.global_data_dir);
-        crate::export::check_target(&request.path, &[roots.projects, roots.sessions.clone()])?;
+        crate::export::check_target(&request.path, &store.history_dirs_for(&request.path))?;
         let include = request.include;
         let (lineage, cut_at, live, recordings) = self
             .live
@@ -124,18 +123,11 @@ impl SessionPool {
             let (history, extension_entries) = export_views(&entries, store.projection())
                 .map_err(|e| PoolError::Internal(format!("failed to serialize transcript: {e}")))?;
             let stats = store.session_stats(sid).await.unwrap_or_default();
-            let metadata: Option<history::project::SessionMetadata> = tokio::fs::read_to_string(
-                history::path::session_metadata_file(&roots.sessions, &sid),
-            )
-            .await
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok());
-            let memory = tokio::fs::read_to_string(history::path::session_memory_file(
-                &roots.sessions,
-                &sid,
-            ))
-            .await
-            .ok();
+            let metadata: Option<history::project::SessionMetadata> =
+                read_sidecar(store.as_ref(), sid, history::path::METADATA_FILE)
+                    .await
+                    .and_then(|raw| serde_json::from_str(&raw).ok());
+            let memory = read_sidecar(store.as_ref(), sid, history::path::MEMORY_FILE).await;
             let in_memory = live.get(&id).cloned();
             let turn_state = in_memory
                 .as_ref()
@@ -661,4 +653,15 @@ pub(in crate::session_pool) fn history_item(
         origin,
         usage,
     }
+}
+
+/// One of `session`'s sidecar files, where the store keeps it; `None` when
+/// it is not there or cannot be read.
+async fn read_sidecar(
+    store: &dyn history::store::HistoryStore,
+    session: base::session::SessionId,
+    name: &str,
+) -> Option<String> {
+    let file = store.sidecar_locator(session)?.file(name).ok()?;
+    tokio::fs::read_to_string(file).await.ok()
 }

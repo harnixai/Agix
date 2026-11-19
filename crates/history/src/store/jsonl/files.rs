@@ -6,7 +6,7 @@ use super::super::SessionFacts;
 use crate::blob::BlobStore;
 use crate::entry::{EnvelopedEntry, SessionKind};
 use crate::error::HistoryError;
-use crate::path::{session_file, session_metadata_file};
+use crate::path::session_metadata_file;
 use crate::project::SessionMetadata;
 use base::session::SessionId;
 use std::collections::HashMap;
@@ -91,6 +91,24 @@ pub(super) async fn collect_session_files(
             .and_then(|m| m.modified().ok())
             .unwrap_or(std::time::UNIX_EPOCH);
         out.push((session_id, path, mtime));
+    }
+    Ok(out)
+}
+
+/// Every `<session>.jsonl` in every project directory under `projects_root`.
+pub(super) async fn collect_every_project(
+    projects_root: &Path,
+) -> Result<Vec<(SessionId, PathBuf, std::time::SystemTime)>, HistoryError> {
+    let mut project_dirs = match tokio::fs::read_dir(projects_root).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(HistoryError::Io(e)),
+    };
+    let mut out = Vec::new();
+    while let Some(entry) = project_dirs.next_entry().await? {
+        if entry.file_type().await.is_ok_and(|ft| ft.is_dir()) {
+            out.append(&mut collect_session_files(entry.path()).await?);
+        }
     }
     Ok(out)
 }
@@ -255,23 +273,6 @@ pub(super) fn parse_log(
         entries.push(env);
     }
     Ok(entries)
-}
-
-/// The length of every `<session>.jsonl` in `dir`.
-pub(super) async fn transcript_lengths_in(
-    dir: &Path,
-) -> Result<HashMap<SessionId, u64>, HistoryError> {
-    let mut lengths = HashMap::new();
-    for session in session_ids_in(dir).await? {
-        match tokio::fs::metadata(session_file(dir, &session)).await {
-            Ok(meta) => {
-                lengths.insert(session, meta.len());
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(HistoryError::Io(e)),
-        }
-    }
-    Ok(lengths)
 }
 
 /// The first `len` bytes of a log, cut back to the last whole line, or `None`

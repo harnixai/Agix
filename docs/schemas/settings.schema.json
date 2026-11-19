@@ -211,6 +211,25 @@
         }
       ]
     },
+    "HistoryLocation": {
+      "description": "[`HistorySettings::location`].",
+      "enum": [
+        "global",
+        "project"
+      ],
+      "type": "string"
+    },
+    "HistorySettings": {
+      "description": "Where sessions' transcripts and private files are kept.",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/HistoryLocation",
+          "default": "global",
+          "description": "`global` (default): under the state root's `projects/` and\n`sessions/`. `project`: a session of a trusted project goes to that\nproject's `<project dir>/state/history/<id>/` (a worktree's to its main\ncheckout's), with only an index under `sessions/<id>/`; the rest stay\nglobal. What is already kept either way is read where it is, and\nhistory kept in a project is read only while the project is trusted.\nTakes effect when the daemon starts."
+        }
+      },
+      "type": "object"
+    },
     "ModelEntry": {
       "anyOf": [
         {
@@ -967,6 +986,13 @@
         "max_parallelism": 10,
         "permission_prompt_timeout_secs": 300
       }
+    },
+    "history": {
+      "$ref": "#/$defs/HistorySettings",
+      "default": {
+        "location": "global"
+      },
+      "description": "Where sessions are kept — see [`HistorySettings`]. Read from the\nglobal tier only: one store serves every project."
     },
     "hooks_config": {
       "description": "Lifecycle hooks: an object from event name (`PreToolUse`,\n`SessionStart`, … — `hooks::HookEvent`) to a list of hooks, each with\na `type` of `command`, `prompt`, `http` or `agent`. Tiers merge per\nevent: a tier that lists an event replaces the lower tiers' list for\nit. An unknown event name is skipped with a warning; the rest still\napply. Format: `docs/hooks.md`."

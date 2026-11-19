@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 ///
 /// `projects` 与 `sessions` 是两个维度，不是两层：sidecar 只按 session id 索引
 /// （`session_sidecar_paths` 拿不到项目信息），所以它进不了 `projects/<cwd>/`。
+/// 放进项目的会话（[`crate::placement`]）在 `sessions/<id>/` 只留索引。
 ///
 /// 从同一个 `global_root` 派生这件事本身是重点：两个根若各读各的 env 变量，
 /// 默认值相同但可以被配成不同的目录，session memory 就会写去没人会读的地方。
@@ -31,40 +32,57 @@ impl HistoryRoots {
     }
 }
 
+/// A session's private files besides its transcript, by name; they sit in
+/// its sidecar directory wherever that is.
+pub const MEMORY_FILE: &str = "session_memory.md";
+pub const METADATA_FILE: &str = "metadata.json";
+pub const PROMPT_STATE_FILE: &str = "prompt_state.json";
+pub const TUI_INPUT_HISTORY_FILE: &str = "tui_input_history.jsonl";
+pub const REPL_INPUT_HISTORY_FILE: &str = "repl_input_history.txt";
+pub const CHECKPOINTS_DIR: &str = "checkpoints";
+/// In the global `sessions/<id>/` of a session kept in its project: where
+/// that is ([`crate::placement::SessionIndex`]).
+pub const INDEX_FILE: &str = "index.json";
+
 /// Global sidecar directory for session-scoped private state.
 pub fn session_sidecar_dir(sessions_root: &Path, session: &SessionId) -> PathBuf {
     sessions_root.join(session.to_string())
 }
 
-/// Session-scoped TUI input history. JSONL strings so multi-line prompts round-trip.
 /// Where the previous contents of files written in `session` are kept; the
 /// objects are under `objects/`.
 pub fn session_checkpoint_dir(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("checkpoints")
+    session_sidecar_dir(sessions_root, session).join(CHECKPOINTS_DIR)
 }
 
+/// Session-scoped TUI input history. JSONL strings so multi-line prompts round-trip.
 pub fn session_tui_input_history_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("tui_input_history.jsonl")
+    session_sidecar_dir(sessions_root, session).join(TUI_INPUT_HISTORY_FILE)
 }
 
 /// Session-scoped line-mode REPL input history. Native rustyline text format.
 pub fn session_repl_input_history_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("repl_input_history.txt")
+    session_sidecar_dir(sessions_root, session).join(REPL_INPUT_HISTORY_FILE)
 }
 
 /// Session-scoped memory snapshot file for cross-session persistence.
 pub fn session_memory_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("session_memory.md")
+    session_sidecar_dir(sessions_root, session).join(MEMORY_FILE)
 }
 
 /// Session-scoped prompt baseline / previous-turn settings snapshot.
 pub fn session_prompt_state_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("prompt_state.json")
+    session_sidecar_dir(sessions_root, session).join(PROMPT_STATE_FILE)
 }
 
 /// Session metadata sidecar.
 pub fn session_metadata_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
-    session_sidecar_dir(sessions_root, session).join("metadata.json")
+    session_sidecar_dir(sessions_root, session).join(METADATA_FILE)
+}
+
+/// The global index entry of a session kept in its project.
+pub fn session_index_file(sessions_root: &Path, session: &SessionId) -> PathBuf {
+    session_sidecar_dir(sessions_root, session).join(INDEX_FILE)
 }
 
 /// 把 cwd 解析到一个稳定的项目目录路径。

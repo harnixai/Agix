@@ -30,6 +30,16 @@ pub enum HistoryError {
     #[error("session {0} was deleted")]
     SessionDeleted(String),
 
+    /// The session is kept in a project that is not trusted now.
+    #[error(
+        "session {session} is kept in the project {}, which is not trusted; its history is not read until the project is trusted again",
+        .project.display()
+    )]
+    ProjectUntrusted {
+        session: String,
+        project: std::path::PathBuf,
+    },
+
     /// The backend cannot do what was asked.
     #[error("this history store does not support {0}")]
     Unsupported(&'static str),

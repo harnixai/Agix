@@ -3,8 +3,9 @@
 //! Tracks extraction timestamps and staleness to prompt the model to update
 //! its cross-session notes every N turns.
 //!
-//! The sidecar file lives at `{sessions_root}/{session_id}/session_memory.md`
-//! and carries a YAML frontmatter block with metadata:
+//! The sidecar file is `session_memory.md` in the session's sidecar directory
+//! (`HistoryStore::sidecar_locator`) and carries a YAML frontmatter block with
+//! metadata:
 //!
 //! ```markdown
 //! ---
@@ -15,7 +16,8 @@
 //! # Session Memory
 //! ```
 
-use std::path::{Path, PathBuf};
+use history::placement::SidecarLocator;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -33,12 +35,18 @@ pub struct SessionMemory {
 }
 
 struct SessionMemoryInner {
-    /// Absolute path to the session_memory.md sidecar file.
-    path: PathBuf,
+    file: MemoryFile,
     /// The turn number when session memory was last updated.
     last_update_turn: AtomicU32,
     /// Internal mutability for file I/O.
     io_lock: Mutex<()>,
+}
+
+enum MemoryFile {
+    Fixed(PathBuf),
+    /// In the session's sidecar directory, wherever that is when asked: the
+    /// session's `Meta`, written after this handle is made, decides it.
+    Sidecar(SidecarLocator),
 }
 
 impl SessionMemory {
@@ -47,9 +55,18 @@ impl SessionMemory {
     /// The file is **not** created here — call [`init_session_memory`] to
     /// write the initial header.
     pub fn new(path: PathBuf) -> Self {
+        Self::of(MemoryFile::Fixed(path))
+    }
+
+    /// `session_memory.md` in the sidecar directory `sidecar` finds.
+    pub fn in_sidecar(sidecar: SidecarLocator) -> Self {
+        Self::of(MemoryFile::Sidecar(sidecar))
+    }
+
+    fn of(file: MemoryFile) -> Self {
         Self {
             inner: Arc::new(SessionMemoryInner {
-                path,
+                file,
                 last_update_turn: AtomicU32::new(0),
                 io_lock: Mutex::new(()),
             }),
@@ -60,7 +77,7 @@ impl SessionMemory {
     /// not already exist. Safe to call multiple times.
     pub async fn init_session_memory(&self) -> std::io::Result<()> {
         let _guard = self.inner.io_lock.lock().await;
-        let path = &self.inner.path;
+        let path = &self.path()?;
         if path.try_exists().unwrap_or(false) {
             return Ok(()); // already exists
         }
@@ -105,13 +122,18 @@ impl SessionMemory {
     }
 
     /// Path to the session_memory.md sidecar file.
-    pub fn path(&self) -> &Path {
-        &self.inner.path
+    pub fn path(&self) -> std::io::Result<PathBuf> {
+        match &self.inner.file {
+            MemoryFile::Fixed(path) => Ok(path.clone()),
+            MemoryFile::Sidecar(sidecar) => sidecar.file(history::path::MEMORY_FILE).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string())
+            }),
+        }
     }
 
     /// Read the full content of the session_memory.md file, if it exists.
     pub async fn load_content(&self) -> std::io::Result<Option<String>> {
-        let path = &self.inner.path;
+        let path = &self.path()?;
         if !path.try_exists().unwrap_or(false) {
             return Ok(None);
         }
@@ -122,7 +144,7 @@ impl SessionMemory {
     /// Update a single frontmatter field in-place, preserving the rest of the
     /// file content. The frontmatter is a YAML block delimited by `---`.
     async fn update_frontmatter_field(&self, key: &str, value: &str) -> std::io::Result<()> {
-        let path = &self.inner.path;
+        let path = &self.path()?;
         let content = tokio::fs::read_to_string(path).await.unwrap_or_default();
 
         let (frontmatter, body) = match base::text::frontmatter::split_frontmatter(&content) {

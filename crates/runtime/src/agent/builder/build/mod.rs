@@ -21,7 +21,7 @@ impl Builder {
         let host_layers = self.host_layers();
         let questions_answered = self.questions_answered();
         let mut r = self.resolve()?;
-        let session = self.open_session(&r.settings)?;
+        let session = self.open_session()?;
         let checkpoints = self.session_checkpoints(&r.settings, &session);
         let compactor = self.take_compactor();
         let agent_depth = self.spec.agent_depth;

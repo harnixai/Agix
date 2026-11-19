@@ -137,10 +137,7 @@ impl Builder {
         (instruction_file, instruction_provider, claude_md_content)
     }
 
-    pub(super) fn open_session(
-        &self,
-        settings: &LoadedSettings,
-    ) -> Result<Transcript, EngineError> {
+    pub(super) fn open_session(&self) -> Result<Transcript, EngineError> {
         let mut session = Transcript::new(
             self.host.history_store.clone(),
             self.spec.session_id.clone(),
@@ -153,7 +150,7 @@ impl Builder {
         // outlive the process. An id that does not parse fails the build
         // rather than degrading: `persist` parses the same id, so both
         // transcript and sidecar would be dead for the whole session.
-        if self.host.history_store.is_some() {
+        if let Some(store) = &self.host.history_store {
             let sid = base::session::SessionId::parse(session.session_id_str()).map_err(|e| {
                 EngineError::Internal(format!(
                     "session_id {:?} is not a valid SessionId ({e}); \
@@ -162,11 +159,9 @@ impl Builder {
                     session.session_id_str()
                 ))
             })?;
-            // Through `history::path` like every other sidecar, or nothing
-            // would look where the file lands.
-            let roots = history::path::HistoryRoots::under(&settings.paths.global_data_dir);
-            let path = history::path::session_memory_file(&roots.sessions, &sid);
-            session = session.with_session_memory(SessionMemory::new(path));
+            if let Some(sidecar) = store.sidecar_locator(sid) {
+                session = session.with_session_memory(SessionMemory::in_sidecar(sidecar));
+            }
         }
         Ok(session)
     }

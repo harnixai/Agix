@@ -45,7 +45,7 @@ async fn a_last_line_cut_short_is_dropped_on_read_and_cut_off_before_the_next_ap
         let s = SessionId::new();
         store.append(s, user("one")).await.unwrap();
         store.append(s, user("two")).await.unwrap();
-        let path = store.session_path_of(s).await;
+        let path = store.path_of(s).await;
         append_raw(&path, fragment);
 
         let loaded = store
@@ -77,7 +77,7 @@ async fn a_whole_last_line_missing_only_its_newline_is_kept() {
     let store = store_in(&root).await;
     let s = SessionId::new();
     store.append(s, user("one")).await.unwrap();
-    let path = store.session_path_of(s).await;
+    let path = store.path_of(s).await;
     let whole = std::fs::read(&path).unwrap();
     std::fs::write(&path, &whole[..whole.len() - 1]).unwrap();
 
@@ -98,7 +98,7 @@ async fn a_session_with_a_broken_log_does_not_hide_another_ones_children() {
     let broken = SessionId::new();
     store.append(parent, user("p")).await.unwrap();
     store.append(broken, user("b")).await.unwrap();
-    let path = store.session_path_of(broken).await;
+    let path = store.path_of(broken).await;
     std::fs::write(&path, "not json\n{}\n").unwrap();
     assert!(store
         .child_sessions(&parent.to_string())
@@ -116,7 +116,7 @@ async fn a_broken_line_mid_log_leaves_only_that_session_out_of_a_search() {
     store.append(good, user("needle one")).await.unwrap();
     store.append(broken, user("needle two")).await.unwrap();
     store.append(broken, user("needle three")).await.unwrap();
-    let path = store.session_path_of(broken).await;
+    let path = store.path_of(broken).await;
     let log = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, log.replacen('\n', "\nnot json\n", 1)).unwrap();
     assert!(matches!(
@@ -173,7 +173,7 @@ async fn delete_takes_the_whole_sidecar_with_it() {
 
     store.delete(s).await.unwrap();
 
-    assert!(!store.session_path_of(s).await.exists());
+    assert!(!store.path_of(s).await.exists());
     assert!(!sidecar.exists());
     store.delete(s).await.unwrap();
     assert!(matches!(
@@ -410,7 +410,7 @@ async fn an_append_given_up_mid_write_finishes_its_line_before_the_next_append()
     let store = Arc::new(store_in(&root).await);
     let s = SessionId::new();
     store.append(s, user("one")).await.unwrap();
-    let path = store.session_path_of(s).await;
+    let path = store.path_of(s).await;
 
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::channel();

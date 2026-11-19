@@ -239,6 +239,20 @@ pub trait HistoryStore: Send + Sync {
         None
     }
 
+    /// Where `session`'s private files besides its log are kept — its
+    /// memory, input history, metadata — or `None` for a store that keeps
+    /// none on disk. Asked again at each use: a session's `Meta` decides
+    /// where it is kept.
+    fn sidecar_locator(&self, _session: SessionId) -> Option<crate::placement::SidecarLocator> {
+        None
+    }
+
+    /// The directories this store keeps sessions in that `path` could lie
+    /// in, for a caller that must not read or write inside them.
+    fn history_dirs_for(&self, _path: &std::path::Path) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
+
     /// Where this store's kept time and kept identifiers come from.
     ///
     /// On the store for the same reason the projection is: an entry's id and

@@ -143,6 +143,14 @@ impl HistoryStore for ObservedHistoryStore {
         self.inner.checkpoint_objects(root)
     }
 
+    fn sidecar_locator(&self, session: SessionId) -> Option<crate::placement::SidecarLocator> {
+        self.inner.sidecar_locator(session)
+    }
+
+    fn history_dirs_for(&self, path: &std::path::Path) -> Vec<std::path::PathBuf> {
+        self.inner.history_dirs_for(path)
+    }
+
     fn environment(&self) -> &dyn base::interface::environment::Environment {
         self.inner.environment()
     }

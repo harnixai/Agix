@@ -24,6 +24,7 @@ pub mod logging;
 pub mod model_router;
 pub mod modules;
 pub mod plugins;
+mod project_history;
 mod recording_view;
 pub mod rpc;
 pub mod server;

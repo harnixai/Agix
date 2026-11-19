@@ -35,6 +35,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("engine", "String"),
     ("plugins", "Vec<PathBuf>"),
     ("js_libs", "Vec<HostJsLib>"),
+    ("history", "Option<HistoryLocation>"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[

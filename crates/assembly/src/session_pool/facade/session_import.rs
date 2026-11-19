@@ -21,11 +21,7 @@ impl SessionPool {
     ) -> Result<api::ImportSummary, PoolError> {
         let store = self.directory.require_store()?.clone();
         let settings = self.bindings.pool_settings().await;
-        let roots = history::path::HistoryRoots::under(&settings.paths.global_data_dir);
-        check_source(
-            &request.path,
-            &[roots.projects.clone(), roots.sessions.clone()],
-        )?;
+        check_source(&request.path, &store.history_dirs_for(&request.path))?;
         let source = request.path.clone();
         let product = settings.paths.layout.product_name().to_string();
         let archive = tokio::task::spawn_blocking(move || read_archive(&source, &product))
@@ -71,18 +67,7 @@ impl SessionPool {
                 return Err(e);
             }
         };
-        for session in &archive.sessions {
-            let Some(memory) = &session.memory else {
-                continue;
-            };
-            let file = history::path::session_memory_file(&roots.sessions, &ids[&session.id]);
-            if let Err(e) = write_file(&file, memory).await {
-                warnings.push(format!(
-                    "the session memory of {} could not be written: {e}",
-                    session.id
-                ));
-            }
-        }
+        write_memories(store.as_ref(), &archive, &ids, &mut warnings).await;
         info!(root = %ids[&archive.root], sessions = summary.len(), "session imported");
         Ok(api::ImportSummary {
             root_session_id: ids[&archive.root].to_string(),
@@ -301,6 +286,39 @@ async fn write_sessions(
         }
     }
     Ok(summary)
+}
+
+/// Each imported session's memory, in its sidecar wherever the store kept
+/// the session; one that cannot be written is a warning.
+async fn write_memories(
+    store: &dyn HistoryStore,
+    archive: &Archive,
+    ids: &HashMap<SessionId, SessionId>,
+    warnings: &mut Vec<String>,
+) {
+    for session in &archive.sessions {
+        let Some(memory) = &session.memory else {
+            continue;
+        };
+        let file = store
+            .sidecar_locator(ids[&session.id])
+            .ok_or_else(|| "this store keeps no session files".to_string())
+            .and_then(|sidecar| {
+                sidecar
+                    .file(history::path::MEMORY_FILE)
+                    .map_err(|e| e.to_string())
+            });
+        let written = match file {
+            Ok(file) => write_file(&file, memory).await.map_err(|e| e.to_string()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = written {
+            warnings.push(format!(
+                "the session memory of {} could not be written: {e}",
+                session.id
+            ));
+        }
+    }
 }
 
 async fn write_file(file: &Path, text: &str) -> std::io::Result<()> {

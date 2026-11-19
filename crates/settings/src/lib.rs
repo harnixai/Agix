@@ -42,7 +42,7 @@ pub use source::{read_settings_file, FileTiers};
 
 /// The keys only the global tier's files may set; the loader drops them from
 /// every other tier.
-pub const GLOBAL_ONLY_KEYS: &[&str] = &["project_trust", "network"];
+pub const GLOBAL_ONLY_KEYS: &[&str] = &["project_trust", "network", "history"];
 
 /// The keys a project's own files may not set; the loader drops them from the
 /// project tier.
@@ -169,6 +169,11 @@ pub struct Settings {
     /// and managed tiers only: the clients are process-wide.
     #[serde(default)]
     pub network: NetworkSettings,
+
+    /// Where sessions are kept — see [`HistorySettings`]. Read from the
+    /// global tier only: one store serves every project.
+    #[serde(default)]
+    pub history: HistorySettings,
 
     /// MCP server configurations, keyed by server name (merged from
     /// global/scene/project layers). `$VAR` / `${VAR}` / `${VAR:-default}`
@@ -413,6 +418,32 @@ impl Default for NetworkSettings {
             use_system_proxy: true,
         }
     }
+}
+
+/// Where sessions' transcripts and private files are kept.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct HistorySettings {
+    /// `global` (default): under the state root's `projects/` and
+    /// `sessions/`. `project`: a session of a trusted project goes to that
+    /// project's `<project dir>/state/history/<id>/` (a worktree's to its main
+    /// checkout's), with only an index under `sessions/<id>/`; the rest stay
+    /// global. What is already kept either way is read where it is, and
+    /// history kept in a project is read only while the project is trusted.
+    /// Takes effect when the daemon starts.
+    pub location: HistoryLocation,
+}
+
+/// [`HistorySettings::location`].
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum HistoryLocation {
+    #[default]
+    Global,
+    Project,
 }
 
 /// Sandbox/security configuration.
@@ -716,6 +747,7 @@ impl Settings {
             hooks_config: None,
             project_trust: Default::default(),
             network: Default::default(),
+            history: Default::default(),
             mcp_servers: HashMap::new(),
             mcp_enabled: HashMap::new(),
             providers: HashMap::new(),

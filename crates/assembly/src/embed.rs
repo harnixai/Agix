@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use base::interface::host_js::HostJsLib;
 use base::interface::scene::SceneSpec;
+pub use settings::HistoryLocation;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -104,6 +105,12 @@ pub struct EmbedConfig {
     /// library's; function paths are dotted identifiers, each once.
     /// Otherwise the start fails with [`EmbedError::InvalidHostLibrary`].
     pub js_libs: Vec<HostJsLib>,
+    /// Where sessions are kept, over the global settings' `history.location`;
+    /// `None` leaves it to them, which is `Global` unless they say otherwise.
+    /// `Project` keeps a trusted project's sessions in its project directory's
+    /// `state/history/` (a worktree's in its main checkout's), with only an
+    /// index under `<data_root>/sessions/`.
+    pub history: Option<HistoryLocation>,
 }
 
 impl EmbedConfig {
@@ -129,6 +136,7 @@ impl EmbedConfig {
             engine: base::paths::DEFAULT_ENGINE.into(),
             plugins: Vec::new(),
             js_libs: Vec::new(),
+            history: None,
         }
     }
 
@@ -294,6 +302,7 @@ impl Embedded {
                 permission_prompt_timeout: config.permission_prompt_timeout,
                 host_plugins: config.plugins.clone(),
                 js_libs: config.js_libs.clone(),
+                history: config.history,
                 ..Default::default()
             },
         )

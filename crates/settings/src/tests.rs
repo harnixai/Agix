@@ -973,6 +973,39 @@ mod project_trust {
     }
 
     #[test]
+    fn only_the_global_tier_says_where_history_is_kept() {
+        use crate::HistoryLocation;
+        for layout in layouts() {
+            let tiers = Tiers::new(&layout);
+            write_settings(&tiers.global, "{}");
+            assert_eq!(
+                tiers.load().values.history.location,
+                HistoryLocation::Global
+            );
+
+            trust_project(&tiers.global, &tiers.project_dir());
+            let project = r#"{"history": {"location": "project"}}"#;
+            write_settings(&tiers.scene, project);
+            write_settings(&tiers.project_dir(), project);
+            assert_eq!(
+                tiers.load().values.history.location,
+                HistoryLocation::Global
+            );
+
+            let mut global: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(tiers.global.join(SETTINGS_FILE)).unwrap(),
+            )
+            .unwrap();
+            global["history"] = serde_json::json!({"location": "project"});
+            write_settings(&tiers.global, &global.to_string());
+            assert_eq!(
+                tiers.load().values.history.location,
+                HistoryLocation::Project
+            );
+        }
+    }
+
+    #[test]
     fn the_worktrees_go_where_the_users_own_tiers_say() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);

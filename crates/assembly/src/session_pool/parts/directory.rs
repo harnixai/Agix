@@ -99,6 +99,9 @@ impl SessionDirectory {
             history::error::HistoryError::SessionNotFound(_) => {
                 PoolError::session_not_found(session_id)
             }
+            e @ history::error::HistoryError::ProjectUntrusted { .. } => {
+                PoolError::ProjectUntrusted(e.to_string())
+            }
             other => PoolError::Internal(format!("failed to read session history: {other}")),
         })
     }
@@ -146,6 +149,17 @@ impl SessionDirectory {
         &self,
         sid: &str,
     ) -> Result<Vec<history::entry::EnvelopedEntry>, String> {
+        self.read_log_or_refuse(sid)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// [`Self::read_log`], telling a session kept in a project that is not
+    /// trusted now (`PROJECT_UNTRUSTED`) from a log that would not load.
+    pub(in crate::session_pool) async fn read_log_or_refuse(
+        &self,
+        sid: &str,
+    ) -> Result<Vec<history::entry::EnvelopedEntry>, PoolError> {
         let (Some(store), Ok(parsed)) = (self.store.as_ref(), base::session::SessionId::parse(sid))
         else {
             return Ok(Vec::new());
@@ -153,9 +167,14 @@ impl SessionDirectory {
         match store.load(parsed).await {
             Ok(entries) => Ok(entries),
             Err(history::error::HistoryError::SessionNotFound(_)) => Ok(Vec::new()),
-            Err(e) => Err(format!(
+            Err(e @ history::error::HistoryError::ProjectUntrusted { .. }) => {
+                Err(PoolError::ProjectUntrusted(format!(
+                    "session `{sid}` could not be brought back: {e}"
+                )))
+            }
+            Err(e) => Err(PoolError::Internal(format!(
                 "session `{sid}` could not be brought back: its transcript could not be loaded: {e}"
-            )),
+            ))),
         }
     }
 

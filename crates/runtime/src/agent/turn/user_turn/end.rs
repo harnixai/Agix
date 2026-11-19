@@ -112,12 +112,14 @@ impl Agent {
 
     async fn remind_stale_session_notes(&mut self) {
         if let Some(ref sm) = self.session.session_memory {
+            let Ok(notes) = sm.path() else {
+                return;
+            };
             let current_turn = self.session.turn_count;
             // The path compared is the one the reminder tells the model, so
             // a literal match needs no canonicalization.
-            let updated_this_turn = Self::extract_tool_file_paths(self.messages_this_turn())
-                .iter()
-                .any(|p| p == sm.path());
+            let updated_this_turn =
+                Self::extract_tool_file_paths(self.messages_this_turn()).contains(&notes);
             if updated_this_turn {
                 if let Err(e) = sm.mark_extraction_completed(current_turn).await {
                     tracing::warn!(error = %e, "failed to mark session_memory extraction completed");
@@ -138,7 +140,7 @@ Your session notes ({}) have not been updated in several turns.
 Consider reviewing and updating them with any persistent facts, user preferences,
 or project context that should survive across sessions.
 </system-reminder>",
-                            sm.path().display()
+                            notes.display()
                         ),
                     }],
                 });

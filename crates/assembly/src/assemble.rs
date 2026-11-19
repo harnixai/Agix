@@ -63,6 +63,9 @@ pub struct Assembly {
     pub credentials: Option<Arc<dyn base::interface::credentials::CredentialSource>>,
     /// Where transcripts live.
     pub transcripts: Transcripts,
+    /// Over the settings' `history.location` for the store this assembly
+    /// opens (`Transcripts::UnderGlobalRoot`); `None` leaves it to them.
+    pub history: Option<settings::HistoryLocation>,
     /// The host's own say on every call, weighed as one more tier of rules:
     /// its deny stands in every mode, its permit is one allow rule.
     pub host_policy: Option<Arc<dyn PermissionPolicy>>,
@@ -158,14 +161,14 @@ pub async fn pool(
         );
     }
 
-    let global_dir = config.settings.paths.global_data_dir.clone();
-
     let cwd = assembly
         .cwd
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     let history_store = match assembly.transcripts {
-        Transcripts::UnderGlobalRoot => default_history_store(&global_dir, &cwd).await,
+        Transcripts::UnderGlobalRoot => {
+            default_history_store(&settings, &cwd, assembly.history).await
+        }
         Transcripts::In(store) => Some(store),
         Transcripts::Nowhere => None,
     };
@@ -378,18 +381,26 @@ fn default_anthropic_client(
     ))))
 }
 
-/// Transcripts under `global_dir`.
+/// Transcripts under the global root, or in their projects where `location`
+/// (else `history.location`) and the project's trust say.
 ///
 /// `None` — logged, not fatal — when the store cannot be opened: a daemon
 /// that runs without persistence is degraded, and one that refuses to start
 /// is unavailable.
 async fn default_history_store(
-    global_dir: &std::path::Path,
+    settings: &settings::LoadedSettings,
     cwd: &std::path::Path,
+    location: Option<settings::HistoryLocation>,
 ) -> Option<Arc<dyn history::store::HistoryStore>> {
+    let global_dir = &settings.paths.global_data_dir;
+    let projects = crate::project_history::ProjectHistoryPolicy::new(
+        location.unwrap_or(settings.values.history.location),
+        settings.paths.layout.clone(),
+        global_dir.clone(),
+    );
     let roots = history::path::HistoryRoots::under(global_dir);
     match history::store::JsonlHistoryStore::with_roots(cwd, roots).await {
-        Ok(store) => Some(Arc::new(store)),
+        Ok(store) => Some(Arc::new(store.with_project_history(Arc::new(projects)))),
         Err(e) => {
             warn!(error = %e, "failed to initialize session history store; sessions will be in-memory only for this run");
             None

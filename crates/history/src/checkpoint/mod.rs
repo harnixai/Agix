@@ -207,12 +207,42 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// make a rewind do less, never write something else.
 #[derive(Debug, Clone)]
 pub struct CheckpointObjects {
-    dir: PathBuf,
+    dir: ObjectsDir,
+}
+
+#[derive(Debug, Clone)]
+enum ObjectsDir {
+    Fixed(PathBuf),
+    /// `checkpoints/objects` in a session's sidecar, wherever that is when asked.
+    Sidecar(crate::placement::SidecarLocator),
 }
 
 impl CheckpointObjects {
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        Self {
+            dir: ObjectsDir::Fixed(dir),
+        }
+    }
+
+    pub fn located(sidecar: crate::placement::SidecarLocator) -> Self {
+        Self {
+            dir: ObjectsDir::Sidecar(sidecar),
+        }
+    }
+
+    fn dir(&self) -> Result<PathBuf, std::io::Error> {
+        match &self.dir {
+            ObjectsDir::Fixed(dir) => Ok(dir.clone()),
+            ObjectsDir::Sidecar(sidecar) => sidecar
+                .file(crate::path::CHECKPOINTS_DIR)
+                .map(|dir| dir.join("objects"))
+                .map_err(|e| match e {
+                    crate::error::HistoryError::Io(e) => e,
+                    other => {
+                        std::io::Error::new(std::io::ErrorKind::PermissionDenied, other.to_string())
+                    }
+                }),
+        }
     }
 }
 
@@ -227,8 +257,9 @@ impl BlobStore for CheckpointObjects {
 
     fn put(&self, bytes: &[u8]) -> Result<String, std::io::Error> {
         let id = sha256_hex(bytes);
-        create_private_dir(&self.dir)?;
-        let path = self.dir.join(&id);
+        let dir = self.dir()?;
+        create_private_dir(&dir)?;
+        let path = dir.join(&id);
         let whole = std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64);
         if !whole {
             base::fs::write_atomic(&path, bytes, base::fs::WriteOpts::PRIVATE)?;
@@ -240,7 +271,7 @@ impl BlobStore for CheckpointObjects {
         if !is_object_id(id) {
             return Ok(None);
         }
-        match std::fs::read(self.dir.join(id)) {
+        match std::fs::read(self.dir()?.join(id)) {
             Ok(bytes) if sha256_hex(&bytes) == id => Ok(Some(bytes)),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -249,7 +280,7 @@ impl BlobStore for CheckpointObjects {
     }
 
     fn list(&self) -> Result<Vec<(String, u64)>, std::io::Error> {
-        let entries = match std::fs::read_dir(&self.dir) {
+        let entries = match std::fs::read_dir(self.dir()?) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(e),
@@ -268,7 +299,7 @@ impl BlobStore for CheckpointObjects {
         if !is_object_id(id) {
             return Ok(());
         }
-        match std::fs::remove_file(self.dir.join(id)) {
+        match std::fs::remove_file(self.dir()?.join(id)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         }

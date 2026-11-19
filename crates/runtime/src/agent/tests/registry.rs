@@ -717,7 +717,7 @@ async fn build_wires_session_memory_when_history_store_present() {
         &history::path::HistoryRoots::under(projects_tmp.path()).sessions,
         &base::session::SessionId::parse(&sid).unwrap(),
     );
-    assert_eq!(sm.path(), expected);
+    assert_eq!(sm.path().unwrap(), expected);
 }
 
 /// What the engine puts to the session's policy: the tool as the session's

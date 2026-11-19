@@ -404,6 +404,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
             "execution.permission_prompt_timeout_secs",
             Tighten(LowerZeroIsWidest),
         ),
+        ("history.location", Withheld),
         ("hooks_config", Withheld),
         ("instruction_file", Withheld),
         ("language", Free),
