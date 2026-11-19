@@ -311,6 +311,15 @@ glob 清单),项目自己写的忽略。三态:
 | `host` | 全局 `settings.local.json` 里的一条命中——`project.trust` 写在这里 |
 | `null` | 没有自己的项目层(`project_trust` 是 `none`) |
 
+**会话历史放进项目时也看信任。** 全局设置 `history.location` 为 `project`(嵌入时
+`EmbedConfig.history`)时,受信项目的会话放在 `<项目>/.agix/state/history/<id>/`(worktree 里的
+放在主仓库的这个目录),全局 `sessions/<id>/` 只留索引;不受信项目的照旧放全局。只认全局索引登记过的
+项目内会话,项目里多出来的不进 `session.list`、搜索,`session.resume` 报 `SESSION_NOT_FOUND`。
+项目后来被取消信任,它里面的历史不读:`session.list` 与搜索里没有这些会话,`session.resume`、
+`session.history`、`session.export` 等指名它们 → `PROJECT_UNTRUSTED`,消息写明是哪个项目;
+重新信任后照常。项目整个搬了家,daemon 在新位置打开它(它是 daemon 的项目,或有会话建在、列在它上面)
+时索引跟过去,会话按新位置恢复。布局见 `ARCHITECTURE.md` §8.2。
+
 ---
 
 ## 4. 数据类型
@@ -2287,6 +2296,8 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   `create_if_missing` 都一样,不起引擎,也不往那份转录写任何东西。崩溃截断、没有换行结尾的最后
   半行不算读不出来,读的时候丢掉。`session.run_turn` 指名这样的会话同样如此。
 - 场景不符 → `SCENE_MISMATCH`;没记场景 → 按当前场景恢复(§3.4)。
+- 会话放在一个现在不受信的项目里(§3.6 末段)→ `PROJECT_UNTRUSTED`,消息含项目路径与
+  "not trusted";不起引擎,不动那份历史。
 - 目标是已终态的侧链 → `SIDECHAIN_TERMINAL`(§3.3)。
 - 会话正在共用同一状态目录的另一个 daemon 里 → `INTERNAL_ERROR`,消息含
   "being written by another process";不会换 id 新建。`session.run_turn` 指名这样的会话
@@ -2380,8 +2391,8 @@ managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:
 
 **路径。** 必须是绝对路径;它所在的目录必须已经存在;目标本身必须不存在(那里有一个符号链接
 也算存在)——导出从不覆盖。归档先写到同目录下的一个临时名,写完才换到目标名上,失败时临时
-文件会被删掉,目标名上不会留下半个归档。目标不能落在会话历史目录(`projects/`、`sessions/`)
-之下。路径在 **daemon 所在的机器上**:经 TCP / WebSocket 连上来的客户端拿到的是那台机器上的
+文件会被删掉,目标名上不会留下半个归档。目标不能落在会话历史目录(`projects/`、`sessions/`,
+以及路径所在项目的 `.agix/state/history/`)之下。路径在 **daemon 所在的机器上**:经 TCP / WebSocket 连上来的客户端拿到的是那台机器上的
 文件。
 
 **归档的布局**(`format: "dir"` 时是同样结构的一个目录):
@@ -2473,7 +2484,7 @@ tool-results/<name>                      只在 include 列了 "tool_results"(�
 ```
 
 **什么都在写之前查完。** 路径必须是绝对路径、是普通文件或目录(符号链接不行),且不在会话历史目录
-(`projects/`、`sessions/`)之下。归档只读它的布局里认得的几项:`manifest.json`、
+(`projects/`、`sessions/`,以及路径所在项目的 `.agix/state/history/`)之下。归档只读它的布局里认得的几项:`manifest.json`、
 `sessions/<id>/transcript.jsonl`、`sessions/<id>/session_memory.md`,以及清单 `tool_results.files` 列出的
 `tool-results/<name>`(文件名只能是 `[A-Za-z0-9_-]` 加 `.txt`,sha256 要对得上,否则 `INVALID_PARAMS`);条目名带 `..`、绝对路径或是
 符号链接的 zip、目录里有符号链接的目录一律拒绝,条目数上限 100,000、解开后总量上限 2 GiB、单个
@@ -2535,7 +2546,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 ```
 
 **真正删除磁盘 transcript 与 `sessions/<id>/` 整个目录(会话记忆、metadata、输入历史、
-文件 checkpoint 的写前副本 `checkpoints/`),并级联删除记着它作父会话的全部会话(侧链,以及它的
+文件 checkpoint 的写前副本 `checkpoints/`;放进项目的会话是项目里的 `state/history/<id>/` 加全局的索引),并级联删除记着它作父会话的全部会话(侧链,以及它的
 分叉)。不可逆。**
 
 `dry_run: true` 只返回将要删除的清单(`deleted` 为 `false`),不实际删除 —— 供宿主

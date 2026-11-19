@@ -2200,7 +2200,7 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 |---|---|---|
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
-| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删;`checkpoints` 设置段限单文件(`max_bytes_per_file`)与总量(`max_total_bytes`),超总量按最旧清并在转录里记 `pruned` |
+| `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);放进项目的会话(§8.2)这里只有 `index.json` 与 `writer.lock`;根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删;`checkpoints` 设置段限单文件(`max_bytes_per_file`)与总量(`max_total_bytes`),超总量按最旧清并在转录里记 `pruned` |
 | `<项目>/.agix/state/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;无项目的会话在 `<状态目录>/tool-results/`;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,随 `state/` 不进仓库,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删;`session.resume` 清无引用的,`session.fork` 硬链接复制,`session.export` / `session.import` 带过去 |
 | `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/state/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
@@ -2229,7 +2229,7 @@ hooks、commands、rules、output-styles 等配置);引擎为这台机器、这�
 
 `state/<产品名的小写>/` 归嵌入方(`Layout::host_state_dir`,如 `.codix/state/codix/`):引擎不读不写,
 与 `state/` 的其余部分一样受保护(§8.1)。产品名小写后不能是引擎在 `state/` 下用的名字
-(`STATE_RESERVED_NAMES`,`history` 给按项目存放的会话历史留着),`Layout::with_product_name` 在启动时拒。
+(`STATE_RESERVED_NAMES`,其中 `history` 是按项目存放的会话历史,§8.2),`Layout::with_product_name` 在启动时拒。
 
 **旧位置。** 读一个项目的设置就是打开它(`settings_source::read_pair`,在一切用到本机数据之前):直接放在
 `.agix/` 下的 `PROJECT_STATE_ENTRIES`(上面那六项)一次性改名进 `state/`,之后只读新位置。项目层目录是
@@ -2353,6 +2353,38 @@ instrumentation scope 与 `agix.*` 指标名标识库,仍是 agix;导出器是�
 门禁照常按用户、项目各层判断;文件在但读不了或不合法仍按 §6.1 拒绝一切工具调用,MCP 策略文件读不了仍拒绝一切
 server。宿主点名的 `managed_settings` / `mcp_policy` 与产品名无关,必须存在。所以改名不会让一份本该生效的
 managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字下——这一点写在 `agix-sdk.md` 的迁移说明里。
+
+### 8.2 会话历史放进项目(`history.location`)
+
+全局设置 `history.location`(只认全局层,场景层、项目层写了忽略并告警;嵌入时
+`EmbedConfig.history` 优先)缺省 `global`,布局就是上表。设成 `project` 后,**受信项目**的新会话
+整份放进项目:`<主仓库>/.agix/state/history/<id>/` 下是 `<id>.jsonl`、`metadata.json`、
+`session_memory.md`、输入历史与 `checkpoints/`,文件名与全局 `sessions/<id>/` 里的相同;worktree 里
+的会话放进主仓库的这个目录(`Layout::main_checkout_copies`)。全局 `sessions/<id>/` 只留
+`index.json`(`history::placement::SessionIndex`:项目根、会话目录,项目搬过或拼写不同时另记日志里
+的那个根)和 `writer.lock`——锁在追加知道会话去哪之前就要拿到。索引先于 sidecar 与转录落盘,理由同上:
+它说明日志在哪。不受信的项目、无项目会话照旧全局;侧链与分叉跟父会话放在一处,一条谱系总在一个目录里。
+`state/history` 和 `state/` 的其余部分一样受保护(§8.1),模型写不进去。
+
+**一个解析点。** 会话的文件在哪只由 `JsonlHistoryStore` 内部的 `Homes::locate` 回答:先看全局
+索引,再看全局 metadata(老会话),都没有就是存储自己的项目(那时一个存储只服务一个项目)。读写、
+列表、跨项目搜索、谱系、级联删除、会话记忆(`HistoryStore::sidecar_locator`)、checkpoint 副本
+都经它;导入导出的根检查经 `HistoryStore::history_dirs_for`。项目的布局、新会话进不进项目、项目
+此刻是否受信,是宿主经 `ProjectHistory` 回答的(装配层的 `ProjectHistoryPolicy`,信任每次从全局
+层的 `project_trust` 读)。
+
+**防植入。** 克隆来的仓库可以自带 `.agix/state/history/`。只有全局索引登记过、且索引指向的正是
+那个目录的会话才被认:项目里多出来的 id 不进列表、搜索、谱系,resume 找不到,它的会话记忆与
+checkpoint 也不会被当成谁的。读项目里的历史每次都看项目是否受信;信任撤掉后不读,错误是
+`ProjectUntrusted`(RPC 上 `PROJECT_UNTRUSTED`)而不是"不存在"。写不看信任:已经放进去的会话
+继续写在原处。
+
+**搬家。** 索引记的项目根和会话目录都不在了,而本进程打开过的某个受信项目(存储自己的项目,或列表、
+新会话碰到的)的 `state/history/` 下有这个 id,就把索引改写到新位置,并把 metadata 里的项目路径一起
+改掉;只认索引里已有的 id。之后读出的 `Meta` 把旧根下的路径换成新根,会话按新位置的项目重建。
+
+**兼容。** 不迁移:已在全局的历史原地照读,两种位置可以并存,以索引为准;`history.location` 从
+`project` 改回 `global` 后,项目里的会话照样经索引读。改设置在 daemon 启动时生效。
 
 ---
 
