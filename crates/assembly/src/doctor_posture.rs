@@ -124,7 +124,7 @@ impl HealthCheck for UnattendedNetworkCheck {
         let details = serde_json::json!({
             "unattended_scenes": self.unattended_scenes,
             "network_mode": sandbox.network.mode,
-            "unattended_requires_network_policy": sandbox.unattended_needs_network_policy,
+            "unattended_needs_network_policy": sandbox.unattended_needs_network_policy,
         });
         let open = sandbox.network.mode == NetworkMode::Unrestricted
             && !sandbox.unattended_needs_network_policy;
@@ -219,7 +219,7 @@ impl HealthCheck for NetworkAllowlistCheck {
             .collect();
         let details = serde_json::json!({
             "unreachable_from_the_sandbox": unreachable,
-            "require_enforcement": sandbox.require,
+            "require": sandbox.require,
         });
         if unreachable.is_empty() {
             return CheckResult::ok("the allowlist names only localhost").with_details(details);
@@ -345,7 +345,7 @@ impl HealthCheck for StrictProfileCheck {
         };
         let details = serde_json::json!({
             "enforcement": format!("{strict:?}").to_lowercase(),
-            "sandbox_disabled": !self.settings.values.sandbox.enabled,
+            "sandbox_enabled": self.settings.values.sandbox.enabled,
         });
         if strict == Enforcement::Full {
             return CheckResult::ok(
