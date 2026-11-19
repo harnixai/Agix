@@ -103,7 +103,7 @@ pub fn parse_permission_mode(value: &str) -> Option<crate::permission::Permissio
     match value {
         "default" => Some(PermissionMode::Default),
         "acceptEdits" | "accept_edits" | "accept-edits" => Some(PermissionMode::AcceptEdits),
-        "bypassPermissions" | "bypass_permissions" | "bypass-permissions" | "auto" | "yolo" => {
+        "bypassPermissions" | "bypass_permissions" | "bypass-permissions" => {
             Some(PermissionMode::BypassPermissions)
         }
         "plan" => Some(PermissionMode::Plan),

@@ -886,9 +886,9 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
         "details": { "panic":"…" } },
       { "name":"sandbox.strict_profile",    "status":"…",  "summary":"…" } ] },
   "settings_tiers": [
-    { "tier":"global",  "path":"…/settings.json",       "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] },
-    { "tier":"scene",   "scene":"code", "path":"…/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] },
-    { "tier":"project", "path":"…/.agix/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] } ],
+    { "tier":"global",  "path":"…/settings.json",       "exists":false, "parses":true, "error":null, "unknown_keys":[], "renamed_keys":[], "ignored_values":[] },
+    { "tier":"scene",   "scene":"code", "path":"…/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "renamed_keys":[], "ignored_values":[] },
+    { "tier":"project", "path":"…/.agix/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "renamed_keys":[], "ignored_values":[] } ],
   "providers": { "ok":true, "configured":["anthropic"], "order":["anthropic"],
                  "tasks": { "main":"strong", "subagent":"balanced", "compact":"fast",
                             "memory":"fast", "title":"fast", "web_search":"fast" },
@@ -922,6 +922,10 @@ summary 为 `did not answer within 5s`,报告不再等它;panic 的检查同样�
 `settings_tiers[].unknown_keys` 是那份文件里没有任何设置读的顶层键(拼错的、别的工具的),
 加载时被忽略,daemon 日志里各有一条 warn。有这样的键时 `settings.tiers` 仍是 `ok`,
 `summary` 里写明是哪几层。
+
+`settings_tiers[].renamed_keys` 是那份文件里改过名、不再读的旧键:`{ "old", "new" }`。有这样的键时
+`settings.tiers` 是 `degraded`;其中有旧键原本管着一道保护(权限规则与模式、沙箱、技能里的命令、
+MCP 开关、项目信任)时是 `failing`——它不再读,那道保护就没了。`summary` 列出 `旧 → 新`。
 
 `settings_tiers[].ignored_values` 是这一层(`settings.json` 与 `settings.local.json`)里类型
 不对、因而被丢掉的值:`{ "tier", "origin", "key", "error" }`,`key` 是点分的

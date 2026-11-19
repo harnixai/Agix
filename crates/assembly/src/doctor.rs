@@ -32,9 +32,32 @@ struct TierStatus {
     error: Option<String>,
     /// Top-level keys no setting reads; they are ignored.
     unknown_keys: Vec<String>,
+    /// Keys this release renamed, with what replaced them; they are ignored.
+    renamed_keys: Vec<RenamedKey>,
     /// Values in this tier's files that do not fit their setting, left out
     /// of the merge — see `LoadedSettings::ignored`.
     ignored_values: Vec<settings::IgnoredValue>,
+}
+
+#[derive(serde::Serialize)]
+struct RenamedKey {
+    old: &'static str,
+    new: &'static str,
+}
+
+/// Old keys whose being ignored leaves a protection off: a deny rule, the
+/// sandbox, a disabled MCP server, a trust decision.
+fn guards_something(old: &str) -> bool {
+    [
+        "permission",
+        "allow_client",
+        "disable_",
+        "sandbox",
+        "mcp_enabled",
+        "project_trust",
+    ]
+    .iter()
+    .any(|prefix| old.starts_with(prefix))
 }
 
 fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
@@ -49,6 +72,7 @@ fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
             parses: true,
             error: None,
             unknown_keys: Vec::new(),
+            renamed_keys: Vec::new(),
             ignored_values: Vec::new(),
         };
     }
@@ -65,6 +89,10 @@ fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
                     &value,
                     &crate::settings_sections::all(),
                 ),
+                renamed_keys: settings::renamed::old_keys_in(&value)
+                    .into_iter()
+                    .map(|(old, new)| RenamedKey { old, new })
+                    .collect(),
                 ignored_values: Vec::new(),
             },
             Err(e) => TierStatus {
@@ -75,6 +103,7 @@ fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
                 parses: false,
                 error: Some(format!("invalid JSON: {e}")),
                 unknown_keys: Vec::new(),
+                renamed_keys: Vec::new(),
                 ignored_values: Vec::new(),
             },
         },
@@ -86,6 +115,7 @@ fn inspect_tier(tier: &'static str, dir: &Path) -> TierStatus {
             parses: false,
             error: Some(format!("read error: {e}")),
             unknown_keys: Vec::new(),
+            renamed_keys: Vec::new(),
             ignored_values: Vec::new(),
         },
     }
@@ -168,7 +198,27 @@ impl HealthCheck for SettingsTiersCheck {
             .filter(|t| !t.unknown_keys.is_empty())
             .map(label)
             .collect();
+        let renamed: Vec<&RenamedKey> = tiers.iter().flat_map(|t| &t.renamed_keys).collect();
+        let renamed_list = |keys: &[&RenamedKey]| {
+            keys.iter()
+                .map(|k| format!("{} → {}", k.old, k.new))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let unguarded: Vec<&RenamedKey> = renamed
+            .iter()
+            .copied()
+            .filter(|k| guards_something(k.old))
+            .collect();
         let details = serde_json::to_value(&tiers).unwrap_or(serde_json::Value::Null);
+
+        if !unguarded.is_empty() {
+            return CheckResult::failing(format!(
+                "renamed settings keys are no longer read, so what they protected is off: {}",
+                renamed_list(&unguarded)
+            ))
+            .with_details(details);
+        }
 
         // A tier that is simply absent is the normal case, not a fault: most
         // deployments write one file and leave the other two alone.
@@ -179,6 +229,12 @@ impl HealthCheck for SettingsTiersCheck {
             CheckResult::degraded(format!(
                 "settings values that do not fit their setting, ignored: {}",
                 misfits.join(", ")
+            ))
+            .with_details(details)
+        } else if !renamed.is_empty() {
+            CheckResult::degraded(format!(
+                "renamed settings keys are no longer read: {}",
+                renamed_list(&renamed)
             ))
             .with_details(details)
         } else if with_unknown.is_empty() {
@@ -705,6 +761,49 @@ mod tests {
         assert_eq!(check["status"], "ok", "{check}");
         assert!(
             check["summary"].as_str().unwrap().contains("ignored"),
+            "{check}"
+        );
+    }
+
+    fn settings_check_for(file: &str) -> serde_json::Value {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), file).unwrap();
+        let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
+        let report = run_doctor(
+            &paths,
+            "code",
+            base_settings(),
+            false,
+            crate::plugins::PluginStatus::Enabled,
+            &no_extra_checks(),
+        );
+        report["health"]["checks"][0].clone()
+    }
+
+    #[test]
+    fn a_renamed_key_that_kept_a_protection_on_fails() {
+        let check = settings_check_for(
+            r#"{"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
+        );
+        assert_eq!(check["status"], "failing", "{check}");
+        assert!(
+            check["summary"]
+                .as_str()
+                .unwrap()
+                .contains("permission_rules → permissions."),
+            "{check}"
+        );
+    }
+
+    #[test]
+    fn any_other_renamed_key_degrades() {
+        let check = settings_check_for(r#"{"memory_enabled": false}"#);
+        assert_eq!(check["status"], "degraded", "{check}");
+        assert!(
+            check["summary"]
+                .as_str()
+                .unwrap()
+                .contains("memory_enabled → memory.enabled"),
             "{check}"
         );
     }
