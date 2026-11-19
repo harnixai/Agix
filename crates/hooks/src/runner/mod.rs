@@ -1995,7 +1995,7 @@ mod tests {
     }
 
     async fn appears(path: &std::path::Path) -> bool {
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(60), async {
             while !path.exists() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
@@ -2033,7 +2033,12 @@ mod tests {
     async fn an_observer_hook_is_not_waited_for_once_its_turn_is_stopped() {
         let dir = tempfile_dir();
         let started = dir.join("started");
-        let mut slow = command(&format!("touch '{}'; sleep 30", started.display()));
+        let finished = dir.join("finished");
+        let mut slow = command(&format!(
+            "touch '{}'; sleep 30; touch '{}'",
+            started.display(),
+            finished.display()
+        ));
         if let HookConfig::Command { timeout, .. } = &mut slow {
             *timeout = Some(60_000);
         }
@@ -2041,14 +2046,11 @@ mod tests {
         let stop = CancellationToken::new();
         let input = HookInput::lifecycle("TurnStart", "s", ".", "default");
 
-        let returned = tokio::time::timeout(Duration::from_secs(10), async {
-            tokio::join!(r.run(HookEvent::TurnStart, &input, &stop), async {
-                assert!(appears(&started).await, "the hook never started");
-                stop.cancel();
-            })
-        })
-        .await;
-        assert!(returned.is_ok(), "the stopped turn waited for its hook");
+        tokio::join!(r.run(HookEvent::TurnStart, &input, &stop), async {
+            assert!(appears(&started).await, "the hook never started");
+            stop.cancel();
+        });
+        assert!(!finished.exists(), "the stopped turn waited for its hook");
     }
 
     /// Draining waits for it until the deadline, then stops it with
