@@ -369,8 +369,9 @@ async function check(input, ctx) {
 
 返回值原样（字符串或可序列化的值）交回宿主：`{ ok: true, value, logs }`；`logs` 是 `log` / `console.*`
 记下的行。失败是 `{ ok: false, error: { code, message }, logs }`：`invalid_input`（不符合 `input_schema`，
-没跑）、`refused`（管线没让跑）、`threw`（抛了错；`message` 是错误消息，再跟已经做了的改动）、
-`timeout`、`cancelled`、`stopped`、`not_started`。
+没跑）、`refused`（管线没让跑）、`answered_by_middleware`（`tool.around` 用 `respond` 替函数作答，
+或 `tool.result` 改写了结果——宿主拿到的只会是函数自己的结果或失败）、`threw`（抛了错；`message` 是
+错误消息，再跟已经做了的改动）、`timeout`、`cancelled`、`stopped`、`not_started`。
 
 - **一次内部工具调用**：调用以 `PluginCall {function, input}` 走会话的整条工具管线——权限、
   `PreToolUse`、`tool.around`（`via: "host"`）、执行、`PostToolUse`、遥测；它不在模型的工具表里，

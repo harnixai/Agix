@@ -3802,6 +3802,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 |---|---|
 | `invalid_input` | `input` 不符合函数的 `input_schema`,函数没跑 |
 | `refused` | 管线没让它跑,或拦下了它的结果:deny 规则、plan 模式、hook、`tool.around`、会话已结束 |
+| `answered_by_middleware` | 交回来的不是函数自己的结果:`tool.around` 用 `respond` 替它作答,或 `tool.result` 改写了它的结果。函数可能已经跑过,但结果一律不作数 |
 | `threw` | 函数抛了错;`message` 是错误消息,后面跟它已经做了的改动 |
 | `timeout` | 跑过了 `timeout_ms` |
 | `cancelled` | `plugin.cancel`、连接断开,或会话结束 |

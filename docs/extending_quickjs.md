@@ -347,7 +347,9 @@ function onAround(call) {
 
 因为这一环坐在权限闸门外面,一个 `deny` 是在问用户任何事之前就把调用拦了,一个
 `respond` 是在闸门根本没被问过的情况下答的。两者都没执行任何东西,但两者都决定了
-模型被告知这个工具干了什么。
+模型被告知这个工具干了什么。宿主调插件函数(`PluginCall`,`via:"host"`)时不一样:
+`respond` 的答复和 `tool.result` 改写过的结果都不会当成函数的结果交给宿主,宿主拿到的是
+`ok:false`、`code:"answered_by_middleware"`(`runext.md` §12)。
 
 ### `tool.result` — 一个结果长什么样
 

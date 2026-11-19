@@ -64,8 +64,8 @@ pub struct PluginCallResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct PluginCallError {
-    /// `invalid_input`, `refused`, `threw`, `timeout`, `cancelled`, `stopped`
-    /// or `not_started`.
+    /// `invalid_input`, `refused`, `answered_by_middleware`, `threw`,
+    /// `timeout`, `cancelled`, `stopped` or `not_started`.
     pub code: String,
     pub message: String,
 }

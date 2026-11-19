@@ -4716,7 +4716,7 @@
     "PluginCallError": {
       "properties": {
         "code": {
-          "description": "`invalid_input`, `refused`, `threw`, `timeout`, `cancelled`, `stopped`\nor `not_started`.",
+          "description": "`invalid_input`, `refused`, `answered_by_middleware`, `threw`,\n`timeout`, `cancelled`, `stopped` or `not_started`.",
           "type": "string"
         },
         "message": {

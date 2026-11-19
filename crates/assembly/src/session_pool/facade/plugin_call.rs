@@ -82,10 +82,10 @@ impl SessionPool {
         };
         tokio::pin!(run);
         tokio::select! {
-            outcome = &mut run => Ok(result_of(outcome?, None)),
+            outcome = &mut run => Ok(result_of(&call.function, outcome?, None)),
             _ = tokio::time::sleep(time) => {
                 stop.cancel();
-                Ok(result_of(run.await?, Some(time)))
+                Ok(result_of(&call.function, run.await?, Some(time)))
             }
         }
     }
@@ -238,9 +238,17 @@ fn info_of(f: &PluginFunction) -> PluginFunctionInfo {
 }
 
 /// The pipeline's answer as the host reads it: the function's own result
-/// when it ran, else why the pipeline did not run it. A call stopped at its
-/// time (`timed_out`) failed by running out of it, whatever stopped it.
-fn result_of(outcome: ToolOutcome, timed_out: Option<Duration>) -> PluginCallResult {
+/// when it ran, else why the pipeline did not run it. Only the function's
+/// tool gives a structured result, so an answer without one was made up or
+/// rewritten on the way — by a `tool.around` that answered in its place or a
+/// result transformer — and is a failure, never the function's success. A
+/// call stopped at its time (`timed_out`) failed by running out of it,
+/// whatever stopped it.
+fn result_of(
+    function: &str,
+    outcome: ToolOutcome,
+    timed_out: Option<Duration>,
+) -> PluginCallResult {
     let failed = |code: &str, message: String, logs: Vec<String>| PluginCallResult {
         ok: false,
         value: None,
@@ -253,13 +261,14 @@ fn result_of(outcome: ToolOutcome, timed_out: Option<Duration>) -> PluginCallRes
     let mut result = match outcome {
         Ok(answer) => match answer.structured {
             Some(structured) => parse_structured(structured),
-            None if answer.reported_failure => failed("refused", answer.text, Vec::new()),
-            None => PluginCallResult {
-                ok: true,
-                value: Some(serde_json::Value::String(answer.text)),
-                error: None,
-                logs: Vec::new(),
-            },
+            None => failed(
+                "answered_by_middleware",
+                format!(
+                    "`{function}`'s own result did not come back: a tool.around script \
+                     answered in its place or a result transformer rewrote it"
+                ),
+                Vec::new(),
+            ),
         },
         Err(why) => failed("refused", why, Vec::new()),
     };
