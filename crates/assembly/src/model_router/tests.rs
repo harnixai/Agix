@@ -85,6 +85,19 @@ fn a_provider_that_cannot_be_built_says_which_and_why() {
     assert!(err.contains("ghost"), "{err}");
 }
 
+#[test]
+fn a_base_url_that_does_not_parse_is_reported_without_its_password() {
+    for api in ["anthropic", "openai_chat", "openai_responses"] {
+        let entry = keyed(
+            api,
+            serde_json::json!({"base_url": "https://relay:s3cr3t@gw corp/v1"}),
+        );
+        let err = err_of(build(&settings(serde_json::json!([entry]), &[])));
+        assert!(err.contains("invalid base_url"), "{api}: {err}");
+        assert!(!err.contains("s3cr3t"), "{api}: {err}");
+    }
+}
+
 fn params() -> StreamParams {
     StreamParams {
         model: "strong".into(),

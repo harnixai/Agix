@@ -231,8 +231,12 @@ fn truncated(message: &str) -> String {
 
 /// `…/v1/models` beside the Messages endpoint `base` resolves to.
 fn anthropic_models_url(base: &str) -> Result<Url, ListModelsError> {
-    let base = Url::parse(base)
-        .map_err(|e| ModelError::invalid_request(format!("invalid base_url '{base}': {e}")))?;
+    let base = Url::parse(base).map_err(|e| {
+        ModelError::invalid_request(format!(
+            "invalid base_url '{}': {e}",
+            base::text::scrub_url(base)
+        ))
+    })?;
     let messages = crate::client::messages_url(&base).map_err(ModelError::from)?;
     let mut url = messages.clone();
     let path = messages.path().trim_end_matches("/messages").to_string();
@@ -251,8 +255,12 @@ fn openai_models_url(base: &str, endpoint: &str) -> Result<Url, ModelError> {
     } else {
         format!("{root}/v1/models")
     };
-    Url::parse(&full)
-        .map_err(|e| ModelError::invalid_request(format!("invalid base_url '{base}': {e}")))
+    Url::parse(&full).map_err(|e| {
+        ModelError::invalid_request(format!(
+            "invalid base_url '{}': {e}",
+            base::text::scrub_url(base)
+        ))
+    })
 }
 
 #[cfg(test)]

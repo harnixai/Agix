@@ -38,7 +38,10 @@ impl ModelFactory for AnthropicFactory {
         let client = match cfg.base_url.as_deref() {
             Some(url) if !url.is_empty() => {
                 let base = url::Url::parse(url).map_err(|e| {
-                    format!("provider '{provider_id}': invalid base_url '{url}': {e}")
+                    format!(
+                        "provider '{provider_id}': invalid base_url '{}': {e}",
+                        base::text::scrub_url(url)
+                    )
                 })?;
                 HttpAnthropicClient::with_base(auth, base)
             }

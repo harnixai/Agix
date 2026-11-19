@@ -418,6 +418,7 @@ fn transport_error(url: &url::Url, e: reqwest::Error, origin: Origin) -> ExecErr
         }
         cause = c.source();
     }
+    let url = without_userinfo(url);
     // A request that never reached a server is this side failing, and the two
     // are different sentences to whoever reads them.
     if e.is_connect() || e.is_timeout() {
@@ -425,6 +426,15 @@ fn transport_error(url: &url::Url, e: reqwest::Error, origin: Origin) -> ExecErr
     } else {
         ExecError::failed(format!("{url}: {e}"))
     }
+}
+
+/// `url` fit for an error: a gateway's userinfo is a credential, the user
+/// name included when it is a token.
+fn without_userinfo(url: &url::Url) -> url::Url {
+    let mut shown = url.clone();
+    let _ = shown.set_username("");
+    let _ = shown.set_password(None);
+    shown
 }
 
 fn redirect_target(from: &url::Url, resp: &reqwest::Response) -> Option<url::Url> {
@@ -504,8 +514,12 @@ impl Network for LocalNetwork {
     }
 
     async fn open(&self, req: HttpRequest, origin: Origin) -> Result<HttpStream, ExecError> {
-        let mut url = url::Url::parse(&req.url)
-            .map_err(|e| ExecError::failed(format!("not a url: {} ({e})", req.url)))?;
+        let mut url = url::Url::parse(&req.url).map_err(|e| {
+            ExecError::failed(format!(
+                "not a url: {} ({e})",
+                base::text::scrub_url(&req.url)
+            ))
+        })?;
         let policy = HopPolicy {
             internal_target: req.internal_target.then(|| url.clone()),
         };
@@ -784,6 +798,29 @@ mod tests {
 
     fn ok_response(_: u16) -> String {
         "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok".into()
+    }
+
+    #[tokio::test]
+    async fn a_transport_error_does_not_carry_the_urls_credentials() {
+        let closed = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            listener.local_addr().expect("addr").port()
+        };
+        let (hangs_up, _) = a_counting_server(|_| String::new()).await;
+        for port in [closed, hangs_up] {
+            let url = format!("http://relay:s3cr3t@127.0.0.1:{port}/v1/messages");
+            let err = LocalNetwork::default()
+                .send(HttpRequest::post(&url), Origin::Operator)
+                .await
+                .expect_err("nothing answers");
+            let text = err.to_string();
+            assert!(!text.contains("s3cr3t"), "{text}");
+            assert!(!text.contains("relay"), "{text}");
+            assert!(
+                text.contains(&format!("127.0.0.1:{port}/v1/messages")),
+                "{text}"
+            );
+        }
     }
 
     #[tokio::test]

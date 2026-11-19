@@ -75,31 +75,7 @@ pub(in crate::session_pool) fn holds_credential(path: &[&str], value: &serde_jso
     shown != original
 }
 
-/// [`base::text::scrub_secrets`], and the password of each URL's userinfo
-/// (`https://user:***@host`).
-pub(in crate::session_pool) fn scrub_url(text: &str) -> String {
-    let scrubbed = base::text::scrub_secrets(text);
-    let mut out = String::with_capacity(scrubbed.len());
-    let mut rest = scrubbed.as_str();
-    while let Some(at) = rest.find("://") {
-        let (head, tail) = rest.split_at(at + 3);
-        out.push_str(head);
-        let end = tail
-            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
-            .unwrap_or(tail.len());
-        let (authority, after) = tail.split_at(end);
-        match authority
-            .rsplit_once('@')
-            .and_then(|(userinfo, host)| Some((userinfo.split_once(':')?.0, host)))
-        {
-            Some((user, host)) => out.push_str(&format!("{user}:***@{host}")),
-            None => out.push_str(authority),
-        }
-        rest = after;
-    }
-    out.push_str(rest);
-    out
-}
+pub(in crate::session_pool) use base::text::scrub_url;
 
 fn names_a_secret(lowercase_flag: &str) -> bool {
     ["token", "key", "secret", "passw", "auth"]

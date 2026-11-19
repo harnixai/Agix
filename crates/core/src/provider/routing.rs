@@ -461,7 +461,7 @@ impl Model for RoutedModel {
                         router.health.cool(&id);
                     }
                     tracing::warn!(provider = %id, task = %self.task, %error, "provider could not take the call");
-                    passed_over.push((id, error.to_string()));
+                    passed_over.push((id, crate::text::scrub_url(&error.to_string())));
                     last_error = Some(error);
                 }
             }

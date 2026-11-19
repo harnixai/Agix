@@ -416,8 +416,12 @@ fn responses_url(base_url: &str) -> Result<Url, ModelError> {
     } else {
         format!("{trimmed}/v1/responses")
     };
-    Url::parse(&full)
-        .map_err(|e| ModelError::invalid_request(format!("invalid base_url '{base_url}': {e}")))
+    Url::parse(&full).map_err(|e| {
+        ModelError::invalid_request(format!(
+            "invalid base_url '{}': {e}",
+            base::text::scrub_url(base_url)
+        ))
+    })
 }
 
 #[async_trait]

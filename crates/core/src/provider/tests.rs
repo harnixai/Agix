@@ -94,6 +94,7 @@ impl QuotaLedger for Ledger {
 enum Answer {
     Ok,
     Fail(ModelErrorKind),
+    FailWith(ModelErrorKind, &'static str),
 }
 
 struct Scripted {
@@ -131,6 +132,7 @@ impl Model for Scripted {
                 usage: self.usage,
             })]))),
             Answer::Fail(kind) => Err(ModelError::new(*kind, "scripted")),
+            Answer::FailWith(kind, message) => Err(ModelError::new(*kind, *message)),
         }
     }
 }
@@ -253,6 +255,54 @@ async fn a_failing_provider_hands_the_call_to_the_next_with_the_same_tier() {
         1,
         "no switch: claude again"
     );
+}
+
+#[tokio::test]
+async fn why_a_provider_was_passed_over_does_not_carry_its_urls_password() {
+    const FAILURE: &str = "https://relay:s3cr3t@gw.corp/v1/messages: connection refused";
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let failing = || {
+        routed(
+            ds(),
+            Answer::FailWith(ModelErrorKind::Transport, FAILURE),
+            &asked,
+        )
+    };
+    let router = TaskRouter::new(
+        vec![failing(), routed(claude(), Answer::Ok, &asked)],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .for_session(None)
+    .unwrap();
+    let switches = Arc::new(Switches::default());
+    router.observe(switches.clone());
+    call(&router.model_for("main"), "ds-pro").await.unwrap();
+    let seen = switches.0.lock().unwrap().clone();
+    assert!(seen[0].reason.contains("gw.corp"), "{}", seen[0].reason);
+    assert!(!seen[0].reason.contains("s3cr3t"), "{}", seen[0].reason);
+
+    let mut down = claude();
+    down.id = "other".into();
+    let router = TaskRouter::new(
+        vec![
+            failing(),
+            routed(
+                down,
+                Answer::FailWith(ModelErrorKind::Transport, FAILURE),
+                &asked,
+            ),
+        ],
+        vec!["ds".into(), "other".into()],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .for_session(None)
+    .unwrap();
+    let error = call(&router.model_for("main"), "ds-pro").await.unwrap_err();
+    assert_eq!(error.kind, ModelErrorKind::ProvidersUnavailable);
+    assert!(!error.to_string().contains("s3cr3t"), "{error}");
 }
 
 #[tokio::test]
