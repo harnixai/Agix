@@ -451,18 +451,15 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
         ..Default::default()
     };
     let mut settings = Settings::defaults_for("test-model");
-    let original_max_calls = settings.execution.max_api_calls_per_turn;
+    let original_max_calls = settings.turn.max_model_calls;
     apply_agent_type_overrides(&mut settings, &def);
     assert_eq!(
         settings.permissions.mode,
         base::permission::PermissionMode::Plan
     );
     assert_eq!(settings.model.effort, Some(Effort::Max));
-    assert_eq!(settings.execution.max_api_calls_per_turn, 5);
-    assert_ne!(
-        settings.execution.max_api_calls_per_turn,
-        original_max_calls
-    );
+    assert_eq!(settings.turn.max_model_calls, 5);
+    assert_ne!(settings.turn.max_model_calls, original_max_calls);
 }
 
 /// A plugin ships over the network. Letting its agent type name
@@ -482,7 +479,7 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
     };
     let mut settings = Settings::defaults_for("test-model");
     settings.permissions.mode = M::Default;
-    settings.execution.max_api_calls_per_turn = 25;
+    settings.turn.max_model_calls = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
@@ -492,7 +489,7 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
         "a plugin must not be able to switch the permission gate off"
     );
     assert_eq!(
-        settings.execution.max_api_calls_per_turn, 25,
+        settings.turn.max_model_calls, 25,
         "a plugin must not be able to raise the API-call cap"
     );
 }
@@ -513,12 +510,12 @@ fn plugin_agent_type_may_still_tighten() {
     };
     let mut settings = Settings::defaults_for("test-model");
     settings.permissions.mode = M::AcceptEdits;
-    settings.execution.max_api_calls_per_turn = 25;
+    settings.turn.max_model_calls = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
     assert_eq!(settings.permissions.mode, M::Plan);
-    assert_eq!(settings.execution.max_api_calls_per_turn, 5);
+    assert_eq!(settings.turn.max_model_calls, 5);
 }
 
 #[test]
@@ -534,12 +531,12 @@ fn a_users_agent_type_may_raise_its_cap_and_loosen_its_mode() {
     };
     let mut settings = Settings::defaults_for("test-model");
     settings.permissions.mode = M::Default;
-    settings.execution.max_api_calls_per_turn = 25;
+    settings.turn.max_model_calls = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
     assert_eq!(settings.permissions.mode, M::BypassPermissions);
-    assert_eq!(settings.execution.max_api_calls_per_turn, 200);
+    assert_eq!(settings.turn.max_model_calls, 200);
 }
 
 #[test]
@@ -585,7 +582,7 @@ fn apply_agent_type_overrides_leaves_settings_untouched_when_fields_absent() {
         settings.permissions.mode,
         settings.model.thinking_mode.clone(),
         settings.model.effort,
-        settings.execution.max_api_calls_per_turn,
+        settings.turn.max_model_calls,
     );
     apply_agent_type_overrides(&mut settings, &def);
     assert_eq!(
@@ -593,7 +590,7 @@ fn apply_agent_type_overrides_leaves_settings_untouched_when_fields_absent() {
             settings.permissions.mode,
             settings.model.thinking_mode,
             settings.model.effort,
-            settings.execution.max_api_calls_per_turn
+            settings.turn.max_model_calls
         ),
         before
     );
@@ -627,7 +624,7 @@ fn run_sub_applies_permission_mode_and_max_turns_override_end_to_end() {
         settings.values.permissions.mode,
         base::permission::PermissionMode::Plan
     );
-    assert_eq!(settings.values.execution.max_api_calls_per_turn, 3);
+    assert_eq!(settings.values.turn.max_model_calls, 3);
 }
 
 /// A delegate starts from the mode a host switched the parent to since it was

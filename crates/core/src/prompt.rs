@@ -20,7 +20,7 @@ pub struct PromptBlock {
     /// two blocks differing only here are byte-identical to the model. It
     /// exists because block boundaries alone do not say which block is the
     /// skills inventory and which is the MCP instructions, and the count
-    /// shifts with configuration (rules, MCP and `prompt_append` are each
+    /// shifts with configuration (rules, MCP and `prompt.append` are each
     /// optional), so position is not a reliable answer.
     ///
     /// This is how an extension addresses a block: "put mine after
@@ -62,9 +62,9 @@ pub mod names {
     pub const RULES: &str = "rules";
     /// Instructions contributed by connected MCP servers.
     pub const MCP_INSTRUCTIONS: &str = "mcp.instructions";
-    /// `settings.prompt_append`.
+    /// `settings.prompt.append`.
     pub const CONFIG_PROMPT_APPEND: &str = "config.prompt_append";
-    /// `settings.prompt_override`, which replaces everything else.
+    /// `settings.prompt.override`, which replaces everything else.
     pub const CONFIG_PROMPT_OVERRIDE: &str = "config.prompt_override";
 }
 

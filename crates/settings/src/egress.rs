@@ -1,7 +1,7 @@
-//! `sandbox.egress_proxy` as a settings file writes it — an address, or an
+//! `sandbox.network.proxy` as a settings file writes it — an address, or an
 //! object with an optional SOCKS address and `no_proxy` — read into the
 //! engine's [`EgressProxy`]. A value that does not read is a value the merge
-//! leaves out, so a mistyped proxy leaves `network_mode: proxy` with nothing
+//! leaves out, so a mistyped proxy leaves `network.mode: proxy` with nothing
 //! to reach, which cuts the network.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -62,17 +62,14 @@ impl TryFrom<Wire> for EgressProxySetting {
         let http = proxy_address(&full.http)?;
         let socks = full.socks.as_deref().map(proxy_address).transpose()?;
         if socks.is_some_and(|s| s.port() == http.port()) {
-            return Err(format!(
-                "egress_proxy: socks and http share port {}",
-                http.port()
-            ));
+            return Err(format!("proxy: socks and http share port {}", http.port()));
         }
         if let Some(bad) = full
             .no_proxy
             .iter()
             .find(|n| n.is_empty() || n.contains(',') || n.contains(char::is_whitespace))
         {
-            return Err(format!("egress_proxy.no_proxy: {bad:?} is not one host"));
+            return Err(format!("proxy.no_proxy: {bad:?} is not one host"));
         }
         Ok(Self(EgressProxy {
             http,
@@ -100,13 +97,13 @@ fn proxy_address(text: &str) -> Result<SocketAddr, String> {
         Some(port) => port
             .parse::<u16>()
             .map(|port| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
-            .map_err(|e| format!("egress_proxy: {text:?}: {e}"))?,
+            .map_err(|e| format!("proxy: {text:?}: {e}"))?,
         None => text
             .parse::<SocketAddr>()
-            .map_err(|_| format!("egress_proxy: {text:?} is not `ip:port` or `localhost:port`"))?,
+            .map_err(|_| format!("proxy: {text:?} is not `ip:port` or `localhost:port`"))?,
     };
     if addr.port() == 0 || addr.ip().is_unspecified() {
-        return Err(format!("egress_proxy: {text:?} names no one proxy"));
+        return Err(format!("proxy: {text:?} names no one proxy"));
     }
     Ok(addr)
 }

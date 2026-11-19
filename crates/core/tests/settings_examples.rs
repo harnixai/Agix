@@ -9,7 +9,7 @@ use std::path::Path;
 
 /// `settings_json_schema` 的注释说这份 schema "can never drift from what `LoadedSettings::load()`
 /// actually accepts",README 让用户拿它做编辑器校验。可它要求顶层的 `model`、`paths`,
-/// `sandbox` 要求 `deny_read`、`allowed_domains`:空文件、README 的路由示例、`{"sandbox": {"unattended_requires_network_policy": true}}` 都过不了校验。`bubble` 则反过来:
+/// `sandbox` 要求 `deny_read`:空文件、README 的路由示例、`{"sandbox": {"unattended_needs_network_policy": true}}` 都过不了校验。`bubble` 则反过来:
 /// schema 收,协议说写进 settings.json 会被退回 `default`。
 #[test]
 fn the_settings_schema_accepts_what_the_loader_accepts() {
@@ -22,8 +22,8 @@ fn the_settings_schema_accepts_what_the_loader_accepts() {
     .unwrap();
     let examples = [
         json!({}),
-        json!({"sandbox": {"unattended_requires_network_policy": true}}),
-        json!({"execution": {"max_turns": 10}}),
+        json!({"sandbox": {"unattended_needs_network_policy": true}}),
+        json!({"turn": {"max_model_calls": 10}}),
         json!({
             "providers": {
                 "anthropic": { "api_type": "anthropic", "default_model": "claude-sonnet-4-6" }

@@ -14,7 +14,7 @@ use base::interface::exec::{ConfinementReport, ExecProviders, SandboxSettings};
 /// with every process group a command starts recorded in `process_groups`.
 ///
 /// Only the egress is configured from `EngineConfig`; the other three are
-/// this machine either way. `sandbox.network_mode` is a statement about where
+/// this machine either way. `sandbox.network.mode` is a statement about where
 /// the *model* may reach, which is as true of a `WebFetch` as it is of a
 /// `curl` inside a sandboxed command.
 pub(crate) fn providers_for(

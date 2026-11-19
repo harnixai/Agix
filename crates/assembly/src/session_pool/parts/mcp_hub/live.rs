@@ -105,7 +105,7 @@ impl McpOptions {
 
 pub(in crate::session_pool) struct McpHub {
     /// Centrally-connected MCP servers, one entry per `(project, scene)` — a
-    /// scene tier can declare its own `mcp_servers`, so two scenes on one
+    /// scene tier can declare its own `mcp.servers`, so two scenes on one
     /// project are not interchangeable. The pool's default pair connects
     /// eagerly at startup; every other pair on its first session. Each
     /// session gets its own manager built from the entry's client handles.
@@ -167,7 +167,7 @@ impl McpHub {
 /// `refused` names every entry not connected (invalid or denied), `denied`
 /// those that parse (the policy refuses them, or a project may not declare
 /// them as written), `invalid` those that do not; the last two are kept for
-/// `mcp.status`. `disabled` are those `mcp_enabled` turns off, refused by
+/// `mcp.status`. `disabled` are those an `enabled: false` turns off, refused by
 /// nobody.
 #[derive(Default)]
 pub(in crate::session_pool) struct AdmittedMcp {
@@ -187,7 +187,7 @@ pub(in crate::session_pool) enum Admission {
     Denied(mcp::manager::DeniedServer),
 }
 
-/// The `mcp_servers` keys the project tier's own files (`settings.json`,
+/// The `mcp.servers` keys the project tier's own files (`settings.json`,
 /// `settings.local.json`) declare. A key a project sets at all, even one
 /// field of a global server's, makes that server the project's.
 pub(in crate::session_pool) fn project_tier_mcp_servers(

@@ -966,7 +966,7 @@ async fn git_in_a_repository_other_than_the_projects_own_is_asked_about() {
 }
 
 /// `acceptEdits` waves through reads, not requests to a host the model chose:
-/// a `WebFetch` or `Ping` is asked about unless `sandbox.allowed_domains`
+/// a `WebFetch` or `Ping` is asked about unless `web.allowed_domains`
 /// names the host.
 #[tokio::test]
 async fn accept_edits_asks_before_reaching_a_host_the_settings_do_not_name() {

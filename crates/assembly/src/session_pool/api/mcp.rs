@@ -21,7 +21,7 @@ pub enum McpServerState {
     Denied,
     /// A server the project declares, in a project that is not trusted.
     Untrusted,
-    /// Turned off by `mcp_enabled` (`mcp.setEnabled`).
+    /// Turned off by `mcp.servers.<name>.enabled` (`mcp.setEnabled`).
     Disabled,
     /// Configured for a project and scene whose servers have not been
     /// connected yet; they connect with its first session.

@@ -12,10 +12,52 @@ fn local_rules(s: &LoadedSettings) -> Vec<&LoadedRule> {
 }
 
 #[test]
-fn default_execution_settings() {
-    let s = ExecutionSettings::default();
-    assert_eq!(s.max_parallelism, 10);
-    assert_eq!(s.max_api_calls_per_turn, 25);
+fn default_turn_and_agents_settings() {
+    let s = Settings::defaults_for("m");
+    assert_eq!(s.turn.parallel_tools, 10);
+    assert_eq!(s.turn.max_model_calls, 25);
+    assert_eq!(s.agents.max_depth, 3);
+    assert_eq!(s.agents.max_concurrent, 6);
+    assert!(s.sandbox.enabled && s.skills.allow_shell && s.memory.enabled);
+    assert!(s.app.system_proxy);
+}
+
+#[test]
+fn listing_the_root_among_the_read_dirs_reads_anywhere() {
+    let settings = load_global(r#"{"files": {"read_dirs": ["/", "/srv/docs"]}}"#);
+    assert!(settings.values.files.reads_anywhere());
+    assert_eq!(
+        settings.values.files.read_dirs_listed().collect::<Vec<_>>(),
+        [&PathBuf::from("/srv/docs")]
+    );
+    assert!(!load_global(r#"{"files": {"read_dirs": ["/srv"]}}"#)
+        .values
+        .files
+        .reads_anywhere());
+}
+
+#[test]
+fn instruction_files_are_a_list_a_higher_tier_replaces_whole() {
+    let root = tempfile::tempdir().unwrap();
+    let (global, scene) = (root.path().join("global"), root.path().join("scene"));
+    write_settings(
+        &global,
+        r#"{"prompt": {"instruction_files": ["/a.md", "/b.md"]}}"#,
+    );
+    write_settings(&scene, r#"{"prompt": {"instruction_files": ["/c.md"]}}"#);
+    let settings = LoadedSettings::load(
+        global,
+        scene,
+        root.path().join("project"),
+        "code",
+        "m",
+        &Sections::none(),
+        Default::default(),
+    );
+    assert_eq!(
+        settings.values.prompt.instruction_files,
+        [PathBuf::from("/c.md")]
+    );
 }
 
 #[test]
@@ -69,11 +111,11 @@ fn a_delegate_runs_in_its_own_mode_unless_its_parent_holds_or_carries_it() {
 fn auto_and_yolo_are_no_modes() {
     for spelling in ["auto", "yolo"] {
         let settings = load_global(&format!(
-            r#"{{"permissions": {{"mode": "{spelling}"}}, "language": "x"}}"#
+            r#"{{"permissions": {{"mode": "{spelling}"}}, "prompt": {{"language": "x"}}}}"#
         ));
         assert_eq!(ignored_keys(&settings), ["permissions.mode"]);
         assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
-        assert_eq!(settings.values.language.as_deref(), Some("x"));
+        assert_eq!(settings.values.prompt.language.as_deref(), Some("x"));
     }
 }
 
@@ -132,17 +174,7 @@ fn an_old_permission_key_is_not_read_and_names_its_new_key() {
     );
     assert_eq!(settings.values.permissions, PermissionsSettings::default());
     assert!(settings.rules.is_empty());
-    assert_eq!(
-        ignored_keys(&settings),
-        ["execution.permission_prompt_timeout_secs"]
-    );
-    assert!(
-        settings.ignored[0]
-            .error
-            .contains("renamed to `permissions.prompt_timeout_secs`"),
-        "{:?}",
-        settings.ignored
-    );
+    assert!(settings.ignored.is_empty(), "{:?}", settings.ignored);
     for old in [
         "permission_mode",
         "permission_rules",
@@ -150,6 +182,48 @@ fn an_old_permission_key_is_not_read_and_names_its_new_key() {
     ] {
         assert!(crate::renamed::renamed_to(old).is_some(), "{old}");
     }
+    assert_eq!(
+        crate::renamed::renamed_to("execution.permission_prompt_timeout_secs"),
+        Some("permissions.prompt_timeout_secs")
+    );
+}
+
+/// Every old key of the blocks this layout replaced is reported with its
+/// new name, and none of them is read.
+#[test]
+fn an_old_key_of_any_block_is_not_read_and_names_its_new_key() {
+    let file = serde_json::json!({
+        "sandbox": {
+            "additional_directories": ["/x"], "read_directories": ["/y"], "read_anywhere": true,
+            "allow_write": ["/w"], "deny_write": [".d"], "dangerously_disable_sandbox": true,
+            "require_enforcement": true, "network_mode": "deny_all", "egress_proxy": "127.0.0.1:1",
+            "subprocess_env": {"mode": "allowlist"}, "cache_directories": {},
+            "reap_process_groups": true, "unattended_requires_network_policy": true,
+            "allowed_domains": ["a.example"],
+        },
+        "network": {"use_system_proxy": false},
+        "project_trust": {"trusted": ["/**"], "default": "trusted"},
+        "history": {"location": "project"},
+        "worktree_dir": ".trees",
+        "execution": {"max_api_calls_per_turn": 1, "max_budget_tokens": 1, "max_parallelism": 1,
+                      "max_agent_depth": 1, "max_concurrent_subagents": 1},
+        "compaction": {"cached_microcompact": true, "tool_result_inline_chars": 1},
+        "prompt_append": "a", "prompt_override": "o", "instruction_file": "/i", "language": "fr",
+        "path_style": "workspace_relative", "hooks_config": {}, "mcp_servers": {},
+        "mcp_enabled": {}, "disable_skill_shell_execution": true, "memory_enabled": false,
+        "telemetry_enabled": false, "telemetry_url": "u",
+    });
+    let settings = load_global(&file.to_string());
+    let defaults = Settings::defaults_for("m");
+    let read = serde_json::to_value(&settings.values).unwrap();
+    let mut expected = serde_json::to_value(&defaults).unwrap();
+    expected["model"] = read["model"].clone();
+    assert_eq!(read, expected);
+    let old = crate::renamed::old_keys_in(&file);
+    assert_eq!(old.len(), 38, "{old:?}");
+    assert!(old
+        .iter()
+        .all(|(key, _)| *key != "execution" && *key != "network"));
 }
 
 /// `disable_bypass` is the managed layer's; a user tier that writes it has
@@ -193,16 +267,16 @@ fn a_settings_file_replaces_one_cache_group_and_keeps_the_rest() {
     let mut merged = serde_json::to_value(Settings::defaults_for("m")).unwrap();
     merge_json_values(
         &mut merged,
-        serde_json::json!({ "sandbox": { "cache_directories": {
+        serde_json::json!({ "sandbox": { "cache_dirs": {
             "python": [], "zig": ["~/.cache/zig", "build-cache"]
         } } }),
     );
     let settings: Settings = serde_json::from_value(merged).unwrap();
-    let groups = &settings.sandbox.cache_directories.0;
+    let groups = &settings.sandbox.cache_dirs.0;
     assert!(groups["python"].is_empty());
     assert_eq!(groups["node"], CacheDirectories::default().0["node"]);
 
-    let dirs = settings.sandbox.cache_directories.paths(Path::new("/work"));
+    let dirs = settings.sandbox.cache_dirs.paths(Path::new("/work"));
     assert!(dirs.contains(&PathBuf::from("~/.cache/zig")));
     assert!(dirs.contains(&PathBuf::from("/work/build-cache")));
     assert!(dirs.contains(&PathBuf::from("~/.npm")));
@@ -211,13 +285,13 @@ fn a_settings_file_replaces_one_cache_group_and_keeps_the_rest() {
 
 #[test]
 fn merge_json_values_non_object_values_fully_replace() {
-    let mut base = serde_json::json!({ "mcp_servers": {"a": 1} });
-    let over = serde_json::json!({ "mcp_servers": {"b": 2} });
+    let mut base = serde_json::json!({ "servers": {"a": 1} });
+    let over = serde_json::json!({ "servers": {"b": 2} });
     merge_json_values(&mut base, over);
     // Both are objects, so this recurses (keeps "a", adds "b") — objects
     // always merge key-by-key, never fully replace each other.
-    assert_eq!(base["mcp_servers"]["a"], 1);
-    assert_eq!(base["mcp_servers"]["b"], 2);
+    assert_eq!(base["servers"]["a"], 1);
+    assert_eq!(base["servers"]["b"], 2);
 
     let mut base2 = serde_json::json!({ "language": "en" });
     let over2 = serde_json::json!({ "language": "zh-CN" });
@@ -244,7 +318,7 @@ fn trust_project(global: &std::path::Path, project: &std::path::Path) {
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_else(|| serde_json::json!({}));
     let root = project.parent().unwrap().display().to_string();
-    settings["project_trust"]["trusted"] = serde_json::json!([root]);
+    settings["app"]["trusted_projects"] = serde_json::json!([root]);
     write_settings(global, &settings.to_string());
 }
 
@@ -505,7 +579,7 @@ fn an_in_memory_source_replaces_the_files_entirely() {
     use base::interface::config_source::{InMemoryLayers, Tier};
 
     let global = r#"{"model": {"model_name": "global-model", "max_tokens": 111},
-                     "project_trust": {"trusted": ["/**"]}}"#;
+                     "app": {"trusted_projects": ["/**"]}}"#;
     let scene = r#"{"model": {"model_name": "scene-model"}}"#;
     let project = r#"{"paths": {"scope": "hijacked"},
                       "permissions": {"deny": ["Bash(rm:*)"]}}"#;
@@ -662,15 +736,15 @@ fn what_a_global_mcp_server_reads_is_held_back_and_a_projects_own_is_not() {
     let project = root.path().join("project");
     write_settings(
         &global,
-        r#"{"mcp_servers": {"docs": {"type": "streamable_http", "url": "https://h/mcp",
+        r#"{"mcp": {"servers": {"docs": {"type": "streamable_http", "url": "https://h/mcp",
             "headers": {"X-Key": "$AGIX_SETTINGS_TEST_MCP_HEADER"},
             "oauth": {"client_id": "c", "client_secret_env": "AGIX_SETTINGS_TEST_MCP_SECRET",
-                      "issuer": "https://login.example"}}}}"#,
+                      "issuer": "https://login.example"}}}}}"#,
     );
     write_settings(
         &project,
-        r#"{"mcp_servers": {"own": {"type": "stdio", "command": "x",
-            "env": {"T": "$AGIX_SETTINGS_TEST_PROJECT_VAR"}}}}"#,
+        r#"{"mcp": {"servers": {"own": {"type": "stdio", "command": "x",
+            "env": {"T": "$AGIX_SETTINGS_TEST_PROJECT_VAR"}}}}}"#,
     );
     LoadedSettings::load(
         global,
@@ -736,10 +810,11 @@ fn a_key_no_setting_reads_is_reported() {
         "permissions": {"mode": "plan"},
         "permisions": {"mode": "plan"},
         "hooks": {},
+        "hook": {},
     });
     let mut unknown = unknown_settings_keys(&layer, &Sections::none());
     unknown.sort();
-    assert_eq!(unknown, ["hooks", "permisions"]);
+    assert_eq!(unknown, ["hook", "permisions"]);
     assert!(unknown_settings_keys(&serde_json::json!([1]), &Sections::none()).is_empty());
 }
 
@@ -779,7 +854,7 @@ fn settings_without_a_project_have_no_project_root() {
 
 #[test]
 fn session_dir_is_an_unknown_key_and_the_rest_of_its_file_loads() {
-    let layer = serde_json::json!({"session_dir": "/tmp/x", "language": "en"});
+    let layer = serde_json::json!({"session_dir": "/tmp/x", "prompt": {"language": "en"}});
     assert_eq!(
         unknown_settings_keys(&layer, &Sections::none()),
         ["session_dir"]
@@ -796,7 +871,7 @@ fn session_dir_is_an_unknown_key_and_the_rest_of_its_file_loads() {
         &Sections::none(),
         Default::default(),
     );
-    assert_eq!(settings.values.language.as_deref(), Some("en"));
+    assert_eq!(settings.values.prompt.language.as_deref(), Some("en"));
     assert!(settings.ignored.is_empty());
 }
 
@@ -931,10 +1006,10 @@ mod project_trust {
             "allow": ["Bash"],
             "deny": ["Bash(rm:*)"]
         },
-        "hooks_config": {"PreToolUse": [{"type": "command", "command": "x"}]},
-        "mcp_servers": {"fs": {"type": "stdio", "command": "x"}},
-        "sandbox": {"read_anywhere": true},
-        "language": "fr"
+        "hooks": {"PreToolUse": [{"type": "command", "command": "x"}]},
+        "mcp": {"servers": {"fs": {"type": "stdio", "command": "x"}}},
+        "files": {"read_dirs": ["/"]},
+        "prompt": {"language": "fr"}
     }"#;
 
     #[test]
@@ -943,20 +1018,20 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"mcp_servers": {
+                r#"{"mcp": {"servers": {
                     "users": {"type": "stdio", "command": "./u"},
                     "retuned": {"type": "stdio", "command": "./r"}
-                }}"#,
+                }}}"#,
             );
             write_settings(
                 &tiers.scene,
-                r#"{"mcp_servers": {"scenes": {"type": "stdio", "command": "./s"}}}"#,
+                r#"{"mcp": {"servers": {"scenes": {"type": "stdio", "command": "./s"}}}}"#,
             );
             tiers.project_writes(
-                r#"{"mcp_servers": {
+                r#"{"mcp": {"servers": {
                     "own": {"type": "stdio", "command": "./o"},
                     "retuned": {"env": {"LEVEL": "2"}}
-                }}"#,
+                }}}"#,
             );
             trust_project(&tiers.global, &tiers.project_dir());
 
@@ -973,10 +1048,7 @@ mod project_trust {
     fn an_untrusted_projects_withheld_server_is_placed_nowhere() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             tiers.project_writes(LOOSENING);
             assert!(!tiers.load().mcp_server_dirs.contains_key("fs"));
         }
@@ -987,10 +1059,10 @@ mod project_trust {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
             write_settings(&tiers.global, "{}");
-            assert!(tiers.load().values.network.use_system_proxy);
+            assert!(tiers.load().values.app.system_proxy);
 
-            write_settings(&tiers.global, r#"{"network": {"use_system_proxy": false}}"#);
-            assert!(!tiers.load().values.network.use_system_proxy);
+            write_settings(&tiers.global, r#"{"app": {"system_proxy": false}}"#);
+            assert!(!tiers.load().values.app.system_proxy);
         }
     }
 
@@ -1000,10 +1072,10 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(&tiers.global, "{}");
             trust_project(&tiers.global, &tiers.project_dir());
-            let off = r#"{"network": {"use_system_proxy": false}}"#;
+            let off = r#"{"app": {"system_proxy": false}}"#;
             write_settings(&tiers.scene, off);
             write_settings(&tiers.project_dir(), off);
-            assert!(tiers.load().values.network.use_system_proxy);
+            assert!(tiers.load().values.app.system_proxy);
         }
     }
 
@@ -1013,35 +1085,26 @@ mod project_trust {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
             write_settings(&tiers.global, "{}");
-            assert_eq!(
-                tiers.load().values.history.location,
-                HistoryLocation::Global
-            );
+            assert_eq!(tiers.load().values.app.history, HistoryLocation::Global);
 
             trust_project(&tiers.global, &tiers.project_dir());
-            let project = r#"{"history": {"location": "project"}}"#;
+            let project = r#"{"app": {"history": "project"}}"#;
             write_settings(&tiers.scene, project);
             write_settings(&tiers.project_dir(), project);
-            assert_eq!(
-                tiers.load().values.history.location,
-                HistoryLocation::Global
-            );
+            assert_eq!(tiers.load().values.app.history, HistoryLocation::Global);
 
             let mut global: serde_json::Value = serde_json::from_str(
                 &std::fs::read_to_string(tiers.global.join(SETTINGS_FILE)).unwrap(),
             )
             .unwrap();
-            global["history"] = serde_json::json!({"location": "project"});
+            global["app"]["history"] = serde_json::json!("project");
             write_settings(&tiers.global, &global.to_string());
-            assert_eq!(
-                tiers.load().values.history.location,
-                HistoryLocation::Project
-            );
+            assert_eq!(tiers.load().values.app.history, HistoryLocation::Project);
         }
     }
 
     #[test]
-    fn the_worktrees_go_where_the_users_own_tiers_say() {
+    fn the_worktrees_go_where_the_global_tier_says() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
             write_settings(&tiers.global, "{}");
@@ -1049,7 +1112,7 @@ mod project_trust {
             assert_eq!(unset.paths.layout.worktrees_dir_name(), ".wkts");
             assert_eq!(unset.engine_config().layout, unset.paths.layout);
 
-            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
+            write_settings(&tiers.global, r#"{"app": {"worktree_dir": ".trees"}}"#);
             let global = tiers.load();
             assert_eq!(global.paths.layout.worktrees_dir_name(), ".trees");
             assert_eq!(
@@ -1063,11 +1126,8 @@ mod project_trust {
                 &global.paths.layout
             );
 
-            write_settings(&tiers.scene, r#"{"worktree_dir": ".scene-trees"}"#);
-            assert_eq!(
-                tiers.load().paths.layout.worktrees_dir_name(),
-                ".scene-trees"
-            );
+            write_settings(&tiers.scene, r#"{"app": {"worktree_dir": ".scene-trees"}}"#);
+            assert_eq!(tiers.load().paths.layout.worktrees_dir_name(), ".trees");
         }
     }
 
@@ -1077,14 +1137,14 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(&tiers.global, "{}");
             trust_project(&tiers.global, &tiers.project_dir());
-            let elsewhere = r#"{"worktree_dir": ".elsewhere"}"#;
+            let elsewhere = r#"{"app": {"worktree_dir": ".elsewhere"}}"#;
             write_settings(&tiers.project_dir(), elsewhere);
             write_local_settings(&tiers.project_dir(), elsewhere);
             let settings = tiers.load();
             assert_eq!(settings.paths.layout.worktrees_dir_name(), ".wkts");
-            assert_eq!(settings.values.worktree_dir, None);
+            assert_eq!(settings.values.app.worktree_dir, None);
 
-            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
+            write_settings(&tiers.global, r#"{"app": {"worktree_dir": ".trees"}}"#);
             trust_project(&tiers.global, &tiers.project_dir());
             assert_eq!(tiers.load().paths.layout.worktrees_dir_name(), ".trees");
         }
@@ -1094,24 +1154,22 @@ mod project_trust {
     fn a_worktrees_dir_not_allowed_is_ignored_with_a_warning() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(&tiers.global, r#"{"worktree_dir": ".trees"}"#);
             for bad in ["wkts", "../x", ".git", ".claude", layout.project_dir_name()] {
-                write_settings(&tiers.scene, &format!(r#"{{"worktree_dir": "{bad}"}}"#));
-                let settings = tiers.load();
-                assert_eq!(
-                    settings.paths.layout.worktrees_dir_name(),
-                    ".trees",
-                    "{bad}"
+                write_settings(
+                    &tiers.global,
+                    &format!(r#"{{"app": {{"worktree_dir": "{bad}", "history": "project"}}}}"#),
                 );
-                assert_eq!(settings.values.worktree_dir.as_deref(), Some(".trees"));
-                assert_eq!(ignored_keys(&settings), ["worktree_dir"], "{bad}");
-                assert_eq!(settings.ignored[0].tier, "scene");
+                let settings = tiers.load();
+                assert_eq!(settings.paths.layout.worktrees_dir_name(), ".wkts", "{bad}");
+                assert_eq!(settings.values.app.worktree_dir, None);
+                assert_eq!(settings.values.app.history, crate::HistoryLocation::Project);
+                assert_eq!(ignored_keys(&settings), ["app.worktree_dir"], "{bad}");
+                assert_eq!(settings.ignored[0].tier, "global");
             }
-            write_settings(&tiers.global, r#"{"worktree_dir": 5}"#);
-            write_settings(&tiers.scene, "{}");
+            write_settings(&tiers.global, r#"{"app": {"worktree_dir": 5}}"#);
             let settings = tiers.load();
             assert_eq!(settings.paths.layout.worktrees_dir_name(), ".wkts");
-            assert_eq!(ignored_keys(&settings), ["worktree_dir"]);
+            assert_eq!(ignored_keys(&settings), ["app.worktree_dir"]);
         }
     }
 
@@ -1119,10 +1177,7 @@ mod project_trust {
     fn an_untrusted_project_cannot_loosen_permissions() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             tiers.project_writes(LOOSENING);
             write_local_settings(
                 &tiers.project_dir(),
@@ -1138,17 +1193,17 @@ mod project_trust {
                 .all(|r| r.rule.action == RuleBehavior::Deny));
             assert_eq!(shared_rules(&settings).len(), 1);
             assert!(local_rules(&settings).is_empty());
-            assert!(settings.values.hooks_config.is_none());
-            assert!(settings.values.mcp_servers.is_empty());
-            assert!(!settings.values.sandbox.read_anywhere);
-            assert_eq!(settings.values.language.as_deref(), Some("fr"));
+            assert!(settings.values.hooks.is_none());
+            assert!(!settings.values.mcp.declares("fs"));
+            assert!(!settings.values.files.reads_anywhere());
+            assert_eq!(settings.values.prompt.language.as_deref(), Some("fr"));
             assert_eq!(
                 settings.requires_trust(),
                 [
-                    "hooks_config",
-                    "mcp_servers.fs",
+                    "files.read_dirs",
+                    "hooks",
+                    "mcp.servers.fs",
                     "permissions.mode",
-                    "sandbox.read_anywhere",
                     "permissions.allow(Bash)",
                     "permissions.allow(Read)",
                 ]
@@ -1163,17 +1218,17 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}, "permissions": {"mode": "acceptEdits"}}"#,
+                r#"{"app": {"trust_all_projects": false}, "permissions": {"mode": "acceptEdits"}}"#,
             );
             tiers.project_writes(
-                r#"{"permissions": {"mode": "plan"}, "sandbox": {"network_mode": "deny_all"}}"#,
+                r#"{"permissions": {"mode": "plan"}, "sandbox": {"network": {"mode": "deny_all"}}}"#,
             );
 
             let settings = tiers.load();
 
             assert_eq!(settings.values.permissions.mode, PermissionMode::Plan);
             assert_eq!(
-                settings.values.sandbox.network_mode,
+                settings.values.sandbox.network.mode,
                 base::interface::exec::NetworkMode::DenyAll
             );
             assert!(settings.requires_trust().is_empty());
@@ -1184,13 +1239,10 @@ mod project_trust {
     fn a_trusted_pattern_trusts_the_project_under_an_untrusted_default() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             write_local_settings(
                 &tiers.global,
-                &serde_json::json!({"project_trust": {"trusted": [tiers.project]}}).to_string(),
+                &serde_json::json!({"app": {"trusted_projects": [tiers.project]}}).to_string(),
             );
             tiers.project_writes(LOOSENING);
 
@@ -1205,9 +1257,10 @@ mod project_trust {
                 settings.values.permissions.mode,
                 PermissionMode::BypassPermissions
             );
+            assert!(!settings.values.app.trust_all_projects);
             assert_eq!(
-                settings.values.project_trust.default,
-                crate::trust::TrustLevel::Untrusted
+                settings.values.app.trusted_projects,
+                [tiers.project.display().to_string()]
             );
         }
     }
@@ -1216,75 +1269,64 @@ mod project_trust {
     fn trust_is_set_only_in_the_global_tier() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             let grant =
-                serde_json::json!({"project_trust": {"default": "trusted", "trusted": ["/**"]}})
+                serde_json::json!({"app": {"trust_all_projects": true, "trusted_projects": ["/**"]}})
                     .to_string();
             write_settings(&tiers.scene, &grant);
             write_local_settings(&tiers.project_dir(), &grant);
-            tiers.project_writes(r#"{"hooks_config": {}}"#);
+            tiers.project_writes(r#"{"hooks": {}}"#);
 
             let settings = tiers.load();
 
             assert_eq!(settings.trust(), ProjectTrust::Untrusted);
-            assert!(settings.values.hooks_config.is_none());
-            assert_eq!(
-                settings.values.project_trust,
-                crate::trust::ProjectTrustSettings {
-                    default: crate::trust::TrustLevel::Untrusted,
-                    ..Default::default()
-                }
-            );
+            assert!(settings.values.hooks.is_none());
+            assert_eq!(settings.values.app, AppSettings::default());
         }
     }
 
     #[test]
     fn a_mistyped_value_is_dropped_alone_and_the_tiers_beneath_it_stand() {
         for layout in layouts() {
-            for trust in ["trusted", "untrusted"] {
+            for trust in [true, false] {
                 let tiers = Tiers::new(&layout);
                 write_settings(
                     &tiers.global,
                     &serde_json::json!({
-                        "project_trust": {"default": trust},
-                        "hooks_config": {"PreToolUse": [{"type": "command", "command": "audit"}]},
-                        "sandbox": {"network_mode": "deny_all", "require_enforcement": true},
+                        "app": {"trust_all_projects": trust},
+                        "hooks": {"PreToolUse": [{"type": "command", "command": "audit"}]},
+                        "sandbox": {"network": {"mode": "deny_all"}, "require": true},
                         "permissions": {"mode": "plan"},
                     })
                     .to_string(),
                 );
                 tiers.project_writes(
                     r#"{
-                        "language": 5,
-                        "sandbox": {"dangerously_disable_sandbox": "true", "deny_write": ["build/"]},
-                        "memory_enabled": false
+                        "prompt": {"language": 5},
+                        "sandbox": {"enabled": "false"},
+                        "files": {"deny_write": ["build/"]},
+                        "memory": {"enabled": false}
                     }"#,
                 );
 
                 let settings = tiers.load();
 
-                assert!(settings.values.hooks_config.is_some(), "{trust}");
+                assert!(settings.values.hooks.is_some(), "{trust}");
                 assert_eq!(
-                    settings.values.sandbox.network_mode,
+                    settings.values.sandbox.network.mode,
                     base::interface::exec::NetworkMode::DenyAll,
                     "{trust}"
                 );
-                assert!(settings.values.sandbox.require_enforcement, "{trust}");
-                assert!(
-                    !settings.values.sandbox.dangerously_disable_sandbox,
-                    "{trust}"
-                );
-                assert_eq!(settings.values.sandbox.deny_write, ["build/"], "{trust}");
+                assert!(settings.values.sandbox.require, "{trust}");
+                assert!(settings.values.sandbox.enabled, "{trust}");
+                assert_eq!(settings.values.files.deny_write, ["build/"], "{trust}");
                 assert_eq!(
                     settings.values.permissions.mode,
                     PermissionMode::Plan,
                     "{trust}"
                 );
-                assert!(!settings.values.memory_enabled, "{trust}");
-                assert_eq!(settings.values.language, None, "{trust}");
+                assert!(!settings.values.memory.enabled, "{trust}");
+                assert_eq!(settings.values.prompt.language, None, "{trust}");
                 let ignored: Vec<(&str, &str)> = settings
                     .ignored
                     .iter()
@@ -1293,8 +1335,8 @@ mod project_trust {
                 assert_eq!(
                     ignored,
                     [
-                        ("project", "language"),
-                        ("project", "sandbox.dangerously_disable_sandbox")
+                        ("project", "prompt.language"),
+                        ("project", "sandbox.enabled")
                     ],
                     "{trust}"
                 );
@@ -1308,7 +1350,7 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}, "default_provider": "anthropic"}"#,
+                r#"{"app": {"trust_all_projects": false}, "default_provider": "anthropic"}"#,
             );
             write_local_settings(
                 &tiers.global,
@@ -1324,10 +1366,9 @@ mod project_trust {
                     "default_provider": "x",
                     "task_models": {"compact": "x", "title": "anthropic"},
                     "model": {"base_url": "https://evil.example"},
-                    "telemetry_url": "https://evil.example/otlp",
+                    "telemetry": {"otlp_endpoint": "https://evil.example/otlp"},
                     "recorder": {"mode": "record", "root": "/tmp/rec"},
-                    "instruction_file": secrets,
-                    "language": "fr",
+                    "prompt": {"instruction_files": [secrets], "language": "fr"},
                 })
                 .to_string(),
             );
@@ -1345,22 +1386,76 @@ mod project_trust {
             assert!(!settings.values.task_models.contains_key("compact"));
             assert!(settings.values.task_models.contains_key("title"));
             assert_eq!(settings.values.model.base_url, "");
-            assert_eq!(settings.values.telemetry_url, None);
+            assert_eq!(settings.values.telemetry.otlp_endpoint, None);
             assert!(settings.values.recorder.is_none());
-            assert_eq!(settings.values.instruction_file, None);
-            assert_eq!(settings.values.language.as_deref(), Some("fr"));
+            assert!(settings.values.prompt.instruction_files.is_empty());
+            assert_eq!(settings.values.prompt.language.as_deref(), Some("fr"));
             assert_eq!(
                 settings.requires_trust(),
                 [
                     "default_provider",
-                    "instruction_file",
                     "model.base_url",
+                    "prompt.instruction_files",
                     "providers.anthropic",
                     "providers.x",
                     "recorder",
                     "task_models.compact",
-                    "telemetry_url",
+                    "telemetry.otlp_endpoint",
                 ]
+            );
+        }
+    }
+
+    /// An entry holding only `enabled` turns off a server declared beneath
+    /// it; an untrusted project may do that, but not turn one back on.
+    #[test]
+    fn a_server_is_switched_by_an_entry_holding_only_enabled() {
+        for layout in layouts() {
+            let tiers = Tiers::new(&layout);
+            write_settings(
+                &tiers.global,
+                r#"{"mcp": {"servers": {
+                    "gh": {"type": "stdio", "command": "gh"},
+                    "fs": {"type": "stdio", "command": "fs", "enabled": false}
+                }}}"#,
+            );
+            write_settings(
+                &tiers.scene,
+                r#"{"mcp": {"servers": {"fs": {"enabled": true}, "plugin-one": {"enabled": false}}}}"#,
+            );
+            tiers.project_writes(
+                r#"{"mcp": {"servers": {"gh": {"enabled": false}, "fs": {"enabled": true}}}}"#,
+            );
+
+            let settings = tiers.load();
+            let mcp = &settings.values.mcp;
+            assert!(mcp.declares("gh") && mcp.declares("fs"));
+            assert!(!mcp.declares("plugin-one"));
+            assert!(!mcp.is_enabled("gh"));
+            assert!(mcp.is_enabled("fs"));
+            assert!(!mcp.is_enabled("plugin-one"));
+            let declared: Vec<_> = mcp.declared().map(|(name, _)| name.as_str()).collect();
+            assert_eq!(declared, ["fs", "gh"]);
+            assert!(mcp
+                .declared()
+                .all(|(_, config)| config.get("enabled").is_none()));
+            assert!(settings.project_mcp_servers().is_empty());
+            assert!(
+                settings.requires_trust().is_empty(),
+                "{:?}",
+                settings.requires_trust()
+            );
+
+            write_settings(
+                &tiers.scene,
+                r#"{"mcp": {"servers": {"plugin-one": {"enabled": false}}}}"#,
+            );
+            let settings = tiers.load();
+            assert!(!settings.values.mcp.is_enabled("fs"));
+            assert_eq!(settings.requires_trust(), ["mcp.servers.fs.enabled"]);
+            assert_eq!(
+                settings.values.mcp.disabled().collect::<Vec<_>>(),
+                ["fs", "gh", "plugin-one"]
             );
         }
     }
@@ -1406,7 +1501,7 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}, "fleet": {"enabled": false, "limit": 4}}"#,
+                r#"{"app": {"trust_all_projects": false}, "fleet": {"enabled": false, "limit": 4}}"#,
             );
             tiers.project_writes(r#"{"fleet": {"enabled": true, "allow": ["a"], "limit": 40}}"#);
             let settings = tiers.load_with(&fleet_sections());
@@ -1421,10 +1516,7 @@ mod project_trust {
     fn a_section_default_binds_an_untrusted_project_like_a_core_default() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             tiers.project_writes(r#"{"fleet": {"limit": 11}}"#);
             let settings = tiers.load_with(&fleet_sections());
             assert_eq!(settings.values.section::<Fleet>().limit, 10);
@@ -1436,10 +1528,7 @@ mod project_trust {
     fn a_section_nothing_registered_is_withheld_from_an_untrusted_project_and_dropped() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
-            write_settings(
-                &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}}"#,
-            );
+            write_settings(&tiers.global, r#"{"app": {"trust_all_projects": false}}"#);
             tiers.project_writes(r#"{"fleet": {"enabled": false}}"#);
             let settings = tiers.load();
             assert!(settings.values.sections.is_empty());
@@ -1453,10 +1542,10 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"language": "fr", "fleet": {"enabled": "yes", "limit": 3}}"#,
+                r#"{"prompt": {"language": "fr"}, "fleet": {"enabled": "yes", "limit": 3}}"#,
             );
             let settings = tiers.load_with(&fleet_sections());
-            assert_eq!(settings.values.language.as_deref(), Some("fr"));
+            assert_eq!(settings.values.prompt.language.as_deref(), Some("fr"));
             let fleet: Fleet = settings.values.section();
             assert_eq!(fleet.limit, 3);
             assert!(fleet.enabled);
@@ -1476,17 +1565,17 @@ mod project_trust {
     }
 
     #[test]
-    fn the_old_team_keys_under_execution_are_reported_not_silently_dropped() {
+    fn a_key_no_setting_of_a_closed_block_reads_is_reported_not_silently_dropped() {
         for layout in layouts() {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"execution": {"team_enabled": true, "max_agent_depth": 2}}"#,
+                r#"{"agents": {"team_enabled": true, "max_depth": 2}}"#,
             );
             let settings = tiers.load();
-            assert_eq!(settings.values.execution.max_agent_depth, 2);
+            assert_eq!(settings.values.agents.max_depth, 2);
             let left_out: Vec<_> = settings.ignored.iter().map(|i| i.key.as_str()).collect();
-            assert_eq!(left_out, ["execution.team_enabled"]);
+            assert_eq!(left_out, ["agents.team_enabled"]);
         }
     }
 
@@ -1496,7 +1585,7 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}, "hooks_config": {}}"#,
+                r#"{"app": {"trust_all_projects": false}, "hooks": {}}"#,
             );
 
             let settings = LoadedSettings::load(
@@ -1510,11 +1599,8 @@ mod project_trust {
             );
 
             assert_eq!(settings.trust(), ProjectTrust::NoProject);
-            assert!(settings.values.hooks_config.is_some());
-            assert_eq!(
-                settings.values.project_trust.default,
-                crate::trust::TrustLevel::Untrusted
-            );
+            assert!(settings.values.hooks.is_some());
+            assert!(!settings.values.app.trust_all_projects);
         }
     }
 }
@@ -1539,30 +1625,32 @@ fn ignored_keys(settings: &LoadedSettings) -> Vec<&str> {
 
 #[test]
 fn a_value_left_out_is_reported_at_its_own_key_even_alone_in_its_file() {
-    let alone = load_global(r#"{"sandbox": {"network_mode": "open"}}"#);
-    assert_eq!(ignored_keys(&alone), ["sandbox.network_mode"]);
+    let alone = load_global(r#"{"sandbox": {"network": {"mode": "open"}}}"#);
+    assert_eq!(ignored_keys(&alone), ["sandbox.network.mode"]);
 
-    let both = load_global(r#"{"sandbox": {"network_mode": "open", "read_anywhere": "yes"}}"#);
+    let both = load_global(r#"{"sandbox": {"network": {"mode": "open"}, "require": "yes"}}"#);
     assert_eq!(
         ignored_keys(&both),
-        ["sandbox.network_mode", "sandbox.read_anywhere"]
+        ["sandbox.network.mode", "sandbox.require"]
     );
 }
 
 #[test]
 fn an_object_where_a_value_belongs_is_reported_as_that_value() {
-    let settings = load_global(r#"{"sandbox": {"allowed_domains": {"a": 1}}, "language": "x"}"#);
-    assert_eq!(ignored_keys(&settings), ["sandbox.allowed_domains"]);
-    assert_eq!(settings.values.language.as_deref(), Some("x"));
+    let settings =
+        load_global(r#"{"web": {"allowed_domains": {"a": 1}}, "prompt": {"language": "x"}}"#);
+    assert_eq!(ignored_keys(&settings), ["web.allowed_domains"]);
+    assert_eq!(settings.values.prompt.language.as_deref(), Some("x"));
 }
 
 #[test]
 fn a_program_only_permission_mode_is_left_out_and_reported_with_its_file() {
-    let settings = load_global(r#"{"permissions": {"mode": "bubble"}, "language": "x"}"#);
+    let settings =
+        load_global(r#"{"permissions": {"mode": "bubble"}, "prompt": {"language": "x"}}"#);
     assert_eq!(ignored_keys(&settings), ["permissions.mode"]);
     assert!(settings.ignored[0].origin.ends_with("settings.json"));
     assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
-    assert_eq!(settings.values.language.as_deref(), Some("x"));
+    assert_eq!(settings.values.prompt.language.as_deref(), Some("x"));
 }
 
 #[test]

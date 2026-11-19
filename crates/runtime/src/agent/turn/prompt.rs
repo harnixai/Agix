@@ -214,7 +214,7 @@ pub(super) fn build_prompt_context<'a>(
                 f.git_status.clone(),
                 f.memory_index
                     .clone()
-                    .filter(|_| settings.values.memory_enabled),
+                    .filter(|_| settings.values.memory.enabled),
                 f.output_style.as_ref().map(|os| os.content.clone()),
                 f.shell.clone(),
                 f.home_dir.clone(),
@@ -245,7 +245,7 @@ pub(super) fn build_prompt_context<'a>(
     ctx.git_branch = git_branch.map(Cow::Owned);
     ctx.git_status = git_status.map(Cow::Owned);
     ctx.is_worktree = is_worktree;
-    ctx.language = settings.values.language.clone().map(Cow::Owned);
+    ctx.language = settings.values.prompt.language.clone().map(Cow::Owned);
     ctx.scratchpad_dir = settings
         .paths
         .config_paths()
@@ -430,10 +430,10 @@ impl Agent {
     /// (`collect_memory_files_with` already returns them in that order), so
     /// the closest file is what the model reads most recently, and the header
     /// states the rule explicitly rather than relying on position alone. The
-    /// session's own `instruction_file` — which is usually the nearest
+    /// session's own `prompt.instruction_files` — usually the nearest
     /// `AGENTS.md` and therefore already in `memory_blocks` — is appended
     /// last if its content isn't already present. Deduplication is by trimmed
-    /// content, not path, since `instruction_file` may be an alias or symlink
+    /// content, not path, since an instruction file may be an alias or symlink
     /// of a file the walk already canonicalized under a different name.
     pub(super) fn build_instruction_context(&self) -> String {
         let mut sections: Vec<(String, String)> = Vec::new();
@@ -448,15 +448,15 @@ impl Agent {
         if let Some(ref own) = self.prompt.claude_md_content {
             let already = sections.iter().any(|(_, c)| c.trim() == own.trim());
             if !already && !own.trim().is_empty() {
-                sections.push((
-                    self.settings
-                        .values
-                        .instruction_file
-                        .as_ref()
+                let label = match self.settings.values.prompt.instruction_files.as_slice() {
+                    [] => "instruction file".to_string(),
+                    files => files
+                        .iter()
                         .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| "instruction file".to_string()),
-                    own.clone(),
-                ));
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                };
+                sections.push((label, own.clone()));
             }
         }
 
@@ -598,14 +598,15 @@ impl Agent {
         let rules = self.prompt.rules.rules();
         let values = &self.settings.values;
         let memory_prompt: Option<String> = values
-            .memory_enabled
+            .memory
+            .enabled
             .then(|| memory::memory_prompt(self.memory.store()));
         let blocks = self.prompt.prompt_assembler.assemble(
             &base::interface::prompt_assembler::AssemblyRequest {
                 registry: self.prompt.registry().as_ref(),
                 scene: self.scene.as_ref(),
-                prompt_override: values.prompt_override.as_deref(),
-                prompt_append: values.prompt_append.as_deref(),
+                prompt_override: values.prompt.override_text.as_deref(),
+                prompt_append: values.prompt.append.as_deref(),
                 memory_prompt: memory_prompt.as_deref(),
                 ctx: &ctx,
                 rules: &rules,

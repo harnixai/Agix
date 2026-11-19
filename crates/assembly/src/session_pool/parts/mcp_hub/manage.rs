@@ -70,7 +70,11 @@ impl SessionPool {
         self.admit_mcp(name, &cfg)
             .map_err(PoolError::McpServerDenied)?;
         let precondition = must_exist.then(|| declared_in_tier(name, false));
-        let ops = vec![EditOp::Set(server_key(name), config)];
+        let ops = vec![EditOp::SetKeeping(
+            server_key(name),
+            config,
+            vec![ENABLED.to_string()],
+        )];
         let effect = McpEffect::Server {
             name: name.to_string(),
             connect_pair: !must_exist,
@@ -80,7 +84,7 @@ impl SessionPool {
     }
 
     /// `mcp.removeServer` — take a server out of `tier`, with whatever
-    /// `settings.local.json` held for it and the tier's `mcp_enabled` entry.
+    /// `settings.local.json` held for it and its `enabled` there.
     /// Where another tier still declares it, it reconnects as that one says.
     pub async fn remove_mcp_server(
         &self,
@@ -91,10 +95,7 @@ impl SessionPool {
     ) -> Result<api::McpServerWritten, PoolError> {
         check_server_name(name)?;
         let from_plugin = self.plugins.mcp_servers().contains_key(name);
-        let ops = vec![
-            EditOp::Remove(server_key(name)),
-            EditOp::Remove(enabled_key(name)),
-        ];
+        let ops = vec![EditOp::Remove(server_key(name))];
         let precondition = Some(declared_in_tier(name, from_plugin));
         self.write_mcp_settings(
             project_root,
@@ -128,7 +129,7 @@ impl SessionPool {
         let precondition = (!known).then(|| {
             let server = name.to_string();
             Box::new(move |files: &TierFiles, path: &Path| {
-                if files.declares(&server_key(&server)) || files.declares(&enabled_key(&server)) {
+                if files.declares(&server_key(&server)) {
                     return Ok(());
                 }
                 Err(format!(
@@ -290,7 +291,7 @@ impl SessionPool {
     ) -> Vec<api::McpServerStatus> {
         self.configured_mcp_servers(&settings.values)
             .iter()
-            .filter(|(name, _)| settings.values.mcp_enabled.get(*name) == Some(&false))
+            .filter(|(name, _)| !settings.values.mcp.is_enabled(name))
             .filter(|(name, _)| !listed.iter().any(|s| &s.name == *name))
             .map(|(name, value)| disabled_entry(name, value))
             .collect()
@@ -373,7 +374,7 @@ impl SessionPool {
             let current = update.current()?;
             let mut updated = current
                 .share()
-                .with_subprocess_env(settings.values.sandbox.subprocess_env.clone())
+                .with_subprocess_env(settings.values.sandbox.env.clone())
                 .with_auth(Some(self.mcp.auth.clone()));
             updated.refresh_tools().await;
             let event = apply_admission(&mut updated, name, admission, force).await;
@@ -551,12 +552,14 @@ fn check_server_name(name: &str) -> Result<(), PoolError> {
     Ok(())
 }
 
+const ENABLED: &str = "enabled";
+
 fn server_key(name: &str) -> KeyPath {
-    KeyPath::new(["mcp_servers", name])
+    KeyPath::new(["mcp", "servers", name])
 }
 
 fn enabled_key(name: &str) -> KeyPath {
-    KeyPath::new(["mcp_enabled", name])
+    KeyPath::new(["mcp", "servers", name, ENABLED])
 }
 
 /// That the tier's files declare `name`; a server only a plugin declares
@@ -564,7 +567,7 @@ fn enabled_key(name: &str) -> KeyPath {
 fn declared_in_tier(name: &str, from_plugin: bool) -> Precondition {
     let server = name.to_string();
     Box::new(move |files: &TierFiles, path: &Path| {
-        if files.declares(&server_key(&server)) {
+        if files.declares_besides(&server_key(&server), ENABLED) {
             return Ok(());
         }
         if from_plugin {

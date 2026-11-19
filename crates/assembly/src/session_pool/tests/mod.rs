@@ -130,7 +130,7 @@ pub(super) fn turn(sid: &str, turn_id: &str, message: &str, on_busy: OnBusy) -> 
 /// with no memory extraction.
 pub(super) async fn answered_by(pool: &SessionPool, model: Arc<dyn base::interface::model::Model>) {
     let mut settings = (*pool.bindings.pool_settings().await).clone();
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
     binding.model = model;
     pool.bindings

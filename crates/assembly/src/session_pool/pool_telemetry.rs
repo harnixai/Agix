@@ -74,7 +74,8 @@ pub(in crate::session_pool) fn otel_sink(
 ) -> Option<std::sync::Arc<dyn telemetry::TelemetryRecorder>> {
     let endpoint = settings
         .values
-        .telemetry_url
+        .telemetry
+        .otlp_endpoint
         .clone()
         .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
         .filter(|e| !e.trim().is_empty())?;
@@ -89,7 +90,8 @@ pub(in crate::session_pool) fn otel_sink(
 ) -> Option<std::sync::Arc<dyn telemetry::TelemetryRecorder>> {
     if settings
         .values
-        .telemetry_url
+        .telemetry
+        .otlp_endpoint
         .as_deref()
         .is_some_and(|e| !e.trim().is_empty())
     {

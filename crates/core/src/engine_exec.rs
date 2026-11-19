@@ -4,7 +4,7 @@
 //!
 //! Going through the session's `exec.process` is what puts them where the
 //! session's commands are: on the machine (or remote) the host chose, under
-//! the same `sandbox.subprocess_env`, in a session of their own with no
+//! the same `sandbox.env`, in a session of their own with no
 //! controlling terminal, and stopped as a whole group when they time out. In a
 //! session whose commands the OS sandbox confines they are confined too, so
 //! whatever a repository a confined command configured makes git run is held
@@ -284,7 +284,7 @@ impl EngineExec {
             let unmet = confined.unmet.join("; ");
             if *require_enforcement {
                 return Err(EngineExecError::Refused(format!(
-                    "the session's commands are sandboxed and `sandbox.require_enforcement` \
+                    "the session's commands are sandboxed and `sandbox.require` \
                      is on, but {} cannot be sandboxed here ({unmet})",
                     spec.program
                 )));

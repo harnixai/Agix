@@ -5,7 +5,7 @@
 //! file (`AGENTS.md` / `CLAUDE.md`), injected verbatim, and the `.agix/rules/`
 //! index, advertised by name and first line so the model knows the documents
 //! exist. Both were a fixed answer to a question a deployment may answer
-//! differently — one path out of `settings.instruction_file`, and three
+//! differently — one path out of `settings.prompt.instruction_files`, and three
 //! directory tiers written into the discovery function. A host whose
 //! conventions live in a service, a monorepo tool that composes its own tier
 //! list, or an embedder with no filesystem at all had nothing to replace.

@@ -13,7 +13,7 @@
 //! task's output (`TaskOutput`, `session.taskOutput`, `task_progress`).
 //!
 //! The script runs inside the same OS sandbox as `Bash`, under the same
-//! `sandbox.require_enforcement`.
+//! `sandbox.require`.
 
 use async_trait::async_trait;
 use base::context::{RunningStatus, RunningTask, Session, TaskType};

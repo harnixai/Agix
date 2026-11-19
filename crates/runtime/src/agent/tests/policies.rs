@@ -19,7 +19,7 @@ fn build_hook_runner_defaults_to_empty_without_hooks_config() {
 #[test]
 fn build_hook_runner_parses_hooks_config_into_real_hooks() {
     let mut settings = test_settings();
-    settings.values.hooks_config = Some(serde_json::json!({
+    settings.values.hooks = Some(serde_json::json!({
         "PreToolUse": [
             { "type": "command", "command": "echo hi" }
         ]
@@ -39,7 +39,7 @@ fn build_hook_runner_parses_hooks_config_into_real_hooks() {
 #[test]
 fn a_config_change_hook_is_an_unknown_event_and_the_rest_still_run() {
     let mut settings = test_settings();
-    settings.values.hooks_config = Some(serde_json::json!({
+    settings.values.hooks = Some(serde_json::json!({
         "ConfigChange": [
             { "type": "command", "command": "echo reconfigured" }
         ],
@@ -63,7 +63,7 @@ fn a_config_change_hook_is_an_unknown_event_and_the_rest_still_run() {
 fn build_hook_runner_degrades_to_empty_on_malformed_hooks_config() {
     let mut settings = test_settings();
     // Wrong shape: hooks value must be a map of event -> Vec<HookConfig>.
-    settings.values.hooks_config = Some(serde_json::json!("not-a-hooks-map"));
+    settings.values.hooks = Some(serde_json::json!("not-a-hooks-map"));
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let runner = build_hook_runner(
         &settings,
@@ -747,8 +747,8 @@ async fn the_egress_policy_reaches_the_tool_that_has_to_obey_it() {
     }
 
     let mut settings = test_settings();
-    settings.values.sandbox.network_mode = base::interface::exec::NetworkMode::Allowlist;
-    settings.values.sandbox.allowed_domains = vec!["allowed.test".into()];
+    settings.values.sandbox.network.mode = base::interface::exec::NetworkMode::Allowlist;
+    settings.values.web.allowed_domains = vec!["allowed.test".into()];
 
     let model: Arc<dyn Model> = Arc::new(ToolThenStopModel {
         calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),

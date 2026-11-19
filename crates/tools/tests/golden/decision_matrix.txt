@@ -1576,7 +1576,7 @@ bypassPermissions managed-ask | att Deny -> Deny / Deny | unatt Deny -> Deny / D
 
 # cells: 5600
 
-# `sandbox.require_enforcement` on, and a sandbox that holds a command only in part
+# `sandbox.require` on, and a sandbox that holds a command only in part
 
 ## Bash
 

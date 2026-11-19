@@ -146,7 +146,7 @@ async fn an_unenforceable_policy_still_runs_when_the_host_accepts_it() {
 }
 
 /// Turning the sandbox off is not a shortfall. Refusing here would make
-/// `dangerously_disable_sandbox` and `require_enforcement` contradict
+/// `sandbox.enabled` and `require_enforcement` contradict
 /// each other instead of answering different questions.
 #[tokio::test]
 async fn a_sandbox_that_was_switched_off_is_not_a_failure_to_enforce() {

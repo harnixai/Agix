@@ -59,7 +59,7 @@ pub struct ApiErrorPayload {
     pub latency_ms: u64,
 }
 
-/// 会话 token 预算强制执行事件的载荷——`max_budget_tokens` 90% 提醒注入
+/// 会话 token 预算强制执行事件的载荷——`turn.token_budget` 90% 提醒注入
 /// 或 100% 硬停两种动作都用这个 payload，用 `action` 区分。
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct BudgetEnforcedPayload {

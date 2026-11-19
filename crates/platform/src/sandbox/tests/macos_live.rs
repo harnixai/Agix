@@ -564,7 +564,7 @@ fn unattended_a_command_cannot_reach_the_keychain_or_a_multiplexer() {
     assert!(!unattended_reached, "an unattended command reached tmux");
 }
 
-/// `sandbox.deny_write` names are filename segments, as for the file tools:
+/// `files.deny_write` names are filename segments, as for the file tools:
 /// a command may not write a path with a component that equals one or
 /// begins with it and a dot, in the project or deeper, new or existing.
 #[cfg(target_os = "macos")]

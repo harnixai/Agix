@@ -11,7 +11,7 @@ pub(super) fn test_settings() -> settings::LoadedSettings {
     values.model.max_tokens = 2000;
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;
-    values.telemetry_enabled = false;
+    values.telemetry.enabled = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = "/tmp".into();
     paths.global_data_dir = "/tmp".into();

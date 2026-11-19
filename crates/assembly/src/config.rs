@@ -236,7 +236,7 @@ impl std::fmt::Debug for DaemonConfig {
             .field("max_tokens", &self.settings.values.model.max_tokens)
             .field(
                 "mcp_servers",
-                &self.settings.values.mcp_servers.keys().collect::<Vec<_>>(),
+                &self.settings.values.mcp.servers.keys().collect::<Vec<_>>(),
             )
             .field("tcp_addr", &self.tcp_addr)
             .field("ws_addr", &self.ws_addr)
@@ -255,7 +255,7 @@ impl std::fmt::Debug for DaemonConfig {
                 "task_models",
                 &self.settings.values.task_models.keys().collect::<Vec<_>>(),
             )
-            .field("hooks", &self.settings.values.hooks_config.is_some())
+            .field("hooks", &self.settings.values.hooks.is_some())
             .finish()
     }
 }
@@ -368,7 +368,7 @@ mod tests {
     fn trust_project(global: &Path, project: &Path) {
         std::fs::write(
             global.join("settings.local.json"),
-            serde_json::json!({"project_trust": {"trusted": [project]}}).to_string(),
+            serde_json::json!({"app": {"trusted_projects": [project]}}).to_string(),
         )
         .unwrap();
     }
@@ -460,7 +460,7 @@ mod tests {
         let project_dir = tempfile::tempdir().unwrap();
         write_settings(
             config_dir.path(),
-            r#"{"model": {"model_name": "user-model"}, "execution": {"max_parallelism": 1, "max_api_calls_per_turn": 1}}"#,
+            r#"{"model": {"model_name": "user-model"}, "turn": {"parallel_tools": 1, "max_model_calls": 1}}"#,
         );
         write_project_settings(
             project_dir.path(),
@@ -587,7 +587,7 @@ mod tests {
         write_settings(
             config_dir.path(),
             r#"{
-                "hooks_config": {
+                "hooks": {
                     "PreToolUse": [
                         { "type": "command", "command": "echo scene-hook" }
                     ]
@@ -597,7 +597,7 @@ mod tests {
         write_project_settings(
             project_dir.path(),
             r#"{
-                "hooks_config": {
+                "hooks": {
                     "PreToolUse": [
                         { "type": "command", "command": "echo project-hook" }
                     ]
@@ -617,7 +617,7 @@ mod tests {
         let hooks = config
             .settings
             .values
-            .hooks_config
+            .hooks
             .expect("hooks should be present");
         let command = hooks["PreToolUse"][0]["command"].as_str().unwrap();
         assert_eq!(command, "echo project-hook");
@@ -628,7 +628,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
         let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
-        assert!(config.settings.values.hooks_config.is_none());
+        assert!(config.settings.values.hooks.is_none());
     }
 
     #[test]
@@ -654,7 +654,7 @@ mod tests {
         let paths = Arc::new(StaticDaemonPaths::new(PathBuf::from("/tmp/test")));
         let config = DaemonConfig::minimal(paths.clone());
         assert_eq!(config.session_cap, 32);
-        assert!(config.settings.values.mcp_servers.is_empty());
+        assert!(config.settings.values.mcp.servers.is_empty());
         assert!(config.tcp_addr.is_none());
     }
 }

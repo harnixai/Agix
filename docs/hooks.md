@@ -12,11 +12,11 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 
 ## 配置在哪
 
-`settings.json` 的 `hooks_config`:事件名到一组 hook 的映射。
+`settings.json` 的 `hooks`:事件名到一组 hook 的映射。
 
 ```json
 {
-  "hooks_config": {
+  "hooks": {
     "PreToolUse": [
       { "type": "command", "command": "check-push.sh", "if": "Bash(git push:*)", "timeout": 5000 }
     ],
@@ -36,9 +36,9 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
   唯一的例外是宿主连接登记的 hook(下面「宿主连接的 hook」):它不在设置里,永远叠加在设置
   hook 之上,不会被任何一层替换。
 - **未信任的项目不算数。** 项目没被信任时(`ARCHITECTURE.md` §6.6),它两份设置文件里的
-  `hooks_config` 整段忽略、记一条 warn,低层同名事件的 hook 照常生效;`project.trust` 之后
+  `hooks` 整段忽略、记一条 warn,低层同名事件的 hook 照常生效;`project.trust` 之后
   这个项目的会话重建,项目的 hook 才加载。`project.status` 的 `requires_trust` 里有
-  `hooks_config` 就说明项目配了 hook。
+  `hooks` 就说明项目配了 hook。
 - **坏一条只丢一条。** 不认识的事件名(拼错、写给更新版本引擎的)、格式不对的条目,丢掉那一条、
   记一条 warn,其余照常生效。事件名区分大小写,不做"最接近的"猜测。
 - **从不触发的事件会说出来。** 现在没有这样的事件;若将来有,表里会标 **从不触发**(清单是
@@ -365,7 +365,7 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
 | `WorktreeRemove` | `ExitWorktree` 成功之后 | `tool_name`、`tool_input`、`turn_id` | 只通知,回答被丢弃 |
 | `InstructionsLoaded` | 会话上下文(项目说明)注入转录时,说明非空才发;一个会话一次 | `reason`(注入了多少字节) | 只通知,回答被丢弃 |
 | `CwdChanged` | 会话开始运行时报一次工作目录;活着的会话不会换目录 | `reason`(`session working directory: <路径>`) | 只通知,回答被丢弃 |
-| `FileChanged` | 根会话的 `instruction_file`,或它载入的某份 `AGENTS.md`,被改、建、删;300 ms 去抖,一次变化一个事件 | `tool_name`(`FileWatcher`)、`tool_input`:`file_path`、`change_type`(`created` / `modified` / `deleted`) | 只通知,回答被丢弃 |
+| `FileChanged` | 根会话 `prompt.instruction_files` 里的某个文件,或它载入的某份 `AGENTS.md`,被改、建、删;300 ms 去抖,一次变化一个事件 | `tool_name`(`FileWatcher`)、`tool_input`:`file_path`、`change_type`(`created` / `modified` / `deleted`) | 只通知,回答被丢弃 |
 | `PostSampling` | 一次模型调用的回复完整收完、写进转录之后(被取消的不发) | `reason`(`stop_reason` 与输出 token 数) | 只通知,回答被丢弃 |
 <!-- END GENERATED TABLE -->
 
@@ -395,7 +395,7 @@ hook 是策略的补充,不是唯一的门:要硬拦的东西写成权限规则�
   `team_name` / `teammate_name` 而不带 `reason`,都在这一轮落盘之后,比这一轮的 `TurnComplete`
   hook 晚。所以一个 `TaskCompleted` hook 看 payload 里有没有 `team_name` 来分这两种:有的是成员的
   一轮干完了,没有的是一个任务结束了(常驻成员作为任务结束时,`kind` 是 `teammate`)。
-- **`FileChanged`。** 只有根会话起监视,子 Agent 不重复发;监视的是 `instruction_file`
-  和根会话载入过的每一份 `AGENTS.md`,不是任意文件。不存在的路径不监视。
+- **`FileChanged`。** 只有根会话起监视,子 Agent 不重复发;监视的是 `prompt.instruction_files`
+  里的文件和根会话载入过的每一份 `AGENTS.md`,不是任意文件。不存在的路径不监视。
 - **`UserPromptSubmit` 之后还有一道。** 嵌入方的 `prompt.submit` 扩展点跑在 hook 之后,
   hook 的改写是它看到的原文,它的改写 hook 改不回来。

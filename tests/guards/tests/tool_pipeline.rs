@@ -331,7 +331,13 @@ fn every_field_of_a_calls_context_is_read_and_given() {
     );
 }
 
-const SANDBOX_FIELDS: &[&str] = &["allow_read", "deny_read", "allowed_domains", "network_mode"];
+const SANDBOX_FIELDS: &[&str] = &[
+    "allow_read",
+    "deny_read",
+    "allowed_domains",
+    "network_mode",
+    "network",
+];
 
 const SANDBOX_TYPES: &[(&str, &str)] = &[
     (

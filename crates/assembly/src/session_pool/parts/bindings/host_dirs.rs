@@ -383,15 +383,16 @@ impl Forbidden {
         sensitive: &base::paths::SensitivePaths,
         cwd: &Path,
     ) -> Vec<PathBuf> {
-        let sandbox = &settings.values.sandbox;
+        let values = &settings.values;
         let env = base::context::SessionEnv {
-            additional_writable_dirs: sandbox
-                .additional_directories
+            additional_writable_dirs: values
+                .files
+                .extra_dirs
                 .iter()
                 .map(|dir| cwd.join(dir))
                 .chain(sensitive.state_working_dirs())
                 .collect(),
-            cache_directories: sandbox.cache_directories.paths(cwd),
+            cache_directories: values.sandbox.cache_dirs.paths(cwd),
             ..base::context::SessionEnv::new(cwd.to_path_buf())
         };
         let session_tmp = sensitive
@@ -612,7 +613,7 @@ mod tests {
         let scratch = scratch();
         let root = scratch.path().canonicalize().unwrap();
         let mut settings = settings_in(&root);
-        settings.values.sandbox.additional_directories = vec![root.join("extra")];
+        settings.values.files.extra_dirs = vec![root.join("extra")];
         let in_temp = tempfile::tempdir().unwrap();
         let mut listed = vec![
             root.join("extra/skills").display().to_string(),
@@ -624,7 +625,7 @@ mod tests {
         if cfg!(target_os = "macos") {
             listed.push(in_temp.path().display().to_string());
         }
-        settings.values.sandbox.cache_directories.0.insert(
+        settings.values.sandbox.cache_dirs.0.insert(
             "toolchain".into(),
             vec![root.join("cache").display().to_string()],
         );

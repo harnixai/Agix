@@ -75,7 +75,7 @@ impl LocalNetwork {
         self
     }
 
-    /// The egress a deployment's `sandbox.network_mode` describes, read the
+    /// The egress a deployment's `sandbox.network.mode` describes, read the
     /// same way the sandbox backends read it so the two cannot disagree about
     /// where the model may reach.
     ///
@@ -193,7 +193,7 @@ pub fn configure_system_proxy(use_system_proxy: bool) {
     if USE_SYSTEM_PROXY.set(use_system_proxy).is_err() && use_system_proxy_now() != use_system_proxy
     {
         tracing::warn!(
-            "network.use_system_proxy changed after this process's HTTP clients were set up; restart to apply it"
+            "app.system_proxy changed after this process's HTTP clients were set up; restart to apply it"
         );
     }
 }
@@ -241,7 +241,7 @@ fn internal_refusal(host: &str, ip: IpAddr, origin: Origin) -> ExecError {
     ExecError::denied(match origin {
         Origin::Agent => format!(
             "{place}; a model-directed request reaches such a host only when \
-             sandbox.allowed_domains names it"
+             web.allowed_domains names it"
         ),
         Origin::Operator => format!("{place}, which this request may not reach"),
     })

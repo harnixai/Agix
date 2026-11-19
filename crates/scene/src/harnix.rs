@@ -55,7 +55,7 @@ pub fn spec() -> SceneSpec {
     s.description = "Harnix 宿主会话 — 常用工具集与精简提示词，宿主在其上加自己的工具".into();
     s.supports_team = true;
     s.tools = ToolSurface::allowing(TOOLS).deferring(DEFERRED);
-    s.path_style = PathStyle::WorkspaceRelative;
+    s.path_style = PathStyle::Relative;
     s.token_budget = TokenBudget::new(150_000, 15);
     s.reminders = vec![Reminder::GitStatus];
     s.session_naming =
@@ -122,7 +122,7 @@ mod tests {
         assert!(scene.permits_tool("mcp__github__search", &ToolOrigin::mcp("github")));
         assert!(scene.permits_tool("Agent", &builtin));
         assert!(!scene.interactive);
-        assert_eq!(scene.path_style, PathStyle::WorkspaceRelative);
+        assert_eq!(scene.path_style, PathStyle::Relative);
         for excluded in [
             "AskUserQuestion",
             "EnterPlanMode",

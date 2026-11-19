@@ -34,7 +34,7 @@ pub enum SubprocessEnvMode {
     Allowlist,
 }
 
-/// `sandbox.subprocess_env` in settings.json.
+/// `sandbox.env` in settings.json.
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -279,11 +279,11 @@ pub enum EnvPlan {
 /// variables, since a remote provider's environment is not this machine's.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum EnvScope {
-    /// What `sandbox.subprocess_env` gives every child.
+    /// What `sandbox.env` gives every child.
     #[default]
     Session,
     /// Only what a shell needs to run: `PATH HOME USER LOGNAME SHELL TERM
-    /// LANG LC_* TZ TMPDIR`. `sandbox.subprocess_env.allow` adds nothing to
+    /// LANG LC_* TZ TMPDIR`. `sandbox.env.allow` adds nothing to
     /// it.
     Minimal,
 }

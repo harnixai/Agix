@@ -244,7 +244,7 @@ impl HookEvent {
                 Ignored,
             ),
             HookEvent::FileChanged => (
-                "根会话的 `instruction_file`,或它载入的某份 `AGENTS.md`,被改、建、删;300 ms 去抖,\
+                "根会话 `prompt.instruction_files` 里的某个文件,或它载入的某份 `AGENTS.md`,被改、建、删;300 ms 去抖,\
                  一次变化一个事件",
                 "`tool_name`(`FileWatcher`)、`tool_input`:`file_path`、`change_type`\
                  (`created` / `modified` / `deleted`)",

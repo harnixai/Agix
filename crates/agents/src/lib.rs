@@ -29,7 +29,7 @@ pub const MODULE_ID: &str = "agents";
 pub struct AgentsModule {
     shared_types: Option<SharedAgentTypeMap>,
     /// Set on the copy a session's delegates are assembled with, so the
-    /// whole tree draws on the root's `execution.max_concurrent_subagents`.
+    /// whole tree draws on the root's `agents.max_concurrent`.
     slots: Option<SubagentSlots>,
     /// Set the same way: the root's hook agents and their descendants.
     hook_agents: Option<HookAgents>,
@@ -88,9 +88,10 @@ impl Module for AgentsModule {
         for t in cx.template_tools.list() {
             template.register(t);
         }
-        let slots = self.slots.clone().unwrap_or_else(|| {
-            SubagentSlots::new(settings.values.execution.max_concurrent_subagents)
-        });
+        let slots = self
+            .slots
+            .clone()
+            .unwrap_or_else(|| SubagentSlots::new(settings.values.agents.max_concurrent));
         // The setting is the operator's switch; the scene's capability is what
         // the scene is for. A scene that does no teamwork never shows the
         // model these tools, rather than showing and refusing them.

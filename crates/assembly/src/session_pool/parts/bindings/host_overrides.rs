@@ -48,8 +48,8 @@ impl HostOverrides {
             Ok(values) => {
                 let disk = std::mem::replace(&mut settings.values, values);
                 if let Err(e) = settings.place_worktrees() {
-                    tracing::warn!(error = %e, "the host's worktree_dir is not allowed; left out");
-                    settings.values.worktree_dir = disk.worktree_dir;
+                    tracing::warn!(error = %e, "the host's app.worktree_dir is not allowed; left out");
+                    settings.values.app.worktree_dir = disk.app.worktree_dir;
                 }
             }
             Err(e) => tracing::warn!(error = %e, "the host's settings do not apply here; left out"),
@@ -121,21 +121,21 @@ mod tests {
     fn only_what_the_host_changed_is_carried_and_it_lands_on_other_settings() {
         let disk = Settings::defaults_for("m");
         let mut host = disk.clone();
-        host.memory_enabled = false;
+        host.memory.enabled = false;
         host.model.max_tokens = 7;
         let overrides = HostOverrides::between(&loaded(disk.clone()), &loaded(host));
         assert_eq!(
             overrides.values,
-            Some(serde_json::json!({"memory_enabled": false, "model": {"max_tokens": 7}}))
+            Some(serde_json::json!({"memory": {"enabled": false}, "model": {"max_tokens": 7}}))
         );
 
         let mut other = Settings::defaults_for("other-model");
-        other.language = Some("fr".into());
+        other.prompt.language = Some("fr".into());
         let applied = overrides.apply(loaded(other));
-        assert!(!applied.values.memory_enabled);
+        assert!(!applied.values.memory.enabled);
         assert_eq!(applied.values.model.max_tokens, 7);
         assert_eq!(applied.values.model.model_name, "other-model");
-        assert_eq!(applied.values.language.as_deref(), Some("fr"));
+        assert_eq!(applied.values.prompt.language.as_deref(), Some("fr"));
 
         let same = HostOverrides::between(&loaded(disk.clone()), &loaded(disk));
         assert!(same.values.is_none());

@@ -11,7 +11,7 @@ use super::fence::fenced_ports;
 use super::{sandbox_escape, EgressProxy};
 
 pub(super) const NO_PROXY_CONFIGURED: &str =
-    "network_mode proxy needs sandbox.egress_proxy, so the network is cut entirely";
+    "sandbox.network.mode proxy needs sandbox.network.proxy, so the network is cut entirely";
 
 /// What a command reads to find the proxy at `http` (and `socks`). Both
 /// cases, since curl reads only the lowercase `http_proxy`. An empty

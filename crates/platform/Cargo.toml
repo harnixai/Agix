@@ -40,7 +40,7 @@ http = ["dep:reqwest", "dep:rustls"]
 # approve a command, one runs only when the sandbox fully holds it.
 #
 # Off means no backend is compiled at all: `PlatformSandbox` says it cannot
-# confine anything, and `sandbox.require_enforcement` — which exists to refuse
+# confine anything, and `sandbox.require` — which exists to refuse
 # rather than run unconstrained — refuses every command, naming this feature.
 # The contract, the policy type and the credential deny-read list live in
 # `base` and stay either way; the last of those is a data-exfiltration guard

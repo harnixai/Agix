@@ -1,5 +1,26 @@
 {
   "$defs": {
+    "AgentsSettings": {
+      "additionalProperties": false,
+      "description": "How far and how wide delegation to sub-agents may go.",
+      "properties": {
+        "max_concurrent": {
+          "default": 6,
+          "description": "Sub-agents the model may have running at once anywhere under one\nsession — foreground, background and resumed ones, at every depth.\nA spawn beyond it is refused with a message telling the model to wait\nor do the work itself. `TeamCreate` members and persistent team\nmembers have their own limits (`team.*`) and do not count.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": 3,
+          "description": "How many delegations deep a chain of sub-agents may go: a session a\nhost created is depth 0, and an agent at this depth is not offered\nthe `Agent` tool. Applies to team members too.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ApiType": {
       "description": "API protocol type.",
       "enum": [
@@ -9,6 +30,41 @@
       ],
       "type": "string"
     },
+    "AppSettings": {
+      "description": "What is decided once for the whole instance: read from the global tier's\nfiles only (and from what an embedder sets in memory), never from a scene\nor a project.",
+      "properties": {
+        "history": {
+          "$ref": "#/$defs/HistoryLocation",
+          "default": "global",
+          "description": "Where sessions are kept. `global` (default): under the state root's\n`projects/` and `sessions/`. `project`: a session of a trusted project\ngoes to that project's `<project dir>/state/history/<id>/` (a\nworktree's to its main checkout's), with only an index under\n`sessions/<id>/`; the rest stay global. What is already kept either\nway is read where it is, and history kept in a project is read only\nwhile the project is trusted. Takes effect when the daemon starts."
+        },
+        "system_proxy": {
+          "default": true,
+          "description": "The engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over\nHTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` /\n`NO_PROXY` from the environment (default). `false` connects directly,\nignoring them. Requests to this machine are direct either way. Not the\nnetwork of a sandboxed command, which `sandbox.network` decides. Takes\neffect when the daemon starts; `config.reload` does not apply a change.",
+          "type": "boolean"
+        },
+        "trust_all_projects": {
+          "default": false,
+          "description": "Trust every project no `trusted_projects` entry names.",
+          "type": "boolean"
+        },
+        "trusted_projects": {
+          "description": "Projects whose own configuration takes effect as written — see\n`settings::trust`. Absolute paths, or globs where `*` stays within one\npath segment and `**` crosses them; a leading `~/` is the home\ndirectory. The global `settings.json` and `settings.local.json` lists\nadd up rather than one replacing the other; `project.trust` writes to\nthe second.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "worktree_dir": {
+          "description": "The directory at a repository's root the engine's git worktrees go\nin, which is also the line it adds to that repository's `.gitignore`:\none path component starting with `.`, not starting with `.git`, not a\nconfiguration root nor another tool's directory\n(`base::paths::Layout::with_worktrees_dir`). Unset, `.wkts`. A name\nthat is not allowed is ignored with a warning.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CacheDirectories": {
       "additionalProperties": {
         "items": {
@@ -16,7 +72,7 @@
         },
         "type": "array"
       },
-      "description": "[`SandboxConfig::cache_directories`]: toolchain name → cache paths.",
+      "description": "[`SandboxConfig::cache_dirs`]: toolchain name → cache paths.",
       "type": "object"
     },
     "CheckpointSettings": {
@@ -46,9 +102,18 @@
     "CompactionConfig": {
       "description": "Context compaction, over what the scene asks for. A field left out keeps\nthe scene's own value (`SceneSpec::token_budget`).",
       "properties": {
-        "cached_microcompact": {
+        "clear_on_cache_expiry": {
           "description": "Once an hour — the lifetime of the provider's prompt cache — blank all\nbut the 20 newest tool results and send the provider `cache_edits`\nfor the ones it still holds.",
           "type": "boolean"
+        },
+        "inline_result_chars": {
+          "description": "A tool result longer than this many characters is saved to a file in\nthe project's `state/tool-results/` and the model gets its head, its\ntail and the path (default 30,000; `0` keeps every result in the\nconversation).\n`Read`, `WebFetch` and `TaskOutput` page their own results and are\nnever saved.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "keep_recent": {
           "description": "How many recent rounds compaction leaves as they are.",
@@ -65,15 +130,6 @@
         },
         "threshold_tokens": {
           "description": "Compact once a request's context passes this many tokens. `0` turns\nautomatic compaction off.",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "tool_result_inline_chars": {
-          "description": "A tool result longer than this many characters is saved to a file in\nthe project's `state/tool-results/` and the model gets its head, its\ntail and the path (default 30,000; `0` keeps every result in the\nconversation).\n`Read`, `WebFetch` and `TaskOutput` page their own results and are\nnever saved.",
           "format": "uint",
           "minimum": 0,
           "type": [
@@ -148,62 +204,81 @@
       ],
       "type": "object"
     },
-    "ExecutionSettings": {
-      "additionalProperties": false,
-      "description": "Execution constraints.",
+    "FilesSettings": {
+      "description": "Where the tools may read and write beyond the project.",
       "properties": {
-        "max_agent_depth": {
-          "default": 3,
-          "description": "How many delegations deep a chain of sub-agents may go: a session a\nhost created is depth 0, and an agent at this depth is not offered\nthe `Agent` tool. Applies to team members too.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
+        "allow_write": {
+          "description": "Paths to re-allow writing, on top of the built-in deny defaults. Most\nspecific wins.\n\nThe write-side counterpart of `sandbox.allow_read`, and it exists for\nthe same reason: the defaults sit on real workflows. A project that\nkeeps a checked-in `.env.example`, or a deployment whose agent is\nmeant to maintain a private-registry `.npmrc`, has to be able to say\n\"that one is fine here\".\n\nThis exempts a path from the *deny* rules only. Where a tool may write\nat all is a different question, answered by `extra_dirs` — keeping\nthem apart is what stops one setting quietly widening the project\nboundary.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "max_api_calls_per_turn": {
-          "description": "Ceiling on LLM round trips in one turn, before the turn ends with\n`stop_reason: \"max_turns\"`.\n\nThis is a runaway guard, not a task budget. Every comparable agent\nruntime treats it that way and lands in the same range — the OpenAI\nAgents SDK defaults `max_turns` to 10, LangGraph's `recursion_limit`\nto 25, LangChain's `max_iterations` to 15. A long task is meant to be\nserved by compaction, delegation and resuming, not by a high ceiling:\nraising this does not rescue an agent stuck in a loop, it only buys\nthe loop more iterations before it stops.\n\nRaise it deliberately for a genuinely long single turn. Nothing here\ndetects a *lack of progress* — a model repeating the same failing\ntool call burns the whole allowance either way.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
+        "deny_write": {
+          "description": "Extra filename segments a tool may never write, on top of the built-in\ncredential defaults (`.env`, `id_rsa`, `.ssh`, `.npmrc`, ...). A path is\nrefused if *any* of its components matches one, or begins with one\nfollowed by a dot — so `.env` also covers `.env.production`. A\nsandboxed `Bash` / `Monitor` command is held to the same names inside\nits writable roots (on Linux only for entries that already exist).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "max_budget_tokens": {
-          "description": "Maximum cumulative tokens (input + output, summed across every API\ncall in a turn) before the turn is aborted with `budget_exceeded`.\n`None` = unlimited.\n\nDeliberately token-based, not a dollar figure: provider prices change\nover time and per contract, so enforcing a dollar budget needs a\nper-model price table that can silently drift out of date — a stale\nor missing price makes the hard cap wrong in either direction. Token\ncounts come straight from the provider's own usage accounting on\nevery response, so there is nothing to keep in sync.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        "extra_dirs": {
+          "description": "Directories outside the project that tools may read and write, as if\nthey were part of it. The instance's own state directory (`~/.agix`\nby default) is always readable, but only its `scratchpad` and\n`memory` directories are writable this way.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "max_concurrent_subagents": {
-          "default": 6,
-          "description": "Sub-agents the model may have running at once anywhere under one\nsession — foreground, background and resumed ones, at every depth.\nA spawn beyond it is refused with a message telling the model to wait\nor do the work itself. `TeamCreate` members and persistent team\nmembers have their own limits (`team.*`) and do not count.",
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_parallelism": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
+        "read_dirs": {
+          "description": "Directories outside the project that the file tools (`Read`, `Glob`,\n`Grep`) and read-only shell commands may read without asking. `\"/\"`\nlets them read anywhere. Reading anywhere else needs a person's\napproval, and an unattended session — one with nobody to approve — is\nrefused.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"
     },
     "HistoryLocation": {
-      "description": "[`HistorySettings::location`].",
+      "description": "[`AppSettings::history`].",
       "enum": [
         "global",
         "project"
       ],
       "type": "string"
     },
-    "HistorySettings": {
-      "description": "Where sessions' transcripts and private files are kept.",
+    "McpServerEntry": {
+      "additionalProperties": true,
+      "description": "One `mcp.servers` entry: a server's configuration (`mcp::config::McpServerConfig`,\nread by the MCP module, which this crate cannot depend on), and whether it is on.",
       "properties": {
-        "location": {
-          "$ref": "#/$defs/HistoryLocation",
-          "default": "global",
-          "description": "`global` (default): under the state root's `projects/` and\n`sessions/`. `project`: a session of a trusted project goes to that\nproject's `<project dir>/state/history/<id>/` (a worktree's to its main\ncheckout's), with only an index under `sessions/<id>/`; the rest stay\nglobal. What is already kept either way is read where it is, and\nhistory kept in a project is read only while the project is trusted.\nTakes effect when the daemon starts."
+        "enabled": {
+          "description": "Unset is on.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "McpSettings": {
+      "description": "MCP servers, keyed by server name.",
+      "properties": {
+        "servers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/McpServerEntry"
+          },
+          "description": "Tiers merge by name and field, so a higher tier can change one field\nof a server a lower one declared. An entry holding nothing but\n`enabled` declares nothing: it turns off, or back on, the server of\nthat name declared in a lower tier or by a plugin — except in a\nproject that is not trusted, which may only turn servers off.\n\n`$VAR` / `${VAR}` / `${VAR:-default}` are expanded in a server's\n`command`, `args`, `env`, `url` and `headers` when it connects — the\nonly place in settings that expands anything. Every variable of the\ndaemon's environment read there, and every `*_env` of a server's\n`oauth` block, counts as that server's secret: no other child process\ninherits it (`sandbox.env`).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "MemorySettings": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "The file-based memory system (`MEMORY.md` + one `.md` per memory).\nDefault `true`. `false` drops the memory prompt, the memory index in\neach turn's reminder, and recall.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -344,22 +419,11 @@
         }
       ]
     },
-    "NetworkSettings": {
-      "description": "Egress of the engine's own HTTP: model calls, `WebFetch` / `Ping`, MCP over\nHTTP, OAuth. Not the network of a sandboxed command, which\n`sandbox.network_mode` and `sandbox.egress_proxy` decide.",
-      "properties": {
-        "use_system_proxy": {
-          "default": true,
-          "description": "Follow `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` from\nthe environment (default). `false` connects directly, ignoring them.\nRequests to this machine are direct either way. Takes effect when the\ndaemon starts; `config.reload` does not apply a change.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "PathStyle": {
       "description": "How file tools word the paths the model reads: in tool descriptions and in\nthe paths Grep, Glob, Write and Edit print. Resolving a path the model\npasses in is the same in both styles (relative against the working\ndirectory, absolute as is).",
       "enum": [
         "absolute",
-        "workspace_relative"
+        "relative"
       ],
       "type": "string"
     },
@@ -373,7 +437,7 @@
         },
         {
           "const": "acceptEdits",
-          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
+          "description": "Allow file writes inside the project (the working directory and\n`files.extra_dirs`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
           "type": "string"
         },
         {
@@ -468,20 +532,47 @@
       },
       "type": "object"
     },
-    "ProjectTrustSettings": {
-      "description": "`project_trust` in settings.json. Read from the global tier only; a scene\nor project tier that sets it is ignored with a warning.",
+    "PromptSettings": {
+      "description": "What the system prompt says, over what the scene gives it.",
       "properties": {
-        "default": {
-          "$ref": "#/$defs/TrustLevel",
-          "default": "untrusted",
-          "description": "A project that no `trusted` pattern matches."
+        "append": {
+          "description": "Appended to the end of the system prompt.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "trusted": {
-          "description": "Trusted project roots: absolute paths, or globs where `*` stays within\none path segment and `**` crosses them. A leading `~/` is the home\ndirectory. The global `settings.json` and `settings.local.json` lists\nadd up rather than one replacing the other; `project.trust` writes to\nthe second.",
+        "instruction_files": {
+          "description": "More instruction files (e.g. a `CLAUDE.md` outside the project), read\nin order when the session is built and given to the model alongside\nthe discovered `AGENTS.md` files. A root session with a `FileChanged`\nhook watches them.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "language": {
+          "description": "User language preference (e.g. \"zh-CN\", \"ja\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "override": {
+          "description": "Overrides the entire system prompt if set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path_style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PathStyle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the file tools word paths for the model. `absolute` keeps\ntoday's text; `relative` makes tool descriptions say paths are\nrelative to the working directory and prints Grep / Glob / Write /\nEdit paths under it relative, so a recorded session replays in another\nworking directory and long paths stop repeating in every call.\nResolving paths is unchanged. Unset, the scene decides\n(`SceneSpec::path_style`: `harnix` is relative, the rest absolute)."
         }
       },
       "type": "object"
@@ -499,7 +590,7 @@
         },
         "api_key_env": {
           "default": null,
-          "description": "Environment variable holding the key, read when `api_key` is unset.\nNo child process inherits it once a settings file names it, unless\n`sandbox.subprocess_env.allow` does.",
+          "description": "Environment variable holding the key, read when `api_key` is unset.\nNo child process inherits it once a settings file names it, unless\n`sandbox.env.allow` does.",
           "type": [
             "string",
             "null"
@@ -602,15 +693,8 @@
       ]
     },
     "SandboxConfig": {
-      "description": "Sandbox/security configuration.",
+      "description": "The OS sandbox `Bash` / `Monitor` commands run in.",
       "properties": {
-        "additional_directories": {
-          "description": "Directories outside the project that tools may read and write, as if\nthey were part of it. The instance's own state directory (`~/.agix`\nby default) is always readable, but only its `scratchpad` and\n`memory` directories are writable this way.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "allow_read": {
           "description": "Paths to re-allow reading, on top of the built-in credential deny\ndefaults (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...). It re-allows exactly the\nentry it names; a parent directory, or a path below a denied one,\nchanges nothing. Never a path a `Read(...)` deny rule names.\n\nExists because those defaults are applied to `Bash`, and some of them\nsit on legitimate workflows — `npm install` against a private registry\nreads `~/.npmrc`, `docker build` reads `~/.docker/config.json`.\nThis is the way to say \"yes, that one is fine here\".",
           "items": {
@@ -618,21 +702,7 @@
           },
           "type": "array"
         },
-        "allow_write": {
-          "description": "Paths to re-allow writing, on top of the built-in deny defaults. Most\nspecific wins.\n\nThe write-side counterpart of [`allow_read`](Self::allow_read), and it\nexists for the same reason: the defaults sit on real workflows. A\nproject that keeps a checked-in `.env.example`, or a deployment whose\nagent is meant to maintain a private-registry `.npmrc`, has to be able\nto say \"that one is fine here\".\n\nThis exempts a path from the *deny* rules only. Where a tool may write\nat all is a different question, answered by `additional_directories` —\nkeeping them apart is what stops one setting quietly widening the\nproject boundary.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "allowed_domains": {
-          "description": "Hosts the model may reach (`WebFetch`, `Ping`); a name also covers its\nsubdomains. Under `network_mode: \"allowlist\"` it is the whole list, but\na sandboxed `Bash` / `Monitor` command reaches none of its domains: the\nOS sandbox cannot filter by domain, and lets through only localhost\n(macOS, when listed) or nothing (Linux). In every mode, a host it\nnames may be reached at an address on this machine or a private\nnetwork, which a model-directed request is otherwise refused — write\n`127.0.0.1` here to let `WebFetch` reach a local server.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "cache_directories": {
+        "cache_dirs": {
           "$ref": "#/$defs/CacheDirectories",
           "default": {
             "dotnet": [
@@ -683,26 +753,58 @@
           },
           "description": "Package and build caches outside the project that a sandboxed `Bash`\ncommand may write — `pip`, `npm`, `cargo` and the like fail without\nthem. Grouped by toolchain; a settings file replaces one group by\nnaming it (`\"python\": []` drops it), adds a group under a new name, and\nleaves the rest at their defaults. `~/` means the user's home. The file\ntools do not get these."
         },
-        "dangerously_disable_sandbox": {
-          "default": false,
-          "description": "Bypass the sandbox entirely, in a build that has one.\n\nDefault: false. The backend is behind the `sandbox` compile-time\nfeature, which is on by default; a build without it has nothing to\nbypass and this setting changes nothing in it. It is the runtime half\nof a two-part answer — the build decides whether a sandbox exists, this\ndecides whether to use the one it has.",
+        "deny_read": {
+          "description": "Paths a sandboxed `Bash` / `Monitor` command may not read, added to\nthe built-in credential list (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...);\n`allow_read` is how to let one of those through. The `Read(...)` deny\nrules that name a file or a directory are added on top; one with any\nother glob (`**/*.pem`) is not, so name its files here or deny them\nwith a `Bash(...)` rule.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Run commands in the sandbox, in a build that has one.\n\nDefault: true. The backend is behind the `sandbox` compile-time\nfeature, which is on by default; a build without it has nothing to\nturn off and this setting changes nothing in it. It is the runtime half\nof a two-part answer — the build decides whether a sandbox exists, this\ndecides whether to use the one it has.",
           "type": "boolean"
         },
-        "deny_read": {
-          "description": "Paths a sandboxed `Bash` / `Monitor` command may not read. Empty — the\ndefault — means the built-in credential list (`~/.ssh`, `~/.aws`,\n`~/.npmrc`, ...); a non-empty list replaces that list as a whole\nrather than adding to it, so repeat any of it you still want. The\n`Read(...)` deny rules that name a file or a directory are added on\ntop; one with any other glob (`**/*.pem`) is not, so name its files\nhere or deny them with a `Bash(...)` rule.",
-          "items": {
-            "type": "string"
+        "env": {
+          "$ref": "#/$defs/SubprocessEnv",
+          "default": {
+            "mode": "inherit"
           },
-          "type": "array"
+          "description": "The environment `Bash` / `Monitor` commands, command hooks and MCP\nstdio servers start from, sandboxed or not. By default the host's\nenvironment minus the engine's own credentials: `ANTHROPIC_*`,\n`AGIX_DAEMON_TOKEN`, and every variable a setting names as holding a\nsecret — a provider's `api_key_env`, an MCP server's\n`oauth.client_secret_env` / `oauth.private_key_jwt.key_env` and every\n`$VAR` in its `command`, `args`, `env`, `url` or `headers` (outside\nthe project's own tier), a plugin's MCP servers likewise, the\nenterprise IdP's `client_secret_env`. `\"mode\": \"allowlist\"` keeps only\n`PATH`, `HOME`, the locale and a few others, plus whatever `allow`\nnames. An MCP server takes the policy of the settings it is declared\nin, with its own `env` added on top: what it is given there it gets,\nanother server's secret it does not."
         },
-        "deny_write": {
-          "description": "Extra filename segments a tool may never write, on top of the built-in\ncredential defaults (`.env`, `id_rsa`, `.ssh`, `.npmrc`, ...). A path is\nrefused if *any* of its components matches one, or begins with one\nfollowed by a dot — so `.env` also covers `.env.production`. A\nsandboxed `Bash` / `Monitor` command is held to the same names inside\nits writable roots (on Linux only for entries that already exist).",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "network": {
+          "$ref": "#/$defs/SandboxNetwork",
+          "default": {
+            "mode": "unrestricted"
+          }
         },
-        "egress_proxy": {
+        "reap_on_close": {
+          "default": false,
+          "description": "Stop, when a daemon session ends (closed, evicted, or the daemon\nshutting down), every process group its commands started that is still\nrunning — including services a command deliberately left in the\nbackground. Off by default: such a service outlives the session.",
+          "type": "boolean"
+        },
+        "require": {
+          "default": false,
+          "description": "Refuse to run a sandboxed command when this build on this platform\ncannot actually enforce the policy, instead of running it\nunconstrained.\n\nTwo ways to be unable: the `sandbox` compile-time feature (on by\ndefault) was turned off, so no backend was compiled at all, or it is\non and the platform's tool is missing. Both refuse here, and the\nmessage says which.\n\nOff by default, which is the historical behavior: on Linux without\n`bwrap`, and on platforms with no backend at all, a command whose\npolicy cannot be honored runs anyway with a warning. That is a silent\ndowngrade from \"constrained\" to \"unconstrained\" — fine for a laptop,\nnot fine for a host that treats the sandbox as a boundary.\n\nTurning it on makes such a command fail with an error naming the\nmissing backend. The default is `false` rather than `true` only\nbecause flipping it would break every Linux box without bubblewrap\ninstalled, and every Windows host, on upgrade.",
+          "type": "boolean"
+        },
+        "unattended_needs_network_policy": {
+          "default": false,
+          "description": "In an unattended session, a `Bash` / `Monitor` command nobody can be\nasked about runs without an allow rule when the sandbox fully holds\nit. With this on, it also needs `network.mode` other than\n`unrestricted`: the sandbox holds writes, and an open network is a way\nout it does not cover. Off by default in 0.3.x, which keeps the\nearlier behavior; a later 0.3.x release is planned to turn it on.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SandboxNetwork": {
+      "description": "The network of a sandboxed command. Not the engine's own HTTP, which\n`app.system_proxy` decides.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/NetworkMode",
+          "default": "unrestricted",
+          "description": "Outbound network policy for sandboxed `Bash` commands. `allowlist`\nlets through what `web.allowed_domains` names, as far as the OS\nsandbox can; `proxy` lets a command connect only to `proxy`, which\nboth OS backends hold; filtering by domain is then the proxy's job.\nThe engine's own `WebFetch` and `Ping` are not bound by it: they use\nthe engine's network, not the proxy."
+        },
+        "proxy": {
           "anyOf": [
             {
               "$ref": "#/$defs/EgressProxy"
@@ -711,46 +813,7 @@
               "type": "null"
             }
           ],
-          "description": "Under `network_mode: \"proxy\"`, the one address a sandboxed command may\nconnect to: `\"127.0.0.1:3128\"` for an HTTP proxy, or an object with\n`http`, an optional `socks` and `no_proxy`. The command gets\n`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)\npointing at it. Put the proxy on this machine: macOS can hold a proxy\nelsewhere only to its port, and Linux needs `socat` to relay to it,\ncutting the network entirely without one. Ignored in other modes.\nOnly sandboxed commands go through it: the engine's own `WebFetch` and\n`Ping` use the engine's network, not this proxy, and are not held to\n`allowed_domains`; filtering by domain is the host's proxy's job."
-        },
-        "network_mode": {
-          "$ref": "#/$defs/NetworkMode",
-          "default": "unrestricted",
-          "description": "Outbound network policy for sandboxed `Bash` commands. `proxy` lets a\ncommand connect only to `egress_proxy`, which both OS backends hold;\nfiltering by domain is then the proxy's job. The engine's own\n`WebFetch` and `Ping` are not bound by it: they use the engine's\nnetwork, not the proxy, and are not held to `allowed_domains` either."
-        },
-        "read_anywhere": {
-          "default": false,
-          "description": "Let the file tools read anywhere, as `read_directories` would if it\nlisted `/`. Off by default.",
-          "type": "boolean"
-        },
-        "read_directories": {
-          "description": "Directories outside the project that the file tools (`Read`, `Glob`,\n`Grep`) and read-only shell commands may read without asking. Reading\nanywhere else needs a person's approval, and an unattended session —\none with nobody to approve — is refused.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "reap_process_groups": {
-          "default": false,
-          "description": "Stop, when a daemon session ends (closed, evicted, or the daemon\nshutting down), every process group its commands started that is still\nrunning — including services a command deliberately left in the\nbackground. Off by default: such a service outlives the session.",
-          "type": "boolean"
-        },
-        "require_enforcement": {
-          "default": false,
-          "description": "Refuse to run a sandboxed command when this build on this platform\ncannot actually enforce the policy, instead of running it\nunconstrained.\n\nTwo ways to be unable: the `sandbox` compile-time feature (on by\ndefault) was turned off, so no backend was compiled at all, or it is\non and the platform's tool is missing. Both refuse here, and the\nmessage says which.\n\nOff by default, which is the historical behavior: on Linux without\n`bwrap`, and on platforms with no backend at all, a command whose\npolicy cannot be honored runs anyway with a warning. That is a silent\ndowngrade from \"constrained\" to \"unconstrained\" — fine for a laptop,\nnot fine for a host that treats the sandbox as a boundary.\n\nTurning it on makes such a command fail with an error naming the\nmissing backend. The default is `false` rather than `true` only\nbecause flipping it would break every Linux box without bubblewrap\ninstalled, and every Windows host, on upgrade.",
-          "type": "boolean"
-        },
-        "subprocess_env": {
-          "$ref": "#/$defs/SubprocessEnv",
-          "default": {
-            "mode": "inherit"
-          },
-          "description": "The environment `Bash` / `Monitor` commands, command hooks and MCP\nstdio servers start from, sandboxed or not. By default the host's\nenvironment minus the engine's own credentials: `ANTHROPIC_*`,\n`AGIX_DAEMON_TOKEN`, and every variable a setting names as holding a\nsecret — a provider's `api_key_env`, an MCP server's\n`oauth.client_secret_env` / `oauth.private_key_jwt.key_env` and every\n`$VAR` in its `command`, `args`, `env`, `url` or `headers` (outside\nthe project's own tier), a plugin's MCP servers likewise, the\nenterprise IdP's `client_secret_env`. `\"mode\": \"allowlist\"` keeps only\n`PATH`, `HOME`, the locale and a few others, plus whatever `allow`\nnames. An MCP server takes the policy of the settings it is declared\nin, with its own `env` added on top: what it is given there it gets,\nanother server's secret it does not."
-        },
-        "unattended_requires_network_policy": {
-          "default": false,
-          "description": "In an unattended session, a `Bash` / `Monitor` command nobody can be\nasked about runs without an allow rule when the sandbox fully holds\nit. With this on, it also needs `network_mode` other than\n`unrestricted`: the sandbox holds writes, and an open network is a way\nout it does not cover. Off by default in 0.3.x, which keeps the\nearlier behavior; a later 0.3.x release is planned to turn it on.",
-          "type": "boolean"
+          "description": "Under `mode: \"proxy\"`, the one address a sandboxed command may\nconnect to: `\"127.0.0.1:3128\"` for an HTTP proxy, or an object with\n`http`, an optional `socks` and `no_proxy`. The command gets\n`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` (both cases)\npointing at it. Put the proxy on this machine: macOS can hold a proxy\nelsewhere only to its port, and Linux needs `socat` to relay to it,\ncutting the network entirely without one. Ignored in other modes.\nOnly sandboxed commands go through it: the engine's own `WebFetch` and\n`Ping` use the engine's network, not this proxy, and are not held to\n`web.allowed_domains`; filtering by domain is the host's proxy's job."
         }
       },
       "type": "object"
@@ -796,8 +859,18 @@
       ],
       "type": "object"
     },
+    "SkillsSettings": {
+      "properties": {
+        "allow_shell": {
+          "default": true,
+          "description": "Run skill dynamic-content-injection shell commands (`` !`cmd` `` and\nfenced ` ```! ` blocks in `SKILL.md` bodies). Default: true. When\nfalse, each such placeholder is replaced with\n`[shell command execution disabled by policy]` instead of running.\nA higher tier can set it back, except a project that is not trusted\n(`app.trusted_projects`).",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "SubprocessEnv": {
-      "description": "`sandbox.subprocess_env` in settings.json.",
+      "description": "`sandbox.env` in settings.json.",
       "properties": {
         "allow": {
           "description": "Variables passed through whatever the mode would do with them — in\n`allowlist` mode the extra names to keep, in `inherit` mode a way to\nhand one of the engine's own credentials (a provider's `api_key_env`,\na variable an MCP server's configuration reads) to every child on\npurpose.",
@@ -860,14 +933,14 @@
           "description": "Gates whether `TeamCreate`/`TeamList`/`TeamDelete` are registered at\nall for a session, and only in a scene whose `SceneSpec::supports_team`\nis true. Default `false`: an always-registered tool puts its\n`tool.prompt.md` \"When to Use\" section in every system prompt and its\n`team`/`name` input fields in every `Agent` tool schema, whether or not\nthe operator ever intends to allow it. Flipping this only affects\nsessions built after the change.",
           "type": "boolean"
         },
-        "max_persistent_members": {
+        "max_members": {
           "default": 20,
           "description": "Reclaim policy for persistent team members (`Agent` tool's\n`team_name`+`name` mode): total pool size across a session. Past it the\noldest-idle members are stopped (never an `Active` one), just enough to\nbe back at the cap. `0` turns persistent members off: such a call is\nrefused; one-shot sub-agents are not affected.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
-        "member_idle_timeout_secs": {
+        "member_idle_secs": {
           "default": 1800,
           "description": "Reclaim policy for persistent team members: how long a member may sit\nidle (no message since its last turn finished) before it is stopped on\nits own, independent of the total-count cap above.",
           "format": "uint64",
@@ -880,6 +953,23 @@
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetrySettings": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether sessions record a telemetry transcript.\n\nDefaults to **on**: a session writes one JSONL file per session under\n`<local_data_dir>/telemetry/`, which is what makes a run debuggable\nafter the fact (tool calls, permission decisions, turn costs).",
+          "type": "boolean"
+        },
+        "otlp_endpoint": {
+          "description": "OTLP endpoint telemetry events are exported to. Unset, the\n`OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is used; neither\nmeans no export. Only a build with the `otel` feature exports — any\nother logs a warning when this is set.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -931,18 +1021,71 @@
         }
       ]
     },
-    "TrustLevel": {
-      "description": "What a project no `trusted` pattern names is.",
-      "enum": [
-        "trusted",
-        "untrusted"
-      ],
-      "type": "string"
+    "TurnSettings": {
+      "additionalProperties": false,
+      "description": "The limits of one turn.",
+      "properties": {
+        "max_model_calls": {
+          "default": 25,
+          "description": "Ceiling on LLM round trips in one turn, before the turn ends with\n`stop_reason: \"max_turns\"`.\n\nThis is a runaway guard, not a task budget. Every comparable agent\nruntime treats it that way and lands in the same range — the OpenAI\nAgents SDK defaults `max_turns` to 10, LangGraph's `recursion_limit`\nto 25, LangChain's `max_iterations` to 15. A long task is meant to be\nserved by compaction, delegation and resuming, not by a high ceiling:\nraising this does not rescue an agent stuck in a loop, it only buys\nthe loop more iterations before it stops.\n\nRaise it deliberately for a genuinely long single turn. Nothing here\ndetects a *lack of progress* — a model repeating the same failing\ntool call burns the whole allowance either way.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parallel_tools": {
+          "default": 10,
+          "description": "How many tool calls of one model reply run at once.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "token_budget": {
+          "default": null,
+          "description": "Maximum cumulative tokens (input + output, summed across every API\ncall in a turn) before the turn is aborted with `budget_exceeded`.\n`None` = unlimited.\n\nDeliberately token-based, not a dollar figure: provider prices change\nover time and per contract, so enforcing a dollar budget needs a\nper-model price table that can silently drift out of date — a stale\nor missing price makes the hard cap wrong in either direction. Token\ncounts come straight from the provider's own usage accounting on\nevery response, so there is nothing to keep in sync.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WebSettings": {
+      "description": "What the model's own web tools may reach.",
+      "properties": {
+        "allowed_domains": {
+          "default": [],
+          "description": "Hosts the model may reach (`WebFetch`, `Ping`); a name also covers its\nsubdomains. Under `sandbox.network.mode: \"allowlist\"` it is the whole\nlist, but a sandboxed `Bash` / `Monitor` command reaches none of its\ndomains: the OS sandbox cannot filter by domain, and lets through only\nlocalhost (macOS, when listed) or nothing (Linux). In every mode, a\nhost it names may be reached at an address on this machine or a\nprivate network, which a model-directed request is otherwise refused —\nwrite `127.0.0.1` here to let `WebFetch` reach a local server.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "One settings.json file, and what the settings tiers say once merged. Every\nfield is one a settings file can set; what loading them produced besides is\n[`LoadedSettings`].",
   "properties": {
+    "agents": {
+      "$ref": "#/$defs/AgentsSettings",
+      "default": {
+        "max_concurrent": 6,
+        "max_depth": 3
+      }
+    },
+    "app": {
+      "$ref": "#/$defs/AppSettings",
+      "default": {
+        "history": "global",
+        "system_proxy": true,
+        "trust_all_projects": false
+      },
+      "description": "Read from the global tier only — see [`AppSettings`]."
+    },
     "checkpoints": {
       "$ref": "#/$defs/CheckpointSettings",
       "default": {
@@ -962,83 +1105,25 @@
         "null"
       ]
     },
-    "disable_skill_shell_execution": {
-      "default": false,
-      "description": "Disable skill dynamic-content-injection shell commands (`` !`cmd` ``\nand fenced ` ```! ` blocks in `SKILL.md` bodies). Default: false\n(enabled). When true, each such placeholder is replaced with\n`[shell command execution disabled by policy]` instead of running.\nA higher tier can set it back, except a project that is not trusted\n(`project_trust`).",
-      "type": "boolean"
+    "files": {
+      "$ref": "#/$defs/FilesSettings",
+      "default": {}
     },
-    "execution": {
-      "$ref": "#/$defs/ExecutionSettings",
-      "default": {
-        "max_agent_depth": 3,
-        "max_api_calls_per_turn": 25,
-        "max_budget_tokens": null,
-        "max_concurrent_subagents": 6,
-        "max_parallelism": 10
-      }
-    },
-    "history": {
-      "$ref": "#/$defs/HistorySettings",
-      "default": {
-        "location": "global"
-      },
-      "description": "Where sessions are kept — see [`HistorySettings`]. Read from the\nglobal tier only: one store serves every project."
-    },
-    "hooks_config": {
+    "hooks": {
       "description": "Lifecycle hooks: an object from event name (`PreToolUse`,\n`SessionStart`, … — `hooks::HookEvent`) to a list of hooks, each with\na `type` of `command`, `prompt`, `http` or `agent`. Tiers merge per\nevent: a tier that lists an event replaces the lower tiers' list for\nit. An unknown event name is skipped with a warning; the rest still\napply. Format: `docs/hooks.md`."
     },
-    "instruction_file": {
-      "default": null,
-      "description": "One more instruction file (e.g. a `CLAUDE.md` outside the project),\nread when the session is built and given to the model alongside the\ndiscovered `AGENTS.md` files. A root session with a `FileChanged`\nhook watches it.",
-      "type": [
-        "string",
-        "null"
-      ]
+    "mcp": {
+      "$ref": "#/$defs/McpSettings",
+      "default": {}
     },
-    "language": {
-      "description": "User language preference (e.g. \"zh-CN\", \"ja\").",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "mcp_enabled": {
-      "additionalProperties": {
-        "type": "boolean"
-      },
-      "description": "MCP servers turned off or back on by name, whichever tier or plugin\ndeclares them; a server not named here is on. Tiers merge by name, so\na higher tier turns back on what a lower one turned off — except a\nproject that is not trusted, which may only turn servers off.",
-      "type": "object"
-    },
-    "mcp_servers": {
-      "additionalProperties": true,
-      "description": "MCP server configurations, keyed by server name (merged from\nglobal/scene/project layers). `$VAR` / `${VAR}` / `${VAR:-default}`\nare expanded in a server's `command`, `args`, `env`, `url` and\n`headers` when it connects — the only place in settings that expands\nanything. Every variable of the daemon's environment read there, and\nevery `*_env` of a server's `oauth` block, counts as that server's\nsecret: no other child process inherits it (`sandbox.subprocess_env`).\nKept untyped (`serde_json::Value`\nrather than `mcp::config::McpServerConfig`) — `core` cannot depend on\n`mcp` (which already depends on `core`, for `base::paths::ConfigPaths`)\nwithout a circular dependency; downstream consumers deserialize each\nvalue into `McpServerConfig` themselves.",
-      "type": "object"
-    },
-    "memory_enabled": {
-      "default": true,
-      "description": "The file-based memory system (`MEMORY.md` + one `.md` per memory).\nDefault `true`. `false` drops the memory prompt, the memory index in\neach turn's reminder, and recall.",
-      "type": "boolean"
+    "memory": {
+      "$ref": "#/$defs/MemorySettings",
+      "default": {
+        "enabled": true
+      }
     },
     "model": {
       "$ref": "#/$defs/ModelSettings"
-    },
-    "network": {
-      "$ref": "#/$defs/NetworkSettings",
-      "default": {
-        "use_system_proxy": true
-      },
-      "description": "How this process's own HTTP reaches the network. Read from the global\nand managed tiers only: the clients are process-wide."
-    },
-    "path_style": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PathStyle"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "How the file tools word paths for the model. `absolute` keeps\ntoday's text; `workspace_relative` makes tool descriptions say paths\nare relative to the working directory and prints Grep / Glob / Write /\nEdit paths under it relative, so a recorded session replays in another\nworking directory and long paths stop repeating in every call.\nResolving paths is unchanged. Unset, the scene decides\n(`SceneSpec::path_style`: `harnix` is relative, the rest absolute)."
     },
     "permissions": {
       "$ref": "#/$defs/PermissionsSettings",
@@ -1056,28 +1141,9 @@
         "enabled": true
       }
     },
-    "project_trust": {
-      "$ref": "#/$defs/ProjectTrustSettings",
-      "default": {
-        "default": "untrusted"
-      },
-      "description": "Which projects' own configuration takes effect as written — see\n`settings::trust`. Read from the global tier only."
-    },
-    "prompt_append": {
-      "default": null,
-      "description": "Appended to the end of the system prompt.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "prompt_override": {
-      "default": null,
-      "description": "Overrides the entire system prompt if set.",
-      "type": [
-        "string",
-        "null"
-      ]
+    "prompt": {
+      "$ref": "#/$defs/PromptSettings",
+      "default": {}
     },
     "providers": {
       "additionalProperties": {
@@ -1101,8 +1167,7 @@
     "sandbox": {
       "$ref": "#/$defs/SandboxConfig",
       "default": {
-        "allowed_domains": [],
-        "cache_directories": {
+        "cache_dirs": {
           "dotnet": [
             "~/.nuget/packages"
           ],
@@ -1149,16 +1214,16 @@
             "~/Library/org.swift.swiftpm"
           ]
         },
-        "dangerously_disable_sandbox": false,
-        "deny_read": [],
-        "network_mode": "unrestricted",
-        "read_anywhere": false,
-        "reap_process_groups": false,
-        "require_enforcement": false,
-        "subprocess_env": {
+        "enabled": true,
+        "env": {
           "mode": "inherit"
         },
-        "unattended_requires_network_policy": false
+        "network": {
+          "mode": "unrestricted"
+        },
+        "reap_on_close": false,
+        "require": false,
+        "unattended_needs_network_policy": false
       }
     },
     "scripts": {
@@ -1168,6 +1233,12 @@
         "$ref": "#/$defs/ScriptBinding"
       },
       "type": "array"
+    },
+    "skills": {
+      "$ref": "#/$defs/SkillsSettings",
+      "default": {
+        "allow_shell": true
+      }
     },
     "task_models": {
       "additionalProperties": {
@@ -1180,30 +1251,30 @@
       "$ref": "#/$defs/TeamSettings",
       "default": {
         "enabled": false,
-        "max_persistent_members": 20,
-        "member_idle_timeout_secs": 1800,
+        "max_members": 20,
+        "member_idle_secs": 1800,
         "stage_concurrency": 6
       }
     },
-    "telemetry_enabled": {
-      "default": true,
-      "description": "Whether sessions record a telemetry transcript.\n\nDefaults to **on**: a session writes one JSONL file per session under\n`<local_data_dir>/telemetry/`, which is what makes a run debuggable\nafter the fact (tool calls, permission decisions, turn costs).",
-      "type": "boolean"
+    "telemetry": {
+      "$ref": "#/$defs/TelemetrySettings",
+      "default": {
+        "enabled": true
+      }
     },
-    "telemetry_url": {
-      "default": null,
-      "description": "OTLP endpoint telemetry events are exported to. Unset, the\n`OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is used; neither\nmeans no export. Only a build with the `otel` feature exports — any\nother logs a warning when this is set.",
-      "type": [
-        "string",
-        "null"
-      ]
+    "turn": {
+      "$ref": "#/$defs/TurnSettings",
+      "default": {
+        "max_model_calls": 25,
+        "parallel_tools": 10,
+        "token_budget": null
+      }
     },
-    "worktree_dir": {
-      "description": "The directory at a repository's root the engine's git worktrees go\nin, which is also the line it adds to that repository's `.gitignore`:\none path component starting with `.`, not starting with `.git`, not a\nconfiguration root nor another tool's directory\n(`base::paths::Layout::with_worktrees_dir`). Unset, `.wkts`. Read from\nthe global and scene tiers only — a project's own files cannot move\nit; a name that is not allowed is ignored with a warning.",
-      "type": [
-        "string",
-        "null"
-      ]
+    "web": {
+      "$ref": "#/$defs/WebSettings",
+      "default": {
+        "allowed_domains": []
+      }
     }
   },
   "title": "Settings",

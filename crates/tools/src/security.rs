@@ -127,7 +127,7 @@ pub fn read_facts(
         .with_question(format!("{tool} outside the project requires confirmation"))
 }
 
-/// Whether `sandbox.allowed_domains` names the host `url` reaches. What the
+/// Whether `web.allowed_domains` names the host `url` reaches. What the
 /// url carries reaches that host, so `acceptEdits` sends a request without
 /// asking only to a host the settings vouch for.
 pub fn allowed_domains_name(url: &str, ctx: &base::tool::ToolContext) -> bool {
@@ -137,7 +137,7 @@ pub fn allowed_domains_name(url: &str, ctx: &base::tool::ToolContext) -> bool {
 }
 
 /// Where the file tools may read without asking: the project, every
-/// directory they may write, `sandbox.read_directories`, and the host's
+/// directory they may write, `files.read_dirs`, and the host's
 /// skill directories the session lists.
 pub fn readable_roots(ctx: &base::tool::ToolContext) -> Vec<PathBuf> {
     let env = ctx.session.env();
@@ -150,7 +150,7 @@ pub fn readable_roots(ctx: &base::tool::ToolContext) -> Vec<PathBuf> {
 
 /// Whether a file tool may read `path` (absolute, or relative to the
 /// working directory) without asking — under a [`readable_roots`] entry, or
-/// anywhere when the instance sets `sandbox.read_anywhere`.
+/// anywhere when the instance sets `files.read_dirs` holding `/`.
 ///
 /// Both the normalized spelling and where the OS takes the path as written
 /// have to be inside: the tools open the path as written, and a `..` after a

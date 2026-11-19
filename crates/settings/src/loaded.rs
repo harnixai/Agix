@@ -34,7 +34,7 @@ pub struct LoadedSettings {
     /// The deployment's layer, above every other — see
     /// [`crate::managed`].
     pub managed: Option<ManagedSettings>,
-    /// For each of `values.mcp_servers`, the directory of the tier its
+    /// For each of `values.mcp.servers`, the directory of the tier its
     /// `command` was declared in: the global or scene configuration
     /// directory, or the project root. A stdio server starts there.
     pub mcp_server_dirs: HashMap<String, PathBuf>,
@@ -77,10 +77,10 @@ impl LoadedSettings {
     /// `scope` arguments alone.
     ///
     /// The project tier is the one exception to "every layer merges the same
-    /// way": unless the global tier's `project_trust` trusts the project root
+    /// way": unless the global tier's `app` block trusts the project root
     /// (`local_dir`'s parent), what in it could loosen anything is held back
-    /// before it merges — see [`trust`]. `project_trust`
-    /// itself is read from the global tier only. The decision, and what it
+    /// before it merges — see [`trust`]. `app` itself is read from the global
+    /// tier only. The decision, and what it
     /// held back, is [`trust`](Self::trust) and
     /// [`requires_trust`](Self::requires_trust).
     ///
@@ -101,8 +101,8 @@ impl LoadedSettings {
     ///
     /// `layout` is what the instance names its directories; `local_dir` is
     /// its project directory in the project, and every session of these
-    /// settings carries it, with its worktrees where the global and scene
-    /// tiers' `worktree_dir` puts them ([`Self::place_worktrees`]).
+    /// settings carries it, with its worktrees where the global tier's
+    /// `app.worktree_dir` puts them ([`Self::place_worktrees`]).
     pub fn load(
         global_dir: PathBuf,
         scene_dir: PathBuf,
@@ -232,7 +232,7 @@ impl LoadedSettings {
         // Every merge step above was checked to deserialize.
         let mut values: Settings = serde_json::from_value(merged_json).unwrap_or(base);
         values.sections.retain(|key, _| sections.get(key).is_some());
-        values.project_trust = project_trust;
+        project_trust.write_into(&mut values.app);
         guard_loaded_values(&mut values, &mcp_secret_vars);
 
         let mut paths = PathSettings::new(
@@ -254,7 +254,7 @@ impl LoadedSettings {
             project_layer,
         };
         if let Err(e) = loaded.place_worktrees() {
-            tracing::warn!(error = %e, "worktree_dir is not allowed, the worktrees stay where they were");
+            tracing::warn!(error = %e, "app.worktree_dir is not allowed, the worktrees stay where they were");
         }
         loaded.with_managed(managed)
     }
@@ -282,12 +282,13 @@ impl LoadedSettings {
         self
     }
 
-    /// Put `paths.layout`'s worktrees where `values.worktree_dir` names, the
-    /// default when it names none. A name the layout does not allow leaves
-    /// both as they were.
+    /// Put `paths.layout`'s worktrees where `values.app.worktree_dir` names,
+    /// the default when it names none. A name the layout does not allow
+    /// leaves both as they were.
     pub fn place_worktrees(&mut self) -> Result<(), base::paths::WorktreesDirError> {
         let name = self
             .values
+            .app
             .worktree_dir
             .as_deref()
             .unwrap_or(base::paths::DEFAULT_WORKTREES_DIR);
@@ -300,7 +301,7 @@ impl LoadedSettings {
         self.project_layer.trust
     }
 
-    /// The `project_trust.trusted` pattern that matched the project root;
+    /// The `app.trusted_projects` pattern that matched the project root;
     /// `None` when the default decided, or there is no project tier.
     pub fn trust_pattern(&self) -> Option<&str> {
         self.project_layer.matched.as_deref()
@@ -313,7 +314,7 @@ impl LoadedSettings {
     }
 
     /// The project-tier settings that take effect only while the project is
-    /// trusted, as dotted keys (`hooks_config`, `mcp_servers.github`,
+    /// trusted, as dotted keys (`hooks`, `mcp.servers.github`,
     /// `permissions.allow(Bash)`). Withheld while it is not.
     pub fn requires_trust(&self) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
@@ -330,8 +331,9 @@ impl LoadedSettings {
         &self.project_layer.requires_trust
     }
 
-    /// The project tier's own `mcp_servers` entries, both of its files
-    /// merged — whether or not they were withheld.
+    /// The servers the project tier's own `mcp.servers` declares, both of
+    /// its files merged — whether or not they were withheld. An entry that
+    /// only turns a server off or on declares none.
     pub fn project_mcp_servers(&self) -> &BTreeMap<String, serde_json::Value> {
         &self.project_layer.mcp_servers
     }
@@ -404,16 +406,7 @@ impl LayerFold<'_> {
             });
             return;
         }
-        for key in unknown_settings_keys(&layer.value, self.sections) {
-            match crate::renamed::renamed_to(&key) {
-                Some(renamed_to) => {
-                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, renamed_to, "settings key was renamed, ignoring it")
-                }
-                None => {
-                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "settings key not recognised, ignoring it")
-                }
-            }
-        }
+        warn_of_keys_not_read(&layer, self.sections);
         let is_global = self.tiers.is_global(layer.tier);
         let is_own_project = self.tiers.is_own_project(layer.tier);
         let mut layer_json = layer.value;
@@ -422,18 +415,13 @@ impl LayerFold<'_> {
             drop_keys_not_read_from(layer.tier, is_global, &layer.origin, obj);
             self.refuse_a_worktrees_dir_not_allowed(&layer.origin, layer.tier, obj);
             if is_own_project {
-                for (name, server) in obj
-                    .get("mcp_servers")
-                    .and_then(|v| v.as_object())
-                    .into_iter()
-                    .flatten()
-                {
+                for (name, server) in mcp_servers_declared(obj) {
                     let entry = self
                         .project_layer
                         .mcp_servers
                         .entry(name.clone())
                         .or_insert(serde_json::Value::Null);
-                    merge_json_values(entry, server.clone());
+                    merge_json_values(entry, server);
                 }
                 let gated = trust::gate_layer(obj, &self.merged_json, self.withhold, self.sections);
                 if self.withhold && !gated.is_empty() {
@@ -481,19 +469,22 @@ impl LayerFold<'_> {
         tier: Tier,
         obj: &mut serde_json::Map<String, serde_json::Value>,
     ) {
-        let Some(name) = obj.get("worktree_dir").and_then(|v| v.as_str()) else {
+        let Some(app) = obj.get_mut("app").and_then(|v| v.as_object_mut()) else {
+            return;
+        };
+        let Some(name) = app.get("worktree_dir").and_then(|v| v.as_str()) else {
             return;
         };
         let Err(e) = self.layout.clone().with_worktrees_dir(name) else {
             return;
         };
-        obj.remove("worktree_dir");
+        app.remove("worktree_dir");
         let error = e.to_string();
         tracing::warn!(layer = tier.name(), origin = %origin, error, "settings value does not fit its setting, ignoring it");
         self.ignored.push(IgnoredValue {
             tier: tier.name(),
             origin: origin.to_string(),
-            key: "worktree_dir".into(),
+            key: "app.worktree_dir".into(),
             error,
         });
     }
@@ -565,12 +556,11 @@ impl LayerFold<'_> {
         } else {
             self.scene_dir
         };
-        for (name, server) in layer_json
-            .get("mcp_servers")
-            .and_then(|v| v.as_object())
-            .into_iter()
-            .flatten()
-        {
+        let servers = layer_json
+            .as_object()
+            .map(mcp_servers_declared)
+            .unwrap_or_default();
+        for (name, server) in &servers {
             if server.get("command").is_some() || !self.mcp_server_dirs.contains_key(name) {
                 self.mcp_server_dirs
                     .insert(name.clone(), declared_in.to_path_buf());
@@ -587,9 +577,47 @@ impl LayerFold<'_> {
     }
 }
 
+/// Warn of the keys in `layer` no setting reads: an old key with the one that
+/// replaced it, anything else as not recognised.
+fn warn_of_keys_not_read(layer: &base::interface::config_source::ConfigLayer, sections: &Sections) {
+    let renamed = crate::renamed::old_keys_in(&layer.value);
+    for (key, renamed_to) in &renamed {
+        tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, renamed_to, "settings key was renamed, ignoring it");
+    }
+    for key in unknown_settings_keys(&layer.value, sections) {
+        if !renamed
+            .iter()
+            .any(|(old, _)| old.split('.').next() == Some(key.as_str()))
+        {
+            tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "settings key not recognised, ignoring it");
+        }
+    }
+}
+
+/// The entries of a layer's `mcp.servers` that declare a server, without the
+/// `enabled` beside its configuration.
+fn mcp_servers_declared(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<(String, serde_json::Value)> {
+    let Some(servers) = obj
+        .get("mcp")
+        .and_then(|v| v.get("servers"))
+        .and_then(|v| v.as_object())
+    else {
+        return Vec::new();
+    };
+    servers
+        .iter()
+        .filter_map(|(name, entry)| {
+            let mut config = entry.as_object()?.clone();
+            config.remove("enabled");
+            (!config.is_empty()).then(|| (name.clone(), serde_json::Value::Object(config)))
+        })
+        .collect()
+}
+
 /// `obj`, a layer of `tier`, without the keys that tier is not read for:
-/// [`crate::GLOBAL_ONLY_KEYS`] unless it is the global tier,
-/// [`crate::NOT_FROM_PROJECT_KEYS`] in a project's own.
+/// [`crate::GLOBAL_ONLY_KEYS`] unless it is the global tier.
 fn drop_keys_not_read_from(
     tier: Tier,
     is_global: bool,
@@ -603,16 +631,6 @@ fn drop_keys_not_read_from(
                 origin,
                 key,
                 "this key is read from the global tier only, ignoring it here"
-            );
-        }
-    }
-    for key in crate::NOT_FROM_PROJECT_KEYS {
-        if tier == Tier::Project && !is_global && obj.remove(*key).is_some() {
-            tracing::warn!(
-                layer = tier.name(),
-                origin,
-                key,
-                "a project's own settings cannot set this key, ignoring it"
             );
         }
     }

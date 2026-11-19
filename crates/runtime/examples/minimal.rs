@@ -33,9 +33,9 @@ fn settings(
     values.model.max_tokens = 8192;
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;
-    values.memory_enabled = false;
-    values.disable_skill_shell_execution = true;
-    values.telemetry_enabled = false;
+    values.memory.enabled = false;
+    values.skills.allow_shell = false;
+    values.telemetry.enabled = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = data_dir.clone();
     paths.global_data_dir = data_dir;

@@ -667,13 +667,13 @@ mod tests {
         });
         let _tokens = keys.clone().map(|key| hub.subscribe(key, &file));
 
-        std::fs::write(&file, r#"{"language":"x"}"#).unwrap();
+        std::fs::write(&file, r#"{"prompt":{"language":"x"}}"#).unwrap();
         hub.adopt_written(&file);
         for key in &keys {
             assert!(!hub.inner.has_changed(key), "{key:?}");
         }
 
-        std::fs::write(&file, r#"{"language":"y"}"#).unwrap();
+        std::fs::write(&file, r#"{"prompt":{"language":"y"}}"#).unwrap();
         for key in &keys {
             assert!(hub.inner.has_changed(key), "{key:?}");
         }

@@ -9,7 +9,7 @@ pub(super) fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSe
     values.model.max_tokens = 4096;
     values.model.thinking_mode = ThinkingMode::Off;
     values.model.effort = None;
-    values.telemetry_enabled = false;
+    values.telemetry.enabled = false;
     let mut paths = base::paths::PathSettings::default();
     paths.user_data_dir = root.join("user-data");
     paths.global_data_dir = root.join("global-data");

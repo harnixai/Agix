@@ -272,8 +272,11 @@ mod tests {
             "providers",
             "default_provider",
             "task_models",
-            "hooks_config",
+            "hooks",
             "permissions",
+            "files",
+            "web",
+            "app",
         ] {
             assert!(props.contains_key(key), "schema missing property `{key}`");
         }
@@ -297,7 +300,13 @@ mod tests {
     fn the_schema_requires_nothing_the_defaults_supply() {
         let schema = settings_json_schema(&Sections::none());
         assert!(schema.get("required").is_none(), "{}", schema["required"]);
-        for def in ["ModelSettings", "ExecutionSettings", "SandboxConfig"] {
+        for def in [
+            "ModelSettings",
+            "TurnSettings",
+            "AgentsSettings",
+            "SandboxConfig",
+            "AppSettings",
+        ] {
             assert!(
                 schema["$defs"][def].get("required").is_none(),
                 "{def}: {}",

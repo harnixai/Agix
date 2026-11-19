@@ -19,7 +19,7 @@
 //! `https://evil.net/.example.com/`. In the path `*` stays within one
 //! segment and `**` crosses them, as in path rules.
 //!
-//! `sandbox.allowed_domains` is not a rule of this kind: it lists domains,
+//! `web.allowed_domains` is not a rule of this kind: it lists domains,
 //! each covering its subdomains, and the network layer enforces it on hosts
 //! (`interface::exec::domains_name_host`). Its callers use [`NormalizedUrl`]
 //! to get at the host.

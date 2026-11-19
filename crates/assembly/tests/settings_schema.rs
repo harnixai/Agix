@@ -217,8 +217,10 @@ fn the_schema_accepts_what_the_loader_starts_from() {
     for minimal in [
         serde_json::json!({}),
         serde_json::json!({"model": {"model_name": "m"}}),
-        serde_json::json!({"sandbox": {"network_mode": "deny_all"}}),
-        serde_json::json!({"execution": {"max_parallelism": 4}}),
+        serde_json::json!({"sandbox": {"network": {"mode": "deny_all"}}}),
+        serde_json::json!({"turn": {"parallel_tools": 4}}),
+        serde_json::json!({"mcp": {"servers": {"gh": {"enabled": false}}}}),
+        serde_json::json!({"app": {"history": "project", "system_proxy": false}}),
         serde_json::json!({"team": {"enabled": true, "stage_concurrency": 2}}),
     ] {
         let errors: Vec<String> = validator
@@ -291,7 +293,7 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
             Default::default(),
         )
     };
-    let untrusted = serde_json::json!({"project_trust": {"default": "untrusted"}});
+    let untrusted = serde_json::json!({"app": {"trust_all_projects": false}});
     let mut global = untrusted.clone();
     global["plugins"] = serde_json::json!({"enabled": false, "allow": ["a", "b"]});
     global["team"] = serde_json::json!({"stage_concurrency": 3});
@@ -299,7 +301,7 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
         global,
         serde_json::json!({
             "plugins": {"enabled": true, "allow": ["a"]},
-            "team": {"enabled": true, "stage_concurrency": 30, "member_idle_timeout_secs": 10},
+            "team": {"enabled": true, "stage_concurrency": 30, "member_idle_secs": 10},
             "scripts": [{"path": "x.js", "point": "prompt.block", "entry": "f"}],
         }),
     );
@@ -310,7 +312,7 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
     let team: agents::TeamSettings = settings.values.section();
     assert!(!team.enabled);
     assert_eq!(team.stage_concurrency, 3);
-    assert_eq!(team.member_idle_timeout_secs, 10);
+    assert_eq!(team.member_idle_secs, 10);
     assert!(settings_sections::ScriptBindings::of(&settings.values).is_empty());
     assert_eq!(
         settings.requires_trust(),

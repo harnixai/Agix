@@ -85,10 +85,10 @@ impl SessionPool {
     }
 
     /// `project.trust` — add `project_root` to, or take it off, the
-    /// `project_trust.trusted` list in the global tier's
+    /// `app.trusted_projects` list in the global tier's
     /// `settings.local.json`, and rebuild what that project's sessions were
     /// built from. Taking it off removes only that exact entry: a glob or
-    /// `project_trust.default` may still trust the project, and the status
+    /// `app.trust_all_projects` may still trust the project, and the status
     /// returned says so.
     ///
     /// The entry is the directory the path resolves to (`..` and symlinks
@@ -128,16 +128,14 @@ impl SessionPool {
             .join(SETTINGS_LOCAL_FILE);
         edit_settings_dir(&path, move |tier| {
             let mut local = tier.read(SETTINGS_LOCAL_FILE).map_err(|e| e.to_string())?;
-            let section = local
-                .entry("project_trust")
-                .or_insert_with(|| serde_json::json!({}));
+            let section = local.entry("app").or_insert_with(|| serde_json::json!({}));
             if !section.is_object() {
                 *section = serde_json::json!({});
             }
             let list = section
                 .as_object_mut()
                 .expect("made an object above")
-                .entry("trusted")
+                .entry("trusted_projects")
                 .or_insert_with(|| serde_json::json!([]));
             if !list.is_array() {
                 *list = serde_json::json!([]);

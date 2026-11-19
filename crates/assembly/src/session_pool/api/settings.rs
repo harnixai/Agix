@@ -258,7 +258,7 @@ impl TrustState {
 pub struct ProjectStatus {
     pub project_root: PathBuf,
     pub trust: TrustState,
-    /// The `project_trust.trusted` entry that matched; `null` when the
+    /// The `app.trusted_projects` entry that matched; `null` when the
     /// default decided.
     pub matched: Option<String>,
     /// What decided `trust`: the default, a `trusted` pattern in the global

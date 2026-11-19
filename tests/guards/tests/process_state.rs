@@ -46,7 +46,7 @@ const PROCESS_STATE: &[(&str, &str, Kind, &str)] = &[
     ("crates/core/src/dir_lock.rs", "LOCKS", OsResource, "serialises the holders of a settings or memory directory within this process, which every session of every pool may share; flock covers other processes"),
     ("crates/tools/src/bash/classify/mod.rs", "SUFFIXES", Constant, "a constant table"),
     ("crates/platform/src/network.rs", "PROXIED", SharedCache, "an HTTP client; it reads the process environment's proxy, which every pool shares anyway"),
-    ("crates/platform/src/network.rs", "USE_SYSTEM_PROXY", ProcessEnv, "whether the process-wide HTTP clients follow the environment's proxy; the global tier's `network.use_system_proxy`, given once before the clients are built"),
+    ("crates/platform/src/network.rs", "USE_SYSTEM_PROXY", ProcessEnv, "whether the process-wide HTTP clients follow the environment's proxy; the global tier's `app.system_proxy`, given once before the clients are built"),
     ("crates/platform/src/network.rs", "DIRECT", SharedCache, "an HTTP client with no per-pool configuration"),
     ("crates/platform/src/network.rs", "PUBLIC_ONLY", SharedCache, "an HTTP client whose resolver refuses internal addresses; the only thing it reads is the process environment's proxy"),
     ("crates/platform/src/sandbox/linux.rs", "AVAILABLE", Constant, "whether this machine can sandbox at all"),

@@ -132,8 +132,8 @@ async fn a_tool_step_does_not_relist_tools_without_an_announcement() {
     settings.paths.global_data_dir = dir.path().to_path_buf();
     settings.paths.workspace = base::paths::Workspace::project_of(dir.path());
     settings.paths.local_data_dir = dir.path().to_path_buf();
-    settings.values.memory_enabled = false;
-    settings.values.telemetry_enabled = false;
+    settings.values.memory.enabled = false;
+    settings.values.telemetry.enabled = false;
 
     let asked = Arc::new(Asked::default());
     let model = Arc::new(TwoToolSteps(AtomicUsize::new(0)));

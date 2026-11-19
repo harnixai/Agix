@@ -76,7 +76,7 @@ impl crate::module::Module for SeesPrompt {
         &self,
         cx: &mut crate::module::SessionContext<'_>,
     ) -> Result<(), crate::module::ModuleError> {
-        *self.0.lock().unwrap() = Some(cx.settings.values.prompt_append.clone());
+        *self.0.lock().unwrap() = Some(cx.settings.values.prompt.append.clone());
         Ok(())
     }
 }
@@ -92,7 +92,7 @@ fn a_session_prompt_reaches_the_agent_and_not_its_modules() {
         .build()
         .expect("build should succeed");
     assert_eq!(
-        agent.settings().values.prompt_append.as_deref(),
+        agent.settings().values.prompt.append.as_deref(),
         Some("SESSION-ONLY")
     );
     assert_eq!(

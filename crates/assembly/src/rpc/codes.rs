@@ -86,7 +86,7 @@ error_codes! {
     /// in memory.
     TaskNotFound = -32018, TASK_NOT_FOUND;
     /// `session.startAgent`: the session already runs as many sub-agents as
-    /// `execution.max_concurrent_subagents` allows, or is as deep as
+    /// `agents.max_concurrent` allows, or is as deep as
     /// delegation goes. Refused rather than queued, as the model's own
     /// `Agent` call is.
     TaskLimit = -32019, TASK_LIMIT;

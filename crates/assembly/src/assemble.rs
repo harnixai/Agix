@@ -63,7 +63,7 @@ pub struct Assembly {
     pub credentials: Option<Arc<dyn base::interface::credentials::CredentialSource>>,
     /// Where transcripts live.
     pub transcripts: Transcripts,
-    /// Over the settings' `history.location` for the store this assembly
+    /// Over the settings' `app.history` for the store this assembly
     /// opens (`Transcripts::UnderGlobalRoot`); `None` leaves it to them.
     pub history: Option<settings::HistoryLocation>,
     /// The host's own say on every call, weighed as one more tier of rules:
@@ -382,7 +382,7 @@ fn default_anthropic_client(
 }
 
 /// Transcripts under the global root, or in their projects where `location`
-/// (else `history.location`) and the project's trust say.
+/// (else `app.history`) and the project's trust say.
 ///
 /// `None` — logged, not fatal — when the store cannot be opened: a daemon
 /// that runs without persistence is degraded, and one that refuses to start
@@ -394,7 +394,7 @@ async fn default_history_store(
 ) -> Option<Arc<dyn history::store::HistoryStore>> {
     let global_dir = &settings.paths.global_data_dir;
     let projects = crate::project_history::ProjectHistoryPolicy::new(
-        location.unwrap_or(settings.values.history.location),
+        location.unwrap_or(settings.values.app.history),
         settings.paths.layout.clone(),
         global_dir.clone(),
     );

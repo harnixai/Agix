@@ -881,9 +881,9 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
       { "name":"settings.permissions.mode",  "status":"ok", "summary":"permission mode asks or restricts",
         "details": { "mode":"default" } },
       { "name":"settings.hooks_fail_open",  "status":"ok", "summary":"no hooks configured" },
-      { "name":"sandbox.network_allowlist", "status":"ok", "summary":"sandbox.network_mode is not allowlist" },
-      { "name":"sandbox.egress_proxy",      "status":"ok", "summary":"sandbox.network_mode is not proxy" },
-      { "name":"network.proxy",             "status":"ok", "summary":"…",
+      { "name":"sandbox.network_allowlist", "status":"ok", "summary":"sandbox.network.mode is not allowlist" },
+      { "name":"sandbox.network.proxy",     "status":"ok", "summary":"sandbox.network.mode is not proxy" },
+      { "name":"app.system_proxy",          "status":"ok", "summary":"…",
         "details": { "mode":"…", "variables":[] } },
       { "name":"build.panic",               "status":"ok", "summary":"…",
         "details": { "panic":"…" } },
@@ -960,10 +960,10 @@ daemon 自己的项目的 `project.status` 结果(§6.8):
 
 ```jsonc
 { "name":"project.trust", "status":"degraded",
-  "summary":"project not trusted yet (only project_trust.default decided); withheld until the host trusts it (project.trust): hooks_config, mcp_servers.github",
+  "summary":"project not trusted yet (only app.trust_all_projects decided); withheld until the host trusts it (project.trust): hooks, mcp.servers.github",
   "details": { "project_root":"/Users/x/repo", "trust":"untrusted", "matched":null,
                "trust_source":"default", "default":"untrusted",
-               "requires_trust":["hooks_config", "mcp_servers.github"] } }
+               "requires_trust":["hooks", "mcp.servers.github"] } }
 ```
 
 没有东西要信任才生效、或项目由 `trusted` 清单明确信任时是 `ok`;项目未被信任而有东西被扣下,
@@ -3084,18 +3084,18 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "project_root": "/Users/x/repo",     // 可选,省略 = 这个 daemon 自己的项目;null → INVALID_PARAMS
   "changes": {                         // 必填,1 到 256 个键
     "permissions.mode": "acceptEdits",
-    "sandbox.allowed_domains": ["github.com"],
-    "telemetry_url": null },           // null = 从这一层删掉这个键
+    "web.allowed_domains": ["github.com"],
+    "telemetry.otlp_endpoint": null }, // null = 从这一层删掉这个键
   "dry_run": false,                    // 可选
   "if_revision": "r1:9f2c…" }          // 可选:这一层的 revision 不再是它 → SETTINGS_CONFLICT
 // ← result
 { "tier": "global", "dry_run": false,
   "written_to": "/Users/x/.agix/settings.json",
   "secrets_written_to": "/Users/x/.agix/settings.local.json",   // 只在改了 settings.local.json 时
-  "changed": ["permissions.mode", "sandbox.allowed_domains", "telemetry_url"],
+  "changed": ["permissions.mode", "web.allowed_domains", "telemetry.otlp_endpoint"],
   "rejected": [ ],                     // 只有 dry_run 才可能非空
-  "effective": { "permissions.mode": "acceptEdits", "sandbox.allowed_domains": ["github.com"],
-                 "telemetry_url": null },
+  "effective": { "permissions.mode": "acceptEdits", "web.allowed_domains": ["github.com"],
+                 "telemetry.otlp_endpoint": null },
   "overridden": [ ],
   "revision": "r1:…",
   // "warnings": [ "…" ],              // 只在写进 settings.json 的值里看得出凭据时,见下
@@ -3104,9 +3104,9 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
                "router_error": null, "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
 ```
 
-**键**是点分的设置路径:`model.model_name`、`sandbox.subprocess_env.allow`、`task_models.subagent`、
+**键**是点分的设置路径:`model.model_name`、`sandbox.env.allow`、`task_models.subagent`、
 `plugins.allow`。不支持通配,也不支持数组下标——列表整个写。同一次写里一个键是另一个的前缀
-(`sandbox` 与 `sandbox.allowed_domains`)→ 拒绝。名字里带 `.` 的 map 条目(provider id、server 名)
+(`web` 与 `web.allowed_domains`)→ 拒绝。名字里带 `.` 的 map 条目(provider id、server 名)
 经它寻址不到,它们归 `config.setProvider` 与 `mcp.*`。
 
 **值**:这一层在这个键上的值变成它——对象整个替换这一层原有的那棵(与下面几层照常合并),

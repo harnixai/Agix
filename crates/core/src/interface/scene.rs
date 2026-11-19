@@ -121,7 +121,7 @@ impl TokenBudget {
 pub struct ExecutionParams {
     /// Ceiling on LLM round trips within a single turn for this scene.
     ///
-    /// Combined with `Settings.execution.max_api_calls_per_turn` by taking
+    /// Combined with `Settings.turn.max_model_calls` by taking
     /// the **lower** of the two: a scene declaring a tight loop budget is
     /// making a statement about its own workload that a deployment-wide
     /// setting should not be able to silently widen, and a deployment that

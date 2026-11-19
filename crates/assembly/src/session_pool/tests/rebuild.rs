@@ -891,7 +891,7 @@ async fn a_shutdown_during_a_create_starts_no_engine() {
         .build();
     let started = dir.path().join("started.log");
     let mut settings = (*pool.bindings.pool_settings().await).clone();
-    settings.values.hooks_config = Some(serde_json::json!({
+    settings.values.hooks = Some(serde_json::json!({
         "SessionStart": [
             { "type": "command", "command": format!("echo start >> '{}'", started.display()) }
         ]

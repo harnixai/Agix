@@ -267,8 +267,7 @@ fn credentials_in_shared(files: &TierFiles, ops: &[EditOp], shared: &Path) -> Ve
             for segment in below {
                 value = value.get(*segment)?;
             }
-            let last = segments.last()?;
-            crate::session_pool::holds_credential(last, value).then(|| {
+            crate::session_pool::holds_credential(&segments, value).then(|| {
                 format!(
                     "`{}` in {} carries what looks like a credential (a password or token in a \
                      URL, a token among arguments, or a key named like one); settings.json is the \

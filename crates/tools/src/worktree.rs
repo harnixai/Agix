@@ -1468,7 +1468,7 @@ mod tests {
 
             let r = create_worktree(&providers, &git, repo.path(), "refused", &layout).await;
             assert!(
-                matches!(&r, Err(WorktreeError::GitRefused(why)) if why.contains("require_enforcement")),
+                matches!(&r, Err(WorktreeError::GitRefused(why)) if why.contains("sandbox.require")),
                 "{r:?}"
             );
             assert!(log.argv.lock().unwrap().is_empty(), "git ran anyway");

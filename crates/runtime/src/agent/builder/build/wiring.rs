@@ -69,7 +69,11 @@ impl Builder {
                 (self.spec.agent_depth == 0 && paths.local_data_dir.is_absolute())
                     .then(|| paths.tool_results_dir(session_id))
             });
-            c.path_style = settings.values.path_style.unwrap_or(scene.path_style);
+            c.path_style = settings
+                .values
+                .prompt
+                .path_style
+                .unwrap_or(scene.path_style);
             c.deferred_tools = Arc::new(
                 scene
                     .tools
@@ -126,7 +130,7 @@ impl Builder {
         attended: bool,
         session: &Transcript,
         hooks: &Arc<HookRunner>,
-        instruction_file: Option<&PathBuf>,
+        instruction_files: &[PathBuf],
         exec: base::interface::exec::ExecProviders,
     ) -> Result<SessionWiring, EngineError> {
         let agent_depth = self.spec.agent_depth;
@@ -153,11 +157,8 @@ impl Builder {
         // session loads as instructions are added when it loads them
         // (`inject_session_context`); the instruction file is known now.
         if agent_depth == 0 && hooks.has_hooks_for(hooks::HookEvent::FileChanged) {
-            if let Err(e) = hooks.enable_file_watching(
-                &instruction_file.into_iter().cloned().collect::<Vec<_>>(),
-                300,
-                hook_ambient.clone(),
-            ) {
+            if let Err(e) = hooks.enable_file_watching(instruction_files, 300, hook_ambient.clone())
+            {
                 tracing::warn!(error = %e, "failed to start FileChanged watcher");
             }
         }
@@ -273,8 +274,8 @@ pub(super) fn session_env(
     base::context::SessionEnv {
         additional_writable_dirs: settings
             .values
-            .sandbox
-            .additional_directories
+            .files
+            .extra_dirs
             .iter()
             .map(resolve)
             .chain(config.sandbox.paths.state_working_dirs())
@@ -286,15 +287,14 @@ pub(super) fn session_env(
             .collect(),
         read_directories: settings
             .values
-            .sandbox
-            .read_directories
-            .iter()
+            .files
+            .read_dirs_listed()
             .map(resolve)
             .chain(config.sandbox.paths.readable_state_root())
             .chain(worktree_git.map(|git| git.dir))
             .collect(),
-        read_anywhere: settings.values.sandbox.read_anywhere,
-        cache_directories: settings.values.sandbox.cache_directories.paths(&cwd),
+        read_anywhere: settings.values.files.reads_anywhere(),
+        cache_directories: settings.values.sandbox.cache_dirs.paths(&cwd),
         unattended: !attended,
         base_mode: config.permission_mode,
         skill_dirs: skill_dirs.readable.clone(),

@@ -218,7 +218,7 @@ pub fn project_agent_types_requiring_trust(
             })
             || def
                 .max_turns
-                .is_some_and(|n| n > settings.values.execution.max_api_calls_per_turn)
+                .is_some_and(|n| n > settings.values.turn.max_model_calls)
     })
     .map(|def| format!("agents/{}", def.name))
     .collect();

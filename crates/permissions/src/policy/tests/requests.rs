@@ -525,7 +525,7 @@ fn trust_projects(global: &Path) {
     std::fs::create_dir_all(global).unwrap();
     std::fs::write(
         global.join("settings.json"),
-        r#"{"project_trust": {"default": "trusted"}}"#,
+        r#"{"app": {"trust_all_projects": true}}"#,
     )
     .unwrap();
 }
@@ -802,7 +802,7 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
     for (dir, body) in [
         (
             &global,
-            r#"{"project_trust": {"default": "trusted"}, "permissions": {"deny": ["Bash(rm:*)"]}}"#,
+            r#"{"app": {"trust_all_projects": true}, "permissions": {"deny": ["Bash(rm:*)"]}}"#,
         ),
         (&project, r#"{"permissions": {"allow": ["Bash(ls)"]}}"#),
     ] {

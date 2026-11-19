@@ -14,7 +14,7 @@ pub enum PermissionMode {
     #[default]
     Default,
     /// Allow file writes inside the project (the working directory and
-    /// `sandbox.additional_directories`) and read-only calls without asking;
+    /// `files.extra_dirs`) and read-only calls without asking;
     /// ask about the rest, as `default` does. Writes into the project's
     /// `.git`, its project directory (`.agix` unless renamed; then `.agix`
     /// too), `.claude` and `.agents/skills` still ask.

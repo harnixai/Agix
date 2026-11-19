@@ -54,7 +54,7 @@ pub(in crate::session_pool) fn groups_to_reap(
         .settings
         .values
         .sandbox
-        .reap_process_groups
+        .reap_on_close
         .then(|| core.process_groups().clone())
 }
 
@@ -623,7 +623,7 @@ impl SessionPool {
                         settings.values.model.thinking_mode,
                         base::interface::model::ThinkingMode::Off
                     ),
-                    sandbox_enabled: !settings.values.sandbox.dangerously_disable_sandbox,
+                    sandbox_enabled: settings.values.sandbox.enabled,
                     resume_from: (restore != Restore::New).then(|| session_id.to_string()),
                     auth_modes: Vec::new(),
                     mcp_server_count,

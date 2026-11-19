@@ -136,7 +136,7 @@ async fn snapshot(tool: &dyn Tool, cwd: &Path) -> Value {
         "stance": format!("{:?}", spec.stance),
         "input_schema": {
             "absolute": tool.input_schema(PathStyle::Absolute),
-            "workspace_relative": tool.input_schema(PathStyle::WorkspaceRelative),
+            "workspace_relative": tool.input_schema(PathStyle::Relative),
         },
         "guide": guide,
         "calls": calls,

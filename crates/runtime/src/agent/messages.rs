@@ -528,7 +528,7 @@ pub type EventSender = crate::event_bus::EventBus;
 pub type EventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
 
 /// What [`Builder::session_prompt`] puts over a session's settings. `None`
-/// leaves the settings' `prompt_append` / `prompt_override` in force.
+/// leaves the settings' `prompt.append` / `prompt.override` in force.
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -546,10 +546,10 @@ impl SessionPrompt {
     pub(super) fn applied_to(&self, settings: &LoadedSettings) -> LoadedSettings {
         let mut out = settings.clone();
         if let Some(append) = &self.append {
-            out.values.prompt_append = Some(append.clone());
+            out.values.prompt.append = Some(append.clone());
         }
         if let Some(text) = &self.override_text {
-            out.values.prompt_override = Some(text.clone());
+            out.values.prompt.override_text = Some(text.clone());
         }
         out
     }

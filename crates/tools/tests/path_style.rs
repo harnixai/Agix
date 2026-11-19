@@ -121,7 +121,7 @@ async fn default_style_leaves_schemas_and_guide_as_generated() {
 #[tokio::test]
 async fn workspace_relative_prints_paths_under_the_working_directory_relative() {
     let dir = workspace().await;
-    let style = PathStyle::WorkspaceRelative;
+    let style = PathStyle::Relative;
     let rel = Path::new("src").join("a.rs").display().to_string();
 
     let grep = run(&GrepTool, json!({"pattern": "needle"}), dir.path(), style).await;
@@ -171,7 +171,7 @@ async fn workspace_relative_keeps_paths_outside_the_working_directory_absolute()
         &GlobTool,
         json!({"pattern": "*.rs", "path": other.path().display().to_string()}),
         ws.path(),
-        PathStyle::WorkspaceRelative,
+        PathStyle::Relative,
     )
     .await;
     assert_eq!(out, format!("{}\n", other.path().join("o.rs").display()));
@@ -180,7 +180,7 @@ async fn workspace_relative_keeps_paths_outside_the_working_directory_absolute()
 #[tokio::test]
 async fn workspace_relative_rewords_argument_docs_and_the_read_guide() {
     for tool in [&FileReadTool as &dyn Tool, &FileWriteTool, &FileEditTool] {
-        let schema = tool.input_schema(PathStyle::WorkspaceRelative);
+        let schema = tool.input_schema(PathStyle::Relative);
         let doc = schema["properties"]["file_path"]["description"]
             .as_str()
             .unwrap();
@@ -192,7 +192,7 @@ async fn workspace_relative_rewords_argument_docs_and_the_read_guide() {
         assert!(!doc.contains("The absolute path"), "{doc}");
     }
     let mut ctx = PromptContext::default();
-    ctx.path_style = PathStyle::WorkspaceRelative;
+    ctx.path_style = PathStyle::Relative;
     let guide = FileReadTool.guide(&ctx).await.unwrap();
     assert!(guide
         .contains("relative to the current working directory; an absolute path is also accepted"));

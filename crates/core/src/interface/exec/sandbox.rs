@@ -8,7 +8,7 @@
 //! **The hard invariant: a policy that asked for constraint must never
 //! silently become an unconstrained run.** A backend that cannot deliver says
 //! so through [`Enforcement`], and the caller — with
-//! `sandbox.require_enforcement` — decides whether to refuse. A `warn!` nobody
+//! `sandbox.require` — decides whether to refuse. A `warn!` nobody
 //! reads is not a decision.
 
 use std::net::SocketAddr;
@@ -194,7 +194,7 @@ pub enum NetworkMode {
     Proxy,
 }
 
-/// `sandbox.egress_proxy`: the proxy a sandboxed command's traffic must go
+/// `sandbox.network.proxy`: the proxy a sandboxed command's traffic must go
 /// through. Addresses, never names, so that nothing has to be resolved to
 /// write the rule or the variables.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,7 +238,7 @@ pub struct SandboxSettings {
     pub paths: std::sync::Arc<crate::paths::SensitivePaths>,
     pub require_enforcement: bool,
     pub unattended_requires_network_policy: bool,
-    /// `dangerously_disable_sandbox`: commands run outside the OS sandbox.
+    /// `sandbox.enabled`: commands run outside the OS sandbox.
     pub disabled: bool,
     /// [`SandboxPolicy::worktree_git`], for a session working in a linked
     /// worktree.

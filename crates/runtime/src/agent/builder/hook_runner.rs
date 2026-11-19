@@ -1,9 +1,9 @@
-//! Hook runner construction from `Settings::hooks_config`.
+//! Hook runner construction from `Settings::hooks`.
 
 use super::*;
 use base::context::Session;
 
-/// Build a `HookRunner` from `settings.hooks_config` (raw JSON from
+/// Build a `HookRunner` from `settings.hooks` (raw JSON from
 /// settings.json's `hooks` section) when the caller didn't inject one
 /// explicitly via `Builder::hooks(...)`.
 ///
@@ -25,7 +25,7 @@ pub(in crate::agent) fn build_hook_runner(
     // Key by key, not whole-map. `HooksSettings` is keyed by `HookEvent`,
     // which has no serde fallback, so one unrecognized event name would
     // otherwise fail the entire map and silently turn off every hook.
-    let parsed: hooks::HooksSettings = match &settings.values.hooks_config {
+    let parsed: hooks::HooksSettings = match &settings.values.hooks {
         Some(v) => {
             let (parsed, report) = hooks::parse_hooks_settings(v);
             for name in &report.unknown_events {

@@ -11,7 +11,7 @@ pub(super) struct Resolved {
     pub(super) settings: Arc<LoadedSettings>,
     pub(super) telemetry_handle: TelemetryHandle,
     pub(super) permission: PermissionSet,
-    pub(super) instruction_file: Option<PathBuf>,
+    pub(super) instruction_files: Vec<PathBuf>,
     pub(super) instruction_provider:
         Arc<dyn base::interface::instruction_provider::InstructionProvider>,
     pub(super) claude_md_content: Option<String>,

@@ -1154,8 +1154,8 @@ impl Model for ScriptedModel {
 fn settings(dir: &Path, memory: bool) -> LoadedSettings {
     let mut values = Settings::defaults_for("test-model");
     values.model.base_url = MODEL_ENDPOINT.into();
-    values.memory_enabled = memory;
-    values.telemetry_enabled = false;
+    values.memory.enabled = memory;
+    values.telemetry.enabled = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.join("user");
     paths.global_data_dir = dir.join("global");

@@ -540,7 +540,7 @@ mod tests {
         let root = dir.path().parent().unwrap().display().to_string();
         std::fs::write(
             empty.path().join(base::paths::SETTINGS_FILE),
-            serde_json::json!({"project_trust": {"trusted": [root]}}).to_string(),
+            serde_json::json!({"app": {"trusted_projects": [root]}}).to_string(),
         )
         .unwrap();
         let settings = crate::LoadedSettings::load(

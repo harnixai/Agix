@@ -269,8 +269,8 @@ async fn stop_team_member_makes_the_next_call_spawn_a_fresh_one() {
 #[tokio::test]
 async fn reclaim_evicts_oldest_idle_members_once_total_exceeds_the_cap() {
     let agent_tool = agent_tool_with_team(team_with(|t| {
-        t.max_persistent_members = 2;
-        t.member_idle_timeout_secs = 1_000_000;
+        t.max_members = 2;
+        t.member_idle_secs = 1_000_000;
     }));
     let session = agent_tool.parent_state();
 
@@ -316,11 +316,11 @@ async fn reclaim_evicts_oldest_idle_members_once_total_exceeds_the_cap() {
     }
 }
 
-/// A member idle past `team.member_idle_timeout_secs` leaves the pool by
+/// A member idle past `team.member_idle_secs` leaves the pool by
 /// itself, with no later spawn to sweep it.
 #[tokio::test]
 async fn a_member_idle_past_the_timeout_leaves_the_pool_on_its_own() {
-    let agent_tool = agent_tool_with_team(team_with(|t| t.member_idle_timeout_secs = 0));
+    let agent_tool = agent_tool_with_team(team_with(|t| t.member_idle_secs = 0));
     let session = agent_tool.parent_state();
     let key = team_key("team", "a");
 
@@ -1207,8 +1207,8 @@ async fn a_deleted_teams_late_turn_does_not_bring_the_team_back() {
 async fn a_member_just_messaged_is_not_reclaimed_before_its_loop_wakes() {
     let agent_tool = TestParent {
         team: team_with(|t| {
-            t.max_persistent_members = 2;
-            t.member_idle_timeout_secs = 1_000_000;
+            t.max_members = 2;
+            t.member_idle_secs = 1_000_000;
         }),
         ..TestParent::new(Arc::new(HoldsUntilCancelled {
             mark: "NOTHING-IS-HELD",

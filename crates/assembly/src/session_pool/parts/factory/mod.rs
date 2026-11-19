@@ -497,7 +497,7 @@ fn session_telemetry(
     // On by default: `Builder::build()`'s fallback handle drops its
     // receiver on the spot, so without a recorder every event is lost.
     // The caller's `output` only chooses *where*, and
-    // `telemetry_enabled: false` in settings.json opts out.
+    // `telemetry.enabled: false` in settings.json opts out.
     //
     // `<session-id>.jsonl` in the project's `state/telemetry/` keeps
     // one file per session, next to the transcripts, so a recording is
@@ -520,7 +520,7 @@ fn session_telemetry(
         }
     };
     if let (true, Some(telemetry_path)) =
-        (settings_snapshot.values.telemetry_enabled, telemetry_path)
+        (settings_snapshot.values.telemetry.enabled, telemetry_path)
     {
         match FileRecorder::new(&telemetry_path) {
             Ok(rec) => {

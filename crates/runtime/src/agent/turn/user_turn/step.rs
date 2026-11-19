@@ -465,7 +465,7 @@ impl Agent {
     }
 }
 
-/// `call` once one of the reply's `slots` (`execution.max_parallelism`) is
+/// `call` once one of the reply's `slots` (`turn.parallel_tools`) is
 /// free, unless the turn was stopped while it waited.
 async fn in_a_slot<F, Fut>(
     slots: Arc<tokio::sync::Semaphore>,

@@ -12,7 +12,7 @@ use settings::LoadedSettings;
 /// The three tiers merged, then `--max-tokens` where no tier set it; the
 /// project tier is `layout`'s directory in `project`. The only
 /// place in the assembly, with [`read_pair_as_if`], that calls `LoadedSettings::load*`. It also hands
-/// `network.use_system_proxy` to the process-wide HTTP clients; a later read
+/// `app.system_proxy` to the process-wide HTTP clients; a later read
 /// that disagrees is the `config.reload` of a setting that needs a restart.
 pub(crate) fn read_pair(
     global_root: PathBuf,
@@ -47,7 +47,7 @@ pub(crate) fn read_pair(
         ),
     };
     fall_back_max_tokens(&mut loaded, max_tokens_fallback);
-    platform::configure_system_proxy(loaded.values.network.use_system_proxy);
+    platform::configure_system_proxy(loaded.values.app.system_proxy);
     loaded
 }
 

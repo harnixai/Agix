@@ -16,7 +16,7 @@
 //! | `loop` | 在固定/动态间隔重复执行任务（监视 build / 状态轮询） |
 //! | `remember` | 把事实 / 偏好 / 决策保存到跨会话 memory |
 //! | `skillify` | 把刚跑过的工作流抽成可复用的 SKILL.md |
-//! | `updateConfig` | 安全编辑 settings.json（permissions / hooks / mcp_servers） |
+//! | `updateConfig` | 安全编辑 settings.json（permissions / hooks / mcp.servers） |
 //! | `init` | 引导用户创建新项目的 AGENTS.md 文件 |
 //! | `security-review` | 审查代码变更中的安全漏洞 |
 //! | `rename` | 重命名当前对话会话标题 |
@@ -113,7 +113,7 @@ pub fn bundled_skills() -> Vec<SkillEntry> {
         },
         SkillEntry {
             name: "updateConfig".into(),
-            description: "Make a precise edit to settings.json (permissions / hooks / mcp_servers) with backup.".into(),
+            description: "Make a precise edit to settings.json (permissions / hooks / mcp.servers) with backup.".into(),
             when_to_use: Some(
                 "When the user wants to add a permission rule, register a hook, or wire an MCP server."
                     .into(),
@@ -488,7 +488,7 @@ Make a precise change to one of the settings.json layers without nuking adjacent
 
 - **Add permission rule**: append the rule string (`"Bash(git push:*)"`) to `permissions.allow`, `permissions.ask` or `permissions.deny` (don't replace the whole list)
 - **Register hook**: append into `hooks.<EventName>[]` (PreToolUse / PostToolUse / Notification / SubagentStop / etc.)
-- **Wire MCP server**: add map entry under `mcp_servers.<name>` with `type` (`stdio` / `streamable_http`) + transport-specific fields
+- **Wire MCP server**: add map entry under `mcp.servers.<name>` with `type` (`stdio` / `streamable_http`) + transport-specific fields
 
 ## Safety
 

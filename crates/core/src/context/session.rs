@@ -23,15 +23,15 @@ pub struct SessionEnv {
     /// besides `cwd`: the project root, for a session working in one of its
     /// worktrees. An allow is read against `cwd` alone.
     pub refusal_rule_roots: Vec<PathBuf>,
-    /// 用户级附加可写目录（`additional_directories`）—— Tool 在做路径校验时用
+    /// 用户级附加可写目录（`files.extra_dirs`）—— Tool 在做路径校验时用
     pub additional_writable_dirs: Vec<PathBuf>,
     /// Directories outside the project the file tools may read without
-    /// asking — `sandbox.read_directories`.
+    /// asking — `files.read_dirs`.
     pub read_directories: Vec<PathBuf>,
-    /// `sandbox.read_anywhere`.
+    /// `files.read_dirs` holding `/`.
     pub read_anywhere: bool,
     /// Package and build caches a sandboxed command may write —
-    /// `sandbox.cache_directories`; a `~/` path is expanded when the command
+    /// `sandbox.cache_dirs`; a `~/` path is expanded when the command
     /// runs.
     pub cache_directories: Vec<PathBuf>,
     /// Nobody answers this session's questions or permission prompts — see

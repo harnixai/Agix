@@ -71,7 +71,7 @@ impl Builder {
             memory: self.memory(w.resolved.memory_store, chains.retrieval_hooks),
             compaction: Compaction::new(
                 w.compactor,
-                settings.values.compaction.cached_microcompact,
+                settings.values.compaction.clear_on_cache_expiry,
             ),
             settings,
             turn: Default::default(),
@@ -109,7 +109,7 @@ impl Builder {
         let turn_policy: Arc<dyn base::interface::turn_policy::TurnPolicy> =
             self.ext.turn_policy.clone().unwrap_or_else(|| {
                 Arc::new(base::interface::turn_policy::LimitsPolicy::new(
-                    settings.values.execution.max_api_calls_per_turn,
+                    settings.values.turn.max_model_calls,
                     scene.execution.max_api_calls_per_turn,
                     5,
                 ))

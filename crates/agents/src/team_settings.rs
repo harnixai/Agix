@@ -27,11 +27,11 @@ pub struct TeamSettings {
     /// oldest-idle members are stopped (never an `Active` one), just enough to
     /// be back at the cap. `0` turns persistent members off: such a call is
     /// refused; one-shot sub-agents are not affected.
-    pub max_persistent_members: usize,
+    pub max_members: usize,
     /// Reclaim policy for persistent team members: how long a member may sit
     /// idle (no message since its last turn finished) before it is stopped on
     /// its own, independent of the total-count cap above.
-    pub member_idle_timeout_secs: u64,
+    pub member_idle_secs: u64,
 }
 
 impl Default for TeamSettings {
@@ -39,8 +39,8 @@ impl Default for TeamSettings {
         Self {
             enabled: false,
             stage_concurrency: 6,
-            max_persistent_members: 20,
-            member_idle_timeout_secs: 1800,
+            max_members: 20,
+            member_idle_secs: 1800,
         }
     }
 }
@@ -49,8 +49,8 @@ impl Section for TeamSettings {
     const KEY: &'static str = "team";
     const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[
         ("enabled", Tighten(FalseTighter)),
-        ("max_persistent_members", Tighten(Lower)),
-        ("member_idle_timeout_secs", Tighten(Lower)),
+        ("max_members", Tighten(Lower)),
+        ("member_idle_secs", Tighten(Lower)),
         ("stage_concurrency", Tighten(Lower)),
     ];
 }

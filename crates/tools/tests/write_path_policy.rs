@@ -224,7 +224,7 @@ use base::interface::permission::{
 
 fn settings_allowing(paths: Vec<PathBuf>) -> settings::LoadedSettings {
     let mut s = settings::Settings::defaults_for("test-model");
-    s.sandbox.allow_write = paths;
+    s.files.allow_write = paths;
     settings::LoadedSettings::new(s, base::paths::PathSettings::default())
 }
 
@@ -240,8 +240,8 @@ async fn gate_decision(
         std::sync::Arc::new(session_state::SessionState::for_tests(cwd.to_path_buf()));
     let mut ctx = ctx_in(cwd);
     ctx.session = session.clone();
-    ctx.sandbox_mut().allow_write = settings.values.sandbox.allow_write.clone();
-    ctx.sandbox_mut().deny_write = settings.values.sandbox.deny_write.clone();
+    ctx.sandbox_mut().allow_write = settings.values.files.allow_write.clone();
+    ctx.sandbox_mut().deny_write = settings.values.files.deny_write.clone();
     let input = serde_json::json!({ "file_path": path.display().to_string(), "content": "x" });
     let facts = ToolFacts::gather(write.as_ref(), &input, &ctx).await;
     gate.decide(&PermissionRequest::new(

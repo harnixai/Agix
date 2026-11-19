@@ -108,7 +108,7 @@ async fn bind(
     task_router: Option<TaskRouter>,
 ) {
     let mut settings = (*pool.bindings.pool_settings().await).clone();
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
     binding.model = model;
     binding.task_router = task_router.map(Arc::new);

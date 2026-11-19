@@ -113,7 +113,7 @@ pub(in crate::session_pool) fn build_pool_telemetry(
     for name in OTLP_HEADER_VARIABLES {
         base::interface::exec::env::hold_back_credential(name);
     }
-    if !settings.values.telemetry_enabled {
+    if !settings.values.telemetry.enabled {
         return telemetry::TelemetryHandle::noop();
     }
     let dir = &settings.paths.local_data_dir;

@@ -76,10 +76,10 @@ pub(super) fn apply_agent_type_overrides(settings: &mut Settings, def: &AgentTyp
         }
     }
     if let Some(max_turns) = def.max_turns {
-        settings.execution.max_api_calls_per_turn = if def.source.may_loosen() {
+        settings.turn.max_model_calls = if def.source.may_loosen() {
             max_turns
         } else {
-            max_turns.min(settings.execution.max_api_calls_per_turn)
+            max_turns.min(settings.turn.max_model_calls)
         };
     }
 }

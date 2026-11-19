@@ -1,6 +1,6 @@
 //! The allowlist that binds the model does not bind the model's own endpoint.
 //!
-//! `sandbox.allowed_domains` answers "where may the model reach". A model API
+//! `web.allowed_domains` answers "where may the model reach". A model API
 //! is where the model *is*, chosen by whoever deployed this engine — bind that
 //! to the same list and the first person who writes one takes the agent's
 //! brain away. Both wire protocols are driven here because the mistake is one

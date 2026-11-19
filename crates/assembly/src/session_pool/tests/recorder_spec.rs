@@ -69,7 +69,7 @@ impl Model for Answering {
 /// in place of what its settings would build.
 async fn bind(pool: &SessionPool, project: &Path, scene: &str, model: Arc<dyn Model>) {
     let mut settings = (*pool.bindings.pool_settings().await).clone();
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
     binding.model = model;
     pool.bindings

@@ -19,10 +19,7 @@ fn key(dotted: &str) -> KeyPath {
 
 #[test]
 fn a_key_is_dotted_segments_without_wildcards_or_indexes() {
-    assert_eq!(
-        key("sandbox.allowed_domains").segments(),
-        ["sandbox", "allowed_domains"]
-    );
+    assert_eq!(key("files.read_dirs").segments(), ["files", "read_dirs"]);
     for bad in [
         "",
         ".",
@@ -33,42 +30,42 @@ fn a_key_is_dotted_segments_without_wildcards_or_indexes() {
     ] {
         assert!(KeyPath::parse(bad).is_err(), "{bad:?}");
     }
-    assert!(key("sandbox").overlaps(&key("sandbox.allowed_domains")));
+    assert!(key("files").overlaps(&key("files.read_dirs")));
     assert!(!key("sandbox.allow_read").overlaps(&key("sandbox.allow_write")));
     assert_eq!(
-        KeyPath::new(["mcp_servers", "a.b"]).segments(),
-        ["mcp_servers", "a.b"]
+        KeyPath::new(["mcp", "servers", "a.b"]).segments(),
+        ["mcp", "servers", "a.b"]
     );
 }
 
 #[test]
 fn set_replaces_the_tier_s_value_in_both_files() {
     let mut tier = files(
-        json!({"sandbox": {"allowed_domains": ["a"], "read_anywhere": true}}),
-        json!({"sandbox": {"allowed_domains": ["local"]}}),
+        json!({"files": {"read_dirs": ["a"], "extra_dirs": ["/x"]}}),
+        json!({"files": {"read_dirs": ["local"]}}),
     );
     let local_changed = apply(
         &mut tier,
-        &[EditOp::Set(key("sandbox.allowed_domains"), json!(["b"]))],
+        &[EditOp::Set(key("files.read_dirs"), json!(["b"]))],
     );
     assert!(local_changed);
     assert_eq!(
         Value::Object(tier.shared),
-        json!({"sandbox": {"allowed_domains": ["b"], "read_anywhere": true}})
+        json!({"files": {"read_dirs": ["b"], "extra_dirs": ["/x"]}})
     );
     assert!(tier.local.is_empty(), "{:?}", tier.local);
 }
 
 #[test]
 fn an_object_set_is_not_merged_with_what_the_tier_had() {
-    let mut tier = files(json!({"sandbox": {"read_anywhere": true}}), json!({}));
+    let mut tier = files(json!({"files": {"extra_dirs": ["/x"]}}), json!({}));
     apply(
         &mut tier,
-        &[EditOp::Set(key("sandbox"), json!({"allowed_domains": []}))],
+        &[EditOp::Set(key("files"), json!({"read_dirs": []}))],
     );
     assert_eq!(
         Value::Object(tier.shared),
-        json!({"sandbox": {"allowed_domains": []}})
+        json!({"files": {"read_dirs": []}})
     );
 }
 
@@ -88,18 +85,18 @@ fn a_level_that_is_not_an_object_becomes_one() {
 #[test]
 fn remove_takes_the_key_from_both_files_and_prunes_what_it_empties() {
     let mut tier = files(
-        json!({"telemetry_url": "u", "sandbox": {"allowed_domains": ["a"]}}),
-        json!({"sandbox": {"allowed_domains": ["b"]}, "language": "x"}),
+        json!({"recorder": "u", "files": {"read_dirs": ["a"]}}),
+        json!({"files": {"read_dirs": ["b"]}, "hooks": {}}),
     );
     apply(
         &mut tier,
         &[
-            EditOp::Remove(key("sandbox.allowed_domains")),
-            EditOp::Remove(key("telemetry_url")),
+            EditOp::Remove(key("files.read_dirs")),
+            EditOp::Remove(key("recorder")),
         ],
     );
     assert!(tier.shared.is_empty(), "{:?}", tier.shared);
-    assert_eq!(Value::Object(tier.local), json!({"language": "x"}));
+    assert_eq!(Value::Object(tier.local), json!({"hooks": {}}));
 }
 
 #[test]
@@ -108,7 +105,7 @@ fn a_credential_goes_to_the_local_file_wherever_it_is_written() {
     let local_changed = apply(
         &mut tier,
         &[
-            EditOp::Set(key("mcp_servers.s.env"), json!({"T": "t"})),
+            EditOp::Set(key("mcp.servers.s.env"), json!({"T": "t"})),
             EditOp::Set(
                 key("providers"),
                 json!({"p": {"api_key": "k", "base_url": "u"}}),
@@ -122,16 +119,16 @@ fn a_credential_goes_to_the_local_file_wherever_it_is_written() {
     );
     assert_eq!(
         Value::Object(tier.local),
-        json!({"mcp_servers": {"s": {"env": {"T": "t"}}}, "providers": {"p": {"api_key": "k"}}})
+        json!({"mcp": {"servers": {"s": {"env": {"T": "t"}}}}, "providers": {"p": {"api_key": "k"}}})
     );
 }
 
 #[test]
 fn a_server_set_whole_replaces_its_local_credentials() {
-    let path = KeyPath::new(["mcp_servers", "gh"]);
+    let path = KeyPath::new(["mcp", "servers", "gh"]);
     let mut tier = files(
-        json!({"mcp_servers": {"gh": {"url": "old"}}}),
-        json!({"mcp_servers": {"gh": {"headers": {"A": "old"}, "env": {"X": "1"}}}}),
+        json!({"mcp": {"servers": {"gh": {"url": "old"}}}}),
+        json!({"mcp": {"servers": {"gh": {"headers": {"A": "old"}, "env": {"X": "1"}}}}}),
     );
     apply(
         &mut tier,
@@ -142,11 +139,11 @@ fn a_server_set_whole_replaces_its_local_credentials() {
     );
     assert_eq!(
         Value::Object(tier.shared.clone()),
-        json!({"mcp_servers": {"gh": {"url": "new"}}})
+        json!({"mcp": {"servers": {"gh": {"url": "new"}}}})
     );
     assert_eq!(
         Value::Object(tier.local.clone()),
-        json!({"mcp_servers": {"gh": {"headers": {"A": "new"}}}})
+        json!({"mcp": {"servers": {"gh": {"headers": {"A": "new"}}}}})
     );
 
     apply(&mut tier, &[EditOp::Set(path, json!({"url": "plain"}))]);
@@ -253,12 +250,12 @@ fn a_change_of_the_block_above_keeps_the_local_lists() {
 #[test]
 fn declares_reads_either_file() {
     let tier = files(
-        json!({"mcp_servers": {"a": {}}}),
-        json!({"mcp_servers": {"b": {}}}),
+        json!({"mcp": {"servers": {"a": {}}}}),
+        json!({"mcp": {"servers": {"b": {}}}}),
     );
-    assert!(tier.declares(&KeyPath::new(["mcp_servers", "a"])));
-    assert!(tier.declares(&KeyPath::new(["mcp_servers", "b"])));
-    assert!(!tier.declares(&KeyPath::new(["mcp_servers", "c"])));
+    assert!(tier.declares(&KeyPath::new(["mcp", "servers", "a"])));
+    assert!(tier.declares(&KeyPath::new(["mcp", "servers", "b"])));
+    assert!(!tier.declares(&KeyPath::new(["mcp", "servers", "c"])));
 }
 
 #[test]
@@ -285,18 +282,60 @@ fn the_schema_says_what_a_key_names() {
     use crate::KeyKind;
     let keys = crate::SchemaKeys::of(&Sections::none());
     assert_eq!(keys.kind(&["sandbox"]), KeyKind::Section);
-    assert_eq!(keys.kind(&["sandbox", "allowed_domains"]), KeyKind::Value);
+    assert_eq!(keys.kind(&["sandbox", "allow_read"]), KeyKind::Value);
+    assert_eq!(keys.kind(&["sandbox", "network"]), KeyKind::Section);
     assert_eq!(
-        keys.kind(&["sandbox", "cache_directories", "python"]),
+        keys.kind(&["mcp", "servers", "gh", "enabled"]),
+        KeyKind::Value
+    );
+    assert_eq!(
+        keys.kind(&["mcp", "servers", "gh", "command"]),
+        KeyKind::Value
+    );
+    assert_eq!(
+        keys.kind(&["sandbox", "cache_dirs", "python"]),
         KeyKind::Value
     );
     assert_eq!(keys.kind(&["sandbox", "nope"]), KeyKind::Unknown);
     assert_eq!(keys.kind(&["paths"]), KeyKind::Unknown);
     assert_eq!(
-        keys.unknown_in(&["sandbox"], &json!({"allowed_domains": [], "nope": 1})),
+        keys.unknown_in(&["sandbox"], &json!({"allow_read": [], "nope": 1})),
         ["sandbox.nope"]
     );
     assert!(keys
         .unknown_in(&["providers"], &json!({"p": {"base_url": "u"}}))
         .is_empty());
+}
+
+#[test]
+fn set_keeping_replaces_the_rest_and_keeps_what_it_names() {
+    let path = KeyPath::new(["mcp", "servers", "gh"]);
+    let mut tier = files(
+        json!({"mcp": {"servers": {"gh": {"url": "old", "enabled": false}}}}),
+        json!({"mcp": {"servers": {"gh": {"headers": {"A": "old"}}}}}),
+    );
+    assert!(tier.declares_besides(&path, "enabled"));
+    apply(
+        &mut tier,
+        &[EditOp::SetKeeping(
+            path.clone(),
+            json!({"command": "gh", "env": {"T": "t"}}),
+            vec!["enabled".into()],
+        )],
+    );
+    assert_eq!(
+        Value::Object(tier.shared.clone()),
+        json!({"mcp": {"servers": {"gh": {"command": "gh", "enabled": false}}}})
+    );
+    assert_eq!(
+        Value::Object(tier.local.clone()),
+        json!({"mcp": {"servers": {"gh": {"env": {"T": "t"}}}}})
+    );
+
+    let only_a_switch = files(
+        json!({"mcp": {"servers": {"gh": {"enabled": false}}}}),
+        json!({}),
+    );
+    assert!(only_a_switch.declares(&path));
+    assert!(!only_a_switch.declares_besides(&path, "enabled"));
 }

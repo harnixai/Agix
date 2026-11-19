@@ -4156,7 +4156,7 @@
         },
         {
           "const": "disabled",
-          "description": "Turned off by `mcp_enabled` (`mcp.setEnabled`).",
+          "description": "Turned off by `mcp.servers.<name>.enabled` (`mcp.setEnabled`).",
           "type": "string"
         },
         {
@@ -4604,7 +4604,7 @@
         },
         {
           "const": "acceptEdits",
-          "description": "Allow file writes inside the project (the working directory and\n`sandbox.additional_directories`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
+          "description": "Allow file writes inside the project (the working directory and\n`files.extra_dirs`) and read-only calls without asking;\nask about the rest, as `default` does. Writes into the project's\n`.git`, its project directory (`.agix` unless renamed; then `.agix`\ntoo), `.claude` and `.agents/skills` still ask.",
           "type": "string"
         },
         {
@@ -5374,7 +5374,7 @@
           "$ref": "#/$defs/TrustLevel"
         },
         "matched": {
-          "description": "The `project_trust.trusted` entry that matched; `null` when the\ndefault decided.",
+          "description": "The `app.trusted_projects` entry that matched; `null` when the\ndefault decided.",
           "type": [
             "string",
             "null"
@@ -5445,7 +5445,7 @@
           "$ref": "#/$defs/TrustLevel"
         },
         "matched": {
-          "description": "The `project_trust.trusted` entry that matched; `null` when the\ndefault decided.",
+          "description": "The `app.trusted_projects` entry that matched; `null` when the\ndefault decided.",
           "type": [
             "string",
             "null"
@@ -7815,7 +7815,7 @@
       "type": "object"
     },
     "SessionPrompt": {
-      "description": "What [`Builder::session_prompt`] puts over a session's settings. `None`\nleaves the settings' `prompt_append` / `prompt_override` in force.",
+      "description": "What [`Builder::session_prompt`] puts over a session's settings. `None`\nleaves the settings' `prompt.append` / `prompt.override` in force.",
       "properties": {
         "append": {
           "type": [
@@ -9046,7 +9046,7 @@
       "type": "object"
     },
     "TrustLevel": {
-      "description": "What a project no `trusted` pattern names is.",
+      "description": "What a project no `app.trusted_projects` pattern names is.",
       "enum": [
         "trusted",
         "untrusted"
@@ -9058,17 +9058,17 @@
       "oneOf": [
         {
           "const": "default",
-          "description": "`project_trust.default`: nobody has said anything about this project.",
+          "description": "`app.trust_all_projects`: nobody has said anything about this project.",
           "type": "string"
         },
         {
           "const": "user",
-          "description": "A `trusted` pattern in the global `settings.json`.",
+          "description": "An `app.trusted_projects` pattern in the global `settings.json`.",
           "type": "string"
         },
         {
           "const": "host",
-          "description": "A `trusted` pattern in the global `settings.local.json`, where\n`project.trust` records the host's answer.",
+          "description": "An `app.trusted_projects` pattern in the global `settings.local.json`,\nwhere `project.trust` records the host's answer.",
           "type": "string"
         }
       ]

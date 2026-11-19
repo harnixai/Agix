@@ -11,7 +11,7 @@ use base::interface::exec::SubprocessEnv;
 
 pub const PROJECT_ROOT_ENV: &str = "AGIX_PROJECT_ROOT";
 
-/// How a manager starts its servers: under the `sandbox.subprocess_env` of
+/// How a manager starts its servers: under the `sandbox.env` of
 /// the settings they were declared in, for the project their connections
 /// serve.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

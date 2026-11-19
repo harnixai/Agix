@@ -105,7 +105,7 @@ pub struct EmbedConfig {
     /// library's; function paths are dotted identifiers, each once.
     /// Otherwise the start fails with [`EmbedError::InvalidHostLibrary`].
     pub js_libs: Vec<HostJsLib>,
-    /// Where sessions are kept, over the global settings' `history.location`;
+    /// Where sessions are kept, over the global settings' `app.history`;
     /// `None` leaves it to them, which is `Global` unless they say otherwise.
     /// `Project` keeps a trusted project's sessions in its project directory's
     /// `state/history/` (a worktree's in its main checkout's), with only an

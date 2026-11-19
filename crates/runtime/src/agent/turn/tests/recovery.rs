@@ -151,8 +151,8 @@ fn hooked_agent(
     hooks: Option<serde_json::Value>,
 ) -> (Agent, crate::agent::EventReceiver) {
     let mut settings = recall_test_settings(root);
-    settings.values.memory_enabled = false;
-    settings.values.hooks_config = hooks;
+    settings.values.memory.enabled = false;
+    settings.values.hooks = hooks;
     let mut builder = crate::agent::Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,
@@ -481,7 +481,7 @@ impl RecoveryPolicy for RaiseAndRecord {
 async fn the_recovery_policy_is_told_the_limit_the_call_went_out_with() {
     let tmp = tempfile::tempdir().unwrap();
     let mut settings = recall_test_settings(tmp.path());
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     settings.values.model.model_name = "m".into();
     settings.values.model.max_tokens = 32_000;
     settings.values.providers.insert(

@@ -12,7 +12,7 @@ pub(super) fn hanging_team_parent(
     let started = Arc::new(tokio::sync::Notify::new());
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let parent = TestParent {
-        team: team_with(|t| t.max_persistent_members = cap),
+        team: team_with(|t| t.max_members = cap),
         ..TestParent::new(Arc::new(AnswersOnlyCancellation {
             started: started.clone(),
             dropped: dropped.clone(),
@@ -512,7 +512,7 @@ impl Model for ModelNameModel {
 async fn a_cap_of_zero_refuses_persistent_members_and_leaves_one_shot_delegates_alone() {
     let asked_for = Arc::new(std::sync::Mutex::new(Vec::new()));
     let agent_tool = TestParent {
-        team: team_with(|t| t.max_persistent_members = 0),
+        team: team_with(|t| t.max_members = 0),
         ..TestParent::new(Arc::new(ModelNameModel {
             asked_for: asked_for.clone(),
         }))
@@ -730,7 +730,7 @@ async fn the_session_cap_refuses_one_sub_agent_too_many_and_a_root_team_member_w
 
     let refused = run_sub_with(&agent_tool).await.unwrap_err();
     assert!(
-        refused.to_string().contains("max_concurrent_subagents"),
+        refused.to_string().contains("agents.max_concurrent"),
         "{refused}"
     );
 

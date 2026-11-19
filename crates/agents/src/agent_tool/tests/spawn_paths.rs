@@ -652,7 +652,7 @@ async fn a_team_started_by_a_sub_agent_holding_the_only_slot_is_refused_its_memb
         let mut team = crate::TeamSettings::default();
         team.enabled = true;
         s.set_section(&team);
-        s.execution.max_concurrent_subagents = 1;
+        s.agents.max_concurrent = 1;
     });
     root.turn("ROOT-MARK start the lead").await;
     root.tasks_settled(std::time::Duration::from_secs(60)).await;
@@ -665,7 +665,7 @@ async fn a_team_started_by_a_sub_agent_holding_the_only_slot_is_refused_its_memb
     let lead = model.seen_with("LEAD-MARK");
     let reported = lead.last().map(|s| s.text.clone()).unwrap_or_default();
     assert!(
-        reported.contains("max_concurrent_subagents"),
+        reported.contains("agents.max_concurrent"),
         "the team did not report its members being refused a slot: {reported}"
     );
 }
@@ -694,7 +694,7 @@ async fn a_root_sessions_team_waits_for_slots_and_every_member_runs() {
         let mut team = crate::TeamSettings::default();
         team.enabled = true;
         s.set_section(&team);
-        s.execution.max_concurrent_subagents = 2;
+        s.agents.max_concurrent = 2;
     });
     root.turn("ROOT-MARK run the team").await;
 

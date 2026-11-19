@@ -187,7 +187,7 @@ async fn a_programs_fan_out_past_the_cap_waits_for_a_slot_instead_of_failing() {
         "a direct call past the cap is refused at once"
     );
     assert!(
-        format!("{:?}", refused[0].content).contains("max_concurrent_subagents"),
+        format!("{:?}", refused[0].content).contains("agents.max_concurrent"),
         "{:?}",
         refused[0].content
     );

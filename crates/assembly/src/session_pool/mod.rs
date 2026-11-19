@@ -269,7 +269,11 @@ fn project_trust_report(
         trust: settings.trust().into(),
         matched: settings.trust_pattern().map(str::to_string),
         trust_source: settings.trust_source(),
-        default: settings.values.project_trust.default,
+        default: if settings.values.app.trust_all_projects {
+            settings::trust::TrustLevel::Trusted
+        } else {
+            settings::trust::TrustLevel::Untrusted
+        },
         requires_trust,
     }
 }

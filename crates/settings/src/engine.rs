@@ -20,34 +20,34 @@ impl LoadedSettings {
         c.max_tokens = settings.model.max_tokens;
         c.fallback_model = settings.model.fallback_model.clone();
         c.permission_prompt_timeout_secs = settings.permissions.prompt_timeout_secs;
-        c.max_parallelism = settings.execution.max_parallelism;
-        c.max_api_calls_per_turn = settings.execution.max_api_calls_per_turn;
-        c.max_agent_depth = settings.execution.max_agent_depth;
+        c.max_parallelism = settings.turn.parallel_tools;
+        c.max_api_calls_per_turn = settings.turn.max_model_calls;
+        c.max_agent_depth = settings.agents.max_depth;
 
         c.permission_mode = settings.permissions.mode;
         c.sandbox = std::sync::Arc::new(SandboxSettings {
             worktree_git: loaded.paths.worktree_git(),
             ..sandbox_settings(
-                &settings.sandbox,
+                settings,
                 &base::paths::ConfigPaths::from_settings(&loaded.paths),
             )
         });
-        c.disable_skill_shell_execution = settings.disable_skill_shell_execution;
+        c.disable_skill_shell_execution = !settings.skills.allow_shell;
         c.project_trust = loaded.trust();
         c.prompt_files = base::paths::PromptFiles::for_project(
             &base::paths::ConfigPaths::from_settings(&loaded.paths),
         );
         c.layout = loaded.paths.layout.clone();
-        c.path_style = settings.path_style.unwrap_or_default();
-        c.subprocess_env = settings.sandbox.subprocess_env.clone();
+        c.path_style = settings.prompt.path_style.unwrap_or_default();
+        c.subprocess_env = settings.sandbox.env.clone();
 
-        if let Some(chars) = settings.compaction.tool_result_inline_chars {
+        if let Some(chars) = settings.compaction.inline_result_chars {
             c.tool_results.inline_chars = chars;
         }
 
         c.system_prompt = base::context::config::SystemPromptSettings {
-            append: settings.prompt_append.clone(),
-            override_text: settings.prompt_override.clone(),
+            append: settings.prompt.append.clone(),
+            override_text: settings.prompt.override_text.clone(),
             ..c.system_prompt
         };
 
@@ -105,54 +105,43 @@ impl LoadedSettings {
     }
 }
 
-/// The engine's sandbox settings from the `sandbox` section, the one place
-/// that maps one to the other. Every field is named, so a setting added to
-/// [`SandboxConfig`] does not compile until it is placed here or set aside.
-pub fn sandbox_settings(
-    config: &SandboxConfig,
-    paths: &base::paths::ConfigPaths,
-) -> SandboxSettings {
+/// The engine's sandbox settings from the `sandbox`, `files` and `web`
+/// blocks, the one place that maps them to it. Every field of
+/// [`SandboxConfig`] is named, so a setting added there does not compile
+/// until it is placed here or set aside.
+pub fn sandbox_settings(settings: &Settings, paths: &base::paths::ConfigPaths) -> SandboxSettings {
     let SandboxConfig {
-        additional_directories: _,
-        read_directories: _,
-        read_anywhere: _,
-        cache_directories: _,
-        deny_read,
+        enabled,
+        require,
         allow_read,
-        deny_write,
-        allow_write,
-        allowed_domains,
-        network_mode,
-        egress_proxy,
-        dangerously_disable_sandbox,
-        require_enforcement,
-        unattended_requires_network_policy,
-        subprocess_env: _,
-        reap_process_groups: _,
-    } = config;
+        deny_read,
+        network,
+        env: _,
+        cache_dirs: _,
+        reap_on_close: _,
+        unattended_needs_network_policy,
+    } = &settings.sandbox;
+    let deny_read: Vec<_> = base::interface::exec::default_deny_read()
+        .into_iter()
+        .chain(deny_read.iter().cloned())
+        .collect();
     SandboxSettings {
         allow_read: allow_read.clone(),
         deny_read: deny_read.clone(),
-        network_mode: *network_mode,
-        allowed_domains: allowed_domains.clone(),
-        egress_proxy: egress_proxy.as_ref().map(|setting| setting.0.clone()),
-        deny_write: deny_write.clone(),
-        allow_write: allow_write.clone(),
+        network_mode: network.mode,
+        allowed_domains: settings.web.allowed_domains.clone(),
+        egress_proxy: network.proxy.as_ref().map(|setting| setting.0.clone()),
+        deny_write: settings.files.deny_write.clone(),
+        allow_write: settings.files.allow_write.clone(),
         // The instance's own root, so the profile denies writes to the
         // settings.json this session actually reads — not to whatever sits
         // under the invoking user's home.
         paths: std::sync::Arc::new(
-            base::paths::SensitivePaths::for_paths(paths).with_read_denials(
-                &base::interface::exec::default_deny_read()
-                    .into_iter()
-                    .chain(deny_read.iter().cloned())
-                    .collect::<Vec<_>>(),
-                allow_read,
-            ),
+            base::paths::SensitivePaths::for_paths(paths).with_read_denials(&deny_read, allow_read),
         ),
-        require_enforcement: *require_enforcement,
-        unattended_requires_network_policy: *unattended_requires_network_policy,
-        disabled: *dangerously_disable_sandbox,
+        require_enforcement: *require,
+        unattended_requires_network_policy: *unattended_needs_network_policy,
+        disabled: !*enabled,
         worktree_git: None,
     }
 }
@@ -160,7 +149,7 @@ pub fn sandbox_settings(
 impl Settings {
     pub fn engine_budget(&self) -> EngineBudget {
         EngineBudget {
-            max_total_tokens: self.execution.max_budget_tokens,
+            max_total_tokens: self.turn.token_budget,
             compact_threshold: self.compaction.threshold_tokens,
             compact_keep_recent: self.compaction.keep_recent,
         }
@@ -170,7 +159,6 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SandboxConfig;
     use base::context::config::PathStyle;
     use base::interface::exec::NetworkMode;
     use base::paths::PathSettings;
@@ -186,23 +174,23 @@ mod tests {
         assert_eq!(config_of(&s).path_style, PathStyle::Absolute);
         s = serde_json::from_value(serde_json::json!({
             "model": serde_json::to_value(&s.model).unwrap(),
-            "path_style": "workspace_relative",
+            "prompt": {"path_style": "relative"},
         }))
         .unwrap();
-        assert_eq!(config_of(&s).path_style, PathStyle::WorkspaceRelative);
+        assert_eq!(config_of(&s).path_style, PathStyle::Relative);
     }
 
     #[test]
     fn the_delegation_depth_is_read_from_settings() {
         let mut s = Settings::defaults_for("test-model");
         assert_eq!(config_of(&s).max_agent_depth, 3);
-        s.execution.max_agent_depth = 1;
+        s.agents.max_depth = 1;
         assert_eq!(config_of(&s).max_agent_depth, 1);
     }
 
-    fn settings_with_sandbox(f: impl FnOnce(&mut SandboxConfig)) -> Settings {
+    fn settings_with_sandbox(f: impl FnOnce(&mut Settings)) -> Settings {
         let mut s = Settings::defaults_for("test-model");
-        f(&mut s.sandbox);
+        f(&mut s);
         s
     }
 
@@ -212,17 +200,18 @@ mod tests {
     /// that chain makes the setting inert while still appearing in the schema.
     #[test]
     fn every_sandbox_setting_reaches_the_engine_config() {
-        let s = settings_with_sandbox(|sb| {
-            sb.network_mode = NetworkMode::Allowlist;
-            sb.allowed_domains = vec!["api.example.com".into()];
-            sb.egress_proxy = serde_json::from_value(serde_json::json!("127.0.0.1:3128")).unwrap();
-            sb.allow_read = vec![PathBuf::from("/tmp/ok")];
-            sb.deny_read = vec![PathBuf::from("/tmp/secret")];
-            sb.deny_write = vec![".secret".into()];
-            sb.allow_write = vec![PathBuf::from("/tmp/w")];
-            sb.require_enforcement = true;
-            sb.unattended_requires_network_policy = true;
-            sb.dangerously_disable_sandbox = true;
+        let s = settings_with_sandbox(|s| {
+            s.sandbox.network.mode = NetworkMode::Allowlist;
+            s.web.allowed_domains = vec!["api.example.com".into()];
+            s.sandbox.network.proxy =
+                serde_json::from_value(serde_json::json!("127.0.0.1:3128")).unwrap();
+            s.sandbox.allow_read = vec![PathBuf::from("/tmp/ok")];
+            s.sandbox.deny_read = vec![PathBuf::from("/tmp/secret")];
+            s.files.deny_write = vec![".secret".into()];
+            s.files.allow_write = vec![PathBuf::from("/tmp/w")];
+            s.sandbox.require = true;
+            s.sandbox.unattended_needs_network_policy = true;
+            s.sandbox.enabled = false;
         });
         let c = config_of(&s);
 
@@ -233,8 +222,12 @@ mod tests {
             Some("127.0.0.1:3128".parse().unwrap())
         );
         assert_eq!(c.sandbox.allow_read, [PathBuf::from("/tmp/ok")]);
-        assert_eq!(c.sandbox.deny_read, [PathBuf::from("/tmp/secret")]);
-        assert_eq!(c.sandbox.policy().deny_read, [PathBuf::from("/tmp/secret")]);
+        let with_secret: Vec<_> = base::interface::exec::default_deny_read()
+            .into_iter()
+            .chain([PathBuf::from("/tmp/secret")])
+            .collect();
+        assert_eq!(c.sandbox.deny_read, with_secret);
+        assert_eq!(c.sandbox.policy().deny_read, with_secret);
         assert_eq!(c.sandbox.deny_write, [".secret"]);
         assert_eq!(c.sandbox.allow_write, [PathBuf::from("/tmp/w")]);
         assert!(c.sandbox.require_enforcement);
@@ -244,24 +237,30 @@ mod tests {
 
     /// An unconfigured `deny_read` means the built-in credential list, never
     /// "deny exactly nothing" — which would make `~/.ssh` and `~/.aws`
-    /// readable by any command the classifier allows.
+    /// readable by any command the classifier allows; a configured one adds
+    /// to that list rather than replacing it.
     #[test]
-    fn empty_deny_read_means_defaults_not_an_empty_deny_list() {
-        let c = config_of(&settings_with_sandbox(|sb| {
-            sb.deny_read = Vec::new();
+    fn deny_read_adds_to_the_built_in_credential_list() {
+        let defaults = base::interface::exec::default_deny_read();
+        let c = config_of(&settings_with_sandbox(|s| {
+            s.sandbox.deny_read = Vec::new();
         }));
-        assert_eq!(
-            c.sandbox.policy().deny_read,
-            base::interface::exec::default_deny_read()
-        );
+        assert_eq!(c.sandbox.policy().deny_read, defaults);
+
+        let c = config_of(&settings_with_sandbox(|s| {
+            s.sandbox.deny_read = vec![PathBuf::from("/srv/secret")];
+        }));
+        let denied = c.sandbox.policy().deny_read;
+        assert!(defaults.iter().all(|d| denied.contains(d)), "{denied:?}");
+        assert!(denied.contains(&PathBuf::from("/srv/secret")));
     }
 
     /// The file tools refuse what `deny_read` names too, not only the
     /// built-in credential list.
     #[test]
     fn a_configured_deny_read_is_a_credential_to_the_file_tools() {
-        let c = config_of(&settings_with_sandbox(|sb| {
-            sb.deny_read = vec![PathBuf::from("/tmp/agix-deny-read-case")];
+        let c = config_of(&settings_with_sandbox(|s| {
+            s.sandbox.deny_read = vec![PathBuf::from("/tmp/agix-deny-read-case")];
         }));
         assert!(c
             .sandbox
@@ -285,8 +284,8 @@ mod tests {
         assert_eq!(loaded.permission_settings().layout, c.layout);
     }
 
-    /// The setting file says `"network_mode": "deny_all"`; that is what the
-    /// engine type reads and writes.
+    /// The setting file says `"network": {"mode": "deny_all"}`; that is what
+    /// the engine type reads and writes.
     #[test]
     fn network_mode_keeps_its_wire_names() {
         for (mode, wire) in [

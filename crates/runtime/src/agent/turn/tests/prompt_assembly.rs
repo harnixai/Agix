@@ -130,8 +130,8 @@ fn test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     values.model.max_tokens = 2000;
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;
-    values.memory_enabled = false;
-    values.telemetry_enabled = false;
+    values.memory.enabled = false;
+    values.telemetry.enabled = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = root.to_path_buf();
     paths.global_data_dir = root.to_path_buf();
@@ -519,14 +519,14 @@ async fn rebuilt_prompt_still_carries_skills_and_scene_skeleton() {
 fn scene_execution_params_tighten_the_api_call_ceiling() {
     let dir = tempfile::tempdir().unwrap();
     let settings = test_settings(dir.path());
-    assert_eq!(settings.values.execution.max_api_calls_per_turn, 25);
+    assert_eq!(settings.values.turn.max_model_calls, 25);
 
     let resolve = |scene_limit: u32| {
         let scene = scene_with(vec![], scene_limit);
         settings
             .values
-            .execution
-            .max_api_calls_per_turn
+            .turn
+            .max_model_calls
             .min(scene.execution.max_api_calls_per_turn)
     };
 

@@ -11,7 +11,7 @@ impl SessionPool {
         self.mcp.auth.clone()
     }
 
-    /// Drop the cached connections whose `mcp_servers` came from `tier`, so the
+    /// Drop the cached connections whose `mcp.servers` came from `tier`, so the
     /// next session or rebuild on those keys connects with the changed config
     /// (a new `Authorization`, say) instead of reusing the old connection.
     /// `keep` is a key the caller reconnects itself.
@@ -36,7 +36,7 @@ impl SessionPool {
     /// eagerly at startup by `connect_mcp_servers_in_background`, so by the
     /// time this is first called for it the cache is typically already warm.
     ///
-    /// Not deduplicated across projects with an identical `mcp_servers`
+    /// Not deduplicated across projects with an identical `mcp.servers`
     /// config — two projects that happen to declare the same server each
     /// get their own connection.
     pub(in crate::session_pool) async fn mcp_for_project(
@@ -74,12 +74,17 @@ impl SessionPool {
     }
 
     /// The MCP servers a `(project, scene)` with these settings connects:
-    /// its `mcp_servers` and every active plugin's `[[mcp]]` declarations.
+    /// what its `mcp.servers` declares and every active plugin's `[[mcp]]`
+    /// declarations.
     pub(in crate::session_pool) fn configured_mcp_servers(
         &self,
         settings: &Settings,
     ) -> HashMap<String, serde_json::Value> {
-        let mut servers = settings.mcp_servers.clone();
+        let mut servers: HashMap<String, serde_json::Value> = settings
+            .mcp
+            .declared()
+            .map(|(name, config)| (name.clone(), config))
+            .collect();
         servers.extend(self.plugins.mcp_servers());
         servers
     }
@@ -135,7 +140,7 @@ impl SessionPool {
 
     /// Parse the servers `settings` configure and pass each through
     /// `admit_mcp`, a project's own after `confined_to_own_env`; one turned
-    /// off (`mcp_enabled`) is left out without a word. Every other entry that
+    /// off (`mcp.servers.<name>.enabled`) is left out without a word. Every other entry that
     /// will not be connected gets a `mcp_connect_failed` event here.
     pub(in crate::session_pool) fn admit_mcp_servers(
         &self,
@@ -309,11 +314,11 @@ impl SessionPool {
         }
     }
 
-    /// Reconnect MCP servers to match `mcp_servers` (from freshly-reloaded
+    /// Reconnect MCP servers to match `mcp.servers` (from freshly-reloaded
     /// `Settings`) — the `config.reload`/`config.setProvider` counterpart to
     /// `connect_mcp_servers_in_background`, which runs once at daemon
     /// startup. `create()` sources MCP from the MCP cache, not
-    /// from `Settings`, so a reloaded `mcp_servers` reaches sessions only
+    /// from `Settings`, so a reloaded `mcp.servers` reaches sessions only
     /// through this.
     ///
     /// Connects the *complete* new config rather than diffing it against the
@@ -398,13 +403,13 @@ impl SessionPool {
     }
 }
 
-/// The pair's servers start under its settings' `sandbox.subprocess_env`, and
+/// The pair's servers start under its settings' `sandbox.env`, and
 /// are told the pair's project.
 fn mcp_launch(
     settings: &settings::LoadedSettings,
     project_root: Option<&Path>,
 ) -> mcp::project::McpLaunch {
-    mcp::project::McpLaunch::new(settings.values.sandbox.subprocess_env.clone(), project_root)
+    mcp::project::McpLaunch::new(settings.values.sandbox.env.clone(), project_root)
 }
 
 /// What admitting a server depends on besides the server: which names a
@@ -435,13 +440,13 @@ impl McpJudge {
         name: &str,
         value: &serde_json::Value,
     ) -> Admission {
-        if settings.values.mcp_enabled.get(name) == Some(&false) {
+        if !settings.values.mcp.is_enabled(name) {
             return Admission::Disabled;
         }
         let cfg = match serde_json::from_value::<mcp::config::McpServerConfig>(value.clone()) {
             Ok(cfg) => cfg,
             Err(e) => {
-                tracing::warn!(server = %name, error = %e, "invalid mcp_servers config, skipping");
+                tracing::warn!(server = %name, error = %e, "invalid mcp.servers config, skipping");
                 return Admission::Invalid(mcp::manager::FailedServer {
                     name: name.to_string(),
                     transport: "unknown",

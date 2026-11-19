@@ -26,9 +26,9 @@ pub struct AssemblyRequest<'a> {
     /// What else asked to be in this prompt.
     pub registry: &'a dyn PromptRegistry,
     pub scene: &'a SceneSpec,
-    /// `settings.prompt_override`: when set, it is the whole prompt.
+    /// `settings.prompt.override`: when set, it is the whole prompt.
     pub prompt_override: Option<&'a str>,
-    /// `settings.prompt_append`.
+    /// `settings.prompt.append`.
     pub prompt_append: Option<&'a str>,
     /// The memory section, already rendered; `None` when memory is off.
     pub memory_prompt: Option<&'a str>,

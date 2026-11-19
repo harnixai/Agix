@@ -42,7 +42,7 @@ async fn telemetry_disabled_yields_a_noop_handle_even_with_an_absolute_dir() {
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
-    settings.values.telemetry_enabled = false;
+    settings.values.telemetry.enabled = false;
     settings.paths.local_data_dir = dir.path().to_path_buf();
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let _handle = build_pool_telemetry(&settings);
@@ -56,7 +56,7 @@ async fn absolute_dir_and_telemetry_enabled_persists_events_to_pool_jsonl() {
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
-    settings.values.telemetry_enabled = true;
+    settings.values.telemetry.enabled = true;
     settings.paths.local_data_dir = dir.path().to_path_buf();
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let handle = build_pool_telemetry(&settings);
@@ -109,7 +109,7 @@ async fn recording_into_the_project_keeps_the_recordings_out_of_git() {
         Settings::defaults_for("claude-sonnet-4-6"),
         base::paths::PathSettings::default(),
     );
-    settings.values.telemetry_enabled = true;
+    settings.values.telemetry.enabled = true;
     settings.paths.local_data_dir = dir.path().join(".agix");
     settings.paths.workspace = base::paths::Workspace::project_of(&settings.paths.local_data_dir);
     let _handle = build_pool_telemetry(&settings);

@@ -180,8 +180,8 @@ pub(crate) fn confine_shell(
             platform = std::env::consts::OS,
             unmet = %confined.unmet.join("; "),
             "sandbox policy is not fully enforced. Install bwrap (Linux), \
-             set sandbox.require_enforcement to refuse instead, or \
-             dangerously_disable_sandbox to stop asking."
+             set sandbox.require to refuse instead, or \
+             sandbox.enabled to false to stop asking."
         );
     }
     confined.spec

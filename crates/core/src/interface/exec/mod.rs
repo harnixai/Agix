@@ -17,7 +17,7 @@
 //!
 //! This machine's own answers to the four contracts are the `platform` crate,
 //! which depends on this one; [`env`] stays here because it is the
-//! `sandbox.subprocess_env` setting and the engine's credential list, both of
+//! `sandbox.env` setting and the engine's credential list, both of
 //! which `base` itself reads.
 //!
 //! [`tool_middleware`]: crate::interface::tool_middleware

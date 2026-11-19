@@ -20,7 +20,7 @@ fn prompt_context_includes_os() {
     values.model.max_tokens = 4096;
     values.model.thinking_mode = ThinkingMode::Auto;
     values.model.effort = None;
-    values.telemetry_enabled = false;
+    values.telemetry.enabled = false;
     let mut paths = base::paths::PathSettings::default();
     paths.user_data_dir = "/tmp/user".into();
     paths.global_data_dir = "/tmp/global".into();
@@ -178,7 +178,7 @@ async fn a_policy_is_told_what_the_cache_cost() {
     );
 }
 
-/// `max_budget_tokens` must stop the turn on real reported usage — no
+/// `turn.token_budget` must stop the turn on real reported usage — no
 /// dollar conversion, no per-model price table to keep in sync.
 #[tokio::test]
 async fn max_budget_tokens_stops_the_turn_on_reported_usage() {
@@ -194,7 +194,7 @@ async fn max_budget_tokens_stops_the_turn_on_reported_usage() {
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive));
 
     let mut settings = recall_test_settings(tmp.path());
-    settings.values.execution.max_budget_tokens = Some(1000);
+    settings.values.turn.token_budget = Some(1000);
 
     let (telemetry_tx, mut telemetry_rx) = tokio::sync::mpsc::channel(16);
     let (mut agent, _event_rx, _input_tx) = crate::agent::Builder::new()

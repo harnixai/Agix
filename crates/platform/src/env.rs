@@ -1,4 +1,4 @@
-//! `sandbox.subprocess_env` applied to a command started on this machine.
+//! `sandbox.env` applied to a command started on this machine.
 //!
 //! The policy and what it decides are `base`'s
 //! ([`SubprocessEnv::resolve`]); this is the one place that reads this

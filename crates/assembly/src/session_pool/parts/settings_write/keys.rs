@@ -1,6 +1,6 @@
 //! `config.set` 收哪些键：有专门方法的键族指过去，可执行配置不收，只从全局层读的键
-//! 只能写全局层，不从项目层读的键不写项目层，schema 里没有的键不收。值本身放不放得进、
-//! 未受信项目收不收，由写入核心按加载器判。
+//! 只能写全局层，schema 里没有的键不收。值本身放不放得进、未受信项目收不收，由写入核心
+//! 按加载器判。
 
 use settings::edit::KeyPath;
 use settings::{KeyKind, SchemaKeys};
@@ -15,10 +15,12 @@ enum Refusal {
     NotWritable(&'static str),
 }
 
-/// Key families `config.set` does not write, by their first segment.
+/// Key families `config.set` does not write, dotted, with `*` for one map
+/// key: a key at, above or beneath one of them is refused, for the reason of
+/// the family it names exactly, else of the first it overlaps.
 const CONFIG_SET_REFUSES: &[(&str, Refusal)] = &[
     (
-        "mcp_servers",
+        "mcp.servers",
         Refusal::UseMethod(
             "mcp.addServer",
             "a server is admitted by the MCP policy and connected or disconnected as it is \
@@ -26,14 +28,14 @@ const CONFIG_SET_REFUSES: &[(&str, Refusal)] = &[
         ),
     ),
     (
-        "mcp_enabled",
+        "mcp.servers.*.enabled",
         Refusal::UseMethod(
             "mcp.setEnabled",
             "turning a server off or on disconnects or connects it as it is written",
         ),
     ),
     (
-        "project_trust",
+        "app.trusted_projects",
         Refusal::UseMethod(
             "project.trust",
             "trust is recorded for one project root at a time, in the global tier's \
@@ -41,7 +43,15 @@ const CONFIG_SET_REFUSES: &[(&str, Refusal)] = &[
         ),
     ),
     (
-        "hooks_config",
+        "app.trust_all_projects",
+        Refusal::UseMethod(
+            "project.trust",
+            "trust is recorded for one project root at a time, in the global tier's \
+             settings.local.json",
+        ),
+    ),
+    (
+        "hooks",
         Refusal::NotWritable(
             "hooks run commands; they are configured in the settings files themselves, not \
              over RPC",
@@ -66,10 +76,22 @@ pub(in crate::session_pool) fn refusal(
 ) -> Option<SettingRejected> {
     let segments = path.segments();
     let dotted = path.dotted();
-    if let Some((_, refusal)) = CONFIG_SET_REFUSES
+    let overlaps = |family: &str| {
+        family
+            .split('.')
+            .zip(&segments)
+            .all(|(f, s)| f == "*" || f == *s)
+    };
+    let exactly = |family: &str| family.split('.').count() == segments.len() && overlaps(family);
+    let refused = CONFIG_SET_REFUSES
         .iter()
-        .find(|(family, _)| segments.first() == Some(family))
-    {
+        .find(|(family, _)| exactly(family))
+        .or_else(|| {
+            CONFIG_SET_REFUSES
+                .iter()
+                .find(|(family, _)| overlaps(family))
+        });
+    if let Some((_, refusal)) = refused {
         return Some(match refusal {
             Refusal::UseMethod(method, reason) => SettingRejected {
                 method: Some(method.to_string()),
@@ -103,13 +125,6 @@ pub(in crate::session_pool) fn refusal(
             dotted,
             RejectKind::NotAtTier,
             format!("`{}` is read from the global tier only", segments[0]),
-        ));
-    }
-    if tier == SettingsTier::Project && settings::NOT_FROM_PROJECT_KEYS.contains(&segments[0]) {
-        return Some(SettingRejected::new(
-            dotted,
-            RejectKind::NotAtTier,
-            format!("`{}` is not read from a project's settings", segments[0]),
         ));
     }
     None

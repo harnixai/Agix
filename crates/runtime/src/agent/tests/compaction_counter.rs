@@ -75,7 +75,7 @@ async fn a_manual_compaction_lands_under_its_target_in_the_sessions_counter() {
 
 fn built_with_cached_microcompact(on: bool) -> Agent {
     let mut settings = test_settings();
-    settings.values.compaction.cached_microcompact = on;
+    settings.values.compaction.clear_on_cache_expiry = on;
     Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,

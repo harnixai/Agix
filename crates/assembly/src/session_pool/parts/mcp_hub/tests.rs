@@ -121,21 +121,21 @@ async fn a_pair_stuck_connecting_holds_up_no_other_pairs_connect() {
     std::fs::write(
         stuck.join(".agix").join("settings.json"),
         serde_json::json!({
-            "mcp_servers": {
+            "mcp": {"servers": {
                 "mute": {
                     "type": "stdio",
                     "command": "/bin/sh",
                     "args": ["-c", format!("touch '{}'; while read l; do :; done", asked.display())],
                     "startup_timeout_ms": 20_000,
                 }
-            }
+            }}
         })
         .to_string(),
     )
     .unwrap();
     std::fs::write(
         dir.path().join("settings.local.json"),
-        serde_json::json!({"project_trust": {"trusted": [stuck]}}).to_string(),
+        serde_json::json!({"app": {"trusted_projects": [stuck]}}).to_string(),
     )
     .unwrap();
     let other = dir.path().join("other");

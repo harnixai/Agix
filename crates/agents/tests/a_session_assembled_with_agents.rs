@@ -42,9 +42,9 @@ fn settings() -> settings::LoadedSettings {
     settings.model.thinking_mode = ThinkingMode::Auto;
     settings.model.effort = None;
     settings.model.max_tokens = 2000;
-    settings.memory_enabled = false;
-    settings.telemetry_enabled = false;
-    settings.disable_skill_shell_execution = true;
+    settings.memory.enabled = false;
+    settings.telemetry.enabled = false;
+    settings.skills.allow_shell = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.clone();
     paths.global_data_dir = dir.clone();
@@ -142,7 +142,7 @@ async fn the_agent_tool_goes_when_its_session_does() {
     let mut team = agents::TeamSettings::default();
     team.enabled = true;
     with_teams.values.set_section(&team);
-    with_teams.values.hooks_config = Some(serde_json::json!({
+    with_teams.values.hooks = Some(serde_json::json!({
         "Stop": [{ "type": "agent", "prompt": "check" }]
     }));
     let agent = build(with_teams, 0, true);
@@ -291,7 +291,7 @@ async fn delegate_once(
             ),
     );
     let mut s = settings();
-    s.values.memory_enabled = false;
+    s.values.memory.enabled = false;
     let builder = Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,

@@ -15,7 +15,7 @@ use crate::path_rule::is_within_root_lexical;
 /// Generated or curated, and a model editing one directly is nearly always
 /// doing it the wrong way round. Denied like the credential list, and
 /// exempted the same way: a deployment whose agent is supposed to maintain a
-/// `.gitignore` says so in `sandbox.allow_write`.
+/// `.gitignore` says so in `files.allow_write`.
 const GUARDED_FILENAMES: &[&str] = &[".gitignore", "package-lock.json", "Cargo.lock", ".envrc"];
 
 /// 不论 cwd 在哪，下面这些系统目录都拒写。

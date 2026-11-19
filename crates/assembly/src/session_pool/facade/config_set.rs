@@ -28,7 +28,7 @@ impl SessionPool {
         let (ops, mut rejected) = changes_to_ops(change.tier, change.changes);
         let refused_already = !rejected.is_empty();
         let touches_connections = ops.iter().any(|op| {
-            ["sandbox.subprocess_env", "network"]
+            ["sandbox.env", "app.system_proxy"]
                 .iter()
                 .any(|key| op.path().overlaps(&KeyPath::new(key.split('.'))))
         });

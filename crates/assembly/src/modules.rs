@@ -40,8 +40,8 @@ pub fn compiled() -> Vec<&'static str> {
 /// so a section that will be ignored says so instead of doing nothing.
 pub fn unassembled_settings(settings: &Settings) -> Vec<(&'static str, &'static str)> {
     let mut out = Vec::new();
-    if !cfg!(feature = "mcp") && !settings.mcp_servers.is_empty() {
-        out.push(("mcp_servers", "mcp"));
+    if !cfg!(feature = "mcp") && settings.mcp.declared().next().is_some() {
+        out.push(("mcp.servers", "mcp"));
     }
     let team_enabled = settings
         .sections
@@ -280,15 +280,15 @@ mod tests {
     #[test]
     fn a_section_for_a_missing_module_is_named() {
         let mut settings = Settings::defaults_for("test");
-        settings
-            .mcp_servers
-            .insert("x".into(), serde_json::json!({}));
+        settings.mcp =
+            serde_json::from_value(serde_json::json!({"servers": {"x": {"command": "x"}}}))
+                .unwrap();
         settings
             .sections
             .insert("team".into(), serde_json::json!({"enabled": true}));
         let named = unassembled_settings(&settings);
         assert_eq!(
-            named.contains(&("mcp_servers", "mcp")),
+            named.contains(&("mcp.servers", "mcp")),
             !cfg!(feature = "mcp")
         );
         assert_eq!(

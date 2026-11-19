@@ -156,7 +156,7 @@
 //! constrains is the commands the *model* runs, which is defence in depth on a
 //! machine whose owner is sitting at it and a boundary only where the agent
 //! acts for someone else. Without the feature the backends are not compiled,
-//! [`PlatformSandbox`] says so, and `sandbox.require_enforcement` refuses every
+//! [`PlatformSandbox`] says so, and `sandbox.require` refuses every
 //! command rather than running it unconstrained — which is the same promise the
 //! enforcement report always made, kept one step earlier.
 //!

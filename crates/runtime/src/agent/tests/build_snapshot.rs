@@ -195,8 +195,8 @@ async fn build_matches_the_golden_snapshot() {
     {
         let seen = fresh();
         let mut settings = test_settings();
-        settings.values.sandbox.additional_directories = vec!["extra".into()];
-        settings.values.sandbox.read_directories = vec!["docs".into()];
+        settings.values.files.extra_dirs = vec!["extra".into()];
+        settings.values.files.read_dirs = vec!["docs".into()];
         let builder = builder_for(
             scene_deferring("minimal", &["StructuredOutput", "Later"]),
             template_of(vec![Arc::new(Named("Early")), structured()]),

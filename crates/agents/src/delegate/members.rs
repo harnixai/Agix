@@ -160,10 +160,10 @@ impl Delegator {
         spec: Spec,
         prompt: String,
     ) -> Result<Delegated, DelegateError> {
-        if self.limits.max_persistent_members == 0 {
+        if self.limits.max_members == 0 {
             return Err(DelegateError::Limit(
                 "persistent team members are turned off in this session \
-                 (team.max_persistent_members is 0). Call Agent without team_name \
+                 (team.max_members is 0). Call Agent without team_name \
                  and name to run a one-shot sub-agent instead, or do the work yourself."
                     .into(),
             ));
@@ -177,16 +177,16 @@ impl Delegator {
         }
         let live = &self.members.live;
         let alive = live.read().unwrap_or_else(|e| e.into_inner()).len();
-        if alive >= self.limits.max_persistent_members {
+        if alive >= self.limits.max_members {
             let busy = if alive == 1 {
                 "1 persistent member is busy, the most this session keeps \
-                 (team.max_persistent_members). Message it, wait for it to go idle, \
+                 (team.max_members). Message it, wait for it to go idle, \
                  or stop it with TaskStop or TeamDelete."
                     .to_string()
             } else {
                 format!(
                     "{alive} persistent members are busy, the most this session keeps \
-                     (team.max_persistent_members). Message one of them, wait for \
+                     (team.max_members). Message one of them, wait for \
                      one to go idle, or stop one with TaskStop or TeamDelete."
                 )
             };
@@ -317,7 +317,7 @@ impl Delegator {
             idle_since,
             idle_seq,
             idle_seq_counter: self.members.idle_seq_counter.clone(),
-            idle_bound: std::time::Duration::from_secs(self.limits.member_idle_timeout_secs),
+            idle_bound: std::time::Duration::from_secs(self.limits.member_idle_secs),
             spawn_lock: self.members.spawn_lock.clone(),
             slots: self.limits.slots.clone(),
             run,
@@ -367,12 +367,12 @@ impl Delegator {
     }
 
     /// Stops the oldest idle members while there are more than
-    /// `team.max_persistent_members`, counting the member `protect` is about
+    /// `team.max_members`, counting the member `protect` is about
     /// to add. A running member is never stopped; `protect` itself never is.
     /// Run before a member is spawned; a member idle past
-    /// `team.member_idle_timeout_secs` leaves on its own.
+    /// `team.member_idle_secs` leaves on its own.
     pub(crate) fn reclaim_idle_members(&self, protect: Option<&(String, String)>) {
-        let max_total = self.limits.max_persistent_members;
+        let max_total = self.limits.max_members;
         let victims: Vec<(String, String)> = {
             let members = self.members.live.read().unwrap_or_else(|e| e.into_inner());
             let mut idle: Vec<((String, String), u64)> = members

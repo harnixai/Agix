@@ -25,7 +25,7 @@ pub(super) fn parent_settings_for_test(scope: &str) -> (LoadedSettings, std::pat
     s.paths.local_data_dir = dir.clone();
     s.paths.scope = scope.to_string();
     // Keep the turn from making an extra post-turn extraction call.
-    s.values.memory_enabled = false;
+    s.values.memory.enabled = false;
     (s, dir)
 }
 

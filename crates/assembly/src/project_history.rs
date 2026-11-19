@@ -1,7 +1,7 @@
 //! The engine's side of keeping history in projects: a project's history
 //! directory (a worktree's is its main checkout's), whether a new session goes
-//! there (`history.location` and the project's trust), and whether a project
-//! is trusted now — the global tier's `project_trust`, read again whenever
+//! there (`app.history` and the project's trust), and whether a project
+//! is trusted now — the global tier's `app` block, read again whenever
 //! either of its files has changed since, so that taking trust back stops
 //! reads at once while a listing does not read both files once per session.
 
@@ -146,7 +146,7 @@ mod tests {
         let patterns: Vec<String> = trusted.iter().map(|p| p.display().to_string()).collect();
         std::fs::write(
             global.join(base::paths::SETTINGS_FILE),
-            serde_json::json!({"project_trust": {"trusted": patterns}}).to_string(),
+            serde_json::json!({"app": {"trusted_projects": patterns}}).to_string(),
         )
         .unwrap();
         ProjectHistoryPolicy::new(
@@ -203,8 +203,7 @@ mod tests {
         let local = global.join(base::paths::SETTINGS_LOCAL_FILE);
         std::fs::write(
             &local,
-            serde_json::json!({"project_trust": {"trusted": [a.display().to_string()]}})
-                .to_string(),
+            serde_json::json!({"app": {"trusted_projects": [a.display().to_string()]}}).to_string(),
         )
         .unwrap();
         assert!(p.trusted(&a));

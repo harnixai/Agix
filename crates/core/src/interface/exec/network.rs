@@ -187,7 +187,7 @@ pub trait Network: Send + Sync {
 /// address that carries one of those IPv4 ones (mapped, compatible, NAT64,
 /// 6to4).
 ///
-/// Whether `domains` — `sandbox.allowed_domains`, as written in settings —
+/// Whether `domains` — `web.allowed_domains`, as written in settings —
 /// names `host`, itself or as a subdomain. Case, a trailing dot and the
 /// brackets around an IPv6 address do not matter.
 pub fn domains_name_host(domains: &[String], host: &str) -> bool {
@@ -198,7 +198,7 @@ pub fn domains_name_host(domains: &[String], host: &str) -> bool {
     })
 }
 
-/// A `sandbox.allowed_domains` entry or a host, in the form
+/// A `web.allowed_domains` entry or a host, in the form
 /// [`domains_name_host`] compares them in.
 pub fn domain_key(entry: &str) -> String {
     let bare = entry
@@ -212,7 +212,7 @@ pub fn domain_key(entry: &str) -> String {
     }
 }
 
-/// Whether a `sandbox.allowed_domains` entry names this machine's loopback:
+/// Whether a `web.allowed_domains` entry names this machine's loopback:
 /// `localhost` or a loopback address.
 pub fn names_loopback(entry: &str) -> bool {
     let key = domain_key(entry);

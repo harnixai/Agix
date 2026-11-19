@@ -69,7 +69,7 @@ impl HealthCheck for HooksFailOpenCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let Some(value) = &self.0.values.hooks_config else {
+        let Some(value) = &self.0.values.hooks else {
             return CheckResult::ok("no hooks configured");
         };
         let (parsed, _) = hooks::parse_hooks_settings(value);
@@ -123,11 +123,11 @@ impl HealthCheck for UnattendedNetworkCheck {
         let sandbox = &self.settings.values.sandbox;
         let details = serde_json::json!({
             "unattended_scenes": self.unattended_scenes,
-            "network_mode": sandbox.network_mode,
-            "unattended_requires_network_policy": sandbox.unattended_requires_network_policy,
+            "network_mode": sandbox.network.mode,
+            "unattended_requires_network_policy": sandbox.unattended_needs_network_policy,
         });
-        let open = sandbox.network_mode == NetworkMode::Unrestricted
-            && !sandbox.unattended_requires_network_policy;
+        let open = sandbox.network.mode == NetworkMode::Unrestricted
+            && !sandbox.unattended_needs_network_policy;
         if self.unattended_scenes.is_empty() {
             CheckResult::ok("no unattended scene is served")
         } else if !open {
@@ -135,10 +135,10 @@ impl HealthCheck for UnattendedNetworkCheck {
         } else {
             CheckResult::degraded(format!(
                 "unattended scenes ({}) run sandboxed Bash / Monitor commands without asking \
-                 while sandbox.network_mode is unrestricted: such a command can send what it \
-                 reads anywhere. Set sandbox.unattended_requires_network_policy to true, or \
-                 network_mode to deny_all / allowlist; the setting is planned to default to \
-                 true in a later 0.3.x release",
+                 while sandbox.network.mode is unrestricted: such a command can send what it \
+                 reads anywhere. Set sandbox.unattended_needs_network_policy to true, or \
+                 sandbox.network.mode to deny_all / allowlist; the setting is planned to \
+                 default to true in a later 0.3.x release",
                 self.unattended_scenes.join(", ")
             ))
         }
@@ -165,7 +165,7 @@ impl NetworkProxyCheck {
 
 impl HealthCheck for NetworkProxyCheck {
     fn name(&self) -> &str {
-        "network.proxy"
+        "app.system_proxy"
     }
 
     fn check(&self) -> CheckResult {
@@ -177,7 +177,7 @@ impl HealthCheck for NetworkProxyCheck {
         } else {
             (
                 "direct",
-                "network.use_system_proxy is false: the engine's HTTP connects directly",
+                "app.system_proxy is false: the engine's HTTP connects directly",
             )
         };
         CheckResult::ok(summary).with_details(serde_json::json!({
@@ -187,7 +187,7 @@ impl HealthCheck for NetworkProxyCheck {
     }
 }
 
-/// `network_mode: allowlist` reads as "these domains and nothing else", and
+/// `sandbox.network.mode: allowlist` reads as "these domains and nothing else", and
 /// for a sandboxed command it is "nothing else": neither OS backend filters
 /// by domain.
 pub struct NetworkAllowlistCheck(Arc<LoadedSettings>);
@@ -205,10 +205,13 @@ impl HealthCheck for NetworkAllowlistCheck {
 
     fn check(&self) -> CheckResult {
         let sandbox = &self.0.values.sandbox;
-        if sandbox.network_mode != NetworkMode::Allowlist {
-            return CheckResult::ok("sandbox.network_mode is not allowlist");
+        if sandbox.network.mode != NetworkMode::Allowlist {
+            return CheckResult::ok("sandbox.network.mode is not allowlist");
         }
-        let unreachable: Vec<&str> = sandbox
+        let unreachable: Vec<&str> = self
+            .0
+            .values
+            .web
             .allowed_domains
             .iter()
             .map(String::as_str)
@@ -216,18 +219,18 @@ impl HealthCheck for NetworkAllowlistCheck {
             .collect();
         let details = serde_json::json!({
             "unreachable_from_the_sandbox": unreachable,
-            "require_enforcement": sandbox.require_enforcement,
+            "require_enforcement": sandbox.require,
         });
         if unreachable.is_empty() {
             return CheckResult::ok("the allowlist names only localhost").with_details(details);
         }
-        let refused = if sandbox.require_enforcement {
-            "; with sandbox.require_enforcement on, every sandboxed command is refused"
+        let refused = if sandbox.require {
+            "; with sandbox.require on, every sandboxed command is refused"
         } else {
             ""
         };
         CheckResult::degraded(format!(
-            "sandbox.network_mode is allowlist, but the OS sandbox cannot filter by domain: a \
+            "sandbox.network.mode is allowlist, but the OS sandbox cannot filter by domain: a \
              sandboxed Bash / Monitor command reaches none of {} (macOS lets through only \
              localhost, and only when the allowlist names it; Linux cuts the network \
              entirely){refused}. WebFetch and Ping do follow the allowlist",
@@ -237,7 +240,7 @@ impl HealthCheck for NetworkAllowlistCheck {
     }
 }
 
-/// `network_mode: proxy` is a promise both backends can keep, but not
+/// `sandbox.network.mode: proxy` is a promise both backends can keep, but not
 /// everywhere: a proxy off this machine (macOS), no `socat` (Linux), no
 /// proxy configured at all. What the session's sandbox makes of it is what
 /// this reports.
@@ -254,37 +257,37 @@ impl EgressProxyCheck {
 
 impl HealthCheck for EgressProxyCheck {
     fn name(&self) -> &str {
-        "sandbox.egress_proxy"
+        "sandbox.network.proxy"
     }
 
     fn check(&self) -> CheckResult {
         let config = &self.settings.values.sandbox;
-        let proxy = config.egress_proxy.as_ref().map(|p| &p.0);
+        let proxy = config.network.proxy.as_ref().map(|p| &p.0);
         let mut details = serde_json::json!({
-            "network_mode": config.network_mode,
+            "network_mode": config.network.mode,
             "http": proxy.map(|p| p.http.to_string()),
             "socks": proxy.and_then(|p| p.socks).map(|s| s.to_string()),
         });
-        if config.network_mode != NetworkMode::Proxy {
+        if config.network.mode != NetworkMode::Proxy {
             return match proxy {
                 Some(_) => CheckResult::degraded(
-                    "sandbox.egress_proxy is set but sandbox.network_mode is not proxy, so it \
+                    "sandbox.network.proxy is set but sandbox.network.mode is not proxy, so it \
                      is ignored",
                 )
                 .with_details(details),
-                None => CheckResult::ok("sandbox.network_mode is not proxy"),
+                None => CheckResult::ok("sandbox.network.mode is not proxy"),
             };
         }
         if proxy.is_none() {
             return CheckResult::failing(
-                "sandbox.network_mode is proxy but sandbox.egress_proxy is missing or did not \
+                "sandbox.network.mode is proxy but sandbox.network.proxy is missing or did not \
                  read: sandboxed commands run with the network cut",
             )
             .with_details(details);
         }
-        if config.dangerously_disable_sandbox {
+        if !config.enabled {
             return CheckResult::degraded(
-                "sandbox.dangerously_disable_sandbox is on: nothing holds commands to the proxy",
+                "sandbox.enabled is false: nothing holds commands to the proxy",
             )
             .with_details(details);
         }
@@ -326,7 +329,7 @@ impl HealthCheck for StrictProfileCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let strict = if self.settings.values.sandbox.dangerously_disable_sandbox {
+        let strict = if !self.settings.values.sandbox.enabled {
             Enforcement::None
         } else {
             let dir = std::env::temp_dir();
@@ -342,7 +345,7 @@ impl HealthCheck for StrictProfileCheck {
         };
         let details = serde_json::json!({
             "enforcement": format!("{strict:?}").to_lowercase(),
-            "sandbox_disabled": self.settings.values.sandbox.dangerously_disable_sandbox,
+            "sandbox_disabled": !self.settings.values.sandbox.enabled,
         });
         if strict == Enforcement::Full {
             return CheckResult::ok(
@@ -350,8 +353,8 @@ impl HealthCheck for StrictProfileCheck {
             )
             .with_details(details);
         }
-        let why = if self.settings.values.sandbox.dangerously_disable_sandbox {
-            "sandbox.dangerously_disable_sandbox is on"
+        let why = if !self.settings.values.sandbox.enabled {
+            "sandbox.enabled is false"
         } else {
             "this build or machine has no sandbox backend that holds it"
         };
@@ -450,8 +453,8 @@ mod tests {
     fn the_egress_proxy_check_reports_what_the_sandbox_makes_of_it() {
         let check = |mode: NetworkMode, proxy: Option<&str>, held: Enforcement| {
             let settings = settings_with(|s| {
-                s.sandbox.network_mode = mode;
-                s.sandbox.egress_proxy = proxy.map(|p| serde_json::from_value(p.into()).unwrap());
+                s.sandbox.network.mode = mode;
+                s.sandbox.network.proxy = proxy.map(|p| serde_json::from_value(p.into()).unwrap());
             });
             EgressProxyCheck::new(settings, Arc::new(HoldsProxy(held))).check()
         };
@@ -482,7 +485,7 @@ mod tests {
         assert_eq!(unheld.status.label(), "degraded", "{unheld:?}");
         assert!(unheld.summary.contains("no sandbox backend"), "{unheld:?}");
         let off = check(
-            settings_with(|s| s.sandbox.dangerously_disable_sandbox = true),
+            settings_with(|s| s.sandbox.enabled = false),
             Enforcement::Full,
         );
         assert_eq!(off.status.label(), "degraded", "{off:?}");
@@ -501,14 +504,14 @@ mod tests {
         assert_eq!(status(settings_with(|_| {}), Vec::new()), "ok");
         assert_eq!(
             status(
-                settings_with(|s| s.sandbox.network_mode = NetworkMode::Allowlist),
+                settings_with(|s| s.sandbox.network.mode = NetworkMode::Allowlist),
                 unattended()
             ),
             "ok"
         );
         assert_eq!(
             status(
-                settings_with(|s| s.sandbox.unattended_requires_network_policy = true),
+                settings_with(|s| s.sandbox.unattended_needs_network_policy = true),
                 unattended()
             ),
             "ok"
@@ -529,9 +532,9 @@ mod tests {
     fn an_allowlist_of_domains_is_flagged_as_unreachable_from_the_sandbox() {
         let allowlist = |domains: &[&str], require: bool| {
             NetworkAllowlistCheck::new(settings_with(|s| {
-                s.sandbox.network_mode = NetworkMode::Allowlist;
-                s.sandbox.allowed_domains = domains.iter().map(|d| d.to_string()).collect();
-                s.sandbox.require_enforcement = require;
+                s.sandbox.network.mode = NetworkMode::Allowlist;
+                s.web.allowed_domains = domains.iter().map(|d| d.to_string()).collect();
+                s.sandbox.require = require;
             }))
             .check()
         };
@@ -551,7 +554,7 @@ mod tests {
         assert_eq!(allowlist(&["localhost"], true).status.label(), "ok");
         assert_eq!(
             NetworkAllowlistCheck::new(settings_with(|s| {
-                s.sandbox.allowed_domains = vec!["registry.npmjs.org".into()];
+                s.web.allowed_domains = vec!["registry.npmjs.org".into()];
             }))
             .check()
             .status
@@ -575,7 +578,7 @@ mod tests {
     #[test]
     fn a_pretooluse_hook_without_on_error_is_reported_and_a_blocking_one_is_not() {
         let open = settings_with(|s| {
-            s.hooks_config = Some(serde_json::json!({
+            s.hooks = Some(serde_json::json!({
                 "PreToolUse": [{ "type": "command", "command": "true" }],
                 "PostToolUse": [{ "type": "command", "command": "true" }],
             }));
@@ -586,7 +589,7 @@ mod tests {
         assert!(!r.summary.contains("PostToolUse"));
 
         let closed = settings_with(|s| {
-            s.hooks_config = Some(serde_json::json!({
+            s.hooks = Some(serde_json::json!({
                 "PreToolUse": [{ "type": "command", "command": "true", "on_error": "block" }],
             }));
         });

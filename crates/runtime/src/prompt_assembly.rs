@@ -106,7 +106,7 @@ fn fold_system_blocks(blocks: Vec<PromptBlock>, separator: &str, name: &str) -> 
 /// contributions appended after. That is what makes "before the skills
 /// inventory" a thing an extension can ask for.
 ///
-/// `prompt_override` still wins over all of it. Overriding the prompt means
+/// `prompt.override` still wins over all of it. Overriding the prompt means
 /// overriding the prompt; a contribution surviving it would make the setting
 /// mean something narrower than it says.
 fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {

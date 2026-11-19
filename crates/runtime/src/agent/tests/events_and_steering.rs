@@ -557,7 +557,7 @@ pub(super) async fn steer_during_a_tool_step(
 
 pub(super) fn prompt_hook(command: &str) -> settings::LoadedSettings {
     let mut settings = test_settings();
-    settings.values.hooks_config = Some(serde_json::json!({
+    settings.values.hooks = Some(serde_json::json!({
         "UserPromptSubmit": [ { "type": "command", "command": command } ]
     }));
     settings

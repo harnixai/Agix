@@ -46,9 +46,9 @@ fn test_settings() -> settings::LoadedSettings {
     settings.model.thinking_mode = ThinkingMode::Auto;
     settings.model.effort = None;
     settings.model.max_tokens = 2000;
-    settings.memory_enabled = false;
-    settings.telemetry_enabled = false;
-    settings.disable_skill_shell_execution = true;
+    settings.memory.enabled = false;
+    settings.telemetry.enabled = false;
+    settings.skills.allow_shell = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = dir.clone();
     paths.global_data_dir = dir.clone();

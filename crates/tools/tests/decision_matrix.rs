@@ -8,7 +8,7 @@
 //! `UPDATE_GOLDEN=1 cargo test -p tools --test integration decision_matrix::` 重新生成。
 //!
 //! 家目录用固定的 `/home/matrix`，不读环境；沙箱用一个恒报 Full 的桩，让无人值守的
-//! Bash 放行通道不随运行机器变化。快照末尾另有一节：`sandbox.require_enforcement` 打开、
+//! Bash 放行通道不随运行机器变化。快照末尾另有一节：`sandbox.require` 打开、
 //! 沙箱只兑现一部分时 Bash 和 Monitor 的结论。
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -66,7 +66,7 @@ impl Sandbox for HoldsEverything {
 }
 
 /// Holds a command only in part, under a host that demands it be held fully:
-/// the cells `sandbox.require_enforcement` decides.
+/// the cells `sandbox.require` decides.
 struct HoldsPartly;
 
 impl Sandbox for HoldsPartly {
@@ -422,7 +422,7 @@ pub(crate) async fn render() -> (String, usize) {
 
     let _ = writeln!(
         out,
-        "\n# `sandbox.require_enforcement` on, and a sandbox that holds a command only in part"
+        "\n# `sandbox.require` on, and a sandbox that holds a command only in part"
     );
     let mut confinement = 0usize;
     for tool in all
@@ -447,7 +447,7 @@ pub(crate) async fn render() -> (String, usize) {
 #[derive(Clone, Copy)]
 enum Sandboxing {
     Holds,
-    /// Only in part, and `sandbox.require_enforcement` is on.
+    /// Only in part, and `sandbox.require` is on.
     HoldsPartlyAsDemanded,
 }
 
@@ -563,7 +563,7 @@ fn context_like_the_runtime(session: &Arc<dyn Session>, cwd: &Path) -> ToolConte
         session_state::testing::tool_context_for_test(session.exec().unwrap(), cwd.to_path_buf());
     ctx.session_id = "matrix".into();
     *ctx.sandbox_mut() = settings::sandbox_settings(
-        &settings.values.sandbox,
+        &settings.values,
         &base::paths::ConfigPaths::from_settings(&settings.paths),
     );
     ctx.session = session.clone();

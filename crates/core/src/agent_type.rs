@@ -67,7 +67,7 @@ pub struct AgentTypeDefinition {
     /// name (`low` … `max`).
     pub effort: Option<String>,
     /// Maximum API calls a spawned subagent of this type may make, applied
-    /// as this subagent's own `execution.max_api_calls_per_turn` instead of
+    /// as this subagent's own `turn.max_model_calls` instead of
     /// inheriting the parent's cap wholesale. `None` = inherit parent's cap.
     pub max_turns: Option<u32>,
     /// Skill names to preload in full at subagent startup (not just their

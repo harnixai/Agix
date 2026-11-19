@@ -60,7 +60,7 @@ impl Builder {
                 policy.with_no_one_to_ask(NO_HOST_TO_ASK)
             }))
         });
-        let (instruction_file, instruction_provider, claude_md_content) =
+        let (instruction_files, instruction_provider, claude_md_content) =
             self.instruction_context(&settings);
         let environment = self
             .host
@@ -86,7 +86,7 @@ impl Builder {
             settings,
             telemetry_handle,
             permission,
-            instruction_file,
+            instruction_files,
             instruction_provider,
             claude_md_content,
             environment,
@@ -100,21 +100,19 @@ impl Builder {
         &self,
         settings: &LoadedSettings,
     ) -> (
-        Option<PathBuf>,
+        Vec<PathBuf>,
         Arc<dyn base::interface::instruction_provider::InstructionProvider>,
         Option<String>,
     ) {
-        let configured_instruction_file = settings.values.instruction_file.clone();
-        let instruction_file = self
-            .spec
-            .instruction_file
-            .clone()
-            .or(configured_instruction_file);
+        let instruction_files = match &self.spec.instruction_file {
+            Some(path) => vec![path.clone()],
+            None => settings.values.prompt.instruction_files.clone(),
+        };
         let instruction_provider: Arc<
             dyn base::interface::instruction_provider::InstructionProvider,
         > = self.host.instruction_provider.clone().unwrap_or_else(|| {
             Arc::new(
-                prompt_files::InstructionFile::new(instruction_file.clone()).reading_with(
+                prompt_files::InstructionFile::new(instruction_files.clone()).reading_with(
                     base::paths::PromptFiles::for_project(
                         &base::paths::ConfigPaths::from_settings(&settings.paths),
                     ),
@@ -134,7 +132,7 @@ impl Builder {
                 )
             }
         };
-        (instruction_file, instruction_provider, claude_md_content)
+        (instruction_files, instruction_provider, claude_md_content)
     }
 
     pub(super) fn open_session(&self) -> Result<Transcript, EngineError> {

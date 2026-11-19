@@ -1,19 +1,20 @@
-//! The configured instruction file (`AGENTS.md` / `CLAUDE.md`) as an
-//! `InstructionProvider` that reads it from disk.
+//! The configured instruction files (`AGENTS.md` / `CLAUDE.md`,
+//! `prompt.instruction_files`) as an `InstructionProvider` that reads them
+//! from disk, in order.
 
 use base::interface::instruction_provider::{InstructionDoc, InstructionProvider};
 use base::paths::PromptFiles;
 use std::path::PathBuf;
 
 pub struct InstructionFile {
-    path: Option<PathBuf>,
+    paths: Vec<PathBuf>,
     files: PromptFiles,
 }
 
 impl InstructionFile {
-    pub fn new(path: Option<PathBuf>) -> Self {
+    pub fn new(paths: Vec<PathBuf>) -> Self {
         Self {
-            path,
+            paths,
             files: PromptFiles::unscoped(),
         }
     }
@@ -30,20 +31,20 @@ impl InstructionProvider for InstructionFile {
     }
 
     fn documents(&self) -> Vec<InstructionDoc> {
-        let Some(ref path) = self.path else {
-            return Vec::new();
-        };
-        match self.files.read_to_string(path) {
-            Ok(content) if !content.trim().is_empty() => vec![InstructionDoc {
-                path: path.clone(),
-                content,
-            }],
-            Ok(_) => Vec::new(),
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "failed to read instruction file for CLAUDE.md context injection");
-                Vec::new()
-            }
-        }
+        self.paths
+            .iter()
+            .filter_map(|path| match self.files.read_to_string(path) {
+                Ok(content) if !content.trim().is_empty() => Some(InstructionDoc {
+                    path: path.clone(),
+                    content,
+                }),
+                Ok(_) => None,
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to read instruction file for CLAUDE.md context injection");
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -54,9 +55,9 @@ mod tests {
 
     #[test]
     fn an_absent_instruction_file_contributes_nothing() {
-        assert!(InstructionFile::new(None).documents().is_empty());
+        assert!(InstructionFile::new(Vec::new()).documents().is_empty());
         assert!(
-            InstructionFile::new(Some(PathBuf::from("/nonexistent/AGENTS.md")))
+            InstructionFile::new(vec![PathBuf::from("/nonexistent/AGENTS.md")])
                 .documents()
                 .is_empty()
         );
@@ -67,7 +68,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("AGENTS.md");
         std::fs::write(&path, "   \n\n").unwrap();
-        assert!(InstructionFile::new(Some(path)).documents().is_empty());
+        assert!(InstructionFile::new(vec![path]).documents().is_empty());
     }
 
     #[test]
@@ -75,9 +76,24 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("AGENTS.md");
         std::fs::write(&path, "# Conventions\n\nBe brief.\n").unwrap();
-        let docs = InstructionFile::new(Some(path.clone())).documents();
+        let docs = InstructionFile::new(vec![path.clone()]).documents();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].path, path);
         assert_eq!(docs[0].content, "# Conventions\n\nBe brief.\n");
+    }
+
+    #[test]
+    fn several_files_are_read_in_the_order_given() {
+        let dir = TempDir::new().unwrap();
+        let (a, b) = (dir.path().join("a.md"), dir.path().join("b.md"));
+        std::fs::write(&a, "A").unwrap();
+        std::fs::write(&b, "B").unwrap();
+        let missing = dir.path().join("missing.md");
+        let docs = InstructionFile::new(vec![b.clone(), missing, a.clone()]).documents();
+        let read: Vec<_> = docs
+            .iter()
+            .map(|d| (d.path.clone(), d.content.as_str()))
+            .collect();
+        assert_eq!(read, [(b, "B"), (a, "A")]);
     }
 }

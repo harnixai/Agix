@@ -259,8 +259,8 @@ impl HealthCheck for HooksCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let configured = self.0.values.hooks_config.is_some();
-        let (ok, error) = match &self.0.values.hooks_config {
+        let configured = self.0.values.hooks.is_some();
+        let (ok, error) = match &self.0.values.hooks {
             None => (true, None),
             Some(v) => {
                 let (_, report) = hooks::parse_hooks_settings(v);
@@ -309,7 +309,7 @@ impl HealthCheck for MemoryCheck {
 
     fn check(&self) -> CheckResult {
         let cap = memory::MAX_MEMORIES;
-        if !self.0.values.memory_enabled {
+        if !self.0.values.memory.enabled {
             return CheckResult::ok("memory is off")
                 .with_details(serde_json::json!({ "enabled": false, "cap": cap }));
         }
@@ -392,9 +392,9 @@ impl HealthCheck for ManagedSettingsCheck {
 /// Whether a project is trusted, and what of its own configuration that
 /// decides — `project.status`'s answer for it, as a verdict.
 ///
-/// `degraded` when something is decided only by `project_trust.default`:
+/// `degraded` when something is decided only by `app.trust_all_projects`:
 /// nobody has trusted the project and it has configuration that is withheld
-/// until somebody does, or `default: trusted` lets such configuration through
+/// until somebody does, or `trust_all_projects: true` lets such configuration through
 /// without anybody having looked at it. Either way the summary lists the keys.
 pub struct ProjectTrustCheck(serde_json::Value);
 
@@ -423,7 +423,7 @@ impl HealthCheck for ProjectTrustCheck {
                 CheckResult::ok("project not trusted; nothing in it needs trust")
             }
             (Some("untrusted"), false) if by_default => CheckResult::degraded(format!(
-                "project not trusted yet (only project_trust.default decided); \
+                "project not trusted yet (only app.trust_all_projects decided); \
                  withheld until the host trusts it (project.trust): {}",
                 gated.join(", ")
             )),
@@ -432,13 +432,13 @@ impl HealthCheck for ProjectTrustCheck {
                 gated.join(", ")
             )),
             (Some("trusted"), _) if !by_default => {
-                CheckResult::ok("project trusted by project_trust.trusted")
+                CheckResult::ok("project trusted by app.trusted_projects")
             }
             (Some("trusted"), true) => CheckResult::ok(
-                "project trusted by project_trust.default; nothing in it needs trust",
+                "project trusted by app.trust_all_projects; nothing in it needs trust",
             ),
             (Some("trusted"), false) => CheckResult::degraded(format!(
-                "project trusted only by project_trust.default: trusted, without anybody trusting it; \
+                "project trusted only by app.trust_all_projects: true, without anybody trusting it; \
                  in effect because of that: {}",
                 gated.join(", ")
             )),
@@ -627,7 +627,7 @@ mod tests {
 
     fn base_settings() -> Arc<LoadedSettings> {
         let mut settings = Settings::defaults_for("test-model");
-        settings.memory_enabled = false;
+        settings.memory.enabled = false;
         Arc::new(LoadedSettings::new(
             settings,
             base::paths::PathSettings::default(),
@@ -686,7 +686,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("settings.json"),
-            r#"{"permision_mode": "plan", "language": "en"}"#,
+            r#"{"permision_mode": "plan", "prompt": {"language": "en"}}"#,
         )
         .unwrap();
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());
@@ -722,7 +722,7 @@ mod tests {
         std::fs::create_dir_all(project.join(".agix")).unwrap();
         std::fs::write(
             project.join(".agix/settings.json"),
-            r#"{"language": 5, "memory_enabled": false}"#,
+            r#"{"prompt": {"language": 5}, "memory": {"enabled": false}}"#,
         )
         .unwrap();
         let settings = LoadedSettings::load(
@@ -750,7 +750,10 @@ mod tests {
         assert_eq!(check["name"], "settings.tiers");
         assert_eq!(check["status"], "degraded", "{check}");
         assert!(
-            check["summary"].as_str().unwrap().contains("language"),
+            check["summary"]
+                .as_str()
+                .unwrap()
+                .contains("prompt.language"),
             "{check}"
         );
         let project_tier = report["settings_tiers"]
@@ -761,7 +764,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(
-            project_tier["ignored_values"][0]["key"], "language",
+            project_tier["ignored_values"][0]["key"], "prompt.language",
             "{project_tier}"
         );
     }
@@ -950,8 +953,8 @@ mod tests {
                 "settings.permissions.mode",
                 "settings.hooks_fail_open",
                 "sandbox.network_allowlist",
-                "sandbox.egress_proxy",
-                "network.proxy",
+                "sandbox.network.proxy",
+                "app.system_proxy",
                 "build.panic",
                 "sandbox.strict_profile",
                 "acme.licence"

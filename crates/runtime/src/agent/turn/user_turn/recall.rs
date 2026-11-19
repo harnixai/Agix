@@ -18,7 +18,7 @@ impl Agent {
         // The handle aborts on drop, so a recall that misses its budget
         // stops spending on the selection call.
         let handle: Option<tokio_util::task::AbortOnDropHandle<Recall>> =
-            if !self.settings.values.memory_enabled {
+            if !self.settings.values.memory.enabled {
                 None
             } else {
                 let ask = RecallQuery {

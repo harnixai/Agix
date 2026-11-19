@@ -38,7 +38,7 @@ impl Builder {
             r.attended,
             &session,
             &hooks.hooks,
-            r.instruction_file.as_ref(),
+            &r.instruction_files,
             exec,
         )?;
         let cron = self.register_session_tools(&r, &state.state);

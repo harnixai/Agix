@@ -11,8 +11,8 @@ use crate::merge::merge_json_values;
 /// the committed `settings.json` by every writer.
 pub const SECRET_PATHS: &[&str] = &[
     "providers.*.api_key",
-    "mcp_servers.*.headers",
-    "mcp_servers.*.env",
+    "mcp.servers.*.headers",
+    "mcp.servers.*.env",
 ];
 
 /// The lists each file adds to the other files' rather than replacing them,
@@ -24,7 +24,7 @@ pub const CONCATENATED_KEYS: &[&str] = &[
     "permissions.allow_exact",
     "permissions.ask",
     "permissions.deny",
-    "project_trust.trusted",
+    "app.trusted_projects",
 ];
 
 /// A dotted settings key, one segment per object level.
@@ -98,6 +98,10 @@ pub enum EditOp {
     /// The tier holds `value` at the key, replacing what either file held
     /// there.
     Set(KeyPath, Value),
+    /// [`Set`](Self::Set), except that the named keys directly beneath the
+    /// key keep what each file held there: a server's configuration replaced
+    /// whole, its `enabled` kept.
+    SetKeeping(KeyPath, Value, Vec<String>),
     /// Neither file holds the key.
     Remove(KeyPath),
     /// `value` merged key by key into what `settings.json` holds at the key;
@@ -109,7 +113,10 @@ pub enum EditOp {
 impl EditOp {
     pub fn path(&self) -> &KeyPath {
         match self {
-            Self::Set(path, _) | Self::Remove(path) | Self::Merge(path, _) => path,
+            Self::Set(path, _)
+            | Self::SetKeeping(path, _, _)
+            | Self::Remove(path)
+            | Self::Merge(path, _) => path,
         }
     }
 }
@@ -129,6 +136,20 @@ impl TierFiles {
             .iter()
             .any(|file| get(file, &segments).is_some())
     }
+
+    /// Whether either file holds at `path` anything but `besides`: a value
+    /// that is not an object, or an object with some other key.
+    pub fn declares_besides(&self, path: &KeyPath, besides: &str) -> bool {
+        let segments = path.segments();
+        [&self.shared, &self.local]
+            .iter()
+            .filter_map(|file| get(file, &segments))
+            .any(|value| {
+                value
+                    .as_object()
+                    .is_none_or(|fields| fields.keys().any(|key| key != besides))
+            })
+    }
 }
 
 /// Apply `ops` in order, credentials into `local`; credentials `shared`
@@ -140,6 +161,27 @@ pub fn apply(files: &mut TierFiles, ops: &[EditOp]) -> bool {
     for op in &ops {
         match op {
             EditOp::Set(path, value) => set(files, path, value.clone()),
+            EditOp::SetKeeping(path, value, keep) => {
+                let held: Vec<(Vec<&str>, Option<Value>, Option<Value>)> = keep
+                    .iter()
+                    .map(|key| {
+                        let mut at = path.segments();
+                        at.push(key);
+                        let shared = get(&files.shared, &at).cloned();
+                        let local = get(&files.local, &at).cloned();
+                        (at, shared, local)
+                    })
+                    .collect();
+                set(files, path, value.clone());
+                for (at, shared, local) in held {
+                    if let Some(value) = shared {
+                        put(&mut files.shared, &at, value);
+                    }
+                    if let Some(value) = local {
+                        put(&mut files.local, &at, value);
+                    }
+                }
+            }
             EditOp::Remove(path) => {
                 take(&mut files.shared, &path.segments());
                 take_local(files, path);

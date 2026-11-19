@@ -187,7 +187,7 @@ impl Agent {
             ctx.memory_summary = frozen
                 .memory_index
                 .as_deref()
-                .filter(|m| self.settings.values.memory_enabled && !m.is_empty())
+                .filter(|m| self.settings.values.memory.enabled && !m.is_empty())
                 .map(std::borrow::Cow::Borrowed);
             let reminder = self.scene.reminder(&ctx);
             if !reminder.is_empty() {

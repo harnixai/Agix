@@ -9,12 +9,18 @@
 /// string under a `headers` or `env` object is redacted whatever its key: an
 /// MCP server's `Authorization` header and the variables a stdio server is
 /// started with are credentials as often as not, under names nobody can list.
+/// `sandbox.env` is not one of them: it names variables, it holds no values.
 pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::Value) {
+    redact_beneath(value, None);
+}
+
+fn redact_beneath(value: &mut serde_json::Value, parent: Option<&str>) {
     match value {
         serde_json::Value::Object(map) => {
             for (k, v) in map.iter_mut() {
                 let key = k.to_ascii_lowercase();
-                if matches!(key.as_str(), "headers" | "env") && v.is_object() {
+                let sandbox_env = key == "env" && parent == Some("sandbox");
+                if matches!(key.as_str(), "headers" | "env") && v.is_object() && !sandbox_env {
                     redact_every_string(v);
                     continue;
                 }
@@ -27,7 +33,7 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
                     serde_json::Value::String(s) if s.contains("://") => {
                         *s = scrub_url(s);
                     }
-                    other => redact_settings_secrets(other),
+                    other => redact_beneath(other, Some(&key)),
                 }
             }
         }
@@ -48,7 +54,7 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
                     }
                     other => {
                         secret_follows = false;
-                        redact_settings_secrets(other);
+                        redact_beneath(other, None);
                     }
                 }
             }
@@ -57,14 +63,13 @@ pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::V
     }
 }
 
-/// Whether `value`, written under `key`, carries a credential the redaction
+/// Whether `value`, written at `path`, carries a credential the redaction
 /// would mask: a secret-named key, a password or token in a URL, a token
 /// after a `--token`-like argument.
-pub(in crate::session_pool) fn holds_credential(key: &str, value: &serde_json::Value) -> bool {
-    let original = serde_json::Value::Object(serde_json::Map::from_iter([(
-        key.to_string(),
-        value.clone(),
-    )]));
+pub(in crate::session_pool) fn holds_credential(path: &[&str], value: &serde_json::Value) -> bool {
+    let original = path.iter().rev().fold(value.clone(), |inner, key| {
+        serde_json::Value::Object(serde_json::Map::from_iter([(key.to_string(), inner)]))
+    });
     let mut shown = original.clone();
     redact_settings_secrets(&mut shown);
     shown != original

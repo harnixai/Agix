@@ -125,7 +125,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "core setting")]
     fn a_core_key_cannot_be_taken() {
-        let _ = Sections::none().with_spec(SectionSpec::inert("language"));
+        let _ = Sections::none().with_spec(SectionSpec::inert("prompt"));
     }
 
     #[test]

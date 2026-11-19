@@ -72,7 +72,7 @@ impl Tool for FileReadTool {
         let guide = include_str!("prompts/coding/file_read.prompt.md");
         Some(match ctx.path_style {
             PathStyle::Absolute => guide.to_string(),
-            PathStyle::WorkspaceRelative => guide.replace(ABSOLUTE_PATH_LINE, RELATIVE_PATH_LINE),
+            PathStyle::Relative => guide.replace(ABSOLUTE_PATH_LINE, RELATIVE_PATH_LINE),
         })
     }
 
@@ -192,13 +192,13 @@ const ABSOLUTE_PATH_LINE: &str =
 const RELATIVE_PATH_LINE: &str = "The file_path parameter is relative to the current working directory; an absolute path is also accepted";
 
 /// Rewords the `file_path` argument doc of Read / Write / Edit for
-/// `WorkspaceRelative`; any other style leaves the schema as generated.
+/// `Relative`; any other style leaves the schema as generated.
 pub(crate) fn workspace_relative_file_path(
     mut schema: Value,
     style: PathStyle,
     verb: &str,
 ) -> Value {
-    if style == PathStyle::WorkspaceRelative {
+    if style == PathStyle::Relative {
         if let Some(prop) = schema.pointer_mut("/properties/file_path") {
             prop["description"] = Value::String(format!(
                 "The path of the file to {verb}, relative to the current working directory. \

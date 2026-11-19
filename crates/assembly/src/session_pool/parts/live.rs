@@ -92,7 +92,7 @@ pub(in crate::session_pool) struct SessionCore {
     hub: Arc<SessionHub>,
     steer: SteerHandle,
     /// The process groups this session's commands started, recorded when
-    /// `sandbox.reap_process_groups` is on and stopped when the session ends.
+    /// `sandbox.reap_on_close` is on and stopped when the session ends.
     process_groups: Arc<platform::GroupLedger>,
     naming: Mutex<Naming>,
     /// How full the context was after the last turn that called the model.

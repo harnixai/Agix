@@ -144,7 +144,7 @@ fn subagent_inherits_the_parent_instruction_file() {
         Settings::defaults_for("test-model"),
         base::paths::PathSettings::default(),
     );
-    parent.values.instruction_file = Some(std::path::PathBuf::from("/proj/AGENTS.md"));
+    parent.values.prompt.instruction_files = vec![std::path::PathBuf::from("/proj/AGENTS.md")];
     let agent_tool = TestParent {
         config,
         tools: tools.clone(),
@@ -154,8 +154,12 @@ fn subagent_inherits_the_parent_instruction_file() {
     }
     .agent_tool();
     assert_eq!(
-        agent_tool.sub_settings(None).values.instruction_file,
-        Some(std::path::PathBuf::from("/proj/AGENTS.md")),
+        agent_tool
+            .sub_settings(None)
+            .values
+            .prompt
+            .instruction_files,
+        [std::path::PathBuf::from("/proj/AGENTS.md")],
         "sub-agents must inherit the project's instruction file from settings"
     );
 }

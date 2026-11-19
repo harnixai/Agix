@@ -84,7 +84,7 @@ fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     settings.model.max_tokens = 4096;
     settings.model.thinking_mode = ThinkingMode::Off;
     settings.model.effort = None;
-    settings.telemetry_enabled = false;
+    settings.telemetry.enabled = false;
     let mut paths = PathSettings::default();
     paths.user_data_dir = root.join("user-data");
     paths.global_data_dir = root.join("global-data");
@@ -200,7 +200,7 @@ async fn run_one_turn(
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive));
     let mut settings = recall_test_settings(tmp.path());
     // Keep the transcript to just what this test injects.
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
 
     let (mut agent, _event_rx, _input_tx) = Builder::new()
         .scene(scene)

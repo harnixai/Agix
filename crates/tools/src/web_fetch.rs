@@ -550,7 +550,7 @@ hello";
         ctx
     }
 
-    /// `settings.sandbox.allowed_domains` binds what the model may reach, and
+    /// `settings.web.allowed_domains` binds what the model may reach, and
     /// a url the model chose to fetch is exactly that.
     #[tokio::test]
     async fn the_allowed_domains_setting_reaches_this_tool() {

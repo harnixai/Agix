@@ -124,8 +124,8 @@ impl Builder {
     /// `providers` instead of this machine. Delegates use the same set.
     ///
     /// The egress policy and the subprocess environment are then
-    /// `providers`' to enforce; `sandbox.network_mode` and
-    /// `sandbox.subprocess_env` configure only the default set. Not together
+    /// `providers`' to enforce; `sandbox.network.mode` and
+    /// `sandbox.env` configure only the default set. Not together
     /// with [`Builder::process_groups`]: record the groups in the providers
     /// passed here (`platform::local_providers_with_ledger`).
     pub fn exec(mut self, providers: base::interface::exec::ExecProviders) -> Self {
@@ -489,7 +489,7 @@ impl Builder {
     }
 
     /// Whether a finished turn starts extracting durable memories from the
-    /// conversation (on by default, and only while `memory_enabled`). Recall
+    /// conversation (on by default, and only while `memory.enabled`). Recall
     /// is unaffected. Off for an agent dropped as soon as its turn returns:
     /// its extraction would be paid for and then abandoned unfinished.
     pub fn memory_extraction(mut self, enabled: bool) -> Self {
@@ -729,7 +729,7 @@ impl Builder {
     /// Replace where the standing instructions (`AGENTS.md` / `CLAUDE.md`)
     /// come from.
     ///
-    /// The default reads the one path `instruction_file` names, which is what
+    /// The default reads the one path `prompt.instruction_files` names, which is what
     /// a deployment whose conventions live in a file wants. One whose
     /// conventions live in a service, or that has already loaded them, hands
     /// them over instead of staging a file for the engine to read back.

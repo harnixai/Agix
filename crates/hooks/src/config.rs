@@ -225,7 +225,7 @@ pub enum HookEvent {
     /// Working directory changed.
     CwdChanged,
     /// An instruction file the root session watches changed: its
-    /// `instruction_file` and every `AGENTS.md` it loaded.
+    /// `prompt.instruction_files` and every `AGENTS.md` it loaded.
     FileChanged,
     /// Fired after each model API sampling completes (streaming
     /// response fully consumed). Hook receives model output for real-time
@@ -284,7 +284,7 @@ impl HooksParseReport {
     }
 }
 
-/// Parse `settings.hooks_config`, keeping every entry that is well-formed.
+/// Parse `settings.hooks`, keeping every entry that is well-formed.
 ///
 /// Deserializing straight into [`HooksSettings`] cannot do this. It is a
 /// `HashMap` keyed by [`HookEvent`], which has no `#[serde(other)]` fallback,

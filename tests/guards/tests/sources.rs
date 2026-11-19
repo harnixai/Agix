@@ -106,7 +106,7 @@ const HOME_READERS: &[(&str, &str)] = &[
     ),
     (
         "crates/settings/src/trust.rs",
-        "expands a leading `~/` in `project_trust.trusted` patterns, the same \
+        "expands a leading `~/` in `app.trusted_projects` patterns, the same \
          `~` permission rules expand — the home the user means by \
          `~/work/**`. A fact about the machine, never a place Agix writes.",
     ),
@@ -123,7 +123,7 @@ const HOME_READERS: &[(&str, &str)] = &[
     ),
     (
         "crates/tools/src/bash/sandbox.rs",
-        "the `~/` of `sandbox.cache_directories`, where pip and npm keep their \
+        "the `~/` of `sandbox.cache_dirs`, where pip and npm keep their \
          caches.",
     ),
     (

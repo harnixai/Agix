@@ -52,7 +52,7 @@ pub struct EngineConfig {
     /// The session's sandbox settings; every policy a command runs under is
     /// derived from these.
     pub sandbox: std::sync::Arc<crate::interface::exec::SandboxSettings>,
-    /// Mirrors `Settings.disable_skill_shell_execution` — read by the skill
+    /// `Settings.skills.allow_shell`, the other way round — read by the skill
     /// expansion's `` !`cmd` `` step via `ToolContext.config`.
     pub disable_skill_shell_execution: bool,
     /// Whether the project tier is in effect (`LoadedSettings::trust`); an
@@ -63,7 +63,7 @@ pub struct EngineConfig {
     /// What the instance names its directories, for the tools that make one
     /// or name one to the model.
     pub layout: crate::paths::Layout,
-    /// Mirrors `Settings.sandbox.subprocess_env`.
+    /// Mirrors `Settings.sandbox.env`.
     pub subprocess_env: crate::interface::exec::SubprocessEnv,
 
     /// File read/write byte/line limits. Sub-config keeps related field
@@ -201,14 +201,14 @@ pub struct McpServerInstruction {
 pub enum PathStyle {
     #[default]
     Absolute,
-    WorkspaceRelative,
+    Relative,
 }
 
 impl PathStyle {
     /// `path` as the model should see it: under `cwd` and relative in
-    /// `WorkspaceRelative`, otherwise exactly `path.display()`.
+    /// `Relative`, otherwise exactly `path.display()`.
     pub fn render(self, path: &std::path::Path, cwd: &std::path::Path) -> String {
-        if self == PathStyle::WorkspaceRelative {
+        if self == PathStyle::Relative {
             if let Ok(rel) = path.strip_prefix(cwd) {
                 return if rel.as_os_str().is_empty() {
                     ".".to_string()
@@ -292,10 +292,10 @@ mod tests {
         let cwd = Path::new("/ws");
         let inside = Path::new("/ws/src/a.rs");
         assert_eq!(PathStyle::Absolute.render(inside, cwd), "/ws/src/a.rs");
-        assert_eq!(PathStyle::WorkspaceRelative.render(inside, cwd), "src/a.rs");
-        assert_eq!(PathStyle::WorkspaceRelative.render(cwd, cwd), ".");
+        assert_eq!(PathStyle::Relative.render(inside, cwd), "src/a.rs");
+        assert_eq!(PathStyle::Relative.render(cwd, cwd), ".");
         assert_eq!(
-            PathStyle::WorkspaceRelative.render(Path::new("/other/a.rs"), cwd),
+            PathStyle::Relative.render(Path::new("/other/a.rs"), cwd),
             "/other/a.rs"
         );
     }

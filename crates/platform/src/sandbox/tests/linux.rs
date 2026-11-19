@@ -738,7 +738,7 @@ fn linux_a_project_skill_cannot_be_planted_where_agents_is_absent() {
     assert!(tmpfs < shut, "{args:?}");
 }
 
-/// `sandbox.deny_write` reaches bwrap as read-only binds of the entries it
+/// `files.deny_write` reaches bwrap as read-only binds of the entries it
 /// names, at any depth below a writable root, laid after the root's own
 /// writable bind.
 #[cfg(target_os = "linux")]

@@ -164,7 +164,7 @@ pub trait BudgetPolicy: Send + Sync {
 /// The engine's own numbers.
 #[derive(Default)]
 pub struct EngineBudget {
-    /// `settings.execution.max_budget_tokens`. `None` is unlimited, which is
+    /// `settings.turn.token_budget`. `None` is unlimited, which is
     /// the default.
     pub max_total_tokens: Option<u64>,
     /// `settings.compaction`: over the scene's threshold and kept rounds when
