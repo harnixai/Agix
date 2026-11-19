@@ -878,8 +878,8 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
       { "name":"settings.hooks",     "status":"ok", "summary":"hooks configuration parses" },
       { "name":"memory",             "status":"ok", "summary":"0/200 memories",
         "details": { "enabled":true, "count":0, "cap":200 } },
-      { "name":"settings.permission_mode",  "status":"ok", "summary":"permission mode asks or restricts",
-        "details": { "permission_mode":"default" } },
+      { "name":"settings.permissions.mode",  "status":"ok", "summary":"permission mode asks or restricts",
+        "details": { "mode":"default" } },
       { "name":"settings.hooks_fail_open",  "status":"ok", "summary":"no hooks configured" },
       { "name":"sandbox.network_allowlist", "status":"ok", "summary":"sandbox.network_mode is not allowlist" },
       { "name":"sandbox.egress_proxy",      "status":"ok", "summary":"sandbox.network_mode is not proxy" },
@@ -1007,8 +1007,8 @@ daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,
 策略文件读不了或解析不了时这项是 `failing`,`health.status` 随之是 `failing`:这时所有
 MCP server 都被拒绝。
 
-引擎自带的另外几项是姿态检查,不看运行状态,只读设置与构建:`settings.permission_mode` 在
-`permission_mode` 是 `bypassPermissions`(含 `auto` / `yolo`)时是 `degraded`,否则 `ok`;
+引擎自带的另外几项是姿态检查,不看运行状态,只读设置与构建:`settings.permissions.mode` 在
+`permissions.mode` 是 `bypassPermissions` 时是 `degraded`,否则 `ok`;
 `settings.hooks_fail_open` 在有 `PreToolUse` / `UserPromptSubmit` / `Stop` 的 hook 的 `on_error` 是
 `allow`(失败时放行)时是 `degraded`,`details.fail_open` 列出事件与条数;`network.proxy` 报引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)怎么走:
 `details.mode` 是 `system`(跟随环境里的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`,缺省)或
@@ -3083,7 +3083,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "scene": "code",                     // 可选,省略 = 这个 daemon 的场景;tier:"scene" 时写的就是它那一层
   "project_root": "/Users/x/repo",     // 可选,省略 = 这个 daemon 自己的项目;null → INVALID_PARAMS
   "changes": {                         // 必填,1 到 256 个键
-    "permission_mode": "acceptEdits",
+    "permissions.mode": "acceptEdits",
     "sandbox.allowed_domains": ["github.com"],
     "telemetry_url": null },           // null = 从这一层删掉这个键
   "dry_run": false,                    // 可选
@@ -3092,9 +3092,9 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 { "tier": "global", "dry_run": false,
   "written_to": "/Users/x/.agix/settings.json",
   "secrets_written_to": "/Users/x/.agix/settings.local.json",   // 只在改了 settings.local.json 时
-  "changed": ["permission_mode", "sandbox.allowed_domains", "telemetry_url"],
+  "changed": ["permissions.mode", "sandbox.allowed_domains", "telemetry_url"],
   "rejected": [ ],                     // 只有 dry_run 才可能非空
-  "effective": { "permission_mode": "acceptEdits", "sandbox.allowed_domains": ["github.com"],
+  "effective": { "permissions.mode": "acceptEdits", "sandbox.allowed_domains": ["github.com"],
                  "telemetry_url": null },
   "overridden": [ ],
   "revision": "r1:…",

@@ -76,7 +76,7 @@ impl From<&Option<base::permission::ManagedSettings>> for ManagedLayer {
         };
         let mut unreadable = managed.error.clone();
         let mut rules = RuleSet::empty();
-        for rule in &managed.permission_rules {
+        for rule in &managed.rules {
             match crate::rule::parse_rule_string(
                 &rule.tool,
                 RuleSource::PolicySettings,
@@ -95,7 +95,7 @@ impl From<&Option<base::permission::ManagedSettings>> for ManagedLayer {
         }
         Self {
             rules,
-            bypass_disabled: managed.disable_bypass_permissions_mode,
+            bypass_disabled: managed.disable_bypass,
             unreadable,
         }
     }

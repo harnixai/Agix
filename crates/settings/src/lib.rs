@@ -1,8 +1,8 @@
-//! The settings types: what one settings.json file may say
-//! ([`SettingsFile`]), what the tiers say once merged ([`Settings`]), and what
-//! loading them produced ([`LoadedSettings`] — the values, where this scene's
-//! data lives, each permission rule with its tier, the managed layer and the
-//! project-trust decision).
+//! The settings types: what one settings.json file may say and what the tiers
+//! say once merged ([`Settings`]), and what loading them produced
+//! ([`LoadedSettings`] — the values, where this scene's data lives, each
+//! permission rule with its tier, the managed layer and the project-trust
+//! decision).
 //!
 //! [`LoadedSettings::load`] is the single canonical settings.json loader
 //! (global → scene → project, generic recursive JSON merge). Everything
@@ -10,7 +10,6 @@
 //! result; it does not perform its own multi-layer config merging.
 
 use base::interface::model::{Effort, ThinkingMode};
-use base::permission::{PermissionMode, PermissionRuleEntry};
 use base::provider::{ApiType, ProviderConfig, TaskModelOverride};
 use base::recorder::RecorderConfig;
 use serde::{Deserialize, Serialize};
@@ -27,6 +26,8 @@ pub mod import;
 mod loaded;
 pub mod managed;
 mod merge;
+pub mod permissions;
+pub mod renamed;
 mod schema;
 pub mod section;
 mod source;
@@ -37,6 +38,7 @@ mod tests;
 
 pub use loaded::LoadedSettings;
 pub use merge::merge_json_values;
+pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
 pub use source::{read_settings_file, FileTiers};
 
@@ -48,22 +50,9 @@ pub const GLOBAL_ONLY_KEYS: &[&str] = &["project_trust", "network", "history"];
 /// project tier.
 pub const NOT_FROM_PROJECT_KEYS: &[&str] = &["worktree_dir"];
 
-/// One settings.json file: the settings it overrides, and the permission rules
-/// it adds to every other tier's.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SettingsFile {
-    #[serde(flatten)]
-    pub settings: Settings,
-    /// Allow/deny/ask rules for specific tools.
-    ///
-    /// Every tier's rules apply side by side: a project's rules are added to
-    /// the global and scene ones, never substituted for them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub permission_rules: Vec<PermissionRuleEntry>,
-}
-
-/// What the settings tiers say once merged. Every field is one a settings
-/// file can set; what loading them produced besides is [`LoadedSettings`].
+/// One settings.json file, and what the settings tiers say once merged. Every
+/// field is one a settings file can set; what loading them produced besides is
+/// [`LoadedSettings`].
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
 pub struct Settings {
@@ -123,25 +112,10 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path_style: Option<base::context::config::PathStyle>,
 
-    /// Permission mode for tool execution.
+    /// The permission mode, the allow / ask / deny rules, and how long a
+    /// permission prompt waits.
     #[serde(default)]
-    pub permission_mode: PermissionMode,
-
-    /// Whether an RPC client may request a *more permissive* mode than
-    /// `permission_mode` above.
-    ///
-    /// The daemon's `session.create` takes an optional `permission_mode` in
-    /// its options. With this `false` — the default — a client can *tighten*
-    /// the mode for its own session, but a request to loosen it is clamped to
-    /// what is configured here. Otherwise any client that could authenticate
-    /// could open a `bypassPermissions` session no matter how the daemon was
-    /// configured (`crates/assembly/src/server/mod.rs` notes there is no
-    /// per-method authorization on that socket).
-    ///
-    /// Set it to `true` only when every client of this daemon is as trusted
-    /// as the daemon itself.
-    #[serde(default)]
-    pub allow_client_permission_override: bool,
+    pub permissions: PermissionsSettings,
 
     /// Whether sessions record a telemetry transcript.
     ///
@@ -312,18 +286,6 @@ pub struct ExecutionSettings {
     /// counts come straight from the provider's own usage accounting on
     /// every response, so there is nothing to keep in sync.
     pub max_budget_tokens: Option<u64>,
-    /// How long a tool call waits for a host to answer a permission prompt
-    /// before the call is denied. `0` waits indefinitely (only session
-    /// cancellation interrupts it).
-    ///
-    /// The wait itself lives in the engine (`execute_tool_inner`), so the
-    /// bound has to be reachable from `EngineConfig`, not only from a
-    /// daemon-side flag — a host driving the engine directly needs it too.
-    ///
-    /// Failing closed (deny, not permit) on expiry is deliberate: a prompt
-    /// that went unanswered is not consent.
-    #[serde(default = "default_permission_prompt_timeout_secs")]
-    pub permission_prompt_timeout_secs: u64,
     /// Sub-agents the model may have running at once anywhere under one
     /// session — foreground, background and resumed ones, at every depth.
     /// A spawn beyond it is refused with a message telling the model to wait
@@ -342,10 +304,6 @@ fn default_max_agent_depth() -> u32 {
     3
 }
 
-fn default_permission_prompt_timeout_secs() -> u64 {
-    300
-}
-
 fn default_max_concurrent_subagents() -> usize {
     6
 }
@@ -356,7 +314,6 @@ impl Default for ExecutionSettings {
             max_parallelism: 10,
             max_api_calls_per_turn: 25,
             max_budget_tokens: None,
-            permission_prompt_timeout_secs: default_permission_prompt_timeout_secs(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
             max_agent_depth: default_max_agent_depth(),
         }
@@ -707,11 +664,11 @@ fn default_true() -> bool {
 impl Settings {
     /// Validate settings consistency. Returns Err on invalid combinations.
     pub fn validate(&self) -> Result<(), String> {
-        if !self.permission_mode.is_user_settable() {
+        if !self.permissions.mode.is_user_settable() {
             return Err(format!(
                 "Permission mode '{:?}' is program-only and cannot be set in settings.json. \
                  Defaulting to Default.",
-                self.permission_mode
+                self.permissions.mode
             ));
         }
         Ok(())
@@ -739,11 +696,10 @@ impl Settings {
             recorder: None,
             telemetry_url: None,
             telemetry_enabled: true,
-            allow_client_permission_override: false,
             memory_enabled: true,
             disable_skill_shell_execution: false,
             path_style: Default::default(),
-            permission_mode: PermissionMode::default(),
+            permissions: PermissionsSettings::default(),
             hooks_config: None,
             project_trust: Default::default(),
             network: Default::default(),

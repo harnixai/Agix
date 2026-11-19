@@ -102,8 +102,8 @@ impl Delegator {
             apply_agent_type_overrides(&mut sub_settings.values, d);
         }
         if let Some(mode) = spec.permission_mode {
-            sub_settings.values.permission_mode =
-                mode.min_permissive(sub_settings.values.permission_mode);
+            sub_settings.values.permissions.mode =
+                mode.min_permissive(sub_settings.values.permissions.mode);
         }
         let scene = self.scene_for_subagent(def.as_ref());
         let scene_id = scene.id.clone();

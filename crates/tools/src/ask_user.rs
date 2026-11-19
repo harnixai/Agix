@@ -1,7 +1,7 @@
 //! `AskUserQuestionTool` —— 让模型主动向用户提问。
 //!
 //! 模型显式调用此工具以向用户提问。问题经会话的 `Elicitation` 送到宿主，
-//! 等待时长同权限提问（`permission_prompt_timeout_secs`，0 为不限），回合取消时撤回；
+//! 等待时长同权限提问（`permissions.prompt_timeout_secs`，0 为不限），回合取消时撤回；
 //! 回答作为工具结果交还模型，没人回答也照实告诉模型。
 
 use async_trait::async_trait;

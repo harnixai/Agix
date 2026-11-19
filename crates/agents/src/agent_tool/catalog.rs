@@ -214,7 +214,7 @@ pub fn project_agent_types_requiring_trust(
     .filter(|def| {
         below.contains_key(&def.name)
             || def.permission_mode.is_some_and(|m| {
-                m.permissiveness() > settings.values.permission_mode.permissiveness()
+                m.permissiveness() > settings.values.permissions.mode.permissiveness()
             })
             || def
                 .max_turns

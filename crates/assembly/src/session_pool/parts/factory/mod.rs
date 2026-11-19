@@ -190,10 +190,10 @@ impl EngineFactory {
         &self,
         settings: &LoadedSettings,
     ) -> u64 {
-        self.permission_prompt_timeout.map_or(
-            settings.values.execution.permission_prompt_timeout_secs,
-            |timeout| timeout.as_secs(),
-        )
+        self.permission_prompt_timeout
+            .map_or(settings.values.permissions.prompt_timeout_secs, |timeout| {
+                timeout.as_secs()
+            })
     }
 
     pub(in crate::session_pool) fn build(
@@ -363,9 +363,9 @@ impl EngineFactory {
         let permission_mode = effective_permission_mode(base_settings, requested_mode);
         {
             let mut snap = base_settings.clone();
-            snap.values.execution.permission_prompt_timeout_secs =
+            snap.values.permissions.prompt_timeout_secs =
                 self.permission_prompt_timeout_secs(base_settings);
-            snap.values.permission_mode = permission_mode;
+            snap.values.permissions.mode = permission_mode;
             if let Some(name) = model_name {
                 snap.values.model.model_name = name.clone();
             }

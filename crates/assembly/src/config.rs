@@ -640,9 +640,7 @@ mod tests {
         write_settings(
             dir.path(),
             r#"{
-                "permission_rules": [
-                    { "tool": "Bash(git push:*)", "action": "deny" }
-                ]
+                "permissions": {"deny": ["Bash(git push:*)"]}
             }"#,
         );
         let paths = StaticDaemonPaths::new(dir.path().to_path_buf());

@@ -23,16 +23,15 @@ impl PermissionModeCheck {
 
 impl HealthCheck for PermissionModeCheck {
     fn name(&self) -> &str {
-        "settings.permission_mode"
+        "settings.permissions.mode"
     }
 
     fn check(&self) -> CheckResult {
-        let mode = self.0.values.permission_mode;
-        let details = serde_json::json!({ "permission_mode": mode });
+        let mode = self.0.values.permissions.mode;
+        let details = serde_json::json!({ "mode": mode });
         if mode == PermissionMode::BypassPermissions {
             CheckResult::degraded(
-                "permission_mode is bypassPermissions (also spelled auto / yolo): \
-                 tool calls run without asking",
+                "permissions.mode is bypassPermissions: tool calls run without asking",
             )
             .with_details(details)
         } else {
@@ -566,11 +565,11 @@ mod tests {
         let ask = PermissionModeCheck::new(settings_with(|_| {})).check();
         assert!(ask.status.label() == "ok", "{ask:?}");
         let bypass = PermissionModeCheck::new(settings_with(|s| {
-            s.permission_mode = PermissionMode::BypassPermissions
+            s.permissions.mode = PermissionMode::BypassPermissions
         }))
         .check();
         assert_eq!(bypass.status.label(), "degraded");
-        assert!(bypass.summary.contains("auto / yolo"));
+        assert!(bypass.summary.contains("permissions.mode"));
     }
 
     #[test]

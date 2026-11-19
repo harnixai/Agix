@@ -107,7 +107,7 @@ fn session_options_cannot_loosen_an_asking_settings_default() {
 #[test]
 fn allow_client_permission_override_restores_client_wins() {
     let mut settings = defaults();
-    settings.values.allow_client_permission_override = true;
+    settings.values.permissions.client_may_loosen = true;
     let opts = SessionOptions {
         permission_mode: Some(base::permission::PermissionMode::BypassPermissions),
         ..Default::default()
@@ -124,7 +124,7 @@ fn allow_client_permission_override_restores_client_wins() {
 #[test]
 fn a_client_may_always_tighten() {
     let mut settings = defaults();
-    settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
+    settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
     let opts = SessionOptions {
         permission_mode: Some(base::permission::PermissionMode::Plan),
         ..Default::default()
@@ -136,43 +136,12 @@ fn a_client_may_always_tighten() {
 }
 
 #[test]
-fn auto_and_yolo_in_session_options_clamp_and_resolve_as_bypass() {
-    use base::permission::PermissionMode;
+fn auto_and_yolo_are_no_session_mode() {
     for spelling in ["auto", "yolo"] {
-        let opts: SessionOptions =
-            serde_json::from_value(serde_json::json!({ "permission_mode": spelling })).unwrap();
-        assert_eq!(
-            opts.permission_mode,
-            Some(PermissionMode::BypassPermissions)
+        let opts = serde_json::from_value::<SessionOptions>(
+            serde_json::json!({ "permission_mode": spelling }),
         );
-
-        assert_eq!(
-            effective_permission_mode(&defaults(), opts.permission_mode),
-            PermissionMode::Default,
-            "{spelling} must clamp like bypassPermissions"
-        );
-        let mut accepts_edits = defaults();
-        accepts_edits.values.permission_mode = PermissionMode::AcceptEdits;
-        assert_eq!(
-            effective_permission_mode(&accepts_edits, opts.permission_mode),
-            PermissionMode::AcceptEdits
-        );
-
-        let mut bypass = defaults();
-        bypass.values.permission_mode = PermissionMode::BypassPermissions;
-        assert_eq!(
-            effective_permission_mode(&bypass, opts.permission_mode),
-            PermissionMode::BypassPermissions,
-            "{spelling}"
-        );
-
-        let mut overridable = defaults();
-        overridable.values.allow_client_permission_override = true;
-        assert_eq!(
-            effective_permission_mode(&overridable, opts.permission_mode),
-            PermissionMode::BypassPermissions,
-            "{spelling}"
-        );
+        assert!(opts.is_err(), "{spelling} was read as a mode");
     }
 }
 
@@ -198,7 +167,7 @@ fn effective_mode_prefers_session_options_then_settings_then_ask() {
         "an unconfigured daemon asks"
     );
 
-    settings.values.permission_mode = PermissionMode::BypassPermissions;
+    settings.values.permissions.mode = PermissionMode::BypassPermissions;
     assert_eq!(
         effective_permission_mode(&settings, None),
         PermissionMode::BypassPermissions

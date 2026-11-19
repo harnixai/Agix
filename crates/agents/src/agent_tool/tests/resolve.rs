@@ -454,7 +454,7 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
     let original_max_calls = settings.execution.max_api_calls_per_turn;
     apply_agent_type_overrides(&mut settings, &def);
     assert_eq!(
-        settings.permission_mode,
+        settings.permissions.mode,
         base::permission::PermissionMode::Plan
     );
     assert_eq!(settings.model.effort, Some(Effort::Max));
@@ -481,13 +481,13 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
         ..Default::default()
     };
     let mut settings = Settings::defaults_for("test-model");
-    settings.permission_mode = M::Default;
+    settings.permissions.mode = M::Default;
     settings.execution.max_api_calls_per_turn = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
     assert_eq!(
-        settings.permission_mode,
+        settings.permissions.mode,
         M::Default,
         "a plugin must not be able to switch the permission gate off"
     );
@@ -512,12 +512,12 @@ fn plugin_agent_type_may_still_tighten() {
         ..Default::default()
     };
     let mut settings = Settings::defaults_for("test-model");
-    settings.permission_mode = M::AcceptEdits;
+    settings.permissions.mode = M::AcceptEdits;
     settings.execution.max_api_calls_per_turn = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
-    assert_eq!(settings.permission_mode, M::Plan);
+    assert_eq!(settings.permissions.mode, M::Plan);
     assert_eq!(settings.execution.max_api_calls_per_turn, 5);
 }
 
@@ -533,12 +533,12 @@ fn a_users_agent_type_may_raise_its_cap_and_loosen_its_mode() {
         ..Default::default()
     };
     let mut settings = Settings::defaults_for("test-model");
-    settings.permission_mode = M::Default;
+    settings.permissions.mode = M::Default;
     settings.execution.max_api_calls_per_turn = 25;
 
     apply_agent_type_overrides(&mut settings, &def);
 
-    assert_eq!(settings.permission_mode, M::BypassPermissions);
+    assert_eq!(settings.permissions.mode, M::BypassPermissions);
     assert_eq!(settings.execution.max_api_calls_per_turn, 200);
 }
 
@@ -559,18 +559,18 @@ fn a_planning_parent_holds_a_type_to_plan_and_a_bypassing_one_takes_it_along() {
         (M::AcceptEdits, M::Default, M::Default),
     ] {
         let mut settings = Settings::defaults_for("test-model");
-        settings.permission_mode = parent;
+        settings.permissions.mode = parent;
         apply_agent_type_overrides(&mut settings, &typed(asked));
-        assert_eq!(settings.permission_mode, applied, "{parent:?} + {asked:?}");
+        assert_eq!(settings.permissions.mode, applied, "{parent:?} + {asked:?}");
     }
     let mut settings = Settings::defaults_for("test-model");
-    settings.permission_mode = M::Default;
+    settings.permissions.mode = M::Default;
     let plugin = AgentTypeDefinition {
         source: AgentTypeSource::Plugin,
         ..typed(M::BypassPermissions)
     };
     apply_agent_type_overrides(&mut settings, &plugin);
-    assert_eq!(settings.permission_mode, M::Default);
+    assert_eq!(settings.permissions.mode, M::Default);
 }
 
 #[test]
@@ -582,7 +582,7 @@ fn apply_agent_type_overrides_leaves_settings_untouched_when_fields_absent() {
     };
     let mut settings = Settings::defaults_for("test-model");
     let before = (
-        settings.permission_mode,
+        settings.permissions.mode,
         settings.model.thinking_mode.clone(),
         settings.model.effort,
         settings.execution.max_api_calls_per_turn,
@@ -590,7 +590,7 @@ fn apply_agent_type_overrides_leaves_settings_untouched_when_fields_absent() {
     apply_agent_type_overrides(&mut settings, &def);
     assert_eq!(
         (
-            settings.permission_mode,
+            settings.permissions.mode,
             settings.model.thinking_mode,
             settings.model.effort,
             settings.execution.max_api_calls_per_turn
@@ -624,7 +624,7 @@ fn run_sub_applies_permission_mode_and_max_turns_override_end_to_end() {
     let mut settings = agent_tool.sub_settings(None);
     apply_agent_type_overrides(&mut settings.values, &def);
     assert_eq!(
-        settings.values.permission_mode,
+        settings.values.permissions.mode,
         base::permission::PermissionMode::Plan
     );
     assert_eq!(settings.values.execution.max_api_calls_per_turn, 3);
@@ -642,18 +642,18 @@ fn a_delegate_starts_from_the_mode_a_host_switched_the_parent_to() {
     }
     .agent_tool();
     assert_eq!(
-        agent_tool.sub_settings(None).values.permission_mode,
+        agent_tool.sub_settings(None).values.permissions.mode,
         M::Default
     );
 
     state.switch_permission_mode(M::AcceptEdits);
     assert_eq!(
-        agent_tool.sub_settings(None).values.permission_mode,
+        agent_tool.sub_settings(None).values.permissions.mode,
         M::AcceptEdits
     );
     state.switch_permission_mode(M::Plan);
     assert_eq!(
-        agent_tool.sub_settings(None).values.permission_mode,
+        agent_tool.sub_settings(None).values.permissions.mode,
         M::AcceptEdits,
         "in plan the delegate starts from where plan returns to; the relay holds it to plan"
     );

@@ -86,11 +86,17 @@ pub(in crate::session_pool) fn refusal(
         _ => keys.unknown_in(&segments, value),
     };
     if !unknown.is_empty() {
-        return Some(SettingRejected::new(
-            dotted,
-            RejectKind::UnknownKey,
-            format!("no setting reads {}", quoted(&unknown)),
-        ));
+        let renamed: Vec<String> = unknown
+            .iter()
+            .filter_map(|key| {
+                settings::renamed::renamed_to(key).map(|new| format!("`{key}` is now `{new}`"))
+            })
+            .collect();
+        let mut reason = format!("no setting reads {}", quoted(&unknown));
+        if !renamed.is_empty() {
+            reason = format!("{reason} ({})", renamed.join("; "));
+        }
+        return Some(SettingRejected::new(dotted, RejectKind::UnknownKey, reason));
     }
     if tier != SettingsTier::Global && settings::GLOBAL_ONLY_KEYS.contains(&segments[0]) {
         return Some(SettingRejected::new(

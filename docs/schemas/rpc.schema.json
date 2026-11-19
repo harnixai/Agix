@@ -4609,7 +4609,7 @@
         },
         {
           "const": "bypassPermissions",
-          "description": "Ask nothing and skip the rules of the user's tiers. Credentials\n(`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)\nare still refused, the deployment's managed `deny` / `ask` rules still\napply, input that is not valid is still refused, and `Bash` still runs\nin the OS sandbox. `auto` and `yolo` are accepted as other spellings\nof this mode and read back as `bypassPermissions`.",
+          "description": "Ask nothing and skip the rules of the user's tiers. Credentials\n(`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)\nare still refused, the deployment's managed `deny` / `ask` rules still\napply, input that is not valid is still refused, and `Bash` still runs\nin the OS sandbox.",
           "type": "string"
         },
         {
@@ -7728,7 +7728,7 @@
               "type": "null"
             }
           ],
-          "description": "This session's permission mode. `None` takes the settings'\n`permission_mode`. A session may always ask for a stricter mode than\nthe settings'; a looser one is clamped unless the settings set\n`allow_client_permission_override`."
+          "description": "This session's permission mode. `None` takes the settings'\n`permissions.mode`. A session may always ask for a stricter mode than\nthe settings'; a looser one is clamped unless the settings set\n`permissions.client_may_loosen`."
         },
         "permission_rules": {
           "description": "Allow/deny/ask rules for the `Policy` this session's\n`permission_mode` (if set) constructs. Ignored when `permission_mode`\nis `None`.",

@@ -66,12 +66,14 @@ impl HostOverrides {
     }
 }
 
-fn rule_key(rule: &LoadedRule) -> (Option<Value>, base::interface::config_source::Tier, bool) {
-    (
-        serde_json::to_value(&rule.rule).ok(),
-        rule.tier,
-        rule.machine_local,
-    )
+fn rule_key(
+    rule: &LoadedRule,
+) -> (
+    &base::permission::PermissionRuleEntry,
+    base::interface::config_source::Tier,
+    bool,
+) {
+    (&rule.rule, rule.tier, rule.machine_local)
 }
 
 fn changed(from: &Value, to: &Value) -> Option<Value> {

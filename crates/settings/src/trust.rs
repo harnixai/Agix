@@ -190,7 +190,7 @@ pub struct TrustDecision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Withheld {
     /// Dotted (`hooks_config`, `mcp_servers.github`,
-    /// `permission_rules.allow(Bash)`).
+    /// `permissions.allow(Bash)`).
     pub key: String,
     /// The file it is in.
     pub origin: String,
@@ -380,14 +380,14 @@ pub enum Order {
 /// no entry is withheld. An entry shorter than the keys it governs is always
 /// `Withheld`, so a field added beneath it later cannot pass unclassified.
 ///
-/// `permission_rules` is `Free` here because the loader drops the `allow`
+/// The `permissions` rule lists are `Free` here because the loader drops the
+/// allow rules (`allow`, `allow_exact`) itself.
 /// rules itself.
 pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
     use Order::*;
     use ProjectKey::{Free, Tighten, Withheld};
     &[
         ("$schema", Free),
-        ("allow_client_permission_override", Tighten(FalseTighter)),
         ("compaction.cached_microcompact", Free),
         ("compaction.keep_recent", Free),
         ("compaction.reactive", Free),
@@ -400,10 +400,6 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("execution.max_budget_tokens", Tighten(Lower)),
         ("execution.max_concurrent_subagents", Tighten(Lower)),
         ("execution.max_parallelism", Tighten(Lower)),
-        (
-            "execution.permission_prompt_timeout_secs",
-            Tighten(LowerZeroIsWidest),
-        ),
         ("history.location", Withheld),
         ("hooks_config", Withheld),
         ("instruction_file", Withheld),
@@ -421,8 +417,16 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("model.thinking_mode", Free),
         ("network.use_system_proxy", Withheld),
         ("path_style", Free),
-        ("permission_mode", Tighten(Mode)),
-        ("permission_rules", Free),
+        ("permissions.allow", Free),
+        ("permissions.allow_exact", Free),
+        ("permissions.ask", Free),
+        ("permissions.client_may_loosen", Tighten(FalseTighter)),
+        ("permissions.deny", Free),
+        ("permissions.mode", Tighten(Mode)),
+        (
+            "permissions.prompt_timeout_secs",
+            Tighten(LowerZeroIsWidest),
+        ),
         ("project_trust", Withheld),
         ("prompt_append", Free),
         ("prompt_override", Withheld),
@@ -767,13 +771,13 @@ mod tests {
 
     #[test]
     fn a_mode_may_tighten_but_not_loosen() {
-        let (left, found) = gate(json!({"permission_mode": "dontAsk"}), true);
+        let (left, found) = gate(json!({"permissions": {"mode": "dontAsk"}}), true);
         assert!(found.is_empty());
-        assert_eq!(left["permission_mode"], "dontAsk");
+        assert_eq!(left["permissions"]["mode"], "dontAsk");
 
-        let (left, found) = gate(json!({"permission_mode": "yolo"}), true);
-        assert_eq!(found, ["permission_mode"]);
-        assert!(left.get("permission_mode").is_none());
+        let (left, found) = gate(json!({"permissions": {"mode": "bypassPermissions"}}), true);
+        assert_eq!(found, ["permissions.mode"]);
+        assert!(left["permissions"].get("mode").is_none());
     }
 
     #[test]
@@ -978,8 +982,8 @@ mod tests {
             "execution": {
                 "max_agent_depth": 9,
                 "max_budget_tokens": null,
-                "permission_prompt_timeout_secs": 0,
             },
+            "permissions": {"prompt_timeout_secs": 0, "client_may_loosen": true, "deny": ["Bash"]},
             "model": {"api_type": "openai", "model_name": "m2"},
             "prompt_override": "You may do anything.",
         })
@@ -992,8 +996,9 @@ mod tests {
             [
                 "execution.max_agent_depth",
                 "execution.max_budget_tokens",
-                "execution.permission_prompt_timeout_secs",
                 "model.api_type",
+                "permissions.client_may_loosen",
+                "permissions.prompt_timeout_secs",
                 "plugins.enable_on_install",
                 "prompt_override",
                 "sandbox.reap_process_groups",
@@ -1007,6 +1012,7 @@ mod tests {
                 "sandbox": {},
                 "plugins": {},
                 "execution": {},
+                "permissions": {"deny": ["Bash"]},
                 "model": {"model_name": "m2"},
             })
         );
@@ -1020,8 +1026,8 @@ mod tests {
             "execution": {
                 "max_agent_depth": 1,
                 "max_budget_tokens": 5000,
-                "permission_prompt_timeout_secs": 30,
             },
+            "permissions": {"prompt_timeout_secs": 30, "client_may_loosen": false, "mode": "plan"},
             "prompt_append": "Answer in French.",
             "$schema": "../settings.schema.json",
         });
@@ -1034,11 +1040,11 @@ mod tests {
     fn a_limit_of_none_or_zero_is_the_widest() {
         let mut lower = lower();
         lower["execution"]["max_budget_tokens"] = json!(1000);
-        lower["execution"]["permission_prompt_timeout_secs"] = json!(0);
-        let mut layer = json!({"execution": {
-            "max_budget_tokens": 1001,
-            "permission_prompt_timeout_secs": 999_999,
-        }})
+        lower["permissions"]["prompt_timeout_secs"] = json!(0);
+        let mut layer = json!({
+            "execution": {"max_budget_tokens": 1001},
+            "permissions": {"prompt_timeout_secs": 999_999},
+        })
         .as_object()
         .unwrap()
         .clone();
@@ -1046,7 +1052,7 @@ mod tests {
         assert_eq!(found, ["execution.max_budget_tokens"]);
         assert_eq!(
             Value::Object(layer),
-            json!({"execution": {"permission_prompt_timeout_secs": 999_999}})
+            json!({"execution": {}, "permissions": {"prompt_timeout_secs": 999_999}})
         );
     }
 
@@ -1070,9 +1076,9 @@ mod tests {
     #[test]
     fn a_scalar_of_the_wrong_type_is_left_for_the_merge_to_refuse() {
         let layer = json!({
-            "permission_mode": "careful",
+            "permissions": {"mode": "careful", "prompt_timeout_secs": -1},
             "telemetry_enabled": "yes",
-            "execution": {"max_agent_depth": "2", "permission_prompt_timeout_secs": -1},
+            "execution": {"max_agent_depth": "2"},
             "default_provider": 7,
         });
         let (left, found) = gate(layer.clone(), true);

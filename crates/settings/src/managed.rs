@@ -4,8 +4,9 @@
 //! It is read from a fixed system path (`Layout::managed_settings_file`) that the
 //! user's data directory, the project and the model have no say in; a daemon
 //! started with `--managed-settings <path>` reads that file instead. Only
-//! [`MANAGED_KEYS`] may appear in it. A file that is there but cannot be
-//! honoured — unreadable, not JSON, a key outside that list, a value of the
+//! [`MANAGED_KEYS`] may appear in it, and in its `permissions` block only
+//! [`MANAGED_PERMISSION_KEYS`]. A file that is there but cannot be
+//! honoured — unreadable, not JSON, a key outside those lists, a value of the
 //! wrong shape — is not skipped the way a broken user tier is: it sets
 //! [`ManagedSettings::error`], and the permission gate then refuses every tool
 //! call until it is fixed. Skipping it would silently drop every deny the
@@ -15,12 +16,19 @@
 //! (`permissions::policy::ManagedLayer`); this module only says what the file
 //! holds. Semantics: `docs/ARCHITECTURE.md` §6.1.
 
-use base::permission::{ManagedSettings, PermissionRuleEntry};
+use base::permission::ManagedSettings;
+use serde_json::{Map, Value};
 use std::path::Path;
+
+use crate::permissions::{self, RULE_LISTS};
 
 /// The keys a managed settings file may set. `$schema` is the editor's and is
 /// accepted too.
-pub const MANAGED_KEYS: &[&str] = &["permission_rules", "disable_bypass_permissions_mode"];
+pub const MANAGED_KEYS: &[&str] = &[permissions::KEY];
+
+/// The keys of its `permissions` block a managed settings file may set.
+pub const MANAGED_PERMISSION_KEYS: &[&str] =
+    &["allow", "allow_exact", "ask", "deny", "disable_bypass"];
 
 /// The file at `path`. `None` when it does not exist and `required` is
 /// false; a `required` file that does not exist is an error, so a path the
@@ -38,51 +46,96 @@ pub fn read(path: &Path, required: bool) -> Option<ManagedSettings> {
     })
 }
 
-pub fn from_value(origin: impl Into<String>, value: serde_json::Value) -> ManagedSettings {
+pub fn from_value(origin: impl Into<String>, value: Value) -> ManagedSettings {
     let origin = origin.into();
-    let serde_json::Value::Object(mut fields) = value else {
+    let Value::Object(mut fields) = value else {
         return broken(origin, "is not a JSON object".into());
     };
     fields.remove("$schema");
-    let mut refused: Vec<&str> = fields
-        .keys()
-        .map(String::as_str)
-        .filter(|key| !MANAGED_KEYS.contains(key))
-        .collect();
-    if !refused.is_empty() {
-        refused.sort_unstable();
-        return broken(
-            origin,
-            format!(
-                "sets keys managed settings may not set: {} (allowed: {})",
-                refused.join(", "),
-                MANAGED_KEYS.join(", ")
-            ),
-        );
+    if let Some(refusal) = refused_keys(&fields, MANAGED_KEYS, "") {
+        return broken(origin, refusal);
     }
-    let permission_rules = match fields.remove("permission_rules") {
-        None => Vec::new(),
-        Some(rules) => match serde_json::from_value::<Vec<PermissionRuleEntry>>(rules) {
-            Ok(rules) => rules,
-            Err(e) => return broken(origin, format!("permission_rules: {e}")),
-        },
-    };
-    let disable_bypass_permissions_mode = match fields.remove("disable_bypass_permissions_mode") {
-        None => false,
-        Some(serde_json::Value::Bool(b)) => b,
+    let mut block = match fields.remove(permissions::KEY) {
+        None => Map::new(),
+        Some(Value::Object(block)) => block,
         Some(other) => {
             return broken(
                 origin,
-                format!("disable_bypass_permissions_mode must be true or false, not {other}"),
+                format!("{}: must be an object, not {other}", permissions::KEY),
+            )
+        }
+    };
+    let prefix = format!("{}.", permissions::KEY);
+    if let Some(refusal) = refused_keys(&block, MANAGED_PERMISSION_KEYS, &prefix) {
+        return broken(origin, refusal);
+    }
+    let mut rules = Vec::new();
+    for (list, _, _) in RULE_LISTS {
+        let Some(value) = block.remove(*list) else {
+            continue;
+        };
+        let (read, unread) = permissions::read_rule_list(list, value);
+        if let Some((at, error)) = unread.into_iter().next() {
+            return broken(origin, format!("{at}: {error}"));
+        }
+        rules.extend(read);
+    }
+    let disable_bypass = match block.remove("disable_bypass") {
+        None => false,
+        Some(Value::Bool(b)) => b,
+        Some(other) => {
+            return broken(
+                origin,
+                format!("{prefix}disable_bypass must be true or false, not {other}"),
             )
         }
     };
     ManagedSettings {
         origin,
         error: None,
-        permission_rules,
-        disable_bypass_permissions_mode,
+        rules,
+        disable_bypass,
     }
+}
+
+/// Why `fields` cannot stand, when it holds a key outside `allowed`.
+fn refused_keys(fields: &Map<String, Value>, allowed: &[&str], prefix: &str) -> Option<String> {
+    let mut refused: Vec<String> = fields
+        .keys()
+        .filter(|key| !allowed.contains(&key.as_str()))
+        .map(|key| {
+            let dotted = format!("{prefix}{key}");
+            match crate::renamed::renamed_to(&dotted) {
+                Some(new) => format!("{dotted} (renamed to {new})"),
+                None => dotted,
+            }
+        })
+        .collect();
+    if refused.is_empty() {
+        return None;
+    }
+    refused.sort_unstable();
+    let allowed: Vec<String> = allowed.iter().map(|key| format!("{prefix}{key}")).collect();
+    Some(format!(
+        "sets keys managed settings may not set: {} (allowed: {})",
+        refused.join(", "),
+        allowed.join(", ")
+    ))
+}
+
+/// The layer as `config.get` and `daemon.doctor` show it: where it came from,
+/// why it cannot be honoured if it cannot, and its `permissions` block in the
+/// file's own shape.
+pub fn report(managed: &ManagedSettings) -> Value {
+    let mut block = permissions::rule_lists(managed.rules.iter());
+    block.insert("disable_bypass".into(), Value::Bool(managed.disable_bypass));
+    let mut report = Map::new();
+    report.insert("origin".into(), Value::String(managed.origin.clone()));
+    if let Some(error) = &managed.error {
+        report.insert("error".into(), Value::String(error.clone()));
+    }
+    report.insert(permissions::KEY.into(), Value::Object(block));
+    Value::Object(report)
 }
 
 fn broken(origin: String, error: String) -> ManagedSettings {
@@ -106,46 +159,86 @@ mod tests {
             "it",
             json!({
                 "$schema": "x",
-                "permission_rules": [{"tool": "Bash(curl:*)", "action": "deny"}],
-                "disable_bypass_permissions_mode": true,
+                "permissions": {
+                    "deny": ["Bash(curl:*)"],
+                    "ask": ["Bash(git push:*)"],
+                    "allow_exact": ["Bash(ls)"],
+                    "disable_bypass": true,
+                },
             }),
         );
         assert_eq!(m.error, None);
-        assert!(m.disable_bypass_permissions_mode);
-        assert_eq!(m.permission_rules.len(), 1);
-        assert_eq!(m.permission_rules[0].action, RuleBehavior::Deny);
+        assert!(m.disable_bypass);
+        let read: Vec<_> = m
+            .rules
+            .iter()
+            .map(|r| (r.tool.as_str(), r.action))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("Bash(ls)", RuleBehavior::Allow),
+                ("Bash(git push:*)", RuleBehavior::Ask),
+                ("Bash(curl:*)", RuleBehavior::Deny),
+            ]
+        );
+        assert!(!m.rules[0].matching.is_pattern());
     }
 
     #[test]
     fn a_bypass_session_can_be_asked_when_the_layer_asks_denies_or_takes_bypass_away() {
-        let rule = |action: &str| json!({"permission_rules": [{"tool": "Bash", "action": action}]});
+        let rule = |list: &str| json!({"permissions": { list: ["Bash"] }});
         let asks = |value| from_value("it", value).asks_under_bypass();
         assert!(asks(rule("ask")));
         assert!(asks(rule("deny")));
-        assert!(asks(json!({"disable_bypass_permissions_mode": true})));
+        assert!(asks(json!({"permissions": {"disable_bypass": true}})));
         assert!(!asks(rule("allow")));
         assert!(!asks(json!({})));
-        assert!(!asks(json!({"permission_mode": "default"})));
+        assert!(!asks(json!({"permissions": {"mode": "default"}})));
     }
 
     #[test]
     fn a_key_outside_the_allowed_set_breaks_the_whole_layer() {
-        for key in ["permission_mode", "sandbox", "permision_rules"] {
+        for (key, value) in [
+            ("sandbox", json!({})),
+            ("permision", json!({})),
+            ("permission_rules", json!([])),
+        ] {
             let m = from_value(
                 "it",
-                json!({ key: {}, "permission_rules": [{"tool": "Bash", "action": "deny"}] }),
+                json!({ key: value, "permissions": {"deny": ["Bash"]} }),
             );
             let error = m.error.unwrap_or_else(|| panic!("{key} was accepted"));
             assert!(error.contains(key), "{error}");
-            assert!(m.permission_rules.is_empty());
+            assert!(m.rules.is_empty());
         }
+        for key in ["mode", "prompt_timeout_secs", "client_may_loosen"] {
+            let m = from_value("it", json!({"permissions": { key: 1, "deny": ["Bash"] }}));
+            let error = m.error.unwrap_or_else(|| panic!("{key} was accepted"));
+            assert!(error.contains(&format!("permissions.{key}")), "{error}");
+            assert!(m.rules.is_empty());
+        }
+    }
+
+    #[test]
+    fn an_old_key_is_refused_with_its_new_name() {
+        let m = from_value("it", json!({"disable_bypass_permissions_mode": true}));
+        let error = m.error.unwrap();
+        assert!(
+            error.contains("renamed to permissions.disable_bypass"),
+            "{error}"
+        );
+        assert!(!m.disable_bypass);
     }
 
     #[test]
     fn a_value_of_the_wrong_shape_breaks_the_layer() {
         for value in [
-            json!({"disable_bypass_permissions_mode": "yes"}),
-            json!({"permission_rules": [{"tool": "Bash", "action": "forbid"}]}),
+            json!({"permissions": {"disable_bypass": "yes"}}),
+            json!({"permissions": {"deny": "Bash"}}),
+            json!({"permissions": {"deny": ["Bash", 5]}}),
+            json!({"permissions": {"deny": ["Bash(rm:*"]}}),
+            json!({"permissions": ["deny"]}),
             json!(["not", "an", "object"]),
         ] {
             assert!(from_value("it", value.clone()).error.is_some(), "{value}");

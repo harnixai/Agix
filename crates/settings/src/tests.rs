@@ -1,8 +1,7 @@
 use super::*;
-use crate::merge::read_permission_rules;
 use crate::section::Sections;
 use base::paths::{SETTINGS_FILE, SETTINGS_LOCAL_FILE};
-use base::permission::{LoadedRule, RuleBehavior};
+use base::permission::{LoadedRule, PermissionMode, RuleBehavior};
 
 fn shared_rules(s: &LoadedSettings) -> Vec<&LoadedRule> {
     s.rules.iter().filter(|r| !r.machine_local).collect()
@@ -29,10 +28,8 @@ fn permission_mode_deserializes_bubble_and_dontask() {
     assert_eq!(d, PermissionMode::DontAsk);
     assert!(d.is_user_settable(), "DontAsk is user-settable");
 
-    let s = Settings {
-        permission_mode: PermissionMode::Bubble,
-        ..Settings::defaults_for("test")
-    };
+    let mut s = Settings::defaults_for("test");
+    s.permissions.mode = PermissionMode::Bubble;
     assert!(s.validate().is_err());
 }
 
@@ -69,30 +66,104 @@ fn a_delegate_runs_in_its_own_mode_unless_its_parent_holds_or_carries_it() {
 }
 
 #[test]
-fn auto_and_yolo_in_settings_json_mean_bypass() {
+fn auto_and_yolo_are_no_modes() {
     for spelling in ["auto", "yolo"] {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        write_settings(&project, &format!(r#"{{"permission_mode": "{spelling}"}}"#));
-        trust_project(&root.path().join("global"), &project);
-        let settings = LoadedSettings::load(
-            root.path().join("global"),
-            root.path().join("scene"),
-            project,
-            "code",
-            "m",
-            &Sections::none(),
-            Default::default(),
-        );
-        assert_eq!(
-            settings.values.permission_mode,
-            PermissionMode::BypassPermissions
-        );
-        assert_eq!(
-            serde_json::to_value(settings.values.permission_mode).unwrap(),
-            serde_json::json!("bypassPermissions")
-        );
+        let settings = load_global(&format!(
+            r#"{{"permissions": {{"mode": "{spelling}"}}, "language": "x"}}"#
+        ));
+        assert_eq!(ignored_keys(&settings), ["permissions.mode"]);
+        assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
+        assert_eq!(settings.values.language.as_deref(), Some("x"));
     }
+}
+
+#[test]
+fn the_permissions_block_reads_every_key() {
+    let settings = load_global(
+        r#"{"permissions": {
+            "mode": "acceptEdits",
+            "allow": ["Bash(git status:*)"],
+            "allow_exact": ["Bash(rm a*.tmp)"],
+            "ask": ["Bash(git push:*)"],
+            "deny": ["Read(~/.env)"],
+            "prompt_timeout_secs": 30,
+            "client_may_loosen": true
+        }}"#,
+    );
+    assert!(settings.ignored.is_empty(), "{:?}", settings.ignored);
+    let permissions = &settings.values.permissions;
+    assert_eq!(permissions.mode, PermissionMode::AcceptEdits);
+    assert_eq!(permissions.prompt_timeout_secs, 30);
+    assert!(permissions.client_may_loosen);
+    assert!(permissions.allow.is_empty() && permissions.deny.is_empty());
+    let rules: Vec<_> = settings
+        .rules
+        .iter()
+        .map(|r| {
+            (
+                r.rule.tool.as_str(),
+                r.rule.action,
+                r.rule.matching.is_pattern(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            ("Bash(git status:*)", RuleBehavior::Allow, true),
+            ("Bash(rm a*.tmp)", RuleBehavior::Allow, false),
+            ("Bash(git push:*)", RuleBehavior::Ask, true),
+            ("Read(~/.env)", RuleBehavior::Deny, true),
+        ]
+    );
+    assert_eq!(settings.engine_config().permission_prompt_timeout_secs, 30);
+}
+
+/// No old key is read; the report of each names the key that replaced it.
+#[test]
+fn an_old_permission_key_is_not_read_and_names_its_new_key() {
+    let settings = load_global(
+        r#"{
+            "permission_mode": "plan",
+            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "allow_client_permission_override": true,
+            "execution": {"permission_prompt_timeout_secs": 1}
+        }"#,
+    );
+    assert_eq!(settings.values.permissions, PermissionsSettings::default());
+    assert!(settings.rules.is_empty());
+    assert_eq!(
+        ignored_keys(&settings),
+        ["execution.permission_prompt_timeout_secs"]
+    );
+    assert!(
+        settings.ignored[0]
+            .error
+            .contains("renamed to `permissions.prompt_timeout_secs`"),
+        "{:?}",
+        settings.ignored
+    );
+    for old in [
+        "permission_mode",
+        "permission_rules",
+        "allow_client_permission_override",
+    ] {
+        assert!(crate::renamed::renamed_to(old).is_some(), "{old}");
+    }
+}
+
+/// `disable_bypass` is the managed layer's; a user tier that writes it has
+/// written nothing.
+#[test]
+fn only_the_managed_layer_disables_bypass() {
+    let settings =
+        load_global(r#"{"permissions": {"mode": "bypassPermissions", "disable_bypass": true}}"#);
+    assert_eq!(ignored_keys(&settings), ["permissions.disable_bypass"]);
+    assert_eq!(
+        settings.values.permissions.mode,
+        PermissionMode::BypassPermissions
+    );
+    assert!(!settings.bypass_disabled());
 }
 
 #[test]
@@ -204,14 +275,8 @@ fn local_overlay_outranks_the_settings_json_beside_it() {
 fn local_overlay_permission_rules_add_to_rather_than_replace_the_committed_ones() {
     let root = tempfile::tempdir().unwrap();
     let project = root.path().join("project");
-    write_settings(
-        &project,
-        r#"{"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
-    );
-    write_local_settings(
-        &project,
-        r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
-    );
+    write_settings(&project, r#"{"permissions": {"deny": ["Bash(rm:*)"]}}"#);
+    write_local_settings(&project, r#"{"permissions": {"allow": ["Bash(ls)"]}}"#);
     trust_project(&root.path().join("global"), &project);
 
     let settings = LoadedSettings::load(
@@ -245,14 +310,8 @@ fn local_overlay_is_read_from_every_tier() {
     let root = tempfile::tempdir().unwrap();
     let global = root.path().join("global");
     let project = root.path().join("project");
-    write_local_settings(
-        &global,
-        r#"{"permission_rules": [{"tool": "Bash(id)", "action": "allow"}]}"#,
-    );
-    write_local_settings(
-        &project,
-        r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
-    );
+    write_local_settings(&global, r#"{"permissions": {"allow": ["Bash(id)"]}}"#);
+    write_local_settings(&project, r#"{"permissions": {"allow": ["Bash(ls)"]}}"#);
     trust_project(&global, &project);
 
     let settings = LoadedSettings::load(
@@ -280,18 +339,9 @@ fn committed_tiers_contribute_rules_side_by_side_each_tagged_with_its_tier() {
     let global = root.path().join("global");
     let scene = root.path().join("scene");
     let project = root.path().join("project");
-    write_settings(
-        &global,
-        r#"{"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
-    );
-    write_settings(
-        &scene,
-        r#"{"permission_rules": [{"tool": "Read(~/.ssh/**)", "action": "deny"}]}"#,
-    );
-    write_settings(
-        &project,
-        r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
-    );
+    write_settings(&global, r#"{"permissions": {"deny": ["Bash(rm:*)"]}}"#);
+    write_settings(&scene, r#"{"permissions": {"deny": ["Read(~/.ssh/**)"]}}"#);
+    write_settings(&project, r#"{"permissions": {"allow": ["Bash(ls)"]}}"#);
     trust_project(&global, &project);
 
     let settings = LoadedSettings::load(
@@ -322,10 +372,7 @@ fn a_directory_serving_as_two_tiers_contributes_its_rules_once() {
     use base::interface::config_source::Tier;
     let root = tempfile::tempdir().unwrap();
     let home_agix = root.path().join("home");
-    write_settings(
-        &home_agix,
-        r#"{"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
-    );
+    write_settings(&home_agix, r#"{"permissions": {"deny": ["Bash(rm:*)"]}}"#);
 
     let settings = LoadedSettings::load(
         home_agix.clone(),
@@ -394,15 +441,13 @@ fn a_managed_layer_is_held_apart_and_takes_bypass_away() {
             Tier::Global,
             false,
             "user",
-            serde_json::json!({"permission_mode": "yolo",
-                "permission_rules": [{"tool": "Bash", "action": "allow"}]}),
+            serde_json::json!({"permissions": {"mode": "bypassPermissions", "allow": ["Bash"]}}),
         )
         .with(
             Tier::Managed,
             false,
             "it",
-            serde_json::json!({"disable_bypass_permissions_mode": true,
-                "permission_rules": [{"tool": "Bash(curl:*)", "action": "deny"}]}),
+            serde_json::json!({"permissions": {"disable_bypass": true, "deny": ["Bash(curl:*)"]}}),
         );
     let root = tempfile::tempdir().unwrap();
     let settings = LoadedSettings::load_from(
@@ -416,12 +461,12 @@ fn a_managed_layer_is_held_apart_and_takes_bypass_away() {
         Default::default(),
     );
 
-    assert_eq!(settings.values.permission_mode, PermissionMode::Default);
+    assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
     assert!(settings.bypass_disabled());
     assert_eq!(shared_rules(&settings).len(), 1);
     let managed = settings.managed.expect("the managed layer");
     assert_eq!(managed.origin, "it");
-    assert_eq!(managed.permission_rules[0].tool, "Bash(curl:*)");
+    assert_eq!(managed.rules[0].tool, "Bash(curl:*)");
 }
 
 #[test]
@@ -454,7 +499,7 @@ fn a_managed_layer_with_a_key_it_may_not_set_merges_nothing() {
 /// The same configuration, once from six files and
 /// once from a source that never touches a disk, has to produce the same
 /// `Settings` — including the two rules that are not part of the generic
-/// merge (an overlay's `permission_rules` held apart, `paths` ignored).
+/// merge (an overlay's `permissions` rule lists held apart, `paths` ignored).
 #[test]
 fn an_in_memory_source_replaces_the_files_entirely() {
     use base::interface::config_source::{InMemoryLayers, Tier};
@@ -463,8 +508,8 @@ fn an_in_memory_source_replaces_the_files_entirely() {
                      "project_trust": {"trusted": ["/**"]}}"#;
     let scene = r#"{"model": {"model_name": "scene-model"}}"#;
     let project = r#"{"paths": {"scope": "hijacked"},
-                      "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#;
-    let project_local = r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#;
+                      "permissions": {"deny": ["Bash(rm:*)"]}}"#;
+    let project_local = r#"{"permissions": {"allow": ["Bash(ls)"]}}"#;
 
     let root = tempfile::tempdir().unwrap();
     let global_dir = root.path().join("global");
@@ -688,13 +733,13 @@ fn a_key_no_setting_reads_is_reported() {
     let layer = serde_json::json!({
         "$schema": "../schemas/settings.schema.json",
         "model": {},
-        "permission_mode": "plan",
-        "permision_mode": "plan",
+        "permissions": {"mode": "plan"},
+        "permisions": {"mode": "plan"},
         "hooks": {},
     });
     let mut unknown = unknown_settings_keys(&layer, &Sections::none());
     unknown.sort();
-    assert_eq!(unknown, ["hooks", "permision_mode"]);
+    assert_eq!(unknown, ["hooks", "permisions"]);
     assert!(unknown_settings_keys(&serde_json::json!([1]), &Sections::none()).is_empty());
 }
 
@@ -760,10 +805,7 @@ fn a_bad_permission_rule_is_left_out_alone_and_reported() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("settings.json"),
-        r#"{"permission_rules": [
-             {"tool": "Read", "action": "allwo"},
-             {"tool": "Bash", "action": "deny"}
-           ]}"#,
+        r#"{"permissions": {"allow": [5], "deny": ["Bash"], "ask": "Read"}}"#,
     )
     .unwrap();
     let settings = LoadedSettings::load(
@@ -780,13 +822,10 @@ fn a_bad_permission_rule_is_left_out_alone_and_reported() {
         .map(|r| (r.rule.tool.as_str(), r.rule.action))
         .collect();
     assert_eq!(rules, [("Bash", RuleBehavior::Deny)]);
-    assert_eq!(settings.ignored.len(), 1, "{:?}", settings.ignored);
-    assert_eq!(settings.ignored[0].key, "permission_rules[0]");
-    assert!(settings.ignored[0].error.contains("allwo"));
-
-    let (rules, unread) = read_permission_rules(serde_json::json!({"tool": "Bash"}));
-    assert!(rules.is_empty());
-    assert_eq!(unread[0].0, "permission_rules");
+    assert_eq!(
+        ignored_keys(&settings),
+        ["permissions.allow[0]", "permissions.ask"]
+    );
 }
 
 #[test]
@@ -794,11 +833,7 @@ fn a_deny_rule_that_does_not_parse_is_reported_rather_than_skipped_silently() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("settings.json"),
-        r#"{"permission_rules": [
-             {"tool": "Bash(rm:*", "action": "deny"},
-             {"tool": "(rm:*)", "action": "deny"},
-             {"tool": "Bash(ls:*)", "action": "deny"}
-           ]}"#,
+        r#"{"permissions": {"deny": ["Bash(rm:*", "(rm:*)", "Bash(ls:*)"]}}"#,
     )
     .unwrap();
     let settings = LoadedSettings::load(
@@ -811,7 +846,7 @@ fn a_deny_rule_that_does_not_parse_is_reported_rather_than_skipped_silently() {
         Default::default(),
     );
     let keys: Vec<_> = settings.ignored.iter().map(|i| i.key.as_str()).collect();
-    assert_eq!(keys, ["permission_rules[0]", "permission_rules[1]"]);
+    assert_eq!(keys, ["permissions.deny[0]", "permissions.deny[1]"]);
     assert!(settings.ignored[0].error.contains("Bash(rm:*"));
     assert_eq!(shared_rules(&settings).len(), 1);
 }
@@ -891,11 +926,11 @@ mod project_trust {
     }
 
     const LOOSENING: &str = r#"{
-        "permission_mode": "bypassPermissions",
-        "permission_rules": [
-            {"tool": "Bash", "action": "allow"},
-            {"tool": "Bash(rm:*)", "action": "deny"}
-        ],
+        "permissions": {
+            "mode": "bypassPermissions",
+            "allow": ["Bash"],
+            "deny": ["Bash(rm:*)"]
+        },
         "hooks_config": {"PreToolUse": [{"type": "command", "command": "x"}]},
         "mcp_servers": {"fs": {"type": "stdio", "command": "x"}},
         "sandbox": {"read_anywhere": true},
@@ -1091,13 +1126,13 @@ mod project_trust {
             tiers.project_writes(LOOSENING);
             write_local_settings(
                 &tiers.project_dir(),
-                r#"{"permission_rules": [{"tool": "Read", "action": "allow"}]}"#,
+                r#"{"permissions": {"allow": ["Read"]}}"#,
             );
 
             let settings = tiers.load();
 
             assert_eq!(settings.trust(), ProjectTrust::Untrusted);
-            assert_eq!(settings.values.permission_mode, PermissionMode::Default);
+            assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
             assert!(shared_rules(&settings)
                 .into_iter()
                 .all(|r| r.rule.action == RuleBehavior::Deny));
@@ -1112,10 +1147,10 @@ mod project_trust {
                 [
                     "hooks_config",
                     "mcp_servers.fs",
-                    "permission_mode",
+                    "permissions.mode",
                     "sandbox.read_anywhere",
-                    "permission_rules.allow(Bash)",
-                    "permission_rules.allow(Read)",
+                    "permissions.allow(Bash)",
+                    "permissions.allow(Read)",
                 ]
             );
             assert!(settings.project_mcp_servers().contains_key("fs"));
@@ -1128,15 +1163,15 @@ mod project_trust {
             let tiers = Tiers::new(&layout);
             write_settings(
                 &tiers.global,
-                r#"{"project_trust": {"default": "untrusted"}, "permission_mode": "acceptEdits"}"#,
+                r#"{"project_trust": {"default": "untrusted"}, "permissions": {"mode": "acceptEdits"}}"#,
             );
             tiers.project_writes(
-                r#"{"permission_mode": "plan", "sandbox": {"network_mode": "deny_all"}}"#,
+                r#"{"permissions": {"mode": "plan"}, "sandbox": {"network_mode": "deny_all"}}"#,
             );
 
             let settings = tiers.load();
 
-            assert_eq!(settings.values.permission_mode, PermissionMode::Plan);
+            assert_eq!(settings.values.permissions.mode, PermissionMode::Plan);
             assert_eq!(
                 settings.values.sandbox.network_mode,
                 base::interface::exec::NetworkMode::DenyAll
@@ -1167,7 +1202,7 @@ mod project_trust {
                 Some(tiers.project.to_str().unwrap())
             );
             assert_eq!(
-                settings.values.permission_mode,
+                settings.values.permissions.mode,
                 PermissionMode::BypassPermissions
             );
             assert_eq!(
@@ -1217,7 +1252,7 @@ mod project_trust {
                         "project_trust": {"default": trust},
                         "hooks_config": {"PreToolUse": [{"type": "command", "command": "audit"}]},
                         "sandbox": {"network_mode": "deny_all", "require_enforcement": true},
-                        "permission_mode": "plan",
+                        "permissions": {"mode": "plan"},
                     })
                     .to_string(),
                 );
@@ -1244,7 +1279,7 @@ mod project_trust {
                 );
                 assert_eq!(settings.values.sandbox.deny_write, ["build/"], "{trust}");
                 assert_eq!(
-                    settings.values.permission_mode,
+                    settings.values.permissions.mode,
                     PermissionMode::Plan,
                     "{trust}"
                 );
@@ -1523,10 +1558,10 @@ fn an_object_where_a_value_belongs_is_reported_as_that_value() {
 
 #[test]
 fn a_program_only_permission_mode_is_left_out_and_reported_with_its_file() {
-    let settings = load_global(r#"{"permission_mode": "bubble", "language": "x"}"#);
-    assert_eq!(ignored_keys(&settings), ["permission_mode"]);
+    let settings = load_global(r#"{"permissions": {"mode": "bubble"}, "language": "x"}"#);
+    assert_eq!(ignored_keys(&settings), ["permissions.mode"]);
     assert!(settings.ignored[0].origin.ends_with("settings.json"));
-    assert_eq!(settings.values.permission_mode, PermissionMode::Default);
+    assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
     assert_eq!(settings.values.language.as_deref(), Some("x"));
 }
 
@@ -1538,12 +1573,12 @@ fn what_an_untrusted_project_holds_back_names_the_file_it_is_in() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
         project.join("settings.json"),
-        r#"{"permission_mode": "bypassPermissions"}"#,
+        r#"{"permissions": {"mode": "bypassPermissions"}}"#,
     )
     .unwrap();
     std::fs::write(
         project.join("settings.local.json"),
-        r#"{"permission_rules": [{"tool": "Bash", "action": "allow"}]}"#,
+        r#"{"permissions": {"allow": ["Bash"]}}"#,
     )
     .unwrap();
     let settings = LoadedSettings::load(
@@ -1564,17 +1599,17 @@ fn what_an_untrusted_project_holds_back_names_the_file_it_is_in() {
         withheld,
         [
             (
-                "permission_mode",
+                "permissions.mode",
                 project.join("settings.json").display().to_string()
             ),
             (
-                "permission_rules.allow(Bash)",
+                "permissions.allow(Bash)",
                 project.join("settings.local.json").display().to_string()
             ),
         ]
     );
     assert_eq!(
         settings.requires_trust(),
-        ["permission_mode", "permission_rules.allow(Bash)"]
+        ["permissions.mode", "permissions.allow(Bash)"]
     );
 }

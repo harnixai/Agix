@@ -368,8 +368,7 @@ impl HealthCheck for ManagedSettingsCheck {
             "path": self.path.display().to_string(),
             "origin": managed.origin,
             "error": self.unreadable,
-            "permission_rules": managed.permission_rules,
-            "disable_bypass_permissions_mode": managed.disable_bypass_permissions_mode,
+            "permissions": settings::managed::report(managed)["permissions"],
         });
         match &self.unreadable {
             Some(why) => CheckResult::failing(format!(
@@ -378,8 +377,8 @@ impl HealthCheck for ManagedSettingsCheck {
             None => CheckResult::ok(format!(
                 "managed settings from {}: {} permission rule(s){}",
                 managed.origin,
-                managed.permission_rules.len(),
-                if managed.disable_bypass_permissions_mode {
+                managed.rules.len(),
+                if managed.disable_bypass {
                     ", bypassPermissions disabled"
                 } else {
                     ""
@@ -948,7 +947,7 @@ mod tests {
                 "settings.providers",
                 "settings.hooks",
                 "memory",
-                "settings.permission_mode",
+                "settings.permissions.mode",
                 "settings.hooks_fail_open",
                 "sandbox.network_allowlist",
                 "sandbox.egress_proxy",

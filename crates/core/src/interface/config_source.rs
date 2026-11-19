@@ -9,7 +9,7 @@
 //!
 //! What moves is only *where the layers come from*. The merge — six layers
 //! low-to-high, generic recursive JSON merge, `paths` stripped from every
-//! layer, `permission_rules` from an overlay held apart — stays exactly where
+//! layer, the `permissions` rule lists from an overlay held apart — stays exactly where
 //! it was, in `settings::LoadedSettings::load_from`. A source hands over
 //! JSON values in priority order and has no say in what happens to them,
 //! which is what keeps "settings come from somewhere else" from turning into
@@ -45,9 +45,9 @@ pub enum Tier {
     Scene,
     /// This project.
     Project,
-    /// The deployment's — see `settings::managed`. Only
-    /// `permission_rules` and `disable_bypass_permissions_mode` are read from
-    /// it, and nothing below it can override them.
+    /// The deployment's — see `settings::managed`. Only the `permissions`
+    /// rule lists and `permissions.disable_bypass` are read from it, and
+    /// nothing below it can override them.
     Managed,
 }
 
@@ -69,8 +69,8 @@ pub struct ConfigLayer {
     /// Whether this is the per-machine overlay for its tier rather than the
     /// shared settings.
     ///
-    /// The merge treats the two identically but for one rule: a
-    /// `permission_rules` array in an overlay is marked
+    /// The merge treats the two identically but for one rule: the
+    /// `permissions` rule lists in an overlay are marked
     /// `LoadedRule::machine_local`, apart from the shared
     /// rules, because a rule nobody else on the team can see is not the same
     /// kind of statement as one committed alongside the code.

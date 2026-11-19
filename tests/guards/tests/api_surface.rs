@@ -243,7 +243,7 @@ fn the_contracts_keep_no_per_thread_state() {
     );
 }
 
-const FILE_SHAPED: &[&str] = &["Settings", "SettingsFile"];
+const FILE_SHAPED: &[&str] = &["Settings"];
 const SETTINGS_FILE: &str = "crates/settings/src/lib.rs";
 
 fn deprecated_attrs(f: &SourceFile) -> Vec<Hit> {

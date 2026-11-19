@@ -185,31 +185,9 @@
           "format": "uint",
           "minimum": 0,
           "type": "integer"
-        },
-        "permission_prompt_timeout_secs": {
-          "default": 300,
-          "description": "How long a tool call waits for a host to answer a permission prompt\nbefore the call is denied. `0` waits indefinitely (only session\ncancellation interrupts it).\n\nThe wait itself lives in the engine (`execute_tool_inner`), so the\nbound has to be reachable from `EngineConfig`, not only from a\ndaemon-side flag — a host driving the engine directly needs it too.\n\nFailing closed (deny, not permit) on expiry is deliberate: a prompt\nthat went unanswered is not consent.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "type": "object"
-    },
-    "GrantMatch": {
-      "description": "How an allow's content meets a call's.",
-      "oneOf": [
-        {
-          "const": "pattern",
-          "description": "As a `settings.json` rule's content is: `*`, `prefix:*`, path and URL\npatterns.",
-          "type": "string"
-        },
-        {
-          "const": "exact",
-          "description": "Only a call whose content is the same text.",
-          "type": "string"
-        }
-      ]
     },
     "HistoryLocation": {
       "description": "[`HistorySettings::location`].",
@@ -399,12 +377,8 @@
           "type": "string"
         },
         {
-          "description": "Ask nothing and skip the rules of the user's tiers. Credentials\n(`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)\nare still refused, the deployment's managed `deny` / `ask` rules still\napply, input that is not valid is still refused, and `Bash` still runs\nin the OS sandbox. `auto` and `yolo` are accepted as other spellings\nof this mode and read back as `bypassPermissions`.",
-          "enum": [
-            "bypassPermissions",
-            "auto",
-            "yolo"
-          ],
+          "const": "bypassPermissions",
+          "description": "Ask nothing and skip the rules of the user's tiers. Credentials\n(`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)\nare still refused, the deployment's managed `deny` / `ask` rules still\napply, input that is not valid is still refused, and `Bash` still runs\nin the OS sandbox.",
           "type": "string"
         },
         {
@@ -419,26 +393,56 @@
         }
       ]
     },
-    "PermissionRuleEntry": {
-      "description": "A single permission rule: allow/deny/ask a tool matching a pattern.",
+    "PermissionsSettings": {
+      "additionalProperties": false,
+      "description": "`permissions` in a settings file.\n\nThe rule lists are not merged like the rest: every tier's apply side by\nside, a project's added to the global and scene ones, never substituted\nfor them; the merged settings hold none of them.",
       "properties": {
-        "action": {
-          "$ref": "#/$defs/RuleBehavior",
-          "description": "Action: \"allow\", \"deny\", or \"ask\"."
+        "allow": {
+          "description": "Rules that allow a call without asking: `Bash`, `Bash(git status:*)`,\n`Read(~/notes/**)`, `mcp__server__tool`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "match": {
-          "$ref": "#/$defs/GrantMatch",
-          "description": "`\"exact\"`: the content in `tool` allows only a call whose content is\nthat same text, as \"allow every time\" records it. Read on allow rules\nonly; a deny or ask is always a pattern."
+        "allow_exact": {
+          "description": "Allow rules whose content is compared as written, not read as a\npattern: `Bash(rm a*.tmp)` allows that command and no other. \"Allow\nevery time\" records its answers here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "tool": {
-          "description": "Tool name pattern (e.g. \"Bash\", \"Bash(git push:*)\", \"FileWrite\").",
-          "type": "string"
+        "ask": {
+          "description": "Rules that ask before a call, even one an allow rule covers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "client_may_loosen": {
+          "default": false,
+          "description": "Whether an RPC client may request a *more permissive* mode than\n`mode` above.\n\nThe daemon's `session.create` takes an optional `permission_mode` in\nits options. With this `false` — the default — a client can *tighten*\nthe mode for its own session, but a request to loosen it is clamped to\nwhat is configured here. Otherwise any client that could authenticate\ncould open a `bypassPermissions` session no matter how the daemon was\nconfigured (`crates/assembly/src/server/mod.rs` notes there is no\nper-method authorization on that socket).\n\nSet it to `true` only when every client of this daemon is as trusted\nas the daemon itself.",
+          "type": "boolean"
+        },
+        "deny": {
+          "description": "Rules that refuse a call. A deny wins over any allow or ask.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/PermissionMode",
+          "default": "default",
+          "description": "Permission mode for tool execution."
+        },
+        "prompt_timeout_secs": {
+          "default": 300,
+          "description": "How long a tool call waits for a host to answer a permission prompt\nbefore the call is denied. `0` waits indefinitely (only session\ncancellation interrupts it).\n\nThe wait itself lives in the engine (`execute_tool_inner`), so the\nbound has to be reachable from `EngineConfig`, not only from a\ndaemon-side flag — a host driving the engine directly needs it too.\n\nFailing closed (deny, not permit) on expiry is deliberate: a prompt\nthat went unanswered is not consent.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
-      "required": [
-        "tool",
-        "action"
-      ],
       "type": "object"
     },
     "PluginsConfig": {
@@ -596,14 +600,6 @@
           "type": "string"
         }
       ]
-    },
-    "RuleBehavior": {
-      "enum": [
-        "allow",
-        "deny",
-        "ask"
-      ],
-      "type": "string"
     },
     "SandboxConfig": {
       "description": "Sandbox/security configuration.",
@@ -945,13 +941,8 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One settings.json file: the settings it overrides, and the permission rules\nit adds to every other tier's.",
+  "description": "One settings.json file, and what the settings tiers say once merged. Every\nfield is one a settings file can set; what loading them produced besides is\n[`LoadedSettings`].",
   "properties": {
-    "allow_client_permission_override": {
-      "default": false,
-      "description": "Whether an RPC client may request a *more permissive* mode than\n`permission_mode` above.\n\nThe daemon's `session.create` takes an optional `permission_mode` in\nits options. With this `false` — the default — a client can *tighten*\nthe mode for its own session, but a request to loosen it is clamped to\nwhat is configured here. Otherwise any client that could authenticate\ncould open a `bypassPermissions` session no matter how the daemon was\nconfigured (`crates/assembly/src/server/mod.rs` notes there is no\nper-method authorization on that socket).\n\nSet it to `true` only when every client of this daemon is as trusted\nas the daemon itself.",
-      "type": "boolean"
-    },
     "checkpoints": {
       "$ref": "#/$defs/CheckpointSettings",
       "default": {
@@ -983,8 +974,7 @@
         "max_api_calls_per_turn": 25,
         "max_budget_tokens": null,
         "max_concurrent_subagents": 6,
-        "max_parallelism": 10,
-        "permission_prompt_timeout_secs": 300
+        "max_parallelism": 10
       }
     },
     "history": {
@@ -1050,17 +1040,14 @@
       ],
       "description": "How the file tools word paths for the model. `absolute` keeps\ntoday's text; `workspace_relative` makes tool descriptions say paths\nare relative to the working directory and prints Grep / Glob / Write /\nEdit paths under it relative, so a recorded session replays in another\nworking directory and long paths stop repeating in every call.\nResolving paths is unchanged. Unset, the scene decides\n(`SceneSpec::path_style`: `harnix` is relative, the rest absolute)."
     },
-    "permission_mode": {
-      "$ref": "#/$defs/PermissionMode",
-      "default": "default",
-      "description": "Permission mode for tool execution."
-    },
-    "permission_rules": {
-      "description": "Allow/deny/ask rules for specific tools.\n\nEvery tier's rules apply side by side: a project's rules are added to\nthe global and scene ones, never substituted for them.",
-      "items": {
-        "$ref": "#/$defs/PermissionRuleEntry"
+    "permissions": {
+      "$ref": "#/$defs/PermissionsSettings",
+      "default": {
+        "client_may_loosen": false,
+        "mode": "default",
+        "prompt_timeout_secs": 300
       },
-      "type": "array"
+      "description": "The permission mode, the allow / ask / deny rules, and how long a\npermission prompt waits."
     },
     "plugins": {
       "$ref": "#/$defs/PluginsConfig",
@@ -1219,6 +1206,6 @@
       ]
     }
   },
-  "title": "SettingsFile",
+  "title": "Settings",
   "type": "object"
 }

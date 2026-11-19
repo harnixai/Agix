@@ -119,7 +119,10 @@ impl SessionPool {
         let (mut value, mut local, revision) = match (tier, dir) {
             (Tier::Effective, _) => {
                 let settings = self.settings_for_project(project_root, scene_id).await;
-                managed = serde_json::to_value(&settings.managed).unwrap_or_default();
+                managed = settings
+                    .managed
+                    .as_ref()
+                    .map_or(serde_json::Value::Null, settings::managed::report);
                 (effective_settings_json(&settings), None, None)
             }
             (_, Some(dir)) => {
@@ -572,23 +575,19 @@ impl SessionPool {
 pub(super) fn effective_settings_json(settings: &LoadedSettings) -> serde_json::Value {
     let mut value =
         serde_json::to_value(&settings.values).unwrap_or_else(|_| serde_json::json!({}));
-    let rules: Vec<_> = settings
+    let shared = settings
         .rules
         .iter()
         .filter(|r| !r.machine_local)
-        .map(|r| &r.rule)
-        .collect();
+        .map(|r| &r.rule);
+    for (list, rules) in settings::permissions::rule_lists(shared) {
+        value[settings::permissions::KEY][list] = rules;
+    }
     if let Some(object) = value.as_object_mut() {
         object.insert(
             "paths".into(),
             serde_json::to_value(&settings.paths).unwrap_or_default(),
         );
-        if !rules.is_empty() {
-            object.insert(
-                "permission_rules".into(),
-                serde_json::to_value(rules).unwrap_or_default(),
-            );
-        }
     }
     value
 }

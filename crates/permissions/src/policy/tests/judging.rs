@@ -559,9 +559,7 @@ async fn rule_engine_deny_short_circuits() {
 
 #[tokio::test]
 async fn bypass_mode_consults_no_rule_no_protected_path_and_no_tool_verdict() {
-    for spelling in ["bypassPermissions", "auto", "yolo"] {
-        bypass_spelling_consults_nothing(spelling).await;
-    }
+    bypass_spelling_consults_nothing("bypassPermissions").await;
 }
 
 async fn bypass_spelling_consults_nothing(spelling: &str) {

@@ -312,9 +312,9 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     // here to answer a prompt, and a case that hung on one would look like a
     // case whose turn never finished.
     if !session.asking {
-        settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
+        settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
     } else {
-        settings.values.permission_mode = base::permission::PermissionMode::Default;
+        settings.values.permissions.mode = base::permission::PermissionMode::Default;
     }
     settings
         .values

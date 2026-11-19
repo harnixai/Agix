@@ -500,7 +500,7 @@ async fn a_session_with_no_host_refuses_what_it_would_ask_and_says_how_to_allow_
     let (told, prompts) = touch_with_the_default_permission(None).await;
     assert_eq!(prompts, 0, "{told}");
     assert!(told.contains("no host to ask"), "{told}");
-    assert!(told.contains("permission_rules"), "{told}");
+    assert!(told.contains("permissions.allow"), "{told}");
 }
 
 /// With an elicitation handler the same call is put to it.

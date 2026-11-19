@@ -125,7 +125,7 @@ impl Delegator {
             c.fallback_model.clone(),
         );
         if let Some(mode) = self.env.parent.state.host_permission_mode() {
-            settings.values.permission_mode = mode;
+            settings.values.permissions.mode = mode;
         }
         settings
     }

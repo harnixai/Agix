@@ -7,11 +7,11 @@ use crate::settings_sections::ScriptBindings;
 ///
 /// The caller's mode — `session.setPermissionMode`'s, else
 /// `options.permission_mode` — is honored, but **clamped** to the
-/// daemon's configured `settings.permission_mode`: a client may tighten the
+/// daemon's configured `permissions.mode`: a client may tighten the
 /// mode for its own session and may not loosen it, since there is no
 /// per-method authorization on this socket (see `server/mod.rs`).
 ///
-/// `settings.allow_client_permission_override` (default `false`) lets the
+/// `permissions.client_may_loosen` (default `false`) lets the
 /// client win outright, for deployments where every client is as trusted as
 /// the daemon.
 ///
@@ -35,19 +35,19 @@ fn clamped_permission_mode(
     requested: Option<base::permission::PermissionMode>,
 ) -> base::permission::PermissionMode {
     let Some(requested) = requested else {
-        return settings.permission_mode;
+        return settings.permissions.mode;
     };
-    if settings.allow_client_permission_override {
+    if settings.permissions.client_may_loosen {
         return requested;
     }
-    let clamped = requested.min_permissive(settings.permission_mode);
+    let clamped = requested.min_permissive(settings.permissions.mode);
     if clamped != requested {
         warn!(
             requested = ?requested,
-            configured = ?settings.permission_mode,
+            configured = ?settings.permissions.mode,
             effective = ?clamped,
             "session requested a more permissive mode than this daemon allows; clamped \
-             (set `allow_client_permission_override: true` to permit it)"
+             (set `permissions.client_may_loosen: true` to permit it)"
         );
     }
     clamped

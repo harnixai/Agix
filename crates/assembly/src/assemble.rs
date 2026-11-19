@@ -49,7 +49,7 @@ pub struct Assembly {
     /// available to `scene.activate`.
     pub scenes: Vec<Arc<SceneSpec>>,
     /// How long an unanswered permission prompt may block a turn, over every
-    /// session's `execution.permission_prompt_timeout_secs`. Left at
+    /// session's `permissions.prompt_timeout_secs`. Left at
     /// `None` the settings decide, and 300 seconds when they say nothing either.
     pub permission_prompt_timeout: Option<Duration>,
     /// Where model calls go. `None` builds an Anthropic client keyed from
@@ -152,11 +152,11 @@ pub async fn pool(
         None => default_anthropic_client(assembly.credentials.as_deref(), &config.paths.layout())?,
     };
     if matches!(
-        settings.values.permission_mode,
+        settings.values.permissions.mode,
         base::permission::PermissionMode::BypassPermissions
     ) {
         warn!(
-            "settings.permission_mode = bypassPermissions — no permission rule is consulted for \
+            "permissions.mode = bypassPermissions — no permission rule is consulted for \
              any tool call in any session; this daemon is trusting its host to sandbox it"
         );
     }

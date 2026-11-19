@@ -29,7 +29,7 @@ fn a_key_is_dotted_segments_without_wildcards_or_indexes() {
         "a..b",
         "a.",
         "providers.*.api_key",
-        "permission_rules[0]",
+        "permissions.allow[0]",
     ] {
         assert!(KeyPath::parse(bad).is_err(), "{bad:?}");
     }
@@ -205,23 +205,49 @@ fn a_moved_credential_does_not_replace_the_local_one() {
 #[test]
 fn the_concatenated_lists_are_edited_in_settings_json_only() {
     let mut tier = files(
-        json!({"permission_rules": [{"tool": "Read", "action": "allow"}]}),
-        json!({"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}),
+        json!({"permissions": {"allow": ["Read"]}}),
+        json!({"permissions": {"allow": ["Bash(ls)"]}}),
     );
-    let rules = json!([{"tool": "Edit", "action": "deny"}]);
+    let rules = json!(["Edit"]);
     assert!(!apply(
         &mut tier,
-        &[EditOp::Set(key("permission_rules"), rules.clone())]
+        &[EditOp::Set(key("permissions.allow"), rules.clone())]
     ));
-    assert_eq!(tier.shared["permission_rules"], rules);
-    assert_eq!(tier.local["permission_rules"][0]["tool"], "Bash(ls)");
+    assert_eq!(tier.shared["permissions"]["allow"], rules);
+    assert_eq!(tier.local["permissions"]["allow"][0], "Bash(ls)");
 
     assert!(!apply(
         &mut tier,
-        &[EditOp::Remove(key("permission_rules"))]
+        &[EditOp::Remove(key("permissions.allow"))]
     ));
     assert!(tier.shared.is_empty());
-    assert!(tier.local.contains_key("permission_rules"));
+    assert_eq!(tier.local["permissions"]["allow"][0], "Bash(ls)");
+}
+
+/// "Allow every time" writes `settings.local.json`; setting or removing the
+/// whole `permissions` block does not take those answers away.
+#[test]
+fn a_change_of_the_block_above_keeps_the_local_lists() {
+    let mut tier = files(
+        json!({"permissions": {"mode": "plan", "deny": ["Bash"]}}),
+        json!({"permissions": {"allow_exact": ["Bash(ls)"], "mode": "dontAsk"}}),
+    );
+    apply(
+        &mut tier,
+        &[EditOp::Set(key("permissions"), json!({"mode": "default"}))],
+    );
+    assert_eq!(
+        Value::Object(tier.shared.clone()),
+        json!({"permissions": {"mode": "default"}})
+    );
+    assert_eq!(
+        Value::Object(tier.local.clone()),
+        json!({"permissions": {"allow_exact": ["Bash(ls)"]}})
+    );
+
+    apply(&mut tier, &[EditOp::Remove(key("permissions"))]);
+    assert!(tier.shared.is_empty());
+    assert_eq!(tier.local["permissions"]["allow_exact"][0], "Bash(ls)");
 }
 
 #[test]

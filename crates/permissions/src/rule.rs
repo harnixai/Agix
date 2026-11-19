@@ -61,10 +61,10 @@ pub fn format_rule_string(r: &PermissionRule) -> String {
     }
 }
 
-/// `settings.json` 的 `permission_rules` → 规则引擎认识的 `PermissionRule`。
+/// settings 文件 `permissions` 块里的规则串 → 规则引擎认识的 `PermissionRule`。
 ///
-/// 两边是两个不同的类型：settings 侧是 `{"tool": "Bash(git push:*)",
-/// "action": "deny"}`（面向人手写的一行字符串），引擎侧是拆好的
+/// 两边是两个不同的类型：settings 侧是写在 `allow` / `ask` / `deny` 某个列表里的
+/// 一行字符串（`Bash(git push:*)`，面向人手写），引擎侧是拆好的
 /// `{tool_name, rule_content, behavior, source}`。
 ///
 /// 解析不了的条目（空串、括号不配对……）跳过并 warn，不整体失败：一条手写错
@@ -85,7 +85,7 @@ pub fn rules_from_settings(
             if !r.matching.is_pattern() {
                 tracing::warn!(
                     rule = %r.tool,
-                    "`match: exact` is read on allow rules only; this rule is a pattern"
+                    "an exact match is read on allow rules only; this rule is a pattern"
                 );
             }
             match parse_rule_string(&r.tool, source, r.action) {
@@ -94,7 +94,7 @@ pub fn rules_from_settings(
                     tracing::warn!(
                         rule = %r.tool,
                         error = %e,
-                        "unparsable permission_rules entry in settings.json, skipping"
+                        "unparsable permission rule in the settings, skipping"
                     );
                     None
                 }
@@ -117,15 +117,15 @@ pub fn rules_from(loaded: &base::permission::PermissionSettings) -> Vec<Permissi
     rules.extend(rules_from_settings(&local, RuleSource::LocalSettings));
     if let Some(managed) = &loaded.managed {
         rules.extend(rules_from_settings(
-            &managed.permission_rules,
+            &managed.rules,
             RuleSource::PolicySettings,
         ));
     }
     rules
 }
 
-/// The allow rules of `loaded` written `"match": "exact"` — what "allow every
-/// time" kept — each with its tier's [`RuleSource`]. [`rules_from`] leaves
+/// The allow rules of `loaded` from `permissions.allow_exact` — what "allow
+/// every time" kept — each with its tier's [`RuleSource`]. [`rules_from`] leaves
 /// them out.
 pub fn exact_allows_from(loaded: &base::permission::PermissionSettings) -> Vec<PermissionRule> {
     loaded
@@ -139,7 +139,7 @@ pub fn exact_allows_from(loaded: &base::permission::PermissionSettings) -> Vec<P
                     tracing::warn!(
                         rule = %r.rule.tool,
                         error = %e,
-                        "unparsable permission_rules entry in settings.json, skipping"
+                        "unparsable permission rule in the settings, skipping"
                     );
                     None
                 }

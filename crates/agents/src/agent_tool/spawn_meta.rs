@@ -92,7 +92,7 @@ impl SubagentPayload {
             session_id: session_id.to_string(),
             cwd: cwd.to_path_buf(),
             depth,
-            permission_mode: settings.permission_mode,
+            permission_mode: settings.permissions.mode,
             agent_type: agent_type.map(str::to_string),
             stop_reason: None,
         }

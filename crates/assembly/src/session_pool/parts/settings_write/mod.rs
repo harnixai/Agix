@@ -341,9 +341,9 @@ fn judge(
     rejected
 }
 
-/// The settings key a loader report names: `permission_rules[0]` and
-/// `permission_rules.allow(Bash)` are about `permission_rules` and
-/// `permission_rules.allow`.
+/// The settings key a loader report names: `permissions.deny[0]` and
+/// `permissions.allow(Bash)` are about `permissions.deny` and
+/// `permissions.allow`.
 fn key_of(reported: &str) -> KeyPath {
     let key = reported.split(['(', '[']).next().unwrap_or(reported);
     KeyPath::new(key.split('.').filter(|segment| !segment.is_empty()))

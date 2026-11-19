@@ -4,31 +4,27 @@
 use serde_json::Value;
 
 use crate::section::Sections;
-use crate::{Settings, SettingsFile};
+use crate::Settings;
 
 /// JSON Schema for one settings.json file, published as
 /// `docs/schemas/settings.schema.json` for editor autocomplete/validation
 /// (reference it from a settings.json file via a `"$schema"` key).
 ///
-/// Generated from [`SettingsFile`]'s type definitions, then adjusted to what
+/// Generated from [`Settings`]' type definitions, then adjusted to what
 /// [`LoadedSettings::load`] does with a file: a file is merged over the
 /// built-in defaults, so a field the defaults already supply is optional
 /// however the type declares it ([`optional_where_defaulted`]); program-only
 /// modes are left out. Regenerate with
 /// `cargo test -p assembly --test settings_schema write_settings_schema -- --ignored`
-/// after changing any `SettingsFile`-reachable type or a registered section.
+/// after changing any `Settings`-reachable type or a registered section.
 ///
 /// The core types give the schema; each registered section's schema is added
 /// under its key, with the section's definitions merged into `$defs`.
 pub fn settings_json_schema(sections: &Sections) -> Value {
     let mut generator = schemars::SchemaGenerator::default();
     let mut schema =
-        serde_json::to_value(generator.root_schema_for::<SettingsFile>()).unwrap_or_default();
-    let mut defaults = serde_json::to_value(SettingsFile {
-        settings: Settings::defaults_for(""),
-        permission_rules: Vec::new(),
-    })
-    .unwrap_or_default();
+        serde_json::to_value(generator.root_schema_for::<Settings>()).unwrap_or_default();
+    let mut defaults = serde_json::to_value(Settings::defaults_for("")).unwrap_or_default();
     for spec in sections.iter() {
         let mut property = serde_json::to_value(spec.schema(&mut generator)).unwrap_or_default();
         let default = spec.default_value();
@@ -50,7 +46,6 @@ pub fn settings_json_schema(sections: &Sections) -> Value {
         }
     }
     optional_where_defaulted(&mut schema, &defaults);
-    admit_permission_mode_aliases(&mut schema);
     schema
 }
 
@@ -104,27 +99,6 @@ fn defaulted_objects(
         }
     }
     out.push((pointer.to_string(), defaulted.clone()));
-}
-
-/// schemars renders each variant as a `const`, which has no room for serde's
-/// `alias`: the spellings `Settings` accepts for `bypassPermissions` have to
-/// be added by hand or editors flag them.
-fn admit_permission_mode_aliases(schema: &mut Value) {
-    let variants = schema
-        .pointer_mut("/$defs/PermissionMode/oneOf")
-        .and_then(Value::as_array_mut);
-    for variant in variants.into_iter().flatten() {
-        let Some(object) = variant.as_object_mut() else {
-            continue;
-        };
-        if object.get("const") == Some(&serde_json::json!("bypassPermissions")) {
-            object.remove("const");
-            object.insert(
-                "enum".into(),
-                serde_json::json!(["bypassPermissions", "auto", "yolo"]),
-            );
-        }
-    }
 }
 
 /// The top-level keys of one settings file that no setting reads — a typo,
@@ -299,7 +273,7 @@ mod tests {
             "default_provider",
             "task_models",
             "hooks_config",
-            "permission_rules",
+            "permissions",
         ] {
             assert!(props.contains_key(key), "schema missing property `{key}`");
         }
@@ -330,23 +304,12 @@ mod tests {
                 schema["$defs"][def]["required"]
             );
         }
-        assert_eq!(
-            schema["$defs"]["PermissionRuleEntry"]["required"],
-            serde_json::json!(["tool", "action"]),
-            "a list entry is not merged with defaults"
-        );
-        assert!(!schema["$defs"]["PermissionMode"]
-            .to_string()
-            .contains("\"bubble\""));
-    }
-
-    #[test]
-    fn the_schema_admits_the_permission_mode_aliases() {
-        let schema = settings_json_schema(&Sections::none());
-        let admitted = schema.to_string();
-        assert!(
-            admitted.contains(r#"["bypassPermissions","auto","yolo"]"#),
-            "{admitted}"
-        );
+        assert!(schema["$defs"]["PermissionsSettings"]
+            .get("required")
+            .is_none());
+        let modes = schema["$defs"]["PermissionMode"].to_string();
+        for absent in ["\"bubble\"", "\"auto\"", "\"yolo\""] {
+            assert!(!modes.contains(absent), "{modes}");
+        }
     }
 }

@@ -17,8 +17,15 @@ pub const SECRET_PATHS: &[&str] = &[
 
 /// The lists each file adds to the other files' rather than replacing them,
 /// so a tier's two files are edited apart: a change reaches `settings.json`
-/// only.
-pub const CONCATENATED_KEYS: &[&str] = &["permission_rules", "project_trust.trusted"];
+/// only, and a change of the object above one leaves what
+/// `settings.local.json` holds there.
+pub const CONCATENATED_KEYS: &[&str] = &[
+    "permissions.allow",
+    "permissions.allow_exact",
+    "permissions.ask",
+    "permissions.deny",
+    "project_trust.trusted",
+];
 
 /// A dotted settings key, one segment per object level.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -135,9 +142,7 @@ pub fn apply(files: &mut TierFiles, ops: &[EditOp]) -> bool {
             EditOp::Set(path, value) => set(files, path, value.clone()),
             EditOp::Remove(path) => {
                 take(&mut files.shared, &path.segments());
-                if !path.is_concatenated() {
-                    take(&mut files.local, &path.segments());
-                }
+                take_local(files, path);
             }
             EditOp::Merge(path, value) => merge(files, path, value.clone()),
         }
@@ -154,7 +159,7 @@ fn set(files: &mut TierFiles, path: &KeyPath, mut value: Value) {
         put(&mut files.shared, &segments, value);
         return;
     }
-    take(&mut files.local, &segments);
+    take_local(files, path);
     let secrets = path.secrets_beneath();
     if secrets.iter().any(Vec::is_empty) {
         take(&mut files.shared, &segments);
@@ -165,6 +170,24 @@ fn set(files: &mut TierFiles, path: &KeyPath, mut value: Value) {
     put(&mut files.shared, &segments, value);
     if let Some(found) = found {
         put(&mut files.local, &segments, found);
+    }
+}
+
+/// Remove what `settings.local.json` holds at `path`, except the concatenated
+/// lists at or beneath it.
+fn take_local(files: &mut TierFiles, path: &KeyPath) {
+    if path.is_concatenated() {
+        return;
+    }
+    let kept: Vec<(Vec<&str>, Value)> = CONCATENATED_KEYS
+        .iter()
+        .map(|key| key.split('.').collect::<Vec<_>>())
+        .filter(|key| path.contains(&KeyPath::new(key.iter().copied())))
+        .filter_map(|key| get(&files.local, &key).cloned().map(|value| (key, value)))
+        .collect();
+    take(&mut files.local, &path.segments());
+    for (key, value) in kept {
+        put(&mut files.local, &key, value);
     }
 }
 

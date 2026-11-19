@@ -16,7 +16,8 @@ use base::interface::config_source::{ConfigSource, Tier};
 use base::paths::{Layout, PathSettings, Workspace};
 use base::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
 
-use crate::merge::{merge_fitting, merge_json_values, read_permission_rules};
+use crate::merge::{merge_fitting, merge_json_values};
+use crate::permissions::{self, read_rule_list, take_rule_lists};
 use crate::section::Sections;
 use crate::trust::{self, ProjectLayer, ProjectTrustSettings};
 use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
@@ -26,7 +27,7 @@ use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
 pub struct LoadedSettings {
     pub values: Settings,
     pub paths: PathSettings,
-    /// Every tier's `permission_rules`, lowest tier first. They are
+    /// Every tier's `permissions` rule lists, lowest tier first. They are
     /// concatenated, never overridden: a project's rules are added to the
     /// global and scene ones.
     pub rules: Vec<LoadedRule>,
@@ -263,11 +264,10 @@ impl LoadedSettings {
     /// `bypassPermissions` the lower tiers configured becomes `default`.
     pub fn with_managed(mut self, managed: Option<ManagedSettings>) -> Self {
         if let Some(m) = &managed {
-            if m.disable_bypass_permissions_mode
-                && self.values.permission_mode == PermissionMode::BypassPermissions
+            if m.disable_bypass && self.values.permissions.mode == PermissionMode::BypassPermissions
             {
-                tracing::warn!(origin = %m.origin, "managed settings disable bypassPermissions; permission_mode falls back to default");
-                self.values.permission_mode = PermissionMode::Default;
+                tracing::warn!(origin = %m.origin, "managed settings disable bypassPermissions; permissions.mode falls back to default");
+                self.values.permissions.mode = PermissionMode::Default;
             }
         }
         self.managed = managed;
@@ -314,7 +314,7 @@ impl LoadedSettings {
 
     /// The project-tier settings that take effect only while the project is
     /// trusted, as dotted keys (`hooks_config`, `mcp_servers.github`,
-    /// `permission_rules.allow(Bash)`). Withheld while it is not.
+    /// `permissions.allow(Bash)`). Withheld while it is not.
     pub fn requires_trust(&self) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         self.project_layer
@@ -338,9 +338,7 @@ impl LoadedSettings {
 
     /// Whether the deployment has taken `bypassPermissions` away.
     pub fn bypass_disabled(&self) -> bool {
-        self.managed
-            .as_ref()
-            .is_some_and(|m| m.disable_bypass_permissions_mode)
+        self.managed.as_ref().is_some_and(|m| m.disable_bypass)
     }
 }
 
@@ -407,7 +405,14 @@ impl LayerFold<'_> {
             return;
         }
         for key in unknown_settings_keys(&layer.value, self.sections) {
-            tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "settings key not recognised, ignoring it");
+            match crate::renamed::renamed_to(&key) {
+                Some(renamed_to) => {
+                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, renamed_to, "settings key was renamed, ignoring it")
+                }
+                None => {
+                    tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, "settings key not recognised, ignoring it")
+                }
+            }
         }
         let is_global = self.tiers.is_global(layer.tier);
         let is_own_project = self.tiers.is_own_project(layer.tier);
@@ -441,29 +446,25 @@ impl LayerFold<'_> {
                         origin: layer.origin.clone(),
                     }));
             }
-            if let Some(mode) = obj
-                .get("permission_mode")
-                .and_then(|v| serde_json::from_value::<PermissionMode>(v.clone()).ok())
-                .filter(|mode| !mode.is_user_settable())
+            if let Some(block) = obj
+                .get_mut(permissions::KEY)
+                .and_then(serde_json::Value::as_object_mut)
             {
-                obj.remove("permission_mode");
-                let error = format!(
-                    "permission mode {mode:?} is program-only and cannot be set in a settings file"
-                );
-                tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, error, "settings value does not fit its setting, ignoring it");
-                self.ignored.push(IgnoredValue {
-                    tier: layer.tier.name(),
-                    origin: layer.origin.clone(),
-                    key: "permission_mode".into(),
-                    error,
-                });
-            }
-            if let Some(rules) = obj.remove("permission_rules") {
-                self.take_permission_rules(&layer.origin, layer.tier, layer.machine_local, rules);
+                self.refuse_a_program_only_mode(&layer.origin, layer.tier, block);
+                for (list, rules) in take_rule_lists(block) {
+                    self.take_permission_rules(
+                        &layer.origin,
+                        layer.tier,
+                        layer.machine_local,
+                        list,
+                        rules,
+                    );
+                }
             }
         }
         self.note_mcp_servers(layer.tier, &layer_json);
         for (key, error) in merge_fitting(&mut self.merged_json, layer_json, self.sections) {
+            let error = crate::renamed::explain(&key, error);
             tracing::warn!(layer = layer.tier.name(), origin = %layer.origin, key, error, "settings value does not fit its setting, ignoring it");
             self.ignored.push(IgnoredValue {
                 tier: layer.tier.name(),
@@ -497,14 +498,41 @@ impl LayerFold<'_> {
         });
     }
 
+    fn refuse_a_program_only_mode(
+        &mut self,
+        origin: &str,
+        tier: Tier,
+        block: &mut serde_json::Map<String, serde_json::Value>,
+    ) {
+        let Some(mode) = block
+            .get("mode")
+            .and_then(|v| serde_json::from_value::<PermissionMode>(v.clone()).ok())
+            .filter(|mode| !mode.is_user_settable())
+        else {
+            return;
+        };
+        block.remove("mode");
+        let error = format!(
+            "permission mode {mode:?} is program-only and cannot be set in a settings file"
+        );
+        tracing::warn!(layer = tier.name(), origin = %origin, error, "settings value does not fit its setting, ignoring it");
+        self.ignored.push(IgnoredValue {
+            tier: tier.name(),
+            origin: origin.to_string(),
+            key: format!("{}.mode", permissions::KEY),
+            error,
+        });
+    }
+
     fn take_permission_rules(
         &mut self,
         origin: &str,
         tier: Tier,
         machine_local: bool,
+        list: &str,
         rules: serde_json::Value,
     ) {
-        let (rules, unread) = read_permission_rules(rules);
+        let (rules, unread) = read_rule_list(list, rules);
         for (key, error) in unread {
             tracing::warn!(layer = tier.name(), origin = %origin, key, error, "permission rule does not read, ignoring it");
             self.ignored.push(IgnoredValue {
@@ -517,7 +545,7 @@ impl LayerFold<'_> {
         for rule in rules {
             if self.tiers.is_own_project(tier) && rule.action == RuleBehavior::Allow {
                 self.project_layer.requires_trust.push(trust::Withheld {
-                    key: format!("permission_rules.allow({})", rule.tool),
+                    key: format!("{}.{list}({})", permissions::KEY, rule.tool),
                     origin: origin.to_string(),
                 });
                 if self.withhold {
@@ -604,6 +632,6 @@ fn guard_loaded_values(values: &mut Settings, mcp_secret_vars: &[String]) {
     }
     if let Err(reason) = values.validate() {
         tracing::warn!("Settings validation: {reason}");
-        values.permission_mode = PermissionMode::default();
+        values.permissions.mode = PermissionMode::default();
     }
 }

@@ -3,54 +3,6 @@
 
 use crate::section::Sections;
 use crate::Settings;
-use base::permission::PermissionRuleEntry;
-
-/// One layer's `permission_rules`, rule by rule: a rule that does not read is
-/// left out by itself (`permission_rules[i]`, with why), so a mistyped allow
-/// does not take the deny rules beside it along. A value that is not a list
-/// is left out as a whole.
-pub(crate) fn read_permission_rules(
-    rules: serde_json::Value,
-) -> (Vec<PermissionRuleEntry>, Vec<(String, String)>) {
-    let serde_json::Value::Array(entries) = rules else {
-        let error = serde_json::from_value::<Vec<PermissionRuleEntry>>(rules)
-            .err()
-            .map_or_else(|| "expected a list".to_string(), |e| e.to_string());
-        return (Vec::new(), vec![("permission_rules".to_string(), error)]);
-    };
-    let mut kept = Vec::new();
-    let mut unread = Vec::new();
-    for (index, entry) in entries.into_iter().enumerate() {
-        match serde_json::from_value::<PermissionRuleEntry>(entry) {
-            Ok(rule) => match rule_text_problem(&rule.tool) {
-                None => kept.push(rule),
-                Some(problem) => unread.push((
-                    format!("permission_rules[{index}]"),
-                    format!("{:?}: {problem}", rule.tool),
-                )),
-            },
-            Err(e) => unread.push((format!("permission_rules[{index}]"), e.to_string())),
-        }
-    }
-    (kept, unread)
-}
-
-/// What keeps a rule string such as `Bash(rm:*` from being a rule, in the
-/// terms `permissions::rule::parse_rule_string` rejects it by.
-fn rule_text_problem(tool: &str) -> Option<&'static str> {
-    let tool = tool.trim();
-    if tool.is_empty() {
-        return Some("rule string is empty");
-    }
-    let open = tool.find('(')?;
-    if !tool.ends_with(')') {
-        return Some("rule has unbalanced parens");
-    }
-    tool[..open]
-        .trim()
-        .is_empty()
-        .then_some("rule names no tool before the parens")
-}
 
 /// Merge `over` into `merged` — a settings object that deserializes — one
 /// value at a time, leaving out each value that would stop the result from

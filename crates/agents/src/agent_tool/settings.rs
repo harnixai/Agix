@@ -53,20 +53,20 @@ pub(crate) fn delegate_selector(
 pub(super) fn apply_agent_type_overrides(settings: &mut Settings, def: &AgentTypeDefinition) {
     if let Some(mode) = def.permission_mode {
         let applied = if def.source.may_loosen() {
-            settings.permission_mode.for_delegate(mode)
+            settings.permissions.mode.for_delegate(mode)
         } else {
-            mode.min_permissive(settings.permission_mode)
+            mode.min_permissive(settings.permissions.mode)
         };
         if applied != mode {
             tracing::warn!(
                 agent_type = %def.name,
                 requested = ?mode,
-                inherited = ?settings.permission_mode,
+                inherited = ?settings.permissions.mode,
                 applied = ?applied,
                 "agent type's permission mode held by its parent's"
             );
         }
-        settings.permission_mode = applied;
+        settings.permissions.mode = applied;
     }
     if let Some(effort) = &def.effort {
         if let Some(level) = parse_effort(effort) {

@@ -49,7 +49,7 @@ pub struct EmbedConfig {
     pub max_tokens: u32,
     pub session_cap: usize,
     pub session_idle_timeout: Duration,
-    /// Over every session's `execution.permission_prompt_timeout_secs`.
+    /// Over every session's `permissions.prompt_timeout_secs`.
     pub permission_prompt_timeout: Option<Duration>,
     /// `Some`: take the scene's `daemon.lock` and write the `instances.d`
     /// entry under this name; without a `groups_file`, record the commands

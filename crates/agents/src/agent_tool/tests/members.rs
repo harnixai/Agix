@@ -466,14 +466,15 @@ async fn team_delete_cleanup_stops_a_persistent_member() {
 }
 
 #[tokio::test]
-async fn auto_for_a_persistent_member_is_bypass() {
+async fn bypass_for_a_persistent_member_is_kept() {
     let agent_tool = team_enabled_agent_tool();
     let ctx = session_state::testing::tool_context_for_test(
         platform::local_providers(),
         std::path::PathBuf::from("/tmp"),
     );
     let input = serde_json::json!({
-        "prompt": "hi", "team_name": "t-auto", "name": "worker", "permission_mode": "auto",
+        "prompt": "hi", "team_name": "t-auto", "name": "worker",
+        "permission_mode": "bypassPermissions",
     });
     base::tool::Tool::call(&agent_tool, input, ctx, ProgressSender::noop("t"))
         .await

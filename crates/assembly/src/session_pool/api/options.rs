@@ -23,9 +23,9 @@ pub struct SessionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryOptions>,
     /// This session's permission mode. `None` takes the settings'
-    /// `permission_mode`. A session may always ask for a stricter mode than
+    /// `permissions.mode`. A session may always ask for a stricter mode than
     /// the settings'; a looser one is clamped unless the settings set
-    /// `allow_client_permission_override`.
+    /// `permissions.client_may_loosen`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<base::permission::PermissionMode>,
     /// Allow/deny/ask rules for the `Policy` this session's

@@ -181,7 +181,7 @@ fn every_documented_settings_example_is_valid_and_loads_whole() {
     // Values the docs show on purpose as what gets ignored.
     let counterexamples = [
         serde_json::json!({"language": 5}),
-        serde_json::json!({"permission_mode": "plann"}),
+        serde_json::json!({"permissions": {"mode": "plann"}}),
     ];
     // `plugin.list`'s result, which shares a settings key and is no settings file.
     let not_settings = [serde_json::json!({"plugins": []})];
@@ -228,8 +228,8 @@ fn the_schema_accepts_what_the_loader_starts_from() {
         assert!(errors.is_empty(), "{minimal}: {errors:?}");
     }
     for refused in [
-        serde_json::json!({"permission_mode": "bubble"}),
-        serde_json::json!({"permission_rules": [{"tool": "Bash"}]}),
+        serde_json::json!({"permissions": {"mode": "bubble"}}),
+        serde_json::json!({"permissions": {"allow": [{"tool": "Bash"}]}}),
         serde_json::json!({"model": {"max_tokens": "many"}}),
     ] {
         assert!(!validator.is_valid(&refused), "{refused} passed the schema");

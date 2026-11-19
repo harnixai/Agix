@@ -405,8 +405,8 @@ fn hash_skill_content(content: &str) -> u64 {
 /// Split one `allowed-tools` frontmatter entry into `(tool name, content
 /// pattern)`.
 ///
-/// Accepts the same `Tool(pattern)` shape `settings.json`'s
-/// `permission_rules` uses (`permissions::rule::parse_rule_string`), so a
+/// Accepts the same `Tool(pattern)` shape a settings file's `permissions`
+/// rules use (`permissions::rule::parse_rule_string`), so a
 /// skill can say `Bash(cargo test:*)` and get exactly that call approved
 /// rather than every `Bash` call. A bare `Bash` yields `None` for the
 /// pattern, which the caller treats as a blanket grant — see the call site

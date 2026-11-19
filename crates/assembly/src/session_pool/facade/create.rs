@@ -603,7 +603,7 @@ impl SessionPool {
             .note_script_faults(std::mem::take(&mut built.script_faults));
 
         let settings = &built.settings;
-        let mode_name = serde_json::to_value(settings.values.permission_mode)
+        let mode_name = serde_json::to_value(settings.values.permissions.mode)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "default".to_string());
@@ -652,7 +652,7 @@ impl SessionPool {
                 .unwrap_or_else(|| settings.paths.global_data_dir.display().to_string()),
             started_at: store.environment().now(),
             model: settings.values.model.model_name.clone(),
-            permission_mode: serde_json::to_value(settings.values.permission_mode)
+            permission_mode: serde_json::to_value(settings.values.permissions.mode)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| "default".to_string()),

@@ -23,9 +23,7 @@ pub enum PermissionMode {
     /// (`.ssh`, `.aws`, `.gnupg`, the state directory's settings and tokens)
     /// are still refused, the deployment's managed `deny` / `ask` rules still
     /// apply, input that is not valid is still refused, and `Bash` still runs
-    /// in the OS sandbox. `auto` and `yolo` are accepted as other spellings
-    /// of this mode and read back as `bypassPermissions`.
-    #[serde(alias = "auto", alias = "yolo")]
+    /// in the OS sandbox.
     BypassPermissions,
     /// Plan mode — only allow read-only tools.
     Plan,
@@ -159,21 +157,14 @@ pub enum RuleBehavior {
     Ask,
 }
 
-/// A single permission rule: allow/deny/ask a tool matching a pattern.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+/// One rule string of a settings file's `permissions` block, with the list it
+/// was written in: `allow`, `ask` and `deny` give the action, `allow_exact`
+/// an allow whose content matches only the same text.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionRuleEntry {
-    /// Tool name pattern (e.g. "Bash", "Bash(git push:*)", "FileWrite").
+    /// As written: `Bash`, `Bash(git push:*)`, `mcp__srv__tool`.
     pub tool: String,
-    /// Action: "allow", "deny", or "ask".
     pub action: RuleBehavior,
-    /// `"exact"`: the content in `tool` allows only a call whose content is
-    /// that same text, as "allow every time" records it. Read on allow rules
-    /// only; a deny or ask is always a pattern.
-    #[serde(
-        default,
-        rename = "match",
-        skip_serializing_if = "crate::interface::permission::GrantMatch::is_pattern"
-    )]
     pub matching: crate::interface::permission::GrantMatch,
 }
 
@@ -197,15 +188,14 @@ impl LoadedRule {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ManagedSettings {
     /// The file (or other source) the layer came from.
     pub origin: String,
     /// Why the layer cannot be honoured. While set, every tool call is refused.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    pub permission_rules: Vec<PermissionRuleEntry>,
-    pub disable_bypass_permissions_mode: bool,
+    pub rules: Vec<PermissionRuleEntry>,
+    pub disable_bypass: bool,
 }
 
 impl ManagedSettings {
@@ -214,8 +204,8 @@ impl ManagedSettings {
     pub fn followed_by(mut self, later: Self) -> Self {
         self.origin = format!("{}, {}", self.origin, later.origin);
         self.error = self.error.or(later.error);
-        self.permission_rules.extend(later.permission_rules);
-        self.disable_bypass_permissions_mode |= later.disable_bypass_permissions_mode;
+        self.rules.extend(later.rules);
+        self.disable_bypass |= later.disable_bypass;
         self
     }
 
@@ -225,11 +215,7 @@ impl ManagedSettings {
     /// (`$CMD x`) is asked about rather than refused.
     pub fn asks_under_bypass(&self) -> bool {
         self.error.is_none()
-            && (self.disable_bypass_permissions_mode
-                || self
-                    .permission_rules
-                    .iter()
-                    .any(|r| r.action != RuleBehavior::Allow))
+            && (self.disable_bypass || self.rules.iter().any(|r| r.action != RuleBehavior::Allow))
     }
 }
 
@@ -293,14 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn auto_and_yolo_are_bypass() {
-        for spelling in ["auto", "yolo"] {
-            let mode: PermissionMode = serde_json::from_value(spelling.into()).unwrap();
-            assert_eq!(mode, PermissionMode::BypassPermissions);
-            assert_eq!(
-                serde_json::to_value(mode).unwrap(),
-                serde_json::Value::String("bypassPermissions".into())
-            );
+    fn only_the_claude_code_spellings_are_modes() {
+        for spelling in ["auto", "yolo", "bypass_permissions"] {
+            assert!(serde_json::from_value::<PermissionMode>(spelling.into()).is_err());
         }
     }
 

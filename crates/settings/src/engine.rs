@@ -19,12 +19,12 @@ impl LoadedSettings {
         let mut c = EngineConfig::defaults_for(settings.model.model_name.clone());
         c.max_tokens = settings.model.max_tokens;
         c.fallback_model = settings.model.fallback_model.clone();
-        c.permission_prompt_timeout_secs = settings.execution.permission_prompt_timeout_secs;
+        c.permission_prompt_timeout_secs = settings.permissions.prompt_timeout_secs;
         c.max_parallelism = settings.execution.max_parallelism;
         c.max_api_calls_per_turn = settings.execution.max_api_calls_per_turn;
         c.max_agent_depth = settings.execution.max_agent_depth;
 
-        c.permission_mode = settings.permission_mode;
+        c.permission_mode = settings.permissions.mode;
         c.sandbox = std::sync::Arc::new(SandboxSettings {
             worktree_git: loaded.paths.worktree_git(),
             ..sandbox_settings(

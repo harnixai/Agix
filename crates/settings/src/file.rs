@@ -177,7 +177,7 @@ fn refuse_symlink(path: &Path) -> Result<(), SettingsFileError> {
     }
 }
 
-/// Which behavior bucket to append to.
+/// Which rule list of `permissions` to append to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AppendTarget {
@@ -187,8 +187,9 @@ pub enum AppendTarget {
 }
 
 impl AppendTarget {
-    fn action(&self) -> &'static str {
+    fn list(&self, matching: GrantMatch) -> &'static str {
         match self {
+            AppendTarget::Allow if !matching.is_pattern() => "allow_exact",
             AppendTarget::Allow => "allow",
             AppendTarget::Deny => "deny",
             AppendTarget::Ask => "ask",
@@ -203,18 +204,15 @@ pub enum AppendError {
     File(#[from] SettingsFileError),
     #[error("{} has no file name", .0.display())]
     NoFileName(std::path::PathBuf),
-    #[error("permission_rules in the settings file is not a list")]
-    NotAList,
+    #[error("permissions in the settings file is not an object")]
+    NotAnObject,
+    #[error("permissions.{0} in the settings file is not a list")]
+    NotAList(&'static str),
 }
 
-/// Append `rule_string` to `permission_rules` in the given settings.json
-/// file, as `{"tool": <rule_string>, "action": <target>}`. If the file
-/// doesn't exist, it's created with `{}` first. If an identical entry is
-/// already present, the file is left untouched.
-///
-/// The shape here is the one `base::settings::Settings`
-/// deserializes — writing anything else produces a file `LoadedSettings::load`
-/// silently drops as an unknown key.
+/// Append `rule_string` to the `permissions` list of `target` in the given
+/// settings file. If the file doesn't exist, it's created with `{}` first. If
+/// the list already holds the string, the file is left untouched.
 ///
 /// Returns `Ok(true)` if the file was modified, `Ok(false)` if the rule was
 /// already present.
@@ -227,7 +225,7 @@ pub fn append_permission_rule(
 }
 
 /// [`append_permission_rule`] for an allow whose content is matched only by
-/// the same text, written with `"match": "exact"`.
+/// the same text, written to `permissions.allow_exact`.
 pub fn append_exact_allow(settings_path: &Path, rule_string: &str) -> Result<bool, AppendError> {
     append(
         settings_path,
@@ -254,25 +252,21 @@ fn append(
     let tier = SettingsDir::lock(dir)?;
     let mut value = tier.read(file)?;
 
-    let arr = value
-        .entry("permission_rules".to_string())
-        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
-    let arr = arr.as_array_mut().ok_or(AppendError::NotAList)?;
-
-    let action = target.action();
-    let mut entry = serde_json::json!({ "tool": rule_string, "action": action });
-    if !matching.is_pattern() {
-        entry["match"] = serde_json::to_value(matching).unwrap_or_default();
-    }
-    let already = arr.iter().any(|v| {
-        ["tool", "action", "match"]
-            .iter()
-            .all(|key| v.get(key) == entry.get(key))
-    });
-    if already {
+    let block = value
+        .entry(crate::permissions::KEY.to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or(AppendError::NotAnObject)?;
+    let list = target.list(matching);
+    let arr = block
+        .entry(list.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or(AppendError::NotAList(list))?;
+    if arr.iter().any(|v| v.as_str() == Some(rule_string)) {
         return Ok(false);
     }
-    arr.push(entry);
+    arr.push(Value::String(rule_string.to_string()));
 
     tier.write(file, &value)?;
     Ok(true)
@@ -523,7 +517,7 @@ mod tests {
         });
 
         let v: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
-        let arr = v["permission_rules"].as_array().unwrap();
+        let arr = v["permissions"]["allow"].as_array().unwrap();
         assert_eq!(
             arr.len(),
             n,
@@ -540,6 +534,7 @@ mod tests {
         let local = dir.path().join(base::paths::SETTINGS_LOCAL_FILE);
         append_permission_rule(&local, AppendTarget::Allow, "Bash(git status)").unwrap();
         append_permission_rule(&local, AppendTarget::Deny, "Bash(rm -rf:*)").unwrap();
+        append_exact_allow(&local, "Bash(rm a*.tmp)").unwrap();
 
         let empty = TempDir::new().unwrap();
         let root = dir.path().parent().unwrap().display().to_string();
@@ -562,13 +557,21 @@ mod tests {
             .rules
             .iter()
             .filter(|r| r.machine_local)
-            .map(|r| (r.rule.tool.as_str(), r.rule.action))
+            .map(|r| {
+                (
+                    r.rule.tool.as_str(),
+                    r.rule.action,
+                    r.rule.matching.is_pattern(),
+                )
+            })
             .collect();
+        use base::permission::RuleBehavior;
         assert_eq!(
             loaded,
             vec![
-                ("Bash(git status)", base::permission::RuleBehavior::Allow),
-                ("Bash(rm -rf:*)", base::permission::RuleBehavior::Deny),
+                ("Bash(git status)", RuleBehavior::Allow, true),
+                ("Bash(rm a*.tmp)", RuleBehavior::Allow, false),
+                ("Bash(rm -rf:*)", RuleBehavior::Deny, true),
             ]
         );
     }
@@ -580,11 +583,9 @@ mod tests {
         let modified = append_permission_rule(&p, AppendTarget::Allow, "Bash(ls)").unwrap();
         assert!(modified);
         let v: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
-        let arr = v["permission_rules"].as_array().unwrap();
-        assert_eq!(arr.len(), 1);
         assert_eq!(
-            arr[0],
-            serde_json::json!({"tool":"Bash(ls)","action":"allow"})
+            v,
+            serde_json::json!({"permissions": {"allow": ["Bash(ls)"]}})
         );
     }
 
@@ -592,11 +593,7 @@ mod tests {
     fn append_idempotent_when_rule_present() {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("settings.json");
-        fs::write(
-            &p,
-            r#"{"permission_rules":[{"tool":"Bash(git status)","action":"allow"}]}"#,
-        )
-        .unwrap();
+        fs::write(&p, r#"{"permissions":{"allow":["Bash(git status)"]}}"#).unwrap();
         let modified = append_permission_rule(&p, AppendTarget::Allow, "Bash(git status)").unwrap();
         assert!(!modified);
     }
@@ -611,7 +608,10 @@ mod tests {
         let modified = append_permission_rule(&p, AppendTarget::Deny, "Bash(ls)").unwrap();
         assert!(modified);
         let v: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
-        assert_eq!(v["permission_rules"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            v,
+            serde_json::json!({"permissions": {"allow": ["Bash(ls)"], "deny": ["Bash(ls)"]}})
+        );
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
         let p = dir.path().join("settings.json");
         fs::write(
             &p,
-            r#"{"model":"x","weird":42,"permission_rules":[{"tool":"Bash(rm:*)","action":"deny"}]}"#,
+            r#"{"model":"x","weird":42,"permissions":{"mode":"plan","allow":["Bash(rm:*)"]}}"#,
         )
         .unwrap();
         append_permission_rule(&p, AppendTarget::Allow, "Bash(ls)").unwrap();
@@ -628,12 +628,8 @@ mod tests {
         assert_eq!(v["model"], "x");
         assert_eq!(v["weird"], 42);
         assert_eq!(
-            v["permission_rules"][0],
-            serde_json::json!({"tool":"Bash(rm:*)","action":"deny"})
-        );
-        assert_eq!(
-            v["permission_rules"][1],
-            serde_json::json!({"tool":"Bash(ls)","action":"allow"})
+            v["permissions"],
+            serde_json::json!({"mode": "plan", "allow": ["Bash(rm:*)", "Bash(ls)"]})
         );
     }
 
@@ -645,12 +641,8 @@ mod tests {
         append_permission_rule(&p, AppendTarget::Ask, "Bash(git push:*)").unwrap();
         let v: serde_json::Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
         assert_eq!(
-            v["permission_rules"][0],
-            serde_json::json!({"tool":"Bash(rm -rf:*)","action":"deny"})
-        );
-        assert_eq!(
-            v["permission_rules"][1],
-            serde_json::json!({"tool":"Bash(git push:*)","action":"ask"})
+            v["permissions"],
+            serde_json::json!({"deny": ["Bash(rm -rf:*)"], "ask": ["Bash(git push:*)"]})
         );
     }
 
@@ -695,8 +687,8 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
     }
 
-    /// An exact allow is written with `"match": "exact"`, once, and apart
-    /// from a pattern rule of the same text.
+    /// An exact allow is written to `allow_exact`, once, and apart from a
+    /// pattern rule of the same text.
     #[test]
     fn an_exact_allow_is_written_with_its_match() {
         let dir = TempDir::new().unwrap();
@@ -707,11 +699,8 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(
-            written["permission_rules"],
-            serde_json::json!([
-                {"tool": "Bash(ls *)", "action": "allow"},
-                {"tool": "Bash(ls *)", "action": "allow", "match": "exact"},
-            ])
+            written["permissions"],
+            serde_json::json!({"allow": ["Bash(ls *)"], "allow_exact": ["Bash(ls *)"]})
         );
     }
 }

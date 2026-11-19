@@ -202,7 +202,7 @@ async fn a_team_create_member_is_judged_in_its_mode_held_to_the_parents() {
         let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let tools = Arc::new(InMemoryToolRegistry::new());
         let (mut settings, dir) = parent_settings_for_test("code");
-        settings.values.permission_mode = parent_mode;
+        settings.values.permissions.mode = parent_mode;
         let agent_tool = TestParent {
             config: Arc::new(EngineConfig::defaults_for("test-model")),
             tools: tools.clone(),
@@ -355,7 +355,7 @@ impl base::interface::delegate::Delegator for LateDelegator {
 async fn a_fail_closed_agent_hook_does_not_block_its_own_agents_tools() {
     let (mut parent, _tools, runs, dir) = wired_parent("code");
     if let Some(settings) = parent.settings.as_mut() {
-        settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
+        settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
     }
     let late = Arc::new(LateDelegator::default());
     let guard: hooks::HookConfig = serde_json::from_value(serde_json::json!({

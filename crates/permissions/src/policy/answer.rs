@@ -48,7 +48,7 @@ impl Policy {
                         "{} — and nobody is attending this session to approve it. Work within \
                          what is allowed; if the task needs this, report it: the instance's \
                          settings grant it (`sandbox.additional_directories`, \
-                         `sandbox.read_directories`, or a `permission_rules` allow rule).",
+                         `sandbox.read_directories`, or a `permissions.allow` rule).",
                         reason.message
                     ),
                 ),

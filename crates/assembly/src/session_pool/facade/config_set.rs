@@ -152,7 +152,8 @@ fn effective_values(
         changed.push(path.dotted());
         effective.insert(path.dotted(), at(&shown, path));
         if let EditOp::Set(_, written) = op {
-            let leaf = !written.is_object() && path.dotted() != "permission_rules";
+            let leaf =
+                !written.is_object() && !settings::permissions::names_a_rule_list(&path.dotted());
             if leaf && at(&merged, path) != *written {
                 overridden.push(path.dotted());
             }

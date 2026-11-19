@@ -1,15 +1,14 @@
 //! The LIVE cases in `tests/blackbox/tests/live_*.rs` run with the real
 //! model under the permission mode a user would use; none of them takes the
-//! gate away just to get past it (G12). `bypassPermissions`, its aliases
-//! `yolo` and `auto`, as a permission mode in a case is a failure unless a
-//! `// bypass:` comment in the same function says why the case is about
-//! bypass itself.
+//! gate away just to get past it (G12). `bypassPermissions` as a permission
+//! mode in a case is a failure unless a `// bypass:` comment in the same
+//! function says why the case is about bypass itself.
 
 use guards::allow::{self, Finding};
 use guards::scan;
 use guards::{par_flat_map, ws, View};
 
-const BYPASS_NAMES: &[&str] = &["bypassPermissions", "yolo", "auto"];
+const BYPASS_NAMES: &[&str] = &["bypassPermissions"];
 
 fn is_live_case_file(rel: &str) -> bool {
     rel.strip_prefix("tests/blackbox/tests/")
@@ -25,10 +24,7 @@ fn live_cases_do_not_bypass_permissions_without_saying_why() {
         let fns = scan::fns(f, View::Full);
         scan::string_literals(f, View::Full)
             .into_iter()
-            .filter(|(value, hit)| {
-                BYPASS_NAMES.contains(&value.as_str())
-                    && (value != "auto" || hit.snippet.to_lowercase().contains("mode"))
-            })
+            .filter(|(value, _)| BYPASS_NAMES.contains(&value.as_str()))
             .filter(|(_, hit)| {
                 let Some(case) = fns
                     .iter()

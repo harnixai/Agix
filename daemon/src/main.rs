@@ -40,7 +40,7 @@ Options:
       --permission-prompt-timeout <SECS>
                                    Seconds a permission prompt may go unanswered before it is
                                    denied (0 = wait forever)
-                                   [default: execution.permission_prompt_timeout_secs, else 300]
+                                   [default: permissions.prompt_timeout_secs, else 300]
       --worker-threads <N>         Async worker threads [env: AGIX_WORKER_THREADS]
                                    [default: the number of CPU cores]
       --mcp-policy <PATH>          MCP policy file to enforce instead of the managed one

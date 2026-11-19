@@ -802,12 +802,9 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
     for (dir, body) in [
         (
             &global,
-            r#"{"project_trust": {"default": "trusted"}, "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}"#,
+            r#"{"project_trust": {"default": "trusted"}, "permissions": {"deny": ["Bash(rm:*)"]}}"#,
         ),
-        (
-            &project,
-            r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
-        ),
+        (&project, r#"{"permissions": {"allow": ["Bash(ls)"]}}"#),
     ] {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("settings.json"), body).unwrap();
@@ -842,10 +839,10 @@ async fn a_rule_in_the_project_tier_does_not_erase_the_users_global_denies() {
 #[tokio::test]
 async fn a_deny_holds_for_a_command_after_a_hash_the_shell_does_not_read_as_a_comment() {
     let settings = with_managed(
-        json!({"permission_rules": [
-            {"tool": "Bash(echo:*)", "action": "allow"},
-            {"tool": "Bash(rm:*)", "action": "deny"}
-        ]}),
+        json!({"permissions": {
+            "allow": ["Bash(echo:*)"],
+            "deny": ["Bash(rm:*)"]
+        }}),
         json!({}),
     );
     for command in [
@@ -894,8 +891,8 @@ async fn verdict(
 #[tokio::test]
 async fn a_managed_deny_overrides_a_users_allow_and_a_managed_allow_no_users_deny() {
     let settings = with_managed(
-        json!({"permission_rules": [{"tool": "Bash", "action": "allow"}]}),
-        json!({"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}),
+        json!({"permissions": {"allow": ["Bash"]}}),
+        json!({"permissions": {"deny": ["Bash(rm:*)"]}}),
     );
     let outcome = verdict(&settings, PermissionMode::Default, "rm -rf build").await;
     assert!(
@@ -909,8 +906,8 @@ async fn a_managed_deny_overrides_a_users_allow_and_a_managed_allow_no_users_den
     );
 
     let settings = with_managed(
-        json!({"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}),
-        json!({"permission_rules": [{"tool": "Bash", "action": "allow"}]}),
+        json!({"permissions": {"deny": ["Bash(rm:*)"]}}),
+        json!({"permissions": {"allow": ["Bash"]}}),
     );
     let outcome = verdict(&settings, PermissionMode::Default, "rm -rf build").await;
     assert!(
@@ -920,42 +917,40 @@ async fn a_managed_deny_overrides_a_users_allow_and_a_managed_allow_no_users_den
 }
 
 #[tokio::test]
-async fn bypass_and_its_aliases_still_answer_to_the_managed_deny_and_ask() {
+async fn bypass_still_answers_to_the_managed_deny_and_ask() {
     let settings = with_managed(
-        json!({"permission_rules": [{"tool": "Bash(ls)", "action": "deny"}]}),
-        json!({"permission_rules": [
-            {"tool": "Bash(rm:*)", "action": "deny"},
-            {"tool": "Bash(chmod:*)", "action": "ask"},
-        ]}),
+        json!({"permissions": {"deny": ["Bash(ls)"]}}),
+        json!({"permissions": {
+            "ask": ["Bash(chmod:*)"],
+            "deny": ["Bash(rm:*)"]
+        }}),
     );
-    for spelling in ["bypassPermissions", "auto", "yolo"] {
-        let mode: PermissionMode = serde_json::from_value(json!(spelling)).unwrap();
-        let outcome = verdict(&settings, mode, "rm -rf build").await;
-        assert!(
-            matches!(outcome, PermissionOutcome::Deny { ref reason } if reason.message.contains("managed")),
-            "{spelling}: {outcome:?}"
-        );
-        let outcome = verdict(&settings, mode, "chmod 600 key").await;
-        assert!(
-            matches!(outcome, PermissionOutcome::Prompt { .. }),
-            "{spelling}: {outcome:?}"
-        );
-        let outcome = verdict(&settings, mode, "ls").await;
-        assert!(
-            matches!(outcome, PermissionOutcome::Permit { .. }),
-            "{spelling}: a user's deny is not consulted under bypass: {outcome:?}"
-        );
-    }
+    let mode = PermissionMode::BypassPermissions;
+    let outcome = verdict(&settings, mode, "rm -rf build").await;
+    assert!(
+        matches!(outcome, PermissionOutcome::Deny { ref reason } if reason.message.contains("managed")),
+        "{outcome:?}"
+    );
+    let outcome = verdict(&settings, mode, "chmod 600 key").await;
+    assert!(
+        matches!(outcome, PermissionOutcome::Prompt { .. }),
+        "{outcome:?}"
+    );
+    let outcome = verdict(&settings, mode, "ls").await;
+    assert!(
+        matches!(outcome, PermissionOutcome::Permit { .. }),
+        "a user's deny is not consulted under bypass: {outcome:?}"
+    );
 }
 
 #[tokio::test]
 async fn disabling_bypass_judges_a_bypass_session_as_default() {
     let settings = with_managed(
-        json!({"permission_mode": "bypassPermissions"}),
-        json!({"disable_bypass_permissions_mode": true}),
+        json!({"permissions": {"mode": "bypassPermissions"}}),
+        json!({"permissions": {"disable_bypass": true}}),
     );
     assert_eq!(
-        settings.values.permission_mode,
+        settings.values.permissions.mode,
         base::permission::PermissionMode::Default
     );
     let outcome = verdict(&settings, PermissionMode::BypassPermissions, "touch x").await;
@@ -968,8 +963,8 @@ async fn disabling_bypass_judges_a_bypass_session_as_default() {
 #[tokio::test]
 async fn a_managed_layer_that_cannot_be_honoured_refuses_every_call() {
     for managed in [
-        json!({"permission_mode": "plan"}),
-        json!({"permission_rules": [{"tool": "Bash(rm:*", "action": "deny"}]}),
+        json!({"permissions": {"mode": "plan"}}),
+        json!({"permissions": {"deny": ["Bash(rm:*"]}}),
     ] {
         let settings = with_managed(json!({}), managed.clone());
         for mode in [PermissionMode::BypassPermissions, PermissionMode::Default] {

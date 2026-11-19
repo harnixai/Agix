@@ -4,8 +4,8 @@ use super::*;
 use permissions::policy::Policy;
 
 const NO_HOST_TO_ASK: &str = "this session has no host to ask. Allow the call with a \
-                              `permission_rules` allow rule in the settings, or choose a \
-                              `permission_mode`; `bypassPermissions` lets every call through \
+                              `permissions.allow` rule in the settings, or choose a \
+                              `permissions.mode`; `bypassPermissions` lets every call through \
                               and still guards credentials and the managed settings";
 
 impl Builder {

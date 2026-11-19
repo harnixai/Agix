@@ -11,7 +11,7 @@ pub struct EngineConfig {
     pub max_tokens: u32,
     /// How long a tool call waits for a permission answer before denying.
     /// `0` = wait indefinitely. See
-    /// `ExecutionSettings::permission_prompt_timeout_secs`.
+    /// the `permissions.prompt_timeout_secs` setting.
     pub permission_prompt_timeout_secs: u64,
     /// How long a tool call still running when its turn is cancelled is given
     /// to stop on its own before it is dropped and answered as cancelled.
