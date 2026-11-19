@@ -3,7 +3,7 @@
 //! against a package installed with `plugin.install`, in a directory with no
 //! session and in a session running a turn, and `SessionPool::call_plugin`
 //! through `Embedded::pool()`. Only what the RPC, the session's tasks and
-//! history, and the project directory show.
+//! history, the project directory and the host's own library functions show.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -570,6 +570,86 @@ async fn the_rust_interface_calls_a_host_package_function_through_the_pool() -> 
         .map(|f| f.name)
         .collect();
     assert!(names.contains(&"xflow.wait".to_string()), "{names:?}");
+    embedded.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::Result<()> {
+    use base::interface::host_js::{HostCallContext, HostJsLib};
+    use daemon::embed::{EmbedConfig, Embedded};
+    use std::sync::{Arc, Mutex};
+
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let (data, project, package) = (
+        root.join("data"),
+        root.join("project"),
+        root.join("host-gate"),
+    );
+    std::fs::create_dir_all(&data)?;
+    std::fs::create_dir_all(&project)?;
+    std::fs::create_dir_all(&package)?;
+    std::fs::write(
+        package.join("plugin.toml"),
+        "uses = [\"codix\"]\n[plugin]\nname = \"gate\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n\
+         [[function]]\nname = \"open\"\nentry = \"gate.js:open\"\ndescription = \"opens a flow\"\n",
+    )?;
+    std::fs::write(
+        package.join("gate.js"),
+        "async function open(input, ctx) { return await codix.flow.begin(input); }\n",
+    )?;
+    let settings = json!({
+        "providers": { "stub": {
+            "api_type": "anthropic",
+            "base_url": stub.base_url().as_str(),
+            "api_key": "stub-key",
+            "default_model": "claude-sonnet-4-6",
+            "models": ["claude-sonnet-4-6"]
+        }},
+        "default_provider": "stub"
+    });
+    std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
+
+    let seen: Arc<Mutex<Vec<HostCallContext>>> = Arc::default();
+    let record = seen.clone();
+    let codix =
+        HostJsLib::new("codix").function("flow.begin", move |cx: HostCallContext, input: Value| {
+            let record = record.clone();
+            async move {
+                record.lock().unwrap().push(cx);
+                Ok(json!({ "run": "r-1", "input": input }))
+            }
+        });
+    let mut config = EmbedConfig::new(&data);
+    config.cwd = Some(project.clone());
+    config.plugins = vec![package];
+    config.js_libs = vec![codix];
+    let embedded = Embedded::start(config).await?;
+    let (ours, theirs) = tokio::io::duplex(1 << 20);
+    embedded.serve_stream(theirs);
+    let mut client = rpc_client::DaemonRpcClient::with_transport(Box::new(
+        rpc_client::transport::stream(ours, "embed"),
+    ));
+
+    let result = ok(client
+        .call(
+            "plugin.call",
+            json!({ "function": "gate.open", "cwd": project, "input": { "change": "c4" } }),
+        )
+        .await?)?;
+    assert_eq!(
+        result["value"],
+        json!({ "run": "r-1", "input": { "change": "c4" } }),
+        "{result}"
+    );
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(seen[0].via, "host");
+    assert_eq!(seen[0].plugin, "gate");
+    assert_eq!(seen[0].entry, "open");
+    assert_eq!(seen[0].session_id, None, "a call outside any session");
     embedded.shutdown().await;
     Ok(())
 }
