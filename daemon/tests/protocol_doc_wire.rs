@@ -484,6 +484,11 @@ const NOT_SENT: &[(&str, &str)] = &[
         "plugin.install#0",
         "needs a plugin archive whose checksum matches; the example's path is a stand-in",
     ),
+    (
+        "plugin.call#0",
+        "needs an installed package with the function the example names; \
+         tests/blackbox/tests/plugin_calls.rs sends it over the socket",
+    ),
 ];
 
 /// Documented ids and paths stand for this machine's; fill in the real ones.

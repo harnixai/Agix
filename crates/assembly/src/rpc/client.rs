@@ -1,4 +1,5 @@
-//! 一条客户端连接：连接 id、发往它的帧队列，以及队列满时退订并告知的机制。
+//! 一条客户端连接：连接 id、发往它的帧队列、队列满时退订并告知的机制，以及
+//! 这条连接上按名字可取消的请求。
 
 use std::sync::Arc;
 
@@ -60,6 +61,23 @@ pub struct Client {
     dropped: std::sync::Arc<std::sync::Mutex<Vec<DroppedSubscription>>>,
     daemon_events: std::sync::atomic::AtomicBool,
     gone: tokio_util::sync::CancellationToken,
+    runs: std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+}
+
+/// A request of this connection that `run_id` names until it is dropped.
+pub struct NamedRun<'a> {
+    client: &'a Client,
+    run_id: String,
+}
+
+impl Drop for NamedRun<'_> {
+    fn drop(&mut self) {
+        self.client
+            .runs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.run_id);
+    }
 }
 
 /// A session this connection was unsubscribed from because its queue was
@@ -125,7 +143,32 @@ impl Client {
             dropped,
             daemon_events: std::sync::atomic::AtomicBool::new(false),
             gone: tokio_util::sync::CancellationToken::new(),
+            runs: Default::default(),
         }
+    }
+
+    /// Name a request of this connection `run_id`, so [`Self::cancel_run`]
+    /// reaches `cancel`; `None` while another request has the name.
+    pub fn name_run(
+        &self,
+        run_id: &str,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Option<NamedRun<'_>> {
+        let mut runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        if runs.contains_key(run_id) {
+            return None;
+        }
+        runs.insert(run_id.to_string(), cancel);
+        Some(NamedRun {
+            client: self,
+            run_id: run_id.to_string(),
+        })
+    }
+
+    /// `false` if no request of this connection is named `run_id`.
+    pub fn cancel_run(&self, run_id: &str) -> bool {
+        let runs = self.runs.lock().unwrap_or_else(|e| e.into_inner());
+        runs.get(run_id).inspect(|c| c.cancel()).is_some()
     }
 
     pub fn id(&self) -> ConnectionId {

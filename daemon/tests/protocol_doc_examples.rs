@@ -665,6 +665,21 @@ const NOT_COMPARED: &[(&str, &str)] = &[
         "mcp.auth.setIdentity",
         "needs an enterprise IdP and a server granted through it",
     ),
+    (
+        "plugin.functions",
+        "lists the functions of installed packages; tests/blackbox/tests/plugin_calls.rs \
+         installs one and checks the fields",
+    ),
+    (
+        "plugin.call",
+        "needs an installed package's function to call; tests/blackbox/tests/plugin_calls.rs \
+         checks both result shapes",
+    ),
+    (
+        "plugin.cancel",
+        "needs a call still running on the same connection; tests/blackbox/tests/plugin_calls.rs \
+         cancels one",
+    ),
 ];
 
 /// Documented methods without a `// ← result` example, and why.

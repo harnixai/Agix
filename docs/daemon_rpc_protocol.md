@@ -833,6 +833,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
+| `plugin_functions` | 有 `plugin.functions` / `plugin.call` / `plugin.cancel`:宿主按名字调包的 `[[function]]`,拿回结构化结果(§6.5、`docs/runext.md` §12) |
 
 #### `daemon.status`
 
@@ -2737,6 +2738,7 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
                             // monitor:{command,description,persistent,tool_use_id}
                             // code:{description,background,tool_use_id}(RunCode 的程序,docs/ptc.md)
                             // ext:{description,command,background,tool_use_id}(RunExt 的命令,docs/runext.md;command 是带引号规整后的命令行,background 总是 false)
+                            //     宿主调的插件函数(plugin.call):{description,function,via:"host",background:false,tool_use_id}
                             // cron:{cron,prompt,recurring,durable,expires_ms}
                             // mcp_task:{server,tool,tool_use_id,mcp_task_id,mcp_status,status_message?,poll_interval_ms?,ttl_ms?}
       "usage": { },         // agent / teammate:它自己的模型调用到此刻的合计(§3.5 四字段)
@@ -3727,6 +3729,91 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 上面四个方法各自会自动刷新,**这个是给它们盖不到的情况用的**:有人手工把插件放进
 目录、或者开发时原地改了包的内容。
 
+#### `plugin.functions`
+
+```jsonc
+// → params(可选,至多给一个)
+{ "session_id": "…" }   // 或 { "cwd": "/abs/project" };给了的必须存在
+// ← result
+{ "functions": [
+  { "name": "xflow.check",              // 调用名 <包名>.<name>
+    "plugin": "xflow", "plugin_version": "1.0.0",
+    "description": "门禁检查",
+    "writes": ["reports/**"],
+    "input_schema": { … } }             // 包里的 JSON Schema;没有为 null
+] }
+```
+
+启用着的包的全部 `[[function]]`。函数表是池级的:`session_id` / `cwd` 只检查目标在不在
+(会话不在 `SESSION_NOT_FOUND`,目录不在 `PROJECT_NOT_FOUND`),不改变列出的内容。
+
+#### `plugin.call`
+
+```jsonc
+// → params
+{ "function": "xflow.check",             // 只接受调用名,不接受命令行
+  "input": { "change": "c1" },           // 交给函数的 input,省略为 null;有 input_schema 时先校验
+  "session_id": "…",                     // 在这个会话的环境里跑;不带会话时换成 "cwd": "/abs/project"(绝对路径),两者只给一个
+  "writes": false,                       // 缺省 false
+  "permission_rules": [ ],               // 写法同 session.create 的 options.permission_rules
+  "timeout_ms": 30000,                   // 缺省并至多 120000
+  "run_id": "gate-7" }                   // 可选:plugin.cancel 用它指这次调用,同一连接内唯一
+// ← result
+{ "ok": true,  "value": <函数的返回值>, "logs": ["…"] }
+{ "ok": false, "error": { "code": "…", "message": "…" }, "logs": ["…"] }
+```
+
+宿主调用作为一次内部工具调用 `PluginCall {function, input}` 走会话的整条工具管线——权限判定、
+`PreToolUse`、`tool.around`(看到的 `via` 是 `"host"`)、执行、`PostToolUse`、遥测——但不进
+模型的工具表,也不进对话。函数在 `RunExt` 的运行时上跑,签名 `async function check(input, ctx)`,
+`ctx` 是冻结的 `{ via:"host", projectRoot, cwd, plugin:{name,version}, function, session, readOnly }`
+(`session` 是会话 id,不带会话时为 `null`)。
+
+**权限**:调用本身算宿主批准——会话要问的视同允许;deny 规则、plan 模式照样拦(这时
+`code:"refused"`)。规则写 `PluginCall(xflow.check)`。函数里的子调用与插件命令的子调用同一套
+(`tool.around` 看到 `via:"PluginCall:xflow.check"`):`writes:false` 时经文件工具的写入、会改东西
+的命令一律失败;`writes:true` 时只写得了函数声明的 `writes`,配置路径照样不让写;**要问人的一律
+失败**,错误说明是哪次调用、为什么(没人能替宿主调的函数答应,用这次调用的 `permission_rules`
+放行)。`permission_rules` 追加在会话或场景的规则之后,只管这次调用和它的子调用:deny 任何模式
+都拒,allow 只回答模式本来要问的。
+
+**带 `session_id`**:用那个会话的工具表、MCP 连接、规则、工作目录与信任;不在内存里的会话先
+带回来。不开新一轮、不进对话、不排进输入队列,可以和正在跑的一轮同时进行。调用登记为会话的一件
+`kind:"ext"` 任务(`detail`:`{description, function, via:"host", background:false, tool_use_id}`),
+`session.tasks` 看得到,`session.stopTask` 让它停下(函数可以借 `stopRequested()` 收尾)。
+
+**不带 `session_id`**:在 `cwd` 下用 daemon 的场景、这个目录的工具与规则跑,引擎是临时的:
+不写日志、不进 `session.list`、不连 MCP、不发会话事件,调用结束(成功、失败或取消)就收掉。
+
+与 `RunCode` / `RunExt` 共用同时运行脚本的名额。`code` 取值:
+
+| `code` | 含义 |
+|---|---|
+| `invalid_input` | `input` 不符合函数的 `input_schema`,函数没跑 |
+| `refused` | 管线没让它跑,或拦下了它的结果:deny 规则、plan 模式、hook、`tool.around`、会话已结束 |
+| `threw` | 函数抛了错;`message` 是错误消息,后面跟它已经做了的改动 |
+| `timeout` | 跑过了 `timeout_ms` |
+| `cancelled` | `plugin.cancel`、连接断开,或会话结束 |
+| `stopped` | 被 `session.stopTask` 停下又没在宽限期内收尾 |
+| `not_started` | 入口读不出来、名额等不到等,函数没开始 |
+
+请求本身不成立时是 JSON-RPC 错误而不是 `ok:false`:没有这个函数、`session_id` 与 `cwd` 都给或都
+不给、`cwd` 不是绝对路径、`timeout_ms` 为 0 或超过上限、`run_id` 在这条连接上正被占着
+(`INVALID_PARAMS`);会话不在(`SESSION_NOT_FOUND`);目录不在(`PROJECT_NOT_FOUND`);
+构建里没有 `RunCode` 的运行时(`METHOD_NOT_FOUND`,`data.module` 为 `"ptc"`)。
+
+#### `plugin.cancel`
+
+```jsonc
+// → params
+{ "run_id": "gate-7" }
+// ← result
+{ "cancelled": true }   // false:这条连接上没有以此为名、还在跑的调用
+```
+
+`run_id` 按连接登记:别的连接取消不了它,调用结束后名字就释放。发起调用的连接断开时,
+它还没完的调用一律取消。
+
 **关于 `scope`**:只有 `global`(全局根下的 `plugins/`,跨场景共享)和 `scene`
 (场景根下的,只对这个 daemon 的场景生效)两个值,默认 `global`,别的值返回
 `INVALID_PARAMS`。
@@ -3737,7 +3824,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 就地换掉的,已经在跑的会话在下一轮开始时就看到包的 skill 出现或消失(发 `skills_changed`)。
 
 > 插件子系统可以在编译期整个裁掉(daemon 的 `plugin-packages` feature,默认开启)。
-> 裁掉或被策略关掉的构建里,上面五个方法一律返回 `PLUGINS_DISABLED (-32016)` ——
+> 裁掉或被策略关掉的构建里,上面的方法(`plugin.cancel` 除外)一律返回 `PLUGINS_DISABLED (-32016)` ——
 > 不是"未知方法",因为方法是存在的,只是这个构建不提供它。用 `daemon.doctor` 的
 > `plugins.status` 判断当前是哪种情况。
 

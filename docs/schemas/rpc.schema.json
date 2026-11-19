@@ -4713,6 +4713,139 @@
         }
       ]
     },
+    "PluginCallError": {
+      "properties": {
+        "code": {
+          "description": "`invalid_input`, `refused`, `threw`, `timeout`, `cancelled`, `stopped`\nor `not_started`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginCallParams": {
+      "properties": {
+        "cwd": {
+          "default": null,
+          "description": "The directory a call without a session runs in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function": {
+          "description": "The call name, `<plugin>.<name>`.",
+          "type": "string"
+        },
+        "input": {
+          "default": null
+        },
+        "permission_rules": {
+          "default": [],
+          "description": "Held after the session's or the scene's rules, for this call only.",
+          "items": {
+            "$ref": "#/$defs/PermissionRule"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "default": null,
+          "description": "What `plugin.cancel` names this call by, on this connection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "description": "Run in this session's environment; without it `cwd` is required.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "default": null,
+          "description": "At most 120000.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "writes": {
+          "default": false,
+          "description": "Let the function write inside its `writes`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "function"
+      ],
+      "type": "object"
+    },
+    "PluginCallResult": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginCallError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "logs": {
+          "description": "What the function logged, oldest first; the start is dropped past the\nlog's limit.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "value": {
+          "description": "What the function returned, when `ok`."
+        }
+      },
+      "required": [
+        "ok",
+        "logs"
+      ],
+      "type": "object"
+    },
+    "PluginCancelParams": {
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "type": "object"
+    },
+    "PluginCancelled": {
+      "properties": {
+        "cancelled": {
+          "description": "`false`: no call of this connection is running under `run_id`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "type": "object"
+    },
     "PluginCommand": {
       "description": "A command a package adds (`[[command]]`).",
       "properties": {
@@ -4842,6 +4975,74 @@
         "writes",
         "has_input_schema"
       ],
+      "type": "object"
+    },
+    "PluginFunctionInfo": {
+      "description": "A function the host can call.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "input_schema": true,
+        "name": {
+          "description": "The call name, `<plugin>.<name>`.",
+          "type": "string"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "plugin_version": {
+          "type": "string"
+        },
+        "writes": {
+          "description": "Globs relative to the project that a writing call may write.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "plugin",
+        "plugin_version",
+        "description",
+        "writes"
+      ],
+      "type": "object"
+    },
+    "PluginFunctionList": {
+      "properties": {
+        "functions": {
+          "items": {
+            "$ref": "#/$defs/PluginFunctionInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "functions"
+      ],
+      "type": "object"
+    },
+    "PluginFunctionsParams": {
+      "description": "Either names a place that must exist; neither lists them all the same.",
+      "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "PluginInfo": {
@@ -9465,6 +9666,22 @@
         "$ref": "#/$defs/McpServerWritten"
       }
     },
+    "plugin.call": {
+      "params": {
+        "$ref": "#/$defs/PluginCallParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PluginCallResult"
+      }
+    },
+    "plugin.cancel": {
+      "params": {
+        "$ref": "#/$defs/PluginCancelParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PluginCancelled"
+      }
+    },
     "plugin.disable": {
       "params": {
         "$ref": "#/$defs/PluginToggleParams"
@@ -9479,6 +9696,14 @@
       },
       "result": {
         "$ref": "#/$defs/PluginToggled"
+      }
+    },
+    "plugin.functions": {
+      "params": {
+        "$ref": "#/$defs/PluginFunctionsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PluginFunctionList"
       }
     },
     "plugin.install": {
