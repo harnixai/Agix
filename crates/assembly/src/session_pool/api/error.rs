@@ -259,14 +259,20 @@ impl Busy {
         Self::new(session_id, BusyReason::PreviousEngine, message.into())
     }
 
-    pub(crate) fn background_tasks(session_id: &str, running_task_ids: Vec<String>) -> Self {
+    /// `host_calls`: a host's `plugin.call` runs in the session, which has
+    /// no task to list until the function starts.
+    pub(crate) fn background_tasks(
+        session_id: &str,
+        running_task_ids: Vec<String>,
+        host_calls: bool,
+    ) -> Self {
+        let message = match host_calls {
+            true => format!("{}: a host plugin.call is running in it", Self::MESSAGE),
+            false => Self::MESSAGE.into(),
+        };
         Self {
             running_task_ids,
-            ..Self::new(
-                session_id,
-                BusyReason::BackgroundTasks,
-                Self::MESSAGE.into(),
-            )
+            ..Self::new(session_id, BusyReason::BackgroundTasks, message)
         }
     }
 }

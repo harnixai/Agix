@@ -347,8 +347,9 @@ impl LiveSession {
             return Some(busy);
         }
         let running = self.background_work();
-        (!running.is_empty() || self.core.host_calls.any())
-            .then(|| Busy::background_tasks(sid, running))
+        let host_calls = self.core.host_calls.any();
+        (!running.is_empty() || host_calls)
+            .then(|| Busy::background_tasks(sid, running, host_calls))
     }
 
     /// What runs under this engine beside the turns and would stop with it:

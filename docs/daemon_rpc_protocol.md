@@ -4486,7 +4486,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 |---|---|---|
 | `turn_running` | 有一轮在跑(`run_turn` 的 `reject`、`setModel`、`setPrompt`、`inspectContext` 等都报这一项) | 那一轮的 id,必定有值 |
 | `rebuilding` | 正在原地重建(`setPrompt`、换厂商的 `setModel`、配置变更后下一轮开始前) | `null` |
-| `background_tasks` | 空闲,但有后台任务或宿主的 `plugin.call` 在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids`(调用还没起任务时可能为空) | `null` |
+| `background_tasks` | 空闲,但有后台任务或宿主的 `plugin.call` 在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids`(调用还没起任务时可能为空);有宿主的 `plugin.call` 在跑时 `message` 写明这一点 | `null` |
 | `previous_engine` | 刚被关闭、驱逐或重建,上一个引擎在宽限期内还没停下 | `null` |
 | `context_operation` | 一个 `inspectContext` / `dropMessages` / `editMessage` 还没答完,会话归它独占 | `null` |
 | `rewinding` | 一个 `session.rewind` 还没答完,会话归它独占 | `null` |

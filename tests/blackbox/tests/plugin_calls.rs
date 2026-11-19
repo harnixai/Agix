@@ -961,6 +961,18 @@ async fn a_session_running_a_call_is_not_rebuilt_under_it() -> anyhow::Result<()
     assert_eq!(answered["result"]["value"]["gate"], "green", "{answered}");
     let refused = set.error.expect("a session running a call is busy");
     assert!(refused.message.contains("busy"), "{}", refused.message);
+    let data = refused.data.unwrap_or_default();
+    assert_eq!(data["reason"], "background_tasks", "{data}");
+    assert_eq!(
+        data.get("running_task_ids"),
+        None,
+        "the call had no task yet: {data}"
+    );
+    assert!(
+        refused.message.contains("plugin.call"),
+        "the refusal says what holds the session though no task is listed: {}",
+        refused.message
+    );
     run.finish().await;
     Ok(())
 }
