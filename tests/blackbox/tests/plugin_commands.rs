@@ -976,3 +976,57 @@ async fn a_deny_rule_holds_however_the_line_quotes_the_words() -> anyhow::Result
     run.finish().await;
     Ok(())
 }
+
+/// The command's own task, running while its `Bash` call is judged, is not
+/// background work the call is told to wait for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commands_own_task_is_not_a_background_task_its_shell_must_wait_for() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("ext-sleep", &stub)
+        .settings(json!({ "permission_rules": [
+            { "tool": "Bash", "action": "allow" },
+            { "tool": "RunExt", "action": "allow" }
+        ] }))
+        .start()
+        .await?;
+    let package = tempfile::tempdir()?;
+    std::fs::write(
+        package.path().join("plugin.toml"),
+        "[plugin]\nname = \"pauser\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n\
+         [[command]]\nname = \"pause\"\nentry = \"pause.js:main\"\n\
+         description = \"runs shell commands\"\nwrites = [\"paused/**\"]\n",
+    )?;
+    std::fs::write(
+        package.path().join("pause.js"),
+        "async function main(argv, input, ctx) {\n\
+           const out = [];\n\
+           for (const command of [\"for i in 1; do sleep 2; done\", \"sleep 3\"]) {\n\
+             try { await tools.Bash({ command }); out.push(\"ran\"); }\n\
+             catch (e) { out.push(String(e.message || e)); }\n\
+           }\n\
+           return out.join(\"\\n---\\n\");\n\
+         }\n",
+    )?;
+    let (archive, _) = package_dir(package.path(), run.world.root(), "pauser")?;
+    let installed = install(&mut run, &archive, "pauser").await?;
+    assert_eq!(installed["success"], true, "{installed}");
+
+    stub.script([
+        Reply::calls("command", "RunExt", json!({ "command": "pause" })),
+        Reply::text("done"),
+    ]);
+    let session = run.session().await?;
+    let events = run.turn(&session, "pause").await?;
+    let command = result_of(&events, "RunExt");
+    let text = &command[0].1;
+    let (sleep_loop, long) = text.split_once("---").unwrap_or_default();
+    assert!(sleep_loop.contains("ran"), "{command:?}");
+    assert!(long.contains("sleep >= 2s is blocked"), "{command:?}");
+    assert!(
+        !text.contains("TaskWait") && !text.contains("Background tasks"),
+        "the command is not told to wait for itself: {command:?}"
+    );
+    run.finish().await;
+    Ok(())
+}

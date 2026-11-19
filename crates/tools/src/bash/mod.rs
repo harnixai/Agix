@@ -124,7 +124,7 @@ impl Tool for BashTool {
                 ValidationResult::err(format!("timeout_ms exceeds {} ms cap", MAX_TIMEOUT_MS), 3)
             }
             Ok(ref p) if is_long_sleep(&p.command) => {
-                let running = ctx.session.running_background_task_ids();
+                let running = background_tasks_besides_the_caller(ctx);
                 if running.is_empty() {
                     ValidationResult::err(
                         "sleep >= 2s is blocked — use the Monitor tool for polling, or sleep 1 if \
@@ -139,7 +139,7 @@ impl Tool for BashTool {
                 }
             }
             Ok(ref p) if is_sleep_loop(&p.command) => {
-                let running = ctx.session.running_background_task_ids();
+                let running = background_tasks_besides_the_caller(ctx);
                 if running.is_empty() {
                     ValidationResult::Ok
                 } else {
@@ -359,6 +359,30 @@ fn is_sleep_loop(cmd: &str) -> bool {
         }
     }
     sleeps
+}
+
+/// The running background work other than the program or plugin command this
+/// call is made from, whose task lasts until the call returns: a sub-call's
+/// tool-use id is its caller's followed by `.n`, and a task names the call
+/// that started it.
+fn background_tasks_besides_the_caller(ctx: &ToolContext) -> Vec<String> {
+    let mut running = ctx.session.running_background_task_ids();
+    if ctx.from_code {
+        running.retain(|id| !started_by_a_caller_of(ctx, id));
+    }
+    running
+}
+
+fn started_by_a_caller_of(ctx: &ToolContext, task_id: &str) -> bool {
+    let Some(task) = ctx.session.find_running_task(task_id) else {
+        return false;
+    };
+    let detail = task.detail.lock().unwrap_or_else(|e| e.into_inner());
+    detail["tool_use_id"].as_str().is_some_and(|caller| {
+        ctx.tool_use_id
+            .strip_prefix(caller)
+            .is_some_and(|rest| rest.starts_with('.'))
+    })
 }
 
 /// Background tasks report their end as a notice delivered once the current

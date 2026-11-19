@@ -1106,6 +1106,37 @@ async fn a_sleep_loop_is_turned_away_towards_task_wait_while_a_background_task_r
     }
 }
 
+#[tokio::test]
+async fn a_sleep_loop_does_not_wait_for_the_program_it_is_called_from() {
+    let dir = TempDir::new().unwrap();
+    let mut ctx = ctx_in(dir.path());
+    let session = session_state::SessionState::for_tests(dir.path().to_path_buf());
+    session.register_task(
+        "ext-own".into(),
+        base::context::task::TaskType::Ext,
+        tokio_util::sync::CancellationToken::new(),
+        json!({ "tool_use_id": "call_1" }),
+    );
+    ctx.session = std::sync::Arc::new(session);
+    let input = json!({ "command": "for i in 1; do sleep 2; done" });
+
+    ctx.from_code = true;
+    ctx.tool_use_id = "call_1.3".into();
+    assert!(matches!(
+        BashTool.validate_input(&input, &ctx).await,
+        ValidationResult::Ok
+    ));
+
+    for (from_code, id) in [(true, "call_10.1"), (false, "call_1.3"), (false, "call_1")] {
+        ctx.from_code = from_code;
+        ctx.tool_use_id = id.into();
+        match BashTool.validate_input(&input, &ctx).await {
+            ValidationResult::Err(msg, 6) => assert!(msg.contains("\"ext-own\""), "{msg}"),
+            other => panic!("{id} (from code: {from_code}): {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn shell_escape_hatch_commands_left_the_allow_list() {
     // awk / less / more / env 都能派生 shell 或倒出环境变量

@@ -57,6 +57,12 @@ name = "marked"
 entry = "xflow.js:marked"
 description = "reads what tool.around refuses"
 
+[[function]]
+name = "pause"
+entry = "xflow.js:pause"
+description = "runs the shell commands it is given"
+writes = ["paused/**"]
+
 [[script]]
 point = "tool.around"
 entry = "guard.js:onAround"
@@ -87,6 +93,18 @@ async function marked(input, ctx) {
   } catch (e) {
     return String(e.message || e);
   }
+}
+async function pause(input, ctx) {
+  const out = {};
+  for (const [key, command] of Object.entries(input)) {
+    try {
+      await tools.Bash({ command });
+      out[key] = "ran";
+    } catch (e) {
+      out[key] = String(e.message || e);
+    }
+  }
+  return out;
 }
 "#;
 
@@ -298,6 +316,37 @@ async fn tool_around_sees_the_host_and_the_function_making_their_calls() -> anyh
             .is_some_and(|v| v.contains("read via PluginCall:xflow.marked")),
         "{marked}"
     );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_functions_own_task_is_not_a_background_task_its_shell_must_wait_for(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_xflow("fn-sleep", &stub).await?;
+    let session = run.session().await?;
+    let commands = json!({ "loop": "for i in 1; do sleep 2; done", "long": "sleep 3" });
+    let allow_bash = json!([{ "source": "session", "behavior": "allow", "tool_name": "Bash" }]);
+    let in_dir_params = in_dir(
+        &run,
+        "xflow.pause",
+        json!({ "input": commands, "writes": true, "permission_rules": allow_bash }),
+    );
+    let in_session_params = json!({
+        "function": "xflow.pause", "session_id": session, "input": commands,
+        "writes": true, "permission_rules": allow_bash,
+    });
+    for params in [in_dir_params, in_session_params] {
+        let result = call(&mut run, params).await?;
+        assert_eq!(result["value"]["loop"], "ran", "{result}");
+        let long = result["value"]["long"].as_str().unwrap_or_default();
+        assert!(long.contains("sleep >= 2s is blocked"), "{result}");
+        assert!(
+            !long.contains("TaskWait") && !long.contains("Background tasks"),
+            "the call is not told to wait for itself: {result}"
+        );
+    }
     run.finish().await;
     Ok(())
 }
