@@ -716,17 +716,17 @@ async fn the_rust_interface_calls_a_host_package_function_through_the_pool() -> 
     std::fs::write(project.join("gate.txt"), "amber\n")?;
     write_package(&package)?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub"
+        }]
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
     let mut config = EmbedConfig::new(&data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(project.clone());
     config.plugins = vec![package];
     let embedded = Embedded::start(config).await?;
@@ -783,14 +783,13 @@ async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::R
         "async function open(input, ctx) { return await codix.flow.begin(input); }\n",
     )?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub"
+        }]
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
 
@@ -805,6 +804,7 @@ async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::R
             }
         });
     let mut config = EmbedConfig::new(&data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(project.clone());
     config.plugins = vec![package];
     config.js_libs = vec![codix];
@@ -847,6 +847,7 @@ async fn embedded_with(
     let data = root.join("data");
     std::fs::create_dir_all(&data)?;
     let mut config = daemon::embed::EmbedConfig::new(&data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.join("project"));
     config.plugins = vec![package.to_path_buf()];
     config.js_libs = libs;
@@ -1118,17 +1119,17 @@ async fn a_call_holds_the_session_it_brought_back_while_others_crowd_the_pool() 
     std::fs::create_dir_all(&data)?;
     write_package(&package)?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub"
+        }]
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
     let mut config = EmbedConfig::new(&data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(project);
     config.plugins = vec![package];
     config.session_cap = 1;

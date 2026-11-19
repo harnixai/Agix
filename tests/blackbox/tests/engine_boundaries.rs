@@ -402,61 +402,6 @@ async fn a_tool_the_policy_refuses_never_runs() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_overload_reported_inside_the_stream_moves_to_the_fallback_model() -> anyhow::Result<()>
-{
-    let stub = ProviderStub::start().await?;
-    let mut run = stubbed("in-stream-overload", &stub)
-        .settings(json!({ "model": { "fallback_model": "fallback-stub-model" } }))
-        .start()
-        .await?;
-    let session = run.session().await?;
-    stub.script([
-        Reply::errored(vec![Block::text("half an ans")], "overloaded_error", "busy"),
-        Reply::text("RECOVERED-ON-FALLBACK"),
-    ]);
-    let events = run.turn(&session, "hello").await?;
-    assert!(
-        events.text.contains("RECOVERED-ON-FALLBACK"),
-        "{}",
-        events.text
-    );
-    let calls = turn_calls(&stub);
-    assert_eq!(calls.len(), 2, "one failed call, one retry");
-    assert_eq!(calls[1].model(), "fallback-stub-model");
-    run.finish().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_overload_refused_before_the_stream_moves_to_the_fallback_model() -> anyhow::Result<()> {
-    let stub = ProviderStub::start().await?;
-    let mut run = stubbed("open-overload", &stub)
-        .settings(json!({ "model": { "fallback_model": "fallback-stub-model" } }))
-        .start()
-        .await?;
-    let session = run.session().await?;
-    stub.inject_failures_when(
-        "\"model\":\"claude-sonnet-4-6\"",
-        8,
-        Reply::status(
-            529,
-            r#"{"type":"error","error":{"type":"overloaded_error","message":"busy"}}"#,
-        ),
-    );
-    stub.script([Reply::text("RECOVERED-ON-FALLBACK")]);
-    let events = run.turn(&session, "hello").await?;
-    assert!(
-        events.text.contains("RECOVERED-ON-FALLBACK"),
-        "{}",
-        events.text
-    );
-    let last = turn_calls(&stub).pop().expect("a call");
-    assert_eq!(last.model(), "fallback-stub-model");
-    run.finish().await;
-    Ok(())
-}
-
 fn chat_text(text: &str, finish_reason: Option<&str>) -> Value {
     json!({ "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": finish_reason }] })
 }
@@ -471,13 +416,13 @@ async fn a_chat_stream_closed_without_an_end_marker_marks_the_turn_truncated() -
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("chat-truncated", &stub)
         .settings(json!({
-            "providers": { "chat": {
-                "api_type": "openai_compatible",
+            "providers": [{
+                "id": "chat",
+                "api": "openai_chat",
                 "base_url": stub.base_url().as_str(),
-                "api_key": "stub-key",
-                "default_model": "chat-stub-model"
-            }},
-            "default_provider": "chat"
+                "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+                "tiers": {"strong": "chat-stub-model"}
+            }]
         }))
         .start()
         .await?;

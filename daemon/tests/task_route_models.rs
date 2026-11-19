@@ -1,5 +1,5 @@
-//! The model name each route carries is one its provider was configured with,
-//! seen at the providers' endpoints.
+//! The model each call asks for is its task's tier at the provider it goes
+//! to, seen at the providers' endpoints.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,38 +16,41 @@ fn route(path: &str) -> String {
     http(500, r#"{"error":{"message":"unexpected path"}}"#)
 }
 
-fn provider(base_url: String, models: &[&str]) -> base::provider::ProviderConfig {
+fn provider(id: &str, base_url: String) -> base::provider::ProviderConfig {
     base::provider::ProviderConfig {
-        api_type: Some("anthropic".into()),
+        id: id.into(),
+        api: Some("anthropic".into()),
         base_url: Some(base_url),
-        api_key: Some("k".into()),
-        default_model: models.first().map(|m| m.to_string()),
-        models: models.iter().map(|m| (*m).into()).collect(),
+        models: [format!("{id}-a"), format!("{id}-b")]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        tiers: base::provider::Tiers {
+            strong: Some(format!("{id}-a")),
+            balanced: Some(format!("{id}-b")),
+            fast: None,
+        },
         ..Default::default()
     }
 }
 
-/// A daemon whose settings' model is `settings_model`, with providers `one`
-/// (the default) and `two` on `stub`, and `task_models` as given.
-async fn daemon(
-    stub: &Stub,
-    settings_model: &'static str,
-    task_models: Value,
-) -> crate::support::Served {
-    let one = provider(format!("{}/one", stub.base), &["one-a", "one-b"]);
-    let two = provider(format!("{}/two", stub.base), &["two-a", "two-b"]);
+/// A daemon with providers `one` and `two` on `stub`, in `order`, and
+/// `model.tasks` as given.
+async fn daemon(stub: &Stub, order: &[&str], tasks: Value) -> crate::support::Served {
+    let one = provider("one", format!("{}/one", stub.base));
+    let two = provider("two", format!("{}/two", stub.base));
+    let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
     crate::support::serve_permitting_all(
         Arc::new(MockAnthropicClient::new()),
         crate::support::Serving {
-            model: settings_model,
+            keys: &[("one", "k-one"), ("two", "k-two")],
             ..Default::default()
         },
         |config| {
             let values = &mut config.settings.values;
-            values.providers.insert("one".into(), one);
-            values.providers.insert("two".into(), two);
-            values.default_provider = Some("one".into());
-            values.task_models = serde_json::from_value(task_models).unwrap();
+            values.providers = vec![one, two];
+            values.model.order = order;
+            values.model.tasks = serde_json::from_value(tasks).unwrap();
         },
     )
     .await
@@ -82,14 +85,9 @@ async fn session(served: &crate::support::Served, options: Value) -> String {
 }
 
 #[tokio::test]
-async fn the_conversation_asks_for_the_model_task_models_main_names() {
+async fn the_conversation_asks_the_first_provider_for_the_main_tier() {
     let stub = Stub::start(route).await;
-    let served = daemon(
-        &stub,
-        "one-a",
-        json!({"main": {"provider": "two", "model": "two-b"}}),
-    )
-    .await;
+    let served = daemon(&stub, &["two", "one"], json!({"main": "balanced"})).await;
     let session = session(&served, json!({})).await;
     let turn = crate::support::call_frame(
         &served.sock,
@@ -115,26 +113,25 @@ async fn start_agent(served: &crate::support::Served, session: &str, prompt: &st
 }
 
 #[tokio::test]
-async fn a_task_on_the_default_provider_carries_its_model_not_the_named_providers() {
+async fn a_sub_agent_asks_for_the_subagent_tier() {
     let stub = Stub::start(route).await;
-    let served = daemon(&stub, "one-a", json!({})).await;
-    let session = session(&served, json!({"provider": "two"})).await;
+    let served = daemon(&stub, &["one"], json!({})).await;
+    let session = session(&served, json!({})).await;
     start_agent(&served, &session, "SUB-ON-ONE").await;
     assert_eq!(
         request_to(&stub, "/one/", "SUB-ON-ONE").await.body["model"],
-        "one-a",
-        "the sub-agent is routed to provider one by the settings, and goes with one's model"
+        "one-b"
     );
 }
 
 #[tokio::test]
-async fn a_task_on_the_default_provider_carries_its_model_not_the_main_routes() {
+async fn a_provider_a_session_names_takes_its_sub_agents_too() {
     let stub = Stub::start(route).await;
-    let served = daemon(&stub, "one-a", json!({"main": "two"})).await;
-    let session = session(&served, json!({})).await;
-    start_agent(&served, &session, "SUB-BESIDE-MAIN").await;
+    let served = daemon(&stub, &["two", "one"], json!({})).await;
+    let session = session(&served, json!({"provider": "one"})).await;
+    start_agent(&served, &session, "SUB-ON-NAMED").await;
     assert_eq!(
-        request_to(&stub, "/one/", "SUB-BESIDE-MAIN").await.body["model"],
-        "one-a"
+        request_to(&stub, "/one/", "SUB-ON-NAMED").await.body["model"],
+        "one-b"
     );
 }

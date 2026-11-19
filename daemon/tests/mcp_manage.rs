@@ -445,7 +445,7 @@ async fn a_write_that_reconnects_every_server_starts_none_for_a_pair_that_never_
         &sock,
         "config.setProvider",
         json!({"project_root": other, "tier": "project", "provider_id": "p",
-               "config": {"api_type": "anthropic", "api_key": "k", "default_model": "m"}}),
+               "config": {"api": "anthropic", "tiers": {"strong": "m"}}}),
     )
     .await;
     assert_eq!(

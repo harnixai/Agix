@@ -269,12 +269,13 @@ async fn a_provider_key_env_is_not_handed_to_commands() {
             std::fs::create_dir_all(other.join(".agix")).unwrap();
             std::fs::write(
                 other.join(".agix").join("settings.json"),
-                json!({"providers": {"spare": {
-                    "api_type": "openai_compatible",
+                json!({"providers": [{
+                    "id": "spare",
+                    "api": "openai_chat",
                     "base_url": "http://127.0.0.1:9/v1",
                     "api_key_env": VAR,
-                    "default_model": "m",
-                }}, "default_provider": "spare"})
+                    "tiers": {"strong": "m"},
+                }], "model": {"order": ["spare"]}})
                 .to_string(),
             )
             .unwrap();

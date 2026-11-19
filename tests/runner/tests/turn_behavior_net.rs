@@ -53,7 +53,6 @@ struct Case {
     /// everywhere else in this file.
     compact_threshold: usize,
     permission_mode: PermissionMode,
-    fallback_model: Option<String>,
     /// How the harness answers a `PermissionPrompt`. `None` means the case
     /// does not expect one, and getting one is a failure rather than a hang.
     approve_prompts: Option<bool>,
@@ -84,7 +83,6 @@ impl Case {
             replies,
             compact_threshold: 0,
             permission_mode: PermissionMode::BypassPermissions,
-            fallback_model: None,
             approve_prompts: None,
             hooks_config: None,
             max_api_calls: None,
@@ -154,7 +152,6 @@ async fn trace(case: Case) -> String {
     settings.values.model.model_name = "golden-model".into();
     settings.values.model.max_tokens = 1024;
     settings.values.model.thinking_mode = ThinkingMode::Off;
-    settings.values.model.fallback_model = case.fallback_model.clone();
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");
     settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
@@ -429,23 +426,6 @@ async fn a_tool_that_reports_its_own_failure_says_so_to_the_model() {
         ],
     ))
     .await;
-}
-
-/// Overload on the first call, success on the retry. With a fallback model
-/// configured, the retry must go to it — visible only in the recorded call
-/// list, since the response is the script's either way.
-#[tokio::test]
-async fn overload_falls_back_to_the_second_model() {
-    let mut case = Case::new(
-        "overload_fallback",
-        vec!["hi"],
-        vec![
-            Reply::Fail(base::interface::model::ModelError::overloaded()),
-            Reply::Text("recovered"),
-        ],
-    );
-    case.fallback_model = Some("golden-fallback".into());
-    check(case).await;
 }
 
 /// `max_tokens` is a stop reason the loop treats as "not finished" — it

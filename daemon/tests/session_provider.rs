@@ -39,14 +39,16 @@ impl Daemon {
     }
 }
 
-fn provider(models: &[&str]) -> base::provider::ProviderConfig {
+fn provider(id: &str, models: &[&str]) -> base::provider::ProviderConfig {
     base::provider::ProviderConfig {
-        api_type: Some("anthropic".into()),
+        id: id.into(),
+        api: Some("anthropic".into()),
         base_url: Some("http://127.0.0.1:9".into()),
-        api_key: Some("unused".into()),
-        api_key_env: None,
-        default_model: models.first().map(|m| m.to_string()),
         models: models.iter().map(|m| (*m).into()).collect(),
+        tiers: base::provider::Tiers {
+            strong: models.first().map(|m| m.to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -56,14 +58,10 @@ async fn start_daemon() -> Daemon {
         Arc::new(MockAnthropicClient::new()),
         Default::default(),
         |config| {
-            let providers = &mut config.settings.values;
-            providers
-                .providers
-                .insert("one".into(), provider(&["one-a"]));
-            providers
-                .providers
-                .insert("two".into(), provider(&["two-a", "two-b"]));
-            providers.default_provider = Some("one".into());
+            config.settings.values.providers = vec![
+                provider("one", &["one-a"]),
+                provider("two", &["two-a", "two-b"]),
+            ];
         },
     )
     .await;
@@ -127,7 +125,7 @@ async fn a_session_moves_to_another_provider_and_stays_there() {
     assert_eq!(switched["provider"], "two");
     assert!(
         switched["model"].is_null(),
-        "no model was chosen for the new provider, so its default applies: {switched}"
+        "no model was chosen for the new provider, so `model.tasks.main` applies: {switched}"
     );
 
     daemon.ok("config.reload", serde_json::json!({})).await;
@@ -155,13 +153,11 @@ async fn a_provider_added_while_a_session_is_open_can_be_chosen_by_it() {
             serde_json::json!({
                 "provider_id": "three",
                 "config": {
-                    "api_type": "anthropic",
+                    "api": "anthropic",
                     "base_url": "http://127.0.0.1:9",
-                    "api_key": "unused",
-                    "default_model": "three-a",
+                    "tiers": {"strong": "three-a"},
                     "models": ["three-a"]
-                },
-                "default_provider": "three"
+                }
             }),
         )
         .await;

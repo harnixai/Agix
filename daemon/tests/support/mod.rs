@@ -254,6 +254,8 @@ pub async fn start_scripted_server_holding(
     config.session_cap = session_cap;
     let Seed(settings, rules) = settings.into();
     config.settings.values = settings;
+    config.settings.default_model = config.settings.values.model.model_name.clone();
+    config.settings.settle_providers();
     config.settings.rules = rules
         .into_iter()
         .map(|rule| {
@@ -489,6 +491,8 @@ pub struct Serving {
     pub max_tokens: u32,
     pub session_cap: Option<usize>,
     pub history: bool,
+    /// Provider id → API key, as a host's credential source would answer.
+    pub keys: &'static [(&'static str, &'static str)],
 }
 
 impl Default for Serving {
@@ -499,6 +503,7 @@ impl Default for Serving {
             max_tokens: 2000,
             session_cap: None,
             history: false,
+            keys: &[],
         }
     }
 }
@@ -537,6 +542,7 @@ pub async fn serve_permitting_all(
     }
     config.settings.values.memory.enabled = false;
     configure(&mut config);
+    config.settings.settle_providers();
 
     let global = config.settings.paths.global_data_dir.clone();
     let store: Option<Arc<dyn history::store::HistoryStore>> = if serving.history {
@@ -568,6 +574,16 @@ pub async fn serve_permitting_all(
                 None => daemon::Transcripts::default(),
             },
             host_policy: Some(Arc::new(PermitAll)),
+            credentials: (!serving.keys.is_empty()).then(|| {
+                Arc::new(base::interface::credentials::StaticCredentials::new(
+                    serving.keys.iter().map(|(id, key)| {
+                        (
+                            id.to_string(),
+                            base::interface::credentials::Secret::new(*key),
+                        )
+                    }),
+                )) as Arc<dyn base::interface::credentials::CredentialSource>
+            }),
             ..Default::default()
         },
     )

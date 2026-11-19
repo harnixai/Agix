@@ -504,7 +504,6 @@ const OPAQUE_ALLOWED: &[&str] = &[
     "/$defs/CallRequest/properties/input_map",
     "/$defs/ConfigSetParams/properties/changes/additionalProperties",
     "/$defs/ConfigSetProviderParams/properties/config",
-    "/$defs/ConfigSetProviderParams/properties/task_models",
     "/$defs/ConfigTier/properties/local",
     "/$defs/ConfigTier/properties/managed",
     "/$defs/ConfigTier/properties/settings",

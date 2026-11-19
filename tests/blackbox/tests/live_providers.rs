@@ -1,25 +1,26 @@
-//! `task_models` routing with a real model: in the `harnix` scene, which
-//! names its sessions, the naming call goes to the model `task_models.title`
-//! names and the summary of a compaction to the one `task_models.compact`
-//! names, while every turn stays on the default provider's model.
+//! `model.tasks` with a real model: in the `harnix` scene, which names its
+//! sessions, the naming call goes to the model of the tier `model.tasks.title`
+//! names and the summary of a compaction to that of `model.tasks.compact`,
+//! while every turn stays on the `strong` tier's model.
 
 use std::time::{Duration, Instant};
 
 use blackbox::{LiveRun, Purpose};
 use serde_json::{json, Value};
 
-/// A `providers` entry for the proxy that serves `model`.
-fn provider(run: &LiveRun, model: &str) -> Value {
-    json!({
-        "api_type": "anthropic",
+/// A `providers` list of the proxy, its tiers served by these models.
+fn providers(run: &LiveRun, strong: &str, balanced: &str, fast: &str) -> Value {
+    json!([{
+        "id": "proxy",
+        "api": "anthropic",
         "base_url": blackbox::ModelEndpoint::base_url(&run.provider).as_str(),
-        "api_key": "harness",
-        "default_model": model,
-    })
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "tiers": {"strong": strong, "balanced": balanced, "fast": fast},
+    }])
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn title_and_compact_calls_go_to_the_models_task_models_names() -> anyhow::Result<()> {
+async fn title_and_compact_calls_go_to_the_models_of_their_tiers() -> anyhow::Result<()> {
     let name = "providers-routed";
     let mut run = LiveRun::builder(name)
         .options(|o| o.scene("harnix"))
@@ -35,13 +36,8 @@ async fn title_and_compact_calls_go_to_the_models_task_models_names() -> anyhow:
         "AGIX_LIVE_MODELS needs three Flash names"
     );
     let mut settings = LiveRun::base_settings();
-    settings["providers"] = json!({
-        "main": provider(&run, &main),
-        "compact": provider(&run, &compactor),
-        "title": provider(&run, &titler),
-    });
-    settings["default_provider"] = json!("main");
-    settings["task_models"] = json!({ "compact": "compact", "title": "title" });
+    settings["providers"] = providers(&run, &main, &compactor, &titler);
+    settings["model"] = json!({ "tasks": { "compact": "balanced", "title": "fast" } });
     run.world.write_project_settings(name, &settings)?;
     let reloaded = run.client.config_reload(&rpc_client::Target::own()).await?;
     let report = reloaded.result.unwrap_or_default();

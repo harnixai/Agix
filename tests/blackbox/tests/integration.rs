@@ -39,6 +39,7 @@ mod plugin_commands;
 mod plugin_functions;
 mod project_state;
 mod project_trust_untrusted;
+mod provider_fallback;
 mod provider_tiers;
 mod sandbox_chain;
 mod session_attended;

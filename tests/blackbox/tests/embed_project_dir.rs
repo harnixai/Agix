@@ -81,14 +81,13 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
         "---\ndescription: style\nalwaysApply: true\n---\nCURSOR-MDC-RULE\n",
     )?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "memory": { "enabled": true },
         "team": { "enabled": true },
         "permissions": {
@@ -111,6 +110,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
 
 fn config(root: &Root, project_dir: &str) -> EmbedConfig {
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.project_dir = Some(project_dir.into());
     config

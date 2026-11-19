@@ -114,7 +114,7 @@ pub enum Reply {
     },
     /// An OpenAI-compatible chat-completions stream: these chunks as `data:`
     /// events, then `[DONE]` when `done`. For a project whose provider is
-    /// `openai_compatible` with this stub as its `base_url`.
+    /// `openai_chat` with this stub as its `base_url`.
     Chat {
         chunks: Vec<serde_json::Value>,
         done: bool,

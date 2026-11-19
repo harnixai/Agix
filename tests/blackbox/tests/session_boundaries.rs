@@ -1645,17 +1645,17 @@ async fn inspect_context_reports_the_provider_the_next_call_goes_to() -> anyhow:
     let stub = ProviderStub::start().await?;
     let provider = |model: &str| {
         json!({
-            "api_type": "anthropic",
+            "id": model.trim_start_matches("model-"),
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": model,
+            "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+            "tiers": {"strong": model},
             "models": [model]
         })
     };
     let mut run = stubbed("inspect-provider", &stub)
         .settings(json!({
-            "providers": { "first": provider("model-one"), "second": provider("model-two") },
-            "default_provider": "first"
+            "providers": [provider("model-one"), provider("model-two")]
         }))
         .start()
         .await?;
@@ -1665,20 +1665,20 @@ async fn inspect_context_reports_the_provider_the_next_call_goes_to() -> anyhow:
             let c = inspected_context(&mut run, &session).await?;
             c["provider"].clone()
         },
-        json!("first")
+        json!("one")
     );
     let set = run
         .client
         .call(
             "session.setModel",
-            json!({ "session_id": session, "model": "model-two", "provider": "second" }),
+            json!({ "session_id": session, "model": "model-two", "provider": "two" }),
         )
         .await?;
     anyhow::ensure!(set.error.is_none(), "{set:?}");
     let c = inspected_context(&mut run, &session).await?;
     assert_eq!(
         (&c["provider"], &c["model"]),
-        (&json!("second"), &json!("model-two"))
+        (&json!("two"), &json!("model-two"))
     );
     run.finish().await;
     Ok(())

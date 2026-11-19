@@ -166,63 +166,6 @@ async fn null_removes_the_key_from_the_tier_and_the_lower_value_shows_through() 
 }
 
 #[tokio::test]
-async fn credentials_land_in_the_local_file_and_read_back_redacted() {
-    let (server, sock, dir, handle) = start_server().await;
-    let written = call(
-        &sock,
-        "config.set",
-        json!({"tier": "global", "changes": {
-            "providers.q": {"api_key": "token-123456", "base_url": "https://q.example"},
-            "providers.p.api_key": "key-abcdef"
-        }}),
-    )
-    .await;
-    let (shared, local) = (
-        dir.path().join("settings.json"),
-        dir.path().join("settings.local.json"),
-    );
-    assert_eq!(
-        written["secrets_written_to"],
-        json!(local.display().to_string()),
-        "{written}"
-    );
-    let committed = read(&shared);
-    assert_eq!(
-        committed["providers"],
-        json!({"q": {"base_url": "https://q.example"}}),
-        "{committed}"
-    );
-    let machine = read(&local);
-    assert_eq!(machine["providers"]["q"]["api_key"], "token-123456");
-    assert_eq!(machine["providers"]["p"]["api_key"], "key-abcdef");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&local).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "settings.local.json is {mode:o}");
-    }
-    assert_eq!(written["effective"]["providers.p.api_key"], "***cdef");
-
-    let tier = call(
-        &sock,
-        "config.get",
-        json!({"scene": "code", "tier": "global"}),
-    )
-    .await;
-    assert_eq!(
-        tier["local"]["providers"]["q"]["api_key"], "***3456",
-        "{tier}"
-    );
-    assert_eq!(tier["local"]["providers"]["p"]["api_key"], "***cdef");
-
-    server.shutdown_token().cancel();
-    let _ = handle.await;
-}
-
-/// A credential inside a value — a password in a URL — is not a key the
-/// writer moves to `settings.local.json`: it lands in `settings.json`, and
-/// the answer says so without repeating it; read back, it is masked.
-#[tokio::test]
 async fn a_credential_inside_a_value_is_written_with_a_warning_and_read_back_masked() {
     let (server, sock, _dir, handle) = start_server().await;
     let written = call(

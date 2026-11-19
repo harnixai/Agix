@@ -588,23 +588,24 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
         8,
         |config| {
             let settings = &mut config.settings.values;
-            settings.default_provider = Some("anthropic".into());
-            for (id, model) in [
-                ("deepseek", "deepseek-chat"),
+            settings.providers = [
                 ("anthropic", "claude-opus-4-6"),
-            ] {
-                settings.providers.insert(
-                    id.into(),
-                    base::provider::ProviderConfig {
-                        api_type: Some("anthropic".into()),
-                        base_url: Some("http://127.0.0.1:9".into()),
-                        api_key: Some("unused".into()),
-                        default_model: Some(model.into()),
-                        models: vec![model.into()],
-                        ..Default::default()
-                    },
-                );
-            }
+                ("deepseek", "deepseek-chat"),
+            ]
+            .into_iter()
+            .map(|(id, model)| base::provider::ProviderConfig {
+                id: id.into(),
+                api: Some("anthropic".into()),
+                base_url: Some("http://127.0.0.1:9".into()),
+                models: vec![model.into()],
+                tiers: base::provider::Tiers {
+                    strong: Some(model.into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .collect();
+            config.settings.settle_providers();
         },
     )
     .await;
@@ -629,7 +630,11 @@ async fn documented_request_examples_are_accepted_by_a_real_daemon() {
             }
             let h = if matches!(
                 method.as_str(),
-                "session.create" | "session.setModel" | "mcp.auth.start" | "config.listModels"
+                "session.create"
+                    | "session.setModel"
+                    | "mcp.auth.start"
+                    | "config.listModels"
+                    | "config.getProvider"
             ) {
                 &with_providers
             } else {
@@ -1381,6 +1386,11 @@ const SESSION_EVENTS_NOT_PROVOKED: &[(&str, &str)] = &[
         "subscription_dropped",
         "needs a connection that stops reading while the session overflows its queue; \
          whether it overflows is a matter of timing",
+    ),
+    (
+        "provider_switched",
+        "needs two providers whose endpoints the harness serves, the first failing; the \
+         black-box provider cases drive it",
     ),
 ];
 

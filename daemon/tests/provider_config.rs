@@ -2,63 +2,47 @@
 
 use crate::support::*;
 use daemon::rpc::codes;
+use serde_json::{json, Value};
+
+fn read(path: &std::path::Path) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// The entry with `id` in a settings file's `providers` list.
+fn entry<'a>(settings: &'a Value, id: &str) -> Option<&'a Value> {
+    settings["providers"]
+        .as_array()?
+        .iter()
+        .find(|e| e["id"] == id)
+}
+
+const DEEPSEEK: &str = r#"{"vendor":"deepseek","api":"openai_chat","base_url":"https://api.deepseek.com","api_key_env":"DEEPSEEK_API_KEY","tiers":{"strong":"deepseek-pro"}}"#;
 
 #[tokio::test]
-async fn set_provider_writes_project_settings_and_doctor_sees_it() {
+async fn set_provider_writes_a_list_entry_and_doctor_sees_it() {
     let (_server, sock, dir, handle) = start_server().await;
 
-    let resp = rpc_call(
+    let saved = call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","api_key":"k","default_model":"deepseek-pro"},"default_provider":"deepseek"},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek",
+               "config": serde_json::from_str::<Value>(DEEPSEEK).unwrap()}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert!(v["result"].is_object(), "expected success, got: {v}");
-    assert_eq!(v["result"]["routing"]["ok"], true, "resp: {v}");
-    assert_eq!(v["result"]["default_provider"], "deepseek");
+    assert_eq!(saved["routing"]["ok"], true, "{saved}");
+    assert_eq!(saved["providers"], json!(["deepseek"]), "{saved}");
+    assert_eq!(saved["order"], json!(["deepseek"]), "{saved}");
+    assert!(saved.get("secrets_written_to").is_none(), "{saved}");
 
-    // Written to disk at the project tier, the key to the machine-local file.
-    let agix = dir.path().join(".agix");
-    let written = std::fs::read_to_string(agix.join("settings.json")).unwrap();
-    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
+    let written = read(&dir.path().join(".agix").join("settings.json"));
     assert_eq!(
-        written["providers"]["deepseek"]["default_model"],
+        entry(&written, "deepseek").unwrap()["tiers"]["strong"],
         "deepseek-pro"
     );
-    assert!(
-        written["providers"]["deepseek"].get("api_key").is_none(),
-        "the committed settings.json carries the key: {written}"
-    );
-    let local = std::fs::read_to_string(agix.join("settings.local.json")).unwrap();
-    let local: serde_json::Value = serde_json::from_str(&local).unwrap();
-    assert_eq!(local["providers"]["deepseek"]["api_key"], "k");
-    assert_eq!(
-        v["result"]["secrets_written_to"],
-        agix.join("settings.local.json").display().to_string()
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(agix.join("settings.local.json"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600, "settings.local.json is {mode:o}");
-    }
-    let ignored = std::fs::read_to_string(agix.join(".gitignore")).unwrap_or_default();
-    assert!(
-        ignored.lines().any(|l| l == "settings.local.json"),
-        "the key can be committed: .agix/.gitignore is {ignored:?}"
-    );
 
-    // Doctor now reflects the newly-written provider.
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"daemon.doctor","id":2}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["result"]["providers"]["default_provider"], "deepseek");
+    let doctor = call(&sock, "daemon.doctor", json!({})).await;
+    assert_eq!(doctor["providers"]["configured"], json!(["deepseek"]));
+    assert_eq!(doctor["model"]["provider"], "deepseek");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -70,30 +54,27 @@ async fn set_provider_can_target_another_project_this_daemon_serves() {
 
     let other = dir.path().join("other-project");
     std::fs::create_dir_all(&other).unwrap();
-
-    let resp = rpc_call(
+    let saved = call(
         &sock,
-        &format!(
-            r#"{{"jsonrpc":"2.0","method":"config.setProvider","params":{{"project_root":"{}","provider_id":"deepseek","config":{{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","api_key":"k","default_model":"deepseek-pro"}},"default_provider":"deepseek"}},"id":1}}"#,
-            other.display()
-        ),
+        "config.setProvider",
+        json!({"project_root": other, "provider_id": "deepseek",
+               "config": serde_json::from_str::<Value>(DEEPSEEK).unwrap()}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert!(v["result"].is_object(), "expected success, got: {v}");
     assert_eq!(
-        v["result"]["written_to"],
+        saved["written_to"],
         other
             .join(".agix")
             .join("settings.json")
             .display()
             .to_string(),
-        "{v}"
+        "{saved}"
     );
-
-    let local = std::fs::read_to_string(other.join(".agix").join("settings.local.json")).unwrap();
-    let local: serde_json::Value = serde_json::from_str(&local).unwrap();
-    assert_eq!(local["providers"]["deepseek"]["api_key"], "k");
+    assert!(entry(
+        &read(&other.join(".agix").join("settings.json")),
+        "deepseek"
+    )
+    .is_some());
     assert!(
         !dir.path().join(".agix").join("settings.json").exists(),
         "the daemon's own project must not be written when another one was named"
@@ -101,13 +82,13 @@ async fn set_provider_can_target_another_project_this_daemon_serves() {
 
     // `null` is refused rather than silently writing the global tier: these
     // methods act on the project tier, and a no-project session has none.
-    let resp = rpc_call(
+    let refused = call_frame(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"project_root":null,"provider_id":"x","config":{"api_type":"anthropic"}},"id":2}"#,
+        "config.setProvider",
+        json!({"project_root": null, "provider_id": "x", "config": {"api": "anthropic"}}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["error"]["code"], -32602, "{v}");
+    assert_eq!(refused["error"]["code"], -32602, "{refused}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -116,95 +97,65 @@ async fn set_provider_can_target_another_project_this_daemon_serves() {
 #[tokio::test]
 async fn set_provider_partial_patch_does_not_clobber_untouched_fields() {
     let (_server, sock, dir, handle) = start_server().await;
-
-    rpc_call(
+    call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","default_model":"deepseek-pro"}},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek",
+               "config": serde_json::from_str::<Value>(DEEPSEEK).unwrap()}),
+    )
+    .await;
+    call(
+        &sock,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "config": {"tiers": {"fast": "deepseek-flash"}}}),
     )
     .await;
 
-    // Second call only touches api_key — base_url/default_model must survive.
-    rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_key":"new-key"}},"id":2}"#,
-    )
-    .await;
-
-    let written = std::fs::read_to_string(dir.path().join(".agix").join("settings.json")).unwrap();
-    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
-    let local =
-        std::fs::read_to_string(dir.path().join(".agix").join("settings.local.json")).unwrap();
-    let local: serde_json::Value = serde_json::from_str(&local).unwrap();
-    assert_eq!(local["providers"]["deepseek"]["api_key"], "new-key");
+    let written = read(&dir.path().join(".agix").join("settings.json"));
+    let deepseek = entry(&written, "deepseek").unwrap();
+    assert_eq!(deepseek["base_url"], "https://api.deepseek.com");
     assert_eq!(
-        written["providers"]["deepseek"]["base_url"],
-        "https://api.deepseek.com/v1"
-    );
-    assert_eq!(
-        written["providers"]["deepseek"]["default_model"],
-        "deepseek-pro"
+        deepseek["tiers"],
+        json!({"strong": "deepseek-pro", "fast": "deepseek-flash"})
     );
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
 
-/// A key that an earlier write left in the committed file moves out the next
-/// time that provider is written, and a delete clears it from both files.
+/// A provider is written where it is defined — here the global tier's
+/// `settings.local.json` — whatever tier the call names; a new one goes to
+/// the tier named.
 #[tokio::test]
-async fn set_provider_moves_a_committed_key_to_the_local_file() {
+async fn set_provider_writes_a_provider_back_where_it_is_defined() {
     let (_server, sock, dir, handle) = start_server().await;
-    let agix = dir.path().join(".agix");
-    std::fs::create_dir_all(&agix).unwrap();
+    let global_local = dir.path().join("settings.local.json");
     std::fs::write(
-        agix.join("settings.json"),
-        r#"{"providers":{"deepseek":{"api_key":"old-key","base_url":"https://x/v1"}},"prompt":{"append":"kept"}}"#,
+        &global_local,
+        r#"{"providers": [{"id": "mine", "tiers": {"strong": "m"}}]}"#,
     )
     .unwrap();
+    call(&sock, "config.reload", json!({})).await;
 
-    rpc_call(
+    let saved = call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"default_model":"m"}},"id":1}"#,
+        "config.setProvider",
+        json!({"tier": "project", "provider_id": "mine", "config": {"base_url": "https://gw.example"}}),
     )
     .await;
-    let read = |name: &str| -> serde_json::Value {
-        serde_json::from_str(&std::fs::read_to_string(agix.join(name)).unwrap()).unwrap()
-    };
-    let committed = read("settings.json");
-    assert!(
-        committed["providers"]["deepseek"].get("api_key").is_none(),
-        "{committed}"
-    );
+    assert_ne!(saved["tier"], "project", "{saved}");
     assert_eq!(
-        committed["providers"]["deepseek"]["base_url"],
-        "https://x/v1"
+        entry(&read(&global_local), "mine").unwrap()["base_url"],
+        "https://gw.example"
     );
-    assert_eq!(committed["prompt"]["append"], "kept");
-    assert_eq!(
-        read("settings.local.json")["providers"]["deepseek"]["api_key"],
-        "old-key"
-    );
+    assert!(!dir.path().join(".agix").join("settings.json").exists());
 
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.getProvider","params":{"include_secrets":true},"id":2}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    let shown = call(&sock, "config.getProvider", json!({"provider_id": "mine"})).await;
     assert_eq!(
-        v["result"]["providers"]["deepseek"]["api_key"], "old-key",
-        "{v}"
+        shown["providers"][0]["defined_in"],
+        global_local.display().to_string(),
+        "{shown}"
     );
-
-    rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","delete":true},"id":3}"#,
-    )
-    .await;
-    assert!(read("settings.json")["providers"].get("deepseek").is_none());
-    assert!(read("settings.local.json")["providers"]
-        .get("deepseek")
-        .is_none());
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -213,36 +164,47 @@ async fn set_provider_moves_a_committed_key_to_the_local_file() {
 #[tokio::test]
 async fn set_provider_delete_removes_entry() {
     let (_server, sock, dir, handle) = start_server().await;
-
-    rpc_call(
+    call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"default_model":"deepseek-pro"}},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "config": {"tiers": {"strong": "deepseek-pro"}}}),
     )
     .await;
-    rpc_call(
+    let deleted = call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","delete":true},"id":2}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "delete": true}),
     )
     .await;
+    assert_eq!(deleted["providers"], json!(["anthropic"]), "{deleted}");
 
-    let written = std::fs::read_to_string(dir.path().join(".agix").join("settings.json")).unwrap();
-    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
-    assert!(written["providers"].get("deepseek").is_none());
+    let written = read(&dir.path().join(".agix").join("settings.json"));
+    assert!(entry(&written, "deepseek").is_none(), "{written}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
 
 #[tokio::test]
-async fn set_provider_rejects_missing_provider_id() {
+async fn set_provider_rejects_a_missing_id_and_an_old_key() {
     let (_server, sock, _dir, handle) = start_server().await;
-    let resp = rpc_call(
+    let missing = call_frame(&sock, "config.setProvider", json!({})).await;
+    assert_eq!(missing["error"]["code"], codes::INVALID_PARAMS, "{missing}");
+
+    let old = call_frame(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "config": {"api_type": "openai_compatible"}}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["error"]["code"], codes::INVALID_PARAMS, "resp: {v}");
+    assert_eq!(old["error"]["code"], codes::INVALID_PARAMS, "{old}");
+    assert!(
+        old["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("providers[].api"),
+        "{old}"
+    );
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -257,13 +219,13 @@ async fn set_provider_refuses_to_clobber_a_malformed_existing_settings_json() {
     let settings_path = agix_dir.join("settings.json");
     std::fs::write(&settings_path, "{not valid json").unwrap();
 
-    let resp = rpc_call(
+    let refused = call_frame(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"default_model":"deepseek-pro"}},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "config": {"tiers": {"strong": "deepseek-pro"}}}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["error"]["code"], codes::INVALID_PARAMS, "resp: {v}");
+    assert_eq!(refused["error"]["code"], codes::INVALID_PARAMS, "{refused}");
 
     // The original (malformed) content must survive untouched — not get
     // silently replaced with `{}` + the patch.
@@ -275,152 +237,96 @@ async fn set_provider_refuses_to_clobber_a_malformed_existing_settings_json() {
 }
 
 #[tokio::test]
-async fn get_provider_redacts_api_key_by_default_and_reveals_with_flag() {
+async fn config_reload_with_no_providers_routes_to_the_built_in_one() {
     let (_server, sock, _dir, handle) = start_server().await;
-    rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_key":"sk-secret-1234"}},"id":1}"#,
-    )
-    .await;
 
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.getProvider","id":2}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(
-        v["result"]["providers"]["deepseek"]["api_key"], "***1234",
-        "resp: {v}"
-    );
-
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.getProvider","params":{"include_secrets":true},"id":3}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(
-        v["result"]["providers"]["deepseek"]["api_key"], "sk-secret-1234",
-        "resp: {v}"
-    );
+    let reloaded = call(&sock, "config.reload", json!({})).await;
+    assert_eq!(reloaded["routing"]["ok"], true, "{reloaded}");
+    assert_eq!(reloaded["routing"]["router_rebuilt"], true, "{reloaded}");
+    assert_eq!(reloaded["providers"], json!(["anthropic"]), "{reloaded}");
+    assert_eq!(reloaded["order"], json!(["anthropic"]), "{reloaded}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
 
 #[tokio::test]
-async fn config_reload_with_no_providers_reports_ok_and_no_router() {
+async fn set_provider_with_openai_chat_rebuilds_the_router() {
     let (_server, sock, _dir, handle) = start_server().await;
-
-    let resp = rpc_call(
+    let saved = call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.reload","id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek",
+               "config": serde_json::from_str::<Value>(DEEPSEEK).unwrap()}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert!(v["result"].is_object(), "expected success, got: {v}");
-    assert_eq!(v["result"]["routing"]["ok"], true, "resp: {v}");
-    assert_eq!(v["result"]["routing"]["router_rebuilt"], false, "resp: {v}");
-    assert!(v["result"]["providers"].as_array().unwrap().is_empty());
+    assert_eq!(saved["routing"]["ok"], true, "{saved}");
+    assert_eq!(saved["routing"]["router_rebuilt"], true, "{saved}");
+    assert!(saved["routing"]["router_error"].is_null(), "{saved}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
 
 #[tokio::test]
-async fn set_provider_with_openai_compatible_rebuilds_the_router() {
-    // `openai_compatible` has a runtime `Model` impl
-    // (`model::OpenAICompatibleModel`), so configuring a DeepSeek-shaped
-    // provider builds and swaps the live router.
-    let (_server, sock, _dir, handle) = start_server().await;
-
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","api_key":"k","default_model":"deepseek-pro"},"default_provider":"deepseek"},"id":1}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["result"]["routing"]["ok"], true, "resp: {v}");
-    assert_eq!(v["result"]["routing"]["router_rebuilt"], true, "resp: {v}");
-    assert!(
-        v["result"]["routing"]["router_error"].is_null(),
-        "resp: {v}"
-    );
-
-    _server.shutdown_token().cancel();
-    let _ = handle.await;
-}
-
-#[tokio::test]
-async fn set_provider_with_openai_compatible_missing_base_url_reports_a_router_error() {
-    // The one thing an `openai_compatible` provider cannot do without: there
-    // is no default host to fall back to, and guessing one would surface as a
+async fn set_provider_with_openai_chat_missing_base_url_reports_a_router_error() {
+    // The one thing an `openai_chat` provider cannot do without: there is no
+    // default host to fall back to, and guessing one would surface as a
     // confusing auth failure on the first call instead of a config error.
     let (_server, sock, _dir, handle) = start_server().await;
-
-    let resp = rpc_call(
+    let saved = call(
         &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","api_key":"k","default_model":"deepseek-pro"},"default_provider":"deepseek"},"id":1}"#,
+        "config.setProvider",
+        json!({"provider_id": "deepseek",
+               "config": {"api": "openai_chat", "tiers": {"strong": "deepseek-pro"}}}),
     )
     .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["result"]["routing"]["ok"], true, "resp: {v}");
-    assert_eq!(v["result"]["routing"]["router_rebuilt"], false, "resp: {v}");
-    let router_error = v["result"]["routing"]["router_error"].as_str().unwrap();
+    assert_eq!(saved["routing"]["ok"], true, "{saved}");
+    assert_eq!(saved["routing"]["router_rebuilt"], false, "{saved}");
+    let router_error = saved["routing"]["router_error"].as_str().unwrap();
+    assert!(router_error.contains("base_url"), "{router_error}");
+
+    _server.shutdown_token().cancel();
+    let _ = handle.await;
+}
+
+/// The other failure layer: settings that do not route — a tier outside the
+/// provider's models, an order naming a provider nobody defines — are
+/// `routing.ok: false`, and the previous router is kept.
+#[tokio::test]
+async fn providers_that_do_not_route_report_routing_not_ok() {
+    let (_server, sock, _dir, handle) = start_server().await;
+    let saved = call(
+        &sock,
+        "config.setProvider",
+        json!({"provider_id": "deepseek",
+               "config": {"models": ["deepseek-pro"], "tiers": {"strong": "deepseek-max"}}}),
+    )
+    .await;
+    assert_eq!(saved["routing"]["ok"], false, "{saved}");
+    let error = saved["routing"]["error"].as_str().unwrap();
+    assert!(error.contains("deepseek-max"), "{error}");
+
+    call(
+        &sock,
+        "config.setProvider",
+        json!({"provider_id": "deepseek", "delete": true}),
+    )
+    .await;
+    let set = call(
+        &sock,
+        "config.set",
+        json!({"tier": "project", "changes": {"model.order": ["ghost-provider"]}}),
+    )
+    .await;
+    assert_eq!(set["routing"]["ok"], false, "{set}");
     assert!(
-        router_error.contains("base_url"),
-        "router_error: {router_error}"
+        set["routing"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("ghost-provider"),
+        "{set}"
     );
-
-    _server.shutdown_token().cancel();
-    let _ = handle.await;
-}
-
-#[tokio::test]
-async fn set_provider_with_unresolvable_config_reports_routing_not_ok() {
-    // Distinguishes the other failure layer: `default_provider` pointing at
-    // a provider that doesn't exist is a `resolve_task_models` failure, not
-    // a router-build failure — `routing.ok` must be `false` here (unlike
-    // the openai_compatible case above).
-    let (_server, sock, _dir, handle) = start_server().await;
-
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"anthropic","config":{"api_type":"anthropic","api_key":"k","default_model":"claude-sonnet-4-6"},"default_provider":"ghost-provider"},"id":1}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert_eq!(v["result"]["routing"]["ok"], false, "resp: {v}");
-    assert_eq!(v["result"]["routing"]["router_rebuilt"], false, "resp: {v}");
-    let error = v["result"]["routing"]["error"].as_str().unwrap();
-    assert!(error.contains("ghost-provider"), "error: {error}");
-
-    _server.shutdown_token().cancel();
-    let _ = handle.await;
-}
-
-#[tokio::test]
-async fn get_provider_reads_back_api_key_env_thinking_toggle_and_reasoning_passback() {
-    let (_server, sock, _dir, handle) = start_server().await;
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.setProvider","params":{"provider_id":"deepseek","config":{"api_type":"openai_compatible","base_url":"https://api.deepseek.com/v1","api_key_env":"AGIX_TEST_GETPROVIDER_KEY","reasoning_passback":true,"thinking_toggle":"deepseek"}},"id":1}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    assert!(v["result"].is_object(), "setProvider: {v}");
-
-    let resp = rpc_call(
-        &sock,
-        r#"{"jsonrpc":"2.0","method":"config.getProvider","id":2}"#,
-    )
-    .await;
-    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-    let p = &v["result"]["providers"]["deepseek"];
-    assert_eq!(p["api_key_env"], "AGIX_TEST_GETPROVIDER_KEY", "resp: {v}");
-    assert_eq!(p["reasoning_passback"], true, "resp: {v}");
-    assert_eq!(p["thinking_toggle"], "deepseek", "resp: {v}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -438,35 +344,35 @@ async fn get_provider_reports_whether_the_credential_has_a_value_and_never_the_v
     }
     let (_server, sock, _dir, handle) = start_server().await;
     for (id, var) in [("has_key", SET), ("no_key", UNSET)] {
-        let resp = rpc_call(
+        call(
             &sock,
-            &format!(
-                r#"{{"jsonrpc":"2.0","method":"config.setProvider","params":{{"provider_id":"{id}","config":{{"api_type":"openai_compatible","base_url":"https://example.invalid/v1","api_key_env":"{var}"}}}},"id":1}}"#
-            ),
+            "config.setProvider",
+            json!({"provider_id": id, "config": {
+                "vendor": "deepseek", "api": "openai_chat",
+                "base_url": "https://example.invalid/v1", "api_key_env": var,
+                "tiers": {"strong": "m"}}}),
         )
         .await;
-        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-        assert!(v["result"].is_object(), "setProvider: {v}");
     }
 
-    for params in [r#""#, r#","params":{"include_secrets":true}"#] {
-        let resp = rpc_call(
-            &sock,
-            &format!(r#"{{"jsonrpc":"2.0","method":"config.getProvider"{params},"id":2}}"#),
-        )
-        .await;
-        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
-        assert_eq!(
-            v["result"]["providers"]["has_key"]["credential_present"], true,
-            "resp: {v}"
-        );
-        assert_eq!(
-            v["result"]["providers"]["no_key"]["credential_present"], false,
-            "resp: {v}"
-        );
+    for params in [json!({}), json!({"include_secrets": true})] {
+        let shown = call(&sock, "config.getProvider", params).await;
+        let of = |id: &str| {
+            shown["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["id"] == id)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(of("has_key")["credential_present"], true, "{shown}");
+        assert_eq!(of("no_key")["credential_present"], false, "{shown}");
+        assert_eq!(of("has_key")["vendor"], "deepseek", "{shown}");
+        assert_eq!(of("has_key")["api_key_env"], SET, "{shown}");
         assert!(
-            !resp.contains(SECRET),
-            "the variable's value is in the reply: {resp}"
+            !shown.to_string().contains(SECRET),
+            "the variable's value is in the reply: {shown}"
         );
     }
 
@@ -482,10 +388,9 @@ async fn set_provider_writes_the_scene_tier_of_the_scene_it_names() {
     let saved = call(
         &sock,
         "config.setProvider",
-        serde_json::json!({
+        json!({
             "tier": "scene", "scene": "harnix", "provider_id": "scened",
-            "config": {"api_type": "anthropic", "api_key": "k"},
-            "default_provider": "scened"
+            "config": {"api": "anthropic", "tiers": {"strong": "m"}}
         }),
     )
     .await;
@@ -493,41 +398,35 @@ async fn set_provider_writes_the_scene_tier_of_the_scene_it_names() {
     assert_eq!(saved["tier"], "scene", "{saved}");
     assert_eq!(
         saved["written_to"],
-        serde_json::json!(scene_dir.join("settings.json").display().to_string())
+        json!(scene_dir.join("settings.json").display().to_string())
     );
-    let written: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(scene_dir.join("settings.json")).unwrap())
-            .unwrap();
-    assert_eq!(written["default_provider"], "scened");
-    assert!(written["providers"]["scened"].get("api_key").is_none());
+    assert!(entry(&read(&scene_dir.join("settings.json")), "scened").is_some());
 
-    let get = |scene: &str| {
-        call(
-            &sock,
-            "config.getProvider",
-            serde_json::json!({"scene": scene}),
-        )
+    let order = |scene: &str| {
+        let sock = sock.clone();
+        let scene = scene.to_string();
+        async move { call(&sock, "config.getProvider", json!({"scene": scene})).await["order"].clone() }
     };
-    assert_eq!(get("harnix").await["default_provider"], "scened");
-    assert!(get("code").await["default_provider"].is_null());
+    assert_eq!(order("harnix").await, json!(["scened"]));
+    assert_eq!(order("code").await, json!(["anthropic"]));
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
 }
 
-/// A password in a provider's `base_url` is not the `api_key` the writer
-/// moves to `settings.local.json`: the answer warns, naming the provider and
-/// not the password, as `config.set` does.
+/// A password in a provider's `base_url` is written as it is, with a
+/// warning that names the providers and not the password, as `config.set`
+/// does; reading it back scrubs it.
 #[tokio::test]
 async fn a_password_in_a_providers_base_url_is_written_with_a_warning() {
     let (server, sock, _dir, handle) = start_server().await;
     let saved = call(
         &sock,
         "config.setProvider",
-        serde_json::json!({"tier": "global", "provider_id": "gw",
-            "config": {"api_type": "anthropic", "api_key": "k-in-local",
+        json!({"tier": "global", "provider_id": "gw",
+            "config": {"api": "anthropic",
                        "base_url": "https://agent:hunter2-pass@gw.invalid/",
-                       "default_model": "m"}}),
+                       "tiers": {"strong": "m"}}}),
     )
     .await;
     let warnings = saved["warnings"].as_array().cloned().unwrap_or_default();
@@ -537,17 +436,17 @@ async fn a_password_in_a_providers_base_url_is_written_with_a_warning() {
         "{saved}"
     );
     assert!(!saved.to_string().contains("hunter2-pass"), "{saved}");
-    let shown = call(&sock, "config.getProvider", serde_json::json!({})).await;
+    let shown = call(&sock, "config.getProvider", json!({"provider_id": "gw"})).await;
     assert_eq!(
-        shown["providers"]["gw"]["base_url"], "https://agent:***@gw.invalid/",
+        shown["providers"][0]["base_url"], "https://agent:***@gw.invalid/",
         "{shown}"
     );
 
     let clean = call(
         &sock,
         "config.setProvider",
-        serde_json::json!({"tier": "global", "provider_id": "plain",
-            "config": {"api_type": "anthropic", "api_key": "k-in-local", "default_model": "m"}}),
+        json!({"tier": "global", "provider_id": "plain",
+            "config": {"api": "anthropic", "tiers": {"strong": "m"}}}),
     )
     .await;
     assert!(clean.get("warnings").is_none(), "{clean}");

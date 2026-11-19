@@ -14,13 +14,14 @@ async fn a_responses_provider_runs_a_tool_round_and_reports_usage() -> anyhow::R
             blackbox::ModelEndpoint::model(&stub),
         ))
         .settings(json!({
-            "providers": { "resp": {
-                "api_type": "openai_responses",
+            "providers": [{
+                "id": "resp",
+                "vendor": "openai",
+                "api": "openai_responses",
                 "base_url": stub.base_url().as_str(),
-                "api_key": "stub-key",
-                "default_model": "responses-stub-model"
-            }},
-            "default_provider": "resp"
+                "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+                "tiers": {"strong": "responses-stub-model"}
+            }]
         }))
         .start()
         .await?;

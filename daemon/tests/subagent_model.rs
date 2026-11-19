@@ -1,5 +1,5 @@
-//! Which model a sub-agent asks for when settings route sub-agents to a
-//! provider of their own, seen at that provider's endpoint.
+//! Which model a sub-agent asks for: its tier at the first provider, or the
+//! tier, alias or model its spawn names — seen at the provider's endpoint.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,27 +16,15 @@ fn route(path: &str) -> String {
     http(500, r#"{"error":{"message":"unexpected path"}}"#)
 }
 
-fn provider(base_url: String, models: &[&str]) -> base::provider::ProviderConfig {
-    base::provider::ProviderConfig {
-        api_type: Some("anthropic".into()),
-        base_url: Some(base_url),
-        api_key: Some("k".into()),
-        default_model: models.first().map(|m| m.to_string()),
-        models: models.iter().map(|m| (*m).into()).collect(),
-        ..Default::default()
-    }
-}
-
-/// The first request the `sub` provider received after `seen_before` others.
-async fn next_sub_request(stub: &Stub, seen_before: usize) -> Seen {
+/// The first request carrying `needle` the provider received.
+async fn request_with(stub: &Stub, needle: &str) -> Seen {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        let sub: Vec<Seen> = stub
+        let found = stub
             .seen()
             .into_iter()
-            .filter(|s| s.path.starts_with("/sub/"))
-            .collect();
-        if let Some(request) = sub.into_iter().nth(seen_before) {
+            .find(|s| s.path.starts_with("/p/") && s.body.to_string().contains(needle));
+        if let Some(request) = found {
             return request;
         }
         assert!(
@@ -49,21 +37,22 @@ async fn next_sub_request(stub: &Stub, seen_before: usize) -> Seen {
 }
 
 #[tokio::test]
-async fn a_sub_agent_asks_for_the_model_task_models_routes_sub_agents_to() {
+async fn a_sub_agent_asks_for_its_tier_or_what_its_spawn_names() {
     let stub = Stub::start(route).await;
-    let main = provider(format!("{}/main", stub.base), &["main-a", "main-b"]);
-    let sub = provider(format!("{}/sub", stub.base), &["sub-a", "sub-b"]);
+    let provider: base::provider::ProviderConfig = serde_json::from_value(json!({
+        "id": "p", "api": "anthropic", "base_url": format!("{}/p", stub.base),
+        "models": ["p-a", "p-b", "p-c"],
+        "tiers": {"strong": "p-a", "balanced": "p-b", "fast": "p-c"},
+    }))
+    .unwrap();
     let served = crate::support::serve_permitting_all(
         Arc::new(MockAnthropicClient::new()),
-        Default::default(),
+        crate::support::Serving {
+            keys: &[("p", "k")],
+            ..Default::default()
+        },
         |config| {
-            let values = &mut config.settings.values;
-            values.providers.insert("main".into(), main);
-            values.providers.insert("sub".into(), sub);
-            values.default_provider = Some("main".into());
-            values.task_models =
-                serde_json::from_value(json!({"subagent": {"provider": "sub", "model": "sub-b"}}))
-                    .unwrap();
+            config.settings.values.providers = vec![provider];
         },
     )
     .await;
@@ -75,34 +64,28 @@ async fn a_sub_agent_asks_for_the_model_task_models_routes_sub_agents_to() {
     let switched = crate::support::call_frame(
         &served.sock,
         "session.setModel",
-        json!({"session_id": session, "model": "main-b"}),
+        json!({"session_id": session, "model": "fast"}),
     )
     .await;
     assert!(switched.get("result").is_some(), "{switched}");
 
-    let started = crate::support::call_frame(
-        &served.sock,
-        "session.startAgent",
-        json!({"session_id": session, "prompt": "SUB-ROUTED"}),
-    )
-    .await;
-    assert!(started.get("result").is_some(), "{started}");
-    let request = next_sub_request(&stub, 0).await;
-    assert_eq!(
-        request.body["model"], "sub-b",
-        "task_models.subagent names the model, over the session's own choice"
-    );
-
-    let started = crate::support::call_frame(
-        &served.sock,
-        "session.startAgent",
-        json!({"session_id": session, "prompt": "SUB-NAMED", "model": "sub-a"}),
-    )
-    .await;
-    assert!(started.get("result").is_some(), "{started}");
-    let request = next_sub_request(&stub, 1).await;
-    assert_eq!(
-        request.body["model"], "sub-a",
-        "a model named for the spawn itself comes first"
-    );
+    for (prompt, named, expected) in [
+        ("SUB-UNNAMED", None, "p-b"),
+        ("SUB-TIER", Some("strong"), "p-a"),
+        ("SUB-ALIAS", Some("haiku"), "p-c"),
+        ("SUB-INHERIT", Some("inherit"), "p-c"),
+        ("SUB-ID", Some("p-a"), "p-a"),
+    ] {
+        let mut params = json!({"session_id": session, "prompt": prompt});
+        if let Some(named) = named {
+            params["model"] = json!(named);
+        }
+        let started = crate::support::call_frame(&served.sock, "session.startAgent", params).await;
+        assert!(started.get("result").is_some(), "{started}");
+        assert_eq!(
+            request_with(&stub, prompt).await.body["model"],
+            expected,
+            "{prompt}"
+        );
+    }
 }

@@ -1,9 +1,9 @@
 //! `WebFetch` and `WebSearch` with a real model, against pages this test
 //! serves: a plain page, one past the 50 000-character cap, error statuses,
 //! a redirect the tool hands back instead of following, JSON, a slow page the
-//! host interrupts, extraction on the model `task_models.web_fetch` names
+//! host interrupts, extraction on the model `model.tasks.web_fetch` names
 //! (and the page text when that model fails), and a search routed by
-//! `task_models.web_search`.
+//! `model.tasks.web_search`.
 
 use std::time::{Duration, Instant};
 
@@ -55,14 +55,15 @@ async fn reload_with(run: &mut LiveRun, name: &str, extra: Value) -> anyhow::Res
     Ok(())
 }
 
-/// A `providers` entry for the proxy that serves `model`.
-fn provider(run: &LiveRun, model: &str) -> Value {
-    json!({
-        "api_type": "anthropic",
+/// A `providers` list of the proxy, its tiers served by these models.
+fn providers(run: &LiveRun, strong: &str, balanced: &str, fast: &str) -> Value {
+    json!([{
+        "id": "proxy",
+        "api": "anthropic",
         "base_url": blackbox::ModelEndpoint::base_url(&run.provider).as_str(),
-        "api_key": "harness",
-        "default_model": model,
-    })
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "tiers": {"strong": strong, "balanced": balanced, "fast": fast},
+    }])
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -107,7 +108,7 @@ async fn webfetch_brings_a_page_back_as_text_without_an_extraction_call() -> any
             .calls()
             .iter()
             .all(|c| c.purpose() != Purpose::WebFetch),
-        "an extraction call with no task_models.web_fetch"
+        "an extraction call with no model.tasks.web_fetch"
     );
     run.finish().await;
     Ok(())
@@ -318,7 +319,7 @@ fn long_page(build: &str, noise: &str) -> Page {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn task_models_web_fetch_extracts_on_its_own_model_and_falls_back_to_the_page(
+async fn a_web_fetch_tier_extracts_on_its_own_model_and_falls_back_to_the_page(
 ) -> anyhow::Result<()> {
     let pages = PageServer::start().await?;
     let (build, noise) = (
@@ -339,12 +340,8 @@ async fn task_models_web_fetch_extracts_on_its_own_model_and_falls_back_to_the_p
         "AGIX_LIVE_MODELS needs a second Flash name"
     );
     let settings = json!({
-        "providers": {
-            "main": provider(&run, &main),
-            "extract": provider(&run, &extractor),
-        },
-        "default_provider": "main",
-        "task_models": { "web_fetch": "extract" },
+        "providers": providers(&run, &main, &main, &extractor),
+        "model": { "tasks": { "web_fetch": "fast" } },
         "web": PageServer::reachable(),
     });
     reload_with(&mut run, "web-extract", settings).await?;
@@ -435,7 +432,7 @@ async fn task_models_web_fetch_extracts_on_its_own_model_and_falls_back_to_the_p
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn task_models_web_search_routes_the_search_to_its_own_model() -> anyhow::Result<()> {
+async fn the_web_search_tier_routes_the_search_to_its_own_model() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("web-search-routed").start().await?;
     let (main, searcher) = (
         run.config().model.clone(),
@@ -443,12 +440,7 @@ async fn task_models_web_search_routes_the_search_to_its_own_model() -> anyhow::
     );
     assert_ne!(main, searcher, "AGIX_LIVE_MODELS needs a third Flash name");
     let settings = json!({
-        "providers": {
-            "main": provider(&run, &main),
-            "search": provider(&run, &searcher),
-        },
-        "default_provider": "main",
-        "task_models": { "web_search": "search" },
+        "providers": providers(&run, &main, &main, &searcher),
     });
     reload_with(&mut run, "web-search-routed", settings).await?;
     let session = run.session().await?;
@@ -477,7 +469,7 @@ async fn task_models_web_search_routes_the_search_to_its_own_model() -> anyhow::
     });
     assert!(!searches.is_empty(), "the search went to the provider");
     for search in &searches {
-        assert_eq!(search.model(), searcher, "routed by task_models.web_search");
+        assert_eq!(search.model(), searcher, "the web_search task's tier");
     }
     for turn in turns.iter().filter(|c| c.purpose() == Purpose::Turn) {
         assert_eq!(turn.model(), main);

@@ -69,14 +69,13 @@ fn root(stub: &ProviderStub, mcp: &McpServer) -> anyhow::Result<Root> {
         ],
     )?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "memory": { "enabled": false },
         "mcp": { "servers": { "docs": { "type": "streamable_http", "url": mcp.url } } },
         "permissions": {"mode": "default", "allow": ["Agent", "Write"]}
@@ -120,6 +119,7 @@ async fn run(product: Option<&str>, project_dir: &str) -> anyhow::Result<Seen> {
     let (mcp, auth) = McpServer::start().await;
     let root = root(&stub, &mcp)?;
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.project_dir = Some(project_dir.into());
     if let Some(name) = product {
@@ -293,6 +293,7 @@ async fn a_name_that_cannot_be_a_product_is_refused_at_start() -> anyhow::Result
     let dir = tempfile::tempdir()?;
     for name in ["", "1x", "-x", "a b", "a/b", "a.b", "Ägix"] {
         let mut config = EmbedConfig::new(dir.path());
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(dir.path().to_path_buf());
         config.product = name.into();
         match Embedded::start(config).await {

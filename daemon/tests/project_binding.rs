@@ -20,7 +20,7 @@ async fn session_create_binds_to_a_different_project_with_its_own_settings() {
     std::fs::create_dir_all(other_project.join(".agix")).unwrap();
     std::fs::write(
         other_project.join(".agix").join("settings.json"),
-        r#"{"model": {"model_name": "other-project-model"}, "memory": {"enabled": false}}"#,
+        r#"{"model": {"effort": "low"}, "memory": {"enabled": false}}"#,
     )
     .unwrap();
 
@@ -59,9 +59,10 @@ async fn session_create_binds_to_a_different_project_with_its_own_settings() {
     }
 
     run_turn(&srv.sock, Some(&sid), "go").await;
-    let sent_model = seen.lock().unwrap().last().unwrap().model.clone();
+    let sent_effort = seen.lock().unwrap().last().unwrap().effort;
     assert_eq!(
-        sent_model, "other-project-model",
+        sent_effort,
+        Some(base::interface::model::Effort::Low),
         "the turn must have used the project's own settings, not the pool default"
     );
 
@@ -292,11 +293,7 @@ async fn another_projects_settings_change_reaches_the_daemon_without_a_reload() 
     let other_project = srv._dir.path().join("other-project");
     std::fs::create_dir_all(other_project.join(".agix")).unwrap();
     let settings_file = other_project.join(".agix").join("settings.json");
-    std::fs::write(
-        &settings_file,
-        r#"{"model": {"model_name": "first-model"}}"#,
-    )
-    .unwrap();
+    std::fs::write(&settings_file, r#"{"model": {"effort": "low"}}"#).unwrap();
 
     // Reading the effective settings is what builds (and caches) this
     // project's binding — the state the file change has to invalidate.
@@ -308,21 +305,17 @@ async fn another_projects_settings_change_reaches_the_daemon_without_a_reload() 
     };
     let first = rpc(&srv.sock, &effective(&other_project)).await;
     assert_eq!(
-        first["result"]["settings"]["model"]["model_name"], "first-model",
+        first["result"]["settings"]["model"]["effort"], "low",
         "{first}"
     );
 
-    std::fs::write(
-        &settings_file,
-        r#"{"model": {"model_name": "second-model"}}"#,
-    )
-    .unwrap();
+    std::fs::write(&settings_file, r#"{"model": {"effort": "max"}}"#).unwrap();
 
     let mut seen_second = false;
     for _ in 0..60 {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let now = rpc(&srv.sock, &effective(&other_project)).await;
-        if now["result"]["settings"]["model"]["model_name"] == "second-model" {
+        if now["result"]["settings"]["model"]["effort"] == "max" {
             seen_second = true;
             break;
         }
@@ -687,7 +680,7 @@ async fn a_project_bound_session_keeps_its_own_settings_across_close_and_resume(
     std::fs::create_dir_all(other_project.join(".agix")).unwrap();
     std::fs::write(
         other_project.join(".agix").join("settings.json"),
-        r#"{"model": {"model_name": "other-project-model"}, "memory": {"enabled": false}}"#,
+        r#"{"model": {"effort": "low"}, "memory": {"enabled": false}}"#,
     )
     .unwrap();
 
@@ -715,9 +708,10 @@ async fn a_project_bound_session_keeps_its_own_settings_across_close_and_resume(
     assert_eq!(closed["result"]["closed"], sid);
 
     run_turn(&srv.sock, Some(&sid), "second, after reattach").await;
-    let sent_model = seen.lock().unwrap().last().unwrap().model.clone();
+    let sent_effort = seen.lock().unwrap().last().unwrap().effort;
     assert_eq!(
-        sent_model, "other-project-model",
+        sent_effort,
+        Some(base::interface::model::Effort::Low),
         "resuming must rebuild against the session's own recorded project, not the pool default"
     );
 

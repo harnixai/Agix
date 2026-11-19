@@ -978,8 +978,7 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
             serde_json::json!({"tier": "global", "changes": {
                 "permissions.mode": "acceptEdits",
                 "web.allowed_domains": ["github.com"],
-                "telemetry.otlp_endpoint": null,
-                "providers.doc.api_key": "sk-doc-example"
+                "telemetry.otlp_endpoint": null
             }}),
         )
         .await;
@@ -1009,11 +1008,10 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
         .call(
             "config.setProvider",
             serde_json::json!({"provider_id": "deepseek",
-                               "config": {"api_type": "openai_compatible",
+                               "config": {"vendor": "deepseek", "api": "openai_chat",
                                           "base_url": "http://127.0.0.1:9/v1",
-                                          "api_key": "sk-doc-example",
-                                          "default_model": "deepseek-chat"},
-                               "default_provider": "deepseek",
+                                          "api_key_env": "DEEPSEEK_API_KEY",
+                                          "tiers": {"strong": "deepseek-chat"}},
                                "project_root": project}),
         )
         .await;
@@ -1077,17 +1075,16 @@ async fn documented_mcp_management_results_are_real() {
 async fn the_documented_set_model_result_is_real() {
     let doc = protocol_doc();
     let daemon = start_daemon_with(Arc::new(OneTurnClient), |settings| {
-        settings.providers.insert(
-            "anthropic".into(),
-            base::provider::ProviderConfig {
-                api_type: Some("anthropic".into()),
-                base_url: Some("http://127.0.0.1:9".into()),
-                api_key: Some("sk-doc-example".into()),
-                default_model: Some("claude-sonnet-4-6".into()),
+        settings.providers = vec![base::provider::ProviderConfig {
+            id: "anthropic".into(),
+            api: Some("anthropic".into()),
+            base_url: Some("http://127.0.0.1:9".into()),
+            tiers: base::provider::Tiers {
+                strong: Some("claude-sonnet-4-6".into()),
                 ..Default::default()
             },
-        );
-        settings.default_provider = Some("anthropic".into());
+            ..Default::default()
+        }];
     })
     .await;
     let created = daemon

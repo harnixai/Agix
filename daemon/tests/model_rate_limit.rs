@@ -192,7 +192,7 @@ async fn a_rate_limit_past_the_ladder_tells_the_host_when_to_come_back() {
 }
 
 #[tokio::test]
-async fn an_overload_with_no_fallback_model_ends_the_turn_as_retryable() {
+async fn an_overload_ends_the_turn_as_retryable() {
     let daemon = Daemon::start(&OVERLOADED).await;
 
     let failed = daemon.failed_turn().await;

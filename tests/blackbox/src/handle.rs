@@ -226,6 +226,7 @@ impl Daemon {
                 cwd: Some(opts.project.clone()),
                 permission_prompt_timeout: Some(opts.prompt_timeout),
                 model_client: Some(client),
+                credentials: Some(crate::stub_credentials().0),
                 extra_scenes: opts.host.scenes.iter().map(|s| s.id.clone()).collect(),
                 scenes: opts.host.scenes.clone(),
                 plugins: opts.host.plugins.clone(),

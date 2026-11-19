@@ -495,12 +495,10 @@ async fn a_provider_can_be_configured_for_one_project_only(mode: Mode) -> anyhow
             json!({
                 "provider_id": "cheap",
                 "config": {
-                    "api_type": "openai_compatible",
+                    "api": "openai_chat",
                     "base_url": "https://example.invalid/v1",
-                    "api_key": "k",
-                    "default_model": "cheap-1"
-                },
-                "default_provider": "cheap"
+                    "tiers": {"strong": "cheap-1"}
+                }
             }),
         )
         .await?;
@@ -514,7 +512,7 @@ async fn a_provider_can_be_configured_for_one_project_only(mode: Mode) -> anyhow
     let on_disk: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         c.join(".agix").join("settings.json"),
     )?)?;
-    assert_eq!(on_disk["providers"]["cheap"]["default_model"], "cheap-1");
+    assert_eq!(on_disk["providers"][0]["tiers"]["strong"], "cheap-1");
     assert_eq!(
         on_disk["prompt"]["append"], "MARK-C-RIGHT",
         "the rest of the project's settings were clobbered by the provider write"

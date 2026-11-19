@@ -69,14 +69,13 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
         }))?,
     )?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "permissions": {"mode": "default"},
         "memory": { "enabled": false }
     });
@@ -97,6 +96,7 @@ async fn start(
     js_libs: Vec<HostJsLib>,
 ) -> anyhow::Result<(Embedded, DaemonRpcClient)> {
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.js_libs = js_libs;
     let embedded = Embedded::start(config).await?;
@@ -282,6 +282,7 @@ async fn a_library_that_cannot_be_installed_fails_the_start() -> anyhow::Result<
     ];
     for (engine, namespace, js_libs) in cases {
         let mut config = EmbedConfig::new(dir.path());
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(dir.path().to_path_buf());
         config.engine = engine.into();
         config.js_libs = js_libs;

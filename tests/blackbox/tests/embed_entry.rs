@@ -19,14 +19,13 @@ static NAMED: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 fn write_provider_settings(data_root: &Path, stub: &ProviderStub) -> anyhow::Result<()> {
     std::fs::create_dir_all(data_root)?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub"
+        }]
     });
     std::fs::write(
         data_root.join("settings.json"),
@@ -57,6 +56,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
 
 fn config(root: &Root) -> EmbedConfig {
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config
 }
@@ -662,6 +662,7 @@ fn group_alive(group: i64) -> bool {
 /// in a turn whose command never ends. It waits to be killed.
 async fn host_a_command_that_never_ends(dir: &Path) -> anyhow::Result<()> {
     let mut c = EmbedConfig::new(dir.join("data"));
+    c.credentials = Some(blackbox::stub_credentials());
     c.cwd = Some(dir.join("project"));
     c.groups_file = Some(host_groups_file(dir));
     let embedded = Embedded::start(c).await?;

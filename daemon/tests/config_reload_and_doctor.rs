@@ -186,14 +186,13 @@ async fn config_reload_picks_up_a_hand_edited_settings_file() {
     std::fs::write(
         &settings_path,
         serde_json::json!({
-            "providers": {
-                "anthropic": {
-                    "api_type": "anthropic",
-                    "api_key": "sk-ant-hand-edited",
-                    "default_model": "claude-sonnet-4-6"
-                }
-            },
-            "default_provider": "anthropic"
+            "providers": [{
+                "id": "hand-edited",
+                "api": "anthropic",
+                "api_key_env": "AGIX_TEST_HAND_EDITED_KEY",
+                "tiers": {"strong": "claude-sonnet-4-6"}
+            }],
+            "model": {"order": ["hand-edited"]}
         })
         .to_string(),
     )
@@ -206,7 +205,11 @@ async fn config_reload_picks_up_a_hand_edited_settings_file() {
     .await;
     let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
     assert!(v["result"].is_object(), "expected success, got: {v}");
-    assert_eq!(v["result"]["default_provider"], "anthropic", "resp: {v}");
+    assert_eq!(
+        v["result"]["order"],
+        serde_json::json!(["hand-edited"]),
+        "resp: {v}"
+    );
     assert_eq!(v["result"]["routing"]["ok"], true, "resp: {v}");
     assert_eq!(v["result"]["routing"]["router_rebuilt"], true, "resp: {v}");
     assert_eq!(

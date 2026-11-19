@@ -44,17 +44,17 @@ impl Daemon {
         std::fs::create_dir_all(&data)?;
         std::fs::create_dir_all(&project)?;
         let settings = json!({
-            "providers": { "stub": {
-                "api_type": "anthropic",
+            "providers": [{
+                "id": "stub",
+                "api": "anthropic",
                 "base_url": stub.base_url().as_str(),
-                "api_key": "stub-key",
-                "default_model": "claude-sonnet-4-6",
+                "tiers": {"strong": "claude-sonnet-4-6"},
                 "models": ["claude-sonnet-4-6"]
-            }},
-            "default_provider": "stub"
+            }]
         });
         std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
         let mut config = EmbedConfig::new(&data);
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(project);
         config.plugins = host_plugins(&root);
         let embedded = Embedded::start(config).await?;

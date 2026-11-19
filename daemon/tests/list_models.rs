@@ -166,21 +166,37 @@ fn not_found_route(_: &str) -> String {
     http(404, r#"{"error":{"message":"Not Found"}}"#)
 }
 
-fn provider(api_type: &str, base_url: String, key: &str, models: Value) -> Value {
-    json!({"api_type": api_type, "base_url": base_url, "api_key": key,
-           "default_model": "claude-a", "models": models})
+/// A provider entry; `key` is what the host's credential source answers for
+/// it.
+fn provider(api: &str, base_url: String, key: &str, models: Value) -> Value {
+    json!({"api": api, "base_url": base_url, "key": key,
+           "tiers": {"strong": "claude-a"}, "models": models})
 }
 
-async fn daemon_with(providers: Value) -> crate::support::Served {
-    let providers: std::collections::HashMap<String, base::provider::ProviderConfig> =
-        serde_json::from_value(providers).unwrap();
-    let default = providers.keys().min().cloned();
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
+
+/// A daemon serving the providers `providers` maps by id, the first id
+/// first in the order.
+pub(crate) async fn daemon_with(providers: Value) -> crate::support::Served {
+    let mut keys = Vec::new();
+    let mut list = Vec::new();
+    for (id, mut entry) in providers.as_object().unwrap().clone() {
+        if let Some(key) = entry.as_object_mut().unwrap().remove("key") {
+            keys.push((leak(id.clone()), leak(key.as_str().unwrap().to_string())));
+        }
+        entry["id"] = json!(id);
+        list.push(serde_json::from_value::<base::provider::ProviderConfig>(entry).unwrap());
+    }
     crate::support::serve_permitting_all(
         Arc::new(MockAnthropicClient::new()),
-        Default::default(),
+        crate::support::Serving {
+            keys: Box::leak(keys.into_boxed_slice()),
+            ..Default::default()
+        },
         |config| {
-            config.settings.values.providers = providers;
-            config.settings.values.default_provider = default;
+            config.settings.values.providers = list;
         },
     )
     .await
@@ -191,7 +207,7 @@ async fn list_models_answers_what_each_endpoint_lists_asked_with_the_configured_
     let stub = Stub::start(catalog_route).await;
     let served = daemon_with(json!({
         "anth": provider("anthropic", format!("{}/anthropic", stub.base), "k-anth", json!([])),
-        "oai": provider("openai_compatible", format!("{}/openai/v1", stub.base), "k-oai", json!([])),
+        "oai": provider("openai_chat", format!("{}/openai/v1", stub.base), "k-oai", json!([])),
     }))
     .await;
 
@@ -271,7 +287,7 @@ async fn a_redirect_to_another_origin_does_not_carry_the_key() {
     let gateway = Stub::start(redirect_route).await;
     let served = daemon_with(json!({
         "anth": provider("anthropic", format!("{}/anthropic", gateway.base), "k-anth", json!([])),
-        "oai": provider("openai_compatible", format!("{}/openai/v1", gateway.base), "k-oai", json!([])),
+        "oai": provider("openai_chat", format!("{}/openai/v1", gateway.base), "k-oai", json!([])),
     }))
     .await;
 
@@ -303,7 +319,7 @@ async fn a_redirect_to_another_origin_does_not_carry_the_key() {
 async fn an_endpoint_that_does_not_list_models_is_models_unsupported() {
     let stub = Stub::start(not_found_route).await;
     let served = daemon_with(json!({
-        "gw": provider("openai_compatible", format!("{}/v1", stub.base), "k", json!([])),
+        "gw": provider("openai_chat", format!("{}/v1", stub.base), "k", json!([])),
     }))
     .await;
     let refused =
@@ -331,13 +347,20 @@ async fn a_provider_without_a_key_is_not_asked_and_reads_back_its_models_as_writ
         &served.sock,
         "config.setProvider",
         json!({"tier": "global", "provider_id": "keyless", "config": {
-            "api_type": "openai_compatible", "base_url": format!("{}/openai/v1", stub.base),
-            "api_key_env": "AGIX_TEST_76_NO_SUCH_KEY", "models": models}}),
+            "api": "openai_chat", "base_url": format!("{}/openai/v1", stub.base),
+            "api_key_env": "AGIX_TEST_76_NO_SUCH_KEY", "models": models,
+            "tiers": {"strong": "plain"}}}),
     )
     .await;
 
-    let view = crate::support::call(&served.sock, "config.getProvider", json!({})).await;
-    assert_eq!(view["providers"]["keyless"]["models"], models, "{view}");
+    let view = crate::support::call(
+        &served.sock,
+        "config.getProvider",
+        json!({"provider_id": "keyless"}),
+    )
+    .await;
+    assert_eq!(view["providers"][0]["models"], models, "{view}");
+    assert_eq!(view["providers"][0]["credential_present"], false, "{view}");
 
     let refused = crate::support::call_frame(
         &served.sock,
@@ -456,7 +479,7 @@ async fn a_listing_cut_off_at_its_page_limit_says_so() {
 async fn a_listing_larger_than_the_cap_is_refused_rather_than_read_whole() {
     let stub = Stub::start(huge_route).await;
     let served = daemon_with(json!({
-        "oai": provider("openai_compatible", format!("{}/v1", stub.base), "k", json!([])),
+        "oai": provider("openai_chat", format!("{}/v1", stub.base), "k", json!([])),
     }))
     .await;
     let refused = crate::support::call_frame(

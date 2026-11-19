@@ -19,14 +19,22 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
     ))
 }
 
-fn provider_at(base_url: &str, api_type: &str) -> Value {
+fn provider_at(base_url: &str, api: &str) -> Value {
     json!({
-        "api_type": api_type,
+        "api": api,
         "base_url": base_url,
-        "api_key": "sk-tier-test",
-        "default_model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "tiers": {"strong": "claude-sonnet-4-6"},
         "models": ["claude-sonnet-4-6"]
     })
+}
+
+/// The entry with `id` in a settings file's `providers` list.
+fn entry(settings: &Value, id: &str) -> Value {
+    settings["providers"]
+        .as_array()
+        .and_then(|list| list.iter().find(|e| e["id"] == id).cloned())
+        .unwrap_or(Value::Null)
 }
 
 fn read_json(path: &Path) -> Value {
@@ -87,8 +95,7 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
                 json!({
                     "tier": "global",
                     "provider_id": "shared",
-                    "config": config,
-                    "default_provider": "shared"
+                    "config": config
                 }),
             )
             .await
@@ -96,7 +103,7 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(
-        read_json(&global.join("settings.json"))["providers"]["shared"].is_null(),
+        entry(&read_json(&global.join("settings.json")), "shared").is_null(),
         "the global settings were written while another holder had the directory"
     );
     assert!(
@@ -114,26 +121,17 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
         canonical(&global.join("settings.json").to_string_lossy()),
         "{saved}"
     );
-    assert_eq!(
-        canonical(saved["secrets_written_to"].as_str().unwrap_or_default()),
-        canonical(&global.join("settings.local.json").to_string_lossy()),
-        "{saved}"
-    );
+    assert!(saved.get("secrets_written_to").is_none(), "{saved}");
     assert_eq!(saved["routing"]["router_rebuilt"], true, "{saved}");
 
     let shared = read_json(&global.join("settings.json"));
-    assert_eq!(shared["providers"]["shared"]["api_type"], "anthropic");
-    assert!(
-        shared["providers"]["shared"]["api_key"].is_null(),
-        "the key went into the committed file: {shared}"
-    );
+    assert_eq!(entry(&shared, "shared")["api"], "anthropic");
     let local = read_json(&global.join("settings.local.json"));
-    assert_eq!(local["providers"]["shared"]["api_key"], "sk-tier-test");
     assert!(
         local["app"]["trusted_projects"]
             .as_array()
             .is_some_and(|t| !t.is_empty()),
-        "writing the key dropped what the global settings.local.json already held: {local}"
+        "writing the provider dropped what the global settings.local.json already held: {local}"
     );
     assert_eq!(
         std::fs::read(&project_settings)?,
@@ -147,7 +145,7 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
         .config_get_provider(&Target::project(&run.project), false)
         .await?;
     let seen = seen.result.expect("getProvider result");
-    assert_eq!(seen["default_provider"], "shared", "{seen}");
+    assert_eq!(seen["order"], json!(["shared"]), "{seen}");
     run.finish().await;
     Ok(())
 }
@@ -163,8 +161,7 @@ async fn a_global_tier_held_past_the_wait_is_refused_and_written_after_release(
     let params = json!({
         "tier": "global",
         "provider_id": "shared",
-        "config": provider_at(stub.base_url().as_str(), "anthropic"),
-        "default_provider": "shared"
+        "config": provider_at(stub.base_url().as_str(), "anthropic")
     });
 
     let held = HeldDir::hold(&global)?;
@@ -190,7 +187,7 @@ async fn a_global_tier_held_past_the_wait_is_refused_and_written_after_release(
     let saved = saved.result.expect("setProvider result after release");
     assert_eq!(saved["tier"], "global", "{saved}");
     assert_eq!(
-        read_json(&global.join("settings.json"))["providers"]["shared"]["api_type"],
+        entry(&read_json(&global.join("settings.json")), "shared")["api"],
         "anthropic"
     );
     run.finish().await;
@@ -214,14 +211,13 @@ async fn a_dry_run_writes_nothing_and_refuses_what_would_not_route() -> anyhow::
                 "tier": "global",
                 "dry_run": true,
                 "provider_id": "broken",
-                "config": provider_at(stub.base_url().as_str(), "anthropic-typo"),
-                "default_provider": "broken"
+                "config": provider_at(stub.base_url().as_str(), "anthropic-typo")
             }),
         )
         .await?;
     let error = refused
         .error
-        .expect("a dry run of an api_type nothing builds is refused");
+        .expect("a dry run of an api nothing builds is refused");
     assert_eq!(error.code, -32602, "{}", error.message);
     assert!(
         error.message.contains("anthropic-typo"),
@@ -239,8 +235,7 @@ async fn a_dry_run_writes_nothing_and_refuses_what_would_not_route() -> anyhow::
                     "tier": tier,
                     "dry_run": true,
                     "provider_id": "fine",
-                    "config": provider_at(stub.base_url().as_str(), "anthropic"),
-                    "default_provider": "fine"
+                    "config": provider_at(stub.base_url().as_str(), "anthropic")
                 }),
             )
             .await?;
@@ -250,24 +245,14 @@ async fn a_dry_run_writes_nothing_and_refuses_what_would_not_route() -> anyhow::
         assert_eq!(tried["dry_run"], true, "{tried}");
         assert_eq!(tried["tier"], tier, "{tried}");
         assert_eq!(tried["routing"]["router_rebuilt"], true, "{tried}");
-        assert_eq!(tried["default_provider"], "fine", "{tried}");
-        let dir = if tier == "global" {
-            global.clone()
-        } else {
-            run.project.join(".agix")
-        };
-        assert_eq!(
-            canonical(tried["secrets_written_to"].as_str().unwrap_or_default()),
-            canonical(&dir.join("settings.local.json").to_string_lossy()),
-            "{tried}"
-        );
+        assert_eq!(tried["order"], json!(["fine"]), "{tried}");
         assert_eq!(snapshot(&tiers), before, "the {tier} dry run wrote a file");
     }
 
     let seen = run.client.config_get_provider(&target, false).await?;
     let seen = seen.result.expect("getProvider result");
     assert!(
-        seen["providers"]["fine"].is_null(),
+        !seen.to_string().contains("\"fine\""),
         "a dry run reached the live configuration: {seen}"
     );
     run.finish().await;
@@ -287,7 +272,7 @@ async fn an_untrusted_project_is_served_by_a_provider_written_to_the_global_tier
         .client
         .config_set_provider(
             &target,
-            json!({ "provider_id": "shared", "config": config, "default_provider": "shared" }),
+            json!({ "provider_id": "shared", "config": config }),
         )
         .await?;
     let error = refused
@@ -302,8 +287,7 @@ async fn an_untrusted_project_is_served_by_a_provider_written_to_the_global_tier
             json!({
                 "tier": "global",
                 "provider_id": "shared",
-                "config": config,
-                "default_provider": "shared"
+                "config": config
             }),
         )
         .await?;

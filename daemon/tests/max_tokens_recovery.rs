@@ -157,12 +157,3 @@ async fn a_reply_cut_off_at_max_tokens_is_continued_by_a_user_message_within_the
         retry.max_tokens
     );
 }
-
-#[tokio::test]
-async fn model_max_output_tokens_sets_how_far_the_retry_raises_the_limit() {
-    let retry = the_retry(Some(
-        serde_json::json!({"model": {"max_output_tokens": 20_000}}),
-    ))
-    .await;
-    assert_eq!(retry.max_tokens, 20_000);
-}

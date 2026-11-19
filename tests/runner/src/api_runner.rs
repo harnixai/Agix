@@ -7,7 +7,6 @@ use base::interface::model::Model;
 use base::interface::model::ThinkingMode;
 use base::interface::scene::SceneSpec;
 use base::permission::PermissionMode;
-use base::provider::ApiType;
 use base::recorder::{RecorderConfig, RecorderMode};
 use base::tool::InMemoryToolRegistry;
 use runtime::agent::{Builder, EventReceiver, InputMessage, InputSender};
@@ -261,13 +260,10 @@ async fn build_agent(
             base::paths::PathSettings::default(),
         )
     };
-    settings.values.model.api_type = ApiType::Anthropic;
-    settings.values.model.base_url = String::new();
     settings.values.model.model_name = model_name.clone();
     settings.values.model.max_tokens = 2000;
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.values.model.effort = None;
-    settings.values.model.fallback_model = None;
     if config.fixture_dir.is_none() {
         settings.paths.user_data_dir = tmp.join("user");
         settings.paths.global_data_dir = tmp.join("global");

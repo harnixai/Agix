@@ -33,14 +33,13 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&project)?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "permissions": {"mode": "default"},
         "memory": { "enabled": false }
     });
@@ -114,6 +113,8 @@ async fn a_project_keeps_its_local_data_in_state_and_the_model_writes_only_its_w
         an_old_layout(&own)?;
 
         let mut config = EmbedConfig::new(&root.data);
+
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(root.project.clone());
         config.product = "Codix".into();
         if let Some(engine) = engine {
@@ -212,6 +213,8 @@ async fn the_state_root_stays_where_it_is_when_the_project_directory_is_it() -> 
     put(&data.join(".imported.json"), "{}")?;
 
     let mut config = EmbedConfig::new(&data);
+
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(home.clone());
     let embedded = Embedded::start(config).await?;
     let mut client = connect(&embedded);
@@ -251,6 +254,7 @@ async fn a_product_named_like_what_the_engine_keeps_in_state_is_refused_at_start
         "Imported",
     ] {
         let mut config = EmbedConfig::new(dir.path());
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(dir.path().to_path_buf());
         config.product = name.into();
         match Embedded::start(config).await {

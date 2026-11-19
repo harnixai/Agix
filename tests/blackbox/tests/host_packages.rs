@@ -28,14 +28,13 @@ fn root(stub: &ProviderStub, mode: &str) -> anyhow::Result<Root> {
     std::fs::create_dir_all(&data)?;
     std::fs::create_dir_all(&project)?;
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "permissions": {"mode": mode},
         "memory": { "enabled": false }
     });
@@ -60,6 +59,7 @@ fn host_package(dir: &Path) -> anyhow::Result<()> {
 
 async fn start(root: &Root, packages: Vec<PathBuf>) -> anyhow::Result<(Embedded, DaemonRpcClient)> {
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.plugins = packages;
     let embedded = Embedded::start(config).await?;

@@ -86,3 +86,19 @@ pub trait ModelEndpoint {
     fn base_url(&self) -> url::Url;
     fn model(&self) -> &str;
 }
+
+/// What the host's credential source answers for every provider of an
+/// engine embedded in the test process: the stubs take any key.
+pub fn stub_credentials() -> daemon::embed::HostCredentials {
+    struct AnyProvider;
+    impl base::interface::credentials::CredentialSource for AnyProvider {
+        fn api_key(
+            &self,
+            _provider_id: &str,
+            _config: &base::provider::ProviderConfig,
+        ) -> Result<base::interface::credentials::Secret, String> {
+            Ok(base::interface::credentials::Secret::new("stub-key"))
+        }
+    }
+    daemon::embed::HostCredentials(std::sync::Arc::new(AnyProvider))
+}

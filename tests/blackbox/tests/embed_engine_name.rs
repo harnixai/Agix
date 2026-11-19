@@ -46,14 +46,13 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
         )?;
     }
     let settings = json!({
-        "providers": { "stub": {
-            "api_type": "anthropic",
+        "providers": [{
+            "id": "stub",
+            "api": "anthropic",
             "base_url": stub.base_url().as_str(),
-            "api_key": "stub-key",
-            "default_model": "claude-sonnet-4-6",
+            "tiers": {"strong": "claude-sonnet-4-6"},
             "models": ["claude-sonnet-4-6"]
-        }},
-        "default_provider": "stub",
+        }],
         "permissions": {"mode": "default"},
         "memory": { "enabled": false }
     });
@@ -88,6 +87,7 @@ async fn a_named_engine_is_the_global_the_errors_and_the_project_directory() -> 
     let stub = ProviderStub::start().await?;
     let root = root(&stub)?;
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.engine = "foo".into();
     let embedded = Embedded::start(config).await?;
@@ -159,6 +159,7 @@ async fn engine_name_check(engine: &str) -> anyhow::Result<Value> {
     let stub = ProviderStub::start().await?;
     let root = root(&stub)?;
     let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(root.project.clone());
     config.engine = engine.into();
     let embedded = Embedded::start(config).await?;
@@ -226,6 +227,7 @@ async fn a_name_that_cannot_be_an_engine_is_refused_at_start() -> anyhow::Result
         "abcdefghijklmnopq",
     ] {
         let mut config = EmbedConfig::new(dir.path());
+        config.credentials = Some(blackbox::stub_credentials());
         config.cwd = Some(dir.path().to_path_buf());
         config.engine = name.into();
         match Embedded::start(config).await {
