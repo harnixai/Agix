@@ -34,6 +34,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("product", "String"),
     ("engine", "String"),
     ("plugins", "Vec<PathBuf>"),
+    ("js_libs", "Vec<HostJsLib>"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[
@@ -46,6 +47,7 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("InvalidProjectDir", "{name:String,reason:String}"),
     ("InvalidProductName", "{name:String,reason:String}"),
     ("InvalidEngineName", "{name:String,reason:String}"),
+    ("InvalidHostLibrary", "{namespace:String,reason:String}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

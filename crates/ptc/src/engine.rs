@@ -14,12 +14,17 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::host_libs::LibraryScripts;
+
 const PRELUDE: &str = include_str!("prelude.js");
 
 pub(crate) struct CallRequest {
+    /// A tool's name, or a host function's path (`codix.flow.start`).
     pub name: String,
     pub input: String,
-    /// `{"ok":true,"value":…}` or `{"ok":false,"error":"…"}`.
+    pub host_library: bool,
+    /// `{"ok":true,"value":…}` or `{"ok":false,"error":"…"}`, with the
+    /// error's `code` from a host function.
     pub reply: oneshot::Sender<String>,
 }
 
@@ -33,6 +38,7 @@ pub(crate) struct Host {
     pub program: Option<ProgramHost>,
     /// The base library's global.
     pub library: String,
+    pub host_libraries: LibraryScripts,
 }
 
 #[derive(Clone)]
@@ -185,8 +191,12 @@ async fn evaluate(run: Run) -> ScriptEnd {
     let stopped = run.hard_stop.clone();
     let end = context
         .async_with(async |ctx| {
+            let (calls, host_libraries) = (host.calls.clone(), host.host_libraries.clone());
             if let Err(e) = install(&ctx, host) {
                 return ScriptEnd::Threw(format!("could not set up the script globals: {e}"));
+            }
+            if let Err(e) = install_host_libraries(&ctx, calls, &host_libraries) {
+                return ScriptEnd::Threw(e);
             }
             let (started, source, style) = match &script {
                 Script::Program(code) => (
@@ -275,25 +285,37 @@ fn wrap(code: &str) -> String {
     )
 }
 
+/// The function a script's requests leave through: tool calls, or calls of
+/// a host library's functions.
+fn caller<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    calls: mpsc::UnboundedSender<CallRequest>,
+    host_library: bool,
+) -> rquickjs::Result<Function<'js>> {
+    Function::new(
+        ctx.clone(),
+        Async(move |name: String, input: String| {
+            let calls = calls.clone();
+            async move {
+                let (reply, answer) = oneshot::channel();
+                let request = CallRequest {
+                    name,
+                    input,
+                    host_library,
+                    reply,
+                };
+                if calls.send(request).is_err() {
+                    return Ok::<_, rquickjs::Error>(stopped_answer());
+                }
+                Ok(answer.await.unwrap_or_else(|_| stopped_answer()))
+            }
+        }),
+    )
+}
+
 fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
     let bridge = Object::new(ctx.clone())?;
-    let calls = host.calls.clone();
-    bridge.set(
-        "call",
-        Function::new(
-            ctx.clone(),
-            Async(move |name: String, input: String| {
-                let calls = calls.clone();
-                async move {
-                    let (reply, answer) = oneshot::channel();
-                    if calls.send(CallRequest { name, input, reply }).is_err() {
-                        return Ok::<_, rquickjs::Error>(stopped_answer());
-                    }
-                    Ok(answer.await.unwrap_or_else(|_| stopped_answer()))
-                }
-            }),
-        )?,
-    )?;
+    bridge.set("call", caller(ctx, host.calls.clone(), false)?)?;
     let log = host.log.clone();
     bridge.set(
         "log",
@@ -334,8 +356,46 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
     js_lib::install_named(ctx, &host.library)
 }
 
+/// The stubs, then each library's prelude, then the namespaces frozen.
+fn install_host_libraries(
+    ctx: &rquickjs::Ctx<'_>,
+    calls: mpsc::UnboundedSender<CallRequest>,
+    scripts: &LibraryScripts,
+) -> Result<(), String> {
+    let Some(stubs) = &scripts.stubs else {
+        return Ok(());
+    };
+    let explained = |e| explain(e, "", Style::Program);
+    let freeze: Function = (|| {
+        let bridge = Object::new(ctx.clone())?;
+        bridge.set("call", caller(ctx, calls, true)?)?;
+        ctx.globals().set("__hostLibraries", bridge)?;
+        ctx.eval_with_options(stubs.as_str(), eval_options("<host-libraries>"))
+    })()
+    .catch(ctx)
+    .map_err(|e| format!("could not set up the host libraries: {}", explained(e)))?;
+    for (namespace, source) in &scripts.preludes {
+        ctx.eval_with_options::<(), _>(
+            source.as_str(),
+            eval_options(&format!("{namespace}.prelude.js")),
+        )
+        .catch(ctx)
+        .map_err(|e| {
+            format!(
+                "the prelude of host library `{namespace}` failed: {}",
+                explained(e)
+            )
+        })?;
+    }
+    freeze
+        .call::<_, ()>(())
+        .catch(ctx)
+        .map_err(|e| format!("could not freeze the host libraries: {}", explained(e)))
+}
+
 fn stopped_answer() -> String {
-    r#"{"ok":false,"error":"the run is stopping; no more calls are made"}"#.to_string()
+    r#"{"ok":false,"error":"the run is stopping; no more calls are made","code":"stopped"}"#
+        .to_string()
 }
 
 /// Whose script an error is explained for.

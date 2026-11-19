@@ -40,6 +40,7 @@
 //! | [`health::HealthCheck`] | whether a subsystem is working |
 //! | [`elicitation::Elicitation`] | how the engine asks a person something |
 //! | [`host_call::HostCalls`] | how a call only the host can make reaches it |
+//! | [`host_js::HostFn`] | a function of a JavaScript library the host gives plugin code |
 //! | [`token_counter::TokenCounter`] | how big the context is judged to be |
 //! | [`prompt_registry::PromptRegistry`] | what goes into the system prompt |
 //! | [`prompt_assembler::PromptAssembler`] | how the whole prompt is put together |
@@ -75,6 +76,7 @@ pub mod event_sink;
 pub mod exec;
 pub mod health;
 pub mod host_call;
+pub mod host_js;
 pub mod inline_command;
 pub mod instruction_provider;
 pub mod mcp_servers;

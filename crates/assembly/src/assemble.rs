@@ -73,6 +73,13 @@ pub struct Assembly {
     /// of the same name. One that does not load fails the assembly; with
     /// plugins switched off by settings none is loaded.
     pub host_plugins: Vec<PathBuf>,
+    /// The JavaScript libraries the host gives plugin code: a package's
+    /// commands and functions get those its `uses` names, and a package
+    /// naming one not here does not install or load. A library that cannot
+    /// be installed — its namespace not a new global, the engine's name or
+    /// another library's, a function path not dotted identifiers or given
+    /// twice — fails the assembly.
+    pub js_libs: Vec<base::interface::host_js::HostJsLib>,
     /// The host's last word on every session engine — see
     /// [`SessionCustomizer`].
     pub customize_session: Option<SessionCustomizer>,
@@ -116,6 +123,7 @@ pub async fn pool(
     scene: Arc<SceneSpec>,
     assembly: Assembly,
 ) -> anyhow::Result<Arc<SessionPool>> {
+    crate::plugins::host_libraries::check(&assembly.js_libs, config.paths.layout().engine())?;
     let (managed_path, managed) = managed_settings(config);
     let settings = Arc::new(config.settings.clone().with_managed(managed.clone()));
     for (section, module) in crate::modules::unassembled_settings(&settings.values) {
@@ -178,7 +186,7 @@ pub async fn pool(
     .managed_settings(managed_path, managed)
     .host_changes(&own_settings_on_disk(config), config)
     .plugins(assembly.plugins)
-    .host_libraries(Vec::new());
+    .host_libraries(assembly.js_libs);
     if let Some(customize) = assembly.customize_session {
         pool = pool.session_customizer(customize);
     }

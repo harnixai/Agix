@@ -279,6 +279,7 @@ impl RunCodeTool {
                     allowed: PROGRAM_CALLS,
                     run_slots: slots.as_ref(),
                     turn_cancel: cancel,
+                    host_libraries: Default::default(),
                 },
                 true,
             )
@@ -432,6 +433,7 @@ impl Tool for RunCodeTool {
                 allowed: PROGRAM_CALLS,
                 run_slots: slots.as_ref(),
                 turn_cancel: ctx.cancel.clone(),
+                host_libraries: Default::default(),
             },
             false,
         )

@@ -42,6 +42,8 @@ pub struct HostContracts {
     pub skill_dirs: HostSkillDirs,
     /// See [`Builder::ext_commands`].
     pub ext_commands: Vec<base::command::ExtCommand>,
+    /// See [`Builder::host_js_libs`].
+    pub host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
 }
 
 /// The host's skill directories as the permission checks see them — see
@@ -113,6 +115,7 @@ impl Builder {
             attended,
             skill_dirs,
             ext_commands,
+            host_js_libs,
         } = host;
         self.host.exec = Some(exec);
         self.host.token_counter = Some(token_counter);
@@ -138,6 +141,7 @@ impl Builder {
         self.host.attended = Some(attended);
         self.host.skill_dirs = skill_dirs;
         self.host.ext_commands = ext_commands;
+        self.host.host_js_libs = host_js_libs;
         self
     }
 }

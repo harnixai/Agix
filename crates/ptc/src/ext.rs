@@ -3,10 +3,12 @@
 //! JavaScript runs on the same runtime as `RunCode`, without `agent()`,
 //! `notify` or `messages`, and its sub-calls are its own: a read-only call
 //! writes nothing, a write call writes only inside the command's `writes`.
+//! The host libraries its package `uses` are globals of its runtime.
 //! Design: `docs/runext.md`.
 
 use crate::calls::{cut_note, Allowed};
 use crate::engine::{CommandScript, ScriptEnd};
+use crate::host_libs::{call_context, HostBinding, HostLibraries};
 use crate::run::{execute, Ended, Front, Launch};
 use crate::{default_run_slots, truncate, Library, Limits};
 use async_trait::async_trait;
@@ -47,6 +49,7 @@ pub struct RunExtTool {
     description: String,
     limits: Limits,
     library: Library,
+    host_libraries: HostLibraries,
     run_slots: Arc<Semaphore>,
 }
 
@@ -102,6 +105,7 @@ impl RunExtTool {
             description,
             limits: Limits::for_commands(),
             library: Library::default(),
+            host_libraries: HostLibraries::default(),
             run_slots: default_run_slots(),
         }
     }
@@ -115,6 +119,13 @@ impl RunExtTool {
     /// model reads about commands is their own.
     pub fn with_library(mut self, library: Library) -> Self {
         self.library = library;
+        self
+    }
+
+    /// The host's libraries, of which a command gets those its package
+    /// `uses`.
+    pub fn with_host_libraries(mut self, libraries: HostLibraries) -> Self {
+        self.host_libraries = libraries;
         self
     }
 
@@ -237,6 +248,7 @@ impl RunExtTool {
             allowed: COMMAND_CALLS,
             run_slots: slots.as_ref(),
             turn_cancel: ctx.cancel.clone(),
+            host_libraries: self.host_libraries_of(command, ctx),
         };
         let result = match execute(front, launch).await {
             Ok(ended) => result_of(&ended, &self.limits),
@@ -246,6 +258,11 @@ impl RunExtTool {
             .task()
             .append_output(&format!("{}\n", text_of(&result)));
         result
+    }
+
+    fn host_libraries_of(&self, command: &ExtCommand, ctx: &ToolContext) -> HostBinding {
+        let context = call_context(ctx, &command.plugin, &command.plugin_version, &command.name);
+        self.host_libraries.bind(&command.uses, context)
     }
 
     async fn entry_source(&self, command: &ExtCommand) -> Result<String, String> {

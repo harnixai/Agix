@@ -39,6 +39,10 @@ pub struct ToolContext {
     /// The call comes from a program (`RunCode`), not from the model: there
     /// is nobody to ask and no conversation to report back to mid-call.
     pub from_code: bool,
+    /// Who made the call, as `tool.around` is told: `model`, `user`,
+    /// `skill`, `RunCode`, `host`, or the plugin command or function whose
+    /// call it is.
+    pub via: String,
     /// What the session's sandbox holds a command to.
     pub confinement: crate::interface::exec::ConfinementReport,
     /// How the engine runs its own git and helpers for the session — see
@@ -113,6 +117,7 @@ impl ToolContext {
             exec,
             dispatch: None,
             from_code: false,
+            via: "model".into(),
             confinement: Default::default(),
             engine_git,
             attendance: crate::interface::permission::Attendance::Attended,

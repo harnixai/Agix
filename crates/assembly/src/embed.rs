@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base::interface::host_js::HostJsLib;
 use base::interface::scene::SceneSpec;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinHandle;
@@ -92,6 +93,14 @@ pub struct EmbedConfig {
     /// `plugin.disable`, and loaded in place of an installed package of the
     /// same name. One that does not load fails the start.
     pub plugins: Vec<PathBuf>,
+    /// The JavaScript libraries the host gives plugin code, each a global
+    /// of its namespace in the commands and functions of the packages whose
+    /// `uses` names it, and only there. A package naming one not here is
+    /// not installed or loaded. The namespace is `[a-z][a-z0-9]*`, not the
+    /// engine's name, no global a script already has and no other
+    /// library's; function paths are dotted identifiers, each once.
+    /// Otherwise the start fails with [`EmbedError::InvalidHostLibrary`].
+    pub js_libs: Vec<HostJsLib>,
 }
 
 impl EmbedConfig {
@@ -116,6 +125,7 @@ impl EmbedConfig {
             product: base::paths::DEFAULT_PRODUCT_NAME.into(),
             engine: base::paths::DEFAULT_ENGINE.into(),
             plugins: Vec::new(),
+            js_libs: Vec::new(),
         }
     }
 
@@ -163,6 +173,9 @@ pub enum EmbedError {
     /// `EmbedConfig::engine` cannot name the engine.
     #[error("engine `{name}`: {reason}")]
     InvalidEngineName { name: String, reason: String },
+    /// A library of `EmbedConfig::js_libs` cannot be installed.
+    #[error("host library `{namespace}`: {reason}")]
+    InvalidHostLibrary { namespace: String, reason: String },
 }
 
 /// Who keeps this process's process-group record: a named instance, or the
@@ -254,6 +267,7 @@ impl Embedded {
             &base::paths::StateRoot::new(&config.data_root).scenes_dir(),
             &layout_of(&config)?,
         )?;
+        check_host_libraries(&config)?;
         let daemon_config = daemon_config(&config, &scene.id)?;
         let socket = daemon_config.socket_path.clone();
         let instance = match &config.instance {
@@ -276,6 +290,7 @@ impl Embedded {
                 extra_scenes: config.scenes.clone(),
                 permission_prompt_timeout: config.permission_prompt_timeout,
                 host_plugins: config.plugins.clone(),
+                js_libs: config.js_libs.clone(),
                 ..Default::default()
             },
         )
@@ -430,6 +445,15 @@ fn layout_of(config: &EmbedConfig) -> Result<base::paths::Layout, EmbedError> {
             name: e.name,
             reason: e.reason.to_string(),
         })
+}
+
+fn check_host_libraries(config: &EmbedConfig) -> Result<(), EmbedError> {
+    crate::plugins::host_libraries::check(&config.js_libs, layout_of(config)?.engine()).map_err(
+        |e| EmbedError::InvalidHostLibrary {
+            namespace: e.namespace,
+            reason: e.reason,
+        },
+    )
 }
 
 fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, EmbedError> {

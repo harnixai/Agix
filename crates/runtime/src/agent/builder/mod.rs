@@ -233,6 +233,13 @@ impl Builder {
         self
     }
 
+    /// The JavaScript libraries the host gives plugin code: a command gets
+    /// those its package `uses`, in the session and its delegates.
+    pub fn host_js_libs(mut self, libs: Arc<[base::interface::host_js::HostJsLib]>) -> Self {
+        self.host.host_js_libs = libs;
+        self
+    }
+
     /// The host's skill directories: the ones this session lists, which its
     /// file tools and sandbox read without asking, and every one any session
     /// lists, under which no tool writes in any permission mode. Both are

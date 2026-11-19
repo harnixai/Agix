@@ -9,6 +9,7 @@ mod daemon_surface;
 mod demo_plugins;
 mod embed_engine_name;
 mod embed_entry;
+mod embed_host_libraries;
 mod embed_product_name;
 mod embed_project_dir;
 mod engine_boundaries;

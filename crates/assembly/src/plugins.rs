@@ -16,6 +16,7 @@ mod commands;
 mod functions;
 #[cfg(feature = "plugin-packages")]
 mod health;
+pub(crate) mod host_libraries;
 #[cfg(feature = "plugin-packages")]
 mod packages;
 mod policy;

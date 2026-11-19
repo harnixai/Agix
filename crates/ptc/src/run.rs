@@ -5,6 +5,7 @@
 
 use crate::calls::{Allowed, CallLog, Dispatcher};
 use crate::engine::{self, Host, ProgramHost, Run, Script, ScriptEnd};
+use crate::host_libs::HostBinding;
 use crate::{take_one, Library, Limits, StopCause};
 use base::context::{RunningTask, Session};
 use base::interface::tool_dispatch::ToolDispatch;
@@ -35,6 +36,8 @@ pub(crate) struct Launch<'a> {
     pub allowed: Allowed,
     pub run_slots: Option<&'a Arc<Semaphore>>,
     pub turn_cancel: CancellationToken,
+    /// The host libraries the script's package `uses`; none for `RunCode`.
+    pub host_libraries: HostBinding,
 }
 
 /// How a script ended, with what it did on the way.
@@ -74,6 +77,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         allowed,
         run_slots,
         turn_cancel,
+        host_libraries,
     } = launch;
     let _slot = acquire_run_slot(run_slots, &turn_cancel, task).await?;
     let started = engine::now_ms();
@@ -112,6 +116,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         stop_requested: stop_requested.clone(),
         program,
         library: library.global().to_string(),
+        host_libraries: host_libraries.scripts(),
     };
 
     let dispatcher = tokio::spawn(
@@ -125,6 +130,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
             hard_stop: hard_stop.clone(),
             cause: cause.clone(),
             log: calls_log.clone(),
+            host_libraries: Arc::new(host_libraries),
         }
         .run(calls_rx),
     );

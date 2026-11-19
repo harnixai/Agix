@@ -1,8 +1,10 @@
 //! A script's tool calls on the engine's side: each request from the script
 //! becomes a call through the session's dispatch, within the run's limits,
-//! and its answer goes back to the script.
+//! and its answer goes back to the script. A call of a host library's
+//! function goes to the host instead.
 
 use crate::engine::CallRequest;
+use crate::host_libs::HostBinding;
 use crate::{Limits, StopCause};
 use base::context::RunningTask;
 use base::interface::tool_dispatch::ToolDispatch;
@@ -83,6 +85,7 @@ pub(crate) struct Dispatcher {
     pub hard_stop: CancellationToken,
     pub cause: Arc<StopCause>,
     pub log: Arc<CallLog>,
+    pub host_libraries: Arc<HostBinding>,
 }
 
 /// What becomes of one request before it runs.
@@ -132,6 +135,14 @@ impl Dispatcher {
                 r = calls.recv() => match r { Some(r) => r, None => break },
                 _ = this.hard_stop.cancelled() => break,
             };
+            if request.host_library {
+                let this = this.clone();
+                running.spawn(async move {
+                    let reply = this.host_call(&request.name, &request.input).await;
+                    let _ = request.reply.send(reply);
+                });
+                continue;
+            }
             let input: Value = match serde_json::from_str(&request.input) {
                 Ok(v) => v,
                 Err(e) => {
@@ -203,6 +214,43 @@ impl Dispatcher {
             }
             Ok(answer) => fail(log, task, &label, &answer.text, max_chars),
             Err(e) => fail(log, task, &label, &e, max_chars),
+        }
+    }
+
+    /// One call of a host library's function, answered as the script reads
+    /// it, with a line in the task's output for each.
+    async fn host_call(&self, path: &str, input: &str) -> String {
+        use tracing::Instrument;
+        let context = self.host_libraries.context();
+        let span = tracing::info_span!(
+            "host_library_call",
+            function = %path,
+            plugin = context.map(|c| c.plugin.as_str()),
+            entry = context.map(|c| c.entry.as_str()),
+            via = context.map(|c| c.via.as_str()),
+        );
+        let started = std::time::Instant::now();
+        let answer = self
+            .host_libraries
+            .call(
+                path,
+                input,
+                self.limits.call_result_chars,
+                self.hard_stop.child_token(),
+            )
+            .instrument(span)
+            .await;
+        let ms = started.elapsed().as_millis();
+        match answer {
+            Ok(value) => {
+                self.task.append_output(&format!("{path} ok {ms}ms\n"));
+                serde_json::json!({"ok": true, "value": value}).to_string()
+            }
+            Err(e) => {
+                self.task
+                    .append_output(&format!("{path} error {} {ms}ms\n", e.code));
+                serde_json::json!({"ok": false, "error": e.message, "code": e.code}).to_string()
+            }
         }
     }
 }

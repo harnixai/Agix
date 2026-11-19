@@ -127,6 +127,7 @@ impl Builder {
             attended: resolved.attended,
             skill_dirs: self.host.skill_dirs.clone(),
             ext_commands: self.host.ext_commands.clone(),
+            host_js_libs: self.host.host_js_libs.clone(),
         }
     }
 

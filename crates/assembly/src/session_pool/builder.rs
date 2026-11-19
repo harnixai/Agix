@@ -20,6 +20,7 @@ pub(crate) struct SessionPoolBuilder {
     permission_prompt_timeout: Option<Duration>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
     host_libraries: Vec<base::command::HostLibrary>,
+    host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
     customize: Option<SessionCustomizer>,
     mcp: Option<McpSetup>,
 }
@@ -54,6 +55,7 @@ impl SessionPool {
             permission_prompt_timeout: None,
             rust_plugins: Vec::new(),
             host_libraries: Vec::new(),
+            host_js_libs: Arc::from([]),
             customize: None,
             mcp: None,
         }
@@ -116,8 +118,12 @@ impl SessionPoolBuilder {
 
     /// The JavaScript libraries the host provides to package code: a
     /// package whose `uses` names another does not install or load.
-    pub(crate) fn host_libraries(mut self, libraries: Vec<base::command::HostLibrary>) -> Self {
-        self.host_libraries = libraries;
+    pub(crate) fn host_libraries(
+        mut self,
+        libraries: Vec<base::interface::host_js::HostJsLib>,
+    ) -> Self {
+        self.host_libraries = libraries.iter().map(|lib| lib.library()).collect();
+        self.host_js_libs = libraries.into();
         self
     }
 
@@ -135,24 +141,9 @@ impl SessionPoolBuilder {
     }
 
     pub(crate) fn build(self) -> Arc<SessionPool> {
-        let (managed_settings_path, managed_settings, settings) = match self.managed {
-            Some((path, managed)) => {
-                let settings = Arc::new((*self.settings).clone().with_managed(managed.clone()));
-                (path, managed, settings)
-            }
-            None => {
-                let path = self.paths.layout().managed_settings_file();
-                (path, None, self.settings)
-            }
-        };
-        let layers = parts::bindings::Layers::new(
-            self.host_overrides,
-            ManagedLayer {
-                path: managed_settings_path,
-                settings: managed_settings,
-            },
-            self.max_tokens_fallback,
-        );
+        let (managed, settings) = managed_layer(self.managed, self.settings, self.paths.as_ref());
+        let layers =
+            parts::bindings::Layers::new(self.host_overrides, managed, self.max_tokens_fallback);
         let settings =
             parts::bindings::own_settings_in(&self.cwd, settings, self.paths.as_ref(), &layers);
         let mcp = McpHub::new(self.mcp, &settings.paths);
@@ -186,6 +177,7 @@ impl SessionPoolBuilder {
             self.customize,
             self.permission_prompt_timeout,
             self.history_store.clone(),
+            self.host_js_libs,
         );
         let bindings = BindingCache::new(
             settings,
@@ -212,5 +204,33 @@ impl SessionPoolBuilder {
             specs,
             factory,
         })
+    }
+}
+
+/// The managed layer the host named, else the platform's file with nothing
+/// read from it, and `settings` with it on top.
+fn managed_layer(
+    managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
+    settings: Arc<LoadedSettings>,
+    paths: &dyn crate::config::DaemonPaths,
+) -> (ManagedLayer, Arc<LoadedSettings>) {
+    match managed {
+        Some((path, managed)) => {
+            let settings = Arc::new((*settings).clone().with_managed(managed.clone()));
+            (
+                ManagedLayer {
+                    path,
+                    settings: managed,
+                },
+                settings,
+            )
+        }
+        None => (
+            ManagedLayer {
+                path: paths.layout().managed_settings_file(),
+                settings: None,
+            },
+            settings,
+        ),
     }
 }

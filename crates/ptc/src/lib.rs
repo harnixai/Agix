@@ -13,10 +13,12 @@ mod calls;
 mod code;
 mod engine;
 mod ext;
+mod host_libs;
 mod run;
 
 pub use code::{RunCodeInput, RunCodeTool, TOOL_NAME};
 pub use ext::{split_command_line, RunExtInput, RunExtTool, EXT_TOOL_NAME};
+pub use host_libs::HostLibraries;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -155,5 +157,7 @@ pub(crate) fn take_one(left: &AtomicU32) -> bool {
 
 #[cfg(test)]
 mod ext_tests;
+#[cfg(test)]
+mod host_libs_tests;
 #[cfg(test)]
 mod tests;

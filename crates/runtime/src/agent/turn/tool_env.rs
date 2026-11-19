@@ -249,6 +249,7 @@ pub(super) fn tool_context_for(
             as Arc<dyn base::interface::tool_dispatch::ToolDispatch>
     });
     tool_ctx.from_code = ctx.caller.is_code();
+    tool_ctx.via = ctx.caller.via();
     tool_ctx.confinement = crate::exec::confinement_of(
         &ctx.session_state,
         &ctx.config,

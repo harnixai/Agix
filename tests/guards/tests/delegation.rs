@@ -83,6 +83,7 @@ const INHERITED: &[(&str, &str)] = &[
     ("attended", "attended"),
     ("skill_dirs", "skill_dirs"),
     ("ext_commands", "ext_commands"),
+    ("host_js_libs", "host_js_libs"),
 ];
 
 /// Decided per delegate by whoever spawns it.

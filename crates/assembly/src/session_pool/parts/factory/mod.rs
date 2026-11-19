@@ -46,12 +46,19 @@ pub(in crate::session_pool) struct EngineFactory {
     /// `Duration::ZERO` waits forever.
     permission_prompt_timeout: Option<Duration>,
     history_store: Option<Arc<dyn history::store::HistoryStore>>,
-    /// How many `RunCode` programs this pool's sessions may run at once,
-    /// together. One per pool, so a pool filling it leaves the others in the
-    /// process their own.
-    run_slots: Arc<tokio::sync::Semaphore>,
+    scripts: ScriptShares,
     background_hooks: hooks::BackgroundHooks,
     hosts: HostConnections,
+}
+
+/// What the scripts of every session this pool builds share.
+pub(in crate::session_pool) struct ScriptShares {
+    /// How many scripts this pool's sessions may run at once, together. One
+    /// per pool, so a pool filling it leaves the others in the process their
+    /// own.
+    pub(in crate::session_pool) run_slots: Arc<tokio::sync::Semaphore>,
+    /// The JavaScript libraries the host gives plugin code.
+    pub(in crate::session_pool) host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
 }
 
 /// What an engine takes over from the session it runs: the session's state
@@ -124,6 +131,7 @@ impl EngineFactory {
         customize: Option<SessionCustomizer>,
         permission_prompt_timeout: Option<Duration>,
         history_store: Option<Arc<dyn history::store::HistoryStore>>,
+        host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
     ) -> Self {
         Self {
             tools,
@@ -132,7 +140,10 @@ impl EngineFactory {
             customize,
             permission_prompt_timeout,
             history_store,
-            run_slots: runtime::agent::default_run_slots(),
+            scripts: ScriptShares {
+                run_slots: runtime::agent::default_run_slots(),
+                host_js_libs,
+            },
             background_hooks: hooks::BackgroundHooks::new(),
             hosts: HostConnections::default(),
         }
@@ -150,7 +161,14 @@ impl EngineFactory {
     }
 
     pub(in crate::session_pool) fn run_slots(&self) -> &Arc<tokio::sync::Semaphore> {
-        &self.run_slots
+        &self.scripts.run_slots
+    }
+
+    /// `builder` with what this pool's scripts share.
+    fn sharing_scripts(&self, builder: Builder) -> Builder {
+        builder
+            .run_slots(self.scripts.run_slots.clone())
+            .host_js_libs(self.scripts.host_js_libs.clone())
     }
 
     /// Where every session's notify-only hooks run, drained at shutdown.
@@ -187,7 +205,8 @@ impl EngineFactory {
         let permission =
             resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot, options);
 
-        let mut builder = Builder::new()
+        let mut builder = self
+            .sharing_scripts(Builder::new())
             .scene(scene)
             .model(model)
             .tools(self.tools.clone())
@@ -197,7 +216,6 @@ impl EngineFactory {
             .session_state(req.seed.state, req.seed.generation.get())
             .steering(req.seed.steer)
             .cron_store(req.cron_store)
-            .run_slots(self.run_slots.clone())
             .background_hooks(self.background_hooks.clone())
             .attended(options.and_then(|o| o.attended))
             .question_prompts(options.is_some_and(SessionOptions::answers_questions))

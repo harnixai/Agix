@@ -57,6 +57,8 @@ pub(super) struct HostSetup {
     pub(super) skill_dirs: super::host::HostSkillDirs,
     /// See [`Builder::ext_commands`].
     pub(super) ext_commands: Vec<base::command::ExtCommand>,
+    /// See [`Builder::host_js_libs`].
+    pub(super) host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
 }
 
 impl HostSetup {
@@ -86,6 +88,7 @@ impl HostSetup {
             attended: None,
             skill_dirs: Default::default(),
             ext_commands: Vec::new(),
+            host_js_libs: Arc::from([]),
         }
     }
 }
