@@ -31,8 +31,8 @@ pub(crate) struct Host {
     pub stop_requested: Arc<AtomicBool>,
     /// What only a model's program has: `agent`, `notify`, `messages`, `args`.
     pub program: Option<ProgramHost>,
-    /// Further globals the base library is bound to.
-    pub library_aliases: Vec<String>,
+    /// The base library's global.
+    pub library: String,
 }
 
 #[derive(Clone)]
@@ -331,11 +331,7 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(ms))
         })?,
     )?;
-    let library = host
-        .library_aliases
-        .first()
-        .map_or(js_lib::GLOBAL, String::as_str);
-    js_lib::install_named(ctx, library)
+    js_lib::install_named(ctx, &host.library)
 }
 
 fn stopped_answer() -> String {

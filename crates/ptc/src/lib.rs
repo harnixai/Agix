@@ -96,10 +96,6 @@ impl Library {
     pub fn global(&self) -> &str {
         &self.global
     }
-
-    pub(crate) fn aliases(&self) -> Vec<&str> {
-        vec![self.global.as_str()]
-    }
 }
 
 impl Default for Library {

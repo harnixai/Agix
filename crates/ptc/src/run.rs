@@ -111,7 +111,7 @@ pub(crate) async fn execute(front: Front, launch: Launch<'_>) -> Result<Ended, S
         }),
         stop_requested: stop_requested.clone(),
         program,
-        library_aliases: library.aliases().into_iter().map(str::to_string).collect(),
+        library: library.global().to_string(),
     };
 
     let dispatcher = tokio::spawn(
