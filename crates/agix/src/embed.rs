@@ -7,3 +7,4 @@ pub use ::assembly::embed::HistoryLocation;
 pub use ::base::interface::host_js::HostCallContext;
 pub use ::base::interface::host_js::HostJsError;
 pub use ::base::interface::host_js::HostJsLib;
+pub use ::base::interface::host_js::PackageSource;

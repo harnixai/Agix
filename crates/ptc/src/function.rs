@@ -10,7 +10,7 @@
 use crate::calls::Allowed;
 use crate::engine::{CommandScript, ScriptEnd};
 use crate::ext::read_entry;
-use crate::host_libs::{call_context, HostBinding, HostLibraries};
+use crate::host_libs::{call_context, HostBinding, HostLibraries, Package};
 use crate::run::{execute, Ended, Front, Launch};
 use crate::{default_run_slots, truncate, Library, Limits};
 use async_trait::async_trait;
@@ -138,7 +138,12 @@ impl PluginCallTool {
     /// session it runs in, none for a call outside any.
     fn host_libraries_of(&self, ctx: &ToolContext) -> HostBinding {
         let f = &self.function;
-        let mut context = call_context(ctx, &f.plugin, &f.plugin_version, &f.name);
+        let package = Package {
+            name: &f.plugin,
+            version: &f.plugin_version,
+            source: f.source,
+        };
+        let mut context = call_context(ctx, package, &f.name);
         context.session_id = self.session.clone();
         self.host_libraries.bind(&f.uses, context)
     }

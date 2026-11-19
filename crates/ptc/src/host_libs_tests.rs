@@ -39,6 +39,7 @@ fn command(root: &Path, source: &str, uses: &[&str]) -> ExtCommand {
         description: "flows".into(),
         plugin: "flow-plugin".into(),
         plugin_version: "2.0.0".into(),
+        source: Default::default(),
         root: root.to_path_buf(),
         file: root.join("cmd.js"),
         function: "main".into(),

@@ -75,6 +75,7 @@ fn command(root: &Path, source: &str) -> ExtCommand {
         description: "requirements and specs".into(),
         plugin: "forge-plugin".into(),
         plugin_version: "1.2.3".into(),
+        source: Default::default(),
         root: root.to_path_buf(),
         file: root.join("cmd.js"),
         function: "main".into(),

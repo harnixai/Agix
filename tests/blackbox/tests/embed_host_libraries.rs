@@ -1,7 +1,8 @@
 //! An embedder's JavaScript library (`EmbedConfig.js_libs`) in plugin code,
 //! over `Embedded::serve_stream`: a package that `uses` it installs, and its
 //! command typed as `/name` calls the host's function, gets its answer, and
-//! the host sees who called (`via:"user"`, the package, the session). A
+//! the host sees who called (`via:"user"`, the package — an installed one,
+//! whatever it calls itself — the session). A
 //! package that does not declare it, and a `RunCode` program, have no such
 //! global. The same package is refused by an embedder without the library,
 //! and a library that cannot be installed fails the start.
@@ -15,7 +16,7 @@ use rpc_client::DaemonRpcClient;
 use serde_json::{json, Value};
 use test_runner::plugin_fixture::{file_url, zip_with_entries, Entry};
 
-use base::interface::host_js::{HostCallContext, HostJsLib};
+use base::interface::host_js::{HostCallContext, HostJsLib, PackageSource};
 
 const USES: &str = "uses = [\"codix\"]\n[plugin]\nname = \"xflow\"\nversion = \"1.0.0\"\n\
     api_version = \"0.1\"\n[[command]]\nname = \"xrun\"\nentry = \"x.js:main\"\n\
@@ -200,6 +201,11 @@ async fn a_command_that_uses_the_hosts_library_calls_it_and_others_do_not_have_i
         assert_eq!(input, &json!({ "change": "c1" }));
         assert_eq!(cx.via, "user");
         assert_eq!(cx.plugin, "xflow");
+        assert_eq!(
+            cx.source,
+            PackageSource::Installed,
+            "a package anyone may install"
+        );
         assert_eq!(cx.plugin_version, "1.0.0");
         assert_eq!(cx.entry, "xrun");
         assert_eq!(cx.session_id.as_deref(), Some(session.as_str()));

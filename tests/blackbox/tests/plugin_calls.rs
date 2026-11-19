@@ -761,7 +761,7 @@ async fn the_rust_interface_calls_a_host_package_function_through_the_pool() -> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::Result<()> {
-    use base::interface::host_js::{HostCallContext, HostJsLib};
+    use base::interface::host_js::{HostCallContext, HostJsLib, PackageSource};
     use daemon::embed::{EmbedConfig, Embedded};
     use std::sync::{Arc, Mutex};
 
@@ -833,6 +833,7 @@ async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::R
     assert_eq!(seen.len(), 1, "{seen:?}");
     assert_eq!(seen[0].via, "host");
     assert_eq!(seen[0].plugin, "gate");
+    assert_eq!(seen[0].source, PackageSource::Host);
     assert_eq!(seen[0].entry, "open");
     assert_eq!(seen[0].session_id, None, "a call outside any session");
     embedded.shutdown().await;

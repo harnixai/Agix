@@ -22,6 +22,7 @@ pub fn declared_functions(plugin: &Plugin) -> Result<Vec<PluginFunction>, Plugin
                 name: f.name.clone(),
                 plugin: plugin.name().to_string(),
                 plugin_version: plugin.manifest.plugin.version.clone(),
+                source: plugin.source(),
                 description: f.description.clone(),
                 root: plugin.root.clone(),
                 file: crate::commands::entry_file(plugin, &what, f.file())?,

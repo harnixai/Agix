@@ -8,7 +8,7 @@
 
 use crate::calls::{cut_note, Allowed};
 use crate::engine::{CommandScript, ScriptEnd};
-use crate::host_libs::{call_context, HostBinding, HostLibraries};
+use crate::host_libs::{call_context, HostBinding, HostLibraries, Package};
 use crate::run::{execute, Ended, Front, Launch};
 use crate::{default_run_slots, truncate, Library, Limits};
 use async_trait::async_trait;
@@ -261,7 +261,12 @@ impl RunExtTool {
     }
 
     fn host_libraries_of(&self, command: &ExtCommand, ctx: &ToolContext) -> HostBinding {
-        let context = call_context(ctx, &command.plugin, &command.plugin_version, &command.name);
+        let package = Package {
+            name: &command.plugin,
+            version: &command.plugin_version,
+            source: command.source,
+        };
+        let context = call_context(ctx, package, &command.name);
         self.host_libraries.bind(&command.uses, context)
     }
 

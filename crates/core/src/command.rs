@@ -15,6 +15,18 @@ pub const BUILTIN_COMMANDS: &[(&str, &str)] = &[
     ("cost", "Show the tokens and calls this session has spent"),
 ];
 
+/// Where a package comes from, as the engine's registry of packages knows
+/// it — unlike its name, which the package's own `plugin.toml` gives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PackageSource {
+    /// `plugin.install`: anyone who can install a package, under any name.
+    #[default]
+    Installed,
+    /// One of the embedding host's own packages, from a directory it named.
+    Host,
+}
+
 /// One command an enabled package declares, as the session runs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtCommand {
@@ -22,6 +34,7 @@ pub struct ExtCommand {
     pub description: String,
     pub plugin: String,
     pub plugin_version: String,
+    pub source: PackageSource,
     /// The package's unpacked directory.
     pub root: PathBuf,
     /// The entry file, inside `root`.
@@ -46,6 +59,7 @@ pub struct PluginFunction {
     pub name: String,
     pub plugin: String,
     pub plugin_version: String,
+    pub source: PackageSource,
     pub description: String,
     /// The package's unpacked directory.
     pub root: PathBuf,
@@ -103,6 +117,7 @@ mod tests {
             description: String::new(),
             plugin: "forge".into(),
             plugin_version: "1.0.0".into(),
+            source: PackageSource::Installed,
             root: PathBuf::new(),
             file: PathBuf::new(),
             function: "main".into(),

@@ -406,6 +406,7 @@ pub struct Plugin {
     pub manifest: PluginManifest,
     layout: base::paths::Layout,
     bytecode_dir: Option<PathBuf>,
+    source: base::command::PackageSource,
 }
 
 impl Plugin {
@@ -426,6 +427,7 @@ impl Plugin {
             manifest,
             layout: layout.clone(),
             bytecode_dir: crate::commands::bytecode_dir(root),
+            source: base::command::PackageSource::Installed,
         })
     }
 
@@ -442,6 +444,16 @@ impl Plugin {
     /// Keep compiled entries in `dir`, for a package that is not in a cache.
     pub fn with_bytecode_dir(mut self, dir: PathBuf) -> Self {
         self.bytecode_dir = Some(dir);
+        self
+    }
+
+    pub fn source(&self) -> base::command::PackageSource {
+        self.source
+    }
+
+    /// The package as one of the host's own.
+    pub fn from_host(mut self) -> Self {
+        self.source = base::command::PackageSource::Host;
         self
     }
 

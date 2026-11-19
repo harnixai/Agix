@@ -64,6 +64,7 @@ fn function(root: &Path, source: &str, schema: Option<Value>) -> PluginFunction 
         name: "check".into(),
         plugin: "xflow".into(),
         plugin_version: "1.0.0".into(),
+        source: Default::default(),
         description: "gate check".into(),
         root: root.to_path_buf(),
         file: root.join("xflow.js"),

@@ -558,6 +558,7 @@ mod tests {
             description: "requirements and specs".into(),
             plugin: "forge".into(),
             plugin_version: "1.0.0".into(),
+            source: base::command::PackageSource::Installed,
             root: std::path::PathBuf::new(),
             file: std::path::PathBuf::new(),
             function: "main".into(),

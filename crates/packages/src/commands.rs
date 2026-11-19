@@ -29,6 +29,7 @@ pub fn declared_commands(plugin: &Plugin) -> Result<Vec<ExtCommand>, PluginError
                 description: c.description.clone(),
                 plugin: plugin.name().to_string(),
                 plugin_version: plugin.manifest.plugin.version.clone(),
+                source: plugin.source(),
                 root: plugin.root.clone(),
                 file,
                 function: c.function().to_string(),

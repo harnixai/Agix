@@ -4,7 +4,7 @@
 //! call: its limits, its cancellation, its line in the task's output and its
 //! tracing span. `RunCode` runs without any.
 
-use base::interface::host_js::{HostCallContext, HostJsError, HostJsLib};
+use base::interface::host_js::{HostCallContext, HostJsError, HostJsLib, PackageSource};
 use base::tool::ToolContext;
 use serde_json::Value;
 use std::sync::Arc;
@@ -39,17 +39,24 @@ impl HostLibraries {
     }
 }
 
+/// The package a command or function is from.
+pub(crate) struct Package<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub source: PackageSource,
+}
+
 /// The context a plugin command or function run from `ctx` calls the host
 /// with.
 pub(crate) fn call_context(
     ctx: &ToolContext,
-    plugin: &str,
-    plugin_version: &str,
+    package: Package<'_>,
     entry: &str,
 ) -> HostCallContext {
     HostCallContext {
-        plugin: plugin.to_string(),
-        plugin_version: plugin_version.to_string(),
+        plugin: package.name.to_string(),
+        plugin_version: package.version.to_string(),
+        source: package.source,
         entry: entry.to_string(),
         session_id: (!ctx.session_id.is_empty()).then(|| ctx.session_id.clone()),
         project_root: Some(ctx.cwd.clone()),

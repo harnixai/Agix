@@ -13,6 +13,8 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+pub use crate::command::PackageSource;
+
 use crate::command::HostLibrary;
 
 /// One function of a host library. Any
@@ -44,8 +46,11 @@ where
 /// the call goes ahead.
 #[derive(Debug, Clone)]
 pub struct HostCallContext {
+    /// The name the package gives itself: any installed package can take
+    /// one, so `source` is what tells the host's own package from it.
     pub plugin: String,
     pub plugin_version: String,
+    pub source: PackageSource,
     /// The command's name, or the function's.
     pub entry: String,
     pub session_id: Option<String>,
@@ -172,6 +177,7 @@ mod tests {
         let cx = HostCallContext {
             plugin: "p".into(),
             plugin_version: "1".into(),
+            source: PackageSource::Installed,
             entry: "cmd".into(),
             session_id: None,
             project_root: None,

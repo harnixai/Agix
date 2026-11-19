@@ -41,8 +41,9 @@ pub fn load_host_package(
             format!("{}: {e}", dir.display()),
         ))
     })?;
-    let plugin =
-        Plugin::load(&root, &root.join("plugin.toml"), layout)?.with_bytecode_dir(bytecode_dir);
+    let plugin = Plugin::load(&root, &root.join("plugin.toml"), layout)?
+        .with_bytecode_dir(bytecode_dir)
+        .from_host();
     check_libraries(&plugin, provided)?;
     let disclosure = Disclosure::from_plugin(&plugin, provided)?;
     Ok((plugin, disclosure))

@@ -662,7 +662,7 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 ## 10. 嵌入入口：`agix::embed`
 
-前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型（另有 `js_libs` 用的 `HostJsLib`、`HostCallContext`、`HostJsError`），宿主之后经协议（`daemon_rpc_protocol.md`）用引擎；协议是 Rust 接口的子集，只有 Rust 才有的（`SessionPool::call_plugin` 的 `CancellationToken`、`register_host_plugin`……）经 `Embedded::pool()` 拿到同一个池去调。
+前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型（另有 `js_libs` 用的 `HostJsLib`、`HostCallContext`、`HostJsError`、`PackageSource`），宿主之后经协议（`daemon_rpc_protocol.md`）用引擎；协议是 Rust 接口的子集，只有 Rust 才有的（`SessionPool::call_plugin` 的 `CancellationToken`、`register_host_plugin`……）经 `Embedded::pool()` 拿到同一个池去调。
 
 ```rust
 use agix::embed::{EmbedConfig, Embedded};
@@ -759,7 +759,7 @@ engine.shutdown().await;
 取消与上限由引擎管。
 
 ```rust
-use agix::embed::{EmbedConfig, Embedded, HostCallContext, HostJsError, HostJsLib};
+use agix::embed::{EmbedConfig, Embedded, HostCallContext, HostJsError, HostJsLib, PackageSource};
 use serde_json::{json, Value};
 
 # fn main() -> anyhow::Result<()> {
@@ -770,8 +770,8 @@ let mut config = EmbedConfig::new(dir.path().join("state"));
 config.js_libs.push(
     HostJsLib::new("codix")
         .function("flow.start", |cx: HostCallContext, input: Value| async move {
-            if cx.via == "model" && cx.plugin != "xflow" {
-                return Err(HostJsError::new("denied", "only xflow starts flows for the model"));
+            if cx.via == "model" && cx.source != PackageSource::Host {
+                return Err(HostJsError::new("denied", "only the host's own packages start flows for the model"));
             }
             Ok(json!({ "run": "r-1", "change": input["change"] }))
         })
@@ -799,7 +799,8 @@ engine.shutdown().await;
 
   | 字段 | 内容 |
   |---|---|
-  | `plugin` / `plugin_version` | 代码所在的包 |
+  | `plugin` / `plugin_version` | 代码所在的包，按包自己 `plugin.toml` 里写的 |
+  | `source` | 包从哪来：`PackageSource::Host`（宿主经 `EmbedConfig.plugins` / `register_host_plugin` 登记的自带包）或 `PackageSource::Installed`（`plugin.install` 装的） |
   | `entry` | 命令名，或函数名 |
   | `session_id` | 所在会话；没有会话时 `None` |
   | `project_root` / `cwd` | 会话的工作目录（同脚本 `ctx` 的 `projectRoot` / `cwd`） |
@@ -808,6 +809,8 @@ engine.shutdown().await;
   | `cancel` | 脚本被停时触发 |
 
   宿主库的调用不是工具调用：不经权限判定、`tool.around` 与 hooks，不进转录。放不放行由宿主看上下文自己定。
+  `plugin` 是包自报的名字，谁都能装一个叫 `xflow` 的包；`uses` 也不是授权，任何包写上就拿得到这个全局。要认
+  宿主自己的包，看 `source`，不看 `plugin`。
 - **出错**：返回 `Err(HostJsError { code, message })` → Promise reject 一个 `Error`，带 `code` 与 `message`；命令没接住
   时模型读到的是 `message`（`runext.md` §4）。引擎自己的拒绝也带 `code`：`limit`（见下）、`stopped`（运行在停）、
   `failed`（函数 panic）。
@@ -834,7 +837,9 @@ engine.shutdown().await;
 
 - **0.3.20** `EmbedConfig.product_name` 改名为 `EmbedConfig.product`（含义不变，`EmbedError::InvalidProductName` 的消息前缀随之是 `product`）；新增 `EmbedConfig.engine`（缺省 `agix`）与 `EmbedError::InvalidEngineName { name, reason }`；`EmbedConfig.project_dir` 改为 `Option<String>`，`None` 取 `.<engine>`，原来写 `config.project_dir = ".codix".into()` 的改成 `Some(".codix".into())`。0.3.19 的“产品名别名”去掉：改了产品名不再给基础库挂第二个名字，基础库只在引擎名下（缺省 `agix`，与产品名无关）。库式用法：`js_lib::{alias_for, install_as}` 删掉，换成 `js_lib::install_named(ctx, name)` 与 `js_lib::check_global_name`；`ptc::Library::for_product` → `for_engine`（`shown()` → `global()`）；`script_host::QuickJsEngine::for_product` → `for_engine`，`script_host::bindings::engine_for` 收引擎名；`base::paths::known_state_roots` 多一个 `&Layout`；新增 `Layout::{with_engine, with_project_dir, engine, state_dir_names}`。
   - 新增 `EmbedConfig.js_libs`（缺省空）与 `EmbedError::InvalidHostLibrary { namespace, reason }`；类型
-    `agix::embed::{HostJsLib, HostCallContext, HostJsError}`（即 `base::interface::host_js`，另有 trait `HostFn`）。
+    `agix::embed::{HostJsLib, HostCallContext, HostJsError, PackageSource}`（即 `base::interface::host_js`，另有 trait
+    `HostFn`）。库式用法：`base::command::{ExtCommand, PluginFunction}` 多一个 `source: PackageSource`，
+    `packages::manifest::Plugin::{source, from_host}`。
     库式用法：`Assembly::js_libs`；`base::tool::ToolContext` 多一个公有字段 `via`（`ToolContext::new` 给 `"model"`）；
     `ptc::HostLibraries` 与 `RunExtTool::with_host_libraries`；`runtime::agent::Builder::host_js_libs`，`HostContracts`
     多一个 `host_js_libs`。
