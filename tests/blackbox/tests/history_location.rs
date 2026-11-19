@@ -282,6 +282,34 @@ async fn a_host_id_whose_directory_was_planted_does_not_take_in_what_is_there() 
     Ok(())
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_state_directory_linked_into_the_tracked_tree_keeps_history_globally(
+) -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.project("linked-state")?;
+    let tracked = project.join("docs/log");
+    std::fs::create_dir_all(&tracked)?;
+    std::fs::create_dir_all(project.join(".agix"))?;
+    std::os::unix::fs::symlink("../docs/log", project.join(".agix/state"))?;
+    keep_in_projects(&world)?;
+    world.trust_project(&project)?;
+    let provider = ProviderStub::start().await?;
+    let (daemon, session) = one_turn(&world, &provider, &project).await?;
+
+    assert!(world
+        .transcript_dir(&project)
+        .join(format!("{session}.jsonl"))
+        .is_file());
+    assert!(
+        !tracked.join("history").exists(),
+        "{:?}",
+        names_in(&tracked)
+    );
+    daemon.stop().await;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_untrusted_project_or_the_global_setting_keeps_history_globally() -> anyhow::Result<()> {
     let world = World::new()?;

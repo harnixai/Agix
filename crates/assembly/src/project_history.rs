@@ -25,27 +25,36 @@ impl ProjectHistoryPolicy {
         }
     }
 
-    /// The project directory at `root` made ready to hold history: a
-    /// directory of its own inside the project, with its `.gitignore`.
+    /// The project at `root` made ready to hold history: its project
+    /// directory, `state/` and `state/history` each a directory of its own
+    /// inside the project, the first with its `.gitignore`.
     fn prepare(&self, root: &Path) -> bool {
+        let Ok(real_root) = root.canonicalize() else {
+            return false;
+        };
         let dir = self.layout.project_dir(root);
-        if dir.symlink_metadata().is_err() {
-            if let Err(e) = std::fs::create_dir(&dir) {
-                tracing::warn!(dir = %dir.display(), error = %e, "could not make the project directory; this session's history is kept globally");
+        let state = self.layout.project_state_dir(root);
+        for level in [&dir, &state, &state.join(entry::HISTORY)] {
+            if let Err(why) = own_dir_inside(level, &real_root) {
+                tracing::warn!(dir = %level.display(), "{why}; this session's history is kept globally");
                 return false;
             }
         }
-        let own_dir = dir.symlink_metadata().is_ok_and(|m| m.is_dir());
-        let inside = match (dir.canonicalize(), root.canonicalize()) {
-            (Ok(dir), Ok(root)) => dir.starts_with(root),
-            _ => false,
-        };
-        if !(own_dir && inside) {
-            tracing::warn!(dir = %dir.display(), "the project directory is not a directory of its own inside the project; this session's history is kept globally");
-            return false;
-        }
         base::paths::ensure_local_data_gitignore(&dir);
         true
+    }
+}
+
+fn own_dir_inside(dir: &Path, real_root: &Path) -> Result<(), String> {
+    if dir.symlink_metadata().is_err() {
+        std::fs::create_dir(dir).map_err(|e| format!("could not be made: {e}"))?;
+    }
+    let own = dir.symlink_metadata().is_ok_and(|m| m.is_dir());
+    let inside = dir.canonicalize().is_ok_and(|d| d.starts_with(real_root));
+    if own && inside {
+        Ok(())
+    } else {
+        Err("not a directory of its own inside the project".into())
     }
 }
 
@@ -139,5 +148,38 @@ mod tests {
         let global = tmp.path().join("global");
         std::fs::create_dir_all(&global).unwrap();
         assert!(!policy(HistoryLocation::Project, &global, &[&root]).keeps_new(&root));
+    }
+
+    #[test]
+    fn a_state_or_history_directory_that_is_not_its_own_keeps_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let global = base.join("global");
+        std::fs::create_dir_all(&global).unwrap();
+
+        let linked = base.join("linked");
+        let elsewhere = base.join("elsewhere");
+        std::fs::create_dir_all(linked.join(".codix")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, linked.join(".codix/state")).unwrap();
+
+        let filed = base.join("filed");
+        std::fs::create_dir_all(filed.join(".codix/state")).unwrap();
+        std::fs::write(filed.join(".codix/state/history"), "").unwrap();
+
+        let history_linked = base.join("history-linked");
+        std::fs::create_dir_all(history_linked.join(".codix/state")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, history_linked.join(".codix/state/history"))
+            .unwrap();
+
+        let p = policy(
+            HistoryLocation::Project,
+            &global,
+            &[&linked, &filed, &history_linked],
+        );
+        for root in [&linked, &filed, &history_linked] {
+            assert!(!p.keeps_new(root), "{}", root.display());
+        }
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
     }
 }
