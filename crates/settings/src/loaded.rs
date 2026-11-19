@@ -15,12 +15,16 @@ use std::path::PathBuf;
 use base::interface::config_source::{ConfigSource, Tier};
 use base::paths::{Layout, PathSettings, Workspace};
 use base::permission::{LoadedRule, ManagedSettings, PermissionMode, ProjectTrust, RuleBehavior};
+use base::provider::ProviderConfig;
 
 use crate::merge::{merge_fitting, merge_json_values};
+
+mod providers;
 use crate::permissions::{self, read_rule_list, take_rule_lists};
 use crate::section::Sections;
 use crate::trust::{self, ProjectLayer, ProjectTrustSettings};
 use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
+use providers::PROVIDERS;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -40,22 +44,42 @@ pub struct LoadedSettings {
     pub mcp_server_dirs: HashMap<String, PathBuf>,
     /// The values the loader left out because they do not fit their setting.
     pub ignored: Vec<IgnoredValue>,
+    /// For each of `values.providers`, the file it was defined in. The
+    /// engine's own provider has none.
+    pub provider_origins: BTreeMap<String, ProviderOrigin>,
+    /// The model every tier of the built-in provider is: the daemon's
+    /// `--model`.
+    pub default_model: String,
     project_layer: ProjectLayer,
+}
+
+/// Where a provider was defined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderOrigin {
+    pub tier: Tier,
+    /// The file, as the source names it.
+    pub origin: String,
+    /// The tier's `settings.local.json` rather than its `settings.json`.
+    pub machine_local: bool,
 }
 
 impl LoadedSettings {
     /// Settings that were not loaded from any tier: no rules, no managed
     /// layer, and no project tier of their own.
     pub fn new(values: Settings, paths: PathSettings) -> Self {
-        Self {
+        let mut loaded = Self {
+            default_model: values.model.model_name.clone(),
             values,
             paths,
             rules: Vec::new(),
             managed: None,
             mcp_server_dirs: HashMap::new(),
             ignored: Vec::new(),
+            provider_origins: BTreeMap::new(),
             project_layer: ProjectLayer::default(),
-        }
+        };
+        loaded.settle_providers();
+        loaded
     }
 
     /// Load settings from the three tiers on disk. Priority (low → high):
@@ -94,10 +118,8 @@ impl LoadedSettings {
     /// `scope` identifies which product instance `scene_dir` belongs to (see
     /// `base::paths::ConfigPaths`) — no default at this layer; callers decide.
     ///
-    /// `default_model` seeds `model.model_name` **before** any layer is
-    /// merged in — lower priority than every settings.json layer. This lets
-    /// a caller's CLI `--model` flag act as a fallback rather than a hard
-    /// override.
+    /// `default_model` is every tier of the provider the engine supplies when
+    /// no tier defines one — the CLI's `--model`.
     ///
     /// `layout` is what the instance names its directories; `local_dir` is
     /// its project directory in the project, and every session of these
@@ -210,6 +232,8 @@ impl LoadedSettings {
             managed: None,
             mcp_server_dirs: HashMap::new(),
             mcp_secret_vars: Vec::new(),
+            providers: Vec::new(),
+            provider_origins: BTreeMap::new(),
         };
         for layer in layers {
             fold.apply(layer);
@@ -222,6 +246,7 @@ impl LoadedSettings {
             managed,
             mcp_server_dirs,
             mcp_secret_vars,
+            provider_origins,
             ..
         } = fold;
         let mut seen = std::collections::HashSet::new();
@@ -251,8 +276,11 @@ impl LoadedSettings {
             managed: None,
             mcp_server_dirs,
             ignored,
+            provider_origins,
+            default_model: default_model.to_string(),
             project_layer,
         };
+        loaded.settle_providers();
         if let Err(e) = loaded.place_worktrees() {
             tracing::warn!(error = %e, "app.worktree_dir is not allowed, the worktrees stay where they were");
         }
@@ -394,6 +422,8 @@ struct LayerFold<'a> {
     managed: Option<ManagedSettings>,
     mcp_server_dirs: HashMap<String, PathBuf>,
     mcp_secret_vars: Vec<String>,
+    providers: Vec<ProviderConfig>,
+    provider_origins: BTreeMap<String, ProviderOrigin>,
 }
 
 impl LayerFold<'_> {
@@ -450,6 +480,12 @@ impl LayerFold<'_> {
                 }
             }
         }
+        if let Some(providers) = layer_json
+            .as_object_mut()
+            .and_then(|obj| obj.remove(PROVIDERS))
+        {
+            self.take_providers(&layer.origin, layer.tier, layer.machine_local, providers);
+        }
         self.note_mcp_servers(layer.tier, &layer_json);
         for (key, error) in merge_fitting(&mut self.merged_json, layer_json, self.sections) {
             let error = crate::renamed::explain(&key, error);
@@ -461,6 +497,16 @@ impl LayerFold<'_> {
                 error,
             });
         }
+    }
+
+    fn ignore(&mut self, tier: Tier, origin: &str, key: String, error: String) {
+        tracing::warn!(layer = tier.name(), origin = %origin, key, error, "settings value does not fit its setting, ignoring it");
+        self.ignored.push(IgnoredValue {
+            tier: tier.name(),
+            origin: origin.to_string(),
+            key,
+            error,
+        });
     }
 
     fn refuse_a_worktrees_dir_not_allowed(
@@ -642,7 +688,7 @@ fn drop_keys_not_read_from(
 fn guard_loaded_values(values: &mut Settings, mcp_secret_vars: &[String]) {
     for name in values
         .providers
-        .values()
+        .iter()
         .filter_map(|p| p.api_key_env.as_deref())
         .chain(mcp_secret_vars.iter().map(String::as_str))
     {

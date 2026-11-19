@@ -10,22 +10,22 @@ use super::*;
 async fn each_scene_resolves_its_own_settings_tier() {
     let (pool, dir) = test_pool().await;
 
-    // `scenes/harnix/settings.json` sets a model the pool's own tier never
+    // `scenes/harnix/settings.json` sets a limit the pool's own tier never
     // mentions — if the harnix session picks it up, it read harnix's tier.
     let harnix_tier = dir.path().join("scenes").join("harnix");
     std::fs::create_dir_all(&harnix_tier).unwrap();
     std::fs::write(
         harnix_tier.join("settings.json"),
-        r#"{"model": {"model_name": "model-from-harnix-tier"}}"#,
+        r#"{"model": {"max_tokens": 1234}}"#,
     )
     .unwrap();
 
     let code = pool.settings_for_project(None, "code").await;
     let harnix = pool.settings_for_project(None, "harnix").await;
 
-    assert_eq!(harnix.values.model.model_name, "model-from-harnix-tier");
+    assert_eq!(harnix.values.model.max_tokens, 1234);
     assert_ne!(
-        code.values.model.model_name, harnix.values.model.model_name,
+        code.values.model.max_tokens, harnix.values.model.max_tokens,
         "two scenes must not share one settings entry"
     );
     assert_eq!(

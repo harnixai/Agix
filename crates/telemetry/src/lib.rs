@@ -26,10 +26,11 @@ pub use events::{
     AgentCompletedPayload, AgentSpawnedPayload, ApiErrorPayload, ApiRequestPayload,
     BudgetEnforcedAction, BudgetEnforcedPayload, CompactActionPayload, CompactKind, EventPayload,
     HookRunPayload, McpConnectionErrorPayload, McpServerConnectedPayload,
-    PermissionDecisionOutcome, PermissionDecisionPayload, ResumeActionPayload, ResumeOutcome,
-    SessionEndPayload, SessionStartPayload, SlashCommandUsedPayload, StartupTimingPayload,
-    TeamStageCompletePayload, TelemetryEvent, ToolCancelledPayload, ToolExecutionPayload,
-    ToolOutcome, ToolStartPayload, TurnCompletePayload, TurnStartPayload, UserPromptSubmitPayload,
+    PermissionDecisionOutcome, PermissionDecisionPayload, ProviderSwitchedPayload,
+    ResumeActionPayload, ResumeOutcome, SessionEndPayload, SessionStartPayload,
+    SlashCommandUsedPayload, StartupTimingPayload, TeamStageCompletePayload, TelemetryEvent,
+    ToolCancelledPayload, ToolExecutionPayload, ToolOutcome, ToolStartPayload, TurnCompletePayload,
+    TurnStartPayload, UserPromptSubmitPayload,
 };
 pub use file_recorder::FileRecorder;
 pub use handle::{

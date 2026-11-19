@@ -2,7 +2,6 @@
 //! （`ConfigTier.settings`、`managed`）是不透明的 JSON，保持 `Value`。
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Which settings layer `config.get` reads.
@@ -139,19 +138,30 @@ pub struct SettingsWritten {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderView {
-    pub api_type: Option<String>,
+    pub id: String,
+    pub vendor: base::provider::Vendor,
+    /// `anthropic` when the entry leaves it unset.
+    pub api: String,
+    /// Its credentials and query scrubbed unless secrets were asked for.
     pub base_url: Option<String>,
-    /// Redacted to `***<last 4>` unless secrets were asked for.
-    pub api_key: Option<String>,
     pub api_key_env: Option<String>,
-    pub default_model: Option<String>,
     pub models: Vec<base::provider::ModelEntry>,
-    pub reasoning_passback: bool,
-    pub thinking_toggle: Option<base::provider::ThinkingToggle>,
+    /// The tiers as written.
+    pub tiers: base::provider::Tiers,
+    pub quota: base::provider::Quota,
+    /// Tokens used in the day, week and month the call falls in, each with
+    /// its limit and first day; only for a provider with a `quota`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<base::provider::QuotaStatus>,
     /// Whether the credential source the engine builds this provider's client
     /// with yields a non-empty key. Never the key itself, whatever
     /// `include_secrets` says.
     pub credential_present: bool,
+    /// The provider the engine supplies when the settings define none.
+    pub builtin: bool,
+    /// The settings file the entry is in; `None` for the built-in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defined_in: Option<String>,
 }
 
 /// What a provider's endpoint lists, as `config.listModels` answers.
@@ -164,15 +174,18 @@ pub struct ModelList {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderConfigView {
-    pub providers: BTreeMap<String, ProviderView>,
-    pub default_provider: Option<String>,
-    pub task_models: BTreeMap<String, base::provider::TaskModelOverride>,
+    /// Every defined provider in load order, or the one asked for.
+    pub providers: Vec<ProviderView>,
+    /// `model.order` as it routes: the first defined provider when unset.
+    pub order: Vec<String>,
+    pub tasks: base::provider::TaskTiers,
 }
 
 /// What reading the settings back and resolving provider routing found.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RoutingStatus {
-    /// The configuration's shape parses.
+    /// The providers route: every tier is in its provider's models and every
+    /// id in `model.order` is defined.
     pub ok: bool,
     pub warnings: Vec<String>,
     pub error: Option<String>,
@@ -187,8 +200,7 @@ pub struct RoutingStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SettingsReloaded {
     pub providers: Vec<String>,
-    pub default_provider: Option<String>,
-    pub task_models: Vec<String>,
+    pub order: Vec<String>,
     pub routing: RoutingStatus,
 }
 
@@ -214,13 +226,13 @@ pub struct ProviderSaved {
 /// What `set_provider` is asked to write.
 #[derive(Debug, Clone)]
 pub struct ProviderPatch {
+    /// Where a provider not yet defined is written; one already defined is
+    /// written where it is.
     pub tier: SettingsTier,
     pub dry_run: bool,
     pub provider_id: String,
     pub delete: bool,
     pub config: Option<serde_json::Value>,
-    pub default_provider: Option<String>,
-    pub task_models: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

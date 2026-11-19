@@ -97,6 +97,7 @@ pub mod entry {
     pub const SESSIONS: &str = "sessions";
     pub const PROJECTS: &str = "projects";
     pub const RECORDINGS: &str = "recordings";
+    pub const QUOTA: &str = "quota";
 
     pub const DAEMON: &str = "daemon";
     pub const INSTANCES: &str = "instances.d";

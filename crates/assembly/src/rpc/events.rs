@@ -147,6 +147,7 @@ pub enum SessionEventPayload {
         message: String,
         status: Option<String>,
     },
+    ProviderSwitched(base::provider::ProviderSwitch),
     Compact {
         strategy: String,
         messages_before: usize,
@@ -301,6 +302,7 @@ impl SessionEventPayload {
         "team_progress",
         "skills_changed",
         "notification",
+        "provider_switched",
         "compact",
         "user_message_delivered",
         "user_message_refused",
@@ -697,6 +699,7 @@ impl SessionEventPayload {
                 message: message.clone(),
                 status: status.clone(),
             },
+            AgentEvent::ProviderSwitched(switch) => Self::ProviderSwitched(switch.clone()),
             // The nested event goes through this same projection, so a
             // sub-agent's frames have the shape the parent's do; one with no
             // projection is not sent at all.

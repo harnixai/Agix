@@ -190,12 +190,12 @@ impl SessionPool {
     /// effect at some unannounced later moment — the caller would have been
     /// told the model changed and watched the old one answer.
     ///
-    /// With `provider`, the conversation moves to that provider's client. An
-    /// engine is built around its client, so the session is rebuilt on the
-    /// new spec; it is idle, so nothing is cut off. A model is checked
-    /// against the provider it will be sent to and refused when that
-    /// provider's `models` list does not have it — sending a name to an
-    /// endpoint that does not serve it fails only later, and less legibly.
+    /// `model` is a tier — `strong`, `balanced`, `fast` — or a model id. With
+    /// `provider`, that provider goes first in the session's `model.order`;
+    /// an engine is built around its router, so the session is rebuilt on the
+    /// new spec; it is idle, so nothing is cut off. A model id no provider in
+    /// the session's order takes is refused — sending a name to an endpoint
+    /// that does not serve it fails only later, and less legibly.
     ///
     /// `reasoning` changes the session's own effort and thinking mode, read
     /// at each of its engine's model calls; neither needs a rebuild.
@@ -290,11 +290,24 @@ impl SessionPool {
         spec
     }
 
+    /// Put `sid`'s model and reasoning choices onto its session's state, a
+    /// tier as the model the session's first provider serves it with.
     pub(in crate::session_pool) async fn project_model_choice(&self, sid: &str) {
         let spec = self.specs.get(sid);
         if let Some(core) = self.live.core_of(sid).await {
-            core.state()
-                .set_model_choice(spec.as_ref().and_then(SessionSpec::model));
+            let model = match spec.as_ref().and_then(SessionSpec::model) {
+                Some(name) if base::provider::Tier::from_name(&name).is_some() => {
+                    let binding = self.binding_for(core.project(), &core.scene().id).await;
+                    let provider = spec.as_ref().and_then(SessionSpec::provider);
+                    let resolved = binding
+                        .task_router
+                        .for_session(provider.as_deref())
+                        .map(|router| router.resolve_model(&name));
+                    Some(resolved.unwrap_or(name))
+                }
+                other => other,
+            };
+            core.state().set_model_choice(model);
             core.state().set_reasoning_choice(
                 spec.as_ref()
                     .map(SessionSpec::reasoning)

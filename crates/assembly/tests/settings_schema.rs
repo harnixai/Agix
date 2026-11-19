@@ -216,7 +216,7 @@ fn the_schema_accepts_what_the_loader_starts_from() {
         jsonschema::validator_for(&settings_json_schema(&settings_sections::all())).unwrap();
     for minimal in [
         serde_json::json!({}),
-        serde_json::json!({"model": {"model_name": "m"}}),
+        serde_json::json!({"model": {"order": ["anthropic"], "tasks": {"main": "fast"}}}),
         serde_json::json!({"sandbox": {"network": {"mode": "deny_all"}}}),
         serde_json::json!({"turn": {"parallel_tools": 4}}),
         serde_json::json!({"mcp": {"servers": {"gh": {"enabled": false}}}}),

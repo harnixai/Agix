@@ -399,6 +399,10 @@ pub enum AgentEvent {
         turn_id: String,
     },
 
+    /// A model call went to a different provider than the session's call
+    /// before it: `from` could not take it, or `to` can again.
+    ProviderSwitched(crate::provider::ProviderSwitch),
+
     /// A sub-agent was spawned.
     AgentSpawned {
         agent_id: String,
@@ -562,6 +566,8 @@ pub enum FailureKind {
     EngineUnreachable,
     PersistFailed,
     Internal,
+    /// No provider in the order could take the call.
+    ProvidersUnavailable,
 }
 
 impl FailureKind {
@@ -582,6 +588,7 @@ impl FailureKind {
             Self::EngineUnreachable => "engine_unreachable",
             Self::PersistFailed => "persist_failed",
             Self::Internal => "internal",
+            Self::ProvidersUnavailable => "providers_unavailable",
         }
     }
 
@@ -595,6 +602,7 @@ impl FailureKind {
                 | Self::EngineStopped
                 | Self::EngineUnreachable
                 | Self::PersistFailed
+                | Self::ProvidersUnavailable
         )
     }
 }
@@ -615,6 +623,7 @@ impl From<crate::interface::model::ModelErrorKind> for FailureKind {
             M::Billing => Self::Billing,
             M::Denied => Self::EgressDenied,
             M::ServerError | M::Protocol | M::Cancelled | M::NotRecorded => Self::ModelError,
+            M::ProvidersUnavailable => Self::ProvidersUnavailable,
         }
     }
 }

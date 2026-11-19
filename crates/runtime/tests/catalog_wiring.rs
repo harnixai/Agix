@@ -85,7 +85,8 @@ use runtime::prompt_assembly::DefaultAssembler;
 use settings::{LoadedSettings, Settings};
 use tokio_util::sync::CancellationToken;
 
-const MODEL_ENDPOINT: &str = "http://model.invalid/";
+const FETCHED: &str = "http://model.invalid/";
+const FETCH_INPUT: &str = r#"{"url": "http://model.invalid/"}"#;
 const RULE_PATH: &str = "/srv/rules/probe.md";
 
 #[derive(Clone, Copy)]
@@ -171,15 +172,23 @@ const PROBES: &[Probe] = &[
     Probe {
         id: "exec.network",
         builder: "exec",
-        plan: Plan::Answer,
-        install: |b, p| b.exec(p.exec.clone()),
+        plan: Plan::Tool("WebFetch", FETCH_INPUT),
+        install: |b, p| {
+            let builtins = Arc::new(InMemoryToolRegistry::new());
+            tools::register_builtin_tools(&builtins);
+            b.exec(p.exec.clone())
+                .tools(builtins)
+                .permission(PermissionSet::without_grants(Arc::new(Permits(
+                    p.seen.clone(),
+                ))))
+        },
         used: |p, _| {
             let requests = p.seen.requests.lock().unwrap().clone();
             requests
                 .iter()
-                .any(|(url, origin)| url == MODEL_ENDPOINT && *origin == Origin::Operator)
+                .any(|(url, origin)| url == FETCHED && *origin == Origin::Agent)
                 .then_some(())
-                .ok_or(format!("the warmup request never reached it: {requests:?}"))
+                .ok_or(format!("the fetch never reached it: {requests:?}"))
         },
     },
     Probe {
@@ -1153,7 +1162,6 @@ impl Model for ScriptedModel {
 
 fn settings(dir: &Path, memory: bool) -> LoadedSettings {
     let mut values = Settings::defaults_for("test-model");
-    values.model.base_url = MODEL_ENDPOINT.into();
     values.memory.enabled = memory;
     values.telemetry.enabled = false;
     let mut paths = PathSettings::default();

@@ -92,12 +92,10 @@ pub(super) fn settings_from_parent(
     parent: &LoadedSettings,
     model_name: String,
     max_tokens: u32,
-    fallback_model: Option<String>,
 ) -> LoadedSettings {
     let mut settings = parent.clone();
     settings.values.model.model_name = model_name;
     settings.values.model.max_tokens = max_tokens;
-    settings.values.model.fallback_model = fallback_model;
     settings
 }
 
@@ -107,14 +105,12 @@ pub(super) fn settings_from_parent(
 pub(super) fn fallback_settings(
     model_name: String,
     max_tokens: u32,
-    fallback_model: Option<String>,
     local_data_dir: std::path::PathBuf,
 ) -> LoadedSettings {
     let mut settings = Settings::defaults_for(&model_name);
     settings.model.max_tokens = max_tokens;
     settings.model.thinking_mode = ThinkingMode::Auto;
     settings.model.effort = None;
-    settings.model.fallback_model = fallback_model;
     let mut paths = PathSettings::default();
     paths.user_data_dir = local_data_dir.join("scenes").join("code");
     paths.global_data_dir = local_data_dir.clone();

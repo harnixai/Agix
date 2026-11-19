@@ -18,6 +18,11 @@ impl Builder {
             &w.ambient,
             chains.turn_starts,
         );
+        let task_router = self.observed_router(
+            &w.events.tx,
+            &w.resolved.telemetry_handle,
+            &w.session.session_id,
+        );
         let session_end = SessionEnd {
             ended: w.hooks.session_ended,
             stopping: CancellationToken::new(),
@@ -38,7 +43,7 @@ impl Builder {
             identity: self.identity(w.agent_depth, w.resolved.attended),
             llm: ModelRoute::new(
                 w.resolved.model,
-                self.host.task_router.take(),
+                task_router,
                 recovery_policy,
                 chains.model_interceptors,
             ),
@@ -91,6 +96,23 @@ impl Builder {
         (agent, w.events.rx, w.input_tx)
     }
 
+    /// The router, its switches reported on this session's events and
+    /// telemetry.
+    fn observed_router(
+        &mut self,
+        events: &crate::agent::messages::EventSender,
+        telemetry: &telemetry::TelemetryHandle,
+        session_id: &str,
+    ) -> Option<Arc<base::provider::TaskRouter>> {
+        let router = self.host.task_router.take()?;
+        router.observe(Arc::new(crate::agent::instruments::SwitchReporter {
+            events: events.clone(),
+            telemetry: telemetry.clone(),
+            session_id: session_id.to_string(),
+        }));
+        Some(router)
+    }
+
     pub(super) fn policies(
         &self,
         settings: &LoadedSettings,
@@ -102,9 +124,7 @@ impl Builder {
     ) {
         let recovery_policy: Arc<dyn base::interface::recovery_policy::RecoveryPolicy> =
             self.host.recovery_policy.clone().unwrap_or_else(|| {
-                Arc::new(base::interface::recovery_policy::DefaultRecovery::new(
-                    settings.values.model.fallback_model.clone(),
-                ))
+                Arc::new(base::interface::recovery_policy::DefaultRecovery::default())
             });
         let turn_policy: Arc<dyn base::interface::turn_policy::TurnPolicy> =
             self.ext.turn_policy.clone().unwrap_or_else(|| {

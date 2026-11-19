@@ -121,21 +121,6 @@ impl RecoveryPolicy for AlwaysRetrySame {
     }
 }
 
-/// Retries against another model, every time it is asked.
-struct SwitchModel;
-
-impl RecoveryPolicy for SwitchModel {
-    fn on_failure(&self, _failure: &ModelFailure<'_>, _so_far: &CallRecovery) -> Recovery {
-        Recovery::RetryWith {
-            model: "fallback-model".into(),
-        }
-    }
-
-    fn on_early_stop(&self, _reason: &str, _attempt: &RecoveryAttempt) -> StopRecovery {
-        StopRecovery::Accept
-    }
-}
-
 fn agent(
     model: Arc<Scripted>,
     policy: Option<Arc<dyn RecoveryPolicy>>,
@@ -375,15 +360,18 @@ async fn a_cancel_during_the_compaction_for_a_retry_ends_the_turn_cancelled() {
 }
 
 /// A retry is the request that failed, sent again: the cache edits it
-/// carried go with it, whichever model it goes to.
+/// carried go with it.
 #[tokio::test(start_paused = true)]
 async fn a_retry_carries_the_cache_edits_of_the_call_that_failed() {
     let tmp = tempfile::tempdir().unwrap();
     let model = Scripted::new(vec![
         Answer::Refused(ModelError::overloaded()),
-        Answer::Text("answered by the fallback"),
+        Answer::Text("answered on the retry"),
     ]);
-    let (mut agent, _events) = agent(model.clone(), Some(Arc::new(SwitchModel)), tmp.path());
+    let policy = Arc::new(AlwaysRetrySame {
+        after: Duration::from_secs(1),
+    });
+    let (mut agent, _events) = agent(model.clone(), Some(policy), tmp.path());
     agent.compaction.pend_cache_edits(vec!["toolu_old".into()]);
 
     let outcome = turn(&mut agent, CancellationToken::new())
@@ -411,8 +399,8 @@ impl Model for CutOff {
         base::provider::ApiType::Anthropic
     }
 
-    fn provenance(&self) -> Option<&str> {
-        Some("p")
+    fn provenance(&self) -> Option<String> {
+        Some("p".into())
     }
 
     async fn stream(
@@ -484,11 +472,11 @@ async fn the_recovery_policy_is_told_the_limit_the_call_went_out_with() {
     settings.values.memory.enabled = false;
     settings.values.model.model_name = "m".into();
     settings.values.model.max_tokens = 32_000;
-    settings.values.providers.insert(
-        "p".into(),
+    settings.values.providers.push(
         serde_json::from_value(serde_json::json!({
-            "api_type": "anthropic",
+            "id": "p",
             "models": [{"id": "m", "max_output": 8192}],
+            "tiers": {"strong": "m"},
         }))
         .unwrap(),
     );

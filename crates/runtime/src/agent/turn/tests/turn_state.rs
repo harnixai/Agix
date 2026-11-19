@@ -30,7 +30,6 @@ fn user_blocks_open_the_conversation_and_the_input_map_follows() {
             max_tokens: 1,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: vec![],
             origin: None,
             input_map: Some(base::interface::model::InputMap {

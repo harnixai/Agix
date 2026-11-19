@@ -4,13 +4,9 @@
 use super::*;
 
 impl Delegator {
-    /// The model instance a sub-agent spawn should use. Every spawn point is
-    /// the same task type — `task_models` in settings.json is keyed by a
-    /// small fixed taxonomy (`main`/`subagent`/`compact`/`memory`/
-    /// `web_search`), not by `subagent_type` (which agent *kind* — "general-purpose",
-    /// "code-reviewer", etc. — a different axis entirely), so the lookup
-    /// key here is always the literal `"subagent"` task type regardless of
-    /// which `subagent_type` was requested.
+    /// The model instance a sub-agent spawn should use. Every spawn is the
+    /// `subagent` task, whatever its `subagent_type`: `model.tasks` is keyed
+    /// by the kind of call, not the kind of agent.
     pub(crate) fn model_for_subagent(&self) -> Arc<dyn Model> {
         match &self.env.host.task_router {
             Some(router) => router.model_for("subagent"),
@@ -109,41 +105,64 @@ impl Delegator {
         }
     }
 
-    /// A sub-agent's `Settings`: the parent's, with its own model — `model_name`,
-    /// else [`Self::unnamed_delegate_model`] — and the mode a host switched the
+    /// A sub-agent's `Settings`: the parent's, with its own model — the one
+    /// `model_name` names ([`Self::named_delegate_model`]), else
+    /// [`Self::unnamed_delegate_model`] — and the mode a host switched the
     /// parent to since it was built.
     pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
         let c = &self.env.config;
         let model_name = match model_name {
-            Some(name) => name.to_string(),
+            Some(name) => self.named_delegate_model(name),
             None => self.unnamed_delegate_model(),
         };
-        let mut settings = settings_from_parent(
-            &self.env.settings,
-            model_name,
-            c.max_tokens,
-            c.fallback_model.clone(),
-        );
+        let mut settings = settings_from_parent(&self.env.settings, model_name, c.max_tokens);
         if let Some(mode) = self.env.parent.state.host_permission_mode() {
             settings.values.permissions.mode = mode;
         }
         settings
     }
 
-    /// The model of a delegate whose spawn and agent type name none: the one
-    /// the `"subagent"` route goes with, where the parent session's own is the
-    /// one its next call asks for — a host's choice made since the session was
-    /// built is not in its settings.
-    fn unnamed_delegate_model(&self) -> String {
-        let parent = self
-            .env
+    /// The model the parent session's next call asks for — a host's choice
+    /// made since the session was built is not in its settings.
+    fn parent_model(&self) -> String {
+        self.env
             .parent
             .state
             .model_choice()
-            .unwrap_or_else(|| self.env.config.model.clone());
-        match &self.env.host.task_router {
-            Some(router) => router.model_name_on_route("subagent", &*self.env.model, &parent),
-            None => parent,
+            .unwrap_or_else(|| self.env.config.model.clone())
+    }
+
+    /// The model of a delegate whose spawn and agent type name none: the
+    /// `subagent` task's tier at the first provider — unless that provider
+    /// serves it with the conversation's own tier's model, in which case the
+    /// delegate follows the parent's model.
+    fn unnamed_delegate_model(&self) -> String {
+        let Some(router) = &self.env.host.task_router else {
+            return self.parent_model();
+        };
+        match (
+            router.model_name_for("subagent"),
+            router.model_name_for("main"),
+        ) {
+            (Some(subagent), Some(main)) if subagent != main => subagent,
+            _ => self.parent_model(),
+        }
+    }
+
+    /// The model `name` asks for: `inherit` is the parent's; a tier —
+    /// `strong`, `balanced`, `fast`, or Claude Code's `opus`, `sonnet`,
+    /// `haiku` — the first provider's model of that tier; anything else a
+    /// model id.
+    fn named_delegate_model(&self, name: &str) -> String {
+        if name == "inherit" {
+            return self.parent_model();
+        }
+        let tier = base::provider::Tier::from_claude_alias(name)
+            .or_else(|| base::provider::Tier::from_name(name));
+        match (tier, &self.env.host.task_router) {
+            (Some(tier), Some(router)) => router.resolve_model(tier.as_str()),
+            (Some(_), None) => self.parent_model(),
+            (None, _) => name.to_string(),
         }
     }
 

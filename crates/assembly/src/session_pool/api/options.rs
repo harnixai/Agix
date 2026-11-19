@@ -36,15 +36,14 @@ pub struct SessionOptions {
     /// JSON Schema the session's structured output must satisfy — see
     /// `runtime::agent::Builder::output_schema`.
     pub output_schema: Option<serde_json::Value>,
-    /// The provider this session's conversation goes to, by its id in
-    /// `providers`. `None` follows the settings' routing. Sub-agents,
-    /// compaction and the other routed tasks keep the settings' routing
-    /// either way.
+    /// A provider, by its id in `providers`, put first in this session's
+    /// `model.order` — for its conversation, sub-agents, compaction and every
+    /// other call; the rest of the order follows as the settings have it.
+    /// `None` keeps the settings' order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
-    /// The conversation's model. `None` takes the provider's `default_model`
-    /// when `provider` is given, else the model `task_models.main` routes to,
-    /// else the settings' model.
+    /// The conversation's model: a tier — `strong`, `balanced`, `fast` — or a
+    /// model id. `None` takes `model.tasks.main`'s tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The conversation's reasoning effort; `None` takes the settings'
@@ -52,7 +51,7 @@ pub struct SessionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<base::interface::model::Effort>,
     /// The conversation's thinking mode; `None` takes the settings'
-    /// `model.thinking_mode`. Its sub-agents keep the settings'.
+    /// `model.thinking`. Its sub-agents keep the settings'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_mode: Option<base::interface::model::ThinkingMode>,
     /// A system-prompt append / override for this session's own agent, over

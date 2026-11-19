@@ -113,15 +113,17 @@ pub struct RenameParams {
 pub struct SetModelParams {
     pub session_id: String,
     /// At least one of `model`, `provider`, `effort` and `thinking_mode`.
+    /// A tier — `strong`, `balanced`, `fast` — or a model id.
     #[serde(default)]
     pub model: Option<String>,
+    /// A provider to put first in the session's `model.order`.
     #[serde(default)]
     pub provider: Option<String>,
     /// `null` takes the session back to the settings' `model.effort`.
     #[serde(default, deserialize_with = "Patch::present")]
     #[schemars(with = "Option<base::interface::model::Effort>")]
     pub effort: Patch<base::interface::model::Effort>,
-    /// `null` takes the session back to the settings' `model.thinking_mode`.
+    /// `null` takes the session back to the settings' `model.thinking`.
     #[serde(default, deserialize_with = "Patch::present")]
     #[schemars(with = "Option<base::interface::model::ThinkingMode>")]
     pub thinking_mode: Patch<base::interface::model::ThinkingMode>,

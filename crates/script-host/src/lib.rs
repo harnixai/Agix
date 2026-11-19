@@ -1373,7 +1373,6 @@ mod binding_tests {
                 max_tokens: 8192,
                 thinking_mode: base::interface::model::ThinkingMode::Auto,
                 effort: None,
-                fallback_model: None,
                 cache_edits: Vec::new(),
                 origin: None,
                 input_map: None,

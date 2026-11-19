@@ -283,11 +283,9 @@ impl Agent {
         match &self.llm.task_router {
             Some(router) => (
                 self.accounted(router.model_for(task)),
-                router.model_name_on_route(
-                    task,
-                    &*self.llm.model,
-                    &self.settings.values.model.model_name,
-                ),
+                router
+                    .model_name_for(task)
+                    .unwrap_or_else(|| self.settings.values.model.model_name.clone()),
             ),
             None => (
                 self.llm.model.clone(),
@@ -340,7 +338,6 @@ impl Agent {
                 max_tokens: self.output_cap(model, max_tokens),
                 thinking_mode: reasoning.thinking_mode,
                 effort: reasoning.effort,
-                fallback_model: self.settings.values.model.fallback_model.clone(),
                 cache_edits: self.compaction.lend_cache_edits(),
                 origin,
                 input_map,
@@ -359,12 +356,9 @@ impl Agent {
 
     /// Reassemble after a recovery changed the model or the message list.
     ///
-    /// The tool table and the messages come from the caller rather than being
-    /// rebuilt: the overloaded path retries the *same* conversation against a
-    /// different model, while the prompt-too-long path retries a conversation
-    /// that compaction just shortened. Only the prompt blocks are rebuilt, so
-    /// a fallback model still gets the skills inventory and MCP guidance the
-    /// primary one got.
+    /// The tool table comes from the caller rather than being rebuilt, and the
+    /// messages are the conversation compaction just shortened. Only the
+    /// prompt blocks are rebuilt.
     ///
     /// The overhead estimate is not redone: it belongs to the call that
     /// failed. The cache edits that call carried go out again with the retry,
@@ -378,7 +372,6 @@ impl Agent {
         max_tokens: u32,
         tool_defs: Vec<ToolDef>,
         messages: Vec<ModelMessage>,
-        fallback_model: Option<String>,
         origin: Option<base::interface::model::CallOrigin>,
         cache_edits: Vec<String>,
     ) -> ModelRequest {
@@ -393,7 +386,6 @@ impl Agent {
                 max_tokens: self.output_cap(model, max_tokens),
                 thinking_mode: reasoning.thinking_mode,
                 effort: reasoning.effort,
-                fallback_model,
                 cache_edits,
                 origin,
                 input_map,
@@ -459,15 +451,10 @@ impl Agent {
         self.session.token_count() + self.compaction.overhead()
     }
 
-    /// What the `models` entry of the provider this session's client was built
-    /// for says about `model`.
+    /// What the `models` entry of the first provider that lists `model` says
+    /// about it.
     pub(crate) fn model_spec(&self, model: &str) -> Option<&base::provider::ModelSpec> {
-        let provider = self.llm.model.provenance()?;
-        self.settings
-            .values
-            .providers
-            .get(provider)?
-            .model_spec(model)
+        self.settings.values.model_spec(model)
     }
 
     /// `max_tokens`, held to `model`'s configured `max_output`.
@@ -491,7 +478,7 @@ impl Agent {
     /// recovering, or the turn's end.
     ///
     /// `failed` is the request as it went out, before interceptors; `model` is
-    /// the turn's current model, which a switch replaces.
+    /// the turn's current model.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn recover_call(
         &mut self,
@@ -499,7 +486,7 @@ impl Agent {
         after_first_byte: bool,
         failed: ModelRequest,
         call: &mut RecoveringCall,
-        model: &mut String,
+        model: &str,
         step: u32,
         cancel: &CancellationToken,
     ) -> Result<Option<ModelRequest>, super::TurnError> {
@@ -515,30 +502,12 @@ impl Agent {
         call.recoveries += 1;
         let max_tokens = failed.params.max_tokens;
         let origin = failed.params.origin.clone();
-        let cache_edits = failed.params.cache_edits.clone();
         let next = match recovery {
             Recovery::Fail => {
                 return Err(super::TurnError::Model(
                     failure.error.clone(),
                     call.tools_ran || !failure.resendable,
                 ))
-            }
-            Recovery::RetryWith { model: to } => {
-                tracing::warn!(from = %model, to = %to, error = %failure.error, "retrying against a different model");
-                call.so_far.switched_model = true;
-                *model = to;
-                // `fallback_model: None` — this retry *is* the fallback, so
-                // there is nothing further to fall back to.
-                self.prepare_retry(
-                    model,
-                    max_tokens,
-                    failed.tool_defs,
-                    failed.messages,
-                    None,
-                    origin,
-                    cache_edits,
-                )
-                .await
             }
             Recovery::CompactAndRetry => {
                 call.so_far.compacted = true;
@@ -548,10 +517,6 @@ impl Agent {
                 if cancel.is_cancelled() {
                     return Ok(None);
                 }
-                let fallback = match call.so_far.switched_model {
-                    true => None,
-                    false => self.settings.values.model.fallback_model.clone(),
-                };
                 // The retry keeps skills and MCP instructions: they cost a few
                 // KB, the history is what blew the budget, and the compaction
                 // freed far more.
@@ -560,7 +525,6 @@ impl Agent {
                     max_tokens,
                     failed.tool_defs,
                     pair_dangling_tool_uses(self.session.messages().to_vec()),
-                    fallback,
                     origin,
                     self.compaction.lend_cache_edits(),
                 )
@@ -633,7 +597,6 @@ impl Agent {
                 let ceiling = self
                     .model_spec(model)
                     .and_then(|spec| spec.max_output)
-                    .or(self.settings.values.model.max_output_tokens)
                     .unwrap_or_else(|| super::output_limit::max_output_tokens(model));
                 *effective_max_tokens = max_tokens.min(ceiling).max(in_force);
                 if let Some(nudge) = nudge {

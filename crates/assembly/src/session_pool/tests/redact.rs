@@ -11,14 +11,14 @@ fn mcp_headers_and_env_are_redacted_whatever_their_keys() {
             "local": {"type": "stdio", "command": "srv", "env": {"GITHUB_PAT": "ghp_abcd5678"}}
         }},
         "providers": {"p": {"API_KEY": "sk-upper-4321", "Client_Secret": "cs-0000"}},
-        "model": {"model_name": "keep-me"}
+        "model": {"order": ["keep-me"]}
     });
     redact_settings_secrets(&mut settings);
     let dumped = settings.to_string();
     for leaked in ["sk-live", "on-1", "ghp_", "sk-upper", "cs-"] {
         assert!(!dumped.contains(leaked), "{leaked} in {dumped}");
     }
-    assert_eq!(settings["model"]["model_name"], "keep-me");
+    assert_eq!(settings["model"]["order"][0], "keep-me");
     assert_eq!(settings["mcp"]["servers"]["remote"]["url"], "https://x");
     assert_eq!(settings["mcp"]["servers"]["local"]["command"], "srv");
 }

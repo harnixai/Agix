@@ -1,7 +1,6 @@
 //! 一个 `(project, scene)` 对解析出的一切：合并后的设置、对话模型与按任务的路由、
 //! skill/agent 类型/命令目录，以及它们来自哪些设置文件。
 
-use model::adapter::AnthropicModel;
 use model::client::AnthropicClient;
 use settings::LoadedSettings;
 use std::path::PathBuf;
@@ -51,12 +50,10 @@ pub(in crate::session_pool) fn tier_covers(
 /// one `Settings`, and rebuilding it is how any of them changes.
 pub(in crate::session_pool) struct ProjectBinding {
     pub(in crate::session_pool) settings: Arc<LoadedSettings>,
-    /// The conversation's model for a session on this pair, and the
-    /// per-task-type routing behind it. `providers` and `task_models` are
-    /// settings fields like any other, so they are decided by the pair: a
+    /// Where a session on this pair sends its model calls. `providers` and
+    /// `model` are settings like any other, so they are decided by the pair: a
     /// project that configures its own provider is served by it.
-    pub(in crate::session_pool) model: Arc<dyn base::interface::model::Model>,
-    pub(in crate::session_pool) task_router: Option<Arc<base::provider::TaskRouter>>,
+    pub(in crate::session_pool) task_router: Arc<base::provider::TaskRouter>,
     /// What building `task_router` had to say — reported by `config.reload`
     /// and `config.setProvider` for the pair they targeted.
     pub(in crate::session_pool) routing: RoutingReport,
@@ -86,19 +83,12 @@ impl ProjectBinding {
         last_good_router: Option<Arc<base::provider::TaskRouter>>,
         credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
     ) -> Self {
-        let (task_router, routing) = resolve_router(&settings, last_good_router, credentials);
-        // `task_models.main` is what points the conversation itself at a
-        // configured provider; with none configured this is the plain
-        // Anthropic client the daemon was started with.
-        let model: Arc<dyn base::interface::model::Model> = match task_router.as_ref() {
-            Some(router) => router.model_for("main"),
-            None => Arc::new(AnthropicModel::new(client.clone())),
-        };
+        let (task_router, routing) =
+            resolve_router(&settings, last_good_router, client, credentials);
         let modules = crate::modules::ProjectModules::build(&settings, plugins);
         let commands = modules.commands();
         Self {
             settings,
-            model,
             task_router,
             routing,
             modules,
@@ -122,58 +112,55 @@ impl ProjectBinding {
             .map(|(tier, _)| tier)
     }
 
-    /// The client for provider `id`, when the settings configure one that
-    /// built.
-    pub(in crate::session_pool) fn provider_client(
-        &self,
-        id: &str,
-    ) -> Option<Arc<dyn base::interface::model::Model>> {
-        self.task_router.as_ref()?.provider(id)
+    /// Have every call of a session on this pair answered by `model`, under
+    /// the built-in provider's id.
+    #[cfg(test)]
+    pub(in crate::session_pool) fn answer_with(
+        &mut self,
+        model: Arc<dyn base::interface::model::Model>,
+    ) {
+        self.task_router = Arc::new(base::provider::TaskRouter::single(
+            base::provider::RoutedProvider::new(
+                base::provider::ProviderConfig::BUILTIN_ID,
+                base::provider::ResolvedTiers::all(&self.settings.values.model.model_name),
+                model,
+            ),
+            self.settings.values.model.tasks.clone(),
+        ));
     }
 
-    /// The provider a session's main calls go to: the one it names, else the
-    /// one the conversation is routed to. Without a router the settings'
-    /// `default_provider` is not in use, so no provider is reported.
-    pub(in crate::session_pool) fn routed_provider(&self, named: Option<&str>) -> Option<String> {
-        if let Some(named) = named {
-            return Some(named.to_string());
+    /// The provider a session's calls go to first: the one it names, else
+    /// the first of `model.order`.
+    pub(in crate::session_pool) fn routed_provider(&self, named: Option<&str>) -> String {
+        match named {
+            Some(named) => named.to_string(),
+            None => self.task_router.head().id().to_string(),
         }
-        let router = self.task_router.as_ref()?;
-        router
-            .provider_id_for("main")
-            .map(str::to_string)
-            .or_else(|| self.settings.values.default_provider.clone())
     }
 
-    /// Whether a session on this pair may talk to `provider` with `model`.
-    ///
-    /// A model is checked against the `models` allow-list of the provider it
-    /// would be sent to — the one named, else the one the conversation is
-    /// routed to. An empty list, or no provider at all, accepts any name: the
-    /// daemon has no catalog to check against.
+    /// Whether a session on this pair may put `provider` first and ask for
+    /// `model`: the provider must be defined, and the model a tier or one the
+    /// session's first provider takes — an empty `models` takes any.
     pub(in crate::session_pool) fn check_model_choice(
         &self,
         provider: Option<&str>,
         model: Option<&str>,
     ) -> Result<(), String> {
-        if let Some(id) = provider {
-            if self.provider_client(id).is_none() {
-                return Err(format!(
-                    "provider `{id}` is not configured for this session's project"
-                ));
+        let router = self
+            .task_router
+            .for_session(provider)
+            .map_err(|e| format!("{e} for this session's project"))?;
+        let head = &router.head().config;
+        match model {
+            Some(model)
+                if base::provider::Tier::from_name(model).is_none()
+                    && !head.accepts_model(model) =>
+            {
+                Err(format!(
+                    "model `{model}` is not one of provider `{}`'s models",
+                    head.id
+                ))
             }
-        }
-        let Some(model) = model else {
-            return Ok(());
-        };
-        let routed = self.routed_provider(provider);
-        let Some(id) = routed else {
-            return Ok(());
-        };
-        match self.settings.values.providers.get(&id) {
-            Some(config) if !config.accepts_model(model) => Err(format!(
-                "model `{model}` is not one of provider `{id}`'s models"
-            )),
             _ => Ok(()),
         }
     }
@@ -199,20 +186,9 @@ impl ProjectBinding {
 }
 
 /// How re-resolving a pair's routing went, for `config.setProvider` and
-/// `config.reload`.
-///
-/// Two genuinely different checks, kept in separate fields on purpose:
-/// `warnings`/`error` are `base::provider::resolve_task_models`'s own
-/// soft-fallback outcome — pure config-shape validation (does every
-/// `task_models` entry resolve to a provider that exists, etc.), unaware of
-/// `api_type` or whether a real client could actually be built. A config can
-/// resolve cleanly (`error: None`) yet still fail to produce a live
-/// `TaskRouter` (`router_rebuilt: false`, `router_error: Some(..)`) — e.g.
-/// `api_type: openai_compatible`, which the schema accepts but has no
-/// runtime implementation. Collapsing these into one `ok` flag would be a
-/// breaking change to what `routing.ok` has always meant to callers (see
-/// `set_provider_writes_project_settings_and_doctor_sees_it`'s test, which
-/// deliberately uses `openai_compatible` and asserts `routing.ok == true`).
+/// `config.reload`: `error` when the settings do not route — a tier outside a
+/// provider's models, an order naming a provider nobody defines — and
+/// `router_error` when they do but a client could not be built from them.
 #[derive(Debug, Default, Clone)]
 pub(in crate::session_pool) struct RoutingReport {
     pub(in crate::session_pool) warnings: Vec<String>,
@@ -221,74 +197,52 @@ pub(in crate::session_pool) struct RoutingReport {
     pub(in crate::session_pool) router_error: Option<String>,
 }
 
-/// Build the router a settings tier's `providers`/`task_models` describe.
+/// Build the router a pair's settings describe.
 ///
-/// `last_good` is what this pair was already being served by. A config that
-/// no longer resolves, or that resolves but cannot produce a live client
-/// (`api_type: openai_compatible` is accepted by the schema and has no
-/// runtime implementation), keeps it rather than tearing working routing down
-/// over a bad edit — the failure is reported, not acted on.
-pub(super) fn resolve_router(
+/// `last_good` is what this pair was already being served by. Settings that
+/// no longer route, or that route but cannot produce a live client, keep it
+/// rather than tearing working routing down over a bad edit — the failure is
+/// reported, not acted on. With nothing to keep, the pair is served by the
+/// provider the engine supplies when the settings define none.
+pub(in crate::session_pool) fn resolve_router(
     loaded: &LoadedSettings,
     last_good: Option<Arc<base::provider::TaskRouter>>,
+    client: &Arc<dyn AnthropicClient>,
     credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
-) -> (Option<Arc<base::provider::TaskRouter>>, RoutingReport) {
-    let settings = &loaded.values;
+) -> (Arc<base::provider::TaskRouter>, RoutingReport) {
     let mut report = RoutingReport::default();
-    if settings.providers.is_empty() {
-        // No providers configured (or the last one was just deleted) —
-        // routing reverts to "no router", same as if multi-provider config
-        // was never touched.
-        return (None, report);
-    }
-    match base::provider::resolve_task_models(
-        &settings.providers,
-        settings.default_provider.as_deref(),
-        &settings.task_models,
-    ) {
-        Ok((resolved, warnings)) => {
-            report.warnings = warnings;
-            // `resolve_task_models` succeeding guarantees `default_provider`
-            // is `Some` and non-empty (one of its own hard-error checks).
-            let default_provider = settings
-                .default_provider
-                .as_deref()
-                .expect("resolve_task_models already validated default_provider is set");
-            match crate::model_router::build_task_router(
-                &settings.providers,
-                default_provider,
-                resolved,
-                credentials,
-                &loaded.paths.layout,
-            ) {
-                Ok(router) => {
-                    report.router_rebuilt = true;
-                    let router = router.with_default_model(settings.model.model_name.clone());
-                    (Some(Arc::new(router)), report)
-                }
-                Err(e) => {
-                    // Deliberately `router_error`, not `error` —
-                    // `resolve_task_models` itself succeeded (the warnings
-                    // above already reflect that), only the build step
-                    // failed; see `RoutingReport`'s doc comment.
-                    if last_good.is_some() {
-                        warn!(error = %e, "task router build failed; keeping the previous router");
-                    } else {
-                        warn!(error = %e, "task router build failed; no router");
-                    }
-                    report.router_error = Some(e);
-                    (last_good, report)
-                }
+    if let Err(e) = loaded.values.routing() {
+        report.error = Some(e);
+    } else {
+        let quota_dir = loaded.paths.global_data_dir.join(base::paths::entry::QUOTA);
+        match crate::model_router::build_task_router(
+            &loaded.values,
+            client,
+            credentials,
+            &loaded.paths.layout,
+            quota_dir,
+        ) {
+            Ok(router) => {
+                report.router_rebuilt = true;
+                return (Arc::new(router), report);
             }
-        }
-        Err(e) => {
-            if last_good.is_some() {
-                warn!(error = %e, "provider config no longer resolves; keeping the previous router");
-            } else {
-                warn!(error = %e, "provider config does not resolve; no router");
-            }
-            report.error = Some(e);
-            (last_good, report)
+            Err(e) => report.router_error = Some(e),
         }
     }
+    let problem = report.error.as_deref().or(report.router_error.as_deref());
+    if let Some(router) = last_good {
+        warn!(error = ?problem, "the providers do not route; keeping the previous router");
+        return (router, report);
+    }
+    warn!(error = ?problem, "the providers do not route; serving the built-in provider");
+    let builtin = base::provider::ProviderConfig::builtin(&loaded.default_model);
+    let router = base::provider::TaskRouter::single(
+        base::provider::RoutedProvider {
+            tiers: base::provider::ResolvedTiers::all(&loaded.default_model),
+            config: builtin,
+            client: Arc::new(model::adapter::AnthropicModel::new(client.clone())),
+        },
+        loaded.values.model.tasks.clone(),
+    );
+    (Arc::new(router), report)
 }

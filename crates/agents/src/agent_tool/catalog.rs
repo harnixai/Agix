@@ -158,7 +158,7 @@ pub fn agent_type_dirs(settings: &LoadedSettings) -> Vec<(std::path::PathBuf, Ag
 /// `[[agents]]`) < each directory in order — same override order as skills
 /// (`crates/core/src/frozen/skill.rs`). A definition replaces a lower one of
 /// the same `name` entirely (not field-merged — a type definition is one
-/// atomic unit, same convention as `task_models` overrides in the
+/// atomic unit, same convention as `model.tasks` in the
 /// multi-provider LLM config), when its source may shadow
 /// ([`AgentTypeSource::may_shadow`]): an untrusted project's type only adds
 /// names nothing else defines.

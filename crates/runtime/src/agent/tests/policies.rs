@@ -886,10 +886,7 @@ async fn a_recovery_policy_can_refuse_the_fallback_the_engine_would_take() {
         }
     }
 
-    // A fallback *is* configured, so the engine's own policy would switch
-    // to it. The point is that the host's policy wins.
-    let mut settings = test_settings();
-    settings.values.model.fallback_model = Some("some-other-model".into());
+    let settings = test_settings();
 
     let (mut agent, mut event_rx, input_tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(

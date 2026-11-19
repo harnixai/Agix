@@ -111,6 +111,19 @@ pub struct EmbedConfig {
     /// `state/history/` (a worktree's in its main checkout's), with only an
     /// index under `<data_root>/sessions/`.
     pub history: Option<HistoryLocation>,
+    /// Keys for the providers whose `api_key_env` names no variable the
+    /// process has — for a host that keeps them in a vault or keychain.
+    pub credentials: Option<HostCredentials>,
+}
+
+/// The host's credential source, as [`EmbedConfig::credentials`] holds it.
+#[derive(Clone)]
+pub struct HostCredentials(pub Arc<dyn base::interface::credentials::CredentialSource>);
+
+impl std::fmt::Debug for HostCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HostCredentials")
+    }
 }
 
 impl EmbedConfig {
@@ -137,6 +150,7 @@ impl EmbedConfig {
             plugins: Vec::new(),
             js_libs: Vec::new(),
             history: None,
+            credentials: None,
         }
     }
 
@@ -303,6 +317,7 @@ impl Embedded {
                 host_plugins: config.plugins.clone(),
                 js_libs: config.js_libs.clone(),
                 history: config.history,
+                credentials: config.credentials.as_ref().map(|c| c.0.clone()),
                 ..Default::default()
             },
         )

@@ -387,15 +387,12 @@ async fn a_prompt_chosen_behind_a_delete_finds_the_session_gone() {
 }
 
 #[tokio::test]
-async fn a_pair_with_no_router_reports_no_routed_provider_unless_one_is_named() {
+async fn a_pair_whose_providers_do_not_route_is_served_by_the_built_in_one() {
     let (pool, _dir) = test_pool().await;
     let mut settings = (*pool.bindings.pool_settings().await).clone();
-    settings.values.default_provider = Some("ghost".into());
+    settings.values.model.order = vec!["ghost".into()];
     let binding = pool.bindings.binding_from(settings);
-    assert!(binding.task_router.is_none());
-    assert_eq!(binding.routed_provider(None), None);
-    assert_eq!(
-        binding.routed_provider(Some("named")).as_deref(),
-        Some("named")
-    );
+    assert!(binding.routing.error.as_deref().unwrap().contains("ghost"));
+    assert_eq!(binding.routed_provider(None), "anthropic");
+    assert_eq!(binding.routed_provider(Some("named")), "named");
 }

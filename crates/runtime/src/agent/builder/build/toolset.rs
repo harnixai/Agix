@@ -7,7 +7,8 @@ const STRUCTURED_OUTPUT: &str = "StructuredOutput";
 impl Builder {
     /// The model `WebSearch` searches through and the model name it asks for:
     /// the session's own, asking for the model the conversation asks for at
-    /// the time of the search, unless `task_models.web_search` routes it.
+    /// the time of the search, unless the router's first provider serves the
+    /// `web_search` task with another model than the conversation's tier.
     fn web_search_model(
         &self,
         settings: &LoadedSettings,
@@ -19,7 +20,13 @@ impl Builder {
             .host
             .task_router
             .as_ref()
-            .and_then(|router| Some((router, router.model_name_for(WEB_SEARCH_TASK)?)));
+            .and_then(|router| Some((router, router.model_name_for(WEB_SEARCH_TASK)?)))
+            .filter(|(router, name)| {
+                router
+                    .model_name_for(base::provider::TaskTiers::MAIN)
+                    .as_ref()
+                    != Some(name)
+            });
         if let Some((router, name)) = routed {
             let name = name.to_string();
             let model = telemetry::model::TelemetryModel::new(

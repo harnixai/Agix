@@ -39,14 +39,6 @@ pub struct EngineConfig {
     /// User-facing API: surface as `--strong-model` CLI flag, or in
     /// `~/.agix/scenes/<scope>/settings.json`.
     pub strong_model: Option<String>,
-    /// Optional fallback model for retry on overloaded /
-    /// transport errors. When the primary model returns 503/529/transport
-    /// error, the engine falls back to this model for the remaining turns.
-    /// Once activated, stays active for the rest of the session to avoid
-    /// oscillation.
-    /// `None` = no fallback (propagate the error immediately).
-    /// User-facing API: surface as `--fallback-model` CLI flag.
-    pub fallback_model: Option<String>,
 
     pub permission_mode: PermissionMode,
     /// The session's sandbox settings; every policy a command runs under is
@@ -235,7 +227,6 @@ impl EngineConfig {
             max_parallelism: 10,
             max_api_calls_per_turn: 25,
             strong_model: None,
-            fallback_model: None,
 
             // permission / sandbox
             permission_mode: PermissionMode::Default,

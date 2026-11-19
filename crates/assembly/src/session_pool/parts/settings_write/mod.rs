@@ -259,7 +259,7 @@ pub(in crate::session_pool) fn edit_tier(
 /// among a server's arguments.
 fn credentials_in_shared(files: &TierFiles, ops: &[EditOp], shared: &Path) -> Vec<String> {
     ops.iter()
-        .filter(|op| !matches!(op, EditOp::Remove(_)))
+        .filter(|op| !matches!(op, EditOp::Remove(_) | EditOp::RemoveEntry(..)))
         .filter_map(|op| {
             let segments = op.path().segments();
             let (first, below) = segments.split_first()?;
@@ -267,13 +267,22 @@ fn credentials_in_shared(files: &TierFiles, ops: &[EditOp], shared: &Path) -> Ve
             for segment in below {
                 value = value.get(*segment)?;
             }
+            let (value, named) = match op {
+                EditOp::MergeEntry(path, id, _) => (
+                    value
+                        .as_array()?
+                        .iter()
+                        .find(|e| e.get("id").and_then(serde_json::Value::as_str) == Some(id))?,
+                    format!("{}.{id}", path.dotted()),
+                ),
+                _ => (value, op.path().dotted()),
+            };
             crate::session_pool::holds_credential(&segments, value).then(|| {
                 format!(
-                    "`{}` in {} carries what looks like a credential (a password or token in a \
+                    "`{named}` in {} carries what looks like a credential (a password or token in a \
                      URL, a token among arguments, or a key named like one); settings.json is the \
                      file that is shared or committed, unlike settings.local.json beside it. An \
                      MCP server takes credentials in `headers` or `env`, which are kept there",
-                    op.path().dotted(),
                     shared.display()
                 )
             })

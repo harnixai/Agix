@@ -201,7 +201,7 @@ pub(in crate::session_pool) fn own_settings_in(
         Some(cwd),
         &paths.layout(),
         &host.paths.scope,
-        &host.values.model.model_name,
+        &host.default_model,
         layers.max_tokens_fallback,
     );
     Arc::new(layers.over(loaded, true))
@@ -274,7 +274,7 @@ impl BindingCache {
 
     async fn load_pair_as(&self, project: Option<&Path>, scene: &str, own: bool) -> LoadedSettings {
         let startup_scene = self.startup_scene().await;
-        let default_model = self.settings.read().await.values.model.model_name.clone();
+        let default_model = self.settings.read().await.default_model.clone();
         let (global_root, scene_root, scene, project, fallback) = (
             self.paths.global_root(),
             self.scene_root(scene, &startup_scene),
@@ -312,7 +312,7 @@ impl BindingCache {
             project: project.to_path_buf(),
             layout: self.paths.layout(),
             scene: scene.to_string(),
-            default_model: self.settings.read().await.values.model.model_name.clone(),
+            default_model: self.settings.read().await.default_model.clone(),
             max_tokens_fallback: self.layers.max_tokens_fallback,
         }
     }
@@ -329,9 +329,9 @@ impl BindingCache {
     ) -> (LoadedSettings, binding::RoutingReport) {
         let own = self.is_own_pair(Some(project), scene).await;
         let loaded = self.layers.over(loaded, own);
-        let credentials = self.credentials.clone();
+        let (client, credentials) = (self.client.clone(), self.credentials.clone());
         off_the_runtime(move || {
-            let (_, routing) = binding::resolve_router(&loaded, None, &credentials);
+            let (_, routing) = binding::resolve_router(&loaded, None, &client, &credentials);
             (loaded, routing)
         })
         .await
@@ -428,11 +428,11 @@ impl BindingCache {
             })
             .await,
         );
-        if let Some(router) = built.task_router.clone() {
+        if built.routing.router_rebuilt {
             self.last_good_routers
                 .lock()
                 .await
-                .insert(key.clone(), router);
+                .insert(key.clone(), built.task_router.clone());
         }
         // Built outside the lock — scanning skill and agent directories is
         // disk work, and holding the map across it would serialize the first

@@ -248,13 +248,15 @@ impl std::fmt::Debug for DaemonConfig {
             )
             .field(
                 "providers",
-                &self.settings.values.providers.keys().collect::<Vec<_>>(),
+                &self
+                    .settings
+                    .values
+                    .providers
+                    .iter()
+                    .map(|p| p.id.as_str())
+                    .collect::<Vec<_>>(),
             )
-            .field("default_provider", &self.settings.values.default_provider)
-            .field(
-                "task_models",
-                &self.settings.values.task_models.keys().collect::<Vec<_>>(),
-            )
+            .field("order", &self.settings.values.model.order)
             .field("hooks", &self.settings.values.hooks.is_some())
             .finish()
     }
@@ -460,18 +462,15 @@ mod tests {
         let project_dir = tempfile::tempdir().unwrap();
         write_settings(
             config_dir.path(),
-            r#"{"model": {"model_name": "user-model"}, "turn": {"parallel_tools": 1, "max_model_calls": 1}}"#,
+            r#"{"model": {"max_tokens": 1000}, "turn": {"parallel_tools": 1, "max_model_calls": 1}}"#,
         );
-        write_project_settings(
-            project_dir.path(),
-            r#"{"model": {"model_name": "project-model"}}"#,
-        );
+        write_project_settings(project_dir.path(), r#"{"model": {"max_tokens": 3000}}"#);
         let paths = StaticDaemonPaths::with_project(
             config_dir.path().to_path_buf(),
             project_dir.path().to_path_buf(),
         );
         let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
-        assert_eq!(config.settings.values.model.model_name, "project-model");
+        assert_eq!(config.settings.values.model.max_tokens, 3000);
     }
 
     #[test]
@@ -479,14 +478,8 @@ mod tests {
         let global_dir = tempfile::tempdir().unwrap();
         let config_dir = tempfile::tempdir().unwrap();
         let project_dir = tempfile::tempdir().unwrap();
-        write_settings(
-            global_dir.path(),
-            r#"{"model": {"model_name": "global-model"}}"#,
-        );
-        write_settings(
-            config_dir.path(),
-            r#"{"model": {"model_name": "scene-model"}}"#,
-        );
+        write_settings(global_dir.path(), r#"{"model": {"max_tokens": 1000}}"#);
+        write_settings(config_dir.path(), r#"{"model": {"max_tokens": 3000}}"#);
         // Project layer doesn't touch model — scene value should win over global.
         write_project_settings(project_dir.path(), r#"{}"#);
 
@@ -497,7 +490,7 @@ mod tests {
         .with_global(global_dir.path().to_path_buf());
 
         let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
-        assert_eq!(config.settings.values.model.model_name, "scene-model"); // scene overrides global
+        assert_eq!(config.settings.values.model.max_tokens, 3000); // scene overrides global
     }
 
     /// `DaemonConfig.paths.global_root()` must not fall back to
@@ -525,40 +518,37 @@ mod tests {
     fn load_daemon_config_scene_overrides_global_which_is_the_only_layer_set() {
         let global_dir = tempfile::tempdir().unwrap();
         let config_dir = tempfile::tempdir().unwrap();
-        write_settings(
-            global_dir.path(),
-            r#"{"model": {"model_name": "global-model"}}"#,
-        );
+        write_settings(global_dir.path(), r#"{"model": {"max_tokens": 1000}}"#);
         // No scene-level or project-level settings.json at all.
         let paths = StaticDaemonPaths::new(config_dir.path().to_path_buf())
             .with_global(global_dir.path().to_path_buf());
         let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
-        assert_eq!(config.settings.values.model.model_name, "global-model");
+        assert_eq!(config.settings.values.model.max_tokens, 1000);
     }
 
     #[test]
-    fn load_daemon_config_parses_and_merges_providers() {
+    fn load_daemon_config_adds_up_providers_and_routes_by_the_order() {
         let config_dir = tempfile::tempdir().unwrap();
         let project_dir = tempfile::tempdir().unwrap();
         write_settings(
             config_dir.path(),
             r#"{
-                "providers": {
-                    "deepseek": {
-                        "api_type": "openai_compatible",
-                        "base_url": "https://api.deepseek.com/v1",
-                        "api_key": "user-key",
-                        "default_model": "deepseek-pro",
-                        "models": ["deepseek-pro", "deepseek-flash"]
-                    }
-                },
-                "default_provider": "deepseek",
-                "task_models": { "subagent": "deepseek" }
+                "providers": [{
+                    "id": "deepseek",
+                    "vendor": "deepseek",
+                    "api": "openai_chat",
+                    "base_url": "https://api.deepseek.com",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                    "models": ["deepseek-pro", "deepseek-flash"],
+                    "tiers": {"strong": "deepseek-pro", "balanced": "deepseek-flash"}
+                }],
+                "model": {"order": ["local", "deepseek"]}
             }"#,
         );
         write_project_settings(
             project_dir.path(),
-            r#"{ "providers": { "deepseek": { "api_key": "project-key" } } }"#,
+            r#"{"providers": [{"id": "local", "api": "openai_chat",
+                               "base_url": "http://127.0.0.1:8000", "tiers": {"strong": "qwen"}}]}"#,
         );
         trust_project(config_dir.path(), project_dir.path());
         let paths = StaticDaemonPaths::with_project(
@@ -567,17 +557,14 @@ mod tests {
         );
         let config = load_daemon_config("cli-model", 2000, None, "code", &paths);
 
-        let deepseek = &config.settings.values.providers["deepseek"];
-        assert_eq!(deepseek.api_key.as_deref(), Some("project-key")); // project overrides field
-        assert_eq!(deepseek.default_model.as_deref(), Some("deepseek-pro")); // untouched field survives
+        let values = &config.settings.values;
+        let ids: Vec<&str> = values.providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["deepseek", "local"]);
         assert_eq!(
-            config.settings.values.default_provider.as_deref(),
-            Some("deepseek")
+            values.provider("deepseek").unwrap().vendor,
+            base::provider::Vendor::Deepseek
         );
-        assert_eq!(
-            config.settings.values.task_models["subagent"],
-            base::provider::TaskModelOverride::ProviderOnly("deepseek".into())
-        );
+        assert_eq!(values.model.model_name, "qwen");
     }
 
     #[test]

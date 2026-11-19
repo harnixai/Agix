@@ -43,10 +43,15 @@ impl HostOverrides {
         let Ok(mut merged) = serde_json::to_value(&settings.values) else {
             return settings;
         };
+        let providers = with_the_hosts_providers(&merged, layer);
         settings::merge_json_values(&mut merged, layer.clone());
+        if let Some(providers) = providers {
+            merged["providers"] = providers;
+        }
         match serde_json::from_value::<Settings>(merged) {
             Ok(values) => {
                 let disk = std::mem::replace(&mut settings.values, values);
+                settings.settle_providers();
                 if let Err(e) = settings.place_worktrees() {
                     tracing::warn!(error = %e, "the host's app.worktree_dir is not allowed; left out");
                     settings.values.app.worktree_dir = disk.app.worktree_dir;
@@ -64,6 +69,20 @@ impl HostOverrides {
         settings.rules.extend(self.rules.iter().cloned());
         settings
     }
+}
+
+/// The host's providers followed by those of `merged` with an id the host's
+/// do not have, when the host set any: the list adds up as the tiers' do.
+fn with_the_hosts_providers(merged: &Value, layer: &Value) -> Option<Value> {
+    let hosts = layer.get("providers")?.as_array()?;
+    let ids: Vec<&Value> = hosts.iter().filter_map(|p| p.get("id")).collect();
+    let rest = merged
+        .get("providers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|p| p.get("id").is_none_or(|id| !ids.contains(&id)));
+    Some(Value::Array(hosts.iter().chain(rest).cloned().collect()))
 }
 
 fn rule_key(

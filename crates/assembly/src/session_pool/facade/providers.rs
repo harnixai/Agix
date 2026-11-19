@@ -1,69 +1,71 @@
-//! provider 配置的读写：`get_providers`、`set_provider`（写项目层、场景层或全局层，或只
-//! 试算不写，经按层写设置的核心），以及向 provider 端点问它有哪些模型的 `list_models`。
+//! provider 配置的读写：`get_providers`（含配额用量）、`set_provider`（按 id 改 `providers`
+//! 列表项，写回定义它的那个文件，新的写到指定层，或只试算不写，经按层写设置的核心），以及
+//! 向 provider 端点问它有哪些模型的 `list_models`。
 
 use crate::session_pool::*;
 use settings::edit::{EditOp, KeyPath};
 
 impl SessionPool {
-    /// Read back the current effective provider/task_models configuration —
-    /// the read-side counterpart to `set_provider`. `api_key` is redacted
-    /// (`***<last 4 chars>`) unless `include_secrets` is `true` — default
-    /// to redacted so a caller that just wants to know *which* providers
-    /// are configured doesn't accidentally end up with plaintext keys in
-    /// its own logs/UI. See the trust-boundary note on `config.setProvider`
-    /// in `crates/assembly/src/server/` — `include_secrets: true` is still gated
-    /// by nothing more than "can reach this socket", same as every other
-    /// method here.
+    /// The pair's providers as configured — every one, or only `provider_id`
+    /// — with each one's usage against its quota; and the order and tiers
+    /// calls go by. A `base_url`'s credentials and query are scrubbed unless
+    /// `include_secrets` is `true`; no key is ever in the answer.
     pub async fn get_providers(
         &self,
         project_root: Option<&Path>,
         scene_id: &str,
+        provider_id: Option<&str>,
         include_secrets: bool,
-    ) -> api::ProviderConfigView {
-        let settings = self
+    ) -> Result<api::ProviderConfigView, PoolError> {
+        let binding = self
             .binding_for(Some(project_root.unwrap_or(self.cwd())), scene_id)
-            .await
-            .settings
-            .clone();
+            .await;
+        let settings = binding.settings.clone();
+        if let Some(id) = provider_id {
+            if settings.values.provider(id).is_none() {
+                return Err(PoolError::InvalidRequest(format!(
+                    "provider `{id}` is not configured"
+                )));
+            }
+        }
+        let ledger = settings::quota::FileQuotaLedger::new(
+            settings
+                .paths
+                .global_data_dir
+                .join(base::paths::entry::QUOTA),
+        );
         let providers = settings
             .values
             .providers
             .iter()
-            .map(|(id, cfg)| {
-                let api_key = cfg.api_key.as_ref().map(|k| {
-                    if include_secrets {
-                        k.clone()
-                    } else {
-                        redact_secret(k)
-                    }
-                });
-                (
-                    id.clone(),
-                    api::ProviderView {
-                        api_type: cfg.api_type.clone(),
-                        base_url: cfg.base_url.as_deref().map(|url| {
-                            if include_secrets {
-                                url.to_string()
-                            } else {
-                                scrub_url(url)
-                            }
-                        }),
-                        api_key,
-                        api_key_env: cfg.api_key_env.clone(),
-                        default_model: cfg.default_model.clone(),
-                        models: cfg.models.clone(),
-                        reasoning_passback: cfg.reasoning_passback,
-                        thinking_toggle: cfg.thinking_toggle,
-                        credential_present: self.bindings.credential_present(id, cfg),
-                    },
-                )
+            .filter(|cfg| provider_id.is_none_or(|id| cfg.id == id))
+            .map(|cfg| api::ProviderView {
+                id: cfg.id.clone(),
+                vendor: cfg.vendor,
+                api: cfg.api().to_string(),
+                base_url: cfg.base_url.as_deref().map(|url| match include_secrets {
+                    true => url.to_string(),
+                    false => scrub_url(url),
+                }),
+                api_key_env: cfg.api_key_env.clone(),
+                models: cfg.models.clone(),
+                tiers: cfg.tiers.clone(),
+                quota: cfg.quota.clone(),
+                usage: (!cfg.quota.is_unlimited())
+                    .then(|| base::provider::QuotaLedger::status(&ledger, &cfg.id, &cfg.quota)),
+                credential_present: self.bindings.credential_present(&cfg.id, cfg),
+                builtin: cfg.builtin,
+                defined_in: settings
+                    .provider_origins
+                    .get(&cfg.id)
+                    .map(|origin| origin.origin.clone()),
             })
             .collect();
-        api::ProviderConfigView {
+        Ok(api::ProviderConfigView {
             providers,
-            default_provider: settings.values.default_provider.clone(),
-            task_models: settings.values.task_models.clone().into_iter().collect(),
-        }
+            order: binding.task_router.order().to_vec(),
+            tasks: settings.values.model.tasks.clone(),
+        })
     }
 
     /// `config.listModels`: the models `provider_id`'s endpoint lists, asked
@@ -82,7 +84,7 @@ impl SessionPool {
             .await
             .settings
             .clone();
-        let Some(cfg) = settings.values.providers.get(provider_id) else {
+        let Some(cfg) = settings.values.provider(provider_id) else {
             return Err(PoolError::InvalidRequest(format!(
                 "provider `{provider_id}` is not configured"
             )));
@@ -92,9 +94,9 @@ impl SessionPool {
             Ok(_) => return Err(no_key(provider_id, "its key is empty")),
             Err(reason) => return Err(no_key(provider_id, &reason)),
         };
-        let api_type = cfg.api_type.as_deref().unwrap_or("anthropic");
         let network = platform::LocalNetwork::default().with_user_agent(self.layout().user_agent());
-        match model::catalog::list_models(api_type, cfg.base_url.as_deref(), &key, &network).await {
+        match model::catalog::list_models(cfg.api(), cfg.base_url.as_deref(), &key, &network).await
+        {
             Ok(listing) => Ok(api::ModelList {
                 models: listing.models,
                 truncated: listing.truncated,
@@ -110,26 +112,18 @@ impl SessionPool {
         }
     }
 
-    /// Merge a provider config patch (and/or `default_provider` /
-    /// `task_models` patches) into `patch.tier`'s settings.json — its
-    /// credential fields into the uncommitted `settings.local.json` beside
-    /// it — then reload the pair's merged settings so validation and any
-    /// session created after this call see the change. `dry_run` reads the
-    /// same files, merges what the write would leave in them, and writes
-    /// nothing; a configuration that would not route is refused, so a result
-    /// means the write would work.
+    /// Merge `patch.config` into the `providers` entry `patch.provider_id`
+    /// in the settings file that defines it — a new one goes to `patch.tier`'s
+    /// `settings.json` — or with `delete` remove it from that tier, then
+    /// reload the pair's merged settings so validation and any session
+    /// created after this call see the change. `dry_run` reads the same
+    /// files, merges what the write would leave in them, and writes nothing;
+    /// a configuration that would not route is refused, so a result means the
+    /// write would work.
     ///
-    /// `config_patch`/`task_models_patch` are raw partial JSON objects
-    /// merged key-by-key onto the existing tier file (see
-    /// `settings::merge_json_values`) — deliberately not
-    /// typed `ProviderConfig` structs, since deserializing a partial patch
-    /// into a `#[serde(default)]` struct would silently null out every field
-    /// the caller didn't mention, clobbering unrelated existing values.
-    /// `delete: true` removes the `providers.<id>` entry outright rather
-    /// than merging; any `task_models` entry that referenced it degrades to
-    /// `default_provider` automatically the next time routing is resolved
-    /// (see `base::provider::resolve_task_models`'s soft-fallback) — no
-    /// separate "downgrade" write is needed.
+    /// `config` is a raw partial JSON object merged key by key onto the entry
+    /// — deliberately not a typed `ProviderConfig`, whose defaults would
+    /// clobber every field the caller did not mention.
     ///
     /// Refused with `PROJECT_UNTRUSTED`, writing nothing, when the target is
     /// a project's own tier and that project is not trusted: a provider there
@@ -142,6 +136,22 @@ impl SessionPool {
         patch: api::ProviderPatch,
     ) -> Result<api::ProviderSaved, PoolError> {
         check_provider_patch(&patch)?;
+        let defined = self
+            .binding_for(Some(project_root.unwrap_or(self.cwd())), scene_id)
+            .await
+            .settings
+            .provider_origins
+            .get(&patch.provider_id)
+            .map(|origin| origin.tier);
+        let patch = api::ProviderPatch {
+            tier: match defined {
+                Some(base::interface::config_source::Tier::Global) => api::SettingsTier::Global,
+                Some(base::interface::config_source::Tier::Scene) => api::SettingsTier::Scene,
+                Some(base::interface::config_source::Tier::Project) => api::SettingsTier::Project,
+                _ => patch.tier,
+            },
+            ..patch
+        };
         if patch.tier == api::SettingsTier::Project {
             self.trusted_project_tier(
                 project_root,
@@ -189,23 +199,15 @@ impl SessionPool {
 
 /// `patch` as changes to its tier.
 fn provider_ops(patch: api::ProviderPatch) -> Vec<EditOp> {
-    let entry = KeyPath::new(["providers", patch.provider_id.as_str()]);
-    let mut ops = Vec::new();
+    let list = KeyPath::new(["providers"]);
+    let id = patch.provider_id;
     if patch.delete {
-        ops.push(EditOp::Remove(entry));
-    } else if let Some(config) = patch.config {
-        ops.push(EditOp::Merge(entry, config));
+        return vec![EditOp::RemoveEntry(list, id)];
     }
-    if let Some(provider) = patch.default_provider {
-        ops.push(EditOp::Set(
-            KeyPath::new(["default_provider"]),
-            serde_json::Value::String(provider),
-        ));
-    }
-    if let Some(task_models) = patch.task_models {
-        ops.push(EditOp::Merge(KeyPath::new(["task_models"]), task_models));
-    }
-    ops
+    let config = patch
+        .config
+        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+    vec![EditOp::MergeEntry(list, id, config)]
 }
 
 /// The refusal `list_models` gives a provider with no credential, the kind a
@@ -214,9 +216,9 @@ fn no_key(provider_id: &str, reason: &str) -> PoolError {
     PoolError::Engine(base::event::TurnFailure::new(
         base::event::FailureKind::NoCredentials,
         format!(
-            "provider `{provider_id}` has no API key ({reason}): set its `api_key` or \
-             `api_key_env`, or have the host supply one through its CredentialSource; \
-             the request was not sent"
+            "provider `{provider_id}` has no API key ({reason}): set its `api_key_env`, or \
+             have the host supply one through its CredentialSource; the request was not \
+             sent"
         ),
     ))
 }
@@ -227,19 +229,30 @@ fn check_provider_patch(patch: &api::ProviderPatch) -> Result<(), PoolError> {
         return Err(invalid("provider_id must not be empty".into()));
     }
     if let Some(cfg) = &patch.config {
-        if !cfg.is_object() {
+        let Some(fields) = cfg.as_object() else {
             return Err(invalid("config must be a JSON object".into()));
+        };
+        if let Some(id) = fields
+            .get("id")
+            .filter(|id| id.as_str() != Some(&patch.provider_id))
+        {
+            return Err(invalid(format!(
+                "config.id {id} is not provider_id `{}`; a provider's id is not changed this way",
+                patch.provider_id
+            )));
         }
-        serde_json::from_value::<base::provider::ProviderConfig>(cfg.clone())
-            .map_err(|e| invalid(format!("invalid provider config: {e}")))?;
-    }
-    if let Some(tm) = &patch.task_models {
-        let obj = tm
-            .as_object()
-            .ok_or_else(|| invalid("task_models must be a JSON object".into()))?;
-        for (task, ov) in obj {
-            serde_json::from_value::<base::provider::TaskModelOverride>(ov.clone())
-                .map_err(|e| invalid(format!("invalid task_models.{task}: {e}")))?;
+        let mut entry = cfg.clone();
+        entry["id"] = serde_json::Value::String(patch.provider_id.clone());
+        if let Err(e) = serde_json::from_value::<base::provider::ProviderConfig>(entry) {
+            let message = match fields.keys().find_map(|key| {
+                settings::renamed::renamed_to(&format!("providers[].{key}")).map(|new| (key, new))
+            }) {
+                Some((key, new)) => {
+                    format!("invalid provider config: `{key}` was renamed to `{new}`")
+                }
+                None => format!("invalid provider config: {e}"),
+            };
+            return Err(invalid(message));
         }
     }
     Ok(())

@@ -33,3 +33,29 @@ impl Telemetry {
         self.perf.start_timer(category, name)
     }
 }
+
+/// Tells the session's host and its telemetry where its model calls moved.
+pub(crate) struct SwitchReporter {
+    pub(crate) events: crate::agent::messages::EventSender,
+    pub(crate) telemetry: TelemetryHandle,
+    pub(crate) session_id: String,
+}
+
+impl base::provider::RouteObserver for SwitchReporter {
+    fn switched(&self, switch: &base::provider::ProviderSwitch) {
+        let _ = self.telemetry.record(TelemetryEvent::provider_switched(
+            &self.session_id,
+            0,
+            None,
+            telemetry::ProviderSwitchedPayload {
+                from: switch.from.clone(),
+                to: switch.to.clone(),
+                reason: switch.reason.clone(),
+                task: switch.task.clone(),
+            },
+        ));
+        let _ = self
+            .events
+            .send(base::event::AgentEvent::ProviderSwitched(switch.clone()));
+    }
+}

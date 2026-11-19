@@ -2,7 +2,7 @@
 //! [`base::interface::model::Model`], speaking OpenAI **Chat Completions**
 //! (`POST <base>/v1/chat/completions`) instead of the Anthropic Messages API.
 //!
-//! It is what `base::provider::ApiType::OpenAICompatible` in `settings.json`
+//! It is what `base::provider::ApiType::OpenAIChat` in `settings.json`
 //! builds: OpenAI, vLLM, Ollama, and the many gateways that only expose the
 //! OpenAI shape, beside Anthropic and Anthropic-protocol relays.
 //!
@@ -33,7 +33,7 @@ use base::interface::model::{
     Model, ModelError, ModelErrorKind, ModelMessage, ModelStream, StreamParams, ToolDef,
 };
 use base::prompt::PromptBlock;
-use base::provider::{ApiType, ThinkingToggle};
+use base::provider::{ApiType, Vendor};
 use futures::stream::StreamExt;
 use platform::LocalNetwork;
 use std::sync::Arc;
@@ -58,8 +58,8 @@ struct Inner {
     /// [`chat_completions_url`]).
     endpoint: Url,
     api_key: String,
-    /// Used when [`StreamParams::model`] is empty — the `default_model` from
-    /// the provider's config.
+    /// Used when [`StreamParams::model`] is empty — the provider's `strong`
+    /// tier.
     default_model: String,
     /// Shared with `crate::client` — see
     /// [`BackoffPolicy`](base::interface::backoff::BackoffPolicy). Retrying
@@ -68,8 +68,7 @@ struct Inner {
     /// this protocol rather than a thing a policy gets to decide.
     backoff: Arc<dyn BackoffPolicy>,
     provenance: Option<String>,
-    reasoning_passback: bool,
-    thinking_toggle: Option<ThinkingToggle>,
+    vendor: Vendor,
 }
 
 impl OpenAICompatibleModel {
@@ -77,8 +76,7 @@ impl OpenAICompatibleModel {
     /// without a trailing slash — all four spellings appear in the wild, and
     /// getting it wrong yields a 404 at first use rather than at startup.
     ///
-    /// `model_default` is the provider's configured `default_model`; a
-    /// per-request `StreamParams::model` overrides it.
+    /// `model_default` is sent when a request names no model.
     pub fn new(
         base_url: &str,
         api_key: impl Into<String>,
@@ -94,8 +92,7 @@ impl OpenAICompatibleModel {
                 default_model: model_default.into(),
                 backoff: Arc::new(LadderBackoff::new()),
                 provenance: None,
-                reasoning_passback: false,
-                thinking_toggle: None,
+                vendor: Vendor::Generic,
             }),
         })
     }
@@ -119,12 +116,10 @@ impl OpenAICompatibleModel {
         self
     }
 
-    /// See `ProviderConfig::reasoning_passback` and
-    /// `ProviderConfig::thinking_toggle`.
-    pub fn with_reasoning(mut self, passback: bool, toggle: Option<ThinkingToggle>) -> Self {
-        let inner = Arc::make_mut(&mut self.inner);
-        inner.reasoning_passback = passback;
-        inner.thinking_toggle = toggle;
+    /// Who runs the endpoint: how it switches thinking, whether it wants its
+    /// reasoning back, how it spells effort.
+    pub fn with_vendor(mut self, vendor: Vendor) -> Self {
+        Arc::make_mut(&mut self.inner).vendor = vendor;
         self
     }
 
@@ -154,8 +149,7 @@ impl Clone for Inner {
             default_model: self.default_model.clone(),
             backoff: self.backoff.clone(),
             provenance: self.provenance.clone(),
-            reasoning_passback: self.reasoning_passback,
-            thinking_toggle: self.thinking_toggle,
+            vendor: self.vendor,
         }
     }
 }
@@ -266,11 +260,11 @@ async fn send_with_retry<T: serde::Serialize>(
 #[async_trait]
 impl Model for OpenAICompatibleModel {
     fn api_type(&self) -> ApiType {
-        ApiType::OpenAICompatible
+        ApiType::OpenAIChat
     }
 
-    fn provenance(&self) -> Option<&str> {
-        self.inner.provenance.as_deref()
+    fn provenance(&self) -> Option<String> {
+        self.inner.provenance.clone()
     }
 
     async fn stream(
@@ -282,17 +276,15 @@ impl Model for OpenAICompatibleModel {
         cancel: CancellationToken,
     ) -> Result<ModelStream, ModelError> {
         // Ignored, with reasons:
-        // - `thinking_mode`, unless the provider names a `thinking_toggle`:
-        //   Chat Completions has no standard thinking switch.
+        // - `thinking_mode`, unless the provider's vendor has a switch for it:
+        //   Chat Completions has no standard one.
         // - `cache_edits`: server-side cache surgery is Anthropic-only; there
         //   is no equivalent, and the compaction that produced the ids has
         //   already removed the content locally.
-        // - `fallback_model`: model fallback is the caller's policy, and the
-        //   Anthropic adapter does not act on it either.
         if params.provider_search.is_some() {
             return Err(ModelError::unsupported(
-                "this provider has no web search of its own; route `task_models.web_search` \
-                 to one that has",
+                "this provider has no web search of its own; put one that has first in \
+                 `model.order`",
             ));
         }
         let model = if params.model.is_empty() {
@@ -308,14 +300,14 @@ impl Model for OpenAICompatibleModel {
             messages,
             Some(params.max_tokens),
             &request::Reasoning {
-                passback: self.inner.reasoning_passback,
+                passback: self.inner.vendor.passes_reasoning_back(),
                 provenance: self.inner.provenance.clone(),
             },
         );
         req.thinking_switch = request::thinking_switch(
-            self.inner.thinking_toggle,
+            self.inner.vendor.thinking_toggle(),
             &params.thinking_mode,
-            params.effort,
+            params.effort.map(|effort| self.inner.vendor.effort(effort)),
         );
 
         // Sent here rather than on the first read, so a refusal comes back
@@ -402,10 +394,10 @@ mod tests {
     /// The whole point of the module: `daemon::model_router` can route on
     /// `api_type()` and hand this back as an `Arc<dyn Model>`.
     #[test]
-    fn declares_openai_compatible_and_boxes_into_a_trait_object() {
+    fn declares_openai_chat_and_boxes_into_a_trait_object() {
         let m = OpenAICompatibleModel::new("https://api.openai.com/v1", "sk-test", "gpt-4o")
             .expect("valid config");
-        assert_eq!(m.api_type(), ApiType::OpenAICompatible);
+        assert_eq!(m.api_type(), ApiType::OpenAIChat);
         assert_eq!(
             m.endpoint().as_str(),
             "https://api.openai.com/v1/chat/completions"
@@ -429,7 +421,6 @@ mod tests {
                     max_tokens: 10,
                     thinking_mode: base::interface::model::ThinkingMode::Off,
                     effort: None,
-                    fallback_model: None,
                     cache_edits: Vec::new(),
                     origin: None,
                     input_map: None,
@@ -440,7 +431,7 @@ mod tests {
             .await;
         match refused {
             Err(e) if e.kind == ModelErrorKind::Unsupported => {
-                assert!(e.message.contains("task_models.web_search"))
+                assert!(e.message.contains("model.order"))
             }
             Err(other) => panic!("{other:?}"),
             Ok(_) => panic!("a provider search went out"),

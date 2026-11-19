@@ -250,7 +250,6 @@ async fn every_recorded_call_matches_what_crossed_the_boundary() {
                     max_tokens: 8192,
                     thinking_mode: ThinkingMode::Off,
                     effort: None,
-                    fallback_model: Some("claude-sonnet-5".into()),
                     cache_edits: vec![],
                     origin: Some(
                         CallOrigin::turn("S1", 1, step)
@@ -327,10 +326,6 @@ async fn every_recorded_call_matches_what_crossed_the_boundary() {
 
         assert_eq!(recorded.request.params.model, actual.params.model);
         assert_eq!(recorded.request.params.max_tokens, actual.params.max_tokens);
-        assert_eq!(
-            recorded.request.params.fallback_model,
-            actual.params.fallback_model
-        );
         let origin = actual.params.origin.as_ref().unwrap();
         assert_eq!(
             (recorded.request.turn, recorded.request.step),
@@ -378,7 +373,6 @@ async fn token_boundaries_and_argument_fragments_survive_the_round_trip() {
                 max_tokens: 100,
                 thinking_mode: ThinkingMode::Off,
                 effort: None,
-                fallback_model: None,
                 cache_edits: vec![],
                 origin: None,
                 input_map: None,
@@ -451,7 +445,6 @@ async fn replaying_a_recording_reproduces_the_boundary_traffic() {
         max_tokens: 100,
         thinking_mode: ThinkingMode::Off,
         effort: None,
-        fallback_model: None,
         cache_edits: vec![],
         origin: None,
         input_map: None,

@@ -1,6 +1,6 @@
 //! The most `max_tokens` a model accepts, by model name: how far an
 //! output-limit recovery may raise a call's limit before the provider refuses
-//! the request. `model.max_output_tokens` overrides it.
+//! the request. A provider's `models[].max_output` overrides it.
 
 pub(crate) const UNKNOWN_MODEL: u32 = 32_000;
 

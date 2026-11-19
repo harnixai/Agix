@@ -18,7 +18,6 @@ impl LoadedSettings {
         let settings = &loaded.values;
         let mut c = EngineConfig::defaults_for(settings.model.model_name.clone());
         c.max_tokens = settings.model.max_tokens;
-        c.fallback_model = settings.model.fallback_model.clone();
         c.permission_prompt_timeout_secs = settings.permissions.prompt_timeout_secs;
         c.max_parallelism = settings.turn.parallel_tools;
         c.max_api_calls_per_turn = settings.turn.max_model_calls;

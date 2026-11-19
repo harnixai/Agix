@@ -1,8 +1,8 @@
 //! `CredentialSource` — where the engine's API keys come from.
 //!
-//! The default sources are the environment (`ANTHROPIC_AUTH_TOKEN`/
-//! `ANTHROPIC_API_KEY` for the primary client) and `settings.json` for every
-//! other provider. That is fine on a laptop and disqualifying for a host that
+//! The default source is the environment: the variable a provider's
+//! `api_key_env` names, and `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` for
+//! the provider the engine supplies when the settings define none. That is fine on a laptop and disqualifying for a host that
 //! is not allowed to have a credential on disk at all — a service pulling
 //! from a vault, an operator injecting per-request identity, anything with
 //! rotation. This trait is the seam such a host replaces.
@@ -67,18 +67,17 @@ pub trait CredentialSource: Send + Sync {
     fn api_key(&self, provider_id: &str, config: &ProviderConfig) -> Result<Secret, String>;
 }
 
-/// What the provider entry in `settings.json` says: its `api_key`, or else the
-/// environment variable its `api_key_env` names. The default source.
+/// What the provider entry in `settings.json` says: the environment variable
+/// its `api_key_env` names — `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`
+/// for the built-in provider. The default source.
 pub struct ConfigCredentials;
 
 impl CredentialSource for ConfigCredentials {
     fn api_key(&self, provider_id: &str, config: &ProviderConfig) -> Result<Secret, String> {
-        if let Some(key) = config.api_key.as_ref().filter(|k| !k.is_empty()) {
-            return Ok(Secret::new(key.clone()));
-        }
         match config.api_key_env.as_deref().filter(|n| !n.is_empty()) {
             Some(name) => EnvCredentials::new([name]).api_key(provider_id, config),
-            None => Err("missing api_key".to_string()),
+            None if config.builtin => EnvCredentials::anthropic().api_key(provider_id, config),
+            None => Err("missing api_key: no `api_key_env`".to_string()),
         }
     }
 }
@@ -186,41 +185,12 @@ mod tests {
         assert_eq!(s.expose(), CANARY);
     }
 
-    /// The paths a key actually escapes through are the incidental ones — a
-    /// config struct in a `{:?}`, a whole settings blob in a log line. The
-    /// config type carries the key in plaintext because that is the file
-    /// format; printing it must still be impossible.
     #[test]
-    fn a_provider_config_does_not_print_its_key() {
-        let cfg = ProviderConfig {
-            api_key: Some(CANARY.into()),
-            base_url: Some("https://api.example.com".into()),
-            ..Default::default()
-        };
-        let printed = format!("{cfg:?}");
-        assert!(!printed.contains(CANARY), "{printed}");
-        assert!(
-            printed.contains("api.example.com"),
-            "redacting the key must not redact the rest: {printed}"
-        );
-    }
-
-    #[test]
-    fn the_config_source_reports_a_missing_key_the_way_it_always_did() {
+    fn the_config_source_reports_a_missing_key() {
         let err = ConfigCredentials
             .api_key("main", &ProviderConfig::default())
             .unwrap_err();
-        assert_eq!(err, "missing api_key");
-
-        let empty = ProviderConfig {
-            api_key: Some(String::new()),
-            ..Default::default()
-        };
-        assert_eq!(
-            ConfigCredentials.api_key("main", &empty).unwrap_err(),
-            "missing api_key",
-            "an empty key is a missing key, not a key that is empty"
-        );
+        assert!(err.starts_with("missing api_key"), "{err}");
     }
 
     #[test]
@@ -253,17 +223,6 @@ mod tests {
         let got = ConfigCredentials.api_key("p", &cfg).unwrap();
         assert_eq!(got.expose(), std::env::var("PATH").unwrap());
 
-        let written = ProviderConfig {
-            api_key: Some(CANARY.into()),
-            api_key_env: Some("PATH".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            ConfigCredentials.api_key("p", &written).unwrap().expose(),
-            CANARY,
-            "a key written in the entry wins over the variable"
-        );
-
         let unset = ProviderConfig {
             api_key_env: Some("AGIX_TEST_CREDENTIAL_THAT_IS_NOT_SET".into()),
             ..Default::default()
@@ -289,13 +248,14 @@ mod tests {
                 .expose(),
             CANARY
         );
-        let written = ProviderConfig {
-            api_key: Some("from-settings".into()),
+        let named = ProviderConfig {
+            api_key_env: Some("PATH".into()),
             ..Default::default()
         };
-        assert_eq!(
-            chain.api_key("vault-backed", &written).unwrap().expose(),
-            "from-settings"
+        assert_ne!(
+            chain.api_key("vault-backed", &named).unwrap().expose(),
+            CANARY,
+            "the variable the entry names wins over the host"
         );
         let err = chain
             .api_key("unknown", &ProviderConfig::default())

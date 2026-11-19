@@ -67,62 +67,64 @@ fn model_for_subagent_uses_parent_model_when_no_router_configured() {
     assert!(Arc::ptr_eq(&picked, &agent_tool.delegator.env.model));
 }
 
-#[test]
-fn model_for_subagent_routes_through_task_router_when_configured() {
-    let routed_model: Arc<dyn Model> = Arc::new(DummyModel);
-    let mut providers = std::collections::HashMap::new();
-    providers.insert("other".to_string(), routed_model.clone());
-    let mut resolved = std::collections::HashMap::new();
-    resolved.insert(
-        "subagent".to_string(),
-        base::provider::ResolvedModel {
-            provider_id: "other".into(),
-            model: "x".into(),
-        },
-    );
-    let default_model: Arc<dyn Model> = Arc::new(DummyModel);
-    let router = Arc::new(base::provider::TaskRouter::new(
-        providers,
-        resolved,
-        default_model,
-    ));
-
-    let agent_tool = TestParent {
+fn tiered_parent(strong: &str, balanced: &str, fast: &str) -> AgentTool {
+    let router = base::provider::TaskRouter::new(
+        vec![base::provider::RoutedProvider::new(
+            "p",
+            base::provider::ResolvedTiers {
+                strong: strong.into(),
+                balanced: balanced.into(),
+                fast: fast.into(),
+            },
+            Arc::new(DummyModel),
+        )],
+        Vec::new(),
+        base::provider::TaskTiers::default(),
+    )
+    .unwrap();
+    TestParent {
         host: Some(runtime::agent::HostContracts {
-            task_router: Some(router),
+            task_router: Some(Arc::new(router)),
             ..host_contracts()
         }),
         ..test_parent()
     }
-    .agent_tool();
-    let picked = agent_tool.delegator.model_for_subagent();
-    assert!(Arc::ptr_eq(&picked, &routed_model));
-    assert!(!Arc::ptr_eq(&picked, &agent_tool.delegator.env.model));
+    .agent_tool()
+}
+
+fn delegate_model(tool: &AgentTool, named: Option<&str>) -> String {
+    tool.delegator
+        .sub_settings(named)
+        .values
+        .model
+        .model_name
+        .clone()
 }
 
 #[test]
-fn model_for_subagent_falls_back_to_default_when_no_subagent_override() {
-    // No "subagent" entry in `resolved` — router's own `default`
-    // (which may differ from `inner.model`) should win, proving the
-    // router is actually consulted rather than short-circuited.
-    let router_default: Arc<dyn Model> = Arc::new(DummyModel);
-    let router = Arc::new(base::provider::TaskRouter::new(
-        std::collections::HashMap::new(),
-        std::collections::HashMap::new(),
-        router_default.clone(),
+fn a_sub_agent_asks_for_its_tier_or_the_one_it_names() {
+    let tool = tiered_parent("s", "b", "f");
+    assert!(!Arc::ptr_eq(
+        &tool.delegator.model_for_subagent(),
+        &tool.delegator.env.model
     ));
+    assert_eq!(delegate_model(&tool, None), "b");
+    assert_eq!(delegate_model(&tool, Some("fast")), "f");
+    assert_eq!(delegate_model(&tool, Some("opus")), "s");
+    assert_eq!(delegate_model(&tool, Some("haiku")), "f");
+    assert_eq!(
+        delegate_model(&tool, Some("some-model-id")),
+        "some-model-id"
+    );
+    let parent = tool.delegator.env.config.model.clone();
+    assert_eq!(delegate_model(&tool, Some("inherit")), parent);
+}
 
-    let agent_tool = TestParent {
-        host: Some(runtime::agent::HostContracts {
-            task_router: Some(router),
-            ..host_contracts()
-        }),
-        ..test_parent()
-    }
-    .agent_tool();
-    let picked = agent_tool.delegator.model_for_subagent();
-    assert!(Arc::ptr_eq(&picked, &router_default));
-    assert!(!Arc::ptr_eq(&picked, &agent_tool.delegator.env.model));
+#[test]
+fn a_provider_with_one_model_for_every_tier_leaves_the_sub_agent_on_the_parents() {
+    let tool = tiered_parent("m", "m", "m");
+    let parent = tool.delegator.env.config.model.clone();
+    assert_eq!(delegate_model(&tool, None), parent);
 }
 
 #[test]

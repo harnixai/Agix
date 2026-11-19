@@ -287,7 +287,6 @@ mod tests {
                 max_tokens: 100,
                 thinking_mode: ThinkingMode::Off,
                 effort: None,
-                fallback_model: None,
                 cache_edits: vec![],
             },
             system: vec![BlobId("a".repeat(16))],

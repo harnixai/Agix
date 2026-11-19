@@ -35,10 +35,10 @@ pub use messages::*;
 pub(crate) use tooling::sync_mcp_adapters;
 use tooling::Tooling;
 
-/// The `task_models` key that routes `WebSearch` to a provider of its own.
+/// The `model.tasks` key `WebSearch` asks its tier by.
 const WEB_SEARCH_TASK: &str = "web_search";
 
-/// The `task_models` key that turns on `WebFetch` page extraction.
+/// The `model.tasks` key that turns on `WebFetch` page extraction.
 const WEB_FETCH_TASK: &str = "web_fetch";
 
 /// The one tool in `NEEDS_A_USER` an attended session also needs a host for:

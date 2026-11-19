@@ -16,7 +16,7 @@ use base::provider::ProviderConfig;
 use crate::adapter::AnthropicModel;
 use crate::client::{AnthropicClient, AuthMode, HttpAnthropicClient};
 
-/// Anthropic's Messages API. Also what an unset `api_type` means.
+/// Anthropic's Messages API. Also what an unset `api` means.
 pub struct AnthropicFactory;
 
 impl ModelFactory for AnthropicFactory {
@@ -56,11 +56,11 @@ impl ModelFactory for AnthropicFactory {
 }
 
 /// OpenAI Chat Completions, and the gateways that only speak its shape.
-pub struct OpenAICompatibleFactory;
+pub struct OpenAIChatFactory;
 
-impl ModelFactory for OpenAICompatibleFactory {
+impl ModelFactory for OpenAIChatFactory {
     fn api_type(&self) -> &str {
-        "openai_compatible"
+        "openai_chat"
     }
 
     fn build(
@@ -79,16 +79,16 @@ impl ModelFactory for OpenAICompatibleFactory {
             .clone()
             .filter(|u| !u.is_empty())
             .ok_or_else(|| {
-                format!("provider '{provider_id}': api_type 'openai_compatible' requires base_url")
+                format!("provider '{provider_id}': api 'openai_chat' requires base_url")
             })?;
         let api_key = credentials
             .api_key(provider_id, cfg)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?;
-        let default_model = cfg.default_model.clone().unwrap_or_default();
+        let default_model = cfg.tiers.strong.clone().unwrap_or_default();
         let model = crate::OpenAICompatibleModel::new(&base_url, api_key.expose(), default_model)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?
             .with_provenance(provider_id)
-            .with_reasoning(cfg.reasoning_passback, cfg.thinking_toggle);
+            .with_vendor(cfg.vendor);
         Ok(Arc::new(match network {
             Some(net) => model.with_network(net.clone()),
             None => model,
@@ -119,7 +119,7 @@ impl ModelFactory for OpenAIResponsesFactory {
         let api_key = credentials
             .api_key(provider_id, cfg)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?;
-        let default_model = cfg.default_model.clone().unwrap_or_default();
+        let default_model = cfg.tiers.strong.clone().unwrap_or_default();
         let model = crate::OpenAIResponsesModel::new(&base_url, api_key.expose(), default_model)
             .map_err(|e| format!("provider '{provider_id}': {e}"))?
             .with_provenance(provider_id);
@@ -136,7 +136,7 @@ impl ModelFactory for OpenAIResponsesFactory {
 pub fn builtin_registry() -> ModelFactoryRegistry {
     let mut registry = ModelFactoryRegistry::new();
     registry.register(Arc::new(AnthropicFactory));
-    registry.register(Arc::new(OpenAICompatibleFactory));
+    registry.register(Arc::new(OpenAIChatFactory));
     registry.register(Arc::new(OpenAIResponsesFactory));
     registry
 }
@@ -149,28 +149,25 @@ mod tests {
     fn the_builtins_are_the_two_protocols_this_crate_implements() {
         assert_eq!(
             builtin_registry().api_types(),
-            ["anthropic", "openai_compatible", "openai_responses"]
+            ["anthropic", "openai_chat", "openai_responses"]
         );
     }
 
     /// Same message the hand-written match produced, still produced at the
     /// point config is read.
     #[test]
-    fn openai_compatible_without_a_base_url_fails_with_the_reason() {
+    fn openai_chat_without_a_base_url_fails_with_the_reason() {
         let Err(err) = builtin_registry().build(
             "relay",
             &ProviderConfig {
-                api_type: Some("openai_compatible".into()),
-                api_key: Some("k".into()),
+                api: Some("openai_chat".into()),
+                api_key_env: Some("PATH".into()),
                 ..Default::default()
             },
         ) else {
             panic!("a config with no base_url must not build");
         };
-        assert_eq!(
-            err,
-            "provider 'relay': api_type 'openai_compatible' requires base_url"
-        );
+        assert_eq!(err, "provider 'relay': api 'openai_chat' requires base_url");
     }
 
     #[test]
@@ -178,26 +175,26 @@ mod tests {
         let Err(err) = builtin_registry().build("main", &ProviderConfig::default()) else {
             panic!("a config with no api_key must not build");
         };
-        assert_eq!(err, "provider 'main': missing api_key");
+        assert_eq!(err, "provider 'main': missing api_key: no `api_key_env`");
     }
 
     #[test]
     fn built_clients_know_which_provider_they_are() {
         let registry = builtin_registry();
-        for (id, api_type) in [("claude", "anthropic"), ("deepseek", "openai_compatible")] {
+        for (id, api) in [("claude", "anthropic"), ("deepseek", "openai_chat")] {
             let model = registry
                 .build(
                     id,
                     &ProviderConfig {
-                        api_type: Some(api_type.into()),
+                        api: Some(api.into()),
                         base_url: Some("https://example.invalid".into()),
-                        api_key: Some("k".into()),
-                        reasoning_passback: true,
+                        api_key_env: Some("PATH".into()),
+                        vendor: base::provider::Vendor::Deepseek,
                         ..Default::default()
                     },
                 )
-                .unwrap_or_else(|e| panic!("{api_type}: {e}"));
-            assert_eq!(model.provenance(), Some(id));
+                .unwrap_or_else(|e| panic!("{api}: {e}"));
+            assert_eq!(model.provenance().as_deref(), Some(id));
         }
     }
 }

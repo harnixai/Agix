@@ -346,7 +346,7 @@ const UNWRAPPED_MODEL_FOR: &[(&str, &str)] = &[
         "handed to the child session's `Builder::model`, which `build()` wraps",
     ),
     (
-        "crates/assembly/src/session_pool/parts/bindings/binding.rs",
+        "crates/assembly/src/session_pool/parts/factory/mod.rs",
         "the session's main model, handed to `Builder::model`, which `build()` wraps",
     ),
 ];

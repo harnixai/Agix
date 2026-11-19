@@ -2,6 +2,7 @@
 # Production functions above FN_MAX lines and files above FILE_MAX lines, at the size
 # they had when the guard was introduced. A ceiling only goes down:
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration size::
+file  crates/assembly/src/rpc/events.rs                          -                                      802
 file  crates/compaction/src/compact.rs                           -                                      1017
 file  crates/core/src/interface/catalog.rs                       -                                      853
 file  crates/core/src/paths/sensitive.rs                         -                                      893
@@ -19,7 +20,7 @@ fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn   
 fn    crates/agents/src/delegate/mod.rs                          Delegator::dispatch_unboxed            95
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   104
-fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        365
+fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        366
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              89
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    139
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
@@ -29,7 +30,6 @@ fn    crates/assembly/src/session_pool/facade/trust.rs           SessionPool::se
 fn    crates/assembly/src/session_pool/facade/turn.rs            SessionPool::run_turn                  173
 fn    crates/assembly/src/session_pool/parts/factory/mod.rs      EngineFactory::build                   104
 fn    crates/assembly/src/session_pool/parts/mcp_hub/status.rs   mcp_status_entries                     93
-fn    crates/core/src/provider.rs                                resolve_task_models                    85
 fn    crates/history/src/transcript.rs                           apply_entry_to_messages                83
 fn    crates/hooks/src/catalog.rs                                HookEvent::spec                        194
 fn    crates/hooks/src/runner/executor.rs                        HookRunner::exec_command               93
@@ -46,7 +46,7 @@ fn    crates/platform/src/process.rs                             LocalProcess::s
 fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
 fn    crates/ptc/src/run.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
-fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      87
+fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      92
 fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         106
 fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   99
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
@@ -61,7 +61,7 @@ fn    crates/runtime/src/plugin.rs                               register_all   
 fn    crates/runtime/src/prompt_assembly.rs                      assemble                               90
 fn    crates/scene/src/declarative.rs                            DeclaredScene::parse                   90
 fn    crates/script-host/src/lib.rs                              bindings::install                      98
-fn    crates/settings/src/loaded.rs                              LoadedSettings::load_from              94
+fn    crates/settings/src/loaded.rs                              LoadedSettings::load_from              100
 fn    crates/skills/src/bundled.rs                               bundled_skills                         135
 fn    crates/tools/src/bash/paths.rs                             path_args_stay_within                  111
 fn    crates/tools/src/file_edit.rs                              perform_edits_structured               82

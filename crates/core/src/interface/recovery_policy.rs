@@ -1,8 +1,7 @@
 //! `RecoveryPolicy` — what to do when a model call goes wrong.
 //!
 //! The engine's own answers ([`DefaultRecovery`]): a request refused for size
-//! is compacted and retried once. A provider reporting overload or a rate
-//! limit is retried on the configured fallback model, once. A transient
+//! is compacted and retried once. A transient
 //! failure after the stream had started — a stream that broke off, went
 //! silent, or ended in an overload event — is sent again as it was, twice at
 //! most, after 2s and then 8s, or after the provider's own `retry-after` —
@@ -15,10 +14,9 @@
 //! accepts. A response the provider paused is sent back to be continued.
 //!
 //! Every one of those is a reasonable answer and none of them is the only
-//! one. A deployment on a single model has no fallback to switch to and would
-//! rather wait. One paying per token would rather fail than escalate to 64K.
-//! One with a cheap second provider would rather switch on *any* error, not
-//! only overload.
+//! one. One paying per token would rather fail than escalate to 64K. Moving
+//! to another provider is not among them: the router does that below the
+//! turn, before a failure reaches this policy.
 //!
 //! # Which failures reach it
 //!
@@ -99,7 +97,6 @@ impl<'a> ModelFailure<'a> {
 /// What one model call has already spent on recovering.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CallRecovery {
-    pub switched_model: bool,
     pub compacted: bool,
     /// [`Recovery::RetrySame`]s so far.
     pub same_retries: u32,
@@ -113,11 +110,6 @@ pub const MAX_RECOVERIES_PER_CALL: u32 = 4;
 pub enum Recovery {
     /// Give up. The turn fails and the message reaches the host.
     Fail,
-    /// Send the same conversation to a different model.
-    ///
-    /// The retry carries no fallback of its own — a fallback that could fall
-    /// back would be a loop with no bound, and the bound is the point.
-    RetryWith { model: String },
     /// Shorten the conversation, then retry against the same model. Failing to
     /// shorten it is a failure: retrying an unshortened request that was
     /// refused for size just spends another call to be told the same thing.
@@ -179,9 +171,6 @@ pub trait RecoveryPolicy: Send + Sync {
 
 /// The engine's own answers.
 pub struct DefaultRecovery {
-    /// Where an overload or a rate limit goes. `None` leaves it to the
-    /// same-request retry, which only covers a failure after the first byte.
-    pub fallback_model: Option<String>,
     /// How many output-limit escalations a turn may spend.
     pub max_output_escalations: u32,
 }
@@ -203,10 +192,11 @@ impl DefaultRecovery {
     /// named no delay. Its length is the budget.
     pub const SAME_RETRY_DELAYS: &'static [Duration] =
         &[Duration::from_secs(2), Duration::from_secs(8)];
+}
 
-    pub fn new(fallback_model: Option<String>) -> Self {
+impl Default for DefaultRecovery {
+    fn default() -> Self {
         Self {
-            fallback_model,
             max_output_escalations: 3,
         }
     }
@@ -216,17 +206,6 @@ impl RecoveryPolicy for DefaultRecovery {
     fn on_failure(&self, failure: &ModelFailure<'_>, so_far: &CallRecovery) -> Recovery {
         if failure.kind == ModelErrorKind::ContextTooLong && !so_far.compacted {
             return Recovery::CompactAndRetry;
-        }
-        if matches!(
-            failure.kind,
-            ModelErrorKind::Overloaded | ModelErrorKind::RateLimited
-        ) && !so_far.switched_model
-        {
-            if let Some(model) = &self.fallback_model {
-                return Recovery::RetryWith {
-                    model: model.clone(),
-                };
-            }
         }
         if failure.after_first_byte && failure.kind.transient() {
             if let Some(delay) = Self::SAME_RETRY_DELAYS.get(so_far.same_retries as usize) {
@@ -302,25 +281,18 @@ mod tests {
     }
 
     #[test]
-    fn an_overload_switches_to_the_fallback_when_there_is_one() {
-        let with = DefaultRecovery::new(Some("smaller-model".into()));
+    fn an_overload_before_the_first_byte_fails() {
         assert_eq!(
-            with.on_failure(&failure(ModelErrorKind::Overloaded), &fresh()),
-            Recovery::RetryWith {
-                model: "smaller-model".into()
-            }
-        );
-        let without = DefaultRecovery::new(None);
-        assert_eq!(
-            without.on_failure(&failure(ModelErrorKind::Overloaded), &fresh()),
-            Recovery::Fail
+            DefaultRecovery::default().on_failure(&failure(ModelErrorKind::Overloaded), &fresh()),
+            Recovery::Fail,
+            "before the first byte the client's ladder already waited"
         );
     }
 
     #[test]
     fn a_request_refused_for_size_is_shortened_rather_than_resent() {
         assert_eq!(
-            DefaultRecovery::new(None)
+            DefaultRecovery::default()
                 .on_failure(&failure(ModelErrorKind::ContextTooLong), &fresh()),
             Recovery::CompactAndRetry
         );
@@ -329,30 +301,8 @@ mod tests {
     #[test]
     fn anything_else_fails() {
         assert_eq!(
-            DefaultRecovery::new(Some("m".into()))
-                .on_failure(&failure(ModelErrorKind::Transport), &fresh()),
-            Recovery::Fail,
-            "a fallback exists for overload, not for every error"
-        );
-    }
-
-    #[test]
-    fn a_rate_limit_also_goes_to_the_fallback_once() {
-        let p = DefaultRecovery::new(Some("smaller-model".into()));
-        assert_eq!(
-            p.on_failure(&failure(ModelErrorKind::RateLimited), &fresh()),
-            Recovery::RetryWith {
-                model: "smaller-model".into()
-            }
-        );
-        let switched = CallRecovery {
-            switched_model: true,
-            ..fresh()
-        };
-        assert_eq!(
-            p.on_failure(&failure(ModelErrorKind::RateLimited), &switched),
-            Recovery::Fail,
-            "before the first byte the client's ladder already waited"
+            DefaultRecovery::default().on_failure(&failure(ModelErrorKind::Transport), &fresh()),
+            Recovery::Fail
         );
     }
 
@@ -363,7 +313,7 @@ mod tests {
             ..fresh()
         };
         assert_eq!(
-            DefaultRecovery::new(None)
+            DefaultRecovery::default()
                 .on_failure(&failure(ModelErrorKind::ContextTooLong), &compacted),
             Recovery::Fail
         );
@@ -371,7 +321,7 @@ mod tests {
 
     #[test]
     fn a_stream_that_broke_off_is_sent_again_twice() {
-        let p = DefaultRecovery::new(None);
+        let p = DefaultRecovery::default();
         let after = |same_retries| {
             p.on_failure(
                 &streamed(ModelErrorKind::StreamInterrupted),
@@ -401,7 +351,7 @@ mod tests {
         let hinted =
             streamed(ModelErrorKind::Overloaded).with_retry_after(Some(Duration::from_secs(5)));
         assert_eq!(
-            DefaultRecovery::new(None).on_failure(&hinted, &fresh()),
+            DefaultRecovery::default().on_failure(&hinted, &fresh()),
             Recovery::RetrySame {
                 after: Duration::from_secs(5)
             }
@@ -410,7 +360,7 @@ mod tests {
 
     #[test]
     fn a_provider_delay_beyond_the_ladders_cap_is_not_waited_for() {
-        let p = DefaultRecovery::new(None);
+        let p = DefaultRecovery::default();
         let asking = |delay| streamed(ModelErrorKind::Overloaded).with_retry_after(Some(delay));
         assert_eq!(
             p.on_failure(&asking(LadderBackoff::MAX_SERVER_HINT), &fresh()),
@@ -433,7 +383,7 @@ mod tests {
 
     #[test]
     fn only_a_transient_failure_after_the_first_byte_is_sent_again() {
-        let p = DefaultRecovery::new(None);
+        let p = DefaultRecovery::default();
         for kind in [ModelErrorKind::Timeout, ModelErrorKind::Transport] {
             assert_eq!(
                 p.on_failure(&failure(kind), &fresh()),
@@ -463,7 +413,7 @@ mod tests {
     /// reader has no way to check against intent — so it is checked here.
     #[test]
     fn the_escalation_ladder_is_64k_then_8k_each_with_a_nudge() {
-        let p = DefaultRecovery::new(None);
+        let p = DefaultRecovery::default();
         assert_eq!(
             p.on_early_stop("max_tokens", &attempt(0, 2000)),
             StopRecovery::RaiseOutputLimit {
@@ -489,7 +439,7 @@ mod tests {
 
     #[test]
     fn a_paused_response_is_continued_whatever_the_escalations() {
-        let p = DefaultRecovery::new(None);
+        let p = DefaultRecovery::default();
         for escalations in [0, 3] {
             assert_eq!(
                 p.on_early_stop("pause_turn", &attempt(escalations, 2000)),
@@ -505,7 +455,7 @@ mod tests {
     #[test]
     fn an_ordinary_stop_reason_is_not_a_recovery() {
         assert_eq!(
-            DefaultRecovery::new(None).on_early_stop("end_turn", &attempt(0, 2000)),
+            DefaultRecovery::default().on_early_stop("end_turn", &attempt(0, 2000)),
             StopRecovery::Accept
         );
     }

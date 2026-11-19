@@ -114,8 +114,6 @@ pub struct RecordedParams {
     pub thinking_mode: ThinkingMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fallback_model: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cache_edits: Vec<String>,
     /// `StreamParams::provider_search`'s `max_uses`, when the call asked the
@@ -261,7 +259,6 @@ mod tests {
                 max_tokens: 8192,
                 thinking_mode: ThinkingMode::Off,
                 effort: None,
-                fallback_model: None,
                 cache_edits: vec![],
             },
             system: vec![BlobId("aaaaaaaaaaaaaaaa".into())],

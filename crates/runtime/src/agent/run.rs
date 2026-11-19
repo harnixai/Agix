@@ -391,33 +391,18 @@ impl Agent {
         tracing::info!("Engine stopped");
     }
 
-    /// Warm up the agent by pre-computing the frozen environment snapshot,
-    /// creating the session-memory sidecar, and pre-connecting to the API
-    /// endpoint. All operations run in parallel via `tokio::join!` to
-    /// minimize startup latency.
+    /// Warm up the agent by pre-computing the frozen environment snapshot and
+    /// creating the session-memory sidecar, in parallel.
     async fn warmup(&mut self) {
-        let base_url = self.settings.values.model.base_url.clone();
         let session_memory = self.session.session_memory.clone();
-        let network = self.exec.network.clone();
         let engine_git = Arc::clone(&self.engine_git);
 
-        let (frozen, _, _) = tokio::join!(
+        let (frozen, _) = tokio::join!(
             crate::turn::collect_frozen(
                 &self.settings.paths,
                 &*self.policies.environment,
                 &engine_git
             ),
-            async move {
-                if !base_url.is_empty() {
-                    // Warms anything only while the model client and the
-                    // session's network share `platform`'s connection pool.
-                    let warming = network.send(
-                        base::interface::exec::HttpRequest::get(&base_url),
-                        base::interface::exec::Origin::Operator,
-                    );
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), warming).await;
-                }
-            },
             async move {
                 if let Some(sm) = session_memory {
                     if let Err(e) = sm.init_session_memory().await {

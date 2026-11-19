@@ -46,8 +46,8 @@ impl Model for AnthropicModel {
         ApiType::Anthropic
     }
 
-    fn provenance(&self) -> Option<&str> {
-        self.provenance.as_deref()
+    fn provenance(&self) -> Option<String> {
+        self.provenance.clone()
     }
 
     async fn stream(
@@ -1274,7 +1274,6 @@ mod provider_search_tests {
             max_tokens: 100,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: Vec::new(),
             origin: None,
             input_map: None,
@@ -1414,7 +1413,6 @@ mod call_failure_tests {
             max_tokens: 100,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: Vec::new(),
             origin: None,
             input_map: None,

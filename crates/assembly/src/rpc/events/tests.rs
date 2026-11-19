@@ -199,6 +199,12 @@ fn agent_samples() -> Vec<(&'static str, Value)> {
             json!({"kind": "notification", "message": "look", "status": null, "turn_id": "inner"}),
         ),
         (
+            "provider_switched",
+            json!({"kind": "provider_switched", "from": "ds", "to": "claude",
+                   "reason": "`ds`: day quota of 100 tokens used up (120 since 2026-11-19)",
+                   "task": "main"}),
+        ),
+        (
             "agent_spawned",
             json!({"kind": "agent_spawned", "agent_id": "a1", "parent_turn": 2, "turn_id": "inner"}),
         ),

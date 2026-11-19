@@ -125,7 +125,6 @@ async fn drain(
         max_tokens,
         thinking_mode: ThinkingMode::Off,
         effort: None,
-        fallback_model: None,
         cache_edits: vec![],
         origin: session_id.map(|id| {
             base::interface::model::CallOrigin::auxiliary(

@@ -64,7 +64,6 @@ impl SessionNamer {
             max_tokens: 50,
             thinking_mode: base::interface::model::ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: vec![],
             origin: Some(CallOrigin::auxiliary(
                 self.session_id.clone(),

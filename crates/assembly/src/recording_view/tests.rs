@@ -82,7 +82,6 @@ fn call(seq: u64, ts: u64, session: &str, blobs: &BlobStore) -> CallRecord {
             max_tokens: 8192,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: vec![],
             search_max_uses: None,
         },
@@ -279,7 +278,7 @@ fn a_call_in_full_inlines_what_fits_and_refers_to_the_rest() {
                 "session_id": "S0", "parent_session_id": null, "agent_type": null,
                 "turn_id": "T1", "turn": 1, "step": 0, "purpose": null,
                 "provider": "anthropic", "model": "claude-test", "max_tokens": 8192,
-                "thinking_mode": "off", "effort": null, "fallback_model": null,
+                "thinking_mode": "off", "effort": null,
                 "system": [
                     {"role": "system", "cache": "ephemeral", "source": "identity",
                      "origin": "kernel", "text": "You are Agix."},

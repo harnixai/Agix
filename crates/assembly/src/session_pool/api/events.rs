@@ -78,6 +78,7 @@ pub fn emitted_outside_turns(event: &AgentEvent) -> bool {
             | AgentEvent::ToolProgress { .. }
             | AgentEvent::SkillsChanged { .. }
             | AgentEvent::Notification { .. }
+            | AgentEvent::ProviderSwitched { .. }
             | AgentEvent::TeamProgress { .. }
     )
 }

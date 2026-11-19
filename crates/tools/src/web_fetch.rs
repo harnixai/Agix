@@ -3,7 +3,7 @@
 //! 通过执行层的 `Network` 抓 URL；content-type 含 html 的用 html2text 转成纯
 //! 文本，其它按 utf-8 解码。5 MB 上限、15s 超时，不跟随重定向。
 //!
-//! 带了 [`PageExtractor`]（`task_models.web_fetch` 配了模型）且调用给了
+//! 带了 [`PageExtractor`]（`model.tasks.web_fetch` 配了档位）且调用给了
 //! `prompt` 时，返回那个模型对 `prompt` 的回答；否则返回页面文本。抽取失败或
 //! 答空时退回页面文本，结果头里写明。调用触及主机（`Reach::Host`），runtime 把整个
 //! 结果放进 external-content 定界块；定界之后至多 50_000 字符，与工具结果预算的单条

@@ -193,7 +193,7 @@ impl HealthCheck for SettingsTiersCheck {
     }
 }
 
-/// Provider and task-model routing — the same resolution `main.rs` runs at
+/// Whether the providers route — the same check the assembly runs at
 /// startup, re-run here so this reflects the live settings after a reload.
 pub struct ProviderRoutingCheck(Arc<LoadedSettings>);
 
@@ -209,35 +209,24 @@ impl HealthCheck for ProviderRoutingCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let settings = &self.0;
-        let (ok, warnings, error) = if settings.values.providers.is_empty() {
-            (true, Vec::new(), None)
-        } else {
-            match base::provider::resolve_task_models(
-                &settings.values.providers,
-                settings.values.default_provider.as_deref(),
-                &settings.values.task_models,
-            ) {
-                Ok((_, warnings)) => (true, warnings, None),
-                Err(e) => (false, Vec::new(), Some(e)),
-            }
+        let values = &self.0.values;
+        let routing = values.routing();
+        let order: Vec<&str> = match &routing {
+            Ok(order) => order.iter().map(|(p, _)| p.id.as_str()).collect(),
+            Err(_) => values.model.order.iter().map(String::as_str).collect(),
         };
-
+        let error = routing.as_ref().err().cloned();
         let details = serde_json::json!({
-            "configured": settings.values.providers.keys().collect::<Vec<_>>(),
-            "default_provider": settings.values.default_provider,
-            "task_models": settings.values.task_models.keys().collect::<Vec<_>>(),
-            "ok": ok,
-            "warnings": warnings,
+            "configured": values.providers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            "order": order,
+            "tasks": values.model.tasks,
+            "ok": error.is_none(),
             "error": error,
         });
 
         match error {
             Some(e) => CheckResult::failing(e).with_details(details),
-            None if !warnings.is_empty() => {
-                CheckResult::degraded(warnings.join("; ")).with_details(details)
-            }
-            None => CheckResult::ok("provider routing resolves").with_details(details),
+            None => CheckResult::ok("the providers route").with_details(details),
         }
     }
 }
@@ -523,7 +512,11 @@ pub fn run_doctor(
         permission_rules_count: settings.rules.len(),
         model: ModelReport {
             model_name: settings.values.model.model_name.clone(),
-            api_type: format!("{:?}", settings.values.model.api_type),
+            provider: settings
+                .values
+                .routing()
+                .ok()
+                .and_then(|order| order.first().map(|(p, _)| p.id.clone())),
         },
         runtime: RuntimeReport::default(),
     }
@@ -595,8 +588,10 @@ pub struct PluginsReport {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ModelReport {
+    /// What `model.tasks.main` is at the first provider of `model.order`.
     pub model_name: String,
-    pub api_type: String,
+    /// That provider; `None` when the providers do not route.
+    pub provider: Option<String>,
 }
 
 #[cfg(test)]
@@ -777,19 +772,18 @@ mod tests {
             Settings::defaults_for("test-model"),
             base::paths::PathSettings::default(),
         );
-        settings.values.default_provider = Some("does-not-exist".into());
-        settings.values.providers.insert(
-            "real".into(),
-            base::provider::ProviderConfig {
-                api_type: Some("anthropic".into()),
-                base_url: None,
-                api_key: None,
-                api_key_env: None,
-                default_model: Some("m".into()),
-                models: vec![],
+        settings.values.model.order = vec!["does-not-exist".into()];
+        settings
+            .values
+            .providers
+            .push(base::provider::ProviderConfig {
+                id: "real".into(),
+                tiers: base::provider::Tiers {
+                    strong: Some("m".into()),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-        );
+            });
         let settings = Arc::new(settings);
         let report = run_doctor(
             &paths,

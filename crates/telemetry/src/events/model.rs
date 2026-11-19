@@ -59,6 +59,20 @@ pub struct ApiErrorPayload {
     pub latency_ms: u64,
 }
 
+/// A model call that went to a different provider than the session's call
+/// before it.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct ProviderSwitchedPayload {
+    pub from: String,
+    pub to: String,
+    /// Why each provider before `to` in the order did not take the call; when
+    /// none was passed over, that `to` can take calls again.
+    pub reason: String,
+    /// `main`, `subagent`, `compact`, `memory`, `title`, `web_search`,
+    /// `web_fetch`.
+    pub task: String,
+}
+
 /// 会话 token 预算强制执行事件的载荷——`turn.token_budget` 90% 提醒注入
 /// 或 100% 硬停两种动作都用这个 payload，用 `action` 区分。
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]

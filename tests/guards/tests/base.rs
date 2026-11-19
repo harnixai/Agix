@@ -159,7 +159,12 @@ const BASE_FS: &[(&str, &str)] = &[
 ];
 
 /// Production files of base that call a model, each with why.
-const BASE_MODEL_CALLS: &[(&str, &str)] = &[];
+const BASE_MODEL_CALLS: &[(&str, &str)] = &[(
+    "crates/core/src/provider/routing.rs",
+    "the task router is the `Model` every routed call goes through: it passes the call to a \
+     provider's client and on to the next when one cannot take it; runtime and agents reach it \
+     through `base`, so it cannot live in `model`",
+)];
 
 const FS_METHODS: &[&str] = &[
     "canonicalize",

@@ -38,11 +38,13 @@ pub trait Model: Send + Sync {
     /// Which API protocol this model client uses.
     fn api_type(&self) -> ApiType;
 
-    /// The provider id this client was built for, stamped on the reasoning it
-    /// produces so a later request to a different provider does not echo it
-    /// back. `None` for a client built outside a provider route; reasoning
-    /// from such a client carries no provenance and is sent wherever it goes.
-    fn provenance(&self) -> Option<&str> {
+    /// The provider id this client was built for — for one that routes
+    /// between providers, the one its last call went to — stamped on the
+    /// reasoning it produces so a later request to a different provider does
+    /// not echo it back. `None` for a client built outside a provider route;
+    /// reasoning from such a client carries no provenance and is sent
+    /// wherever it goes.
+    fn provenance(&self) -> Option<String> {
         None
     }
 
@@ -67,8 +69,6 @@ pub struct StreamParams {
     pub max_tokens: u32,
     pub thinking_mode: ThinkingMode,
     pub effort: Option<Effort>,
-    /// Fallback model to switch to on persistent Overloaded/529 errors (e.g. Opus → Sonnet).
-    pub fallback_model: Option<String>,
     /// Cache edits: tool_use_ids whose tool result content should be deleted from the
     /// server-side cached prefix. Wired to the Anthropic `cache_edits` content block.
     pub cache_edits: Vec<String>,
@@ -563,6 +563,9 @@ pub enum ModelErrorKind {
     /// call is one a replay is allowed to go without — the caller skips it
     /// rather than reporting a failure.
     NotRecorded,
+    /// Every provider in the order was out of quota or failed to take the
+    /// call; the message says why for each.
+    ProvidersUnavailable,
 }
 
 impl ModelErrorKind {
@@ -586,6 +589,7 @@ impl ModelErrorKind {
             Self::Cancelled => "cancelled",
             Self::Unsupported => "unsupported",
             Self::NotRecorded => "not_recorded",
+            Self::ProvidersUnavailable => "providers_unavailable",
         }
     }
 

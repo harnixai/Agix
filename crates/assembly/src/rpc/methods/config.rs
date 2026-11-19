@@ -59,6 +59,10 @@ pub struct ConfigSetParams {
 pub struct ConfigGetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,
+    /// Only this provider; every one when absent.
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    /// `base_url` as written, credentials and query included.
     #[serde(default)]
     pub include_secrets: bool,
 }
@@ -74,20 +78,18 @@ pub struct ConfigListModelsParams {
 pub struct ConfigSetProviderParams {
     #[serde(flatten)]
     pub target: ConfigTarget,
+    /// Where a provider not defined yet is written. One already defined is
+    /// written in the file that defines it.
     #[serde(default)]
     pub tier: SettingsTier,
     /// Work out what the write would do, and write nothing.
     #[serde(default)]
     pub dry_run: bool,
     pub provider_id: String,
-    /// A partial patch merged key by key onto `tier`'s entry.
+    /// A partial patch merged key by key onto the `providers` entry with this
+    /// id.
     #[serde(default)]
     pub config: Option<serde_json::Value>,
-    #[serde(default)]
-    pub default_provider: Option<String>,
-    /// A partial patch merged key by key.
-    #[serde(default)]
-    pub task_models: Option<serde_json::Value>,
     /// Remove the provider instead of merging.
     #[serde(default)]
     pub delete: bool,

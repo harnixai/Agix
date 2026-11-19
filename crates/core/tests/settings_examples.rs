@@ -25,10 +25,8 @@ fn the_settings_schema_accepts_what_the_loader_accepts() {
         json!({"sandbox": {"unattended_needs_network_policy": true}}),
         json!({"turn": {"max_model_calls": 10}}),
         json!({
-            "providers": {
-                "anthropic": { "api_type": "anthropic", "default_model": "claude-sonnet-4-6" }
-            },
-            "default_provider": "anthropic"
+            "providers": [{ "id": "claude", "tiers": { "strong": "claude-sonnet-4-6" } }],
+            "model": { "order": ["claude"] }
         }),
     ];
     let mut refused = Vec::new();

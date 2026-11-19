@@ -17,7 +17,10 @@ mod tool;
 
 pub use hook::HookRunPayload;
 pub use mcp::{McpConnectionErrorPayload, McpServerConnectedPayload};
-pub use model::{ApiErrorPayload, ApiRequestPayload, BudgetEnforcedAction, BudgetEnforcedPayload};
+pub use model::{
+    ApiErrorPayload, ApiRequestPayload, BudgetEnforcedAction, BudgetEnforcedPayload,
+    ProviderSwitchedPayload,
+};
 pub use session::{SessionEndPayload, SessionStartPayload, StartupTimingPayload};
 pub use team::{AgentCompletedPayload, AgentSpawnedPayload, TeamStageCompletePayload};
 pub use tool::{
@@ -114,6 +117,8 @@ event_kinds! {
     api_request => ApiRequest(ApiRequestPayload) in Session;
     /// 一轮里的一次模型调用失败:请求被拒,或流在回复完整之前断了。每次失败的尝试一条,不论这一轮后来恢复没有;取消不算。
     api_error => ApiError(ApiErrorPayload) in Session;
+    /// 一次模型调用去了与本会话上一次调用不同的 provider:排在前面的配额用完、没有密钥、密钥被拒、连不上或重试用尽,或排在前面的又能用了。
+    provider_switched => ProviderSwitched(ProviderSwitchedPayload) in Session;
     /// 工具开始执行:PreToolUse hook、输入校验、权限都放行之后。
     tool_start => ToolStart(ToolStartPayload) in Session;
     /// 工具执行结束,成功或失败;工具自己报告的失败(如 Bash 非零退出)算失败。

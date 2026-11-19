@@ -559,12 +559,6 @@
             }
           ]
         },
-        "fallback_model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "input_map": {
           "description": "What the turn's user message is made of, as coordinates over `messages`."
         },
@@ -1343,10 +1337,19 @@
       "properties": {
         "include_secrets": {
           "default": false,
+          "description": "`base_url` as written, credentials and query included.",
           "type": "boolean"
         },
         "project_root": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_id": {
+          "default": null,
+          "description": "Only this provider; every one when absent.",
           "type": [
             "string",
             "null"
@@ -1438,14 +1441,7 @@
       "properties": {
         "config": {
           "default": null,
-          "description": "A partial patch merged key by key onto `tier`'s entry."
-        },
-        "default_provider": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "A partial patch merged key by key onto the `providers` entry with this\nid."
         },
         "delete": {
           "default": false,
@@ -1474,13 +1470,10 @@
             "null"
           ]
         },
-        "task_models": {
-          "default": null,
-          "description": "A partial patch merged key by key."
-        },
         "tier": {
           "$ref": "#/$defs/SettingsTier",
-          "default": "project"
+          "default": "project",
+          "description": "Where a provider not defined yet is written. One already defined is\nwritten in the file that defines it."
         }
       },
       "required": [
@@ -2764,6 +2757,11 @@
         {
           "const": "engine_unreachable",
           "description": "The engine did not take or answer a request.",
+          "type": "string"
+        },
+        {
+          "const": "providers_unavailable",
+          "description": "No provider in the order could take the call.",
           "type": "string"
         }
       ]
@@ -4464,20 +4462,25 @@
     },
     "ModelReport": {
       "properties": {
-        "api_type": {
+        "model_name": {
+          "description": "What `model.tasks.main` is at the first provider of `model.order`.",
           "type": "string"
         },
-        "model_name": {
-          "type": "string"
+        "provider": {
+          "description": "That provider; `None` when the providers do not route.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "model_name",
-        "api_type"
+        "model_name"
       ],
       "type": "object"
     },
     "ModelSpec": {
+      "additionalProperties": false,
       "description": "A model with what the engine should know about it beyond its id.\n\n`context_window` and `max_output` are applied to the model's calls;\n`reasoning_levels` and `input_types` are kept and reported; nothing in\nthe engine decides by them.",
       "properties": {
         "context_window": {
@@ -4501,7 +4504,7 @@
           ]
         },
         "max_output": {
-          "description": "The most `max_tokens` a call to this model is sent with.",
+          "description": "The most `max_tokens` a call to this model is sent with, and the most\na reply cut off at its limit is retried with. Unset, the model's\ndocumented limit, looked up by its id.",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -4543,6 +4546,33 @@
           "type": "string"
         }
       ]
+    },
+    "PeriodUsage": {
+      "description": "One period's usage against its limit.",
+      "properties": {
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "start": {
+          "description": "The period's first day, `YYYY-MM-DD`, local time.",
+          "type": "string"
+        },
+        "used": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "used"
+      ],
+      "type": "object"
     },
     "PermissionDecision": {
       "description": "Wire shape: `{\"type\":\"permit\"}` / `{\"type\":\"deny\",\"reason\":\"...\"}` /\n`{\"type\":\"permit_always\",\"scope\":\"session\"}` /\n`{\"type\":\"permit_always\",\"scope\":\"local\"}` — what\n`session.respondToPrompt` (daemon RPC) parses out of its `decision`\nparam and what `InputMessage::PermissionResponse` carries.",
@@ -5528,42 +5558,42 @@
     },
     "ProviderConfigView": {
       "properties": {
-        "default_provider": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "order": {
+          "description": "`model.order` as it routes: the first defined provider when unset.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "providers": {
-          "additionalProperties": {
+          "description": "Every defined provider in load order, or the one asked for.",
+          "items": {
             "$ref": "#/$defs/ProviderView"
           },
-          "type": "object"
+          "type": "array"
         },
-        "task_models": {
-          "additionalProperties": {
-            "$ref": "#/$defs/TaskModelOverride"
-          },
-          "type": "object"
+        "tasks": {
+          "$ref": "#/$defs/TaskTiers"
         }
       },
       "required": [
         "providers",
-        "task_models"
+        "order",
+        "tasks"
       ],
       "type": "object"
     },
     "ProviderSaved": {
       "properties": {
-        "default_provider": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "dry_run": {
           "description": "Nothing was written: `written_to`, `secrets_written_to` and the rest\nare what the write would have done.",
           "type": "boolean"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "providers": {
           "items": {
@@ -5580,12 +5610,6 @@
             "string",
             "null"
           ]
-        },
-        "task_models": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         },
         "tier": {
           "$ref": "#/$defs/SettingsTier"
@@ -5606,19 +5630,16 @@
         "dry_run",
         "written_to",
         "providers",
-        "task_models",
+        "order",
         "routing"
       ],
       "type": "object"
     },
     "ProviderView": {
       "properties": {
-        "api_key": {
-          "description": "Redacted to `***<last 4>` unless secrets were asked for.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "api": {
+          "description": "`anthropic` when the entry leaves it unset.",
+          "type": "string"
         },
         "api_key_env": {
           "type": [
@@ -5626,27 +5647,30 @@
             "null"
           ]
         },
-        "api_type": {
+        "base_url": {
+          "description": "Its credentials and query scrubbed unless secrets were asked for.",
           "type": [
             "string",
             "null"
           ]
         },
-        "base_url": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "builtin": {
+          "description": "The provider the engine supplies when the settings define none.",
+          "type": "boolean"
         },
         "credential_present": {
           "description": "Whether the credential source the engine builds this provider's client\nwith yields a non-empty key. Never the key itself, whatever\n`include_secrets` says.",
           "type": "boolean"
         },
-        "default_model": {
+        "defined_in": {
+          "description": "The settings file the entry is in; `None` for the built-in one.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "id": {
+          "type": "string"
         },
         "models": {
           "items": {
@@ -5654,24 +5678,37 @@
           },
           "type": "array"
         },
-        "reasoning_passback": {
-          "type": "boolean"
+        "quota": {
+          "$ref": "#/$defs/Quota"
         },
-        "thinking_toggle": {
+        "tiers": {
+          "$ref": "#/$defs/Tiers",
+          "description": "The tiers as written."
+        },
+        "usage": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ThinkingToggle"
+              "$ref": "#/$defs/QuotaStatus"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Tokens used in the day, week and month the call falls in, each with\nits limit and first day; only for a provider with a `quota`."
+        },
+        "vendor": {
+          "$ref": "#/$defs/Vendor"
         }
       },
       "required": [
+        "id",
+        "vendor",
+        "api",
         "models",
-        "reasoning_passback",
-        "credential_present"
+        "tiers",
+        "quota",
+        "credential_present",
+        "builtin"
       ],
       "type": "object"
     },
@@ -5711,6 +5748,60 @@
           "type": "object"
         }
       ]
+    },
+    "Quota": {
+      "additionalProperties": false,
+      "description": "Token limits per period, counted as uncached input plus cache writes plus\noutput; cache reads do not count. A period left out has no limit.",
+      "properties": {
+        "day": {
+          "description": "From 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "month": {
+          "description": "From the 1st, 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "week": {
+          "description": "From Monday 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "QuotaStatus": {
+      "description": "A provider's usage in the periods it is in now.",
+      "properties": {
+        "day": {
+          "$ref": "#/$defs/PeriodUsage"
+        },
+        "month": {
+          "$ref": "#/$defs/PeriodUsage"
+        },
+        "week": {
+          "$ref": "#/$defs/PeriodUsage"
+        }
+      },
+      "required": [
+        "day",
+        "week",
+        "month"
+      ],
+      "type": "object"
     },
     "ReasoningReport": {
       "description": "The reasoning effort and thinking mode the session's next model call\ncarries, and whether each is the session's own choice or the settings'.",
@@ -6516,7 +6607,7 @@
           "type": "array"
         },
         "ok": {
-          "description": "The configuration's shape parses.",
+          "description": "The providers route: every tier is in its provider's models and every\nid in `model.order` is defined.",
           "type": "boolean"
         },
         "router_error": {
@@ -7709,7 +7800,7 @@
           "type": "array"
         },
         "model": {
-          "description": "The conversation's model. `None` takes the provider's `default_model`\nwhen `provider` is given, else the model `task_models.main` routes to,\nelse the settings' model.",
+          "description": "The conversation's model: a tier — `strong`, `balanced`, `fast` — or a\nmodel id. `None` takes `model.tasks.main`'s tier.",
           "type": [
             "string",
             "null"
@@ -7756,7 +7847,7 @@
           "type": "array"
         },
         "provider": {
-          "description": "The provider this session's conversation goes to, by its id in\n`providers`. `None` follows the settings' routing. Sub-agents,\ncompaction and the other routed tasks keep the settings' routing\neither way.",
+          "description": "A provider, by its id in `providers`, put first in this session's\n`model.order` — for its conversation, sub-agents, compaction and every\nother call; the rest of the order follows as the settings have it.\n`None` keeps the settings' order.",
           "type": [
             "string",
             "null"
@@ -7798,7 +7889,7 @@
               "type": "null"
             }
           ],
-          "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking_mode`. Its sub-agents keep the settings'."
+          "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking`. Its sub-agents keep the settings'."
         }
       },
       "type": "object"
@@ -7985,7 +8076,7 @@
         },
         "model": {
           "default": null,
-          "description": "At least one of `model`, `provider`, `effort` and `thinking_mode`.",
+          "description": "At least one of `model`, `provider`, `effort` and `thinking_mode`.\nA tier — `strong`, `balanced`, `fast` — or a model id.",
           "type": [
             "string",
             "null"
@@ -7993,6 +8084,7 @@
         },
         "provider": {
           "default": null,
+          "description": "A provider to put first in the session's `model.order`.",
           "type": [
             "string",
             "null"
@@ -8010,7 +8102,7 @@
               "type": "null"
             }
           ],
-          "description": "`null` takes the session back to the settings' `model.thinking_mode`."
+          "description": "`null` takes the session back to the settings' `model.thinking`."
         }
       },
       "required": [
@@ -8103,11 +8195,11 @@
     },
     "SettingsReloaded": {
       "properties": {
-        "default_provider": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "providers": {
           "items": {
@@ -8117,17 +8209,11 @@
         },
         "routing": {
           "$ref": "#/$defs/RoutingStatus"
-        },
-        "task_models": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         }
       },
       "required": [
         "providers",
-        "task_models",
+        "order",
         "routing"
       ],
       "type": "object"
@@ -8163,12 +8249,6 @@
           },
           "type": "array"
         },
-        "default_provider": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "dry_run": {
           "type": "boolean"
         },
@@ -8176,6 +8256,12 @@
           "additionalProperties": true,
           "description": "Each key's value in the pair's merged settings afterwards, credentials\nredacted.",
           "type": "object"
+        },
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "overridden": {
           "description": "The keys written whose value in the pair's merged settings is not what\nwas written: a higher tier, the host or the managed layer sets them.",
@@ -8210,12 +8296,6 @@
             "null"
           ]
         },
-        "task_models": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "tier": {
           "$ref": "#/$defs/SettingsTier"
         },
@@ -8240,7 +8320,7 @@
         "overridden",
         "revision",
         "providers",
-        "task_models",
+        "order",
         "routing"
       ],
       "type": "object"
@@ -8742,32 +8822,6 @@
       ],
       "type": "object"
     },
-    "TaskModelOverride": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "properties": {
-            "model": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "provider"
-          ],
-          "type": "object"
-        }
-      ],
-      "description": "A `task_models.<task>` entry. Accepts either the shorthand `\"provider_id\"`\nstring form or the detailed `{ \"provider\": ..., \"model\": ... }` object form."
-    },
     "TaskOutput": {
       "description": "Part of what one task has produced. Offsets count every byte the work\never printed.",
       "properties": {
@@ -8884,6 +8938,54 @@
         }
       ]
     },
+    "TaskTiers": {
+      "additionalProperties": false,
+      "description": "The tier each kind of model call asks for. The task types: `main` (the\nconversation), `subagent` (sub-agents started without a model of their\nown), `compact` (summarizing for compaction), `memory` (extracting\nmemories), `title` (naming a session), `web_search` (`WebSearch`) and\n`web_fetch` (`WebFetch` reading a page — unset, `WebFetch` uses no model\nand returns the page text).",
+      "properties": {
+        "compact": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        },
+        "main": {
+          "$ref": "#/$defs/Tier",
+          "default": "strong",
+          "description": "Default `strong`."
+        },
+        "memory": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        },
+        "subagent": {
+          "$ref": "#/$defs/Tier",
+          "default": "balanced",
+          "description": "Default `balanced`."
+        },
+        "title": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        },
+        "web_fetch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Default unset: no model reads fetched pages."
+        },
+        "web_search": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        }
+      },
+      "type": "object"
+    },
     "TelemetryOptions": {
       "properties": {
         "output": {
@@ -8922,25 +9024,42 @@
         }
       ]
     },
-    "ThinkingToggle": {
-      "description": "The request fields OpenAI-compatible endpoints use to switch thinking.",
-      "oneOf": [
-        {
-          "const": "deepseek",
-          "description": "`\"thinking\": {\"type\": \"enabled\" | \"disabled\"}` (DeepSeek).",
-          "type": "string"
+    "Tier": {
+      "description": "A model tier. Tasks and sessions ask for a tier; each provider says which\nof its models serves it.",
+      "enum": [
+        "strong",
+        "balanced",
+        "fast"
+      ],
+      "type": "string"
+    },
+    "Tiers": {
+      "additionalProperties": false,
+      "description": "Which of a provider's models serves each tier, as written.",
+      "properties": {
+        "balanced": {
+          "description": "Unset, `strong`'s.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "const": "enable_thinking",
-          "description": "`\"enable_thinking\": true | false` (Qwen / DashScope).",
-          "type": "string"
+        "fast": {
+          "description": "Unset, `balanced`'s.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "const": "chat_template_kwargs",
-          "description": "`\"chat_template_kwargs\": {\"enable_thinking\": true | false}` (vLLM, SGLang).",
-          "type": "string"
+        "strong": {
+          "description": "Required.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      ]
+      },
+      "type": "object"
     },
     "ToolCallAnswered": {
       "properties": {
@@ -9273,6 +9392,19 @@
         "output_tokens"
       ],
       "type": "object"
+    },
+    "Vendor": {
+      "description": "Who runs the endpoint. Decides what the protocol leaves open: how thinking\nis switched on, whether reasoning goes back, how effort is spelled.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "deepseek",
+        "qwen",
+        "vllm",
+        "sglang",
+        "generic"
+      ],
+      "type": "string"
     },
     "VisibleText": {
       "description": "A piece of text that will reach the model, and where it came from.",
@@ -10689,6 +10821,18 @@
           "properties": {
             "kind": {
               "const": "prompt_resolved"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        "provider_switched": {
+          "description": "未类型化:字段见 docs/daemon_rpc_protocol.md 对应小节(协议文档 §7 的 kind 表)",
+          "properties": {
+            "kind": {
+              "const": "provider_switched"
             }
           },
           "required": [

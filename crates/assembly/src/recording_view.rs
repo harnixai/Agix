@@ -206,7 +206,6 @@ impl Opened {
                 max_tokens: request.params.max_tokens,
                 thinking_mode: request.params.thinking_mode.clone(),
                 effort: request.params.effort,
-                fallback_model: request.params.fallback_model.clone(),
                 system,
                 tools,
                 messages,

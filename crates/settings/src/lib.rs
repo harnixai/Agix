@@ -10,10 +10,10 @@
 //! result; it does not perform its own multi-layer config merging.
 
 use base::interface::model::{Effort, ThinkingMode};
-use base::provider::{ApiType, ProviderConfig, TaskModelOverride};
+use base::provider::{ProviderConfig, ResolvedTiers, TaskTiers};
 use base::recorder::RecorderConfig;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 mod blocks;
@@ -32,6 +32,7 @@ mod loaded;
 pub mod managed;
 mod merge;
 pub mod permissions;
+pub mod quota;
 pub mod renamed;
 mod schema;
 pub mod section;
@@ -41,7 +42,7 @@ pub mod trust;
 #[cfg(test)]
 mod tests;
 
-pub use loaded::LoadedSettings;
+pub use loaded::{LoadedSettings, ProviderOrigin};
 pub use merge::merge_json_values;
 pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
@@ -103,21 +104,20 @@ pub struct Settings {
     #[serde(default)]
     pub app: AppSettings,
 
-    /// Multi-provider LLM registry, keyed by provider id.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub providers: HashMap<String, ProviderConfig>,
-    /// Provider id used for any task with no `task_models` entry, and as the
-    /// fallback target when an entry's provider/model turns out invalid.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_provider: Option<String>,
-    /// Per-task-type provider/model routing — see `base::provider::resolve_task_models`.
-    ///
-    /// Keys: `main`, `subagent`, `compact`, `memory`, `title`, `web_search`,
-    /// `web_fetch`. `web_fetch` alone has no default: `WebFetch` has a model
-    /// read the page only when this names one, and otherwise returns the page
-    /// text.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub task_models: HashMap<String, TaskModelOverride>,
+    /// The model providers: each one's endpoint, models, tiers and quota.
+    /// Tiers add to the list rather than replace it; an id already defined
+    /// in a tier read earlier (global, scene, project — each tier's
+    /// `settings.local.json` after its `settings.json`) is ignored with a
+    /// warning. With none defined, the engine supplies `anthropic`: Anthropic's
+    /// API, keyed from `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` or the
+    /// host, at `ANTHROPIC_BASE_URL` when set, every tier the daemon's
+    /// `--model`. Not read from a project that is not trusted.
+    #[serde(
+        default,
+        skip_serializing_if = "no_defined_providers",
+        serialize_with = "defined_providers"
+    )]
+    pub providers: Vec<ProviderConfig>,
 
     /// The module-owned keys (`team`, `plugins`, `scripts`) of the sections
     /// the build registered — see [`section::Sections`]; read one with
@@ -125,6 +125,18 @@ pub struct Settings {
     #[serde(flatten)]
     #[schemars(skip)]
     pub sections: BTreeMap<String, serde_json::Value>,
+}
+
+fn no_defined_providers(providers: &[ProviderConfig]) -> bool {
+    providers.iter().all(|p| p.builtin)
+}
+
+/// The providers a file defines: not the one the engine supplies.
+fn defined_providers<S: serde::Serializer>(
+    providers: &[ProviderConfig],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(providers.iter().filter(|p| !p.builtin))
 }
 
 /// A value in a settings file that does not fit its setting — `"memory": {"enabled": 5}`
@@ -145,27 +157,34 @@ pub struct IgnoredValue {
 /// every current Claude model's limit.
 pub const DEFAULT_MAX_TOKENS: u32 = 32_000;
 
-/// LLM model configuration for a single provider.
+/// Which providers model calls go to, and how they are made.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct ModelSettings {
-    pub api_type: ApiType,
-    pub base_url: String,
-    /// Resolved model name (upper layer already resolved slot → name).
-    pub model_name: String,
-    pub max_tokens: u32,
-    pub thinking_mode: ThinkingMode,
+    /// Provider ids, from `providers`, in the order a model call tries them:
+    /// the first is the default, and a call goes to the next when one is out
+    /// of quota, has no key, refuses the key, or cannot be reached once its
+    /// retries are spent. Every call starts from the first again. Each id must
+    /// be defined. Unset, the first defined provider alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
+    /// The tier — `strong`, `balanced` or `fast` — each kind of model call
+    /// asks the provider for.
+    #[serde(default)]
+    pub tasks: TaskTiers,
     /// Sent as `output_config.effort`; `None` leaves it to the endpoint.
     #[serde(default)]
     pub effort: Option<Effort>,
-    /// Fallback model for persistent Overloaded/529 errors (e.g. Opus → Sonnet).
-    /// None = no fallback.
-    #[serde(default)]
-    pub fallback_model: Option<String>,
-    /// The most `max_tokens` a reply cut off at its limit is retried with.
-    /// Unset, the model's documented limit, looked up by its name.
-    #[serde(default)]
-    pub max_output_tokens: Option<u32>,
+    /// `auto`, `on` or `off`.
+    #[serde(rename = "thinking")]
+    pub thinking_mode: ThinkingMode,
+    pub max_tokens: u32,
+    /// The conversation's model: what `tasks.main` is at the first provider
+    /// of `order`, or a session's own choice. Not read from a file.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub model_name: String,
 }
 
 /// Context compaction, over what the scene asks for. A field left out keeps
@@ -447,14 +466,12 @@ impl Settings {
     pub fn defaults_for(model_name: &str) -> Self {
         Self {
             model: ModelSettings {
-                api_type: ApiType::Anthropic,
-                base_url: String::new(),
+                order: Vec::new(),
+                tasks: TaskTiers::default(),
                 model_name: model_name.to_string(),
                 max_tokens: DEFAULT_MAX_TOKENS,
                 thinking_mode: ThinkingMode::On,
                 effort: Some(Effort::High),
-                fallback_model: None,
-                max_output_tokens: None,
             },
             permissions: PermissionsSettings::default(),
             files: FilesSettings::default(),
@@ -471,11 +488,24 @@ impl Settings {
             telemetry: TelemetrySettings::default(),
             recorder: None,
             app: AppSettings::default(),
-            providers: HashMap::new(),
-            default_provider: None,
-            task_models: HashMap::new(),
+            providers: Vec::new(),
             sections: BTreeMap::new(),
         }
+    }
+
+    /// The providers model calls go through, in `model.order`, each with its
+    /// tiers filled — or what is wrong with them.
+    pub fn routing(&self) -> Result<Vec<(&ProviderConfig, ResolvedTiers)>, String> {
+        base::provider::routing_order(&self.providers, &self.model.order)
+    }
+
+    /// What `models` says about `model` at the first provider that lists it.
+    pub fn model_spec(&self, model: &str) -> Option<&base::provider::ModelSpec> {
+        self.providers.iter().find_map(|p| p.model_spec(model))
+    }
+
+    pub fn provider(&self, id: &str) -> Option<&ProviderConfig> {
+        self.providers.iter().find(|p| p.id == id)
     }
 
     /// The section `S`, or `S::default()` when the settings carry none.

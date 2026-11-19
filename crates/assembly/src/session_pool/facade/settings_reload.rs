@@ -51,8 +51,7 @@ impl SessionPool {
     /// and routing as they are now. The pair's MCP connections follow `mcp`.
     ///
     /// Never fails outright — misconfiguration degrades to "keep the
-    /// previous router, report why in the returned status";
-    /// `resolve_task_models` is advisory.
+    /// previous router, report why in the returned status".
     pub(in crate::session_pool) async fn settings_tier_changed(
         &self,
         changed: Option<&Tier>,
@@ -125,9 +124,11 @@ pub(in crate::session_pool) fn settings_reloaded(
     routing: api::RoutingStatus,
 ) -> api::SettingsReloaded {
     api::SettingsReloaded {
-        providers: settings.providers.keys().cloned().collect(),
-        default_provider: settings.default_provider.clone(),
-        task_models: settings.task_models.keys().cloned().collect(),
+        providers: settings.providers.iter().map(|p| p.id.clone()).collect(),
+        order: settings
+            .routing()
+            .map(|order| order.iter().map(|(p, _)| p.id.clone()).collect())
+            .unwrap_or_else(|_| settings.model.order.clone()),
         routing,
     }
 }

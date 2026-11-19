@@ -21,15 +21,6 @@
       },
       "type": "object"
     },
-    "ApiType": {
-      "description": "API protocol type.",
-      "enum": [
-        "anthropic",
-        "openai_compatible",
-        "openai_responses"
-      ],
-      "type": "string"
-    },
     "AppSettings": {
       "description": "What is decided once for the whole instance: read from the global tier's\nfiles only (and from what an embedder sets in memory), never from a scene\nor a project.",
       "properties": {
@@ -295,14 +286,9 @@
       "description": "One entry of a provider's `models`."
     },
     "ModelSettings": {
-      "description": "LLM model configuration for a single provider.",
+      "additionalProperties": false,
+      "description": "Which providers model calls go to, and how they are made.",
       "properties": {
-        "api_type": {
-          "$ref": "#/$defs/ApiType"
-        },
-        "base_url": {
-          "type": "string"
-        },
         "effort": {
           "anyOf": [
             {
@@ -315,40 +301,39 @@
           "default": null,
           "description": "Sent as `output_config.effort`; `None` leaves it to the endpoint."
         },
-        "fallback_model": {
-          "default": null,
-          "description": "Fallback model for persistent Overloaded/529 errors (e.g. Opus → Sonnet).\nNone = no fallback.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "max_output_tokens": {
-          "default": null,
-          "description": "The most `max_tokens` a reply cut off at its limit is retried with.\nUnset, the model's documented limit, looked up by its name.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "max_tokens": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
-        "model_name": {
-          "description": "Resolved model name (upper layer already resolved slot → name).",
-          "type": "string"
+        "order": {
+          "description": "Provider ids, from `providers`, in the order a model call tries them:\nthe first is the default, and a call goes to the next when one is out\nof quota, has no key, refuses the key, or cannot be reached once its\nretries are spent. Every call starts from the first again. Each id must\nbe defined. Unset, the first defined provider alone.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "thinking_mode": {
-          "$ref": "#/$defs/ThinkingMode"
+        "tasks": {
+          "$ref": "#/$defs/TaskTiers",
+          "default": {
+            "compact": "fast",
+            "main": "strong",
+            "memory": "fast",
+            "subagent": "balanced",
+            "title": "fast",
+            "web_search": "fast"
+          },
+          "description": "The tier — `strong`, `balanced` or `fast` — each kind of model call\nasks the provider for."
+        },
+        "thinking": {
+          "$ref": "#/$defs/ThinkingMode",
+          "description": "`auto`, `on` or `off`."
         }
       },
       "type": "object"
     },
     "ModelSpec": {
+      "additionalProperties": false,
       "description": "A model with what the engine should know about it beyond its id.\n\n`context_window` and `max_output` are applied to the model's calls;\n`reasoning_levels` and `input_types` are kept and reported; nothing in\nthe engine decides by them.",
       "properties": {
         "context_window": {
@@ -372,7 +357,7 @@
           ]
         },
         "max_output": {
-          "description": "The most `max_tokens` a call to this model is sent with.",
+          "description": "The most `max_tokens` a call to this model is sent with, and the most\na reply cut off at its limit is retried with. Unset, the model's\ndocumented limit, looked up by its id.",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -578,71 +563,91 @@
       "type": "object"
     },
     "ProviderConfig": {
-      "description": "A single provider's connection + model config, as written in settings.json.",
+      "additionalProperties": false,
+      "description": "One entry of `providers`.",
       "properties": {
-        "api_key": {
-          "default": null,
-          "description": "Stored in plaintext, same as every other settings.json field — which\nis why [`Debug`](std::fmt::Debug) is hand-written below rather than\nderived. To keep the key off disk, name an environment variable in\n`api_key_env` instead, or have the host supply it through\n[`CredentialSource`](crate::interface::credentials::CredentialSource).",
+        "api": {
+          "description": "`anthropic` (default), `openai_chat` or `openai_responses`, or a\nprotocol the host registered.",
           "type": [
             "string",
             "null"
           ]
         },
         "api_key_env": {
-          "default": null,
-          "description": "Environment variable holding the key, read when `api_key` is unset.\nNo child process inherits it once a settings file names it, unless\n`sandbox.env.allow` does.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "api_type": {
-          "default": null,
-          "description": "\"anthropic\" | \"openai_compatible\" | \"openai_responses\". Kept as a plain string (not\n`ApiType`) so an unrecognized value degrades to a warning instead of\na hard parse failure of the whole settings.json.",
+          "description": "The environment variable holding the key. Without one the host's\ncredential source is asked. No child process inherits it once a\nsettings file names it, unless `sandbox.env.allow` does.",
           "type": [
             "string",
             "null"
           ]
         },
         "base_url": {
-          "default": null,
+          "description": "Required for `openai_chat`; `anthropic` without one uses Anthropic's\nown API, `openai_responses` OpenAI's.",
           "type": [
             "string",
             "null"
           ]
         },
-        "default_model": {
-          "default": null,
-          "description": "Model used when a task_models override doesn't name one explicitly,\nor when a named model fails the `models` allow-list check below.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "id": {
+          "description": "Unique. When the tiers define the same id twice, the first in load\norder (global, scene, project; each tier's `settings.local.json`\nafter its `settings.json`) is used and the rest ignored.",
+          "type": "string"
         },
         "models": {
-          "default": [],
-          "description": "The models this provider serves, each a bare id or an id with what the\nengine should know about it. The ids filter an explicitly requested\nmodel name; empty accepts any name. Not fetched from the provider —\n`config.listModels` does that, on request.",
+          "description": "The models this provider serves, each an id or an object with what\nthe engine should know about it. Empty accepts any id. Not fetched\nfrom the provider — `config.listModels` does that, on request.",
           "items": {
             "$ref": "#/$defs/ModelEntry"
           },
           "type": "array"
         },
-        "reasoning_passback": {
-          "default": false,
-          "description": "OpenAI-compatible only: echo the model's `reasoning_content` back on\nthe assistant messages of the current tool loop. DeepSeek's thinking\nmode requires it; OpenAI itself and older reasoners reject it, hence\noff by default.",
-          "type": "boolean"
+        "quota": {
+          "$ref": "#/$defs/Quota",
+          "description": "Token limits; past one, the provider is skipped until the period\nturns over."
         },
-        "thinking_toggle": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ThinkingToggle"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "OpenAI-compatible only: how this endpoint is told to turn thinking on\nor off when `thinking_mode` is not `auto`. Unset sends nothing — Chat\nCompletions has no standard field for it."
+        "tiers": {
+          "$ref": "#/$defs/Tiers",
+          "default": {},
+          "description": "Which model serves `strong`, `balanced` and `fast`. `strong` is\nrequired; `balanced` defaults to `strong`'s, `fast` to `balanced`'s.\nEach must be in `models` when `models` lists any."
+        },
+        "vendor": {
+          "$ref": "#/$defs/Vendor",
+          "default": "generic",
+          "description": "`anthropic`, `openai`, `deepseek`, `qwen`, `vllm`, `sglang` or\n`generic` (default). Decides how thinking is switched, whether\nreasoning is sent back and how effort is spelled."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "Quota": {
+      "additionalProperties": false,
+      "description": "Token limits per period, counted as uncached input plus cache writes plus\noutput; cache reads do not count. A period left out has no limit.",
+      "properties": {
+        "day": {
+          "description": "From 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "month": {
+          "description": "From the 1st, 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "week": {
+          "description": "From Monday 00:00 local time.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -900,31 +905,53 @@
         }
       ]
     },
-    "TaskModelOverride": {
-      "anyOf": [
-        {
-          "type": "string"
+    "TaskTiers": {
+      "additionalProperties": false,
+      "description": "The tier each kind of model call asks for. The task types: `main` (the\nconversation), `subagent` (sub-agents started without a model of their\nown), `compact` (summarizing for compaction), `memory` (extracting\nmemories), `title` (naming a session), `web_search` (`WebSearch`) and\n`web_fetch` (`WebFetch` reading a page — unset, `WebFetch` uses no model\nand returns the page text).",
+      "properties": {
+        "compact": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
         },
-        {
-          "properties": {
-            "model": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+        "main": {
+          "$ref": "#/$defs/Tier",
+          "default": "strong",
+          "description": "Default `strong`."
+        },
+        "memory": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        },
+        "subagent": {
+          "$ref": "#/$defs/Tier",
+          "default": "balanced",
+          "description": "Default `balanced`."
+        },
+        "title": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
+        },
+        "web_fetch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tier"
             },
-            "provider": {
-              "type": "string"
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "provider"
           ],
-          "type": "object"
+          "description": "Default unset: no model reads fetched pages."
+        },
+        "web_search": {
+          "$ref": "#/$defs/Tier",
+          "default": "fast",
+          "description": "Default `fast`."
         }
-      ],
-      "description": "A `task_models.<task>` entry. Accepts either the shorthand `\"provider_id\"`\nstring form or the detailed `{ \"provider\": ..., \"model\": ... }` object form."
+      },
+      "type": "object"
     },
     "TeamSettings": {
       "properties": {
@@ -1001,25 +1028,42 @@
         }
       ]
     },
-    "ThinkingToggle": {
-      "description": "The request fields OpenAI-compatible endpoints use to switch thinking.",
-      "oneOf": [
-        {
-          "const": "deepseek",
-          "description": "`\"thinking\": {\"type\": \"enabled\" | \"disabled\"}` (DeepSeek).",
-          "type": "string"
+    "Tier": {
+      "description": "A model tier. Tasks and sessions ask for a tier; each provider says which\nof its models serves it.",
+      "enum": [
+        "strong",
+        "balanced",
+        "fast"
+      ],
+      "type": "string"
+    },
+    "Tiers": {
+      "additionalProperties": false,
+      "description": "Which of a provider's models serves each tier, as written.",
+      "properties": {
+        "balanced": {
+          "description": "Unset, `strong`'s.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "const": "enable_thinking",
-          "description": "`\"enable_thinking\": true | false` (Qwen / DashScope).",
-          "type": "string"
+        "fast": {
+          "description": "Unset, `balanced`'s.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        {
-          "const": "chat_template_kwargs",
-          "description": "`\"chat_template_kwargs\": {\"enable_thinking\": true | false}` (vLLM, SGLang).",
-          "type": "string"
+        "strong": {
+          "description": "Required.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      ]
+      },
+      "type": "object"
     },
     "TurnSettings": {
       "additionalProperties": false,
@@ -1051,6 +1095,19 @@
         }
       },
       "type": "object"
+    },
+    "Vendor": {
+      "description": "Who runs the endpoint. Decides what the protocol leaves open: how thinking\nis switched on, whether reasoning goes back, how effort is spelled.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "deepseek",
+        "qwen",
+        "vllm",
+        "sglang",
+        "generic"
+      ],
+      "type": "string"
     },
     "WebSettings": {
       "description": "What the model's own web tools may reach.",
@@ -1098,13 +1155,6 @@
       "$ref": "#/$defs/CompactionConfig",
       "default": {}
     },
-    "default_provider": {
-      "description": "Provider id used for any task with no `task_models` entry, and as the\nfallback target when an entry's provider/model turns out invalid.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "files": {
       "$ref": "#/$defs/FilesSettings",
       "default": {}
@@ -1146,11 +1196,11 @@
       "default": {}
     },
     "providers": {
-      "additionalProperties": {
+      "description": "The model providers: each one's endpoint, models, tiers and quota.\nTiers add to the list rather than replace it; an id already defined\nin a tier read earlier (global, scene, project — each tier's\n`settings.local.json` after its `settings.json`) is ignored with a\nwarning. With none defined, the engine supplies `anthropic`: Anthropic's\nAPI, keyed from `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` or the\nhost, at `ANTHROPIC_BASE_URL` when set, every tier the daemon's\n`--model`. Not read from a project that is not trusted.",
+      "items": {
         "$ref": "#/$defs/ProviderConfig"
       },
-      "description": "Multi-provider LLM registry, keyed by provider id.",
-      "type": "object"
+      "type": "array"
     },
     "recorder": {
       "anyOf": [
@@ -1239,13 +1289,6 @@
       "default": {
         "allow_shell": true
       }
-    },
-    "task_models": {
-      "additionalProperties": {
-        "$ref": "#/$defs/TaskModelOverride"
-      },
-      "description": "Per-task-type provider/model routing — see `base::provider::resolve_task_models`.\n\nKeys: `main`, `subagent`, `compact`, `memory`, `title`, `web_search`,\n`web_fetch`. `web_fetch` alone has no default: `WebFetch` has a model\nread the page only when this names one, and otherwise returns the page\ntext.",
-      "type": "object"
     },
     "team": {
       "$ref": "#/$defs/TeamSettings",

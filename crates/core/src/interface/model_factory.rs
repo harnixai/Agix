@@ -1,13 +1,13 @@
 //! `ModelFactory` — how a wire protocol gets built from configuration.
 //!
 //! [`Model`] is open: anyone can implement another protocol. Constructing one
-//! was not. The composition root matched on `api_type` and knew exactly two
+//! was not. The composition root matched on the protocol name and knew exactly two
 //! answers, so a third protocol could be written but never reached — the only
 //! way to configure it was to edit the match, in the kernel, in a release.
 //!
 //! # What is registered, and by what key
 //!
-//! The key is the `api_type` **string** from `settings.json`, not the
+//! The key is a provider's `api` **string** from `settings.json`, not the
 //! [`ApiType`] enum. That enum names the protocols the engine itself
 //! implements and is what a [`Model`] reports about itself; the registry is
 //! about what a *host* can add, and a host adding a protocol has no way to
@@ -17,7 +17,7 @@
 //!
 //! # Unknown means unknown at startup
 //!
-//! [`ModelFactoryRegistry::build`] fails for an `api_type` nobody claimed,
+//! [`ModelFactoryRegistry::build`] fails for an `api` nobody claimed,
 //! and it fails where provider config is read — at startup — rather than on
 //! the first call that happens to route there. A typo in a provider name
 //! should cost a clear error at launch, not a mid-conversation failure in
@@ -33,7 +33,7 @@ use crate::provider::ProviderConfig;
 
 /// Builds a live model from one provider's configuration.
 pub trait ModelFactory: Send + Sync {
-    /// The `api_type` value in `settings.json` this factory answers to.
+    /// The `api` value in `settings.json` this factory answers to.
     fn api_type(&self) -> &str;
 
     /// Construct the model, or say what is wrong with the config.
@@ -42,7 +42,7 @@ pub trait ModelFactory: Send + Sync {
     /// wrote, and an error that does not name it makes them guess which of
     /// their providers is broken.
     ///
-    /// The credential comes from `credentials`, never from `config.api_key`
+    /// The credential comes from `credentials`, never from `config.api_key_env`
     /// directly: a factory that reads the field itself silently opts its
     /// protocol out of whatever the host arranged, which is exactly the bug
     /// the source exists to prevent.
@@ -82,12 +82,12 @@ impl ModelFactoryRegistry {
         Self::default()
     }
 
-    /// Add a factory, replacing any previous one for the same `api_type` and
+    /// Add a factory, replacing any previous one for the same `api` and
     /// returning it.
     ///
     /// Replacing is allowed on purpose: a host that wants its own client
     /// behind `anthropic` — a proxy, a recording layer, a different retry
-    /// policy — should not have to invent a new `api_type` its users then
+    /// policy — should not have to invent a new `api` its users then
     /// have to write in their settings.
     pub fn register(&mut self, factory: Arc<dyn ModelFactory>) -> Option<Arc<dyn ModelFactory>> {
         self.by_api_type
@@ -116,7 +116,7 @@ impl ModelFactoryRegistry {
         self.by_api_type.get(api_type)
     }
 
-    /// The registered `api_type` values, sorted — for error messages, so what
+    /// The registered `api` values, sorted — for error messages, so what
     /// the user is told they may write is generated from what actually works.
     pub fn api_types(&self) -> Vec<&str> {
         let mut out: Vec<&str> = self.by_api_type.keys().map(String::as_str).collect();
@@ -128,11 +128,17 @@ impl ModelFactoryRegistry {
         self.by_api_type.is_empty()
     }
 
+    /// Why the credential source has no usable key for this provider, when
+    /// it has none.
+    pub fn missing_credential(&self, provider_id: &str, config: &ProviderConfig) -> Option<String> {
+        NonEmpty(self.credentials.as_ref())
+            .api_key(provider_id, config)
+            .err()
+    }
+
     /// Build the model one provider config describes.
     ///
-    /// An absent `api_type` means `anthropic`, matching
-    /// [`ApiType`](crate::provider::ApiType)'s serde default and the behavior
-    /// every existing settings file relies on. An empty key from the source
+    /// An absent `api` means `anthropic`. An empty key from the source
     /// is no key: the factory is not asked to build a client that would send
     /// requests with it.
     pub fn build(
@@ -140,7 +146,7 @@ impl ModelFactoryRegistry {
         provider_id: &str,
         config: &ProviderConfig,
     ) -> Result<Arc<dyn Model>, String> {
-        let api_type = config.api_type.as_deref().unwrap_or("anthropic");
+        let api_type = config.api();
         match self.by_api_type.get(api_type) {
             Some(f) => f.build(
                 provider_id,
@@ -149,7 +155,7 @@ impl ModelFactoryRegistry {
                 self.network.as_ref(),
             ),
             None => Err(format!(
-                "provider '{provider_id}': unrecognized api_type '{api_type}' (expected {})",
+                "provider '{provider_id}': unrecognized api '{api_type}' (expected {})",
                 self.api_types()
                     .iter()
                     .map(|t| format!("'{t}'"))
@@ -197,21 +203,21 @@ mod tests {
     fn an_unknown_api_type_names_the_provider_and_what_is_available() {
         let mut registry = ModelFactoryRegistry::new();
         registry.register(Arc::new(Stub("anthropic")));
-        registry.register(Arc::new(Stub("openai_compatible")));
+        registry.register(Arc::new(Stub("openai_chat")));
 
         let Err(err) = registry.build(
             "my-provider",
             &ProviderConfig {
-                api_type: Some("gemini".into()),
+                api: Some("gemini".into()),
                 ..Default::default()
             },
         ) else {
-            panic!("an unregistered api_type must not build");
+            panic!("an unregistered api must not build");
         };
         assert!(err.contains("my-provider"), "{err}");
         assert!(err.contains("'gemini'"), "{err}");
         assert!(
-            err.contains("'anthropic' or 'openai_compatible'"),
+            err.contains("'anthropic' or 'openai_chat'"),
             "the list of what works must come from what is registered: {err}"
         );
     }
@@ -225,7 +231,7 @@ mod tests {
         };
         assert_eq!(
             err, "stub",
-            "an absent api_type must reach the anthropic factory"
+            "an absent api must reach the anthropic factory"
         );
     }
 

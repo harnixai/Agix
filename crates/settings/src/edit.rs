@@ -9,11 +9,7 @@ use crate::merge::merge_json_values;
 
 /// The settings that hold credentials, with `*` for one map key: kept out of
 /// the committed `settings.json` by every writer.
-pub const SECRET_PATHS: &[&str] = &[
-    "providers.*.api_key",
-    "mcp.servers.*.headers",
-    "mcp.servers.*.env",
-];
+pub const SECRET_PATHS: &[&str] = &["mcp.servers.*.headers", "mcp.servers.*.env"];
 
 /// The lists each file adds to the other files' rather than replacing them,
 /// so a tier's two files are edited apart: a change reaches `settings.json`
@@ -25,6 +21,7 @@ pub const CONCATENATED_KEYS: &[&str] = &[
     "permissions.ask",
     "permissions.deny",
     "app.trusted_projects",
+    "providers",
 ];
 
 /// A dotted settings key, one segment per object level.
@@ -108,6 +105,12 @@ pub enum EditOp {
     /// what `settings.local.json` holds beside it stays unless `value` sets
     /// a credential.
     Merge(KeyPath, Value),
+    /// `value` merged into the entry whose `id` is the given one of the list
+    /// at the key, in the file that holds it — `settings.json` when both do —
+    /// or added to `settings.json`'s list when neither does.
+    MergeEntry(KeyPath, String, Value),
+    /// Neither file's list at the key holds an entry with that `id`.
+    RemoveEntry(KeyPath, String),
 }
 
 impl EditOp {
@@ -116,7 +119,9 @@ impl EditOp {
             Self::Set(path, _)
             | Self::SetKeeping(path, _, _)
             | Self::Remove(path)
-            | Self::Merge(path, _) => path,
+            | Self::Merge(path, _)
+            | Self::MergeEntry(path, _, _)
+            | Self::RemoveEntry(path, _) => path,
         }
     }
 }
@@ -187,6 +192,11 @@ pub fn apply(files: &mut TierFiles, ops: &[EditOp]) -> bool {
                 take_local(files, path);
             }
             EditOp::Merge(path, value) => merge(files, path, value.clone()),
+            EditOp::MergeEntry(path, id, value) => merge_entry(files, path, id, value.clone()),
+            EditOp::RemoveEntry(path, id) => {
+                remove_entry(&mut files.shared, path, id);
+                remove_entry(&mut files.local, path, id);
+            }
         }
     }
     for op in &ops {
@@ -245,6 +255,41 @@ fn merge(files: &mut TierFiles, path: &KeyPath, mut value: Value) {
     };
     if let Some(found) = found {
         merge_json_values(slot(&mut files.local, &segments), found);
+    }
+}
+
+fn has_id(entry: &Value, id: &str) -> bool {
+    entry.get("id").and_then(Value::as_str) == Some(id)
+}
+
+fn merge_entry(files: &mut TierFiles, path: &KeyPath, id: &str, value: Value) {
+    let segments = path.segments();
+    for file in [&mut files.shared, &mut files.local] {
+        let entry = get_mut(file, &segments)
+            .and_then(Value::as_array_mut)
+            .and_then(|list| list.iter_mut().find(|entry| has_id(entry, id)));
+        if let Some(entry) = entry {
+            merge_json_values(entry, value);
+            return;
+        }
+    }
+    let mut entry = serde_json::json!({ "id": id });
+    merge_json_values(&mut entry, value);
+    match get_mut(&mut files.shared, &segments).and_then(Value::as_array_mut) {
+        Some(list) => list.push(entry),
+        None => put(&mut files.shared, &segments, Value::Array(vec![entry])),
+    }
+}
+
+/// The list at `path` without its entry `id`; gone with it when emptied.
+fn remove_entry(file: &mut Map<String, Value>, path: &KeyPath, id: &str) {
+    let segments = path.segments();
+    let Some(list) = get_mut(file, &segments).and_then(Value::as_array_mut) else {
+        return;
+    };
+    list.retain(|entry| !has_id(entry, id));
+    if list.is_empty() {
+        take(file, &segments);
     }
 }
 

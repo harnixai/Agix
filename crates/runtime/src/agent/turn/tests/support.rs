@@ -5,7 +5,6 @@ use base::interface::model::ThinkingMode;
 
 pub(super) fn recall_test_settings(root: &std::path::Path) -> settings::LoadedSettings {
     let mut values = settings::Settings::defaults_for("test-model");
-    values.model.base_url = "https://api.example.com".into();
     values.model.max_tokens = 4096;
     values.model.thinking_mode = ThinkingMode::Off;
     values.model.effort = None;

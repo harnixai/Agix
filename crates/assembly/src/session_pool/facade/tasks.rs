@@ -319,9 +319,11 @@ impl SessionPool {
             })
             .await?;
         let named = self.specs.get(session_id).and_then(|spec| spec.provider());
-        self.binding_for(project.as_deref(), &scene)
-            .await
-            .routed_provider(named.as_deref())
+        Some(
+            self.binding_for(project.as_deref(), &scene)
+                .await
+                .routed_provider(named.as_deref()),
+        )
     }
 
     /// `session.dropMessages`: the positions dropped.

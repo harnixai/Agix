@@ -463,7 +463,6 @@ impl RequestShape {
                 max_tokens: params.max_tokens,
                 thinking_mode: params.thinking_mode.clone(),
                 effort: params.effort,
-                fallback_model: params.fallback_model.clone(),
                 cache_edits: params.cache_edits.clone(),
                 search_max_uses: params.provider_search.map(|s| s.max_uses),
             },
@@ -525,7 +524,7 @@ impl Model for RecorderModel {
         self.inner.api_type()
     }
 
-    fn provenance(&self) -> Option<&str> {
+    fn provenance(&self) -> Option<String> {
         self.inner.provenance()
     }
 
@@ -700,7 +699,7 @@ impl RecorderModel {
             provider: self.provider_id.clone().unwrap_or_else(|| {
                 match self.inner.api_type() {
                     ApiType::Anthropic => "anthropic",
-                    ApiType::OpenAICompatible => "openai_compatible",
+                    ApiType::OpenAIChat => "openai_chat",
                     ApiType::OpenAIResponses => "openai_responses",
                 }
                 .into()
@@ -711,7 +710,6 @@ impl RecorderModel {
                 max_tokens: params.max_tokens,
                 thinking_mode: params.thinking_mode.clone(),
                 effort: params.effort,
-                fallback_model: params.fallback_model.clone(),
                 cache_edits: params.cache_edits.clone(),
                 search_max_uses: params.provider_search.map(|s| s.max_uses),
             },
@@ -928,7 +926,6 @@ mod tests {
             max_tokens: 100,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: vec![],
             origin: Some(CallOrigin::turn(session, 0, step)),
             input_map: None,

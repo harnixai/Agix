@@ -374,8 +374,7 @@ impl OpenAIResponsesModel {
                 default_model: model_default.into(),
                 backoff: Arc::new(LadderBackoff::new()),
                 provenance: None,
-                reasoning_passback: false,
-                thinking_toggle: None,
+                vendor: base::provider::Vendor::Openai,
             }),
         })
     }
@@ -427,8 +426,8 @@ impl Model for OpenAIResponsesModel {
         ApiType::OpenAIResponses
     }
 
-    fn provenance(&self) -> Option<&str> {
-        self.inner.provenance.as_deref()
+    fn provenance(&self) -> Option<String> {
+        self.inner.provenance.clone()
     }
 
     async fn stream(
@@ -441,8 +440,8 @@ impl Model for OpenAIResponsesModel {
     ) -> Result<ModelStream, ModelError> {
         if params.provider_search.is_some() {
             return Err(ModelError::unsupported(
-                "this provider has no web search of its own; route `task_models.web_search` \
-                 to one that has",
+                "this provider has no web search of its own; put one that has first in \
+                 `model.order`",
             ));
         }
         let model = if params.model.is_empty() {

@@ -58,7 +58,9 @@ pub struct AgentTypeDefinition {
     /// Tool names removed from the pool, applied before `allowed_tools`
     /// (deny first, then allow).
     pub disallowed_tools: Vec<String>,
-    /// Optional model override (e.g. "claude-sonnet-4-20250514").
+    /// The model its sub-agents use: `strong`, `balanced` or `fast` (also
+    /// `opus`, `sonnet`, `haiku`, as Claude Code writes them), `inherit` for
+    /// the parent's, or a model id.
     pub model: Option<String>,
     /// Optional permission mode for spawned subagents of this type. Whether
     /// it may be looser than the parent session's depends on `source`.

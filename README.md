@@ -478,31 +478,34 @@ sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
 
 ```json
 {
-  "providers": {
-    "anthropic": { "api_type": "anthropic", "default_model": "claude-sonnet-4-6" },
-    "local":     { "api_type": "openai_compatible", "base_url": "http://localhost:11434",
-                   "default_model": "qwen3" }
-  },
-  "default_provider": "anthropic",
-  "task_models": { "subagent": "local", "compact": "local" }
+  "providers": [
+    { "id": "ds", "vendor": "deepseek", "api": "openai_chat",
+      "base_url": "https://api.deepseek.com", "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "tiers": { "strong": "deepseek-v4-pro", "balanced": "deepseek-v4-flash" },
+      "quota": { "day": 20000000 } },
+    { "id": "claude", "vendor": "anthropic", "api": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "tiers": { "strong": "claude-opus-4-6", "balanced": "claude-sonnet-4-6",
+                 "fast": "claude-haiku-4-5" } }
+  ],
+  "model": { "order": ["ds", "claude"], "tasks": { "subagent": "balanced" } }
 }
 ```
 
-Task keys `main`, `subagent`, `compact`, `memory`, `web_search` and `web_fetch`
-route each kind of call; a session can also choose its own provider. A conversation's
-model is, in order: the session's own `model`, the session's chosen provider's
-`default_model`, the model of `task_models.main`, then `model.model_name`. A sub-agent's:
-the `Agent` call's (or `session.startAgent`'s) `model`, the agent type's `model`, the model of
-`task_models.subagent`, then the session's current model. A task with no `task_models` entry
-(sub-agents, compaction, memory, titles) runs on `default_provider`'s client, with the session's
-model when the session is on that provider and `model.model_name` when it is not. `WebSearch`
-searches through the session's own model (the provider's built-in search; after
-`session.setModel`, the new one) unless
-`task_models.web_search` names another provider. `WebFetch` returns the page as
-plain text in windows of up to 50,000 characters, read on with `offset` / `limit`
-(each continuation fetches the page again); only when `task_models.web_fetch`
-names a provider does that provider's model read the page and answer the call's
-`prompt` instead. It never falls back to the session's own model.
+Each kind of call asks for a tier — `strong`, `balanced` or `fast` — set per task
+in `model.tasks` (`main`, `subagent`, `compact`, `memory`, `title`, `web_search`,
+`web_fetch`), and each provider says which of its models serves a tier. Every
+call starts at the first provider of `model.order` and goes to the next when one
+is out of quota (tokens per local day, week or month, cache reads not counted),
+has no key, refuses its key, or cannot be reached once its retries are spent; the
+session is told with a `provider_switched` event. With no `providers`, the engine
+supplies `anthropic`, keyed from `ANTHROPIC_API_KEY`, every tier `--model`. A
+session can put a provider of its own first, and ask for a tier or a model id.
+`WebFetch` returns the page as plain text in windows of up to 50,000 characters,
+read on with `offset` / `limit` (each continuation fetches the page again); only
+when `model.tasks.web_fetch` names a tier does a model read the page and answer
+the call's `prompt` instead.
 
 ### Context, telemetry, recording
 
@@ -516,7 +519,7 @@ names a provider does that provider's model read the page and answer the call's
   project's `.agix/state/tool-results/`; the model gets a head and tail preview with the path and
   reads on with `Read` `offset`. The limit is
   `compaction.tool_result_inline_chars` (`0` turns it off).
-- **Telemetry**: 22 structured event types (`EventPayload` (22)) with
+- **Telemetry**: 23 structured event types (`EventPayload` (23)) with
   OpenTelemetry export, four token counts per call, and the calls no turn asked
   for — compaction, memory, hooks, search — counted too.
 - **Recorder**: wrap any `Model` and a session becomes a self-contained
@@ -555,8 +558,7 @@ A few switches whose effect the rest of this README does not mention:
 
 | Setting | Default | Effect |
 |---|---|---|
-| `model.fallback_model` | none | the model a call is retried on when the main one stays overloaded (529) |
-| `model.max_output_tokens` | by model name | the most `max_tokens` a reply cut off at its limit is retried with |
+| `providers[].models[].max_output` | by model name | the most `max_tokens` a call to the model is sent with, and a reply cut off at its limit is retried with |
 | `memory_enabled` | `true` | file-based memory: the memory prompt, the index in each turn's reminder, recall |
 | `telemetry_enabled` | `true` | one telemetry JSONL file per session under the project's `.agix/state/telemetry/` (the state directory's `telemetry/` without a project) |
 | `telemetry_url` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |

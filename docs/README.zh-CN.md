@@ -416,7 +416,7 @@ let pool = agix::pool::assemble(
   清理(`cached_microcompact`)。超过 30,000 字符的工具结果(`Read`、`WebFetch`、`TaskOutput`
   自己分页的除外)整个存进项目的 `.agix/state/tool-results/`,模型拿到头尾预览和路径,用 `Read` 的 `offset`
   读后续;阈值是 `compaction.tool_result_inline_chars`(`0` 关闭)。
-- **遥测**:22 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
+- **遥测**:23 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
   一轮的调用——压缩、记忆、hooks、搜索——也算进去。
 - **录制**:把任意 `Model` 包一层,一个会话就成了自包含的目录;回放逐字节一致、不用联网。录像不脱敏
   ——提示词、工具参数与结果按发出去的原样记下——所以要像保管 transcript 一样保管它。daemon 里录制的

@@ -16,7 +16,6 @@ use base::interface::script::ScriptOutcome;
 ///   "model": "claude-opus-5",
 ///   "maxTokens": 8192,
 ///   "thinkingMode": "auto",
-///   "fallbackModel": null,
 ///   "tools": ["Read", "Write", "Bash"],
 ///   "promptBlocks": ["scene.skeleton", "rules"],
 ///   "messageCount": 24
@@ -39,9 +38,8 @@ use base::interface::script::ScriptOutcome;
 /// { "maxTokens": 2048, "model": "claude-haiku-5", "thinkingMode": "off", "tools": ["Read"] }
 /// ```
 ///
-/// - **model**, **maxTokens**, **thinkingMode**, **fallbackModel** — replace
-///   the request's. `fallbackModel: null` clears it. `maxTokens: 0` and an
-///   empty `model` are refused, because a request built from them cannot be
+/// - **model**, **maxTokens**, **thinkingMode** — replace the request's.
+///   `maxTokens: 0` and an empty `model` are refused, because a request built from them cannot be
 ///   sent and "the script had a bug" would surface as a provider error.
 /// - **tools** — keeps the tools it names and drops the rest, in the order
 ///   they already had. A name the request does not offer is ignored: a script
@@ -85,20 +83,8 @@ struct Requested {
     max_tokens: Option<u32>,
     #[serde(default)]
     thinking_mode: Option<ThinkingMode>,
-    /// Absent and `null` are different answers here — "leave it" and "clear
-    /// it" — and serde collapses both to `None` unless the value is read
-    /// through something that never yields one.
-    #[serde(default, deserialize_with = "present")]
-    fallback_model: Option<serde_json::Value>,
     #[serde(default)]
     tools: Option<Vec<String>>,
-}
-
-fn present<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 /// The request as the script asked for it, with every field already checked.
@@ -106,7 +92,6 @@ struct Changes {
     model: Option<String>,
     max_tokens: Option<u32>,
     thinking_mode: Option<ThinkingMode>,
-    fallback_model: Option<Option<String>>,
     tools: Option<Vec<String>>,
 }
 
@@ -118,7 +103,6 @@ impl Changes {
         self.model.is_some()
             || self.max_tokens.is_some()
             || self.thinking_mode.is_some()
-            || self.fallback_model.is_some()
             || self.tools.is_some()
     }
 }
@@ -134,18 +118,10 @@ fn read(returned: serde_json::Value) -> Option<Changes> {
         Some(0) => return None,
         other => other,
     };
-    let fallback_model = match requested.fallback_model {
-        None => None,
-        Some(serde_json::Value::Null) => Some(None),
-        Some(serde_json::Value::String(m)) => Some(Some(m)),
-        Some(_) => return None,
-    };
-
     Some(Changes {
         model,
         max_tokens,
         thinking_mode: requested.thinking_mode,
-        fallback_model,
         tools: requested.tools,
     })
 }
@@ -156,7 +132,6 @@ impl ModelInterceptor for ModelRequestScript {
             "model": request.params.model,
             "maxTokens": request.params.max_tokens,
             "thinkingMode": request.params.thinking_mode,
-            "fallbackModel": request.params.fallback_model,
             "tools": request.tool_defs.iter().map(|t| &t.name).collect::<Vec<_>>(),
             "promptBlocks": request
                 .prompt_blocks
@@ -207,9 +182,6 @@ impl ModelInterceptor for ModelRequestScript {
         }
         if let Some(mode) = changes.thinking_mode {
             request.params.thinking_mode = mode;
-        }
-        if let Some(fallback) = changes.fallback_model {
-            request.params.fallback_model = fallback;
         }
         if let Some(keep) = changes.tools {
             request.tool_defs.retain(|t| keep.contains(&t.name));
@@ -289,7 +261,6 @@ mod tests {
                 max_tokens: 8192,
                 thinking_mode: ThinkingMode::Auto,
                 effort: None,
-                fallback_model: Some("claude-sonnet-5".into()),
                 cache_edits: Vec::new(),
                 origin: None,
                 input_map: None,
@@ -314,15 +285,12 @@ mod tests {
     fn a_script_reshapes_the_knobs_it_names_and_nothing_else() {
         let out = intercepted(serde_json::json!({
             "maxTokens": 2048,
-            "model": "claude-haiku-5",
             "thinkingMode": "off",
         }));
         assert_eq!(out.params.max_tokens, 2048);
-        assert_eq!(out.params.model, "claude-haiku-5");
         assert_eq!(out.params.thinking_mode, ThinkingMode::Off);
         assert_eq!(
-            out.params.fallback_model,
-            Some("claude-sonnet-5".to_string()),
+            out.params.model, "claude-opus-5",
             "a field the script did not name is not a field it changed"
         );
         assert_eq!(names(&out), ["Read", "Write", "Bash"]);
@@ -345,22 +313,6 @@ mod tests {
             .is_empty());
     }
 
-    #[test]
-    fn a_script_can_clear_the_fallback_but_absence_is_not_clearing() {
-        assert_eq!(
-            intercepted(serde_json::json!({"fallbackModel": null}))
-                .params
-                .fallback_model,
-            None
-        );
-        assert_eq!(
-            intercepted(serde_json::json!({"maxTokens": 16}))
-                .params
-                .fallback_model,
-            Some("claude-sonnet-5".to_string())
-        );
-    }
-
     /// A script handed the request back untouched changes nothing, which is
     /// the natural way to write "not this time" in JavaScript.
     #[test]
@@ -372,7 +324,6 @@ mod tests {
         assert_eq!(out.params.model, before.params.model);
         assert_eq!(out.params.max_tokens, before.params.max_tokens);
         assert_eq!(out.params.thinking_mode, before.params.thinking_mode);
-        assert_eq!(out.params.fallback_model, before.params.fallback_model);
         assert_eq!(names(&out), names(&before));
     }
 
@@ -383,13 +334,10 @@ mod tests {
     fn a_field_of_the_wrong_type_discards_the_whole_return() {
         let out = intercepted(serde_json::json!({
             "maxTokens": 2048,
-            "fallbackModel": {"name": "something"},
+            "thinkingMode": {"name": "something"},
         }));
         assert_eq!(out.params.max_tokens, 8192);
-        assert_eq!(
-            out.params.fallback_model,
-            Some("claude-sonnet-5".to_string())
-        );
+        assert_eq!(out.params.thinking_mode, ThinkingMode::Auto);
     }
 
     #[test]

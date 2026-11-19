@@ -72,13 +72,10 @@ fn an_object_set_is_not_merged_with_what_the_tier_had() {
 #[test]
 fn a_level_that_is_not_an_object_becomes_one() {
     let mut tier = files(json!({"model": "opus"}), json!({}));
-    apply(
-        &mut tier,
-        &[EditOp::Set(key("model.model_name"), json!("x"))],
-    );
+    apply(&mut tier, &[EditOp::Set(key("model.max_tokens"), json!(5))]);
     assert_eq!(
         Value::Object(tier.shared),
-        json!({"model": {"model_name": "x"}})
+        json!({"model": {"max_tokens": 5}})
     );
 }
 
@@ -107,19 +104,19 @@ fn a_credential_goes_to_the_local_file_wherever_it_is_written() {
         &[
             EditOp::Set(key("mcp.servers.s.env"), json!({"T": "t"})),
             EditOp::Set(
-                key("providers"),
-                json!({"p": {"api_key": "k", "base_url": "u"}}),
+                key("mcp.servers.u"),
+                json!({"url": "u", "headers": {"A": "k"}}),
             ),
         ],
     );
     assert!(local_changed);
     assert_eq!(
         Value::Object(tier.shared),
-        json!({"providers": {"p": {"base_url": "u"}}})
+        json!({"mcp": {"servers": {"u": {"url": "u"}}}})
     );
     assert_eq!(
         Value::Object(tier.local),
-        json!({"mcp": {"servers": {"s": {"env": {"T": "t"}}}}, "providers": {"p": {"api_key": "k"}}})
+        json!({"mcp": {"servers": {"s": {"env": {"T": "t"}}, "u": {"headers": {"A": "k"}}}}})
     );
 }
 
@@ -152,51 +149,51 @@ fn a_server_set_whole_replaces_its_local_credentials() {
 
 #[test]
 fn merge_keeps_the_local_overrides_and_moves_an_old_key_out() {
-    let path = KeyPath::new(["providers", "p"]);
+    let path = KeyPath::new(["mcp", "servers", "p"]);
     let mut tier = files(
-        json!({"providers": {"p": {"api_key": "stale", "base_url": "u"}}}),
-        json!({"providers": {"p": {"default_model": "local-model"}}}),
+        json!({"mcp": {"servers": {"p": {"env": {"K": "stale"}, "url": "u"}}}}),
+        json!({"mcp": {"servers": {"p": {"command": "local-cmd"}}}}),
     );
     let local_changed = apply(
         &mut tier,
-        &[EditOp::Merge(path.clone(), json!({"default_model": "m"}))],
+        &[EditOp::Merge(path.clone(), json!({"command": "m"}))],
     );
     assert!(local_changed);
     assert_eq!(
         Value::Object(tier.shared.clone()),
-        json!({"providers": {"p": {"base_url": "u", "default_model": "m"}}})
+        json!({"mcp": {"servers": {"p": {"url": "u", "command": "m"}}}})
     );
     assert_eq!(
         Value::Object(tier.local.clone()),
-        json!({"providers": {"p": {"default_model": "local-model", "api_key": "stale"}}})
+        json!({"mcp": {"servers": {"p": {"command": "local-cmd", "env": {"K": "stale"}}}}})
     );
 
     apply(
         &mut tier,
-        &[EditOp::Merge(path, json!({"api_key": "fresh"}))],
+        &[EditOp::Merge(path, json!({"env": {"K": "fresh"}}))],
     );
-    assert_eq!(tier.local["providers"]["p"]["api_key"], "fresh");
-    assert!(tier.shared["providers"]["p"].get("api_key").is_none());
+    assert_eq!(tier.local["mcp"]["servers"]["p"]["env"]["K"], "fresh");
+    assert!(tier.shared["mcp"]["servers"]["p"].get("env").is_none());
 }
 
 #[test]
 fn a_moved_credential_does_not_replace_the_local_one() {
     let mut tier = files(
-        json!({"providers": {"p": {"api_key": "old", "base_url": "u"}}}),
-        json!({"providers": {"p": {"api_key": "current"}}}),
+        json!({"mcp": {"servers": {"p": {"env": {"K": "old"}, "url": "u"}}}}),
+        json!({"mcp": {"servers": {"p": {"env": {"K": "current"}}}}}),
     );
     apply(
         &mut tier,
         &[EditOp::Merge(
-            KeyPath::new(["providers", "p"]),
-            json!({"base_url": "v"}),
+            KeyPath::new(["mcp", "servers", "p"]),
+            json!({"url": "v"}),
         )],
     );
     assert_eq!(
         Value::Object(tier.shared),
-        json!({"providers": {"p": {"base_url": "v"}}})
+        json!({"mcp": {"servers": {"p": {"url": "v"}}}})
     );
-    assert_eq!(tier.local["providers"]["p"]["api_key"], "current");
+    assert_eq!(tier.local["mcp"]["servers"]["p"]["env"]["K"], "current");
 }
 
 #[test]
@@ -303,7 +300,7 @@ fn the_schema_says_what_a_key_names() {
         ["sandbox.nope"]
     );
     assert!(keys
-        .unknown_in(&["providers"], &json!({"p": {"base_url": "u"}}))
+        .unknown_in(&["providers"], &json!([{"id": "p", "base_url": "u"}]))
         .is_empty());
 }
 
@@ -338,4 +335,30 @@ fn set_keeping_replaces_the_rest_and_keeps_what_it_names() {
     );
     assert!(only_a_switch.declares(&path));
     assert!(!only_a_switch.declares_besides(&path, "enabled"));
+}
+
+#[test]
+fn a_list_entry_is_edited_in_the_file_that_holds_it() {
+    let path = KeyPath::new(["providers"]);
+    let mut tier = files(
+        json!({"providers": [{"id": "a", "base_url": "u"}]}),
+        json!({"providers": [{"id": "b", "tiers": {"strong": "x"}}]}),
+    );
+    let local_changed = apply(
+        &mut tier,
+        &[
+            EditOp::MergeEntry(path.clone(), "b".into(), json!({"tiers": {"fast": "y"}})),
+            EditOp::MergeEntry(path.clone(), "c".into(), json!({"api": "openai_chat"})),
+            EditOp::RemoveEntry(path, "a".into()),
+        ],
+    );
+    assert!(local_changed);
+    assert_eq!(
+        Value::Object(tier.shared),
+        json!({"providers": [{"id": "c", "api": "openai_chat"}]})
+    );
+    assert_eq!(
+        Value::Object(tier.local),
+        json!({"providers": [{"id": "b", "tiers": {"strong": "x", "fast": "y"}}]})
+    );
 }

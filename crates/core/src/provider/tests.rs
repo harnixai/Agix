@@ -1,0 +1,370 @@
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
+
+use super::*;
+use crate::interface::model::{
+    Model, ModelError, ModelErrorKind, ModelEvent, ModelMessage, ModelStream, StreamParams,
+    ToolDef, Usage,
+};
+use crate::prompt::PromptBlock;
+
+fn provider(id: &str, models: &[&str], tiers: [Option<&str>; 3]) -> ProviderConfig {
+    ProviderConfig {
+        id: id.into(),
+        models: models.iter().map(|m| (*m).into()).collect(),
+        tiers: Tiers {
+            strong: tiers[0].map(str::to_string),
+            balanced: tiers[1].map(str::to_string),
+            fast: tiers[2].map(str::to_string),
+        },
+        ..Default::default()
+    }
+}
+
+#[test]
+fn missing_tiers_take_the_tier_above() {
+    let p = provider("ds", &[], [Some("pro"), None, None]);
+    assert_eq!(p.resolved_tiers().unwrap(), ResolvedTiers::all("pro"));
+    let p = provider("ds", &[], [Some("pro"), Some("flash"), None]);
+    let tiers = p.resolved_tiers().unwrap();
+    assert_eq!(
+        (tiers.balanced.as_str(), tiers.fast.as_str()),
+        ("flash", "flash")
+    );
+}
+
+#[test]
+fn a_provider_without_strong_or_with_a_tier_outside_its_models_is_an_error() {
+    let err = provider("ds", &[], [None, Some("flash"), None])
+        .resolved_tiers()
+        .unwrap_err();
+    assert!(err.contains("tiers.strong"), "{err}");
+    let err = provider("ds", &["pro"], [Some("pro"), Some("flash"), None])
+        .resolved_tiers()
+        .unwrap_err();
+    assert!(
+        err.contains("tiers.balanced") && err.contains("flash"),
+        "{err}"
+    );
+}
+
+#[test]
+fn the_order_names_defined_providers_and_defaults_to_the_first() {
+    let providers = vec![
+        provider("ds", &[], [Some("pro"), None, None]),
+        provider("claude", &[], [Some("opus"), None, None]),
+    ];
+    let order = routing_order(&providers, &[]).unwrap();
+    assert_eq!(order.len(), 1);
+    assert_eq!(order[0].0.id, "ds");
+    let order = routing_order(&providers, &["claude".into(), "ds".into()]).unwrap();
+    assert_eq!(order[0].0.id, "claude");
+    let err = routing_order(&providers, &["ds".into(), "ghost".into()]).unwrap_err();
+    assert!(err.contains("ghost"), "{err}");
+}
+
+/// Usage in memory, counted as the file-backed ledger counts it.
+#[derive(Default)]
+struct Ledger(Mutex<std::collections::HashMap<String, u64>>);
+
+impl QuotaLedger for Ledger {
+    fn status(&self, provider: &str, quota: &Quota) -> QuotaStatus {
+        let used = self.0.lock().unwrap().get(provider).copied().unwrap_or(0);
+        let usage = |limit| PeriodUsage {
+            start: "2026-11-19".into(),
+            used,
+            limit,
+        };
+        QuotaStatus {
+            day: usage(quota.day),
+            week: usage(quota.week),
+            month: usage(quota.month),
+        }
+    }
+
+    fn record(&self, provider: &str, tokens: u64) {
+        *self.0.lock().unwrap().entry(provider.into()).or_default() += tokens;
+    }
+}
+
+#[derive(Clone)]
+enum Answer {
+    Ok,
+    Fail(ModelErrorKind),
+}
+
+struct Scripted {
+    id: &'static str,
+    answer: Answer,
+    usage: Usage,
+    asked: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl Model for Scripted {
+    fn api_type(&self) -> ApiType {
+        ApiType::Anthropic
+    }
+
+    fn provenance(&self) -> Option<String> {
+        Some(self.id.to_string())
+    }
+
+    async fn stream(
+        &self,
+        _prompt_blocks: Vec<PromptBlock>,
+        _tools: Vec<ToolDef>,
+        _messages: Vec<ModelMessage>,
+        params: StreamParams,
+        _cancel: CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(format!("{}:{}", self.id, params.model));
+        match &self.answer {
+            Answer::Ok => Ok(Box::new(futures::stream::iter([Ok(ModelEvent::EndTurn {
+                stop_reason: "end_turn".into(),
+                usage: self.usage,
+            })]))),
+            Answer::Fail(kind) => Err(ModelError::new(*kind, "scripted")),
+        }
+    }
+}
+
+fn routed(
+    config: ProviderConfig,
+    answer: Answer,
+    asked: &Arc<Mutex<Vec<String>>>,
+) -> RoutedProvider {
+    let id: &'static str = Box::leak(config.id.clone().into_boxed_str());
+    RoutedProvider {
+        tiers: config.resolved_tiers().unwrap(),
+        config,
+        client: Arc::new(Scripted {
+            id,
+            answer,
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_creation_input_tokens: 2,
+                cache_read_input_tokens: 1000,
+            },
+            asked: asked.clone(),
+        }),
+    }
+}
+
+fn params(model: &str) -> StreamParams {
+    StreamParams {
+        model: model.into(),
+        max_tokens: 100,
+        thinking_mode: crate::interface::model::ThinkingMode::Off,
+        effort: None,
+        cache_edits: Vec::new(),
+        origin: None,
+        input_map: None,
+        provider_search: None,
+    }
+}
+
+async fn call(model: &Arc<dyn Model>, name: &str) -> Result<(), ModelError> {
+    use futures::StreamExt;
+    let mut stream = model
+        .stream(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            params(name),
+            CancellationToken::new(),
+        )
+        .await?;
+    while stream.next().await.is_some() {}
+    Ok(())
+}
+
+#[derive(Default)]
+struct Switches(Mutex<Vec<ProviderSwitch>>);
+
+impl RouteObserver for Switches {
+    fn switched(&self, switch: &ProviderSwitch) {
+        self.0.lock().unwrap().push(switch.clone());
+    }
+}
+
+fn ds() -> ProviderConfig {
+    provider(
+        "ds",
+        &["ds-pro", "ds-flash"],
+        [Some("ds-pro"), Some("ds-flash"), None],
+    )
+}
+
+fn claude() -> ProviderConfig {
+    provider("claude", &[], [Some("opus"), Some("sonnet"), Some("haiku")])
+}
+
+#[tokio::test]
+async fn a_failing_provider_hands_the_call_to_the_next_with_the_same_tier() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let router = TaskRouter::new(
+        vec![
+            routed(ds(), Answer::Fail(ModelErrorKind::ServerError), &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .for_session(None)
+    .unwrap();
+    let switches = Arc::new(Switches::default());
+    router.observe(switches.clone());
+
+    let main = router.model_for("main");
+    call(&main, "ds-flash").await.unwrap();
+    assert_eq!(*asked.lock().unwrap(), ["ds:ds-flash", "claude:sonnet"]);
+    assert_eq!(main.provenance().as_deref(), Some("claude"));
+    let seen = switches.0.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        (seen[0].from.as_str(), seen[0].to.as_str()),
+        ("ds", "claude")
+    );
+    assert_eq!(seen[0].task, "main");
+    assert!(
+        seen[0].reason.contains("server_error"),
+        "{}",
+        seen[0].reason
+    );
+
+    asked.lock().unwrap().clear();
+    call(&main, "ds-pro").await.unwrap();
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["claude:opus"],
+        "a provider that failed to connect is passed over while it cools down"
+    );
+    assert_eq!(
+        switches.0.lock().unwrap().len(),
+        1,
+        "no switch: claude again"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_request_is_not_sent_elsewhere() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let router = TaskRouter::new(
+        vec![
+            routed(ds(), Answer::Fail(ModelErrorKind::InvalidRequest), &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let err = call(&router.model_for("main"), "ds-pro").await.unwrap_err();
+    assert_eq!(err.kind, ModelErrorKind::InvalidRequest);
+    assert_eq!(*asked.lock().unwrap(), ["ds:ds-pro"]);
+}
+
+#[tokio::test]
+async fn a_sole_provider_fails_with_its_own_error_and_all_failing_with_each_reason() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let alone = TaskRouter::new(
+        vec![routed(
+            ds(),
+            Answer::Fail(ModelErrorKind::Overloaded),
+            &asked,
+        )],
+        Vec::new(),
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let err = call(&alone.model_for("main"), "strong").await.unwrap_err();
+    assert_eq!(err.kind, ModelErrorKind::Overloaded);
+
+    let both = TaskRouter::new(
+        vec![
+            routed(ds(), Answer::Fail(ModelErrorKind::Auth), &asked),
+            routed(claude(), Answer::Fail(ModelErrorKind::Overloaded), &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let err = call(&both.model_for("compact"), "").await.unwrap_err();
+    assert_eq!(err.kind, ModelErrorKind::ProvidersUnavailable);
+    assert!(err.message.contains("`ds`: auth") && err.message.contains("`claude`: overloaded"));
+    assert!(asked
+        .lock()
+        .unwrap()
+        .ends_with(&["ds:ds-flash".into(), "claude:haiku".into()]));
+}
+
+#[tokio::test]
+async fn a_provider_out_of_quota_is_skipped_after_the_call_that_used_it_up() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut limited = ds();
+    limited.quota.day = Some(20);
+    let router = TaskRouter::new(
+        vec![
+            routed(limited, Answer::Ok, &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .with_quota(Arc::new(Ledger::default()))
+    .for_session(None)
+    .unwrap();
+    let main = router.model_for("main");
+    call(&main, "strong").await.unwrap();
+    call(&main, "strong").await.unwrap();
+    call(&main, "strong").await.unwrap();
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["ds:ds-pro", "ds:ds-pro", "claude:opus"],
+        "17 tokens a call, cache reads not counted: over 20 after the second"
+    );
+}
+
+#[tokio::test]
+async fn a_session_may_put_another_provider_first() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let router = TaskRouter::new(
+        vec![
+            routed(ds(), Answer::Ok, &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into()],
+        TaskTiers::default(),
+    )
+    .unwrap();
+    let session = router.for_session(Some("claude")).unwrap();
+    assert_eq!(session.order(), ["claude", "ds"]);
+    assert_eq!(
+        session.model_name_for("subagent").as_deref(),
+        Some("sonnet")
+    );
+    assert_eq!(session.resolve_model("fast"), "haiku");
+    assert!(router.for_session(Some("ghost")).is_err());
+    assert_eq!(router.model_name_for("web_fetch"), None);
+}
+
+#[test]
+fn deepseek_spells_effort_its_own_way() {
+    use crate::interface::model::Effort;
+    assert_eq!(Vendor::Deepseek.effort(Effort::Medium), Effort::High);
+    assert_eq!(Vendor::Deepseek.effort(Effort::Max), Effort::Max);
+    assert_eq!(Vendor::Generic.effort(Effort::Medium), Effort::Medium);
+    assert!(Vendor::Deepseek.passes_reasoning_back());
+    assert_eq!(
+        Vendor::Qwen.thinking_toggle(),
+        Some(ThinkingToggle::EnableThinking)
+    );
+}

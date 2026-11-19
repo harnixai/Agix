@@ -132,7 +132,7 @@ pub(super) async fn answered_by(pool: &SessionPool, model: Arc<dyn base::interfa
     let mut settings = (*pool.bindings.pool_settings().await).clone();
     settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
-    binding.model = model;
+    binding.answer_with(model);
     pool.bindings
         .insert(
             (Some(pool.cwd().to_path_buf()), "code".to_string()),

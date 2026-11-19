@@ -99,17 +99,56 @@ pub const RENAMED_KEYS: &[(&str, &str)] = &[
     ("memory_enabled", "memory.enabled"),
     ("telemetry_enabled", "telemetry.enabled"),
     ("telemetry_url", "telemetry.otlp_endpoint"),
+    ("default_provider", "model.order"),
+    ("task_models", "model.tasks"),
+    ("model.model_name", "providers[].tiers / model.tasks.main"),
+    ("model.api_type", "providers[].api"),
+    ("model.base_url", "providers[].base_url"),
+    ("model.max_output_tokens", "providers[].models[].max_output"),
+    ("model.fallback_model", "model.order"),
+    ("model.thinking_mode", "model.thinking"),
+    ("providers[].api_type", "providers[].api"),
+    ("providers[].thinking_toggle", "providers[].vendor"),
+    ("providers[].reasoning_passback", "providers[].vendor"),
+    ("providers[].api_key", "providers[].api_key_env"),
+    (
+        "providers[].default_model",
+        "providers[].tiers / model.order",
+    ),
 ];
 
 /// What replaced `key`, when it is an old key or lies beneath one. `key` may
-/// carry a list index (`permission_rules[0]`).
+/// carry list indexes (`permission_rules[0]`, `providers[2].api_type`).
 pub fn renamed_to(key: &str) -> Option<&'static str> {
-    let key = key.split('[').next().unwrap_or(key);
-    RENAMED_KEYS
-        .iter()
-        .filter(|(old, _)| key == *old || key.starts_with(&format!("{old}.")))
-        .max_by_key(|(old, _)| old.len())
-        .map(|(_, new)| *new)
+    let find = |key: &str| {
+        RENAMED_KEYS
+            .iter()
+            .filter(|(old, _)| key == *old || key.starts_with(&format!("{old}.")))
+            .max_by_key(|(old, _)| old.len())
+            .map(|(_, new)| *new)
+    };
+    find(&without_indexes(key)).or_else(|| find(key.split('[').next().unwrap_or(key)))
+}
+
+/// `key` with each `[<index>]` as `[]`.
+fn without_indexes(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut in_index = false;
+    for c in key.chars() {
+        match c {
+            '[' => {
+                in_index = true;
+                out.push('[');
+            }
+            ']' => {
+                in_index = false;
+                out.push(']');
+            }
+            _ if in_index => {}
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// `error` about `key`, with the new name when `key` is an old one.
@@ -156,6 +195,9 @@ mod tests {
         );
         assert!(renamed_to("permission_rules[3]").is_some());
         assert_eq!(renamed_to("mcp_servers.github"), Some("mcp.servers"));
+        assert_eq!(renamed_to("providers[2].api_type"), Some("providers[].api"));
+        assert_eq!(renamed_to("model.thinking_mode"), Some("model.thinking"));
+        assert_eq!(renamed_to("providers[0].models"), None);
         assert_eq!(renamed_to("permissions.mode"), None);
         assert_eq!(renamed_to("prompt.language"), None);
         assert!(explain("permission_mode", "x".into()).contains("permissions.mode"));

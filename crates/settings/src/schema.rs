@@ -270,8 +270,6 @@ mod tests {
         for key in [
             "model",
             "providers",
-            "default_provider",
-            "task_models",
             "hooks",
             "permissions",
             "files",

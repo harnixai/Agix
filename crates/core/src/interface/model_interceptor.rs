@@ -110,7 +110,6 @@ mod tests {
                 max_tokens: 1024,
                 thinking_mode: crate::interface::model::ThinkingMode::Off,
                 effort: None,
-                fallback_model: None,
                 cache_edits: Vec::new(),
                 origin: None,
                 input_map: None,

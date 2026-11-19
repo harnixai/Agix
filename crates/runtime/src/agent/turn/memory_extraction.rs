@@ -39,7 +39,7 @@ pub(crate) async fn finish_within(
 ///
 /// `model`/`model_name` are resolved by the caller — normally via
 /// `TaskRouter::model_for("memory")` / `model_name_for("memory")` when a
-/// `task_models.memory` override is configured, falling
+/// router is configured, falling
 /// back to the main conversation model otherwise, mirroring
 /// `agents::delegate::Delegator::model_for_subagent`'s pattern for the `"subagent"`
 /// task type. `prompt_intro` is the scene's override, if any — see
@@ -166,7 +166,6 @@ Return only a JSON array of memories. If nothing is worth saving, return []."
         max_tokens: 2000,
         thinking_mode: ThinkingMode::Off,
         effort: None,
-        fallback_model: None,
         cache_edits: vec![],
         // A call the session pays for, outside any turn. Saying so is what
         // lets it be counted; the recall half of this feature has always

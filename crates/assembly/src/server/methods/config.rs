@@ -57,9 +57,14 @@ async fn get_provider(
     params: ConfigGetProviderParams,
 ) -> Result<ProviderConfigView, PoolError> {
     let (project_root, scene) = s.target_of(params.target);
-    Ok(s.pool
-        .get_providers(project_root.as_deref(), &scene, params.include_secrets)
-        .await)
+    s.pool
+        .get_providers(
+            project_root.as_deref(),
+            &scene,
+            params.provider_id.as_deref(),
+            params.include_secrets,
+        )
+        .await
 }
 
 /// Abandoned when the connection that asked goes away, or the daemon stops.
@@ -95,8 +100,6 @@ async fn set_provider(
                 provider_id: params.provider_id,
                 delete: params.delete,
                 config: params.config,
-                default_provider: params.default_provider,
-                task_models: params.task_models,
             },
         )
         .await

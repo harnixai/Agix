@@ -132,6 +132,7 @@ handle 和一个后台 future,事件过滤、脱敏之后交给你给的每个 `
 | `startup_timing` | daemon 启动完成、开始接请求时,一次。 | 池 | `config_load_ms`、`pool_build_ms`、`total_startup_ms` |
 | `api_request` | 每次模型调用完成。一轮里的调用不带 `purpose`;辅助调用带:`compact`、`memory`、`title`、`hook`、`team_judge`、`web_search`、`web_fetch`。 | 会话 | `cache_creation_tokens`、`cache_read_tokens`、`default_model`、`input_message_count`、`input_tokens`、`latency_ms`、`model`、`output_tokens`、`purpose?`、`stop_reason`、`tool_count`、`truncated?` |
 | `api_error` | 一轮里的一次模型调用失败:请求被拒,或流在回复完整之前断了。每次失败的尝试一条,不论这一轮后来恢复没有;取消不算。 | 会话 | `error_kind`、`error_message`、`http_status?`、`latency_ms`、`model` |
+| `provider_switched` | 一次模型调用去了与本会话上一次调用不同的 provider:排在前面的配额用完、没有密钥、密钥被拒、连不上或重试用尽,或排在前面的又能用了。 | 会话 | `from`、`reason`、`task`、`to` |
 | `tool_start` | 工具开始执行:PreToolUse hook、输入校验、权限都放行之后。 | 会话 | `deferred`、`destructive`、`extension?`、`input_json_size`、`tool_name`、`tool_use_id` |
 | `tool_execution` | 工具执行结束,成功或失败;工具自己报告的失败(如 Bash 非零退出)算失败。 | 会话 | `error_message?`、`input_json_size`、`is_error`、`latency_ms`、`outcome`(`approved` / `denied` / `succeeded` / `failed` / `timeout` / `cancelled`)、`result_content_size`、`tool_name`、`tool_use_id`、`user_approved` |
 | `tool_cancelled` | 一次工具调用在等权限回答时会话被关闭。 | 会话 | `elapsed_ms`、`reason`、`tool_name` |

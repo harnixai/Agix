@@ -189,7 +189,7 @@ impl Agent {
                     after_first_byte,
                     sent,
                     &mut recovering,
-                    &mut state.model,
+                    &state.model,
                     step,
                     cancel,
                 )
@@ -266,7 +266,7 @@ impl Agent {
             cancel.clone(),
             cancel_grace,
             self.llm.interceptors(),
-            self.llm.model().provenance(),
+            self.llm.model().provenance().as_deref(),
         )
         .await
         .map_err(|failure| (failure, true))

@@ -63,7 +63,7 @@ impl Model for TelemetryModel {
         self.inner.api_type()
     }
 
-    fn provenance(&self) -> Option<&str> {
+    fn provenance(&self) -> Option<String> {
         self.inner.provenance()
     }
 

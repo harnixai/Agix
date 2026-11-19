@@ -137,20 +137,20 @@ pub async fn pool(
         );
     }
 
-    // Validation, not a value: every session's router is built by its own
-    // `(project, scene)` binding from that pair's settings. What this still
-    // does is fail startup loudly on a daemon whose own project names a
-    // provider config that cannot resolve, rather than letting every session
-    // quietly fall back to the plain client.
     let credentials: Arc<dyn CredentialSource> = match &assembly.credentials {
         Some(host) => Arc::new(base::interface::credentials::ConfigThen(host.clone())),
         None => Arc::new(base::interface::credentials::ConfigCredentials),
     };
-    validate_task_router_config(config, &credentials)?;
     let client = match assembly.model_client {
         Some(client) => client,
         None => default_anthropic_client(assembly.credentials.as_deref(), &config.paths.layout())?,
     };
+    // Validation, not a value: every session's router is built by its own
+    // `(project, scene)` binding from that pair's settings. What this still
+    // does is fail startup loudly on a daemon whose own project's providers
+    // do not route, rather than letting every session quietly fall back to
+    // the built-in provider.
+    validate_task_router_config(config, &client, &credentials)?;
     if matches!(
         settings.values.permissions.mode,
         base::permission::PermissionMode::BypassPermissions
@@ -265,7 +265,7 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
         Some(&paths.project_root()),
         &paths.layout(),
         &config.settings.paths.scope,
-        &config.settings.values.model.model_name,
+        &config.settings.default_model,
         config.max_tokens_fallback,
     )
 }
@@ -284,49 +284,31 @@ fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission:
     (path, managed)
 }
 
-/// Multi-provider routing, or `None` when the deployment configured none.
-///
-/// Purely additive: with no `providers`, sub-agent spawns inherit the one
-/// client built above. An invalid configuration fails the assembly instead of starting a
-/// daemon that silently routes everything to the default.
+/// Whether the daemon's own pair's providers route and build.
 fn validate_task_router_config(
     config: &DaemonConfig,
+    client: &Arc<dyn AnthropicClient>,
     credentials: &Arc<dyn CredentialSource>,
 ) -> anyhow::Result<()> {
-    if config.settings.values.providers.is_empty() {
-        return Ok(());
-    }
-    let (resolved, warnings) = base::provider::resolve_task_models(
-        &config.settings.values.providers,
-        config.settings.values.default_provider.as_deref(),
-        &config.settings.values.task_models,
-    )
-    .map_err(|e| anyhow::anyhow!("invalid multi-provider LLM config: {e}"))?;
-    for w in &warnings {
-        warn!("model routing: {w}");
-    }
-    for (task, r) in &resolved {
-        info!(task = %task, provider = %r.provider_id, model = %r.model, "model routing resolved");
-    }
-    let default_provider = config
-        .settings
-        .values
-        .default_provider
-        .as_deref()
-        .expect("resolve_task_models already validated default_provider is set");
-    crate::model_router::build_task_router(
-        &config.settings.values.providers,
-        default_provider,
-        resolved,
+    let settings = &config.settings;
+    let router = crate::model_router::build_task_router(
+        &settings.values,
+        client,
         credentials,
         &config.paths.layout(),
+        settings
+            .paths
+            .global_data_dir
+            .join(base::paths::entry::QUOTA),
     )
-    .map_err(|e| anyhow::anyhow!("failed to build multi-provider model router: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("the providers in settings do not route: {e}"))?;
+    info!(order = ?router.order(), "model providers");
     Ok(())
 }
 
-/// The client used when no provider routing applies: keyed from the
-/// environment, else from the host's source, asked for provider `"default"`.
+/// The client of the provider the engine supplies when the settings define
+/// none: keyed from the environment, else from the host's source, asked for
+/// provider `"default"`.
 ///
 /// With no key anywhere (an empty one counts as none) it is a
 /// [`NoCredentialsClient`]: a daemon that cannot reach the default provider
@@ -367,8 +349,8 @@ fn default_anthropic_client(
         return Ok(Arc::new(NoCredentialsClient::new(
             "provider `default` has no API key: set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY \
              (any non-empty value for an ANTHROPIC_BASE_URL gateway that needs none), configure \
-             a provider with `api_key` / `api_key_env` in settings, or have the host supply one \
-             through its CredentialSource; the request was not sent",
+             a provider with `api_key_env` in settings, or have the host supply one through its \
+             CredentialSource; the request was not sent",
         )));
     };
     let auth = AuthMode::ApiKey(api_key);

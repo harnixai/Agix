@@ -65,13 +65,13 @@ impl Model for Answering {
     }
 }
 
-/// Serve `project` on `scene` with `model`, and `task_router` when given,
-/// in place of what its settings would build.
+/// Serve `project` on `scene` with `model` in place of what its settings
+/// would build.
 async fn bind(pool: &SessionPool, project: &Path, scene: &str, model: Arc<dyn Model>) {
     let mut settings = (*pool.bindings.pool_settings().await).clone();
     settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
-    binding.model = model;
+    binding.answer_with(model);
     pool.bindings
         .insert((Some(project.to_path_buf()), scene.to_string()), binding)
         .await;

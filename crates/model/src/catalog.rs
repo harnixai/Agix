@@ -39,7 +39,7 @@ impl From<ModelError> for ListModelsError {
     }
 }
 
-/// Every model the endpoint of a provider with this `api_type` and `base_url`
+/// Every model the endpoint of a provider with this `api` and `base_url`
 /// lists, in the endpoint's order, up to [`MAX_PAGES`] pages of at most
 /// [`MAX_PAGE_BYTES`] each.
 pub async fn list_models(
@@ -52,9 +52,9 @@ pub async fn list_models(
     let listing = async {
         match api_type {
             "anthropic" => list_anthropic(base_url, api_key, net).await,
-            "openai_compatible" => {
+            "openai_chat" => {
                 let base = base_url.ok_or_else(|| {
-                    ModelError::invalid_request("api_type 'openai_compatible' requires base_url")
+                    ModelError::invalid_request("api 'openai_chat' requires base_url")
                 })?;
                 list_openai(&openai_models_url(base, "/chat/completions")?, api_key, net).await
             }
@@ -63,7 +63,7 @@ pub async fn list_models(
                 list_openai(&openai_models_url(base, "/responses")?, api_key, net).await
             }
             other => Err(ListModelsError::Unsupported(format!(
-                "listing models is not implemented for api_type '{other}'"
+                "listing models is not implemented for api '{other}'"
             ))),
         }
     };

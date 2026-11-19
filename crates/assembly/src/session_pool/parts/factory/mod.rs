@@ -235,9 +235,7 @@ impl EngineFactory {
         if let Some(clock) = clock {
             builder = builder.environment(clock);
         }
-        if let Some(router) = task_router {
-            builder = builder.task_router(router);
-        }
+        builder = builder.task_router(task_router);
         builder = builder.scene_registry(req.scene_registry);
         let (mut builder, script_ledger, script_faults) = bind_session_scripts(
             builder.ext_commands(req.packages.commands),
@@ -380,9 +378,9 @@ impl EngineFactory {
     }
 }
 
-/// The conversation's model and the task router, each wrapped in the
-/// session's recorder when it asked for one, the model name chosen for it,
-/// and the clock it keeps time by.
+/// The conversation's model and the session's own router, its clients
+/// wrapped in the session's recorder when it asked for one, the model name
+/// chosen for it, and the clock it keeps time by.
 #[allow(clippy::type_complexity)]
 fn models(
     session_id: &str,
@@ -391,7 +389,7 @@ fn models(
 ) -> Result<
     (
         Arc<dyn base::interface::model::Model>,
-        Option<Arc<base::provider::TaskRouter>>,
+        Arc<base::provider::TaskRouter>,
         Option<String>,
         Option<Arc<dyn base::interface::environment::Environment>>,
     ),
@@ -399,62 +397,42 @@ fn models(
 > {
     let options = spec.options.as_ref();
     let base_settings = &binding.settings;
-    let task_router = binding.task_router.clone();
-    // Wrap the model in a recorder if this session asked for one.
-    //
-    // Both the conversation's model *and* every routed provider get
-    // wrapped, sharing one `Recorder` so they write into one recording.
-    // Wrapping only the conversation's model left sub-agents, compaction
-    // and memory extraction — everything reached through the router —
-    // recording nothing whenever `providers` was configured.
     let recorder_config = options
         .and_then(|o| o.recorder.as_ref())
         .map(|recorder| recorder_config(session_id, recorder, base_settings));
     let clock = session_clock(options, recorder_config.as_ref(), session_id);
-    let provider_id = spec.provider();
-    let conversation_model = match provider_id.as_deref() {
-        None => binding.model.clone(),
-        Some(id) => binding
-            .provider_client(id)
-            .ok_or_else(|| format!("provider `{id}` is not configured"))?,
+    let router = binding
+        .task_router
+        .for_session(spec.provider().as_deref())?;
+    let model_name = match spec.model() {
+        Some(name) => router.resolve_model(&name),
+        None => router
+            .model_name_for(base::provider::TaskTiers::MAIN)
+            .unwrap_or_else(|| base_settings.values.model.model_name.clone()),
     };
-    let model_name = spec.model().or_else(|| match provider_id.as_deref() {
-        Some(id) => binding
-            .settings
-            .values
-            .providers
-            .get(id)
-            .and_then(|config| config.default_model.clone()),
-        None => binding
-            .task_router
-            .as_ref()
-            .and_then(|router| router.model_name_for("main"))
-            .map(str::to_string),
-    });
-    let (model, task_router) = match recorder_config {
-        None => (conversation_model, task_router),
+    // Every provider's client is wrapped, sharing one `Recorder`, so
+    // sub-agents, compaction and memory extraction — everything reached
+    // through the router — record into the same recording as the
+    // conversation.
+    let router = match recorder_config {
+        None => router,
         Some(config) => {
             let shared = spec.recorder.clone().unwrap_or_default();
-            let wrap = |provider_id: Option<&str>,
-                        inner: Arc<dyn base::interface::model::Model>| {
-                let mut m = RecorderModel::shared(
-                    inner,
-                    Some(config.clone()),
-                    env!("CARGO_PKG_VERSION"),
-                    shared.clone(),
-                );
-                if let Some(id) = provider_id {
-                    m = m.with_provider_id(id);
-                }
-                Arc::new(m) as Arc<dyn base::interface::model::Model>
-            };
-            (
-                wrap(provider_id.as_deref(), conversation_model),
-                task_router.map(|r| Arc::new(r.map_models(|id, inner| wrap(Some(id), inner)))),
-            )
+            router.map_models(|provider_id, inner| {
+                Arc::new(
+                    RecorderModel::shared(
+                        inner,
+                        Some(config.clone()),
+                        env!("CARGO_PKG_VERSION"),
+                        shared.clone(),
+                    )
+                    .with_provider_id(provider_id),
+                ) as Arc<dyn base::interface::model::Model>
+            })
         }
     };
-    Ok((model, task_router, model_name, clock))
+    let model = router.model_for(base::provider::TaskTiers::MAIN);
+    Ok((model, Arc::new(router), Some(model_name), clock))
 }
 
 /// What the session's `recorder` option asks the model wrapper to do.

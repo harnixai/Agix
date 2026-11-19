@@ -95,7 +95,6 @@ async fn chat_completions_is_reachable_from_behind_an_allowlist() {
         max_tokens: 256,
         thinking_mode: ThinkingMode::Off,
         effort: None,
-        fallback_model: None,
         cache_edits: Vec::new(),
         origin: None,
         input_map: None,

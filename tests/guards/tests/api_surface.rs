@@ -484,10 +484,12 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ),
     ("SystemKind", PROTOCOL),
     ("TaskEvent", PROJECTED),
-    ("TaskModelOverride", SETTING),
     ("TeamStageStatus", PROJECTED),
     ("ThinkingMode", SETTING),
-    ("ThinkingToggle", SETTING),
+    (
+        "ThinkingToggle",
+        "how a vendor switches thinking; the Chat Completions request builder places every variant",
+    ),
     (
         "Tier",
         "a layer's tier decides what it may set; the layering decides every variant",
@@ -506,6 +508,7 @@ const CLOSED_ENUMS: &[(&str, &str)] = &[
     ("TrustSource", TRUST),
     ("TurnStep", HOST_ANSWER),
     ("ValidationResult", HOST_ANSWER),
+    ("Vendor", SETTING),
     ("Workdir", DELEGATE_ASK),
     (
         "Workspace",

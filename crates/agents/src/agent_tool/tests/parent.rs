@@ -92,7 +92,6 @@ impl TestParent {
             fallback_settings(
                 self.config.model.clone(),
                 self.config.max_tokens,
-                self.config.fallback_model.clone(),
                 std::env::temp_dir(),
             )
         });

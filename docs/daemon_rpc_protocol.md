@@ -874,7 +874,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
     "status": "…",                    // ok | degraded | failing,取所有检查里最差的一项
     "checks": [                       // 每项的 details 与下面同名的顶层字段是同一份数据
       { "name":"settings.tiers",     "status":"ok", "summary":"every settings.json present parses" },
-      { "name":"settings.providers", "status":"ok", "summary":"provider routing resolves" },
+      { "name":"settings.providers", "status":"ok", "summary":"the providers route" },
       { "name":"settings.hooks",     "status":"ok", "summary":"hooks configuration parses" },
       { "name":"memory",             "status":"ok", "summary":"0/200 memories",
         "details": { "enabled":true, "count":0, "cap":200 } },
@@ -892,13 +892,15 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
     { "tier":"global",  "path":"…/settings.json",       "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] },
     { "tier":"scene",   "scene":"code", "path":"…/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] },
     { "tier":"project", "path":"…/.agix/settings.json", "exists":false, "parses":true, "error":null, "unknown_keys":[], "ignored_values":[] } ],
-  "providers": { "ok":true, "default_provider":null, "configured":[], "task_models":[],
-                 "warnings":[], "error":null },
+  "providers": { "ok":true, "configured":["anthropic"], "order":["anthropic"],
+                 "tasks": { "main":"strong", "subagent":"balanced", "compact":"fast",
+                            "memory":"fast", "title":"fast", "web_search":"fast" },
+                 "error":null },
   "hooks": { "configured":false, "ok":true, "error":null },
   "session_persistence": { "history_store_wired":true },
   "plugins": { "status":"enabled" },
   "permission_rules_count": 0,
-  "model": { "model_name":"claude-sonnet-4-6", "api_type":"Anthropic" },
+  "model": { "model_name":"claude-sonnet-4-6", "provider":"anthropic" },
   "runtime": { "sessions":[], "stopping_engines":0 } }
 ```
 
@@ -3091,7 +3093,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 // ← result
 { "tier": "global", "dry_run": false,
   "written_to": "/Users/x/.agix/settings.json",
-  "secrets_written_to": "/Users/x/.agix/settings.local.json",   // 只在改了 settings.local.json 时
+  // "secrets_written_to": "/Users/x/.agix/settings.local.json", // 只在改了 settings.local.json 时
   "changed": ["permissions.mode", "web.allowed_domains", "telemetry.otlp_endpoint"],
   "rejected": [ ],                     // 只有 dry_run 才可能非空
   "effective": { "permissions.mode": "acceptEdits", "web.allowed_domains": ["github.com"],
@@ -3099,8 +3101,8 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "overridden": [ ],
   "revision": "r1:…",
   // "warnings": [ "…" ],              // 只在写进 settings.json 的值里看得出凭据时,见下
-  "providers": [ ], "default_provider": null, "task_models": [ ],
-  "routing": { "ok": true, "warnings": [ ], "error": null, "router_rebuilt": false,
+  "providers": [ ], "order": [ ],
+  "routing": { "ok": true, "warnings": [ ], "error": null, "router_rebuilt": true,
                "router_error": null, "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
 ```
 
@@ -3172,21 +3174,20 @@ revision,什么都不写,重读再写即可。锁等满 10 秒 → `SETTINGS_LOC
 
 ```jsonc
 // ← result
-{ "providers": [ ],           // 重载后配置里的 provider id
-  "default_provider": null,
-  "task_models": [ ],         // 重载后配置里的 task 名
+{ "providers": [ ],           // 重载后定义的 provider id;一个都没定义时是引擎自带的 anthropic
+  "order": [ ],               // 调用依次尝试的 provider(model.order;没写时是第一个定义的)
   "routing": {
-    "ok": true,               // 配置形状解析得通
+    "ok": true,               // provider 路由得通:各档模型都在 models 里,order 里的 id 都有定义
     "warnings": [ ], "error": null,
-    "router_rebuilt": false,  // 真的建出了一个可用的 router
+    "router_rebuilt": true,   // 真的建出了一个可用的 router
     "router_error": null,
     "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
 ```
 
-`ok` 与 `router_rebuilt` 是**两件事**:配置可以解析得通(`ok: true`)却建不出客户端
-(`router_rebuilt: false` + `router_error`),`api_type: openai_compatible` 就是这种。
+`ok` 与 `router_rebuilt` 是**两件事**:配置可以路由得通(`ok: true`)却建不出客户端
+(`router_rebuilt: false` + `router_error`),`api: openai_chat` 缺 `base_url` 就是这种。
 
-`api_type` 取值：`anthropic`、`openai_compatible`（Chat Completions）、`openai_responses`（OpenAI Responses API，`/v1/responses`，流式事件按类型解析；PDF 以 `input_file` 送出）。
+`api` 取值：`anthropic`、`openai_chat`（Chat Completions）、`openai_responses`（OpenAI Responses API，`/v1/responses`，流式事件按类型解析；PDF 以 `input_file` 送出）。
 
 重载按新配置重连 MCP server,最多等 10 秒:到点还没连完的列在 `mcp_connecting`,在后台接着连,
 各自的结果随后以 `mcp_connected` / `mcp_connect_failed` 通知到达(同会话创建)。命令不存在、
@@ -3240,11 +3241,12 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 // → params (getProvider)
 { "scene": "code",                      // 都可选,见上
   "project_root": "/Users/x/repo-b",
+  "provider_id": "deepseek",            // 可选:只要这一个;省略 = 全部
   "include_secrets": false }
 // ← result (getProvider)
-{ "providers": { },           // { "<id>": {api_type, base_url, api_key, api_key_env, default_model, models, reasoning_passback, thinking_toggle, credential_present} }
-  "default_provider": null,
-  "task_models": { } }
+{ "providers": [ ],           // [ {id, vendor, api, base_url, api_key_env, models, tiers, quota, usage?, credential_present, builtin, defined_in?} ]
+  "order": [ ],
+  "tasks": { } }
 ```
 
 `api_key` 默认脱敏为 `***<末 4 位>`,`base_url` 里的密码默认换成 `***`(`https://u:***@host`)。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
@@ -3288,10 +3290,9 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 { "tier": "project",                                   // 可选;"project"(缺省)| "scene" | "global"
   "dry_run": false,                                    // 可选;true = 只试算,不写
   "provider_id": "deepseek",
-  "config": { "api_type":"openai_compatible", "base_url":"…",
-              "api_key":"…", "default_model":"…" },   // 部分补丁,逐键 merge
-  "default_provider": "deepseek",                      // 可选
-  "task_models": { "subagent": "deepseek" },           // 可选,逐键 merge
+  "config": { "vendor":"deepseek", "api":"openai_chat", "base_url":"…",
+              "api_key_env":"DEEPSEEK_API_KEY",
+              "tiers": { "strong":"deepseek-chat" } },  // 部分补丁,逐键 merge 进 providers 里这个 id 的那一项
   "delete": false }                                    // 可选;true = 删掉这个 provider
 ```
 
@@ -4045,6 +4046,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `subagent_progress` | `{agent_label,agent_session_id,agent_type,parent_turn,parent_tool_use_id,task_id,event}` | 子 Agent 事件镜像,`event` 是嵌套的本表结构(同样不带 `turn_id`;子 Agent 的事件本表里没有的,整帧不发);`parent_tool_use_id` 是父会话里发起它的那次 `Agent` 调用,不知道时为 `null`;`task_id` 是它在 `session.tasks` 里的任务 |
 | `team_progress` | `{team,team_id,stage,stage_index,stage_count,status,members,failed}` | 团队阶段生命周期 |
 | `skills_changed` | `{added,removed}` | 会话可用的 skill 与它上次看到的不同:skill 文件在两轮之间增删后,下一轮开始时发一次(同一份 skill 目录上的每个会话各发各的;宿主目录的改动只到列了它的会话)。缓存了 `commands.list` 的客户端该重取 |
+| `provider_switched` | `{from,to,reason,task}` | 这次模型调用去了与本会话上一次调用不同的 provider(`model.order`):`from` 配额用完、没有密钥、密钥被拒、连不上或重试用尽,`reason` 逐个说明排在 `to` 前面的为什么没接;或排在前面的又能用了。`task` 是调用的种类(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`);子 Agent 的也报在父会话上 |
 | `notification` | `{message,status}` | 模型用 `PushNotification` 要用户回来看:宿主该把 `message` 以通知的形式送到用户面前(桌面通知、消息推送……)。`status` 是 `"proactive"`(模型主动发的)或 `null`;引擎自己的提醒(如 `permit_always` 的 `local` 没能写下)也走这一帧,`status` 为 `null`。同时触发 `Notification` hook,`reason` 即 `message` |
 | `compact` | `{strategy,messages_before,messages_after,tokens_before,tokens_after,dropped_rounds?,dropped_messages?,estimated_tokens_saved?,trim?}` | 上下文被压缩或修剪了(§7.1) |
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
@@ -4492,6 +4494,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `session_closed` | 这一轮中途会话被关闭或删除 | `false` |
 | `engine_stopped` | 引擎在一轮中途退出;会话已移出内存,下一次调用(包括排在这一轮后面等着的)从 transcript 恢复它。引擎 panic 也走这里,但只在会 unwind 的构建里(dev、`release-fast`);`--release` 构建是 `panic = "abort"`,panic 直接结束整个 daemon | `true` |
 | `engine_unreachable` | 引擎没有接下、没有回答一个回合之外的请求 | `true` |
+| `providers_unavailable` | `model.order` 里的 provider 都接不了这次调用:配额用完、没有密钥、密钥被拒、连不上或重试用尽;`message` 逐个列出原因。只有一个 provider 时报它自己的错误种类 | `true` |
 | `persist_failed` | 会话的日志缺了它在内存里的一部分(上一轮写日志失败,如 `turn_complete` 报 `persisted: false`),重建前补写又失败;会话没有重建,照旧在跑 | `true` |
 | `internal` | 引擎内部错误 | `false` |
 

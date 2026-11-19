@@ -1,6 +1,6 @@
 //! PageExtractor —— 用一个模型从抓到的页面里取出 `WebFetch` 要的东西。
 //!
-//! `task_models.web_fetch` 配了模型时 `WebFetch` 才带上它：把页面文本和调用方
+//! `model.tasks.web_fetch` 配了档位时 `WebFetch` 才带上它：把页面文本和调用方
 //! 的 `prompt` 交给那个模型，返回它的回答而不是整页。走的是 `dyn Model`，所以
 //! 照常进录像、用量统计，也跟着路由到任何提供方。
 
@@ -66,7 +66,6 @@ impl PageExtractor {
             max_tokens: MAX_OUTPUT_TOKENS,
             thinking_mode: ThinkingMode::Off,
             effort: None,
-            fallback_model: None,
             cache_edits: Vec::new(),
             origin: Some(CallOrigin::auxiliary(session_id, call_purpose::WEB_FETCH)),
             input_map: None,

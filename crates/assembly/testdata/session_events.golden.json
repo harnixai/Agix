@@ -1500,6 +1500,46 @@
       }
     },
     {
+      "between_turns": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "from": "ds",
+            "kind": "provider_switched",
+            "reason": "`ds`: day quota of 100 tokens used up (120 since 2026-11-19)",
+            "task": "main",
+            "to": "claude"
+          },
+          "session_id": "s1",
+          "turn_id": null
+        }
+      },
+      "case": "provider_switched",
+      "event": {
+        "from": "ds",
+        "kind": "provider_switched",
+        "reason": "`ds`: day quota of 100 tokens used up (120 since 2026-11-19)",
+        "task": "main",
+        "to": "claude"
+      },
+      "in_turn": {
+        "jsonrpc": "2.0",
+        "method": "session.event",
+        "params": {
+          "event": {
+            "from": "ds",
+            "kind": "provider_switched",
+            "reason": "`ds`: day quota of 100 tokens used up (120 since 2026-11-19)",
+            "task": "main",
+            "to": "claude"
+          },
+          "session_id": "s1",
+          "turn_id": "t1"
+        }
+      }
+    },
+    {
       "between_turns": null,
       "case": "agent_spawned",
       "event": {

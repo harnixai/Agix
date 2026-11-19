@@ -66,7 +66,7 @@ use std::sync::Arc;
 ///
 /// `WebFetchTool` is registered here without page extraction;
 /// [`register_web_fetch`] swaps in the extracting one when a session routes
-/// `task_models.web_fetch` to a model.
+/// `model.tasks.web_fetch` to a tier.
 pub fn register_builtin_tools(reg: &std::sync::Arc<base::tool::InMemoryToolRegistry>) {
     let simple: Vec<Arc<dyn Tool>> = vec![
         Arc::new(crate::bash::BashTool),
@@ -250,7 +250,7 @@ mod register_builtin_tools_tests {
     #[async_trait::async_trait]
     impl base::interface::model::Model for NoSearch {
         fn api_type(&self) -> base::provider::ApiType {
-            base::provider::ApiType::OpenAICompatible
+            base::provider::ApiType::OpenAIChat
         }
         async fn stream(
             &self,

@@ -7,7 +7,7 @@ use base::interface::model::{
     Usage,
 };
 use base::prompt::PromptBlock;
-use base::provider::{ApiType, ResolvedModel, TaskRouter};
+use base::provider::{ApiType, ResolvedTiers, RoutedProvider, TaskRouter, TaskTiers};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Answers every call: a naming call with `title`, anything else with a
@@ -110,8 +110,10 @@ async fn bind(
     let mut settings = (*pool.bindings.pool_settings().await).clone();
     settings.values.memory.enabled = false;
     let mut binding = pool.bindings.binding_from(settings);
-    binding.model = model;
-    binding.task_router = task_router.map(Arc::new);
+    match task_router {
+        Some(router) => binding.task_router = Arc::new(router),
+        None => binding.answer_with(model),
+    }
     pool.bindings
         .insert((Some(project.to_path_buf()), scene.to_string()), binding)
         .await;
@@ -247,29 +249,25 @@ async fn a_session_is_named_through_its_own_projects_title_route() {
     let project = dir.path().join("project");
     std::fs::create_dir_all(&project).unwrap();
 
-    let main = Answering::new("不该用这个");
-    let titler = Answering::new("发布清单");
-    let router = TaskRouter::new(
-        HashMap::from([
-            ("main".to_string(), main.clone() as Arc<dyn Model>),
-            ("titler".to_string(), titler.clone() as Arc<dyn Model>),
-        ]),
-        HashMap::from([(
-            call_purpose::TITLE.to_string(),
-            ResolvedModel {
-                provider_id: "titler".into(),
-                model: "title-model".into(),
+    let model = Answering::new("发布清单");
+    let router = TaskRouter::single(
+        RoutedProvider::new(
+            "p",
+            ResolvedTiers {
+                strong: "main-model".into(),
+                balanced: "main-model".into(),
+                fast: "title-model".into(),
             },
-        )]),
-        main.clone(),
+            model.clone(),
+        ),
+        TaskTiers::default(),
     );
-    bind(&pool, &project, "harnix", main.clone(), Some(router)).await;
+    bind(&pool, &project, "harnix", model.clone(), Some(router)).await;
     let sid = harnix_session(&pool, &project, None).await;
     let result = first_turn(&pool, &sid).await;
 
     assert_eq!(result["name"], "发布清单", "{result}");
-    assert_eq!(titler.naming_calls(), ["title-model"]);
-    assert!(main.naming_calls().is_empty());
+    assert_eq!(model.naming_calls(), ["title-model"]);
 }
 
 /// A session's first turn names it as its scene says now: a `scene.reload`

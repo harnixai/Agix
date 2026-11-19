@@ -176,7 +176,6 @@ pub struct CallRequest {
     pub max_tokens: u32,
     pub thinking_mode: base::interface::model::ThinkingMode,
     pub effort: Option<base::interface::model::Effort>,
-    pub fallback_model: Option<String>,
     /// The assembled system blocks, in order, each as it was sent.
     pub system: Vec<CallPart<SystemBlockView>>,
     /// The tool table as sent: `name`, `description`, `input_schema`, `source`.

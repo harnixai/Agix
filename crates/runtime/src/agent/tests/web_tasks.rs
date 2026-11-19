@@ -1,4 +1,4 @@
-//! WebSearch and WebFetch routed through the session model or `task_models`.
+//! WebSearch and WebFetch routed through the session model or the task router.
 
 use super::*;
 
@@ -91,21 +91,23 @@ async fn web_search_goes_through_the_sessions_own_model() {
 }
 
 #[tokio::test]
-async fn task_models_can_route_web_search_to_another_provider() {
+async fn a_router_sends_web_search_to_its_provider() {
     let (session, session_asked) = search_spy("https://from.session.example");
     let (searcher, searcher_asked) = search_spy("https://from.searcher.example");
     let router = base::provider::TaskRouter::new(
-        [("searcher".to_string(), searcher as Arc<dyn Model>)].into(),
-        [(
-            WEB_SEARCH_TASK.to_string(),
-            base::provider::ResolvedModel {
-                provider_id: "searcher".into(),
-                model: "search-model".into(),
+        vec![base::provider::RoutedProvider::new(
+            "searcher",
+            base::provider::ResolvedTiers {
+                strong: "main-model".into(),
+                balanced: "main-model".into(),
+                fast: "search-model".into(),
             },
-        )]
-        .into(),
-        session.clone() as Arc<dyn Model>,
-    );
+            searcher as Arc<dyn Model>,
+        )],
+        Vec::new(),
+        base::provider::TaskTiers::default(),
+    )
+    .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,
@@ -227,21 +229,22 @@ pub(super) fn templated() -> Arc<InMemoryToolRegistry> {
 }
 
 #[tokio::test]
-async fn task_models_web_fetch_extracts_pages_on_the_routed_model() {
+async fn a_web_fetch_tier_extracts_pages_on_the_routed_model() {
     let (session, session_asked) = extract_spy("from the session");
     let (fetcher, fetcher_asked) = extract_spy("from the fetcher");
     let router = base::provider::TaskRouter::new(
-        [("fetcher".to_string(), fetcher as Arc<dyn Model>)].into(),
-        [(
-            WEB_FETCH_TASK.to_string(),
-            base::provider::ResolvedModel {
-                provider_id: "fetcher".into(),
-                model: "fetch-model".into(),
-            },
-        )]
-        .into(),
-        session.clone() as Arc<dyn Model>,
-    );
+        vec![base::provider::RoutedProvider::new(
+            "fetcher",
+            base::provider::ResolvedTiers::all("fetch-model"),
+            fetcher as Arc<dyn Model>,
+        )],
+        Vec::new(),
+        base::provider::TaskTiers {
+            web_fetch: Some(base::provider::Tier::Fast),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,
@@ -279,21 +282,19 @@ async fn task_models_web_fetch_extracts_pages_on_the_routed_model() {
 }
 
 #[tokio::test]
-async fn without_task_models_web_fetch_no_model_reads_the_page() {
+async fn without_a_web_fetch_tier_no_model_reads_the_page() {
     let (session, session_asked) = extract_spy("from the session");
     let (other, other_asked) = extract_spy("from another task's model");
     let router = base::provider::TaskRouter::new(
-        [("other".to_string(), other as Arc<dyn Model>)].into(),
-        [(
-            WEB_SEARCH_TASK.to_string(),
-            base::provider::ResolvedModel {
-                provider_id: "other".into(),
-                model: "search-model".into(),
-            },
-        )]
-        .into(),
-        session.clone() as Arc<dyn Model>,
-    );
+        vec![base::provider::RoutedProvider::new(
+            "other",
+            base::provider::ResolvedTiers::all("search-model"),
+            other as Arc<dyn Model>,
+        )],
+        Vec::new(),
+        base::provider::TaskTiers::default(),
+    )
+    .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(
             scene::code::Interaction::Interactive,

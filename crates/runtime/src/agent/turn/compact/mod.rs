@@ -118,7 +118,7 @@ struct Checkpoint {
 }
 
 impl Agent {
-    /// Routed under the `"compact"` task type, so `task_models.compact` can
+    /// Routed under the `"compact"` task type, so `model.tasks.compact` can
     /// point summarization at another model.
     pub(super) fn compaction_summarizer(&self) -> Option<compaction::llm_summary::LlmSummarizer> {
         let (model, model_name) = self.model_for_task("compact");
