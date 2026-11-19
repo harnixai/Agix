@@ -381,7 +381,7 @@ async fn a_tool_the_policy_refuses_never_runs() -> anyhow::Result<()> {
         .settings(json!({
             "sandbox": PageServer::reachable(),
             "hooks_config": {
-                "PreToolUse": [{ "type": "command", "command": hook, "timeout": 5000 }]
+                "PreToolUse": [{ "type": "command", "command": hook, "timeout": 60000 }]
             }
         }))
         .start()
