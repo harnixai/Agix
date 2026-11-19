@@ -556,6 +556,7 @@ fn main() -> anyhow::Result<()> {
 | 回答宿主工具 | `session.respondToolCall` | `pool.respond_tool_call(id, call_id, HostReply)`；连接提供的工具用 `respond_tool_call_from(Some(watcher_id), ..)` |
 | 压缩 | `session.compact { instructions?, at? }` | `run_turn` 发 `CompactParams { .. }.command()?` 生成的 `/compact …` |
 | 关会话 | `session.close` | `pool.shutdown_session(id)` |
+| 调插件函数 | `plugin.call` / `plugin.functions`，取消用 `plugin.cancel {run_id}` | `pool.call_plugin(PluginCall::new(function, input, PluginCallTarget::Session(id) \| Project(cwd)), cancel)`，`pool.plugin_functions(Option<&PluginCallTarget>)`；取消就是 `cancel.cancel()`（`runext.md` §12） |
 | 关停 | `daemon.shutdown` | `pool.shutdown_all()` 加 §7 |
 
 RPC 层多做、池不替你做的检查：认证；`turn_id` 的形式（§3）；消息与附件都为空时拒绝；`options` 里未知字段的告警；宿主工具回答里图片的 `media_type` 与大小（`ImageSource::check`）：直接给 `ToolResultBlock::image` 不经这道检查。其余方法在 `SessionPool` 上多半同名（见 rustdoc）；它们的参数类型门面没收的，需要时到 `openatta/Agix` 提 issue。
@@ -660,7 +661,7 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 ## 10. 嵌入入口：`agix::embed`
 
-前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型（另有 `js_libs` 用的 `HostJsLib`、`HostCallContext`、`HostJsError`），宿主之后只经协议（`daemon_rpc_protocol.md`）用引擎。
+前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型（另有 `js_libs` 用的 `HostJsLib`、`HostCallContext`、`HostJsError`），宿主之后经协议（`daemon_rpc_protocol.md`）用引擎；协议是 Rust 接口的子集，只有 Rust 才有的（`SessionPool::call_plugin` 的 `CancellationToken`、`register_host_plugin`……）经 `Embedded::pool()` 拿到同一个池去调。
 
 ```rust
 use agix::embed::{EmbedConfig, Embedded};
@@ -730,6 +731,7 @@ engine.shutdown().await;
 - `serve_stream(stream)`：在任意 `AsyncRead + AsyncWrite` 上服务一条连接，分帧、帧上限、在途上限、出站队列都与 unix socket 上的一条连接相同，不要 `daemon.auth`。回复与事件走同一条有序的流：等到一个回复，就已经收到了排在它前面的帧。进程内就用 `tokio::io::duplex`，不必再写一份进程内链路；对端关掉写端，任务结束。
 - `serve_unix()`：在 `config.socket` 上监听，直到关停开始；权限与 agixd 的 socket 相同（`0600`，拒绝引擎自己起的进程）。路径上已有一个还有人在听的 socket（另一个 agixd 或 `Embedded`）时不替换它，返回 `AddrInUse`；没人听的旧文件照常换掉。没有 `instance` 时没有锁，这是唯一挡住两个引擎抢同一个 socket 的地方。关停开始之后再调，什么都不绑、不写，立刻返回。
 - `closed()`：关停开始（有连接发了 `daemon.shutdown`，或调了 `shutdown`）就返回；宿主据此收尾自己的东西。
+- `pool()`：协议服务的那个 `SessionPool`（`&Arc<SessionPool>`），给协议没有的 Rust 用法，如 §8 表里的 `call_plugin`。与协议连接同时用没有问题：两边看到的是同一组会话。
 - `shutdown()`：不再接受连接，停掉所有会话（至多等 10 秒），放掉锁、删掉上面那些文件。可以重复调、并发调，后来的等第一次做完。
 
 **不替宿主做的**，即 §7 表里剩下的：装 tracing subscriber（装了就用 `agix::process::log_filter`）、信号处理、panic 钩子、退出进程、建运行时（用调用方的，必须多线程），以及开了 `otel` 时最后的 `agix::process::shutdown_process_exporter`。
@@ -830,6 +832,7 @@ engine.shutdown().await;
     库式用法：`Assembly::js_libs`；`base::tool::ToolContext` 多一个公有字段 `via`（`ToolContext::new` 给 `"model"`）；
     `ptc::HostLibraries` 与 `RunExtTool::with_host_libraries`；`runtime::agent::Builder::host_js_libs`，`HostContracts`
     多一个 `host_js_libs`。
+  - 新增 `Embedded::pool() -> &Arc<SessionPool>`；`SessionPool::{call_plugin, plugin_functions}` 与 `agix::session::{PluginCall, PluginCallTarget, PluginCallResult, PluginCallError, PluginFunctionInfo}`（宿主调用插件函数，协议上是 `plugin.call` / `plugin.functions` / `plugin.cancel`）。
 
 - **0.3.18** git worktree 从 `<项目>/<project_dir>/worktrees/<名>` 挪到仓库根的 `.wkts/<名>`，第一次建 worktree 时往仓库 `.gitignore` 加的是 `.wkts/`，不再是整个 `<project_dir>/`。目录名由设置 `worktree_dir` 改（只从全局层与场景层读，项目层写了丢掉并告警，`config.set` 写项目层得 `not_at_tier`）。不做兼容：旧位置的 worktree 不再被认作引擎的（要用就自己 `git worktree move`），用户 `.gitignore` 里已有的 `<project_dir>/` 一行不替人删。`<project_dir>/.gitignore` 的引擎条目（`base::paths::local_data_gitignore`）加上 `.imported.json`、`memory/`、`scratchpad/`、`teams/`，有项目的会话建起来时就补上：项目层目录里只有协作者共用的配置随仓库提交。新增 `base::paths::ensure_project_data_gitignore`（项目层目录是符号链接或在项目之外时不写）；`.gitignore` 是符号链接时两处引擎写入都不动它。库式用法：`base::paths::{PROJECT_WORKTREES_DIR, entry::WORKTREES}` 删掉；新增 `DEFAULT_WORKTREES_DIR`、`Layout::{with_worktrees_dir, worktrees_dir_name, worktrees_dir_names}` 与 `WorktreesDirError`，`Layout::{worktrees_dir, gitignore_entry, main_checkout_copies, worktree_of}` 改按 worktree 目录算，`Layout::new` 拒 `.wkts`；`Settings.worktree_dir`、`settings::NOT_FROM_PROJECT_KEYS`、`LoadedSettings::place_worktrees`；`tools::worktree::name_the_directories` 的占位符由 `{project_dir}` 换成 `{worktrees_dir}`；`WorktreeError::WorktreesDirIsALink`（worktree 目录是符号链接时不建）；`Layout::with_worktrees_dir` 拒以 `.git` 开头的名字；`tools::worktree::prune_orphan_worktrees` 删掉（没有调用方，它会删 worktree 目录里认不出的目录）。
   - 新增 `SessionPool::set_permission_mode(session_id, PermissionMode)`,回 `PermissionModeChoice { session_id, mode, requested, clamped }`(即 `session.setPermissionMode`);`SessionEvent` 多一个 `PermissionModeChanged(session_state::ModeChange)`(`ModeChange { mode, source }`,`ModeChangeSource { Host, Model }`);`base::context::Session` 多一个 `host_permission_mode`(trait 唯一的实现在 `session-state`,外部不用实现);`SessionState` 新增 `switch_permission_mode`、`permission_mode_changes`、`subscribe_permission_mode`。新增 `session_state::ModeCeiling` 与 `EngineAttachment::with_mode_ceiling`:挂上的引擎带着它时,`plan` 退出后要回到的模式(含从日志读回的)按它夹紧;不带(自己拼 `EngineAttachment` 的测试)照旧不夹。`base::interface::permission::Delegate` 多一个公有字段 `tightens_only`(`Delegate::new` 给 `false`)与 `Delegate::mode_under(parent)`:自己实现 `PermissionPolicy` 又判子 Agent 调用的,用 `mode_under` 代替 `parent.for_delegate(delegate.mode)`,只能收紧的 agent 类型才不会被 `bypassPermissions` 的父会话带走。

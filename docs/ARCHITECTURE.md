@@ -267,6 +267,16 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 tool-use id,不能向人询问,要批准的调用直接被拒;宿主看不到它们的 `tool_use` 帧。`tests/guards/tests/tool_pipeline.rs`
 守着没有第二条路径。
 
+宿主在轮次之外调插件函数(`plugin.call`,`docs/runext.md` §12)也走这一条:池把为这次调用建的
+`PluginCall` 工具对象交给会话的 `HostToolRunner`(`base::interface::plugin_call`,实现在
+`runtime/src/agent/turn/host_runner.rs`),它不在会话的工具表里、不进对话,tool-use id 是 `host-<id>`。
+谁发起的调用记在 `Caller` 上(`tool.around` 的 `via`):模型(`model`)、程序(`RunCode`)、插件命令
+(`RunExt:<命令>`)、skill 的内联命令(`skill`)、用户敲的 `/name`(`Person`,`user`)、宿主(`Host`,
+`host`)。`Person` 与 `Host` 的调用本身就是批准,会话要问的视同允许,deny 规则与 plan 模式照拦;
+插件命令与宿主调的函数的子调用都是 `Caller::Command`(后者 `via` 为 `PluginCall:<函数>`),按调用时的
+只读或 `writes` 范围收窄,要问人的直接拒。带会话的调用用会话的引擎,可以与正在跑的一轮并发;不带
+会话的,池在给定目录下建一个不写日志、不进会话表、不连 MCP 的临时引擎,只为这一次调用。
+
 **取消有宽限。** 一轮被取消时,还在跑的工具先得到 `tool_cancel_grace`(缺省 2 秒)自己停下,
 过了就丢弃、把这次调用答成已取消,不拖着整轮不收尾。MCP server 把调用转成任务时,调用在原地挂着
 等任务(§6.4),取消同样先走这段宽限;调用被丢弃时才向 server 发 `tasks/cancel`。
@@ -896,7 +906,7 @@ plan 模式的那一次调用)、`short_description`、`callable_from_code`、`c
 | 词 | 含义 |
 |---|---|
 | **Agent** | 执行实体:自己的上下文与步进循环(一轮之内「调模型 → 调工具」直到结束);会话的主 Agent 与常驻团队成员另有输入循环(`Agent::run`),一次性子 Agent 跑完一轮即止。都是线程池上的一个 tokio 任务 |
-| **Task**(运行任务) | 在跑的工作的句柄:状态、输出、取消、收件箱。类型有 agent / shell / monitor / teammate / cron / code(`RunCode` 的程序)/ ext(`RunExt` 的命令);`TaskOutput` / `TaskWait` / `TaskStop` / `TaskMessage`、`session.tasks`、`task_*` 事件说的都是它 |
+| **Task**(运行任务) | 在跑的工作的句柄:状态、输出、取消、收件箱。类型有 agent / shell / monitor / teammate / cron / code(`RunCode` 的程序)/ ext(`RunExt` 的命令、宿主调的插件函数);`TaskOutput` / `TaskWait` / `TaskStop` / `TaskMessage`、`session.tasks`、`task_*` 事件说的都是它 |
 | **Todo** | 记账清单(`TodoWrite`),不执行任何东西 |
 | **Event / Message** | Agent 之间、Agent 与宿主之间的全部交互:输入通道与收件箱进,`AgentEvent` 与 `session.event` 出 |
 

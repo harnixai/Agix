@@ -1125,8 +1125,9 @@ Builder::new().tool_middleware(Arc::new(Deadline));
 包装按注册顺序嵌套,先注册的在最外面。
 
 `ToolCall::via` 说这次调用是谁发起的:`model`、`RunCode`(程序的子调用)、`RunExt:<命令名>`
-(插件命令的子调用)、`user`(用户敲的 `/name` 插件命令)、`skill`(skill 的内联命令)。`plugin` 是
-`RunExt:<命令名>` 时命令所在的包名(其余为 `None`),`project_root` 是会话有项目时的工作目录。
+(插件命令的子调用)、`user`(用户敲的 `/name` 插件命令)、`skill`(skill 的内联命令)、`host`(宿主在轮次
+之外调插件函数的那次 `PluginCall`)、`PluginCall:<调用名>`(那个函数的子调用)。`plugin` 是
+`RunExt:<命令名>` 或 `PluginCall:<调用名>` 时命令或函数所在的包名(其余为 `None`),`project_root` 是会话有项目时的工作目录。
 
 daemon 的嵌入方碰不到 `Builder`——会话引擎是池子建的。`Assembly { customize_session:
 Some(..), .. }` 交给池子一个 `SessionCustomizer`:每建一次会话引擎,池子把配好的

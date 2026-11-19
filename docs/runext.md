@@ -352,7 +352,39 @@ may write reports/**``，不写文件的是 ``…; writes no files``；`disclosu
 
 包顶层的 `uses`（`plugin_packages.md`「宿主库」）同样管函数：函数的运行时里装着包声明的宿主库。
 
-宿主怎么调、`ctx` 里有什么、权限与取消，见 `daemon_rpc_protocol.md` 的 `plugin.call` 与 `agix-sdk.md`。
+### 调用
+
+宿主按调用名调：协议上是 `plugin.call`（列表 `plugin.functions`、取消 `plugin.cancel`，见
+`daemon_rpc_protocol.md` §6.5），Rust 上是 `SessionPool::call_plugin(PluginCall, CancellationToken)`
+（`agix-sdk.md` §8）。只接受调用名与结构化的 `input`，没有命令行。
+
+```js
+async function check(input, ctx) {
+  // input: 宿主给的 input（有 input_schema 时已校验过），没给是 null
+  // ctx:   { via: "host", projectRoot, cwd, plugin: { name, version },
+  //          function: "xflow.check", session: <会话 id 或 null>, readOnly }   冻结的
+  return { passed: true };
+}
+```
+
+返回值原样（字符串或可序列化的值）交回宿主：`{ ok: true, value, logs }`；`logs` 是 `log` / `console.*`
+记下的行。失败是 `{ ok: false, error: { code, message }, logs }`：`invalid_input`（不符合 `input_schema`，
+没跑）、`refused`（管线没让跑）、`threw`（抛了错；`message` 是错误消息，再跟已经做了的改动）、
+`timeout`、`cancelled`、`stopped`、`not_started`。
+
+- **一次内部工具调用**：调用以 `PluginCall {function, input}` 走会话的整条工具管线——权限、
+  `PreToolUse`、`tool.around`（`via: "host"`）、执行、`PostToolUse`、遥测；它不在模型的工具表里，
+  也不进对话。权限规则写 `PluginCall(xflow.check)`。
+- **调用是宿主的批准**：会话要问的视同允许，deny 规则、plan 模式照拦。`plan` 模式下只读的调用
+  照常跑。
+- **子调用**同命令的子调用（§6），`tool.around` 看到 `via: "PluginCall:xflow.check"`：宿主没让写
+  （缺省）时一律不写；让写时只写 `writes` 之内，配置路径照样不让写。**要问人的一律失败**，错误说明
+  哪次调用、为什么；要放行就在这次调用的 `permission_rules` 里写规则。函数里也不能调
+  `Agent` / `RunCode` / `RunExt`。
+- **在哪跑**：带会话时用那个会话的工具、MCP、规则、目录与信任，不开新一轮，可以与正在跑的一轮并发，
+  调用是会话的一件 `ext` 任务（`session.tasks` 看得到，`session.stopTask` 能停）；不带会话时在给定
+  目录下用场景的工具与这个目录的规则，在一个不写日志、不进会话列表、不连 MCP 的临时引擎上跑完即收。
+- **限额**：与 `RunCode` / `RunExt` 共用同时运行脚本的名额，时限缺省并至多两分钟，其余同命令（§7）。
 
 ## 13. 和其他扩展方式的关系
 

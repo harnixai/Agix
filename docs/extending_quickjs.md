@@ -285,9 +285,11 @@ function onVariable(ctx) {
 
 `via` 是这次调用由谁发起:`"model"`(模型直接调,包括模型写进子 Agent prompt 里的 `/name`)、
 `"RunCode"`(模型写的程序里的子调用)、`"RunExt:<命令名>"`(插件命令的子调用,`runext.md`)、
-`"user"`(用户敲的 `/name` 插件命令那次 `RunExt` 本身)、`"skill"`(skill 正文里的内联命令)。
+`"user"`(用户敲的 `/name` 插件命令那次 `RunExt` 本身)、`"skill"`(skill 正文里的内联命令)、
+`"host"`(宿主在轮次之外调插件函数的那次 `PluginCall` 本身,`runext.md` §12)、
+`"PluginCall:<调用名>"`(宿主调的插件函数里的子调用,如 `"PluginCall:xflow.check"`)。
 
-`plugin` 是 `via` 为 `"RunExt:<命令名>"` 时那条命令所在的插件包名,其余为 `null`。命令名归哪个包
+`plugin` 是 `via` 为 `"RunExt:<命令名>"` 或 `"PluginCall:<调用名>"` 时那条命令或函数所在的插件包名,其余为 `null`。命令名归哪个包
 是装了什么决定的(同名时按包名排序先到的占着,`runext.md` §2),只看 `via` 的守卫会放行另一个包
 抢先占了这个名字的命令,所以要同时核对包名。
 
