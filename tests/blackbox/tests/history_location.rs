@@ -107,6 +107,9 @@ async fn a_trusted_projects_session_is_kept_in_it_and_resumes_after_a_restart() 
         dir.display()
     );
     assert!(dir.join("metadata.json").is_file());
+    for name in [".gitignore", ".ignore"] {
+        assert_eq!(std::fs::read_to_string(kept_in(&project, name))?, "*\n");
+    }
     let global = names_in(&global_entry(&world, &session));
     assert!(global.contains(&"index.json".to_string()), "{global:?}");
     assert!(!global.contains(&"metadata.json".to_string()), "{global:?}");

@@ -27,20 +27,31 @@ impl ProjectHistoryPolicy {
 
     /// The project at `root` made ready to hold history: its project
     /// directory, `state/` and `state/history` each a directory of its own
-    /// inside the project, the first with its `.gitignore`.
+    /// inside the project, the first with its `.gitignore`, the last with a
+    /// `.gitignore` and an `.ignore` of its own that leave everything in it
+    /// out — of git whatever the repository's own rules say, and of Grep and
+    /// Glob.
     fn prepare(&self, root: &Path) -> bool {
         let Ok(real_root) = root.canonicalize() else {
             return false;
         };
         let dir = self.layout.project_dir(root);
         let state = self.layout.project_state_dir(root);
-        for level in [&dir, &state, &state.join(entry::HISTORY)] {
+        let history = state.join(entry::HISTORY);
+        for level in [&dir, &state, &history] {
             if let Err(why) = own_dir_inside(level, &real_root) {
                 tracing::warn!(dir = %level.display(), "{why}; this session's history is kept globally");
                 return false;
             }
         }
         base::paths::ensure_local_data_gitignore(&dir);
+        for name in [".gitignore", ".ignore"] {
+            let file = history.join(name);
+            if let Err(e) = ignore_everything(&file) {
+                tracing::warn!(file = %file.display(), error = %e, "could not keep the project's history out of the repository; this session's history is kept globally");
+                return false;
+            }
+        }
         true
     }
 }
@@ -56,6 +67,17 @@ fn own_dir_inside(dir: &Path, real_root: &Path) -> Result<(), String> {
     } else {
         Err("not a directory of its own inside the project".into())
     }
+}
+
+fn ignore_everything(file: &Path) -> std::io::Result<()> {
+    const EVERYTHING: &[u8] = b"*\n";
+    match base::fs::read_no_follow(file) {
+        Ok(bytes) if bytes == EVERYTHING => return Ok(()),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    base::fs::write_atomic(file, EVERYTHING, base::fs::WriteOpts::DURABLE)
 }
 
 impl ProjectHistory for ProjectHistoryPolicy {
@@ -148,6 +170,33 @@ mod tests {
         let global = tmp.path().join("global");
         std::fs::create_dir_all(&global).unwrap();
         assert!(!policy(HistoryLocation::Project, &global, &[&root]).keeps_new(&root));
+    }
+
+    #[test]
+    fn the_history_directory_keeps_itself_out_of_git_and_searches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap().join("repo");
+        std::fs::create_dir_all(root.join(".codix")).unwrap();
+        std::os::unix::fs::symlink("/dev/null", root.join(".codix/.gitignore")).unwrap();
+        let global = tmp.path().join("global");
+        std::fs::create_dir_all(&global).unwrap();
+        assert!(policy(HistoryLocation::Project, &global, &[&root]).keeps_new(&root));
+        let history = root.join(".codix/state/history");
+        for name in [".gitignore", ".ignore"] {
+            assert_eq!(
+                std::fs::read_to_string(history.join(name)).unwrap(),
+                "*\n",
+                "{name}"
+            );
+        }
+
+        let linked = tmp.path().canonicalize().unwrap().join("linked");
+        std::fs::create_dir_all(linked.join(".codix/state/history")).unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::write(&outside, "kept").unwrap();
+        std::os::unix::fs::symlink(&outside, linked.join(".codix/state/history/.ignore")).unwrap();
+        assert!(!policy(HistoryLocation::Project, &global, &[&linked]).keeps_new(&linked));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "kept");
     }
 
     #[test]
