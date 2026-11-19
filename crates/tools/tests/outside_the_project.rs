@@ -205,7 +205,7 @@ async fn configuration_is_confirmed_in(layout: &base::paths::Layout, own: &str) 
     let scratch = project
         .path()
         .join(own)
-        .join("scratchpad/x.txt")
+        .join("state/scratchpad/x.txt")
         .display()
         .to_string();
     let check = |tool: &'static str, input: serde_json::Value| {
