@@ -491,7 +491,7 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 恢复;所以换规格的调用(`setModel` 换厂商、`setPrompt`)先只改内存里的规格,重建成功之后才
 记进日志,失败就退回原来的规格,日志与正在跑的引擎不会各说各的。
 
-会话的后台任务(子 Agent、团队成员、后台程序、Monitor)跑在它的运行体之下,停掉旧 `Agent`
+会话的后台任务(子 Agent、团队成员、后台程序、Monitor)和宿主的插件函数调用跑在它的运行体之下,停掉旧 `Agent`
 就停掉了它们,所以**还有后台任务在跑的会话不重建**:绑定失效的那种推迟,这一轮照旧用现在的
 引擎,标记留着下次再看;`session.setPrompt`、换厂商的 `session.setModel` 返回 `SESSION_BUSY`
 (`reason: "background_tasks"`,另带 `running_task_ids`)。

@@ -556,8 +556,9 @@ impl SessionPool {
 
     /// Move live, idle `sid` into `Rebuilding`, so no turn starts until the
     /// rebuild is aborted or the rebuilt entry replaces it. A session whose
-    /// background tasks still run, or that has team members, idle or not, is
-    /// not idle: they run under its engine and would be stopped with it.
+    /// background tasks or host calls still run, or that has team members,
+    /// idle or not, is not idle: they run under its engine and would be
+    /// stopped with it.
     /// Callers hold `sid`'s session lock.
     pub(in crate::session_pool) async fn hold_for_rebuild(
         &self,
@@ -565,12 +566,8 @@ impl SessionPool {
     ) -> Result<HeldSlot, Rebuild> {
         self.live
             .with_live_mut(sid, |live| {
-                if let Some(busy) = live.turn.busy(sid) {
+                if let Some(busy) = live.busy(sid) {
                     return Err(Rebuild::Busy(busy));
-                }
-                let running_tasks = live.background_work();
-                if !running_tasks.is_empty() {
-                    return Err(Rebuild::Busy(Busy::background_tasks(sid, running_tasks)));
                 }
                 live.turn
                     .begin_rebuild()

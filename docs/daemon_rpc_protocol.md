@@ -1958,7 +1958,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 哪一代引擎跑下一轮都在那一轮开始时读它;正在跑的这一轮不会换,这时受理下来,调用方被告知模型
 换了,却看着旧模型答完这一轮。要换就先 `session.interrupt`,或者等这一轮结束。会话正在原地重建时同样
 `SESSION_BUSY`,`reason` 为 `"rebuilding"`。换厂商要重建会话,会话还有后台任务在跑(子 Agent、
-团队成员、后台程序、Monitor)时同样 `SESSION_BUSY`,`reason` 为 `"background_tasks"`,`data` 多一个
+团队成员、后台程序、Monitor、宿主的 `plugin.call`)时同样 `SESSION_BUSY`,`reason` 为 `"background_tasks"`,`data` 多一个
 `running_task_ids` 列出它们 —— 重建会停掉它们;等它们结束,或先 `session.stopTask`。
 
 重建时旧引擎 5 秒内没停下(卡在不理会取消的工具调用里之类;只通知的 hook 在后台跑,不拖住它),也返回 `SESSION_BUSY`
@@ -4486,7 +4486,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 |---|---|---|
 | `turn_running` | 有一轮在跑(`run_turn` 的 `reject`、`setModel`、`setPrompt`、`inspectContext` 等都报这一项) | 那一轮的 id,必定有值 |
 | `rebuilding` | 正在原地重建(`setPrompt`、换厂商的 `setModel`、配置变更后下一轮开始前) | `null` |
-| `background_tasks` | 空闲,但有后台任务在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids` | `null` |
+| `background_tasks` | 空闲,但有后台任务或宿主的 `plugin.call` 在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids`(调用还没起任务时可能为空) | `null` |
 | `previous_engine` | 刚被关闭、驱逐或重建,上一个引擎在宽限期内还没停下 | `null` |
 | `context_operation` | 一个 `inspectContext` / `dropMessages` / `editMessage` 还没答完,会话归它独占 | `null` |
 | `rewinding` | 一个 `session.rewind` 还没答完,会话归它独占 | `null` |

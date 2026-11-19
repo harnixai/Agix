@@ -202,6 +202,10 @@ const FIELDS: &[(&str, &str)] = &[
         "Session: its host skill directories, which every engine it gets is built over",
     ),
     (
+        "SessionCore::host_calls",
+        "Session: the host calls running in it, which no rebuild may cut off",
+    ),
+    (
         "EngineSlot::generation",
         "Engine: the number it attached to the state under",
     ),

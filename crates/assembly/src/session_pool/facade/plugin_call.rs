@@ -4,6 +4,7 @@
 //! 就收掉。设计见 docs/runext.md §12。
 
 use crate::session_pool::parts::factory::{Restore, SessionSeed};
+use crate::session_pool::parts::host_calls::HostCallHold;
 use crate::session_pool::parts::live::{Naming, SessionCore};
 use crate::session_pool::parts::specs::SessionSpec;
 use crate::session_pool::*;
@@ -68,7 +69,7 @@ impl SessionPool {
         let run = async {
             match &call.target {
                 PluginCallTarget::Session(id) => {
-                    let runner = self.session_runner(id).await?;
+                    let (runner, _running) = self.session_runner(id).await?;
                     Ok(runner
                         .run(tool, input, call.permission_rules, stop.clone())
                         .await)
@@ -120,14 +121,21 @@ impl SessionPool {
         }))
     }
 
-    /// The engine `id` runs on, brought into memory if it is not.
-    async fn session_runner(&self, id: &str) -> Result<Arc<dyn HostToolRunner>, PoolError> {
+    /// The engine `id` runs on, brought into memory if it is not, and the
+    /// session counted busy with the call until the hold is dropped.
+    async fn session_runner(
+        &self,
+        id: &str,
+    ) -> Result<(Arc<dyn HostToolRunner>, HostCallHold), PoolError> {
         if !self.session_exists(id).await {
             return Err(PoolError::no_session(id));
         }
         self.ensure_live(id, None).await?;
         self.live
-            .with_live(id, |live| live.engine.host_tool_runner.clone())
+            .with_live(id, |live| {
+                let runner = live.engine.host_tool_runner.clone()?;
+                Some((runner, live.core.host_calls().hold()))
+            })
             .await
             .flatten()
             .ok_or_else(|| PoolError::no_session(id))

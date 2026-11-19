@@ -1,10 +1,37 @@
-//! 宿主调用插件函数时池要记着的东西：不带会话的调用各自建的临时引擎
+//! 宿主调用插件函数时池要记着的东西：一个会话里正在跑几个宿主调用（`HostCalls`，
+//! 有就不算空闲，不被重建、回滚、驱逐），以及不带会话的调用各自建的临时引擎
 //! （`OneCallEngines`），整池关闭时由它停掉这些调用、等它们收尾、回收它们的进程组。
 
 use crate::session_pool::parts::live::SessionCore;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::{CancellationToken, DropGuard};
+
+/// The host calls running in one session, from before its engine is handed
+/// them until they have ended.
+#[derive(Default)]
+pub(in crate::session_pool) struct HostCalls(Arc<AtomicUsize>);
+
+impl HostCalls {
+    pub(in crate::session_pool) fn hold(&self) -> HostCallHold {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        HostCallHold(self.0.clone())
+    }
+
+    pub(in crate::session_pool) fn any(&self) -> bool {
+        self.0.load(Ordering::SeqCst) > 0
+    }
+}
+
+/// One running host call, counted until dropped.
+pub(in crate::session_pool) struct HostCallHold(Arc<AtomicUsize>);
+
+impl Drop for HostCallHold {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 struct OneCallEngine {
     stop: CancellationToken,

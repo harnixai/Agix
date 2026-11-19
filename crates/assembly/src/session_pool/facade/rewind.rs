@@ -65,12 +65,8 @@ impl SessionPool {
     ) -> Result<(InputSender, Arc<SessionCore>, Generation), PoolError> {
         self.live
             .with_live_mut(sid, |live| {
-                if let Some(busy) = live.turn.busy(sid) {
+                if let Some(busy) = live.busy(sid) {
                     return Err(PoolError::SessionBusy(busy));
-                }
-                let running = live.background_work();
-                if !running.is_empty() {
-                    return Err(PoolError::SessionBusy(Busy::background_tasks(sid, running)));
                 }
                 live.turn
                     .begin_exclusive(SessionOp::Rewind)

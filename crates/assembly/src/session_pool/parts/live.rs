@@ -10,7 +10,8 @@
 //! { `SessionHub.inner` | `SessionCore.*` | `SessionState.*` }，叶子锁之间互不嵌套。
 //! `session_locks` 的表锁、`stopping` 和 `one_call` 只在取、放的那一下持有。
 
-use crate::session_pool::parts::host_calls::{OneCallEngines, OneCallGuard};
+use crate::session_pool::api::Busy;
+use crate::session_pool::parts::host_calls::{HostCalls, OneCallEngines, OneCallGuard};
 use crate::session_pool::parts::hub::SessionHub;
 use crate::session_pool::parts::phase::{Generation, Generations, TurnSlot, TurnTicket};
 use crate::session_pool::{CreateError, SessionNamer, AGENT_EXIT_GRACE, PROCESS_GROUP_GRACE};
@@ -102,6 +103,7 @@ pub(in crate::session_pool) struct SessionCore {
     /// The host's skill directories for it, which every engine it gets is
     /// built over.
     skill_dirs: super::bindings::SessionSkillDirs,
+    host_calls: HostCalls,
 }
 
 impl SessionCore {
@@ -156,11 +158,16 @@ impl SessionCore {
             log: LogHealth::default(),
             last_failure: Mutex::new(None),
             skill_dirs: Default::default(),
+            host_calls: HostCalls::default(),
         })
     }
 
     pub(in crate::session_pool) fn skill_dirs(&self) -> &super::bindings::SessionSkillDirs {
         &self.skill_dirs
+    }
+
+    pub(in crate::session_pool) fn host_calls(&self) -> &HostCalls {
+        &self.host_calls
     }
 
     pub(in crate::session_pool) fn id(&self) -> &str {
@@ -320,17 +327,28 @@ impl LiveSession {
         !self.is_busy() && !self.core.log.is_behind()
     }
 
-    /// Whether eviction would cut something off: a turn, a rebuild,
-    /// background tasks, or team members.
+    /// Whether eviction would cut something off: what [`Self::busy`] says,
+    /// or any other task running.
     pub(in crate::session_pool) fn is_busy(&self) -> bool {
-        !self.turn.is_idle()
+        self.busy(self.core.id()).is_some()
             || self
                 .core
                 .state
                 .list_running_tasks()
                 .iter()
                 .any(|(_, status)| matches!(status, base::context::RunningStatus::Running))
-            || !self.live_members().is_empty()
+    }
+
+    /// Why the engine may not be stopped or swapped now: a turn or an
+    /// operation holds the slot, or work runs under it — background tasks,
+    /// team members, host calls.
+    pub(in crate::session_pool) fn busy(&self, sid: &str) -> Option<Busy> {
+        if let Some(busy) = self.turn.busy(sid) {
+            return Some(busy);
+        }
+        let running = self.background_work();
+        (!running.is_empty() || self.core.host_calls.any())
+            .then(|| Busy::background_tasks(sid, running))
     }
 
     /// What runs under this engine beside the turns and would stop with it:

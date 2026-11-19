@@ -130,7 +130,15 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
 }
 
 async fn with_xflow(name: &str, stub: &ProviderStub) -> anyhow::Result<LiveRun> {
-    let mut run = stubbed(name, stub).start().await?;
+    with_xflow_settings(name, stub, json!({})).await
+}
+
+async fn with_xflow_settings(
+    name: &str,
+    stub: &ProviderStub,
+    settings: Value,
+) -> anyhow::Result<LiveRun> {
+    let mut run = stubbed(name, stub).settings(settings).start().await?;
     let source = tempfile::tempdir()?;
     write_package(source.path())?;
     let (archive, _) = package_dir(source.path(), run.world.root(), "xflow")?;
@@ -757,4 +765,64 @@ fn running_command(command: &str) -> bool {
         .args(["-f", command])
         .output()
         .is_ok_and(|out| out.status.success())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_running_a_call_is_not_rebuilt_under_it() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let gate = tempfile::tempdir()?;
+    let (started, release) = (gate.path().join("started"), gate.path().join("release"));
+    let hook = gate.path().join("hold.sh");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\ncat > /dev/null\ntouch '{}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            started.display(),
+            release.display()
+        ),
+    )?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let mut run = with_xflow_settings(
+        "fn-rebuild",
+        &stub,
+        json!({ "hooks_config": { "PreToolUse": [
+            { "type": "command", "command": hook, "timeout": 60_000 }
+        ] } }),
+    )
+    .await?;
+    let session = run.session().await?;
+
+    let mut caller = run.daemon.connect().await?;
+    let call_id = caller
+        .send_request(
+            "plugin.call",
+            json!({ "function": "xflow.check", "session_id": session, "input": { "change": "c6" } }),
+        )
+        .await?;
+    wait_until(|| started.exists(), "the call to reach its hook").await?;
+    let set = run
+        .client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": session, "append": "MID-CALL" }),
+        )
+        .await?;
+    std::fs::write(&release, "")?;
+    let answered = loop {
+        let frame = tokio::time::timeout(Duration::from_secs(30), caller.next_frame())
+            .await??
+            .ok_or_else(|| anyhow::anyhow!("closed"))?;
+        if frame["id"].as_i64() == Some(call_id) {
+            break frame;
+        }
+    };
+    assert_eq!(answered["result"]["ok"], true, "{answered}");
+    assert_eq!(answered["result"]["value"]["gate"], "green", "{answered}");
+    let refused = set.error.expect("a session running a call is busy");
+    assert!(refused.message.contains("busy"), "{}", refused.message);
+    run.finish().await;
+    Ok(())
 }
