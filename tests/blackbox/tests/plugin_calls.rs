@@ -63,6 +63,12 @@ entry = "xflow.js:pause"
 description = "runs the shell commands it is given"
 writes = ["paused/**"]
 
+[[function]]
+name = "delegate"
+entry = "xflow.js:delegate"
+description = "hands the work to a sub-agent"
+writes = ["delegated/**"]
+
 [[script]]
 point = "tool.around"
 entry = "guard.js:onAround"
@@ -93,6 +99,9 @@ async function marked(input, ctx) {
   } catch (e) {
     return String(e.message || e);
   }
+}
+async function delegate(input, ctx) {
+  return await tools.Agent({ prompt: input.prompt, description: "delegated" });
 }
 async function pause(input, ctx) {
   const out = {};
@@ -347,6 +356,48 @@ async fn a_functions_own_task_is_not_a_background_task_its_shell_must_wait_for(
             "the call is not told to wait for itself: {result}"
         );
     }
+    run.finish().await;
+    Ok(())
+}
+
+/// A call in no session leaves nothing under the project's saved tool
+/// results: a long result a function's call gets is not saved to a file (only
+/// a model's own calls' are), and a function cannot start a sub-agent whose
+/// calls would be.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_in_no_session_leaves_no_saved_tool_results_behind() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = with_xflow_settings(
+        "fn-spill",
+        &stub,
+        json!({ "permission_rules": [
+            { "tool": "Bash", "action": "allow" },
+            { "tool": "Agent", "action": "allow" }
+        ] }),
+    )
+    .await?;
+    let params = in_dir(
+        &run,
+        "xflow.pause",
+        json!({ "input": { "count": "seq 1 12000" }, "writes": true }),
+    );
+    let result = call(&mut run, params).await?;
+    assert_eq!(result["value"]["count"], "ran", "{result}");
+    let params = in_dir(
+        &run,
+        "xflow.delegate",
+        json!({ "input": { "prompt": "count to fifty thousand" }, "writes": true }),
+    );
+    let result = call(&mut run, params).await?;
+    assert!(
+        error_of(&result).1.contains("Agent cannot be called"),
+        "{result}"
+    );
+    let saved = run.project.join(".agix/state/tool-results");
+    let left: Vec<_> = std::fs::read_dir(&saved)
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    assert_eq!(left, Vec::<std::path::PathBuf>::new(), "left behind");
     run.finish().await;
     Ok(())
 }
