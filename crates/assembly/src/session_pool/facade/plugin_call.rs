@@ -149,9 +149,6 @@ impl SessionPool {
                 path: dir.to_path_buf(),
             });
         }
-        self.live
-            .refuse_while_shutting_down()
-            .map_err(PoolError::Internal)?;
         let scene = self
             .scenes
             .resolve(None)
@@ -165,7 +162,10 @@ impl SessionPool {
             Naming::default(),
             time::OffsetDateTime::now_utc(),
         );
-        let _closing = Closing(core.clone());
+        let _kept = self
+            .live
+            .keep_one_call(&core, cancel.clone())
+            .map_err(PoolError::Internal)?;
         let spec = SessionSpec {
             options: Some(SessionOptions {
                 attended: Some(true),
@@ -201,18 +201,6 @@ impl SessionPool {
         built.agent.attach_session();
         let runner = built.agent.host_tool_runner();
         Ok(runner.run(tool, input, rules, cancel).await)
-    }
-}
-
-/// What a transient engine leaves running is stopped however its call ends.
-struct Closing(Arc<SessionCore>);
-
-impl Drop for Closing {
-    fn drop(&mut self) {
-        for task in self.0.state().running_background_tasks() {
-            task.cancel.cancel();
-        }
-        self.0.reap_process_groups_later();
     }
 }
 

@@ -5,6 +5,7 @@ pub(super) mod bindings;
 pub(super) mod directory;
 pub(super) mod events;
 pub(super) mod factory;
+pub(super) mod host_calls;
 pub(super) mod hosts;
 pub(super) mod hub;
 pub(super) mod live;

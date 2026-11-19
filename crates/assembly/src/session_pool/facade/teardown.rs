@@ -268,7 +268,7 @@ impl SessionPool {
     }
 
     /// 关闭所有 session，等每个 Agent 把手上的一轮收尾落盘再返回——包括已经
-    /// 被 close、驱逐、还没停下的那些。From the moment this starts no session
+    /// 被 close、驱逐、还没停下的那些，以及宿主调用各自建的临时引擎。From the moment this starts no session
     /// is created; a second call waits for the first to finish.
     ///
     /// Each session is taken out under its session lock, as `session.close`
@@ -279,8 +279,9 @@ impl SessionPool {
             self.live.shut_down().await;
             return;
         };
+        let one_calls = self.live.stop_one_calls();
         let ids = self.live.ids().await;
-        let (exits, ledgers): (Vec<CancellationToken>, Vec<_>) =
+        let (exits, mut ledgers): (Vec<CancellationToken>, Vec<_>) =
             futures::future::join_all(ids.iter().map(|sid| {
                 self.live.with_session_lock(sid, async move {
                     let live = self.live.remove(sid).await?;
@@ -295,10 +296,14 @@ impl SessionPool {
             .into_iter()
             .flatten()
             .unzip();
-        let exits: Vec<CancellationToken> = exits
+        let mut exits: Vec<CancellationToken> = exits
             .into_iter()
             .chain(self.live.engines_still_stopping())
             .collect();
+        for (ended, core) in one_calls {
+            exits.push(ended);
+            ledgers.push(core.process_groups().clone());
+        }
         let deadline = tokio::time::Instant::now() + AGENT_EXIT_GRACE;
         let all = futures::future::join_all(exits.iter().map(|e| e.cancelled()));
         if tokio::time::timeout_at(deadline, all).await.is_err() {

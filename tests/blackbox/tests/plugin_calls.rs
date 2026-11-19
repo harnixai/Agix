@@ -6,6 +6,7 @@
 //! history, the project directory and the host's own library functions show.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply};
@@ -652,4 +653,108 @@ async fn a_function_that_uses_a_host_library_calls_it_as_the_host() -> anyhow::R
     assert_eq!(seen[0].session_id, None, "a call outside any session");
     embedded.shutdown().await;
     Ok(())
+}
+
+/// An engine with no provider configured, `package` installed as a host
+/// package and `libs` as the host's libraries, in `root/project`.
+async fn embedded_with(
+    root: &Path,
+    package: &Path,
+    libs: Vec<base::interface::host_js::HostJsLib>,
+) -> anyhow::Result<daemon::embed::Embedded> {
+    let data = root.join("data");
+    std::fs::create_dir_all(&data)?;
+    let mut config = daemon::embed::EmbedConfig::new(&data);
+    config.cwd = Some(root.join("project"));
+    config.plugins = vec![package.to_path_buf()];
+    config.js_libs = libs;
+    Ok(daemon::embed::Embedded::start(config).await?)
+}
+
+fn project_in(root: &Path) -> anyhow::Result<std::path::PathBuf> {
+    let project = root.join("project");
+    std::fs::create_dir_all(&project)?;
+    std::fs::write(project.join("gate.txt"), "amber\n")?;
+    Ok(project)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutting_down_stops_a_call_running_in_a_directory_and_what_it_started(
+) -> anyhow::Result<()> {
+    use base::interface::host_js::{HostCallContext, HostJsLib};
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let project = project_in(&root)?;
+    let package = root.join("host-hold");
+    std::fs::create_dir_all(&package)?;
+    std::fs::write(
+        package.join("plugin.toml"),
+        "uses = [\"signal\"]\n[plugin]\nname = \"hold\"\nversion = \"1.0.0\"\napi_version = \"0.1\"\n\
+         [[function]]\nname = \"on\"\nentry = \"hold.js:on\"\ndescription = \"holds on\"\n",
+    )?;
+    std::fs::write(
+        package.join("hold.js"),
+        "async function on(input, ctx) {\n\
+           await signal.ready({});\n\
+           try { await tools.Bash({ command: \"tail -n 617 -f /dev/null\" }); } catch (e) {}\n\
+           while (true) {}\n\
+         }\n",
+    )?;
+    let (ready_tx, mut ready_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let signal = HostJsLib::new("signal").function("ready", move |_: HostCallContext, _: Value| {
+        let ready_tx = ready_tx.clone();
+        async move {
+            let _ = ready_tx.send(());
+            Ok(Value::Null)
+        }
+    });
+    let embedded = Arc::new(embedded_with(&root, &package, vec![signal]).await?);
+
+    let mut call = PluginCall::new("hold.on", json!({}), PluginCallTarget::Project(project));
+    call.writes = true;
+    call.permission_rules = vec![base::permission::PermissionRule {
+        source: base::permission::RuleSource::Session,
+        behavior: base::permission::RuleBehavior::Allow,
+        tool_name: "Bash".into(),
+        rule_content: None,
+    }];
+    let pool = embedded.pool().clone();
+    let running = tokio::spawn(async move {
+        pool.call_plugin(call, tokio_util::sync::CancellationToken::new())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(30), ready_rx.recv())
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the function never got going"))?;
+    wait_until(|| running_command(HELD), "the function's command to start").await?;
+
+    embedded.shutdown().await;
+    let ended = tokio::time::timeout(Duration::from_secs(30), running)
+        .await
+        .map_err(|_| anyhow::anyhow!("the call ran on past the shutdown"))??;
+    let result = ended?;
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("cancelled"),
+        "{result:?}"
+    );
+    wait_until(|| !running_command(HELD), "the call's command to stop").await
+}
+
+async fn wait_until(done: impl Fn() -> bool, what: &str) -> anyhow::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done() {
+        anyhow::ensure!(Instant::now() < deadline, "waited in vain for {what}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    Ok(())
+}
+
+const HELD: &str = "tail -n 617 -f /dev/null";
+
+fn running_command(command: &str) -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-f", command])
+        .output()
+        .is_ok_and(|out| out.status.success())
 }

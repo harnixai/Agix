@@ -1,5 +1,5 @@
 //! 内存里的会话 `LiveSessions`：会话表、每会话的磁盘临界区锁、容量与空闲超时、
-//! 刚被拿出表还在停的引擎、整池关闭的状态，以及引擎的代际号。
+//! 刚被拿出表还在停的引擎、宿主调用各自建的临时引擎、整池关闭的状态，以及引擎的代际号。
 //!
 //! 表里每个会话是一个 `LiveSession`：会话本身的 `SessionCore`（状态、事件出口、
 //! steer 队列、进程组、名字、上下文用量与日志是否落后；建会话或冷恢复时建，关闭、驱逐、整池
@@ -8,8 +8,9 @@
 //!
 //! 锁序：`session_locks[sid]` → `sessions` → `TurnSlot.rx` →
 //! { `SessionHub.inner` | `SessionCore.*` | `SessionState.*` }，叶子锁之间互不嵌套。
-//! `session_locks` 的表锁和 `stopping` 只在取、放的那一下持有。
+//! `session_locks` 的表锁、`stopping` 和 `one_call` 只在取、放的那一下持有。
 
+use crate::session_pool::parts::host_calls::{OneCallEngines, OneCallGuard};
 use crate::session_pool::parts::hub::SessionHub;
 use crate::session_pool::parts::phase::{Generation, Generations, TurnSlot, TurnTicket};
 use crate::session_pool::{CreateError, SessionNamer, AGENT_EXIT_GRACE, PROCESS_GROUP_GRACE};
@@ -360,6 +361,13 @@ pub(in crate::session_pool) struct Displaced {
     pub(in crate::session_pool) replaced: Option<LiveSession>,
 }
 
+#[derive(Default)]
+struct Shutdown {
+    /// Set once the pool starts shutting down; no session is created after.
+    begun: AtomicBool,
+    finished: CancellationToken,
+}
+
 pub(in crate::session_pool) struct LiveSessions {
     sessions: AsyncMutex<HashMap<String, LiveSession>>,
     /// Per-`session_id` mutexes serializing a session's own disk-mutating
@@ -375,10 +383,8 @@ pub(in crate::session_pool) struct LiveSessions {
     /// session id. A session brought back under one of these ids waits for
     /// that engine first, so the two never run side by side.
     stopping: std::sync::Mutex<HashMap<String, CancellationToken>>,
-    /// Set once the pool starts shutting down; no session is created after.
-    shutting_down: AtomicBool,
-    /// Cancelled when the shutdown has finished.
-    shut_down: CancellationToken,
+    one_call: OneCallEngines,
+    shutdown: Shutdown,
     /// Numbers every engine this pool brings up; the number is also the one
     /// the engine attaches to its session's state under.
     generations: Generations,
@@ -392,8 +398,8 @@ impl LiveSessions {
             cap,
             idle_timeout,
             stopping: std::sync::Mutex::new(HashMap::new()),
-            shutting_down: AtomicBool::new(false),
-            shut_down: CancellationToken::new(),
+            one_call: OneCallEngines::default(),
+            shutdown: Shutdown::default(),
             generations: Generations::default(),
         }
     }
@@ -653,8 +659,27 @@ impl LiveSessions {
             .is_some_and(|lock| lock.try_lock().is_err())
     }
 
+    /// Keep `core`'s engine, built for the one host call `stop` ends, for a
+    /// shutdown to stop and wait for. Refused once the pool is shutting down.
+    pub(in crate::session_pool) fn keep_one_call(
+        &self,
+        core: &Arc<SessionCore>,
+        stop: CancellationToken,
+    ) -> Result<OneCallGuard, String> {
+        self.one_call
+            .admit(core, stop, || self.refuse_while_shutting_down())
+    }
+
+    /// Stop the host calls running on engines of their own: what says each
+    /// has ended, and each one's session.
+    pub(in crate::session_pool) fn stop_one_calls(
+        &self,
+    ) -> Vec<(CancellationToken, Arc<SessionCore>)> {
+        self.one_call.stop_all()
+    }
+
     pub(in crate::session_pool) fn refuse_while_shutting_down(&self) -> Result<(), String> {
-        if self.shutting_down.load(Ordering::SeqCst) {
+        if self.shutdown.begun.load(Ordering::SeqCst) {
             return Err("the daemon is shutting down".to_string());
         }
         Ok(())
@@ -663,15 +688,15 @@ impl LiveSessions {
     /// Mark the pool as shutting down. `None` when it already was; the first
     /// caller holds the guard that marks the shutdown finished when dropped.
     pub(in crate::session_pool) fn begin_shutdown(&self) -> Option<DropGuard> {
-        if self.shutting_down.swap(true, Ordering::SeqCst) {
+        if self.shutdown.begun.swap(true, Ordering::SeqCst) {
             return None;
         }
-        Some(self.shut_down.clone().drop_guard())
+        Some(self.shutdown.finished.clone().drop_guard())
     }
 
     /// Wait until the shutdown in progress has finished.
     pub(in crate::session_pool) async fn shut_down(&self) {
-        self.shut_down.cancelled().await;
+        self.shutdown.finished.cancelled().await;
     }
 
     #[cfg(test)]
