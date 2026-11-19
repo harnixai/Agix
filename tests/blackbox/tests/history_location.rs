@@ -134,6 +134,21 @@ async fn a_trusted_projects_session_is_kept_in_it_and_resumes_after_a_restart() 
         refused.error.is_some(),
         "an export into the history: {refused:?}"
     );
+    #[cfg(unix)]
+    {
+        let link = world.root().join("into-history");
+        std::os::unix::fs::symlink(kept_in(&project, ""), &link)?;
+        let refused = client
+            .call(
+                "session.export",
+                json!({ "session_id": session, "path": link.join("x.zip").to_string_lossy() }),
+            )
+            .await?;
+        assert!(
+            refused.error.is_some(),
+            "an export into the history through a link: {refused:?}"
+        );
+    }
     let archive = world.root().join("out.zip");
     let exported = client
         .call(

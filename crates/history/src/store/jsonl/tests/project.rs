@@ -413,6 +413,19 @@ async fn the_store_names_the_projects_history_directory_around_a_path() {
     assert!(dirs.contains(&world.roots().sessions));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn the_history_directory_is_named_around_a_path_through_a_linked_parent() {
+    let world = World::new();
+    let project = world.project("p");
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    start(&store, &project).await;
+    let link = world.project("elsewhere").join("lnk");
+    std::os::unix::fs::symlink(history_dir(&project), &link).unwrap();
+    let dirs = store.history_dirs_for(&link.join("out.zip"));
+    assert!(dirs.contains(&history_dir(&project)), "{dirs:?}");
+}
+
 fn mentions(entries: &[EnvelopedEntry], text: &str) -> bool {
     serde_json::to_string(entries).unwrap().contains(text)
 }

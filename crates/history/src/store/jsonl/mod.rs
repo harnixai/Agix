@@ -402,14 +402,15 @@ impl JsonlHistoryStore {
 
     /// Every directory this store keeps sessions in that `path` could be
     /// inside: the global roots, and the history directory of each project
-    /// `path` is in.
+    /// `path` is in, as spelled or as its nearest existing ancestor resolves
+    /// — a path about to be written does not exist yet.
     fn dirs_around(&self, path: &Path) -> Vec<PathBuf> {
         let mut dirs = vec![
             self.homes.projects_root.clone(),
             self.homes.sessions_root.clone(),
         ];
         if let Some(projects) = self.homes.projects() {
-            let real = path.canonicalize().ok();
+            let real = path.ancestors().find_map(|dir| dir.canonicalize().ok());
             let ancestors = path
                 .ancestors()
                 .chain(real.iter().flat_map(|p| p.ancestors()));
