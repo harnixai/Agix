@@ -84,6 +84,12 @@ const HOME_READERS: &[(&str, &str)] = &[
          machine. The session's own state root still comes as a parameter.",
     ),
     (
+        "crates/core/src/paths/sensitive/spellings.rs",
+        "a root spelled from `$HOME` in a command (`~/.agix/memory`) is the same \
+         root: the home directory is how the shell will read the text, a fact about \
+         the machine. The state root itself still comes as a parameter.",
+    ),
+    (
         "crates/platform/src/sandbox/tests/macos.rs",
         "the cases build the policy a confined command gets by default, which \
          names this machine's home.",

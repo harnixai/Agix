@@ -145,6 +145,10 @@ const BASE_FS: &[(&str, &str)] = &[
         "PromptFiles: every file the engine reads for the model goes through the sensitive-path check; SensitivePaths resolves its roots and lists the scene directories once, when built",
     ),
     (
+        "crates/core/src/paths/sensitive/spellings.rs",
+        "SensitivePaths resolves each root it is built with once, through its symbolic links",
+    ),
+    (
         "crates/core/src/interface/exec/filesystem.rs",
         "the Filesystem contract's provided methods call its own canonicalize and metadata",
     ),

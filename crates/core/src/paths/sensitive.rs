@@ -12,7 +12,7 @@
 //! also those of the other instances' state roots this machine is known to
 //! have ([`known_state_roots`]).
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use super::layout::{
     entry, Layout, CLAUDE_CREDENTIALS, ENGINE_CONFIG_FILES, PROJECT_ENGINE_CONFIG_DIRS,
@@ -21,7 +21,9 @@ use super::layout::{
 use super::ConfigPaths;
 
 mod config_root;
+mod spellings;
 pub use config_root::ConfigRootAt;
+use spellings::{absolute_lexically, lowered_components, Spellings};
 
 /// The repository's own configuration: confirmed like the engine's rather
 /// than refused — `git` plumbing through `Bash` is normal work, and a
@@ -590,18 +592,34 @@ impl SensitivePaths {
     }
 
     /// Whether `spelled`, the lowered text up to a component split on `/`,
-    /// ends at the session's state root spelled absolutely: what comes
-    /// before the root's first component is the start of the text or ends
-    /// in something no name holds, as `S=` or a quote does in a command.
+    /// ends at the session's state root, spelled absolutely or from `~`,
+    /// `$HOME` or `${HOME}`: what comes before is the start of the text or
+    /// ends in something no name holds, as `S=` or a quote does in a command.
     fn state_root_ends_at(&self, spelled: &[&str]) -> bool {
         let name_char = |c: char| c.is_alphanumeric() || "._-".contains(c);
-        self.state_root.iter().flat_map(|s| &s.lowered).any(|root| {
+        let ends_with = |root: &[String], before_ok: &dyn Fn(&str) -> bool| {
             let Some(at) = spelled.len().checked_sub(root.len() + 1) else {
                 return false;
             };
             !root.is_empty()
-                && !spelled[at].ends_with(name_char)
+                && before_ok(spelled[at])
                 && spelled[at + 1..].iter().zip(root).all(|(s, r)| s == r)
+        };
+        let from_home = |before: &str| {
+            ["~", "$home", "${home}"].iter().any(|home| {
+                before
+                    .strip_suffix(home)
+                    .is_some_and(|rest| !rest.ends_with(name_char))
+            })
+        };
+        self.state_root.iter().any(|root| {
+            root.lowered
+                .iter()
+                .any(|spelling| ends_with(spelling, &|before| !before.ends_with(name_char)))
+                || root
+                    .below_home
+                    .iter()
+                    .any(|spelling| ends_with(spelling, &from_home))
         })
     }
 
@@ -787,36 +805,6 @@ impl PromptFiles {
     }
 }
 
-/// A directory as given, normalized, and as the filesystem resolves it;
-/// and both lowercased component by component.
-#[derive(Debug, Clone)]
-struct Spellings {
-    given: PathBuf,
-    real: PathBuf,
-    lowered: Vec<Vec<String>>,
-}
-
-impl Spellings {
-    fn of(dir: &Path) -> Self {
-        let given = absolute_lexically(dir);
-        let real = std::fs::canonicalize(&given).unwrap_or_else(|_| given.clone());
-        let mut lowered = vec![lowered_components(&given)];
-        let real_lowered = lowered_components(&real);
-        if !lowered.contains(&real_lowered) {
-            lowered.push(real_lowered);
-        }
-        Self {
-            given,
-            real,
-            lowered,
-        }
-    }
-
-    fn spell(&self, path: &Path) -> bool {
-        path.starts_with(&self.given) || path.starts_with(&self.real)
-    }
-}
-
 fn is_working_entry(name: &str) -> bool {
     STATE_ROOT_WORKING_DIRS.contains(&name)
 }
@@ -854,21 +842,6 @@ fn scene_dirs_in(base: &Path) -> Vec<SceneDir> {
         .collect();
     dirs.sort_by(|a, b| a.path.cmp(&b.path));
     dirs
-}
-
-fn absolute_lexically(path: &Path) -> PathBuf {
-    crate::path::normalize_lexically(
-        &std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
-    )
-}
-
-fn lowered_components(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|c| match c {
-            Component::Normal(name) => Some(super::fold_case(&name.to_string_lossy())),
-            _ => None,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -1371,6 +1344,37 @@ mod tests {
                 "/x/Users/me/{own}/memory/MEMORY.md",
                 "x/Users/me/{own}/memory/MEMORY.md",
                 "/repo/{own}/memory/MEMORY.md",
+            ] {
+                assert!(paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_state_roots_working_space_spelled_from_home_is_not_configuration() {
+        for layout in test_layouts() {
+            let root = own("/Users/me/{own}", &layout);
+            let paths = SensitivePaths {
+                state_root: Some(Spellings::of_with_home(
+                    Path::new(&root),
+                    Some(Path::new("/Users/me")),
+                )),
+                ..SensitivePaths::new(None, None, layout.clone())
+            };
+            for p in [
+                "cat ~/{own}/memory/MEMORY.md",
+                "echo x > $HOME/{own}/memory/a.md",
+                "ls \"${HOME}/{own}/scratchpad/sessions\"",
+                "S=~/{own}/scratchpad/x",
+            ] {
+                assert!(!paths.names_configuration(&own(p, &layout)), "{p}");
+            }
+            for p in [
+                "cat ~/{own}/settings.json",
+                "cat ~/{own}/tool-results/s/x",
+                "cat x~/{own}/memory/MEMORY.md",
+                "cat $HOMEX/{own}/memory/MEMORY.md",
+                "cat ~/other/{own}/memory/MEMORY.md",
             ] {
                 assert!(paths.names_configuration(&own(p, &layout)), "{p}");
             }
