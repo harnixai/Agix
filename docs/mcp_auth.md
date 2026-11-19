@@ -11,10 +11,10 @@
 
 ## 1. 配置
 
-`settings.json` 的 `mcp_servers` 里,远端 server 可以有一个 `oauth` 块,**每个键都可省**:
+`settings.json` 的 `mcp.servers` 里,远端 server 可以有一个 `oauth` 块,**每个键都可省**:
 
 ```jsonc
-"mcp_servers": {
+"mcp": { "servers": {
   "docs": {
     "type": "streamable_http",
     "url": "https://mcp.example.com/mcp",
@@ -26,7 +26,7 @@
       "callback_port": 8765                  // 回环回调固定用这个端口(默认临时端口)
     }
   }
-}
+} }
 ```
 
 - **没有 `oauth` 键照样能用**:server 回 401 并给出受保护资源元数据,它就进入"需要登录"。
@@ -46,7 +46,7 @@
   `$VAR` 引用的变量,daemon 加载设置、启用插件、装配 MCP 策略时就记下,任何子进程都不继承:
   `Bash`、`Monitor`、command hook、引擎自己跑的 git、`pdftotext`,以及别的 MCP stdio server——模型一句
   `printenv` 读不到(`ARCHITECTURE.md` §5 第 5 条)。stdio server 自己 `env` 里写的照给,继承来的
-  环境里没有别的 server 的密钥。确实要让命令也拿到某个变量的,写进 `sandbox.subprocess_env.allow`。
+  环境里没有别的 server 的密钥。确实要让命令也拿到某个变量的,写进 `sandbox.env.allow`。
 - **项目层的 server 读不了 daemon 的环境,也用不了 daemon 的身份。** 项目
   `.agix/settings.json` / `settings.local.json` 里声明的 server(`mcp.addServer` 缺省写的也是这一层)
   不能用 `client_secret_env`、`private_key_jwt.key_env`(读 daemon 的环境)、

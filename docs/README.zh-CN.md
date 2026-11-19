@@ -141,7 +141,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 - worktree 隔离。
 - 工作区信任:用户没信任的项目按插件级权限对待——它自己的设置只能收紧,它的 hook、MCP
   server、skill 命令与授权、更宽的 agent 类型,以及决定数据送到哪里的设置(provider、端点、
-  instruction_file)都等信任之后才生效(在全局层或经 RPC 确认;缺省不信任,
+  instruction_files)都等信任之后才生效(在全局层或经 RPC 确认;缺省不信任,
   [ARCHITECTURE.md](ARCHITECTURE.md) §6.6)。
 
 **宿主控制**
@@ -386,36 +386,56 @@ let pool = agix::pool::assemble(
 
 ```json
 {
-  "providers": {
-    "anthropic": { "api_type": "anthropic", "default_model": "claude-sonnet-4-6" },
-    "local":     { "api_type": "openai_compatible", "base_url": "http://localhost:11434",
-                   "default_model": "qwen3" }
-  },
-  "default_provider": "anthropic",
-  "task_models": { "subagent": "local", "compact": "local" }
+  "providers": [
+    { "id": "ds", "vendor": "deepseek", "api": "openai_chat",
+      "base_url": "https://api.deepseek.com", "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+      "tiers": { "strong": "deepseek-v4-pro", "balanced": "deepseek-v4-flash" },
+      "quota": { "day": 20000000, "month": 300000000 } },
+    { "id": "claude", "vendor": "anthropic", "api": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "tiers": { "strong": "claude-opus-4-6", "balanced": "claude-sonnet-4-6",
+                 "fast": "claude-haiku-4-5" } }
+  ],
+  "model": { "order": ["ds", "claude"], "tasks": { "subagent": "balanced" } }
 }
 ```
 
-任务键 `main`、`subagent`、`compact`、`memory`、`web_search`、`web_fetch` 各自路由一类
-调用;会话也能选自己的 provider。对话的模型依次取:会话自己选的 `model`、会话选的 provider
-的 `default_model`、`task_models.main` 的模型、设置的 `model.model_name`。子 Agent 的模型依次取:`Agent` 调用(或 `session.startAgent`)
-的 `model`、agent 类型的 `model`、`task_models.subagent` 的模型、会话当前的模型。没有
-`task_models` 条目的任务(子 Agent、压缩、记忆、标题)走 `default_provider` 的 client:会话本身
-也在它上面时带会话的模型,会话在别的 provider 上时带设置的 `model.model_name`——不是 `default_provider`
-的 `default_model`,所以对话经 `task_models.main` 走了别的 provider 时,`model.model_name` 要写
-`default_provider` 认得的模型。`WebSearch` 默认经会话自己的模型让提供方搜索(`session.setModel` 换了模型就用换上的),
-`task_models.web_search` 可以换一个提供方。`WebFetch` 默认返回页面转成的纯文本(超过
-50,000 字符分段,用 `offset` / `limit` 续读,续读会再抓一次页面);只有 `task_models.web_fetch` 配了 provider 时,才由那个模型读页面、按调用
-的 `prompt` 作答。它不会退回到会话自己的模型。
+provider 有 `id`、`vendor`(`anthropic`、`openai`、`deepseek`、`qwen`、`vllm`、`sglang` 或
+`generic`;决定怎么开关思考、是否回传推理内容、effort 怎么写)、`api`(`anthropic`、`openai_chat`
+或 `openai_responses`)、`base_url`、存放密钥的环境变量名(`api_key_env`;设置里不写密钥,
+嵌入引擎的宿主可以自己提供密钥)、`models`、`tiers`,以及可选的 `quota`。
+
+每类调用要的是一个档位——`strong`、`balanced` 或 `fast`——按任务写在 `model.tasks`
+(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、`web_fetch`;缺省依次是 `strong`、
+`balanced`、`fast`,`web_fetch` 缺省不设),每个 provider 说明自己哪个模型对应哪一档:
+`strong` 必填,`balanced` 缺省取 `strong` 的模型,`fast` 缺省取 `balanced` 的。
+
+每次调用都从 `model.order` 的第一个 provider 起;它配额用尽、没有凭据、凭据被拒、连不上,或一直
+回 5xx / 529 / 429 直到重试用完,以及回 402 时,换下一个;400 是请求本身的问题,不会换别家重试。
+连不上的 provider 会被晾一小段时间。`order` 里的 provider 都不可用时,这一轮以
+`providers_unavailable` 失败,并逐个说明原因。切换时丢掉上一家私有的推理内容,会话收到
+`provider_switched` 事件(同名遥测事件也记一条)。
+
+`quota` 是每 `day`、`week`、`month` 的 token 上限,可以只写其中几项。计数口径是未命中缓存的输入加缓存写入加输出,
+缓存命中不计。周期按本机时区,周从周一、月从 1 号起。用量按 provider id 记在状态目录的
+`quota/` 下,同一台机器上的所有实例共用;越过上限的那一次调用照常完成,从下一次调用起跳过这个
+provider。`config.getProvider` 返回各周期的已用量与上限。
+
+没有配 `providers` 时,引擎自己提供 `anthropic`,密钥取 `ANTHROPIC_AUTH_TOKEN` /
+`ANTHROPIC_API_KEY`,三档都是 `--model`。会话可以把自己选的 provider 排到最前面,也可以指定档位或模型 id。
+`WebFetch` 默认返回页面转成的纯文本(超过
+50,000 字符分段,用 `offset` / `limit` 续读,续读会再抓一次页面);只有 `model.tasks.web_fetch` 配了档位时,才由模型读页面、按调用
+的 `prompt` 作答。
 
 ### 上下文、遥测、录制
 
 - **压缩**:先让 LLM 写摘要,不行再退到更便宜的办法(截断、微压缩、折叠),压到阈值减去
   系统提示词与工具定义之后剩下的大小。`compaction` 设置里可以打开两项:带熔断的预测式
   提前清理(`reactive`),以及每小时一次、以 cache edit 下发、不白扔已付过钱的提示缓存的
-  清理(`cached_microcompact`)。超过 30,000 字符的工具结果(`Read`、`WebFetch`、`TaskOutput`
+  清理(`clear_on_cache_expiry`)。超过 30,000 字符的工具结果(`Read`、`WebFetch`、`TaskOutput`
   自己分页的除外)整个存进项目的 `.agix/state/tool-results/`,模型拿到头尾预览和路径,用 `Read` 的 `offset`
-  读后续;阈值是 `compaction.tool_result_inline_chars`(`0` 关闭)。
+  读后续;阈值是 `compaction.inline_result_chars`(`0` 关闭)。
 - **遥测**:23 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
   一轮的调用——压缩、记忆、hooks、搜索——也算进去。
 - **录制**:把任意 `Model` 包一层,一个会话就成了自包含的目录;回放逐字节一致、不用联网。录像不脱敏
@@ -438,29 +458,59 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 
 配置按层叠加,优先级从低到高:内建默认 → `~/.agix/settings.json` →
 `~/.agix/scenes/<scene>/settings.json` → `<项目>/.agix/settings.json`,每层可再带一个
-`settings.local.json`;各层的 `permission_rules` 并列生效。完整的配置面是生成的
+`settings.local.json`,优先于它旁边的文件。完整的配置面是生成的
 [JSON Schema](schemas/settings.schema.json)。值按字面取:`$VAR` / `${VAR}` / `${VAR:-默认}`
-只在 MCP server 的 `command`、`args`、`env`、`url`、`headers` 里展开。
+只在 MCP server 的 `command`、`args`、`env`、`url`、`headers` 里展开。引擎不再读的旧键会被忽略,
+加载时的告警会指出取代它的新键。
+
+层与层怎么合:
+
+- 对象逐键合并;高层写的标量或列表替换低层的(项目里的 `model.order` 替换全局的)。
+- `providers` 是定义,各层相加;某个 id 在先读的层里已经定义过,就以它为准,后面重复的忽略并告警。
+- `permissions` 的规则列表(`allow`、`allow_exact`、`ask`、`deny`)不合并:各层的规则并列生效,
+  deny 压过任何 allow。
+- `hooks` 按事件合并:某一层列了某个事件,就替换低层对这个事件的列表。`mcp.servers` 按名字、按字段合并。
+- `app` 只认全局层;scene、项目层写了会被忽略并告警。
+- 部署的 managed 文件只许写 `permissions`(规则列表和 `disable_bypass`),优先于所有层。
+- 用户没信任的项目只能收紧(见工作区信任):`providers`、`hooks`、`mcp.servers` 条目、
+  `prompt.instruction_files`、`prompt.override`、`sandbox.network.proxy`、`telemetry.otlp_endpoint`、
+  `recorder` 都等信任之后才生效,它的 `model.order` 只能排在它之上已定义的 provider。
+
+各块:
+
+| 块 | 内容 |
+|---|---|
+| `providers`、`model` | 模型 provider、每类调用要的档位、回退顺序([模型路由](#模型路由));`model.effort`、`model.thinking`(`auto`、`on`、`off`)、`model.max_tokens` |
+| `permissions` | `mode`;字符串写的规则列表(`allow`、`ask`、`deny`;`allow_exact` 按字面比对内容,"每次都允许"记在这里);`prompt_timeout_secs`(提问没人答就拒绝);`client_may_loosen`(RPC 客户端能否要求比 `mode` 更宽的模式) |
+| `files` | `extra_dirs`(像项目一样读写)、`read_dirs`(不问就能读;写 `"/"` 即任意处可读)、`allow_write`、`deny_write` |
+| `sandbox` | `enabled`、`require`(平台没法强制沙箱时拒绝执行命令)、`allow_read`、`deny_read`(追加到内建的凭据列表)、`network`、`env`、`cache_dirs`、`reap_on_close`、`unattended_needs_network_policy` |
+| `web` | `WebFetch`、`Ping` 的 `allowed_domains`,也是 `sandbox.network.mode: "allowlist"` 读的那份名单 |
+| `turn`、`agents`、`team` | `turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`;`agents.max_depth`、`agents.max_concurrent`;`team.enabled`、`team.stage_concurrency`、`team.max_members`、`team.member_idle_secs` |
+| `compaction` | `threshold_tokens`、`keep_recent`、`reactive`、`clear_on_cache_expiry`、`inline_result_chars` |
+| `prompt` | `append`、`override`、`instruction_files`、`language`、`path_style`(`absolute`、`relative`) |
+| `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
+| `memory`、`telemetry`、`checkpoints`、`recorder` | `memory.enabled`;`telemetry.enabled`、`telemetry.otlp_endpoint`;文件检查点;LLM 录制 |
+| `app` | 只认全局层:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir` |
 
 几个本文别处没提到的开关:
 
 | 设置 | 缺省 | 作用 |
 |---|---|---|
-| `model.fallback_model` | 无 | 主模型一直过载(529)时改用这个模型重试 |
-| `model.max_output_tokens` | 按模型名查 | 回复在 `max_tokens` 处被截断后,重试时 `max_tokens` 最多抬到多少 |
-| `memory_enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
-| `telemetry_enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
-| `telemetry_url` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |
-| `instruction_file` | 无 | 再加一份指令文件,会话构建时读入,与 `AGENTS.md` 一样交给模型 |
-| `hooks_config` | 无 | 生命周期 hook:事件名 → hook 列表([extension_points.md](extension_points.md)) |
-| `disable_skill_shell_execution` | `false` | skill 正文里的 `` !`cmd` `` 换成一行说明,不执行 |
+| `providers[].models[].max_output` | 按模型名查 | 调用这个模型时 `max_tokens` 最多发多少,回复在上限处被截断后重试也最多抬到这么多 |
+| `memory.enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
+| `telemetry.enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
+| `telemetry.otlp_endpoint` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |
+| `prompt.instruction_files` | `[]` | 再加几份指令文件,会话构建时按序读入,与 `AGENTS.md` 一样交给模型 |
+| `hooks` | 无 | 生命周期 hook:事件名 → hook 列表([extension_points.md](extension_points.md)) |
+| `skills.allow_shell` | `true` | `false` 时 skill 正文里的 `` !`cmd` `` 换成一行说明,不执行 |
 | `team.enabled` | `false` | 给场景支持团队(`code`、`harnix`)的会话注册 `TeamCreate` / `TeamList` / `TeamDelete` |
-| `team.member_idle_timeout_secs` | `1800` | 团队成员空闲这么久就停掉 |
-| `sandbox.network_mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all`、`allowlist`(`sandbox.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网)或 `proxy`——要按域名过滤,在前面放一个代理 |
-| `sandbox.egress_proxy` | 无 | `proxy` 模式下沙箱里的命令唯一能连的地址(`"127.0.0.1:3128"`,或 `{"http", "socks", "no_proxy"}`),经 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 告诉命令;代理不在本机时 macOS 只能按端口限,Linux 要 `socat`,没有就整个断网 |
-| `network.use_system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`;`false` 直连。只认全局 / 托管层(scene、项目层写了会被忽略),daemon 启动时生效;与上面沙箱命令的出网无关 |
-| `history.location` | `global` | 会话放在哪。`global`:状态目录的 `projects/` 与 `sessions/`。`project`:受信项目的会话放进它的 `.agix/state/history/<id>/`(worktree 里的放进主仓库的),`sessions/<id>/` 只留索引;不受信的项目照旧放全局。已经放在任一处的历史原地照读;项目里的历史只在项目受信时读。只认全局层,daemon 启动时生效 |
-| `worktree_dir` | `.wkts` | `EnterWorktree` 与 `Agent` 的 `worktree` 把 git worktree 建在仓库根的这个目录下(`<仓库>/.wkts/<名>`),仓库的 `.gitignore` 也只加这一行;一个以 `.` 开头的路径分量,不能以 `.git` 开头,也不能是配置目录或别的工具的目录。只认全局 / 场景层:项目自己的设置改不了它 |
+| `team.member_idle_secs` | `1800` | 团队成员空闲这么久就停掉 |
+| `sandbox.enabled` | `true` | `false` 时命令不进 OS 沙箱运行 |
+| `sandbox.network.mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all`、`allowlist`(`web.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网)或 `proxy`——要按域名过滤,在前面放一个代理 |
+| `sandbox.network.proxy` | 无 | `proxy` 模式下沙箱里的命令唯一能连的地址(`"127.0.0.1:3128"`,或 `{"http", "socks", "no_proxy"}`),经 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 告诉命令;代理不在本机时 macOS 只能按端口限,Linux 要 `socat`,没有就整个断网 |
+| `app.system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`;`false` 直连。daemon 启动时生效;与上面沙箱命令的出网无关 |
+| `app.history` | `global` | 会话放在哪。`global`:状态目录的 `projects/` 与 `sessions/`。`project`:受信项目的会话放进它的 `.agix/state/history/<id>/`(worktree 里的放进主仓库的),`sessions/<id>/` 只留索引;不受信的项目照旧放全局。已经放在任一处的历史原地照读;项目里的历史只在项目受信时读。daemon 启动时生效 |
+| `app.worktree_dir` | `.wkts` | `EnterWorktree` 与 `Agent` 的 `worktree` 把 git worktree 建在仓库根的这个目录下(`<仓库>/.wkts/<名>`),仓库的 `.gitignore` 也只加这一行;一个以 `.` 开头的路径分量,不能以 `.git` 开头,也不能是配置目录或别的工具的目录 |
 
 | 变量 | 作用 |
 |---|---|

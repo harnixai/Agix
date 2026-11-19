@@ -19,7 +19,7 @@
   项目的,`pool.jsonl` 用 daemon 自己那一层的。它不是绝对路径时(测试、没配 `paths` 的
   嵌入方)什么都不记,而不是写进进程的当前目录。
 - `session.create` 的 `options.telemetry.output` 把这个会话的文件放到指定路径。
-- **开关**:`settings.json` 的 `telemetry_enabled`,缺省 `true`。关掉后会话与池都不记。
+- **开关**:`settings.json` 的 `telemetry.enabled`,缺省 `true`。关掉后会话与池都不记。
 - **轮转**:一个文件写到 64 MiB(`telemetry::file_recorder::DEFAULT_MAX_BYTES`)就改名为
   `<文件>.1`(覆盖上一个 `.1`),再开一个新的;一个文件最多占两份的空间。
 - **文件权限**:只有属主可读写(0600),已有的文件打开时也收紧;为它们新建的那一层目录是
@@ -29,7 +29,7 @@
 
 ### OpenTelemetry
 
-daemon 用 `--features otel` 编译、配了 `telemetry_url`(或环境变量
+daemon 用 `--features otel` 编译、配了 `telemetry.otlp_endpoint`(或环境变量
 `OTEL_EXPORTER_OTLP_ENDPOINT`)时,同样的事件流再送一份到 OTLP 端点:一份指标,一份 trace。
 没编 `otel` 却配了端点的,启动时记一条 warn。
 
@@ -59,7 +59,7 @@ invoke_agent <scene>              一轮(turn_start → turn_complete)
   `gen_ai.conversation.id` 属性聚合。
 - **不带内容**,和 JSONL 一样:不发 `gen_ai.input.messages`、`gen_ai.output.messages`、
   `gen_ai.tool.call.arguments` / `result`、`gen_ai.system_instructions`。
-- 只在 `telemetry_enabled` 为 true 时有(事件流关着就没有源)。
+- 只在 `telemetry.enabled` 为 true 时有(事件流关着就没有源)。
 - 不在一轮里的模型调用(`purpose` 为 `title`、`memory` 之类)是根 span。
 - 开着的 span 合计最多 4,096 个,超出时最旧的被结束并带 `agix.abandoned=true`;会话结束时它还开着的
   span 同样结束并标出。

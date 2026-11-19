@@ -109,7 +109,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_unattended.rs` | `harnix` 场景、缺省权限、无人值守：项目内 Edit 与沙箱里的 Bash 照常做完，往实例授权的根之外写被拒绝且没有任何询问发给宿主；`AskUserQuestion` 与计划模式连名字都不出现；Bash 的重定向与 `cp` 往授权根之外（不在本机临时目录下）写，被 OS 沙箱挡住，同样没有询问 |
 | `live_mcp.rs` | toy MCP server 那一套：宿主打断一轮时进行中的 `slow` 在 server 那头被取消；一个 server 中途 `crash`，调用报错、另一个 server 照常、它自己下一次调用又连回来；超过 5 万字符的 `big` 结果只有截断后的头到达模型，4 万字符的整段到达；`ListMcpResources` / `ReadMcpResource` 读到运行时写进资源的令牌、unicode 资源原样、20 万字节的资源不整段进模型，`@toy:<uri>` 引用把资源内联进那条消息（大资源带截断标记）而不调工具；`mcp.addServer` 后同一会话下一轮就能用、`mcp.updateServer` 后调用落到新进程；streamable HTTP 与 SSE 两种传输（另起的 daemon，shell 设了代理也直连本机）；`--mcp-policy` 拒绝的 server（含插件声明的 `<插件>-mcp-<名字>`）在 `mcp.status` 里是 `denied`、工具从未出现在请求里、进程从未起过、`mcp.addServer` 它得 `-32020` 且 settings.json 不变；插件声明的 server 在 `config.reload` 之后新会话照样能用；模型让插件声明的 toy 用 `touch_in_root` 写一个标记，标记落在会话的项目里、不在包目录（server 从 roots 得知项目）；toy 的 `ask` 经 `mcp_elicitation` 询问向用户问颜色，宿主作答（`prompt_types` 里没列它时是拒绝），模型复述出用户选的那个；`--task` 的 toy 把 `work` 转成任务，模型等到它完成并把结果里的令牌原样说出来，宿主看到 `kind:"mcp_task"` 的 `task_finished` 为 `done` |
 | `live_mcp_oauth.rs` | `OAuthWorld` 上要登录的 MCP server：没登录时 `mcp.status` 是 `auth_required`，模型的请求里没有它的工具、系统提示写明要用户登录；宿主 `mcp.auth.start`、浏览器 GET `authorize_url` 回到回环监听后 `mcp_auth_completed` / `mcp_connected`，同一会话下一轮模型直接调到它，结果里有只有带有效令牌才拿得到的标记；external redirect 经 `mcp.auth.complete` 交回；访问令牌中途过期，模型的调用底下自动刷新照常成功；刷新被 `invalid_grant` 拒绝后 `mcp_auth_required`、工具从下一轮的请求里消失，再登录又回来；`insufficient_scope` 之后按并集 scope 再登录，`write` 能用；登出后工具消失；`client_credentials`（另起的 daemon，密钥经环境变量）无人值守就能用、`mcp.auth.start` 得 `-32602`；`mcp.auth.setIdentity` 交出企业身份后连上；伪造 `state` 的回调得 400、流程继续等真的那个；过期的登录发 `mcp_auth_failed`、`mcp.auth.complete` 得 `-32602`；授权服务器不在 `allowed_authorization_servers` 里时 `mcp.auth.start` 得 `-32020`、授权服务器只被读过元数据。签发过令牌的每条都核对：令牌（及企业身份、客户端密钥）不在任何发给模型的请求、`session.export`、遥测文件、转录与另起 daemon 的 stderr 里，只在凭据存储 `mcp/oauth/` 下 |
-| `live_web.rs` | `PageServer` 上的页面：普通页（实体解码、中文）取回成文本，没配 `task_models.web_fetch` 时即使给了 `prompt` 也没有抽取调用；7 万字符的页在 5 万字符处截断、截断点之后的标记不进模型；404 / 500 以错误返回，重定向交回目标 URL 而不跟随（目标只在模型自己再取时被命中），JSON 原样；宿主打断一轮时等着慢页的 `WebFetch` 立刻收尾；`task_models.web_fetch` 指向第二个 Flash 名字时恰有一次抽取请求落在那个模型上、读的是整页，会话模型的请求里没有整页，抽取请求被注入 400 时退回页面文本；`task_models.web_search` 把搜索请求路由到第三个名字 |
+| `live_web.rs` | `PageServer` 上的页面：普通页（实体解码、中文）取回成文本，没配 `model.tasks.web_fetch` 时即使给了 `prompt` 也没有抽取调用；7 万字符的页在 5 万字符处截断、截断点之后的标记不进模型；404 / 500 以错误返回，重定向交回目标 URL 而不跟随（目标只在模型自己再取时被命中），JSON 原样；宿主打断一轮时等着慢页的 `WebFetch` 立刻收尾；`model.tasks.web_fetch` 指向的档位由第二个 Flash 名字担任时，恰有一次抽取请求落在那个模型上、读的是整页，会话模型的请求里没有整页，抽取请求被注入 400 时退回页面文本；`model.tasks.web_search` 的档位由第三个名字担任，搜索请求路由到它 |
 | `live_permissions.rs` | 权限面，宿主经 `Watcher` 作答：`ask` 规则下的写被宿主拒绝，模型照拒绝理由换路写；`permit_always(local)` 落进 `settings.local.json`，同一会话里同样的命令不再问，`config.reload` 后的新会话也不问；无人作答的询问按 `prompt_timeout` 超时成拒绝、这一轮照常收尾；进计划模式后压缩，写仍被拒，压缩后第一次请求里有计划模式仍在的提醒；`dontAsk` 只放行规则允许的，复合命令里夹带的 `rm` 整条拒绝、不询问；global / project / local 三层规则一起生效，任何一层的 deny 都胜过别处与会话 `options` 里的 allow；父会话的 deny 规则管住子 Agent；`yolo` 按 `bypassPermissions` 报回 |
 | `live_hooks.rs` | 项目的 hook 用在真实模型上：`PreToolUse` 以退出码 2 拒掉 `rm`，模型照 stderr 里的理由改用 `mv`；`PreToolUse` 的 `updated_input` 把写入改到 `drafts/`；`UserPromptSubmit` 给消息补上的上下文被模型用上，`SessionStart` 与 `PostToolUse`（看得到 Read 的结果）都记到；`prompt` 后端由模型逐次判定、拦下删除；`agent` 后端起一个子 Agent 判定、拦下写入后模型改写别处 |
 | `live_context.rs` | 手动压缩由模型写摘要（`FullCompact`），压缩前给的事实之后还答得出；一轮里读的文件撑过 `compaction.threshold_tokens` 时自己压缩、照样做完这一轮；`session.fork` 的分叉记得分叉前的、不知道源会话之后的；带 `output_schema` 建的会话一轮以符合 schema 的 `structured_output` 结束；`/compact` 之后的第一个请求里有「计划模式仍在」和还在跑的监视器 `task:<id>` 两条提醒；开了 `compaction.reactive` 的长一轮里，最早几次读的结果在轮内被清掉、最新的留着，宿主收到那一趟的 `compact` 帧；阈值低到没有可丢的东西时不压缩、不发帧、不把读过的文件一遍遍补回去 |
@@ -118,7 +118,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_memory.rs` | `memory.enabled` 时模型照 `# Memory` 一节在 `global_memory_dir()` 写下记忆与 `MEMORY.md` 索引，新会话的提示词里有索引、第一个请求前就被召回（不到 5 条时不起选择调用）；7 条记忆时恰有一次 `MemoryRecall` 调用、用会话的模型、只拿名字和描述；项目 `.agix/state/memory/` 里的记忆和全局的一起进提示词的索引、一起被召回；关了记忆就没有 `# Memory` 一节、没有召回与抽取 |
 | `live_transport.rs` | 另起的 daemon 带 `--listen` / `--listen-ws` / `--token`：同一个会话 Unix 上建、TCP 上跑一轮、WebSocket 上跑下一轮读前一轮写的文件，三条连接读到的历史一样长；错 token、外站 `Origin` 被拒，没握手的 TCP 连接得 `-32003` |
 | `live_scenes.rs` | `scene.register` 运行时登记的声明式场景：请求里只有它列的 `Read` / `Write`，`prompt.md` 的令牌在系统提示里，照样把活干完；同 id 再登记得 `-32602`；`scene.describe` / `scene.list` 报出它和会话数；有会话时 `scene.deactivate`、`scene.unregister` 都得 `-32009`，关掉会话后才停得掉、撤得掉 |
-| `live_providers.rs` | `harnix` 场景里 `task_models.title` 与 `task_models.compact` 各指向另一个 Flash 名字：命名请求、压缩请求各恰一次、落在各自的模型上，对话请求都留在默认厂商的模型上 |
+| `live_providers.rs` | `harnix` 场景里 `model.tasks.title` 与 `model.tasks.compact` 各指向的档位由另一个 Flash 名字担任：命名请求、压缩请求各恰一次、落在各自的模型上，对话请求都留在默认厂商的模型上 |
 | `live_autonomy.rs` | `TodoWrite` 的列表随多步任务更新，`session.export` 的 `runtime.json` 里是做完两项、剩一项待办；模型用 `CronCreate` 建的每分钟任务按时以 `initiator:"schedule"` 的一轮跑起来，`CronDelete` 之后再过两次检查也不再跑；宿主 `schedule.create` 的一次性任务无人连接也跑、跑一次就没了，非法表达式被拒；`max_rounds` 用完的目标以 `blocked`（`round limit`）结束，`turn.token_budget` 耗尽的一轮以 `budget_exceeded` 结束、目标解除武装；两个后台子 agent，一个只经 `TaskMessage` 拿到要写的词、`TaskWait` / `TaskOutput` 收回，另一个被 `TaskStop` 停成 `stopped`；声明式场景里的 `Sleep` 真等了要的时长、超过 30 秒的被拒、被中断时立即收尾，`Ping` 对页面报出 200 和 404 |
 | `live_workspace.rs` | 声明式场景提供的工作区工具：`git_project` 上 `EnterWorktree` 后写的文件只在 `.wkts/<slug>` 里，主工作区 `git status` 看不见，`ExitWorktree` 带 `discard_changes` 删掉目录与分支；非 git 目录里 `EnterWorktree` 失败；`NotebookEdit` 改、插、删 cell 后笔记本仍合法，越界的 `cell_index` 报错且不改文件；`Glob` / `Grep` 原样交回中文与带音标的文件名，二进制文件不进 `Grep` 的结果。|
 
@@ -128,7 +128,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 `WebFetch`、MCP 工具、项目外的读写……）要问。用例要的是这些能力本身时，由宿主那一侧的
 `Watcher` 作答（`run.watch(&session, true)` 批准每个询问，子 Agent、团队成员的询问也经父会话
 到达）；只写项目内文件的用 `acceptEdits` 也行。无人值守的场景（`harnix`、声明式场景）不问、
-直接拒，要用的工具由设置里的 `permission_rules` 放行，和真实部署给实例授权一样；定时任务
+直接拒，要用的工具由设置里的 `permissions.allow` 放行，和真实部署给实例授权一样；定时任务
 跑起来时没人在场，同样用规则放行。只有用例要验证的恰恰是 bypass 本身时才用它，并在用例里
 写明为什么。`LiveRun::finish()` 缺省**失败**：有因为没人作答而被拒的工具调用（`refused, nobody answered the
 prompt`）就报错——一条用例「过了」却在这里有记录，说明它要验证的东西可能根本没跑到。
@@ -157,7 +157,7 @@ prompt`）就报错——一条用例「过了」却在这里有记录，说明�
 
 ```rust
 let mut run = LiveRun::builder("perm")
-    .settings(json!({ "permission_mode": "default" }))      // 项目层，盖在 base_settings 上
+    .settings(json!({ "permissions": { "mode": "default" } }))      // 项目层，盖在 base_settings 上
     .mode(Mode::Spawned)
     .options(|o| o.prompt_timeout(Duration::from_secs(3)).arg("--listen").arg("127.0.0.1:0"))
     .before_start(|world, project| world.write_global_settings(&json!({ "prompt": { "language": "中文" } })))

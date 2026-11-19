@@ -206,11 +206,9 @@ JSON。
 一条 allow 规则：
 
 ```json
-"permission_rules": [
-  { "tool": "mcp__reqdb__items_query", "action": "allow" },
-  { "tool": "mcp__reqdb__items_get", "action": "allow" },
-  { "tool": "mcp__reqdb__items_put", "action": "allow" }
-]
+"permissions": {
+  "allow": ["mcp__reqdb__items_query", "mcp__reqdb__items_get", "mcp__reqdb__items_put"]
+}
 ```
 
 plan 模式下 MCP 工具照样被拦，远端那一组的只读子命令在 plan 模式下用不了。

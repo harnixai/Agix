@@ -156,7 +156,7 @@ manifest 里出现引擎不认识的顶级段,不拒,但打一条 WARN 说它"�
   无项目会话(`project_root: null`)答空列表。2026-07-28 的服务在 `input_required` 里要,更早的
   自己发 `roots/list`,答的都一样。
 - **环境变量 `AGIX_PROJECT_ROOT`**(只对 stdio 服务):项目根的绝对路径;无项目时没有这个变量,
-  daemon 自己的环境里有也不传。它在 `sandbox.subprocess_env` 与服务自己的 `env` 之后设,
+  daemon 自己的环境里有也不传。它在 `sandbox.env` 与服务自己的 `env` 之后设,
   allowlist 拿不掉它,配置也改不了它。
 
 项目根是解析过符号链接的路径,同一个目录经链接或另一种写法打开,服务看到的是同一个;会话在

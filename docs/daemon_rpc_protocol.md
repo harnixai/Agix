@@ -52,7 +52,7 @@ TCP 与 WebSocket 都要求 `--token` 或 `AGIX_DAEMON_TOKEN`;没有 token 时�
 (Bash、hook、stdio MCP 服务器)时会把这个变量剥掉,不会传下去。
 
 **TCP 与 WebSocket 都是明文,daemon 不做 TLS。** token 和之后的每一帧(提示、工具结果、
-`config.setProvider` 的 `api_key`)都按原样过网,所以只把它们开在回环地址、可信网络上,
+`mcp.addServer` 的 `headers`)都按原样过网,所以只把它们开在回环地址、可信网络上,
 或者经 SSH 隧道 / 自己的 TLS 终结代理转出去。
 
 所有监听器都 bind 好之后,daemon 才写 `instances.d` 里自己的那一项(§2):宿主看到这个
@@ -282,14 +282,15 @@ daemon 按**单轮**如实上报,不做跨轮/跨会话聚合。
 一个项目自己的配置(项目层目录 `<项目>/.agix/` 下的设置、agent 类型、hook 脚本,`.agents/skills/`;项目层目录缺省叫 `.agix`,嵌入方可经 `EmbedConfig.project_dir` 改名,下文的 `.agix` 凡指项目里的都是它)
 是仓库内容。**没被信任的项目按插件级信任处理**:它的设置只能收紧,不能放宽,而且是白名单——
 项目层里没有登记的设置键一律不生效,登记了的要么照常、要么只在不比下面几层更宽时保留、要么整个不生效;
-它的 `hooks_config`、`mcp_servers`、`scripts` 不生效,项目层目录的 `hooks/` 不进 hook 命令的 `PATH`;
-决定对话、凭据、遥测送到哪里的键(`providers`、指向项目自己 provider 的 `default_provider` /
-`task_models`、`model.base_url`、`model.api_type`、`telemetry_url`、`recorder`)、`instruction_file` 与
-整个替换系统提示词的 `prompt_override` 不生效,`telemetry_enabled: false`(关审计记录)也不生效;
+它的 `hooks`、`mcp.servers`、`scripts` 不生效,项目层目录的 `hooks/` 不进 hook 命令的 `PATH`;
+决定对话、凭据、遥测送到哪里的键(`providers`、排了项目自己 provider 的 `model.order`、
+`sandbox.network.proxy`、`telemetry.otlp_endpoint`、`recorder`)、`prompt.instruction_files` 与
+整个替换系统提示词的 `prompt.override` 不生效,`telemetry.enabled: false`(关审计记录)也不生效,
+`app` 块整块不认;
 它的 agent 类型只能收紧、不替换同名类型;它的 skill 里的 `` !`cmd` `` 不执行,`allowed-tools`
 不授予任何东西。完整的表在 `ARCHITECTURE.md` §6.6。
 
-信任是**项目根**的属性,只能写在全局层的 `project_trust` 里(`default` 加 `trusted` 路径 /
+信任是**项目根**的属性,只能写在全局层的 `app` 块里(`trust_all_projects` 加 `trusted_projects` 路径 /
 glob 清单),项目自己写的忽略。三态:
 
 | `trust` | 意思 |
@@ -298,20 +299,20 @@ glob 清单),项目自己写的忽略。三态:
 | `untrusted` | 项目层按上面收紧 |
 | `none` | 没有自己的项目层(无项目会话,或项目根就是放全局目录的那个目录,如 `$HOME`)。项目层目录(缺省 `.agix`)是链到全局 / 场景目录的符号链接时不算,按 `untrusted` |
 
-**缺省 `default: "untrusted"`**:一个谁都没确认过的项目,项目层按上面收紧。
+**缺省 `app.trust_all_projects: false`**:一个谁都没确认过的项目,项目层按上面收紧。
 宿主用 `project.status`(§6.8)拿到状态和"信任之后才生效的东西"来画确认对话框,用
-`project.trust` 记下用户的选择;无人值守的部署在全局设置里写 `trusted` glob 预先信任。
+`project.trust` 记下用户的选择;无人值守的部署在全局设置里写 `app.trusted_projects` glob 预先信任。
 `session.create` / `session.resume` 的结果里有 `project_trust`(同上表的三个值)与
 `trust_source`——是谁定的:
 
 | `trust_source` | 意思 |
 |---|---|
-| `default` | 没有 `trusted` 条目命中,由 `project_trust.default` 决定 |
-| `user` | 全局 `settings.json` 里的一条 `trusted` 命中 |
+| `default` | 没有 `app.trusted_projects` 条目命中,由 `app.trust_all_projects` 决定 |
+| `user` | 全局 `settings.json` 里的一条 `app.trusted_projects` 命中 |
 | `host` | 全局 `settings.local.json` 里的一条命中——`project.trust` 写在这里 |
 | `null` | 没有自己的项目层(`project_trust` 是 `none`) |
 
-**会话历史放进项目时也看信任。** 全局设置 `history.location` 为 `project`(嵌入时
+**会话历史放进项目时也看信任。** 全局设置 `app.history` 为 `project`(嵌入时
 `EmbedConfig.history`)时,受信项目的会话放在 `<项目>/.agix/state/history/<id>/`(worktree 里的
 放在主仓库的这个目录),全局 `sessions/<id>/` 只留索引;不受信项目的照旧放全局。只认全局索引登记过的
 项目内会话,项目里多出来的不进 `session.list`、搜索,`session.resume` 报 `SESSION_NOT_FOUND`。
@@ -407,15 +408,11 @@ glob 清单),项目自己写的忽略。三态:
 | `plan` | 只允许只读工具 |
 | `default` | 未显式放行的工具调用都发 `prompt` 询问(**默认**) |
 | `bubble` | 把询问上抛给父 Agent —— 程序专用,写进 settings.json 会被退回 `default` |
-| `acceptEdits` | 自动放行项目内的文件写入与只读调用,其余询问。"项目内"指会话的工作目录、`sandbox.additional_directories`,读还包括 `sandbox.read_directories`(`sandbox.read_anywhere` 时不限):项目外的写入照样询问,`Read` / `Glob` / `Grep` 读项目外、只读的 `Bash` / `Monitor` 命令参数指向项目外(含 `~`、`$VAR` 这类展开不了的写法)也照样询问,与 `default` 一致(`.ssh` 一类的凭据仍被拒)。项目内的 `.git`、项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)、`.claude`、`.agents/skills` 下的写入也照样询问(改它们等于改 agent 自己的规则)。只读的 `Bash` / `Monitor` 命令只要跑 `git`,就还要求每一次 `git` 找到的仓库就是会话目录自己所在的那个(不能是裸仓库;`cd` 进项目自带的嵌套 `.git`、或 `cd` 到去向不明的目录再跑 `git`,都要询问),因为仓库配置(`core.fsmonitor`、`diff.external` 一类)会让 git 自己去启动程序,会话自己的仓库是用户的,项目里带来的是别人写的。`WebFetch` / `Ping` 只放行 `sandbox.allowed_domains` 列出的主机;MCP 工具一律询问,server 自报的 `readOnlyHint` 不算(有 allow 规则的照常放行) |
-| `bypassPermissions` | 不询问、不看用户各层(设置文件、`options.permission_rules`)的规则 —— 那些规则里的 `deny`、`/etc/passwd` 一类路径、`rm -rf /` 一类命令都放行。凭据(`.ssh` / `.aws` / `.gnupg`、沙箱拒读的家目录凭据库如 `.git-credentials` / `.config/gh` / `.kube`、状态目录里的设置与 token 等,§6.1)任何模式都拒,部署方 managed 层的 `deny` / `ask`、宿主策略的 `deny` 照样生效;`PreToolUse` hook 的拦截、委派带来的 deny 照样拒;`sandbox.require_enforcement` 打开而沙箱兜不住的命令照样拒(没装 `bwrap` 的 Linux 上即每条 `Bash`);除此之外只有不合法的输入(没读过就改、超出上限、会被读错的路径)被拒,`Bash` 仍在 OS 沙箱里 |
-
-`auto`、`yolo` 是 `bypassPermissions` 的另外两种写法:在 settings.json、`options.permission_mode`、
-agent 类型的 frontmatter 里都收,解析出来就是 `bypassPermissions`,夹紧、存进会话日志、
-`session.resume` 报出来的也都是 `bypassPermissions`。
+| `acceptEdits` | 自动放行项目内的文件写入与只读调用,其余询问。"项目内"指会话的工作目录、`files.extra_dirs`,读还包括 `files.read_dirs`(含 `"/"` 时不限):项目外的写入照样询问,`Read` / `Glob` / `Grep` 读项目外、只读的 `Bash` / `Monitor` 命令参数指向项目外(含 `~`、`$VAR` 这类展开不了的写法)也照样询问,与 `default` 一致(`.ssh` 一类的凭据仍被拒)。项目内的 `.git`、项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)、`.claude`、`.agents/skills` 下的写入也照样询问(改它们等于改 agent 自己的规则)。只读的 `Bash` / `Monitor` 命令只要跑 `git`,就还要求每一次 `git` 找到的仓库就是会话目录自己所在的那个(不能是裸仓库;`cd` 进项目自带的嵌套 `.git`、或 `cd` 到去向不明的目录再跑 `git`,都要询问),因为仓库配置(`core.fsmonitor`、`diff.external` 一类)会让 git 自己去启动程序,会话自己的仓库是用户的,项目里带来的是别人写的。`WebFetch` / `Ping` 只放行 `web.allowed_domains` 列出的主机;MCP 工具一律询问,server 自报的 `readOnlyHint` 不算(有 allow 规则的照常放行) |
+| `bypassPermissions` | 不询问、不看用户各层(设置文件、`options.permission_rules`)的规则 —— 那些规则里的 `deny`、`/etc/passwd` 一类路径、`rm -rf /` 一类命令都放行。凭据(`.ssh` / `.aws` / `.gnupg`、沙箱拒读的家目录凭据库如 `.git-credentials` / `.config/gh` / `.kube`、状态目录里的设置与 token 等,§6.1)任何模式都拒,部署方 managed 层的 `deny` / `ask`、宿主策略的 `deny` 照样生效;`PreToolUse` hook 的拦截、委派带来的 deny 照样拒;`sandbox.require` 打开而沙箱兜不住的命令照样拒(没装 `bwrap` 的 Linux 上即每条 `Bash`);除此之外只有不合法的输入(没读过就改、超出上限、会被读错的路径)被拒,`Bash` 仍在 OS 沙箱里 |
 
 表格是按**宽松程度从严到宽**排的,这个顺序就是会话级取值被夹紧的依据:会话只能
-比 settings 更严,不能更宽,除非 settings 里开了 `allow_client_permission_override`。
+比 settings 更严,不能更宽,除非 settings 里开了 `permissions.client_may_loosen`。
 `session.setPermissionMode` 设的模式同样按这个顺序夹紧。
 
 `plan` 模式里调 `ExitPlanMode` 照常询问(`prompt_type: "permission"`、`tool_name:
@@ -465,7 +462,7 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
   `cd` 到不是项目内字面路径之后再读的,照常询问。
 - 文件类工具用 glob(`"/etc/**"`)。匹配前两边都规整成绝对路径:相对路径按会话的
   工作目录解析,`.` / `..` 去掉,`~` 展开;符号链接解析后的路径上命中 `deny` / `ask`
-  也算,`<目录>/<worktree 目录>/<名>/`(缺省 `.wkts`,设置 `worktree_dir`)下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
+  也算,`<目录>/<worktree 目录>/<名>/`(缺省 `.wkts`,设置 `app.worktree_dir`)下的路径在 `<目录>/` 下的同一路径(主检出里的那一份)上
   命中 `deny` / `ask` 也算——锚在项目上的规则对子 Agent worktree 里的拷贝同样成立。`*` 不跨
   `/`,`**` 跨。`Read(...)` 同样约束 `Grep` / `Glob`,`Edit(...)` 同样约束 `Write` /
   `NotebookEdit`。沙箱开着时,点名具体路径的 `Read(...)` `deny`——一个文件或目录,或目录后面只跟
@@ -506,10 +503,10 @@ settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 
 
 `source` 与 `behavior` 都是 camelCase/小写的既有序列化格式,不是笔误。
 
-`bypassPermissions`(及 `auto` / `yolo`)会话不看这些规则,只看 `policySettings` 那一层的
+`bypassPermissions` 会话不看这些规则,只看 `policySettings` 那一层的
 `deny` / `ask`——但只认真正从 managed 设置文件读进来的规则:客户端在这里写
 `"source": "policySettings"` 只改变报出时的名字,不会让它在 bypass 下生效。managed 设置关掉了
-bypass(`disable_bypass_permissions_mode`)时,请求 `bypassPermissions` 的会话按 `default`
+bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 `default`
 运行,`session.resume` 报出的 `permission.mode` 也是 `default`。
 
 ### 4.7 `PermissionDecision` / `QuestionAnswer` / `McpElicitationAnswer` — 回答提问
@@ -603,7 +600,7 @@ TCP 与 WebSocket 需要(开了 `--unix-socket-auth` 时 unix socket 也要),都
 
 认证粒度是 **daemon 级**,不按场景或会话签发 —— 一条通过认证的连接可以访问这个
 daemon 的全部场景与会话,而且**没有任何逐方法的授权**。特别地,
-`config.setProvider` 能把后续所有模型流量指向调用方给的 `base_url`/`api_key`(`tier:"global"` 时是所有项目的);
+`config.setProvider` 能把后续所有模型流量指向调用方给的 `base_url`(`tier:"global"` 时是所有项目的);
 把 socket 或 token 暴露出去,等同于暴露模型凭据本身。连接不加密(§1),token 在不可信的
 网络上一过就算泄露了。
 
@@ -915,7 +912,7 @@ summary 为 `did not answer within 5s`,报告不再等它;panic 的检查同样�
 的副本,放在顶层是因为现有客户端读的是它们。
 
 `memory` 数的是会话用的记忆(全局与项目两个目录合起来)。到了上限(200 条)是 `degraded`:
-轮末的记忆抽取不再添新的,已有的一条不删,要腾地方得有人删掉一些。`memory_enabled` 为
+轮末的记忆抽取不再添新的,已有的一条不删,要腾地方得有人删掉一些。`memory.enabled` 为
 `false` 时是 `ok`,`details.enabled` 为 `false`。
 
 `settings_tiers` 依次是全局层、每个激活场景的场景层(`scene` 是哪个场景;daemon 启动的场景在前,
@@ -928,13 +925,13 @@ summary 为 `did not answer within 5s`,报告不再等它;panic 的检查同样�
 
 `settings_tiers[].ignored_values` 是这一层(`settings.json` 与 `settings.local.json`)里类型
 不对、因而被丢掉的值:`{ "tier", "origin", "key", "error" }`,`key` 是点分的
-(`sandbox.network_mode`),一个对象里的值都不对时逐个报它们自己的键,只有这里根本不该是对象时才报
-这个对象本身(`sandbox.allowed_domains` 写成了对象);`permission_mode` 写了只能由程序设的模式也列在
-这里;`permission_rules` 逐条读,读不出来的一条是 `permission_rules[0]` 这样带下标。被丢的只是这个值,同一个文件里
+(`sandbox.network.mode`),一个对象里的值都不对时逐个报它们自己的键,只有这里根本不该是对象时才报
+这个对象本身(`web.allowed_domains` 写成了对象);`permissions.mode` 写了只能由程序设的模式也列在
+这里;`permissions` 的规则串逐条读,读不出来的一条是 `permissions.allow[0]` 这样带下标。被丢的只是这个值,同一个文件里
 其余的值和别的层照常生效。有这样的值时 `settings.tiers` 是 `degraded`,`summary` 列出
 `<层> (<键>)`。
 
-`providers.ok` 只说明配置**形状**解析得通(每个 `task_models` 条目都指向一个存在
+`providers.ok` 只说明配置**形状**解析得通(每个 `tiers` 里的模型都在它的 `models` 里、`model.order` 里的每个 id 都指向一个存在
 的 provider),不说明真能建出客户端,更不说明那个端点能连上 —— 缺凭据、`base_url`
 指向一个没人监听的地址,这里都仍然是 `ok: true`。这项检查从已经握着的设置立刻回
 答,不发起任何网络探测。
@@ -968,8 +965,8 @@ daemon 自己的项目的 `project.status` 结果(§6.8):
                "requires_trust":["hooks", "mcp.servers.github"] } }
 ```
 
-没有东西要信任才生效、或项目由 `trusted` 清单明确信任时是 `ok`;项目未被信任而有东西被扣下,
-或只靠 `default: "trusted"` 信任而有这样的东西时是 `degraded`,`summary` 列出这些键。
+没有东西要信任才生效、或项目由 `app.trusted_projects` 明确信任时是 `ok`;项目未被信任而有东西被扣下,
+或只靠 `app.trust_all_projects: true` 信任而有这样的东西时是 `degraded`,`summary` 列出这些键。
 
 daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,说明部署方的 managed
 设置(`ARCHITECTURE.md` §6.1"用户规则与部署方规则")在哪里找、找到了什么:
@@ -981,12 +978,11 @@ daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,
                "path":"/etc/agix/managed-settings.json",   // 查找的路径(--managed-settings 或系统路径)
                "origin":"/etc/agix/managed-settings.json", // 这一层的来源
                "error":null,                               // 不能执行时的原因
-               "permission_rules":[ { "tool":"Bash(curl:*)", "action":"deny" } ],
-               "disable_bypass_permissions_mode":false } }
+               "permissions":{ "deny":["Bash(curl:*)"], "disable_bypass":false } } }
 ```
 
 系统路径上没有这个文件时是 `ok`,`details` 只有 `{ "present": false, "path": "…" }`;用 `--managed-settings` 点名的文件不存在时是 `failing`(点名的路径不会悄悄当成没有 managed 设置)。文件读不了、
-不是 JSON、有 `permission_rules` / `disable_bypass_permissions_mode` / `$schema` 以外的键、
+不是 JSON、有 `permissions` / `$schema` 以外的键(或 `permissions` 里有 `allow` / `allow_exact` / `ask` / `deny` / `disable_bypass` 以外的键)、
 值的形状不对或有写不成规则的规则时是 `failing`:这时**所有工具调用都被拒绝**,任何权限模式
 都一样。
 
@@ -1012,10 +1008,10 @@ MCP server 都被拒绝。
 引擎自带的另外几项是姿态检查,不看运行状态,只读设置与构建:`settings.permissions.mode` 在
 `permissions.mode` 是 `bypassPermissions` 时是 `degraded`,否则 `ok`;
 `settings.hooks_fail_open` 在有 `PreToolUse` / `UserPromptSubmit` / `Stop` 的 hook 的 `on_error` 是
-`allow`(失败时放行)时是 `degraded`,`details.fail_open` 列出事件与条数;`network.proxy` 报引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)怎么走:
+`allow`(失败时放行)时是 `degraded`,`details.fail_open` 列出事件与条数;`app.system_proxy` 报引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)怎么走:
 `details.mode` 是 `system`(跟随环境里的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`,缺省)或
-`direct`(`network.use_system_proxy` 为 `false`,不经代理),`details.variables` 是环境里已设置的代理变量名
-(不含值);总是 `ok`。它与沙箱内命令的出网(`sandbox.network_mode`)是两回事。`build.panic` 说明这个
+`direct`(`app.system_proxy` 为 `false`,不经代理),`details.variables` 是环境里已设置的代理变量名
+(不含值);总是 `ok`。它与沙箱内命令的出网(`sandbox.network.mode`)是两回事。`build.panic` 说明这个
 二进制是 `panic = "abort"`(工具 panic 会结束进程)还是 `unwind`(变成那次调用的错误),总是 `ok`。
 
 插件包开着(`plugins.status` 是 `enabled`)时还有一项 `plugins.enable_state`:两层
@@ -1031,35 +1027,35 @@ MCP server 都被拒绝。
 只看源码文本，不运行。
 
 daemon 自己的会话池还有一项 `sandbox.unattended_network`:这个 daemon 服务的场景里有无人值守的
-(没人回答提问与权限询问),`sandbox.network_mode` 是 `unrestricted`,而
-`sandbox.unattended_requires_network_policy` 关着——三条同时成立时是 `degraded`:无人值守会话里
+(没人回答提问与权限询问),`sandbox.network.mode` 是 `unrestricted`,而
+`sandbox.unattended_needs_network_policy` 关着——三条同时成立时是 `degraded`:无人值守会话里
 沙箱完整生效的 `Bash` / `Monitor` 命令不问就跑,网络又是开着的。`summary` 提示这个开关计划在
 后续 0.3.x 版本改为缺省开;其余情况是 `ok`。这一项按场景缺省的 `interactive` 报;`options.attended` 把某个会话改成有人或无人值守,不反映在这里。
 
 ```jsonc
 { "name":"sandbox.unattended_network", "status":"degraded", "summary":"unattended scenes (code) run …",
   "details": { "unattended_scenes":["code"], "network_mode":"unrestricted",
-               "unattended_requires_network_policy":false } }
+               "unattended_needs_network_policy":false } }
 ```
 
-`sandbox.network_allowlist`:`sandbox.network_mode` 是 `allowlist`,而 `allowed_domains` 里有
+`sandbox.network_allowlist`:`sandbox.network.mode` 是 `allowlist`,而 `web.allowed_domains` 里有
 回环(`localhost`、`127.0.0.1`、`::1`)以外的条目时是 `degraded`——两个 OS 沙箱后端都不按域名放行,
 沙箱里的 `Bash` / `Monitor` 命令连不上这些域名(macOS 只放开名单里的回环,Linux 整个断网,
-`ARCHITECTURE.md` §6.3);`sandbox.require_enforcement` 开着时 `summary` 另外说明每条沙箱命令都会
-被拒。其余情况是 `ok`。`details` 是 `{"unreachable_from_the_sandbox": [...], "require_enforcement": false}`,
+`ARCHITECTURE.md` §6.3);`sandbox.require` 开着时 `summary` 另外说明每条沙箱命令都会
+被拒。其余情况是 `ok`。`details` 是 `{"unreachable_from_the_sandbox": [...], "require": false}`,
 不是 `allowlist` 时 `details` 为 `null`。
 
-`sandbox.egress_proxy`:`sandbox.network_mode` 是 `proxy` 时,用一条探测命令问会话的沙箱能否把命令
+`sandbox.network.proxy`:`sandbox.network.mode` 是 `proxy` 时,用一条探测命令问会话的沙箱能否把命令
 只限到代理上:能是 `ok`;只能部分做到(macOS 上代理不在本机、只能按端口限;Linux 上找不到 `socat`、
 中继起不来而整个断网;代理端口就是 daemon 自己的端口)是 `degraded`,`summary` 与 `details.unmet`
-列出原因;`egress_proxy` 缺失或读不出(命令整个断网)是 `failing`。设了 `egress_proxy` 而模式不是
+列出原因;`sandbox.network.proxy` 缺失或读不出(命令整个断网)是 `failing`。设了 `sandbox.network.proxy` 而模式不是
 `proxy` 也是 `degraded`(地址被忽略)。`details` 是 `{"network_mode", "http", "socks", "enforcement",
 "unmet"}`(后两项只在探测过时有);两者都没设时 `details` 为 `null`。
 
 `sandbox.strict_profile`:自动放行的命令(只读通道)跑在严格 profile 里——断网、只能写会话的
 `TMPDIR`、只能读可读根和系统目录、只带最小环境变量。这台机器的沙箱兑现不了它(没有后端、Linux 上没有
-bwrap,或 `sandbox.dangerously_disable_sandbox` 开着)时是 `degraded`:通道照常放行,命令按会话自己的
-约束跑。`details` 是 `{"enforcement": "full" | "partial" | "none", "sandbox_disabled": false}`。
+bwrap,或 `sandbox.enabled` 为 `false`)时是 `degraded`:通道照常放行,命令按会话自己的
+约束跑。`details` 是 `{"enforcement": "full" | "partial" | "none", "sandbox_enabled": true}`。
 
 #### `daemon.subscribeEvents`
 
@@ -1340,7 +1336,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
     "effort": "high",                     // 可选,low | medium | high | xhigh | max,省略 = 设置的 model.effort
-    "thinking_mode": "on",                // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking_mode
+    "thinking_mode": "on",                // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
     "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
@@ -1488,7 +1484,7 @@ skill 目录相同。只有列了它的会话看得到:提示词里的 skill 清
 这类 skill 的 `source` 是 `host`(`commands.list`,`session.get` 的 `shadowed.by`)。
 
 信任同插件包:`allowed-tools` 只认收窄的写法(`Bash(cargo test:*)`),裸工具名与指到项目之外的模式不认;
-`` !`cmd` `` 经会话自己的 `Bash`、按会话的权限执行,`disable_skill_shell_execution` 照样生效。
+`` !`cmd` `` 经会话自己的 `Bash`、按会话的权限执行,`skills.allow_shell: false` 照样生效。
 读取以目录自己为根:skill 目录、`SKILL.md`、`files:` 里经符号链接指到目录之外的不读,记警告;
 名字以 `mcp__` 开头的不读;解析不了的 `SKILL.md` 跳过,同磁盘层。
 
@@ -1496,8 +1492,8 @@ skill 目录相同。只有列了它的会话看得到:提示词里的 skill 清
 `skill_dirs[i].path`(数量超限、构建没有 skills 模块时为 `skill_dirs`),什么都不建:必须是绝对路径;
 已存在但不是目录的拒绝;解开链接后同一目录出现两次(记在后一项上);落在这个绑定的 skill 层
 (`{global}/skills`、`{global}/scenes`、场景层的 `skills`)、会话的项目根、工作目录、可写目录
-(`sandbox.additional_directories`、状态根的 scratchpad 与 memory)、沙箱里的命令能写的目录(状态根的
-`tmp`、`sandbox.cache_directories`、`/dev`、macOS 的每用户临时目录 `/var/folders/…/T`,`tempfile` 之类
+(`files.extra_dirs`、状态根的 scratchpad 与 memory)、沙箱里的命令能写的目录(状态根的
+`tmp`、`sandbox.cache_dirs`、`/dev`、macOS 的每用户临时目录 `/var/folders/…/T`,`tempfile` 之类
 缺省建在这里)或凭据位置之内、或把它们包在里面。不存在的目录收下,`state` 为 `missing`,出现之后在下一轮
 开始前(daemon 为会话跑的每一轮前检查)读进来,此后被监视;出现时是符号链接的,按它解析到的位置监视,
 那个位置同样受下面的读写边界约束。落在*另一个*项目(包括未受信的项目)里的目录照收,里面的 skill
@@ -1548,14 +1544,12 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `input`,不符合的调用以校验错误
 退回给模型,不发帧。
 
-`provider` 让这个会话的对话走 `providers` 里那个厂商的 client,而不是设置里
-`task_models.main` 路由到的那个;子 Agent、压缩等其他路由任务仍按设置走——没有
-`task_models` 条目的走 `default_provider` 的 client,带设置的 `model.model_name`,不带这个会话
-的模型。`model` 省略时用该厂商的 `default_model`。厂商没配置、或 `model` 不在该厂商的 `models`
-白名单里 → `INVALID_PARAMS`。对话的模型依次取:会话自己选的 `model`(`options.model` 或
-`session.setModel`);给了 `provider` 时该厂商的 `default_model`;没给时 `task_models.main`
-解析出的模型(详细写法的 `model`,简写时该厂商的 `default_model`);都没有用设置的
-`model.model_name`。
+`provider` 把这个会话要用的 provider 排到这个会话的 `model.order` 最前,其余照旧:它不可用(配额用尽、
+没有凭据、连不上……)时仍按 `order` 往后换。`model` 可以是模型 id,也可以是档位名(`strong`、
+`balanced`、`fast`);省略时对话取 `model.tasks.main` 的档位。provider 没配置、或 `model` 不在该 provider 的
+`models` 白名单里 → `INVALID_PARAMS`。对话的模型依次取:会话自己选的 `model`(`options.model` 或
+`session.setModel`);没选时 `model.tasks.main` 那一档在当前 provider 里对应的模型。子 Agent、压缩、记忆、
+标题、搜索也都走同一个 `order`,各取自己任务的档位(`model.tasks`)。
 
 #### `session.run_turn`
 
@@ -1629,7 +1623,7 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 
 `reasoning` 是这个会话下一次模型调用带的推理强度(`null` = 不发,交给端点)与思考开关,`*_source`
 为 `session`(会话自己的,`options` 或 `session.setModel` 设的)或 `settings`(会话绑定的项目与场景的
-`model.effort` / `model.thinking_mode`)。sidechain 与没记场景的老会话没有这个键。
+`model.effort` / `model.thinking`)。sidechain 与没记场景的老会话没有这个键。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -1854,7 +1848,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 
 **用户改过的名字不会被自动命名覆盖**:开了自动命名的场景在首轮结束后会生成一个
 名字,但它跳过已经被 `session.rename` 命名过的会话。生成名字用的是会话自己项目的
-`task_models.title` 路由,没配就用会话自己的对话模型。
+`model.tasks.title` 那一档的模型。
 
 #### `session.goal` / `session.setGoal` / `session.updateGoal`
 
@@ -1951,19 +1945,18 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 条",不是改写已经说过的话。所以"这一段用便宜的,接下来换个强的"不再需要新建会话,
 也就不再需要丢掉上下文。
 
-只给 `model`:换模型名,仍走当前厂商的 client。给 `provider`:对话改走那个厂商的
-client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),没同时给 `model` 就用
-该厂商的 `default_model`。`model` 按它将被发往的厂商的 `models` 白名单检查,不在
+只给 `model`:换模型(模型 id 或档位名),仍走当前 provider。给 `provider`:把它排到这个会话
+`model.order` 的最前,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),没同时给 `model` 就取
+`model.tasks.main` 的档位。`model` 按它将被发往的 provider 的 `models` 白名单检查,不在
 白名单里 → `INVALID_PARAMS`,而不是把一个对端不认识的模型名静默发过去。子 Agent、
-压缩等其他路由任务的 client 仍按设置走;这个会话此后派生的子 Agent,`Agent` 调用与 agent
-类型都没指定模型、设置里也没有 `task_models.subagent`、会话本身也在 `default_provider` 上时,
-用这里换上的模型,与会话本身一致;会话在别的 provider 上时它们带设置的 `model.model_name`。
-`WebSearch` 没有 `task_models.web_search` 时经会话自己的 client 搜索,同样带这里换上的模型。
+压缩等其他任务照 `model.tasks` 取各自的档位;这个会话此后派生的子 Agent,`Agent` 调用与 agent
+类型都没指定模型时,取 `model.tasks.subagent` 那一档的模型,与对话用的是同一个模型时跟随这里换上的模型。
+`WebSearch` 搜索用 `model.tasks.web_search` 那一档的模型。
 
 `effort` / `thinking_mode` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
 这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。
 不重建会话;键不给就不动,给 `null` 就去掉会话自己的值、回到设置的 `model.effort` /
-`model.thinking_mode`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
+`model.thinking`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
 (`options.thinking_mode` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
 就降到 `max_tokens - 1`,`max_tokens` 留不出 1024 时这次调用关掉思考,都记一条 warn。当前生效值与来源见 `session.get` 的 `reasoning`。
 
@@ -2009,7 +2002,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 #### `session.setPrompt`
 
 这个会话自己的系统提示词:一段追加文字与一份整体替换,优先于 settings.json 的
-`prompt_append` / `prompt_override`。`session.create` 的 `options.prompt` 给初值,这个方法
+`prompt.append` / `prompt.override`。`session.create` 的 `options.prompt` 给初值,这个方法
 在会话进行中改。
 
 ```jsonc
@@ -2046,7 +2039,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 `permit` 也不再改模式,模型得到一个拒绝,说模式已被切成了什么。模型在下一步读到一条提醒,说用户把模式切成了什么。
 
 夹紧同 `options.permission_mode`(§4.5):不宽于会话所在项目与场景的设置,除非设置开了
-`allow_client_permission_override`;managed 层关了 `bypassPermissions` 时它得 `default`。`mode` 是会话
+`permissions.client_may_loosen`;managed 层关了 `bypassPermissions` 时它得 `default`。`mode` 是会话
 此刻所在的模式,`requested` 是请求的,`clamped` 为 `true` 表示设置把它夹窄了。`mode` 不是 §4.5 的取值、
 或是只能由程序设的 `bubble` → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`;场景不符 → `SCENE_MISMATCH`。
 写不进会话日志 → `ENGINE_ERROR`(`kind: "persist_failed"`,§7.2):`plan` 以外的模式没记进规格时,模式不变;
@@ -2197,7 +2190,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
   "request": { "session_id": "…", "parent_session_id": null, "agent_type": null,
                "turn_id": "…", "turn": 1, "step": 0, "purpose": null,
                "provider": "anthropic", "model": "…", "max_tokens": 8192,
-               "thinking_mode": "off", "effort": null, "fallback_model": null,
+               "thinking_mode": "off", "effort": null,
                "system": [ { "role": "system", "cache": "ephemeral", "source": "identity",
                              "origin": "kernel", "text": "…" },
                            { "blob": "s.0123456789abcdef", "bytes": 70000 } ],
@@ -2319,7 +2312,7 @@ client,会话在原地按新的规格重建(它是空闲的,不会腰斩什么),
 `permission.prompts` 为 `false` 意味着这个会话跑在 `bypassPermissions` 下、部署方的
 managed 层(§10)也没有能让它询问的东西,不会有任何 `prompt_type:"permission"` 的 `prompt`
 帧。`bypassPermissions` 会话在 managed 层有 `ask` 或 `deny` 规则(`deny` 规则读不透的命令,
-如 `$CMD x`,是询问而不是拒绝)、或写了 `disable_bypass_permissions_mode: true` 时,
+如 `$CMD x`,是询问而不是拒绝)、或写了 `permissions.disable_bypass: true` 时,
 `prompts` 为 `true`:这样的会话仍可能被询问,宿主要能回答。
 
 #### `session.fork`
@@ -2887,7 +2880,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "prompt": "…",
   "description": "…",                // 可选,进 task.detail
   "subagent_type": "reviewer",       // 可选,按 agent 目录取模型、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
-  "model": "…",                      // 可选,压过 agent 类型与 task_models.subagent 的 model;不接受 provider,子 Agent 的 provider 按设置路由(task_models.subagent,没配是 default_provider)
+  "model": "…",                      // 可选,压过 agent 类型与 model.tasks.subagent 的 model(模型 id、档位名,或 opus / sonnet / haiku、inherit);不接受 provider,子 Agent 的 provider 按 model.order 路由
   "allowed_tools": [ ], "disallowed_tools": [ ],  // 可选,在 agent 类型之上再收窄,只会更少
   "permission_rules": [ ],           // 可选,同 options.permission_rules 的写法;只有 deny 生效
   "output_schema": { },              // 可选,同 session.create;交上来的进任务的 structured_output
@@ -2900,7 +2893,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 - 父会话空闲、正在一轮里都能起,互不阻塞;不在内存里时先恢复,同 `session.run_turn`。
 - 子 Agent 随父会话的运行体结束:父会话被 `session.close` 或 `daemon.shutdown` 时,它被停下
   (`stopped`)。还有子 Agent 在跑的会话不会被驱逐。
-- 计入 `execution.max_concurrent_subagents`,也受委派深度限制;超了 → `TASK_LIMIT`,不排队。
+- 计入 `agents.max_concurrent`,也受委派深度限制;超了 → `TASK_LIMIT`,不排队。
 - 权限:子 Agent 的工具调用照父会话的权限判;`permission_rules` 里的 deny 规则先判,命中
   就拒。allow / ask 规则不生效 —— 宿主起的子 Agent 只能比父会话更严。询问怎么答见 §10。
 - `output_schema`:子 Agent 交的不满足 schema 时被退回重交;结束时在 `task_finished.task`
@@ -2952,7 +2945,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 的会话的提问不可能是"已经完成了")。`prompt_type` 为 `host_tool_call` → `INVALID_PARAMS`:
 宿主工具的调用用 `session.respondToolCall` 回答;`hook_call` 同理,用 `session.respondHook`。
 
-未在 `--permission-prompt-timeout`(没给时取设置 `execution.permission_prompt_timeout_secs`,
+未在 `--permission-prompt-timeout`(没给时取设置 `permissions.prompt_timeout_secs`,
 默认 300 秒)内回答的提问**失败关闭**:权限提问按拒绝
 处理,turn 带着一条 error `tool_result` 继续;模型的提问以"用户没有回答"作为
 `AskUserQuestion` 的结果交还模型;MCP server 的询问回 server `cancel`。都不会挂死。
@@ -3067,9 +3060,9 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 全局层下的 `scenes/<id>`)。`local` 与 `revision` 只在单层读时有;文件不存在时 `revision` 按空文件算。
 
 `managed` 只在 `tier: "effective"` 时有内容:部署方的 managed 层
-(`{ "origin", "permission_rules", "disable_bypass_permissions_mode" }`,不能执行时另有
-`error`),没有这一层时是 `null`。它不并进 `settings`——`settings.permission_rules` 只是各层
-设置文件里的规则,managed 层的规则在这里单列,裁决时与它们一起生效。
+(`{ "origin", "permissions": { "allow"?, "allow_exact"?, "ask"?, "deny"?, "disable_bypass" } }`,不能执行时另有
+`error`),没有这一层时是 `null`。它不并进 `settings`——合并后的 `settings` 不含 `permissions` 的规则列表,各层
+设置文件里的规则与 managed 层的规则都在别处单列,裁决时一起生效。
 
 **该层没有文件时 `settings` 是 `null`,不是 `{}`** —— "这层没配"和"这层配了个空的"
 是两种状态,配置界面得能区分。`tier: "project"` 而没给 `project_root` 同理。
@@ -3106,18 +3099,18 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
                "router_error": null, "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
 ```
 
-**键**是点分的设置路径:`model.model_name`、`sandbox.env.allow`、`task_models.subagent`、
+**键**是点分的设置路径:`model.effort`、`sandbox.env.allow`、`model.tasks.subagent`、
 `plugins.allow`。不支持通配,也不支持数组下标——列表整个写。同一次写里一个键是另一个的前缀
 (`web` 与 `web.allowed_domains`)→ 拒绝。名字里带 `.` 的 map 条目(provider id、server 名)
 经它寻址不到,它们归 `config.setProvider` 与 `mcp.*`。
 
 **值**:这一层在这个键上的值变成它——对象整个替换这一层原有的那棵(与下面几层照常合并),
 `null` 从这一层的两个文件里删掉这个键,删空的上级对象一并去掉。所以高层写不出字面的 `null` 去盖住
-下层。`permission_rules` 是各层各文件拼接的,这里只换这一层 `settings.json` 的那份,权限询问里
+下层。`permissions` 的规则列表(`allow`、`allow_exact`、`ask`、`deny`)是各层各文件拼接的,这里只换这一层 `settings.json` 的那份,权限询问里
 "永久允许"记进 `settings.local.json` 的规则不动(`null` 同样只删 `settings.json` 的)。
 
-**密钥落 `settings.local.json`**:`providers.*.api_key`、`mcp_servers.*.headers`、
-`mcp_servers.*.env` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
+**密钥落 `settings.local.json`**:`mcp.servers.*.headers`、
+`mcp.servers.*.env` 不管从哪个键写进来,都写进同一层的 `settings.local.json`
 (0600);`settings.json` 里这些键原有的值在这次写入时挪过去(local 里已有的不覆盖)。其余键一律写
 `settings.json`。挪的是整个键,不看值:URL 里的密码(`https://u:p@host`)或查询参数里的 token
 (`?api_key=…`)、MCP server `args` 里 `--token` 后面的值、`url` 等字段照样写进 `settings.json`——
@@ -3133,11 +3126,11 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 |---|---|
 | `bad_path` | 不是点分的键,或与同一次写里的另一个键重叠 |
 | `unknown_key` | 没有设置读这个键(值是对象时,对象里的键也逐个查) |
-| `invalid_value` | 值放不进这个设置(按加载器的规则判:类型、枚举、一条一条的权限规则),或 `permission_mode` 写了只能由程序设的模式 |
+| `invalid_value` | 值放不进这个设置(按加载器的规则判:类型、枚举、一条一条的权限规则),或 `permissions.mode` 写了只能由程序设的模式 |
 | `requires_trust` | 写进未受信项目的项目层,而它会被扣下(§3.6):未受信项目只能增加与收紧,判的是写入那一刻相对下面几层 |
-| `not_at_tier` | `network.*` 只从全局层读,写在场景层 / 项目层;`worktree_dir` 不从项目层读,写在项目层 |
-| `use_method` | 有专门的方法,`method` 指明:`mcp_servers` → `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`,`mcp_enabled` → `mcp.setEnabled`,`project_trust` → `project.trust` |
-| `not_writable` | `hooks_config`、`scripts`:它们执行代码,不经 RPC 写,宿主仍可直接改设置文件 |
+| `not_at_tier` | `app.*` 只从全局层读,写在场景层 / 项目层 |
+| `use_method` | 有专门的方法,`method` 指明:`mcp.servers` → `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`,`mcp.servers.<名>.enabled` → `mcp.setEnabled`,`app.trusted_projects` / `app.trust_all_projects` → `project.trust` |
+| `not_writable` | `hooks`、`scripts`:它们执行代码,不经 RPC 写,宿主仍可直接改设置文件 |
 
 宿主能连上这个 socket 就能直接改这些文件,所以按键拒绝不是安全边界,而是"写下去的东西加载器会照样
 生效"的保证:手写进文件时会被加载器静默丢掉的值,在这里直接报出来。
@@ -3148,7 +3141,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 
 **答复**:`effective` 是每个键写完之后在定位参数那一对 `(项目, 场景)` 合并结果里的值(密钥脱敏);
 `overridden` 列出写进去了、但这一对的生效值不是它的键——更高的层、宿主覆盖或 managed 层盖住了它
-(只对标量与列表算,`permission_rules` 不算)。`revision` 是写完之后(`dry_run`:现在)这一层的
+(只对标量与列表算,`permissions` 的规则列表不算)。`revision` 是写完之后(`dry_run`:现在)这一层的
 revision。其余字段同 `config.reload`。
 
 **并发**:两个文件在那一层目录的锁下读改写(同 `config.setProvider`),锁内重新读文件、只套用这次
@@ -3158,7 +3151,7 @@ revision。其余字段同 `config.reload`。
 revision,什么都不写,重读再写即可。锁等满 10 秒 → `SETTINGS_LOCKED`。
 
 **写完之后**:daemon 自己那一对的设置重读,从这一层合出来的绑定作废(项目层只作废那个项目的,场景层
-那个场景的,全局层全部),已有会话在下一轮前换上新配置。改动碰到 `sandbox.subprocess_env` 或 `network`
+那个场景的,全局层全部),已有会话在下一轮前换上新配置。改动碰到 `sandbox.env` 或 `app.system_proxy`
 时这一对的 MCP server 按新配置重连(这一对的 MCP 还没连过时不连,等它第一个会话),其余改动不动 MCP 连接。监视器不会把引擎自己刚写下的内容当成又一次
 改动(第一次建出文件时例外,会多重读一次)。`plugins.*` 与手改文件一样,要到 `plugin.reload` 才影响已
 加载的包。
@@ -3229,13 +3222,14 @@ skills、agents 目录监视不了;它被建出来之后(比如 `permit_always` 
 
 两者都接受 `scene` / `project_root` 定位参数,语义与 `config.reload` 一致:省略 = 这个
 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
-`setProvider` 缺省写**被指定项目**的项目层目录里的 `settings.json`(`{project_root}/.agix/settings.json`,`tier:"project"`),
+`setProvider` 改的是已经定义了这个 id 的那一层的 `settings.json`;这个 id 还没有定义时新建在 `tier` 指的那一层:
+缺省 `tier:"project"`,写**被指定项目**的项目层目录里的 `settings.json`(`{project_root}/.agix/settings.json`),
 `tier:"global"` 写全局层的 `settings.json`(`config.get` 的 `global` 那一份,对所有场景、所有项目生效),
 `tier:"scene"` 写 `scene` 指的那个场景自己那一层(`config.get` 的 `scene` 那一份);
-`written_to` 回的就是写的那个路径;`api_key` 写进同目录的 `settings.local.json`(0600)。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目层目录借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里;链到项目之外别处(如另一个项目的 `.agix`)同样拒绝——写进去改的是那个目录的设置。
+`written_to` 回的就是写的那个路径。`mcp.addServer` 与 `mcp.updateServer` 同样接受这两个参数。项目层目录借用了全局 / 场景层(仓库里提交的符号链接,或项目根就是放全局层的目录)时,`setProvider` 与 `mcp.addServer` 拒绝写,`INVALID_PARAMS` 并说明原因——写进去会落在对所有项目生效的那一份里;链到项目之外别处(如另一个项目的 `.agix`)同样拒绝——写进去改的是那个目录的设置。
 
 **provider 路由是按 `(项目, 场景)` 解析的**:一个项目在自己的 settings 里配了
-`providers` / `task_models`,它的会话就走它自己的路由,不是 daemon 那个项目的。
+`providers` / `model.order`,它的会话就走它自己的路由,不是 daemon 那个项目的。
 
 ```jsonc
 // → params (getProvider)
@@ -3244,12 +3238,12 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
   "provider_id": "deepseek",            // 可选:只要这一个;省略 = 全部
   "include_secrets": false }
 // ← result (getProvider)
-{ "providers": [ ],           // [ {id, vendor, api, base_url, api_key_env, models, tiers, quota, usage?, credential_present, builtin, defined_in?} ]
-  "order": [ ],
-  "tasks": { } }
+{ "providers": [ ],           // [ {id, vendor, api, base_url, api_key_env, models, tiers, quota, usage?, credential_present, builtin, defined_in?} ],按加载顺序
+  "order": [ ],               // model.order 实际的路由顺序;没写时是第一个定义的 provider
+  "tasks": { } }              // model.tasks:每类调用要的档位
 ```
 
-`api_key` 默认脱敏为 `***<末 4 位>`,`base_url` 里的密码默认换成 `***`(`https://u:***@host`)。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(条目里的 `api_key` / `api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
+`base_url` 里的密码与查询串默认换成 `***`(`https://u:***@host`);`include_secrets: true` 时原样给出。`quota` 是写进设置的上限;有 `quota` 的 provider 还带 `usage`:此刻所在的日、周、月各自已用的 token(未命中缓存的输入加缓存写入加输出,缓存命中不计)、上限与起始日(按本机时区,周从周一、月从 1 号)。`defined_in` 是定义这一项的设置文件,内建的没有。`credential_present` 是布尔:引擎给这个 provider 建 client 时用的凭据来源(`api_key_env` 指的环境变量,再加宿主给的 `CredentialSource`)现在能不能给出非空的 key;只报有没有,任何情况下(含 `include_secrets: true`)答复里都不带 key 或环境变量的值。
 
 `models` 的每一项是模型 id 字符串,或一个对象,两种写法可以混用;读回时原样是写进去的形状:
 
@@ -3264,12 +3258,11 @@ daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVAL
 ]
 ```
 
-id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`session.create` / `setModel`
-的 `model`)必须是其中之一。对象里的值按**这个 provider 的 client 发出的调用**取:会话用的模型
+`models` 非空时,显式指定的模型(`tiers` 里写的、`session.create` / `setModel` 的 `model`)必须是其中之一。对象里的值按**这个 provider 的 client 发出的调用**取:会话用的模型
 (含子 Agent)在它的 provider 里有对象条目时——
 
 - `max_output`:这一轮每次调用的 `max_tokens` 取 `model.max_tokens` 与它的较小值;回复在
-  `max_tokens` 处被截断后的重试也以它为上限(先于 `model.max_output_tokens`,再先于按模型名查的表)。
+  `max_tokens` 处被截断后的重试也以它为上限(先于按模型名查的表)。
   压缩、记忆提取、标题这些自带小上限的调用不受影响。
 - `context_window`:`turn_complete` 的 `context.window` 报它,不再按模型名推断。压缩阈值仍由
   场景与 `compaction.*` 决定。
@@ -3278,7 +3271,7 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
 
 对象缺 `id`、或某项既不是字符串也不是对象,`setProvider` 以 `INVALID_PARAMS` 拒绝。
 
-没配 `providers` / `task_models.main` 时用的缺省客户端(provider id `default`),密钥依次取
+没配 `providers` 时引擎自己提供的 `anthropic` provider(缺省客户端,向宿主要密钥时的 provider id 是 `default`),密钥依次取
 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、宿主的 `CredentialSource`。都没有时 daemon 照样启动,
 走它的每一次模型调用(主轮、子 Agent、压缩、记忆提取)都不发请求,这一轮以 `no_credentials`
 (§9.1)结束。`ANTHROPIC_BASE_URL` 指向不需要密钥的网关时也要给一个任意非空值,与 `providers`
@@ -3292,25 +3285,23 @@ id 的作用不变:`models` 非空时,显式指定的模型(`task_models`、`ses
   "provider_id": "deepseek",
   "config": { "vendor":"deepseek", "api":"openai_chat", "base_url":"…",
               "api_key_env":"DEEPSEEK_API_KEY",
-              "tiers": { "strong":"deepseek-chat" } },  // 部分补丁,逐键 merge 进 providers 里这个 id 的那一项
+              "tiers": { "strong":"deepseek-chat" },
+              "quota": { "day": 20000000 } },          // 部分补丁,逐键 merge 进 providers 里这个 id 的那一项
   "delete": false }                                    // 可选;true = 删掉这个 provider
 ```
 
-响应是 `config.reload` 的结果再加 `tier`、`dry_run`、`written_to`(写入的 settings.json)和
-`secrets_written_to`(写了密钥时才有,即那个 settings.local.json),以及 `warnings`(写进 settings.json 的
+响应是 `config.reload` 的结果再加 `tier`、`dry_run`、`written_to`(写入的 settings.json),以及 `warnings`(写进 settings.json 的
 provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同 `config.set` 的 `warnings`)。`routing` 与其余字段
 报的是定位参数指的那一对(scene, 项目)写完之后的样子。
 
-`config` / `task_models` 是部分补丁:只提到的键被覆盖,没提到的保持原样。`delete: true` 同样作用于
-`tier` 指的那一层。它与 `config.set` 是同一个写入实现,`config.set` 也能写 `providers.*`、
-`default_provider`、`task_models.*`。写成的样子按加载器的规则逐键检查,加载器会丢掉的值(比如
+`config` 是部分补丁:只提到的键被覆盖,没提到的保持原样;`config.id` 若写了必须等于 `provider_id`,
+写了旧名字的键(如 `api_type`、`api_key`)以 `INVALID_PARAMS` 拒绝并说出新名字。`delete: true` 作用于
+定义这个 id 的那一层。它与 `config.set` 是同一个写入实现,`config.set` 也能写 `model.order`、`model.tasks.*`。写成的样子按加载器的规则逐键检查,加载器会丢掉的值(比如
 `models` 里既不是字符串也不是对象的一项)直接以 `INVALID_PARAMS` 拒绝,`data.rejected` 同 `config.set`,
 什么都不写。`tier:"project"` 而 `project_root` 不是目录 → `PROJECT_NOT_FOUND`(不会替它建出目录)。
 
-**密钥不进 settings.json。** `config.api_key` 写进项目层的 `settings.local.json` —— 这个
-文件按约定不提交,在 unix 上每次写都是 0600;其余字段照旧写 settings.json。settings.json 里
-这个 provider 已有的 `api_key`(早先版本写进去的)在这次写入时挪进 settings.local.json。
-`delete: true` 从两个文件里都删掉这个 provider。
+**设置里没有明文密钥。** provider 只写 `api_key_env`(密钥所在的环境变量名),或由宿主的
+`CredentialSource` 提供。`delete: true` 从那一层的两个文件里都删掉这个 provider。
 
 `tier:"project"` 而目标项目未被信任(§3.6)→ `PROJECT_UNTRUSTED`,什么都不写:项目层的
 `providers` 在未信任时不生效。要给它配 provider,先 `project.trust`,或者用 `tier:"global"`
@@ -3322,9 +3313,9 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 **`dry_run: true`**:做写入之前的全部检查(参数、项目信任、项目层目录是否借用全局 / 场景层),
 读出那一层的两个文件、在内存里套上补丁,按会写成的样子与其余各层合并、解析 provider 路由、
 建出 client(不发网络请求)。哪个文件都不写、不建目录、不拿锁,也不动正在用的配置。
-套上之后路由解析不了或 client 建不出来(比如写错的 `api_type`、`openai_compatible` 缺
-`base_url`、没有 `api_key`)→ `INVALID_PARAMS`,消息里是原因;能用时回的结果与真写一样,
-`dry_run` 为 `true`,`written_to` / `secrets_written_to` 是会写的路径,`routing.mcp_*` 为空。
+套上之后路由解析不了或 client 建不出来(比如写错的 `api`、`openai_chat` 缺
+`base_url`、`tiers` 里的模型不在 `models` 里、`model.order` 里有没定义的 id)→ `INVALID_PARAMS`,消息里是原因;能用时回的结果与真写一样,
+`dry_run` 为 `true`,`written_to` 是会写的路径,`routing.mcp_*` 为空。
 所以宿主可以先 `dry_run` 再写,确认这一对 `(项目, 场景)` 的配置能用。检查只覆盖这一对:`tier:"global"` 的改动同样会进入其他项目与场景的合并结果,它们自己那几层是否依赖这处改动,`dry_run` 不检查。真写不因路由解析不了而拒绝:
 文件照写,`routing.error` / `routing.router_error` 报原因,已经在用的路由保留。
 
@@ -3356,9 +3347,9 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
   "truncated": false }   // true = 端点还有更多页,这里只是前 50 页
 ```
 
-- `anthropic`(或没写 `api_type`):`GET …/v1/models`,带 `x-api-key` 与 `anthropic-version`,
+- `anthropic`(或没写 `api`):`GET …/v1/models`,带 `x-api-key` 与 `anthropic-version`,
   按 `has_more` / `last_id` 翻页取全,最多 50 页;第 50 页之后还有时 `truncated` 为 `true`。
-- `openai_compatible` / `openai_responses`:`GET …/models`,带 `Authorization: Bearer`;路径与
+- `openai_chat` / `openai_responses`:`GET …/models`,带 `Authorization: Bearer`;路径与
   这个 provider 发对话请求的端点同级(`base_url` 写到主机、写到 `/v1`、写全端点都一样)。
 
 每项只有 `id` 必有;其余字段端点给了才有,不按模型名猜:`display_name`(Anthropic)、
@@ -3372,7 +3363,7 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 
 - `provider` 不在配置里 → `INVALID_PARAMS`。
 - 这个 provider 拿不到凭据 → 不发请求,`ENGINE_ERROR`,`data.kind` 为 `no_credentials`。
-- 端点回 404 / 405 / 501,或回的不是带 `data` 列表的 JSON,或 `api_type` 是宿主自己注册的
+- 端点回 404 / 405 / 501,或回的不是带 `data` 列表的 JSON,或 `api` 是宿主自己注册的
   协议 → `MODELS_UNSUPPORTED`(§9),`message` 带端点的说明。
 - 其余 HTTP 失败与连不上、超时按模型调用的失败分类,`ENGINE_ERROR`,`data.kind` 为 `auth`、
   `rate_limited`、`model_unavailable` 等(§9.1),`message` 带端点的说明(截到 500 字)。
@@ -3394,7 +3385,7 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 各自处理;其余 server 的连接不动。定位参数那一对的 MCP 还没连过时,只有 `addServer` 先按它第一个会话那样把
 其余 server 连上(它要立刻试连新加的那个);`updateServer` / `removeServer` / `setEnabled` 只写文件、不启动
 任何东西,答复的 `servers` 同 `mcp.status` 对没连过的对的答法(`not_started` 等),等这一对第一个会话再连。
-`config.set` 不收 `mcp_servers.*` 与 `mcp_enabled.*`,指向这几个方法。
+`config.set` 不收 `mcp.servers` 下的键(含 `mcp.servers.<名>.enabled`),指向这几个方法。
 
 #### `mcp.status`
 
@@ -3420,7 +3411,7 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 | `failed` | 没连上(进程起不来、握手失败或超时),或者配置不合法、没有启动(`error` 以 `invalid config:` 开头,`transport` 为 `unknown`);另带 `error` 说明原因 |
 | `denied` | MCP 策略(`ARCHITECTURE.md` §6.4)拒绝了它,或者它是项目自己声明的、用了项目的 server 不能用的东西(daemon 环境里的密钥、本机的密钥文件、`"grant": "enterprise"` 的企业身份);`tool_count` 为 0,另带 `error` 说明是哪份策略、哪条规则 |
 | `untrusted` | 项目自己声明的 server,项目未被信任(§3.6),没有启动;`tool_count` 为 0,另带 `error`。`project.trust` 之后启动 |
-| `disabled` | `mcp_enabled` 把它关了(`mcp.setEnabled`),没有启动;`tool_count` 为 0 |
+| `disabled` | 被 `enabled: false` 关了(`mcp.setEnabled`),没有启动;`tool_count` 为 0 |
 | `not_started` | 这一对的 MCP 还没连过(`loaded: false`),它会在这一对第一个会话时连接 |
 
 `loaded` 说这一对 `(项目, 场景)` 的 MCP 连过没有。连过的,`servers` 是连接的实际状态;没连过的
@@ -3495,7 +3486,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 ```
 
 从那一层的两个文件里删掉这个 server(settings.local.json 里它的 `headers` / `env` 一起删),同一层
-`mcp_enabled` 里它的开关也一并删掉。删完断开它;别的层仍声明它(删掉项目层的覆盖,全局那份还在)时按剩下
+它条目里的 `enabled` 也随之删掉。删完断开它;别的层仍声明它(删掉项目层的覆盖,全局那份还在)时按剩下
 的配置重连,答复的 `servers` 里如实可见。那一层没有声明它 → `INVALID_PARAMS`,消息带那份 settings.json 的
 路径;它是插件包声明的,消息指向 `plugin.disable` / `mcp.setEnabled`。未受信项目可以删自己层里的 server。
 
@@ -3508,8 +3499,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "written_to": "…", "servers": [ ] }
 ```
 
-在那一层写 `mcp_enabled.<name>`(`settings.json` 里的 `{ "mcp_enabled": { "github": false } }`,没写的缺省
-开着)。开关按名字跨层合并:全局关、项目开 → 这个项目开着;对任何一层、任何插件声明的 server 都有效,
+在那一层写 `mcp.servers.<name>.enabled`(`settings.json` 里的 `{ "mcp": { "servers": { "github": { "enabled": false } } } }`,没写的缺省
+开着;只有 `enabled` 的条目不声明 server,只是对别处声明的那个的开关)。开关按名字跨层合并:全局关、项目开 → 这个项目开着;对任何一层、任何插件声明的 server 都有效,
 不改变它是谁的 server。关掉的不连接、不发 `mcp_connect_failed`,`mcp.status` 里是 `disabled`。
 未受信项目只能关不能开:`enabled: true` 写进未受信项目层 → `PROJECT_UNTRUSTED`,什么都不写。
 名字既不在这一对的配置里(含插件)、也不在那一层的文件里 → `INVALID_PARAMS`。
@@ -3964,9 +3955,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 // ← result
 { "project_root": "…/work",
   "trust": "untrusted",        // trusted | untrusted | none
-  "matched": null,             // 命中的 project_trust.trusted 条目;null = 由 default 决定
+  "matched": null,             // 命中的 app.trusted_projects 条目;null = 由 default 决定
   "trust_source": "default",   // default | user | host | null,§3.6
-  "default": "untrusted",      // project_trust.default
+  "default": "untrusted",      // app.trust_all_projects 的结果
   "requires_trust": [ ] }      // 见下
 ```
 
@@ -3975,15 +3966,14 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 
 | 条目 | 意思 |
 |---|---|
-| `hooks_config`、`scripts` | 项目设置里的 hook、脚本绑定 |
-| `mcp_servers.<名字>` | 项目设置里声明或改写的 MCP server |
-| `permission_mode`、`allow_client_permission_override`、`disable_skill_shell_execution` | 比下面几层更松的值 |
-| `permission_rules.allow(<规则>)` | 项目设置里的一条 allow 规则 |
-| `sandbox.<键>`(含 `sandbox.cache_directories.<组>`、`sandbox.subprocess_env.allow`) | 放宽沙箱的值 |
+| `hooks`、`scripts` | 项目设置里的 hook、脚本绑定 |
+| `mcp.servers.<名字>` | 项目设置里声明或改写的 MCP server |
+| `permissions.mode`、`permissions.client_may_loosen`、`skills.allow_shell` | 比下面几层更松的值 |
+| `permissions.allow(<规则>)`、`permissions.allow_exact(<规则>)` | 项目设置里的一条 allow 规则 |
+| `sandbox.<键>`(含 `sandbox.cache_dirs.<组>`、`sandbox.env.allow`)、`files.<键>`、`web.allowed_domains` | 放宽沙箱与读写范围的值 |
 | `providers.<id>` | 项目设置里的一个 provider(新加的,或改写已有的) |
-| `default_provider`、`task_models.<任务>` | 指向项目自己的 provider(下面几层没有的) |
-| `model.base_url` | 项目设置里的模型端点 |
-| `telemetry_url`、`recorder`、`instruction_file` | 遥测送到哪里、录像写到哪里、读进提示词的文件 |
+| `model.order` | 排了项目自己的 provider(下面几层没有的) |
+| `sandbox.network.proxy`、`telemetry.otlp_endpoint`、`recorder`、`prompt.instruction_files` | 沙箱命令能连的代理、遥测送到哪里、录像写到哪里、读进提示词的文件 |
 | `plugins.enabled`、`plugins.allow` | 比下面几层放进更多插件的值 |
 | `agents/<名字>` | 替换同名类型、或要求比会话更松的模式 / 更高的调用上限的项目 agent 类型 |
 | `skills/<名字>` | 正文里有 `` !`cmd` `` / ` ```! ` 的,或 `allowed-tools` 不空的项目 skill |
@@ -4001,11 +3991,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 ```
 
 `trusted: true` 把这个项目根加进全局层 `settings.local.json`(0600)的
-`project_trust.trusted`;`false` 把指向同一目录的条目删掉。记下的是**解析之后的真实目录**
+`app.trusted_projects`;`false` 把指向同一目录的条目删掉。记下的是**解析之后的真实目录**
 (`..`、符号链接都展开),其中的 glob 元字符(`*`、`?`、`[`、`]`、`{`、`}`)用 `[…]` 转义——
 `/x/Project [v2]` 记成 `/x/Project [[]v2[]]`,只命中它自己。结果是写完之后的
 `project.status`,外加 `written_to`。**`false` 只删这一条**:另一条 glob 或
-`default: "trusted"` 仍然信任它时,结果里照样是 `trusted`(`matched` 说明是哪一条),
+`app.trust_all_projects: true` 仍然信任它时,结果里照样是 `trusted`(`matched` 说明是哪一条),
 要改就改全局设置。缺 `trusted`、`project_root` 是相对路径、`trusted: true` 而目录不存在 →
 `INVALID_PARAMS`;全局层目录 10 秒内拿不到锁 → `SETTINGS_LOCKED`,什么都没写(§6.4)。
 
@@ -4363,7 +4353,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `kind` | 载荷 | 什么时候 |
 |---|---|---|
 | `mcp_connected` | `{server, transport, tool_count}` | 启动连接、`config.reload` 重连、`mcp.addServer` / `mcp.updateServer` / `mcp.removeServer`(别的层仍声明它时)/ `mcp.setEnabled`(打开时)/ `mcp.reconnect` 成功 |
-| `mcp_connect_failed` | `{server, error}` | 同上,失败时,`error` 是原因(进程起不来、握手失败、超过启动时限……)。另外,启动、重连、另一个项目第一次起会话时要连的 server 里,配置解析不了的、被 MCP 策略拒绝的(`ARCHITECTURE.md` §6.4)各发一条,`mcp_enabled` 关掉的不发;会话创建时还没连完、之后在后台连上或失败的 server 也各发一条 `mcp_connected` / `mcp_connect_failed` |
+| `mcp_connect_failed` | `{server, error}` | 同上,失败时,`error` 是原因(进程起不来、握手失败、超过启动时限……)。另外,启动、重连、另一个项目第一次起会话时要连的 server 里,配置解析不了的、被 MCP 策略拒绝的(`ARCHITECTURE.md` §6.4)各发一条,`enabled: false` 关掉的不发;会话创建时还没连完、之后在后台连上或失败的 server 也各发一条 `mcp_connected` / `mcp_connect_failed` |
 | `mcp_auth_required` | `{server, scopes}` | 远端 server 要求登录:没有令牌、令牌被拒且刷新不了,或要求更多 scope(这时 server 保持连接);`enterprise` server 还没有可用的企业身份(宿主该调 `mcp.auth.setIdentity`)。`scopes` 是要请求的(可能为空)。同一个 server 从已登录/未涉及变成需要登录时发一次 |
 | `mcp_auth_completed` | `{server}` | 登录完成,令牌已存;随后是这个 server 的 `mcp_connected` / `mcp_connect_failed` |
 | `mcp_auth_failed` | `{server, error}` | 登录失败:授权服务器在回调里报错、换令牌失败,或 10 分钟内没完成 |
@@ -4407,7 +4397,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32016 | PLUGINS_DISABLED | 插件子系统不可用 —— 被编译裁掉或被策略关闭 |
 | -32017 | TOO_MANY_IN_FLIGHT | 这条连接同时在途的请求已达上限(§5.2) |
 | -32018 | TASK_NOT_FOUND | `session.taskOutput`:引擎不知道这个任务(没跑过、结束得早已被忘掉,或引擎不在内存里) |
-| -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `execution.max_concurrent_subagents`,或委派已到最深 |
+| -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `agents.max_concurrent`,或委派已到最深 |
 | -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.reconnect`:这个 server 被策略拒绝;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
 | -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set` / `mcp.setEnabled`:被拒的键全部是因为项目未受信(`setEnabled` 是在未受信项目里打开),什么都没写,`data.rejected` 逐键列出(§9.1);`mcp.reconnect`:未受信项目自己的 server;`session.resume` / `session.history` / `session.export` / 带 `session_id` 的 `session.create` / `session.run_turn` 等:会话放在现在不受信的项目里(§3.6) |
@@ -4415,7 +4405,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |
 | -32026 | SETTINGS_LOCKED | `project.trust` / `config.set` / `config.setProvider` / `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` / `mcp.setEnabled`:设置目录被别的进程握着,等满 10 秒仍没拿到锁,什么都没写;放手后重发(§6.4) |
-| -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api_type` 没有引擎知道的列法(§6.4) |
+| -32027 | MODELS_UNSUPPORTED | `config.listModels`:provider 的端点不列模型(回 404 / 405 / 501,或回的不是模型列表),或它的 `api` 没有引擎知道的列法(§6.4) |
 | -32028 | SETTINGS_CONFLICT | `config.set` 带 `if_revision`:这一层在那之后被改过,什么都没写;`data.revision` 是现在的 revision(§6.4、§9.1) |
 
 `PARSE_ERROR (-32700)` 只在一行不是合法 JSON 时回,`id` 为 `null`。`-32001` 保留不用:会话数到顶时驱逐最久未用的空闲会话,不拒绝新建。
@@ -4447,8 +4437,8 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 { "generation": 1763200000000 }
 
 // INVALID_PARAMS / PROJECT_UNTRUSTED,config.set、config.setProvider 与写 MCP 设置的方法有键被拒时(§6.4、§6.5)
-{ "rejected": [ { "key": "sandbox.network_mode", "kind": "invalid_value", "reason": "…" },
-                { "key": "mcp_servers.github", "kind": "use_method", "method": "mcp.addServer", "reason": "…" } ] }
+{ "rejected": [ { "key": "sandbox.network.mode", "kind": "invalid_value", "reason": "…" },
+                { "key": "mcp.servers.github", "kind": "use_method", "method": "mcp.addServer", "reason": "…" } ] }
 
 // SETTINGS_CONFLICT
 { "revision": "r1:…" }
@@ -4529,7 +4519,7 @@ daemon 会话的默认权限模式是 **`default`(ask)**,不是放行一切。
 
 工具调用触发询问时,daemon 推送 `session.event {kind:"prompt"}` 并**阻塞该次工具
 调用**,直到:收到 `session.respondToPrompt`;或超过 `--permission-prompt-timeout`
-(没给时取设置 `execution.permission_prompt_timeout_secs`,默认 300 秒)→ **按拒绝处理**;或会话被关闭 → 按拒绝处理。
+(没给时取设置 `permissions.prompt_timeout_secs`,默认 300 秒)→ **按拒绝处理**;或会话被关闭 → 按拒绝处理。
 
 超时**永远失败关闭**,不会自动放行 —— 无人应答不等于同意。
 
@@ -4562,12 +4552,12 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 `"permission_mode": "bypassPermissions"`(daemon 范围),或 `options.permission_mode:
 "bypassPermissions"`(单会话范围)。
 
-会话级只能**收紧**、不能放宽,除非 settings 里开了 `allow_client_permission_override`
+会话级只能**收紧**、不能放宽,除非 settings 里开了 `permissions.client_may_loosen`
 (§4.5)。
 
 部署方的 managed 设置(`ARCHITECTURE.md` §6.1)在这两者之上:它的 `deny` / `ask` 在
 `bypassPermissions` 下照样拒绝 / 询问,`PreToolUse` hook 的 `approve` 也答不了它的 `ask`——这一问
-一定以 `prompt_type:"permission"` 的 `prompt` 帧发给宿主(无人值守时拒绝);它写了 `disable_bypass_permissions_mode: true` 时,
+一定以 `prompt_type:"permission"` 的 `prompt` 帧发给宿主(无人值守时拒绝);它写了 `permissions.disable_bypass: true` 时,
 上面两种声明都只得到 `default`。
 
 ---

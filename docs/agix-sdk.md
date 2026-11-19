@@ -38,18 +38,18 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 设置从哪来：`load_daemon_config(model, max_tokens, socket, scope, &paths)` 按全局（`global_root/settings.json`）、场景（`config_root/settings.json`）、项目（`project_root/<项目层目录>/settings.json`，缺省 `.agix`）三层合并；`model` 与 `max_tokens` 是这些层都没写时的兜底；`socket` 只在挂 Unix 监听时才用，传 `None`。托管设置：`config.managed_settings_path` 指定的文件必须存在，否则读平台路径（macOS 是 `/Library/Application Support/<产品名>/managed-settings.json`，缺省 `Agix`）。
 
-状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，引擎名、项目层目录或产品名不是缺省的时再 `.with_layout(base::paths::Layout::default().with_engine("codix")?.with_product_name("Codix")?)`（§10 的 `engine`、`project_dir` 与 `product`；只改目录用 `Layout::new(".codix")?`）。内建场景用 `builtin(id, &layout)` 取，`layout` 定它的展示名（`<产品名> Code`）：传池自己的 `config.paths.layout()`，名字才与池里其余地方一致。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。`UnderGlobalRoot` 按设置 `history.location`（或 `Assembly::history`，给了就以它为准）决定受信项目的会话是否放进项目（`ARCHITECTURE.md` §8.2）；自己建 `JsonlHistoryStore` 交给 `In` 的，要同样的行为就 `.with_project_history(policy)`，`policy` 实现 `agix::history::ProjectHistory`（项目的历史目录、新会话进不进项目、项目此刻是否受信），不给则一律放全局、也不读索引放进项目的会话。交给 `In` 的存储若是包装另一个存储（加观察、加缓存），`HistoryStore` 上有缺省实现的方法都要转发给里面那个，`history::store::ObservedHistoryStore` 是照着写的样例；漏了 `sidecar_locator`，会话就没有会话记忆与提醒；漏了 `history_dirs_for`，导入导出仍避开设置里的全局历史根，却挡不住项目里的 `state/history`；漏了 `checkpoint_objects`，`session.checkpoints`/`session.rewind` 无从恢复。转发要用的类型（`HistoryError`、`SidecarLocator`、`ProjectHistory` 等）都在 `agix::history` 下。
+状态目录：`DefaultDaemonPaths::from_env(scope)` 是 `$AGIX_CONFIG_HOME` 或 `$HOME/.agix`，场景目录 `scenes/<scope>/`；嵌入方自带目录用 `StaticDaemonPaths::with_project(config_root, project_root).with_global(global_root)`，引擎名、项目层目录或产品名不是缺省的时再 `.with_layout(base::paths::Layout::default().with_engine("codix")?.with_product_name("Codix")?)`（§10 的 `engine`、`project_dir` 与 `product`；只改目录用 `Layout::new(".codix")?`）。内建场景用 `builtin(id, &layout)` 取，`layout` 定它的展示名（`<产品名> Code`）：传池自己的 `config.paths.layout()`，名字才与池里其余地方一致。会话日志放哪由 `Assembly::transcripts` 定：`Transcripts::UnderGlobalRoot`（缺省）、`In(store)`、`Nowhere`。`UnderGlobalRoot` 按设置 `app.history`（或 `Assembly::history`，给了就以它为准）决定受信项目的会话是否放进项目（`ARCHITECTURE.md` §8.2）；自己建 `JsonlHistoryStore` 交给 `In` 的，要同样的行为就 `.with_project_history(policy)`，`policy` 实现 `agix::history::ProjectHistory`（项目的历史目录、新会话进不进项目、项目此刻是否受信），不给则一律放全局、也不读索引放进项目的会话。交给 `In` 的存储若是包装另一个存储（加观察、加缓存），`HistoryStore` 上有缺省实现的方法都要转发给里面那个，`history::store::ObservedHistoryStore` 是照着写的样例；漏了 `sidecar_locator`，会话就没有会话记忆与提醒；漏了 `history_dirs_for`，导入导出仍避开设置里的全局历史根，却挡不住项目里的 `state/history`；漏了 `checkpoint_objects`，`session.checkpoints`/`session.rewind` 无从恢复。转发要用的类型（`HistoryError`、`SidecarLocator`、`ProjectHistory` 等）都在 `agix::history` 下。
 
-provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（加 `ANTHROPIC_BASE_URL`）建 Anthropic 客户端，环境里没有就向 `Assembly::credentials` 要 provider `"default"` 的密钥。设置里的 `providers`、`default_provider`、`task_models` 在 `assemble` 时校验，配错直接失败，不静默回退。
+provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（加 `ANTHROPIC_BASE_URL`）建 Anthropic 客户端，环境里没有就向 `Assembly::credentials` 要 provider `"default"` 的密钥。设置里的 `providers`、`model.order`、`model.tasks` 在 `assemble` 时校验，配错直接失败，不静默回退。一个 provider 找不到密钥不算配错：它的调用以 `no_credentials` 失败，交给 `model.order` 里的下一个。
 
 模块清单不由嵌入方传：由编入的 feature 决定。要加 Rust 能力用 `Assembly::plugins`（§6）。`Assembly` 其余字段：
 
 - `cwd`：缺省项目；`scenes` 与 `extra_scenes`：自定义场景与要额外启用的场景名。
-- `permission_prompt_timeout`：缺省读设置 `execution.permission_prompt_timeout_secs`，再缺省 300 秒，超时拒绝。
+- `permission_prompt_timeout`：缺省读设置 `permissions.prompt_timeout_secs`，再缺省 300 秒，超时拒绝。
 - `host_policy`：它的 deny 在任何模式下都成立。
 - `customize_session`：每次建或重建会话都应用；`mcp`：MCP 的登录存储、OAuth 客户端与策略。
 - `js_libs`：给插件代码的宿主 JS 库，见 §10「宿主 JS 库」；不合规的装配失败。
-- `history`：会话放在哪，压过设置的 `history.location`；`None` 按设置（缺省 `global`）。只对 `Transcripts::UnderGlobalRoot` 起作用。
+- `history`：会话放在哪，压过设置的 `app.history`；`None` 按设置（缺省 `global`）。只对 `Transcripts::UnderGlobalRoot` 起作用。
 - `host_plugins`：宿主自带的插件包，每项是一个解开的包目录（根上有 `plugin.toml`）。装配时逐个登记，
   校验同 `plugin.install`，有一个加载不了装配就失败；设置把插件关了（`plugins.enabled: false`）时一个也不登记，
   记一条 warn。运行中再登记用 `SessionPool::register_host_plugin(dir)`，返回它在 `plugin.list` 里的那一项。
@@ -72,7 +72,7 @@ use agix::prelude::*;
 let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
 // 记忆选取会另调一次模型，会吃掉 mock 脚本里的一条回答
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 
 let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 let pool = assemble(
@@ -120,7 +120,7 @@ use agix::prelude::*;
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let created = pool.create_session(None, ProjectSelector::Default, None).await?;
@@ -212,7 +212,7 @@ fn answer(event: &AgentEvent) -> Option<(String, PromptAnswer)> {
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let created = pool.create_session(None, ProjectSelector::Default, None).await?;
@@ -298,7 +298,7 @@ use agix::session::SessionOptions;
 # mock.push_text("查到了");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let options = SessionOptions {
@@ -377,7 +377,7 @@ assert!(matches!(turn.await??, TurnOutcome::Completed { .. }));
 
 `Plugin`（`name` 加 `register(&PluginSession, &mut Registrar)`）经 `Assembly::plugins` 进入池建的**每一个**会话，子 Agent 也在内，每次重建再注册一次。`Registrar` 能加工具、agent 类型、工具与提示中间件、结果变换、模型拦截、提示块与变量、组装钩子、健康检查。Rust 插件和 QuickJS 脚本落在同一个点时 Rust 先（包裹时在内），与注册先后无关。
 
-`SessionCustomizer`（`Arc<dyn Fn(Builder, &SessionCtx) -> Builder>`）是对每次建引擎的最后一句话：执行层（`agix::contracts::exec`）、`token_counter`、`prompt_assembler`、`rule_provider` 这些契约在这里换。**在池里换 `exec` 要求设置 `sandbox.reap_process_groups` 为 `false`**（缺省就是）：它开着时池给会话设了 `process_groups`，与 `exec` 同设会让 `build()` 报错（`ARCHITECTURE.md` §1.1 注入口表）。
+`SessionCustomizer`（`Arc<dyn Fn(Builder, &SessionCtx) -> Builder>`）是对每次建引擎的最后一句话：执行层（`agix::contracts::exec`）、`token_counter`、`prompt_assembler`、`rule_provider` 这些契约在这里换。**在池里换 `exec` 要求设置 `sandbox.reap_on_close` 为 `false`**（缺省就是）：它开着时池给会话设了 `process_groups`，与 `exec` 同设会让 `build()` 报错（`ARCHITECTURE.md` §1.1 注入口表）。
 
 `Module` 与 `SessionContext` 在 `agix::modules`：池的模块清单由编入的 feature 决定，嵌入方一般用不到；自己用 `Builder` 装单个会话时才写。`HostContracts` 是子 Agent 整份继承的那一套（`ARCHITECTURE.md` §3.4）。
 
@@ -447,7 +447,7 @@ impl Plugin for EchoPlugin {
 # mock.push_text("你好。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 let pool = assemble(
     &config,
@@ -592,7 +592,7 @@ impl FrameSink for Frames {
 # mock.push_text("经 Rust。");
 # let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
 # let mut config = load_daemon_config("claude-sonnet-4-6", 8192, None, "code", &paths);
-# config.settings.values.memory_enabled = false;
+# config.settings.values.memory.enabled = false;
 # let scene = Arc::new(builtin("code", &config.paths.layout()).expect("built-in scene"));
 # let pool = assemble(&config, scene, Assembly { cwd: Some(work.clone()), model_client: Some(mock.clone()), ..Default::default() }).await?;
 let server = DaemonServer::new(pool.clone(), CancellationToken::new());
@@ -713,11 +713,12 @@ engine.shutdown().await;
 | `engine` | 无（agixd 总是 `agix`） | `agix`：引擎在脚本与文件名里的名字 |
 | `plugins` | 无（agixd 不带宿主包） | 空：宿主自带的插件包目录，即 `Assembly::host_plugins`（§2）；有一个加载不了 `start` 返回 `EmbedError::Startup` |
 | `js_libs` | 无（agixd 不带宿主库） | 空：给插件代码的宿主 JS 库，即 `Assembly::js_libs`；不合规时 `start` 返回 `EmbedError::InvalidHostLibrary`（见「宿主 JS 库」） |
-| `history` | 无（agixd 按设置 `history.location`） | `None`：按全局设置 `history.location`，缺省 `Global`；`Some(HistoryLocation::Project)` 让受信项目的会话放进项目，见下 |
+| `credentials` | 无（agixd 只读环境变量） | `None`：给 `api_key_env` 指名的变量在环境里没有的 provider 提供密钥的来源，即 `Assembly::credentials`（`agix::embed::HostCredentials`，包一个 `Arc<dyn CredentialSource>`）；环境里有的变量照用，没有的才问它，宿主可以把密钥放在密钥库或钥匙串里 |
+| `history` | 无（agixd 按设置 `app.history`） | `None`：按全局设置 `app.history`，缺省 `Global`；`Some(HistoryLocation::Project)` 让受信项目的会话放进项目，见下 |
 
-数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
+数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key_env` 指名的环境变量，或 `credentials` 给的密钥来源。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
 
-**`project_dir`。** 不给就是 `.<engine>`（缺省 `.agix`）。引擎在项目里放的一切——项目层设置（`settings.json`、`settings.local.json`）、agents、hooks、rules、output-styles、团队、记忆、telemetry、`tool-results`、导入标记——都在 `<项目>/<project_dir>/` 下，其中只属于这台机器的（团队、记忆、scratchpad、telemetry、`tool-results`、导入标记）在它的 `state/` 里，`<project_dir>/.gitignore` 由引擎补上三行：`state/`、`settings.local.json`、`mcp.local.json`（git worktree 除外：它们在仓库根的 `.wkts/`，由用户设置的 `worktree_dir` 改名，不随 `project_dir` 变，仓库的 `.gitignore` 也只加这一行，`project_dir` 里的东西照常能提交），提示词、`daemon.doctor`、`config.list` 报的也是这个名字。只认这一个名字，不做“先找它、找不到再读 `.agix`”。名字是一个路径分量，以 `.` 开头，只含小写字母、数字、`.`、`_`、`-`，至多 64 个字符，不能是 `.`、`..`，也不能是别的工具的目录（`.git`、`.agents`、`.claude`、`.codex`、`.cursor`、`.github`、`.vscode`、`.idea`）。要以 `.` 开头，是因为引擎拒写其中的配置子目录，起成 `src`、`docs` 这类项目自己用的名字，项目自己的文件就成了配置；隐藏目录是工具放自己状态的惯例位置。也不能是 `.wkts`（worktree 目录的缺省名）。不合法时 `start` 返回 `EmbedError::InvalidProjectDir { name, reason }`。保护跟着名字走：模型改不了它的设置文件，改其中的配置子目录要问，沙箱里的命令只写得了其中的 `state/scratchpad/`、`state/memory/`（`ARCHITECTURE.md` §8.1）。名字不是 `.agix` 时，项目里的 `.agix` 与 `.claude` 一样作为别的代理的配置继续受保护（写工具拒写其中的设置文件、写别的要问，沙箱里整个写不了，其中的 `settings.local.json` / `mcp.local.json` 仍算凭据），但不再被读。`.agents/skills` 是跨工具的约定，不随名字变；worktree 的分支前缀跟的是 `product`，不是它。
+**`project_dir`。** 不给就是 `.<engine>`（缺省 `.agix`）。引擎在项目里放的一切——项目层设置（`settings.json`、`settings.local.json`）、agents、hooks、rules、output-styles、团队、记忆、telemetry、`tool-results`、导入标记——都在 `<项目>/<project_dir>/` 下，其中只属于这台机器的（团队、记忆、scratchpad、telemetry、`tool-results`、导入标记）在它的 `state/` 里，`<project_dir>/.gitignore` 由引擎补上三行：`state/`、`settings.local.json`、`mcp.local.json`（git worktree 除外：它们在仓库根的 `.wkts/`，由用户设置的 `app.worktree_dir` 改名，不随 `project_dir` 变，仓库的 `.gitignore` 也只加这一行，`project_dir` 里的东西照常能提交），提示词、`daemon.doctor`、`config.list` 报的也是这个名字。只认这一个名字，不做“先找它、找不到再读 `.agix`”。名字是一个路径分量，以 `.` 开头，只含小写字母、数字、`.`、`_`、`-`，至多 64 个字符，不能是 `.`、`..`，也不能是别的工具的目录（`.git`、`.agents`、`.claude`、`.codex`、`.cursor`、`.github`、`.vscode`、`.idea`）。要以 `.` 开头，是因为引擎拒写其中的配置子目录，起成 `src`、`docs` 这类项目自己用的名字，项目自己的文件就成了配置；隐藏目录是工具放自己状态的惯例位置。也不能是 `.wkts`（worktree 目录的缺省名）。不合法时 `start` 返回 `EmbedError::InvalidProjectDir { name, reason }`。保护跟着名字走：模型改不了它的设置文件，改其中的配置子目录要问，沙箱里的命令只写得了其中的 `state/scratchpad/`、`state/memory/`（`ARCHITECTURE.md` §8.1）。名字不是 `.agix` 时，项目里的 `.agix` 与 `.claude` 一样作为别的代理的配置继续受保护（写工具拒写其中的设置文件、写别的要问，沙箱里整个写不了，其中的 `settings.local.json` / `mcp.local.json` 仍算凭据），但不再被读。`.agents/skills` 是跨工具的约定，不随名字变；worktree 的分支前缀跟的是 `product`，不是它。
 
 **`product`。** 引擎自称的地方都用它：模型收到的提示词（`You are Codix, …`）、工具指南与报错里的产品名、Bash 指南里提交与 PR 的署名（缺省是带链接的 `[Agix](…)`，改名后只写名字）、桌面通知的标题、Cursor 规则导入时写的注释、内建场景在 `scene.list` / `scene.describe` 里的名字（`Codix Code`、`Codix Mini`，场景 id `code` / `mini` 不变）、OpenTelemetry 的 `service.name`（`<小写名>`）；MCP 动态注册的 `client_name`（授权页上显示的名字；库式用法给了 `McpOptions.oauth_client` 时用宿主的）；引擎发出的 HTTP 请求（模型、MCP OAuth、`WebFetch` 等工具、hook、插件包下载、`config.listModels`）的 `User-Agent: <小写名>/<版本>`，请求自己带了就不覆盖；worktree 的分支 `<小写名>/worktree-<名>` 与 `.gitignore` 里那行的注释、嵌套仓库被挪开的 `.git` 的新名字 `.git.<小写名>-quarantine-<时间>`；没给 `managed_settings` / `mcp_policy` 时读的平台路径（macOS `/Library/Application Support/<名>/`，Windows `%ProgramData%\<名>\`，其余 `/etc/<小写名>/`）。规则：ASCII 字母开头，其后至多 31 个 ASCII 字母、数字、`-`、`_`——小写形式要能当路径分量、git 分支名的一段和 HTTP token，也不能是引擎在项目 `state/` 下自己用的名字（`base::paths::STATE_RESERVED_NAMES`：`memory`、`scratchpad`、`teams`、`telemetry`、`tool-results`、`history`、`imported`、`sessions`、`cache`、`tmp`），因为 `state/<小写名>/` 归嵌入方；不合法时 `start` 返回 `EmbedError::InvalidProductName { name, reason }`。不跟着变的是接口的名字：线上协议的 `agix.*` 方法与命名空间、`AGIX_*` 环境变量、transcript 与导出包的 `agix.` 命名空间、OpenTelemetry 的 instrumentation scope 与 `agix.*` 指标名（它们标识库，不是服务）、协议 schema 的标题、场景 id、内部的临时目录与线程名，以及 agixd 自己。脚本里基础库的名字也不跟它，跟的是 `engine`。
 
@@ -725,7 +726,7 @@ engine.shutdown().await;
 
 **`engine`。** 引擎在脚本与文件名里的名字：三处 JS 载体（`RunCode`、插件命令、`[[script]]`）里基础库唯一的全局（缺省 `agix`；改成 `foo` 后脚本里只有 `foo`，没有 `agix`），基础库错误的名字 `<首字母大写>Error`（`FooError`），`RunCode` 工具描述与指南里写的 `foo.yaml`、`foo.glob`……（`agix_js.md` §2）；`project_dir` 的缺省 `.<engine>`；沙箱与写工具当作本机另一个实例的状态目录来守的 `~/.<engine>`（`~/.agix` 照守，同机的 agixd 用它）。规则：`[a-z][a-z0-9]*`，至多 16 个字符，不能是 JavaScript 保留字，不能与脚本已有的全局重名（载体放的 `tools`、`console`、`fs`……，新上下文里的 `escape`、`atob`……），`.<engine>` 也要是合法的 `project_dir`（所以不能是 `git`、`claude`、`codex`、`wkts` 这类）；不合法时 `start` 返回 `EmbedError::InvalidEngineName { name, reason }`。用 `agix.*` 写的插件在改了引擎名的嵌入方里调不到基础库，`daemon.doctor` 的 `plugins.engine_name` 点名这些包（只看源码文本）。不跟着变的：`agix.*` RPC 方法与命名空间、`AGIX_*` 环境变量、transcript 命名空间、OpenTelemetry scope 与指标名、agixd、crate 名，以及 `data_root`（必给，不从引擎名推）。库式用法：`base::paths::Layout::default().with_engine("foo")?`（同时把项目层目录设成 `.foo`，要别的名字在它之后 `.with_project_dir(..)?`），`Layout::engine()`，`DEFAULT_ENGINE`，`EngineNameError`；脚本全局名的规则是 `js_lib::check_global_name`（即 `base::interface::script::check_global_name`）。
 
-**`history`。** 会话的转录、会话记忆、metadata、checkpoint 副本与输入历史放在哪。`Global`（agixd 的缺省）放在 `<data_root>/projects/` 与 `<data_root>/sessions/<id>/`。`Project` 让**受信**项目的新会话整份放进 `<项目>/<project_dir>/state/history/<id>/`（git worktree 里的会话放进主仓库的这个目录），`<data_root>/sessions/<id>/` 只留一份索引（`index.json`：项目根、会话目录与谱系）和写者锁；不受信的项目、无项目的会话照旧放全局，子 Agent 与同一项目的分叉跟着父会话。类型是 `agix::embed::HistoryLocation`（即 `settings::HistoryLocation`）。不给时读全局设置 `history.location`（只认全局层，场景层、项目层写了忽略并告警）。已经放在任一处的历史原地照读、不迁移，两种位置并存以索引为准，所以中途改这个值不会丢会话。只读索引登记过的项目内会话：克隆来的仓库自带的 `state/history/` 不会被当成谁的历史；项目被取消信任后，它里面的历史不读，`session.resume` 等报 `PROJECT_UNTRUSTED`。项目整个搬了家，在新位置打开它（`cwd` 是它，或有会话建在它上面）时索引跟过去。导出不能写进、导入不能读自项目的历史目录。细节在 `ARCHITECTURE.md` §8.2。
+**`history`。** 会话的转录、会话记忆、metadata、checkpoint 副本与输入历史放在哪。`Global`（agixd 的缺省）放在 `<data_root>/projects/` 与 `<data_root>/sessions/<id>/`。`Project` 让**受信**项目的新会话整份放进 `<项目>/<project_dir>/state/history/<id>/`（git worktree 里的会话放进主仓库的这个目录），`<data_root>/sessions/<id>/` 只留一份索引（`index.json`：项目根、会话目录与谱系）和写者锁；不受信的项目、无项目的会话照旧放全局，子 Agent 与同一项目的分叉跟着父会话。类型是 `agix::embed::HistoryLocation`（即 `settings::HistoryLocation`）。不给时读全局设置 `app.history`（只认全局层，场景层、项目层写了忽略并告警）。已经放在任一处的历史原地照读、不迁移，两种位置并存以索引为准，所以中途改这个值不会丢会话。只读索引登记过的项目内会话：克隆来的仓库自带的 `state/history/` 不会被当成谁的历史；项目被取消信任后，它里面的历史不读，`session.resume` 等报 `PROJECT_UNTRUSTED`。项目整个搬了家，在新位置打开它（`cwd` 是它，或有会话建在它上面）时索引跟过去。导出不能写进、导入不能读自项目的历史目录。细节在 `ARCHITECTURE.md` §8.2。
 
 **`instance`。** 给了名字，`start` 拿 `<data_root>/scenes/<scene>/daemon.lock`（同一场景已有一个在跑 → `EmbedError::AlreadyRunning`），`serve_unix` 绑好 socket 后写 `<data_root>/daemon/instances.d/<名字>.json`；`shutdown` 把它们收掉。不给就两样都不做，锁由宿主自己管。
 
@@ -744,7 +745,7 @@ engine.shutdown().await;
 
 **仍是进程级的**，两个 `Embedded` 会共用：
 
-- `network.use_system_proxy` 交给进程级的 HTTP 客户端：进程里第一次读到的设置生效，之后读到不同的只记一条 warn；两个数据根设得不同，后起的那个用不上自己的。代理变量（`HTTP(S)_PROXY`、`NO_PROXY`）也从进程环境读。
+- `app.system_proxy` 交给进程级的 HTTP 客户端：进程里第一次读到的设置生效，之后读到不同的只记一条 warn；两个数据根设得不同，后起的那个用不上自己的。代理变量（`HTTP(S)_PROXY`、`NO_PROXY`）也从进程环境读。
 - OpenTelemetry 导出器：第一个起它的端点就是全进程的端点，`service.name` 也是那个池的产品名。
 - 进程组登记：见上，至多一个登记的（`InstanceInProcess` / `GroupsInProcess`）。
 - `OTEL_EXPORTER_OTLP_ENDPOINT`（设置没写端点时）与上面的凭据变量从进程环境读。
@@ -837,12 +838,16 @@ engine.shutdown().await;
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
+- **0.3.21**
+  - 新增 `EmbedConfig.credentials: Option<HostCredentials>`（缺省 `None`）与类型 `agix::embed::HostCredentials`：给 `api_key_env` 指名的变量在环境里没有的 provider 提供密钥；库式用法是 `Assembly::credentials`。
+  - 设置按块重排，旧键不再读（读到时告警里给出新键名，对照表是 `settings::renamed::RENAMED_KEYS`）：`Settings` 上的字段随之变成 `permissions`、`files`、`turn`、`agents`、`prompt`、`app`、`web` 等块，`providers` 是带 `id` 的列表，`model.order` 排 provider、`model.tasks` 写档位。下面 0.3.20 条目里的 `history.location`、`worktree_dir` 现在是 `app.history`、`app.worktree_dir`。
+  - 删掉 `model.fallback_model` 与 provider 条目里的明文 `api_key`；新增 `provider_switched` 事件、`providers_unavailable` 错误码与按 provider 的 token 配额（用量落在状态根的 `quota/`）。
 - **0.3.20**
   - 引擎名与产品名（#90）：`EmbedConfig.product_name` 改名为 `EmbedConfig.product`（含义不变，`EmbedError::InvalidProductName` 的消息前缀随之是 `product`）；新增 `EmbedConfig.engine`（缺省 `agix`）与 `EmbedError::InvalidEngineName { name, reason }`；`EmbedConfig.project_dir` 改为 `Option<String>`，`None` 取 `.<engine>`，原来写 `config.project_dir = ".codix".into()` 的改成 `Some(".codix".into())`。0.3.19 的“产品名别名”去掉：改了产品名不再给基础库挂第二个名字，基础库只在引擎名下（缺省 `agix`，与产品名无关）。库式用法：`js_lib::{alias_for, install_as}` 删掉，换成 `js_lib::install_named(ctx, name)` 与 `js_lib::check_global_name`；`ptc::Library::for_product` → `for_engine`（`shown()` → `global()`）；`script_host::QuickJsEngine::for_product` → `for_engine`，`script_host::bindings::engine_for` 收引擎名；`base::paths::known_state_roots` 多一个 `&Layout`；新增 `Layout::{with_engine, with_project_dir, engine, state_dir_names}`。
   - 宿主 JS 库（#91）：新增 `EmbedConfig.js_libs`（缺省空）与 `EmbedError::InvalidHostLibrary { namespace, reason }`；类型 `agix::embed::{HostJsLib, HostCallContext, HostJsError, PackageSource}`（即 `base::interface::host_js`，另有 trait `HostFn`）。库式用法：`Assembly::js_libs`；`base::command::{ExtCommand, PluginFunction}` 多一个 `source: PackageSource`，`packages::manifest::Plugin::{source, from_host}`；`base::tool::ToolContext` 多一个公有字段 `via`（`ToolContext::new` 给 `"model"`）；`ptc::HostLibraries` 与 `RunExtTool::with_host_libraries`；`runtime::agent::Builder::host_js_libs`，`HostContracts` 多一个 `host_js_libs`。
   - 宿主调插件函数与宿主自带包（#92）：新增 `EmbedConfig.plugins`（缺省空）、`Assembly::host_plugins` 与 `SessionPool::register_host_plugin(dir)`；`Embedded::pool() -> &Arc<SessionPool>`；`SessionPool::{call_plugin, plugin_functions}` 与 `agix::session::{PluginCall, PluginCallTarget, PluginCallResult, PluginCallError, PluginFunctionInfo}`（协议上是 `plugin.call` / `plugin.functions` / `plugin.cancel`）。
   - 项目层目录分出 `state/`（#93）：记忆、scratchpad、团队、telemetry、`tool-results`、导入标记从 `<project_dir>/` 直下挪到 `<project_dir>/state/`，打开项目时旧位置的这几项一次性改名过去（旧项是符号链接、`state/` 里已有同名的都不动，之后只读新位置），`.gitignore` 的引擎条目只剩 `state/`、`settings.local.json`、`mcp.local.json`，旧的行不替人删；模型不问就能写的只有 `state/scratchpad/`、`state/memory/`，直接放在 `<project_dir>/` 下的 `scratchpad/`、`memory/` 不再算工作区；`product` 的小写不能是 `STATE_RESERVED_NAMES` 里的名字。库式用法：`base::paths::{LOCAL_DATA_IGNORED_FILES, LOCAL_DATA_IGNORED_DIRS}` 删掉，换成 `LOCAL_CONFIG_FILES`（`local_data_gitignore()` 另加 `state/`）；`ConfigRootAt::writable_entry` → `writable_state_entry`（判的是 `state/` 直下的名字），新增 `ConfigRootAt::state_dir`；新增 `entry::{STATE, HISTORY}`、`PROJECT_STATE_ENTRIES`、`PROJECT_STATE_ENGINE_DIRS`、`STATE_RESERVED_NAMES`、`Layout::{project_state_dir, host_state_dir}`、`PathSettings::project_state_dir`、`ConfigPaths::{project_state_dir, local_state_dir}`；`ConfigPaths` 的 `local_memory_dir`、`scratchpad_dir`、`telemetry_dir`、`tool_results_dir`、`imported_marker` 与 `Layout::teams_dir` 改指 `state/` 下。
-  - 会话历史按项目存放（#94）：新增 `EmbedConfig.history: Option<HistoryLocation>`（缺省 `None`，即按全局设置 `history.location`，缺省 `Global`，行为同前）与类型 `agix::embed::HistoryLocation`；设置新增 `history.location`（`global` | `project`，只认全局层）。库式用法：`Assembly::history`；`JsonlHistoryStore::with_project_history` 与 `agix::history::{ProjectHistory, ProjectHistoryDir, SessionIndex, SidecarLocator, HistoryError}`；`HistoryStore` 多两个有缺省实现的方法 `sidecar_locator(session)`（会话记忆、metadata、输入历史所在的目录，每次用时再定位）与 `history_dirs_for(path)`（导入导出要避开的目录），包装别的存储的实现要转发；`HistoryError::ProjectUntrusted { session, project }`；`session::session_memory::SessionMemory::in_sidecar(locator)`，`SessionMemory::path()` 改为返回 `io::Result<PathBuf>`；`CheckpointObjects::located(locator)`；`history::path` 新增 sidecar 文件名常量与 `session_index_file`。会话记忆不再由 runtime 按 `global_data_dir` 自己拼路径，而是问存储。
+  - 会话历史按项目存放（#94）：新增 `EmbedConfig.history: Option<HistoryLocation>`（缺省 `None`，即按全局设置 `app.history`，缺省 `Global`，行为同前）与类型 `agix::embed::HistoryLocation`；设置新增 `history.location`（`global` | `project`，只认全局层）。库式用法：`Assembly::history`；`JsonlHistoryStore::with_project_history` 与 `agix::history::{ProjectHistory, ProjectHistoryDir, SessionIndex, SidecarLocator, HistoryError}`；`HistoryStore` 多两个有缺省实现的方法 `sidecar_locator(session)`（会话记忆、metadata、输入历史所在的目录，每次用时再定位）与 `history_dirs_for(path)`（导入导出要避开的目录），包装别的存储的实现要转发；`HistoryError::ProjectUntrusted { session, project }`；`session::session_memory::SessionMemory::in_sidecar(locator)`，`SessionMemory::path()` 改为返回 `io::Result<PathBuf>`；`CheckpointObjects::located(locator)`；`history::path` 新增 sidecar 文件名常量与 `session_index_file`。会话记忆不再由 runtime 按 `global_data_dir` 自己拼路径，而是问存储。
 
 - **0.3.18** git worktree 从 `<项目>/<project_dir>/worktrees/<名>` 挪到仓库根的 `.wkts/<名>`，第一次建 worktree 时往仓库 `.gitignore` 加的是 `.wkts/`，不再是整个 `<project_dir>/`。目录名由设置 `worktree_dir` 改（只从全局层与场景层读，项目层写了丢掉并告警，`config.set` 写项目层得 `not_at_tier`）。不做兼容：旧位置的 worktree 不再被认作引擎的（要用就自己 `git worktree move`），用户 `.gitignore` 里已有的 `<project_dir>/` 一行不替人删。`<project_dir>/.gitignore` 的引擎条目（`base::paths::local_data_gitignore`）加上 `.imported.json`、`memory/`、`scratchpad/`、`teams/`，有项目的会话建起来时就补上：项目层目录里只有协作者共用的配置随仓库提交。新增 `base::paths::ensure_project_data_gitignore`（项目层目录是符号链接或在项目之外时不写）；`.gitignore` 是符号链接时两处引擎写入都不动它。库式用法：`base::paths::{PROJECT_WORKTREES_DIR, entry::WORKTREES}` 删掉；新增 `DEFAULT_WORKTREES_DIR`、`Layout::{with_worktrees_dir, worktrees_dir_name, worktrees_dir_names}` 与 `WorktreesDirError`，`Layout::{worktrees_dir, gitignore_entry, main_checkout_copies, worktree_of}` 改按 worktree 目录算，`Layout::new` 拒 `.wkts`；`Settings.worktree_dir`、`settings::NOT_FROM_PROJECT_KEYS`、`LoadedSettings::place_worktrees`；`tools::worktree::name_the_directories` 的占位符由 `{project_dir}` 换成 `{worktrees_dir}`；`WorktreeError::WorktreesDirIsALink`（worktree 目录是符号链接时不建）；`Layout::with_worktrees_dir` 拒以 `.git` 开头的名字；`tools::worktree::prune_orphan_worktrees` 删掉（没有调用方，它会删 worktree 目录里认不出的目录）。
   - 新增 `SessionPool::set_permission_mode(session_id, PermissionMode)`,回 `PermissionModeChoice { session_id, mode, requested, clamped }`(即 `session.setPermissionMode`);`SessionEvent` 多一个 `PermissionModeChanged(session_state::ModeChange)`(`ModeChange { mode, source }`,`ModeChangeSource { Host, Model }`);`base::context::Session` 多一个 `host_permission_mode`(trait 唯一的实现在 `session-state`,外部不用实现);`SessionState` 新增 `switch_permission_mode`、`permission_mode_changes`、`subscribe_permission_mode`。新增 `session_state::ModeCeiling` 与 `EngineAttachment::with_mode_ceiling`:挂上的引擎带着它时,`plan` 退出后要回到的模式(含从日志读回的)按它夹紧;不带(自己拼 `EngineAttachment` 的测试)照旧不夹。`base::interface::permission::Delegate` 多一个公有字段 `tightens_only`(`Delegate::new` 给 `false`)与 `Delegate::mode_under(parent)`:自己实现 `PermissionPolicy` 又判子 Agent 调用的,用 `mode_under` 代替 `parent.for_delegate(delegate.mode)`,只能收紧的 agent 类型才不会被 `bypassPermissions` 的父会话带走。

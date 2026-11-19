@@ -138,7 +138,7 @@ tools.Read({file_path, offset?, limit?}) → a text file: {content, totalLines, 
   卡死。
 - **并发**：可并行的工具（读取、检索、`agent()`）同时至多 8 个在跑；不可并行的（写文件、Bash）
   按提交顺序一个接一个——与模型一次发多个工具调用时的规则相同，排队时不占并行名额，读取照跑。
-  子 Agent 另受引擎的委派并发上限（`execution.max_concurrent_subagents`，缺省 6）约束：程序里
+  子 Agent 另受引擎的委派并发上限（`agents.max_concurrent`，缺省 6）约束：程序里
   超出上限的 `agent()` 排队等空位，不失败，停止时不再等；模型直接调 `Agent` 到上限仍是立刻拒绝。
 - **停止**：`TaskStop` 先置停止标志（`stopRequested()` 为真），10 秒宽限后仍未结束就强制：
   打断脚本、取消在跑的子调用。用户中断这一轮也是强制停止；后台运行随会话结束而强制停止。

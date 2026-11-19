@@ -195,7 +195,7 @@ monitors and structured output ([table below](#tools--46-built-in)).
 - Workspace trust: a project the user has not trusted gets plugin-level
   authority — its own settings can only tighten, and its hooks, MCP servers,
   skill commands and grants, looser agent types, and the settings that pick
-  where data goes (providers, endpoints, the instruction file) wait for trust
+  where data goes (providers, endpoints, instruction files) wait for trust
   (granted in the global tier or over RPC; untrusted by default,
   [ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.6).
 
@@ -483,7 +483,7 @@ sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
       "base_url": "https://api.deepseek.com", "api_key_env": "DEEPSEEK_API_KEY",
       "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
       "tiers": { "strong": "deepseek-v4-pro", "balanced": "deepseek-v4-flash" },
-      "quota": { "day": 20000000 } },
+      "quota": { "day": 20000000, "month": 300000000 } },
     { "id": "claude", "vendor": "anthropic", "api": "anthropic",
       "api_key_env": "ANTHROPIC_API_KEY",
       "tiers": { "strong": "claude-opus-4-6", "balanced": "claude-sonnet-4-6",
@@ -493,15 +493,42 @@ sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
 }
 ```
 
-Each kind of call asks for a tier — `strong`, `balanced` or `fast` — set per task
-in `model.tasks` (`main`, `subagent`, `compact`, `memory`, `title`, `web_search`,
-`web_fetch`), and each provider says which of its models serves a tier. Every
-call starts at the first provider of `model.order` and goes to the next when one
-is out of quota (tokens per local day, week or month, cache reads not counted),
-has no key, refuses its key, or cannot be reached once its retries are spent; the
-session is told with a `provider_switched` event. With no `providers`, the engine
-supplies `anthropic`, keyed from `ANTHROPIC_API_KEY`, every tier `--model`. A
-session can put a provider of its own first, and ask for a tier or a model id.
+A provider has an `id`, a `vendor` (`anthropic`, `openai`, `deepseek`, `qwen`,
+`vllm`, `sglang` or `generic`; it decides how thinking is switched, whether
+reasoning is sent back and how effort is spelled), an `api` (`anthropic`,
+`openai_chat` or `openai_responses`), a `base_url`, the environment variable
+holding its key (`api_key_env`; there is no key in settings, and a host
+embedding the engine can supply keys itself), its `models`, its `tiers` and an
+optional `quota`.
+
+Each kind of call asks for a tier — `strong`, `balanced` or `fast` — set per
+task in `model.tasks` (`main`, `subagent`, `compact`, `memory`, `title`,
+`web_search`, `web_fetch`; the defaults are `strong`, `balanced` and `fast`, and
+`web_fetch` is unset), and each provider says which of its models serves a tier:
+`strong` is required, `balanced` defaults to `strong`'s model, `fast` to
+`balanced`'s.
+
+Every call starts at the first provider of `model.order` and goes to the next
+when one is out of quota, has no credential, refuses its credential, cannot be
+reached, or keeps answering 5xx / 529 / 429 until its retries are spent, and
+on a 402; a 400 is the request's own fault and is not retried elsewhere. A
+provider that could not be reached is left alone for a short while. When every
+provider in the order is unavailable the turn fails with `providers_unavailable`
+and the reason for each. Switching drops the previous provider's private
+reasoning content, and the session is told with a `provider_switched` event
+(and a telemetry event of the same name).
+
+A `quota` is a token limit per `day`, `week` or `month`, any of them. Tokens are
+counted as input that missed the cache plus cache writes plus output; cache
+reads are not counted. Periods follow this machine's local time, the week
+starting on Monday and the month on the 1st. Usage is kept per provider id under
+the state directory's `quota/`, shared by every instance on the machine; the call
+that crosses a limit finishes, and the provider is skipped from the next one on.
+`config.getProvider` reports usage against each limit.
+
+With no `providers`, the engine supplies `anthropic`, keyed from
+`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`, every tier `--model`. A session can
+put a provider of its own first, and ask for a tier or a model id.
 `WebFetch` returns the page as plain text in windows of up to 50,000 characters,
 read on with `offset` / `limit` (each continuation fetches the page again); only
 when `model.tasks.web_fetch` names a tier does a model read the page and answer
@@ -514,11 +541,11 @@ the call's `prompt` instead.
   system prompt and tool definitions. Opt-in in the `compaction` settings: a
   predictive pass with a circuit breaker (`reactive`), and hourly clearing that
   emits cache edits so the prompt cache is not thrown away
-  (`cached_microcompact`). A tool result over 30,000 characters (except those of
+  (`clear_on_cache_expiry`). A tool result over 30,000 characters (except those of
   `Read`, `WebFetch` and `TaskOutput`, which page themselves) is saved whole to the
   project's `.agix/state/tool-results/`; the model gets a head and tail preview with the path and
   reads on with `Read` `offset`. The limit is
-  `compaction.tool_result_inline_chars` (`0` turns it off).
+  `compaction.inline_result_chars` (`0` turns it off).
 - **Telemetry**: 23 structured event types (`EventPayload` (23)) with
   OpenTelemetry export, four token counts per call, and the calls no turn asked
   for — compaction, memory, hooks, search — counted too.
@@ -548,30 +575,69 @@ systemd, decides which background commands to stop.
 
 Configuration is layered, lowest priority first: built-in defaults →
 `~/.agix/settings.json` → `~/.agix/scenes/<scene>/settings.json` →
-`<project>/.agix/settings.json`, each with an optional `settings.local.json`;
-`permission_rules` from every tier apply side by side. The full surface is the
-generated [JSON Schema](docs/schemas/settings.schema.json). Values are taken
-literally: `$VAR` / `${VAR}` / `${VAR:-default}` are expanded only inside an
-MCP server's `command`, `args`, `env`, `url` and `headers`.
+`<project>/.agix/settings.json`, each with an optional `settings.local.json`
+that outranks the file beside it. The full surface is the generated
+[JSON Schema](docs/schemas/settings.schema.json). Values are taken literally:
+`$VAR` / `${VAR}` / `${VAR:-default}` are expanded only inside an MCP server's
+`command`, `args`, `env`, `url` and `headers`. A key the engine no longer reads
+is ignored, and the load warning names the key that replaced it.
+
+How layers combine:
+
+- Objects merge key by key; a scalar or a list set in a higher layer replaces
+  the lower one's (a project's `model.order` replaces the global one).
+- `providers` holds definitions, so layers add to it; an id already defined in
+  a layer read earlier wins and the later one is ignored with a warning.
+- `permissions` rule lists (`allow`, `allow_exact`, `ask`, `deny`) are not
+  merged: every layer's rules apply side by side, and a deny wins over any
+  allow.
+- `hooks` merge per event: a layer that lists an event replaces the lower
+  layers' list for it. `mcp.servers` merge by name and field.
+- `app` is read from the global layer only; a scene or project that sets it is
+  ignored with a warning.
+- A deployment's managed file may hold only `permissions` (the rule lists and
+  `disable_bypass`); it outranks every layer.
+- A project the user has not trusted can only tighten (see Workspace trust):
+  `providers`, `hooks`, `mcp.servers` entries, `prompt.instruction_files`,
+  `prompt.override`, `sandbox.network.proxy`, `telemetry.otlp_endpoint` and
+  `recorder` wait for trust, and its `model.order` may name only providers
+  defined above it.
+
+The blocks:
+
+| Block | What it holds |
+|---|---|
+| `providers`, `model` | the model providers, the tier each kind of call asks for, the fallback order ([Model routing](#model-routing)); `model.effort`, `model.thinking` (`auto`, `on`, `off`), `model.max_tokens` |
+| `permissions` | `mode`, the rule lists as strings (`allow`, `ask`, `deny`; `allow_exact` compares its content as written and is where "allow every time" records), `prompt_timeout_secs` (an unanswered prompt is denied), `client_may_loosen` (whether an RPC client may ask for a looser mode than `mode`) |
+| `files` | `extra_dirs` (read and write like the project), `read_dirs` (read without asking; `"/"` reads anywhere), `allow_write`, `deny_write` |
+| `sandbox` | `enabled`, `require` (refuse to run a command when the platform cannot enforce the sandbox), `allow_read`, `deny_read` (added to the built-in credential list), `network`, `env`, `cache_dirs`, `reap_on_close`, `unattended_needs_network_policy` |
+| `web` | `allowed_domains` for `WebFetch` and `Ping`, and the list `sandbox.network.mode: "allowlist"` reads |
+| `turn`, `agents`, `team` | `turn.max_model_calls`, `turn.token_budget`, `turn.parallel_tools`; `agents.max_depth`, `agents.max_concurrent`; `team.enabled`, `team.stage_concurrency`, `team.max_members`, `team.member_idle_secs` |
+| `compaction` | `threshold_tokens`, `keep_recent`, `reactive`, `clear_on_cache_expiry`, `inline_result_chars` |
+| `prompt` | `append`, `override`, `instruction_files`, `language`, `path_style` (`absolute`, `relative`) |
+| `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches, `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
+| `memory`, `telemetry`, `checkpoints`, `recorder` | `memory.enabled`; `telemetry.enabled`, `telemetry.otlp_endpoint`; file checkpoints; LLM recording |
+| `app` | global layer only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir` |
 
 A few switches whose effect the rest of this README does not mention:
 
 | Setting | Default | Effect |
 |---|---|---|
 | `providers[].models[].max_output` | by model name | the most `max_tokens` a call to the model is sent with, and a reply cut off at its limit is retried with |
-| `memory_enabled` | `true` | file-based memory: the memory prompt, the index in each turn's reminder, recall |
-| `telemetry_enabled` | `true` | one telemetry JSONL file per session under the project's `.agix/state/telemetry/` (the state directory's `telemetry/` without a project) |
-| `telemetry_url` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |
-| `instruction_file` | none | one more instruction file, read when the session is built and given to the model like `AGENTS.md` |
-| `hooks_config` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |
-| `disable_skill_shell_execution` | `false` | a skill body's `` !`cmd` `` is replaced by a notice instead of run |
+| `memory.enabled` | `true` | file-based memory: the memory prompt, the index in each turn's reminder, recall |
+| `telemetry.enabled` | `true` | one telemetry JSONL file per session under the project's `.agix/state/telemetry/` (the state directory's `telemetry/` without a project) |
+| `telemetry.otlp_endpoint` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |
+| `prompt.instruction_files` | `[]` | more instruction files, read in order when the session is built and given to the model like `AGENTS.md` |
+| `hooks` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |
+| `skills.allow_shell` | `true` | `false` replaces a skill body's `` !`cmd` `` with a notice instead of running it |
 | `team.enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |
-| `team.member_idle_timeout_secs` | `1800` | a team member idle this long is stopped |
-| `sandbox.network_mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, `allowlist` (`sandbox.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux), or `proxy` — to filter by domain, put a proxy in front |
-| `sandbox.egress_proxy` | none | under `proxy`, the only address a sandboxed command may connect to (`"127.0.0.1:3128"`, or `{"http", "socks", "no_proxy"}`), named to it in `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; macOS holds a proxy off this machine only to its port, Linux needs `socat` and cuts the network without it |
-| `network.use_system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`; `false` connects directly. Global / managed tier only (a scene or project that sets it is ignored), applied at daemon start; unrelated to the sandboxed commands' network above |
-| `history.location` | `global` | where sessions are kept. `global`: under the state directory's `projects/` and `sessions/`. `project`: a trusted project's sessions go to its `.agix/state/history/<id>/` (a worktree's to its main checkout's) with only an index left under `sessions/<id>/`; untrusted projects stay global. History already kept either way is read where it is; history in a project is read only while the project is trusted. Global tier only, applied at daemon start |
-| `worktree_dir` | `.wkts` | the directory at the repository root that `EnterWorktree` and `Agent`'s `worktree` put git worktrees in (`<repo>/.wkts/<name>`), and the one line added to the repository's `.gitignore`; one path component starting with `.`, not starting with `.git`, and not a configuration directory or another tool's. Global / scene tier only: a project's own settings cannot move it |
+| `team.member_idle_secs` | `1800` | a team member idle this long is stopped |
+| `sandbox.enabled` | `true` | `false` runs commands without the OS sandbox |
+| `sandbox.network.mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, `allowlist` (`web.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux), or `proxy` — to filter by domain, put a proxy in front |
+| `sandbox.network.proxy` | none | under `proxy`, the only address a sandboxed command may connect to (`"127.0.0.1:3128"`, or `{"http", "socks", "no_proxy"}`), named to it in `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; macOS holds a proxy off this machine only to its port, Linux needs `socat` and cuts the network without it |
+| `app.system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`; `false` connects directly. Applied at daemon start; unrelated to the sandboxed commands' network above |
+| `app.history` | `global` | where sessions are kept. `global`: under the state directory's `projects/` and `sessions/`. `project`: a trusted project's sessions go to its `.agix/state/history/<id>/` (a worktree's to its main checkout's) with only an index left under `sessions/<id>/`; untrusted projects stay global. History already kept either way is read where it is; history in a project is read only while the project is trusted. Applied at daemon start |
+| `app.worktree_dir` | `.wkts` | the directory at the repository root that `EnterWorktree` and `Agent`'s `worktree` put git worktrees in (`<repo>/.wkts/<name>`), and the one line added to the repository's `.gitignore`; one path component starting with `.`, not starting with `.git`, and not a configuration directory or another tool's |
 
 | Variable | Purpose |
 |---|---|

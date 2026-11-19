@@ -63,7 +63,7 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 - 以 `<shell> -c <command>` 起进程,`shell` 缺省 `bash`;工作目录是 payload 的 `cwd`。
 - `PATH` 前面依次加上项目的 `.agix/hooks/`(项目未被信任时没有这一项)、
   `~/.agix/scenes/<scene>/hooks/`、`~/.agix/hooks/`,所以 `command` 可以直接写放在那里的脚本名。环境与 Bash 工具同一套
-  (`sandbox.subprocess_env`)。command hook **不进 OS 沙箱**,以 daemon 的身份运行。
+  (`sandbox.env`)。command hook **不进 OS 沙箱**,以 daemon 的身份运行。
 - **未信任的项目里不跑项目给的程序。** 工作目录照旧是项目里的 `cwd`,所以 `./scripts/check.sh`、
   `scripts/x.sh` 这类相对路径落到的是仓库放在那里的文件。项目未被信任时(ARCHITECTURE §6.6),
   在场的 hook 都来自全局层、场景层。它们若以相对路径起程序——`command` 里任何一段启动的程序
@@ -135,7 +135,7 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
   每一跳都查)都不许落到本机或内网:回环、私有网段、链路本地、`0.0.0.0/8`、
   `100.64.0.0/10`、`198.18.0.0/15`、组播、保留段,IPv6 的 ULA、链路本地、站点本地,以及
   映射或内嵌这些 IPv4 的 IPv6 地址。主机名在发出前查一次、建连时由连接自己的解析器再查
-  一次,第二次解析到内网同样拒绝。`sandbox.allowed_domains` 管不到它(它管的是模型选的
+  一次,第二次解析到内网同样拒绝。`web.allowed_domains` 管不到它(它管的是模型选的
   目标),也放不开这条。重定向换了源(协议、主机、端口任一个不同)时,配置的 `headers` 与
   `authorization`、`cookie` 一律不跟过去,只留 `content-type`、`accept*`、`user-agent` 这类描述
   请求本身的头。
@@ -156,10 +156,11 @@ JSON。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:
 `block`,`reason` 作 `message`;`ok: true` 缺省什么都不说,写了 `"may_approve": true` 的记为
 `approve`(配在 `PreToolUse` 上就是替人答应权限询问,见"回答";为什么缺省不算见 `prompt`)。
 不是 JSON 的回答只当 `message`,不拦不改。写了 `model` 的,子 Agent 跑在这个模型上,provider
-按会话的路由选;不写用 `task_models.subagent` 的模型,没配就与子 Agent 一样(会话在
-`default_provider` 上时用会话当前的模型,否则用设置的 `model.model_name`)。
+按 `model.order` 选;`model` 可以写档位(`strong`、`balanced`、`fast`,或 `opus`、`sonnet`、`haiku`)
+或模型 id;不写,就与没点名模型的子 Agent 一样(`model.tasks.subagent` 那一档的模型,与对话用的是同一个模型时
+跟随会话当前的模型)。
 
-这个子 Agent 不占 `execution.max_concurrent_subagents`,模型把名额占满了照样起。它自己的事件
+这个子 Agent 不占 `agents.max_concurrent`,模型把名额占满了照样起。它自己的事件
 (工具调用、`SubagentStart` 等)不再起 agent hook,按执行失败处理、走 `on_error`;command /
 prompt / http hook 对它照旧跑。它读的是模型写的 payload,所以只有 `Read`、`Grep`、`Glob`
 (外加 `ToolSearch`),要批准的调用直接拒、不问人。它一次性跑完就丢,不做记忆抽取。它在 payload 的

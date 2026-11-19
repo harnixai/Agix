@@ -276,37 +276,37 @@ impl Tool for FileTicketTool {
   所以工具的 `permission_facts` 不用为程序另写一套。
 - `RunCode` 只注册在根会话上(子 Agent 已经是委派了一层),排在所有工具之后,所以它
   描述里列出的就是这个会话最终可调的那些。场景白名单里没有 `RunCode` 的、构建没开 `ptc`
-  特性的,没有它;部署方要关也可以写一条 `{"tool": "RunCode", "action": "deny"}`。
+  特性的,没有它;部署方要关也可以在 `permissions.deny` 里写一条 `RunCode`。
 
 ### LLM 后端 — `model`、`model.factory`、`credentials`
 
 `base::interface::model::Model` 是一个协议。要让一个协议变得*可配置*——也就是在
-`settings.json` 里写一句 `api_type` 就能用上——得注册一个 `ModelFactory`:
+`settings.json` 的 provider 里写一句 `api` 就能用上——得注册一个 `ModelFactory`:
 
 ```rust
 let mut factories = model::factory::builtin_registry();
 factories.register(Arc::new(MyProtocolFactory));
-let router = daemon::model_router::build_task_router_with(
-    &providers, "default", resolved, &factories,
+let router = assembly::model_router::build_task_router_with(
+    &settings, &builtin, &factories,
 )?;
 ```
 
-注册一个已经存在的 `api_type` 就是替换它。宿主正是这么把自己的 client 塞到
+注册一个已经存在的 `api` 就是替换它。宿主正是这么把自己的 client 塞到
 `anthropic` 背后的:不必另发明一个名字,再逼用户去记。
 
-凭据来自 `CredentialSource`,工厂从不直接读 `config.api_key`。缺省的
-`ConfigCredentials` 按厂商条目自己写的来:先 `api_key`,没有就读 `api_key_env`
-指名的环境变量。宿主要接自己的密钥库,用 `ConfigThen` 把它挂在后面——条目里写了的
-照用,没写的问宿主:
+凭据来自 `CredentialSource`,设置里没有明文密钥。缺省的
+`ConfigCredentials` 读 provider 条目 `api_key_env` 指名的环境变量。宿主要接自己的密钥库,
+用 `ConfigThen` 把它挂在后面——环境里有的照用,没有的问宿主:
 
 ```rust
 let factories = model::factory::builtin_registry()
     .with_credentials(Arc::new(ConfigThen(Arc::new(MyVaultCredentials))));
 ```
 
-daemon 的嵌入方不必自己拼:`Assembly { credentials: Some(..), .. }`,每个绑定建
-路由时都走这条链;没有任何厂商路由时的缺省 Anthropic 客户端先看
-`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`,再以厂商 id `"default"` 问它。
+daemon 的嵌入方不必自己拼:`Assembly { credentials: Some(..), .. }`(经 `agix::embed` 起的是
+`EmbedConfig.credentials`),每个绑定建路由时都走这条链;没有配 `providers` 时引擎自己提供的
+`anthropic` 先看 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`,再以 provider id `"default"` 问它。
+一个 provider 找不到密钥不让构建失败:它的调用以 `no_credentials` 失败,交给 `model.order` 里的下一个。
 
 拿回来的是 `Secret`:没有 `Display`,没有 `Serialize`,`Debug` 打出来是
 `<redacted>`。要读它得调 `.expose()`。
@@ -316,12 +316,14 @@ daemon 的嵌入方不必自己拼:`Assembly { credentials: Some(..), .. }`,每�
 跳过来源是别家的块,来源字段本身不上线。返回 `None` 的客户端产生的块不带来源,
 发给谁都照发。
 
-OpenAI 兼容端点的推理没有标准字段,两项按厂商条目配置:
+OpenAI 兼容端点的推理没有标准字段,由 provider 条目的 `vendor` 推出:
 
-| 键 | 作用 |
+| `vendor` | 作用 |
 |---|---|
-| `reasoning_passback` | 把当前工具循环里模型自己的 `reasoning_content` 回传(DeepSeek 思考模式要求;OpenAI 本家会拒) |
-| `thinking_toggle` | `thinking_mode` 不是 `auto` 时怎么开关思考:`deepseek`(`thinking.type`)、`enable_thinking`(Qwen)、`chat_template_kwargs`(vLLM / SGLang) |
+| `deepseek` | 回传当前工具循环里模型自己的 `reasoning_content`(DeepSeek 思考模式要求;OpenAI 本家会拒);`model.thinking` 不是 `auto` 时用 `thinking.type` 开关思考;effort 的 `medium`、`xhigh` 按 `high` 发 |
+| `qwen` | `model.thinking` 不是 `auto` 时用 `enable_thinking` 开关思考 |
+| `vllm`、`sglang` | `model.thinking` 不是 `auto` 时用 `chat_template_kwargs.enable_thinking` 开关思考 |
+| `anthropic`、`openai`、`generic` | 不发开关字段,不回传推理内容 |
 
 ### 配置从哪来 — `config.source`
 
@@ -339,7 +341,7 @@ let settings = LoadedSettings::load_from(&source, global, scene, project, "code"
 ```
 
 一个 source 只决定有哪些层、顺序如何、每层里是什么 JSON。合并两边是同一套——每层
-都剥掉 `paths`,每层的 `permission_rules` 单独拎出来按层拼接(不参与覆盖),其余
+都剥掉 `paths`,每层 `permissions` 里的规则列表单独拎出来按层拼接(不参与覆盖),其余
 靠后的层递归盖在靠前的上面——所以把配置从磁盘上搬走,改不了一个配置文件的含义。
 
 那几个目录参数即使 source 一个字节都不从里面读也得留着:它们是 scene 的*数据*待
@@ -383,7 +385,7 @@ Builder::new().permission(PermissionSet::without_grants(Arc::new(MyPolicy)));
 `agixd` 的会话池对每个会话都装 `Policy`;宿主给的 `Assembly.host_policy` 是其中一层规则:它的
 deny 在任何模式下都生效,它的 allow 只算一条 allow 规则。没调 `.permission(..)` 的 `Builder` 用的也是
 `Policy`,规则与模式取自它的设置;同时也没给 `elicitation` 时没人可问,要问的调用一律拒绝,并提示用
-`permission_rules` 或 `permission_mode` 放行。要规则仍然算数又不想被询问,用 `acceptEdits` 或
+`permissions.allow` 或 `permissions.mode` 放行。要规则仍然算数又不想被询问,用 `acceptEdits` 或
 `dontAsk` 加 allow 规则。
 
 ### 一个 agent 怎么呈现自己 — `scene`
@@ -428,7 +430,7 @@ scene.prompt = Arc::new(MyPrompt { base: scene::harnix::HarnixPrompt });
 | `ScenePrompt::session_context` | 空 | 本会话的事实(工作目录、平台、草稿目录),由内核在会话开头连同项目说明作为一条上下文消息注入一次,压缩与 `/clear` 之后重新注入。**随会话而变的东西放这里,不要放进系统提示**:系统提示逐字节相同,厂商的前缀缓存才能跨会话命中 |
 | `bundled_skills` | `["skillify"]` | 列出哪些内置技能;依赖的工具不被允许的自动不列 |
 | `attended_skills` | 空 | 除 `bundled_skills` 外再列的内置技能,只在会话有人值守时列 |
-| `path_style` | 绝对路径 | 文件工具给模型看的路径;`harnix` 用相对路径,省掉每次都重复的项目前缀。设置里写了 `path_style` 以设置为准 |
+| `path_style` | 绝对路径 | 文件工具给模型看的路径;`harnix` 用相对路径,省掉每次都重复的项目前缀。设置里写了 `prompt.path_style` 以设置为准 |
 | `token_budget` | 150000 / 20 | 压缩阈值与保留轮数 |
 | `reminders` | 空 | 每轮 `<system-reminder>` 带什么(`GitStatus`、`Memory`),按列出的顺序;内建场景是 `[GitStatus]` |
 | `session_naming` | `None` | 首轮之后用这段提示(`{first_message}` 换成用户首条消息)让模型给会话起名;会话的 `options.auto_name:false` 盖过它 |
@@ -498,7 +500,7 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 | `deferred_tools` | string[] | `[]` | 只报名字、schema 经 `ToolSearch` 取的工具;不支持通配 |
 | `token_budget.compact_threshold` | 整数 | 150000 | 0 = 不自动压缩 |
 | `token_budget.compact_keep_recent` | 整数 | 20 | |
-| `execution.max_api_calls_per_turn` | 整数 ≥ 1 | 不设上限 | 和设置取较小的那个,所以只能收紧 |
+| `execution.max_api_calls_per_turn` | 整数 ≥ 1 | 不设上限 | 和设置的 `turn.max_model_calls` 取较小的那个,所以只能收紧 |
 | `requires_project` | bool | `false` | |
 | `supports_team` | bool | `false` | |
 | `modules` | string[] 或缺省 | 缺省 = 全部 | 这个场景的会话跑哪些模块,见下 |
@@ -509,7 +511,7 @@ for refused in registry.register_declarative_dir(&global_root.join("scenes")) {
 
 校验从严:未知字段、缺了必填字段、id 不合规、同一列表里重复、一个名字同时在
 `tools` 与 `disallowed_tools`(或 `modules` 与 `disabled_modules`)里、
-`max_api_calls_per_turn` 为 0、`prompt.md` 为空——都是带文件路径的加载错误,不会被
+`execution.max_api_calls_per_turn` 为 0、`prompt.md` 为空——都是带文件路径的加载错误,不会被
 悄悄当成缺省值。两个文件只在加载时读一次;改文件不影响已经在跑的会话。
 
 `prompt.md` 里可以写这几个占位符,由场景每次调用时填:
@@ -684,7 +686,7 @@ Builder::new().exec(ExecProviders::in_process())   // switching is this call
 
 整个会话——工具调用、引擎自己的 git 与 `pdftotext`、warmup 的预连接——都跑在这一套上,
 子 Agent 沿用同一套。这时出网策略和子进程环境由传进来的 provider 负责,
-`sandbox.network_mode`、`sandbox.subprocess_env` 只配置缺省的那一套。它与
+`sandbox.network.mode`、`sandbox.env` 只配置缺省的那一套。它与
 `Builder::process_groups` 不能同时设置:要记录进程组,就在传进来的 provider 里带上
 ledger(`platform::local_providers_with_ledger`)。
 
@@ -705,10 +707,10 @@ ledger(`platform::local_providers_with_ledger`)。
 是:经 provider 规范化,检查解析出来的那个路径,再经 provider 写。
 
 **出网策略问的是*模型*能够到哪。** 每个请求都带着"是谁选的目的地"。
-`allowed_domains` 约束 `Origin::Agent`——一个 WebFetch 的 url、一个 Ping 的主机
+`web.allowed_domains` 约束 `Origin::Agent`——一个 WebFetch 的 url、一个 Ping 的主机
 ——而不约束 `Origin::Operator`,也就是模型端点、MCP server、遥测。把它套到所有东西
 上,agent 就连自己的模型都够不着了。`Origin::Agent` 的请求另外不许落到
-`is_internal_address` 判为内部的地址上,`allowed_domains` 点名的主机除外;一个运维者写下、
+`is_internal_address` 判为内部的地址上,`web.allowed_domains` 点名的主机除外;一个运维者写下、
 内容却来自外面的端点(HTTP hook)用 `HttpRequest::public_only` 要同样的待遇;
 `internal_target` 再放开它自己的那个主机与端口(HTTP hook 的 `allow_local`),别的每一跳照旧。
 自己实现 `Network` 的,这几条也要在重定向的每一跳上查;跳到别的源(协议、主机、端口任一个不同)时,
@@ -722,7 +724,7 @@ provider——模型、OAuth、遥测和 registry 的 client 各造各的。所�
 本机 provider 起的每个子进程自领一个进程组,停的时候整组停,所以命令里放到后台的进程
 也会被停掉;命令本身退出后,输出最多再等 `OUTPUT_GRACE_AFTER_EXIT`。子进程的环境由
 `platform::local_providers_with` 收的那份 `SubprocessEnv` 决定——缺省是宿主环境去掉
-引擎自己的凭据,设置里对应 `sandbox.subprocess_env`。自己写 `Process` 的,这两条
+引擎自己的凭据,设置里对应 `sandbox.env`。自己写 `Process` 的,这两条
 也该守住:"停掉一个命令"指的是它起的全部进程,模型 `printenv` 能读到什么也该是一个
 明确的决定。哪些变量算引擎的凭据问 `base::interface::exec::env::is_engine_credential`:除了固定的几个,
 还有设置里 provider 的 `api_key_env`、MCP server 配置读的变量(`oauth` 的 `*_env` 与 `$VAR`)、
@@ -733,7 +735,7 @@ provider——模型、OAuth、遥测和 registry 的 client 各造各的。所�
 命令自己先退出、留在后台的进程(`nohup … &`、`npm run dev &`)不随句柄停。要在会话结束时
 收掉它们,给会话一份 `platform::GroupLedger`:`Builder::process_groups(ledger)` 让这个会话
 (连同它派出的子 Agent)起的每个进程组记进台账,引擎停下后由嵌入方调 `ledger.reap(grace)`
-——先 `SIGTERM`,`grace` 后还在的 `SIGKILL`。daemon 里对应设置 `sandbox.reap_process_groups`
+——先 `SIGTERM`,`grace` 后还在的 `SIGKILL`。daemon 里对应设置 `sandbox.reap_on_close`
 (缺省关):打开后会话关闭、被逐出、daemon 收尾时都会收,故意留在后台的服务也一并停掉。
 自己拼 `ExecProviders` 的用 `platform::local_providers_with_ledger`。
 
@@ -743,7 +745,7 @@ provider——模型、OAuth、遥测和 registry 的 client 各造各的。所�
 
 沙箱有一条不变量是引擎强制而不是请求的:**要求过约束的策略,绝不会悄悄变成一次不
 受约束的运行。** 后端报告 `Full`、`Partial` 或 `None`,并说清自己没能兑现什么;
-`sandbox.require_enforcement` 决定不到 `Full` 要不要拒。约束什么、要不要约束,始终
+`sandbox.require` 决定不到 `Full` 要不要拒。约束什么、要不要约束,始终
 是内核的事——provider 只回答*怎么*约束。同一个后端收到的 `SandboxPolicy` 随放行的依据而不同
 (`ExecProfile`,`ARCHITECTURE.md` §6.3):无人值守会话的命令带着
 `SandboxPolicy::deny_ipc_escapes`:除了写,还要挡住命令请别的进程在沙箱外代办的路(本机后端
@@ -827,7 +829,7 @@ client 各自解析,作为 `FailedAttempt.server_hint` 交给策略;拿它做什
 
 ```rust
 Builder::new().budget_policy(Arc::new(Capped {
-    inner: EngineBudget::new(settings.execution.max_budget_tokens),
+    inner: EngineBudget::new(settings.turn.token_budget),
     context_hard_cap: 120_000,
 }))
 ```
@@ -841,7 +843,7 @@ Builder::new().budget_policy(Arc::new(Capped {
 不是引擎的:缓存读按普通输入的一个零头计费,全额计入会高估账单,不计入又会让一轮
 缓存命中的执行少算掉它读的绝大部分。两种都说得通,所以引擎只负责如实报。
 `Spend::total_tokens()` 是 input + output(引擎自带的 `EngineBudget` 用的就是它,
-`max_budget_tokens` 的含义因此不变),`Spend::all_tokens()` 是四项全含,想要第三种
+`turn.token_budget` 的含义因此不变),`Spend::all_tokens()` 是四项全含,想要第三种
 口径的自己按需加权:
 
 ```rust
@@ -1012,8 +1014,8 @@ handle.dispose();
 | `memory.session` | 怎么用基于文件的记忆系统 |
 | `rules` | `.agix/rules/` 的发现索引 |
 | `mcp.instructions` | 来自已连接 MCP server 的指令 |
-| `config.prompt_append` | `settings.prompt_append` |
-| `config.prompt_override` | `settings.prompt_override`,它把一切都替掉 |
+| `config.prompt_append` | `settings.prompt.append` |
+| `config.prompt_override` | `settings.prompt.override`,它把一切都替掉 |
 
 块的 `role` 决定它送到哪里：`System` 进系统提示；`User` 不进系统提示，而是每次调用都作为
 对话开头的一条 `<system-reminder>` 消息送出。有的端点（DeepSeek）按 system → tools →
@@ -1226,7 +1228,7 @@ let store = Arc::new(ObservedHistoryStore::new(inner, vec![my_observer]));
 ### 生命周期 hook — `hooks`
 
 二十九个具名事件,四种后端(command、prompt、HTTP、agent),在 `settings.json` 的
-`hooks_config` 里配:事件名 → 一组 hook。各层按事件合并,上层写了某个事件就整组替换下层
+`hooks` 里配:事件名 → 一组 hook。各层按事件合并,上层写了某个事件就整组替换下层
 的那一组(宿主连接登记的 hook 例外,见下);没被信任的项目(`ARCHITECTURE.md` §6.6)那一层的整段不加载。有些事件能解析、能接受配置,但还没有任何地方触发它们;`hooks::UNWIRED_EVENTS`
 是那份清单,配到这类事件时引擎会告警,而 `tests/guards/tests/wiring.rs` 从两个
 方向盯着这份清单不许说谎。
