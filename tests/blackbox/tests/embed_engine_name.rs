@@ -3,8 +3,10 @@
 //! `foo` and not under `agix`, its errors are `FooError`, the model reads the
 //! helpers as `foo.*` in the tool's description and guide, and the project's
 //! settings are read from `.foo` and not from `.agix`. The product is still
-//! Agix: the prompt and the `User-Agent` do not follow the engine's name. A
-//! name that cannot be an engine's is refused at start.
+//! Agix: the prompt and the `User-Agent` do not follow the engine's name.
+//! `daemon.doctor` names the installed plugins whose JavaScript still calls
+//! `agix.`, and says nothing of it under the default engine. A name that
+//! cannot be an engine's is refused at start.
 
 use std::path::PathBuf;
 
@@ -12,6 +14,10 @@ use blackbox::{ProviderStub, Reply};
 use daemon::embed::{EmbedConfig, EmbedError, Embedded};
 use rpc_client::DaemonRpcClient;
 use serde_json::{json, Value};
+use test_runner::plugin_fixture::{
+    file_url, package_ext, package_forge, EXT_PACKAGE, EXT_PACKAGE_VERSION, FORGE_PACKAGE,
+    FORGE_PACKAGE_VERSION,
+};
 
 const MAIN: &str = "ENGINE-MAIN-MARK";
 
@@ -148,6 +154,61 @@ async fn a_named_engine_is_the_global_the_errors_and_the_project_directory() -> 
     assert!(seen
         .iter()
         .all(|r| r.header("user-agent") == Some(user_agent.as_str())));
+    Ok(())
+}
+
+async fn engine_name_check(engine: &str) -> anyhow::Result<Value> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let mut config = EmbedConfig::new(&root.data);
+    config.cwd = Some(root.project.clone());
+    config.engine = engine.into();
+    let embedded = Embedded::start(config).await?;
+    let mut client = connect(&embedded);
+    let packages = root.data.join("packages");
+    for (archive, name) in [
+        (package_forge(&packages)?.0, FORGE_PACKAGE),
+        (package_ext(&packages)?.0, EXT_PACKAGE),
+    ] {
+        let version = if name == FORGE_PACKAGE {
+            FORGE_PACKAGE_VERSION
+        } else {
+            EXT_PACKAGE_VERSION
+        };
+        let installed = client
+            .call(
+                "plugin.install",
+                json!({ "name": name, "version": version, "download_url": file_url(&archive) }),
+            )
+            .await?;
+        anyhow::ensure!(installed.error.is_none(), "{name}: {installed:?}");
+    }
+    let doctor = client.daemon_doctor().await?.result.unwrap_or_default();
+    embedded.shutdown().await;
+    Ok(doctor["health"]["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["name"] == "plugins.engine_name")
+        .cloned()
+        .unwrap_or_default())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_doctor_names_the_plugins_that_still_call_agix() -> anyhow::Result<()> {
+    let check = engine_name_check("foo").await?;
+    assert_eq!(check["status"], "degraded", "{check}");
+    let plugins: Vec<&str> = check["details"]["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p["plugin"].as_str())
+        .collect();
+    assert_eq!(plugins, [FORGE_PACKAGE], "{check}");
+    let summary = check["summary"].as_str().unwrap_or_default();
+    assert!(summary.contains("`foo.`"), "{check}");
+
+    assert_eq!(engine_name_check("agix").await?, Value::Null);
     Ok(())
 }
 

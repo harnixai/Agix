@@ -115,7 +115,9 @@ fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::Plugin
 
 #[cfg(feature = "plugin-packages")]
 mod imp {
-    use super::health::{EnableOnInstallCheck, EnableStateCheck, RefusedPackagesCheck};
+    use super::health::{
+        DefaultEngineNameCheck, EnableOnInstallCheck, EnableStateCheck, RefusedPackagesCheck,
+    };
     use super::*;
     use base::agent_type::AgentTypeDefinition;
 
@@ -227,17 +229,25 @@ mod imp {
             if !self.packages.is_enabled() {
                 return Vec::new();
             }
-            vec![
+            let layout = self.packages.layout();
+            let renamed = DefaultEngineNameCheck::under(
+                layout.engine(),
+                self.packages.commands(),
+                self.packages.script_bindings(),
+            );
+            let mut checks: Vec<Arc<dyn base::interface::health::HealthCheck>> = vec![
                 Arc::new(EnableStateCheck(self.packages.tier_dirs())),
                 Arc::new(RefusedPackagesCheck {
                     tiers: self.packages.tier_dirs(),
-                    layout: self.packages.layout(),
+                    layout: layout.clone(),
                     libraries: self.packages.libraries().to_vec(),
                 }),
                 Arc::new(EnableOnInstallCheck(
                     self.packages.policy().enable_on_install,
                 )),
-            ]
+            ];
+            checks.extend(renamed.map(|c| Arc::new(c) as _));
+            checks
         }
 
         pub async fn install(
