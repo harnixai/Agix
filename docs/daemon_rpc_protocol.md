@@ -1013,7 +1013,10 @@ MCP server 都被拒绝。
 `plugins.refused`:磁盘上有发现阶段挡下来、因而不会加载的插件包(披露超限、manifest 读不了等)时是
 `degraded`,`details.refused` 是 `[{name,version,reason}]`;`plugins.enable_on_install` 说明
 `plugins.enable_on_install` 设置是真是假(`plugin.install` 是否装完就启用),总是 `ok`,为真时 `summary`
-提示缺省计划在后续 0.3.x 版本改为 `false`。
+提示缺省计划在后续 0.3.x 版本改为 `false`。引擎名（`EmbedConfig.engine`）不是 `agix` 时还有一项
+`plugins.engine_name`：已启用的包里，命令入口或 `[[script]]` 的源码写了 `agix.` 时是 `degraded`——
+基础库在这个引擎里叫引擎名，这些调用跑不通；`details` 是 `{"engine": "…", "plugins": [{plugin, files}]}`。
+只看源码文本，不运行。
 
 daemon 自己的会话池还有一项 `sandbox.unattended_network`:这个 daemon 服务的场景里有无人值守的
 (没人回答提问与权限询问),`sandbox.network_mode` 是 `unrestricted`,而

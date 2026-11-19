@@ -38,7 +38,7 @@
 | `notify(text)` | 告诉发起它的 Agent 一件事；只在后台运行时送达，一次运行至多 10 条。前台运行时 Agent 正在等结果，它退化为 `log`：进日志，随结果交回 |
 | `stopRequested()` | 是否有人要求它停（`TaskStop`）。长循环里查一下，交回已有的部分结果 |
 | `messages()` | 取出别人经 `TaskMessage` 发给它的消息（字符串数组），取过即清 |
-| `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析，纯计算（`agix_js.md`）。改了产品名的嵌入方，工具描述与指南里写的是它在产品名下的别名（`agix_js.md` §2） |
+| `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析，纯计算（`agix_js.md`）。全局名是引擎名（`EmbedConfig.engine`，缺省 `agix`），工具描述与指南按它写（`agix_js.md` §2） |
 
 标准库都在：`JSON`、`Math`、`Date`、`RegExp`、`Map` / `Set`、`Promise`（含 `all` /
 `allSettled`）、数组与字符串方法。

@@ -116,7 +116,7 @@ function `main` ``。
 | `tools.<Name>(input)` / `callTool(name, input)` | 调本会话可从代码调用的工具（含 `mcp__*`），返回 Promise，失败 reject。远端数据服务走这里，连接与登录由引擎管 |
 | `log(text)` / `console.*` | 进度行，宿主在任务进度里看到，末尾随结果交回 |
 | `stopRequested()` | 是否被要求停下 |
-| `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析（`agix_js.md`） |
+| `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析（`agix_js.md`）。全局名是引擎名，改了引擎名的嵌入方里没有 `agix`（`agix_js.md` §2） |
 
 **没有**：`agent()`（判断留给模型）、`notify` / `messages` / `args`（命令不在后台跑，参数走
 `main`）、`RunCode`、`RunExt`（命令里不起命令）——`callTool("Agent" | "RunCode" | "RunExt", …)`

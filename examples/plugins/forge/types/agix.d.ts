@@ -1,6 +1,6 @@
-// 全局 `agix`（docs/agix_js.md §3）：纯计算的基础库，RunExt 命令、RunCode 与扩展点脚本里都有。
-// 出错抛 AgixError（带 code，如 `yaml.syntax`；改了产品名的嵌入方里 name 随别名，如 CodixError，
-// 判断错误按 code）；参数类型不对抛 TypeError。
+// 全局 `agix`（docs/agix_js.md §3）：纯计算的基础库，RunExt 命令、RunCode 与扩展点脚本里都有；
+// 改了引擎名的嵌入方里全局叫引擎名。出错抛 AgixError（带 code，如 `yaml.syntax`；name 随引擎名，
+// 如 FooError，判断错误按 code）；参数类型不对抛 TypeError。
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 

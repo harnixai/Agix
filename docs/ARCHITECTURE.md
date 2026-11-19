@@ -2286,16 +2286,25 @@ worktree 照样受保护;从一个自定义名字改成另一个,旧名字下的
 空挂载点。引擎自己的 git(只写点名的可写根)不受这些限制。引擎建 worktree 前它是符号链接就拒绝。项目层目录里的 `worktrees/` 不是 worktree 目录,是普通的配置。
 
 **外来状态根。** 状态根不是 `~/.agix` 的实例(嵌入方的 `data_root`,或设了 `AGIX_CONFIG_HOME`)
-把 `~/.agix`(`known_state_roots`)当外来状态根,与自己的状态根一样保护:其中的设置文件、
+把 `~/.agix` 与 `~/.<引擎名>`(`known_state_roots(&layout)`,`Layout::state_dir_names`)当外来状态根,与自己的状态根一样保护:其中的设置文件、
 `mcp/oauth/`、`daemon/auth/` 算凭据(工具在任何模式下都拒读拒写,沙箱里读不到),沙箱里的命令写不了
 其中任何东西(工作目录在它里面时除外),也连不上其中的 unix socket——否则一个 Codix 会话的命令能拿
 agixd 的令牌、连上它的 socket 当宿主。本机别的实例的状态根没有地方登记(`instances.d` 只记同一状态根
-下的 daemon),所以只认缺省的这一个。
+下的 daemon),所以只认这两个:agixd 缺省的,和同名引擎的实例缺省会用的。
 
 **已知边界。** 两个都不用缺省名的宿主(`.codix` 与 `.foo`)开同一个项目时,彼此不保护对方的目录;需要时
 再加一份要保护的名字表。`.agents/skills` 是跨工具约定,不随项目层目录名变。
 
-**产品名。** `Layout` 里的另一个值是产品名(缺省 `Agix`,`EmbedConfig.product_name`,`Layout::with_product_name`
+**引擎名。** `Layout` 里还有引擎名(缺省 `agix`,`EmbedConfig.engine`,`Layout::with_engine` 校验:
+`[a-z][a-z0-9]*`、至多 16 个字符、能当脚本的新全局——`base::interface::script::check_global_name`,即
+`js_lib::check_global_name`)。它是三处 JS 载体里基础库唯一的全局名(`js_lib::install_named`,
+`ptc::Library::for_engine`,`script_host::bindings::engine_for`)、基础库错误名 `<Engine>Error`、`RunCode`
+说明里的 `<engine>.*`、项目层目录的缺省(`with_engine` 同时把它设成 `.<engine>`,`EmbedConfig.project_dir`
+给了就再 `with_project_dir`)和上面那个外来状态根 `~/.<engine>`。校验放在 base 而不是 js-lib,是因为没有
+JavaScript 引擎的构建也要在 `start` 时拒掉非法名字;js-lib 依赖 base 取同一份规则。`agix.*` RPC 命名空间、
+`AGIX_*`、transcript 命名空间、OTel scope 与指标名、agixd 与 crate 名不随它。
+
+**产品名。** `Layout` 里的另一个值是产品名(缺省 `Agix`,`EmbedConfig.product`,`Layout::with_product_name`
 校验:ASCII 字母开头,其后至多 31 个字母、数字、`-`、`_`),与目录名同一条路传、同样没有进程级的值。展示用的
 `product_name()` 进提示词(场景的身份句、`ScenePromptContext.layout`)、工具指南(`PromptContext.layout`)、报错、
 MCP 动态注册的 `client_name`、桌面通知、内建场景的展示名(`<名> Code` / `<名> Mini`,`scene::builtin` 与

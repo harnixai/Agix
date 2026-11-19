@@ -43,15 +43,17 @@ Node 或浏览器的 API。
   段与段之间可以被打断。万一一次调用仍停不下来，载体到时不再等它（`ptc.md`、`extending_quickjs.md`）。
 - **输入输出都是普通的 JSON 值与字符串**，不返回类实例。路径一律 POSIX 写法（`/`）。
 - **出错抛 `AgixError`**（`Error` 的子类，`e.name === "AgixError"`），带 `code`，形如 `yaml.syntax`；
-  "校验不通过"不算出错，以返回值表达。要认出这类错误按 `code` 判断，不按 `name`：改了产品名的
-  嵌入方里 `name` 随别名（见本节末条）。参数类型不对（该传字符串的传了数字）抛 `TypeError`，同 Node。
+  "校验不通过"不算出错，以返回值表达。要认出这类错误按 `code` 判断，不按 `name`：改了引擎名的
+  嵌入方里 `name` 随引擎名（见本节末条）。参数类型不对（该传字符串的传了数字）抛 `TypeError`，同 Node。
 - 嵌套超过 127 层的值报错（`yaml.depth`、`json.depth`），与引擎读 JSON 的上限相同。
-- **改了产品名的嵌入方**（`Layout` 的产品名不是 Agix），同一个冻结对象还挂在产品名的小写形式下：
-  只取 ASCII 字母和数字，如 `Codix` → `codix`。三处载体都装这个别名，`agix` 照常可用；模型读到的
-  （`RunCode` 的工具描述与指南）只写别名。装了别名的载体里错误也随别名命名：别名首字母大写加
-  `Error`，如 `CodixError`（`e.name`、`e.constructor.name` 与 `String(e)` 都是它），模型从程序输出里
-  读不到 Agix；没有别名的仍是 `AgixError`。产品名化出的名字不以字母开头、是保留字、或与脚本已有的
-  全局名（`tools`、`console`、`Math`……）重名时不装别名，模型读到的文字里也不提这些辅助函数。
+- **全局名是引擎名。** 本文写作 `agix` 的全局，实际叫 `Layout` 的引擎名（`EmbedConfig.engine`，
+  缺省 `agix`）；三处载体都只装这一个全局，改了引擎名的嵌入方里没有 `agix`。错误名随它：引擎名首字母
+  大写加 `Error`，如引擎名 `foo` 时是 `FooError`（`e.name`、`e.constructor.name`、`String(e)` 与栈帧
+  都是它）。`RunCode` 的工具描述与指南按引擎名写（`foo.yaml`……）。引擎名是 `[a-z][a-z0-9]*`、至多
+  16 个字符，不能是 JavaScript 保留字，也不能与脚本已有的全局重名（载体自己的 `tools`、`console`、
+  `fs`……与新上下文里的 `escape`、`atob`……），`start` 时校验（`agix-sdk.md` §10）。用 `agix.*` 写的
+  插件在改了引擎名的嵌入方里跑不起来，`daemon.doctor` 的 `plugins.engine_name` 会点名这样的包。
+  产品名（`EmbedConfig.product`）与这里无关。
 
 ## 3. 函数
 
