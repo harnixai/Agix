@@ -3806,7 +3806,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `refused` | 管线没让它跑,或拦下了它的结果:deny 规则、plan 模式、hook、`tool.around`、会话已结束 |
 | `answered_by_middleware` | 交回来的不是函数自己的结果:`tool.around` 用 `respond` 替它作答,或 `tool.result` 改写了它的结果。函数可能已经跑过,但结果一律不作数 |
 | `threw` | 函数抛了错;`message` 是错误消息,后面跟它已经做了的改动 |
-| `timeout` | 跑过了 `timeout_ms` |
+| `timeout` | 跑过了 `timeout_ms`。到点后让它停下,至多再等 2 秒收尾;还没收完(比如 hook 在跑)就先答 `timeout`,剩下的在后台跑完,带会话时会话一直算忙到它真正结束 |
 | `cancelled` | `plugin.cancel`、连接断开,或会话结束;还在等名额时被取消也是它 |
 | `stopped` | 被 `session.stopTask` 停下又没在宽限期内收尾 |
 | `not_started` | 入口读不出来、名额等不到等,函数没开始 |

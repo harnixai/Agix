@@ -41,6 +41,11 @@ impl SessionPool {
     /// Run `call` and hand back what the function returned or why it did
     /// not. `Err` is a call that cannot be made at all: no such function,
     /// session or directory, a time over the limit.
+    ///
+    /// A call past its time is told to stop and answers `timeout` once it
+    /// has, or two seconds later if it is still finishing (its hooks, say);
+    /// the rest of it then ends in the background, still holding its session
+    /// or its engine.
     pub async fn call_plugin(
         &self,
         call: PluginCall,
@@ -65,34 +70,47 @@ impl SessionPool {
             host_js_libs: self.factory.host_js_libs().clone(),
         })
         .map_err(PoolError::InvalidRequest)?;
+        let PluginCall {
+            function: name,
+            input,
+            target,
+            permission_rules: rules,
+            ..
+        } = call;
         let input = serde_json::Value::Object(serde_json::Map::from_iter([
-            ("function".to_string(), call.function.clone().into()),
-            ("input".to_string(), call.input),
+            ("function".to_string(), name.clone().into()),
+            ("input".to_string(), input),
         ]));
+        let pool = self
+            .this
+            .upgrade()
+            .ok_or_else(|| PoolError::Internal("the pool is shutting down".into()))?;
         let stop = cancel.child_token();
-        let name = &call.function;
-        let run = async {
-            match &call.target {
-                PluginCallTarget::Session(id) => {
-                    let (runner, _running) = self.session_runner(id).await?;
-                    let outcome = runner
-                        .run(tool, input, call.permission_rules, stop.clone())
-                        .await;
-                    Ok(result_of(name, outcome))
-                }
-                PluginCallTarget::Project(dir) => {
-                    let rules = call.permission_rules;
-                    self.run_transient(name, dir, tool, input, rules, stop.clone())
-                        .await
+        let _stop_if_dropped = stop.clone().drop_guard();
+        let mut run = tokio::spawn({
+            let stop = stop.clone();
+            async move {
+                match &target {
+                    PluginCallTarget::Session(id) => {
+                        let (runner, _running) = pool.session_runner(id).await?;
+                        Ok(result_of(&name, runner.run(tool, input, rules, stop).await))
+                    }
+                    PluginCallTarget::Project(dir) => {
+                        pool.run_transient(&name, dir, tool, input, rules, stop)
+                            .await
+                    }
                 }
             }
-        };
-        tokio::pin!(run);
+        });
         tokio::select! {
-            result = &mut run => result,
+            joined = &mut run => joined_result(joined),
             _ = tokio::time::sleep(time) => {
                 stop.cancel();
-                Ok(ran_out_of(time, run.await?))
+                let ended = match tokio::time::timeout(WRAP_UP, &mut run).await {
+                    Ok(joined) => joined_result(joined)?,
+                    Err(_) => failure("timeout", String::new()),
+                };
+                Ok(ran_out_of(time, ended))
             }
         }
     }
@@ -236,6 +254,15 @@ impl SessionPool {
             runner.run(tool, input, rules, cancel).await,
         ))
     }
+}
+
+/// How long a call past its time is waited for once told to stop.
+const WRAP_UP: Duration = Duration::from_secs(2);
+
+fn joined_result(
+    joined: Result<Result<PluginCallResult, PoolError>, tokio::task::JoinError>,
+) -> Result<PluginCallResult, PoolError> {
+    joined.map_err(|e| PoolError::Internal(format!("the plugin call failed: {e}")))?
 }
 
 fn time_of(call: &PluginCall) -> Result<Duration, PoolError> {

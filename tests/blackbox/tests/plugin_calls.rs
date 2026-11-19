@@ -1252,3 +1252,39 @@ async fn a_call_in_a_directory_waits_for_a_slot_before_anything_is_built() -> an
     embedded.shutdown().await;
     Ok(())
 }
+
+/// A call that runs out of time answers `timeout` without waiting for its
+/// wrap-up — here a `PostToolUse` hook that takes 10 s — and the wrap-up
+/// still runs to its end after the answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_timed_out_call_answers_without_waiting_for_its_wrap_up() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let project = project_in(&root)?;
+    let package = root.join("host-xflow");
+    write_package(&package)?;
+    std::fs::create_dir_all(root.join("data"))?;
+    let hooks = json!({ "hooks_config": marking_hook(&root, "PostToolUse", 10)? });
+    std::fs::write(root.join("data/settings.json"), serde_json::to_vec(&hooks)?)?;
+    let embedded = embedded_with(&root, &package, Vec::new()).await?;
+
+    let mut call = PluginCall::new("xflow.spin", json!({}), PluginCallTarget::Project(project));
+    call.timeout = Some(Duration::from_millis(500));
+    let result = embedded
+        .pool()
+        .call_plugin(call, tokio_util::sync::CancellationToken::new())
+        .await?;
+    assert_eq!(
+        result.error.as_ref().map(|e| e.code.as_str()),
+        Some("timeout"),
+        "{result:?}"
+    );
+    assert_eq!(
+        marks(&root),
+        "",
+        "the answer waited for the call's PostToolUse hook"
+    );
+    wait_until(|| marks(&root).contains("PostToolUse"), "the wrap-up").await?;
+    embedded.shutdown().await;
+    Ok(())
+}
