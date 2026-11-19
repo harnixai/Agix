@@ -132,7 +132,7 @@ impl SessionMemory {
 
     /// Read the full content of the session_memory.md file, if it exists.
     pub async fn load_content(&self) -> std::io::Result<Option<String>> {
-        match read_own(&self.path()?).await {
+        match history::own_file::read_to_string(&self.path()?).await {
             Ok(content) => Ok(Some(content)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
@@ -143,7 +143,7 @@ impl SessionMemory {
     /// file content. The frontmatter is a YAML block delimited by `---`.
     async fn update_frontmatter_field(&self, key: &str, value: &str) -> std::io::Result<()> {
         let path = &self.path()?;
-        let content = match read_own(path).await {
+        let content = match history::own_file::read_to_string(path).await {
             Ok(content) => content,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
@@ -177,13 +177,6 @@ impl SessionMemory {
 
         write_replacing(path, format!("---\n{}---\n\n{}", new_fm, body)).await
     }
-}
-
-async fn read_own(path: &std::path::Path) -> std::io::Result<String> {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || base::fs::read_to_string_no_follow(&path))
-        .await
-        .map_err(std::io::Error::other)?
 }
 
 async fn write_replacing(path: &std::path::Path, content: String) -> std::io::Result<()> {

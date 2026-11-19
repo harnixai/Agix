@@ -98,7 +98,8 @@ fn project_of(metadata: &SessionMetadata) -> Option<PathBuf> {
 
 pub(super) fn read_metadata(sidecar_root: &Path, session: SessionId) -> Option<SessionMetadata> {
     let text =
-        base::fs::read_to_string_no_follow(&session_metadata_file(sidecar_root, &session)).ok()?;
+        crate::own_file::read_to_string_blocking(&session_metadata_file(sidecar_root, &session))
+            .ok()?;
     serde_json::from_str(&text).ok()
 }
 

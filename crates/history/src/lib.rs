@@ -12,7 +12,7 @@ pub mod entry;
 pub mod error;
 mod lock;
 pub mod observers;
-mod own_file;
+pub mod own_file;
 pub mod path;
 pub mod placement;
 pub mod project;

@@ -198,7 +198,7 @@ pub(super) fn end_on_a_line_break(file: &mut std::fs::File, path: &Path) -> std:
 
 /// fsync `path`, and its directory too unless `dir_done`.
 pub(super) fn sync_log(path: &Path, dir_done: bool) -> Result<(), HistoryError> {
-    match base::fs::no_follow().read(true).open(path) {
+    match crate::own_file::options().read(true).open(path) {
         Ok(file) => file.sync_data()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(HistoryError::Io(e)),
@@ -230,7 +230,7 @@ pub(super) fn write_line(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut f = base::fs::no_follow()
+    let mut f = crate::own_file::options()
         .read(true)
         .append(true)
         .create(true)

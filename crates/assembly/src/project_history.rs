@@ -71,7 +71,7 @@ fn own_dir_inside(dir: &Path, real_root: &Path) -> Result<(), String> {
 
 fn ignore_everything(file: &Path) -> std::io::Result<()> {
     const EVERYTHING: &[u8] = b"*\n";
-    match base::fs::read_no_follow(file) {
+    match history::own_file::read_blocking(file) {
         Ok(bytes) if bytes == EVERYTHING => return Ok(()),
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

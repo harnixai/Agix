@@ -272,7 +272,7 @@ impl BlobStore for CheckpointObjects {
         if !is_object_id(id) {
             return Ok(None);
         }
-        match base::fs::read_no_follow(&self.dir()?.join(id)) {
+        match crate::own_file::read_blocking(&self.dir()?.join(id)) {
             Ok(bytes) if sha256_hex(&bytes) == id => Ok(Some(bytes)),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

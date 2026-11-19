@@ -375,44 +375,7 @@ impl SessionPool {
         parent_session_id: Option<&str>,
     ) -> Vec<SessionInfo> {
         if let Some(parent) = parent_session_id {
-            let Some(store) = self.directory.store() else {
-                return Vec::new();
-            };
-            let Ok(children) = store.child_sessions(parent).await else {
-                return Vec::new();
-            };
-            let active_ids: std::collections::HashSet<String> =
-                self.live.ids().await.into_iter().collect();
-            let mut out = Vec::with_capacity(children.len());
-            for sid in children {
-                let stats = match store.session_stats(sid).await {
-                    Err(history::error::HistoryError::ProjectUntrusted { .. }) => continue,
-                    stats => stats.unwrap_or_default(),
-                };
-                let sid_str = sid.to_string();
-                let active = active_ids.contains(&sid_str);
-                let (facts, resumable) = self.session_facts_and_resumable(&sid_str).await;
-                out.push(SessionInfo {
-                    session_id: sid_str,
-                    name: stats.title,
-                    preview: None,
-                    message_count: 0,
-                    created_at: String::new(),
-                    last_active: String::new(),
-                    status: if active {
-                        SessionStatus::Active
-                    } else {
-                        SessionStatus::Inactive
-                    },
-                    session_kind: facts.session_kind,
-                    scene: facts.scene,
-                    project_root: facts.project_root,
-                    compact_count: stats.compact_count,
-                    parent_session_id: Some(parent.to_string()),
-                    resumable,
-                });
-            }
-            return out;
+            return self.children_listed(parent).await;
         }
 
         // Snapshot active sessions and release the lock before the disk
@@ -509,6 +472,49 @@ impl SessionPool {
             }
         }
 
+        out
+    }
+
+    /// `session.list {parent_session_id}`: the sessions recording `parent`
+    /// as theirs, leaving out those in a project not trusted now.
+    async fn children_listed(&self, parent: &str) -> Vec<SessionInfo> {
+        let Some(store) = self.directory.store() else {
+            return Vec::new();
+        };
+        let Ok(children) = store.child_sessions(parent).await else {
+            return Vec::new();
+        };
+        let active_ids: std::collections::HashSet<String> =
+            self.live.ids().await.into_iter().collect();
+        let mut out = Vec::with_capacity(children.len());
+        for sid in children {
+            let stats = match store.session_stats(sid).await {
+                Err(history::error::HistoryError::ProjectUntrusted { .. }) => continue,
+                stats => stats.unwrap_or_default(),
+            };
+            let sid_str = sid.to_string();
+            let active = active_ids.contains(&sid_str);
+            let (facts, resumable) = self.session_facts_and_resumable(&sid_str).await;
+            out.push(SessionInfo {
+                session_id: sid_str,
+                name: stats.title,
+                preview: None,
+                message_count: 0,
+                created_at: String::new(),
+                last_active: String::new(),
+                status: if active {
+                    SessionStatus::Active
+                } else {
+                    SessionStatus::Inactive
+                },
+                session_kind: facts.session_kind,
+                scene: facts.scene,
+                project_root: facts.project_root,
+                compact_count: stats.compact_count,
+                parent_session_id: Some(parent.to_string()),
+                resumable,
+            });
+        }
         out
     }
 
