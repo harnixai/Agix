@@ -47,7 +47,7 @@ impl Daemon {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let mut global = setup.global;
-        global["sandbox"]["dangerously_disable_sandbox"] = json!(true);
+        global["sandbox"]["enabled"] = json!(false);
         std::fs::write(home.join("settings.json"), global.to_string()).unwrap();
         prepare(&home, &work);
 
@@ -55,7 +55,7 @@ impl Daemon {
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = setup.mode;
         config.managed_settings_path = setup.managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
@@ -219,12 +219,12 @@ async fn an_mcp_oauth_client_secret_is_not_handed_to_commands() {
     let daemon = Daemon::start(
         Setup {
             mode: PermissionMode::BypassPermissions,
-            global: json!({"mcp_servers": {"docs": {
+            global: json!({"mcp": {"servers": {"docs": {
                 "type": "streamable_http",
                 "url": "http://127.0.0.1:9/mcp",
                 "oauth": {"client_id": "agix", "client_secret_env": VAR,
                           "issuer": "https://login.example.com"}
-            }}}),
+            }}}}),
             ..Default::default()
         },
         |_, _| {},

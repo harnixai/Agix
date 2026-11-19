@@ -560,7 +560,7 @@ async fn git_in_a_repository_the_project_ships_is_asked_about() -> anyhow::Resul
     Ok(())
 }
 
-/// Under `acceptEdits`, a `WebFetch` to a host `sandbox.allowed_domains` does
+/// Under `acceptEdits`, a `WebFetch` to a host `web.allowed_domains` does
 /// not name is put to the host rather than run.
 #[tokio::test(flavor = "multi_thread")]
 async fn accept_edits_asks_before_fetching_an_unlisted_host() -> anyhow::Result<()> {

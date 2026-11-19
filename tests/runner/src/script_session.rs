@@ -181,7 +181,7 @@ impl Session {
         self
     }
 
-    /// A `hooks_config` for this session, in the shape `settings.json` uses.
+    /// A `hooks` block for this session, in the shape `settings.json` uses.
     ///
     /// A command hook is a shell line, so a case can be one string rather than
     /// a script file that has to be found, made executable and kept in step
@@ -307,7 +307,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
-    settings.values.memory_enabled = session.memory.is_some();
+    settings.values.memory.enabled = session.memory.is_some();
     // The same choice the daemon makes for a non-interactive host: nothing is
     // here to answer a prompt, and a case that hung on one would look like a
     // case whose turn never finished.
@@ -319,7 +319,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
     settings
         .values
         .set_section(&crate::sections::ScriptBindings(session.bindings));
-    settings.values.hooks_config = session.hooks;
+    settings.values.hooks = session.hooks;
     let settings = Arc::new(settings);
 
     let registry = Arc::new(InMemoryToolRegistry::new());

@@ -17,7 +17,7 @@ async fn a_finished_background_agent_reaches_its_parents_next_call() -> anyhow::
     world.write_project_settings(
         "bg",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent"]}
         }),
     )?;
@@ -110,7 +110,7 @@ async fn a_background_agents_kept_worktree_is_in_its_task_and_its_notice() -> an
     world.write_project_settings(
         "bgwt",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
@@ -203,7 +203,7 @@ async fn stopped_sub_agents_resume_under_their_project_and_in_their_worktree() -
     world.write_project_settings(
         "bgcut",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
@@ -397,7 +397,7 @@ async fn a_finished_foreground_agent_stays_listed_under_its_parent() -> anyhow::
     world.write_project_settings(
         "fg",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent"]}
         }),
     )?;
@@ -478,7 +478,7 @@ async fn a_foreground_agents_question_comes_through_its_parents_turn() -> anyhow
     world.write_project_settings(
         "ask-fg",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent"]}
         }),
     )?;
@@ -587,7 +587,7 @@ async fn an_agents_directory_created_after_startup_is_used() -> anyhow::Result<(
     world.write_project_settings(
         "late-agents",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent"]}
         }),
     )?;

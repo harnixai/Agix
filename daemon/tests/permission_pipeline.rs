@@ -62,7 +62,7 @@ impl Daemon {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         let mut global = setup.global;
-        global["sandbox"]["dangerously_disable_sandbox"] = json!(true);
+        global["sandbox"]["enabled"] = json!(false);
         std::fs::write(home.join("settings.json"), global.to_string()).unwrap();
         std::fs::write(work.join(".agix/settings.json"), setup.project.to_string()).unwrap();
         prepare(&home, &work);
@@ -71,7 +71,7 @@ impl Daemon {
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = setup.mode;
 
         let model = Arc::new(MockAnthropicClient::new());
@@ -593,12 +593,12 @@ async fn an_untrusted_project_cannot_turn_off_reaping_or_telemetry() {
     let daemon = Daemon::start(
         Setup {
             global: json!({
-                "project_trust": {"default": "untrusted"},
-                "sandbox": {"reap_process_groups": true},
+                "app": {"trust_all_projects": false},
+                "sandbox": {"reap_on_close": true},
             }),
             project: json!({
-                "sandbox": {"reap_process_groups": false},
-                "telemetry_enabled": false,
+                "sandbox": {"reap_on_close": false},
+                "telemetry": {"enabled": false},
             }),
             ..Default::default()
         },
@@ -614,11 +614,11 @@ async fn an_untrusted_project_cannot_turn_off_reaping_or_telemetry() {
         .await["settings"]
         .clone();
     assert_eq!(
-        settings["sandbox"]["reap_process_groups"], true,
+        settings["sandbox"]["reap_on_close"], true,
         "background processes are no longer reaped: {settings}"
     );
     assert_eq!(
-        settings["telemetry_enabled"], true,
+        settings["telemetry"]["enabled"], true,
         "the audit record was switched off: {settings}"
     );
 }

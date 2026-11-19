@@ -1,7 +1,7 @@
-//! A `sandbox` section in a project's settings file, from the file to the
-//! tools: `deny_read` names a directory, and a sandboxed `Bash` command is
+//! A project's `sandbox.deny_read`, from the settings file to the tools:
+//! it names a directory, and a sandboxed `Bash` command is
 //! kept out of it, as is the `Read` tool when the directory is one outside
-//! the project that `read_directories` opened — while everything else in
+//! the project that `files.read_dirs` opened — while everything else in
 //! either place stays readable.
 
 use blackbox::{LiveConfig, LiveRun, ProviderStub, Reply};
@@ -40,8 +40,8 @@ async fn a_projects_deny_read_keeps_read_and_bash_out_of_the_directory() -> anyh
             world.write_project_file("deny-read", "secret/key.txt", SECRET)?;
             let mut settings = LiveRun::base_settings();
             settings["permissions"]["allow"] = json!(["Bash"]);
+            settings["files"] = json!({ "read_dirs": [shared] });
             settings["sandbox"] = json!({
-                "read_directories": [shared],
                 "deny_read": [shared.join("secret"), project.join("secret")]
             });
             world.write_project_settings("deny-read", &settings)

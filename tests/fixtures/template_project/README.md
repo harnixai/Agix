@@ -10,10 +10,10 @@ Agix 测试系统用的模板项目 fixture。目录结构就是一个真实项�
 | Skill | `.agents/skills/code-review/SKILL.md` | 项目级 skill 能被发现 |
 | 自定义 subagent | `.agix/agents/reviewer.md` | `AgentTool` 能列出/派生这个自定义类型 |
 | Rule | `.agix/rules/testing.md` | 惰性发现（只读首行），被 `AGENTS.md` 显式引用 |
-| Hook | `.agix/hooks/pre_bash_log.sh` + `.agix/settings.json` 的 `hooks_config.PreToolUse` | 每次 Bash 调用会在 `.agix/hooks_log/pre_bash_log.jsonl` 留一行记录 |
-| MCP | `.agix/settings.json` 的 `mcp_servers.demo` | 真的能连上，`ping` 工具真的能调 |
+| Hook | `.agix/hooks/pre_bash_log.sh` + `.agix/settings.json` 的 `hooks.PreToolUse` | 每次 Bash 调用会在 `.agix/hooks_log/pre_bash_log.jsonl` 留一行记录 |
+| MCP | `.agix/settings.json` 的 `mcp.servers.demo` | 真的能连上，`ping` 工具真的能调 |
 
-## 关于 `mcp_servers.demo`
+## 关于 `mcp.servers.demo`
 
 指向 `tests/fixtures/mcp_toy_server`——一个真实的、用 rmcp 写的最小 stdio MCP server
 （一个 `ping` 工具，回显 `toy: <message>`）。**不是**占位符或预期失败的桩：

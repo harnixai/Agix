@@ -10,7 +10,7 @@ async fn a_sessions_prompt_is_its_own_and_changes_from_its_next_turn() -> anyhow
     let project = world.project("prompted")?;
     world.write_project_settings(
         "prompted",
-        &json!({ "memory_enabled": false, "prompt_append": "FROM-SETTINGS" }),
+        &json!({ "memory": { "enabled": false }, "prompt": { "append": "FROM-SETTINGS" } }),
     )?;
     let provider = ProviderStub::start().await?;
     let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;

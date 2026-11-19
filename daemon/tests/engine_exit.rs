@@ -42,7 +42,7 @@ async fn an_engine_that_dies_mid_turn_closes_its_session_as_engine_stopped_and_i
     crate::support::trust_projects_under(&root, &root);
     std::fs::write(
         root.join("settings.json"),
-        json!({ "memory_enabled": false }).to_string(),
+        json!({ "memory": {"enabled": false} }).to_string(),
     )?;
     let config = load_daemon_config(
         "claude-sonnet-4-6",
@@ -166,7 +166,7 @@ async fn a_turn_queued_behind_an_engine_that_dies_runs_on_the_session_resumed() 
     crate::support::trust_projects_under(&root, &root);
     std::fs::write(
         root.join("settings.json"),
-        json!({ "memory_enabled": false }).to_string(),
+        json!({ "memory": {"enabled": false} }).to_string(),
     )?;
     let config = load_daemon_config(
         "claude-sonnet-4-6",

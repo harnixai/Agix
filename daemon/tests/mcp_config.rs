@@ -33,7 +33,7 @@ async fn mcp_add_server_writes_settings_and_reports_connect_failure() {
     let written = std::fs::read_to_string(dir.path().join(".agix").join("settings.json")).unwrap();
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     assert_eq!(
-        written["mcp_servers"]["bogus"]["command"],
+        written["mcp"]["servers"]["bogus"]["command"],
         "definitely-not-a-real-binary-xyz"
     );
 
@@ -83,10 +83,10 @@ async fn mcp_update_server_replaces_a_declared_server_and_refuses_an_unknown_one
     let written = std::fs::read_to_string(dir.path().join(".agix").join("settings.json")).unwrap();
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     assert_eq!(
-        written["mcp_servers"]["bogus"]["command"],
+        written["mcp"]["servers"]["bogus"]["command"],
         "second-missing-binary"
     );
-    assert_eq!(written["mcp_servers"].as_object().unwrap().len(), 1);
+    assert_eq!(written["mcp"]["servers"].as_object().unwrap().len(), 1);
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -103,7 +103,7 @@ async fn mcp_add_server_keeps_headers_and_env_out_of_the_committed_settings() {
     std::fs::create_dir_all(&agix).unwrap();
     std::fs::write(
         agix.join("settings.json"),
-        r#"{"mcp_servers":{"svc":{"type":"stdio","command":"old-binary","env":{"TOKEN":"old-secret"}}}}"#,
+        r#"{"mcp":{"servers":{"svc":{"type":"stdio","command":"old-binary","env":{"TOKEN":"old-secret"}}}}}"#,
     )
     .unwrap();
     let read = |file: &str| -> serde_json::Value {
@@ -123,15 +123,15 @@ async fn mcp_add_server_keeps_headers_and_env_out_of_the_committed_settings() {
     );
     let committed = read("settings.json");
     assert_eq!(
-        committed["mcp_servers"]["svc"]["command"],
+        committed["mcp"]["servers"]["svc"]["command"],
         "missing-binary-xyz"
     );
     assert!(
-        committed["mcp_servers"]["svc"].get("env").is_none(),
+        committed["mcp"]["servers"]["svc"].get("env").is_none(),
         "the committed settings.json carries the env: {committed}"
     );
     assert_eq!(
-        read("settings.local.json")["mcp_servers"]["svc"]["env"]["TOKEN"],
+        read("settings.local.json")["mcp"]["servers"]["svc"]["env"]["TOKEN"],
         "new-secret"
     );
     #[cfg(unix)]
@@ -151,16 +151,16 @@ async fn mcp_add_server_keeps_headers_and_env_out_of_the_committed_settings() {
     .await;
     let committed = read("settings.json");
     assert_eq!(
-        committed["mcp_servers"]["svc"]["url"],
+        committed["mcp"]["servers"]["svc"]["url"],
         "http://127.0.0.1:9/mcp"
     );
     assert!(
-        committed["mcp_servers"]["svc"].get("headers").is_none(),
+        committed["mcp"]["servers"]["svc"].get("headers").is_none(),
         "{committed}"
     );
     let local = read("settings.local.json");
     assert_eq!(
-        local["mcp_servers"]["svc"],
+        local["mcp"]["servers"]["svc"],
         serde_json::json!({"headers": {"Authorization": "Bearer t"}}),
         "the replaced server's env stayed behind: {local}"
     );
@@ -171,7 +171,7 @@ async fn mcp_add_server_keeps_headers_and_env_out_of_the_committed_settings() {
     )
     .await;
     let local = read("settings.local.json");
-    assert!(local["mcp_servers"].get("svc").is_none(), "{local}");
+    assert!(local["mcp"]["servers"].get("svc").is_none(), "{local}");
 
     _server.shutdown_token().cancel();
     let _ = handle.await;
@@ -251,7 +251,7 @@ async fn mcp_add_server_connects_a_real_server_and_lists_its_tools() {
     let written = std::fs::read_to_string(dir.path().join(".agix").join("settings.json")).unwrap();
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     assert_eq!(
-        written["mcp_servers"]["toy"]["command"],
+        written["mcp"]["servers"]["toy"]["command"],
         binary.to_string_lossy().as_ref()
     );
 
@@ -316,12 +316,12 @@ async fn config_reload_attempts_to_connect_a_hand_edited_mcp_server() {
     std::fs::write(
         &settings_path,
         serde_json::json!({
-            "mcp_servers": {
+            "mcp": {"servers": {
                 "hand-edited": {
                     "type": "stdio",
                     "command": "definitely-not-a-real-binary-xyz"
                 }
-            }
+            }}
         })
         .to_string(),
     )

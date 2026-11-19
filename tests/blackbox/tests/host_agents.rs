@@ -16,7 +16,7 @@ async fn daemon_with(
 ) -> anyhow::Result<(World, ProviderStub, Daemon, DaemonRpcClient, String)> {
     let world = World::new()?;
     let project = world.project(name)?;
-    let mut base = json!({ "memory_enabled": false });
+    let mut base = json!({ "memory": { "enabled": false } });
     if let (Some(base), Some(extra)) = (base.as_object_mut(), settings.as_object()) {
         base.extend(extra.clone());
     }
@@ -322,7 +322,7 @@ async fn the_session_cap_refuses_one_agent_too_many() -> anyhow::Result<()> {
         "cap",
         json!({
             "permissions": {"allow": ["Bash"]},
-            "execution": { "max_concurrent_subagents": 1 }
+            "agents": { "max_concurrent": 1 }
         }),
     )
     .await?;

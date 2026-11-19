@@ -42,7 +42,7 @@ async fn the_next_start_stops_what_a_killed_daemon_left_running() -> anyhow::Res
     world.write_project_settings(
         "crash",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Bash"]}
         }),
     )?;

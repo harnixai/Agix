@@ -37,12 +37,12 @@ fn root(stub: &ProviderStub, mode: &str) -> anyhow::Result<Root> {
         }},
         "default_provider": "stub",
         "permissions": {"mode": mode},
-        "memory_enabled": false
+        "memory": { "enabled": false }
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
     std::fs::write(
         data.join("settings.local.json"),
-        serde_json::to_vec(&json!({ "project_trust": { "trusted": [project] } }))?,
+        serde_json::to_vec(&json!({ "app": { "trusted_projects": [project] } }))?,
     )?;
     Ok(Root {
         _dir: dir,

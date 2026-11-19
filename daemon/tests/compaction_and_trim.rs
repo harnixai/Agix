@@ -144,12 +144,12 @@ async fn start(pre_compact: &str) -> Host {
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     let settings = &mut config.settings.values;
-    settings.memory_enabled = false;
+    settings.memory.enabled = false;
     settings.compaction.reactive = true;
     settings.compaction.threshold_tokens = Some(60_000);
     settings.compaction.keep_recent = Some(2);
     let log = hook_log.display();
-    settings.hooks_config = Some(serde_json::json!({
+    settings.hooks = Some(serde_json::json!({
         "PreCompact": [{ "type": "command", "command": format!("echo pre >> '{log}'; {pre_compact}") }],
         "PostCompact": [{ "type": "command", "command": format!("echo post >> '{log}'") }],
     }));

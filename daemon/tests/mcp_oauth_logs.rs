@@ -79,13 +79,13 @@ async fn no_token_is_ever_logged() {
     std::fs::create_dir_all(root.join(".agix")).unwrap();
     std::fs::write(
         root.join(".agix/settings.json"),
-        serde_json::json!({"mcp_servers": {"docs": {"type": "streamable_http", "url": mcp.url}}})
+        serde_json::json!({"mcp": {"servers": {"docs": {"type": "streamable_http", "url": mcp.url}}}})
             .to_string(),
     )
     .unwrap();
     std::fs::write(
         root.join("settings.local.json"),
-        serde_json::json!({"project_trust": {"trusted": [root, root.join("**")]}}).to_string(),
+        serde_json::json!({"app": {"trusted_projects": [root, root.join("**")]}}).to_string(),
     )
     .unwrap();
     let sock = root.join("d.sock");
@@ -96,7 +96,7 @@ async fn no_token_is_ever_logged() {
         "code",
         &StaticDaemonPaths::new(root.clone()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     config
         .settings
         .rules

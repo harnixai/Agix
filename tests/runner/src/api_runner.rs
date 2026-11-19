@@ -242,7 +242,7 @@ async fn build_agent(
 
     let mut settings = if config.fixture_dir.is_some() {
         // 真实的 LoadedSettings::load() 路径：从拷贝出来的模板项目读
-        // .agix/settings.json（hooks_config/mcp_servers/...），project_root()
+        // .agix/settings.json（hooks/mcp.servers/...），project_root()
         // 落在 workdir 本身，工具（Bash/Read/...)、skills/rules 发现都对着这份
         // 拷贝操作,不是手搭的空 Settings。
         let workdir = tmp.join("workdir");
@@ -275,7 +275,7 @@ async fn build_agent(
         settings.paths.local_data_dir = tmp.join("local");
         settings.paths.scope = "code".into();
     }
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     // 测试非交互运行,始终旁路权限确认——和 daemon 的生产选择一致（IDE/测试
     // 宿主自己管沙盒）。
     settings.values.permissions.mode = PermissionMode::BypassPermissions;
@@ -319,20 +319,26 @@ async fn build_agent(
     }
 
     // Connect any MCP servers the fixture's settings.json configured — without
-    // this, `Settings.mcp_servers` gets parsed but never actually connected, so
+    // this, `mcp.servers` gets parsed but never actually connected, so
     // no MCP tool (e.g. `mcp__demo__ping`) is ever registered/callable and the
     // model never even sees it as an option. `daemon` does the equivalent via
     // `SessionPool::connect_mcp_servers_in_background` (main.rs); this harness
     // had no equivalent at all. Synchronous here (not fire-and-forget like
     // daemon) since the test needs the tools registered before the turn starts.
-    if !settings.values.mcp_servers.is_empty() {
+    let mcp_settings = &settings.values.mcp;
+    let declared: Vec<(String, serde_json::Value)> = mcp_settings
+        .declared()
+        .filter(|(name, _)| mcp_settings.is_enabled(name))
+        .map(|(name, v)| (name.clone(), v))
+        .collect();
+    if !declared.is_empty() {
         let mut parsed = std::collections::HashMap::new();
-        for (name, v) in &settings.values.mcp_servers {
-            match serde_json::from_value::<mcp::config::McpServerConfig>(v.clone()) {
+        for (name, v) in declared {
+            match serde_json::from_value::<mcp::config::McpServerConfig>(v) {
                 Ok(cfg) => {
-                    parsed.insert(name.clone(), cfg);
+                    parsed.insert(name, cfg);
                 }
-                Err(e) => eprintln!("invalid mcp_servers.{name} config, skipping: {e}"),
+                Err(e) => eprintln!("invalid mcp.servers.{name} config, skipping: {e}"),
             }
         }
         if !parsed.is_empty() {

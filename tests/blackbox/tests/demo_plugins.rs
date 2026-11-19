@@ -25,7 +25,10 @@ struct Staged {
 }
 
 async fn stage(name: &str) -> anyhow::Result<Staged> {
-    stage_with(name, json!({ "memory_enabled": false }), |_, _| Ok(())).await
+    stage_with(name, json!({ "memory": { "enabled": false } }), |_, _| {
+        Ok(())
+    })
+    .await
 }
 
 async fn stage_with(
@@ -387,7 +390,7 @@ async fn the_packages_scene_hosts_a_session() -> anyhow::Result<()> {
 async fn the_retrieval_hook_filters_what_recall_selected() -> anyhow::Result<()> {
     let staged = stage_with(
         "demo-recall",
-        json!({ "memory_enabled": true }),
+        json!({ "memory": { "enabled": true } }),
         |world, project| {
             let dir = world.memory_dir(project);
             std::fs::create_dir_all(&dir)?;

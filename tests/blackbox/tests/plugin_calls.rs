@@ -1051,7 +1051,7 @@ async fn a_session_running_a_call_is_not_rebuilt_under_it() -> anyhow::Result<()
     let mut run = with_xflow_settings(
         "fn-rebuild",
         &stub,
-        json!({ "hooks_config": { "PreToolUse": [
+        json!({ "hooks": { "PreToolUse": [
             { "type": "command", "command": hook, "timeout": 60_000 }
         ] } }),
     )
@@ -1211,7 +1211,7 @@ async fn a_call_in_a_directory_waits_for_a_slot_before_anything_is_built() -> an
     let package = root.join("host-xflow");
     write_package(&package)?;
     std::fs::create_dir_all(root.join("data"))?;
-    let hooks = json!({ "hooks_config": marking_hook(&root, "PreToolUse", 0)? });
+    let hooks = json!({ "hooks": marking_hook(&root, "PreToolUse", 0)? });
     std::fs::write(root.join("data/settings.json"), serde_json::to_vec(&hooks)?)?;
     let embedded = embedded_with(&root, &package, Vec::new()).await?;
     let pool = embedded.pool().clone();
@@ -1262,7 +1262,7 @@ async fn a_timed_out_call_answers_without_waiting_for_its_wrap_up() -> anyhow::R
     let package = root.join("host-xflow");
     write_package(&package)?;
     std::fs::create_dir_all(root.join("data"))?;
-    let hooks = json!({ "hooks_config": marking_hook(&root, "PostToolUse", 10)? });
+    let hooks = json!({ "hooks": marking_hook(&root, "PostToolUse", 10)? });
     std::fs::write(root.join("data/settings.json"), serde_json::to_vec(&hooks)?)?;
     let embedded = embedded_with(&root, &package, Vec::new()).await?;
 

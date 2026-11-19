@@ -52,13 +52,12 @@ fn todo_call(id: &str, content: &str) -> Reply {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn execution_max_api_calls_per_turn_ends_a_turn_that_keeps_calling_tools(
-) -> anyhow::Result<()> {
+async fn turn_max_model_calls_ends_a_turn_that_keeps_calling_tools() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed(
         "max-api-calls",
         &stub,
-        json!({ "execution": { "max_api_calls_per_turn": 2 } }),
+        json!({ "turn": { "max_model_calls": 2 } }),
     )
     .start()
     .await?;
@@ -84,7 +83,7 @@ async fn prompt_override_replaces_the_whole_system_prompt() -> anyhow::Result<()
     let mut run = stubbed(
         "prompt-override",
         &stub,
-        json!({ "prompt_override": "OVERRIDE-ONLY-PROMPT" }),
+        json!({ "prompt": { "override": "OVERRIDE-ONLY-PROMPT" } }),
     )
     .start()
     .await?;
@@ -192,16 +191,15 @@ async fn sibling_tool_calls_overlap_by_default() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn execution_max_parallelism_one_runs_sibling_tool_calls_one_at_a_time() -> anyhow::Result<()>
-{
+async fn turn_parallel_tools_one_runs_sibling_tool_calls_one_at_a_time() -> anyhow::Result<()> {
     let overlapped = second_overlaps_first(
         "parallel-one",
-        allow_agents(json!({ "execution": { "max_parallelism": 1 } })),
+        allow_agents(json!({ "turn": { "parallel_tools": 1 } })),
     )
     .await?;
     assert!(
         !overlapped,
-        "max_parallelism 1 still ran two tool calls together"
+        "parallel_tools 1 still ran two tool calls together"
     );
     Ok(())
 }

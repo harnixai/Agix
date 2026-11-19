@@ -52,7 +52,7 @@ async fn a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
     }
     std::fs::write(
         global.join("settings.json"),
-        json!({ "sandbox": {"dangerously_disable_sandbox": true} }).to_string(),
+        json!({ "sandbox": {"enabled": false} }).to_string(),
     )
     .unwrap();
     let skill = global.join("skills").join("probe");
@@ -67,7 +67,7 @@ async fn a_skills_inline_command_does_not_run_in_a_scene_without_bash() {
     let paths =
         StaticDaemonPaths::with_project(scene_root, work.clone()).with_global(global.clone());
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
@@ -143,7 +143,7 @@ async fn bash_turn_in(dir: &std::path::Path, work: &std::path::Path, command: &s
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
@@ -262,7 +262,7 @@ async fn serve_with_probe_skill(
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
@@ -316,9 +316,9 @@ async fn a_pre_tool_use_hook_blocks_a_skills_inline_command() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{"type": "command", "command": block, "if": "Bash"}],
                 "PermissionDenied": [{"type": "command", "command": format!("cat >> '{}'", denied.display())}],
             },
@@ -394,9 +394,9 @@ async fn a_skills_inline_command_the_rules_refuse_fires_permission_denied() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"deny": ["Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PermissionDenied": [{"type": "command", "command": format!("cat >> '{}'", denied.display())}],
             },
         }),
@@ -438,8 +438,8 @@ async fn a_pre_tool_use_hook_cannot_approve_a_skills_inline_command() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
-            "hooks_config": {
+            "sandbox": {"enabled": false},
+            "hooks": {
                 "PreToolUse": [{"type": "command", "command": approve, "if": "Bash"}],
             },
         }),
@@ -471,9 +471,9 @@ async fn a_post_tool_use_hook_withholds_a_skills_inline_command_output() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PostToolUse": [{"type": "command", "command": block, "if": "Bash"}],
             },
         }),
@@ -520,7 +520,7 @@ async fn a_repository_a_skills_inline_command_nests_is_reported_to_the_host() {
         &work,
         json!({
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": {"Notification": [
+            "hooks": {"Notification": [
                 {"type": "command", "command": format!("cat > '{}'", heard.display())}
             ]},
         }),
@@ -574,9 +574,9 @@ async fn a_skills_inline_command_that_fails_fires_post_tool_use_failure() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PostToolUseFailure": [{"type": "command", "command": format!("cat >> '{}'", failed.display())}],
             },
         }),
@@ -630,9 +630,9 @@ async fn a_post_tool_use_hook_discontinuing_a_skills_inline_command_ends_the_tur
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PostToolUse": [{"type": "command", "command": r#"echo '{"continue":false}'"#, "if": "Bash"}],
             },
         }),

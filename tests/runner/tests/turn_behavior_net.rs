@@ -57,7 +57,7 @@ struct Case {
     /// How the harness answers a `PermissionPrompt`. `None` means the case
     /// does not expect one, and getting one is a failure rather than a hang.
     approve_prompts: Option<bool>,
-    /// Raw `settings.hooks_config`, for cases about hooks.
+    /// Raw `settings.hooks`, for cases about hooks.
     hooks_config: Option<serde_json::Value>,
     /// Ceiling on model calls in one turn. `None` leaves the scene's own.
     max_api_calls: Option<u32>,
@@ -160,9 +160,9 @@ async fn trace(case: Case) -> String {
     settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     settings.values.permissions.mode = case.permission_mode;
-    settings.values.hooks_config = case.hooks_config.clone();
+    settings.values.hooks = case.hooks_config.clone();
     settings.values.compaction.reactive = case.reactive_compact;
     let settings = Arc::new(settings);
 

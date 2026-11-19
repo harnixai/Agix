@@ -736,7 +736,7 @@ impl LiveRun {
     /// read-only answers the prompts with a [`Watcher`].
     pub fn base_settings() -> Value {
         json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"mode": "default"}
         })
     }

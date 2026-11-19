@@ -130,7 +130,7 @@ async fn a_global_provider_is_written_under_the_global_tiers_lock() -> anyhow::R
     let local = read_json(&global.join("settings.local.json"));
     assert_eq!(local["providers"]["shared"]["api_key"], "sk-tier-test");
     assert!(
-        local["project_trust"]["trusted"]
+        local["app"]["trusted_projects"]
             .as_array()
             .is_some_and(|t| !t.is_empty()),
         "writing the key dropped what the global settings.local.json already held: {local}"

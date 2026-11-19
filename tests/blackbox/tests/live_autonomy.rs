@@ -384,7 +384,7 @@ async fn a_goal_out_of_rounds_ends_blocked_and_starts_no_more() -> anyhow::Resul
 #[tokio::test(flavor = "multi_thread")]
 async fn a_goal_round_that_runs_out_of_token_budget_disarms_the_goal() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("goal-budget")
-        .settings(json!({ "execution": { "max_budget_tokens": 1000 } }))
+        .settings(json!({ "turn": { "token_budget": 1000 } }))
         .start()
         .await?;
     run.write_file("tally.txt", "")?;
@@ -604,7 +604,7 @@ async fn ping_reaches_a_page_and_reports_its_status() -> anyhow::Result<()> {
     pages.route("/gone", Page::status(404, "gone"));
     let mut run = LiveRun::builder("ping")
         .settings(json!({
-            "sandbox": PageServer::reachable(),
+            "web": PageServer::reachable(),
             "permissions": {"allow": ["Ping"]}
         }))
         .before_start(|world, _| paced_scene(world))
@@ -661,7 +661,7 @@ async fn a_push_notification_reaches_the_host() -> anyhow::Result<()> {
     }
     let mut run = LiveRun::builder("notify")
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "Notification": [{ "type": "command", "command": hook, "timeout": 5000 }]
             }
         }))

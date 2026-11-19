@@ -24,7 +24,7 @@ async fn a_sub_agent_calling_enter_plan_mode_is_refused() {
     let sock = dir.path().join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,

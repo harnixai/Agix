@@ -175,7 +175,7 @@ async fn a_saved_mcp_result_read_back_is_still_fenced() -> anyhow::Result<()> {
     let mut run = stubbed("spill-fence", &stub)
         .settings(json!({
             "permissions": {"allow": ["Read"]},
-            "mcp_servers": { "toy": McpToy::stdio_config(&[])? }
+            "mcp": { "servers": { "toy": McpToy::stdio_config(&[])? } }
         }))
         .start()
         .await?;
@@ -401,7 +401,7 @@ async fn webfetch_reads_a_long_page_in_windows() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("spill-fetch", &stub)
         .settings(json!({
-            "sandbox": PageServer::reachable(),
+            "web": PageServer::reachable(),
             "permissions": {"allow": ["WebFetch"]}
         }))
         .start()
@@ -449,7 +449,7 @@ async fn a_saved_mcp_result_read_back_through_bash_is_fenced_and_bash_is_not_sug
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("spill-bash-fence", &stub)
-        .settings(json!({ "mcp_servers": { "toy": McpToy::stdio_config(&[])? } }))
+        .settings(json!({ "mcp": { "servers": { "toy": McpToy::stdio_config(&[])? } } }))
         .start()
         .await?;
     let session = run.session().await?;

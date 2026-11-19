@@ -1,5 +1,5 @@
 //! The engine's own HTTP follows the environment's proxy unless the global
-//! settings say `network.use_system_proxy: false`. A `PageServer` stands in
+//! settings say `app.system_proxy: false`. A `PageServer` stands in
 //! for the proxy and records what reaches it; the daemon is spawned so the
 //! proxy variables are its own.
 
@@ -73,7 +73,7 @@ async fn the_global_tier_can_make_the_engine_connect_directly() -> anyhow::Resul
     let stub = ProviderStub::start().await?;
     let mut run = proxied_through("proxy-direct", &stub, &proxy, json!({}))
         .before_start(|world, _| {
-            world.write_global_settings(&json!({ "network": { "use_system_proxy": false } }))
+            world.write_global_settings(&json!({ "app": { "system_proxy": false } }))
         })
         .start()
         .await?;
@@ -91,7 +91,7 @@ async fn the_global_tier_can_make_the_engine_connect_directly() -> anyhow::Resul
         .unwrap_or_default();
     let check = doctor["health"]["checks"]
         .as_array()
-        .and_then(|c| c.iter().find(|c| c["name"] == "network.proxy"))
+        .and_then(|c| c.iter().find(|c| c["name"] == "app.system_proxy"))
         .cloned()
         .unwrap_or_default();
     assert_eq!(check["details"]["mode"], "direct", "{check}");
@@ -107,7 +107,7 @@ async fn a_projects_own_setting_cannot_turn_the_system_proxy_off() -> anyhow::Re
         "proxy-project",
         &stub,
         &proxy,
-        json!({ "network": { "use_system_proxy": false } }),
+        json!({ "app": { "system_proxy": false } }),
     )
     .start()
     .await?;

@@ -13,7 +13,7 @@ const WAIT: Duration = Duration::from_secs(30);
 
 fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
     LiveRun::builder(name)
-        .settings(json!({ "permissions": {"mode": "default"}, "memory_enabled": false }))
+        .settings(json!({ "permissions": {"mode": "default"}, "memory": { "enabled": false } }))
         .config(LiveConfig::for_endpoint(
             &stub.base_url(),
             blackbox::ModelEndpoint::model(stub),
@@ -539,7 +539,7 @@ async fn a_link_out_of_the_dir_is_not_read() -> anyhow::Result<()> {
 async fn no_session_writes_a_host_dir() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("skill-dirs-write", &stub)
-        .settings(json!({ "permissions": {"mode": "acceptEdits"}, "memory_enabled": false }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"}, "memory": { "enabled": false } }))
         .start()
         .await?;
     let dir = host_dir(&[("tour", "ORIGINAL")])?;

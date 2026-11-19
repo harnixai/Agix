@@ -134,18 +134,16 @@ struct Daemon {
 
 impl Daemon {
     async fn start(sandboxed: bool) -> Self {
-        Self::start_with(json!({"dangerously_disable_sandbox": !sandboxed})).await
+        Self::start_with(json!({"sandbox": {"enabled": sandboxed}})).await
     }
 
-    async fn start_with(sandbox: serde_json::Value) -> Self {
+    async fn start_with(settings: serde_json::Value) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (home, work) = (dir.path().join("home"), dir.path().join("work"));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(work.join(".agix")).unwrap();
-        let global = json!({
-            "project_trust": {"default": "untrusted"},
-            "sandbox": sandbox,
-        });
+        let mut global = settings;
+        global["app"] = json!({"trust_all_projects": false});
         std::fs::write(home.join("settings.json"), global.to_string()).unwrap();
         // Where `config.setProvider` puts a key; any value stands in for one,
         // and a provider here would take the turn away from the mock model.
@@ -164,7 +162,7 @@ impl Daemon {
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         crate::support::allow_tools(&mut config, &["Bash"]);
 
         let model = Arc::new(MockAnthropicClient::new());
@@ -329,8 +327,8 @@ async fn a_command_runs_under_an_allowlist_of_domains_with_the_network_shut() {
         }
     });
     let daemon = Daemon::start_with(json!({
-        "network_mode": "allowlist",
-        "allowed_domains": ["registry.npmjs.org"],
+        "sandbox": {"network": {"mode": "allowlist"}},
+        "web": {"allowed_domains": ["registry.npmjs.org"]},
     }))
     .await;
     let command = format!(

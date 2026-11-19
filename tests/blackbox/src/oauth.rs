@@ -63,7 +63,7 @@ impl OAuthWorld {
         &self.mcp.url
     }
 
-    /// The `mcp_servers.<name>` entry for the server, with no `oauth` block:
+    /// The `mcp.servers.<name>` entry for the server, with no `oauth` block:
     /// its 401 is what starts the sign-in.
     pub fn config(&self) -> Value {
         json!({ "type": "streamable_http", "url": self.mcp.url })

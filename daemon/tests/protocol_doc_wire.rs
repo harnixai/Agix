@@ -62,7 +62,7 @@ async fn start(
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     config.session_cap = session_cap;
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     configure(&mut config);
 
     let store: Arc<dyn history::store::HistoryStore> = Arc::new(
@@ -1518,7 +1518,7 @@ async fn a_steered_message_a_hook_refuses(obs: &mut Observed) {
         8,
         |config| {
             let settings = &mut config.settings.values;
-            settings.hooks_config = Some(json!({
+            settings.hooks = Some(json!({
                 "UserPromptSubmit": [{"type": "command", "command": hook}]
             }));
         },

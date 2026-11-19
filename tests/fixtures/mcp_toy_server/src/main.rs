@@ -1,4 +1,4 @@
-//! 测试用的 MCP 服务 —— `tests/fixtures/template_project` 的 `mcp_servers.demo`
+//! 测试用的 MCP 服务 —— `tests/fixtures/template_project` 的 `mcp.servers.demo`
 //! 与 `tests/blackbox` 的 MCP 用例连的就是它。不是产品代码，只服务于测试基础设施。
 //!
 //! 命令行：

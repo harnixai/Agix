@@ -173,7 +173,7 @@ async fn an_admitted_plugin_tool_passes_the_scene_whitelist_and_the_rest_do_not(
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     config.settings.rules = [ADMITTED, NOT_ADMITTED]
         .map(|tool| {
             base::permission::LoadedRule::new(
@@ -307,7 +307,7 @@ async fn a_tool_works_where_the_session_does_on_every_engine_it_runs_on() {
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     config.settings.rules = vec![base::permission::LoadedRule::new(
         PermissionRuleEntry {
             tool: PROBE.into(),

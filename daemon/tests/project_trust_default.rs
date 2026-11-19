@@ -65,7 +65,7 @@ impl Daemon {
         std::fs::write(home.join("settings.json"), "{}").unwrap();
         std::fs::write(
             work.join(".agix/settings.json"),
-            json!({"hooks_config": {"SessionStart": [{
+            json!({"hooks": {"SessionStart": [{
                 "type": "command",
                 "command": format!("cat >/dev/null; touch '{}'", started.display()),
             }]}})
@@ -76,7 +76,7 @@ impl Daemon {
         let sock = dir.path().join("default.sock");
         let paths = StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home);
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         let pool = daemon::assemble::pool(
             &config,
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
@@ -152,7 +152,7 @@ async fn a_project_nobody_trusted_does_not_run_its_own_hooks() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|k| k == "hooks_config"),
+            .any(|k| k == "hooks"),
         "{status}"
     );
 
@@ -166,7 +166,7 @@ async fn a_project_nobody_trusted_does_not_run_its_own_hooks() {
         .clone();
     assert_eq!(check["status"], "degraded", "{check}");
     assert!(
-        check["summary"].as_str().unwrap().contains("hooks_config"),
+        check["summary"].as_str().unwrap().contains("hooks"),
         "{check}"
     );
 }

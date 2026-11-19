@@ -90,7 +90,7 @@ impl Daemon {
         }]});
         std::fs::write(
             root.join("settings.json"),
-            json!({ "hooks_config": hooks, "memory_enabled": false }).to_string(),
+            json!({ "hooks": hooks, "memory": {"enabled": false} }).to_string(),
         )
         .unwrap();
         let config = load_daemon_config(

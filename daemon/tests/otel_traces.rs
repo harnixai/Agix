@@ -151,9 +151,9 @@ async fn a_turn_with_a_tool_call_reaches_the_collector_as_spans() {
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     config.settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
-    config.settings.values.telemetry_url = Some(endpoint);
+    config.settings.values.telemetry.otlp_endpoint = Some(endpoint);
     let pool = daemon::assemble::pool(
         &config,
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),

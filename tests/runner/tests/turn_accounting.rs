@@ -65,7 +65,7 @@ async fn one_turn_of_two_calls() -> Ran {
     settings.values.model.model_name = "accounting-model".into();
     settings.values.model.max_tokens = 1024;
     settings.values.model.thinking_mode = ThinkingMode::Off;
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     settings.values.permissions.mode = PermissionMode::BypassPermissions;
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");

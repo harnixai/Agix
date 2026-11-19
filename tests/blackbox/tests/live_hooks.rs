@@ -91,7 +91,7 @@ async fn a_pre_tool_use_hook_refuses_rm_and_the_model_follows_its_reason() -> an
     )?;
     let mut run = LiveRun::start(
         "hook-guard",
-        json!({ "hooks_config": { "PreToolUse": [guard] } }),
+        json!({ "hooks": { "PreToolUse": [guard] } }),
         Mode::InProcess,
     )
     .await?;
@@ -138,7 +138,7 @@ async fn a_pre_tool_use_hook_redirects_a_write_into_drafts() -> anyhow::Result<(
     )?;
     let mut run = LiveRun::start(
         "hook-redirect",
-        json!({ "hooks_config": { "PreToolUse": [redirect] } }),
+        json!({ "hooks": { "PreToolUse": [redirect] } }),
         Mode::InProcess,
     )
     .await?;
@@ -185,7 +185,7 @@ async fn hooks_see_the_session_start_add_context_to_a_prompt_and_see_results() -
     let mut run = LiveRun::start(
         "hook-observe",
         json!({
-            "hooks_config": {
+            "hooks": {
                 "SessionStart": [started],
                 "UserPromptSubmit": [context],
                 "PostToolUse": [observed]
@@ -243,7 +243,7 @@ async fn a_stop_hook_sends_the_model_back_to_finish_the_job() -> anyhow::Result<
     )?;
     let mut run = LiveRun::start(
         "hook-stop",
-        json!({ "hooks_config": { "Stop": [stop] } }),
+        json!({ "hooks": { "Stop": [stop] } }),
         Mode::InProcess,
     )
     .await?;
@@ -263,7 +263,7 @@ async fn a_prompt_hook_judges_a_call_with_a_model_and_blocks_it() -> anyhow::Res
     let mut run = LiveRun::start(
         "hook-prompt",
         json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "prompt",
                     "prompt": "You are SAFETY-REVIEWER. The user message is a JSON description \
@@ -331,7 +331,7 @@ async fn an_agent_hook_runs_a_sub_agent_that_blocks_a_call() -> anyhow::Result<(
     let mut run = LiveRun::start(
         "hook-agent",
         json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "agent",
                     "prompt": "You are GATEKEEPER. Below is a JSON description of a tool call. \

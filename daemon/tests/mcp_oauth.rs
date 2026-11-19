@@ -42,7 +42,7 @@ impl Daemon {
         // may not read `client_secret_env` from the daemon's environment.
         std::fs::write(
             root.join("settings.json"),
-            serde_json::json!({ "mcp_servers": servers }).to_string(),
+            serde_json::json!({ "mcp": { "servers": servers } }).to_string(),
         )
         .unwrap();
         crate::support::trust_projects_under(&root, &root);
@@ -54,7 +54,7 @@ impl Daemon {
             "code",
             &StaticDaemonPaths::new(root.clone()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         crate::support::allow_tools(
             &mut config,
             &["mcp__docs__echo", "mcp__docs__write", "mcp__docs__slow"],

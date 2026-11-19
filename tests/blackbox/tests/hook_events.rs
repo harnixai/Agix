@@ -234,8 +234,8 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
                 "allow": ["Agent"],
                 "deny": ["Read(**/forbidden.txt)"]
             },
-            "mcp_servers": { "demo": McpToy::stdio_config(&[])? },
-            "hooks_config": ledger.on_every_event(),
+            "mcp": { "servers": { "demo": McpToy::stdio_config(&[])? } },
+            "hooks": ledger.on_every_event(),
         }))
         .before_start(|_, project| {
             std::fs::write(project.join("AGENTS.md"), "# Project rules\nBe brief.\n")?;
@@ -493,7 +493,7 @@ async fn worktree_events_bracket_a_worktree() -> anyhow::Result<()> {
     let ledger = Ledger::new()?;
     let mut run = stubbed("wt", &stub)
         .settings(json!({
-            "hooks_config": ledger.on_every_event(),
+            "hooks": ledger.on_every_event(),
             "permissions": {"allow": ["EnterWorktree", "ExitWorktree"]}
         }))
         .before_start(|world, _| {
@@ -557,7 +557,7 @@ async fn a_push_notification_is_a_frame_and_a_notification_hook() -> anyhow::Res
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
     let mut run = stubbed("push", &stub)
-        .settings(json!({ "hooks_config": ledger.on_every_event() }))
+        .settings(json!({ "hooks": ledger.on_every_event() }))
         .before_start(|world, _| {
             world.write_declarative_scene("push", &["PushNotification"], "Push scene.\n")?;
             Ok(())
@@ -631,8 +631,8 @@ async fn file_changed_fires_when_the_configured_instruction_file_is_edited() -> 
     std::fs::write(&notes, "# Rules\nBe brief.\n")?;
     let mut run = stubbed("watched", &stub)
         .settings(json!({
-            "instruction_file": notes,
-            "hooks_config": { "FileChanged": [ledger.hook()] },
+            "prompt": { "instruction_files": [notes] },
+            "hooks": { "FileChanged": [ledger.hook()] },
         }))
         .start()
         .await?;
@@ -650,7 +650,7 @@ async fn file_changed_fires_when_the_agents_md_a_session_loaded_is_edited() -> a
     let stub = ProviderStub::start().await?;
     let ledger = Ledger::new()?;
     let mut run = stubbed("watched-agents", &stub)
-        .settings(json!({ "hooks_config": { "FileChanged": [ledger.hook()], "InstructionsLoaded": [ledger.hook()] } }))
+        .settings(json!({ "hooks": { "FileChanged": [ledger.hook()], "InstructionsLoaded": [ledger.hook()] } }))
         .before_start(|_, project| {
             std::fs::write(project.join("AGENTS.md"), "# Rules\nBe brief.\n")?;
             Ok(())
@@ -675,7 +675,7 @@ async fn a_team_member_finishing_fires_task_completed_and_teammate_idle() -> any
     let mut run = stubbed("teamed", &stub)
         .settings(json!({
             "team": { "enabled": true },
-            "hooks_config": {
+            "hooks": {
                 "TaskCompleted": [ledger.hook()],
                 "TeammateIdle": [ledger.hook()]
             },
@@ -733,7 +733,7 @@ async fn every_way_of_starting_a_sub_agent_is_bracketed_by_subagent_hooks() -> a
         .settings(json!({
             "team": { "enabled": true },
             "permissions": {"allow": ["Agent"]},
-            "hooks_config": {
+            "hooks": {
                 "SubagentStart": [ledger.hook()],
                 "SubagentStop": [ledger.hook()],
             },
@@ -815,9 +815,9 @@ async fn one_edit_fires_file_changed_once_after_sub_agents_have_run() -> anyhow:
     std::fs::write(&notes, "# Rules\nBe brief.\n")?;
     let mut run = stubbed("watched-once", &stub)
         .settings(json!({
-            "instruction_file": notes,
+            "prompt": { "instruction_files": [notes] },
             "permissions": {"allow": ["Agent"]},
-            "hooks_config": { "FileChanged": [ledger.hook()] },
+            "hooks": { "FileChanged": [ledger.hook()] },
         }))
         .start()
         .await?;
@@ -863,7 +863,7 @@ async fn every_payload_names_the_sessions_cwd_permission_mode_and_depth() -> any
     let mut run = stubbed("payloads", &stub)
         .settings(json!({
             "permissions": {"mode": "default", "allow": ["Agent"]},
-            "hooks_config": ledger.on_every_event(),
+            "hooks": ledger.on_every_event(),
         }))
         .start()
         .await?;
@@ -912,7 +912,7 @@ async fn a_pre_tool_use_hook_that_exits_2_blocks_the_call_whatever_it_printed() 
     let stub = ProviderStub::start().await?;
     let refuse = hook_fixture("refuse_exit2.sh");
     let mut run = stubbed("exit-code", &stub)
-        .settings(json!({ "hooks_config": { "PreToolUse": [command_hook(&refuse, 30_000)] } }))
+        .settings(json!({ "hooks": { "PreToolUse": [command_hook(&refuse, 30_000)] } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -938,7 +938,7 @@ async fn an_if_on_a_file_path_matches_however_the_model_spells_the_path() -> any
     let refuse = hook_fixture("refuse_guarded.sh");
     let mut run = stubbed("if-path", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [
+            "hooks": { "PreToolUse": [
                 { "type": "command", "command": refuse, "if": "Write(/**/x.txt)" }
             ] }
         }))
@@ -989,7 +989,7 @@ async fn an_approval_does_not_cover_what_another_hook_rewrote_the_call_into() ->
     )?;
     let mut run = stubbed("approve-rewrite", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [
+            "hooks": { "PreToolUse": [
                 { "type": "command", "command": approve, "if": "Write" },
                 { "type": "command", "command": rewrite, "if": "Write" }
             ] }
@@ -1033,7 +1033,7 @@ async fn a_hook_that_fails_hangs_or_prints_garbage_changes_nothing() -> anyhow::
     )?;
     let mut run = stubbed("bad-hooks", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [
                     command_hook(&garbage, 30_000),
                     command_hook(&failing, 30_000),
@@ -1106,7 +1106,7 @@ async fn a_failing_hook_with_on_error_block_blocks_the_call() -> anyhow::Result<
     broken["on_error"] = json!("block");
     broken["if"] = json!("Bash(echo two*)");
     let mut run = stubbed("on-error-block", &stub)
-        .settings(json!({ "hooks_config": { "PreToolUse": [hung, broken] } }))
+        .settings(json!({ "hooks": { "PreToolUse": [hung, broken] } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1157,7 +1157,7 @@ async fn every_hook_on_an_event_runs_the_first_rewrite_wins_and_a_block_wins_ove
     let block = hook_fixture("block_bash.sh");
     let mut run = stubbed("many-hooks", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [
                     { "type": "command", "command": first, "if": "Write" },
                     { "type": "command", "command": second, "if": "Write" },
@@ -1208,9 +1208,7 @@ async fn a_user_prompt_submit_hook_refuses_one_message_and_rewrites_another() ->
     let stub = ProviderStub::start().await?;
     let screen = hook_fixture("screen_prompt.sh");
     let mut run = stubbed("prompt-screen", &stub)
-        .settings(
-            json!({ "hooks_config": { "UserPromptSubmit": [command_hook(&screen, 30_000)] } }),
-        )
+        .settings(json!({ "hooks": { "UserPromptSubmit": [command_hook(&screen, 30_000)] } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1252,7 +1250,7 @@ async fn a_post_tool_use_hook_withholds_a_result_or_ends_the_turn() -> anyhow::R
     let end = hook_fixture("end_turn.sh");
     let mut run = stubbed("post-hooks", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PostToolUse": [
                     { "type": "command", "command": withhold, "if": "Read" },
                     { "type": "command", "command": end, "if": "Bash" },
@@ -1306,7 +1304,7 @@ async fn a_once_hook_runs_once_per_session() -> anyhow::Result<()> {
     let ledger = Ledger::new()?;
     let mut run = stubbed("once", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{ "type": "command", "command": ledger.script(), "once": true }]
             }
         }))
@@ -1339,7 +1337,7 @@ async fn a_stop_hook_that_blocks_sends_the_model_back_once() -> anyhow::Result<(
         ),
     )?;
     let mut run = stubbed("stop-block", &stub)
-        .settings(json!({ "hooks_config": { "Stop": [command_hook(&keep_going, 30_000)] } }))
+        .settings(json!({ "hooks": { "Stop": [command_hook(&keep_going, 30_000)] } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1368,7 +1366,7 @@ async fn a_prompt_hook_asks_a_model_and_its_verdict_blocks_the_call() -> anyhow:
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("prompt-hook", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "prompt",
                     "prompt": "HOOK-JUDGE: answer with a JSON hook response for this tool call."
@@ -1417,7 +1415,7 @@ async fn an_agent_hook_runs_a_sub_agent_whose_verdict_blocks_the_call() -> anyho
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("agent-hook", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "agent",
                     "prompt": "AGENT-JUDGE: decide whether this call may run; answer {\"ok\": bool, \"reason\": str}.",
@@ -1460,7 +1458,7 @@ async fn http_hook_hits(host: &str) -> anyhow::Result<usize> {
     let url = local.replacen("127.0.0.1", host, 1);
     let mut run = stubbed("http-hook", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [{ "type": "http", "url": url, "timeout": 3000 }] }
+            "hooks": { "PreToolUse": [{ "type": "http", "url": url, "timeout": 3000 }] }
         }))
         .start()
         .await?;
@@ -1521,7 +1519,7 @@ async fn an_http_hook_that_allows_local_reaches_this_machine_and_its_verdict_cou
     let url = pages.url("/hook").replacen("127.0.0.1", "localhost", 1);
     let mut run = stubbed("http-hook-local", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [
+            "hooks": { "PreToolUse": [
                 { "type": "http", "url": url, "timeout": 3000, "allow_local": true }
             ] }
         }))
@@ -1547,7 +1545,7 @@ async fn an_http_hook_that_allows_local_reaches_this_machine_and_its_verdict_cou
     pages.route("/bounce", Page::redirect(elsewhere.url("/hook")));
     let mut run = stubbed("http-hook-bounce", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [
+            "hooks": { "PreToolUse": [
                 { "type": "http", "url": pages.url("/bounce"), "timeout": 3000, "allow_local": true }
             ] }
         }))
@@ -1580,7 +1578,7 @@ async fn an_interrupt_stops_an_agent_hook_still_judging() -> anyhow::Result<()> 
     let ledger = Ledger::new()?;
     let mut run = stubbed("agent-hook-interrupted", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "agent",
                     "prompt": "AGENT-JUDGE: decide whether this call may run; answer {\"ok\": bool, \"reason\": str}.",
@@ -1653,7 +1651,7 @@ async fn a_hook_agent_gets_read_only_tools_and_no_one_to_ask() -> anyhow::Result
     std::fs::write(&secret, "OUTSIDE-SECRET-MARK")?;
     let mut run = stubbed("agent-hook-read-only", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "agent",
                     "prompt": "AGENT-JUDGE: decide whether this call may run; answer {\"ok\": bool, \"reason\": str}.",
@@ -1702,7 +1700,7 @@ async fn a_hook_that_floods_stdout_does_not_stop_the_call_or_the_session() -> an
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("flood-hook", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("huge_stdout.sh"), 30_000)] }
+            "hooks": { "PreToolUse": [command_hook(&hook_fixture("huge_stdout.sh"), 30_000)] }
         }))
         .start()
         .await?;
@@ -1730,7 +1728,7 @@ async fn a_hook_that_leaves_a_background_process_behind_is_still_a_prompt_answer
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("fork-hook", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("fork_background.sh"), 30_000)] }
+            "hooks": { "PreToolUse": [command_hook(&hook_fixture("fork_background.sh"), 30_000)] }
         }))
         .start()
         .await?;
@@ -1757,7 +1755,7 @@ async fn a_hook_that_exits_before_reading_its_payload_changes_nothing() -> anyho
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("half-stdin-hook", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [command_hook(&hook_fixture("half_stdin.sh"), 30_000)] }
+            "hooks": { "PreToolUse": [command_hook(&hook_fixture("half_stdin.sh"), 30_000)] }
         }))
         .start()
         .await?;
@@ -1786,7 +1784,7 @@ fn turns_with(stub: &ProviderStub, mark: &str, not: &[&str]) -> Vec<SeenRequest>
 }
 
 /// A `PreToolUse` agent hook is a guard, not a sub-agent the model asked
-/// for: the model filling `max_concurrent_subagents` with background agents
+/// for: the model filling `agents.max_concurrent` with background agents
 /// does not stop the guard from being asked about the next call.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_hook_still_judges_when_the_model_holds_every_sub_agent_slot() -> anyhow::Result<()>
@@ -1794,9 +1792,9 @@ async fn an_agent_hook_still_judges_when_the_model_holds_every_sub_agent_slot() 
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("hook-slots", &stub)
         .settings(json!({
-            "execution": { "max_concurrent_subagents": 1 },
+            "agents": { "max_concurrent": 1 },
             "permissions": {"allow": ["Agent", "Bash"]},
-            "hooks_config": {
+            "hooks": {
                 "PreToolUse": [{
                     "type": "agent",
                     "prompt": "GUARD-MARK: may this call run? answer {\"ok\": bool, \"reason\": str}.",
@@ -1879,7 +1877,7 @@ async fn session_start_context_is_in_the_first_request() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-session-start", &stub)
-        .settings(json!({ "hooks_config": {
+        .settings(json!({ "hooks": {
             "SessionStart": [adding_context(dir.path(), "s.sh", "SESSION-CTX-MARK")?]
         } }))
         .start()
@@ -1901,7 +1899,7 @@ async fn user_prompt_submit_context_follows_the_prompt_in_the_same_message() -> 
     let stub = ProviderStub::start().await?;
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-prompt", &stub)
-        .settings(json!({ "hooks_config": {
+        .settings(json!({ "hooks": {
             "UserPromptSubmit": [adding_context(dir.path(), "p.sh", "PROMPT-CTX-MARK")?]
         } }))
         .start()
@@ -1920,7 +1918,7 @@ async fn post_tool_use_context_is_in_the_next_request_after_the_result() -> anyh
     let stub = ProviderStub::start().await?;
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-post-tool", &stub)
-        .settings(json!({ "hooks_config": {
+        .settings(json!({ "hooks": {
             "PostToolUse": [adding_context(dir.path(), "t.sh", "POST-CTX-MARK")?]
         } }))
         .start()
@@ -1949,7 +1947,7 @@ async fn pre_tool_use_context_of_a_blocked_call_is_dropped() -> anyhow::Result<(
         &json!({ "decision": "block", "message": "BLOCKED-MARK", "additional_context": "DROPPED-CTX" }),
     )?;
     let mut run = stubbed("ctx-blocked", &stub)
-        .settings(json!({ "hooks_config": { "PreToolUse": [hook] } }))
+        .settings(json!({ "hooks": { "PreToolUse": [hook] } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1972,7 +1970,7 @@ async fn pre_tool_use_context_of_a_call_the_rules_deny_is_dropped_and_of_an_allo
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-denied", &stub)
         .settings(json!({
-            "hooks_config": { "PreToolUse": [adding_context(dir.path(), "d.sh", "PRE-CTX-MARK")?] },
+            "hooks": { "PreToolUse": [adding_context(dir.path(), "d.sh", "PRE-CTX-MARK")?] },
             "permissions": {
                 "allow": ["Bash(echo allowed)"],
                 "deny": ["Bash(echo denied)"]
@@ -2011,7 +2009,7 @@ async fn context_past_the_cap_is_cut_and_says_so() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let long = format!("{}TAIL-PAST-CAP", "x".repeat(15_000));
     let mut run = stubbed("ctx-cap", &stub)
-        .settings(json!({ "hooks_config": {
+        .settings(json!({ "hooks": {
             "UserPromptSubmit": [adding_context(dir.path(), "c.sh", &long)?]
         } }))
         .start()
@@ -2032,7 +2030,7 @@ async fn a_stop_hooks_context_neither_reaches_the_model_nor_extends_the_turn() -
     let stub = ProviderStub::start().await?;
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-stop", &stub)
-        .settings(json!({ "hooks_config": {
+        .settings(json!({ "hooks": {
             "Stop": [adding_context(dir.path(), "s.sh", "STOP-CTX-MARK")?]
         } }))
         .start()
@@ -2057,7 +2055,7 @@ async fn a_sub_agent_starts_with_its_subagent_start_context() -> anyhow::Result<
     let mut run = stubbed("ctx-subagent", &stub)
         .settings(json!({
             "permissions": {"allow": ["Agent"]},
-            "hooks_config": {
+            "hooks": {
                 "SubagentStart": [adding_context(dir.path(), "a.sh", "SUB-CTX-MARK")?]
             },
         }))
@@ -2094,7 +2092,7 @@ async fn permission_requested_approve_runs_the_call_without_a_prompt() -> anyhow
     let mut run = stubbed("perm-approve", &stub)
         .settings(json!({
             "permissions": {"mode": "default", "ask": ["Bash(echo asked > asked.txt)"]},
-            "hooks_config": {
+            "hooks": {
                 "PermissionRequested": [approve],
                 "Notification": [ledger.hook()],
             },
@@ -2130,7 +2128,7 @@ async fn permission_requested_block_denies_with_its_message() -> anyhow::Result<
     let mut run = stubbed("perm-block", &stub)
         .settings(json!({
             "permissions": {"mode": "default", "ask": ["Bash(echo asked > asked.txt)"]},
-            "hooks_config": {
+            "hooks": {
                 "PermissionRequested": [block],
                 "PermissionDenied": [ledger.hook()],
             },
@@ -2170,7 +2168,7 @@ async fn permission_requested_cannot_answer_a_managed_ask() -> anyhow::Result<()
     let mut run = stubbed("perm-managed", &stub)
         .settings(json!({
             "permissions": {"mode": "default"},
-            "hooks_config": { "PermissionRequested": [approve] },
+            "hooks": { "PermissionRequested": [approve] },
         }))
         .mode(blackbox::Mode::Spawned)
         .options(move |o| o.arg("--managed-settings").arg(managed_arg.clone()))

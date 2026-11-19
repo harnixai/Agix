@@ -61,7 +61,7 @@ pub struct DaemonOptions {
     /// has no command line to put them on.
     pub extra_args: Vec<String>,
     /// Environment variables set for a spawned daemon, over the ones it
-    /// inherits — a secret an `mcp_servers` entry names by its variable,
+    /// inherits — a secret an `mcp.servers` entry names by its variable,
     /// say. Ignored in this process, whose environment is every test's.
     pub env: Vec<(String, String)>,
     /// The MCP policy file to enforce in place of the machine's managed one:

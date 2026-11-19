@@ -37,7 +37,7 @@ async fn turn_throughput() -> anyhow::Result<()> {
     world.write_project_settings(
         "bench",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Grep", "Glob", "Read"]}
         }),
     )?;

@@ -80,7 +80,7 @@ impl Pool {
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
 
         let model = Arc::new(MockAnthropicClient::new());
         model.push_turn(one_turn());

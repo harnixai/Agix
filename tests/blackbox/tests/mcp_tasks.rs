@@ -24,7 +24,7 @@ fn toy_run(
             blackbox::ModelEndpoint::model(stub),
         ))
         .settings(json!({
-            "mcp_servers": { "demo": McpToy::stdio_config(&args)? },
+            "mcp": { "servers": { "demo": McpToy::stdio_config(&args)? } },
             "permissions": {"allow": ["mcp__demo"]},
         })))
 }

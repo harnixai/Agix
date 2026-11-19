@@ -535,7 +535,7 @@ pub async fn serve_permitting_all(
     if let Some(cap) = serving.session_cap {
         config.session_cap = cap;
     }
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     configure(&mut config);
 
     let global = config.settings.paths.global_data_dir.clone();
@@ -678,14 +678,14 @@ pub fn trust_projects_under(global: &Path, root: &Path) {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    let trusted = local["project_trust"]["trusted"]
+    let trusted = local["app"]["trusted_projects"]
         .as_array()
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .chain([serde_json::json!(root), serde_json::json!(root.join("**"))])
         .collect::<Vec<_>>();
-    local["project_trust"]["trusted"] = serde_json::Value::Array(trusted);
+    local["app"]["trusted_projects"] = serde_json::Value::Array(trusted);
     std::fs::create_dir_all(global).unwrap();
     std::fs::write(&path, local.to_string()).unwrap();
 }
@@ -713,7 +713,7 @@ pub fn ask_settings() -> Settings {
 /// main turn's.
 pub fn ask_settings_no_memory() -> Settings {
     let mut s = ask_settings();
-    s.memory_enabled = false;
+    s.memory.enabled = false;
     s
 }
 
@@ -866,7 +866,7 @@ where
 
 pub fn hooked_settings(hooks: serde_json::Value) -> Settings {
     let mut s = ask_settings_no_memory();
-    s.hooks_config = Some(hooks);
+    s.hooks = Some(hooks);
     s
 }
 

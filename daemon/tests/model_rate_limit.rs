@@ -106,7 +106,7 @@ impl Daemon {
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         let client = HttpAnthropicClient::with_base(
             AuthMode::ApiKey("k".into()),
             url::Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap(),

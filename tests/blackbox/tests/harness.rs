@@ -38,10 +38,12 @@ async fn the_builder_writes_before_the_daemon_starts_and_applies_its_options() -
 {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("builder", &stub)
-        .settings(json!({ "prompt_append": "PROJECT-LAYER" }))
+        .settings(json!({ "prompt": { "append": "PROJECT-LAYER" } }))
         .options(|o| o.session_cap(2).prompt_timeout(Duration::from_secs(3)))
         .before_start(|world, project| {
-            world.write_global_settings(&json!({ "language": "Klingon-GLOBAL-LAYER" }))?;
+            world.write_global_settings(
+                &json!({ "prompt": { "language": "Klingon-GLOBAL-LAYER" } }),
+            )?;
             std::fs::write(project.join("fixture.txt"), "from before_start")?;
             Ok(())
         })
@@ -378,7 +380,7 @@ async fn the_page_server_serves_what_it_was_given_and_counts_the_hits() -> anyho
 
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("pages", &stub)
-        .settings(json!({ "sandbox": PageServer::reachable() }))
+        .settings(json!({ "web": PageServer::reachable() }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -436,7 +438,7 @@ async fn the_toy_mcp_server_answers_over_stdio_and_http() -> anyhow::Result<()> 
         "legacy": http.config("sse"),
     });
     let mut run = stubbed("mcp", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
 
@@ -505,7 +507,7 @@ async fn world_fixtures_are_where_the_daemon_looks() -> anyhow::Result<()> {
         "TodoWrite",
     ];
     let mut run = stubbed("fixtures", &stub)
-        .settings(json!({ "memory_enabled": true }))
+        .settings(json!({ "memory": { "enabled": true } }))
         .before_start(move |world, _project| {
             world.write_declarative_scene(
                 "workbench",

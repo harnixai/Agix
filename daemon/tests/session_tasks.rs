@@ -64,7 +64,7 @@ impl Daemon {
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         crate::support::allow_tools(&mut config, allowed);
         let mut assembly = daemon::Assembly {
             cwd: Some(cwd),
@@ -1399,7 +1399,7 @@ async fn a_team_member_idle_past_its_bound_no_longer_holds_off_a_rebuild() {
     let daemon = Daemon::start_configured(model.clone(), TOOLS_RUN_UNASKED, |settings, _| {
         let mut team = agents::TeamSettings::default();
         team.enabled = true;
-        team.member_idle_timeout_secs = 1;
+        team.member_idle_secs = 1;
         settings.set_section(&team);
     })
     .await;

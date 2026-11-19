@@ -54,7 +54,7 @@ impl Daemon {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let mut global = setup.global;
-        global["sandbox"]["dangerously_disable_sandbox"] = json!(true);
+        global["sandbox"]["enabled"] = json!(false);
         std::fs::write(home.join("settings.json"), global.to_string()).unwrap();
         prepare(&home, &work);
 
@@ -62,7 +62,7 @@ impl Daemon {
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = setup.mode;
         config.managed_settings_path = setup.managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
@@ -395,7 +395,7 @@ async fn a_hook_approval_overrides_a_managed_ask() {
     let hooked = Daemon::start(
         Setup {
             managed: Some(MANAGED_ASK),
-            global: json!({"hooks_config": {"PreToolUse": [
+            global: json!({"hooks": {"PreToolUse": [
                 {"type": "command", "command": r#"echo '{"decision":"approve"}'"#}
             ]}}),
             ..Default::default()

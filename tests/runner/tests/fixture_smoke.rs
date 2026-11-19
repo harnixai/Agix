@@ -1,6 +1,6 @@
 //! 模板项目 fixture 的结构性冒烟测试 —— 不跑真实 Agent/LLM，只验证
 //! `tests/fixtures/template_project/` 里的配置文件能被真实的解析器认出来
-//! （hooks_config / mcp_servers / .agix/agents/*.md），防止 fixture 被改坏
+//! （hooks / mcp.servers / .agix/agents/*.md），防止 fixture 被改坏
 //! 而没人发现。
 
 use std::path::Path;
@@ -13,14 +13,14 @@ fn fixture_dir() -> &'static Path {
 }
 
 #[test]
-fn settings_json_hooks_config_parses() {
+fn settings_json_hooks_parses() {
     let path = fixture_dir().join(".agix/settings.json");
     let content = std::fs::read_to_string(&path).expect("read settings.json");
     let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
 
-    let hooks_value = v.get("hooks_config").expect("hooks_config key present");
+    let hooks_value = v.get("hooks").expect("hooks key present");
     let hooks: hooks::HooksSettings =
-        serde_json::from_value(hooks_value.clone()).expect("hooks_config parses as HooksSettings");
+        serde_json::from_value(hooks_value.clone()).expect("hooks parses as HooksSettings");
     assert!(
         hooks.contains_key(&hooks::HookEvent::PreToolUse),
         "expected a PreToolUse hook"
@@ -33,13 +33,13 @@ fn settings_json_mcp_servers_parses() {
     let content = std::fs::read_to_string(&path).expect("read settings.json");
     let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
 
-    let mcp_value = v.get("mcp_servers").expect("mcp_servers key present");
+    let mcp_value = v["mcp"].get("servers").expect("mcp.servers key present");
     let map: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_value(mcp_value.clone()).expect("mcp_servers is a map");
+        serde_json::from_value(mcp_value.clone()).expect("mcp.servers is a map");
     assert!(!map.is_empty(), "expected at least one mcp server entry");
     for (name, cfg) in &map {
         let _parsed: mcp::config::McpServerConfig = serde_json::from_value(cfg.clone())
-            .unwrap_or_else(|e| panic!("mcp_servers.{name} should parse as McpServerConfig: {e}"));
+            .unwrap_or_else(|e| panic!("mcp.servers.{name} should parse as McpServerConfig: {e}"));
     }
 }
 
@@ -62,7 +62,7 @@ fn custom_agent_type_frontmatter_parses() {
 }
 
 /// 端到端验证 api_runner.rs 实际会走的路径：`LoadedSettings::load()` 指向拷贝出来的
-/// `.agix/`，`project_root()` 落在 fixture 根，hooks_config/mcp_servers 通过
+/// `.agix/`，`project_root()` 落在 fixture 根，hooks/mcp.servers 通过
 /// 三层合并读出来——不是靠读代码猜的。
 #[test]
 fn settings_load_resolves_project_root_and_config_from_fixture() {
@@ -73,7 +73,7 @@ fn settings_load_resolves_project_root_and_config_from_fixture() {
     std::fs::create_dir_all(tmp.join("global_empty")).unwrap();
     std::fs::write(
         tmp.join("global_empty").join("settings.json"),
-        serde_json::json!({"project_trust": {"default": "trusted"}}).to_string(),
+        serde_json::json!({"app": {"trust_all_projects": true}}).to_string(),
     )
     .unwrap();
 
@@ -94,13 +94,13 @@ fn settings_load_resolves_project_root_and_config_from_fixture() {
     );
     let hooks = settings
         .values
-        .hooks_config
+        .hooks
         .as_ref()
-        .expect("hooks_config should load from fixture's .agix/settings.json");
+        .expect("hooks should load from fixture's .agix/settings.json");
     assert!(hooks.get("PreToolUse").is_some());
     assert!(
-        !settings.values.mcp_servers.is_empty(),
-        "mcp_servers should load from fixture's .agix/settings.json"
+        settings.values.mcp.declares("demo"),
+        "mcp.servers.demo should load from fixture's .agix/settings.json"
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -125,7 +125,7 @@ fn mcp_toy_server_placeholder_resolves_to_real_binary() {
     );
 
     let v: serde_json::Value = serde_json::from_str(&content).unwrap();
-    let command = v["mcp_servers"]["demo"]["command"]
+    let command = v["mcp"]["servers"]["demo"]["command"]
         .as_str()
         .expect("command is a string");
     let path = Path::new(command);

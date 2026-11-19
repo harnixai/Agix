@@ -137,7 +137,7 @@ async fn a_server_that_never_answers_initialize_does_not_hold_up_a_session() -> 
         "toy": McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?,
     });
     let mut run = stubbed("mute", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = tokio::time::timeout(Duration::from_secs(20), run.session())
@@ -212,7 +212,7 @@ async fn a_server_that_answers_garbage_is_left_out_and_the_others_still_work() -
         "toy": McpToy::stdio_config(&[])?,
     });
     let mut run = stubbed("garbage", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = tokio::time::timeout(Duration::from_secs(20), run.session())
@@ -264,7 +264,7 @@ async fn a_server_with_hundreds_of_tools_is_listed_whole_under_a_raised_limit_an
     many_server["max_tools"] = json!(1000);
     let servers = json!({ "many": many_server });
     let mut run = stubbed("many", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -318,7 +318,7 @@ async fn a_server_past_the_metadata_limits_is_cut_and_status_says_so() -> anyhow
     });
     let servers = json!({ "big": canned_server(scratch.path(), "big", &tools)? });
     let mut run = stubbed("limits", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let status = mcp_status_until(&mut run, "the big server connected", |s| {
@@ -409,7 +409,7 @@ async fn a_tool_listed_twice_by_one_server_is_offered_once() -> anyhow::Result<(
         "twin": canned_server(scratch.path(), "twin", &[tool("dup"), tool("dup"), tool("solo")])?,
     });
     let mut run = stubbed("twin", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -436,7 +436,7 @@ async fn the_same_tool_on_two_servers_reaches_the_server_it_was_called_on() -> a
         "right": McpToy::stdio_config(&["--calls", &calls_arg, "--name", "right"])?,
     });
     let mut run = stubbed("twins", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -475,7 +475,7 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
     });
     let mut run = stubbed("allow-one", &stub)
         .settings(json!({
-            "mcp_servers": servers,
+            "mcp": { "servers": servers },
             "permissions": {"mode": "default", "allow": ["mcp__canned__echo"]}
         }))
         .start()
@@ -533,7 +533,7 @@ async fn a_resource_read_without_a_server_goes_only_to_the_server_that_lists_it(
         "right": McpToy::stdio_config(&["--name", "right", "--resources", &files_arg])?,
     });
     let mut run = stubbed("read-unnamed", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -581,7 +581,7 @@ async fn the_resource_tools_obey_a_deny_rule_written_for_their_server() -> anyho
     });
     let mut run = stubbed("resource-deny", &stub)
         .settings(json!({
-            "mcp_servers": servers,
+            "mcp": { "servers": servers },
             "permissions": {"deny": ["mcp__corp"]}
         }))
         .start()
@@ -636,7 +636,7 @@ async fn what_a_server_wrote_in_the_resource_and_tool_listings_reaches_the_model
     let stub = ProviderStub::start().await?;
     let servers = json!({ "corp": McpToy::stdio_config(&["--name", "corp"])? });
     let mut run = stubbed("listing-fence", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -674,7 +674,7 @@ async fn odd_server_names_still_make_tool_names_the_api_accepts() -> anyhow::Res
         servers.insert(name.to_string(), McpToy::stdio_config(&[])?);
     }
     let mut run = stubbed("odd", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -694,7 +694,7 @@ async fn a_call_whose_server_died_is_reported_not_replayed() -> anyhow::Result<(
     let calls = scratch.path().join("calls.log");
     let servers = json!({ "toy": McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])? });
     let mut run = stubbed("replay", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -727,7 +727,7 @@ async fn a_server_that_died_comes_back_for_the_next_call() -> anyhow::Result<()>
     let calls = scratch.path().join("calls.log");
     let servers = json!({ "toy": McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])? });
     let mut run = stubbed("revive", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -771,7 +771,7 @@ async fn an_interrupted_mcp_call_is_cancelled_on_the_server() -> anyhow::Result<
     let calls = scratch.path().join("calls.log");
     let servers = json!({ "toy": McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])? });
     let mut run = stubbed("cancel", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -808,7 +808,7 @@ async fn an_mcp_prompt_runs_as_a_slash_command_and_a_missing_argument_is_reporte
     let stub = ProviderStub::start().await?;
     let servers = json!({ "toy": McpToy::stdio_config(&[])? });
     let mut run = stubbed("prompts", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -880,7 +880,7 @@ async fn the_policys_globs_hold_end_to_end(mode: Mode) -> anyhow::Result<()> {
     });
     let policy = policy_path.clone();
     let mut run = stubbed(&format!("policy-{mode:?}"), &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .mode(mode)
         .options(move |o| o.mcp_policy(policy.clone()))
         .start()
@@ -996,7 +996,7 @@ async fn a_malformed_policy_denies_every_server(mode: Mode) -> anyhow::Result<()
     let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?;
     let policy = policy_path.clone();
     let mut run = stubbed(&format!("badpolicy-{mode:?}"), &stub)
-        .settings(json!({ "mcp_servers": { "toy": toy.clone() } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy.clone() } } }))
         .mode(mode)
         .options(move |o| o.mcp_policy(policy.clone()))
         .start()
@@ -1072,7 +1072,7 @@ async fn webfetch_answers_odd_pages_and_refuses_odd_urls() -> anyhow::Result<()>
     pages.route("/loop", Page::redirect("/loop"));
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("odd-pages", &stub)
-        .settings(json!({ "sandbox": PageServer::reachable() }))
+        .settings(json!({ "web": PageServer::reachable() }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1131,13 +1131,16 @@ async fn webfetch_answers_odd_pages_and_refuses_odd_urls() -> anyhow::Result<()>
 async fn a_network_allowlist_keeps_webfetch_off_this_machine() -> anyhow::Result<()> {
     let pages = PageServer::start().await?;
     pages.route("/doc", Page::text("LOCAL-PAGE"));
-    for sandbox in [
-        json!({ "network_mode": "allowlist", "allowed_domains": ["example.invalid"] }),
-        json!({ "network_mode": "deny_all" }),
+    for settings in [
+        json!({
+            "sandbox": { "network": { "mode": "allowlist" } },
+            "web": { "allowed_domains": ["example.invalid"] },
+        }),
+        json!({ "sandbox": { "network": { "mode": "deny_all" } } }),
     ] {
         let stub = ProviderStub::start().await?;
         let mut run = stubbed("allowlist", &stub)
-            .settings(json!({ "sandbox": sandbox }))
+            .settings(settings.clone())
             .start()
             .await?;
         let session = run.session().await?;
@@ -1150,7 +1153,7 @@ async fn a_network_allowlist_keeps_webfetch_off_this_machine() -> anyhow::Result
         let fetched = result_of(&events, "WebFetch").expect("a WebFetch result");
         assert!(
             fetched.2 && !fetched.1.contains("LOCAL-PAGE"),
-            "{sandbox}: {fetched:?}"
+            "{settings}: {fetched:?}"
         );
         run.finish().await;
     }
@@ -1171,7 +1174,7 @@ async fn the_part_of_a_page_webfetch_keeps_reaches_the_model() -> anyhow::Result
     );
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("page-budget", &stub)
-        .settings(json!({ "sandbox": PageServer::reachable() }))
+        .settings(json!({ "web": PageServer::reachable() }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1208,7 +1211,7 @@ async fn the_part_of_a_page_webfetch_keeps_reaches_the_model() -> anyhow::Result
 async fn a_host_agent_denied_a_dotted_server_is_offered_none_of_its_tools() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("dotted-deny", &stub)
-        .settings(json!({ "mcp_servers": { "my.docs": McpToy::stdio_config(&[])? } }))
+        .settings(json!({ "mcp": { "servers": { "my.docs": McpToy::stdio_config(&[])? } } }))
         .before_start(|world, _| {
             world.write_project_file(
                 "dotted-deny",
@@ -1277,7 +1280,7 @@ async fn an_mcp_resource_is_fenced_as_the_servers_words() -> anyhow::Result<()> 
     let resources = scratch.path().to_string_lossy().into_owned();
     let servers = json!({ "toy": McpToy::stdio_config(&["--resources", &resources])? });
     let mut run = stubbed("resource-fence", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1388,7 +1391,7 @@ async fn a_sub_agent_granted_an_mcp_server_is_shown_and_keeps_its_tools() -> any
     let log = scratch.path().join("calls.log");
     let mut run = stubbed("mcp-grant", &stub)
         .settings(json!({
-            "mcp_servers": { "toy": McpToy::stdio_config(&["--calls", &log.to_string_lossy()])? },
+            "mcp": { "servers": { "toy": McpToy::stdio_config(&["--calls", &log.to_string_lossy()])? } },
             "permissions": {"allow": ["Agent", "mcp__toy__ping"]}
         }))
         .before_start(|world, _| {
@@ -1515,7 +1518,7 @@ async fn the_mcp_tool_lists_each_servers_tools_under_their_callable_names() -> a
         "beta": canned_server(scratch.path(), "beta", &[tool("three")])?,
     });
     let mut run = stubbed("mcp-introspection", &stub)
-        .settings(json!({ "mcp_servers": servers }))
+        .settings(json!({ "mcp": { "servers": servers } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -1564,7 +1567,7 @@ async fn a_program_gets_the_structured_content_an_mcp_tool_answers_with() -> any
     let toy = McpToy::stdio_config(&["--name", "db", "--store", &store.path().to_string_lossy()])?;
     let mut run = stubbed("mcp-structured", &stub)
         .settings(json!({
-            "mcp_servers": { "db": toy },
+            "mcp": { "servers": { "db": toy } },
             "permissions": {"allow": ["RunCode", "mcp__db__items_put"]}
         }))
         .start()

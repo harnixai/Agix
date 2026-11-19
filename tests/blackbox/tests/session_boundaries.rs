@@ -704,7 +704,7 @@ async fn a_closed_session_resumes_while_its_session_start_hook_still_runs() -> a
     }
     let mut run = stubbed("stuck-engine", &stub)
         .settings(json!({
-            "hooks_config": {
+            "hooks": {
                 "SessionStart": [{ "type": "command", "command": hook, "timeout": 120_000 }]
             }
         }))
@@ -853,7 +853,7 @@ async fn an_interrupt_sent_between_turns_reaches_the_turn_it_was_sent_for() -> a
     )?;
     let mut run = stubbed("rewake-interrupt", &stub)
         .settings(json!({
-            "hooks_config": { "SessionStart": [{
+            "hooks": { "SessionStart": [{
                 "type": "command", "command": hook, "async_rewake": true, "timeout": 120_000
             }], "TaskCreated": [{ "type": "command", "command": hook }] },
             "permissions": {"allow": ["Monitor"]}
@@ -1148,7 +1148,7 @@ async fn a_rebuilt_session_keeps_plan_mode_todos_and_loaded_tools() -> anyhow::R
     )?;
     let mut run = stubbed("rebuilt", &stub)
         .settings(json!({
-            "hooks_config": { "SessionStart": [{ "type": "command", "command": hook }] }
+            "hooks": { "SessionStart": [{ "type": "command", "command": hook }] }
         }))
         .start()
         .await?;
@@ -1354,7 +1354,7 @@ async fn a_rebuild_whose_old_engine_is_slow_to_stop_does_not_swallow_the_next_tu
     )?;
     let mut run = stubbed("slow-stop", &stub)
         .settings(json!({
-            "hooks_config": { "SessionEnd": [{
+            "hooks": { "SessionEnd": [{
                 "type": "command", "command": hook, "timeout": 120_000
             }] }
         }))
@@ -1432,7 +1432,7 @@ async fn a_turn_cut_off_by_close_ends_with_a_terminal_frame_for_its_watchers() -
     let mut run = stubbed("close-mid-turn", &stub)
         .settings(json!({
             "permissions": {"allow": ["Bash"]},
-            "hooks_config": { "PreToolUse": [{
+            "hooks": { "PreToolUse": [{
                 "type": "command", "command": hook, "timeout": 120_000
             }] }
         }))

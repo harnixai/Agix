@@ -217,7 +217,7 @@ async fn a_bad_settings_rule_leaves_the_deny_rules_beside_it_in_force() {
     std::fs::create_dir_all(project.join(".agix")).unwrap();
     std::fs::write(
         project.join(".agix").join("settings.json"),
-        r#"{"memory_enabled": false, "permissions": {"allow": ["Read(oops"], "deny": ["Bash"]}}"#,
+        r#"{"memory": {"enabled": false}, "permissions": {"allow": ["Read(oops"], "deny": ["Bash"]}}"#,
     )
     .unwrap();
 

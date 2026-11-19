@@ -96,7 +96,7 @@ fn first_turn_after(calls: &[SeenRequest], from: usize) -> Option<&SeenRequest> 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_memory_written_in_one_session_is_recalled_in_the_next() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("memory-recall")
-        .settings(json!({ "memory_enabled": true }))
+        .settings(json!({ "memory": { "enabled": true } }))
         .start()
         .await?;
     let dir = run.world.global_memory_dir();
@@ -161,7 +161,7 @@ async fn more_than_five_memories_go_through_a_selection_call() -> anyhow::Result
     let token = format!("CI-{}", nonce());
     let seeded = token.clone();
     let mut run = LiveRun::builder("memory-select")
-        .settings(json!({ "memory_enabled": true }))
+        .settings(json!({ "memory": { "enabled": true } }))
         .before_start(move |world, _| seven_memories(&world.global_memory_dir(), &seeded).map(drop))
         .start()
         .await?;
@@ -208,7 +208,7 @@ async fn a_project_memory_is_indexed_and_recalled_with_the_global_ones() -> anyh
     let token = format!("BRANCH-{}", nonce());
     let seeded = token.clone();
     let mut run = LiveRun::builder("memory-project")
-        .settings(json!({ "memory_enabled": true, "permissions": {"mode": "default"} }))
+        .settings(json!({ "memory": { "enabled": true }, "permissions": {"mode": "default"} }))
         .before_start(move |world, project| {
             let global = world.global_memory_dir();
             write_memory(
@@ -276,7 +276,7 @@ async fn a_chinese_memory_index_past_the_byte_cap_is_loaded_cut() -> anyhow::Res
     );
     let seeded = index.clone();
     let mut run = LiveRun::builder("memory-cjk")
-        .settings(json!({ "memory_enabled": true }))
+        .settings(json!({ "memory": { "enabled": true } }))
         .before_start(move |world, _| {
             let dir = world.global_memory_dir();
             std::fs::create_dir_all(&dir)?;
@@ -318,7 +318,7 @@ async fn with_memory_off_nothing_is_recalled_or_extracted() -> anyhow::Result<()
     let token = format!("CI-{}", nonce());
     let seeded = token.clone();
     let mut run = LiveRun::builder("memory-off")
-        .settings(json!({ "memory_enabled": false }))
+        .settings(json!({ "memory": { "enabled": false } }))
         .before_start(move |world, _| seven_memories(&world.global_memory_dir(), &seeded).map(drop))
         .start()
         .await?;

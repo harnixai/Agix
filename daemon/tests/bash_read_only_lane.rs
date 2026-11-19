@@ -69,14 +69,14 @@ impl Daemon {
             std::fs::write(work.join(".agix/settings.json"), "{}").unwrap();
         }
         let mut settings = global;
-        settings["sandbox"]["dangerously_disable_sandbox"] = json!(true);
+        settings["sandbox"]["enabled"] = json!(false);
         std::fs::write(home.join("settings.json"), settings.to_string()).unwrap();
 
         let sock = dir.path().join("agix.sock");
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = base::permission::PermissionMode::Default;
 
         let model = Arc::new(MockAnthropicClient::new());
@@ -192,16 +192,14 @@ async fn a_helper_program_a_variable_names_is_asked_about_not_run() {
 /// through as a read. A trusted project's is not, nor is `ls`.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_untrusted_projects_git_is_asked_about_without_a_sandbox() {
-    for (trust, asked) in [
-        ("untrusted", vec!["toolu_git".to_string()]),
-        ("trusted", Vec::new()),
-    ] {
-        let daemon = Daemon::start_with(json!({"project_trust": {"default": trust}}), true).await;
+    for (trust_all, asked) in [(false, vec!["toolu_git".to_string()]), (true, Vec::new())] {
+        let daemon =
+            Daemon::start_with(json!({"app": {"trust_all_projects": trust_all}}), true).await;
         daemon
             .model
             .push_turn(bash_round("toolu_git", "git status --short"));
         daemon.model.push_turn(bash_round("toolu_ls", "ls"));
         daemon.model.push_turn(text_round("done"));
-        assert_eq!(daemon.turn_denying_prompts().await, asked, "{trust}");
+        assert_eq!(daemon.turn_denying_prompts().await, asked, "{trust_all}");
     }
 }

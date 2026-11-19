@@ -38,7 +38,7 @@ impl Daemon {
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         crate::support::allow_tools(&mut config, &[]);
         let pool = daemon::assemble::pool(
             &config,
@@ -309,7 +309,7 @@ async fn a_session_mid_turn_is_too_busy_to_change() {
 
 /// What the host set on the settings it assembled the daemon with reaches a
 /// session in another project too, not only the daemon's own: with
-/// `memory_enabled` off, that session's prompt has no memory section and its
+/// `memory.enabled` off, that session's prompt has no memory section and its
 /// turn is followed by no extraction call.
 #[tokio::test]
 async fn a_host_setting_reaches_a_session_in_another_project() {

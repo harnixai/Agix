@@ -158,7 +158,7 @@ async fn set_provider_moves_a_committed_key_to_the_local_file() {
     std::fs::create_dir_all(&agix).unwrap();
     std::fs::write(
         agix.join("settings.json"),
-        r#"{"providers":{"deepseek":{"api_key":"old-key","base_url":"https://x/v1"}},"prompt_append":"kept"}"#,
+        r#"{"providers":{"deepseek":{"api_key":"old-key","base_url":"https://x/v1"}},"prompt":{"append":"kept"}}"#,
     )
     .unwrap();
 
@@ -179,7 +179,7 @@ async fn set_provider_moves_a_committed_key_to_the_local_file() {
         committed["providers"]["deepseek"]["base_url"],
         "https://x/v1"
     );
-    assert_eq!(committed["prompt_append"], "kept");
+    assert_eq!(committed["prompt"]["append"], "kept");
     assert_eq!(
         read("settings.local.json")["providers"]["deepseek"]["api_key"],
         "old-key"

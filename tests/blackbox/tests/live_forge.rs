@@ -341,7 +341,7 @@ async fn live_forge_requirements_live_on_the_remote_backend() -> anyhow::Result<
         .collect();
     let mut run = with_forge(
         LiveRun::builder("forge-remote")
-            .settings(json!({ "mcp_servers": { "reqdb": toy }, "permissions": { "allow": allow } }))
+            .settings(json!({ "mcp": { "servers": { "reqdb": toy } }, "permissions": { "allow": allow } }))
             .before_start(|world, _| {
                 world.write_project_file(
                     "forge-remote",

@@ -76,14 +76,14 @@ impl World {
             Err(_) => serde_json::json!({}),
         };
         let entry = serde_json::json!(std::fs::canonicalize(root)?);
-        let mut trusted = local["project_trust"]["trusted"]
+        let mut trusted = local["app"]["trusted_projects"]
             .as_array()
             .cloned()
             .unwrap_or_default();
         if !trusted.contains(&entry) {
             trusted.push(entry);
         }
-        local["project_trust"]["trusted"] = serde_json::Value::Array(trusted);
+        local["app"]["trusted_projects"] = serde_json::Value::Array(trusted);
         write_json(&path, &local)
     }
 

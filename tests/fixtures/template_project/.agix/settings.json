@@ -1,6 +1,6 @@
 {
   "$schema": "../../../../docs/schemas/settings.schema.json",
-  "hooks_config": {
+  "hooks": {
     "PreToolUse": [
       {
         "type": "command",
@@ -10,10 +10,12 @@
       }
     ]
   },
-  "mcp_servers": {
-    "demo": {
-      "type": "stdio",
-      "command": "{{MCP_TOY_SERVER_BIN}}"
+  "mcp": {
+    "servers": {
+      "demo": {
+        "type": "stdio",
+        "command": "{{MCP_TOY_SERVER_BIN}}"
+      }
     }
   }
 }

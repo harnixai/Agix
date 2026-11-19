@@ -1,5 +1,5 @@
 //! What an `acceptEdits` session reads without asking, seen from a host: the
-//! project, and nothing outside it that `sandbox.read_directories` does not
+//! project, and nothing outside it that `files.read_dirs` does not
 //! name — the same as `default`. What it writes only after asking: a
 //! project skill, in any spelling the filesystem takes for `.agents/skills`.
 
@@ -25,7 +25,7 @@ struct Daemon {
 }
 
 impl Daemon {
-    async fn start(read_directories: &[&str]) -> Self {
+    async fn start(read_dirs: &[&str]) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (home, work, elsewhere) = (
             dir.path().join("home"),
@@ -35,21 +35,18 @@ impl Daemon {
         for d in [&home, &work, &elsewhere] {
             std::fs::create_dir_all(d).unwrap();
         }
-        let listed: Vec<PathBuf> = read_directories
-            .iter()
-            .map(|d| dir.path().join(d))
-            .collect();
-        let global = json!({ "sandbox": {
-            "dangerously_disable_sandbox": true,
-            "read_directories": listed,
-        }});
+        let listed: Vec<PathBuf> = read_dirs.iter().map(|d| dir.path().join(d)).collect();
+        let global = json!({
+            "sandbox": {"enabled": false},
+            "files": {"read_dirs": listed},
+        });
         std::fs::write(home.join("settings.json"), global.to_string()).unwrap();
 
         let sock = dir.path().join("accept-edits.sock");
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = base::permission::PermissionMode::AcceptEdits;
 
         let model = Arc::new(MockAnthropicClient::new());

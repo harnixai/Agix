@@ -30,7 +30,7 @@ impl Daemon {
             "code",
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         config.settings.values.permissions.prompt_timeout_secs = 0;
         let pool = daemon::assemble::pool(
             &config,

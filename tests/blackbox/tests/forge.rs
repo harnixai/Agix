@@ -530,13 +530,13 @@ async fn requirements_on_an_mcp_backend_answer_as_the_local_ones() -> anyhow::Re
             .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(move |world, _| {
                 world.write_global_settings(
-                    &json!({ "mcp_servers": { "reqdb": toy }, "permissions": { "allow": allow } }),
+                    &json!({ "mcp": { "servers": { "reqdb": toy } }, "permissions": { "allow": allow } }),
                 )?;
                 let remote = world.project("forge-remote")?;
                 world.trust_project(&remote)?;
                 world.write_project_settings(
                     "forge-remote",
-                    &json!({ "memory_enabled": false, "permissions": {"mode": "acceptEdits"} }),
+                    &json!({ "memory": { "enabled": false }, "permissions": {"mode": "acceptEdits"} }),
                 )?;
                 world.write_project_file(
                     "forge-remote",
@@ -630,7 +630,7 @@ async fn specs_on_an_mcp_backend_take_the_merged_entries() -> anyhow::Result<()>
             .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(move |world, _| {
                 world.write_global_settings(
-                    &json!({ "mcp_servers": { "specdb": toy }, "permissions": { "allow": allow } }),
+                    &json!({ "mcp": { "servers": { "specdb": toy } }, "permissions": { "allow": allow } }),
                 )?;
                 world.write_project_file(
                     "forge-specdb",

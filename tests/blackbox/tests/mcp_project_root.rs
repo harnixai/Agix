@@ -100,7 +100,7 @@ async fn a_plugins_server_and_a_settings_server_learn_the_sessions_project() -> 
     let toy = McpToy::stdio_config(&["--name", "own"])?;
     let older = McpToy::stdio_config(&["--name", "older", "--max-protocol", "2025-11-25"])?;
     let mut run = with_plugin_toy(stubbed("mcp-root", &stub))?
-        .settings(json!({ "mcp_servers": { "toy": toy, "older": older } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy, "older": older } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -320,11 +320,11 @@ async fn a_remote_server_is_offered_no_roots() -> anyhow::Result<()> {
     let older = McpToy::spawn_http(&["--name", "older", "--max-protocol", "2025-11-25"]).await?;
     let local = McpToy::stdio_config(&["--name", "local"])?;
     let mut run = stubbed("mcp-root-remote", &stub)
-        .settings(json!({ "mcp_servers": {
+        .settings(json!({ "mcp": { "servers": {
             "remote": remote.config("streamable_http"),
             "older": older.config("streamable_http"),
             "local": local,
-        } }))
+        } } }))
         .start()
         .await?;
     let session = run.session().await?;

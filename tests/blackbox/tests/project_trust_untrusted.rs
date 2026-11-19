@@ -305,7 +305,7 @@ fn with_inline_limit(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
         ))
         .settings(json!({
             "permissions": {"allow": ["Bash"]},
-            "compaction": { "tool_result_inline_chars": 1 }
+            "compaction": { "inline_result_chars": 1 }
         }))
 }
 

@@ -133,7 +133,7 @@ fn runs(log: &str) -> Vec<(String, String, u64)> {
 async fn a_coordinator_sees_every_worker_through_planted_faults() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "fleet",
-        json!({ "execution": { "max_concurrent_subagents": 16 } }),
+        json!({ "agents": { "max_concurrent": 16 } }),
         Mode::InProcess,
     )
     .await?;

@@ -299,7 +299,7 @@ async fn a_concurrency_safe_tool_starts_while_its_stream_is_still_arriving() -> 
     pages.route("/early", Page::text("EARLY-PAGE"));
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("streaming-exec", &stub)
-        .settings(json!({ "sandbox": PageServer::reachable() }))
+        .settings(json!({ "web": PageServer::reachable() }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -348,7 +348,7 @@ async fn a_tool_the_policy_refuses_never_runs() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("deny-rule", &stub)
         .settings(json!({
-            "sandbox": PageServer::reachable(),
+            "web": PageServer::reachable(),
             "permissions": {"mode": "default", "deny": ["WebFetch"]}
         }))
         .start()
@@ -378,8 +378,8 @@ async fn a_tool_the_policy_refuses_never_runs() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("deny-hook", &stub)
         .settings(json!({
-            "sandbox": PageServer::reachable(),
-            "hooks_config": {
+            "web": PageServer::reachable(),
+            "hooks": {
                 "PreToolUse": [{ "type": "command", "command": hook, "timeout": 60000 }]
             }
         }))
@@ -560,7 +560,7 @@ async fn a_refusal_for_size_compacts_and_retries() -> anyhow::Result<()> {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
     }
     let mut run = stubbed("too-long", &stub)
-        .settings(json!({ "hooks_config": { "PreCompact": [
+        .settings(json!({ "hooks": { "PreCompact": [
             { "type": "command", "command": script, "timeout": 30_000 }
         ] } }))
         .before_start(|_, project| {

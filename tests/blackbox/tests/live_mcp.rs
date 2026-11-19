@@ -149,7 +149,7 @@ async fn a_slow_mcp_call_is_cancelled_on_the_server_when_the_turn_is_interrupted
     let calls = scratch.path().join("calls.log");
     let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?;
     let mut run = LiveRun::builder("mcp-slow")
-        .settings(json!({ "mcp_servers": { "toy": toy } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -198,10 +198,10 @@ async fn a_server_that_dies_is_reported_and_the_rest_keeps_working() -> anyhow::
     let calls_arg = calls.to_string_lossy().into_owned();
     let (steady_probe, after_probe) = (format!("S-{}", nonce()), format!("A-{}", nonce()));
     let mut run = LiveRun::builder("mcp-crash")
-        .settings(json!({ "mcp_servers": {
+        .settings(json!({ "mcp": { "servers": {
             "fragile": McpToy::stdio_config(&["--calls", &calls_arg, "--name", "fragile"])?,
             "steady": McpToy::stdio_config(&["--calls", &calls_arg, "--name", "steady"])?,
-        } }))
+        } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -265,7 +265,7 @@ async fn a_big_mcp_result_is_cut_to_the_result_budget_before_the_model_sees_it(
         format!("BIG-TAIL-{}", nonce()),
     );
     let mut run = LiveRun::builder("mcp-big")
-        .settings(json!({ "mcp_servers": { "toy": McpToy::stdio_config(&[])? } }))
+        .settings(json!({ "mcp": { "servers": { "toy": McpToy::stdio_config(&[])? } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -335,7 +335,7 @@ async fn resources_reach_the_model_by_tool_and_by_reference() -> anyhow::Result<
     )?;
     let toy = McpToy::stdio_config(&["--resources", &resources.to_string_lossy()])?;
     let mut run = LiveRun::builder("mcp-resources")
-        .settings(json!({ "mcp_servers": { "toy": toy } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -424,7 +424,7 @@ async fn resources_reach_the_model_by_tool_and_by_reference() -> anyhow::Result<
 #[tokio::test(flavor = "multi_thread")]
 async fn an_mcp_prompt_runs_as_a_slash_command() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("mcp-prompts")
-        .settings(json!({ "mcp_servers": { "toy": McpToy::stdio_config(&[])? } }))
+        .settings(json!({ "mcp": { "servers": { "toy": McpToy::stdio_config(&[])? } } }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -480,7 +480,7 @@ async fn a_server_added_at_runtime_is_used_and_an_update_takes_effect() -> anyho
     );
     let written: Value =
         serde_json::from_str(&run.read_file(".agix/settings.json").unwrap_or_default())?;
-    assert!(written["mcp_servers"]["late"].is_object(), "{written}");
+    assert!(written["mcp"]["servers"]["late"].is_object(), "{written}");
 
     let probe = format!("L1-{}", nonce());
     let events = run
@@ -554,10 +554,10 @@ async fn the_http_and_sse_transports_carry_tool_calls() -> anyhow::Result<()> {
     let web = McpToy::spawn_http(&["--calls", &calls_arg, "--name", "web"]).await?;
     let legacy = McpToy::spawn_http(&["--calls", &calls_arg, "--name", "legacy"]).await?;
     let mut run = LiveRun::builder("mcp-http")
-        .settings(json!({ "mcp_servers": {
+        .settings(json!({ "mcp": { "servers": {
             "web": web.config("streamable_http"),
             "legacy": legacy.config("sse"),
-        } }))
+        } } }))
         .mode(Mode::Spawned)
         .start()
         .await?;
@@ -634,10 +634,10 @@ async fn the_mcp_policy_keeps_denied_servers_out_of_reach() -> anyhow::Result<()
     let plugin_server = toy_named("plug")?;
     let policy = policy_path.clone();
     let mut run = LiveRun::builder("mcp-policy")
-        .settings(json!({ "mcp_servers": {
+        .settings(json!({ "mcp": { "servers": {
             "demo": toy_named("demo")?,
             "blocked": toy_named("blocked")?,
-        } }))
+        } } }))
         .options(move |o| o.mcp_policy(policy.clone()))
         .before_start(move |world, _| install_plugin_server(world, "plug", "srv", &plugin_server))
         .start()
@@ -816,7 +816,7 @@ async fn live_model_uses_an_mcp_tool_that_asks_the_user() -> anyhow::Result<()> 
     let calls = scratch.path().join("calls.log");
     let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy()])?;
     let mut run = LiveRun::builder("mcp-ask")
-        .settings(json!({ "mcp_servers": { "toy": toy } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy } } }))
         .start()
         .await?;
     let session = run
@@ -865,7 +865,7 @@ async fn live_model_waits_for_an_mcp_task_and_uses_its_result() -> anyhow::Resul
     let calls = scratch.path().join("calls.log");
     let toy = McpToy::stdio_config(&["--calls", &calls.to_string_lossy(), "--task"])?;
     let mut run = LiveRun::builder("mcp-task")
-        .settings(json!({ "mcp_servers": { "toy": toy } }))
+        .settings(json!({ "mcp": { "servers": { "toy": toy } } }))
         .start()
         .await?;
     let session = run.session().await?;

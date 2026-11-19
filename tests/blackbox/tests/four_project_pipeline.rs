@@ -50,14 +50,14 @@ impl Pipeline {
         // Memory off, daemon-wide. It is exercised in its own case; here it
         // would fire a model call after every turn, out of band, and this
         // file scripts the provider call by call.
-        world.write_global_settings(&json!({ "memory_enabled": false }))?;
+        world.write_global_settings(&json!({ "memory": { "enabled": false } }))?;
 
         let mut roots = Vec::new();
         for name in ["a-data", "b-left", "c-right", "d-verify"] {
             let root = world.project(name)?;
             world.write_project_settings(
                 name,
-                &json!({ "prompt_append": format!("MARK-{}", name.to_uppercase()) }),
+                &json!({ "prompt": { "append": format!("MARK-{}", name.to_uppercase()) } }),
             )?;
             world.write_project_skill(name, &format!("skill-{name}"), "a skill of this project")?;
             world.write_project_agent_type(
@@ -422,20 +422,22 @@ async fn a_consumers_settings_change_reaches_it_mid_pipeline(mode: Mode) -> anyh
 
     let before = client.config_get(&target, "effective").await?;
     assert_eq!(
-        before.result.as_ref().expect("config.get result")["settings"]["prompt_append"],
+        before.result.as_ref().expect("config.get result")["settings"]["prompt"]["append"],
         "MARK-B-LEFT",
         "{before:?}"
     );
 
-    p.world
-        .write_project_settings("b-left", &json!({ "prompt_append": "MARK-B-LEFT-V2" }))?;
+    p.world.write_project_settings(
+        "b-left",
+        &json!({ "prompt": { "append": "MARK-B-LEFT-V2" } }),
+    )?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let mut seen = false;
     while std::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let now = client.config_get(&target, "effective").await?;
-        if now.result.as_ref().expect("config.get result")["settings"]["prompt_append"]
+        if now.result.as_ref().expect("config.get result")["settings"]["prompt"]["append"]
             == "MARK-B-LEFT-V2"
         {
             seen = true;
@@ -466,7 +468,7 @@ async fn a_consumers_settings_change_reaches_it_mid_pipeline(mode: Mode) -> anyh
             .config_get(&Target::project(p.root(other)).scene("code"), "effective")
             .await?;
         assert_eq!(
-            theirs.result.as_ref().expect("config.get result")["settings"]["prompt_append"],
+            theirs.result.as_ref().expect("config.get result")["settings"]["prompt"]["append"],
             format!("MARK-{}", other.to_uppercase()),
             "reloading one project moved another's settings"
         );
@@ -514,7 +516,7 @@ async fn a_provider_can_be_configured_for_one_project_only(mode: Mode) -> anyhow
     )?)?;
     assert_eq!(on_disk["providers"]["cheap"]["default_model"], "cheap-1");
     assert_eq!(
-        on_disk["prompt_append"], "MARK-C-RIGHT",
+        on_disk["prompt"]["append"], "MARK-C-RIGHT",
         "the rest of the project's settings were clobbered by the provider write"
     );
 

@@ -42,7 +42,7 @@ async fn run_and_read_log(root: &std::path::Path, fixed: bool) -> String {
     settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
-    settings.values.memory_enabled = false;
+    settings.values.memory.enabled = false;
     settings.values.permissions.mode = PermissionMode::BypassPermissions;
     let settings = Arc::new(settings);
 

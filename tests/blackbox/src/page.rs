@@ -117,7 +117,7 @@ impl PageServer {
         Ok(server)
     }
 
-    /// The `sandbox` settings under which a `WebFetch` may reach this server:
+    /// The `web` settings under which a `WebFetch` may reach this server:
     /// it is on this machine, which a model-directed request reaches only when
     /// `allowed_domains` names the host.
     pub fn reachable() -> serde_json::Value {

@@ -41,7 +41,7 @@ async fn a_project_skill_is_found_and_followed() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "skilled",
         json!({
-            "hooks_config": {
+            "hooks": {
                 "PostToolUse": [{
                     "type": "command",
                     "command": format!("cat >> '{}'; echo >> '{}'", hook_log.display(), hook_log.display()),
@@ -124,8 +124,8 @@ async fn an_mcp_tool_is_called_and_a_hook_sees_the_calls() -> anyhow::Result<()>
     let mut run = LiveRun::start(
         "extended",
         json!({
-            "mcp_servers": { "demo": { "type": "stdio", "command": server } },
-            "hooks_config": {
+            "mcp": { "servers": { "demo": { "type": "stdio", "command": server } } },
+            "hooks": {
                 "PreToolUse": [
                     { "type": "command", "command": hook, "timeout": 5000 }
                 ]

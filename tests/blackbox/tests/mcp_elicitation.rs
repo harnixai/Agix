@@ -34,7 +34,7 @@ fn toy_run(
     let mut args = vec!["--calls", calls.to_str().unwrap_or_default()];
     args.extend_from_slice(toy_args);
     let mut merged = json!({
-        "mcp_servers": { "demo": McpToy::stdio_config(&args)? },
+        "mcp": { "servers": { "demo": McpToy::stdio_config(&args)? } },
         "permissions": {"allow": ["mcp__demo", "Agent"]},
     });
     if let (Some(m), Some(extra)) = (merged.as_object_mut(), settings.as_object()) {
@@ -475,7 +475,7 @@ async fn an_elicitation_hook_can_refuse_before_the_host_is_asked() -> anyhow::Re
         results.display()
     );
     let hooks = json!({
-        "hooks_config": {
+        "hooks": {
             "Elicitation": [{ "type": "command", "command": refuse }],
             "ElicitationResult": [{ "type": "command", "command": record }]
         }

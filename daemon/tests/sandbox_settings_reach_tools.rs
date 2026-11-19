@@ -1,5 +1,5 @@
-//! What `settings.json`'s `sandbox` section says reaches the tools that act
-//! on it: the hosts `WebFetch` may reach, what a sandboxed `Bash` command may
+//! What `settings.json`'s `sandbox` and `web` sections say reaches the tools
+//! that act on it: the hosts `WebFetch` may reach, what a sandboxed `Bash` command may
 //! not read — by the section and by the `Read` deny rules — and the one proxy
 //! it may connect through.
 
@@ -127,7 +127,7 @@ async fn daemon_with_rules(deny: Value, sandbox: Value) -> Daemon {
     let sock = root.join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
@@ -166,7 +166,7 @@ async fn doctor_check(sock: &std::path::Path, name: &str) -> Value {
         .unwrap_or_else(|| panic!("no {name} check: {doctor}"))
 }
 
-/// Under `network_mode: proxy` a command reaches a server on this machine
+/// Under `sandbox.network.mode: proxy` a command reaches a server on this machine
 /// through the proxy its variables name, and not around it.
 #[cfg(target_os = "macos")]
 #[tokio::test(flavor = "multi_thread")]
@@ -174,8 +174,7 @@ async fn egress_goes_only_through_the_proxy() {
     let direct = stub_server("DIRECT-BODY").await;
     let proxy = marking_proxy().await;
     let daemon = daemon_with_sandbox(json!({
-        "network_mode": "proxy",
-        "egress_proxy": format!("127.0.0.1:{proxy}"),
+        "network": {"mode": "proxy", "proxy": format!("127.0.0.1:{proxy}")},
     }))
     .await;
     let url = format!("http://127.0.0.1:{direct}/");
@@ -213,7 +212,7 @@ async fn egress_goes_only_through_the_proxy() {
             .to_string()
     };
 
-    let check = doctor_check(&daemon.sock, "sandbox.egress_proxy").await;
+    let check = doctor_check(&daemon.sock, "sandbox.network.proxy").await;
     if !tools::bash::sandbox_status().starts_with("available") {
         assert_eq!(check["details"]["enforcement"], "none", "{check}");
         return;
@@ -243,11 +242,10 @@ async fn egress_goes_only_through_the_proxy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_proxy_off_this_machine_is_reported_as_held_only_by_port() {
     let daemon = daemon_with_sandbox(json!({
-        "network_mode": "proxy",
-        "egress_proxy": {"http": "192.0.2.10:3128"},
+        "network": {"mode": "proxy", "proxy": {"http": "192.0.2.10:3128"}},
     }))
     .await;
-    let check = doctor_check(&daemon.sock, "sandbox.egress_proxy").await;
+    let check = doctor_check(&daemon.sock, "sandbox.network.proxy").await;
     if !tools::bash::sandbox_status().starts_with("available") {
         return;
     }
@@ -259,16 +257,15 @@ async fn a_proxy_off_this_machine_is_reported_as_held_only_by_port() {
     );
 
     let missing = daemon_with_sandbox(json!({
-        "network_mode": "proxy",
-        "egress_proxy": "proxy.example:3128",
+        "network": {"mode": "proxy", "proxy": "proxy.example:3128"},
     }))
     .await;
-    let check = doctor_check(&missing.sock, "sandbox.egress_proxy").await;
+    let check = doctor_check(&missing.sock, "sandbox.network.proxy").await;
     assert_eq!(check["status"], "failing", "{check}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_sandbox_section_reaches_the_tools() {
+async fn the_sandbox_and_web_sections_reach_the_tools() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path().canonicalize().unwrap();
     let global = dir.join("agix");
@@ -282,10 +279,10 @@ async fn the_sandbox_section_reaches_the_tools() {
         json!({
             "permissions": {"allow": ["WebFetch", "Bash"]},
             "sandbox": {
-                "network_mode": "allowlist",
-                "allowed_domains": ["127.0.0.1"],
+                "network": {"mode": "allowlist"},
                 "deny_read": [secret],
             },
+            "web": {"allowed_domains": ["127.0.0.1"]},
         })
         .to_string(),
     )
@@ -295,7 +292,7 @@ async fn the_sandbox_section_reaches_the_tools() {
     let sock = dir.join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,

@@ -134,7 +134,7 @@ async fn a_skill_added_between_turns_is_announced_on_the_next() -> anyhow::Resul
 async fn a_project_memory_is_indexed_with_the_global_ones() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("memory-tiers", &stub)
-        .settings(json!({ "permissions": {"mode": "default"}, "memory_enabled": true }))
+        .settings(json!({ "permissions": {"mode": "default"}, "memory": { "enabled": true } }))
         .before_start(|world, project| {
             for (dir, name) in [
                 (world.global_memory_dir(), "GLOBAL-TIER-MEMORY"),
@@ -307,7 +307,7 @@ async fn a_forked_skill_gets_its_agent_types_tools_and_no_parents_agent() -> any
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("fork-explore", &stub)
         .settings(json!({
-            "execution": { "max_agent_depth": 1 },
+            "agents": { "max_depth": 1 },
             "permissions": {"allow": ["Skill", "Agent"]}
         }))
         .start()
@@ -357,7 +357,7 @@ async fn a_forked_skill_gets_its_agent_types_tools_and_no_parents_agent() -> any
     let grandchild = turns_with(&stub, "GRANDCHILD-MARK", &["FORK-MARK"]);
     if !grandchild.is_empty() {
         problems.push(format!(
-            "the fork's Agent call spawned a grandchild past max_agent_depth 1 ({} request(s)); \
+            "the fork's Agent call spawned a grandchild past agents.max_depth 1 ({} request(s)); \
              its result: {:?}",
             grandchild.len(),
             tool_result_in(&fork, "f-1")

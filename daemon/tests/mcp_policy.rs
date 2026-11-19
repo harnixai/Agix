@@ -67,7 +67,7 @@ impl Daemon {
         std::fs::create_dir_all(project.join(".agix")).unwrap();
         std::fs::write(
             project.join(".agix").join("settings.json"),
-            serde_json::json!({ "mcp_servers": servers }).to_string(),
+            serde_json::json!({ "mcp": { "servers": servers } }).to_string(),
         )
         .unwrap();
     }
@@ -344,7 +344,7 @@ async fn add_server_refuses_a_denied_server_before_writing_settings() {
     assert_eq!(d.spawned(), ["kept"]);
     let written: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    assert!(written["mcp_servers"]["kept"].is_object(), "{written}");
+    assert!(written["mcp"]["servers"]["kept"].is_object(), "{written}");
 
     let refused = pool
         .update_mcp_server(None, "code", Project, "blocked", d.server("blocked"))
@@ -519,14 +519,14 @@ async fn a_projects_own_server_does_not_expand_the_daemons_environment() {
     std::fs::create_dir_all(d.root().join(".agix")).unwrap();
     std::fs::write(
         d.root().join(".agix").join("settings.json"),
-        serde_json::json!({"mcp_servers": {"proj": project}}).to_string(),
+        serde_json::json!({"mcp": {"servers": {"proj": project}}}).to_string(),
     )
     .unwrap();
     std::fs::write(
         d.root().join("settings.json"),
-        serde_json::json!({"mcp_servers": {
+        serde_json::json!({"mcp": {"servers": {
             "user": d.logging("user", r#"echo "user:[$AGIX_E2E_PROJECT_SECRET]""#),
-        }})
+        }}})
         .to_string(),
     )
     .unwrap();
@@ -554,7 +554,7 @@ async fn an_added_servers_env_is_kept_locally_and_still_expands_after_a_reload()
     )
     .unwrap();
     assert!(
-        committed["mcp_servers"]["local"].get("env").is_none(),
+        committed["mcp"]["servers"]["local"].get("env").is_none(),
         "{committed}"
     );
 
@@ -629,7 +629,8 @@ async fn a_projects_own_server_may_not_sign_with_a_local_key_or_spend_the_enterp
     std::fs::create_dir_all(d.root().join(".agix")).unwrap();
     std::fs::write(
         d.root().join(".agix").join("settings.json"),
-        serde_json::json!({"mcp_servers": {"signer": key_file, "ema": enterprise}}).to_string(),
+        serde_json::json!({"mcp": {"servers": {"signer": key_file, "ema": enterprise}}})
+            .to_string(),
     )
     .unwrap();
     pool.reload_settings(None, "code").await;

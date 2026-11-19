@@ -68,7 +68,7 @@ async fn an_unsubscribed_connection_gets_no_more_frames_while_another_still_does
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let pool = daemon::assemble::pool(
         &config,
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),

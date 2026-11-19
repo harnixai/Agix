@@ -217,7 +217,7 @@ impl Daemon {
         }
 
         let mut settings = json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["HostX", "HostEcho", "Agent", "Bash", "EnterWorktree"]},
         });
         if let Some(extra) = setup.settings.as_object() {
@@ -248,7 +248,7 @@ impl Daemon {
         let paths =
             StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-        config.settings.values.memory_enabled = false;
+        config.settings.values.memory.enabled = false;
         let mut assembly = daemon::Assembly {
             cwd: Some(work.clone()),
             model_client: Some(model.clone()),
@@ -685,7 +685,7 @@ async fn a_sub_agent_in_a_worktree_calls_and_is_hooked_from_the_worktree() {
 async fn a_worktree_sub_agent_starts_its_own_in_a_worktree_of_the_project() {
     let daemon = Daemon::start_with(Setup {
         git: true,
-        settings: json!({"sandbox": {"dangerously_disable_sandbox": false}}),
+        settings: json!({"sandbox": {"enabled": true}}),
         ..Setup::default()
     })
     .await;
@@ -1390,7 +1390,7 @@ async fn a_hook_provider_that_leaves_lets_its_waiting_call_go_on_at_once() {
 }
 
 fn blocking_settings_hook() -> Value {
-    json!({"hooks_config": {"PreToolUse": [{
+    json!({"hooks": {"PreToolUse": [{
         "type": "command",
         "command": r#"echo '{"decision":"block","message":"settings say no"}'"#,
         "if": "Bash",
@@ -1434,7 +1434,7 @@ async fn a_settings_hook_that_blocks_spares_the_connections_hook_the_call() {
 #[tokio::test]
 async fn a_settings_hook_that_lets_the_call_pass_still_asks_the_connections_hook() {
     let daemon = Daemon::start_with(Setup {
-        settings: json!({"hooks_config": {"PreToolUse": [{
+        settings: json!({"hooks": {"PreToolUse": [{
             "type": "command",
             "command": "touch {work}/settings-ran",
             "if": "Bash",
@@ -1815,7 +1815,7 @@ async fn a_worktree_with_work_in_it_is_kept_and_named_and_an_idle_one_is_removed
 async fn an_agent_hook_judges_a_worktree_sub_agents_call_in_the_worktree() {
     let daemon = Daemon::start_with(Setup {
         git: true,
-        settings: json!({"hooks_config": {"PreToolUse": [{
+        settings: json!({"hooks": {"PreToolUse": [{
             "type": "agent",
             "prompt": "Judge the call",
             "if": "Glob",

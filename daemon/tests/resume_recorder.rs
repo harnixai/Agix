@@ -30,7 +30,7 @@ async fn start(
         "code",
         &StaticDaemonPaths::new(root.to_path_buf()),
     );
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     crate::support::allow_tools(&mut config, &[]);
     let pool = daemon::assemble::pool(
         &config,

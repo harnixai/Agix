@@ -244,7 +244,7 @@ fn files_containing(dir: &std::path::Path, needle: &str) -> Vec<std::path::PathB
 
 async fn start(name: &str, world: &OAuthWorld) -> anyhow::Result<LiveRun> {
     LiveRun::builder(name)
-        .settings(json!({ "mcp_servers": { SERVER: world.config() } }))
+        .settings(json!({ "mcp": { "servers": { SERVER: world.config() } } }))
         .start()
         .await
 }
@@ -307,9 +307,11 @@ async fn an_external_redirect_is_handed_back_by_the_host_and_signs_the_user_in(
     let world = OAuthWorld::start().await;
     world.auth.preregister("host-app", None);
     let mut run = LiveRun::builder("oauth-external")
-        .settings(json!({ "mcp_servers": { SERVER: world.config_with(json!({
+        .settings(
+            json!({ "mcp": { "servers": { SERVER: world.config_with(json!({
             "client_id": "host-app", "scopes": ["mcp:read"]
-        })) } }))
+        })) } } }),
+        )
         .start()
         .await?;
     let events = run.daemon_events().await?;
@@ -486,11 +488,11 @@ async fn after_a_logout_the_servers_tools_are_gone() -> anyhow::Result<()> {
 async fn a_client_credentials_server_is_used_with_nobody_signing_in() -> anyhow::Result<()> {
     let world = OAuthWorld::start().await;
     world.auth.preregister("batch", Some("batch-secret"));
-    let servers = json!({ "mcp_servers": { SERVER: world.config_with(json!({
+    let servers = json!({ "mcp": { "servers": { SERVER: world.config_with(json!({
         "grant": "client_credentials", "client_id": "batch",
         "client_secret_env": "AGIX_LIVE_MCP_SECRET", "issuer": world.auth.url,
         "scopes": ["mcp:read"]
-    })) } });
+    })) } } });
     // A user's server, not the project's: a project's own servers may not
     // read the daemon's environment.
     let mut run = LiveRun::builder("oauth-cc")
@@ -537,9 +539,9 @@ async fn an_enterprise_identity_from_the_host_connects_the_server() -> anyhow::R
         &policy,
         world.enterprise_idp_policy("agix-at-idp").to_string(),
     )?;
-    let servers = json!({ "mcp_servers": { SERVER: world.config_with(json!({
+    let servers = json!({ "mcp": { "servers": { SERVER: world.config_with(json!({
         "grant": "enterprise", "client_id": "ema-client", "scopes": ["mcp:read"]
-    })) } });
+    })) } } });
     // A user's server, not the project's: a project's own servers may not
     // spend the identity the host supplied.
     let mut run = LiveRun::builder("oauth-enterprise")
@@ -677,7 +679,7 @@ async fn an_authorization_server_outside_the_policy_is_never_sent_the_user() -> 
         json!({ "allowed_authorization_servers": ["https://login.corp.example"] }).to_string(),
     )?;
     let mut run = LiveRun::builder("oauth-policy")
-        .settings(json!({ "mcp_servers": { SERVER: world.config() } }))
+        .settings(json!({ "mcp": { "servers": { SERVER: world.config() } } }))
         .options(move |o| o.mcp_policy(policy.clone()))
         .start()
         .await?;

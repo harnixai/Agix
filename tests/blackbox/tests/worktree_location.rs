@@ -1,7 +1,7 @@
 //! Where a sub-agent's worktree goes, judged from the repository alone: in
 //! `.wkts/` at its root, the one line the engine adds to its `.gitignore`,
 //! so what the project directory holds can still be committed. The user's
-//! global settings name another directory with `worktree_dir`; the
+//! global settings name another directory with `app.worktree_dir`; the
 //! project's own settings cannot. What the engine writes in the project
 //! directory for this machine alone is ignored there.
 
@@ -37,8 +37,8 @@ async fn a_kept_worktree_in(world: &World, name: &str) -> anyhow::Result<std::pa
     world.write_project_settings(
         name,
         &json!({
-            "memory_enabled": false,
-            "worktree_dir": ".from-the-project",
+            "memory": { "enabled": false },
+            "app": { "worktree_dir": ".from-the-project" },
             "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
@@ -117,7 +117,7 @@ async fn a_worktree_goes_in_wkts_and_the_project_directory_stays_committable() -
 #[tokio::test(flavor = "multi_thread")]
 async fn the_users_global_settings_name_the_worktrees_directory() -> anyhow::Result<()> {
     let world = World::new()?;
-    world.write_global_settings(&json!({ "worktree_dir": ".trees" }))?;
+    world.write_global_settings(&json!({ "app": { "worktree_dir": ".trees" } }))?;
     let repo = a_kept_worktree_in(&world, "wg").await?;
 
     assert!(repo.join(".trees/probe/made.txt").is_file());

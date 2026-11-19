@@ -1,5 +1,5 @@
 //! The toy MCP server (`tests/fixtures/mcp_toy_server`), as a case uses it:
-//! the `mcp_servers` entry that starts it over stdio, or a running copy over
+//! the `mcp.servers` entry that starts it over stdio, or a running copy over
 //! streamable HTTP and the entry that points at it.
 //!
 //! The binary is built on first use and asked of cargo rather than guessed
@@ -24,7 +24,7 @@ impl McpToy {
             .map_err(anyhow::Error::msg)
     }
 
-    /// An `mcp_servers.<name>` value that starts the server over stdio with
+    /// An `mcp.servers.<name>` value that starts the server over stdio with
     /// `args` (`--calls`, `--name`, `--resources`).
     pub fn stdio_config(args: &[&str]) -> anyhow::Result<Value> {
         Ok(json!({
@@ -82,7 +82,7 @@ pub struct McpToyHttp {
 }
 
 impl McpToyHttp {
-    /// An `mcp_servers.<name>` value for this server: `type` is
+    /// An `mcp.servers.<name>` value for this server: `type` is
     /// `streamable_http` or `sse`.
     pub fn config(&self, kind: &str) -> Value {
         json!({ "type": kind, "url": self.url })

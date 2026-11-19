@@ -98,7 +98,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | 用例 | 用一遍什么 |
 |---|---|
 | `live_basics.rs` | Read / Write / Edit / Grep / Bash 改项目；`WebSearch` 是引擎的工具，经会话自己的模型让提供方搜索；`Monitor` 立即返回，日志里的 ERROR 在模型干活途中以通知送达、模型据此处理后用 `TaskStop` 停掉它，宿主边跑边看到那一行，并按 `task_progress` 帧的字节偏移拼出、再用 `session.taskOutput {from_byte}` 补齐的输出与整段输出一致；会话提示词与 resume；Plan 模式不改文件；模型用 `GoalCreate` 设目标后，自动轮一轮推进一步，直到它自己标完成；宿主用 `session.setGoal` 设的目标不需要再发消息就跑完；达不成的目标以 `blocked` 结束、之后不再开轮；带 `prompt_types` 开了提问的会话里，模型用 `AskUserQuestion` 问的问题经 `prompt` 帧到达宿主，宿主选的选项决定了写进文件的内容；`RunCode` 一个程序做完逐文件检索；另起进程的 `agixd`；宿主看着一个目标从设下到完成再到清除的每一帧 `goal_changed`，`Write` 调用的 `tool_args_delta` 拼起来就是它的 `input` |
-| `live_agents.rs` | 两个前台子 agent 各用自己类型指定的模型；前台子 agent 的询问在父会话这一轮里到达宿主（带这一轮的 `turn_id`），批准前它的任务是 `waiting`、批准后回到 `running`；后台子 agent 收宿主的消息、结束后通知父会话；`session.startAgent` 起的子 agent 交回满足 schema 的结构化输出，任务上的用量与代理记下的相等；类型 frontmatter 的 `allowed_tools: [Read]` 让子 agent 只看得到 Read、`max_turns: 2` 让它至多调两次模型；`relay` 子 agent 一层层往下交，到深度上限那一层不再有 `Agent`（`relay, relay, bottom`）；`max_concurrent_subagents: 1` 下模型的第二个后台子 agent 被拒、宿主的 `session.startAgent` 得 `-32019`，空出来之后又能起 |
+| `live_agents.rs` | 两个前台子 agent 各用自己类型指定的模型；前台子 agent 的询问在父会话这一轮里到达宿主（带这一轮的 `turn_id`），批准前它的任务是 `waiting`、批准后回到 `running`；后台子 agent 收宿主的消息、结束后通知父会话；`session.startAgent` 起的子 agent 交回满足 schema 的结构化输出，任务上的用量与代理记下的相等；类型 frontmatter 的 `allowed_tools: [Read]` 让子 agent 只看得到 Read、`max_turns: 2` 让它至多调两次模型；`relay` 子 agent 一层层往下交，到深度上限那一层不再有 `Agent`（`relay, relay, bottom`）；`agents.max_concurrent: 1` 下模型的第二个后台子 agent 被拒、宿主的 `session.startAgent` 得 `-32019`，空出来之后又能起 |
 | `live_team.rs` | `TeamCreate` 两个阶段，后一阶段从团队记忆里拿前一阶段存的东西；同一阶段的两个成员经 `ListPeers` / `SendMessage` / `ReadMail` 传一个只有发送方读得到的词，宿主收到这一阶段 `started`、`completed` 两帧 `team_progress`，团队之后 `TeamList` 列得出、`TeamDelete` 后列不出 |
 | `live_extensions.rs` | 项目 skill；MCP server 的工具；`PreToolUse` hook 看到工具调用；`context: fork` 的 skill 在自己的上下文里干活，主对话只拿回答复；`allowed-tools` 的授权——项目 skill 写成列表的 `Bash(sh build.sh)` 不再询问，项目 skill 的整类 `Bash` 不算数，用户层 skill 的整类 `Bash` 算数；不写成列表的带空格授权（`Bash(sh build.sh)`）同样不询问；会话中途才建 `.agents/skills/` 写进去的 skill 下一轮就能用，会话中途加的 skill 下一轮发 `skills_changed` |
 | `live_multi_agent.rs` | 主控 + 三个不同模型的后台 worker，每个 worker 里多个后台任务；人为制造一个任务失败、一个 worker 故障，修复后重跑，主控汇总 |
@@ -115,11 +115,11 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_context.rs` | 手动压缩由模型写摘要（`FullCompact`），压缩前给的事实之后还答得出；一轮里读的文件撑过 `compaction.threshold_tokens` 时自己压缩、照样做完这一轮；`session.fork` 的分叉记得分叉前的、不知道源会话之后的；带 `output_schema` 建的会话一轮以符合 schema 的 `structured_output` 结束；`/compact` 之后的第一个请求里有「计划模式仍在」和还在跑的监视器 `task:<id>` 两条提醒；开了 `compaction.reactive` 的长一轮里，最早几次读的结果在轮内被清掉、最新的留着，宿主收到那一趟的 `compact` 帧；阈值低到没有可丢的东西时不压缩、不发帧、不把读过的文件一遍遍补回去 |
 | `live_sessions.rs` | 宿主驱动一个会话的一生：Bash 跑到一半 `session.interrupt`，这一轮几秒内收尾、命令的进程被停掉，下一轮照常且请求里那次调用有结果；中断父会话不停后台子 agent，宿主 `session.stopTask` 后它是 `stopped`；忙时 `on_busy: reject` 得 `-32015`（带 `current_turn_id`）、`setModel` 同样被拒，`steer` 进了这一轮（`user_message_delivered`），`queue` 等它结束才开始并读到它写的文件；`session.setModel` 后下一轮的请求落在第二个 Flash 名字上、记得上一轮；`session.compact` / `session.clear` / `session.rename`（unicode 名字、清除）；`session.export` 的 zip 与目录带着侧链的转录，导出不覆盖已有路径，`session.delete` 先 dry run、再连侧链一起删并发 `session_deleted`；宿主暂停、改、清除目标，暂停时不再开轮；另起的 daemon 重启后会话 resume、没有任务还挂在 running、后台命令没活过它的 daemon；文本与图片附件；20 万字节的消息整段到达；中文、emoji、RTL 的消息、文件名与内容逐字节保持；模型一轮改了三个文件后宿主 `session.rewind` 回到上一轮，三个文件与上一轮末逐字节相同、推 `rewound`，下一轮的请求里没有被回滚那一轮的内容、模型重新读过文件再改 |
 | `live_commands.rs` | `/help`、`/skills`、`/cost`（消息数与 `session.history` 的 `total` 相同）、`/clear` 只有 `turn_start`/`turn_complete`、代理一个请求都没收到，`/compact` 只有一次压缩调用、命令文本不进模型；`commands.list` 报出内建命令（`local`/`builtin`）与项目 skill（`prompt`/`project`）；不认识的斜杠命令原样进模型；`/stamp <参数>` 把参数代进 skill 正文、写出的文件里两者都在 |
-| `live_memory.rs` | `memory_enabled` 时模型照 `# Memory` 一节在 `global_memory_dir()` 写下记忆与 `MEMORY.md` 索引，新会话的提示词里有索引、第一个请求前就被召回（不到 5 条时不起选择调用）；7 条记忆时恰有一次 `MemoryRecall` 调用、用会话的模型、只拿名字和描述；项目 `.agix/state/memory/` 里的记忆和全局的一起进提示词的索引、一起被召回；关了记忆就没有 `# Memory` 一节、没有召回与抽取 |
+| `live_memory.rs` | `memory.enabled` 时模型照 `# Memory` 一节在 `global_memory_dir()` 写下记忆与 `MEMORY.md` 索引，新会话的提示词里有索引、第一个请求前就被召回（不到 5 条时不起选择调用）；7 条记忆时恰有一次 `MemoryRecall` 调用、用会话的模型、只拿名字和描述；项目 `.agix/state/memory/` 里的记忆和全局的一起进提示词的索引、一起被召回；关了记忆就没有 `# Memory` 一节、没有召回与抽取 |
 | `live_transport.rs` | 另起的 daemon 带 `--listen` / `--listen-ws` / `--token`：同一个会话 Unix 上建、TCP 上跑一轮、WebSocket 上跑下一轮读前一轮写的文件，三条连接读到的历史一样长；错 token、外站 `Origin` 被拒，没握手的 TCP 连接得 `-32003` |
 | `live_scenes.rs` | `scene.register` 运行时登记的声明式场景：请求里只有它列的 `Read` / `Write`，`prompt.md` 的令牌在系统提示里，照样把活干完；同 id 再登记得 `-32602`；`scene.describe` / `scene.list` 报出它和会话数；有会话时 `scene.deactivate`、`scene.unregister` 都得 `-32009`，关掉会话后才停得掉、撤得掉 |
 | `live_providers.rs` | `harnix` 场景里 `task_models.title` 与 `task_models.compact` 各指向另一个 Flash 名字：命名请求、压缩请求各恰一次、落在各自的模型上，对话请求都留在默认厂商的模型上 |
-| `live_autonomy.rs` | `TodoWrite` 的列表随多步任务更新，`session.export` 的 `runtime.json` 里是做完两项、剩一项待办；模型用 `CronCreate` 建的每分钟任务按时以 `initiator:"schedule"` 的一轮跑起来，`CronDelete` 之后再过两次检查也不再跑；宿主 `schedule.create` 的一次性任务无人连接也跑、跑一次就没了，非法表达式被拒；`max_rounds` 用完的目标以 `blocked`（`round limit`）结束，`execution.max_budget_tokens` 耗尽的一轮以 `budget_exceeded` 结束、目标解除武装；两个后台子 agent，一个只经 `TaskMessage` 拿到要写的词、`TaskWait` / `TaskOutput` 收回，另一个被 `TaskStop` 停成 `stopped`；声明式场景里的 `Sleep` 真等了要的时长、超过 30 秒的被拒、被中断时立即收尾，`Ping` 对页面报出 200 和 404 |
+| `live_autonomy.rs` | `TodoWrite` 的列表随多步任务更新，`session.export` 的 `runtime.json` 里是做完两项、剩一项待办；模型用 `CronCreate` 建的每分钟任务按时以 `initiator:"schedule"` 的一轮跑起来，`CronDelete` 之后再过两次检查也不再跑；宿主 `schedule.create` 的一次性任务无人连接也跑、跑一次就没了，非法表达式被拒；`max_rounds` 用完的目标以 `blocked`（`round limit`）结束，`turn.token_budget` 耗尽的一轮以 `budget_exceeded` 结束、目标解除武装；两个后台子 agent，一个只经 `TaskMessage` 拿到要写的词、`TaskWait` / `TaskOutput` 收回，另一个被 `TaskStop` 停成 `stopped`；声明式场景里的 `Sleep` 真等了要的时长、超过 30 秒的被拒、被中断时立即收尾，`Ping` 对页面报出 200 和 404 |
 | `live_workspace.rs` | 声明式场景提供的工作区工具：`git_project` 上 `EnterWorktree` 后写的文件只在 `.wkts/<slug>` 里，主工作区 `git status` 看不见，`ExitWorktree` 带 `discard_changes` 删掉目录与分支；非 git 目录里 `EnterWorktree` 失败；`NotebookEdit` 改、插、删 cell 后笔记本仍合法，越界的 `cell_index` 报错且不改文件；`Glob` / `Grep` 原样交回中文与带音标的文件名，二进制文件不进 `Grep` 的结果。|
 
 **权限模式：用例不用 `bypassPermissions`。** bypass 下一条规则都不看，deny 规则也不生效
@@ -160,7 +160,7 @@ let mut run = LiveRun::builder("perm")
     .settings(json!({ "permission_mode": "default" }))      // 项目层，盖在 base_settings 上
     .mode(Mode::Spawned)
     .options(|o| o.prompt_timeout(Duration::from_secs(3)).arg("--listen").arg("127.0.0.1:0"))
-    .before_start(|world, project| world.write_global_settings(&json!({ "language": "中文" })))
+    .before_start(|world, project| world.write_global_settings(&json!({ "prompt": { "language": "中文" } })))
     .start()
     .await?;
 ```
@@ -186,7 +186,7 @@ let mut run = LiveRun::builder("perm")
 
 **外面的世界：`PageServer`、`McpToy` 与 `OAuthWorld`。** `PageServer::start()` 起一个本机站点，
 `route(path, Page::html(..) | text | json | status(code, ..) | redirect(to) | huge(chars, &[(at, mark)]) | slow(d, page))`，
-`hits(path)` 证明真的取过。`McpToy::stdio_config(&args)` 给 `mcp_servers.<name>` 一项，
+`hits(path)` 证明真的取过。`McpToy::stdio_config(&args)` 给 `mcp.servers.<name>` 一项，
 `McpToy::spawn_http(&args)` 起 streamable HTTP 版，`.config("streamable_http" | "sse")` 指向它；
 toy server 的工具、资源、提示词和参数（`--calls` 记调用、`--resources` 把目录变成资源、
 `ask` / `ask_twice` 向用户提问并把收到的回答记成 `ask <json>`、`--max-protocol 2025-11-25` 扮成
@@ -196,7 +196,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 `OAuthWorld::start()` 起一个只认自己授权服务器所发令牌的 streamable HTTP MCP server（工具 `echo`，
 要 `mcp:write` 的 `write`）和那个授权服务器（RFC 9728 / 8414 元数据、动态注册、PKCE、刷新轮换、
 吊销、client credentials），`with_enterprise_idp(..)` 再加一个企业 IdP；`config()` /
-`config_with(oauth)` 给 `mcp_servers` 一项，`enterprise_idp_policy(..)` 给策略文件。`click(authorize_url)`
+`config_with(oauth)` 给 `mcp.servers` 一项，`enterprise_idp_policy(..)` 给策略文件。`click(authorize_url)`
 是用户的浏览器：同意并跟着 302 回到 daemon 的回环监听，返回结果页；`consent` 只同意、交回回调 URL
 （external redirect 用）。`auth.state` 能直接改（`reject_refresh`、`token_ttl`、回调带不带对的 `iss`
 的 `iss: IssMode`、元数据声不声明会带它的 `advertise_iss_support`），

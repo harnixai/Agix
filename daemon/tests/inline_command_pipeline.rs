@@ -38,7 +38,7 @@ async fn serve_with_probe_skill(
     let paths =
         StaticDaemonPaths::with_project(global.clone(), work.to_path_buf()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     let pool = daemon::assemble::pool(
         &config,
@@ -101,7 +101,7 @@ async fn an_inline_commands_output_goes_through_the_result_transformers() {
         dir.path(),
         &work,
         json!({
-            "sandbox": {"dangerously_disable_sandbox": true},
+            "sandbox": {"enabled": false},
             "permissions": {"allow": ["Bash"]},
             "scripts": [{"path": script, "point": "tool.result", "entry": "onResult",
                          "timeout_ms": 5000}],

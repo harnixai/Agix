@@ -150,7 +150,10 @@ async fn a_projects_settings_reach_only_its_own_prompt(mode: Mode) -> anyhow::Re
     let world = World::new()?;
     let marked = world.project("marked")?;
     let plain = world.project("plain")?;
-    world.write_project_settings("marked", &json!({ "prompt_append": "SETTINGS-MARK-XYZZY" }))?;
+    world.write_project_settings(
+        "marked",
+        &json!({ "prompt": { "append": "SETTINGS-MARK-XYZZY" } }),
+    )?;
 
     let provider = ProviderStub::start().await?;
     let daemon = Daemon::start(
@@ -504,7 +507,7 @@ fn a_project_with_a_script(world: &World) -> anyhow::Result<std::path::PathBuf> 
     world.write_project_settings(
         "scripted",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "scripts": [
                 {
                     "path": ".agix/scripts/house.js",
@@ -902,7 +905,7 @@ async fn a_failing_tool_says_so_everywhere(mode: Mode) -> anyhow::Result<()> {
     world.write_project_settings(
         "failing",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Bash"]}
         }),
     )?;
@@ -999,7 +1002,7 @@ fn tool_result_for(request: &blackbox::SeenRequest, id: &str) -> Option<serde_js
 async fn a_package_with_a_wasm_component_is_refused(mode: Mode) -> anyhow::Result<()> {
     let world = World::new()?;
     let project = world.project("wasm-refused")?;
-    world.write_project_settings("wasm-refused", &json!({ "memory_enabled": false }))?;
+    world.write_project_settings("wasm-refused", &json!({ "memory": { "enabled": false } }))?;
 
     let src = world.root().join("packages").join("echo-plugin");
     std::fs::create_dir_all(&src)?;
@@ -1285,7 +1288,7 @@ async fn a_reload_reaches_a_session_that_is_already_open(mode: Mode) -> anyhow::
 
     world.write_project_settings(
         "reloaded",
-        &json!({ "prompt_append": "RELOADED-MARK-PLUGH" }),
+        &json!({ "prompt": { "append": "RELOADED-MARK-PLUGH" } }),
     )?;
     let reloaded = client.config_reload(&rpc_client::Target::own()).await?;
     anyhow::ensure!(

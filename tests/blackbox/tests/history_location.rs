@@ -1,4 +1,4 @@
-//! Where a session's history is kept, seen from outside: with `history.location`
+//! Where a session's history is kept, seen from outside: with `app.history`
 //! set to `project`, a trusted project's sessions go to its
 //! `.agix/state/history/<id>/` (a worktree's to its main checkout's) with only
 //! an index under the global `sessions/<id>/`; they come back after a restart
@@ -16,13 +16,13 @@ const PROJECT_UNTRUSTED: i32 = -32022;
 
 fn keep_in_projects(world: &World) -> anyhow::Result<()> {
     world.write_global_settings(&json!({
-        "memory_enabled": false,
-        "history": { "location": "project" }
+        "memory": { "enabled": false },
+        "app": { "history": "project" }
     }))
 }
 
 fn keep_globally(world: &World) -> anyhow::Result<()> {
-    world.write_global_settings(&json!({ "memory_enabled": false }))
+    world.write_global_settings(&json!({ "memory": { "enabled": false } }))
 }
 
 fn kept_in(project: &Path, session: &str) -> PathBuf {
@@ -310,7 +310,7 @@ async fn deleting_a_session_of_a_project_that_lost_its_trust_takes_its_sidechain
     world.write_project_settings(
         "cascade",
         &json!({
-            "memory_enabled": false,
+            "memory": { "enabled": false },
             "permissions": {"allow": ["Agent"]}
         }),
     )?;

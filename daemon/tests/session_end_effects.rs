@@ -283,7 +283,7 @@ fn background_name(test: &str) -> String {
 async fn start_server_running_a_background_sleep(reap: bool, name: &str) -> ScriptedServer {
     let mut settings = ask_settings_no_memory();
     settings.permissions.mode = base::permission::PermissionMode::BypassPermissions;
-    settings.sandbox.reap_process_groups = reap;
+    settings.sandbox.reap_on_close = reap;
     let (srv, _seen) = start_scripted_server(
         vec![
             tool_round(

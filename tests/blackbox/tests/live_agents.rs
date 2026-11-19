@@ -4,7 +4,7 @@
 //! sleep loop that would wait out a background one blind, turned towards
 //! `TaskWait`. An agent type's frontmatter bounds its sub-agent (tools,
 //! calls, permission mode), a chain of sub-agents ends where the depth limit
-//! withholds `Agent`, and `max_concurrent_subagents` refuses one more.
+//! withholds `Agent`, and `agents.max_concurrent` refuses one more.
 
 use std::time::Duration;
 
@@ -573,11 +573,11 @@ async fn host_agent(run: &mut LiveRun, session: &str) -> anyhow::Result<Option<i
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn max_concurrent_subagents_refuses_one_more_from_the_model_and_the_host(
-) -> anyhow::Result<()> {
+async fn agents_max_concurrent_refuses_one_more_from_the_model_and_the_host() -> anyhow::Result<()>
+{
     let mut run = LiveRun::start(
         "slots",
-        json!({ "execution": { "max_concurrent_subagents": 1 } }),
+        json!({ "agents": { "max_concurrent": 1 } }),
         Mode::InProcess,
     )
     .await?;
@@ -611,9 +611,7 @@ async fn max_concurrent_subagents_refuses_one_more_from_the_model_and_the_host(
         .collect();
     eprintln!("[live slots] {agents:?}");
     assert!(
-        agents
-            .iter()
-            .any(|(_, t, _)| t.contains("max_concurrent_subagents")),
+        agents.iter().any(|(_, t, _)| t.contains("max_concurrent")),
         "the second spawn was refused for the limit: {agents:?}"
     );
     let running = run

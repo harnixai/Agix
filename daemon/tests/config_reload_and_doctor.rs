@@ -79,8 +79,8 @@ async fn doctor_warns_when_unattended_commands_may_reach_an_open_network() {
     let attended = check(spec(Interaction::Interactive), None).await;
     assert_eq!(attended["status"], "ok", "{attended}");
     for settings in [
-        r#"{"sandbox": {"network_mode": "deny_all"}}"#,
-        r#"{"sandbox": {"unattended_requires_network_policy": true}}"#,
+        r#"{"sandbox": {"network": {"mode": "deny_all"}}}"#,
+        r#"{"sandbox": {"unattended_needs_network_policy": true}}"#,
     ] {
         let held = check(spec(Interaction::Unattended), Some(settings)).await;
         assert_eq!(held["status"], "ok", "{settings}: {held}");
@@ -377,7 +377,7 @@ async fn doctor_names_the_key_of_a_value_left_out_of_the_settings() {
     std::fs::create_dir_all(dir.path().join(".agix")).unwrap();
     std::fs::write(
         dir.path().join(".agix/settings.json"),
-        r#"{"sandbox": {"network_mode": "open"}}"#,
+        r#"{"sandbox": {"network": {"mode": "open"}}}"#,
     )
     .unwrap();
     let (server, sock, _dir, handle) = start_server_in(dir).await;
@@ -402,7 +402,7 @@ async fn doctor_names_the_key_of_a_value_left_out_of_the_settings() {
         .iter()
         .map(|v| v["key"].as_str().unwrap())
         .collect();
-    assert_eq!(keys, ["sandbox.network_mode"], "{project}");
+    assert_eq!(keys, ["sandbox.network.mode"], "{project}");
 
     server.shutdown_token().cancel();
     let _ = handle.await;

@@ -33,7 +33,7 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         "config.set",
         json!({"tier": "global", "changes": {
             "permissions.mode": "acceptEdits",
-            "sandbox.allowed_domains": ["github.com"]
+            "web.allowed_domains": ["github.com"]
         }}),
     )
     .await;
@@ -50,11 +50,11 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         .map(|k| k.as_str().unwrap())
         .collect();
     changed.sort();
-    assert_eq!(changed, ["permissions.mode", "sandbox.allowed_domains"]);
+    assert_eq!(changed, ["permissions.mode", "web.allowed_domains"]);
     assert_eq!(written["rejected"], json!([]));
     assert_eq!(written["effective"]["permissions.mode"], "acceptEdits");
     assert_eq!(
-        written["effective"]["sandbox.allowed_domains"],
+        written["effective"]["web.allowed_domains"],
         json!(["github.com"])
     );
     assert!(written["routing"].is_object(), "{written}");
@@ -71,14 +71,14 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         "{tier}"
     );
     assert_eq!(
-        tier["settings"]["sandbox"]["allowed_domains"],
+        tier["settings"]["web"]["allowed_domains"],
         json!(["github.com"])
     );
     assert_eq!(tier["revision"], written["revision"], "{tier}");
 
     let merged = effective(&sock, json!({"scene": "code", "project_root": dir.path()})).await;
     assert_eq!(merged["permissions"]["mode"], "acceptEdits");
-    assert_eq!(merged["sandbox"]["allowed_domains"], json!(["github.com"]));
+    assert_eq!(merged["web"]["allowed_domains"], json!(["github.com"]));
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -90,7 +90,7 @@ async fn a_scene_tier_write_reaches_that_scene_only() {
     let written = call(
         &sock,
         "config.set",
-        json!({"tier": "scene", "scene": "harnix", "changes": {"language": "ja"}}),
+        json!({"tier": "scene", "scene": "harnix", "changes": {"prompt.language": "ja"}}),
     )
     .await;
     let scene_file = dir.path().join("scenes/harnix/settings.json");
@@ -98,16 +98,16 @@ async fn a_scene_tier_write_reaches_that_scene_only() {
         written["written_to"],
         json!(scene_file.display().to_string())
     );
-    assert_eq!(read(&scene_file)["language"], "ja");
+    assert_eq!(read(&scene_file)["prompt"]["language"], "ja");
 
     let harnix = effective(
         &sock,
         json!({"scene": "harnix", "project_root": dir.path()}),
     )
     .await;
-    assert_eq!(harnix["language"], "ja", "{harnix}");
+    assert_eq!(harnix["prompt"]["language"], "ja", "{harnix}");
     let code = effective(&sock, json!({"scene": "code", "project_root": dir.path()})).await;
-    assert!(code["language"].is_null(), "{code}");
+    assert!(code["prompt"]["language"].is_null(), "{code}");
 
     let tier = call(
         &sock,
@@ -115,7 +115,7 @@ async fn a_scene_tier_write_reaches_that_scene_only() {
         json!({"scene": "harnix", "tier": "scene"}),
     )
     .await;
-    assert_eq!(tier["settings"]["language"], "ja", "{tier}");
+    assert_eq!(tier["settings"]["prompt"]["language"], "ja", "{tier}");
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -131,46 +131,35 @@ async fn null_removes_the_key_from_the_tier_and_the_lower_value_shows_through() 
         params["changes"] = changes;
         params
     };
+    call(&sock, "config.set", set(json!({"turn.max_model_calls": 7}))).await;
     call(
         &sock,
         "config.set",
-        set(json!({"execution.max_api_calls_per_turn": 7})),
-    )
-    .await;
-    call(
-        &sock,
-        "config.set",
-        json!({"tier": "global", "changes": {"execution.max_api_calls_per_turn": 9}}),
+        json!({"tier": "global", "changes": {"turn.max_model_calls": 9}}),
     )
     .await;
     let mut scene = project.clone();
     scene["scene"] = json!("code");
     assert_eq!(
-        effective(&sock, scene.clone()).await["execution"]["max_api_calls_per_turn"],
+        effective(&sock, scene.clone()).await["turn"]["max_model_calls"],
         7
     );
 
     let removed = call(
         &sock,
         "config.set",
-        set(json!({"execution.max_api_calls_per_turn": null})),
+        set(json!({"turn.max_model_calls": null})),
     )
     .await;
-    assert_eq!(
-        removed["effective"]["execution.max_api_calls_per_turn"], 9,
-        "{removed}"
-    );
+    assert_eq!(removed["effective"]["turn.max_model_calls"], 9, "{removed}");
     let mut tier = scene.clone();
     tier["tier"] = json!("project");
     let tier = call(&sock, "config.get", tier).await;
     assert!(
-        tier["settings"].get("execution").is_none(),
+        tier["settings"].get("turn").is_none(),
         "the emptied object is pruned: {tier}"
     );
-    assert_eq!(
-        effective(&sock, scene).await["execution"]["max_api_calls_per_turn"],
-        9
-    );
+    assert_eq!(effective(&sock, scene).await["turn"]["max_model_calls"], 9);
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -240,15 +229,18 @@ async fn a_credential_inside_a_value_is_written_with_a_warning_and_read_back_mas
         &sock,
         "config.set",
         json!({"tier": "global", "changes": {
-            "telemetry_url": "https://agent:hunter2-pass@collector.invalid/v1",
-            "language": "en"
+            "telemetry.otlp_endpoint": "https://agent:hunter2-pass@collector.invalid/v1",
+            "prompt.language": "en"
         }}),
     )
     .await;
     let warnings = written["warnings"].as_array().cloned().unwrap_or_default();
     assert_eq!(warnings.len(), 1, "{written}");
     assert!(
-        warnings[0].as_str().unwrap().contains("telemetry_url"),
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("telemetry.otlp_endpoint"),
         "{written}"
     );
     assert!(!written.to_string().contains("hunter2-pass"), "{written}");
@@ -256,7 +248,7 @@ async fn a_credential_inside_a_value_is_written_with_a_warning_and_read_back_mas
     let clean = call(
         &sock,
         "config.set",
-        json!({"tier": "global", "changes": {"language": "ja"}}),
+        json!({"tier": "global", "changes": {"prompt.language": "ja"}}),
     )
     .await;
     assert!(clean.get("warnings").is_none(), "{clean}");
@@ -274,10 +266,10 @@ async fn one_refused_key_refuses_the_write_and_each_says_why() {
     ];
     let before = bytes(&files);
     let changes = json!({
-        "language": "fr",
-        "sandbox.network_mode": "open",
-        "hooks_config": {},
-        "mcp_servers.x": {"type": "stdio", "command": "x"}
+        "prompt.language": "fr",
+        "sandbox.network.mode": "open",
+        "hooks": {},
+        "mcp.servers.x": {"type": "stdio", "command": "x"}
     });
 
     let refused = call_frame(
@@ -291,13 +283,13 @@ async fn one_refused_key_refuses_the_write_and_each_says_why() {
     assert_eq!(
         kinds,
         [
-            ("hooks_config".into(), "not_writable".into(), None),
+            ("hooks".into(), "not_writable".into(), None),
             (
-                "mcp_servers.x".into(),
+                "mcp.servers.x".into(),
                 "use_method".into(),
                 Some("mcp.addServer".into())
             ),
-            ("sandbox.network_mode".into(), "invalid_value".into(), None),
+            ("sandbox.network.mode".into(), "invalid_value".into(), None),
         ],
         "{refused}"
     );
@@ -306,19 +298,19 @@ async fn one_refused_key_refuses_the_write_and_each_says_why() {
     let refused = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"language": "fr", "sandbox.network_mode": "open"}}),
+        json!({"tier": "project", "changes": {"prompt.language": "fr", "sandbox.network.mode": "open"}}),
     )
     .await;
     assert_eq!(refused["error"]["code"], codes::INVALID_PARAMS, "{refused}");
     assert_eq!(
         rejected_kinds(&refused["error"]["data"]["rejected"]),
-        [("sandbox.network_mode".into(), "invalid_value".into(), None)],
+        [("sandbox.network.mode".into(), "invalid_value".into(), None)],
         "{refused}"
     );
     assert!(
         refused["error"]["message"]
             .as_str()
-            .is_some_and(|m| m.contains("sandbox.network_mode")),
+            .is_some_and(|m| m.contains("sandbox.network.mode")),
         "{refused}"
     );
     assert_eq!(bytes(&files), before, "a refused write changed a file");
@@ -339,10 +331,10 @@ async fn a_dry_run_reports_the_keys_it_would_refuse_and_writes_nothing() {
         &sock,
         "config.set",
         json!({"tier": "project", "dry_run": true, "changes": {
-            "language": "fr",
-            "sandbox.network_mode": "open",
-            "hooks_config": {},
-            "mcp_servers.x": {"type": "stdio", "command": "x"}
+            "prompt.language": "fr",
+            "sandbox.network.mode": "open",
+            "hooks": {},
+            "mcp.servers.x": {"type": "stdio", "command": "x"}
         }}),
     )
     .await;
@@ -351,13 +343,13 @@ async fn a_dry_run_reports_the_keys_it_would_refuse_and_writes_nothing() {
     assert_eq!(
         rejected_kinds(&result["rejected"]),
         [
-            ("hooks_config".into(), "not_writable".into(), None),
+            ("hooks".into(), "not_writable".into(), None),
             (
-                "mcp_servers.x".into(),
+                "mcp.servers.x".into(),
                 "use_method".into(),
                 Some("mcp.addServer".into())
             ),
-            ("sandbox.network_mode".into(), "invalid_value".into(), None),
+            ("sandbox.network.mode".into(), "invalid_value".into(), None),
         ],
         "{result}"
     );
@@ -366,11 +358,15 @@ async fn a_dry_run_reports_the_keys_it_would_refuse_and_writes_nothing() {
     let accepted = call(
         &sock,
         "config.set",
-        json!({"tier": "project", "dry_run": true, "changes": {"language": "fr"}}),
+        json!({"tier": "project", "dry_run": true, "changes": {"prompt.language": "fr"}}),
     )
     .await;
-    assert_eq!(accepted["changed"], json!(["language"]), "{accepted}");
-    assert_eq!(accepted["effective"]["language"], "fr");
+    assert_eq!(
+        accepted["changed"],
+        json!(["prompt.language"]),
+        "{accepted}"
+    );
+    assert_eq!(accepted["effective"]["prompt.language"], "fr");
     assert_eq!(bytes(&files), before, "a dry run changed a file");
 
     server.shutdown_token().cancel();
@@ -437,7 +433,7 @@ async fn an_untrusted_project_may_tighten_and_nothing_more() {
     let mixed = call_frame(
         &sock,
         "config.set",
-        set(json!({"permissions.mode": "bypassPermissions", "language": 5})),
+        set(json!({"permissions.mode": "bypassPermissions", "prompt.language": 5})),
     )
     .await;
     assert_eq!(mixed["error"]["code"], codes::INVALID_PARAMS, "{mixed}");
@@ -472,7 +468,7 @@ async fn a_project_tier_linked_into_another_project_is_not_written() {
     .unwrap();
     std::fs::write(
         dir.path().join("settings.local.json"),
-        json!({"project_trust": {"trusted": [trusted]}}).to_string(),
+        json!({"app": {"trusted_projects": [trusted]}}).to_string(),
     )
     .unwrap();
     std::os::unix::fs::symlink("../b/.agix", linked.join(".agix")).unwrap();
@@ -497,36 +493,48 @@ async fn a_global_only_key_is_refused_below_the_global_tier() {
     let refused = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"network.use_system_proxy": false}}),
+        json!({"tier": "project", "changes": {"app.system_proxy": false}}),
     )
     .await;
     assert_eq!(refused["error"]["code"], codes::INVALID_PARAMS, "{refused}");
     assert_eq!(
         rejected_kinds(&refused["error"]["data"]["rejected"]),
-        [(
-            "network.use_system_proxy".into(),
-            "not_at_tier".into(),
-            None
-        )]
+        [("app.system_proxy".into(), "not_at_tier".into(), None)]
     );
-    let in_the_project = call_frame(
+    assert!(
+        refused["error"]["data"]["rejected"][0]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("global tier only")),
+        "{refused}"
+    );
+    for tier in ["project", "scene"] {
+        let below = call_frame(
+            &sock,
+            "config.set",
+            json!({"tier": tier, "changes": {"app.worktree_dir": ".trees"}}),
+        )
+        .await;
+        assert_eq!(
+            rejected_kinds(&below["error"]["data"]["rejected"]),
+            [("app.worktree_dir".into(), "not_at_tier".into(), None)],
+            "{tier}: {below}"
+        );
+    }
+    let trust = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"worktree_dir": ".trees"}}),
+        json!({"tier": "global", "changes": {"app.trusted_projects": ["/tmp/x"]}}),
     )
     .await;
     assert_eq!(
-        rejected_kinds(&in_the_project["error"]["data"]["rejected"]),
-        [("worktree_dir".into(), "not_at_tier".into(), None)],
-        "{in_the_project}"
+        rejected_kinds(&trust["error"]["data"]["rejected"]),
+        [(
+            "app.trusted_projects".into(),
+            "use_method".into(),
+            Some("project.trust".into())
+        )],
+        "{trust}"
     );
-    let in_the_scene = call_frame(
-        &sock,
-        "config.set",
-        json!({"tier": "scene", "changes": {"worktree_dir": ".trees"}}),
-    )
-    .await;
-    assert!(in_the_scene["error"].is_null(), "{in_the_scene}");
     let unknown = call_frame(
         &sock,
         "config.set",
@@ -542,6 +550,24 @@ async fn a_global_only_key_is_refused_below_the_global_tier() {
         ],
         "{unknown}"
     );
+    let old = call_frame(
+        &sock,
+        "config.set",
+        json!({"tier": "global", "changes": {"sandbox.read_anywhere": true}}),
+    )
+    .await;
+    let rejected = &old["error"]["data"]["rejected"];
+    assert_eq!(
+        rejected_kinds(rejected),
+        [("sandbox.read_anywhere".into(), "unknown_key".into(), None)],
+        "{old}"
+    );
+    assert!(
+        rejected[0]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("files.read_dirs")),
+        "{old}"
+    );
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -554,12 +580,12 @@ async fn two_connections_writing_one_tier_keep_both_keys() {
         call_frame(
             &sock,
             "config.set",
-            json!({"tier": "global", "changes": {"language": "de"}})
+            json!({"tier": "global", "changes": {"prompt.language": "de"}})
         ),
         call_frame(
             &sock,
             "config.set",
-            json!({"tier": "global", "changes": {"memory_enabled": false}})
+            json!({"tier": "global", "changes": {"memory.enabled": false}})
         ),
     );
     assert!(a.get("result").is_some(), "{a}");
@@ -570,8 +596,8 @@ async fn two_connections_writing_one_tier_keep_both_keys() {
         json!({"scene": "code", "tier": "global"}),
     )
     .await;
-    assert_eq!(tier["settings"]["language"], "de", "{tier}");
-    assert_eq!(tier["settings"]["memory_enabled"], false, "{tier}");
+    assert_eq!(tier["settings"]["prompt"]["language"], "de", "{tier}");
+    assert_eq!(tier["settings"]["memory"]["enabled"], false, "{tier}");
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -593,7 +619,7 @@ async fn a_write_on_a_stale_revision_is_refused_with_the_current_one() {
     let written = call(
         &sock,
         "config.set",
-        json!({"tier": "global", "if_revision": first, "changes": {"sandbox.allowed_domains": ["a.com"]}}),
+        json!({"tier": "global", "if_revision": first, "changes": {"web.allowed_domains": ["a.com"]}}),
     )
     .await;
     let after = written["revision"].clone();
@@ -604,7 +630,7 @@ async fn a_write_on_a_stale_revision_is_refused_with_the_current_one() {
     let stale = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "global", "if_revision": first, "changes": {"sandbox.allowed_domains": ["b.com"]}}),
+        json!({"tier": "global", "if_revision": first, "changes": {"web.allowed_domains": ["b.com"]}}),
     )
     .await;
     assert_eq!(stale["error"]["code"], codes::SETTINGS_CONFLICT, "{stale}");
@@ -631,7 +657,7 @@ async fn a_tier_held_by_another_process_is_refused_as_locked() {
     let refused = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"language": "it"}}),
+        json!({"tier": "project", "changes": {"prompt.language": "it"}}),
     )
     .await;
     assert_eq!(
@@ -645,10 +671,13 @@ async fn a_tier_held_by_another_process_is_refused_as_locked() {
     call(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"language": "it"}}),
+        json!({"tier": "project", "changes": {"prompt.language": "it"}}),
     )
     .await;
-    assert_eq!(read(&tier_dir.join("settings.json"))["language"], "it");
+    assert_eq!(
+        read(&tier_dir.join("settings.json"))["prompt"]["language"],
+        "it"
+    );
 
     server.shutdown_token().cancel();
     let _ = handle.await;
@@ -659,10 +688,10 @@ async fn an_empty_or_malformed_write_is_invalid() {
     let (server, sock, _dir, handle) = start_server().await;
     for params in [
         json!({"tier": "global", "changes": {}}),
-        json!({"changes": {"language": "x"}}),
+        json!({"changes": {"prompt.language": "x"}}),
         json!({"tier": "global", "changes": {"a..b": 1}}),
-        json!({"tier": "global", "changes": {"sandbox": {}, "sandbox.read_anywhere": true}}),
-        json!({"tier": "project", "project_root": null, "changes": {"language": "x"}}),
+        json!({"tier": "global", "changes": {"files": {}, "files.read_dirs": ["/"]}}),
+        json!({"tier": "project", "project_root": null, "changes": {"prompt.language": "x"}}),
     ] {
         let refused = call_frame(&sock, "config.set", params.clone()).await;
         assert_eq!(
@@ -674,7 +703,7 @@ async fn an_empty_or_malformed_write_is_invalid() {
     let missing = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "project_root": "/nonexistent/agix-x", "changes": {"language": "x"}}),
+        json!({"tier": "project", "project_root": "/nonexistent/agix-x", "changes": {"prompt.language": "x"}}),
     )
     .await;
     assert_eq!(
@@ -685,7 +714,7 @@ async fn an_empty_or_malformed_write_is_invalid() {
     let scene = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "scene", "scene": "no-such-scene", "changes": {"language": "x"}}),
+        json!({"tier": "scene", "scene": "no-such-scene", "changes": {"prompt.language": "x"}}),
     )
     .await;
     assert_eq!(scene["error"]["code"], codes::SCENE_NOT_FOUND, "{scene}");
@@ -739,7 +768,7 @@ async fn a_write_that_does_not_touch_mcp_does_not_restart_its_servers() {
     call(
         &sock,
         "config.set",
-        json!({"tier": "global", "changes": {"language": "en"}}),
+        json!({"tier": "global", "changes": {"prompt.language": "en"}}),
     )
     .await;
     let added = call(
@@ -767,13 +796,13 @@ async fn a_write_that_does_not_touch_mcp_does_not_restart_its_servers() {
     call(
         &sock,
         "config.set",
-        json!({"tier": "global", "changes": {"language": "de"}}),
+        json!({"tier": "global", "changes": {"prompt.language": "de"}}),
     )
     .await;
     call(
         &sock,
         "config.set",
-        json!({"tier": "project", "changes": {"memory_enabled": false}}),
+        json!({"tier": "project", "changes": {"memory.enabled": false}}),
     )
     .await;
     let status = call(&sock, "mcp.status", json!({})).await;

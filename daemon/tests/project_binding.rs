@@ -20,7 +20,7 @@ async fn session_create_binds_to_a_different_project_with_its_own_settings() {
     std::fs::create_dir_all(other_project.join(".agix")).unwrap();
     std::fs::write(
         other_project.join(".agix").join("settings.json"),
-        r#"{"model": {"model_name": "other-project-model"}, "memory_enabled": false}"#,
+        r#"{"model": {"model_name": "other-project-model"}, "memory": {"enabled": false}}"#,
     )
     .unwrap();
 
@@ -447,7 +447,7 @@ async fn a_projects_own_script_reaches_the_prompt_the_daemon_sends() {
     std::fs::write(
         project.join(".agix").join("settings.json"),
         r#"{
-             "memory_enabled": false,
+             "memory": {"enabled": false},
              "scripts": [
                {"path": ".agix/scripts/house.js", "point": "prompt.assemble",
                 "entry": "onAssemble", "timeout_ms": 5000}
@@ -525,7 +525,7 @@ async fn session_get_reports_what_the_scripts_did() {
     std::fs::write(
         project.join(".agix").join("settings.json"),
         r#"{
-             "memory_enabled": false,
+             "memory": {"enabled": false},
              "scripts": [
                {"path": ".agix/scripts/broken.js", "point": "prompt.assemble",
                 "entry": "onAssemble", "timeout_ms": 5000}
@@ -632,7 +632,7 @@ async fn one_bad_binding_leaves_the_session_running_with_no_scripts() {
     std::fs::write(
         project.join(".agix").join("settings.json"),
         r#"{
-             "memory_enabled": false,
+             "memory": {"enabled": false},
              "scripts": [
                {"path": ".agix/scripts/house.js", "point": "prompt.assemble",
                 "entry": "onAssemble", "timeout_ms": 5000},
@@ -687,7 +687,7 @@ async fn a_project_bound_session_keeps_its_own_settings_across_close_and_resume(
     std::fs::create_dir_all(other_project.join(".agix")).unwrap();
     std::fs::write(
         other_project.join(".agix").join("settings.json"),
-        r#"{"model": {"model_name": "other-project-model"}, "memory_enabled": false}"#,
+        r#"{"model": {"model_name": "other-project-model"}, "memory": {"enabled": false}}"#,
     )
     .unwrap();
 

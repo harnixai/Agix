@@ -69,7 +69,7 @@ async fn a_command_hook_runs_on_the_execution_layer_the_host_swapped_in() {
     std::fs::write(
         global.join("settings.json"),
         serde_json::json!({
-            "hooks_config": {"UserPromptSubmit": [
+            "hooks": {"UserPromptSubmit": [
                 {"type": "command", "command": "echo hook-marker-7f3a"}
             ]},
         })
@@ -80,7 +80,7 @@ async fn a_command_hook_runs_on_the_execution_layer_the_host_swapped_in() {
     let sock = dir.path().join("agix.sock");
     let paths = StaticDaemonPaths::with_project(global.clone(), work.clone()).with_global(global);
     let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
-    config.settings.values.memory_enabled = false;
+    config.settings.values.memory.enabled = false;
     let model = Arc::new(MockAnthropicClient::new());
     model.push_turn(one_turn());
     let spawned: Arc<Mutex<Vec<String>>> = Arc::default();

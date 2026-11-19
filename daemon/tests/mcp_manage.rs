@@ -63,12 +63,14 @@ async fn a_server_is_added_to_and_removed_from_the_global_tier() {
     )
     .await;
     assert_eq!(
-        tier["settings"]["mcp_servers"]["fs"]["command"], "definitely-not-a-real-binary-xyz",
+        tier["settings"]["mcp"]["servers"]["fs"]["command"], "definitely-not-a-real-binary-xyz",
         "{tier}"
     );
-    assert!(tier["settings"]["mcp_servers"]["fs"].get("env").is_none());
+    assert!(tier["settings"]["mcp"]["servers"]["fs"]
+        .get("env")
+        .is_none());
     assert_eq!(
-        read(&local)["mcp_servers"]["fs"]["env"]["TOKEN"],
+        read(&local)["mcp"]["servers"]["fs"]["env"]["TOKEN"],
         "secret-1234"
     );
     assert_eq!(state_of(&added, "fs").as_deref(), Some("failed"), "{added}");
@@ -79,16 +81,8 @@ async fn a_server_is_added_to_and_removed_from_the_global_tier() {
         json!({"name": "fs", "tier": "global"}),
     )
     .await;
-    assert!(
-        read(&shared).get("mcp_servers").is_none(),
-        "{}",
-        read(&shared)
-    );
-    assert!(
-        read(&local).get("mcp_servers").is_none(),
-        "{}",
-        read(&local)
-    );
+    assert!(read(&shared).get("mcp").is_none(), "{}", read(&shared));
+    assert!(read(&local).get("mcp").is_none(), "{}", read(&local));
     assert_eq!(state_of(&removed, "fs"), None, "{removed}");
     let status = call(&sock, "mcp.status", json!({})).await;
     assert_eq!(state_of(&status, "fs"), None, "{status}");
@@ -120,7 +114,7 @@ async fn a_token_in_a_servers_arguments_or_url_is_written_with_a_warning() {
             warnings[0]
                 .as_str()
                 .unwrap()
-                .contains(&format!("mcp_servers.{name}")),
+                .contains(&format!("mcp.servers.{name}")),
             "{added}"
         );
         assert!(!added.to_string().contains("s3cr3t"), "{added}");
@@ -156,7 +150,7 @@ async fn a_server_turned_off_is_reported_disabled_until_turned_back_on() {
     .await;
     assert_eq!(state_of(&off, "gh").as_deref(), Some("disabled"), "{off}");
     assert_eq!(
-        read(&dir.path().join("settings.json"))["mcp_enabled"]["gh"],
+        read(&dir.path().join("settings.json"))["mcp"]["servers"]["gh"]["enabled"],
         false
     );
     let status = call(&sock, "mcp.status", json!({})).await;
@@ -247,7 +241,7 @@ async fn a_project_turns_off_a_global_server_for_itself_and_an_untrusted_one_onl
         "{turned_on}"
     );
     assert_eq!(
-        read(&untrusted.join(".agix/settings.json"))["mcp_enabled"]["gh"],
+        read(&untrusted.join(".agix/settings.json"))["mcp"]["servers"]["gh"]["enabled"],
         false
     );
 
@@ -309,10 +303,10 @@ async fn the_status_of_a_pair_that_never_connected_starts_nothing() {
         std::fs::create_dir_all(root.join(".agix")).unwrap();
         std::fs::write(
             root.join(".agix/settings.json"),
-            json!({"mcp_servers": {"probe": {
+            json!({"mcp": {"servers": {"probe": {
                 "type": "stdio", "command": "/bin/sh",
                 "args": ["-c", format!("echo started >> '{}'", marker.display())]
-            }}})
+            }}}})
             .to_string(),
         )
         .unwrap();
@@ -369,14 +363,14 @@ async fn writing_a_server_for_a_pair_that_never_connected_starts_nothing() {
     std::fs::create_dir_all(other.join(".agix")).unwrap();
     std::fs::write(
         other.join(".agix/settings.json"),
-        json!({"mcp_servers": {
+        json!({"mcp": {"servers": {
             "probe": {
                 "type": "stdio", "command": "/bin/sh",
                 "args": ["-c", format!("echo started >> '{}'", marker.display())]
             },
             "old": bogus(),
             "spare": bogus()
-        }})
+        }}})
         .to_string(),
     )
     .unwrap();
@@ -429,7 +423,7 @@ async fn writing_a_server_for_a_pair_that_never_connected_starts_nothing() {
 }
 
 /// The writes that reconnect a pair's every server — `config.setProvider`,
-/// a `config.set` touching `sandbox.subprocess_env` — connect nothing for a
+/// a `config.set` touching `sandbox.env` — connect nothing for a
 /// pair that never connected: its servers wait for its first session.
 #[tokio::test]
 async fn a_write_that_reconnects_every_server_starts_none_for_a_pair_that_never_connected() {
@@ -439,10 +433,10 @@ async fn a_write_that_reconnects_every_server_starts_none_for_a_pair_that_never_
     std::fs::create_dir_all(other.join(".agix")).unwrap();
     std::fs::write(
         other.join(".agix/settings.json"),
-        json!({"mcp_servers": {"probe": {
+        json!({"mcp": {"servers": {"probe": {
             "type": "stdio", "command": "/bin/sh",
             "args": ["-c", format!("echo started >> '{}'", marker.display())]
-        }}})
+        }}}})
         .to_string(),
     )
     .unwrap();
@@ -463,14 +457,10 @@ async fn a_write_that_reconnects_every_server_starts_none_for_a_pair_that_never_
         &sock,
         "config.set",
         json!({"tier": "project", "project_root": other,
-               "changes": {"sandbox.subprocess_env.allow": ["LANG"]}}),
+               "changes": {"sandbox.env.allow": ["LANG"]}}),
     )
     .await;
-    assert_eq!(
-        set["changed"],
-        json!(["sandbox.subprocess_env.allow"]),
-        "{set}"
-    );
+    assert_eq!(set["changed"], json!(["sandbox.env.allow"]), "{set}");
     let status = call(&sock, "mcp.status", json!({"project_root": other})).await;
     assert_eq!(status["loaded"], false, "{status}");
     assert!(
@@ -503,7 +493,7 @@ async fn removing_a_server_the_tier_does_not_declare_is_refused_with_the_file() 
         message.contains(&dir.path().join(".agix/settings.json").display().to_string()),
         "{message}"
     );
-    assert!(read(&dir.path().join("settings.json"))["mcp_servers"]["gh"].is_object());
+    assert!(read(&dir.path().join("settings.json"))["mcp"]["servers"]["gh"].is_object());
 
     server.shutdown_token().cancel();
     let _ = handle.await;
