@@ -745,6 +745,7 @@ fn hide_project_and_state(
     ));
     let mut made = Vec::new();
     guard_project(args, roots, &masked, &mut made);
+    held::hold_configuration_in_named_roots(args, roots, &masked, &mut made);
     for p in project_secrets
         .iter()
         .filter(|l| !masked.contains(&l.base))

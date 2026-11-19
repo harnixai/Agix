@@ -115,6 +115,25 @@ impl Roots {
             .collect()
     }
 
+    /// What in the configuration root `real` configures the engine or is
+    /// acted on by it unsandboxed: the guarded files directly in it, and the
+    /// directories guarded with everything under them — its configuration
+    /// directories, and in its `state/` what the engine exports, forks and
+    /// resumes from and the embedder's own.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+    pub(super) fn configuration_in(&self, real: &Path) -> Configuration {
+        let state = real.join(entry::STATE);
+        Configuration {
+            files: ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)).collect(),
+            dirs: ENGINE_CONFIG_DIRS
+                .iter()
+                .map(|d| real.join(d))
+                .chain(PROJECT_STATE_ENGINE_DIRS.iter().map(|d| state.join(d)))
+                .chain([state.join(self.paths.layout().product_id())])
+                .collect(),
+        }
+    }
+
     /// Where the state root is not fenced off, the files and the
     /// directories of its configuration a command could otherwise write:
     /// it is an `.agix` like a project's. One the working directory is in
@@ -397,14 +416,20 @@ fn config_value(raw: &str) -> String {
     out.trim().to_string()
 }
 
+pub(super) struct Configuration {
+    pub(super) files: Vec<PathBuf>,
+    pub(super) dirs: Vec<PathBuf>,
+}
+
 /// What in the project a sandboxed command must not write, because the
 /// engine, or the user's own git, acts on it later outside the sandbox.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) struct ProjectGuard {
     /// `.git` and the git directory it is (in a worktree, the common one it
     /// leads to), the directories down to each submodule's git directory and
-    /// the configuration roots themselves: renaming one away, or replacing
-    /// it with a symlink, would put every rule below on a path nobody reads.
+    /// the configuration roots themselves and their `state/`: renaming one
+    /// away, or replacing it with a symlink, would put every rule below on a
+    /// path nobody reads.
     pub(super) entries: Vec<PathBuf>,
     pub(super) files: Vec<PathBuf>,
     pub(super) trees: Vec<PathBuf>,
@@ -461,14 +486,12 @@ pub(super) fn project_guard(roots: &Roots) -> ProjectGuard {
     trees.extend(configured.hooks);
     files.extend(configured.included);
     let (mut shut, mut working) = (Vec::new(), Vec::new());
-    let host_state = roots.paths.layout().product_id();
     for root in roots.paths.config_roots_in(cwd) {
         let real = root.resolved.clone();
-        let state = real.join(entry::STATE);
-        files.extend(ENGINE_CONFIG_FILES.iter().map(|f| real.join(f)));
-        trees.extend(ENGINE_CONFIG_DIRS.iter().map(|d| real.join(d)));
-        trees.extend(PROJECT_STATE_ENGINE_DIRS.iter().map(|d| state.join(d)));
-        trees.push(state.join(&host_state));
+        let configuration = roots.configuration_in(&real);
+        files.extend(configuration.files);
+        trees.extend(configuration.dirs);
+        entries.push(real.join(entry::STATE));
         working.extend(root.working_entries());
         shut.push(real.clone());
         if real != root.path {

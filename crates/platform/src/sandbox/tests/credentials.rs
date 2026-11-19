@@ -672,6 +672,99 @@ fn a_command_cannot_move_a_read_only_directory_aside_and_plant_another() {
     );
 }
 
+/// What in the project directory's `state/` the engine acts on unsandboxed
+/// — `history/`, `tool-results/`, the embedder's `state/<product id>/` —
+/// cannot be replaced by moving it, `state/` or the project directory aside
+/// and making another in its place, nor written under a writable root the
+/// policy names in `state/`, which stays writable around them. The same
+/// holds for the configuration under a writable root named at or in the
+/// project directory, or in one of its configuration directories.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_command_cannot_move_the_project_state_aside_and_plant_history() {
+    if !a_backend_runs() {
+        return;
+    }
+    for layout in [
+        base::paths::Layout::default(),
+        base::paths::Layout::new(".codix").unwrap(),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().canonicalize().unwrap().join("project");
+        let own = layout.project_dir_name().to_string();
+        let state = format!("{own}/state");
+        let host = format!("{state}/{}", layout.product_id());
+        let engine = [
+            format!("{state}/history"),
+            format!("{state}/tool-results"),
+            host.clone(),
+        ];
+        for d in engine.iter().chain([&format!("{state}/scratchpad")]) {
+            std::fs::create_dir_all(project.join(d).join("s")).unwrap();
+            std::fs::write(project.join(d).join("s/f"), "engine").unwrap();
+        }
+        let runs = |named: &[PathBuf], command: &str| {
+            let policy = SandboxPolicy {
+                state_root: Some(dir.path().join("state")),
+                layout: layout.clone(),
+                additional_writable: named.to_vec(),
+                ..Default::default()
+            };
+            run_confined(&project, &policy, &[], command)
+                .status
+                .success()
+        };
+        let plant = |d: &str| format!("mkdir -p {d}/s && printf forged > {d}/s/f");
+        let named_state = [project.join(&state)];
+        let named_own = [project.join(&own)];
+        for named in [&[][..], &named_state[..], &named_own[..]] {
+            for d in &engine {
+                for aside in [
+                    format!("mv {d} {d}.old"),
+                    format!("mv {state} {state}.old"),
+                    format!("mv {own} {own}.old"),
+                    format!("rm -rf {d}"),
+                    "true".to_string(),
+                ] {
+                    let command = format!("{aside} && {}", plant(d));
+                    assert!(!runs(named, &command), "{named:?}: `{command}` was allowed");
+                }
+                assert_eq!(
+                    std::fs::read_to_string(project.join(d).join("s/f")).unwrap(),
+                    "engine",
+                    "{d}"
+                );
+            }
+            for gone in [format!("{state}.old"), format!("{own}.old")] {
+                assert!(!project.join(&gone).exists(), "{gone}");
+            }
+        }
+        assert!(
+            runs(&[], &format!("echo x > {state}/scratchpad/s/n")),
+            "{state}/scratchpad was not writable"
+        );
+        assert!(
+            runs(&named_state, &format!("echo x > {state}/notes.md")),
+            "the named {state} was not writable"
+        );
+        std::fs::create_dir_all(project.join(&own).join("hooks")).unwrap();
+        std::fs::write(project.join(&own).join("settings.json"), "{}").unwrap();
+        for command in [
+            format!("echo x > {own}/hooks/h.sh"),
+            format!("echo x > {own}/settings.json"),
+            format!("mv {own}/hooks {own}/hooks.old && mkdir {own}/hooks"),
+            format!("mkdir -p {own}/agents && echo x > {own}/agents/a.md"),
+        ] {
+            assert!(!runs(&named_own, &command), "`{command}` was allowed");
+        }
+        let in_hooks = project.join(&own).join("hooks/named");
+        std::fs::create_dir_all(&in_hooks).unwrap();
+        let command = format!("echo x > {own}/hooks/named/h.sh");
+        assert!(!runs(&[in_hooks], &command), "`{command}` was allowed");
+    }
+}
+
 /// Where a configuration root or the project's skills directory is not
 /// there, a command cannot make it and put configuration in it — the
 /// instance's own directory, a foreign root, `.agents/skills` — and the
