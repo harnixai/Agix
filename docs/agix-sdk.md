@@ -48,6 +48,11 @@ provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或
 - `permission_prompt_timeout`：缺省读设置 `execution.permission_prompt_timeout_secs`，再缺省 300 秒，超时拒绝。
 - `host_policy`：它的 deny 在任何模式下都成立。
 - `customize_session`：每次建或重建会话都应用；`mcp`：MCP 的登录存储、OAuth 客户端与策略。
+- `host_plugins`：宿主自带的插件包，每项是一个解开的包目录（根上有 `plugin.toml`）。装配时逐个登记，
+  校验同 `plugin.install`，有一个加载不了装配就失败；设置把插件关了（`plugins.enabled: false`）时一个也不登记，
+  记一条 warn。运行中再登记用 `SessionPool::register_host_plugin(dir)`，返回它在 `plugin.list` 里的那一项。
+  宿主包在 `plugin.list` 里标 `source: "host"`，`plugin.uninstall` / `plugin.disable` 拒绝它，同名的已装包让位
+  （`shadowed_by: "host"`）。见 `plugin_packages.md`「宿主自带的包」。
 
 `assemble` 返回的池已经加载插件、在后台连 MCP、起了 janitor、配置热重载与定时任务，不要再调 `start_*`。一个进程可以有多个池；例外是 `otel` 的导出器是进程级的。
 
@@ -702,6 +707,7 @@ engine.shutdown().await;
 | `groups_file` | 无（agixd 用 `instance` 的） | `None`：有 `instance` 时是 `<data_root>/daemon/groups/<名字>.json`，否则不登记 |
 | `project_dir` | 无（agixd 总是 `.agix`） | `.agix`：引擎在每个项目里的目录名 |
 | `product_name` | 无（agixd 总是 Agix） | `Agix`：引擎自称的产品名 |
+| `plugins` | 无（agixd 不带宿主包） | 空：宿主自带的插件包目录，即 `Assembly::host_plugins`（§2）；有一个加载不了 `start` 返回 `EmbedError::Startup` |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
 

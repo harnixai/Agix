@@ -3602,20 +3602,26 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 ```jsonc
 // ← result
 { "plugins": [ ] }
-// 元素:{ "name":"…", "version":"…", "description":"…", "enabled": true,
-//        "disabled_reason": "…",             // 只在包被 settings.plugins.allow 挡在外面时有
+// 元素:{ "name":"…", "version":"…", "description":"…",
+//        "source": "installed|host",          // host = 嵌入方自带的包
+//        "enabled": true,
+//        "disabled_reason": "…",             // 包不会加载的原因:不在 settings.plugins.allow 里、用了宿主没提供的库、宿主带了同名包
+//        "shadowed_by": "host",              // 只在宿主带了同名包、这个装的包让位时有
 //        "root": "/…/plugins/cache/<name>/<version>",
 //        "script_faults": [],
 //        "skills": [ "tour" ],
 //        "skill_conflicts": [ ],
 //        "commands": [ ],
-//        "command_conflicts": [ ] }
+//        "command_conflicts": [ ],
+//        "functions": [ ] }
 // skill_conflicts 元素:
 //   { "skill": "tour", "shadowed_by": "user|project|plugin",
 //     "path": "/…/skills/tour/SKILL.md",
 //     "plugin": "…" }                       // 只在 shadowed_by 为 plugin 时有
 // commands 元素:
 //   { "name": "forge", "description": "…", "read_only": ["help", "spec list"], "writes": ["forge/**"] }
+// functions 元素(调用名是 <包名>.<name>):
+//   { "name": "check", "description": "…", "writes": ["reports/**"], "has_input_schema": true }
 // command_conflicts 元素:
 //   { "command": "forge", "shadowed_by": "plugin|skill",
 //     "plugin": "…",                        // 只在 shadowed_by 为 plugin 时有
@@ -3641,6 +3647,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 启用着的包声明同名命令时按包名先到的保留,后到的不注册,它的 `command_conflicts` 记一条
 `shadowed_by: "plugin"`、`plugin` 是占着名字的包;一个 skill 与命令同名时 `/名字` 归 skill
 (`RunExt` 照样能跑),记 `shadowed_by: "skill"`、`path` 是那个 `SKILL.md`。
+
+`functions` 是包的 `[[function]]`(`runext.md` §12),只给宿主调,不进模型的工具表。
+
+`source: "host"` 的是嵌入方自带的包(`plugin_packages.md`「宿主自带的包」),协议登记不了;同名的装的
+包让位,`shadowed_by: "host"`、`enabled: false`。
 
 #### `plugin.install`
 
@@ -3679,8 +3690,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 同名包)保持原状。`disclosure` 是这个插件会往模型上下文里塞的文本(含它带的 skill 的
 描述与正文)、它带的 skill 名(`skills`)与命令名(`commands`)和它要起的 MCP 服务器(命令行或地址),让调用方
 在依赖它之前先看见;字段见 `plugin_packages.md`。包里有一个 `SKILL.md` 校验不过,同样在
-改名之前被拒,报 `INVALID_PARAMS`,消息里写明是哪个 skill、哪一项;`[[command]]` 的入口不是
-源码(QuickJS 字节码)同样拒装。
+改名之前被拒,报 `INVALID_PARAMS`,消息里写明是哪个 skill、哪一项;`[[command]]` 或 `[[function]]`
+的入口不是源码(QuickJS 字节码)、`[[function]]` 的 `input_schema` 不是合法的 JSON Schema、`uses`
+里有宿主没提供的库(``needs host library `codix`, which this host does not provide``)同样拒装。
+`disclosure.functions` 是包的函数调用名。
 
 #### `plugin.uninstall`
 
@@ -3689,7 +3702,9 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "name": "…", "version": "1.0.0", "scope": "global" }   // version 省略 = 全部版本
 ```
 
-响应 `{ "success": true, "message": "…" }`。
+响应 `{ "success": true, "message": "…" }`。宿主自带的包报 `INVALID_PARAMS`
+(``` `<name>` is the host's own package; it cannot be uninstalled through the protocol ```),
+`plugin.enable` / `plugin.disable` 同样。
 
 #### `plugin.enable` / `plugin.disable`
 

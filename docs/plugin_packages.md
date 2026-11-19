@@ -2,7 +2,8 @@
 
 插件包是一个带 `plugin.toml` 的目录,打成 zip 安装。它本身不带要跑的代码运行时:包里
 声明的东西——MCP 服务器、绑到扩展点上的 QuickJS 脚本、一个声明式场景、agent 类型、一组
-skill、经 `RunExt` 跑的命令——都由引擎里已有的部分兑现。安装时,一切会到达模型的文本都摆到安装者面前。
+skill、经 `RunExt` 跑的命令、给宿主调的函数——都由引擎里已有的部分兑现。安装时,一切会到达模型的文本都摆到安装者面前。
+嵌入引擎的宿主还可以带自己的包(「宿主自带的包」),并给包里的 JavaScript 提供库(「宿主库」)。
 
 包方案是 `daemon` 的 `plugin-packages` feature,默认开启。不开时 `plugin.*` 这些 RPC 返回
 `PLUGINS_DISABLED`(`-32016`)。脚本怎么写见 `extending_quickjs.md`;引擎的全部扩展点见
@@ -263,6 +264,52 @@ skill 展开用的正文是包加载时读进来、披露过的那份,不是调�
 - **生命周期跟着包走。** 启用着的包的命令进新建的会话(子 Agent 跟着它的会话);已经在跑的会话
   不变。会话里至少有一个命令才有 `RunExt`。
 
+## 包里的函数
+
+`[[function]]` 是只给宿主调的函数,调用名是 `<包名>.<name>`(`github-tools.check`)。它不进模型的工具表,
+也不进 `RunCode`。字段规则、披露与 `plugin.list` 的 `functions` 见 `runext.md` §12;入口与命令同一套检查
+(只收源码、至多 4 MiB、不出包),编译结果同一个 `.bytecode/`。`input_schema` 安装时读成 JSON 并按 JSON
+Schema 编译,过不了拒装;发现时再查一次,入口或 schema 后来变坏的包不加载。同一个包里函数不重名;
+不同包的函数调用名带包名,不冲突。启用着的包的函数随包的启停进出函数表。
+
+## 宿主库
+
+```toml
+uses = ["codix"]
+
+[plugin]
+name = "xflow"
+```
+
+`uses` 是包顶层的键(TOML 里要写在第一个段之前),列出包里的 JavaScript 要用的宿主库,按命名空间。
+名字是小写 ASCII 字母开头,其后小写字母或数字;不能是 `agix`——引擎的基础库总在,不用声明。重复的只算
+一次。宿主库由嵌入引擎的宿主提供(`agix-sdk.md`);没声明的包,它的运行时里没有这个全局。
+
+- **装包时**:`uses` 里有宿主没提供的库,`plugin.install` 拒装,cache 里什么都不写,错误说缺哪个:
+  ``needs host library `codix`, which this host does not provide``(缺几个就列几个)。
+- **已经装着的包**:换了个不提供这个库的宿主(或宿主不再提供),包不加载;`plugin.list` 里它
+  `enabled: false`,`disabled_reason` 是上面那句;`daemon.doctor` 的 `plugins.refused` 检查报
+  `degraded` 并列出它。宿主重新提供这个库(库在池建起来时定下),不用重装就加载。
+- **披露**:每个库一条能力,``uses host library `codix` (<宿主给的描述>)``;宿主没给描述的只写名字。
+
+## 宿主自带的包
+
+嵌入引擎的宿主可以带自己的包:Rust 侧池级装配的 `Assembly::host_plugins`(`EmbedConfig.plugins` 透传),
+或运行中 `SessionPool::register_host_plugin(dir)`,每项是一个解开的包目录(根上有 `plugin.toml`)。协议
+不提供登记。
+
+- **登记即生效**:清单校验、`uses` 检查、披露的上限、入口与 schema 的检查同 `plugin.install`,过不了
+  登记就失败(装配时整个装配失败);过了就进启用集,`[[command]]`、`[[script]]`、`[[function]]`、`uses`
+  与普通包一样;`[dependencies]` 不检查。编译结果放在 global 层的 `.bytecode/`。同名再登记一次,替换前一个。
+- **`plugin.list`**:标 `source: "host"`(装的包是 `"installed"`),`root` 是宿主给的目录。
+- **管不到它**:`plugin.uninstall`、`plugin.disable`(以及 `plugin.enable`)对宿主包的名字报错:
+  ``` `xflow` is the host's own package; it cannot be uninstalled through the protocol ```。
+- **同名**:用户装了与宿主包同名的包,宿主包优先;装的那个照样在 `plugin.list` 里,`shadowed_by: "host"`,
+  `enabled: false`,`disabled_reason` 说明宿主带了同名包。
+- **插件关着时**:`settings.json` 的 `plugins.enabled: false`(或构建里没有包方案)时宿主包也不加载:装配时
+  跳过并记一条 warn,`register_host_plugin` 返回 `PLUGINS_DISABLED`。`plugins.allow` 白名单同样管宿主包,
+  不在白名单里的列出来但不加载。
+
 ## 打包与安装
 
 压缩包就是插件目录的一个普通 zip,`plugin.toml` 在根上;`tests/runner/src/plugin_fixture.rs`
@@ -297,8 +344,8 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
   这次放进去的)。
 - zip 里带 `..` 或绝对路径的条目跳过,不解压。
 
-其余的生命周期:`plugin.list`(每个已安装的插件连同启用状态、`root`、`skills` 与
-`skill_conflicts`、`commands` 与 `command_conflicts`,包括被禁用的)、
+其余的生命周期:`plugin.list`(每个已安装的插件连同启用状态、`source`、`root`、`skills` 与
+`skill_conflicts`、`commands` 与 `command_conflicts`、`functions`,包括被禁用的,以及宿主自带的)、
 `plugin.enable` / `plugin.disable`(按层持久化在 `enabled.json`;scene 层压过 global,没设过
 的算启用)、`plugin.uninstall`(`version` 可选,不给就全删)、`plugin.reload`。
 
@@ -335,10 +382,12 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 ```json
 {"plugin":"github-tools","version":"1.2.0",
  "capabilities":["run its own JavaScript at the `tool.result` extension point",
-                 "adds command `forge` that may write forge/** through the file tools; its other calls (Bash, MCP, web) get what the session's rules allow without asking"],
+                 "adds command `forge` that may write forge/** through the file tools; its other calls (Bash, MCP, web) get what the session's rules allow without asking",
+                 "exposes function `github-tools.check` to the host; writes no files"],
  "scene":"plugin:github-tools",
  "skills":["triage"],
  "commands":["forge"],
+ "functions":["github-tools.check"],
  "mcp_servers":["github (native): runs `npx -y github-mcp`; env: GITHUB_TOKEN"],
  "model_visible":[{"origin":"plugin description","text":"GitHub tools"},
                   {"origin":"agent `pr-reviewer` system prompt","text":"…"},
@@ -355,7 +404,10 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 allow without asking``,不写文件的把 `may write <writes>` 换成 `writes no files`。`writes` 只管住
 命令经 `Write` / `Edit` / `NotebookEdit` 的写入;它调的 `Bash`、MCP 工具按会话的规则走,会话不问就
 放行的(比如有一条 `Bash` 的 allow 规则),命令也能做(`runext.md` §6)。它的 `description` 进 `model_visible`
-(来处 ``command `<名字>` description``),`commands` 是包带的命令名。
+(来处 ``command `<名字>` description``),`commands` 是包带的命令名。每个 `[[function]]` 一条:
+``exposes function `<包名>.<名字>` to the host; may write <writes>``(不写文件的是 `writes no files`),
+`functions` 是调用名;函数的描述不到达模型,不进 `model_visible`。`uses` 的每个库一条
+``uses host library `<名字>` (<描述>)``。
 
 `model_visible` 列出每一段会一字不差到达模型的文本——插件描述、agent 描述与提示词、场景
 描述与提示词、skill 的 `description` / `when_to_use` / 正文 / `files:` 参考文件(来处写成

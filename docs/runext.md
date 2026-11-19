@@ -294,23 +294,59 @@ my-plugin/
 
 完整的样例是 `examples/plugins/forge`，设计见 `forge.md`。
 
-## 12. 和其他扩展方式的关系
+## 12. 插件函数
+
+`[[command]]` 给模型和用户用；`[[function]]` 只给**宿主**用：嵌入引擎的程序按名字调包里的一个函数，
+传结构化的 `input`，拿回结构化的结果。函数不进模型的工具表，也不进 `RunCode` 能调的表；要模型也能用，
+另声明一个 `[[command]]`。
+
+```toml
+[[function]]
+name = "check"                       # 调用名 <包名>.<name>，如 xflow.check
+entry = "xflow.js:check"             # 同 [[command]] 的写法与校验
+description = "门禁检查"              # 单行，至多 500 字符
+writes = []                          # 同 [[command]].writes；缺省不写
+input_schema = "schemas/check.json"  # 可选：包里的 JSON Schema，调用前校验 input
+```
+
+| 字段 | 规则 |
+|---|---|
+| `name` | 同命令名：1–32 个小写 ASCII 字母、数字、`-`，以字母开头。不经 `/name` 调，所以内建斜杠命令的名字也能用。同一个包里重名拒装；不同包之间不冲突，调用名带包名 |
+| `entry` | 同 `[[command]]`：包内、不经符号链接出包、UTF-8 源码、至多 4 MiB，字节码拒装；编译结果与命令同一套缓存（§8） |
+| `description` | 单行，非空，至多 500 字符 |
+| `writes` | 同 `[[command]]`（§2、§6）：只在宿主让这次调用写时生效，且只写得了这里列的范围，配置路径照样不让写 |
+| `input_schema` | 可选。包内的文件（规则同 `entry`），至多 64 KiB；安装时读成 JSON，并按 JSON Schema 编译，读不了、不是 JSON、编译不过的拒装 |
+
+入口函数的签名是 `async function check(input, ctx)`。
+
+**披露**：`disclosure.capabilities` 每个函数一条：``exposes function `xflow.check` to the host;
+may write reports/**``，不写文件的是 ``…; writes no files``；`disclosure.functions` 列出调用名。函数的
+`description` 不到达模型，不进 `model_visible`。`plugin.list` 每个包带 `functions`（`name`、
+`description`、`writes`、`has_input_schema`）。
+
+包顶层的 `uses`（`plugin_packages.md`「宿主库」）同样管函数：函数的运行时里装着包声明的宿主库。
+
+宿主怎么调、`ctx` 里有什么、权限与取消，见 `daemon_rpc_protocol.md` 的 `plugin.call` 与 `agix-sdk.md`。
+
+## 13. 和其他扩展方式的关系
 
 | 要做的事 | 用什么 |
 |---|---|
 | 改模型看到的东西：提示词、工具结果、请求 | `[[script]]`，九个点，不碰 I/O（`extending_quickjs.md`） |
 | 维护结构化数据、按规则推进、批量处理 | `[[command]]` + `RunExt`（本文） |
+| 宿主程序按名字调包里的一段逻辑 | `[[function]]`（§12） |
 | 一次性的批量活，由模型临场决定怎么做 | `RunCode`（`ptc.md`） |
 | 外部系统、别的语言、要常驻进程 | `[[mcp]]` |
 | 要状态、要进程级能力、要性能 | Rust 插件（`plugin_development.md`） |
 
-## 13. 实现落点
+## 14. 实现落点
 
 | 内容 | 位置 |
 |---|---|
 | 运行时（线程、限额、取消、`tools.*` 桥）拆成 `RunCode` 与 `RunExt` 共用 | `crates/ptc` |
 | `agix` 基础库 | `crates/js-lib`（`agix_js.md` §5） |
-| `[[command]]` 的解析、校验、披露、同名处理、字节码缓存 | `crates/packages` |
+| `[[command]]`、`[[function]]`、`uses` 的解析、校验、披露、同名处理、字节码缓存 | `crates/packages` |
+| 函数表（`PluginSubsystem::functions`）、宿主自带的包 | `crates/assembly`（`plugins/`） |
 | 命令表交给会话（`crates/assembly` 把它交给 `Builder::ext_commands`，子 Agent 经 `HostContracts` 继承） | `crates/runtime`、`crates/assembly` |
 | 注册 `RunExt`（会话最后的工具表里有它才有 `/name`）；斜杠命令 | `crates/runtime` |
 | 调用级的写入授权 | `crates/permissions`（`write_scope`、`Reach::EditsProject`），与插件 skill 的 `allowed-tools` 同一套收窄；子调用的拦截在 `crates/runtime`（`Caller::Command`） |
