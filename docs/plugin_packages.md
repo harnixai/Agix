@@ -309,7 +309,8 @@ name = "xflow"
 - **管不到它**:`plugin.uninstall`、`plugin.disable`(以及 `plugin.enable`)对宿主包的名字报错:
   ``` `xflow` is the host's own package; it cannot be uninstalled through the protocol ```。
 - **同名**:用户装了与宿主包同名的包,宿主包优先;装的那个照样在 `plugin.list` 里,`shadowed_by: "host"`,
-  `enabled: false`,`disabled_reason` 说明宿主带了同名包。
+  `enabled: false`,`disabled_reason` 说明宿主带了同名包;`plugin.uninstall` 这个名字删的是装的那个,
+  层里没有装的了才报宿主包。
 - **插件关着时**:`settings.json` 的 `plugins.enabled: false`(或构建里没有包方案)时宿主包也不加载:装配时
   跳过并记一条 warn,`register_host_plugin` 返回 `PLUGINS_DISABLED`。`plugins.allow` 白名单同样管宿主包,
   不在白名单里的列出来但不加载。

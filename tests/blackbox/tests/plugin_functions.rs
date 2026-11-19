@@ -1,7 +1,8 @@
 //! The package side of plugin functions (`[[function]]`), host libraries
 //! (`uses`) and the host's own packages, through the embed entry's protocol
 //! stream: what `plugin.install` discloses and refuses, what `plugin.list`
-//! shows, and what `plugin.uninstall` / `plugin.disable` will not touch.
+//! shows, and what `plugin.uninstall` / `plugin.disable` will not touch — an
+//! installed package the host's shadows is still uninstalled.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -213,7 +214,8 @@ async fn a_package_that_uses_a_library_the_host_lacks_is_not_installed() -> anyh
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_package_is_listed_as_the_hosts_and_beyond_uninstall() -> anyhow::Result<()> {
+async fn a_host_package_is_listed_as_the_hosts_and_beyond_uninstall_and_the_one_it_shadows_is_not(
+) -> anyhow::Result<()> {
     let mut daemon = Daemon::start(|root| {
         let dir = root.join("host-xflow");
         std::fs::create_dir_all(dir.join("schemas")).unwrap();
@@ -246,6 +248,13 @@ async fn a_host_package_is_listed_as_the_hosts_and_beyond_uninstall() -> anyhow:
     assert_eq!(shadowed["shadowed_by"], "host", "{shadowed}");
     assert_eq!(shadowed["enabled"], false, "{shadowed}");
     assert_eq!(named(&plugins, "xflow", "host")["enabled"], true);
+
+    let removed = daemon
+        .call("plugin.uninstall", json!({"name": "xflow"}))
+        .await?;
+    assert_eq!(removed["result"]["success"], true, "{removed}");
+    let plugins = daemon.listed().await?;
+    assert_eq!(plugins.len(), 1, "only the host's is left: {plugins:?}");
 
     for (method, params) in [
         ("plugin.uninstall", json!({"name": "xflow"})),

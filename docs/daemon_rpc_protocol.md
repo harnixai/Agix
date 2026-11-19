@@ -3722,7 +3722,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 
 响应 `{ "success": true, "message": "…" }`。宿主自带的包报 `INVALID_PARAMS`
 (``` `<name>` is the host's own package; it cannot be uninstalled through the protocol ```),
-`plugin.enable` / `plugin.disable` 同样。
+`plugin.enable` / `plugin.disable` 同样;这一层装着被宿主包遮住的同名包(`shadowed_by:"host"`)时,
+`plugin.uninstall` 删的是装的那个。
 
 #### `plugin.enable` / `plugin.disable`
 

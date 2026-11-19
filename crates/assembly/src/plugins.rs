@@ -336,8 +336,14 @@ mod imp {
             version: Option<&str>,
             scope: PluginScope,
         ) -> Result<PluginRemoved, String> {
-            self.refuse_host(name, "uninstalled")?;
             let cache = self.packages.cache_for(scope.as_str())?;
+            let shadowed = || match version {
+                Some(version) => cache.is_cached(name, version),
+                None => !cache.list_versions(name).is_empty(),
+            };
+            if self.packages.is_host(name) && !shadowed() {
+                self.refuse_host(name, "uninstalled")?;
+            }
             let removed =
                 ::packages::install::uninstall(&cache, name, version).map_err(|e| e.to_string())?;
             let message = match version {
