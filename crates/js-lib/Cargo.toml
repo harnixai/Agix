@@ -4,9 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Agix — the `agix` global every embedded JavaScript runtime gets: YAML, glob, path, JSON Schema, SHA-256, UUID, argument parsing"
+description = "Agix — the base library every embedded JavaScript runtime gets under the engine's name: YAML, glob, path, JSON Schema, SHA-256, UUID, argument parsing"
 
 [dependencies]
+base         = { workspace = true }
 rquickjs     = { workspace = true }
 saphyr-parser = "0.3"
 globset      = { workspace = true }

@@ -83,7 +83,7 @@ pub(in crate::session_pool) fn bind_scripts(
     // have left whichever the session did not hold running on a per-turn
     // budget nothing ever reset.
     let mut bound = BoundScripts::default();
-    let engine = script_host::bindings::engine_for(settings.paths.layout.product_name());
+    let engine = script_host::bindings::engine_for(settings.paths.layout.engine());
 
     if let Err(e) = bind_into(
         &mut bound,

@@ -1,7 +1,7 @@
-// The `agix` global (docs/agix_js.md): the namespaces, argument checks and the
-// parts that read better in JavaScript, over the Rust functions `native`
-// carries. Compiled to bytecode once per process; the default export runs
-// once per runtime.
+// The base library (docs/agix_js.md), a global named for the engine: the
+// namespaces, argument checks and the parts that read better in JavaScript,
+// over the Rust functions `native` carries. Compiled to bytecode once per
+// process; the default export runs once per runtime.
 
 const { parse: jsonParse, stringify: jsonStringify } = JSON;
 const { freeze, isFrozen, defineProperty, getOwnPropertyNames, create } = Object;
@@ -441,14 +441,11 @@ function makeCli() {
 
 let installed = false;
 
-export default function install(native, version, aliases) {
-  if (installed) fail("agix.installed", "agix is already installed in this runtime");
-  for (const name of aliases) {
-    if (name in globalThis) fail("agix.alias", `${name} is already a global`);
-  }
+export default function install(native, version, name) {
+  if (installed) fail("library.installed", "the base library is already installed in this runtime");
+  if (name in globalThis) fail("library.global", `${name} is already a global`);
   installed = true;
-  const shown = aliases.length > 0 ? aliases[0] : "agix";
-  const errorName = `${shown[0].toUpperCase()}${shown.slice(1)}Error`;
+  const errorName = `${name[0].toUpperCase()}${name.slice(1)}Error`;
   defineProperty(AgixError, "name", { value: errorName });
   defineProperty(AgixError.prototype, "name", { value: errorName });
   const agix = {
@@ -462,8 +459,10 @@ export default function install(native, version, aliases) {
     cli: makeCli(),
   };
   deepFreeze(AgixError);
-  const value = deepFreeze(agix);
-  for (const name of ["agix", ...aliases]) {
-    defineProperty(globalThis, name, { value, writable: false, enumerable: false, configurable: false });
-  }
+  defineProperty(globalThis, name, {
+    value: deepFreeze(agix),
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
 }

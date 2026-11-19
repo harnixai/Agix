@@ -550,11 +550,11 @@ async fn the_async_runtime_installs_the_same_library() {
 }
 
 #[test]
-fn an_alias_is_the_same_frozen_object() {
+fn a_named_library_is_the_one_frozen_global() {
     let runtime = rquickjs::Runtime::new().unwrap();
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
-        js_lib::install_as(&ctx, &["codix"]).unwrap();
+        js_lib::install_named(&ctx, "codix").unwrap();
         let seen: String = ctx
             .eval(
                 r#"
@@ -562,68 +562,81 @@ fn an_alias_is_the_same_frozen_object() {
                 const d = Object.getOwnPropertyDescriptor(globalThis, "codix");
                 let reassigned;
                 try { codix = {}; reassigned = "changed"; } catch (e) { reassigned = e.name; }
-                JSON.stringify([codix === agix, Object.isFrozen(codix.yaml), d.writable,
+                JSON.stringify([typeof agix, Object.isFrozen(codix.yaml), d.writable,
                     d.configurable, reassigned, codix.yaml.parse("a: 1").a])
                 "#,
             )
             .unwrap();
-        assert_eq!(seen, r#"[true,true,false,false,"TypeError",1]"#);
+        assert_eq!(seen, r#"["undefined",true,false,false,"TypeError",1]"#);
     });
 }
 
 #[test]
-fn errors_are_named_after_the_alias() {
+fn errors_are_named_after_the_global() {
     let runtime = rquickjs::Runtime::new().unwrap();
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
-        js_lib::install_as(&ctx, &["codix"]).unwrap();
+        js_lib::install_named(&ctx, "codix").unwrap();
         let seen: String = ctx
             .eval(
                 r#"
                 let e;
                 try { codix.yaml.parse("a: [1"); } catch (x) { e = x; }
-                JSON.stringify([e.name, e.constructor.name, String(e).split(":")[0], e instanceof Error])
+                JSON.stringify([e.name, e.constructor.name, String(e).split(":")[0],
+                    e instanceof Error, e.stack.includes("Agix")])
                 "#,
             )
             .unwrap();
-        assert_eq!(seen, r#"["CodixError","CodixError","CodixError",true]"#);
+        assert_eq!(
+            seen,
+            r#"["CodixError","CodixError","CodixError",true,false]"#
+        );
     });
 }
 
 #[test]
-fn an_alias_is_a_lowercase_name_no_script_already_has() {
-    assert_eq!(js_lib::alias_for("Codix").as_deref(), Some("codix"));
-    assert_eq!(js_lib::alias_for("My-Tool_2").as_deref(), Some("mytool2"));
-    for product in [
-        "Agix",
-        "a-gix",
-        "2fast",
-        "-_-",
-        "Tools",
-        "Console",
-        "Fs",
-        "New",
-        "Escape",
-        "Constructor",
-    ] {
-        assert_eq!(js_lib::alias_for(product), None, "{product}");
+fn the_global_is_a_lowercase_name_no_script_already_has() {
+    for name in ["agix", "codix", "foo2"] {
+        assert_eq!(js_lib::check_global_name(name), Ok(()), "{name}");
     }
     for name in [
         "Codix",
         "co-dix",
+        "2fast",
         "",
-        "agix",
         "tools",
+        "console",
+        "fs",
         "class",
+        "new",
         "escape",
         "constructor",
     ] {
+        assert!(js_lib::check_global_name(name).is_err(), "{name}");
         let runtime = rquickjs::Runtime::new().unwrap();
         let context = rquickjs::Context::full(&runtime).unwrap();
         context.with(|ctx| {
-            assert!(js_lib::install_as(&ctx, &[name]).is_err(), "{name}");
+            assert!(js_lib::install_named(&ctx, name).is_err(), "{name}");
             assert!(ctx.eval::<bool, _>("typeof agix === 'undefined'").unwrap());
         });
+    }
+}
+
+#[test]
+fn no_global_of_a_fresh_context_can_name_the_library() {
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    let names: Vec<String> = context.with(|ctx| {
+        ctx.eval(
+            "const names = []; \
+             for (let o = globalThis; o; o = Object.getPrototypeOf(o)) \
+               names.push(...Object.getOwnPropertyNames(o)); \
+             names",
+        )
+        .unwrap()
+    });
+    for name in names {
+        assert!(js_lib::check_global_name(&name).is_err(), "{name}");
     }
 }
 

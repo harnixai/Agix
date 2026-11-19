@@ -82,7 +82,12 @@ const MODULE_EDGES: &[(&str, &str, &str)] = &[(
 )];
 
 /// Edges between two crates of one tier below the modules, each with why.
-const SAME_TIER: &[(&str, &str, &str)] = &[];
+const SAME_TIER: &[(&str, &str, &str)] = &[(
+    "js-lib",
+    "base",
+    "the names a script global may take are base's, where `Layout` checks the engine's name \
+     in builds without a JavaScript engine; the library installs under one of them",
+)];
 
 /// Edges that break the tiers today, each with what removes it.
 const NOT_YET: &[(&str, &str, &str)] = &[];

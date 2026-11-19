@@ -1,11 +1,12 @@
-//! An embedder that names its own product (`EmbedConfig.product_name` =
-//! `Codix`), over `Embedded::serve_stream`: the model is told it is Codix
-//! and is never shown `Agix`, every request to the model and to an MCP
-//! authorization server goes out as `codix/<version>`, the client the
-//! authorization server registers is called Codix, and a sub-agent's
-//! worktree is on a `codix/worktree-` branch, and `scene.list` calls the
-//! built-in coding scene "Codix Code". Without the field nothing of that
-//! changes from Agix. A name that cannot be a product's is refused at start.
+//! An embedder that names its own product (`EmbedConfig.product` = `Codix`),
+//! over `Embedded::serve_stream`: the model is told it is Codix and credits
+//! Codix, every request to the model and to an MCP authorization server goes
+//! out as `codix/<version>`, the client the authorization server registers is
+//! called Codix, a sub-agent's worktree is on a `codix/worktree-` branch, and
+//! `scene.list` calls the built-in coding scene "Codix Code". The engine's
+//! name does not follow the product's: `RunCode` still offers the base
+//! library as `agix.*`. Without the field nothing of that changes from Agix.
+//! A name that cannot be a product's is refused at start.
 
 use std::path::{Path, PathBuf};
 
@@ -124,9 +125,9 @@ async fn run(product: Option<&str>, project_dir: &str) -> anyhow::Result<Seen> {
     let root = root(&stub, &mcp)?;
     let mut config = EmbedConfig::new(&root.data);
     config.cwd = Some(root.project.clone());
-    config.project_dir = project_dir.into();
+    config.project_dir = Some(project_dir.into());
     if let Some(name) = product {
-        config.product_name = name.into();
+        config.product = name.into();
     }
     let embedded = Embedded::start(config).await?;
     let mut client = connect(&embedded);
@@ -223,16 +224,18 @@ async fn a_named_product_is_what_the_model_the_servers_and_git_see() -> anyhow::
     let user_agent = format!("codix/{}", env!("CARGO_PKG_VERSION"));
 
     assert!(the_turn(&seen).system_contains("You are Codix"));
+    assert!(!the_turn(&seen).system_contains("You are Agix"));
     assert!(after_the_guide(&seen).messages_contain("Generated with Codix"));
+    assert!(!after_the_guide(&seen).messages_contain("[Agix]("));
     for request in &seen.stub {
         assert_eq!(request.header("user-agent"), Some(user_agent.as_str()));
-        let body = request.body.to_string().to_lowercase();
-        assert!(
-            !body.contains("agix"),
-            "a request to the model names Agix: {}",
-            &body[body.find("agix").unwrap().saturating_sub(120)..][..240.min(body.len())]
-        );
     }
+    let run_code = the_turn(&seen).body["tools"]
+        .as_array()
+        .and_then(|tools| tools.iter().find(|t| t["name"] == "RunCode"))
+        .and_then(|t| t["description"].as_str())
+        .expect("RunCode is offered");
+    assert!(run_code.contains("agix.yaml"), "{run_code}");
     assert_eq!(seen.client_names, ["Codix"]);
     assert!(!seen.as_user_agents.is_empty());
     assert!(
@@ -263,7 +266,7 @@ async fn a_named_product_is_what_the_model_the_servers_and_git_see() -> anyhow::
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn without_a_product_name_the_engine_is_agix() -> anyhow::Result<()> {
+async fn without_a_product_the_engine_calls_itself_agix() -> anyhow::Result<()> {
     let seen = run(None, ".agix").await?;
     let user_agent = format!("agix/{}", env!("CARGO_PKG_VERSION"));
 
@@ -295,7 +298,7 @@ async fn a_name_that_cannot_be_a_product_is_refused_at_start() -> anyhow::Result
     for name in ["", "1x", "-x", "a b", "a/b", "a.b", "Ägix"] {
         let mut config = EmbedConfig::new(dir.path());
         config.cwd = Some(dir.path().to_path_buf());
-        config.product_name = name.into();
+        config.product = name.into();
         match Embedded::start(config).await {
             Err(EmbedError::InvalidProductName { name: refused, .. }) => assert_eq!(refused, name),
             Err(other) => panic!("{name:?}: {other}"),

@@ -75,8 +75,8 @@ impl RunCodeTool {
 
     pub fn new(callable: &[CallableTool], limits: Limits, library: Library) -> Self {
         Self {
-            description: describe(callable, library.shown()),
-            guide: guide(callable, library.shown()),
+            description: describe(callable, library.global()),
+            guide: guide(callable, library.global()),
             limits,
             library,
             run_slots: default_run_slots(),
@@ -141,16 +141,11 @@ A script (QuickJS, ES2023, top-level await; no require/import or Node/browser AP
 tools.<Name>(input) and callTool(name, input) return Promises that reject on failure; log(text) \
 reports progress{helpers}. End with `return <JSON value>`.";
 
-/// `{helpers}` in [`INTRO`] and [`SUMMARY`]: the base library's helpers under
-/// `global`, or nothing when the model is told of none.
-fn with_helpers(text: &str, global: Option<&str>, helpers: impl Fn(&str) -> String) -> String {
-    text.replace("{helpers}", &global.map(helpers).unwrap_or_default())
-}
-
-fn describe(callable: &[CallableTool], library: Option<&str>) -> String {
-    let summary = with_helpers(SUMMARY, library, |g| {
-        format!("; {g}.yaml, {g}.glob, {g}.path, {g}.json and {g}.hash are pure helpers")
-    });
+fn describe(callable: &[CallableTool], g: &str) -> String {
+    let summary = SUMMARY.replace(
+        "{helpers}",
+        &format!("; {g}.yaml, {g}.glob, {g}.path, {g}.json and {g}.hash are pure helpers"),
+    );
     let mut out = format!(
         "{summary}\n\nCallable here (MCP tools too, with callTool; the guide has the rest):"
     );
@@ -161,14 +156,15 @@ fn describe(callable: &[CallableTool], library: Option<&str>) -> String {
     out
 }
 
-fn guide(callable: &[CallableTool], library: Option<&str>) -> String {
-    let intro = with_helpers(INTRO, library, |g| {
-        format!(
+fn guide(callable: &[CallableTool], g: &str) -> String {
+    let intro = INTRO.replace(
+        "{helpers}",
+        &format!(
             "; pure helpers: {g}.yaml (parse, stringify, parseFrontmatter), {g}.glob (test, \
              filter), {g}.path, {g}.json.validate (JSON Schema), {g}.hash.sha256, {g}.uuid (v4, \
              v7), {g}.cli.parseArgs"
-        )
-    });
+        ),
+    );
     let mut out = format!("{intro}\n\nTools callable here (MCP tools too, by name with callTool):");
     for tool in callable {
         out.push_str("\n  ");

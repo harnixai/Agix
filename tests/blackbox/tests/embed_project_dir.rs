@@ -114,7 +114,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
 fn config(root: &Root, project_dir: &str) -> EmbedConfig {
     let mut config = EmbedConfig::new(&root.data);
     config.cwd = Some(root.project.clone());
-    config.project_dir = project_dir.into();
+    config.project_dir = Some(project_dir.into());
     config
 }
 

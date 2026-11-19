@@ -331,3 +331,38 @@ impl ScriptLedger {
         self.dropped.load(Ordering::Relaxed)
     }
 }
+
+const RESERVED_WORDS: &str = "arguments async await break case catch class const continue \
+    debugger default delete do else enum eval export extends false finally for function if \
+    implements import in instanceof interface let new null package private protected public \
+    return static super switch this throw true try typeof undefined var void while with yield";
+
+/// What the carriers put on `globalThis` themselves, `RunCode`'s and
+/// `RunExt`'s stand-ins for missing Node APIs included.
+const CARRIER_GLOBALS: &str = "agent args callTool console exports fetch fs log messages \
+    module notify process require stopRequested tools";
+
+/// The lowercase names a fresh QuickJS context resolves on `globalThis`, its
+/// prototype chain included; `js-lib`'s tests hold this to the interpreter.
+const STANDARD_GLOBALS: &str = "atob btoa constructor escape eval performance undefined unescape";
+
+/// Why `name` cannot be a global the engine adds to every script — the base
+/// library's, or a host library's: it is `[a-z][a-z0-9]*`, no reserved
+/// word, and no name a script already has from its carrier or the language.
+pub fn check_global_name(name: &str) -> Result<(), &'static str> {
+    let listed = |words: &str| words.split_whitespace().any(|w| w == name);
+    if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        Err("it must start with a lowercase ASCII letter")
+    } else if !name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        Err("only lowercase ASCII letters and digits are allowed")
+    } else if listed(RESERVED_WORDS) {
+        Err("it is a JavaScript reserved word")
+    } else if listed(CARRIER_GLOBALS) || listed(STANDARD_GLOBALS) {
+        Err("a script already has a global of that name")
+    } else {
+        Ok(())
+    }
+}

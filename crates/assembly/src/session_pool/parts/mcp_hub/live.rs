@@ -37,7 +37,7 @@ pub struct McpOptions {
     /// The client this host presents to MCP authorization servers it has no
     /// registration with: the name shown on their consent page, and its
     /// client metadata document URL if it publishes one. `None`: the
-    /// product's name (`EmbedConfig::product_name`), dynamic registration only.
+    /// product's name (`EmbedConfig::product`), dynamic registration only.
     pub oauth_client: Option<mcp::oauth::McpOAuthClient>,
     /// The enterprise IdP whose users' identities `"grant": "enterprise"`
     /// MCP servers are authorized from (the host then supplies an identity

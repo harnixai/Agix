@@ -65,21 +65,27 @@ pub struct EmbedConfig {
     /// next start with the same file stops what a killed run left behind;
     /// with or without an `instance`.
     pub groups_file: Option<PathBuf>,
-    /// The name of the directory the engine keeps in each project (`.agix`):
-    /// the project's settings, agents, hooks, rules, memory. Only this name
-    /// is read; a `.agix` beside it is not, and stays guarded against the
-    /// model as another agent's configuration. One path component of
-    /// `[a-z0-9._-]` starting with `.`, not another tool's
+    /// The name of the directory the engine keeps in each project; `None`
+    /// is `.<engine>`: the project's settings, agents, hooks, rules, memory.
+    /// Only this name is read; a `.agix` beside it is not, and stays guarded
+    /// against the model as another agent's configuration. One path
+    /// component of `[a-z0-9._-]` starting with `.`, not another tool's
     /// (`base::paths::layout::OTHER_TOOLS_DIRS`) nor the worktrees
     /// directory's default (`base::paths::DEFAULT_WORKTREES_DIR`).
-    pub project_dir: String,
+    pub project_dir: Option<String>,
     /// The product's name (`Agix`), wherever the engine names itself: the
     /// model's prompts and the messages it reads, the `client_name` an MCP
     /// authorization server shows, the `User-Agent` of its requests, the
     /// branches of its worktrees and the directory its managed settings and
     /// MCP policy are read from. Only this name's managed files are read.
     /// An ASCII letter, then up to 31 ASCII letters, digits, `-` or `_`.
-    pub product_name: String,
+    pub product: String,
+    /// The engine's name in scripts and file names (`agix`): the global the
+    /// script base library is under, its errors' name (`<Engine>Error`), the
+    /// project directory's default and the state directory under `$HOME`
+    /// that is guarded as this engine's. `[a-z][a-z0-9]*`, at most 16 long,
+    /// no JavaScript reserved word and no global a script already has.
+    pub engine: String,
     /// The host's own plugin packages, each an unpacked package directory
     /// with its `plugin.toml`: loaded at start like an installed package,
     /// listed with `source: "host"`, beyond `plugin.uninstall` and
@@ -106,8 +112,9 @@ impl EmbedConfig {
             mcp_policy: None,
             managed_settings: None,
             groups_file: None,
-            project_dir: base::paths::DEFAULT_PROJECT_DIR.into(),
-            product_name: base::paths::DEFAULT_PRODUCT_NAME.into(),
+            project_dir: None,
+            product: base::paths::DEFAULT_PRODUCT_NAME.into(),
+            engine: base::paths::DEFAULT_ENGINE.into(),
             plugins: Vec::new(),
         }
     }
@@ -150,9 +157,12 @@ pub enum EmbedError {
     /// `EmbedConfig::project_dir` cannot name a project's directory.
     #[error("project_dir `{name}`: {reason}")]
     InvalidProjectDir { name: String, reason: String },
-    /// `EmbedConfig::product_name` cannot name the product.
-    #[error("product_name `{name}`: {reason}")]
+    /// `EmbedConfig::product` cannot name the product.
+    #[error("product `{name}`: {reason}")]
     InvalidProductName { name: String, reason: String },
+    /// `EmbedConfig::engine` cannot name the engine.
+    #[error("engine `{name}`: {reason}")]
+    InvalidEngineName { name: String, reason: String },
 }
 
 /// Who keeps this process's process-group record: a named instance, or the
@@ -397,14 +407,25 @@ pub(crate) fn resolve_scene(
     })
 }
 
-/// The project directory and product `config` names, checked.
+/// The engine, project directory and product `config` names, checked.
 fn layout_of(config: &EmbedConfig) -> Result<base::paths::Layout, EmbedError> {
-    base::paths::Layout::new(&config.project_dir)
-        .map_err(|e| EmbedError::InvalidProjectDir {
+    let layout = base::paths::Layout::default()
+        .with_engine(&config.engine)
+        .map_err(|e| EmbedError::InvalidEngineName {
             name: e.name,
             reason: e.reason.to_string(),
-        })?
-        .with_product_name(&config.product_name)
+        })?;
+    let layout = match &config.project_dir {
+        Some(name) => layout
+            .with_project_dir(name)
+            .map_err(|e| EmbedError::InvalidProjectDir {
+                name: e.name,
+                reason: e.reason.to_string(),
+            })?,
+        None => layout,
+    };
+    layout
+        .with_product_name(&config.product)
         .map_err(|e| EmbedError::InvalidProductName {
             name: e.name,
             reason: e.reason.to_string(),
@@ -693,7 +714,7 @@ mod tests {
             daemon_config_of(&config).settings.paths.local_data_dir,
             work.join(".agix")
         );
-        config.project_dir = ".codix".into();
+        config.project_dir = Some(".codix".into());
         let renamed = daemon_config_of(&config);
         assert_eq!(renamed.settings.paths.local_data_dir, work.join(".codix"));
         assert_eq!(renamed.paths.layout().project_dir_name(), ".codix");
@@ -702,7 +723,7 @@ mod tests {
             renamed.paths.layout()
         );
         for bad in ["../x", ".git", "a/b", ""] {
-            config.project_dir = bad.into();
+            config.project_dir = Some(bad.into());
             assert!(
                 matches!(
                     daemon_config(&config, "code"),
@@ -714,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn the_product_name_is_the_one_the_config_names() {
+    fn the_product_is_the_one_the_config_names() {
         let root = tempfile::tempdir().unwrap();
         let mut config = EmbedConfig::new(root.path());
         config.cwd = Some(root.path().join("work"));
@@ -722,7 +743,7 @@ mod tests {
             daemon_config_of(&config).paths.layout().product_name(),
             "Agix"
         );
-        config.product_name = "Codix".into();
+        config.product = "Codix".into();
         let renamed = daemon_config_of(&config);
         assert_eq!(renamed.paths.layout().product_name(), "Codix");
         assert_eq!(
@@ -730,7 +751,7 @@ mod tests {
             renamed.paths.layout()
         );
         for bad in ["", "1x", "a b", "a/b", "a.b"] {
-            config.product_name = bad.into();
+            config.product = bad.into();
             assert!(
                 matches!(
                     daemon_config(&config, "code"),
@@ -739,6 +760,46 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_engine_names_the_project_directory_unless_the_config_names_one() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = EmbedConfig::new(root.path());
+        let work = root.path().join("work");
+        config.cwd = Some(work.clone());
+        assert_eq!(daemon_config_of(&config).paths.layout().engine(), "agix");
+        config.engine = "foo".into();
+        let renamed = daemon_config_of(&config);
+        assert_eq!(renamed.paths.layout().engine(), "foo");
+        assert_eq!(renamed.paths.layout().product_name(), "Agix");
+        assert_eq!(renamed.settings.paths.local_data_dir, work.join(".foo"));
+        assert_eq!(
+            renamed.settings.engine_config().layout,
+            renamed.paths.layout()
+        );
+        config.project_dir = Some(".codix".into());
+        let named = daemon_config_of(&config);
+        assert_eq!(named.settings.paths.local_data_dir, work.join(".codix"));
+        assert_eq!(named.paths.layout().engine(), "foo");
+        config.project_dir = None;
+        for bad in [
+            "", "Foo", "1x", "a-b", "class", "tools", "escape", "codex", "wkts",
+        ] {
+            config.engine = bad.into();
+            assert!(
+                matches!(
+                    daemon_config(&config, "code"),
+                    Err(EmbedError::InvalidEngineName { ref name, .. }) if name == bad
+                ),
+                "{bad:?}"
+            );
+        }
+        config.engine = "a".repeat(17);
+        assert!(matches!(
+            daemon_config(&config, "code"),
+            Err(EmbedError::InvalidEngineName { .. })
+        ));
     }
 
     fn daemon_config_of(config: &EmbedConfig) -> DaemonConfig {

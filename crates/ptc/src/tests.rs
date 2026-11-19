@@ -899,23 +899,15 @@ async fn a_program_has_the_agix_library() {
 }
 
 #[tokio::test]
-async fn the_model_is_told_the_library_under_the_products_own_name() {
+async fn the_model_is_told_the_library_under_the_engines_name() {
     let prompt = base::tool::PromptContext::default();
-    for (product, shown) in [
-        ("Agix", Some("agix")),
-        ("Codix", Some("codix")),
-        ("Tools", None),
-    ] {
-        let tool = RunCodeTool::new(&[], limits(), Library::for_product(product));
+    for engine in ["agix", "codix"] {
+        let tool = RunCodeTool::new(&[], limits(), Library::for_engine(engine));
         let guide = tool.guide(&prompt).await.expect("a guide");
         for text in [tool.description(), guide.as_str()] {
-            match shown {
-                Some(name) => {
-                    assert!(text.contains(&format!("{name}.yaml")), "{product}: {text}");
-                    let others = text.matches("agix.").count();
-                    assert_eq!(others > 0, name == "agix", "{product}: {text}");
-                }
-                None => assert!(!text.contains(".yaml"), "{product}: {text}"),
+            assert!(text.contains(&format!("{engine}.yaml")), "{engine}: {text}");
+            if engine != "agix" {
+                assert!(!text.contains("agix."), "{engine}: {text}");
             }
             assert!(text.contains("End with `return <JSON value>`."), "{text}");
         }
@@ -923,39 +915,40 @@ async fn the_model_is_told_the_library_under_the_products_own_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_renamed_products_program_has_the_library_under_both_names() {
+async fn a_renamed_engines_program_has_the_library_under_that_name_only() {
     let (r, _, _) = run_in(
-        "return [codix === agix, codix.yaml.parse('a: 1').a];",
+        "return [typeof agix, codix.yaml.parse('a: 1').a];",
         json!({}),
         limits(),
-        Library::for_product("Codix"),
+        Library::for_engine("codix"),
     )
     .await;
     assert!(!r.is_error, "{}", text(&r));
-    assert_eq!(r.structured_content, Some(json!([true, 1])));
+    assert_eq!(r.structured_content, Some(json!(["undefined", 1])));
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_renamed_products_helpers_fail_under_its_name() {
+async fn a_renamed_engines_helpers_fail_under_its_name() {
     let caught = "try { codix.yaml.parse('a: [1'); } \
          catch (e) { return [String(e), e.name, e.constructor.name, e.stack ?? '']; }";
-    let (r, _, _) = run_in(caught, json!({}), limits(), Library::for_product("Codix")).await;
+    let (r, _, _) = run_in(caught, json!({}), limits(), Library::for_engine("codix")).await;
     let seen = text(&r)
         + &r.structured_content
             .map(|v| v.to_string())
             .unwrap_or_default();
-    assert!(!seen.to_lowercase().contains("agix"), "{seen}");
     assert!(seen.contains("CodixError: "), "{seen}");
+    assert!(!seen.contains("AgixError"), "{seen}");
 
     let (r, _, _) = run_in(
         "codix.yaml.parse('a: [1');",
         json!({}),
         limits(),
-        Library::for_product("Codix"),
+        Library::for_engine("codix"),
     )
     .await;
     assert!(r.is_error);
-    assert!(!text(&r).to_lowercase().contains("agix"), "{}", text(&r));
+    assert!(text(&r).contains("CodixError"), "{}", text(&r));
+    assert!(!text(&r).contains("AgixError"), "{}", text(&r));
 
     let (r, _) =
         run("try { agix.yaml.parse('a: [1'); } catch (e) { return [e.name, e.constructor.name]; }")
@@ -967,7 +960,7 @@ async fn a_renamed_products_helpers_fail_under_its_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn no_global_a_program_has_can_become_the_librarys_alias() {
+async fn no_other_global_a_program_has_can_name_the_library() {
     let (r, _) = run("const names = []; \
          for (let o = globalThis; o; o = Object.getPrototypeOf(o)) \
            names.push(...Object.getOwnPropertyNames(o)); \
@@ -975,11 +968,8 @@ async fn no_global_a_program_has_can_become_the_librarys_alias() {
     .await;
     let names = r.structured_content.expect("the global names");
     for name in names.as_array().unwrap().iter().filter_map(Value::as_str) {
-        if name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        {
-            assert_eq!(js_lib::alias_for(name), None, "{name}");
+        if name != js_lib::GLOBAL {
+            assert!(js_lib::check_global_name(name).is_err(), "{name}");
         }
     }
 }

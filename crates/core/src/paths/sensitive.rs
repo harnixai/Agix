@@ -15,9 +15,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::layout::{
-    entry, Layout, CLAUDE_CREDENTIALS, DEFAULT_STATE_DIR, ENGINE_CONFIG_FILES,
-    PROJECT_ENGINE_CONFIG_DIRS, STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP,
-    STATE_ROOT_WORKING_DIRS,
+    entry, Layout, CLAUDE_CREDENTIALS, ENGINE_CONFIG_FILES, PROJECT_ENGINE_CONFIG_DIRS,
+    STATE_ROOT_SCRATCHPAD, STATE_ROOT_SESSION_TMP, STATE_ROOT_WORKING_DIRS,
 };
 use super::ConfigPaths;
 
@@ -328,13 +327,12 @@ impl ConfigRootAt {
 }
 
 /// The state roots of instances on this machine that a session's own may
-/// not be: `$HOME/.agix`, where `agixd` keeps its state unless told
-/// otherwise. Nothing on disk lists the others — an instance's
-/// `daemon/instances.d` names the daemons of its own root only.
-pub fn known_state_roots() -> Vec<PathBuf> {
-    super::home_dir()
-        .map(|home| home.join(DEFAULT_STATE_DIR))
-        .into_iter()
+/// not be: `$HOME/<name>` for each of `layout`'s [`Layout::state_dir_names`].
+/// Nothing on disk lists the others — an instance's `daemon/instances.d`
+/// names the daemons of its own root only.
+pub fn known_state_roots(layout: &Layout) -> Vec<PathBuf> {
+    let home = super::home_dir().into_iter();
+    home.flat_map(|home| layout.state_dir_names().map(move |n| home.join(n)))
         .collect()
 }
 
@@ -451,7 +449,7 @@ impl SensitivePaths {
             paths.project_root.as_deref(),
             paths.layout.clone(),
         )
-        .with_foreign_state_roots(&known_state_roots())
+        .with_foreign_state_roots(&known_state_roots(&paths.layout))
     }
 
     pub fn state_root(&self) -> Option<&Path> {
@@ -899,6 +897,19 @@ mod tests {
 
     fn sensitive(state_root: &str) -> SensitivePaths {
         SensitivePaths::new(Some(Path::new(state_root)), None, Layout::default())
+    }
+
+    #[test]
+    fn the_known_state_roots_are_the_engines_and_agixds() {
+        let Some(home) = crate::paths::home_dir() else {
+            return;
+        };
+        assert_eq!(known_state_roots(&Layout::default()), [home.join(".agix")]);
+        let foo = Layout::default().with_engine("foo").unwrap();
+        assert_eq!(
+            known_state_roots(&foo),
+            [home.join(".foo"), home.join(".agix")]
+        );
     }
 
     fn in_layout(layout: &Layout) -> SensitivePaths {

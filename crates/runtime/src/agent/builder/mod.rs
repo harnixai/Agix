@@ -28,15 +28,15 @@ pub fn default_run_slots() -> Arc<tokio::sync::Semaphore> {
 
 impl Builder {
     /// `RunCode` listing the tools registered so far, on the engine's run
-    /// slots when it was given some, naming the base library as the product
-    /// in `layout` does.
+    /// slots when it was given some, with the base library under `layout`'s
+    /// engine name.
     #[cfg(feature = "ptc")]
     fn run_code_for(
         &self,
         tools: &dyn base::tool::ToolRegistry,
         layout: &base::paths::Layout,
     ) -> Arc<ptc::RunCodeTool> {
-        let library = ptc::Library::for_product(layout.product_name());
+        let library = ptc::Library::for_engine(layout.engine());
         let run_code = ptc::RunCodeTool::for_registry(tools, library);
         Arc::new(match self.spec.run_slots.clone() {
             Some(slots) => run_code.with_run_slots(slots),

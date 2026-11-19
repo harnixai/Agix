@@ -77,40 +77,34 @@ impl Limits {
     }
 }
 
-/// The names a script finds the base library (`docs/agix_js.md`) under in the
-/// product it runs in.
+/// The global a script finds the base library (`docs/agix_js.md`) under: the
+/// engine's name.
 #[derive(Debug, Clone)]
 pub struct Library {
-    alias: Option<String>,
-    shown: Option<String>,
+    global: String,
 }
 
 impl Library {
-    /// A renamed product's scripts also find it under [`js_lib::alias_for`]
-    /// its name, and the model is told only that name; when the name gives
-    /// none, the model is told of no helpers at all, so it never reads
-    /// `agix` in a product called something else.
-    pub fn for_product(product: &str) -> Self {
-        let alias = js_lib::alias_for(product);
-        let shown = alias.clone().or_else(|| {
-            (product == base::paths::DEFAULT_PRODUCT_NAME).then(|| js_lib::GLOBAL.to_string())
-        });
-        Self { alias, shown }
+    /// The library of the engine called `engine` (`base::paths::Layout::engine`),
+    /// and the name the model is told the helpers are under.
+    pub fn for_engine(engine: &str) -> Self {
+        Self {
+            global: engine.to_string(),
+        }
     }
 
-    /// The global the model is told the helpers are under.
-    pub fn shown(&self) -> Option<&str> {
-        self.shown.as_deref()
+    pub fn global(&self) -> &str {
+        &self.global
     }
 
     pub(crate) fn aliases(&self) -> Vec<&str> {
-        self.alias.as_deref().into_iter().collect()
+        vec![self.global.as_str()]
     }
 }
 
 impl Default for Library {
     fn default() -> Self {
-        Self::for_product(base::paths::DEFAULT_PRODUCT_NAME)
+        Self::for_engine(js_lib::GLOBAL)
     }
 }
 

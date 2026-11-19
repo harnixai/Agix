@@ -331,8 +331,11 @@ fn install(ctx: &rquickjs::Ctx<'_>, host: Host) -> rquickjs::Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(ms))
         })?,
     )?;
-    let aliases: Vec<&str> = host.library_aliases.iter().map(String::as_str).collect();
-    js_lib::install_as(ctx, &aliases)
+    let library = host
+        .library_aliases
+        .first()
+        .map_or(js_lib::GLOBAL, String::as_str);
+    js_lib::install_named(ctx, library)
 }
 
 fn stopped_answer() -> String {

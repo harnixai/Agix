@@ -147,13 +147,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_renamed_products_scripts_also_have_it_under_its_name() {
-        let out = QuickJsEngine::for_product("Codix")
+    async fn a_renamed_engines_scripts_have_it_under_that_name_only() {
+        let out = QuickJsEngine::for_engine("codix")
             .eval(
                 &script(
                     "function f() {\n\
                        var e; try { codix.yaml.parse('a: [1'); } catch (x) { e = x; }\n\
-                       return [codix === agix, codix.path.basename('a/b.md'), e.name];\n\
+                       return [typeof agix, codix.path.basename('a/b.md'), e.name];\n\
                      }",
                 ),
                 "f",
@@ -162,7 +162,7 @@ mod tests {
             )
             .await
             .expect("the script runs");
-        assert_eq!(out, serde_json::json!([true, "b.md", "CodixError"]));
+        assert_eq!(out, serde_json::json!(["undefined", "b.md", "CodixError"]));
     }
 
     #[tokio::test]
@@ -463,10 +463,10 @@ pub mod bindings {
         Arc::new(crate::QuickJsEngine::new())
     }
 
-    /// [`engine`], for the product called `product`.
+    /// [`engine`], for the engine called `engine` (`base::paths::Layout::engine`).
     #[cfg(feature = "quickjs")]
-    pub fn engine_for(product: &str) -> Arc<dyn ScriptEngine> {
-        Arc::new(crate::QuickJsEngine::for_product(product))
+    pub fn engine_for(engine: &str) -> Arc<dyn ScriptEngine> {
+        Arc::new(crate::QuickJsEngine::for_engine(engine))
     }
 
     /// Everything a host does to honor a `scripts` section: pick the engine,

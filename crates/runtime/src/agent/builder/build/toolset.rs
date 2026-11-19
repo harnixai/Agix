@@ -191,7 +191,7 @@ impl Builder {
         #[cfg(feature = "ptc")]
         if !self.host.ext_commands.is_empty() {
             let run_ext = ptc::RunExtTool::new(self.host.ext_commands.clone())
-                .with_library(ptc::Library::for_product(layout.product_name()));
+                .with_library(ptc::Library::for_engine(layout.engine()));
             tools.register(Arc::new(match self.spec.run_slots.clone() {
                 Some(slots) => run_ext.with_run_slots(slots),
                 None => run_ext,

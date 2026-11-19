@@ -1686,6 +1686,7 @@ dependencies = [
 name = "js-lib"
 version = "0.3.19-2026111801"
 dependencies = [
+ "base",
  "globset",
  "hex",
  "jsonschema",

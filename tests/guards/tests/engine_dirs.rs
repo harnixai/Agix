@@ -10,13 +10,14 @@
 //! The way out is always a method: `ConfigPaths` for a session, `StateRoot`
 //! for the pool's state root, `Layout` when only the name is at hand.
 //!
-//! The product's name is the embedder's too (`EmbedConfig.product_name`):
+//! The product's name is the embedder's too (`EmbedConfig.product`):
 //! a production string or a prompt template that spells `Agix` shows a
 //! host's users and its model the wrong product (NAME-1, NAME-2). It comes
-//! from `Layout::product_name` and what is derived from it. The protocol's
-//! own names — `agix.*` methods and namespaces, `AGIX_*` variables, internal
-//! `agix-` identifiers — are not the product's display name and are not
-//! matched. The doc comments of a `JsonSchema` type are the descriptions of a
+//! from `Layout::product_name` and what is derived from it; the engine's
+//! name in scripts (`EmbedConfig.engine`, the base library's global) from
+//! `Layout::engine`. The protocol's own names — `agix.*` methods and
+//! namespaces, `AGIX_*` variables, internal `agix-` identifiers — are not
+//! the product's display name and are not matched. The doc comments of a `JsonSchema` type are the descriptions of a
 //! tool's input the model reads, and name neither (NAME-3).
 
 use std::collections::BTreeSet;
@@ -213,11 +214,6 @@ const NAMES_THE_PRODUCT: &[(&str, &str)] = &[
         "crates/assembly/src/telemetry_otel/mod.rs: agix",
         "the OpenTelemetry instrumentation scope, which names the library the `agix.*` \
          metrics come from; `service.name` is the product's.",
-    ),
-    (
-        "crates/js-lib/src/lib.rs: agix",
-        "the script base library's global, an API plugin authors write against; a renamed \
-         product also gets it under its own name and the model is told only that one.",
     ),
     (
         "crates/assembly/src/config.rs: /tmp/agix",

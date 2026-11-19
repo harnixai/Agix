@@ -111,8 +111,8 @@ impl RunExtTool {
         self
     }
 
-    /// Commands also find the base library under `library`'s alias; what
-    /// the model reads about commands is their own.
+    /// Commands find the base library under `library`'s global; what the
+    /// model reads about commands is their own.
     pub fn with_library(mut self, library: Library) -> Self {
         self.library = library;
         self

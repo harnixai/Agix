@@ -30,8 +30,9 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("mcp_policy", "Option<PathBuf>"),
     ("managed_settings", "Option<PathBuf>"),
     ("groups_file", "Option<PathBuf>"),
-    ("project_dir", "String"),
-    ("product_name", "String"),
+    ("project_dir", "Option<String>"),
+    ("product", "String"),
+    ("engine", "String"),
     ("plugins", "Vec<PathBuf>"),
 ];
 
@@ -44,6 +45,7 @@ const ERROR_VARIANTS: &[(&str, &str)] = &[
     ("GroupsHeld", "{owner:u32,file:PathBuf}"),
     ("InvalidProjectDir", "{name:String,reason:String}"),
     ("InvalidProductName", "{name:String,reason:String}"),
+    ("InvalidEngineName", "{name:String,reason:String}"),
 ];
 
 const DERIVES: &[(&str, &[&str])] = &[

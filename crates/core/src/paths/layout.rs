@@ -1,13 +1,15 @@
 //! The names of the engine's directories and of what is in them, and the
-//! values that vary between instances: what a project's directory is called,
-//! what the product is called, and what the repository directory the
-//! engine's worktrees go in is called ([`Layout`]: `.agix`, `Agix` and
-//! `.wkts` unless the embedder or the user's settings name others).
+//! values that vary between instances: what the engine is called in scripts
+//! and file names, what a project's directory is called, what the product is
+//! called, and what the repository directory the engine's worktrees go in is
+//! called ([`Layout`]: `agix`, `.agix`, `Agix` and `.wkts` unless the
+//! embedder or the user's settings name others).
 //!
 //! Every other module takes these names from here — the derived paths from
 //! [`super::ConfigPaths`], [`Layout`] and [`StateRoot`], the security
-//! decisions from [`super::SensitivePaths`], the product's name wherever a
-//! person or the model reads it — so that renaming either is one value
+//! decisions from [`super::SensitivePaths`], the engine's name wherever a
+//! script finds it, the product's name wherever a person or the model reads
+//! it — so that renaming any of them is one value
 //! carried through, not a search for literals. A `Layout` is carried by value
 //! from the pool's paths into every session's settings; there is no
 //! process-wide one, since two pools in one process may name these
@@ -16,10 +18,14 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// The project directory's name when the embedder names none.
+/// The engine's name when the embedder names none.
+pub const DEFAULT_ENGINE: &str = "agix";
+
+/// The project directory's name under [`DEFAULT_ENGINE`]: `.<engine>`.
 pub const DEFAULT_PROJECT_DIR: &str = ".agix";
 
-/// `$HOME/<this>` is agixd's state root when nothing names one.
+/// `$HOME/<this>` is agixd's state root when nothing names one, and the
+/// state directory's name under [`DEFAULT_ENGINE`].
 pub const DEFAULT_STATE_DIR: &str = ".agix";
 
 /// Configuration roots of other agents, or of this engine under its default
@@ -209,6 +215,14 @@ pub struct WorktreesDirError {
     pub reason: &'static str,
 }
 
+/// Why a name cannot be the engine's.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`{name}` cannot name the engine: {reason}")]
+pub struct EngineNameError {
+    pub name: String,
+    pub reason: &'static str,
+}
+
 /// Why a name cannot be the product's.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("`{name}` cannot name the product: {reason}")]
@@ -221,6 +235,7 @@ pub struct ProductNameError {
 /// carried in the pool's paths and every session's settings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Layout {
+    engine: Arc<str>,
     project_dir: Arc<str>,
     product: Arc<str>,
     worktrees: Arc<str>,
@@ -229,6 +244,7 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self {
+            engine: Arc::from(DEFAULT_ENGINE),
             project_dir: Arc::from(DEFAULT_PROJECT_DIR),
             product: Arc::from(DEFAULT_PRODUCT_NAME),
             worktrees: Arc::from(DEFAULT_WORKTREES_DIR),
@@ -267,40 +283,80 @@ pub struct ConfigRoot<'a> {
 }
 
 impl Layout {
-    /// One path component of `[a-z0-9._-]`, at most 64 long: the
-    /// configuration checks split shell text on any other character, and a
-    /// lowercase-only name is the same directory on every filesystem. It
-    /// starts with `.`: the engine refuses writes to its configuration
-    /// subdirectories, which a project's own `src` or `docs` must never be
-    /// subject to, and a hidden directory is where tools keep their state.
-    /// Not `.`, `..`, a directory that is another tool's
-    /// ([`OTHER_TOOLS_DIRS`]), nor [`DEFAULT_WORKTREES_DIR`].
+    /// The default layout with its project directory `project_dir`
+    /// ([`Self::with_project_dir`]).
     pub fn new(project_dir: &str) -> Result<Self, LayoutError> {
+        Self::default().with_project_dir(project_dir)
+    }
+
+    /// This layout with its project directory `<project>/<name>`: one path
+    /// component of `[a-z0-9._-]`, at most 64 long — the configuration
+    /// checks split shell text on any other character, and a lowercase-only
+    /// name is the same directory on every filesystem. It starts with `.`:
+    /// the engine refuses writes to its configuration subdirectories, which
+    /// a project's own `src` or `docs` must never be subject to, and a
+    /// hidden directory is where tools keep their state. Not `.`, `..`, a
+    /// directory that is another tool's ([`OTHER_TOOLS_DIRS`]), nor where
+    /// the worktrees go.
+    pub fn with_project_dir(self, name: &str) -> Result<Self, LayoutError> {
+        match self.refuse_project_dir(name) {
+            Some(reason) => Err(LayoutError {
+                name: name.to_string(),
+                reason,
+            }),
+            None => Ok(Self {
+                project_dir: Arc::from(name),
+                ..self
+            }),
+        }
+    }
+
+    fn refuse_project_dir(&self, name: &str) -> Option<&'static str> {
         let lowercase = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
-        let reason = not_hidden_component(
-            project_dir,
+        not_hidden_component(
+            name,
             lowercase,
             "only lowercase letters, digits, `.`, `_` and `-` are allowed",
         )
         .or_else(|| {
             OTHER_TOOLS_DIRS
-                .contains(&project_dir)
+                .contains(&name)
                 .then_some("that directory belongs to another tool")
         })
         .or_else(|| {
-            (project_dir == DEFAULT_WORKTREES_DIR)
+            (name == DEFAULT_WORKTREES_DIR || super::fold_case(&self.worktrees) == name)
                 .then_some("that is where the engine's worktrees go")
-        });
-        match reason {
-            Some(reason) => Err(LayoutError {
-                name: project_dir.to_string(),
+        })
+    }
+
+    /// This layout under the engine name `name`, with its project directory
+    /// `.<name>`: name another with [`Self::with_project_dir`] after this.
+    /// `[a-z][a-z0-9]*`, at most 16 long, and a name a script can be given
+    /// as a new global ([`crate::interface::script::check_global_name`]):
+    /// the base library is installed under it. `.<name>` must be a project
+    /// directory [`Self::with_project_dir`] accepts.
+    pub fn with_engine(self, name: &str) -> Result<Self, EngineNameError> {
+        let refuse = |reason| {
+            Err(EngineNameError {
+                name: name.to_string(),
                 reason,
-            }),
-            None => Ok(Self {
-                project_dir: Arc::from(project_dir),
-                ..Self::default()
-            }),
+            })
+        };
+        if name.len() > 16 {
+            return refuse("it is longer than 16 characters");
         }
+        if let Err(reason) = crate::interface::script::check_global_name(name) {
+            return refuse(reason);
+        }
+        let project_dir = format!(".{name}");
+        if self.refuse_project_dir(&project_dir).is_some() {
+            return refuse("its project directory would be another tool's, or the worktrees'");
+        }
+        Ok(Self {
+            engine: Arc::from(name),
+            project_dir: Arc::from(project_dir),
+            ..self
+        })
     }
 
     /// This layout with its worktrees in `<repository>/<name>/`: one path
@@ -373,6 +429,21 @@ impl Layout {
             product: Arc::from(name),
             ..self
         })
+    }
+
+    /// The engine's name in scripts and file names: the base library's
+    /// global, the start of its errors' name.
+    pub fn engine(&self) -> &str {
+        &self.engine
+    }
+
+    /// The directories under `$HOME` instances keep their state in unless
+    /// told otherwise: `.<engine>` for this engine's, then agixd's
+    /// [`DEFAULT_STATE_DIR`] when that is not it.
+    pub fn state_dir_names(&self) -> impl Iterator<Item = String> {
+        let own = format!(".{}", self.engine);
+        let agixd = (own != DEFAULT_STATE_DIR).then(|| DEFAULT_STATE_DIR.to_string());
+        std::iter::once(own).chain(agixd)
     }
 
     pub fn project_dir_name(&self) -> &str {
@@ -797,6 +868,56 @@ mod tests {
             assert!(Layout::default().with_product_name(bad).is_err(), "{bad:?}");
         }
         assert_eq!(Layout::default().product_name(), DEFAULT_PRODUCT_NAME);
+    }
+
+    #[test]
+    fn an_engine_name_is_a_lowercase_script_global_and_names_the_project_directory() {
+        let agix = Layout::default();
+        assert_eq!(agix.engine(), DEFAULT_ENGINE);
+        assert_eq!(format!(".{DEFAULT_ENGINE}"), DEFAULT_PROJECT_DIR);
+        assert_eq!(agix.state_dir_names().collect::<Vec<_>>(), [".agix"]);
+        for good in ["foo", "x", "codix2", &"a".repeat(16)] {
+            let layout = Layout::default().with_engine(good).unwrap();
+            assert_eq!(layout.engine(), good);
+            assert_eq!(layout.project_dir_name(), format!(".{good}"));
+            assert_eq!(layout.product_name(), DEFAULT_PRODUCT_NAME);
+        }
+        let foo = Layout::default().with_engine("foo").unwrap();
+        assert_eq!(foo.state_dir_names().collect::<Vec<_>>(), [".foo", ".agix"]);
+        assert_eq!(
+            foo.config_roots().map(|r| r.name).collect::<Vec<_>>(),
+            [".foo", ".agix", ".claude"]
+        );
+        let named = foo.with_project_dir(".codix").unwrap();
+        assert_eq!(
+            (named.engine(), named.project_dir_name()),
+            ("foo", ".codix")
+        );
+        for bad in [
+            "",
+            "Foo",
+            "1x",
+            "a-b",
+            "a_b",
+            "a.b",
+            "f\u{f6}o",
+            "class",
+            "new",
+            "tools",
+            "console",
+            "escape",
+            "constructor",
+            "git",
+            "claude",
+            "codex",
+            "wkts",
+            &"a".repeat(17),
+        ] {
+            assert!(Layout::default().with_engine(bad).is_err(), "{bad:?}");
+        }
+        let trees = Layout::default().with_worktrees_dir(".foo").unwrap();
+        assert!(trees.clone().with_engine("foo").is_err());
+        assert!(trees.with_project_dir(".foo").is_err());
     }
 
     #[test]

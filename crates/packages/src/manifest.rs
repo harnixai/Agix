@@ -376,7 +376,7 @@ where
                  letters or digits"
             )));
         }
-        if name.eq_ignore_ascii_case(base::paths::DEFAULT_PRODUCT_NAME) {
+        if name == base::paths::DEFAULT_ENGINE {
             return Err(serde::de::Error::custom(format!(
                 "uses `{name}`: the engine's own library is always there and is not declared"
             )));
