@@ -221,6 +221,10 @@ const FIELDS: &[(&str, &str)] = &[
         "Engine: the stamp of the binding it was built from",
     ),
     ("EngineSlot::delegator", "Engine: its delegator"),
+    (
+        "EngineSlot::host_tool_runner",
+        "Engine: how the host calls a tool through it",
+    ),
     ("EngineSlot::scripts", "Engine: its bound scripts' record"),
     ("EngineSlot::health", "Engine: its plugins' checks"),
     (

@@ -34,6 +34,7 @@ fn dummy_live_session(last_active: Instant) -> LiveSession {
                 epoch: 0,
             },
             delegator: None,
+            host_tool_runner: None,
             scripts: None,
             health: Default::default(),
             commands: Default::default(),

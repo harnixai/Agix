@@ -740,6 +740,7 @@ fn run_engine(
     } = built;
     hub.answer_host_calls_with(input_tx.clone());
     let delegator = agent.delegator();
+    let host_tool_runner = agent.host_tool_runner();
     let health = agent.health();
     let commands = agent.commands();
     let end_reason = agent.end_reason();
@@ -763,6 +764,7 @@ fn run_engine(
             namer,
             binding: binding.stamp.clone(),
             delegator: Some(delegator),
+            host_tool_runner: Some(host_tool_runner),
             scripts,
             health,
             commands,
