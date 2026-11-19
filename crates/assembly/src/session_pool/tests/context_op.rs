@@ -115,3 +115,29 @@ async fn a_turn_asked_for_while_the_context_is_being_changed_is_refused_or_waits
         .count();
     assert_eq!(logged, 1, "the engine wrote the change to the log once");
 }
+
+#[tokio::test]
+async fn a_look_at_the_context_of_a_session_out_of_memory_brings_it_back() {
+    let (pool, _dir) = test_pool_with_store(Some(Arc::new(InMemoryHistoryStore::new()))).await;
+    answered_by(&pool, Arc::new(HoldsTheFirstCall::default())).await;
+    let sid = pool
+        .create_session(None, ProjectSelector::Default, None)
+        .await
+        .expect("a session")
+        .session_id;
+    pool.run_turn(turn(&sid, "t1", "first", OnBusy::Reject), None)
+        .await
+        .expect("a turn");
+    let live = pool.live.remove(&sid).await.unwrap();
+    pool.evict(&sid, &live);
+
+    pool.inspect_context(&sid)
+        .await
+        .expect("a look at the context");
+    assert!(pool.live.contains(&sid).await);
+    assert_eq!(
+        pool.session_detail(&sid).await.unwrap().turn_state,
+        api::TurnState::Idle,
+        "the look let go of the session it brought back"
+    );
+}

@@ -275,11 +275,9 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(not_found());
         }
-        self.ensure_live(session_id, None).await?;
         let Some(delegator) = self
-            .live
-            .with_live(session_id, |live| live.engine.delegator.clone())
-            .await
+            .with_live_ensured(session_id, None, |live| live.engine.delegator.clone())
+            .await?
             .flatten()
         else {
             return Err(not_found());
@@ -381,11 +379,9 @@ impl SessionPool {
         if !self.session_exists(session_id).await {
             return Err(PoolError::no_session(session_id));
         }
-        self.ensure_live(session_id, None).await?;
         self.wait_out_finishing_turn(session_id).await;
         let (input_tx, core, generation) = self
-            .live
-            .with_live_mut(session_id, |live| {
+            .with_live_ensured(session_id, None, |live| {
                 if let Some(busy) = live.turn.busy(session_id) {
                     return Err(PoolError::SessionBusy(busy));
                 }
@@ -398,7 +394,7 @@ impl SessionPool {
                     live.engine.generation,
                 ))
             })
-            .await
+            .await?
             .ok_or_else(|| PoolError::no_session(session_id))??;
         let pool = self.this.clone();
         let operation = tokio::spawn(async move {

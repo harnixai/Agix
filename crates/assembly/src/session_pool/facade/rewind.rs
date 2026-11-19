@@ -28,7 +28,6 @@ impl SessionPool {
             )));
         }
         self.refuse_scene_mismatch(&sid).await?;
-        self.ensure_live(&sid, None).await?;
         self.wait_out_finishing_turn(&sid).await;
         let (input_tx, core, generation) = self.hold_for_rewind(&sid).await?;
         let pool = self.this.clone();
@@ -63,22 +62,21 @@ impl SessionPool {
         &self,
         sid: &str,
     ) -> Result<(InputSender, Arc<SessionCore>, Generation), PoolError> {
-        self.live
-            .with_live_mut(sid, |live| {
-                if let Some(busy) = live.busy(sid) {
-                    return Err(PoolError::SessionBusy(busy));
-                }
-                live.turn
-                    .begin_exclusive(SessionOp::Rewind)
-                    .map_err(|_| PoolError::Internal("an idle slot refused".into()))?;
-                Ok((
-                    live.engine.input_tx.clone(),
-                    live.core.clone(),
-                    live.engine.generation,
-                ))
-            })
-            .await
-            .ok_or_else(|| PoolError::no_session(sid))?
+        self.with_live_ensured(sid, None, |live| {
+            if let Some(busy) = live.busy(sid) {
+                return Err(PoolError::SessionBusy(busy));
+            }
+            live.turn
+                .begin_exclusive(SessionOp::Rewind)
+                .map_err(|_| PoolError::Internal("an idle slot refused".into()))?;
+            Ok((
+                live.engine.input_tx.clone(),
+                live.core.clone(),
+                live.engine.generation,
+            ))
+        })
+        .await?
+        .ok_or_else(|| PoolError::no_session(sid))?
     }
 
     async fn end_rewind(&self, core: &Arc<SessionCore>, generation: Generation) {

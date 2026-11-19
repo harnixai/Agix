@@ -537,14 +537,14 @@ impl SessionPool {
         &self,
         sid: &str,
         options: Option<&SessionOptions>,
-        f: impl FnOnce(&LiveSession) -> T,
+        f: impl FnOnce(&mut LiveSession) -> T,
     ) -> Result<Option<T>, CreateError> {
         self.live
             .with_session_lock(sid, async {
                 if !self.live.contains(sid).await {
                     self.resume_or_create(sid.to_string(), options).await?;
                 }
-                Ok(self.live.with_live(sid, f).await)
+                Ok(self.live.with_live_mut(sid, f).await)
             })
             .await
     }
