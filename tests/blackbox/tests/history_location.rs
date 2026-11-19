@@ -487,3 +487,40 @@ async fn history_in_a_project_that_lost_its_trust_is_refused_saying_why() -> any
     daemon.stop().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn naming_a_session_of_a_project_that_lost_its_trust_is_refused_with_its_own_code(
+) -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.project("revoked-by-id")?;
+    keep_in_projects(&world)?;
+    world.trust_project(&project)?;
+    let provider = ProviderStub::start().await?;
+    let (daemon, session) = one_turn(&world, &provider, &project).await?;
+    daemon.stop().await;
+
+    std::fs::remove_file(world.global_root().join("settings.local.json"))?;
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let created = client
+        .call(
+            "session.create",
+            json!({ "project_root": project.to_string_lossy(), "session_id": session }),
+        )
+        .await?;
+    let error = created
+        .error
+        .ok_or_else(|| anyhow::anyhow!("created over an untrusted project's session"))?;
+    assert_eq!(error.code, PROJECT_UNTRUSTED, "{error:?}");
+
+    let turn = client
+        .session_run_turn(&session, "go on", "t2", None)
+        .await?;
+    let error = turn
+        .response
+        .and_then(|r| r.error)
+        .ok_or_else(|| anyhow::anyhow!("ran a turn on an untrusted project's session"))?;
+    assert_eq!(error.code, PROJECT_UNTRUSTED, "{error:?}");
+    daemon.stop().await;
+    Ok(())
+}

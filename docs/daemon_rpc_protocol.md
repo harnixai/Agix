@@ -316,7 +316,7 @@ glob 清单),项目自己写的忽略。三态:
 放在主仓库的这个目录),全局 `sessions/<id>/` 只留索引;不受信项目的照旧放全局。只认全局索引登记过的
 项目内会话,项目里多出来的不进 `session.list`、搜索,`session.resume` 报 `SESSION_NOT_FOUND`。
 项目后来被取消信任,它里面的历史不读:`session.list` 与搜索里没有这些会话,`session.resume`、
-`session.history`、`session.export` 等指名它们 → `PROJECT_UNTRUSTED`,消息写明是哪个项目;
+`session.history`、`session.export`、带这个 `session_id` 的 `session.create` 与 `session.run_turn` 等指名它们 → `PROJECT_UNTRUSTED`,消息写明是哪个项目(删除不看信任,侧链照样级联删掉);
 重新信任后照常。项目整个搬了家,daemon 在新位置打开它(它是 daemon 的项目,或有会话建在、列在它上面)
 时索引跟过去,会话按新位置恢复。布局见 `ARCHITECTURE.md` §8.2。
 
@@ -4408,7 +4408,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32019 | TASK_LIMIT | `session.startAgent`:会话的子 Agent 已到 `execution.max_concurrent_subagents`,或委派已到最深 |
 | -32020 | MCP_SERVER_DENIED | `mcp.addServer` / `mcp.updateServer`:MCP 策略拒绝这个 server,没有写入任何东西;`mcp.reconnect`:这个 server 被策略拒绝;`mcp.auth.start` / `mcp.auth.logout`:这个 server 被策略拒绝,或(`start`)它的授权服务器不在 `allowed_authorization_servers` 里 |
 | -32021 | MCP_AUTH_FAILED | `mcp.auth.*`:授权服务器或登录本身失败——发现、注册、PKCE、回调 `state` 不符、换令牌;`message` 可以直接给用户看 |
-| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set` / `mcp.setEnabled`:被拒的键全部是因为项目未受信(`setEnabled` 是在未受信项目里打开),什么都没写,`data.rejected` 逐键列出(§9.1);`mcp.reconnect`:未受信项目自己的 server |
+| -32022 | PROJECT_UNTRUSTED | `mcp.addServer` / `mcp.updateServer` / `config.setProvider`(`tier:"project"`):目标项目未被信任(§3.6),写进它项目层的 server / provider 不会生效,所以什么都没写;`config.set` / `mcp.setEnabled`:被拒的键全部是因为项目未受信(`setEnabled` 是在未受信项目里打开),什么都没写,`data.rejected` 逐键列出(§9.1);`mcp.reconnect`:未受信项目自己的 server;`session.resume` / `session.history` / `session.export` / 带 `session_id` 的 `session.create` / `session.run_turn` 等:会话放在现在不受信的项目里(§3.6) |
 | -32023 | REWIND_PRECONDITION | `session.rewind`:有文件不能照要求恢复(会话之外改过、写前内容没留下、写路径策略拒绝、是符号链接、worktree 已删),什么都没改;`data.issues` 列出全部(§9.1) |
 | -32024 | REWIND_FAILED | `session.rewind` 执行到一半失败;已恢复的文件退回了原样,除非 `data.partial` 为 `true`(§9.1) |
 | -32025 | SESSION_EXISTS | `session.import` 带 `keep_ids`:归档里的某个会话 id 在这个 daemon 上已经有了,什么都没写;`session.create` 给的 `session_id` 是另一个场景、项目或 sidechain 的会话,或建它时的 `options` 与这次不同,什么都没做(§9.1) |

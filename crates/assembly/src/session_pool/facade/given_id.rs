@@ -88,11 +88,7 @@ impl SessionPool {
             .wait_until_stopped(sid)
             .await
             .map_err(PoolError::from)?;
-        let log = self
-            .directory
-            .read_log(sid)
-            .await
-            .map_err(PoolError::Internal)?;
+        let log = self.directory.read_log(sid).await?;
         if log.is_empty() {
             return Ok(None);
         }

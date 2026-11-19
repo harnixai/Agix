@@ -144,19 +144,9 @@ impl SessionDirectory {
     /// `sid`'s log, empty when it has none. A log that is not there is
     /// empty, as is one for an id no store could hold; a log that is there
     /// but does not load is an error, never a session to start over under
-    /// the same id.
+    /// the same id. A session kept in a project that is not trusted now is
+    /// `PROJECT_UNTRUSTED`, told apart from a log that would not load.
     pub(in crate::session_pool) async fn read_log(
-        &self,
-        sid: &str,
-    ) -> Result<Vec<history::entry::EnvelopedEntry>, String> {
-        self.read_log_or_refuse(sid)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
-    /// [`Self::read_log`], telling a session kept in a project that is not
-    /// trusted now (`PROJECT_UNTRUSTED`) from a log that would not load.
-    pub(in crate::session_pool) async fn read_log_or_refuse(
         &self,
         sid: &str,
     ) -> Result<Vec<history::entry::EnvelopedEntry>, PoolError> {

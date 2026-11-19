@@ -422,12 +422,24 @@ pub(super) enum CreateError {
     SceneNotActive(String),
     /// Entries of the session's `options` that cannot stand, each named.
     InvalidOptions(Vec<api::InvalidOption>),
+    /// The session's history is kept in a project not trusted now.
+    ProjectUntrusted(String),
     Failed(String),
 }
 
 impl From<String> for CreateError {
     fn from(e: String) -> Self {
         Self::Failed(e)
+    }
+}
+
+impl From<PoolError> for CreateError {
+    fn from(e: PoolError) -> Self {
+        match e {
+            PoolError::ProjectUntrusted(m) => Self::ProjectUntrusted(m),
+            PoolError::Internal(m) => Self::Failed(m),
+            other => Self::Failed(other.to_string()),
+        }
     }
 }
 
@@ -453,6 +465,7 @@ impl CreateError {
             Self::PersistFailed(e) => Self::PersistFailed(outer(e)),
             Self::SceneNotActive(scene) => Self::SceneNotActive(scene),
             Self::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
+            Self::ProjectUntrusted(e) => Self::ProjectUntrusted(outer(e)),
             Self::Failed(e) => Self::Failed(outer(e)),
         }
     }
@@ -471,6 +484,7 @@ impl From<CreateError> for PoolError {
             )),
             CreateError::SceneNotActive(scene) => Self::SceneNotActive { scene },
             CreateError::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
+            CreateError::ProjectUntrusted(e) => Self::ProjectUntrusted(e),
             CreateError::Failed(e) => Self::Internal(e),
         }
     }
