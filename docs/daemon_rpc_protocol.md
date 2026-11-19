@@ -3379,7 +3379,7 @@ provider 配置里看得出凭据时才有,如 `base_url` 里的密码;判据同
 
 ### 6.5 `mcp.*` / `plugin.*` / `import.*` / `commands.*`
 
-`plugin.*` / `commands.list` **只作用于 daemon 自己的默认项目和默认场景**,不接受定位参数。
+`plugin.list` / `plugin.install` / `plugin.uninstall` / `plugin.enable` / `plugin.disable` / `plugin.reload` 与 `commands.list`(不带 `session_id` 时)**只作用于 daemon 自己的默认项目和默认场景**,不接受定位参数;`plugin.functions` / `plugin.call` 用 `session_id` 或 `cwd` 指目标(见各自一节),`plugin.cancel` 只认 `run_id`。
 `mcp.status` / `mcp.addServer` / `mcp.updateServer` / `mcp.removeServer` / `mcp.setEnabled` /
 `mcp.reconnect` / `mcp.auth.start` / `mcp.auth.logout` / `import.*` 接受 §6.4 的 `scene` /
 `project_root`:省略 = 这个 daemon 自己那一对,给路径 = 它服务的另一个项目,`null` → `INVALID_PARAMS`。
@@ -3783,10 +3783,10 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 `ctx` 是冻结的 `{ via:"host", projectRoot, cwd, plugin:{name,version}, function, session, readOnly }`
 (`session` 是会话 id,不带会话时为 `null`)。
 
-**权限**:调用本身算宿主批准——会话要问的视同允许;deny 规则、plan 模式照样拦(这时
+**权限**:调用本身算宿主批准——会话要问的视同允许(部署的托管层规定只能本人答的除外,宿主调用不答复它);deny 规则、plan 模式照样拦(这时
 `code:"refused"`)。规则写 `PluginCall(xflow.check)`。函数里的子调用与插件命令的子调用同一套
 (`tool.around` 看到 `via:"PluginCall:xflow.check"`):`writes:false` 时经文件工具的写入、会改东西
-的命令一律失败;`writes:true` 时只写得了函数声明的 `writes`,配置路径照样不让写;**要问人的一律
+的命令一律失败;`writes:true` 时经文件工具只写得了函数声明的 `writes`(命令的写入按规则走,不受 `writes` 限制),配置路径照样不让写;**要问人的一律
 失败**,错误说明是哪次调用、为什么(没人能替宿主调的函数答应,用这次调用的 `permission_rules`
 放行)。`permission_rules` 追加在会话或场景的规则之后,只管这次调用和它的子调用:deny 任何模式
 都拒,allow 只回答模式本来要问的。

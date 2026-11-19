@@ -272,7 +272,7 @@ tool-use id,不能向人询问,要批准的调用直接被拒;宿主看不到它
 `runtime/src/agent/turn/host_runner.rs`),它不在会话的工具表里、不进对话,tool-use id 是 `host-<id>`。
 谁发起的调用记在 `Caller` 上(`tool.around` 的 `via`):模型(`model`)、程序(`RunCode`)、插件命令
 (`RunExt:<命令>`)、skill 的内联命令(`skill`)、用户敲的 `/name`(`Person`,`user`)、宿主(`Host`,
-`host`)。`Person` 与 `Host` 的调用本身就是批准,会话要问的视同允许,deny 规则与 plan 模式照拦;
+`host`)。`Person` 与 `Host` 的调用本身就是批准,会话要问的视同允许(`Host` 不答复只能本人答的问题,`Caller::answers`),deny 规则与 plan 模式照拦;
 插件命令与宿主调的函数的子调用都是 `Caller::Command`(后者 `via` 为 `PluginCall:<函数>`),按调用时的
 只读或 `writes` 范围收窄,要问人的直接拒。带会话的调用用会话的引擎,可以与正在跑的一轮并发;不带
 会话的,池在给定目录下建一个不写日志、不进会话表、不连 MCP 的临时引擎,只为这一次调用。
