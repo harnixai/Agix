@@ -320,6 +320,26 @@ async fn a_sidechain_is_kept_where_its_parent_is_and_goes_with_it() {
 }
 
 #[tokio::test]
+async fn a_fork_into_another_project_is_kept_by_that_project_not_its_parents() {
+    let world = World::new();
+    let a = world.project("a");
+    let b = world.project("b");
+    let store = world.store(&a, Some(Projects::new(true))).await;
+    let parent = start(&store, &a).await;
+    let fork = SessionId::new();
+    let mut fork_meta = meta(Some(&b), Some(parent));
+    if let LogEntry::Meta { session_kind, .. } = &mut fork_meta {
+        *session_kind = SessionKind::Primary;
+    }
+    store.append(fork, fork_meta).await.unwrap();
+    store.append(fork, said("forked")).await.unwrap();
+
+    assert_eq!(listed(&store, &b).await, [fork]);
+    assert!(history_dir(&b).join(fork.to_string()).is_dir());
+    assert!(!history_dir(&a).join(fork.to_string()).exists());
+}
+
+#[tokio::test]
 async fn a_moved_project_is_found_where_it_is_now_and_the_index_follows() {
     let world = World::new();
     let old = world.project("old");

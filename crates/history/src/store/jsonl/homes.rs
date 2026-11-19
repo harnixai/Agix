@@ -304,8 +304,9 @@ impl Homes {
     }
 
     /// Where a session being created now goes: where its parent is, for a
-    /// sidechain or fork, so that a lineage stays in one directory;
-    /// otherwise its project when the host keeps new sessions there.
+    /// sidechain or fork of the same project, so that a lineage stays in one
+    /// directory; otherwise — a fork imported into another project too — its
+    /// project when the host keeps new sessions there.
     /// `recorded` is the project root as the session's `Meta` spells it,
     /// which a move is later read against.
     ///
@@ -345,18 +346,27 @@ impl Homes {
         let Some(projects) = &self.projects else {
             return Kept::Global;
         };
-        let mut index = match parent {
+        let of_parent = match parent {
+            None => None,
             Some(parent) => match self.locate(parent, Access::Write) {
                 Ok(Home {
                     kept: Kept::InProject(of_parent),
                     ..
-                }) => SessionIndex::new(
-                    session,
-                    of_parent.project_root.clone(),
-                    of_parent.history_dir(),
-                ),
+                }) => Some(of_parent),
                 _ => return Kept::Global,
             },
+        };
+        let in_parents_project = |of_parent: &SessionIndex| {
+            project
+                .and_then(|root| projects.history_of(root))
+                .is_some_and(|found| found.root == of_parent.project_root)
+        };
+        let mut index = match of_parent.filter(in_parents_project) {
+            Some(of_parent) => SessionIndex::new(
+                session,
+                of_parent.project_root.clone(),
+                of_parent.history_dir(),
+            ),
             None => match project.filter(|root| projects.keeps_new(root)) {
                 Some(root) => match projects.history_of(root) {
                     Some(found) => SessionIndex::new(session, found.root, &found.dir),
