@@ -32,6 +32,7 @@ mod openai_responses;
 mod other_instances;
 mod package_trust;
 mod permission_bounds;
+mod plugin_calls;
 mod plugin_commands;
 mod plugin_functions;
 mod project_trust_untrusted;
