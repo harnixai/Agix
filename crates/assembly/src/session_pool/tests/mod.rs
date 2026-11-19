@@ -146,6 +146,7 @@ mod background;
 mod context_op;
 mod eviction;
 mod goal_record;
+mod history_roots;
 mod host_skill_dirs;
 mod hosts;
 mod hub;

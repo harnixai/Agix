@@ -9,7 +9,7 @@ use guards::allow;
 use guards::{ws, Hit, SourceFile, View};
 use syn::{Attribute, Item, UseTree, Visibility};
 
-const FACADE_EXPORTS: usize = 171;
+const FACADE_EXPORTS: usize = 176;
 const PRELUDE_ITEMS: usize = 11;
 
 fn facade_files() -> Vec<&'static SourceFile> {
@@ -225,6 +225,25 @@ fn the_prelude_only_names_the_theme_modules() {
         PRELUDE_ITEMS,
         "the prelude is the minimum for a pool, a session and a turn; change PRELUDE_ITEMS with it \
          and say in the commit which snippet of docs/agix-sdk.md needs the addition"
+    );
+}
+
+#[test]
+fn a_history_store_wrapper_needs_nothing_outside_the_facade() {
+    let exported: Vec<String> = facade_leaves(false).into_iter().map(|l| l.path).collect();
+    let missing: Vec<&str> = [
+        "history::error::HistoryError",
+        "history::placement::ProjectHistory",
+        "history::placement::ProjectHistoryDir",
+        "history::placement::SessionIndex",
+        "history::placement::SidecarLocator",
+    ]
+    .into_iter()
+    .filter(|path| !exported.iter().any(|e| e == path))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "`HistoryStore` methods a wrapper forwards, and `with_project_history`, name these: {missing:?}"
     );
 }
 

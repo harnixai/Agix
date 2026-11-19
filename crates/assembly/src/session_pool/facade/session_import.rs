@@ -21,7 +21,10 @@ impl SessionPool {
     ) -> Result<api::ImportSummary, PoolError> {
         let store = self.directory.require_store()?.clone();
         let settings = self.bindings.pool_settings().await;
-        check_source(&request.path, &store.history_dirs_for(&request.path))?;
+        check_source(
+            &request.path,
+            &super::history_rpc::guarded_dirs(&settings, store.as_ref(), &request.path),
+        )?;
         let source = request.path.clone();
         let product = settings.paths.layout.product_name().to_string();
         let archive = tokio::task::spawn_blocking(move || read_archive(&source, &product))

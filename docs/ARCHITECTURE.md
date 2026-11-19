@@ -2375,7 +2375,7 @@ managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字�
 **一个解析点。** 会话的文件在哪只由 `JsonlHistoryStore` 内部的 `Homes::locate` 回答:先看全局
 索引,再看全局 metadata(老会话),都没有就是存储自己的项目(那时一个存储只服务一个项目)。读写、
 列表、跨项目搜索、谱系、级联删除、会话记忆(`HistoryStore::sidecar_locator`)、checkpoint 副本
-都经它;导入导出的根检查经 `HistoryStore::history_dirs_for`。项目的布局、新会话进不进项目、项目
+都经它;导入导出的根检查用设置里的全局历史根加上 `HistoryStore::history_dirs_for` 答的目录,存储不答也挡得住全局根。项目的布局、新会话进不进项目、项目
 此刻是否受信,是宿主经 `ProjectHistory` 回答的(装配层的 `ProjectHistoryPolicy`,信任每次从全局
 层的 `project_trust` 读)。
 

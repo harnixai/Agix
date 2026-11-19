@@ -74,7 +74,10 @@ impl SessionPool {
             PoolError::InvalidRequest(format!("invalid session_id `{}`: {e}", request.session_id))
         })?;
         let settings = self.bindings.pool_settings().await;
-        crate::export::check_target(&request.path, &store.history_dirs_for(&request.path))?;
+        crate::export::check_target(
+            &request.path,
+            &guarded_dirs(&settings, store.as_ref(), &request.path),
+        )?;
         let include = request.include;
         let (lineage, cut_at, live, recordings) = self
             .live
@@ -664,4 +667,22 @@ async fn read_sidecar(
 ) -> Option<String> {
     let file = store.sidecar_locator(session)?.file(name).ok()?;
     history::own_file::read_to_string(&file).await.ok()
+}
+
+/// The directories an export must not write into and an import must not read
+/// from around `path`: the global history roots the settings name, whatever
+/// the store answers, and those the store names.
+pub(in crate::session_pool) fn guarded_dirs(
+    settings: &settings::LoadedSettings,
+    store: &dyn history::store::HistoryStore,
+    path: &std::path::Path,
+) -> Vec<PathBuf> {
+    let roots = history::path::HistoryRoots::under(&settings.paths.global_data_dir);
+    let mut dirs = vec![roots.projects, roots.sessions];
+    for dir in store.history_dirs_for(path) {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
 }
