@@ -6,7 +6,9 @@
 //! unattended session nothing else under `state/` — not the saved tool
 //! results, not the embedder's own `state/<product id>/`, not the old
 //! places. A product whose id is a name the engine keeps in `state/` is
-//! refused at start.
+//! refused at start. Where the project directory is the state root itself —
+//! the engine started in the directory holding its state root — nothing of
+//! the state root is moved.
 
 use std::path::{Path, PathBuf};
 
@@ -190,6 +192,49 @@ async fn a_project_keeps_its_local_data_in_state_and_the_model_writes_only_its_w
         }
         embedded.shutdown().await;
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_state_root_stays_where_it_is_when_the_project_directory_is_it() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let home = root.data.parent().expect("a parent").to_path_buf();
+    let data = home.join(".agix");
+    std::fs::rename(&root.data, &data)?;
+    std::fs::write(
+        data.join("settings.local.json"),
+        serde_json::to_vec(&json!({ "project_trust": { "trusted": [home] } }))?,
+    )?;
+    put(&data.join("memory/MEMORY.md"), "GLOBAL-FACT")?;
+    put(&data.join("scratchpad/sessions/x/f.txt"), "RUNNING")?;
+    put(&data.join("tool-results/s/r.txt"), "GLOBAL-RESULT")?;
+    put(&data.join(".imported.json"), "{}")?;
+
+    let mut config = EmbedConfig::new(&data);
+    config.cwd = Some(home.clone());
+    let embedded = Embedded::start(config).await?;
+    let mut client = connect(&embedded);
+    client
+        .session_create(json!({ "project_root": home, "options": { "attended": false } }))
+        .await?;
+
+    assert_eq!(read(data.join("memory/MEMORY.md")), "GLOBAL-FACT");
+    assert_eq!(read(data.join("scratchpad/sessions/x/f.txt")), "RUNNING");
+    assert_eq!(read(data.join("tool-results/s/r.txt")), "GLOBAL-RESULT");
+    assert!(data.join(".imported.json").is_file());
+    for moved in [
+        "memory/MEMORY.md",
+        "scratchpad/sessions/x",
+        "tool-results/s",
+        ".imported.json",
+    ] {
+        assert!(
+            data.join("state").join(moved).symlink_metadata().is_err(),
+            "{moved} moved into state/"
+        );
+    }
+    embedded.shutdown().await;
     Ok(())
 }
 

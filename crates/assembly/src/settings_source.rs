@@ -25,7 +25,7 @@ pub(crate) fn read_pair(
 ) -> LoadedSettings {
     let sections = crate::settings_sections::all();
     if let Some(root) = project {
-        move_into_state(root, layout);
+        move_into_state(root, layout, [&global_root, &scene_root]);
     }
     let mut loaded = match project {
         Some(root) => LoadedSettings::load(
@@ -89,14 +89,23 @@ pub(crate) fn read_pair_as_if(
 /// where the project directory is a directory of its own inside the project
 /// and `state/` is one too, never an entry that is a symbolic link, and never
 /// over one already in `state/`. What cannot be moved is left with a warning.
-fn move_into_state(project: &Path, layout: &Layout) {
+/// A project directory that is one of `state_roots`, holds one or lies in one
+/// is left alone: what lies there is the instance's own, not an older
+/// engine's project data.
+fn move_into_state(project: &Path, layout: &Layout, state_roots: [&Path; 2]) {
     let dir = layout.project_dir(project);
     let real_dir = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_dir());
-    let inside = match (dir.canonicalize(), project.canonicalize()) {
-        (Ok(dir), Ok(project)) => dir.starts_with(project),
-        _ => false,
+    let Ok(real) = dir.canonicalize() else {
+        return;
     };
-    if !real_dir(&dir) || !inside {
+    let inside = project
+        .canonicalize()
+        .is_ok_and(|project| real.starts_with(project));
+    let overlaps_a_state_root = state_roots.iter().any(|root| {
+        root.canonicalize()
+            .is_ok_and(|root| real.starts_with(&root) || root.starts_with(&real))
+    });
+    if !real_dir(&dir) || !inside || overlaps_a_state_root {
         return;
     }
     let lying: Vec<&str> = PROJECT_STATE_ENTRIES
@@ -172,7 +181,7 @@ mod tests {
         write(&own.join("settings.local.json"), "{}");
         symlink(&elsewhere, own.join("teams")).unwrap();
 
-        move_into_state(&project, &layout);
+        move_into_state(&project, &layout, [&elsewhere, &elsewhere]);
         assert_eq!(read(state.join("memory/a.md")), "a");
         assert_eq!(read(state.join("scratchpad/n.txt")), "n");
         assert!(state.join(".imported.json").is_file());
@@ -185,7 +194,7 @@ mod tests {
         assert!(state.join("teams").symlink_metadata().is_err());
         assert!(own.join("settings.local.json").is_file());
 
-        move_into_state(&project, &layout);
+        move_into_state(&project, &layout, [&elsewhere, &elsewhere]);
         assert_eq!(read(state.join("memory/a.md")), "a");
     }
 
@@ -201,14 +210,14 @@ mod tests {
 
         write(&own.join("memory/a.md"), "a");
         symlink(&elsewhere, own.join("state")).unwrap();
-        move_into_state(&project, &layout);
+        move_into_state(&project, &layout, [&base.join("data"), &base.join("data")]);
         assert!(own.join("memory/a.md").is_file());
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
 
         std::fs::remove_dir_all(&own).unwrap();
         write(&elsewhere.join("memory/b.md"), "b");
         symlink(&elsewhere, &own).unwrap();
-        move_into_state(&project, &layout);
+        move_into_state(&project, &layout, [&base.join("data"), &base.join("data")]);
         assert!(elsewhere.join("memory/b.md").is_file());
         assert!(!elsewhere.join("state").exists());
     }

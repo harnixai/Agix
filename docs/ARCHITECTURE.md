@@ -2235,6 +2235,9 @@ hooks、commands、rules、output-styles 等配置);引擎为这台机器、这�
 `.agix/` 下的 `PROJECT_STATE_ENTRIES`(上面那六项)一次性改名进 `state/`,之后只读新位置。项目层目录是
 符号链接、落在项目之外,或 `state/` 不是自己的目录时什么都不挪;旧项是符号链接的不挪;`state/` 里已有同名的,
 旧的留着、不再读(记一条 info)。挪不动的记 warn,不影响打开。`.gitignore` 里旧的条目不替人删。
+项目层目录就是状态根或场景目录、包含它或落在它里面时也不挪(在 `$HOME` 里启动,`~/.agix` 既是项目层又是
+状态根):那里直下的记忆、scratchpad、tool-results 是无项目会话的,不是旧引擎留下的项目数据。这种项目的
+`state/` 照样是它自己的本机数据,与状态根直下的那份各归各。
 
 **会话进哪个项目目录由它自己的 `Meta.project_root` 决定**,不是由 daemon 的 cwd
 决定 —— 一个 daemon 同时服务多个项目时,后者会把所有项目的 transcript 堆进一个
