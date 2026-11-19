@@ -1,9 +1,11 @@
 //! `agixd --set KEY=VALUE` seen from outside: a real `agixd` process whose
 //! model is an HTTP stub. The values are a `cli` layer over the settings files
 //! of every project and scene, still there after `config.reload`, and reported
-//! as `cli` by `config.get` and `daemon.doctor`; `--max-tokens` is its
-//! shorthand; a key no setting reads, an old key or a value that does not fit
-//! keeps the daemon from starting and says which `--set` it was.
+//! as `cli` by `config.get` and `daemon.doctor`; `--max-tokens` and
+//! `--session-cap` are shorthands; a key no setting reads, an old key or a
+//! value that does not fit keeps the daemon from starting and says which
+//! `--set` it was. `app.session_cap` holds from the global settings too, and
+//! stays what the daemon started with across `config.reload`.
 
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -429,4 +431,81 @@ async fn max_tokens_overrides_every_settings_file_as_its_set_form_does() {
             "{args:?}"
         );
     }
+}
+
+/// Whether a session that took a turn is still in memory after a second
+/// session took one.
+async fn first_session_stays_with_a_second(daemon: &Agixd) -> bool {
+    let mut client = daemon.client().await;
+    let first = client.session_create(json!({})).await.unwrap();
+    client
+        .session_run_turn(&first, "one", "t1", None)
+        .await
+        .unwrap();
+    let second = client.session_create(json!({})).await.unwrap();
+    client
+        .session_run_turn(&second, "two", "t1", None)
+        .await
+        .unwrap();
+    let got = daemon.ok("session.get", json!({"session_id": first})).await;
+    match got["status"].as_str() {
+        Some("active") => true,
+        Some("inactive") => false,
+        _ => panic!("no status: {got}"),
+    }
+}
+
+fn with_session_cap(cap: u64) -> Value {
+    json!({"memory": {"enabled": false}, "app": {"session_cap": cap}})
+}
+
+#[tokio::test]
+async fn app_session_cap_in_the_global_settings_holds_the_daemon_to_one_session() {
+    let stub = Stub::start(|_| sse_text("ok")).await;
+    let world = World::new();
+    world.write_global(no_memory());
+    let daemon = Agixd::start(&world, &stub, &[]).await;
+    assert!(first_session_stays_with_a_second(&daemon).await);
+
+    let world = World::new();
+    world.write_global(with_session_cap(1));
+    let daemon = Agixd::start(&world, &stub, &[]).await;
+    assert!(!first_session_stays_with_a_second(&daemon).await);
+}
+
+#[tokio::test]
+async fn session_cap_is_its_set_form_over_the_global_settings() {
+    for args in [["--session-cap", "1"], ["--set", "app.session_cap=1"]] {
+        let world = World::new();
+        world.write_global(with_session_cap(8));
+        let stub = Stub::start(|_| sse_text("ok")).await;
+        let daemon = Agixd::start(&world, &stub, &args).await;
+        assert!(
+            !first_session_stays_with_a_second(&daemon).await,
+            "{args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_reload_leaves_the_session_cap_the_daemon_started_with() {
+    let world = World::new();
+    world.write_global(with_session_cap(1));
+    let stub = Stub::start(|_| sse_text("ok")).await;
+    let daemon = Agixd::start(&world, &stub, &[]).await;
+
+    world.write_global(with_session_cap(8));
+    daemon.ok("config.reload", json!({})).await;
+    assert!(!first_session_stays_with_a_second(&daemon).await);
+}
+
+#[tokio::test]
+async fn worker_threads_and_its_set_form_refuse_a_count_of_zero() {
+    let (status, stderr) = refused(&["--worker-threads", "0"]).await;
+    assert!(!status.success(), "{status}");
+    assert!(stderr.contains("invalid worker thread count"), "{stderr}");
+
+    let (status, stderr) = refused(&["--set", "app.worker_threads=0"]).await;
+    assert!(!status.success(), "{status}");
+    assert!(stderr.contains("--set app.worker_threads=0"), "{stderr}");
 }

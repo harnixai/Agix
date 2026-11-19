@@ -779,8 +779,8 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 `daemon.ping` 维持。WebSocket 传输会自动回应 ping 帧,但浏览器的 WebSocket API
 发不了 ping —— 网页端要保活就用 `daemon.ping`。
 
-**会话回收**:超过 `--session-idle-timeout`(默认 3600 秒)没活动的会话,以及池子
-满(`--session-cap`,默认 32)时最久未活动的那个,运行体会被回收。transcript 不
+**会话回收**:超过 `app.session_idle_timeout_secs`(`--session-idle-timeout`,默认 3600 秒)没活动的会话,以及池子
+满(`app.session_cap`,`--session-cap`,默认 32)时最久未活动的那个,运行体会被回收;两个值在 daemon 启动时读定,`config.reload` 不改。transcript 不
 受影响,下次 `run_turn` / `session.resume` 会自动从磁盘恢复,`plan` 模式与 todo 列表也一起
 回来(§4.5)。
 

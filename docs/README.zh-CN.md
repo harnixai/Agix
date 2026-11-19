@@ -30,7 +30,8 @@ Agix 是 agent 产品底下的那台引擎:它运行一个**会话**——装配
 1. **小到哪里都放得下。** `agixd` 是一个 11 MB 的二进制,不用装任何运行时;空闲时内存约
    10 MB,启动约 30 ms。一个真实任务——四个子 Agent 并行外加一段程序,6 分钟里 91 次模型
    调用——内存峰值不到 30 MB,CPU 总共约 8 秒(M2 Max 上 `release` 构建实测)。异步工作
-   线程用 `--worker-threads` 按硬件配,小板子上一个就够;用不到的模块在构建档位里整个去掉。
+   线程用 `app.worker_threads`(`--worker-threads`)按硬件配,小板子上一个就够;用不到的
+   模块在构建档位里整个去掉。
 2. **一个进程,成批会话。** 一个 daemon 同时服务几十个会话,跨项目、跨场景,走 Unix
    socket、TCP 或 WebSocket。闲置的会话被回收,用到时从磁盘恢复。崩溃留下记录,残留的命令
    在下次启动时清掉,和别的服务一样交给 systemd 或 launchd 托管。
@@ -97,8 +98,8 @@ DSH 不在本仓库里。怎么装、怎么自己跑这个对比,以及每个任
 - `release` 构建出 11 MB 的二进制;`release-fast` 体积翻倍,换一点速度和 panic 时展开。
 - 构建档位(`minimal`、`coding`、`full`),按模块开关:MCP、子 Agent、skill、web 工具、
   结构化输出、`RunCode`、WebSocket、脚本、插件、沙箱、OpenTelemetry。
-- `--worker-threads` / `AGIX_WORKER_THREADS`;会话上限,超出时回收最久未用的;闲置超时;
-  一个进程服务多个场景。
+- `app.worker_threads`(`--worker-threads` / `AGIX_WORKER_THREADS`);会话上限,超出时回收
+  最久未用的,与闲置超时(`app.session_cap`、`app.session_idle_timeout_secs`);一个进程服务多个场景。
 - 发现文件,客户端按场景找 daemon。SIGTERM 正常关闭;崩溃记录;被强杀后清理进程组。
 
 **模型**
@@ -288,12 +289,15 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 ——每个文档里写的响应形状都有测试拿真实 daemon 的回答对照。
 
 常用参数:`--scene` / `--scenes`(服务哪些场景)、`--listen` / `--listen-ws` 加
-`--token`(带认证的 TCP / WebSocket)、`--unix-socket-auth`(unix socket 也要认证)、`--session-cap`、`--worker-threads`、`--mcp-policy`、`--managed-settings`,
+`--token`(带认证的 TCP / WebSocket)、`--unix-socket-auth`(unix socket 也要认证)、`--mcp-policy`、`--managed-settings`,
 以及 `--set KEY=VALUE`:在所有设置文件之上设任何一个设置(`--set permissions.mode=plan`、
 `--set 'files.read_dirs=["/data"]'`、`--set turn.max_model_calls=50`;值先按 JSON 读,读不了按字符串;
-可重复)。`--max-tokens N` 就是 `--set model.max_tokens=N`,`--permission-prompt-timeout N` 就是
-`--set permissions.prompt_timeout_secs=N`。没有设置读的键、旧键、放不进的值让 daemon 在启动时就退出,
-报出是哪个 `--set`。
+可重复)。`--set` 的简写:`--max-tokens N`(`model.max_tokens`)、`--permission-prompt-timeout N`
+(`permissions.prompt_timeout_secs`)、`--session-cap N`(`app.session_cap`)、
+`--session-idle-timeout N`(`app.session_idle_timeout_secs`)、`--worker-threads N`
+(`app.worker_threads`;`AGIX_WORKER_THREADS` 排在所有参数之前,参数给了以参数为准)。与 `app`
+的其它键一样,后三个也可以写在全局 `settings.json` 里,不必写进服务的命令行。没有设置读的键、
+旧键、放不进的值让 daemon 在启动时就退出,报出是哪个 `--set`。
 每个运行中的 daemon 在 `~/.agix/daemon/instances.d/` 下写一个发现文件,客户端按场景
 找到它,不用拼路径。
 
@@ -498,7 +502,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `prompt` | `append`、`override`、`instruction_files`、`language`、`path_style`(`absolute`、`relative`) |
 | `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
 | `memory`、`telemetry`、`checkpoints`、`recorder` | `memory.enabled`;`telemetry.enabled`、`telemetry.otlp_endpoint`;文件检查点;LLM 录制 |
-| `app` | 只认全局层:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir` |
+| `app` | 只认全局层:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir`、`session_cap`、`session_idle_timeout_secs`、`worker_threads` |
 
 几个本文别处没提到的开关:
 
@@ -520,6 +524,9 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `app.system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`;`false` 直连。daemon 启动时生效;与上面沙箱命令的出网无关 |
 | `app.history` | `global` | 会话放在哪。`global`:状态目录的 `projects/` 与 `sessions/`。`project`:受信项目的会话放进它的 `.agix/state/history/<id>/`(worktree 里的放进主仓库的),`sessions/<id>/` 只留索引;不受信的项目照旧放全局。已经放在任一处的历史原地照读;项目里的历史只在项目受信时读。daemon 启动时生效 |
 | `app.worktree_dir` | `.wkts` | `EnterWorktree` 与 `Agent` 的 `worktree` 把 git worktree 建在仓库根的这个目录下(`<仓库>/.wkts/<名>`),仓库的 `.gitignore` 也只加这一行;一个以 `.` 开头的路径分量,不能以 `.git` 开头,也不能是配置目录或别的工具的目录 |
+| `app.session_cap` | `32` | 内存里留几个会话;再多一个就把最久未活动的空闲会话移出内存,下次用到时从磁盘恢复。daemon 启动时生效,`config.reload` 不改它 |
+| `app.session_idle_timeout_secs` | `3600` | 会话没有活动多少秒后移出内存。daemon 启动时生效,`config.reload` 不改它 |
+| `app.worker_threads` | 每个 CPU 核一个 | `agixd` 的异步工作线程数,至少 1。启动最先读一次,`config.reload` 不改它;嵌入的引擎跑在宿主的运行时上 |
 
 | 变量 | 作用 |
 |---|---|

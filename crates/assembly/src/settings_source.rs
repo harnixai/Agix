@@ -14,9 +14,10 @@ use settings::{FileTiers, LoadedSettings};
 
 /// The three tiers merged, then `cli` over them; the project tier is
 /// `layout`'s directory in `project`. The only place in the assembly, with
-/// [`read_pair_as_if`], that calls `LoadedSettings::load*`. It also hands
-/// `app.system_proxy` to the process-wide HTTP clients; a later read
-/// that disagrees is the `config.reload` of a setting that needs a restart.
+/// [`read_pair_as_if`] and [`read_app`], that calls `LoadedSettings::load*`.
+/// It also hands `app.system_proxy` to the process-wide HTTP clients; a later
+/// read that disagrees is the `config.reload` of a setting that needs a
+/// restart.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_pair(
     global_root: PathBuf,
@@ -60,6 +61,27 @@ pub(crate) fn read_pair(
     };
     platform::configure_system_proxy(loaded.values.app.system_proxy);
     loaded
+}
+
+/// The `app` block of the global tier at `global_root` with `cli` over it,
+/// for what a process decides before it builds anything; configures nothing.
+pub(crate) fn read_app(
+    global_root: &Path,
+    cli: Option<&serde_json::Value>,
+) -> settings::AppSettings {
+    let root = global_root.to_path_buf();
+    let files = FileTiers::new(root.clone(), root.clone(), root.clone());
+    LoadedSettings::load_without_project_from(
+        &with_cli(files, cli),
+        root.clone(),
+        root,
+        "",
+        "",
+        &crate::settings_sections::all(),
+        Layout::default(),
+    )
+    .values
+    .app
 }
 
 /// `files`, with `cli` as one layer above them.

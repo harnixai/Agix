@@ -8,8 +8,9 @@
 //! `settings::LoadedSettings::load()` — the single canonical
 //! loader (global → scene → project, generic recursive JSON merge).
 //! `DaemonConfig` just wraps that one `Settings` plus the handful of fields
-//! that are genuinely daemon-process-level, not settings.json content
-//! (socket/lock paths, session cap, TCP listener) — a daemon-side copy of the
+//! that are daemon-process-level: socket/lock paths and listeners, which are
+//! not settings.json content, and the session cap and idle timeout, which the
+//! settings' `app` block gives once at start — a daemon-side copy of the
 //! settings would have to learn every new field separately.
 
 use std::net::SocketAddr;
@@ -193,13 +194,13 @@ impl DaemonPaths for StaticDaemonPaths {
 
 /// Fully resolved daemon configuration. `settings` is the one canonical
 /// settings.json projection (see module docs); the remaining fields are
-/// process-level concerns that were never settings.json content in the
-/// first place (socket/lock file locations, session capacity, TCP listener).
+/// process-level and fixed for the pool's life.
 #[derive(Clone)]
 pub struct DaemonConfig {
     pub paths: Arc<dyn DaemonPaths>,
     pub socket_path: PathBuf,
     pub lock_path: PathBuf,
+    /// `app.session_cap` as read at start.
     pub session_cap: usize,
     pub tcp_addr: Option<SocketAddr>,
     /// WebSocket transport address. Shares `tcp_token`, because both are the
@@ -210,7 +211,7 @@ pub struct DaemonConfig {
     /// Always empty: sessions take their rules from `settings.rules`
     /// (see `resolve_session_permission` in `session_pool::parts::factory`), not from here.
     pub permission_rules: RuleSet,
-    /// Session 空闲超时秒数，超时后自动回收（默认 3600 = 1 小时）。
+    /// `app.session_idle_timeout_secs` as read at start.
     pub session_idle_timeout_secs: u64,
     /// Where to read the MCP policy instead of the platform's managed path
     /// (`Layout::mcp_policy_file`). A file named here must exist.
@@ -265,16 +266,17 @@ impl std::fmt::Debug for DaemonConfig {
 impl DaemonConfig {
     pub fn minimal(paths: Arc<dyn DaemonPaths>) -> Self {
         let config_root = paths.config_root();
+        let app = settings::AppSettings::default();
         Self {
             socket_path: socket_path_from_root(&config_root),
             lock_path: lock_path_from_root(&config_root),
             paths,
-            session_cap: 32,
+            session_cap: app.session_cap,
             tcp_addr: None,
             ws_addr: None,
             tcp_token: None,
             permission_rules: RuleSet::empty(),
-            session_idle_timeout_secs: 3600,
+            session_idle_timeout_secs: app.session_idle_timeout_secs,
             mcp_policy_path: None,
             managed_settings_path: None,
             cli_settings: None,
@@ -325,17 +327,27 @@ pub fn load_daemon_config(
                 .with_global(global_root)
                 .with_layout(paths.layout()),
         ),
-        session_cap: 32,
+        session_cap: settings.values.app.session_cap,
         tcp_addr: None,
         ws_addr: None,
         tcp_token: None,
         permission_rules: RuleSet::empty(),
-        session_idle_timeout_secs: 3600,
+        session_idle_timeout_secs: settings.values.app.session_idle_timeout_secs,
         mcp_policy_path: None,
         managed_settings_path: None,
         cli_settings,
         settings,
     }
+}
+
+/// What the settings' `app` block says for the process at the state root
+/// `root`, its global tier with `cli_settings` over it: read before the
+/// process starts anything, as `agixd` sizes its runtime from it.
+pub fn process_settings(
+    root: &Path,
+    cli_settings: Option<&serde_json::Value>,
+) -> settings::AppSettings {
+    crate::settings_source::read_app(root, cli_settings)
 }
 
 /// Where the process at the state root `root` leaves its crash reports.

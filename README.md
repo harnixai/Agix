@@ -43,8 +43,8 @@ when no one is watching.
    30 ms. A real task — four sub-agents in parallel plus a program, 91 model
    calls over six minutes — peaked under 30 MB and used about 8 s of CPU (measured
    on an M2 Max, `release` build). Size the async workers to the hardware
-   with `--worker-threads` — one is enough on a small board — and leave out
-   whole modules at build time with the build tiers.
+   with `app.worker_threads` (`--worker-threads`) — one is enough on a small
+   board — and leave out whole modules at build time with the build tiers.
 2. **Many sessions, one process.** A daemon serves dozens of sessions across
    projects and scenes, over a Unix socket, TCP or WebSocket. Idle sessions
    are evicted and come back from disk on demand. A crash is recorded,
@@ -136,8 +136,9 @@ record of this run — versions, environment and every round:
 - Build tiers (`minimal`, `coding`, `full`) and per-module features: MCP,
   sub-agents, skills, web tools, structured output, `RunCode`, WebSocket,
   scripts, plugins, the sandbox, OpenTelemetry.
-- `--worker-threads` / `AGIX_WORKER_THREADS`; session cap with least-recently-used
-  eviction; idle timeout; several scenes per process.
+- `app.worker_threads` (`--worker-threads` / `AGIX_WORKER_THREADS`); session cap
+  with least-recently-used eviction and idle timeout (`app.session_cap`,
+  `app.session_idle_timeout_secs`); several scenes per process.
 - Discovery files, so clients find a daemon by scene. Clean shutdown on
   SIGTERM, crash records, and process-group cleanup after a hard kill.
 
@@ -371,14 +372,19 @@ project trust, MCP, plugins, scheduling — and every documented response shape 
 against a real daemon's answer by a test.
 
 Useful flags: `--scene` / `--scenes` (which scenes to serve), `--listen` /
-`--listen-ws` with `--token` (TCP / WebSocket, authenticated), `--unix-socket-auth` (the unix socket authenticates too), `--session-cap`,
-`--worker-threads`, `--mcp-policy`, `--managed-settings`, and `--set KEY=VALUE`
+`--listen-ws` with `--token` (TCP / WebSocket, authenticated), `--unix-socket-auth` (the unix socket authenticates too),
+`--mcp-policy`, `--managed-settings`, and `--set KEY=VALUE`
 for any setting over every settings file (`--set permissions.mode=plan`,
 `--set 'files.read_dirs=["/data"]'`, `--set turn.max_model_calls=50`; the value
-is read as JSON, else as a string; repeatable). `--max-tokens N` is
-`--set model.max_tokens=N` and `--permission-prompt-timeout N` is
-`--set permissions.prompt_timeout_secs=N`. A key no setting reads, an old key
-or a value that does not fit stops the daemon at startup, naming the `--set`.
+is read as JSON, else as a string; repeatable). Shorthands for `--set`:
+`--max-tokens N` (`model.max_tokens`), `--permission-prompt-timeout N`
+(`permissions.prompt_timeout_secs`), `--session-cap N` (`app.session_cap`),
+`--session-idle-timeout N` (`app.session_idle_timeout_secs`) and
+`--worker-threads N` (`app.worker_threads`; `AGIX_WORKER_THREADS` comes before
+every flag, so a flag wins). Like any `app` key, these three can be written in
+the global `settings.json` instead of a service's command line. A key no
+setting reads, an old key or a value that does not fit stops the daemon at
+startup, naming the `--set`.
 Each running daemon writes a discovery file
 under `~/.agix/daemon/instances.d/`, so a client finds it by scene instead of
 by path.
@@ -628,7 +634,7 @@ The blocks:
 | `prompt` | `append`, `override`, `instruction_files`, `language`, `path_style` (`absolute`, `relative`) |
 | `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches, `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
 | `memory`, `telemetry`, `checkpoints`, `recorder` | `memory.enabled`; `telemetry.enabled`, `telemetry.otlp_endpoint`; file checkpoints; LLM recording |
-| `app` | global layer only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir` |
+| `app` | global layer only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir`, `session_cap`, `session_idle_timeout_secs`, `worker_threads` |
 
 A few switches whose effect the rest of this README does not mention:
 
@@ -650,6 +656,9 @@ A few switches whose effect the rest of this README does not mention:
 | `app.system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`; `false` connects directly. Applied at daemon start; unrelated to the sandboxed commands' network above |
 | `app.history` | `global` | where sessions are kept. `global`: under the state directory's `projects/` and `sessions/`. `project`: a trusted project's sessions go to its `.agix/state/history/<id>/` (a worktree's to its main checkout's) with only an index left under `sessions/<id>/`; untrusted projects stay global. History already kept either way is read where it is; history in a project is read only while the project is trusted. Applied at daemon start |
 | `app.worktree_dir` | `.wkts` | the directory at the repository root that `EnterWorktree` and `Agent`'s `worktree` put git worktrees in (`<repo>/.wkts/<name>`), and the one line added to the repository's `.gitignore`; one path component starting with `.`, not starting with `.git`, and not a configuration directory or another tool's |
+| `app.session_cap` | `32` | sessions kept in memory; one more takes the least recently active idle one out of memory, and its next use brings it back from disk. Applied at daemon start; `config.reload` does not change it |
+| `app.session_idle_timeout_secs` | `3600` | seconds without activity before a session is taken out of memory. Applied at daemon start; `config.reload` does not change it |
+| `app.worker_threads` | one per CPU core | `agixd`'s async worker threads, at least 1. Read once before anything starts; `config.reload` does not change it. An embedded engine runs on the host's runtime |
 
 | Variable | Purpose |
 |---|---|

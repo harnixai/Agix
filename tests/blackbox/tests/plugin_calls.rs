@@ -1132,7 +1132,7 @@ async fn a_call_holds_the_session_it_brought_back_while_others_crowd_the_pool() 
     config.credentials = Some(blackbox::stub_credentials());
     config.cwd = Some(project);
     config.plugins = vec![package];
-    config.session_cap = 1;
+    config.settings = Some(json!({"app": {"session_cap": 1}}));
     let embedded = Embedded::start(config).await?;
     let pool = embedded.pool().clone();
     let target = pool

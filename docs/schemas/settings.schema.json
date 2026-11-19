@@ -29,6 +29,20 @@
           "default": "global",
           "description": "Where sessions are kept. `global` (default): under the state root's\n`projects/` and `sessions/`. `project`: a session of a trusted project\ngoes to that project's `<project dir>/state/history/<id>/` (a\nworktree's to its main checkout's), with only an index under\n`sessions/<id>/`; the rest stay global. What is already kept either\nway is read where it is, and history kept in a project is read only\nwhile the project is trusted. Takes effect when the daemon starts."
         },
+        "session_cap": {
+          "default": 32,
+          "description": "How many sessions the daemon keeps in memory. Creating or bringing\nback one more takes the least recently active idle session out of\nmemory; its transcript stays and the next use brings it back. Takes\neffect when the daemon starts; `config.reload` does not apply a change.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_idle_timeout_secs": {
+          "default": 3600,
+          "description": "Seconds a session may go without activity before it is taken out of\nmemory, as at the cap. Takes effect when the daemon starts;\n`config.reload` does not apply a change.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "system_proxy": {
           "default": true,
           "description": "The engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over\nHTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` /\n`NO_PROXY` from the environment (default). `false` connects directly,\nignoring them. Requests to this machine are direct either way. Not the\nnetwork of a sandboxed command, which `sandbox.network` decides. Takes\neffect when the daemon starts; `config.reload` does not apply a change.",
@@ -45,6 +59,15 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "worker_threads": {
+          "description": "`agixd`'s async worker threads, at least 1; unset, one per CPU core.\nBlocking work (file I/O, searches, scripts) runs on a pool of its own\nwhatever this is. Read once, before `agixd` starts anything else;\n`config.reload` does not apply a change. An embedded engine runs on\nits host's runtime and does not read it.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "worktree_dir": {
           "description": "The directory at a repository's root the engine's git worktrees go\nin, which is also the line it adds to that repository's `.gitignore`:\none path component starting with `.`, not starting with `.git`, not a\nconfiguration root nor another tool's directory\n(`base::paths::Layout::with_worktrees_dir`). Unset, `.wkts`. A name\nthat is not allowed is ignored with a warning.",
@@ -1135,6 +1158,8 @@
       "$ref": "#/$defs/AppSettings",
       "default": {
         "history": "global",
+        "session_cap": 32,
+        "session_idle_timeout_secs": 3600,
         "system_proxy": true,
         "trust_all_projects": false
       },

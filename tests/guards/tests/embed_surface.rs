@@ -22,8 +22,6 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("scenes", "Vec<String>"),
     ("model", "String"),
     ("max_tokens", "Option<u32>"),
-    ("session_cap", "usize"),
-    ("session_idle_timeout", "Duration"),
     ("permission_prompt_timeout", "Option<Duration>"),
     ("settings", "Option<serde_json::Value>"),
     ("instance", "Option<String>"),

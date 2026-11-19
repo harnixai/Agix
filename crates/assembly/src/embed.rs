@@ -48,17 +48,15 @@ pub struct EmbedConfig {
     /// `model.max_tokens` in `settings`, over what `settings` itself says
     /// there.
     pub max_tokens: Option<u32>,
-    pub session_cap: usize,
-    pub session_idle_timeout: Duration,
     /// `permissions.prompt_timeout_secs` in `settings`, in whole seconds,
     /// over what `settings` itself says there.
     pub permission_prompt_timeout: Option<Duration>,
     /// Settings over every settings file of every project and scene, as
     /// `agixd --set` gives them: a JSON object of settings keys, the `cli`
-    /// layer. It merges as a global tier's file would, `app` included, and
-    /// its `permissions` rule lists add to every pair's. A key no setting
-    /// reads, an old one, or a value that does not fit fails the start with
-    /// [`EmbedError::InvalidSetting`].
+    /// layer. It merges as a global tier's file would, `app` included (the
+    /// session cap is `app.session_cap`), and its `permissions` rule lists add
+    /// to every pair's. A key no setting reads, an old one, or a value that
+    /// does not fit fails the start with [`EmbedError::InvalidSetting`].
     pub settings: Option<serde_json::Value>,
     /// `Some`: take the scene's `daemon.lock` and write the `instances.d`
     /// entry under this name; without a `groups_file`, record the commands
@@ -145,8 +143,6 @@ impl EmbedConfig {
             scenes: Vec::new(),
             model: "claude-sonnet-4-6".into(),
             max_tokens: None,
-            session_cap: 32,
-            session_idle_timeout: Duration::from_secs(3600),
             permission_prompt_timeout: None,
             settings: None,
             instance: None,
@@ -555,8 +551,6 @@ fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, Embe
             return Err(EmbedError::InvalidSetting { key, reason });
         }
     }
-    daemon_config.session_cap = config.session_cap;
-    daemon_config.session_idle_timeout_secs = config.session_idle_timeout.as_secs();
     if config.mcp_policy.is_some() && !crate::modules::compiled().contains(&"mcp") {
         return Err(EmbedError::Startup(
             "mcp_policy: this build has no MCP module (feature `mcp`)".into(),

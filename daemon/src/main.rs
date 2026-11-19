@@ -18,9 +18,12 @@ Usage: agixd [OPTIONS]
 
 Options:
       --socket <PATH>              Unix socket path [default: $HOME/.agix/scenes/<scene>/daemon.sock]
-      --session-cap <N>            Maximum concurrent sessions [default: 32]
+      --session-cap <N>            Sessions kept in memory: --set app.session_cap=N
+                                   [default: app.session_cap, else 32]
       --session-idle-timeout <SECS>
-                                   Session idle timeout in seconds [default: 3600]
+                                   Seconds an idle session stays in memory:
+                                   --set app.session_idle_timeout_secs=SECS
+                                   [default: app.session_idle_timeout_secs, else 3600]
       --set <KEY=VALUE>            Set the settings key KEY over every settings file of every
                                    project and scene (e.g. --set permissions.mode=plan,
                                    --set 'files.read_dirs=[\"/data\"]'); VALUE is read as JSON,
@@ -49,8 +52,9 @@ Options:
                                    denied (0 = wait forever):
                                    --set permissions.prompt_timeout_secs=SECS
                                    [default: permissions.prompt_timeout_secs, else 300]
-      --worker-threads <N>         Async worker threads [env: AGIX_WORKER_THREADS]
-                                   [default: the number of CPU cores]
+      --worker-threads <N>         Async worker threads: --set app.worker_threads=N
+                                   [env: AGIX_WORKER_THREADS]
+                                   [default: app.worker_threads, else the number of CPU cores]
       --mcp-policy <PATH>          MCP policy file to enforce instead of the managed one
                                    [default: /Library/Application Support/Agix/mcp-policy.json
                                    on macOS, %ProgramData%\\Agix\\mcp-policy.json on Windows,
@@ -68,17 +72,11 @@ struct Cli {
     /// Unix socket path (default: $HOME/.agix/scenes/<scene>/daemon.sock)
     socket: Option<PathBuf>,
 
-    /// Maximum concurrent sessions
-    session_cap: usize,
-
-    /// Session idle timeout in seconds (default: 3600 = 1 hour)
-    session_idle_timeout: u64,
-
     /// Model name for sessions
     model: String,
 
-    /// `--set`, `--max-tokens` and `--permission-prompt-timeout`, in the
-    /// order given.
+    /// `--set` and its shorthands, in the order given, after
+    /// `AGIX_WORKER_THREADS`.
     settings: Vec<Assignment>,
 
     /// Bind a TCP listener at this addr (e.g. 127.0.0.1:7878).
@@ -126,11 +124,6 @@ struct Cli {
     /// `code,harnix,mini`. See `default_instance_name()`.
     instance: Option<String>,
 
-    /// Async worker threads; `None` leaves tokio's default of one per CPU
-    /// core. Blocking work (file I/O, searches, scripts) runs on its own pool
-    /// whatever this is.
-    worker_threads: Option<usize>,
-
     /// The MCP policy file, in place of the platform's managed path. Unlike
     /// that one it must exist: a policy someone named and that is not there
     /// denies every MCP server rather than none.
@@ -143,6 +136,18 @@ struct Cli {
     /// The unix socket requires `daemon.auth` as TCP does.
     unix_socket_auth: bool,
 }
+
+/// The flags that are `--set` of a key, with the key.
+const SHORTHANDS: &[(&str, &str)] = &[
+    ("max-tokens", "model.max_tokens"),
+    (
+        "permission-prompt-timeout",
+        "permissions.prompt_timeout_secs",
+    ),
+    ("session-cap", "app.session_cap"),
+    ("session-idle-timeout", "app.session_idle_timeout_secs"),
+    ("worker-threads", "app.worker_threads"),
+];
 
 /// One settings key the command line sets.
 #[derive(Debug, Clone, PartialEq)]
@@ -170,12 +175,23 @@ impl Assignment {
         })
     }
 
-    fn shorthand(flag: &str, given: impl std::fmt::Display, key: &str, value: u64) -> Self {
-        Self {
-            given: format!("--{flag} {given}"),
+    /// `--<flag> N` of one of [`SHORTHANDS`], N read from `parser`.
+    fn shorthand(
+        parser: &mut lexopt::Parser,
+        flag: &str,
+        key: &str,
+    ) -> Result<Self, lexopt::Error> {
+        use lexopt::prelude::*;
+        let value: u64 = match flag {
+            "max-tokens" => number::<u32>(parser, flag)?.into(),
+            "worker-threads" => worker_threads(&parser.value()?.string()?)?,
+            _ => number(parser, flag)?,
+        };
+        Ok(Self {
+            given: format!("--{flag} {value}"),
             key: settings::edit::KeyPath::new(key.split('.')),
             value: value.into(),
-        }
+        })
     }
 
     /// Whether `dotted`, a key an error names, is this one's, beneath it or
@@ -229,10 +245,9 @@ impl Cli {
             let Invocation::Run(mut cli) = invocation else {
                 return Ok(invocation);
             };
-            if cli.worker_threads.is_none() {
-                if let Some(value) = std::env::var_os("AGIX_WORKER_THREADS") {
-                    cli.worker_threads = Some(worker_threads(&value.to_string_lossy())?);
-                }
+            if let Some(value) = std::env::var_os("AGIX_WORKER_THREADS") {
+                cli.settings
+                    .insert(0, worker_threads_from_env(&value.to_string_lossy())?);
             }
             Ok(Invocation::Run(cli))
         });
@@ -259,8 +274,6 @@ impl Cli {
         use lexopt::prelude::*;
         let mut cli = Cli {
             socket: None,
-            session_cap: 32,
-            session_idle_timeout: 3600,
             model: "claude-sonnet-4-6".into(),
             settings: Vec::new(),
             listen: None,
@@ -269,32 +282,25 @@ impl Cli {
             scene: "code".into(),
             scenes: Vec::new(),
             instance: None,
-            worker_threads: None,
             mcp_policy: None,
             managed_settings: None,
             unix_socket_auth: false,
         };
         let mut parser = lexopt::Parser::from_args(args);
         while let Some(arg) = parser.next()? {
+            if let Long(flag) = arg {
+                if let Some(&(flag, key)) = SHORTHANDS.iter().find(|(f, _)| *f == flag) {
+                    cli.settings
+                        .push(Assignment::shorthand(&mut parser, flag, key)?);
+                    continue;
+                }
+            }
             match arg {
                 Long("socket") => cli.socket = Some(parser.value()?.into()),
-                Long("session-cap") => cli.session_cap = number(&mut parser, "session-cap")?,
-                Long("session-idle-timeout") => {
-                    cli.session_idle_timeout = number(&mut parser, "session-idle-timeout")?
-                }
                 Long("model") => cli.model = parser.value()?.string()?,
                 Long("set") => cli
                     .settings
                     .push(Assignment::parse(&parser.value()?.string()?)?),
-                Long("max-tokens") => {
-                    let n: u32 = number(&mut parser, "max-tokens")?;
-                    cli.settings.push(Assignment::shorthand(
-                        "max-tokens",
-                        n,
-                        "model.max_tokens",
-                        n.into(),
-                    ))
-                }
                 Long("listen") => cli.listen = Some(parser.value()?.string()?),
                 Long("listen-ws") => cli.listen_ws = Some(parser.value()?.string()?),
                 Long("token") => cli.token = Some(parser.value()?.string()?),
@@ -308,18 +314,6 @@ impl Cli {
                         .map(str::to_string),
                 ),
                 Long("instance") => cli.instance = Some(parser.value()?.string()?),
-                Long("permission-prompt-timeout") => {
-                    let secs: u64 = number(&mut parser, "permission-prompt-timeout")?;
-                    cli.settings.push(Assignment::shorthand(
-                        "permission-prompt-timeout",
-                        secs,
-                        "permissions.prompt_timeout_secs",
-                        secs,
-                    ))
-                }
-                Long("worker-threads") => {
-                    cli.worker_threads = Some(worker_threads(&parser.value()?.string()?)?)
-                }
                 Long("mcp-policy") => cli.mcp_policy = Some(parser.value()?.into()),
                 Long("managed-settings") => cli.managed_settings = Some(parser.value()?.into()),
                 Long("unix-socket-auth") => cli.unix_socket_auth = true,
@@ -332,8 +326,8 @@ impl Cli {
     }
 }
 
-fn worker_threads(value: &str) -> Result<usize, lexopt::Error> {
-    match value.parse::<usize>() {
+fn worker_threads(value: &str) -> Result<u64, lexopt::Error> {
+    match value.parse::<u64>() {
         Ok(n) if n > 0 => Ok(n),
         _ => Err(format!(
             "invalid worker thread count '{value}': expected an integer of at least 1"
@@ -342,10 +336,21 @@ fn worker_threads(value: &str) -> Result<usize, lexopt::Error> {
     }
 }
 
-fn runtime(worker_threads: Option<usize>) -> std::io::Result<tokio::runtime::Runtime> {
+fn worker_threads_from_env(value: &str) -> Result<Assignment, lexopt::Error> {
+    let n = worker_threads(value)?;
+    Ok(Assignment {
+        given: format!("AGIX_WORKER_THREADS={value}"),
+        key: settings::edit::KeyPath::new(["app", "worker_threads"]),
+        value: n.into(),
+    })
+}
+
+fn runtime(
+    worker_threads: Option<std::num::NonZeroUsize>,
+) -> std::io::Result<tokio::runtime::Runtime> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     if let Some(n) = worker_threads {
-        builder.worker_threads(n);
+        builder.worker_threads(n.get());
     }
     builder.enable_all().build()
 }
@@ -373,12 +378,13 @@ fn default_instance_name(scene: &str, scenes: &[String]) -> String {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    runtime(cli.worker_threads)?.block_on(serve(cli))
+    let data_root = daemon::config::default_global_root();
+    let app = daemon::config::process_settings(&data_root, settings_layer(&cli.settings).as_ref());
+    runtime(app.worker_threads)?.block_on(serve(cli, data_root))
 }
 
-async fn serve(cli: Cli) -> anyhow::Result<()> {
+async fn serve(cli: Cli, data_root: PathBuf) -> anyhow::Result<()> {
     init_logging();
-    let data_root = daemon::config::default_global_root();
     let listeners = listeners_from_cli(&cli)?;
     platform::crash::install(
         daemon::config::crashes_dir_from_root(&data_root),
@@ -422,8 +428,6 @@ fn embed_config(cli: &Cli, data_root: PathBuf) -> EmbedConfig {
     config.scenes = cli.scenes.clone();
     config.model = cli.model.clone();
     config.settings = settings_layer(&cli.settings);
-    config.session_cap = cli.session_cap;
-    config.session_idle_timeout = std::time::Duration::from_secs(cli.session_idle_timeout);
     config.instance = Some(
         cli.instance
             .clone()
@@ -558,13 +562,10 @@ mod tests {
     #[test]
     fn no_arguments_give_the_documented_defaults() {
         let cli = parse(&[]);
-        assert_eq!(cli.session_cap, 32);
-        assert_eq!(cli.session_idle_timeout, 3600);
         assert_eq!(cli.model, "claude-sonnet-4-6");
         assert!(cli.settings.is_empty());
         assert_eq!(cli.scene, "code");
         assert!(cli.socket.is_none() && cli.instance.is_none() && cli.scenes.is_empty());
-        assert_eq!(cli.worker_threads, None);
         assert_eq!(cli.mcp_policy, None);
         assert_eq!(cli.managed_settings, None);
         assert!(!cli.unix_socket_auth);
@@ -587,18 +588,68 @@ mod tests {
 
     #[test]
     fn worker_threads_take_a_positive_count_and_size_the_runtime() {
-        assert_eq!(parse(&["--worker-threads", "1"]).worker_threads, Some(1));
-        assert_eq!(parse(&["--worker-threads=6"]).worker_threads, Some(6));
+        assert_eq!(
+            settings_layer(&parse(&["--worker-threads=6"]).settings),
+            Some(serde_json::json!({"app": {"worker_threads": 6}}))
+        );
         let parse_err =
             |args: &[&str]| Cli::parse_from(args.iter().map(std::ffi::OsString::from)).is_err();
         assert!(parse_err(&["--worker-threads", "0"]));
         assert!(parse_err(&["--worker-threads", "-2"]));
         assert!(parse_err(&["--worker-threads", "all"]));
+        assert!(worker_threads_from_env("0").is_err());
 
-        let rt = runtime(Some(1)).unwrap();
+        let rt = runtime(std::num::NonZeroUsize::new(1)).unwrap();
         assert_eq!(rt.metrics().num_workers(), 1);
-        let rt = runtime(Some(3)).unwrap();
+        let rt = runtime(std::num::NonZeroUsize::new(3)).unwrap();
         assert_eq!(rt.metrics().num_workers(), 3);
+    }
+
+    #[test]
+    fn the_runtime_is_sized_by_the_global_settings_under_the_command_line() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("settings.json"),
+            r#"{"app": {"worker_threads": 2}}"#,
+        )
+        .unwrap();
+        let threads = |args: &[&str]| {
+            let mut cli = parse(args);
+            cli.settings
+                .insert(0, worker_threads_from_env("5").unwrap());
+            daemon::config::process_settings(root.path(), settings_layer(&cli.settings).as_ref())
+                .worker_threads
+                .map(std::num::NonZeroUsize::get)
+        };
+        let from_file = daemon::config::process_settings(root.path(), None).worker_threads;
+        assert_eq!(from_file.map(std::num::NonZeroUsize::get), Some(2));
+        assert_eq!(threads(&[]), Some(5), "the environment is over the file");
+        assert_eq!(threads(&["--worker-threads", "3"]), Some(3));
+        assert_eq!(threads(&["--set", "app.worker_threads=4"]), Some(4));
+    }
+
+    #[test]
+    fn the_session_flags_are_their_set_forms() {
+        for (flag, set) in [
+            (["--session-cap", "4"], "app.session_cap=4"),
+            (
+                ["--session-idle-timeout", "60"],
+                "app.session_idle_timeout_secs=60",
+            ),
+            (["--worker-threads", "2"], "app.worker_threads=2"),
+        ] {
+            let cli = parse(&flag);
+            assert_eq!(
+                settings_layer(&cli.settings),
+                settings_layer(&parse(&["--set", set]).settings),
+                "{flag:?}"
+            );
+            let key = set.split_once('=').unwrap().0;
+            assert_eq!(setting_named(&cli, key), flag.join(" "));
+        }
+        let parse_err =
+            |args: &[&str]| Cli::parse_from(args.iter().map(std::ffi::OsString::from)).is_err();
+        assert!(parse_err(&["--session-idle-timeout", "-1"]));
     }
 
     #[test]
@@ -623,7 +674,10 @@ mod tests {
             cli.socket.as_deref(),
             Some(std::path::Path::new("/tmp/a.sock"))
         );
-        assert_eq!(cli.session_cap, 4);
+        assert_eq!(
+            settings_layer(&cli.settings),
+            Some(serde_json::json!({"app": {"session_cap": 4}}))
+        );
         assert_eq!(cli.scene, "mini");
         assert_eq!(cli.scenes, ["harnix", "triage", "code"]);
         assert_eq!(cli.listen.as_deref(), Some("127.0.0.1:7878"));

@@ -2,9 +2,10 @@
 //! `max_tokens` written in), over `Embedded::serve_stream`: they hold over the
 //! settings files of the daemon's own project and of another one — the
 //! permission mode a session reports and the `max_tokens` its turns ask for —
-//! and `config.get` reports them as the `cli` tier. A key no setting reads, an
-//! old key, a value that does not fit or settings that are not an object are
-//! refused at start, naming the key.
+//! and `config.get` reports them as the `cli` tier; `app.session_cap` there
+//! bounds the sessions in memory. A key no setting reads, an old key, a value
+//! that does not fit or settings that are not an object are refused at start,
+//! naming the key.
 
 use std::path::{Path, PathBuf};
 
@@ -167,5 +168,30 @@ async fn settings_no_setting_takes_are_refused_at_start() -> anyhow::Result<()> 
             Ok(_) => panic!("{settings} was taken"),
         }
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_session_cap_in_the_embedders_settings_holds_the_engine_to_one_session(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    stub.script_when("标题生成器", (0..2).map(|_| Reply::text("a title")));
+    let root = root(&stub)?;
+    let embedded = Embedded::start(config(&root, json!({"app": {"session_cap": 1}}))).await?;
+    let mut client = connect(&embedded);
+
+    let mut sessions = Vec::new();
+    for turn in ["EMBED-CAP-ONE", "EMBED-CAP-TWO"] {
+        let session = client.session_create(json!({})).await?;
+        stub.script_when(turn, [Reply::text("ok")]);
+        let events = client.session_run_turn(&session, turn, "t1", None).await?;
+        anyhow::ensure!(events.turn_complete, "{events:?}");
+        sessions.push(session);
+    }
+    for (session, status) in sessions.iter().zip(["inactive", "active"]) {
+        let got = call(&mut client, "session.get", json!({"session_id": session})).await?;
+        assert_eq!(got["status"], status, "{got}");
+    }
+    embedded.shutdown().await;
     Ok(())
 }

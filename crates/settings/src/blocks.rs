@@ -374,6 +374,22 @@ pub struct AppSettings {
     /// that is not allowed is ignored with a warning.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_dir: Option<String>,
+    /// How many sessions the daemon keeps in memory. Creating or bringing
+    /// back one more takes the least recently active idle session out of
+    /// memory; its transcript stays and the next use brings it back. Takes
+    /// effect when the daemon starts; `config.reload` does not apply a change.
+    pub session_cap: usize,
+    /// Seconds a session may go without activity before it is taken out of
+    /// memory, as at the cap. Takes effect when the daemon starts;
+    /// `config.reload` does not apply a change.
+    pub session_idle_timeout_secs: u64,
+    /// `agixd`'s async worker threads, at least 1; unset, one per CPU core.
+    /// Blocking work (file I/O, searches, scripts) runs on a pool of its own
+    /// whatever this is. Read once, before `agixd` starts anything else;
+    /// `config.reload` does not apply a change. An embedded engine runs on
+    /// its host's runtime and does not read it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_threads: Option<std::num::NonZeroUsize>,
 }
 
 impl Default for AppSettings {
@@ -384,6 +400,9 @@ impl Default for AppSettings {
             history: HistoryLocation::default(),
             system_proxy: true,
             worktree_dir: None,
+            session_cap: 32,
+            session_idle_timeout_secs: 3600,
+            worker_threads: None,
         }
     }
 }
