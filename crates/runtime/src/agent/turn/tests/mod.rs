@@ -5,6 +5,7 @@ mod budget_directive;
 mod checkpoints;
 mod dangling_tool_use;
 mod extract_memories;
+mod host_runner;
 mod inline_commands;
 mod model_failure;
 mod prompt_assembly;

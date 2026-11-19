@@ -260,11 +260,31 @@ pub(crate) async fn execute_tool_with_telemetry(
     name: &str,
     input: serde_json::Value,
 ) -> base::interface::tool_middleware::ToolOutcome {
+    dispatch(ctx, name, None, input).await
+}
+
+/// `tool` through the same pipeline as a call by name, without being looked
+/// up among the session's tools.
+pub(super) async fn execute_given_tool(
+    ctx: &ToolExecCtx,
+    tool: Arc<dyn base::tool::Tool>,
+    input: serde_json::Value,
+) -> base::interface::tool_middleware::ToolOutcome {
+    let name = tool.name().to_string();
+    dispatch(ctx, &name, Some(&tool), input).await
+}
+
+async fn dispatch(
+    ctx: &ToolExecCtx,
+    name: &str,
+    given: Option<&Arc<dyn base::tool::Tool>>,
+    input: serde_json::Value,
+) -> base::interface::tool_middleware::ToolOutcome {
     // No wrappers means no wrapping: the call goes straight through, with no
     // context clone and no future inside a future. A seam nobody uses should
     // cost nothing on the hot path.
     if ctx.tool_middleware.is_empty() {
-        return execute_tool_inner(ctx, name, input).await;
+        return execute_tool_inner(ctx, name, given, input).await;
     }
     let chain = Arc::clone(&ctx.tool_middleware);
     let call = base::interface::tool_middleware::ToolCall {
@@ -287,7 +307,8 @@ pub(crate) async fn execute_tool_with_telemetry(
             ctx.cancel = cancel;
             let name = name.to_string();
             let input = input.clone();
-            async move { execute_tool_inner(&ctx, &name, input).await }
+            let given = given.cloned();
+            async move { execute_tool_inner(&ctx, &name, given.as_ref(), input).await }
         },
     )
     .await
@@ -360,15 +381,27 @@ fn fence_what_came_back(
     }
 }
 
-pub(super) async fn execute_tool_inner(
+fn callee(
     ctx: &ToolExecCtx,
     name: &str,
+    given: Option<&Arc<dyn base::tool::Tool>>,
+) -> Result<Arc<dyn base::tool::Tool>, String> {
+    match given {
+        Some(tool) => Ok(Arc::clone(tool)),
+        None => ctx
+            .tools
+            .get(name)
+            .ok_or_else(|| format!("Tool not found: {name}")),
+    }
+}
+
+async fn execute_tool_inner(
+    ctx: &ToolExecCtx,
+    name: &str,
+    given: Option<&Arc<dyn base::tool::Tool>>,
     input: serde_json::Value,
 ) -> base::interface::tool_middleware::ToolOutcome {
-    let tool = ctx
-        .tools
-        .get(name)
-        .ok_or_else(|| format!("Tool not found: {name}"))?;
+    let tool = callee(ctx, name, given)?;
     let deferred = ctx.config.deferred_tools.contains(name);
 
     // The hook may rewrite the input, and permission judges what will run.

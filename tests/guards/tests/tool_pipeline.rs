@@ -88,6 +88,10 @@ const PUTS_A_CALL_TO_THE_POLICY: &[(&str, &str)] = &[
         "a delegate's call, relayed to its parent's policy",
     ),
     (
+        "crates/runtime/src/agent/turn/host_runner.rs::WithRules::decide",
+        "a host call's, relayed to the session's policy with the call's own rules",
+    ),
+    (
         "crates/permissions/src/policy/host.rs::HostSays::of",
         "the engine's policy asking the host's, as one of its rules",
     ),
@@ -201,7 +205,7 @@ const SETS_A_TOOL_CONTEXT_FIELD: &[(&str, &str)] = &[
         "what the policy let the call through on, known only once it has",
     ),
     (
-        "crates/runtime/src/agent/turn/tool_exec.rs::execute_tool_with_telemetry::cancel",
+        "crates/runtime/src/agent/turn/tool_exec.rs::dispatch::cancel",
         "a `ToolExecCtx` taking the signal the middleware settled on, before any context is made",
     ),
     (

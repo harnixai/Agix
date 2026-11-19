@@ -229,11 +229,18 @@ async fn settle(
     tool_ctx: &base::tool::ToolContext,
     request: base::interface::permission::PermissionRequest<'_>,
 ) -> Answer {
-    use base::interface::permission::PermissionOutcome;
+    use base::interface::permission::{PermissionOutcome, Reason};
     let mode_changes = ctx.session_state.permission_mode_changes();
     let answer = match ctx.permission.policy.decide(&request).await {
-        PermissionOutcome::Prompt { .. } if ctx.caller == Caller::Person => {
+        PermissionOutcome::Prompt { answerable, .. } if ctx.caller.answers(answerable) => {
             Answer::Decided(permitted_by_person(facts, tool_ctx))
+        }
+        PermissionOutcome::Prompt { reason, .. } if ctx.caller == Caller::Host => {
+            let why = format!(
+                "{} — only a person may approve it, and a call the host makes is not one",
+                reason.message
+            );
+            Answer::Refused(Reason::new(reason.stage, &why), Refusal::denied(why))
         }
         PermissionOutcome::Prompt {
             prompt_id,

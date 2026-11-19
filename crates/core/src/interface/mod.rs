@@ -83,6 +83,7 @@ pub mod model;
 pub mod model_factory;
 pub mod model_interceptor;
 pub mod permission;
+pub mod plugin_call;
 pub mod prompt_assembler;
 pub mod prompt_assembly;
 pub mod prompt_middleware;

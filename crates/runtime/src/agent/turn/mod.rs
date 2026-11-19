@@ -7,6 +7,7 @@ mod caller;
 mod compact;
 mod frozen;
 mod gate;
+mod host_runner;
 mod memory_extraction;
 mod obligations;
 mod output_limit;

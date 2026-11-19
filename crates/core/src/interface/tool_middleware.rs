@@ -97,8 +97,9 @@ impl ToolAnswer {
 pub struct ToolCall {
     pub name: String,
     pub input: serde_json::Value,
-    /// Who made the call: `model`, `RunCode`, `RunExt:<command>` of the package
-    /// `plugin`, `user` for a `/name` plugin command, `skill` for a skill's inline command.
+    /// Who made the call: `model`, `RunCode`, `RunExt:<command>` or
+    /// `PluginCall:<function>` of the package `plugin`, `user` for a `/name`
+    /// plugin command, `skill` for a skill's inline command, `host` outside any turn.
     pub via: String,
     pub plugin: Option<String>,
     /// The session's working directory (a worktree's, in one) if it has a project.

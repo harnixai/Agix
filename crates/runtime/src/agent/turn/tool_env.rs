@@ -34,6 +34,8 @@ pub(super) struct SubCallDispatcher {
     ctx: ToolExecCtx,
     prefix: String,
     next: std::sync::atomic::AtomicU64,
+    /// The calls are made by a tool the host called: a plugin function.
+    by_host: bool,
 }
 
 impl SubCallDispatcher {
@@ -42,6 +44,7 @@ impl SubCallDispatcher {
     /// not the round's; and the program's own progress reaches the host as
     /// its task's.
     fn for_code(ctx: &ToolExecCtx) -> Self {
+        let by_host = ctx.caller == Caller::Host;
         let mut ctx = ctx.clone();
         ctx.elicitation = Arc::new(NoAsking);
         ctx.host_calls = None;
@@ -49,7 +52,10 @@ impl SubCallDispatcher {
         ctx.images = Arc::default();
         ctx.caller = Caller::Code;
         ctx.events = None;
-        Self::new(ctx)
+        Self {
+            by_host,
+            ..Self::new(ctx)
+        }
     }
 
     /// A skill's inline command ends the turn of the `Skill` call it runs in
@@ -68,6 +74,7 @@ impl SubCallDispatcher {
             prefix: ctx.tool_use_id.clone(),
             ctx,
             next: std::sync::atomic::AtomicU64::new(1),
+            by_host: false,
         }
     }
 
@@ -147,7 +154,7 @@ impl base::interface::tool_dispatch::ToolDispatch for SubCallDispatcher {
         scope: base::interface::tool_dispatch::CommandScope,
     ) -> Option<Arc<dyn base::interface::tool_dispatch::ToolDispatch>> {
         let mut ctx = self.ctx.clone();
-        ctx.caller = Caller::Command(Arc::new(CommandCalls::new(scope, &ctx.cwd)));
+        ctx.caller = Caller::Command(Arc::new(CommandCalls::new(scope, &ctx.cwd, self.by_host)));
         Some(Arc::new(Self::new(ctx)))
     }
 }
@@ -188,17 +195,22 @@ pub(crate) fn attendance_of(
     caller: &Caller,
 ) -> base::interface::permission::Attendance {
     use base::interface::permission::Attendance;
-    if matches!(caller, Caller::Person) {
+    if caller.approves_its_call() {
         return Attendance::Attended;
     }
     if session.env().unattended {
         return Attendance::Unattended;
     }
     match caller {
-        Caller::Model | Caller::Person => Attendance::Attended,
+        Caller::Model | Caller::Person | Caller::Host => Attendance::Attended,
         Caller::Code => Attendance::NoOneToAsk(
             "this call needs the user's approval, which a program cannot ask for — make this \
              call directly instead of from code",
+        ),
+        Caller::Command(calls) if calls.by_host => Attendance::NoOneToAsk(
+            "this call needs the user's approval, which nobody can give to a plugin function \
+             the host called — allow it with the call's permission rules, or leave it out of \
+             the function",
         ),
         Caller::Command(_) => Attendance::NoOneToAsk(
             "this call needs the user's approval, which a plugin command cannot ask for — run \
@@ -330,6 +342,42 @@ impl Agent {
         ctx.tool_use_id = tool_use_id;
         tool_context_for(&ctx, None)
     }
+
+    /// What every call the host makes outside a turn starts from: the
+    /// session's, as the host's call, with nobody to ask and nobody
+    /// listening, in no turn.
+    pub(super) fn host_call_template(&self) -> ToolExecCtx {
+        let mut ctx =
+            self.tool_exec_ctx(&CancellationToken::new(), &Arc::default(), &Arc::default());
+        ctx.turn_no = 0;
+        ctx.turn_id = String::new();
+        ctx.caller = Caller::Host;
+        ctx.elicitation = Arc::new(NoAsking);
+        ctx.host_calls = None;
+        ctx.events = None;
+        ctx
+    }
+}
+
+/// One host call's context from `template`: `id` names both the call and
+/// the turn it stands in, which nobody typed; it stops on `stop`.
+pub(super) fn host_call_ctx(
+    template: &ToolExecCtx,
+    id: String,
+    stop: CancellationToken,
+    permission: base::interface::permission::PermissionSet,
+) -> ToolExecCtx {
+    let mut ctx = template.clone();
+    ctx.tool_use_id = id.clone();
+    ctx.turn_id = id;
+    ctx.cancel = stop;
+    ctx.permission = permission;
+    ctx.discontinued = Arc::default();
+    ctx.images = Arc::default();
+    ctx.turn = Arc::new(base::tool::TurnScope::new(
+        base::context::goal::TurnOrigin::Automation,
+    ));
+    ctx
 }
 
 fn turn_written_by_a_person(agent_depth: u32, turn_id: &str) -> bool {

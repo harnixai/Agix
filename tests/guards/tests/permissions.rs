@@ -109,6 +109,10 @@ const POLICIES: &[(&str, &str)] = &[
         "crates/agents/src/agent_tool/permission.rs::DelegateRelay",
         "a delegate's calls, handed to its parent's policy",
     ),
+    (
+        "crates/runtime/src/agent/turn/host_runner.rs::WithRules",
+        "a host call's own rules, handed to the session's policy as a delegation's",
+    ),
 ];
 
 #[test]
