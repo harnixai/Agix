@@ -195,6 +195,35 @@ pub(in crate::session_pool) struct RoutingReport {
     pub(in crate::session_pool) error: Option<String>,
     pub(in crate::session_pool) router_rebuilt: bool,
     pub(in crate::session_pool) router_error: Option<String>,
+    /// Set when the settings define providers of their own that do not
+    /// route, with nothing routed before to keep: no session is built on
+    /// the pair, rather than one whose calls go to the built-in provider —
+    /// somewhere the settings never said to send them.
+    pub(in crate::session_pool) refusal: Option<String>,
+}
+
+/// What a pair that refuses sessions is routed to, should anything reach
+/// its router anyway: every call fails with why.
+struct Unrouted(String);
+
+#[async_trait::async_trait]
+impl base::interface::model::Model for Unrouted {
+    fn api_type(&self) -> base::provider::ApiType {
+        base::provider::ApiType::Anthropic
+    }
+
+    async fn stream(
+        &self,
+        _: Vec<base::prompt::PromptBlock>,
+        _: Vec<base::interface::model::ToolDef>,
+        _: Vec<base::interface::model::ModelMessage>,
+        _: base::interface::model::StreamParams,
+        _: tokio_util::sync::CancellationToken,
+    ) -> Result<base::interface::model::ModelStream, base::interface::model::ModelError> {
+        Err(base::interface::model::ModelError::invalid_request(
+            format!("the providers do not route: {}", self.0),
+        ))
+    }
 }
 
 /// Build the router a pair's settings describe.
@@ -202,8 +231,9 @@ pub(in crate::session_pool) struct RoutingReport {
 /// `last_good` is what this pair was already being served by. Settings that
 /// no longer route, or that route but cannot produce a live client, keep it
 /// rather than tearing working routing down over a bad edit — the failure is
-/// reported, not acted on. With nothing to keep, the pair is served by the
-/// provider the engine supplies when the settings define none.
+/// reported, not acted on. With nothing to keep, a pair whose settings define
+/// providers refuses sessions ([`RoutingReport::refusal`]); one that defines
+/// none is served by the provider the engine supplies.
 pub(in crate::session_pool) fn resolve_router(
     loaded: &LoadedSettings,
     last_good: Option<Arc<base::provider::TaskRouter>>,
@@ -233,6 +263,20 @@ pub(in crate::session_pool) fn resolve_router(
     if let Some(router) = last_good {
         warn!(error = ?problem, "the providers do not route; keeping the previous router");
         return (router, report);
+    }
+    if let Some(defined) = loaded.values.providers.iter().find(|p| !p.builtin) {
+        let problem = problem.unwrap_or_default().to_string();
+        warn!(error = %problem, "the providers do not route; refusing sessions on this pair");
+        let router = base::provider::TaskRouter::single(
+            base::provider::RoutedProvider::new(
+                &defined.id,
+                base::provider::ResolvedTiers::all(&loaded.default_model),
+                Arc::new(Unrouted(problem.clone())),
+            ),
+            loaded.values.model.tasks.clone(),
+        );
+        report.refusal = Some(format!("the providers do not route: {problem}"));
+        return (Arc::new(router), report);
     }
     warn!(error = ?problem, "the providers do not route; serving the built-in provider");
     let builtin = base::provider::ProviderConfig::builtin(&loaded.default_model);

@@ -428,6 +428,8 @@ pub(super) enum CreateError {
     InvalidOptions(Vec<api::InvalidOption>),
     /// The session's history is kept in a project not trusted now.
     ProjectUntrusted(String),
+    /// The pair's settings define providers and none of them routes.
+    Unroutable(String),
     Failed(String),
 }
 
@@ -470,6 +472,7 @@ impl CreateError {
             Self::SceneNotActive(scene) => Self::SceneNotActive(scene),
             Self::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             Self::ProjectUntrusted(e) => Self::ProjectUntrusted(outer(e)),
+            Self::Unroutable(e) => Self::Unroutable(outer(e)),
             Self::Failed(e) => Self::Failed(outer(e)),
         }
     }
@@ -489,6 +492,7 @@ impl From<CreateError> for PoolError {
             CreateError::SceneNotActive(scene) => Self::SceneNotActive { scene },
             CreateError::InvalidOptions(invalid) => Self::InvalidOptions(invalid),
             CreateError::ProjectUntrusted(e) => Self::ProjectUntrusted(e),
+            CreateError::Unroutable(e) => Self::InvalidRequest(e),
             CreateError::Failed(e) => Self::Internal(e),
         }
     }

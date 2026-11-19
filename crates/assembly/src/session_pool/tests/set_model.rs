@@ -387,9 +387,42 @@ async fn a_prompt_chosen_behind_a_delete_finds_the_session_gone() {
 }
 
 #[tokio::test]
-async fn a_pair_whose_providers_do_not_route_is_served_by_the_built_in_one() {
+async fn a_pair_whose_providers_do_not_route_refuses_sessions_rather_than_use_the_built_in_one() {
     let (pool, _dir) = test_pool().await;
     let mut settings = (*pool.bindings.pool_settings().await).clone();
+    settings.values.providers = vec![serde_json::from_value(serde_json::json!({
+        "id": "inhouse",
+        "base_url": "https://llm.corp/",
+        "tiers": {"strong": "inhouse-model"},
+    }))
+    .unwrap()];
+    settings.values.model.order = vec!["ghost".into()];
+    let binding = pool.bindings.binding_from(settings);
+    assert!(binding.routing.error.as_deref().unwrap().contains("ghost"));
+    assert_ne!(binding.routed_provider(None), "anthropic");
+    pool.bindings
+        .insert(
+            (Some(pool.cwd().to_path_buf()), "code".to_string()),
+            binding,
+        )
+        .await;
+
+    match pool
+        .create_session(None, ProjectSelector::Default, None)
+        .await
+    {
+        Err(PoolError::InvalidRequest(message)) => {
+            assert!(message.contains("ghost"), "{message}")
+        }
+        other => panic!("expected the session refused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_pair_that_defines_no_provider_is_served_by_the_built_in_one() {
+    let (pool, _dir) = test_pool().await;
+    let mut settings = (*pool.bindings.pool_settings().await).clone();
+    assert!(settings.values.providers.iter().all(|p| p.builtin));
     settings.values.model.order = vec!["ghost".into()];
     let binding = pool.bindings.binding_from(settings);
     assert!(binding.routing.error.as_deref().unwrap().contains("ghost"));

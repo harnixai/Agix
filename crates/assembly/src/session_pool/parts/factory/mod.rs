@@ -401,6 +401,9 @@ fn models(
         .and_then(|o| o.recorder.as_ref())
         .map(|recorder| recorder_config(session_id, recorder, base_settings));
     let clock = session_clock(options, recorder_config.as_ref(), session_id);
+    if let Some(refusal) = &binding.routing.refusal {
+        return Err(CreateError::Unroutable(refusal.clone()));
+    }
     let router = binding
         .task_router
         .for_session(spec.provider().as_deref())?;

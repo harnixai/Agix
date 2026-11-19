@@ -157,3 +157,67 @@ async fn a_provider_failing_with_a_server_error_hands_the_call_to_the_next_one(
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_whose_providers_do_not_route_gets_no_session_and_nothing_is_sent(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let inhouse = |base_url: String| {
+        json!({
+            "id": "inhouse",
+            "api": "anthropic",
+            "base_url": base_url,
+            "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+            "tiers": {"strong": "inhouse-model"},
+        })
+    };
+    let broken = [
+        (
+            "order-typo",
+            json!({
+                "providers": [inhouse(format!("{}inhouse/", stub.base_url()))],
+                "model": {"order": ["inhuose"]},
+            }),
+            "inhuose",
+        ),
+        (
+            "bad-url",
+            json!({"providers": [inhouse("not a url".into())]}),
+            "not a url",
+        ),
+    ];
+    let projects = broken.clone();
+    let mut run = LiveRun::builder("unrouted")
+        .config(LiveConfig::for_endpoint(
+            &stub.base_url(),
+            blackbox::ModelEndpoint::model(&stub),
+        ))
+        .before_start(move |world, _| {
+            for (name, settings, _) in projects {
+                world.write_project_settings(name, &settings)?;
+                world.trust_project(&world.project(name)?)?;
+            }
+            Ok(())
+        })
+        .start()
+        .await?;
+
+    for (name, _, cause) in broken {
+        let root = run.world.project(name)?;
+        let created = run
+            .client
+            .call(
+                "session.create",
+                json!({"project_root": root, "options": {"auto_name": false}}),
+            )
+            .await?;
+        let error = created
+            .error
+            .unwrap_or_else(|| panic!("{name}: a session was created: {:?}", created.result));
+        assert_eq!(error.code, -32602, "{name}: {error:?}");
+        assert!(error.message.contains(cause), "{name}: {error:?}");
+    }
+    assert!(stub.calls().is_empty(), "{:?}", stub.calls());
+    run.finish().await;
+    Ok(())
+}
