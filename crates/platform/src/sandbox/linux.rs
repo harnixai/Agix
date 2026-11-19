@@ -579,6 +579,9 @@ pub(super) fn linux_wrap(
     read.scope_mounts(&mut args);
     bind_writable_roots(&mut args, &roots, &read);
     protect_denied_writes(&mut args, &roots, &policy.deny_write);
+    for dir in roots.read_only_in_reach() {
+        bind(&mut args, "--ro-bind-try", dir);
+    }
     let made = hide_project_and_state(&mut args, &roots, &read);
     hide_fenced(&mut args, &roots);
     hide_denied_reads(&mut args, policy);

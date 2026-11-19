@@ -102,6 +102,7 @@ pub(super) fn build_macos_profile(
     s.push_str(&patterns::deny_write_rules(&roots, &policy.deny_write));
     guard_project_files(&mut s, &roots);
     s.push_str(&patterns::scene_file_write_rules(&roots));
+    read_only_dirs(&mut s, &roots);
 
     read_rules(&mut s, policy, dirs);
     // After `allow_read`, which is for the user's own credential stores and
@@ -197,6 +198,21 @@ fn guard_project_files(s: &mut String, roots: &Roots) {
     }
     for p in &config_dirs {
         s.push_str(&format!("(deny file-write* (subpath \"{}\"))\n", quoted(p)));
+    }
+}
+
+fn read_only_dirs(s: &mut String, roots: &Roots) {
+    for dir in &roots.read_only {
+        s.push_str(&format!(
+            "(deny file-write* (subpath \"{}\"))\n",
+            quoted(dir)
+        ));
+        for above in roots.movable_above(dir) {
+            s.push_str(&format!(
+                "(deny file-write* (literal \"{}\"))\n",
+                quoted(&above)
+            ));
+        }
     }
 }
 

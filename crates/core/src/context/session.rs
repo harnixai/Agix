@@ -42,8 +42,9 @@ pub struct SessionEnv {
     /// The host's skill directories this session lists: readable without
     /// asking, like `read_directories`, and changed without a rebuild.
     pub skill_dirs: LiveDirs,
-    /// Every host skill directory a session in this process has listed: no
-    /// tool writes under one, in any permission mode.
+    /// Every host skill directory a session in this process has listed, and
+    /// the directory of each of the host's own packages: no tool writes
+    /// under one, in any permission mode, and no sandboxed command.
     pub protected_dirs: LiveDirs,
 }
 

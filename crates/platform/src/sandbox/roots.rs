@@ -22,6 +22,8 @@ pub(super) struct Roots {
     pub(super) worktree_git: Option<base::paths::WorktreeGit>,
     pub(super) only_additional: bool,
     pub(super) writable: Vec<PathBuf>,
+    /// The policy's `read_only_dirs`.
+    pub(super) read_only: Vec<PathBuf>,
     pub(super) state_root: Option<PathBuf>,
     /// The policy's other instances' state roots.
     pub(super) foreign_state_roots: Vec<PathBuf>,
@@ -64,6 +66,11 @@ impl Roots {
                 .iter()
                 .map(|p| base::path::resolve_physically(p))
                 .collect(),
+            read_only: policy
+                .read_only_dirs
+                .iter()
+                .map(|p| base::path::resolve_physically(p))
+                .collect(),
             state_root,
         }
     }
@@ -79,6 +86,33 @@ impl Roots {
     pub(super) fn opens(&self, path: &Path) -> bool {
         (!self.only_additional && path.starts_with(&self.cwd))
             || self.writable.iter().any(|root| path.starts_with(root))
+    }
+
+    /// The policy's read-only directories inside a writable root or holding
+    /// one: those a bind can hold without showing what the command may not
+    /// read.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(super) fn read_only_in_reach(&self) -> impl Iterator<Item = &Path> {
+        self.read_only
+            .iter()
+            .filter(|dir| self.opens(dir) || self.write_roots().any(|root| root.starts_with(dir)))
+            .map(PathBuf::as_path)
+    }
+
+    /// The directories strictly inside a root a command may write that hold
+    /// `dir`: moving one aside would take `dir` along.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(super) fn movable_above(&self, dir: &Path) -> Vec<PathBuf> {
+        let roots: Vec<PathBuf> = self
+            .write_roots()
+            .map(Path::to_path_buf)
+            .chain(super::implicit_writable_roots(self.only_additional))
+            .collect();
+        dir.ancestors()
+            .skip(1)
+            .filter(|p| roots.iter().any(|root| p.starts_with(root) && p != root))
+            .map(Path::to_path_buf)
+            .collect()
     }
 
     /// Where the state root is not fenced off, the files and the

@@ -56,8 +56,8 @@ fn host_skill_dir_write(call: &Call<'_>) -> Option<Verdict> {
     Some(Verdict::deny(
         Stage::HostSkillDir,
         format!(
-            "'{}' is a skill directory the host lists for a session; no tool writes under it, \
-             in any permission mode",
+            "'{}' is the host's: a skill directory it lists for a session or one of its own \
+             packages; no tool writes under it, in any permission mode",
             dir.display()
         ),
     ))

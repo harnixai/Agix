@@ -20,6 +20,7 @@ mod harness;
 mod history_location;
 mod hook_events;
 mod host_agents;
+mod host_packages;
 mod host_skill_dirs;
 mod hostile_plugins;
 mod import_sources;

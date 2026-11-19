@@ -58,6 +58,9 @@ pub struct SandboxPolicy {
     /// backend that received it separately could be handed a policy that
     /// looks complete and is not.
     pub additional_writable: Vec<PathBuf>,
+    /// Directories no command writes in, nor moves aside, wherever they lie:
+    /// the host's skill directories and its own packages.
+    pub read_only_dirs: Vec<PathBuf>,
     /// Nothing is writable but `additional_writable` and `/dev`: not `cwd`,
     /// not the state root's working directories, not the per-user temporary
     /// directory. For the engine's own git, which reads the project and
@@ -148,6 +151,7 @@ impl SandboxPolicy {
                     .collect(),
             ),
             additional_writable: writable,
+            read_only_dirs: self.read_only_dirs.clone(),
             only_additional_writable: true,
             worktree_git: self.worktree_git.clone(),
             state_root: self.state_root.clone(),
@@ -262,6 +266,7 @@ impl SandboxSettings {
             foreign_state_roots: self.paths.foreign_state_roots(),
             layout: self.paths.layout().clone(),
             additional_writable: Vec::new(),
+            read_only_dirs: Vec::new(),
             only_additional_writable: false,
             worktree_git: self.worktree_git.clone(),
             deny_ipc_escapes: false,

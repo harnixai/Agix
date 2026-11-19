@@ -302,6 +302,10 @@ name = "xflow"
   登记就失败(装配时整个装配失败);过了就进启用集,`[[command]]`、`[[script]]`、`[[function]]`、`uses`
   与普通包一样;`[dependencies]` 不检查。编译结果放在 global 层的 `.bytecode/`。同名再登记一次,替换前一个。
 - **`plugin.list`**:标 `source: "host"`(装的包是 `"installed"`),`root` 是宿主给的目录。
+- **写保护**:登记之后这个目录(宿主给的写法与解析后的路径)同宿主 skill 目录一样受保护:任何会话、任何
+  权限模式下,写工具与点名它的会改东西的命令都被拒(`Stage::HostSkillDir`),沙箱里的命令写不了它,在可写
+  根里时也挪不走它上面的目录。目录放在项目里也是这样。
+- **身份**:包里代码调宿主库时,`HostCallContext.source` 是 `Host`;装的包是 `Installed`,不论它叫什么名字。
 - **管不到它**:`plugin.uninstall`、`plugin.disable`(以及 `plugin.enable`)对宿主包的名字报错:
   ``` `xflow` is the host's own package; it cannot be uninstalled through the protocol ```。
 - **同名**:用户装了与宿主包同名的包,宿主包优先;装的那个照样在 `plugin.list` 里,`shadowed_by: "host"`,

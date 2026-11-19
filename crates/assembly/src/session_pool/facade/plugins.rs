@@ -183,7 +183,9 @@ impl SessionPool {
     /// like an install, loaded at once in place of an installed package of
     /// its name, and beyond `plugin.uninstall` and `plugin.disable`. A second
     /// registration of a name replaces the first. Sessions created after
-    /// this see it, as after `install_plugin`.
+    /// this see it, as after `install_plugin`. From then on its directory is
+    /// protected as a host skill directory is: no tool and no sandboxed
+    /// command of any session writes under it.
     pub async fn register_host_plugin(
         &self,
         dir: impl AsRef<std::path::Path>,
@@ -193,6 +195,13 @@ impl SessionPool {
             .plugins
             .register_host(dir.as_ref())
             .map_err(PoolError::InvalidRequest)?;
+        let dir = dir.as_ref();
+        let given = std::path::absolute(dir).map(|dir| base::path::normalize_lexically(&dir));
+        self.bindings
+            .host_dirs()
+            .0
+            .protected()
+            .extend(given.into_iter().chain(dir.canonicalize()));
         self.refresh_after_plugin_change().await;
         self.plugin_infos()
             .await

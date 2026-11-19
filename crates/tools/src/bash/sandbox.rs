@@ -15,10 +15,12 @@ pub(super) fn sandbox_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
 }
 
 /// The session's sandbox settings, with what its `Read` deny rules name
-/// outright denied as named, past `allow_read`'s reach.
+/// outright denied as named, past `allow_read`'s reach, and the host's
+/// directories no tool writes held from every command too.
 fn session_policy(ctx: &ToolContext) -> sandbox::SandboxPolicy {
     let mut policy = ctx.config.sandbox.policy();
     policy.deny_read_exact = read_denied_by_rules(ctx);
+    policy.read_only_dirs = ctx.session.env().protected_dirs.get();
     policy
 }
 
