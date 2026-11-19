@@ -65,7 +65,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
     std::fs::write(
         project.join(".agix").join("settings.json"),
         serde_json::to_vec(&json!({
-            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+            "permissions": {"allow": ["RunCode"]}
         }))?,
     )?;
     let settings = json!({
@@ -77,7 +77,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
             "models": ["claude-sonnet-4-6"]
         }},
         "default_provider": "stub",
-        "permission_mode": "default",
+        "permissions": {"mode": "default"},
         "memory_enabled": false
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;

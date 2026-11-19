@@ -42,7 +42,7 @@ impl Daemon {
     /// given up on.
     async fn start_asking(model: Arc<dyn AnthropicClient>, prompt_timeout: Duration) -> Self {
         Self::start_configured(model, &[], |settings, assembly| {
-            settings.permission_mode = base::permission::PermissionMode::Default;
+            settings.permissions.mode = base::permission::PermissionMode::Default;
             assembly.permission_prompt_timeout = Some(prompt_timeout);
         })
         .await

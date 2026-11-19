@@ -27,7 +27,7 @@ async fn an_unattended_session_works_inside_its_roots_and_is_refused_outside() -
 {
     let mut run = LiveRun::start(
         "unattended",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;
@@ -109,7 +109,7 @@ async fn an_unattended_session_works_inside_its_roots_and_is_refused_outside() -
 async fn a_shell_command_writing_outside_the_roots_is_refused_unattended() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "unattended-shell",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;

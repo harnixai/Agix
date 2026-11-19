@@ -282,7 +282,7 @@ async fn auto_mode_goes_on_until_a_stop_before_stage() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = with_forge_from(
         stubbed("forge-auto", &stub)
-            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(|world, _| {
                 world.write_project_file(
                     "forge-auto",
@@ -521,22 +521,22 @@ async fn requirements_on_an_mcp_backend_answer_as_the_local_ones() -> anyhow::Re
         "--store",
         &store.path().to_string_lossy(),
     ])?;
-    let allow: Vec<Value> = ["items_query", "items_get", "items_put"]
+    let allow: Vec<String> = ["items_query", "items_get", "items_put"]
         .iter()
-        .map(|t| json!({ "tool": format!("mcp__reqdb__{t}"), "action": "allow" }))
+        .map(|t| format!("mcp__reqdb__{t}"))
         .collect();
     let mut run = with_forge_from(
         stubbed("forge-local", &stub)
-            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(move |world, _| {
                 world.write_global_settings(
-                    &json!({ "mcp_servers": { "reqdb": toy }, "permission_rules": allow }),
+                    &json!({ "mcp_servers": { "reqdb": toy }, "permissions": { "allow": allow } }),
                 )?;
                 let remote = world.project("forge-remote")?;
                 world.trust_project(&remote)?;
                 world.write_project_settings(
                     "forge-remote",
-                    &json!({ "memory_enabled": false, "permission_mode": "acceptEdits" }),
+                    &json!({ "memory_enabled": false, "permissions": {"mode": "acceptEdits"} }),
                 )?;
                 world.write_project_file(
                     "forge-remote",
@@ -621,16 +621,16 @@ async fn specs_on_an_mcp_backend_take_the_merged_entries() -> anyhow::Result<()>
         "--store",
         &store.path().to_string_lossy(),
     ])?;
-    let allow: Vec<Value> = ["items_query", "items_get", "items_put"]
+    let allow: Vec<String> = ["items_query", "items_get", "items_put"]
         .iter()
-        .map(|t| json!({ "tool": format!("mcp__specdb__{t}"), "action": "allow" }))
+        .map(|t| format!("mcp__specdb__{t}"))
         .collect();
     let mut run = with_forge_from(
         stubbed("forge-specdb", &stub)
-            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(move |world, _| {
                 world.write_global_settings(
-                    &json!({ "mcp_servers": { "specdb": toy }, "permission_rules": allow }),
+                    &json!({ "mcp_servers": { "specdb": toy }, "permissions": { "allow": allow } }),
                 )?;
                 world.write_project_file(
                     "forge-specdb",
@@ -748,7 +748,7 @@ async fn spec_text_that_would_not_read_back_is_refused() -> anyhow::Result<()> {
     let mut run = with_forge(
         "forge-roundtrip",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let session = run.session().await?;
@@ -812,7 +812,7 @@ async fn a_failure_or_a_changed_delta_means_verifying_again() -> anyhow::Result<
     let mut run = with_forge(
         "forge-reverify",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let session = run.session().await?;
@@ -891,7 +891,7 @@ async fn changes_to_one_entry_do_not_overwrite_each_other() -> anyhow::Result<()
     let mut run = with_forge(
         "forge-two",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let session = run.session().await?;
@@ -1003,7 +1003,7 @@ async fn an_archive_that_stopped_part_way_runs_again() -> anyhow::Result<()> {
     let mut run = with_forge(
         "forge-retry",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let session = run.session().await?;
@@ -1064,7 +1064,7 @@ async fn coverage_counts_what_was_archived() -> anyhow::Result<()> {
     let mut run = with_forge(
         "forge-coverage",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let session = run.session().await?;
@@ -1180,7 +1180,7 @@ async fn help_and_odd_input_are_answered_plainly() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = with_forge_from(
         stubbed("forge-odd", &stub)
-            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .before_start(|world, _| {
                 world.write_project_file("forge-odd", "forge/reqs/R-001.md", REQ)?;
                 world.write_project_file("forge-odd", "forge/reqs/README.md", "Requirements.\n")?;
@@ -1235,10 +1235,7 @@ async fn a_program_updates_requirements_in_a_batch() -> anyhow::Result<()> {
     let mut run = with_forge(
         "forge-batch",
         &stub,
-        json!({ "permission_rules": [
-            { "tool": "RunCode", "action": "allow" },
-            { "tool": "RunExt(forge req:*)", "action": "allow" }
-        ] }),
+        json!({ "permissions": {"allow": ["RunCode", "RunExt(forge req:*)"]} }),
     )
     .await?;
     let items: Vec<Value> = (1..=3)
@@ -1312,7 +1309,7 @@ async fn the_user_runs_forge_without_the_model() -> anyhow::Result<()> {
 async fn a_write_outside_the_declared_scope_fails() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("forge-scope", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let narrowed = tempfile::tempdir()?;

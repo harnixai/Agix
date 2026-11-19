@@ -204,7 +204,7 @@ async fn a_todo_list_is_kept_through_a_multi_step_task() -> anyhow::Result<()> {
 async fn a_job_the_model_schedules_fires_as_a_turn_until_it_deletes_it() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("model-cron")
         // The job's turns run with nobody there to answer a prompt.
-        .settings(json!({ "permission_rules": [{ "tool": "Bash(echo:*)", "action": "allow" }] }))
+        .settings(json!({ "permissions": {"allow": ["Bash(echo:*)"]} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -266,7 +266,7 @@ async fn a_job_the_model_schedules_fires_as_a_turn_until_it_deletes_it() -> anyh
 async fn a_one_shot_job_the_host_schedules_runs_once_with_nobody_connected() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("schedule")
         // The job's turns run with nobody there to answer a prompt.
-        .settings(json!({ "permission_rules": [{ "tool": "Bash(echo:*)", "action": "allow" }] }))
+        .settings(json!({ "permissions": {"allow": ["Bash(echo:*)"]} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -605,7 +605,7 @@ async fn ping_reaches_a_page_and_reports_its_status() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("ping")
         .settings(json!({
             "sandbox": PageServer::reachable(),
-            "permission_rules": [{ "tool": "Ping", "action": "allow" }]
+            "permissions": {"allow": ["Ping"]}
         }))
         .before_start(|world, _| paced_scene(world))
         .start()

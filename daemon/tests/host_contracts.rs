@@ -56,7 +56,7 @@ impl Daemon {
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = setup.mode;
+        config.settings.values.permissions.mode = setup.mode;
         config.managed_settings_path = setup.managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -180,7 +180,7 @@ async fn a_url_shaped_deny_written_for_0_3_10_still_refuses_deeper_paths() {
     ] {
         let daemon = Daemon::start(
             Setup {
-                global: json!({"permission_rules": [{"tool": rule, "action": "deny"}]}),
+                global: json!({"permissions": {"deny": [rule]}}),
                 ..Default::default()
             },
             |_, _| {},

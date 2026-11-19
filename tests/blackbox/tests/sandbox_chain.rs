@@ -39,7 +39,7 @@ async fn a_projects_deny_read_keeps_read_and_bash_out_of_the_directory() -> anyh
             std::fs::write(shared.join("open.txt"), OPEN)?;
             world.write_project_file("deny-read", "secret/key.txt", SECRET)?;
             let mut settings = LiveRun::base_settings();
-            settings["permission_rules"] = json!([{ "tool": "Bash", "action": "allow" }]);
+            settings["permissions"]["allow"] = json!(["Bash"]);
             settings["sandbox"] = json!({
                 "read_directories": [shared],
                 "deny_read": [shared.join("secret"), project.join("secret")]

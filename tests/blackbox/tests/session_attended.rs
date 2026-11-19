@@ -17,7 +17,7 @@ const WAIT: Duration = Duration::from_secs(30);
 
 fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
     LiveRun::builder(name)
-        .settings(json!({ "permission_mode": "default", "memory_enabled": false }))
+        .settings(json!({ "permissions": {"mode": "default"}, "memory_enabled": false }))
         .config(LiveConfig::for_endpoint(
             &stub.base_url(),
             blackbox::ModelEndpoint::model(stub),

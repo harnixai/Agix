@@ -35,10 +35,7 @@ fn toy_run(
     args.extend_from_slice(toy_args);
     let mut merged = json!({
         "mcp_servers": { "demo": McpToy::stdio_config(&args)? },
-        "permission_rules": [
-            { "tool": "mcp__demo", "action": "allow" },
-            { "tool": "Agent", "action": "allow" }
-        ],
+        "permissions": {"allow": ["mcp__demo", "Agent"]},
     });
     if let (Some(m), Some(extra)) = (merged.as_object_mut(), settings.as_object()) {
         m.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));

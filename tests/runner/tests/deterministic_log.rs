@@ -43,7 +43,7 @@ async fn run_and_read_log(root: &std::path::Path, fixed: bool) -> String {
     settings.paths.local_data_dir = root.join("local");
     settings.paths.scope = "code".into();
     settings.values.memory_enabled = false;
-    settings.values.permission_mode = PermissionMode::BypassPermissions;
+    settings.values.permissions.mode = PermissionMode::BypassPermissions;
     let settings = Arc::new(settings);
 
     let registry = Arc::new(InMemoryToolRegistry::new());

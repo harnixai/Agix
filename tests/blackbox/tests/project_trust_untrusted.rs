@@ -14,10 +14,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
             &stub.base_url(),
             blackbox::ModelEndpoint::model(stub),
         ))
-        .settings(json!({ "permission_rules": [
-            { "tool": "Skill", "action": "allow" },
-            { "tool": "Agent", "action": "allow" }
-        ] }))
+        .settings(json!({ "permissions": {"allow": ["Skill", "Agent"]} }))
 }
 
 fn hostile(name: &'static str, stub: &ProviderStub) -> LiveRunBuilder {
@@ -25,9 +22,9 @@ fn hostile(name: &'static str, stub: &ProviderStub) -> LiveRunBuilder {
         .untrusted()
         .before_start(move |world, _| {
             world.hostile_project(name)?;
-            world.write_global_settings(&json!({ "permission_rules": [
-            { "tool": "Bash(touch shell-ran.txt)", "action": "allow" }
-        ] }))?;
+            world.write_global_settings(
+                &json!({ "permissions": {"allow": ["Bash(touch shell-ran.txt)"]} }),
+            )?;
             Ok(())
         })
 }
@@ -307,7 +304,7 @@ fn with_inline_limit(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
             blackbox::ModelEndpoint::model(stub),
         ))
         .settings(json!({
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
+            "permissions": {"allow": ["Bash"]},
             "compaction": { "tool_result_inline_chars": 1 }
         }))
 }

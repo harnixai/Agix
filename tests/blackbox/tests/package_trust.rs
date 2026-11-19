@@ -112,7 +112,7 @@ fn asked_tools(watcher: &blackbox::Watcher) -> Vec<String> {
 async fn a_package_skill_cannot_grant_every_bash_command() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("pkg-skill-grant", &stub)
-        .settings(json!({ "permission_rules": [{ "tool": "Skill", "action": "allow" }] }))
+        .settings(json!({ "permissions": {"allow": ["Skill"]} }))
         .start()
         .await?;
     let files = skill_package(
@@ -151,7 +151,7 @@ async fn a_package_skill_cannot_grant_every_bash_command() -> anyhow::Result<()>
 async fn a_package_agent_cannot_widen_its_permission_mode() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("pkg-agent-clamp", &stub)
-        .settings(json!({ "permission_rules": [{ "tool": "Agent", "action": "allow" }] }))
+        .settings(json!({ "permissions": {"allow": ["Agent"]} }))
         .start()
         .await?;
     let files = vec![

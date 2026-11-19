@@ -66,7 +66,7 @@ async fn one_turn_of_two_calls() -> Ran {
     settings.values.model.max_tokens = 1024;
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.values.memory_enabled = false;
-    settings.values.permission_mode = PermissionMode::BypassPermissions;
+    settings.values.permissions.mode = PermissionMode::BypassPermissions;
     settings.paths.user_data_dir = root.join("user");
     settings.paths.global_data_dir = root.join("global");
     settings.paths.workspace = base::paths::Workspace::project_of(&root.join("local"));

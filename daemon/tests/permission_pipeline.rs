@@ -72,7 +72,7 @@ impl Daemon {
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = setup.mode;
+        config.settings.values.permissions.mode = setup.mode;
 
         let model = Arc::new(MockAnthropicClient::new());
         let customize = setup.customize;
@@ -256,7 +256,7 @@ async fn a_local_permit_always_is_not_written_through_a_project_directory_linked
 async fn a_grandchild_agents_question_reaches_the_root_sessions_host() {
     let daemon = Daemon::start(
         Setup {
-            global: json!({"execution": {"permission_prompt_timeout_secs": 5}}),
+            global: json!({"permissions": {"prompt_timeout_secs": 5}}),
             ..Setup::default()
         },
         |_, _| {},
@@ -434,14 +434,14 @@ async fn a_project_permanent_allow_is_written_and_read_back_exact() {
     daemon.model.push_turn(text_round("done"));
     daemon.turn(|_| permit_always("local")).await;
     let written: Value = serde_json::from_str(&daemon.local_settings()).unwrap();
-    let rule = json!({"tool": "Bash(touch *.rs)", "action": "allow", "match": "exact"});
-    assert_eq!(written["permission_rules"], json!([rule]), "{written}");
+    let granted = json!({"allow_exact": ["Bash(touch *.rs)"]});
+    assert_eq!(written["permissions"], granted, "{written}");
 
     let later = Daemon::start(Setup::default(), |home, work| {
         crate::support::trust_projects_under(home, work);
         std::fs::write(
             work.join(".agix/settings.local.json"),
-            json!({"permission_rules": [rule]}).to_string(),
+            json!({"permissions": granted}).to_string(),
         )
         .unwrap();
     })
@@ -556,7 +556,7 @@ async fn a_hosts_refusal_stands_under_bypass() {
 async fn a_hosts_permit_is_an_allow_rule_a_deny_rule_still_overrides() {
     let daemon = Daemon::start(
         Setup {
-            project: json!({"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}),
+            project: json!({"permissions": {"deny": ["Bash(rm:*)"]}}),
             host_policy: Some(Arc::new(HostRefusesTouch)),
             ..Default::default()
         },

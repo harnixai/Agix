@@ -986,7 +986,7 @@ async fn run_agix(case: Case, seed: u64) -> anyhow::Result<Outcome> {
     // permission policy rather than with checks bypassed.
     let mut run = LiveRun::start(
         &format!("agix-{}", case.name()),
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::Spawned,
     )
     .await?;

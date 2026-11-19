@@ -218,13 +218,7 @@ impl Daemon {
 
         let mut settings = json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [
-                {"tool": "HostX", "action": "allow"},
-                {"tool": "HostEcho", "action": "allow"},
-                {"tool": "Agent", "action": "allow"},
-                {"tool": "Bash", "action": "allow"},
-                {"tool": "EnterWorktree", "action": "allow"},
-            ],
+            "permissions": {"allow": ["HostX", "HostEcho", "Agent", "Bash", "EnterWorktree"]},
         });
         if let Some(extra) = setup.settings.as_object() {
             for (k, v) in extra {
@@ -1603,11 +1597,10 @@ async fn a_relative_deny_covers_the_main_checkout_for_a_worktree_sub_agent() {
     let daemon = Daemon::start_with(Setup {
         git: true,
         settings: json!({
-            "permission_rules": [
-                {"tool": "Agent", "action": "allow"},
-                {"tool": "Read", "action": "allow"},
-                {"tool": "Read(.env)", "action": "deny"},
-            ],
+            "permissions": {
+                "allow": ["Agent", "Read"],
+                "deny": ["Read(.env)"]
+            },
         }),
         ..Setup::default()
     })
@@ -1665,13 +1658,10 @@ async fn a_project_deny_covers_the_worktrees_copy_of_a_committed_file() {
     let daemon = Daemon::start_with(Setup {
         git: true,
         settings: json!({
-            "permission_rules": [
-                {"tool": "Agent", "action": "allow"},
-                {"tool": "Bash", "action": "allow"},
-                {"tool": "Read", "action": "allow"},
-                {"tool": "Read({work}/secrets/**)", "action": "deny"},
-                {"tool": "Read(vault/**)", "action": "deny"},
-            ],
+            "permissions": {
+                "allow": ["Agent", "Bash", "Read"],
+                "deny": ["Read({work}/secrets/**)", "Read(vault/**)"]
+            },
         }),
         ..Setup::default()
     })

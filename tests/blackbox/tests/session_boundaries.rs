@@ -856,7 +856,7 @@ async fn an_interrupt_sent_between_turns_reaches_the_turn_it_was_sent_for() -> a
             "hooks_config": { "SessionStart": [{
                 "type": "command", "command": hook, "async_rewake": true, "timeout": 120_000
             }], "TaskCreated": [{ "type": "command", "command": hook }] },
-            "permission_rules": [{ "tool": "Monitor", "action": "allow" }]
+            "permissions": {"allow": ["Monitor"]}
         }))
         .start()
         .await?;
@@ -1228,7 +1228,7 @@ async fn a_rebuilt_session_keeps_plan_mode_todos_and_loaded_tools() -> anyhow::R
 async fn a_session_evicted_at_the_cap_comes_back_still_in_plan_mode() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("evicted-plan", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .options(|o| o.session_cap(1))
         .start()
         .await?;
@@ -1282,10 +1282,7 @@ async fn a_background_agent_stopped_by_an_interrupt_ends_stopped() -> anyhow::Re
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("bg-agent-interrupt", &stub)
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "Bash"]}
         }))
         .start()
         .await?;
@@ -1434,7 +1431,7 @@ async fn a_turn_cut_off_by_close_ends_with_a_terminal_frame_for_its_watchers() -
     )?;
     let mut run = stubbed("close-mid-turn", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": { "PreToolUse": [{
                 "type": "command", "command": hook, "timeout": 120_000
             }] }

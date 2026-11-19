@@ -32,7 +32,7 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         &sock,
         "config.set",
         json!({"tier": "global", "changes": {
-            "permission_mode": "acceptEdits",
+            "permissions.mode": "acceptEdits",
             "sandbox.allowed_domains": ["github.com"]
         }}),
     )
@@ -50,9 +50,9 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         .map(|k| k.as_str().unwrap())
         .collect();
     changed.sort();
-    assert_eq!(changed, ["permission_mode", "sandbox.allowed_domains"]);
+    assert_eq!(changed, ["permissions.mode", "sandbox.allowed_domains"]);
     assert_eq!(written["rejected"], json!([]));
-    assert_eq!(written["effective"]["permission_mode"], "acceptEdits");
+    assert_eq!(written["effective"]["permissions.mode"], "acceptEdits");
     assert_eq!(
         written["effective"]["sandbox.allowed_domains"],
         json!(["github.com"])
@@ -66,7 +66,10 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
         json!({"scene": "code", "tier": "global"}),
     )
     .await;
-    assert_eq!(tier["settings"]["permission_mode"], "acceptEdits", "{tier}");
+    assert_eq!(
+        tier["settings"]["permissions"]["mode"], "acceptEdits",
+        "{tier}"
+    );
     assert_eq!(
         tier["settings"]["sandbox"]["allowed_domains"],
         json!(["github.com"])
@@ -74,7 +77,7 @@ async fn a_key_written_to_the_global_tier_reads_back_and_takes_effect() {
     assert_eq!(tier["revision"], written["revision"], "{tier}");
 
     let merged = effective(&sock, json!({"scene": "code", "project_root": dir.path()})).await;
-    assert_eq!(merged["permission_mode"], "acceptEdits");
+    assert_eq!(merged["permissions"]["mode"], "acceptEdits");
     assert_eq!(merged["sandbox"]["allowed_domains"], json!(["github.com"]));
 
     server.shutdown_token().cancel();
@@ -383,21 +386,26 @@ async fn an_untrusted_project_may_tighten_and_nothing_more() {
     let set =
         |changes: Value| json!({"tier": "project", "project_root": project, "changes": changes});
 
-    let tightened = call(&sock, "config.set", set(json!({"permission_mode": "plan"}))).await;
+    let tightened = call(
+        &sock,
+        "config.set",
+        set(json!({"permissions.mode": "plan"})),
+    )
+    .await;
     assert_eq!(
         tightened["changed"],
-        json!(["permission_mode"]),
+        json!(["permissions.mode"]),
         "{tightened}"
     );
     assert_eq!(
-        read(&project.join(".agix/settings.json"))["permission_mode"],
+        read(&project.join(".agix/settings.json"))["permissions"]["mode"],
         "plan"
     );
 
     let loosened = call_frame(
         &sock,
         "config.set",
-        set(json!({"permission_mode": "bypassPermissions"})),
+        set(json!({"permissions.mode": "bypassPermissions"})),
     )
     .await;
     assert_eq!(
@@ -407,17 +415,17 @@ async fn an_untrusted_project_may_tighten_and_nothing_more() {
     );
     assert_eq!(
         rejected_kinds(&loosened["error"]["data"]["rejected"]),
-        [("permission_mode".into(), "requires_trust".into(), None)]
+        [("permissions.mode".into(), "requires_trust".into(), None)]
     );
     assert_eq!(
-        read(&project.join(".agix/settings.json"))["permission_mode"],
+        read(&project.join(".agix/settings.json"))["permissions"]["mode"],
         "plan"
     );
 
     let allowed = call_frame(
         &sock,
         "config.set",
-        set(json!({"permission_rules": [{"tool": "Bash", "action": "allow"}]})),
+        set(json!({"permissions.allow": ["Bash"]})),
     )
     .await;
     assert_eq!(
@@ -429,7 +437,7 @@ async fn an_untrusted_project_may_tighten_and_nothing_more() {
     let mixed = call_frame(
         &sock,
         "config.set",
-        set(json!({"permission_mode": "bypassPermissions", "language": 5})),
+        set(json!({"permissions.mode": "bypassPermissions", "language": 5})),
     )
     .await;
     assert_eq!(mixed["error"]["code"], codes::INVALID_PARAMS, "{mixed}");
@@ -459,7 +467,7 @@ async fn a_project_tier_linked_into_another_project_is_not_written() {
     let theirs = trusted.join(".agix/settings.json");
     std::fs::write(
         &theirs,
-        json!({"permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]}).to_string(),
+        json!({"permissions": {"deny": ["Bash(rm:*)"]}}).to_string(),
     )
     .unwrap();
     std::fs::write(
@@ -473,7 +481,7 @@ async fn a_project_tier_linked_into_another_project_is_not_written() {
     let refused = call_frame(
         &sock,
         "config.set",
-        json!({"tier": "project", "project_root": linked, "changes": {"permission_rules": null}}),
+        json!({"tier": "project", "project_root": linked, "changes": {"permissions.deny": null}}),
     )
     .await;
     assert_eq!(refused["error"]["code"], codes::INVALID_PARAMS, "{refused}");
@@ -798,21 +806,21 @@ async fn an_allow_recorded_beside_the_list_does_not_refuse_a_deny_written_to_it(
     std::fs::create_dir_all(project.join(".agix")).unwrap();
     std::fs::write(
         project.join(".agix/settings.local.json"),
-        r#"{"permission_rules": [{"tool": "Bash(ls)", "action": "allow"}]}"#,
+        r#"{"permissions": {"allow": ["Bash(ls)"]}}"#,
     )
     .unwrap();
     let written = call(
         &sock,
         "config.set",
         json!({"tier": "project", "project_root": project, "changes": {
-            "permission_rules": [{"tool": "Bash(rm:*)", "action": "deny"}]
+            "permissions.deny": ["Bash(rm:*)"]
         }}),
     )
     .await;
-    assert_eq!(written["changed"], json!(["permission_rules"]), "{written}");
+    assert_eq!(written["changed"], json!(["permissions.deny"]), "{written}");
     assert_eq!(
-        read(&project.join(".agix/settings.json"))["permission_rules"][0]["action"],
-        "deny"
+        read(&project.join(".agix/settings.json"))["permissions"]["deny"],
+        json!(["Bash(rm:*)"])
     );
 
     server.shutdown_token().cancel();

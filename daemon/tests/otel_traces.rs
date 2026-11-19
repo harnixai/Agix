@@ -152,7 +152,7 @@ async fn a_turn_with_a_tool_call_reaches_the_collector_as_spans() {
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     config.settings.values.memory_enabled = false;
-    config.settings.values.permission_mode = base::permission::PermissionMode::BypassPermissions;
+    config.settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
     config.settings.values.telemetry_url = Some(endpoint);
     let pool = daemon::assemble::pool(
         &config,

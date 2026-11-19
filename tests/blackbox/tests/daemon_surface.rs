@@ -903,7 +903,7 @@ async fn a_failing_tool_says_so_everywhere(mode: Mode) -> anyhow::Result<()> {
         "failing",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }]
+            "permissions": {"allow": ["Bash"]}
         }),
     )?;
     world.trust_project(&project)?;

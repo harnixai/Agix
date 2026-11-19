@@ -158,7 +158,7 @@ async fn a_watcher_denies_permits_always_answers_questions_and_can_stay_silent(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("watcher", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .options(|o| o.prompt_timeout(Duration::from_secs(1)))
         .start()
         .await?;

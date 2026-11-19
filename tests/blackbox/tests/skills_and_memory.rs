@@ -14,7 +14,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
             &stub.base_url(),
             blackbox::ModelEndpoint::model(stub),
         ))
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
 }
 
 fn skill(name: &str, body: &str) -> String {
@@ -134,7 +134,7 @@ async fn a_skill_added_between_turns_is_announced_on_the_next() -> anyhow::Resul
 async fn a_project_memory_is_indexed_with_the_global_ones() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("memory-tiers", &stub)
-        .settings(json!({ "permission_mode": "default", "memory_enabled": true }))
+        .settings(json!({ "permissions": {"mode": "default"}, "memory_enabled": true }))
         .before_start(|world, project| {
             for (dir, name) in [
                 (world.global_memory_dir(), "GLOBAL-TIER-MEMORY"),
@@ -173,14 +173,13 @@ async fn a_forked_skills_allowed_tools_are_granted_in_the_fork_only() -> anyhow:
     std::fs::write(
         &managed_file,
         serde_json::to_string(&json!({
-            "permission_rules": [{ "tool": "Bash(echo managed > managed.txt)", "action": "ask" }]
+            "permissions": {"ask": ["Bash(echo managed > managed.txt)"]}
         }))?,
     )?;
     let managed_arg = managed_file.to_string_lossy().to_string();
     let mut run = stubbed("fork-grants", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+            "permissions": {"mode": "default", "allow": ["Skill"]}
         }))
         .mode(blackbox::Mode::Spawned)
         .options(move |o| o.arg("--managed-settings").arg(managed_arg.clone()))
@@ -309,10 +308,7 @@ async fn a_forked_skill_gets_its_agent_types_tools_and_no_parents_agent() -> any
     let mut run = stubbed("fork-explore", &stub)
         .settings(json!({
             "execution": { "max_agent_depth": 1 },
-            "permission_rules": [
-                { "tool": "Skill", "action": "allow" },
-                { "tool": "Agent", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Skill", "Agent"]}
         }))
         .start()
         .await?;
@@ -381,7 +377,7 @@ async fn a_forked_skill_is_narrowed_to_its_allowed_tools() -> anyhow::Result<()>
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("fork-allowed", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+            "permissions": {"allow": ["Skill"]}
         }))
         .start()
         .await?;
@@ -429,10 +425,7 @@ async fn stopping_a_background_forked_skill_leaves_the_turn_running() -> anyhow:
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("bg-fork-stop", &stub)
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Skill", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Skill", "Bash"]}
         }))
         .start()
         .await?;
@@ -500,7 +493,7 @@ async fn a_waited_on_forked_skill_is_a_task_the_host_can_stop() -> anyhow::Resul
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("fork-task", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+            "permissions": {"allow": ["Skill"]}
         }))
         .start()
         .await?;

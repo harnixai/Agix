@@ -173,10 +173,7 @@ async fn second_overlaps_first_of(
 
 fn allow_agents(extra: Value) -> Value {
     let mut settings = json!({
-        "permission_rules": [
-            { "tool": "Agent", "action": "allow" },
-            { "tool": "TeamCreate", "action": "allow" }
-        ],
+        "permissions": {"allow": ["Agent", "TeamCreate"]},
         "team": { "enabled": true }
     });
     for (k, v) in extra.as_object().cloned().unwrap_or_default() {

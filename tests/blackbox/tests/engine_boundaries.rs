@@ -349,8 +349,7 @@ async fn a_tool_the_policy_refuses_never_runs() -> anyhow::Result<()> {
     let mut run = stubbed("deny-rule", &stub)
         .settings(json!({
             "sandbox": PageServer::reachable(),
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "WebFetch", "action": "deny" }]
+            "permissions": {"mode": "default", "deny": ["WebFetch"]}
         }))
         .start()
         .await?;
@@ -738,10 +737,7 @@ async fn a_programs_sub_call_progress_names_a_tool_use_the_host_saw() -> anyhow:
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("program-progress", &stub)
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Bash", "action": "allow" },
-                { "tool": "RunCode", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Bash", "RunCode"]}
         }))
         .start()
         .await?;
@@ -793,7 +789,7 @@ async fn a_program_reading_a_file_the_model_already_read_gets_its_text() -> anyh
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("program-read", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+            "permissions": {"allow": ["RunCode"]}
         }))
         .start()
         .await?;
@@ -844,7 +840,7 @@ async fn a_program_cannot_pin_its_thread_inside_the_base_library() -> anyhow::Re
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("program-runaway-native", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+            "permissions": {"allow": ["RunCode"]}
         }))
         .start()
         .await?;
@@ -894,7 +890,7 @@ async fn a_program_reading_a_large_file_gets_a_truncated_object() -> anyhow::Res
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("program-read-large", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "RunCode", "action": "allow" }]
+            "permissions": {"allow": ["RunCode"]}
         }))
         .start()
         .await?;

@@ -43,7 +43,7 @@ async fn the_next_start_stops_what_a_killed_daemon_left_running() -> anyhow::Res
         "crash",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }]
+            "permissions": {"allow": ["Bash"]}
         }),
     )?;
     world.trust_project(&project)?;

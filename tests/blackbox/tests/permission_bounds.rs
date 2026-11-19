@@ -57,7 +57,7 @@ fn bash(id: &str, command: &str) -> Reply {
 async fn exit_plan_mode_returns_to_the_mode_it_was_entered_from() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("plan-exit", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -94,7 +94,7 @@ async fn exit_plan_mode_returns_to_the_mode_it_was_entered_from() -> anyhow::Res
 async fn a_refused_exit_leaves_the_session_in_plan_mode() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("plan-stay", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -122,7 +122,7 @@ async fn a_refused_exit_leaves_the_session_in_plan_mode() -> anyhow::Result<()> 
 async fn plan_mode_holds_across_a_compaction_and_the_model_is_reminded() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("plan-compact", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -163,8 +163,7 @@ async fn dont_ask_runs_what_a_rule_allows_and_refuses_a_compound_that_hides_more
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("dontask", &stub)
         .settings(json!({
-            "permission_mode": "dontAsk",
-            "permission_rules": [{ "tool": "Bash(echo:*)", "action": "allow" }]
+            "permissions": {"mode": "dontAsk", "allow": ["Bash(echo:*)"]}
         }))
         .start()
         .await?;
@@ -195,25 +194,24 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("tiers", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Write", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Write"]}
         }))
         .before_start(|world, project| {
             world.write_global_settings(&json!({
-                "permission_rules": [{ "tool": "Write(**/global-locked/**)", "action": "deny" }]
+                "permissions": {"deny": ["Write(**/global-locked/**)"]}
             }))?;
             std::fs::create_dir_all(world.config_root("code"))?;
             std::fs::write(
                 world.config_root("code").join("settings.json"),
                 json!({
-                    "permission_rules": [{ "tool": "Write(**/scene-locked/**)", "action": "deny" }]
+                    "permissions": {"deny": ["Write(**/scene-locked/**)"]}
                 })
                 .to_string(),
             )?;
             std::fs::write(
                 project.join(".agix/settings.local.json"),
                 json!({
-                    "permission_rules": [{ "tool": "Write(**/local-locked/**)", "action": "deny" }]
+                    "permissions": {"deny": ["Write(**/local-locked/**)"]}
                 })
                 .to_string(),
             )?;
@@ -256,7 +254,7 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
 async fn permit_always_local_then_a_new_session(reload: bool) -> anyhow::Result<usize> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("always-local", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -293,7 +291,7 @@ async fn permit_always_local_in_an_untrusted_project_is_kept_for_the_session_and
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("always-local-untrusted", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .untrusted()
         .start()
         .await?;
@@ -336,7 +334,7 @@ async fn permit_always_local_holds_for_the_next_session() -> anyhow::Result<()> 
 async fn permit_always_for_the_session_is_not_written_down() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("always-session", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -373,11 +371,11 @@ async fn denied_rm_spelled(spelling: &str) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("deny-rm", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [
-                { "tool": "Bash", "action": "allow" },
-                { "tool": "Bash(rm:*)", "action": "deny" }
-            ]
+            "permissions": {
+                "mode": "acceptEdits",
+                "allow": ["Bash"],
+                "deny": ["Bash(rm:*)"]
+            }
         }))
         .start()
         .await?;
@@ -430,7 +428,7 @@ async fn a_bash_deny_rule_refuses_a_command_dash_p_wrapper() -> anyhow::Result<(
 async fn outside_read(command_for: impl Fn(&std::path::Path) -> String) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("outside-read", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .start()
         .await?;
     let outside = run.world.root().join("outside");
@@ -474,7 +472,7 @@ async fn a_read_after_cd_to_a_variable_is_asked_about() -> anyhow::Result<()> {
 async fn runs_a_program_through_a_reader(command: &str) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("reader-runs", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .start()
         .await?;
     run.write_file("x.sh", "touch ran.txt\n")?;
@@ -529,7 +527,7 @@ async fn a_read_only_name_behind_a_wrappers_option_is_asked_about() -> anyhow::R
 async fn git_in_a_repository_the_project_ships_is_asked_about() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("shipped-repo", &stub)
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .start()
         .await?;
     let ran = run.project.join("ran.txt");
@@ -568,7 +566,7 @@ async fn git_in_a_repository_the_project_ships_is_asked_about() -> anyhow::Resul
 async fn accept_edits_asks_before_fetching_an_unlisted_host() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("accept-fetch", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -616,13 +614,12 @@ async fn a_rule_covers_every_case_of_its_path_on_a_case_insensitive_volume() -> 
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("case-fold", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [
-                { "tool": "Write", "action": "allow" },
-                { "tool": "Edit(secret/**)", "action": "deny" },
-                { "tool": "Read(secret/**)", "action": "deny" },
-                { "tool": "Edit(src/**)", "action": "ask" }
-            ]
+            "permissions": {
+                "mode": "default",
+                "allow": ["Write"],
+                "ask": ["Edit(src/**)"],
+                "deny": ["Edit(secret/**)", "Read(secret/**)"]
+            }
         }))
         .options(|o| o.prompt_timeout(Duration::from_secs(2)))
         .start()
@@ -676,9 +673,8 @@ async fn a_team_member_is_held_to_the_parents_deny_rules() -> anyhow::Result<()>
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("team-rules", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
             "team": { "enabled": true },
-            "permission_rules": [{ "tool": "Write(**/locked/**)", "action": "deny" }]
+            "permissions": {"mode": "acceptEdits", "deny": ["Write(**/locked/**)"]}
         }))
         .start()
         .await?;
@@ -705,7 +701,7 @@ async fn a_team_member_is_no_freer_than_its_parent() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("team-mode", &stub)
         .settings(json!({
-            "permission_mode": "default",
+            "permissions": {"mode": "default"},
             "team": { "enabled": true }
         }))
         .options(|o| o.prompt_timeout(Duration::from_secs(2)))
@@ -744,11 +740,11 @@ async fn sub_agent_writes(agent_type: Option<&str>, path: &str) -> anyhow::Resul
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("sub-agent", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Write(**/locked/**)", "action": "deny" }
-            ]
+            "permissions": {
+                "mode": "acceptEdits",
+                "allow": ["Agent"],
+                "deny": ["Write(**/locked/**)"]
+            }
         }))
         .start()
         .await?;
@@ -799,8 +795,7 @@ async fn a_sub_agent_edits_a_file_it_has_read() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("sub-edit", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Agent"]}
         }))
         .start()
         .await?;
@@ -842,7 +837,7 @@ async fn a_session_created_in_plan_mode_leaves_it_only_when_the_host_permits() -
     for permit in [true, false] {
         let stub = ProviderStub::start().await?;
         let mut run = stubbed("plan-created", &stub)
-            .settings(json!({ "permission_mode": "acceptEdits" }))
+            .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
             .start()
             .await?;
         let session = run
@@ -898,8 +893,7 @@ async fn an_agent_types_stricter_mode_asks_and_its_question_waits_only_the_sessi
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("sub-timeout", &stub)
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Agent"]}
         }))
         .options(|o| o.prompt_timeout(Duration::from_secs(2)))
         .start()
@@ -958,7 +952,7 @@ async fn a_bypassing_parent_does_not_take_along_a_type_that_may_only_tighten() -
     let mut run = stubbed("tighten-only", &stub)
         .untrusted()
         .before_start(|world, _| {
-            world.write_global_settings(&json!({ "allow_client_permission_override": true }))
+            world.write_global_settings(&json!({ "permissions": {"client_may_loosen": true} }))
         })
         .start()
         .await?;

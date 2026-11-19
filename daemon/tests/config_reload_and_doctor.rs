@@ -21,7 +21,7 @@ async fn doctor_lists_the_safety_posture_checks() {
         .filter_map(|c| c["name"].as_str())
         .collect();
     for expected in [
-        "settings.permission_mode",
+        "settings.permissions.mode",
         "settings.hooks_fail_open",
         "build.panic",
     ] {

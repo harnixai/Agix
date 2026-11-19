@@ -193,7 +193,7 @@ async fn a_default_of_trusted_lets_a_project_through_and_the_doctor_says_what() 
     let daemon = Daemon::start(
         json!({"project_trust": {"default": "trusted"}}),
         json!({
-            "permission_mode": "bypassPermissions",
+            "permissions": {"mode": "bypassPermissions"},
             "hooks_config": {"Stop": [{"type": "command", "command": "true"}]},
         }),
     )
@@ -212,7 +212,7 @@ async fn a_default_of_trusted_lets_a_project_through_and_the_doctor_says_what() 
     .unwrap();
 
     assert_eq!(
-        daemon.effective().await["permission_mode"],
+        daemon.effective().await["permissions"]["mode"],
         "bypassPermissions"
     );
 
@@ -222,7 +222,7 @@ async fn a_default_of_trusted_lets_a_project_through_and_the_doctor_says_what() 
     assert_eq!(status["trust_source"], "default");
     assert!(status["matched"].is_null());
     let gated = strings(&status["requires_trust"]);
-    assert!(gated.contains(&"permission_mode"), "{status}");
+    assert!(gated.contains(&"permissions.mode"), "{status}");
     assert!(gated.contains(&"hooks_config"), "{status}");
     assert_eq!(
         gated.contains(&"agents/explore"),
@@ -240,7 +240,7 @@ async fn a_default_of_trusted_lets_a_project_through_and_the_doctor_says_what() 
     let summary = check["summary"].as_str().unwrap();
     assert!(
         summary.contains("project_trust.default")
-            && summary.contains("permission_mode")
+            && summary.contains("permissions.mode")
             && summary.contains("hooks_config"),
         "{check}"
     );
@@ -252,15 +252,14 @@ async fn an_untrusted_project_cannot_loosen_permissions() {
     let daemon = Daemon::start(
         untrusted_by_default(),
         json!({
-            "permission_mode": "bypassPermissions",
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"mode": "bypassPermissions", "allow": ["Bash"]},
             "sandbox": {"read_anywhere": true},
         }),
     )
     .await;
 
     let settings = daemon.effective().await;
-    assert_eq!(settings["permission_mode"], "default", "{settings}");
+    assert_eq!(settings["permissions"]["mode"], "default", "{settings}");
     assert_eq!(settings["sandbox"]["read_anywhere"], false);
 
     let check = daemon.doctor_check("project.trust").await;
@@ -268,9 +267,9 @@ async fn an_untrusted_project_cannot_loosen_permissions() {
     assert_eq!(
         strings(&check["details"]["requires_trust"]),
         [
-            "permission_mode",
+            "permissions.mode",
             "sandbox.read_anywhere",
-            "permission_rules.allow(Bash)"
+            "permissions.allow(Bash)"
         ]
     );
 }
@@ -279,7 +278,7 @@ async fn an_untrusted_project_cannot_loosen_permissions() {
 async fn project_trust_and_status_round_trip() {
     let daemon = Daemon::start(
         untrusted_by_default(),
-        json!({"permission_mode": "bypassPermissions"}),
+        json!({"permissions": {"mode": "bypassPermissions"}}),
     )
     .await;
 
@@ -288,7 +287,7 @@ async fn project_trust_and_status_round_trip() {
 
     let before = daemon.status().await;
     assert_eq!(before["trust"], "untrusted", "{before}");
-    assert_eq!(strings(&before["requires_trust"]), ["permission_mode"]);
+    assert_eq!(strings(&before["requires_trust"]), ["permissions.mode"]);
 
     let work = daemon.work.canonicalize().unwrap();
     let trusted = daemon.trust(true).await;
@@ -305,7 +304,7 @@ async fn project_trust_and_status_round_trip() {
     assert_eq!(written["project_trust"]["trusted"], json!([work]));
     assert_eq!(daemon.status().await["trust"], "trusted");
     assert_eq!(
-        daemon.effective().await["permission_mode"],
+        daemon.effective().await["permissions"]["mode"],
         "bypassPermissions"
     );
 
@@ -336,7 +335,7 @@ async fn project_trust_and_status_round_trip() {
 
     let revoked = daemon.trust(false).await;
     assert_eq!(revoked["trust"], "untrusted", "{revoked}");
-    assert_eq!(daemon.effective().await["permission_mode"], "default");
+    assert_eq!(daemon.effective().await["permissions"]["mode"], "default");
 
     let null_root = daemon
         .call(
@@ -492,13 +491,13 @@ async fn trust_is_set_only_in_the_global_tier() {
         untrusted_by_default(),
         json!({
             "project_trust": {"default": "trusted", "trusted": ["/**"]},
-            "permission_mode": "bypassPermissions",
+            "permissions": {"mode": "bypassPermissions"},
         }),
     )
     .await;
 
     assert_eq!(daemon.status().await["trust"], "untrusted");
-    assert_eq!(daemon.effective().await["permission_mode"], "default");
+    assert_eq!(daemon.effective().await["permissions"]["mode"], "default");
 }
 
 #[cfg(unix)]
@@ -1057,11 +1056,11 @@ async fn doctor_reports_the_settings_tier_of_every_active_scene() {
 }
 
 /// With no prompt timeout given at assembly, the settings' own
-/// `execution.permission_prompt_timeout_secs` is the one sessions run under.
+/// `permissions.prompt_timeout_secs` is the one sessions run under.
 #[tokio::test]
 async fn the_settings_prompt_timeout_applies_when_none_is_given_at_assembly() {
     let daemon = Daemon::start(
-        json!({"execution": {"permission_prompt_timeout_secs": 7}}),
+        json!({"permissions": {"prompt_timeout_secs": 7}}),
         json!({}),
     )
     .await;

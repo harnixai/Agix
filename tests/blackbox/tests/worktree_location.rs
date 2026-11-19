@@ -39,10 +39,7 @@ async fn a_kept_worktree_in(world: &World, name: &str) -> anyhow::Result<std::pa
         &json!({
             "memory_enabled": false,
             "worktree_dir": ".from-the-project",
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;

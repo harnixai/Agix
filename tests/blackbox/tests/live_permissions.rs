@@ -15,7 +15,7 @@
 use std::time::Duration;
 
 use blackbox::{Answer, LiveRun, Mode, Watcher};
-use serde_json::{json, Value};
+use serde_json::json;
 
 fn nonce() -> String {
     format!(
@@ -50,8 +50,7 @@ async fn a_refusal_from_the_host_sends_the_model_another_way() -> anyhow::Result
     let mut run = LiveRun::start(
         "perm-deny",
         json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Write(**/secret/**)", "action": "ask" }]
+            "permissions": {"mode": "default", "ask": ["Write(**/secret/**)"]}
         }),
         Mode::InProcess,
     )
@@ -106,7 +105,7 @@ async fn a_refusal_from_the_host_sends_the_model_another_way() -> anyhow::Result
 async fn an_approval_remembered_locally_is_not_asked_again() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "perm-always",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;
@@ -167,7 +166,7 @@ async fn an_approval_remembered_locally_is_not_asked_again() -> anyhow::Result<(
 async fn an_unanswered_prompt_times_out_into_a_refusal_and_the_turn_goes_on() -> anyhow::Result<()>
 {
     let mut run = LiveRun::builder("perm-timeout")
-        .settings(json!({ "permission_mode": "default" }))
+        .settings(json!({ "permissions": {"mode": "default"} }))
         .options(|o| o.prompt_timeout(Duration::from_secs(3)))
         .start()
         .await?;
@@ -201,7 +200,7 @@ async fn an_unanswered_prompt_times_out_into_a_refusal_and_the_turn_goes_on() ->
 async fn leaving_plan_mode_returns_to_the_mode_it_was_entered_from() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "perm-plan",
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
         Mode::InProcess,
     )
     .await?;
@@ -242,7 +241,7 @@ async fn leaving_plan_mode_returns_to_the_mode_it_was_entered_from() -> anyhow::
 async fn plan_mode_holds_across_a_compaction() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "perm-plan-compact",
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
         Mode::InProcess,
     )
     .await?;
@@ -295,8 +294,7 @@ async fn dont_ask_keeps_to_its_rules_even_inside_a_compound_command() -> anyhow:
     let mut run = LiveRun::start(
         "perm-dontask",
         json!({
-            "permission_mode": "dontAsk",
-            "permission_rules": [{ "tool": "Bash(echo:*)", "action": "allow" }]
+            "permissions": {"mode": "dontAsk", "allow": ["Bash(echo:*)"]}
         }),
         Mode::InProcess,
     )
@@ -335,17 +333,16 @@ async fn dont_ask_keeps_to_its_rules_even_inside_a_compound_command() -> anyhow:
 async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("perm-tiers")
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Write", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Write"]}
         }))
         .before_start(|world, project| {
             world.write_global_settings(&json!({
-                "permission_rules": [{ "tool": "Write(**/.env)", "action": "deny" }]
+                "permissions": {"deny": ["Write(**/.env)"]}
             }))?;
             std::fs::write(
                 project.join(".agix/settings.local.json"),
                 json!({
-                    "permission_rules": [{ "tool": "Write(**/local-locked/**)", "action": "deny" }]
+                    "permissions": {"deny": ["Write(**/local-locked/**)"]}
                 })
                 .to_string(),
             )?;
@@ -387,11 +384,11 @@ async fn a_sub_agent_is_held_to_the_parents_rules() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "perm-sub",
         json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Write(**/locked/**)", "action": "deny" }
-            ]
+            "permissions": {
+                "mode": "acceptEdits",
+                "allow": ["Agent"],
+                "deny": ["Write(**/locked/**)"]
+            }
         }),
         Mode::InProcess,
     )
@@ -427,8 +424,7 @@ async fn a_plan_mode_agent_type_cannot_write() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "perm-sub-plan",
         json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Agent"]}
         }),
         Mode::InProcess,
     )
@@ -451,35 +447,5 @@ async fn a_plan_mode_agent_type_cannot_write() -> anyhow::Result<()> {
     .await?;
     assert!(run.read_file("planned.txt").is_none());
     run.finish_allowing_refusals().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn yolo_in_settings_is_bypass_permissions_by_its_own_name() -> anyhow::Result<()> {
-    // bypass: the case is about bypass itself — that the `yolo` alias resolves to it.
-    let mut run = LiveRun::start(
-        "perm-yolo",
-        json!({ "permission_mode": "yolo" }),
-        Mode::InProcess,
-    )
-    .await?;
-    let token = format!("TOKEN-{}", nonce());
-    let session = run.session().await?;
-    let watcher = run.watch(&session, false).await?;
-    run.turn(
-        &session,
-        &format!("Run `echo {token} > yolo.txt` with the Bash tool, then reply DONE."),
-    )
-    .await?;
-    assert_eq!(trimmed(run.read_file("yolo.txt")), Some(token));
-    assert!(watcher.asked().is_empty());
-    let resumed = run
-        .client
-        .call("session.resume", json!({ "session_id": session }))
-        .await?;
-    let permission: Value = resumed.result.unwrap_or_default()["permission"].clone();
-    assert_eq!(permission["mode"], "bypassPermissions", "{permission}");
-    assert_eq!(permission["prompts"], false, "{permission}");
-    run.finish().await;
     Ok(())
 }

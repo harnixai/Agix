@@ -125,7 +125,7 @@ async fn a_sessions_prompt_and_history_hold_across_a_resume() -> anyhow::Result<
 async fn plan_mode_leaves_the_project_untouched() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "plan",
-        json!({ "permission_mode": "plan" }),
+        json!({ "permissions": {"mode": "plan"} }),
         Mode::InProcess,
     )
     .await?;

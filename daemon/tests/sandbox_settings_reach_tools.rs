@@ -106,21 +106,19 @@ async fn daemon_with_sandbox(sandbox: Value) -> Daemon {
     daemon_with_rules(json!([]), sandbox).await
 }
 
-/// A daemon over a global settings.json of `sandbox`, with `Bash` allowed on
-/// top of `rules`.
-async fn daemon_with_rules(rules: Value, sandbox: Value) -> Daemon {
+/// A daemon over a global settings.json of `sandbox`, with `Bash` allowed and
+/// the `deny` rules.
+async fn daemon_with_rules(deny: Value, sandbox: Value) -> Daemon {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let global = root.join("agix");
     let work = root.join("work");
     std::fs::create_dir_all(&global).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    let mut rules = rules.as_array().cloned().unwrap_or_default();
-    rules.push(json!({"tool": "Bash", "action": "allow"}));
     std::fs::write(
         global.join("settings.json"),
         json!({
-            "permission_rules": rules,
+            "permissions": {"allow": ["Bash"], "deny": deny},
             "sandbox": sandbox,
         })
         .to_string(),
@@ -282,10 +280,7 @@ async fn the_sandbox_section_reaches_the_tools() {
     std::fs::write(
         global.join("settings.json"),
         json!({
-            "permission_rules": [
-                {"tool": "WebFetch", "action": "allow"},
-                {"tool": "Bash", "action": "allow"},
-            ],
+            "permissions": {"allow": ["WebFetch", "Bash"]},
             "sandbox": {
                 "network_mode": "allowlist",
                 "allowed_domains": ["127.0.0.1"],
@@ -377,11 +372,7 @@ async fn the_sandbox_section_reaches_the_tools() {
 /// command runs, reads the file beside it and gets nothing of the denied one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_read_deny_rule_holds_a_command_that_reads_around_it() {
-    let daemon = daemon_with_rules(
-        json!([{"tool": "Read(./secret.txt)", "action": "deny"}]),
-        json!({}),
-    )
-    .await;
+    let daemon = daemon_with_rules(json!(["Read(./secret.txt)"]), json!({})).await;
     std::fs::write(daemon.work.join("secret.txt"), "RULE-SECRET-9d4\n").unwrap();
     std::fs::write(daemon.work.join("sibling.txt"), "SIBLING-9d4\n").unwrap();
     daemon.model.push_turn(tool_round(

@@ -77,13 +77,9 @@ fn root(stub: &ProviderStub, mcp: &McpServer) -> anyhow::Result<Root> {
             "models": ["claude-sonnet-4-6"]
         }},
         "default_provider": "stub",
-        "permission_mode": "default",
         "memory_enabled": false,
         "mcp_servers": { "docs": { "type": "streamable_http", "url": mcp.url } },
-        "permission_rules": [
-            { "tool": "Agent", "action": "allow" },
-            { "tool": "Write", "action": "allow" }
-        ]
+        "permissions": {"mode": "default", "allow": ["Agent", "Write"]}
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
     std::fs::write(

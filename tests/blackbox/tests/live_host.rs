@@ -91,7 +91,7 @@ fn sh(project: &std::path::Path, script: &str) -> String {
 async fn a_host_runs_a_fix_beside_the_session_and_answers_its_questions() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "flow",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;
@@ -819,7 +819,7 @@ async fn a_host_edits_what_the_session_carries_and_sees_the_next_call_first() ->
 async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "host_tool",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;
@@ -898,7 +898,7 @@ async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
 async fn a_connection_provides_a_tool_and_a_hook_that_blocks_bash() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "host_provider",
-        json!({ "permission_mode": "default" }),
+        json!({ "permissions": {"mode": "default"} }),
         Mode::InProcess,
     )
     .await?;

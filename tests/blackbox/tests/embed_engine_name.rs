@@ -38,13 +38,11 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
     let base = dir.path().canonicalize()?;
     let (data, project) = (base.join("data"), base.join("project"));
     std::fs::create_dir_all(&data)?;
-    for (dir, action) in [(".foo", "allow"), (".agix", "deny")] {
+    for (dir, list) in [(".foo", "allow"), (".agix", "deny")] {
         std::fs::create_dir_all(project.join(dir))?;
         std::fs::write(
             project.join(dir).join("settings.json"),
-            serde_json::to_vec(&json!({
-                "permission_rules": [{ "tool": "RunCode", "action": action }]
-            }))?,
+            serde_json::to_vec(&json!({ "permissions": { list: ["RunCode"] } }))?,
         )?;
     }
     let settings = json!({
@@ -56,7 +54,7 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
             "models": ["claude-sonnet-4-6"]
         }},
         "default_provider": "stub",
-        "permission_mode": "default",
+        "permissions": {"mode": "default"},
         "memory_enabled": false
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;

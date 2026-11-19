@@ -102,7 +102,7 @@ async fn an_inline_commands_output_goes_through_the_result_transformers() {
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "scripts": [{"path": script, "point": "tool.result", "entry": "onResult",
                          "timeout_ms": 5000}],
         }),
@@ -193,7 +193,7 @@ async fn a_first_slash_commands_inline_command_leaves_the_users_nested_repositor
     let (sock, model) = serve_with_probe_skill(
         &dir,
         &work,
-        json!({ "permission_rules": [{"tool": "Bash", "action": "allow"}] }),
+        json!({ "permissions": {"allow": ["Bash"]} }),
         "Ran: !`touch inline-ran`",
     )
     .await;

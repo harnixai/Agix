@@ -180,7 +180,7 @@ async fn a_session_without_a_project_offers_no_root() -> anyhow::Result<()> {
     let mut run = with_plugin_toy(stubbed("mcp-root-none", &stub))?
         .before_start(|world, _| {
             world.write_global_settings(&json!({
-                "permission_rules": [{ "tool": PLUGIN_WHERE, "action": "allow" }]
+                "permissions": {"allow": [PLUGIN_WHERE]}
             }))
         })
         .start()
@@ -207,10 +207,7 @@ async fn a_sub_agent_granted_the_server_sees_the_same_root() -> anyhow::Result<(
     let stub = ProviderStub::start().await?;
     let mut run = with_plugin_toy(stubbed("mcp-root-child", &stub))?
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": PLUGIN_WHERE, "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", PLUGIN_WHERE]}
         }))
         .before_start(|world, _| {
             world.write_project_file(

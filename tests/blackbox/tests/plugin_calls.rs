@@ -446,10 +446,7 @@ async fn a_call_in_no_session_leaves_no_saved_tool_results_behind() -> anyhow::R
     let mut run = with_xflow_settings(
         "fn-spill",
         &stub,
-        json!({ "permission_rules": [
-            { "tool": "Bash", "action": "allow" },
-            { "tool": "Agent", "action": "allow" }
-        ] }),
+        json!({ "permissions": {"allow": ["Bash", "Agent"]} }),
     )
     .await?;
     let params = in_dir(

@@ -49,10 +49,7 @@ async fn start(name: &str, git: bool) -> anyhow::Result<(LiveRun, String)> {
         // A declarative scene is unattended: what it may do without asking is
         // what the instance grants.
         .settings(json!({
-            "permission_rules": [
-                { "tool": "EnterWorktree", "action": "allow" },
-                { "tool": "ExitWorktree", "action": "allow" }
-            ]
+            "permissions": {"allow": ["EnterWorktree", "ExitWorktree"]}
         }))
         .before_start(move |world, _| {
             if git {

@@ -38,11 +38,7 @@ async fn turn_throughput() -> anyhow::Result<()> {
         "bench",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [
-                { "tool": "Grep", "action": "allow" },
-                { "tool": "Glob", "action": "allow" },
-                { "tool": "Read", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Grep", "Glob", "Read"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;

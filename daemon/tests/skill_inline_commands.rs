@@ -136,7 +136,7 @@ async fn bash_turn_in(dir: &std::path::Path, work: &std::path::Path, command: &s
     std::fs::create_dir_all(&global).unwrap();
     std::fs::write(
         global.join("settings.json"),
-        json!({ "permission_rules": [{"tool": "Bash", "action": "allow"}] }).to_string(),
+        json!({ "permissions": {"allow": ["Bash"]} }).to_string(),
     )
     .unwrap();
     let sock = dir.join("agix.sock");
@@ -317,7 +317,7 @@ async fn a_pre_tool_use_hook_blocks_a_skills_inline_command() {
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": {
                 "PreToolUse": [{"type": "command", "command": block, "if": "Bash"}],
                 "PermissionDenied": [{"type": "command", "command": format!("cat >> '{}'", denied.display())}],
@@ -395,7 +395,7 @@ async fn a_skills_inline_command_the_rules_refuse_fires_permission_denied() {
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "deny"}],
+            "permissions": {"deny": ["Bash"]},
             "hooks_config": {
                 "PermissionDenied": [{"type": "command", "command": format!("cat >> '{}'", denied.display())}],
             },
@@ -472,7 +472,7 @@ async fn a_post_tool_use_hook_withholds_a_skills_inline_command_output() {
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": {
                 "PostToolUse": [{"type": "command", "command": block, "if": "Bash"}],
             },
@@ -519,7 +519,7 @@ async fn a_repository_a_skills_inline_command_nests_is_reported_to_the_host() {
         &dir,
         &work,
         json!({
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": {"Notification": [
                 {"type": "command", "command": format!("cat > '{}'", heard.display())}
             ]},
@@ -575,7 +575,7 @@ async fn a_skills_inline_command_that_fails_fires_post_tool_use_failure() {
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": {
                 "PostToolUseFailure": [{"type": "command", "command": format!("cat >> '{}'", failed.display())}],
             },
@@ -631,7 +631,7 @@ async fn a_post_tool_use_hook_discontinuing_a_skills_inline_command_ends_the_tur
         &work,
         json!({
             "sandbox": {"dangerously_disable_sandbox": true},
-            "permission_rules": [{"tool": "Bash", "action": "allow"}],
+            "permissions": {"allow": ["Bash"]},
             "hooks_config": {
                 "PostToolUse": [{"type": "command", "command": r#"echo '{"continue":false}'"#, "if": "Bash"}],
             },

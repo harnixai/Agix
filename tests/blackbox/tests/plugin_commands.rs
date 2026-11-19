@@ -245,7 +245,7 @@ async fn a_command_writes_inside_its_scope_only_and_a_read_only_one_writes_nothi
     let mut run = with_notes(
         "ext-scope",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     stub.script([
@@ -280,7 +280,7 @@ async fn a_command_cannot_write_through_a_dangling_symlink_out_of_its_scope() ->
     let mut run = with_notes(
         "ext-dangling",
         &stub,
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
     )
     .await?;
     let outside = run.world.root().join("outside");
@@ -482,7 +482,7 @@ async fn tool_around_sees_whether_the_model_a_program_or_a_command_made_the_call
     let mut run = with_notes(
         "ext-via",
         &stub,
-        json!({ "permission_rules": [{ "tool": "RunCode", "action": "allow" }] }),
+        json!({ "permissions": {"allow": ["RunCode"]} }),
     )
     .await?;
     let secret = run.project.join("guarded/secret.txt");
@@ -531,10 +531,7 @@ async fn a_program_runs_commands_and_gets_their_values() -> anyhow::Result<()> {
     let mut run = with_notes(
         "ext-code",
         &stub,
-        json!({ "permission_rules": [
-            { "tool": "RunCode", "action": "allow" },
-            { "tool": "RunExt(notes add:*)", "action": "allow" }
-        ] }),
+        json!({ "permissions": {"allow": ["RunCode", "RunExt(notes add:*)"]} }),
     )
     .await?;
     let code = r#"
@@ -664,7 +661,7 @@ fn tool_result_text(stub: &ProviderStub, tool_use_id: &str) -> Option<(String, b
 async fn a_command_never_writes_configuration_whatever_its_writes_say() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("ext-config", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let archive = config_writer(run.world.root())?;
@@ -698,7 +695,7 @@ async fn a_command_never_writes_configuration_whatever_its_writes_say() -> anyho
 async fn a_command_in_a_sub_agent_is_held_to_the_same_scope() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("ext-config-child", &stub)
-        .settings(json!({ "permission_rules": [{ "tool": "Agent", "action": "allow" }] }))
+        .settings(json!({ "permissions": {"allow": ["Agent"]} }))
         .start()
         .await?;
     let archive = config_writer(run.world.root())?;
@@ -751,8 +748,7 @@ async fn a_session_cannot_plant_compiled_entries_in_the_bytecode_cache() -> anyh
         "ext-bytecode-cache",
         &stub,
         json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Bash"]}
         }),
     )
     .await?;
@@ -822,10 +818,10 @@ async fn a_slash_command_in_a_prompt_the_model_wrote_is_asked_about() -> anyhow:
     let mut run = with_notes(
         "ext-slash-from-model",
         &stub,
-        json!({ "permission_rules": [
-            { "tool": "Agent", "action": "allow" },
-            { "tool": "RunExt(notes add:*)", "action": "ask" }
-        ] }),
+        json!({ "permissions": {
+            "allow": ["Agent"],
+            "ask": ["RunExt(notes add:*)"]
+        } }),
     )
     .await?;
     let session = run.session().await?;
@@ -950,8 +946,7 @@ async fn a_deny_rule_holds_however_the_line_quotes_the_words() -> anyhow::Result
         "ext-quoted",
         &stub,
         json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "RunExt(notes add x:*)", "action": "deny" }]
+            "permissions": {"mode": "acceptEdits", "deny": ["RunExt(notes add x:*)"]}
         }),
     )
     .await?;
@@ -984,10 +979,7 @@ async fn a_commands_own_task_is_not_a_background_task_its_shell_must_wait_for() 
 {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("ext-sleep", &stub)
-        .settings(json!({ "permission_rules": [
-            { "tool": "Bash", "action": "allow" },
-            { "tool": "RunExt", "action": "allow" }
-        ] }))
+        .settings(json!({ "permissions": {"allow": ["Bash", "RunExt"]} }))
         .start()
         .await?;
     let package = tempfile::tempdir()?;

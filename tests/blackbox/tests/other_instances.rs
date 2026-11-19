@@ -70,11 +70,7 @@ async fn another_instances_state_root_keeps_its_keys_and_its_socket() -> anyhow:
             blackbox::ModelEndpoint::model(&stub),
         ))
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Bash", "action": "allow" },
-                { "tool": "Read", "action": "allow" },
-                { "tool": "Write", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Bash", "Read", "Write"]}
         }))
         .mode(Mode::Spawned)
         .options(move |o| o.env("HOME", home_env.clone()))

@@ -1032,7 +1032,7 @@ async fn an_interrupt_ends_a_turn_still_waiting_for_the_model() -> anyhow::Resul
 async fn a_host_rewinds_a_turn_that_edited_three_files() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "rewind-live",
-        json!({ "permission_mode": "acceptEdits" }),
+        json!({ "permissions": {"mode": "acceptEdits"} }),
         Mode::InProcess,
     )
     .await?;

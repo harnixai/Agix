@@ -1,5 +1,5 @@
 //! The deployment's managed settings over the wire: a `deny` in them holds in a
-//! `bypassPermissions` session, `disable_bypass_permissions_mode` takes that
+//! `bypassPermissions` session, `permissions.disable_bypass` takes that
 //! mode away, a file that cannot be honoured refuses every tool call, and
 //! `daemon.doctor` / `config.get` say where the layer came from.
 
@@ -86,7 +86,7 @@ impl Daemon {
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = PermissionMode::BypassPermissions;
+        config.settings.values.permissions.mode = PermissionMode::BypassPermissions;
         let managed = managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -188,7 +188,7 @@ fn check<'a>(doctor: &'a serde_json::Value, name: &str) -> &'a serde_json::Value
         .unwrap_or_else(|| panic!("no {name} check: {doctor}"))
 }
 
-const DENY_TOUCH: &str = r#"{"permission_rules": [{"tool": "Bash(touch:*)", "action": "deny"}]}"#;
+const DENY_TOUCH: &str = r#"{"permissions": {"deny": ["Bash(touch:*)"]}}"#;
 
 #[tokio::test]
 async fn without_managed_settings_a_bypass_session_runs_the_command() {
@@ -201,27 +201,21 @@ async fn without_managed_settings_a_bypass_session_runs_the_command() {
 
 #[tokio::test]
 async fn a_managed_deny_refuses_the_call_in_a_bypass_session() {
-    for spelling in ["bypassPermissions", "auto", "yolo"] {
-        let d = Daemon::start(Some(DENY_TOUCH), Duration::from_secs(30)).await;
-        let frames = d.run_turn(json!({"permission_mode": spelling})).await;
-        let results = tool_results(&frames);
-        assert!(
-            !d.marker().exists(),
-            "{spelling}: the command ran: {results}"
-        );
-        assert!(results.contains("Bash(touch:*)"), "{spelling}: {results}");
-        assert!(
-            events(&frames, "prompt").is_empty(),
-            "{spelling}: {frames:?}"
-        );
-        d.stop().await;
-    }
+    let d = Daemon::start(Some(DENY_TOUCH), Duration::from_secs(30)).await;
+    let frames = d
+        .run_turn(json!({"permission_mode": "bypassPermissions"}))
+        .await;
+    let results = tool_results(&frames);
+    assert!(!d.marker().exists(), "the command ran: {results}");
+    assert!(results.contains("Bash(touch:*)"), "{results}");
+    assert!(events(&frames, "prompt").is_empty(), "{frames:?}");
+    d.stop().await;
 }
 
 #[tokio::test]
 async fn a_managed_ask_still_asks_in_a_bypass_session() {
     let d = Daemon::start(
-        Some(r#"{"permission_rules": [{"tool": "Bash(touch:*)", "action": "ask"}]}"#),
+        Some(r#"{"permissions": {"ask": ["Bash(touch:*)"]}}"#),
         Duration::from_secs(1),
     )
     .await;
@@ -252,7 +246,7 @@ async fn a_bypass_session_reports_prompts_only_when_the_managed_layer_can_ask() 
     plain.stop().await;
 
     let asks = Daemon::start(
-        Some(r#"{"permission_rules": [{"tool": "Bash(touch:*)", "action": "ask"}]}"#),
+        Some(r#"{"permissions": {"ask": ["Bash(touch:*)"]}}"#),
         Duration::from_secs(30),
     )
     .await;
@@ -265,7 +259,7 @@ async fn a_bypass_session_reports_prompts_only_when_the_managed_layer_can_ask() 
 #[tokio::test]
 async fn disabling_bypass_turns_a_bypass_session_into_one_that_asks() {
     let d = Daemon::start(
-        Some(r#"{"disable_bypass_permissions_mode": true}"#),
+        Some(r#"{"permissions": {"disable_bypass": true}}"#),
         Duration::from_secs(1),
     )
     .await;
@@ -280,7 +274,7 @@ async fn disabling_bypass_turns_a_bypass_session_into_one_that_asks() {
 #[tokio::test]
 async fn a_managed_file_with_a_key_it_may_not_set_refuses_every_tool_call() {
     let d = Daemon::start(
-        Some(r#"{"permission_mode": "bypassPermissions", "permission_rules": []}"#),
+        Some(r#"{"permissions": {"mode": "bypassPermissions"}}"#),
         Duration::from_secs(30),
     )
     .await;
@@ -296,7 +290,7 @@ async fn a_managed_file_with_a_key_it_may_not_set_refuses_every_tool_call() {
         managed["summary"]
             .as_str()
             .unwrap()
-            .contains("permission_mode"),
+            .contains("permissions.mode"),
         "{managed}"
     );
     d.stop().await;
@@ -319,7 +313,8 @@ async fn doctor_and_config_get_name_the_managed_layer_and_where_it_came_from() {
     let layer = &config["result"]["managed"];
     assert_eq!(layer["origin"], origin.as_str(), "{config}");
     assert_eq!(
-        layer["permission_rules"][0]["tool"], "Bash(touch:*)",
+        layer["permissions"],
+        json!({"deny": ["Bash(touch:*)"], "disable_bypass": false}),
         "{config}"
     );
     d.stop().await;

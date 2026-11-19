@@ -279,8 +279,11 @@ async fn structured_output_is_on_the_task_and_the_parent_can_be_left_out() -> an
 /// tool it is rather than as one the session does not know.
 #[tokio::test(flavor = "multi_thread")]
 async fn handing_in_needs_no_approval_when_the_session_has_no_schema() -> anyhow::Result<()> {
-    let (_world, provider, daemon, mut client, session) =
-        daemon_with("schema-default", json!({ "permission_mode": "default" })).await?;
+    let (_world, provider, daemon, mut client, session) = daemon_with(
+        "schema-default",
+        json!({ "permissions": {"mode": "default"} }),
+    )
+    .await?;
     provider.script_when(
         "hand in the verdict",
         [
@@ -318,7 +321,7 @@ async fn the_session_cap_refuses_one_agent_too_many() -> anyhow::Result<()> {
     let (_world, provider, daemon, mut client, session) = daemon_with(
         "cap",
         json!({
-            "permission_rules": [{ "tool": "Bash", "action": "allow" }],
+            "permissions": {"allow": ["Bash"]},
             "execution": { "max_concurrent_subagents": 1 }
         }),
     )

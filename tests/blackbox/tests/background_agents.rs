@@ -18,7 +18,7 @@ async fn a_finished_background_agent_reaches_its_parents_next_call() -> anyhow::
         "bg",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"allow": ["Agent"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;
@@ -111,10 +111,7 @@ async fn a_background_agents_kept_worktree_is_in_its_task_and_its_notice() -> an
         "bgwt",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;
@@ -207,10 +204,7 @@ async fn stopped_sub_agents_resume_under_their_project_and_in_their_worktree() -
         "bgcut",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "Bash"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;
@@ -404,7 +398,7 @@ async fn a_finished_foreground_agent_stays_listed_under_its_parent() -> anyhow::
         "fg",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"allow": ["Agent"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;
@@ -485,7 +479,7 @@ async fn a_foreground_agents_question_comes_through_its_parents_turn() -> anyhow
         "ask-fg",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"allow": ["Agent"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;
@@ -594,7 +588,7 @@ async fn an_agents_directory_created_after_startup_is_used() -> anyhow::Result<(
         "late-agents",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"allow": ["Agent"]}
         }),
     )?;
     assert!(!project.join(".agix/agents").exists());

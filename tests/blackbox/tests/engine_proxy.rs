@@ -16,7 +16,7 @@ fn proxied_through(
     proxy: &PageServer,
     mut project: serde_json::Value,
 ) -> LiveRunBuilder {
-    project["permission_rules"] = json!([{ "tool": "WebFetch", "action": "allow" }]);
+    project["permissions"]["allow"] = json!(["WebFetch"]);
     let proxy_url = proxy.url("");
     LiveRun::builder(name)
         .config(LiveConfig::for_endpoint(

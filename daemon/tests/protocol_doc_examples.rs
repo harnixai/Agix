@@ -976,7 +976,7 @@ async fn documented_scene_session_control_and_schedule_results_are_real() {
         .call(
             "config.set",
             serde_json::json!({"tier": "global", "changes": {
-                "permission_mode": "acceptEdits",
+                "permissions.mode": "acceptEdits",
                 "sandbox.allowed_domains": ["github.com"],
                 "telemetry_url": null,
                 "providers.doc.api_key": "sk-doc-example"

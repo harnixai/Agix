@@ -150,7 +150,7 @@ impl Daemon {
         // Where `config.setProvider` puts a key; any value stands in for one,
         // and a provider here would take the turn away from the mock model.
         let keys = json!({
-            "permission_rules": [{"tool": format!("Bash(echo {SECRET})"), "action": "deny"}],
+            "permissions": {"deny": [format!("Bash(echo {SECRET})")]},
         });
         std::fs::write(home.join("settings.local.json"), keys.to_string()).unwrap();
         let oauth = home.join("scenes").join("code").join("mcp").join("oauth");

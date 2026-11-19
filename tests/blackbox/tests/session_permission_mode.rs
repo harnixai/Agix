@@ -155,7 +155,7 @@ async fn a_switch_reaches_the_later_calls_of_the_running_turn() -> anyhow::Resul
 }
 
 /// Wider than the settings is clamped, and the reply says so; with
-/// `allow_client_permission_override` the host's mode stands. A mode only the
+/// `permissions.client_may_loosen` the host's mode stands. A mode only the
 /// engine sets, a mode that does not exist and a session that does not are
 /// refused.
 #[tokio::test(flavor = "multi_thread")]
@@ -200,7 +200,7 @@ async fn a_switch_is_held_to_the_settings_and_says_when_it_was() -> anyhow::Resu
 
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-override", &stub)
-        .settings(json!({ "allow_client_permission_override": true }))
+        .settings(json!({ "permissions": {"client_may_loosen": true} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -219,7 +219,7 @@ async fn a_switch_is_held_to_the_settings_and_says_when_it_was() -> anyhow::Resu
 async fn a_switched_mode_outlives_a_restart() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-restart", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let edits = run
@@ -264,7 +264,7 @@ async fn a_switched_mode_outlives_a_restart() -> anyhow::Result<()> {
 async fn plan_entered_by_the_host_is_left_to_the_mode_before_it() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-host-plan", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -313,7 +313,7 @@ async fn plan_entered_by_the_host_is_left_to_the_mode_before_it() -> anyhow::Res
 async fn an_exit_approved_after_the_host_switched_changes_nothing() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-overtaken-exit", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -362,7 +362,7 @@ async fn an_exit_approved_after_the_host_switched_changes_nothing() -> anyhow::R
 async fn a_session_not_in_memory_takes_the_mode_up_when_it_comes_back() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-cold", &stub)
-        .settings(json!({ "permission_mode": "acceptEdits" }))
+        .settings(json!({ "permissions": {"mode": "acceptEdits"} }))
         .options(|o| o.session_cap(1))
         .start()
         .await?;
@@ -431,7 +431,7 @@ async fn exit_plan(run: &mut LiveRun, stub: &ProviderStub, session: &str) -> any
 async fn the_mode_plan_returns_to_is_held_to_the_settings_now() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("mode-exit-held", &stub)
-        .settings(json!({ "allow_client_permission_override": true }))
+        .settings(json!({ "permissions": {"client_may_loosen": true} }))
         .start()
         .await?;
     let session = run.session().await?;
@@ -489,7 +489,7 @@ async fn a_clamped_switch_stays_clamped_when_the_settings_loosen() -> anyhow::Re
     assert_eq!(clamped["mode"], "default", "{clamped}");
 
     let mut loosened = LiveRun::base_settings();
-    loosened["allow_client_permission_override"] = json!(true);
+    loosened["permissions"]["client_may_loosen"] = json!(true);
     run.world
         .write_project_settings("mode-clamp-kept", &loosened)?;
     run.restart().await?;

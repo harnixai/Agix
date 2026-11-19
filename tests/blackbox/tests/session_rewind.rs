@@ -25,10 +25,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
 
 fn stubbed_with(name: &str, stub: &ProviderStub, extra: Value) -> LiveRunBuilder {
     let mut settings = json!({
-        "permission_rules": [
-            { "tool": "Write", "action": "allow" },
-            { "tool": "Edit", "action": "allow" }
-        ]
+        "permissions": {"allow": ["Write", "Edit"]}
     });
     settings
         .as_object_mut()

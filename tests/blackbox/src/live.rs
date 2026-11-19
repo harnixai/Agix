@@ -737,7 +737,7 @@ impl LiveRun {
     pub fn base_settings() -> Value {
         json!({
             "memory_enabled": false,
-            "permission_mode": "default"
+            "permissions": {"mode": "default"}
         })
     }
 

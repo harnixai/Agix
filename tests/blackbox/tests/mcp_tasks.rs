@@ -25,7 +25,7 @@ fn toy_run(
         ))
         .settings(json!({
             "mcp_servers": { "demo": McpToy::stdio_config(&args)? },
-            "permission_rules": [{ "tool": "mcp__demo", "action": "allow" }],
+            "permissions": {"allow": ["mcp__demo"]},
         })))
 }
 

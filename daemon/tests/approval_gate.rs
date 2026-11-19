@@ -63,7 +63,7 @@ impl Daemon {
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = setup.mode;
+        config.settings.values.permissions.mode = setup.mode;
         config.managed_settings_path = setup.managed.map(|content| {
             let path = dir.path().join("it").join("managed-settings.json");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -367,8 +367,7 @@ async fn a_project_skill_grants_every_bash_command_with_a_star() {
 /// own rules ask, not the managed layer's `ask`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hook_approval_overrides_a_managed_ask() {
-    const MANAGED_ASK: &str =
-        r#"{"permission_rules": [{"tool": "Bash(touch:*)", "action": "ask"}]}"#;
+    const MANAGED_ASK: &str = r#"{"permissions": {"ask": ["Bash(touch:*)"]}}"#;
     let touch = |daemon: &Daemon| {
         let marker = daemon.work.join("marker");
         daemon.model.push_turn(tool_round(

@@ -229,11 +229,11 @@ async fn every_wired_event_fires_at_its_moment() -> anyhow::Result<()> {
     let ledger = Ledger::new()?;
     let mut run = stubbed("ledger", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Read(**/forbidden.txt)", "action": "deny" }
-            ],
+            "permissions": {
+                "mode": "default",
+                "allow": ["Agent"],
+                "deny": ["Read(**/forbidden.txt)"]
+            },
             "mcp_servers": { "demo": McpToy::stdio_config(&[])? },
             "hooks_config": ledger.on_every_event(),
         }))
@@ -494,10 +494,7 @@ async fn worktree_events_bracket_a_worktree() -> anyhow::Result<()> {
     let mut run = stubbed("wt", &stub)
         .settings(json!({
             "hooks_config": ledger.on_every_event(),
-            "permission_rules": [
-                { "tool": "EnterWorktree", "action": "allow" },
-                { "tool": "ExitWorktree", "action": "allow" }
-            ]
+            "permissions": {"allow": ["EnterWorktree", "ExitWorktree"]}
         }))
         .before_start(|world, _| {
             world.git_project("wt")?;
@@ -735,7 +732,7 @@ async fn every_way_of_starting_a_sub_agent_is_bracketed_by_subagent_hooks() -> a
     let mut run = stubbed("bracketed", &stub)
         .settings(json!({
             "team": { "enabled": true },
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }],
+            "permissions": {"allow": ["Agent"]},
             "hooks_config": {
                 "SubagentStart": [ledger.hook()],
                 "SubagentStop": [ledger.hook()],
@@ -819,7 +816,7 @@ async fn one_edit_fires_file_changed_once_after_sub_agents_have_run() -> anyhow:
     let mut run = stubbed("watched-once", &stub)
         .settings(json!({
             "instruction_file": notes,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }],
+            "permissions": {"allow": ["Agent"]},
             "hooks_config": { "FileChanged": [ledger.hook()] },
         }))
         .start()
@@ -865,8 +862,7 @@ async fn every_payload_names_the_sessions_cwd_permission_mode_and_depth() -> any
     let ledger = Ledger::new()?;
     let mut run = stubbed("payloads", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }],
+            "permissions": {"mode": "default", "allow": ["Agent"]},
             "hooks_config": ledger.on_every_event(),
         }))
         .start()
@@ -1799,10 +1795,7 @@ async fn an_agent_hook_still_judges_when_the_model_holds_every_sub_agent_slot() 
     let mut run = stubbed("hook-slots", &stub)
         .settings(json!({
             "execution": { "max_concurrent_subagents": 1 },
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "Bash", "action": "allow" }
-            ],
+            "permissions": {"allow": ["Agent", "Bash"]},
             "hooks_config": {
                 "PreToolUse": [{
                     "type": "agent",
@@ -1980,10 +1973,10 @@ async fn pre_tool_use_context_of_a_call_the_rules_deny_is_dropped_and_of_an_allo
     let mut run = stubbed("ctx-denied", &stub)
         .settings(json!({
             "hooks_config": { "PreToolUse": [adding_context(dir.path(), "d.sh", "PRE-CTX-MARK")?] },
-            "permission_rules": [
-                { "tool": "Bash(echo denied)", "action": "deny" },
-                { "tool": "Bash(echo allowed)", "action": "allow" }
-            ]
+            "permissions": {
+                "allow": ["Bash(echo allowed)"],
+                "deny": ["Bash(echo denied)"]
+            }
         }))
         .start()
         .await?;
@@ -2063,7 +2056,7 @@ async fn a_sub_agent_starts_with_its_subagent_start_context() -> anyhow::Result<
     let dir = tempfile::tempdir()?;
     let mut run = stubbed("ctx-subagent", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }],
+            "permissions": {"allow": ["Agent"]},
             "hooks_config": {
                 "SubagentStart": [adding_context(dir.path(), "a.sh", "SUB-CTX-MARK")?]
             },
@@ -2100,8 +2093,7 @@ async fn permission_requested_approve_runs_the_call_without_a_prompt() -> anyhow
     let approve = answering(dir.path(), "ok.sh", &json!({ "decision": "approve" }))?;
     let mut run = stubbed("perm-approve", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Bash(echo asked > asked.txt)", "action": "ask" }],
+            "permissions": {"mode": "default", "ask": ["Bash(echo asked > asked.txt)"]},
             "hooks_config": {
                 "PermissionRequested": [approve],
                 "Notification": [ledger.hook()],
@@ -2137,8 +2129,7 @@ async fn permission_requested_block_denies_with_its_message() -> anyhow::Result<
     )?;
     let mut run = stubbed("perm-block", &stub)
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Bash(echo asked > asked.txt)", "action": "ask" }],
+            "permissions": {"mode": "default", "ask": ["Bash(echo asked > asked.txt)"]},
             "hooks_config": {
                 "PermissionRequested": [block],
                 "PermissionDenied": [ledger.hook()],
@@ -2171,14 +2162,14 @@ async fn permission_requested_cannot_answer_a_managed_ask() -> anyhow::Result<()
     std::fs::write(
         &managed_file,
         serde_json::to_string(&json!({
-            "permission_rules": [{ "tool": "Bash(echo managed > managed.txt)", "action": "ask" }]
+            "permissions": {"ask": ["Bash(echo managed > managed.txt)"]}
         }))?,
     )?;
     let managed_arg = managed_file.to_string_lossy().to_string();
     let approve = answering(dir.path(), "ok.sh", &json!({ "decision": "approve" }))?;
     let mut run = stubbed("perm-managed", &stub)
         .settings(json!({
-            "permission_mode": "default",
+            "permissions": {"mode": "default"},
             "hooks_config": { "PermissionRequested": [approve] },
         }))
         .mode(blackbox::Mode::Spawned)

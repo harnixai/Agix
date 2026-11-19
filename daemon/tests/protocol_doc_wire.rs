@@ -2083,7 +2083,7 @@ async fn documented_accept_edits_asks_about_reads_outside_the_project_and_a_nest
         Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
         8,
         |config| {
-            config.settings.values.permission_mode = base::permission::PermissionMode::AcceptEdits
+            config.settings.values.permissions.mode = base::permission::PermissionMode::AcceptEdits
         },
     )
     .await;

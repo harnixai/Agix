@@ -110,7 +110,7 @@ async fn a_background_program_reports_back_when_it_ends() -> anyhow::Result<()> 
     // it runs is granted by a rule.
     let mut run = LiveRun::start(
         "ptc-background",
-        json!({ "permission_rules": [{ "tool": "Bash(sh:*)", "action": "allow" }] }),
+        json!({ "permissions": {"allow": ["Bash(sh:*)"]} }),
         Mode::InProcess,
     )
     .await?;
@@ -189,11 +189,7 @@ async fn a_deny_rule_holds_for_a_call_made_from_code() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "ptc-deny",
         json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [
-                { "tool": "Write(**/locked/**)", "action": "deny" },
-                { "tool": "Edit(**/locked/**)", "action": "deny" }
-            ]
+            "permissions": {"mode": "acceptEdits", "deny": ["Write(**/locked/**)", "Edit(**/locked/**)"]}
         }),
         Mode::InProcess,
     )

@@ -335,13 +335,13 @@ async fn live_forge_requirements_live_on_the_remote_backend() -> anyhow::Result<
         "--store",
         &store.path().to_string_lossy(),
     ])?;
-    let allow: Vec<Value> = ["items_query", "items_get", "items_put"]
+    let allow: Vec<String> = ["items_query", "items_get", "items_put"]
         .iter()
-        .map(|t| json!({ "tool": format!("mcp__reqdb__{t}"), "action": "allow" }))
+        .map(|t| format!("mcp__reqdb__{t}"))
         .collect();
     let mut run = with_forge(
         LiveRun::builder("forge-remote")
-            .settings(json!({ "mcp_servers": { "reqdb": toy }, "permission_rules": allow }))
+            .settings(json!({ "mcp_servers": { "reqdb": toy }, "permissions": { "allow": allow } }))
             .before_start(|world, _| {
                 world.write_project_file(
                     "forge-remote",

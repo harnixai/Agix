@@ -476,8 +476,7 @@ async fn an_allow_rule_for_one_tool_does_not_cover_a_tool_named_after_it() -> an
     let mut run = stubbed("allow-one", &stub)
         .settings(json!({
             "mcp_servers": servers,
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "mcp__canned__echo", "action": "allow" }]
+            "permissions": {"mode": "default", "allow": ["mcp__canned__echo"]}
         }))
         .start()
         .await?;
@@ -583,7 +582,7 @@ async fn the_resource_tools_obey_a_deny_rule_written_for_their_server() -> anyho
     let mut run = stubbed("resource-deny", &stub)
         .settings(json!({
             "mcp_servers": servers,
-            "permission_rules": [{ "tool": "mcp__corp", "action": "deny" }]
+            "permissions": {"deny": ["mcp__corp"]}
         }))
         .start()
         .await?;
@@ -1390,10 +1389,7 @@ async fn a_sub_agent_granted_an_mcp_server_is_shown_and_keeps_its_tools() -> any
     let mut run = stubbed("mcp-grant", &stub)
         .settings(json!({
             "mcp_servers": { "toy": McpToy::stdio_config(&["--calls", &log.to_string_lossy()])? },
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "mcp__toy__ping", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "mcp__toy__ping"]}
         }))
         .before_start(|world, _| {
             world.write_project_file(
@@ -1569,10 +1565,7 @@ async fn a_program_gets_the_structured_content_an_mcp_tool_answers_with() -> any
     let mut run = stubbed("mcp-structured", &stub)
         .settings(json!({
             "mcp_servers": { "db": toy },
-            "permission_rules": [
-                { "tool": "RunCode", "action": "allow" },
-                { "tool": "mcp__db__items_put", "action": "allow" }
-            ]
+            "permissions": {"allow": ["RunCode", "mcp__db__items_put"]}
         }))
         .start()
         .await?;

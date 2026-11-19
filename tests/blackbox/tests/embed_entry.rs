@@ -693,7 +693,7 @@ async fn a_killed_hosts_command_is_stopped_by_the_next_start_on_its_groups_file(
     let mut settings: Value =
         serde_json::from_slice(&std::fs::read(r.data.join("settings.json"))?)?;
     settings["memory_enabled"] = json!(false);
-    settings["permission_rules"] = json!([{ "tool": "Bash", "action": "allow" }]);
+    settings["permissions"]["allow"] = json!(["Bash"]);
     std::fs::write(r.data.join("settings.json"), settings.to_string())?;
     stub.script_when(TITLE_NEEDLE, (0..4).map(|_| Reply::text("a title")));
     stub.script([Reply::calls(
@@ -776,7 +776,7 @@ async fn a_shut_down_record_is_not_rewritten_by_a_later_engine() -> anyhow::Resu
     let mut settings: Value =
         serde_json::from_slice(&std::fs::read(b.data.join("settings.json"))?)?;
     settings["memory_enabled"] = json!(false);
-    settings["permission_rules"] = json!([{ "tool": "Bash", "action": "allow" }]);
+    settings["permissions"]["allow"] = json!(["Bash"]);
     std::fs::write(b.data.join("settings.json"), settings.to_string())?;
     stub.script_when(TITLE_NEEDLE, (0..4).map(|_| Reply::text("a title")));
     stub.script([

@@ -27,8 +27,7 @@ impl Daemon {
         std::fs::create_dir_all(work.join(".agix")).unwrap();
         std::fs::write(
             work.join(".agix/settings.json"),
-            json!({"permission_rules": [{"tool": "Read(secret/**)", "action": "deny"}]})
-                .to_string(),
+            json!({"permissions": {"deny": ["Read(secret/**)"]}}).to_string(),
         )
         .unwrap();
 
@@ -37,7 +36,7 @@ impl Daemon {
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
         let mut config = load_daemon_config("claude-sonnet-4-6", 2000, Some(&sock), "code", &paths);
         config.settings.values.memory_enabled = false;
-        config.settings.values.permission_mode = base::permission::PermissionMode::AcceptEdits;
+        config.settings.values.permissions.mode = base::permission::PermissionMode::AcceptEdits;
         let model = Arc::new(MockAnthropicClient::new());
         let pool = daemon::assemble::pool(
             &config,

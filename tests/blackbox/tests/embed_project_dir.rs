@@ -89,15 +89,13 @@ fn root(stub: &ProviderStub) -> anyhow::Result<Root> {
             "models": ["claude-sonnet-4-6"]
         }},
         "default_provider": "stub",
-        "permission_mode": "default",
         "memory_enabled": true,
         "team": { "enabled": true },
-        "permission_rules": [
-            { "tool": "Write", "action": "allow" },
-            { "tool": "Agent", "action": "allow" },
-            { "tool": "TeamCreate", "action": "allow" },
-            { "tool": format!("Read({})", project.join("secret.txt").display()), "action": "deny" }
-        ]
+        "permissions": {
+            "mode": "default",
+            "allow": ["Write", "Agent", "TeamCreate"],
+            "deny": [format!("Read({})", project.join("secret.txt").display())]
+        }
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
     std::fs::write(

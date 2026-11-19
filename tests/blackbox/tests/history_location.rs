@@ -311,7 +311,7 @@ async fn deleting_a_session_of_a_project_that_lost_its_trust_takes_its_sidechain
         "cascade",
         &json!({
             "memory_enabled": false,
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"allow": ["Agent"]}
         }),
     )?;
     let provider = ProviderStub::start().await?;

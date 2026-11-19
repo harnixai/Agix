@@ -229,8 +229,7 @@ async fn a_foreground_sub_agents_question_reaches_the_host_inside_its_parents_tu
     let mut run = LiveRun::start(
         "asker",
         json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"mode": "default", "allow": ["Agent"]}
         }),
         Mode::InProcess,
     )
@@ -463,8 +462,7 @@ async fn an_agent_types_permission_mode_governs_what_its_sub_agent_is_asked() ->
 {
     let mut run = LiveRun::builder("typed-mode")
         .settings(json!({
-            "permission_mode": "acceptEdits",
-            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+            "permissions": {"mode": "acceptEdits", "allow": ["Agent"]}
         }))
         .options(|o| o.prompt_timeout(Duration::from_secs(3)))
         .start()

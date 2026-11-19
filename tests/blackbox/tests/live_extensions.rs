@@ -229,8 +229,7 @@ async fn a_skills_allowed_tools_pre_approve_what_it_names_and_project_blankets_a
 ) -> anyhow::Result<()> {
     let mut run = LiveRun::builder("granted")
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+            "permissions": {"mode": "default", "allow": ["Skill"]}
         }))
         .options(|o| o.prompt_timeout(std::time::Duration::from_secs(5)))
         .before_start(|world, _| {
@@ -328,8 +327,7 @@ async fn a_skills_allowed_tools_pre_approve_what_it_names_and_project_blankets_a
 async fn a_scoped_grant_written_bare_is_honored() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("granted-bare")
         .settings(json!({
-            "permission_mode": "default",
-            "permission_rules": [{ "tool": "Skill", "action": "allow" }]
+            "permissions": {"mode": "default", "allow": ["Skill"]}
         }))
         .options(|o| o.prompt_timeout(std::time::Duration::from_secs(5)))
         .start()

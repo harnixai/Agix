@@ -27,12 +27,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
             blackbox::ModelEndpoint::model(stub),
         ))
         .settings(json!({
-            "permission_rules": [
-                { "tool": "Bash", "action": "allow" },
-                { "tool": "Read", "action": "allow" },
-                { "tool": "Grep", "action": "allow" },
-                { "tool": "Agent", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Bash", "Read", "Grep", "Agent"]}
         }))
 }
 
@@ -179,7 +174,7 @@ async fn a_saved_mcp_result_read_back_is_still_fenced() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("spill-fence", &stub)
         .settings(json!({
-            "permission_rules": [{ "tool": "Read", "action": "allow" }],
+            "permissions": {"allow": ["Read"]},
             "mcp_servers": { "toy": McpToy::stdio_config(&[])? }
         }))
         .start()
@@ -407,7 +402,7 @@ async fn webfetch_reads_a_long_page_in_windows() -> anyhow::Result<()> {
     let mut run = stubbed("spill-fetch", &stub)
         .settings(json!({
             "sandbox": PageServer::reachable(),
-            "permission_rules": [{ "tool": "WebFetch", "action": "allow" }]
+            "permissions": {"allow": ["WebFetch"]}
         }))
         .start()
         .await?;

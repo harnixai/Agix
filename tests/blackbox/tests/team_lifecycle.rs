@@ -18,11 +18,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
         ))
         .settings(json!({
             "team": { "enabled": true },
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "TeamCreate", "action": "allow" },
-                { "tool": "TeamDelete", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "TeamCreate", "TeamDelete"]}
         }))
 }
 
@@ -232,10 +228,7 @@ async fn a_member_stopped_with_a_queued_message_leaves_no_task_running() -> anyh
     let mut run = stubbed("member-queue", &stub)
         .settings(json!({
             "team": { "enabled": true },
-            "permission_rules": [
-                { "tool": "Agent", "action": "allow" },
-                { "tool": "TeamDelete", "action": "allow" }
-            ]
+            "permissions": {"allow": ["Agent", "TeamDelete"]}
         }))
         .start()
         .await?;

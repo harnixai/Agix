@@ -741,7 +741,7 @@ async fn session_delete_dry_run_reports_without_deleting_anything() {
 #[tokio::test]
 async fn a_rebuilt_session_keeps_the_options_it_was_created_with() {
     let mut settings = ask_settings();
-    settings.allow_client_permission_override = true;
+    settings.permissions.client_may_loosen = true;
     let mut rounds = asking_bash_rounds("first.txt");
     rounds.extend(asking_bash_rounds("second.txt"));
     let (srv, _seen) = start_scripted_server(rounds, settings, Duration::from_secs(5)).await;
