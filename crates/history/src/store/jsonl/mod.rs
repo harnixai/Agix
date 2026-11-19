@@ -9,7 +9,7 @@ mod listing;
 mod store_impl;
 
 use crate::blob::{BlobStore, PasteStore};
-use crate::entry::{EnvelopedEntry, LogEntry};
+use crate::entry::{EnvelopedEntry, LogEntry, SessionKind};
 use crate::error::HistoryError;
 use crate::path::{canonicalize_cwd, project_dir, session_file, session_sidecar_dir, HistoryRoots};
 use crate::placement::{ProjectHistory, SidecarLocator};
@@ -275,22 +275,24 @@ impl JsonlHistoryStore {
         let kept = match self.home_of(session, Access::Write).await?.kept {
             Kept::InProject(index) => Kept::InProject(index),
             Kept::Global => {
-                let (recorded, parent) = match entry {
+                let (recorded, parent, kind) = match entry {
                     LogEntry::Meta {
                         project_root,
                         parent_session_id,
+                        session_kind,
                         ..
                     } => (
                         project_root.as_ref().map(PathBuf::from),
                         parent_session_id
                             .as_deref()
                             .and_then(|p| SessionId::parse(p).ok()),
+                        *session_kind,
                     ),
-                    _ => (None, None),
+                    _ => (None, None, SessionKind::Primary),
                 };
                 let (homes, root) = (self.homes.clone(), project.clone());
                 blocking(move || {
-                    Ok(homes.place(session, root.as_deref(), recorded.as_deref(), parent))
+                    Ok(homes.place(session, root.as_deref(), recorded.as_deref(), parent, kind))
                 })
                 .await?
             }
@@ -316,10 +318,12 @@ impl JsonlHistoryStore {
 
     /// The transcripts kept beside `home`'s, by session: a global project
     /// directory, or the indexed sessions of a project's history directory.
-    /// A lineage is kept in one of these.
+    /// A lineage is kept in one of these. `access` is how the project's
+    /// sessions are located.
     async fn beside(
         &self,
         home: &Home,
+        access: Access,
     ) -> Result<HashMap<SessionId, (PathBuf, Home)>, HistoryError> {
         let homes = self.homes.clone();
         match &home.kept {
@@ -335,7 +339,7 @@ impl JsonlHistoryStore {
                 let dir = index.history_dir().to_path_buf();
                 blocking(move || {
                     Ok(homes
-                        .indexed_in(&dir)
+                        .indexed_in(&dir, access)
                         .into_iter()
                         .map(|(id, home)| (id, (homes.transcript(&home, id), home)))
                         .collect())

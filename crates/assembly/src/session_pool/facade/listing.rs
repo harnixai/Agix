@@ -385,10 +385,13 @@ impl SessionPool {
                 self.live.ids().await.into_iter().collect();
             let mut out = Vec::with_capacity(children.len());
             for sid in children {
+                let stats = match store.session_stats(sid).await {
+                    Err(history::error::HistoryError::ProjectUntrusted { .. }) => continue,
+                    stats => stats.unwrap_or_default(),
+                };
                 let sid_str = sid.to_string();
                 let active = active_ids.contains(&sid_str);
                 let (facts, resumable) = self.session_facts_and_resumable(&sid_str).await;
-                let stats = store.session_stats(sid).await.unwrap_or_default();
                 out.push(SessionInfo {
                     session_id: sid_str,
                     name: stats.title,

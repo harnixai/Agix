@@ -4,8 +4,10 @@
 //! 现在新建的会话进不进项目、项目此刻是否受信。放进项目的会话在全局 `sessions/<id>/`
 //! 留一份 [`SessionIndex`]，存储只读索引登记过的项目内会话；项目目录里多出来的一律不认。
 
+use crate::entry::SessionKind;
 use crate::error::HistoryError;
 use crate::path::session_index_file;
+use crate::store::SessionFacts;
 use base::session::SessionId;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -48,6 +50,13 @@ pub struct SessionIndex {
     /// project was before it moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorded_root: Option<PathBuf>,
+    /// The lineage the session's `Meta` recorded, kept here too so that a
+    /// cascade delete finds a project's sidechains while the project is not
+    /// trusted and its logs are not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<SessionId>,
+    #[serde(default)]
+    pub session_kind: SessionKind,
 }
 
 impl SessionIndex {
@@ -58,6 +67,18 @@ impl SessionIndex {
             project_root,
             dir: history_dir.join(session.to_string()),
             recorded_root: None,
+            parent_session_id: None,
+            session_kind: SessionKind::Primary,
+        }
+    }
+
+    /// What the index knows of the session's `Meta`: its lineage.
+    pub fn facts(&self) -> SessionFacts {
+        SessionFacts {
+            scene: None,
+            project_root: None,
+            session_kind: self.session_kind,
+            parent_session_id: self.parent_session_id.map(|p| p.to_string()),
         }
     }
 

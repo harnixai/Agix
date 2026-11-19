@@ -131,7 +131,7 @@ impl HistoryStore for JsonlHistoryStore {
     /// parent is, so that holds the whole lineage.
     async fn snapshot_lineage(&self, root: SessionId) -> Result<LineageSnapshot, HistoryError> {
         let home = self.home_of(root, Access::Read).await?;
-        let logs = self.beside(&home).await?;
+        let logs = self.beside(&home, Access::Read).await?;
         let mut lengths = std::collections::HashMap::with_capacity(logs.len());
         for (session, (path, _)) in &logs {
             match tokio::fs::metadata(path).await {
@@ -210,8 +210,17 @@ impl HistoryStore for JsonlHistoryStore {
     /// Reads only as far as the `Meta` entry, which the engine writes first.
     /// The default would parse — and hydrate every paste of — an entire
     /// transcript to reach the fields on its first line.
+    ///
+    /// For a session in a project not trusted now, the lineage its index
+    /// recorded, and nothing read from the project: that is what a cascade
+    /// delete, which needs no trust, goes by.
     async fn session_facts(&self, session: SessionId) -> Result<SessionFacts, HistoryError> {
-        let (path, home) = self.session_path_of(session, Access::Read).await?;
+        let (path, home) = self.session_path_of(session, Access::Write).await?;
+        if let Some(index) = home.index() {
+            if self.homes.check_trust(session, &home).is_err() {
+                return Ok(index.facts());
+            }
+        }
         let Some(content) = read_log(&path).await? else {
             return Ok(SessionFacts::default());
         };
@@ -247,19 +256,22 @@ impl HistoryStore for JsonlHistoryStore {
     /// walks `list_sessions`, and would find nothing for a parent belonging
     /// to any project but this store's — taking the cascade delete in
     /// `session.close` down with it.
+    ///
+    /// Needs no trust, as a delete does not; in a project not trusted now
+    /// each child is known by its index (`session_facts`).
     async fn child_sessions(
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<SessionId>, HistoryError> {
         let home = match SessionId::parse(parent_session_id) {
-            Ok(parent) => self.home_of(parent, Access::Read).await?,
+            Ok(parent) => self.home_of(parent, Access::Write).await?,
             Err(_) => super::homes::Home {
                 project: Some(self.homes.canonical_cwd.clone()),
                 kept: Kept::Global,
             },
         };
         let mut out = Vec::new();
-        for sid in self.beside(&home).await?.into_keys() {
+        for sid in self.beside(&home, Access::Write).await?.into_keys() {
             let facts = match self.session_facts(sid).await {
                 Ok(facts) => facts,
                 Err(e @ HistoryError::Parse { .. }) => {

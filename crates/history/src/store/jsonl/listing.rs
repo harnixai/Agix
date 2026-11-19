@@ -3,7 +3,7 @@
 //! an index; every project's are all of those plus every indexed session.
 
 use super::files::*;
-use super::homes::{same_place, Home};
+use super::homes::{same_place, Access, Home};
 use super::JsonlHistoryStore;
 use crate::error::HistoryError;
 use crate::path::project_dir_for;
@@ -80,7 +80,7 @@ impl JsonlHistoryStore {
                     return Ok(Vec::new());
                 };
                 Ok(homes
-                    .indexed_in(&history.dir)
+                    .indexed_in(&history.dir, Access::Read)
                     .into_iter()
                     .filter(|(_, home)| {
                         home.project

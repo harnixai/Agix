@@ -4,7 +4,7 @@
 //! project's `state/history/<id>/`, and only an index in `sessions/<id>/`.
 //! Everything that reads or writes a session's files asks [`Homes::locate`].
 
-use crate::entry::LogEntry;
+use crate::entry::{LogEntry, SessionKind};
 use crate::error::HistoryError;
 use crate::path::{project_dir_for, session_file, session_metadata_file, session_sidecar_dir};
 use crate::placement::{ProjectHistory, SessionIndex};
@@ -224,7 +224,7 @@ impl Homes {
         }
     }
 
-    fn check_trust(&self, session: SessionId, home: &Home) -> Result<(), HistoryError> {
+    pub(super) fn check_trust(&self, session: SessionId, home: &Home) -> Result<(), HistoryError> {
         let Some(index) = home.index() else {
             return Ok(());
         };
@@ -295,10 +295,13 @@ impl Homes {
         project: Option<&Path>,
         recorded: Option<&Path>,
         parent: Option<SessionId>,
+        kind: SessionKind,
     ) -> Kept {
-        let Kept::InProject(index) = self.place_at(session, project, recorded, parent) else {
+        let Kept::InProject(mut index) = self.place_at(session, project, recorded, parent) else {
             return Kept::Global;
         };
+        index.parent_session_id = parent;
+        index.session_kind = kind;
         match make_own_dir(&index) {
             Ok(()) => Kept::InProject(index),
             Err(e) => {
@@ -349,7 +352,7 @@ impl Homes {
     /// with its home. A directory there that no index names, or whose index
     /// names somewhere else, is left out; so is all of it while its project
     /// is not trusted.
-    pub(super) fn indexed_in(&self, history_dir: &Path) -> Vec<(SessionId, Home)> {
+    pub(super) fn indexed_in(&self, history_dir: &Path, access: Access) -> Vec<(SessionId, Home)> {
         let Ok(entries) = std::fs::read_dir(history_dir) else {
             return Vec::new();
         };
@@ -362,7 +365,7 @@ impl Homes {
             else {
                 continue;
             };
-            let Ok(home) = self.locate(session, Access::Read) else {
+            let Ok(home) = self.locate(session, access) else {
                 continue;
             };
             if home

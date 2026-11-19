@@ -509,3 +509,29 @@ async fn a_kept_sessions_files_swapped_for_links_are_not_followed() {
     assert!(fresh.append(s, said("more")).await.is_err());
     assert_eq!(std::fs::read(&outside_log).unwrap(), before);
 }
+
+#[tokio::test]
+async fn a_lineage_in_a_project_no_longer_trusted_is_still_found_for_deleting() {
+    let world = World::new();
+    let project = world.project("p");
+    let projects = Projects::new(true);
+    let store = world.store(&project, Some(projects.clone())).await;
+    let parent = start(&store, &project).await;
+    let child = SessionId::new();
+    store
+        .append(child, meta(Some(&project), Some(parent)))
+        .await
+        .unwrap();
+    drop(store);
+
+    projects.trusted.store(false, Ordering::SeqCst);
+    let fresh = world.store(&project, Some(projects)).await;
+    assert_eq!(
+        fresh.child_sessions(&parent.to_string()).await.unwrap(),
+        [child]
+    );
+    let facts = fresh.session_facts(child).await.unwrap();
+    assert_eq!(facts.session_kind, SessionKind::Sidechain);
+    assert_eq!(facts.parent_session_id, Some(parent.to_string()));
+    assert!(fresh.load(child).await.is_err());
+}

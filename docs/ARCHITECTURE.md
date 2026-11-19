@@ -2364,7 +2364,7 @@ managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字�
 整份放进项目:`<主仓库>/.agix/state/history/<id>/` 下是 `<id>.jsonl`、`metadata.json`、
 `session_memory.md`、输入历史与 `checkpoints/`,文件名与全局 `sessions/<id>/` 里的相同;worktree 里
 的会话放进主仓库的这个目录(`Layout::main_checkout_copies`)。全局 `sessions/<id>/` 只留
-`index.json`(`history::placement::SessionIndex`:项目根、会话目录,项目搬过或拼写不同时另记日志里
+`index.json`(`history::placement::SessionIndex`:项目根、会话目录,父会话与会话种类,项目搬过或拼写不同时另记日志里
 的那个根)和 `writer.lock`——锁在追加知道会话去哪之前就要拿到。索引先于 sidecar 与转录落盘,理由同上:
 它说明日志在哪。不受信的项目、无项目会话照旧全局;侧链与分叉跟父会话放在一处,一条谱系总在一个目录里。
 `state/history` 和 `state/` 的其余部分一样受保护(§8.1),模型写不进去。项目层目录、`state/`、
@@ -2385,7 +2385,7 @@ checkpoint 也不会被当成谁的。新会话落进项目时自己建 `<id>/`(
 已经在了(仓库带来的、另一个全局根的存储先建的),会话就放全局,不接着里面的东西写。项目里的转录、
 metadata、会话记忆与 checkpoint 副本打开时不跟随符号链接。读项目里的历史每次都看项目是否受信;信任撤掉后不读,错误是
 `ProjectUntrusted`(RPC 上 `PROJECT_UNTRUSTED`)而不是"不存在"。写不看信任:已经放进去的会话
-继续写在原处。
+继续写在原处;删除与级联删除也不看:项目不受信时,侧链按索引里记的谱系找到,不读项目里的日志。
 
 **搬家。** 索引记的项目根和会话目录都不在了,而本进程打开过的某个受信项目(存储自己的项目,或列表、
 新会话碰到的)的 `state/history/` 下有这个 id,就把索引改写到新位置,并把 metadata 里的项目路径一起

@@ -41,7 +41,7 @@ impl JsonlHistoryStore {
         root: SessionId,
     ) -> (HashMap<SessionId, (PathBuf, Home)>, HashMap<SessionId, u64>) {
         let home = self.home_of(root, Access::Read).await.unwrap();
-        let logs = self.beside(&home).await.unwrap();
+        let logs = self.beside(&home, Access::Read).await.unwrap();
         let lengths = logs
             .iter()
             .map(|(id, (path, _))| (*id, std::fs::metadata(path).unwrap().len()))

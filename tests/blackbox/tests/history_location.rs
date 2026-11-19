@@ -285,6 +285,80 @@ async fn a_host_id_whose_directory_was_planted_does_not_take_in_what_is_there() 
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_session_of_a_project_that_lost_its_trust_takes_its_sidechains_too(
+) -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.project("cascade")?;
+    keep_in_projects(&world)?;
+    world.trust_project(&project)?;
+    world.write_project_settings(
+        "cascade",
+        &json!({
+            "memory_enabled": false,
+            "permission_rules": [{ "tool": "Agent", "action": "allow" }]
+        }),
+    )?;
+    let provider = ProviderStub::start().await?;
+    provider.script_when(
+        "PARENT-MARK",
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "description": "helper", "prompt": "say the word" }),
+            ),
+            Reply::text("done"),
+        ],
+    );
+    provider.script([Reply::text("the word")]);
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let parent = client
+        .session_create(json!({ "project_root": project.to_string_lossy() }))
+        .await?;
+    let events = client
+        .session_run_turn(&parent, "PARENT-MARK delegate", "t1", None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    daemon.stop().await;
+    let history = kept_in(&project, "");
+    let children: Vec<String> = names_in(&history)
+        .into_iter()
+        .filter(|name| *name != parent && !name.starts_with('.'))
+        .collect();
+    anyhow::ensure!(children.len() == 1, "{:?}", names_in(&history));
+    let child = &children[0];
+
+    std::fs::remove_file(world.global_root().join("settings.local.json"))?;
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let dry = client
+        .call(
+            "session.delete",
+            json!({ "session_id": parent, "dry_run": true }),
+        )
+        .await?;
+    assert_eq!(
+        dry.result.unwrap_or_default()["sidechains_deleted"],
+        json!(1),
+        "{:?}",
+        dry.error
+    );
+    let deleted = client
+        .call("session.delete", json!({ "session_id": parent }))
+        .await?;
+    assert!(deleted.error.is_none(), "{deleted:?}");
+    assert_eq!(
+        deleted.result.unwrap_or_default()["sidechains_deleted"],
+        json!(1)
+    );
+    assert!(!kept_in(&project, child).exists());
+    assert!(!global_entry(&world, child).exists());
+    daemon.stop().await;
+    Ok(())
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_state_directory_linked_into_the_tracked_tree_keeps_history_globally(
