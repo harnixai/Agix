@@ -815,7 +815,9 @@ engine.shutdown().await;
   时模型读到的是 `message`（`runext.md` §4）。引擎自己的拒绝也带 `code`：`limit`（见下）、`stopped`（运行在停）、
   `failed`（函数 panic）。
 - **上限与取消**：输入与返回值按 JSON 各至多 200,000 字符、嵌套至多 128 层（同一次工具调用交回脚本的上限），超了
-  reject `limit`，函数不被调用或返回值丢掉。没有单独的时限：所在运行的时限（命令 2 分钟）管它。脚本被停（超时、
+  reject `limit`，函数不被调用或返回值丢掉。一次运行里同时在跑的宿主库调用至多 8 个（与工具子调用的
+  并发上限同一个数，两者各算各的），多出的排队，排着时运行被停就以 `stopped` reject、函数不被调用。
+  没有单独的时限：所在运行的时限（命令 2 分钟）管它。脚本被停（超时、
   `TaskStop` 宽限过后、这一轮被中断）时 `cancel` 触发、Promise 以 `stopped` reject，引擎不再等这个函数；函数该在
   `cancel` 上收手。
 - **观测**：每次调用往所在 `ext` 任务的输出记一行，``codix.flow.start ok 12ms``、``codix.flow.fail error denied 3ms``

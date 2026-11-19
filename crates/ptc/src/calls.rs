@@ -127,6 +127,7 @@ impl Dispatcher {
     pub(crate) async fn run(self, mut calls: mpsc::UnboundedReceiver<CallRequest>) {
         let this = Arc::new(self);
         let slots = Arc::new(Semaphore::new(this.limits.parallel.max(1)));
+        let host_slots = Arc::new(Semaphore::new(this.limits.parallel.max(1)));
         let mut last_serial: Option<oneshot::Receiver<()>> = None;
         let agents = AtomicU32::new(0);
         let mut running = tokio::task::JoinSet::new();
@@ -136,9 +137,16 @@ impl Dispatcher {
                 _ = this.hard_stop.cancelled() => break,
             };
             if request.host_library {
-                let this = this.clone();
+                let (this, slots) = (this.clone(), host_slots.clone());
                 running.spawn(async move {
-                    let reply = this.host_call(&request.name, &request.input).await;
+                    let reply = tokio::select! {
+                        biased;
+                        _ = this.hard_stop.cancelled() => host_answer(Err(crate::host_libs::stopped())),
+                        slot = slots.acquire_owned() => {
+                            let _slot = slot;
+                            this.host_call(&request.name, &request.input).await
+                        }
+                    };
                     let _ = request.reply.send(reply);
                 });
                 continue;
@@ -241,17 +249,20 @@ impl Dispatcher {
             .instrument(span)
             .await;
         let ms = started.elapsed().as_millis();
-        match answer {
-            Ok(value) => {
-                self.task.append_output(&format!("{path} ok {ms}ms\n"));
-                serde_json::json!({"ok": true, "value": value}).to_string()
-            }
-            Err(e) => {
-                self.task
-                    .append_output(&format!("{path} error {} {ms}ms\n", e.code));
-                serde_json::json!({"ok": false, "error": e.message, "code": e.code}).to_string()
-            }
+        match &answer {
+            Ok(_) => self.task.append_output(&format!("{path} ok {ms}ms\n")),
+            Err(e) => self
+                .task
+                .append_output(&format!("{path} error {} {ms}ms\n", e.code)),
         }
+        host_answer(answer)
+    }
+}
+
+fn host_answer(answer: Result<Value, base::interface::host_js::HostJsError>) -> String {
+    match answer {
+        Ok(value) => serde_json::json!({"ok": true, "value": value}).to_string(),
+        Err(e) => serde_json::json!({"ok": false, "error": e.message, "code": e.code}).to_string(),
     }
 }
 

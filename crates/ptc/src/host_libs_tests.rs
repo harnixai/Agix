@@ -404,6 +404,38 @@ async fn a_defect_under_a_renamed_engine_names_no_internal_global() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn no_more_host_calls_run_at_once_than_sub_calls_do() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (running, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (now, peak) = (running.clone(), most.clone());
+    let lib = HostJsLib::new("codix").function("slow", move |_: HostCallContext, _: Value| {
+        let (now, peak) = (now.clone(), peak.clone());
+        async move {
+            peak.fetch_max(now.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            now.fetch_sub(1, Ordering::SeqCst);
+            Ok(Value::Null)
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let tool = tool(
+        dir.path(),
+        "async function main() { \
+           await Promise.all(Array.from({ length: 40 }, () => codix.slow())); return 'done'; }",
+        &["codix"],
+        vec![lib],
+    );
+    let r = run_in(&tool, context()).await;
+    assert!(!r.is_error, "{}", text(&r));
+    let parallel = Limits::for_commands().parallel;
+    let most = most.load(Ordering::SeqCst);
+    assert!(
+        most <= parallel,
+        "{most} host calls at once, over {parallel}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_function_that_panics_rejects_with_failed() {
     type Ready = std::future::Ready<Result<Value, HostJsError>>;
     let lib = HostJsLib::new("codix")
