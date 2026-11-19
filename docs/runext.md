@@ -117,11 +117,37 @@ function `main` ``。
 | `log(text)` / `console.*` | 进度行，宿主在任务进度里看到，末尾随结果交回 |
 | `stopRequested()` | 是否被要求停下 |
 | `agix.*` | 基础库：YAML 与 frontmatter、glob、路径、JSON Schema、SHA-256、UUID、参数解析（`agix_js.md`）。全局名是引擎名，改了引擎名的嵌入方里没有 `agix`（`agix_js.md` §2） |
+| `<宿主库>.*` | 包顶层 `uses` 声明的宿主库，如 `codix.flow.start(input)`，见下面「宿主库」；没声明的包里没有 |
 
 **没有**：`agent()`（判断留给模型）、`notify` / `messages` / `args`（命令不在后台跑，参数走
 `main`）、`RunCode`、`RunExt`（命令里不起命令）——`callTool("Agent" | "RunCode" | "RunExt", …)`
 直接 reject；`require` / `import`、npm 包、Node 与浏览器 API 都是一调用就抛错的
 桩，同 `RunCode`。`agix` 没有的纯 JS 库，在构建期打包进入口文件。
+
+### 宿主库
+
+嵌入引擎的宿主可以给插件代码提供 JavaScript 库（`agix-sdk.md` §10「宿主 JS 库」）。包顶层声明
+`uses = ["codix"]`（`plugin_packages.md`「宿主库」），命令的运行时里就有全局 `codix`，函数都是返回 Promise 的
+`codix.<路径>(input)`，JSON 进、JSON 出：
+
+```js
+async function main(argv, input, ctx) {
+  try {
+    return await codix.flow.start({ change: argv[0] });
+  } catch (e) {
+    if (e.code === "denied") throw new Error(`cannot start a flow here: ${e.message}`);
+    throw e;
+  }
+}
+```
+
+- 宿主返回错误时 reject 一个 `Error`，带 `code` 与 `message`；引擎自己的拒绝是 `limit`（输入或返回值超过单个工具
+  结果的上限 200,000 字符，或嵌套超过 128 层）、`stopped`（命令被停）。命令被停时宿主收到取消，引擎不等它。
+- 宿主库的调用不是工具调用：不占子调用名额，不经权限判定，`tool.around` 与 hooks 看不到它。宿主看调用上下文（包、
+  命令、会话、`via`……）自己决定放不放行。
+- 每次调用在任务输出里记一行：``codix.flow.start ok 12ms``、``codix.flow.start error denied 3ms``。
+- 宿主库全局与基础库一样冻结、不可替换；宿主的 prelude（便利封装）在命令代码之前已经求值好。
+- `RunCode` 的程序与 `[[script]]` 的九个点里没有宿主库；`[[function]]` 的运行时里有（§12）。
 
 ### 从代码里读写文件
 
@@ -344,6 +370,9 @@ may write reports/**``，不写文件的是 ``…; writes no files``；`disclosu
 | 内容 | 位置 |
 |---|---|
 | 运行时（线程、限额、取消、`tools.*` 桥）拆成 `RunCode` 与 `RunExt` 共用 | `crates/ptc` |
+| 宿主库：类型 | `base::interface::host_js` |
+| 宿主库：按 `uses` 选库、桩与 prelude、调用的上限、取消与观测 | `crates/ptc`（`host_libs.rs`，桥在 `engine.rs`，分发在 `calls.rs`） |
+| 宿主库：启动时的命名校验、交给会话（`Builder::host_js_libs`，子 Agent 经 `HostContracts` 继承） | `crates/assembly`（`plugins/host_libraries.rs`）、`crates/runtime` |
 | `agix` 基础库 | `crates/js-lib`（`agix_js.md` §5） |
 | `[[command]]`、`[[function]]`、`uses` 的解析、校验、披露、同名处理、字节码缓存 | `crates/packages` |
 | 函数表（`PluginSubsystem::functions`）、宿主自带的包 | `crates/assembly`（`plugins/`） |

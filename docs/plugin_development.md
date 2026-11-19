@@ -225,6 +225,20 @@ examples/plugins/quickjs/
 `tests/fixtures/ext_plugin/`(一个 `notes` 命令加一个用 `via` 守护目录的 `tool.around` 脚本),
 完整的样例是 `forge`(`forge.md`)。
 
+### 用宿主的库
+
+嵌入 Agix 的宿主（如 Codix）可以给插件代码提供自己的 JavaScript 库。要用就在 `plugin.toml` 顶层（第一个段之前）
+声明 `uses = ["codix"]`，命令与 `[[function]]` 里就能 `await codix.flow.start({ … })`；没声明就没有这个全局。
+
+- 只有提供了这个库的宿主装得上这个包：别的宿主 `plugin.install` 拒装，说缺哪个库；已经装着的换了宿主就不加载
+  （`plugin_packages.md`「宿主库」）。安装披露写出用了哪些宿主库。
+- 函数 JSON 进、JSON 出，返回 Promise；宿主拒绝时 reject 的 `Error` 带 `code` 与 `message`，按 `code` 分支。上限、
+  取消与任务输出里的记录见 `runext.md` §4「宿主库」。
+- 宿主库调用不是工具调用：权限规则、`tool.around`、hooks 都管不到它，放不放行是宿主看调用上下文（包名、命令名、
+  会话、`via`）自己决定的。
+- 库的 `.d.ts` 由宿主随它的插件开发资料给，放进包的 `types/`，和 `runext.d.ts`、`agix.d.ts` 一起引用。
+- `RunCode` 与 `[[script]]` 脚本里没有宿主库；要在九个点上用宿主的能力，写 Rust 插件。
+
 ### 以 forge 为例
 
 `examples/plugins/forge/` 是写插件命令的参照:一个命令、一组 skill、一个守卫,不需要构建。按它

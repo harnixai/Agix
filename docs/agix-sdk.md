@@ -48,6 +48,7 @@ provider：`Assembly::model_client` 为 `None` 时按 `ANTHROPIC_AUTH_TOKEN` 或
 - `permission_prompt_timeout`：缺省读设置 `execution.permission_prompt_timeout_secs`，再缺省 300 秒，超时拒绝。
 - `host_policy`：它的 deny 在任何模式下都成立。
 - `customize_session`：每次建或重建会话都应用；`mcp`：MCP 的登录存储、OAuth 客户端与策略。
+- `js_libs`：给插件代码的宿主 JS 库，见 §10「宿主 JS 库」；不合规的装配失败。
 - `host_plugins`：宿主自带的插件包，每项是一个解开的包目录（根上有 `plugin.toml`）。装配时逐个登记，
   校验同 `plugin.install`，有一个加载不了装配就失败；设置把插件关了（`plugins.enabled: false`）时一个也不登记，
   记一条 warn。运行中再登记用 `SessionPool::register_host_plugin(dir)`，返回它在 `plugin.list` 里的那一项。
@@ -659,7 +660,7 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 ## 10. 嵌入入口：`agix::embed`
 
-前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型，宿主之后只经协议（`daemon_rpc_protocol.md`）用引擎。
+前九节把池当库用：装配的每一步都看得见，`Assembly` 的字段随版本变。只想要「agixd 的参数进、协议连接出」的宿主用 `agix::embed`（也在 `daemon::embed`）：agixd 自己就从这里起，出现的只有 `EmbedConfig`、`EmbedError`、`Embedded` 三个类型（另有 `js_libs` 用的 `HostJsLib`、`HostCallContext`、`HostJsError`），宿主之后只经协议（`daemon_rpc_protocol.md`）用引擎。
 
 ```rust
 use agix::embed::{EmbedConfig, Embedded};
@@ -709,6 +710,7 @@ engine.shutdown().await;
 | `product` | 无（agixd 总是 Agix） | `Agix`：引擎自称的产品名 |
 | `engine` | 无（agixd 总是 `agix`） | `agix`：引擎在脚本与文件名里的名字 |
 | `plugins` | 无（agixd 不带宿主包） | 空：宿主自带的插件包目录，即 `Assembly::host_plugins`（§2）；有一个加载不了 `start` 返回 `EmbedError::Startup` |
+| `js_libs` | 无（agixd 不带宿主库） | 空：给插件代码的宿主 JS 库，即 `Assembly::js_libs`；不合规时 `start` 返回 `EmbedError::InvalidHostLibrary`（见「宿主 JS 库」） |
 
 数据根、套接字和两个策略文件只从这里来，不看本进程的 `AGIX_CONFIG_HOME` 或 `HOME`，所以一个进程里起两个不同 `data_root` 的 `Embedded`，会话互不可见。凭据照旧：`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`，以及设置里 `providers` 的 `api_key` / `api_key_env`。一个也没有时照样起来，记一条 warn；走缺省 provider 的模型调用不发请求，那一轮以 `no_credentials` 失败（agixd 同样）。
 
@@ -740,11 +742,94 @@ engine.shutdown().await;
 - `OTEL_EXPORTER_OTLP_ENDPOINT`（设置没写端点时）与上面的凭据变量从进程环境读。
 - `AGIX_RECORD` / `AGIX_REPLAY` / `AGIX_RECORDINGS_DIR` 只对自己拿 `RecorderModel` 包模型、又不给配置的代码起作用；池里会话的录制只看 `options.recorder`。
 
+### 宿主 JS 库
+
+嵌入方给**插件代码**注册自己的 JavaScript 库：一个命名空间下的一组异步函数，JSON 进、JSON 出。插件包顶层声明
+`uses = ["codix"]`（`plugin_packages.md`「宿主库」），它的插件命令（`RunExt` 与 `/name`，`runext.md`）和插件函数
+（`[[function]]`，`runext.md` §12）的运行时里就有全局 `codix`；没声明的包、`RunCode` 的程序、`[[script]]` 的九个点
+都没有。宿主拿不到 QuickJS 的任何类型：桩由引擎按函数表生成，每次新建运行时不跑宿主的 Rust 代码，Promise 的衔接、
+取消与上限由引擎管。
+
+```rust
+use agix::embed::{EmbedConfig, Embedded, HostCallContext, HostJsError, HostJsLib};
+use serde_json::{json, Value};
+
+# fn main() -> anyhow::Result<()> {
+# tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(async {
+# let dir = tempfile::tempdir()?;
+let mut config = EmbedConfig::new(dir.path().join("state"));
+# config.cwd = Some(dir.path().to_path_buf());
+config.js_libs.push(
+    HostJsLib::new("codix")
+        .function("flow.start", |cx: HostCallContext, input: Value| async move {
+            if cx.via == "model" && cx.plugin != "xflow" {
+                return Err(HostJsError::new("denied", "only xflow starts flows for the model"));
+            }
+            Ok(json!({ "run": "r-1", "change": input["change"] }))
+        })
+        .prelude("codix.flow.startAll = (changes) => Promise.all(changes.map((change) => codix.flow.start({ change })));")
+        .description("Codix 的流程与作业"),
+);
+let engine = Embedded::start(config).await?;
+engine.shutdown().await;
+# Ok::<(), anyhow::Error>(())
+# })
+# }
+```
+
+插件里写 `const run = await codix.flow.start({ change: "c1" });`。
+
+- **函数**：`function(path, f)`，`f` 是 `Fn(HostCallContext, Value) -> impl Future<Output = Result<Value, HostJsError>>`
+  （`Send + Sync + 'static`）。`path` 是命名空间之下的点分路径，`flow.start` 在脚本里是 `codix.flow.start(input)`，
+  返回 Promise。`input` 不传是 `null`；没有 JSON 形式的（函数、`BigInt`）在脚本里就抛 `TypeError`。函数在调用方的
+  tokio 运行时上自己一个任务里跑。
+- **`prelude(js)`**：纯 JavaScript，在桩之后、插件代码之前求值（基础库与 `tools.*` 已在），可以往命名空间上加便利
+  封装。求值完命名空间整个冻结：全局不可写、不可删、不可枚举，与基础库一样。prelude 抛错时每次运行都失败，结果是
+  ``the prelude of host library `codix` failed: …``。
+- **`description(text)`**：进安装披露，``uses host library `codix` (<text>)``。
+- **调用上下文** `HostCallContext`：
+
+  | 字段 | 内容 |
+  |---|---|
+  | `plugin` / `plugin_version` | 代码所在的包 |
+  | `entry` | 命令名，或函数名 |
+  | `session_id` | 所在会话；没有会话时 `None` |
+  | `project_root` / `cwd` | 会话的工作目录（同脚本 `ctx` 的 `projectRoot` / `cwd`） |
+  | `via` | 谁跑的这段插件代码：`model`（模型调 `RunExt`）、`user`（用户敲的 `/name`）、`skill`（skill 的内联命令）、`RunCode`（程序里调 `RunExt`）、`host`（宿主调插件函数） |
+  | `agent_depth` | 子 Agent 层级，根会话是 0 |
+  | `cancel` | 脚本被停时触发 |
+
+  宿主库的调用不是工具调用：不经权限判定、`tool.around` 与 hooks，不进转录。放不放行由宿主看上下文自己定。
+- **出错**：返回 `Err(HostJsError { code, message })` → Promise reject 一个 `Error`，带 `code` 与 `message`；命令没接住
+  时模型读到的是 `message`（`runext.md` §4）。引擎自己的拒绝也带 `code`：`limit`（见下）、`stopped`（运行在停）、
+  `failed`（函数 panic）。
+- **上限与取消**：输入与返回值按 JSON 各至多 200,000 字符、嵌套至多 128 层（同一次工具调用交回脚本的上限），超了
+  reject `limit`，函数不被调用或返回值丢掉。没有单独的时限：所在运行的时限（命令 2 分钟）管它。脚本被停（超时、
+  `TaskStop` 宽限过后、这一轮被中断）时 `cancel` 触发、Promise 以 `stopped` reject，引擎不再等这个函数；函数该在
+  `cancel` 上收手。
+- **观测**：每次调用往所在 `ext` 任务的输出记一行，``codix.flow.start ok 12ms``、``codix.flow.fail error denied 3ms``
+  （`session.tasks` / `TaskOutput` 看得到），并打一个 tracing span `host_library_call`（`function`、`plugin`、`entry`、
+  `via`）。
+- **命名**：命名空间 `[a-z][a-z0-9]*`，不能是引擎名（`engine`），也不能是 `agix`（包的 `uses` 写不了它），不能是
+  JavaScript 保留字或脚本已有的全局（`tools`、`callTool`、`console`、`log`……，规则同 `engine`），库之间不重名；函数
+  路径是点分的 JavaScript 标识符（`[A-Za-z_$][A-Za-z0-9_$]*`，不能是 `__proto__`），不重复，一个路径不能又是另一个的
+  前缀（`flow` 与 `flow.start` 不并存）。不合规时 `start` 返回 `EmbedError::InvalidHostLibrary { namespace, reason }`。
+- **安装**：库名单就是包的 `uses` 对照的名单：声明了没提供的库的包 `plugin.install` 拒装，已装的不加载，原因进
+  `plugin.list` / `daemon.doctor`（`plugin_packages.md`「宿主库」）。给插件作者的 `.d.ts` 由宿主随自己的开发资料提供。
+- **库式用法**：`Assembly::js_libs`（§2），校验相同，不合规时 `assemble` 失败，消息同上；`ptc::HostLibraries` 是
+  `RunExtTool::with_host_libraries` 收的那一份，自己用 `Builder` 装会话时给 `Builder::host_js_libs`，子 Agent 经
+  `HostContracts` 继承。
+
 ### 迁移说明
 
 守卫 `tests/guards/tests/embed_surface.rs` 钉着这三个类型的字段、变体和方法签名；这里每条都对应其中的一次变化。
 
 - **0.3.20** `EmbedConfig.product_name` 改名为 `EmbedConfig.product`（含义不变，`EmbedError::InvalidProductName` 的消息前缀随之是 `product`）；新增 `EmbedConfig.engine`（缺省 `agix`）与 `EmbedError::InvalidEngineName { name, reason }`；`EmbedConfig.project_dir` 改为 `Option<String>`，`None` 取 `.<engine>`，原来写 `config.project_dir = ".codix".into()` 的改成 `Some(".codix".into())`。0.3.19 的“产品名别名”去掉：改了产品名不再给基础库挂第二个名字，基础库只在引擎名下（缺省 `agix`，与产品名无关）。库式用法：`js_lib::{alias_for, install_as}` 删掉，换成 `js_lib::install_named(ctx, name)` 与 `js_lib::check_global_name`；`ptc::Library::for_product` → `for_engine`（`shown()` → `global()`）；`script_host::QuickJsEngine::for_product` → `for_engine`，`script_host::bindings::engine_for` 收引擎名；`base::paths::known_state_roots` 多一个 `&Layout`；新增 `Layout::{with_engine, with_project_dir, engine, state_dir_names}`。
+  - 新增 `EmbedConfig.js_libs`（缺省空）与 `EmbedError::InvalidHostLibrary { namespace, reason }`；类型
+    `agix::embed::{HostJsLib, HostCallContext, HostJsError}`（即 `base::interface::host_js`，另有 trait `HostFn`）。
+    库式用法：`Assembly::js_libs`；`base::tool::ToolContext` 多一个公有字段 `via`（`ToolContext::new` 给 `"model"`）；
+    `ptc::HostLibraries` 与 `RunExtTool::with_host_libraries`；`runtime::agent::Builder::host_js_libs`，`HostContracts`
+    多一个 `host_js_libs`。
 
 - **0.3.18** git worktree 从 `<项目>/<project_dir>/worktrees/<名>` 挪到仓库根的 `.wkts/<名>`，第一次建 worktree 时往仓库 `.gitignore` 加的是 `.wkts/`，不再是整个 `<project_dir>/`。目录名由设置 `worktree_dir` 改（只从全局层与场景层读，项目层写了丢掉并告警，`config.set` 写项目层得 `not_at_tier`）。不做兼容：旧位置的 worktree 不再被认作引擎的（要用就自己 `git worktree move`），用户 `.gitignore` 里已有的 `<project_dir>/` 一行不替人删。`<project_dir>/.gitignore` 的引擎条目（`base::paths::local_data_gitignore`）加上 `.imported.json`、`memory/`、`scratchpad/`、`teams/`，有项目的会话建起来时就补上：项目层目录里只有协作者共用的配置随仓库提交。新增 `base::paths::ensure_project_data_gitignore`（项目层目录是符号链接或在项目之外时不写）；`.gitignore` 是符号链接时两处引擎写入都不动它。库式用法：`base::paths::{PROJECT_WORKTREES_DIR, entry::WORKTREES}` 删掉；新增 `DEFAULT_WORKTREES_DIR`、`Layout::{with_worktrees_dir, worktrees_dir_name, worktrees_dir_names}` 与 `WorktreesDirError`，`Layout::{worktrees_dir, gitignore_entry, main_checkout_copies, worktree_of}` 改按 worktree 目录算，`Layout::new` 拒 `.wkts`；`Settings.worktree_dir`、`settings::NOT_FROM_PROJECT_KEYS`、`LoadedSettings::place_worktrees`；`tools::worktree::name_the_directories` 的占位符由 `{project_dir}` 换成 `{worktrees_dir}`；`WorktreeError::WorktreesDirIsALink`（worktree 目录是符号链接时不建）；`Layout::with_worktrees_dir` 拒以 `.git` 开头的名字；`tools::worktree::prune_orphan_worktrees` 删掉（没有调用方，它会删 worktree 目录里认不出的目录）。
   - 新增 `SessionPool::set_permission_mode(session_id, PermissionMode)`,回 `PermissionModeChoice { session_id, mode, requested, clamped }`(即 `session.setPermissionMode`);`SessionEvent` 多一个 `PermissionModeChanged(session_state::ModeChange)`(`ModeChange { mode, source }`,`ModeChangeSource { Host, Model }`);`base::context::Session` 多一个 `host_permission_mode`(trait 唯一的实现在 `session-state`,外部不用实现);`SessionState` 新增 `switch_permission_mode`、`permission_mode_changes`、`subscribe_permission_mode`。新增 `session_state::ModeCeiling` 与 `EngineAttachment::with_mode_ceiling`:挂上的引擎带着它时,`plan` 退出后要回到的模式(含从日志读回的)按它夹紧;不带(自己拼 `EngineAttachment` 的测试)照旧不夹。`base::interface::permission::Delegate` 多一个公有字段 `tightens_only`(`Delegate::new` 给 `false`)与 `Delegate::mode_under(parent)`:自己实现 `PermissionPolicy` 又判子 Agent 调用的,用 `mode_under` 代替 `parent.for_delegate(delegate.mode)`,只能收紧的 agent 类型才不会被 `bypassPermissions` 的父会话带走。
