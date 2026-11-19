@@ -412,3 +412,100 @@ async fn the_store_names_the_projects_history_directory_around_a_path() {
     assert!(dirs.contains(&history_dir(&project)));
     assert!(dirs.contains(&world.roots().sessions));
 }
+
+fn mentions(entries: &[EnvelopedEntry], text: &str) -> bool {
+    serde_json::to_string(entries).unwrap().contains(text)
+}
+
+#[tokio::test]
+async fn a_new_session_does_not_take_over_a_directory_already_under_its_id() {
+    let world = World::new();
+    let project = world.project("p");
+    let other_state = TempDir::new().unwrap();
+    let other = JsonlHistoryStore::with_roots(&project, HistoryRoots::under(other_state.path()))
+        .await
+        .unwrap()
+        .with_project_history(Projects::new(true));
+    let s = SessionId::new();
+    other.append(s, meta(Some(&project), None)).await.unwrap();
+    other.append(s, said("PLANTED")).await.unwrap();
+    other
+        .set_session_title(s, Some("planted".into()))
+        .await
+        .unwrap();
+
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    store.append(s, meta(Some(&project), None)).await.unwrap();
+    store.append(s, said("real")).await.unwrap();
+
+    let mine = store.load(s).await.unwrap();
+    assert!(mentions(&mine, "real") && !mentions(&mine, "PLANTED"));
+    assert_ne!(
+        store.session_stats(s).await.unwrap().title.as_deref(),
+        Some("planted")
+    );
+    let theirs = other.load(s).await.unwrap();
+    assert!(mentions(&theirs, "PLANTED") && !mentions(&theirs, "real"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_planted_transcript_link_is_not_written_through() {
+    let world = World::new();
+    let project = world.project("p");
+    let outside = world.project("outside").join("outside.txt");
+    std::fs::write(&outside, "untouched").unwrap();
+    let s = SessionId::new();
+    let planted = history_dir(&project).join(s.to_string());
+    std::fs::create_dir_all(&planted).unwrap();
+    std::os::unix::fs::symlink(&outside, planted.join(format!("{s}.jsonl"))).unwrap();
+
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    store.append(s, meta(Some(&project), None)).await.unwrap();
+    store.append(s, said("real")).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "untouched");
+    assert!(mentions(&store.load(s).await.unwrap(), "real"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_kept_sessions_files_swapped_for_links_are_not_followed() {
+    let world = World::new();
+    let project = world.project("p");
+    let elsewhere = world.project("elsewhere");
+    let store = world.store(&project, Some(Projects::new(true))).await;
+    let s = start(&store, &project).await;
+    store
+        .set_session_title(s, Some("mine".into()))
+        .await
+        .unwrap();
+    drop(store);
+    let dir = history_dir(&project).join(s.to_string());
+
+    let outside_log = elsewhere.join("log.jsonl");
+    std::fs::rename(dir.join(format!("{s}.jsonl")), &outside_log).unwrap();
+    let before = std::fs::read(&outside_log).unwrap();
+    std::os::unix::fs::symlink(&outside_log, dir.join(format!("{s}.jsonl"))).unwrap();
+
+    let mut metadata: SessionMetadata =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
+    metadata.title = Some("planted".into());
+    let outside_metadata = elsewhere.join("metadata.json");
+    std::fs::write(&outside_metadata, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    std::fs::remove_file(dir.join("metadata.json")).unwrap();
+    std::os::unix::fs::symlink(&outside_metadata, dir.join("metadata.json")).unwrap();
+
+    let fresh = world.store(&project, Some(Projects::new(true))).await;
+    assert!(fresh.load(s).await.is_err());
+    assert_ne!(
+        fresh
+            .session_stats(s)
+            .await
+            .ok()
+            .and_then(|stats| stats.title)
+            .as_deref(),
+        Some("planted")
+    );
+    assert!(fresh.append(s, said("more")).await.is_err());
+    assert_eq!(std::fs::read(&outside_log).unwrap(), before);
+}

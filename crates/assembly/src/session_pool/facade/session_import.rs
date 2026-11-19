@@ -325,5 +325,10 @@ async fn write_file(file: &Path, text: &str) -> std::io::Result<()> {
     if let Some(dir) = file.parent() {
         tokio::fs::create_dir_all(dir).await?;
     }
-    tokio::fs::write(file, text).await
+    let (file, text) = (file.to_path_buf(), text.to_string());
+    tokio::task::spawn_blocking(move || {
+        base::fs::write_atomic(&file, text.as_bytes(), base::fs::WriteOpts::DURABLE)
+    })
+    .await
+    .map_err(std::io::Error::other)?
 }

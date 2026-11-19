@@ -78,8 +78,8 @@ impl SessionMemory {
     pub async fn init_session_memory(&self) -> std::io::Result<()> {
         let _guard = self.inner.io_lock.lock().await;
         let path = &self.path()?;
-        if path.try_exists().unwrap_or(false) {
-            return Ok(()); // already exists
+        if path.symlink_metadata().is_ok() {
+            return Ok(());
         }
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -88,8 +88,7 @@ impl SessionMemory {
             "---\nextraction_started: ~\nextraction_completed: ~\nlast_update_turn: 0\n---\n\n{}",
             SESSION_MEMORY_HEADER
         );
-        tokio::fs::write(path, &header).await?;
-        Ok(())
+        write_replacing(path, header).await
     }
 
     /// Record that extraction completed. Updates the completion timestamp and
@@ -133,19 +132,22 @@ impl SessionMemory {
 
     /// Read the full content of the session_memory.md file, if it exists.
     pub async fn load_content(&self) -> std::io::Result<Option<String>> {
-        let path = &self.path()?;
-        if !path.try_exists().unwrap_or(false) {
-            return Ok(None);
+        match read_own(&self.path()?).await {
+            Ok(content) => Ok(Some(content)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
         }
-        let content = tokio::fs::read_to_string(path).await?;
-        Ok(Some(content))
     }
 
     /// Update a single frontmatter field in-place, preserving the rest of the
     /// file content. The frontmatter is a YAML block delimited by `---`.
     async fn update_frontmatter_field(&self, key: &str, value: &str) -> std::io::Result<()> {
         let path = &self.path()?;
-        let content = tokio::fs::read_to_string(path).await.unwrap_or_default();
+        let content = match read_own(path).await {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e),
+        };
 
         let (frontmatter, body) = match base::text::frontmatter::split_frontmatter(&content) {
             (Some(fm), body) => (fm.trim().to_string(), body.trim_start().to_string()),
@@ -173,10 +175,24 @@ impl SessionMemory {
             new_fm.push_str(&format!("{}: {}\n", key, value));
         }
 
-        let final_content = format!("---\n{}---\n\n{}", new_fm, body);
-        tokio::fs::write(path, &final_content).await?;
-        Ok(())
+        write_replacing(path, format!("---\n{}---\n\n{}", new_fm, body)).await
     }
+}
+
+async fn read_own(path: &std::path::Path) -> std::io::Result<String> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || base::fs::read_to_string_no_follow(&path))
+        .await
+        .map_err(std::io::Error::other)?
+}
+
+async fn write_replacing(path: &std::path::Path, content: String) -> std::io::Result<()> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        base::fs::write_atomic(&path, content.as_bytes(), base::fs::WriteOpts::FAST)
+    })
+    .await
+    .map_err(std::io::Error::other)?
 }
 
 fn iso_now() -> String {
@@ -230,6 +246,24 @@ mod tests {
         assert!(!content.contains("extraction_completed: ~"));
         assert!(content.contains("extraction_completed: "));
         assert!(content.contains("last_update_turn: 5"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_memory_file_that_is_a_link_is_neither_read_nor_written_through() {
+        let dir = TempDir::new().unwrap();
+        let outside = dir.path().join("outside.md");
+        std::fs::write(&outside, "---\nlast_update_turn: 0\n---\n\noutside").unwrap();
+        let path = dir.path().join("session_memory.md");
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        let sm = sm(path);
+        sm.init_session_memory().await.unwrap();
+        assert!(sm.load_content().await.is_err());
+        let _ = sm.mark_extraction_completed(5).await;
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "---\nlast_update_turn: 0\n---\n\noutside"
+        );
     }
 
     #[test]

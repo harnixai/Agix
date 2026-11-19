@@ -97,7 +97,8 @@ fn project_of(metadata: &SessionMetadata) -> Option<PathBuf> {
 }
 
 pub(super) fn read_metadata(sidecar_root: &Path, session: SessionId) -> Option<SessionMetadata> {
-    let text = std::fs::read_to_string(session_metadata_file(sidecar_root, &session)).ok()?;
+    let text =
+        base::fs::read_to_string_no_follow(&session_metadata_file(sidecar_root, &session)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
@@ -283,7 +284,31 @@ impl Homes {
     /// otherwise its project when the host keeps new sessions there.
     /// `recorded` is the project root as the session's `Meta` spells it,
     /// which a move is later read against.
+    ///
+    /// The session's directory in the project is made here and must not be
+    /// there yet: one that is was put there by someone else — a repository,
+    /// another store with its own global root — and this session is kept
+    /// globally instead of taking in what is in it.
     pub(super) fn place(
+        &self,
+        session: SessionId,
+        project: Option<&Path>,
+        recorded: Option<&Path>,
+        parent: Option<SessionId>,
+    ) -> Kept {
+        let Kept::InProject(index) = self.place_at(session, project, recorded, parent) else {
+            return Kept::Global;
+        };
+        match make_own_dir(&index) {
+            Ok(()) => Kept::InProject(index),
+            Err(e) => {
+                tracing::warn!(%session, dir = %index.dir.display(), error = %e, "the session's directory in its project could not be made its own; the session is kept globally");
+                Kept::Global
+            }
+        }
+    }
+
+    fn place_at(
         &self,
         session: SessionId,
         project: Option<&Path>,
@@ -365,6 +390,18 @@ impl Homes {
             })
             .collect()
     }
+}
+
+fn make_own_dir(index: &SessionIndex) -> std::io::Result<()> {
+    let history = index.history_dir();
+    std::fs::create_dir_all(history)?;
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&index.dir)?;
+    #[cfg(unix)]
+    std::fs::File::open(history)?.sync_all()?;
+    Ok(())
 }
 
 fn rewrite_metadata(session: SessionId, from: &Path, index: &SessionIndex) {

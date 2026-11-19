@@ -260,7 +260,8 @@ impl BlobStore for CheckpointObjects {
         let dir = self.dir()?;
         create_private_dir(&dir)?;
         let path = dir.join(&id);
-        let whole = std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64);
+        let whole = std::fs::symlink_metadata(&path)
+            .is_ok_and(|m| m.is_file() && m.len() == bytes.len() as u64);
         if !whole {
             base::fs::write_atomic(&path, bytes, base::fs::WriteOpts::PRIVATE)?;
         }
@@ -271,7 +272,7 @@ impl BlobStore for CheckpointObjects {
         if !is_object_id(id) {
             return Ok(None);
         }
-        match std::fs::read(self.dir()?.join(id)) {
+        match base::fs::read_no_follow(&self.dir()?.join(id)) {
             Ok(bytes) if sha256_hex(&bytes) == id => Ok(Some(bytes)),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

@@ -123,7 +123,7 @@ pub(super) fn skip_unreadable(session: SessionId, error: &HistoryError) {
 /// the log is not there. A last line that is whole but lacks only its newline
 /// is kept.
 pub(super) async fn read_log(path: &Path) -> Result<Option<String>, HistoryError> {
-    let mut bytes = match tokio::fs::read(path).await {
+    let mut bytes = match crate::own_file::read(path).await {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(HistoryError::Io(e)),
@@ -198,7 +198,7 @@ pub(super) fn end_on_a_line_break(file: &mut std::fs::File, path: &Path) -> std:
 
 /// fsync `path`, and its directory too unless `dir_done`.
 pub(super) fn sync_log(path: &Path, dir_done: bool) -> Result<(), HistoryError> {
-    match std::fs::File::open(path) {
+    match base::fs::no_follow().read(true).open(path) {
         Ok(file) => file.sync_data()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(HistoryError::Io(e)),
@@ -230,7 +230,7 @@ pub(super) fn write_line(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut f = std::fs::OpenOptions::new()
+    let mut f = base::fs::no_follow()
         .read(true)
         .append(true)
         .create(true)
@@ -279,7 +279,7 @@ pub(super) fn parse_log(
 /// when the file is gone.
 pub(super) async fn read_prefix(path: &Path, len: u64) -> Result<Option<String>, HistoryError> {
     use tokio::io::AsyncReadExt;
-    let file = match tokio::fs::File::open(path).await {
+    let file = match crate::own_file::open(path).await {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(HistoryError::Io(e)),
@@ -301,7 +301,7 @@ pub(super) async fn head_facts(
     len: u64,
 ) -> Result<Option<SessionFacts>, HistoryError> {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt};
-    let file = match tokio::fs::File::open(path).await {
+    let file = match crate::own_file::open(path).await {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(HistoryError::Io(e)),
@@ -370,6 +370,6 @@ pub(super) async fn load_session_metadata(
     session: SessionId,
 ) -> Option<SessionMetadata> {
     let path = session_metadata_file(sessions_root, &session);
-    let content = tokio::fs::read_to_string(path).await.ok()?;
+    let content = crate::own_file::read_to_string(&path).await.ok()?;
     serde_json::from_str(&content).ok()
 }

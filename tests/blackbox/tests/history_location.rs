@@ -232,6 +232,57 @@ async fn a_session_planted_in_the_project_without_an_index_is_not_anyones() -> a
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_host_id_whose_directory_was_planted_does_not_take_in_what_is_there() -> anyhow::Result<()>
+{
+    let world = World::new()?;
+    let project = world.project("planted-id")?;
+    keep_in_projects(&world)?;
+    world.trust_project(&project)?;
+    let provider = ProviderStub::start().await?;
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let donor = client
+        .session_create(json!({ "project_root": project.to_string_lossy() }))
+        .await?;
+    provider.script([Reply::text("ok")]);
+    client
+        .session_run_turn(&donor, "PLANTED-WORDS", "t1", None)
+        .await?;
+
+    let planted = base::session::SessionId::new().to_string();
+    let to = kept_in(&project, &planted);
+    std::fs::create_dir_all(&to)?;
+    std::fs::copy(
+        kept_in(&project, &donor).join(format!("{donor}.jsonl")),
+        to.join(format!("{planted}.jsonl")),
+    )?;
+    let taken = client
+        .session_create(json!({
+            "project_root": project.to_string_lossy(),
+            "session_id": planted,
+        }))
+        .await?;
+    assert_eq!(taken, planted);
+    provider.script([Reply::text("ok")]);
+    let events = client
+        .session_run_turn(&planted, "real words", "t2", None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    daemon.stop().await;
+
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(project.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let history = client
+        .call("session.history", json!({ "session_id": planted }))
+        .await?;
+    let text = serde_json::to_string(&history)?;
+    assert!(text.contains("real words"), "{text}");
+    assert!(!text.contains("PLANTED-WORDS"), "{text}");
+    daemon.stop().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_untrusted_project_or_the_global_setting_keeps_history_globally() -> anyhow::Result<()> {
     let world = World::new()?;
     let provider = ProviderStub::start().await?;

@@ -149,7 +149,7 @@ impl SessionPromptState {
         session: SessionId,
     ) -> Result<Option<Self>, HistoryError> {
         let path = session_prompt_state_file(sessions_root, &session);
-        let content = match tokio::fs::read_to_string(&path).await {
+        let content = match crate::own_file::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(HistoryError::Io(e)),
@@ -158,12 +158,7 @@ impl SessionPromptState {
     }
 
     pub async fn save(&self, sessions_root: &Path, session: SessionId) -> Result<(), HistoryError> {
-        let path = session_prompt_state_file(sessions_root, &session);
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        tokio::fs::write(&path, serde_json::to_vec_pretty(self)?).await?;
-        Ok(())
+        write_json_atomic(&session_prompt_state_file(sessions_root, &session), self).await
     }
 }
 
@@ -176,7 +171,7 @@ pub async fn ensure_session_sidecar_in(
     let paths = session_sidecar_paths_in(sessions_root, &session);
     create_dir_durably(&paths.dir).await?;
 
-    let mut metadata = match tokio::fs::read_to_string(&paths.metadata).await {
+    let mut metadata = match crate::own_file::read_to_string(&paths.metadata).await {
         Ok(content) => serde_json::from_str::<SessionMetadata>(&content)
             .unwrap_or_else(|_| SessionMetadata::new(canonical_cwd, project_history_dir, session)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -236,7 +231,7 @@ pub async fn add_counters_in(
         return Ok(());
     }
     let paths = session_sidecar_paths_in(sessions_root, &session);
-    let mut metadata = match tokio::fs::read_to_string(&paths.metadata).await {
+    let mut metadata = match crate::own_file::read_to_string(&paths.metadata).await {
         Ok(content) => serde_json::from_str::<SessionMetadata>(&content)
             .unwrap_or_else(|_| SessionMetadata::new(canonical_cwd, project_history_dir, session)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -265,7 +260,7 @@ pub async fn set_session_title_in(
     let paths =
         ensure_session_sidecar_in(sessions_root, canonical_cwd, project_history_dir, session)
             .await?;
-    let mut metadata = match tokio::fs::read_to_string(&paths.metadata).await {
+    let mut metadata = match crate::own_file::read_to_string(&paths.metadata).await {
         Ok(content) => serde_json::from_str::<SessionMetadata>(&content)
             .unwrap_or_else(|_| SessionMetadata::new(canonical_cwd, project_history_dir, session)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -288,7 +283,7 @@ pub async fn session_stats_in(
     session: SessionId,
 ) -> Result<crate::store::SessionStats, HistoryError> {
     let path = session_metadata_file(sessions_root, &session);
-    let content = match tokio::fs::read_to_string(&path).await {
+    let content = match crate::own_file::read_to_string(&path).await {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(crate::store::SessionStats::default())

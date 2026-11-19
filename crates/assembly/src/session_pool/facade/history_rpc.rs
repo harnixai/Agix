@@ -663,5 +663,8 @@ async fn read_sidecar(
     name: &str,
 ) -> Option<String> {
     let file = store.sidecar_locator(session)?.file(name).ok()?;
-    tokio::fs::read_to_string(file).await.ok()
+    tokio::task::spawn_blocking(move || base::fs::read_to_string_no_follow(&file))
+        .await
+        .ok()?
+        .ok()
 }

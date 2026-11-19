@@ -1,4 +1,6 @@
-//! Atomic file replacement shared by every crate that persists state.
+//! Atomic file replacement shared by every crate that persists state, and
+//! opening a file that must be the path itself rather than what a symlink
+//! there points at.
 //!
 //! `write_atomic` is the one implementation of "write a temp file next to the
 //! target, then rename it into place". Callers keep their own directory
@@ -65,6 +67,30 @@ pub fn write_atomic(path: &Path, bytes: &[u8], opts: WriteOpts) -> std::io::Resu
     Ok(())
 }
 
+/// Options that open the path itself: on Unix a symlink there fails the open
+/// (`ELOOP`) instead of being followed.
+pub fn no_follow() -> std::fs::OpenOptions {
+    #[allow(unused_mut)]
+    let mut options = std::fs::OpenOptions::new();
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
+    options
+}
+
+/// `path`'s bytes, refusing a symlink at `path`.
+pub fn read_no_follow(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    no_follow().read(true).open(path)?.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// [`read_no_follow`] as text.
+pub fn read_to_string_no_follow(path: &Path) -> std::io::Result<String> {
+    String::from_utf8(read_no_follow(path)?)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 fn write_temp(tmp: &Path, bytes: &[u8], opts: WriteOpts) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -118,6 +144,18 @@ mod tests {
         write_atomic(&path, b"2", WriteOpts::PRIVATE).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_not_read_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, "secret").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(read_no_follow(&link).is_err());
+        assert_eq!(read_to_string_no_follow(&target).unwrap(), "secret");
     }
 
     #[test]
