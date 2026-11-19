@@ -14,6 +14,7 @@ mod host_connections;
 mod import;
 mod listing;
 mod permission_mode;
+mod plugin_call;
 mod plugins;
 pub(super) mod providers;
 mod recording_rpc;

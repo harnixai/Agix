@@ -11,6 +11,7 @@ mod host_connections;
 mod mcp;
 mod options;
 mod plugin;
+mod plugin_call;
 mod rewind;
 mod scene;
 mod session;
@@ -50,6 +51,9 @@ pub use plugin::{
     CommandConflict, CommandShadow, PluginCommand, PluginDisclosure, PluginFunctionEntry,
     PluginInfo, PluginInstalled, PluginOrigin, PluginRemoved, PluginScope, PluginToggled,
     SkillConflict, SkillOrigin, VisibleText,
+};
+pub use plugin_call::{
+    PluginCall, PluginCallError, PluginCallResult, PluginCallTarget, PluginFunctionInfo,
 };
 pub use rewind::{
     CheckpointFile, CheckpointList, CheckpointTurn, InterruptedRewind, RewindCut, RewindOutcome,

@@ -248,7 +248,6 @@ pub(in crate::session_pool) struct EngineSlot {
     /// How the engine delegates, for `session.startAgent`.
     pub(in crate::session_pool) delegator: Option<Arc<dyn base::interface::delegate::Delegator>>,
     /// How the host calls a tool through the engine outside any turn.
-    #[expect(dead_code, reason = "`SessionPool::call_plugin` reads it")]
     pub(in crate::session_pool) host_tool_runner:
         Option<Arc<dyn base::interface::plugin_call::HostToolRunner>>,
     /// What this engine's bound scripts did, if it bound any.

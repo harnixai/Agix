@@ -107,6 +107,9 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     /// The session's host skill directories, and every session's.
     pub(in crate::session_pool) skill_dirs: &'a crate::session_pool::SessionSkillDirs,
     pub(in crate::session_pool) protected_dirs: base::context::LiveDirs,
+    /// An engine for one host call and gone after it: it writes no
+    /// transcript and no telemetry file.
+    pub(in crate::session_pool) transient: bool,
 }
 
 pub(in crate::session_pool) struct BuiltEngine {
@@ -162,6 +165,12 @@ impl EngineFactory {
 
     pub(in crate::session_pool) fn run_slots(&self) -> &Arc<tokio::sync::Semaphore> {
         &self.scripts.run_slots
+    }
+
+    pub(in crate::session_pool) fn host_js_libs(
+        &self,
+    ) -> &Arc<[base::interface::host_js::HostJsLib]> {
+        &self.scripts.host_js_libs
     }
 
     /// `builder` with what this pool's scripts share.
@@ -220,8 +229,8 @@ impl EngineFactory {
             .attended(options.and_then(|o| o.attended))
             .question_prompts(options.is_some_and(SessionOptions::answers_questions))
             .mcp_prompts(options.is_some_and(SessionOptions::answers_mcp_elicitation));
-        if let Some(store) = &self.history_store {
-            builder = builder.history_store(store.clone());
+        if !req.transient {
+            builder = self.kept(builder, &settings_snapshot, options, session_id);
         }
         if let Some(clock) = clock {
             builder = builder.environment(clock);
@@ -247,9 +256,6 @@ impl EngineFactory {
                 protected: req.protected_dirs.clone(),
             });
 
-        if let Some(handle) = session_telemetry(&settings_snapshot, options, session_id) {
-            builder = builder.telemetry_handle(handle);
-        }
         if let Some(prompt) = spec.prompt() {
             builder = builder.session_prompt(prompt);
         }
@@ -290,6 +296,23 @@ impl EngineFactory {
             script_faults,
             settings: settings_snapshot,
         })
+    }
+
+    /// `builder` writing the session's transcript and telemetry file.
+    fn kept(
+        &self,
+        mut builder: Builder,
+        settings: &LoadedSettings,
+        options: Option<&SessionOptions>,
+        session_id: &str,
+    ) -> Builder {
+        if let Some(store) = &self.history_store {
+            builder = builder.history_store(store.clone());
+        }
+        if let Some(handle) = session_telemetry(settings, options, session_id) {
+            builder = builder.telemetry_handle(handle);
+        }
+        builder
     }
 
     /// The session's own host tools, then those the host connections provide

@@ -44,6 +44,20 @@ fn created_on(log: Option<&[history::entry::EnvelopedEntry]>) -> time::OffsetDat
         .map_or_else(time::OffsetDateTime::now_utc, |env| env.ts)
 }
 
+/// Where `core`'s commands record their process groups, when `binding`'s
+/// settings have them stopped as the session ends.
+pub(in crate::session_pool) fn groups_to_reap(
+    core: &SessionCore,
+    binding: &ProjectBinding,
+) -> Option<Arc<platform::GroupLedger>> {
+    binding
+        .settings
+        .values
+        .sandbox
+        .reap_process_groups
+        .then(|| core.process_groups().clone())
+}
+
 /// A caller's `session_id`, in the one spelling the engine gives its own.
 fn given_session_id(id: &str) -> Result<base::session::SessionId, PoolError> {
     match base::session::SessionId::parse(id) {
@@ -580,14 +594,10 @@ impl SessionPool {
             cron_store: self.scheduler.store(),
             packages: self.plugins.for_session(),
             mcp_module,
-            process_groups: binding
-                .settings
-                .values
-                .sandbox
-                .reap_process_groups
-                .then(|| core.process_groups().clone()),
+            process_groups: groups_to_reap(core, binding),
             skill_dirs: core.skill_dirs(),
             protected_dirs: self.bindings.host_dirs().0.protected().clone(),
+            transient: false,
         })?;
         self.plugins
             .note_script_faults(std::mem::take(&mut built.script_faults));

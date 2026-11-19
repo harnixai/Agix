@@ -75,6 +75,7 @@ const METHODS: &[(&str, &str)] = &[
     ),
     ("closed", "pubasyncfnclosed(&self)"),
     ("shutdown", "pubasyncfnshutdown(&self)"),
+    ("pool", "pubfnpool(&self)->&Arc<SessionPool>"),
 ];
 
 fn squash(tokens: impl ToTokens) -> String {

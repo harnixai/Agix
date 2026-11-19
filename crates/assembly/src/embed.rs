@@ -387,6 +387,12 @@ impl Embedded {
             .await;
     }
 
+    /// The session pool the protocol serves, for what only the Rust interface
+    /// reaches: `SessionPool::call_plugin`, `register_host_plugin`, ….
+    pub fn pool(&self) -> &Arc<SessionPool> {
+        &self.pool
+    }
+
     pub(crate) fn server(&self) -> &Arc<DaemonServer> {
         &self.server
     }
