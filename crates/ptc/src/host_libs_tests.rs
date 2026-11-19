@@ -402,3 +402,32 @@ async fn a_defect_under_a_renamed_engine_names_no_internal_global() {
         assert!(!text(&r).contains("agix"), "{source}: {}", text(&r));
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_function_that_panics_rejects_with_failed() {
+    type Ready = std::future::Ready<Result<Value, HostJsError>>;
+    let lib = HostJsLib::new("codix")
+        .function("before", |_: HostCallContext, _: Value| -> Ready {
+            panic!("before its future")
+        })
+        .function("inside", |_: HostCallContext, _: Value| async {
+            panic!("inside its future")
+        });
+    let dir = tempfile::tempdir().unwrap();
+    let tool = tool(
+        dir.path(),
+        "async function main() { const codes = []; \
+         for (const f of [codix.before, codix.inside]) { \
+           try { await f(); codes.push('ok'); } catch (e) { codes.push(e.code); } } \
+         return codes; }",
+        &["codix"],
+        vec![lib],
+    );
+    let r = run_in(&tool, context()).await;
+    assert_eq!(
+        r.structured_content,
+        Some(json!(["failed", "failed"])),
+        "{}",
+        text(&r)
+    );
+}

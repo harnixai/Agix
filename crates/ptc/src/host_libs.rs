@@ -134,8 +134,11 @@ impl HostBinding {
         context.cancel = cancel.clone();
         // Its own task, so that a host function still running when the
         // script is stopped sees the cancellation instead of being dropped
-        // mid-await; the script is not kept waiting for it.
-        let answer = tokio::spawn(f.call(context, input));
+        // mid-await; the script is not kept waiting for it. The function is
+        // called inside the task: a panic before its future is made is the
+        // task's, reported as `failed` like one inside it.
+        let f = f.clone();
+        let answer = tokio::spawn(async move { f.call(context, input).await });
         let value = tokio::select! {
             biased;
             _ = cancel.cancelled() => return Err(stopped()),
