@@ -101,7 +101,7 @@ impl Roots {
 
     /// The directories strictly inside a root a command may write that hold
     /// `dir`: moving one aside would take `dir` along.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
     pub(super) fn movable_above(&self, dir: &Path) -> Vec<PathBuf> {
         let roots: Vec<PathBuf> = self
             .write_roots()

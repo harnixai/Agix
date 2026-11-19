@@ -614,6 +614,64 @@ fn a_command_cannot_move_the_worktrees_aside_or_rewrite_their_links() {
     }
 }
 
+/// A read-only directory of the policy cannot be replaced by moving it, or
+/// a directory above it in the project, aside and making another in its
+/// place; the rest of those directories stays writable.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_command_cannot_move_a_read_only_directory_aside_and_plant_another() {
+    if !a_backend_runs() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().canonicalize().unwrap().join("project");
+    let packages = ["tools/xflow", "a/b/pkg", "a/pkg"];
+    for pkg in packages {
+        std::fs::create_dir_all(project.join(pkg)).unwrap();
+        std::fs::write(project.join(pkg).join("x.js"), "host").unwrap();
+    }
+    let policy = SandboxPolicy {
+        state_root: Some(dir.path().join("state")),
+        read_only_dirs: packages.iter().map(|pkg| project.join(pkg)).collect(),
+        ..Default::default()
+    };
+    let runs = |command: &str| {
+        run_confined(&project, &policy, &[], command)
+            .status
+            .success()
+    };
+    let plant = |pkg: &str| format!("mkdir -p {pkg} && printf HACKED > {pkg}/x.js");
+    for (aside, pkg) in [
+        ("mv tools moved", "tools/xflow"),
+        ("mv tools/xflow tools/x2", "tools/xflow"),
+        ("mv a moved", "a/b/pkg"),
+        ("mv a/b a/c", "a/b/pkg"),
+        ("mv a/b/pkg a/b/p2", "a/b/pkg"),
+        ("rm -rf tools", "tools/xflow"),
+        ("true", "tools/xflow"),
+        ("true", "a/b/pkg"),
+        ("true", "a/pkg"),
+    ] {
+        let command = format!("{aside} && {}", plant(pkg));
+        assert!(!runs(&command), "`{command}` was allowed");
+    }
+    for pkg in packages {
+        assert_eq!(
+            std::fs::read_to_string(project.join(pkg).join("x.js")).unwrap(),
+            "host",
+            "{pkg}"
+        );
+    }
+    for gone in ["moved", "tools/x2", "a/c", "a/b/p2"] {
+        assert!(!project.join(gone).exists(), "{gone}");
+    }
+    assert!(
+        runs("echo x > tools/other.txt && mkdir tools/new && echo y > a/b/q.txt && rm a/b/q.txt"),
+        "the directories above stayed writable"
+    );
+}
+
 /// Where a configuration root or the project's skills directory is not
 /// there, a command cannot make it and put configuration in it — the
 /// instance's own directory, a foreign root, `.agents/skills` — and the

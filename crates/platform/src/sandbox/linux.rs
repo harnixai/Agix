@@ -17,6 +17,7 @@ use base::paths::{
 };
 use std::path::{Path, PathBuf};
 
+mod held;
 mod stdio;
 mod worktrees;
 
@@ -578,10 +579,8 @@ pub(super) fn linux_wrap(
     // After the `/tmp` tmpfs, or a project under `/tmp` is hidden by it.
     read.scope_mounts(&mut args);
     bind_writable_roots(&mut args, &roots, &read);
+    held::hold_read_only_dirs(&mut args, &roots);
     protect_denied_writes(&mut args, &roots, &policy.deny_write);
-    for dir in roots.read_only_in_reach() {
-        bind(&mut args, "--ro-bind-try", dir);
-    }
     let made = hide_project_and_state(&mut args, &roots, &read);
     hide_fenced(&mut args, &roots);
     hide_denied_reads(&mut args, policy);
