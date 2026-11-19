@@ -53,7 +53,7 @@ pub struct PluginCallTool {
     limits: Limits,
     library: Library,
     host_libraries: HostLibraries,
-    run_slots: Arc<Semaphore>,
+    run_slots: Option<Arc<Semaphore>>,
 }
 
 const FUNCTION_CALLS: Allowed = Allowed {
@@ -86,7 +86,7 @@ impl PluginCallTool {
             limits: Limits::for_commands(),
             library: Library::default(),
             host_libraries: HostLibraries::default(),
-            run_slots: default_run_slots(),
+            run_slots: Some(default_run_slots()),
         })
     }
 
@@ -112,7 +112,13 @@ impl PluginCallTool {
     }
 
     pub fn with_run_slots(mut self, slots: Arc<Semaphore>) -> Self {
-        self.run_slots = slots;
+        self.run_slots = Some(slots);
+        self
+    }
+
+    /// The caller took the call's slot before handing it over.
+    pub fn with_slot_held(mut self) -> Self {
+        self.run_slots = None;
         self
     }
 
@@ -240,14 +246,11 @@ impl PluginCallTool {
             limits: &self.limits,
             library: &self.library,
             allowed: FUNCTION_CALLS,
-            run_slots: Some(&self.run_slots),
+            run_slots: self.run_slots.as_ref(),
             turn_cancel: ctx.cancel.clone(),
             host_libraries: self.host_libraries_of(ctx),
         };
-        let answer = match execute(front, launch).await {
-            Ok(ended) => Answer::of(&ended, &ctx.cancel),
-            Err(why) => Answer::failed("not_started", format!("the function did not start: {why}")),
-        };
+        let answer = Answer::of_run(execute(front, launch).await, &ctx.cancel);
         scope
             .task()
             .append_output(&format!("{}\n", answer.summary(self.limits.result_chars)));
@@ -262,6 +265,16 @@ struct Answer {
 }
 
 impl Answer {
+    fn of_run(run: Result<Ended, String>, cancel: &CancellationToken) -> Self {
+        match run {
+            Ok(ended) => Self::of(&ended, cancel),
+            Err(_) if cancel.is_cancelled() => {
+                Self::failed("cancelled", "the call was cancelled before it started")
+            }
+            Err(why) => Self::failed("not_started", format!("the function did not start: {why}")),
+        }
+    }
+
     fn failed(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             outcome: Err((code, message.into())),

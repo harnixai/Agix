@@ -58,7 +58,10 @@ impl SessionPool {
                 PluginCallTarget::Project(_) => None,
             },
             engine: self.layout().engine(),
-            run_slots: self.run_slots(),
+            run_slots: match &call.target {
+                PluginCallTarget::Session(_) => Some(self.run_slots()),
+                PluginCallTarget::Project(_) => None,
+            },
             host_js_libs: self.factory.host_js_libs().clone(),
         })
         .map_err(PoolError::InvalidRequest)?;
@@ -67,26 +70,29 @@ impl SessionPool {
             ("input".to_string(), call.input),
         ]));
         let stop = cancel.child_token();
+        let name = &call.function;
         let run = async {
             match &call.target {
                 PluginCallTarget::Session(id) => {
                     let (runner, _running) = self.session_runner(id).await?;
-                    Ok(runner
+                    let outcome = runner
                         .run(tool, input, call.permission_rules, stop.clone())
-                        .await)
+                        .await;
+                    Ok(result_of(name, outcome))
                 }
                 PluginCallTarget::Project(dir) => {
-                    self.run_transient(dir, tool, input, call.permission_rules, stop.clone())
+                    let rules = call.permission_rules;
+                    self.run_transient(name, dir, tool, input, rules, stop.clone())
                         .await
                 }
             }
         };
         tokio::pin!(run);
         tokio::select! {
-            outcome = &mut run => Ok(result_of(&call.function, outcome?, None)),
+            result = &mut run => result,
             _ = tokio::time::sleep(time) => {
                 stop.cancel();
-                Ok(result_of(&call.function, run.await?, Some(time)))
+                Ok(ran_out_of(time, run.await?))
             }
         }
     }
@@ -149,20 +155,31 @@ impl SessionPool {
 
     /// One call on an engine of its own in `dir`: the default scene's tools
     /// and the directory's rules, attended so the call itself is the host's
-    /// approval, with nobody to ask about the calls it makes.
+    /// approval, with nobody to ask about the calls it makes. The engine is
+    /// built only once the call has its script slot, which bounds how many
+    /// of them there are at once; `tool` runs in that slot.
     async fn run_transient(
         &self,
+        function: &str,
         dir: &Path,
         tool: Arc<dyn base::tool::Tool>,
         input: serde_json::Value,
         rules: Vec<PermissionRule>,
         cancel: CancellationToken,
-    ) -> Result<ToolOutcome, PoolError> {
+    ) -> Result<PluginCallResult, PoolError> {
         if !dir.is_dir() {
             return Err(PoolError::ProjectNotFound {
                 path: dir.to_path_buf(),
             });
         }
+        let _slot = tokio::select! {
+            slot = self.run_slots().acquire_owned() => slot.map_err(|_| {
+                PoolError::Internal("no script can run in this process any more".into())
+            })?,
+            _ = cancel.cancelled() => {
+                return Ok(failure("cancelled", "the call was cancelled before it started".into()));
+            }
+        };
         let scene = self
             .scenes
             .resolve(None)
@@ -214,7 +231,10 @@ impl SessionPool {
             .note_script_faults(std::mem::take(&mut built.script_faults));
         built.agent.attach_session();
         let runner = built.agent.host_tool_runner();
-        Ok(runner.run(tool, input, rules, cancel).await)
+        Ok(result_of(
+            function,
+            runner.run(tool, input, rules, cancel).await,
+        ))
     }
 }
 
@@ -245,49 +265,52 @@ fn info_of(f: &PluginFunction) -> PluginFunctionInfo {
     }
 }
 
-/// The pipeline's answer as the host reads it: the function's own result
-/// when it ran, else why the pipeline did not run it. Only the function's
-/// tool gives a structured result, so an answer without one was made up or
-/// rewritten on the way — by a `tool.around` that answered in its place or a
-/// result transformer — and is a failure, never the function's success. A
-/// call stopped at its time (`timed_out`) failed by running out of it,
-/// whatever stopped it.
-fn result_of(
-    function: &str,
-    outcome: ToolOutcome,
-    timed_out: Option<Duration>,
-) -> PluginCallResult {
-    let failed = |code: &str, message: String, logs: Vec<String>| PluginCallResult {
+fn failure(code: &str, message: String) -> PluginCallResult {
+    PluginCallResult {
         ok: false,
         value: None,
         error: Some(PluginCallError {
             code: code.into(),
             message,
         }),
-        logs,
-    };
-    let mut result = match outcome {
+        logs: Vec::new(),
+    }
+}
+
+/// The pipeline's answer as the host reads it: the function's own result
+/// when it ran, else why the pipeline did not run it. Only the function's
+/// tool gives a structured result, so an answer without one was made up or
+/// rewritten on the way — by a `tool.around` that answered in its place or a
+/// result transformer — and is a failure, never the function's success.
+fn result_of(function: &str, outcome: ToolOutcome) -> PluginCallResult {
+    match outcome {
         Ok(answer) => match answer.structured {
             Some(structured) => parse_structured(structured),
-            None => failed(
+            None => failure(
                 "answered_by_middleware",
                 format!(
                     "`{function}`'s own result did not come back: a tool.around script \
                      answered in its place or a result transformer rewrote it"
                 ),
-                Vec::new(),
             ),
         },
-        Err(why) => failed("refused", why, Vec::new()),
-    };
-    if let (Some(time), false) = (timed_out, result.ok) {
-        result = failed(
+        Err(why) => failure("refused", why),
+    }
+}
+
+/// A call stopped at its time failed by running out of it, whatever
+/// stopped it.
+fn ran_out_of(time: Duration, result: PluginCallResult) -> PluginCallResult {
+    if result.ok {
+        return result;
+    }
+    PluginCallResult {
+        logs: result.logs,
+        ..failure(
             "timeout",
             format!("the call ran past its {} ms", time.as_millis()),
-            std::mem::take(&mut result.logs),
-        );
+        )
     }
-    result
 }
 
 fn parse_structured(structured: serde_json::Value) -> PluginCallResult {

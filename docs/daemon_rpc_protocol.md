@@ -3797,7 +3797,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 **不带 `session_id`**:在 `cwd` 下用 daemon 的场景、这个目录的工具与规则跑,引擎是临时的:
 不写日志、不进 `session.list`、不连 MCP、不发会话事件,调用结束(成功、失败或取消)就收掉。
 
-与 `RunCode` / `RunExt` 共用同时运行脚本的名额。`code` 取值:
+与 `RunCode` / `RunExt` 共用同时运行脚本的名额;不带会话的调用先等到名额再建临时引擎,同时在的临时引擎
+因此不超过名额数。`code` 取值:
 
 | `code` | 含义 |
 |---|---|
@@ -3806,7 +3807,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `answered_by_middleware` | 交回来的不是函数自己的结果:`tool.around` 用 `respond` 替它作答,或 `tool.result` 改写了它的结果。函数可能已经跑过,但结果一律不作数 |
 | `threw` | 函数抛了错;`message` 是错误消息,后面跟它已经做了的改动 |
 | `timeout` | 跑过了 `timeout_ms` |
-| `cancelled` | `plugin.cancel`、连接断开,或会话结束 |
+| `cancelled` | `plugin.cancel`、连接断开,或会话结束;还在等名额时被取消也是它 |
 | `stopped` | 被 `session.stopTask` 停下又没在宽限期内收尾 |
 | `not_started` | 入口读不出来、名额等不到等,函数没开始 |
 

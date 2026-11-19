@@ -17,7 +17,9 @@ pub struct FunctionCall<'a> {
     pub session_id: Option<String>,
     /// The engine name its base library is under.
     pub engine: &'a str,
-    pub run_slots: Arc<tokio::sync::Semaphore>,
+    /// The slots it waits for one of; `None` when the caller already holds
+    /// the call's slot.
+    pub run_slots: Option<Arc<tokio::sync::Semaphore>>,
     /// The host's JavaScript libraries; the function gets those its package
     /// `uses`.
     pub host_js_libs: Arc<[base::interface::host_js::HostJsLib]>,
@@ -36,8 +38,11 @@ pub fn tool(call: FunctionCall<'_>) -> Result<Arc<dyn base::tool::Tool>, String>
     {
         let mut tool = ptc::PluginCallTool::new(call.function, call.writes)?
             .with_library(ptc::Library::for_engine(call.engine))
-            .with_run_slots(call.run_slots)
             .with_host_libraries(ptc::HostLibraries::new(call.host_js_libs));
+        tool = match call.run_slots {
+            Some(slots) => tool.with_run_slots(slots),
+            None => tool.with_slot_held(),
+        };
         if let Some(time) = call.time {
             tool = tool.with_time(time)?;
         }

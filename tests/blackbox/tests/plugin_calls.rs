@@ -1177,3 +1177,78 @@ async fn a_call_holds_the_session_it_brought_back_while_others_crowd_the_pool() 
     embedded.shutdown().await;
     Ok(())
 }
+
+/// A command hook on `event` for every tool that appends the event's name
+/// to `marks`, after `pause` seconds.
+fn marking_hook(root: &Path, event: &str, pause: u32) -> anyhow::Result<Value> {
+    let marks = root.join("marks");
+    let script = root.join(format!("{event}.sh"));
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncat > /dev/null\nsleep {pause}\necho {event} >> '{}'\necho '{{}}'\n",
+            marks.display()
+        ),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(json!({ event: [{ "type": "command", "command": script, "timeout": 60_000 }] }))
+}
+
+fn marks(root: &Path) -> String {
+    std::fs::read_to_string(root.join("marks")).unwrap_or_default()
+}
+
+/// A call in a directory builds its engine only once it has a slot to run
+/// in: with every slot taken, nothing of the call happens — not even the
+/// pipeline's first hook — until one comes free.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_in_a_directory_waits_for_a_slot_before_anything_is_built() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let project = project_in(&root)?;
+    let package = root.join("host-xflow");
+    write_package(&package)?;
+    std::fs::create_dir_all(root.join("data"))?;
+    let hooks = json!({ "hooks_config": marking_hook(&root, "PreToolUse", 0)? });
+    std::fs::write(root.join("data/settings.json"), serde_json::to_vec(&hooks)?)?;
+    let embedded = embedded_with(&root, &package, Vec::new()).await?;
+    let pool = embedded.pool().clone();
+
+    let slots = pool.run_slots();
+    let taken = slots
+        .clone()
+        .acquire_many_owned(slots.available_permits() as u32)
+        .await?;
+    let call = PluginCall::new(
+        "xflow.check",
+        json!({ "change": "c6" }),
+        PluginCallTarget::Project(project),
+    );
+    let calling = pool.clone();
+    let running = tokio::spawn(async move {
+        calling
+            .call_plugin(call, tokio_util::sync::CancellationToken::new())
+            .await
+    });
+    let started = tokio::time::timeout(Duration::from_secs(3), async {
+        while !marks(&root).contains("PreToolUse") {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(
+        started.is_err(),
+        "the call went ahead with no slot to run in: {}",
+        marks(&root)
+    );
+    drop(taken);
+    let result = running.await??;
+    assert!(result.ok, "{result:?}");
+    assert!(marks(&root).contains("PreToolUse"));
+    embedded.shutdown().await;
+    Ok(())
+}
