@@ -6,8 +6,11 @@
 //! each is turned into what the engine consumes without running anything the
 //! package shipped.
 
+mod validate;
+
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use validate::validate;
 
 /// Plugin API contract versions this build understands.
 ///
@@ -27,6 +30,8 @@ pub const KNOWN_SECTIONS: &[&str] = &[
     "agent",
     "skills",
     "command",
+    "function",
+    "uses",
 ];
 
 /// Top-level sections addressed to whoever embeds the engine, not to the
@@ -45,6 +50,9 @@ pub const HOST_SECTION_PREFIX: &str = "x-";
 #[derive(Debug, Deserialize, Clone)]
 pub struct PluginManifest {
     pub plugin: PluginMeta,
+    /// Host libraries the package's code calls, by namespace, each once.
+    #[serde(default, deserialize_with = "library_names")]
+    pub uses: Vec<String>,
     /// Other packages this one needs installed, by name, each with the
     /// versions that will do.
     #[serde(default, deserialize_with = "dependency_requirements")]
@@ -68,6 +76,9 @@ pub struct PluginManifest {
     /// Commands this package adds, each run through `RunExt` and as `/name`.
     #[serde(default)]
     pub command: Vec<CommandDef>,
+    /// Functions this package exposes to the host, never to the model.
+    #[serde(default)]
+    pub function: Vec<FunctionDef>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -187,6 +198,32 @@ impl CommandDef {
     }
 }
 
+/// A function this package exposes to the host (`docs/runext.md`).
+#[derive(Debug, Deserialize, Clone)]
+#[non_exhaustive]
+pub struct FunctionDef {
+    pub name: String,
+    /// `<file>:<function>`, the file relative to the plugin root.
+    pub entry: String,
+    pub description: String,
+    /// Globs relative to the project root that a writing call may write.
+    #[serde(default)]
+    pub writes: Vec<String>,
+    /// A JSON Schema file, relative to the plugin root, for the input.
+    #[serde(default)]
+    pub input_schema: Option<PathBuf>,
+}
+
+impl FunctionDef {
+    pub fn file(&self) -> &str {
+        self.entry.rsplit_once(':').map_or("", |(f, _)| f)
+    }
+
+    pub fn function(&self) -> &str {
+        self.entry.rsplit_once(':').map_or("", |(_, f)| f)
+    }
+}
+
 /// A plugin-declared agent type.
 ///
 /// `permission_mode` stays a string here and is parsed when the definition
@@ -228,6 +265,8 @@ pub enum PluginError {
     Checksum(String),
     #[error("unsupported api_version `{found}` (this build supports {supported})")]
     ApiVersion { found: String, supported: String },
+    #[error("needs host {}, which this host does not provide", libraries_named(.0))]
+    MissingLibrary(Vec<String>),
     #[error("requires plugin `{name}` `{required}`, {found}")]
     Dependency {
         name: String,
@@ -242,6 +281,14 @@ pub enum PluginError {
         required: semver::VersionReq,
         running: String,
     },
+}
+
+fn libraries_named(names: &[String]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
+    match quoted.as_slice() {
+        [one] => format!("library {one}"),
+        _ => format!("libraries {}", quoted.join(", ")),
+    }
 }
 
 /// This build's version as a plugin's `requires_engine` sees it: `x.y.z`.
@@ -314,6 +361,33 @@ where
         .collect()
 }
 
+fn library_names<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut names = Vec::<String>::new();
+    for name in Vec::<String>::deserialize(deserializer)? {
+        let mut chars = name.chars();
+        let fits = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+            && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+        if !fits {
+            return Err(serde::de::Error::custom(format!(
+                "uses `{name}`: a library name is a lowercase ASCII letter, then lowercase \
+                 letters or digits"
+            )));
+        }
+        if name.eq_ignore_ascii_case(base::paths::DEFAULT_PRODUCT_NAME) {
+            return Err(serde::de::Error::custom(format!(
+                "uses `{name}`: the engine's own library is always there and is not declared"
+            )));
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
 fn version_requirement<'de, D>(deserializer: D) -> Result<Option<semver::VersionReq>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -331,6 +405,7 @@ pub struct Plugin {
     pub root: PathBuf,
     pub manifest: PluginManifest,
     layout: base::paths::Layout,
+    bytecode_dir: Option<PathBuf>,
 }
 
 impl Plugin {
@@ -350,11 +425,24 @@ impl Plugin {
             root: root.to_path_buf(),
             manifest,
             layout: layout.clone(),
+            bytecode_dir: crate::commands::bytecode_dir(root),
         })
     }
 
     pub fn name(&self) -> &str {
         &self.manifest.plugin.name
+    }
+
+    /// Where this package's compiled entries are kept; `None` compiles every
+    /// run.
+    pub fn bytecode_dir(&self) -> Option<&Path> {
+        self.bytecode_dir.as_deref()
+    }
+
+    /// Keep compiled entries in `dir`, for a package that is not in a cache.
+    pub fn with_bytecode_dir(mut self, dir: PathBuf) -> Self {
+        self.bytecode_dir = Some(dir);
+        self
     }
 
     /// Scene id this plugin's own scene registers under, if it declares one.
@@ -480,205 +568,6 @@ fn refuse_retired_sections(raw: &str, product: &str) -> Result<(), PluginError> 
     Ok(())
 }
 
-fn validate(m: &PluginManifest) -> Result<(), PluginError> {
-    if m.plugin.name.trim().is_empty() {
-        return Err(PluginError::Schema("plugin.name must not be empty".into()));
-    }
-    if !SUPPORTED_API_VERSIONS.contains(&m.plugin.api_version.as_str()) {
-        return Err(PluginError::ApiVersion {
-            found: m.plugin.api_version.clone(),
-            supported: SUPPORTED_API_VERSIONS.join(", "),
-        });
-    }
-    if let Some(required) = &m.plugin.requires_engine {
-        if required.comparators.iter().any(|c| !c.pre.is_empty()) {
-            return Err(PluginError::Schema(format!(
-                "requires_engine `{required}` names a pre-release; the engine is compared by \
-                 its x.y.z alone, so write the requirement without a suffix"
-            )));
-        }
-        check_engine(required, env!("CARGO_PKG_VERSION"))?;
-    }
-    for s in &m.script {
-        if s.point.trim().is_empty() {
-            return Err(PluginError::Schema(
-                "a `[[script]]` declares no `point`".into(),
-            ));
-        }
-        let Some((file, function)) = s.entry.rsplit_once(':') else {
-            return Err(PluginError::Schema(format!(
-                "script entry `{}` is not `<file>:<function>`",
-                s.entry
-            )));
-        };
-        if file.is_empty() || function.is_empty() {
-            return Err(PluginError::Schema(format!(
-                "script entry `{}` is not `<file>:<function>`",
-                s.entry
-            )));
-        }
-        // The path is resolved against the package's own directory, so
-        // anything that could leave it is refused here rather than relied on
-        // being caught later — the later check is in a different crate, and a
-        // package that reaches outside itself is the one case where "it
-        // probably fails anyway" is not good enough.
-        if !inside_package(Path::new(file)) {
-            return Err(PluginError::Schema(format!(
-                "script entry `{}` must name a file inside the package",
-                s.entry
-            )));
-        }
-    }
-
-    if let Some(dir) = &m.scene.dir {
-        if !inside_package(dir) {
-            return Err(PluginError::Schema(format!(
-                "`[scene] dir` `{}` must name a directory inside the package",
-                dir.display()
-            )));
-        }
-    }
-
-    if let Some(skills) = &m.skills {
-        if !inside_package(&skills.dir) {
-            return Err(PluginError::Schema(format!(
-                "`[skills] dir` `{}` must name a directory inside the package",
-                skills.dir.display()
-            )));
-        }
-    }
-
-    validate_agents(&m.agent)?;
-
-    validate_commands(&m.command)?;
-
-    for s in &m.mcp {
-        let Some(config) = &s.config else {
-            return Err(PluginError::Schema(format!(
-                "mcp `{}` declares no `config`",
-                s.name
-            )));
-        };
-        if !inside_package(config) {
-            return Err(PluginError::Schema(format!(
-                "mcp `{}` config `{}` must name a file inside the package",
-                s.name,
-                config.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn validate_agents(agents: &[AgentDef]) -> Result<(), PluginError> {
-    for a in agents {
-        if !inside_package(&a.prompt) {
-            return Err(PluginError::Schema(format!(
-                "agent `{}` prompt `{}` must name a file inside the package",
-                a.name,
-                a.prompt.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn validate_commands(commands: &[CommandDef]) -> Result<(), PluginError> {
-    let mut names = std::collections::HashSet::new();
-    for c in commands {
-        validate_command(c)?;
-        if !names.insert(c.name.as_str()) {
-            return Err(PluginError::Schema(format!(
-                "command `{}` is declared twice",
-                c.name
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn validate_command(c: &CommandDef) -> Result<(), PluginError> {
-    let schema = |what: String| PluginError::Schema(format!("command `{}` {what}", c.name));
-    let name_fits = c.name.len() <= 32
-        && c.name.starts_with(|ch: char| ch.is_ascii_lowercase())
-        && c.name
-            .chars()
-            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-');
-    if !name_fits {
-        return Err(schema(
-            "must be 1–32 lowercase ASCII letters, digits or `-`, starting with a letter".into(),
-        ));
-    }
-    if base::command::BUILTIN_COMMANDS
-        .iter()
-        .any(|(builtin, _)| *builtin == c.name)
-    {
-        return Err(schema("takes the name of a built-in slash command".into()));
-    }
-    let (file, function) = (c.file(), c.function());
-    if file.is_empty() || !is_identifier(function) {
-        return Err(schema(format!(
-            "entry `{}` is not `<file>:<function>` with a JavaScript identifier",
-            c.entry
-        )));
-    }
-    if !inside_package(Path::new(file)) {
-        return Err(schema(format!(
-            "entry `{}` must name a file inside the package",
-            c.entry
-        )));
-    }
-    if c.description.trim().is_empty() || c.description.contains(['\n', '\r']) {
-        return Err(schema("needs a one-line description".into()));
-    }
-    if c.read_only
-        .iter()
-        .any(|p| !p.is_empty() && p.split_whitespace().next().is_none())
-    {
-        return Err(schema(
-            "has a blank `read_only` prefix; `\"\"` is the call with no arguments".into(),
-        ));
-    }
-    for glob in &c.writes {
-        if let Some(why) = unscoped_write(glob) {
-            return Err(schema(format!(
-                "`writes` `{glob}` {why}; write a glob relative to the project, below a \
-                 directory in it (`data/**`)"
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Why a `writes` glob would reach beyond the project as written. Where it
-/// lands once resolved against a project is checked again where it is used.
-fn unscoped_write(glob: &str) -> Option<&'static str> {
-    let glob = glob.trim();
-    if glob.is_empty() {
-        return Some("is empty");
-    }
-    if Path::new(glob).is_absolute() || glob.starts_with('~') || glob.starts_with('\\') {
-        return Some("is not relative to the project");
-    }
-    if glob.split(['/', '\\']).any(|part| part == "..") {
-        return Some("climbs out with `..`");
-    }
-    let literal = glob
-        .split('/')
-        .take_while(|part| !part.contains(['*', '?', '[', '{']))
-        .filter(|part| !part.is_empty() && *part != ".")
-        .count();
-    (literal == 0).then_some("covers the whole project")
-}
-
-fn is_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,6 +606,66 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(twice.contains("declared twice"), "{twice}");
+    }
+
+    #[test]
+    fn a_function_is_named_and_scoped_or_refused() {
+        let with = |body: &str| load_str(&format!("{MINIMAL}\n[[function]]\n{body}\n"));
+        let m = with(
+            "name = \"check\"\nentry = \"xflow.js:check\"\ndescription = \"gate\"\n\
+             writes = [\"reports/**\"]\ninput_schema = \"schemas/check.json\"",
+        )
+        .unwrap();
+        let f = &m.function[0];
+        assert_eq!((f.file(), f.function()), ("xflow.js", "check"));
+        assert_eq!(
+            f.input_schema.as_deref(),
+            Some(Path::new("schemas/check.json"))
+        );
+        assert!(with("name = \"help\"\nentry = \"f.js:main\"\ndescription = \"d\"").is_ok());
+        let long = "x".repeat(crate::disclosure::MAX_DESCRIPTION_CHARS + 1);
+        for (body, says) in [
+            ("name = \"Check\"\nentry = \"f.js:main\"\ndescription = \"d\"", "lowercase"),
+            ("name = \"x\"\nentry = \"f.js\"\ndescription = \"d\"", "<file>:<function>"),
+            ("name = \"x\"\nentry = \"f.js:a.b\"\ndescription = \"d\"", "identifier"),
+            ("name = \"x\"\nentry = \"/f.js:main\"\ndescription = \"d\"", "inside the package"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \" \"", "one-line"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"a\\nb\"", "one-line"),
+            (&format!("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"{long}\""), "over the 500"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"**\"]", "whole project"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\nwrites = [\"a/../../b\"]", "`..`"),
+            ("name = \"x\"\nentry = \"f.js:main\"\ndescription = \"d\"\ninput_schema = \"../s.json\"", "inside the package"),
+        ] {
+            let e = with(body).unwrap_err().to_string();
+            assert!(e.contains("function `") && e.contains(says), "{body}: {e}");
+        }
+        let twice = load_str(&format!(
+            "{MINIMAL}\n[[function]]\nname = \"x\"\nentry = \"f.js:a\"\ndescription = \"d\"\n\
+             [[function]]\nname = \"x\"\nentry = \"g.js:b\"\ndescription = \"d\"\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("function `x` is declared twice"), "{twice}");
+        assert!(unknown_sections(&format!("uses = []\n{MINIMAL}\n[[function]]\n")).is_empty());
+    }
+
+    #[test]
+    fn uses_names_host_libraries_each_once() {
+        let m = load_str(&format!("uses = [\"codix\", \"x2\", \"codix\"]\n{MINIMAL}")).unwrap();
+        assert_eq!(m.uses, ["codix", "x2"]);
+        assert!(load_str(MINIMAL).unwrap().uses.is_empty());
+        for (uses, says) in [
+            ("\"Codix\"", "lowercase"),
+            ("\"2x\"", "lowercase"),
+            ("\"co-dix\"", "lowercase"),
+            ("\"\"", "lowercase"),
+            ("\"agix\"", "engine's own library"),
+        ] {
+            let e = load_str(&format!("uses = [{uses}]\n{MINIMAL}"))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(says), "{uses}: {e}");
+        }
     }
 
     fn load_str(toml_str: &str) -> Result<PluginManifest, PluginError> {

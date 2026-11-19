@@ -47,8 +47,9 @@ pub use options::{
     ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption, TelemetryOptions,
 };
 pub use plugin::{
-    CommandConflict, CommandShadow, PluginCommand, PluginDisclosure, PluginInfo, PluginInstalled,
-    PluginRemoved, PluginScope, PluginToggled, SkillConflict, SkillOrigin, VisibleText,
+    CommandConflict, CommandShadow, PluginCommand, PluginDisclosure, PluginFunctionEntry,
+    PluginInfo, PluginInstalled, PluginOrigin, PluginRemoved, PluginScope, PluginToggled,
+    SkillConflict, SkillOrigin, VisibleText,
 };
 pub use rewind::{
     CheckpointFile, CheckpointList, CheckpointTurn, InterruptedRewind, RewindCut, RewindOutcome,

@@ -19,6 +19,7 @@ pub(crate) struct SessionPoolBuilder {
     max_tokens_fallback: u32,
     permission_prompt_timeout: Option<Duration>,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
+    host_libraries: Vec<base::command::HostLibrary>,
     customize: Option<SessionCustomizer>,
     mcp: Option<McpSetup>,
 }
@@ -52,6 +53,7 @@ impl SessionPool {
             max_tokens_fallback: settings::DEFAULT_MAX_TOKENS,
             permission_prompt_timeout: None,
             rust_plugins: Vec::new(),
+            host_libraries: Vec::new(),
             customize: None,
             mcp: None,
         }
@@ -112,6 +114,13 @@ impl SessionPoolBuilder {
         self
     }
 
+    /// The JavaScript libraries the host provides to package code: a
+    /// package whose `uses` names another does not install or load.
+    pub(crate) fn host_libraries(mut self, libraries: Vec<base::command::HostLibrary>) -> Self {
+        self.host_libraries = libraries;
+        self
+    }
+
     /// Hand every session engine this pool builds to `customize` last.
     pub(crate) fn session_customizer(mut self, customize: SessionCustomizer) -> Self {
         self.customize = Some(customize);
@@ -154,6 +163,7 @@ impl SessionPoolBuilder {
         let plugins = Arc::new(crate::plugins::PluginSubsystem::new(
             paths.clone(),
             settings.values.section(),
+            self.host_libraries,
         ));
         let tools = Arc::new(base::tool::InMemoryToolRegistry::new());
         tools::register_builtin_tools(&tools);

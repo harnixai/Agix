@@ -569,6 +569,7 @@ const NON_EXHAUSTIVE_STRUCTS: &[(&str, &str)] = &[
     ("EmbedConfig", "crates/assembly/src/embed.rs"),
     ("ExecutionParams", "crates/core/src/interface/scene.rs"),
     ("ExecutionSettings", "crates/settings/src/lib.rs"),
+    ("FunctionDef", "crates/packages/src/manifest.rs"),
     ("Grant", "crates/core/src/interface/permission.rs"),
     ("Listeners", "crates/assembly/src/agixd.rs"),
     ("LoadedRule", "crates/core/src/permission.rs"),

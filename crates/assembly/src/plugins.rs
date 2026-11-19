@@ -4,14 +4,20 @@
 //! Reading a package — manifest, fetch, checksum, unpack, cache, disclose,
 //! enable — is the `plugin-packages` feature. A package runs nothing of its
 //! own: its MCP servers, script bindings, scene directory, agent types and
-//! skills are honored by the parts of the engine that already exist. Without
-//! the feature the same API answers that there are no plugins, so the rest of
-//! the daemon needs no conditional compilation of its own.
+//! skills are honored by the parts of the engine that already exist, and its
+//! commands and functions by the engine's QuickJS. The host that embeds the
+//! engine may bring packages of its own and the libraries packages use.
+//! Without the feature the same API answers that there are no plugins, so the
+//! rest of the daemon needs no conditional compilation of its own.
 
 #[cfg(feature = "plugin-packages")]
 mod commands;
 #[cfg(feature = "plugin-packages")]
+mod functions;
+#[cfg(feature = "plugin-packages")]
 mod health;
+#[cfg(feature = "plugin-packages")]
+mod packages;
 mod policy;
 
 pub use policy::PluginsConfig;
@@ -20,6 +26,7 @@ use crate::config::DaemonPaths;
 use crate::session_pool::api::{
     PluginInfo, PluginInstalled, PluginRemoved, PluginScope, PluginToggled,
 };
+use base::command::HostLibrary;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -82,386 +89,6 @@ pub struct Contributions {
     pub skills: Vec<PackageSkills>,
 }
 
-/// Manifests, the cache, the enable state, and what a package declares.
-#[cfg(feature = "plugin-packages")]
-mod packages {
-    use super::{DaemonPaths, PackageScripts, PackageSkills, PluginsConfig};
-    use crate::session_pool::api::PluginInfo;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::sync::{Arc, RwLock};
-
-    pub struct Packages {
-        paths: Arc<dyn DaemonPaths>,
-        /// The `settings.plugins` policy this pool started with. Held rather
-        /// than re-read, so a refresh mid-session cannot quietly widen what
-        /// is allowed to load.
-        policy: PluginsConfig,
-        enabled: bool,
-        /// The permitted, enabled set. Rescanned by install/uninstall/enable/
-        /// disable, so every reader — the MCP configs, the script bindings,
-        /// the scenes, the agent types — is looking at one answer rather than each
-        /// walking the directory at a different moment.
-        active: RwLock<Arc<Vec<::packages::manifest::Plugin>>>,
-        /// Why a package's script binding could not be honored, by package.
-        /// A fault here costs that binding and nothing else, so it has to be
-        /// reported somewhere the person who installed the package will look.
-        script_faults: RwLock<HashMap<String, Vec<String>>>,
-    }
-
-    impl Packages {
-        pub fn new(paths: Arc<dyn DaemonPaths>, policy: PluginsConfig) -> Self {
-            let enabled = policy.enabled;
-            let active = Arc::new(if enabled {
-                active_plugins(paths.as_ref(), &policy)
-            } else {
-                Vec::new()
-            });
-            Self {
-                paths,
-                policy,
-                enabled,
-                active: RwLock::new(active),
-                script_faults: RwLock::new(HashMap::new()),
-            }
-        }
-
-        pub fn is_enabled(&self) -> bool {
-            self.enabled
-        }
-
-        pub fn policy(&self) -> &PluginsConfig {
-            &self.policy
-        }
-
-        pub fn layout(&self) -> base::paths::Layout {
-            self.paths.layout()
-        }
-
-        pub fn active(&self) -> Arc<Vec<::packages::manifest::Plugin>> {
-            self.active
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone()
-        }
-
-        pub fn rescan(&self) {
-            if !self.enabled {
-                return;
-            }
-            let refreshed = Arc::new(active_plugins(self.paths.as_ref(), &self.policy));
-            *self.active.write().unwrap_or_else(|e| e.into_inner()) = refreshed;
-        }
-
-        pub fn count(&self) -> usize {
-            self.active().len()
-        }
-
-        /// Every active package's declared MCP servers by key. A key two
-        /// packages both produce goes to the one met first; the other's is in
-        /// [`Self::mcp_key_clashes`].
-        pub fn mcp_servers(&self) -> HashMap<String, serde_json::Value> {
-            let mut out = HashMap::new();
-            for (_, key, config, _) in self.keyed_mcp_servers() {
-                out.entry(key).or_insert(config);
-            }
-            out
-        }
-
-        /// The package root each of [`Self::mcp_servers`] comes from.
-        pub fn mcp_server_dirs(&self) -> HashMap<String, PathBuf> {
-            let mut out = HashMap::new();
-            for (_, key, _, root) in self.keyed_mcp_servers() {
-                out.entry(key).or_insert(root);
-            }
-            out
-        }
-
-        /// `(key, package kept, package refused)` for each MCP server key a
-        /// later package produced after an earlier one had it.
-        pub fn mcp_key_clashes(&self) -> Vec<(String, String, String)> {
-            let mut owners: HashMap<String, String> = HashMap::new();
-            let mut clashes = Vec::new();
-            for (plugin, key, _, _) in self.keyed_mcp_servers() {
-                match owners.get(&key) {
-                    Some(kept) => clashes.push((key, kept.clone(), plugin)),
-                    None => {
-                        owners.insert(key, plugin);
-                    }
-                }
-            }
-            clashes
-        }
-
-        fn keyed_mcp_servers(&self) -> Vec<(String, String, serde_json::Value, PathBuf)> {
-            self.active()
-                .iter()
-                .flat_map(|p| {
-                    ::packages::mcp::servers_for(p)
-                        .into_iter()
-                        .map(|(key, config)| (p.name().to_string(), key, config, p.root.clone()))
-                })
-                .collect()
-        }
-
-        /// See [`super::commands::kept`].
-        pub fn commands(&self) -> Vec<base::command::ExtCommand> {
-            super::commands::kept(&self.active())
-        }
-
-        pub fn command_clashes(&self) -> Vec<(String, String, String)> {
-            super::commands::clashes(&self.active())
-        }
-
-        /// Every active package's `[[script]]` declarations, as bindings the
-        /// carrier can take.
-        pub fn script_bindings(&self) -> Vec<PackageScripts> {
-            self.active()
-                .iter()
-                .filter(|p| !p.manifest.script.is_empty())
-                .map(|p| PackageScripts {
-                    name: p.name().to_string(),
-                    root: p.root.clone(),
-                    bindings: p
-                        .manifest
-                        .script
-                        .iter()
-                        .map(|s| base::interface::script::ScriptBinding {
-                            path: PathBuf::from(s.file()),
-                            point: s.point.clone(),
-                            entry: s.function().to_string(),
-                            timeout_ms: s.timeout_ms,
-                            calls_per_turn: s.calls_per_turn,
-                        })
-                        .collect(),
-                })
-                .collect()
-        }
-
-        pub fn agent_types(&self) -> Vec<base::agent_type::AgentTypeDefinition> {
-            self.active()
-                .iter()
-                .flat_map(::packages::agents::agent_types)
-                .collect()
-        }
-
-        /// Discovery already read these skills; a package whose files changed
-        /// since and no longer pass loses its skills here, not the others'.
-        pub fn skills(&self) -> Vec<PackageSkills> {
-            self.active()
-                .iter()
-                .filter(|p| p.manifest.skills.is_some())
-                .filter_map(|p| match ::packages::skills::declared_skills(p) {
-                    Ok(skills) => Some(PackageSkills {
-                        plugin: p.name().to_string(),
-                        skills: skills.into_iter().map(|s| (s.entry, s.body)).collect(),
-                    }),
-                    Err(e) => {
-                        tracing::warn!(
-                            plugin = %p.name(),
-                            error = %e,
-                            "package skills no longer load; skipping them"
-                        );
-                        None
-                    }
-                })
-                .collect()
-        }
-
-        pub fn note_script_faults(&self, faults: Vec<(String, String)>) {
-            let mut by_plugin: HashMap<String, Vec<String>> = HashMap::new();
-            for (plugin, reason) in faults {
-                by_plugin.entry(plugin).or_default().push(reason);
-            }
-            *self
-                .script_faults
-                .write()
-                .unwrap_or_else(|e| e.into_inner()) = by_plugin;
-        }
-
-        /// Every plugin on disk with its enable state — including the
-        /// disabled ones, which a management UI has to show in order to turn
-        /// them back on.
-        pub fn list(&self) -> Vec<PluginInfo> {
-            let (global, scene) = self.tier_dirs();
-            let global_state = ::packages::state::EnableState::new(global.clone());
-            let scene_state = ::packages::state::EnableState::new(scene.clone());
-            let script_faults = self.script_faults.read().unwrap_or_else(|e| e.into_inner());
-            ::packages::discover_plugins(&global, &scene, &self.paths.layout())
-                .iter()
-                .map(|p| {
-                    let name = &p.manifest.plugin.name;
-                    let skills: Vec<String> = ::packages::skills::declared_skills(p)
-                        .map(|skills| skills.into_iter().map(|s| s.entry.name).collect())
-                        .unwrap_or_default();
-                    let commands = super::commands::listed(p);
-                    let permitted = self.policy().permits(name);
-                    PluginInfo {
-                        name: name.clone(),
-                        version: p.manifest.plugin.version.clone(),
-                        description: p.manifest.plugin.description.clone(),
-                        enabled: permitted
-                            && ::packages::state::resolve_enabled(
-                                name,
-                                &global_state,
-                                &scene_state,
-                            ),
-                        disabled_reason: (!permitted)
-                            .then(|| "not permitted by settings.plugins.allow".to_string()),
-                        // The unpacked directory. Without it a host that wants
-                        // to read something out of the package — a UI bundle,
-                        // an icon — has to rebuild this path itself, which
-                        // makes the daemon's disk layout part of its API.
-                        root: p.root.display().to_string(),
-                        script_faults: script_faults
-                            .get(name.as_str())
-                            .cloned()
-                            .unwrap_or_default(),
-                        skills,
-                        skill_conflicts: Vec::new(),
-                        commands,
-                        command_conflicts: Vec::new(),
-                    }
-                })
-                .collect()
-        }
-
-        pub fn tier_dirs(&self) -> (PathBuf, PathBuf) {
-            tier_dirs(self.paths.as_ref())
-        }
-
-        pub fn tier_root(&self, scope: &str) -> Result<PathBuf, String> {
-            let (global, scene) = self.tier_dirs();
-            match scope {
-                "global" => Ok(global),
-                "scene" => Ok(scene),
-                other => Err(format!(
-                    "invalid scope '{other}' — expected 'global' or 'scene'"
-                )),
-            }
-        }
-
-        /// Load back what was just installed, the way discovery will, and
-        /// produce the disclosure an installer shows.
-        ///
-        /// Unpacking and being found are two different pieces of code and
-        /// only the second one reads the manifest, so a package can unpack
-        /// cleanly and still be one nothing will ever load. Left alone it is
-        /// installed in no sense a caller cares about: absent from `list`,
-        /// contributing nothing, with the reason in a log line nobody is
-        /// reading. Asking here is what turns that into an answer at the
-        /// moment somebody is standing in front of it. A disclosure over its
-        /// limits is the same kind of answer: the package is refused, not
-        /// installed with a note attached.
-        pub fn load_back(
-            &self,
-            name: &str,
-            version: &str,
-            scope: &str,
-        ) -> Result<::packages::Disclosure, String> {
-            let cache = ::packages::cache::PluginCache::new(
-                self.tier_root(scope)?.join(base::paths::entry::CACHE),
-            );
-            let manifest = cache
-                .cached_manifest(name, version)
-                .ok_or_else(|| format!("no plugin.toml in the installed package `{name}`"))?;
-            let loaded = ::packages::manifest::Plugin::load(
-                &cache.version_dir(name, version),
-                &manifest,
-                &self.paths.layout(),
-            )
-            .map_err(|e| e.to_string())?;
-            if loaded.manifest.plugin.name != name {
-                return Err(format!(
-                    "the package calls itself `{}`, not `{name}`",
-                    loaded.manifest.plugin.name
-                ));
-            }
-            ::packages::Disclosure::from_plugin(&loaded).map_err(|e| e.to_string())
-        }
-
-        pub fn cache_for(&self, scope: &str) -> Result<::packages::cache::PluginCache, String> {
-            Ok(::packages::cache::PluginCache::new(
-                self.tier_root(scope)?.join(base::paths::entry::CACHE),
-            ))
-        }
-
-        pub fn set_enabled(&self, name: &str, enabled: bool, scope: &str) -> Result<(), String> {
-            ::packages::state::EnableState::new(self.tier_root(scope)?)
-                .set_enabled(name, enabled)
-                .map_err(|e| e.to_string())
-        }
-
-        /// Keep a package that is about to be installed off until the host
-        /// enables it, by writing its entry before it exists: writing it
-        /// afterwards would leave a window in which a rescan counts it as
-        /// enabled. Returns whether an entry was written, which
-        /// [`release_hold`](Self::release_hold) takes back if the install
-        /// fails. A name the tier already has an entry for keeps it.
-        pub fn hold_disabled(&self, name: &str, scope: &str) -> Result<bool, String> {
-            let state = ::packages::state::EnableState::new(self.tier_root(scope)?);
-            if state.get(name).is_some() {
-                return Ok(false);
-            }
-            state.set_enabled(name, false).map_err(|e| e.to_string())?;
-            Ok(true)
-        }
-
-        pub fn release_hold(&self, name: &str, scope: &str) {
-            if let Ok(root) = self.tier_root(scope) {
-                let _ = ::packages::state::EnableState::new(root).clear(name);
-            }
-        }
-
-        pub fn resolved_enabled(&self, name: &str) -> bool {
-            let (global, scene) = self.tier_dirs();
-            ::packages::state::resolve_enabled(
-                name,
-                &::packages::state::EnableState::new(global),
-                &::packages::state::EnableState::new(scene),
-            )
-        }
-    }
-
-    /// The two plugin-tier roots (plain `plugins/`, not `plugins/cache/` —
-    /// see `packages::cache`): global, shared across scenes, and this daemon's
-    /// own scene.
-    fn tier_dirs(paths: &dyn DaemonPaths) -> (PathBuf, PathBuf) {
-        (
-            base::paths::StateRoot::new(paths.global_root()).plugins_dir(),
-            paths.config_root().join(base::paths::entry::PLUGINS),
-        )
-    }
-
-    fn active_plugins(
-        paths: &dyn DaemonPaths,
-        policy: &PluginsConfig,
-    ) -> Vec<::packages::manifest::Plugin> {
-        let (global, scene) = tier_dirs(paths);
-        let global_state = ::packages::state::EnableState::new(global.clone());
-        let scene_state = ::packages::state::EnableState::new(scene.clone());
-        let active: Vec<::packages::manifest::Plugin> = ::packages::discover_plugins(
-            &global,
-            &scene,
-            &paths.layout(),
-        )
-        .into_iter()
-        .filter(|p| {
-            let name = &p.manifest.plugin.name;
-            if !policy.permits(name) {
-                tracing::info!(plugin = %name, "not permitted by settings.plugins; skipping");
-                return false;
-            }
-            ::packages::state::resolve_enabled(name, &global_state, &scene_state)
-        })
-        .collect();
-        for (_, server) in active.iter().flat_map(::packages::mcp::servers_for) {
-            base::interface::exec::env::hold_back_what_an_mcp_server_reads(&server);
-        }
-        active
-    }
-}
-
 #[cfg(feature = "plugin-packages")]
 fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::PluginDisclosure {
     use crate::session_pool::api::{PluginDisclosure, VisibleText};
@@ -472,6 +99,7 @@ fn disclosure_of(d: &::packages::Disclosure) -> crate::session_pool::api::Plugin
         scene: d.scene.clone(),
         skills: d.skills.clone(),
         commands: d.commands.clone(),
+        functions: d.functions.clone(),
         mcp_servers: d.mcp_servers.clone(),
         model_visible: d
             .model_visible
@@ -496,9 +124,15 @@ mod imp {
     }
 
     impl PluginSubsystem {
-        pub fn new(paths: Arc<dyn DaemonPaths>, policy: PluginsConfig) -> Self {
+        /// `libraries` is what the host provides to package code; a package
+        /// that uses another does not install or load.
+        pub fn new(
+            paths: Arc<dyn DaemonPaths>,
+            policy: PluginsConfig,
+            libraries: Vec<HostLibrary>,
+        ) -> Self {
             Self {
-                packages: super::packages::Packages::new(paths, policy),
+                packages: super::packages::Packages::new(paths, policy, libraries),
             }
         }
 
@@ -556,6 +190,27 @@ mod imp {
             self.packages.command_clashes()
         }
 
+        /// Every function the active packages expose to the host.
+        pub fn functions(&self) -> Vec<base::command::PluginFunction> {
+            self.packages.functions()
+        }
+
+        /// Take up the package at `dir` as one of the host's own. Returns
+        /// its name.
+        pub fn register_host(&self, dir: &std::path::Path) -> Result<String, String> {
+            self.packages.register_host(dir)
+        }
+
+        fn refuse_host(&self, name: &str, what: &str) -> Result<(), String> {
+            if self.packages.is_host(name) {
+                return Err(format!(
+                    "`{name}` is the host's own package; it cannot be {what} through the \
+                     protocol"
+                ));
+            }
+            Ok(())
+        }
+
         pub fn note_script_faults(&self, faults: Vec<(String, String)>) {
             self.packages.note_script_faults(faults);
         }
@@ -574,10 +229,11 @@ mod imp {
             }
             vec![
                 Arc::new(EnableStateCheck(self.packages.tier_dirs())),
-                Arc::new(RefusedPackagesCheck(
-                    self.packages.tier_dirs(),
-                    self.packages.layout(),
-                )),
+                Arc::new(RefusedPackagesCheck {
+                    tiers: self.packages.tier_dirs(),
+                    layout: self.packages.layout(),
+                    libraries: self.packages.libraries().to_vec(),
+                }),
                 Arc::new(EnableOnInstallCheck(
                     self.packages.policy().enable_on_install,
                 )),
@@ -628,10 +284,15 @@ mod imp {
                 checksum: checksum.map(str::to_string),
                 version: version.to_string(),
             };
-            let installed =
-                ::packages::install::install(cache, name, &source, &self.packages.layout())
-                    .await
-                    .map_err(|e| e.to_string())?;
+            let installed = ::packages::install::install(
+                cache,
+                name,
+                &source,
+                &self.packages.layout(),
+                self.packages.libraries(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             let loaded = self.packages.load_back(name, version, scope);
             let (message, disclosure) = match (installed, loaded) {
                 (::packages::install::Installed::AlreadyPresent, Ok(d)) => (
@@ -664,6 +325,7 @@ mod imp {
             version: Option<&str>,
             scope: PluginScope,
         ) -> Result<PluginRemoved, String> {
+            self.refuse_host(name, "uninstalled")?;
             let cache = self.packages.cache_for(scope.as_str())?;
             let removed =
                 ::packages::install::uninstall(&cache, name, version).map_err(|e| e.to_string())?;
@@ -684,6 +346,7 @@ mod imp {
             enabled: bool,
             scope: PluginScope,
         ) -> Result<PluginToggled, String> {
+            self.refuse_host(name, if enabled { "enabled" } else { "disabled" })?;
             self.packages.set_enabled(name, enabled, scope.as_str())?;
             self.refresh().await;
             Ok(PluginToggled {
@@ -707,7 +370,11 @@ mod imp {
     pub struct PluginSubsystem;
 
     impl PluginSubsystem {
-        pub fn new(_paths: Arc<dyn DaemonPaths>, _policy: PluginsConfig) -> Self {
+        pub fn new(
+            _paths: Arc<dyn DaemonPaths>,
+            _policy: PluginsConfig,
+            _libraries: Vec<HostLibrary>,
+        ) -> Self {
             Self
         }
         pub fn status(&self) -> PluginStatus {
@@ -742,6 +409,12 @@ mod imp {
         }
         pub fn command_clashes(&self) -> Vec<(String, String, String)> {
             Vec::new()
+        }
+        pub fn functions(&self) -> Vec<base::command::PluginFunction> {
+            Vec::new()
+        }
+        pub fn register_host(&self, _dir: &std::path::Path) -> Result<String, String> {
+            Err(DISABLED_MESSAGE.to_string())
         }
         pub fn note_script_faults(&self, _faults: Vec<(String, String)>) {}
         pub fn count(&self) -> usize {

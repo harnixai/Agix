@@ -80,6 +80,7 @@ fn command(root: &Path, source: &str) -> ExtCommand {
         function: "main".into(),
         read_only: vec!["help".into(), "spec list".into()],
         writes: vec!["forge/**".into()],
+        uses: Vec::new(),
         bytecode_dir: Some(root.join(".bytecode")),
     }
 }

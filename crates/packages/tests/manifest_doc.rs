@@ -71,6 +71,7 @@ fn the_documented_example_names_every_manifest_field_and_no_other() {
         ("agent", "AgentDef"),
         ("skills", "SkillsSection"),
         ("command", "CommandDef"),
+        ("function", "FunctionDef"),
     ] {
         let table = first_table(&root[section], section);
         assert_eq!(

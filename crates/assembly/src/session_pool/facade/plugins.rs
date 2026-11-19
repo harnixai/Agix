@@ -1,4 +1,4 @@
-//! 插件：加载、安装卸载、启停，以及变更后的刷新。
+//! 插件：加载、安装卸载、启停、宿主自带包的登记，以及变更后的刷新。
 
 use crate::session_pool::*;
 
@@ -177,6 +177,28 @@ impl SessionPool {
             .map_err(PoolError::InvalidRequest)?;
         self.refresh_after_plugin_change().await;
         Ok(out)
+    }
+
+    /// Take up the package unpacked at `dir` as one of the host's own: checked
+    /// like an install, loaded at once in place of an installed package of
+    /// its name, and beyond `plugin.uninstall` and `plugin.disable`. A second
+    /// registration of a name replaces the first. Sessions created after
+    /// this see it, as after `install_plugin`.
+    pub async fn register_host_plugin(
+        &self,
+        dir: impl AsRef<std::path::Path>,
+    ) -> Result<api::PluginInfo, PoolError> {
+        self.require_plugins()?;
+        let name = self
+            .plugins
+            .register_host(dir.as_ref())
+            .map_err(PoolError::InvalidRequest)?;
+        self.refresh_after_plugin_change().await;
+        self.plugin_infos()
+            .await
+            .into_iter()
+            .find(|p| p.name == name && p.source == api::PluginOrigin::Host)
+            .ok_or_else(|| PoolError::Internal(format!("host package `{name}` is not listed")))
     }
 
     /// Re-merge whatever the plugin set now contributes into the catalogs of

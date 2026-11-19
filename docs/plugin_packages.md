@@ -12,6 +12,9 @@ skill、经 `RunExt` 跑的命令——都由引擎里已有的部分兑现。�
 ## `plugin.toml`
 
 ```toml
+# 包里的 JavaScript 要用的宿主库(宿主嵌入引擎时提供);TOML 里顶级键要写在第一个段之前。
+uses = ["codix"]               # 可选;见下面「宿主库」
+
 [plugin]
 name = "github-tools"          # 必填
 version = "1.2.0"              # 必填
@@ -73,6 +76,15 @@ entry = "forge.js:main"              # <文件>:<函数>,文件相对插件根�
 description = "需求、规格与变更流程"   # 单行,进 RunExt 的工具描述——披露
 read_only = ["", "help", "spec list"]  # 参数以这些整词前缀开头的调用算只读;"" 是不带参数的调用
 writes = ["forge/**"]                # 能写的范围,glob 相对项目根;不写就是不写文件
+
+# ── 函数 ──
+# 只给宿主调的函数(`github-tools.check`),不进模型的工具表;见下面「包里的函数」。
+[[function]]
+name = "check"                       # 名字规则同命令名;同一个包里不重名
+entry = "forge.js:check"             # 同 [[command]] 的 entry,必须是源码
+description = "门禁检查"              # 单行,至多 500 字符——披露
+writes = []                          # 同 [[command]] 的 writes;宿主让它写时也只能写这些
+input_schema = "schemas/check.json"  # 可选;包里的 JSON Schema,调用前校验 input
 
 # ── 写给宿主的段 ──
 # `x-` 开头的顶级段:引擎不读、不执行、不警告;宿主自己约定它的形状。

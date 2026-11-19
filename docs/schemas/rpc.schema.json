@@ -4760,6 +4760,13 @@
           },
           "type": "array"
         },
+        "functions": {
+          "description": "What the host calls its functions by (`<plugin>.<name>`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "inert": {
           "type": "boolean"
         },
@@ -4800,9 +4807,40 @@
         "capabilities",
         "skills",
         "commands",
+        "functions",
         "mcp_servers",
         "model_visible",
         "inert"
+      ],
+      "type": "object"
+    },
+    "PluginFunctionEntry": {
+      "description": "A function a package exposes to the host (`[[function]]`).",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "has_input_schema": {
+          "description": "Whether the input is checked against a schema the package ships.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Called as `<plugin>.<name>`.",
+          "type": "string"
+        },
+        "writes": {
+          "description": "Globs relative to the project that a writing call may write.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "writes",
+        "has_input_schema"
       ],
       "type": "object"
     },
@@ -4824,7 +4862,7 @@
           "type": "string"
         },
         "disabled_reason": {
-          "description": "Why a package that is installed is not loaded regardless of its enable\nstate: `settings.plugins.allow` does not name it.",
+          "description": "Why a package is not loaded regardless of its enable state:\n`settings.plugins.allow` does not name it, it uses a library the host\ndoes not provide, or the host has its own package of the name.",
           "type": [
             "string",
             "null"
@@ -4832,6 +4870,12 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "functions": {
+          "items": {
+            "$ref": "#/$defs/PluginFunctionEntry"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -4847,6 +4891,17 @@
           },
           "type": "array"
         },
+        "shadowed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The host's own package of this name, which is loaded in its place."
+        },
         "skill_conflicts": {
           "items": {
             "$ref": "#/$defs/SkillConflict"
@@ -4859,6 +4914,9 @@
           },
           "type": "array"
         },
+        "source": {
+          "$ref": "#/$defs/PluginOrigin"
+        },
         "version": {
           "type": "string"
         }
@@ -4867,13 +4925,15 @@
         "name",
         "version",
         "description",
+        "source",
         "enabled",
         "root",
         "script_faults",
         "skills",
         "skill_conflicts",
         "commands",
-        "command_conflicts"
+        "command_conflicts",
+        "functions"
       ],
       "type": "object"
     },
@@ -4947,6 +5007,21 @@
         "plugins"
       ],
       "type": "object"
+    },
+    "PluginOrigin": {
+      "description": "Where a package comes from.",
+      "oneOf": [
+        {
+          "const": "installed",
+          "description": "`plugin.install`, into a tier's cache.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "The embedding host's own, from a directory it named; `plugin.uninstall`\nand `plugin.disable` do not reach it.",
+          "type": "string"
+        }
+      ]
     },
     "PluginRemoved": {
       "properties": {

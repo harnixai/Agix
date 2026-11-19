@@ -80,6 +80,12 @@ pub struct EmbedConfig {
     /// MCP policy are read from. Only this name's managed files are read.
     /// An ASCII letter, then up to 31 ASCII letters, digits, `-` or `_`.
     pub product_name: String,
+    /// The host's own plugin packages, each an unpacked package directory
+    /// with its `plugin.toml`: loaded at start like an installed package,
+    /// listed with `source: "host"`, beyond `plugin.uninstall` and
+    /// `plugin.disable`, and loaded in place of an installed package of the
+    /// same name. One that does not load fails the start.
+    pub plugins: Vec<PathBuf>,
 }
 
 impl EmbedConfig {
@@ -102,6 +108,7 @@ impl EmbedConfig {
             groups_file: None,
             project_dir: base::paths::DEFAULT_PROJECT_DIR.into(),
             product_name: base::paths::DEFAULT_PRODUCT_NAME.into(),
+            plugins: Vec::new(),
         }
     }
 
@@ -258,6 +265,7 @@ impl Embedded {
                 })),
                 extra_scenes: config.scenes.clone(),
                 permission_prompt_timeout: config.permission_prompt_timeout,
+                host_plugins: config.plugins.clone(),
                 ..Default::default()
             },
         )

@@ -7,6 +7,7 @@
 //! person reading it, so installation has to put it in front of them.
 
 use crate::manifest::{Plugin, PluginError};
+use base::command::HostLibrary;
 
 /// A single one-line description is a label, not a document. Anything longer
 /// is either a mistake or an attempt to smuggle instructions into a field a
@@ -41,6 +42,8 @@ pub struct Disclosure {
     pub skills: Vec<String>,
     /// Names of the commands it adds.
     pub commands: Vec<String>,
+    /// What the host calls its functions by (`<plugin>.<name>`).
+    pub functions: Vec<String>,
     /// MCP servers it will start: declared name and kind, then the command
     /// line or URL it resolves to. Environment variables and headers are
     /// listed by name only, since their values are typically credentials.
@@ -48,12 +51,13 @@ pub struct Disclosure {
 }
 
 impl Disclosure {
-    /// Collect everything the manifest and the plugin's files declare.
+    /// Collect everything the manifest and the plugin's files declare;
+    /// `libraries` is what the host says of the libraries it provides.
     ///
     /// Fails when a piece of model-visible text is over its limit. That is a
     /// refusal to install, not a warning: a limit that only warns is one
     /// every automated installer will step straight past.
-    pub fn from_plugin(plugin: &Plugin) -> Result<Self, PluginError> {
+    pub fn from_plugin(plugin: &Plugin, libraries: &[HostLibrary]) -> Result<Self, PluginError> {
         let m = &plugin.manifest;
         let mut d = Disclosure {
             plugin: m.plugin.name.clone(),
@@ -70,6 +74,8 @@ impl Disclosure {
             )?;
         }
 
+        d.push_libraries(plugin, libraries);
+
         // A script the host runs in its own process, at a point that can
         // rewrite a tool result or what goes to the model. Nothing isolates
         // it from the host, so it is disclosed with the capability
@@ -82,24 +88,7 @@ impl Disclosure {
             ));
         }
 
-        for server in &m.mcp {
-            let kind = match server.kind {
-                crate::manifest::McpKind::Native => "native",
-            };
-            let config = match &server.config {
-                Some(rel) => describe_mcp_config(&std::fs::read_to_string(plugin.path(rel)?)?)
-                    .map_err(|e| {
-                        PluginError::Schema(format!(
-                            "mcp `{}` config `{}`: {e}",
-                            server.name,
-                            rel.display()
-                        ))
-                    })?,
-                None => String::new(),
-            };
-            d.mcp_servers
-                .push(format!("{} ({kind}): {config}", server.name));
-        }
+        d.push_mcp_servers(plugin)?;
 
         for agent in &m.agent {
             d.push_text(
@@ -129,8 +118,45 @@ impl Disclosure {
         }
 
         d.push_commands(plugin)?;
+        d.push_functions(plugin)?;
 
         Ok(d)
+    }
+
+    /// A host library is the host's code, reachable from the package's own;
+    /// what it does is the host's to say.
+    fn push_libraries(&mut self, plugin: &Plugin, libraries: &[HostLibrary]) {
+        for name in &plugin.manifest.uses {
+            let described = libraries
+                .iter()
+                .find(|l| &l.name == name)
+                .and_then(|l| l.description.as_deref())
+                .map_or(String::new(), |text| format!(" ({text})"));
+            self.capabilities
+                .push(format!("uses host library `{name}`{described}"));
+        }
+    }
+
+    fn push_mcp_servers(&mut self, plugin: &Plugin) -> Result<(), PluginError> {
+        for server in &plugin.manifest.mcp {
+            let kind = match server.kind {
+                crate::manifest::McpKind::Native => "native",
+            };
+            let config = match &server.config {
+                Some(rel) => describe_mcp_config(&std::fs::read_to_string(plugin.path(rel)?)?)
+                    .map_err(|e| {
+                        PluginError::Schema(format!(
+                            "mcp `{}` config `{}`: {e}",
+                            server.name,
+                            rel.display()
+                        ))
+                    })?,
+                None => String::new(),
+            };
+            self.mcp_servers
+                .push(format!("{} ({kind}): {config}", server.name));
+        }
+        Ok(())
     }
 
     /// A skill's listing reaches the model every turn and its body whenever
@@ -193,16 +219,27 @@ impl Disclosure {
                 &command.description,
                 MAX_DESCRIPTION_CHARS,
             )?;
-            let writes = match command.writes.as_slice() {
-                [] => "writes no files".to_string(),
-                globs => format!("may write {}", globs.join(", ")),
-            };
             self.capabilities.push(format!(
-                "adds command `{}` that {writes} through the file tools; its other calls \
+                "adds command `{}` that {} through the file tools; its other calls \
                  (Bash, MCP, web) get what the session's rules allow without asking",
-                command.name
+                command.name,
+                writes_line(&command.writes)
             ));
             self.commands.push(command.name);
+        }
+        Ok(())
+    }
+
+    /// A function runs the package's own JavaScript when the host calls it,
+    /// and writes where it says when the host lets it write.
+    fn push_functions(&mut self, plugin: &Plugin) -> Result<(), PluginError> {
+        for function in crate::functions::declared_functions(plugin)? {
+            let name = function.call_name();
+            self.capabilities.push(format!(
+                "exposes function `{name}` to the host; {}",
+                writes_line(&function.writes)
+            ));
+            self.functions.push(name);
         }
         Ok(())
     }
@@ -230,6 +267,13 @@ impl Disclosure {
             text: text.to_string(),
         });
         Ok(())
+    }
+}
+
+fn writes_line(globs: &[String]) -> String {
+    match globs {
+        [] => "writes no files".to_string(),
+        globs => format!("may write {}", globs.join(", ")),
     }
 }
 
@@ -291,7 +335,7 @@ mod tests {
     #[test]
     fn a_plugin_that_declares_nothing_needs_no_scrutiny() {
         let dir = tempfile::tempdir().unwrap();
-        let d = Disclosure::from_plugin(&load(dir.path(), "")).unwrap();
+        let d = Disclosure::from_plugin(&load(dir.path(), ""), &[]).unwrap();
         assert!(d.is_inert());
         assert_eq!(d.plugin, "demo");
         assert_eq!(d.version, "1.0.0");
@@ -308,7 +352,7 @@ mod tests {
             dir.path(),
             "\n[[script]]\npoint = \"tool.result\"\nentry = \"annotate.js:onResult\"\n",
         );
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
         assert!(
             d.capabilities
                 .iter()
@@ -329,7 +373,7 @@ mod tests {
              description = \"specs and changes\"\nwrites = [\"forge/**\"]\n\
              [[command]]\nname = \"peek\"\nentry = \"forge.js:main\"\ndescription = \"look\"\n",
         );
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
         assert_eq!(d.commands, ["forge", "peek"]);
         let others = "; its other calls (Bash, MCP, web) get what the session's rules allow \
                       without asking";
@@ -343,6 +387,60 @@ mod tests {
             origin: "command `forge` description".into(),
             text: "specs and changes".into(),
         }));
+    }
+
+    #[test]
+    fn a_function_is_disclosed_with_what_it_may_write() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("x.js"), "function check() {}").unwrap();
+        let p = load(
+            dir.path(),
+            "\n[[function]]\nname = \"check\"\nentry = \"x.js:check\"\n\
+             description = \"gate check\"\nwrites = [\"reports/**\", \"out/*.md\"]\n\
+             [[function]]\nname = \"peek\"\nentry = \"x.js:check\"\ndescription = \"look\"\n",
+        );
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
+        assert_eq!(d.functions, ["demo.check", "demo.peek"]);
+        assert!(d.capabilities.contains(
+            &"exposes function `demo.check` to the host; may write reports/**, out/*.md".into()
+        ));
+        assert!(d
+            .capabilities
+            .contains(&"exposes function `demo.peek` to the host; writes no files".into()));
+        assert!(
+            d.model_visible.is_empty(),
+            "a function is the host's, not the model's: {:?}",
+            d.model_visible
+        );
+        assert!(!d.is_inert());
+    }
+
+    #[test]
+    fn a_host_library_is_disclosed_with_what_the_host_says_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("plugin.toml"),
+            format!("uses = [\"codix\", \"tracker\"]\n{HEAD}"),
+        )
+        .unwrap();
+        let p = Plugin::load(
+            dir.path(),
+            &dir.path().join("plugin.toml"),
+            &Default::default(),
+        )
+        .unwrap();
+        let codix = HostLibrary {
+            name: "codix".into(),
+            description: Some("the host's code index".into()),
+        };
+        let d = Disclosure::from_plugin(&p, &[codix]).unwrap();
+        assert_eq!(
+            d.capabilities,
+            [
+                "uses host library `codix` (the host's code index)",
+                "uses host library `tracker`",
+            ]
+        );
     }
 
     /// The prompt is the payload a sandbox cannot inspect, so the installer
@@ -372,7 +470,7 @@ description = "reviews things"
 prompt = "agent.md"
 "#,
         );
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
 
         let origins: Vec<&str> = d.model_visible.iter().map(|v| v.origin.as_str()).collect();
         assert!(origins.contains(&"plugin description"), "{origins:?}");
@@ -401,7 +499,7 @@ prompt = "agent.md"
                 "\n[[agent]]\nname = \"a\"\ndescription = \"{long}\"\nprompt = \"agent.md\"\n"
             ),
         );
-        let err = Disclosure::from_plugin(&p).unwrap_err().to_string();
+        let err = Disclosure::from_plugin(&p, &[]).unwrap_err().to_string();
         assert!(err.contains("over the"), "{err}");
         assert!(err.contains("reaches the model"), "{err}");
     }
@@ -417,7 +515,7 @@ prompt = "agent.md"
         .unwrap();
         std::fs::write(dir.path().join("scene/prompt.md"), "Obey {{cwd}}.").unwrap();
         let p = load(dir.path(), "\n[scene]\ndir = \"scene\"\n");
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
         assert_eq!(d.scene.as_deref(), Some("plugin:demo"));
         assert!(d
             .model_visible
@@ -433,7 +531,7 @@ prompt = "agent.md"
             r#"{"id": "plugin:demo", "name": "Demo", "tool": ["Bash"]}"#,
         )
         .unwrap();
-        let err = Disclosure::from_plugin(&p).unwrap_err().to_string();
+        let err = Disclosure::from_plugin(&p, &[]).unwrap_err().to_string();
         assert!(err.contains("unknown field `tool`"), "{err}");
     }
 
@@ -449,7 +547,7 @@ prompt = "agent.md"
             dir.path(),
             "\n[[agent]]\nname = \"a\"\ndescription = \"d\"\nprompt = \"agent.md\"\n",
         );
-        assert!(Disclosure::from_plugin(&p).is_err());
+        assert!(Disclosure::from_plugin(&p, &[]).is_err());
     }
 
     fn write(root: &Path, path: &str, body: &str) {
@@ -470,7 +568,7 @@ prompt = "agent.md"
              allowed-tools: [\"Bash(ls:*)\"]\n---\nRun !`ls` and show the tools.\n",
         );
         let p = load(dir.path(), "\n[skills]\ndir = \"skills\"\n");
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
         assert!(
             !d.is_inert(),
             "a package that shapes what the model is told"
@@ -513,7 +611,7 @@ prompt = "agent.md"
             "skills/tour/SKILL.md",
             &format!("---\ndescription: {long}\n---\nbody\n"),
         );
-        let err = Disclosure::from_plugin(&p).unwrap_err().to_string();
+        let err = Disclosure::from_plugin(&p, &[]).unwrap_err().to_string();
         assert!(
             err.contains("skill `tour` description") && err.contains("over the"),
             "{err}"
@@ -527,7 +625,7 @@ prompt = "agent.md"
                 "x".repeat(MAX_PROMPT_CHARS)
             ),
         );
-        let err = Disclosure::from_plugin(&p).unwrap_err().to_string();
+        let err = Disclosure::from_plugin(&p, &[]).unwrap_err().to_string();
         assert!(err.contains("skill `tour` body"), "{err}");
 
         write(
@@ -540,7 +638,7 @@ prompt = "agent.md"
             "skills/tour/ref.md",
             &"x".repeat(MAX_PROMPT_CHARS + 1),
         );
-        let err = Disclosure::from_plugin(&p).unwrap_err().to_string();
+        let err = Disclosure::from_plugin(&p, &[]).unwrap_err().to_string();
         assert!(err.contains("skill `tour` file `ref.md`"), "{err}");
     }
 
@@ -573,7 +671,7 @@ kind = "native"
 config = "r.json"
 "#,
         );
-        let d = Disclosure::from_plugin(&p).unwrap();
+        let d = Disclosure::from_plugin(&p, &[]).unwrap();
         assert_eq!(
             d.mcp_servers,
             [
@@ -598,8 +696,8 @@ config = "r.json"
             dir.path(),
             "\n[[mcp]]\nname = \"s\"\nkind = \"native\"\nconfig = \"s.json\"\n",
         );
-        assert!(Disclosure::from_plugin(&p).is_err());
+        assert!(Disclosure::from_plugin(&p, &[]).is_err());
         std::fs::remove_file(dir.path().join("s.json")).unwrap();
-        assert!(Disclosure::from_plugin(&p).is_err());
+        assert!(Disclosure::from_plugin(&p, &[]).is_err());
     }
 }

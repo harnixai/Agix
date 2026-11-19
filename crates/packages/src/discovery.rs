@@ -104,7 +104,7 @@ fn load_installed_tier(cache: &PluginCache, layout: &Layout) -> (Vec<Plugin>, Ve
             };
             let loaded =
                 Plugin::load(&path.join(&version), &manifest_path, layout).and_then(|plugin| {
-                    Disclosure::from_plugin(&plugin)?;
+                    Disclosure::from_plugin(&plugin, &[])?;
                     Ok(plugin)
                 });
             let e = match loaded {

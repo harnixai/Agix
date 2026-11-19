@@ -1,5 +1,7 @@
-//! Slash-command names the engine answers itself, and the plugin commands
-//! (`[[command]]`) a session runs through `RunExt` and as `/name args`.
+//! Slash-command names the engine answers itself, the plugin commands
+//! (`[[command]]`) a session runs through `RunExt` and as `/name args`, the
+//! plugin functions (`[[function]]`) only the host calls, and the host
+//! libraries (`uses`) a package's code may need.
 
 use std::path::PathBuf;
 
@@ -31,8 +33,49 @@ pub struct ExtCommand {
     pub read_only: Vec<String>,
     /// Globs relative to the project root that the command may write.
     pub writes: Vec<String>,
+    /// The host libraries the package declares, by namespace.
+    pub uses: Vec<String>,
     /// Where compiled entries are kept between runs; `None` compiles every run.
     pub bytecode_dir: Option<PathBuf>,
+}
+
+/// One function an enabled package declares for the host to call, never the
+/// model: `<plugin>.<name>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginFunction {
+    pub name: String,
+    pub plugin: String,
+    pub plugin_version: String,
+    pub description: String,
+    /// The package's unpacked directory.
+    pub root: PathBuf,
+    /// The entry file, inside `root`.
+    pub file: PathBuf,
+    /// The function the entry file defines, called as `(input, ctx)`.
+    pub function: String,
+    /// Globs relative to the project root that a writing call may write.
+    pub writes: Vec<String>,
+    /// The JSON Schema `input` is checked against before the call.
+    pub input_schema: Option<serde_json::Value>,
+    /// The host libraries the package declares, by namespace.
+    pub uses: Vec<String>,
+    /// Where compiled entries are kept between runs; `None` compiles every run.
+    pub bytecode_dir: Option<PathBuf>,
+}
+
+impl PluginFunction {
+    /// The name a host calls it by.
+    pub fn call_name(&self) -> String {
+        format!("{}.{}", self.plugin, self.name)
+    }
+}
+
+/// A JavaScript library the host provides to plugin code, as a package's
+/// `uses` names it and its install disclosure describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostLibrary {
+    pub name: String,
+    pub description: Option<String>,
 }
 
 impl ExtCommand {
@@ -65,6 +108,7 @@ mod tests {
             function: "main".into(),
             read_only: read_only.iter().map(|s| s.to_string()).collect(),
             writes: Vec::new(),
+            uses: Vec::new(),
             bytecode_dir: None,
         }
     }

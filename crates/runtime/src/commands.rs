@@ -563,6 +563,7 @@ mod tests {
             function: "main".into(),
             read_only: Vec::new(),
             writes: Vec::new(),
+            uses: Vec::new(),
             bytecode_dir: None,
         }
     }

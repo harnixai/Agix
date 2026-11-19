@@ -32,6 +32,7 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("groups_file", "Option<PathBuf>"),
     ("project_dir", "String"),
     ("product_name", "String"),
+    ("plugins", "Vec<PathBuf>"),
 ];
 
 const ERROR_VARIANTS: &[(&str, &str)] = &[

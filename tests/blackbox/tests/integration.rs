@@ -31,6 +31,7 @@ mod other_instances;
 mod package_trust;
 mod permission_bounds;
 mod plugin_commands;
+mod plugin_functions;
 mod project_trust_untrusted;
 mod provider_tiers;
 mod sandbox_chain;

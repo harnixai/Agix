@@ -1,13 +1,13 @@
 //! The commands a package adds (`[[command]]`), as `RunExt` runs them, and
-//! the one check on their files no manifest field can carry: an entry is
-//! JavaScript source, never bytecode.
+//! the one check on their files — and on `[[function]]` entries — no manifest
+//! field can carry: an entry is JavaScript source, never bytecode.
 //!
 //! QuickJS does not verify bytecode, so a crafted file can corrupt the host's
 //! memory; it is also tied to one QuickJS build and cannot be read at
 //! install. The engine compiles each entry itself and keeps the result in
 //! the cache's `.bytecode` directory (`ptc`).
 
-use crate::manifest::{CommandDef, Plugin, PluginError};
+use crate::manifest::{Plugin, PluginError};
 use base::command::ExtCommand;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,7 @@ pub fn declared_commands(plugin: &Plugin) -> Result<Vec<ExtCommand>, PluginError
         .command
         .iter()
         .map(|c| {
-            let file = entry_file(plugin, c)?;
+            let file = entry_file(plugin, &format!("command `{}`", c.name), c.file())?;
             Ok(ExtCommand {
                 name: c.name.clone(),
                 description: c.description.clone(),
@@ -34,30 +34,31 @@ pub fn declared_commands(plugin: &Plugin) -> Result<Vec<ExtCommand>, PluginError
                 function: c.function().to_string(),
                 read_only: c.read_only.clone(),
                 writes: c.writes.clone(),
-                bytecode_dir: bytecode_dir(&plugin.root),
+                uses: plugin.manifest.uses.clone(),
+                bytecode_dir: plugin.bytecode_dir().map(Path::to_path_buf),
             })
         })
         .collect()
 }
 
-fn entry_file(plugin: &Plugin, c: &CommandDef) -> Result<PathBuf, PluginError> {
-    let refused = |what: String| PluginError::Schema(format!("command `{}` {what}", c.name));
+/// `entry`, resolved inside `plugin` and checked to be source of a size the
+/// engine runs; `what` names the declaration in a refusal.
+pub(crate) fn entry_file(plugin: &Plugin, what: &str, entry: &str) -> Result<PathBuf, PluginError> {
+    let refused = |why: String| PluginError::Schema(format!("{what} {why}"));
     let file = plugin
-        .path(Path::new(c.file()))
+        .path(Path::new(entry))
         .map_err(|e| refused(format!("entry: {e}")))?;
     let size = std::fs::metadata(&file)?.len();
     if size > MAX_ENTRY_BYTES {
         return Err(refused(format!(
-            "entry `{}` is {size} bytes, over the {MAX_ENTRY_BYTES} allowed",
-            c.file()
+            "entry `{entry}` is {size} bytes, over the {MAX_ENTRY_BYTES} allowed"
         )));
     }
     let bytes = std::fs::read(&file)?;
     if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
         return Err(refused(format!(
-            "entry `{}` is not JavaScript source: a package brings source only, never \
-             compiled QuickJS bytecode; the engine compiles it on this machine",
-            c.file()
+            "entry `{entry}` is not JavaScript source: a package brings source only, never \
+             compiled QuickJS bytecode; the engine compiles it on this machine"
         )));
     }
     Ok(file)

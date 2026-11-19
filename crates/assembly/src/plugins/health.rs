@@ -35,12 +35,13 @@ impl HealthCheck for EnableStateCheck {
 }
 
 /// Packages on disk that discovery sets aside — a disclosure over its
-/// limits, a manifest that no longer loads — and so never load, however
-/// they got into the cache.
-pub(super) struct RefusedPackagesCheck(
-    pub(super) (std::path::PathBuf, std::path::PathBuf),
-    pub(super) base::paths::Layout,
-);
+/// limits, a manifest that no longer loads — or that use a library this host
+/// does not provide, and so never load, however they got into the cache.
+pub(super) struct RefusedPackagesCheck {
+    pub(super) tiers: (std::path::PathBuf, std::path::PathBuf),
+    pub(super) layout: base::paths::Layout,
+    pub(super) libraries: Vec<base::command::HostLibrary>,
+}
 
 impl HealthCheck for RefusedPackagesCheck {
     fn name(&self) -> &str {
@@ -48,8 +49,18 @@ impl HealthCheck for RefusedPackagesCheck {
     }
 
     fn check(&self) -> CheckResult {
-        let (global, scene) = &self.0;
-        let refused = ::packages::scan_plugins(global, scene, &self.1).refused;
+        let (global, scene) = &self.tiers;
+        let found = ::packages::scan_plugins(global, scene, &self.layout);
+        let mut refused = found.refused;
+        refused.extend(found.plugins.iter().filter_map(|p| {
+            ::packages::host::check_libraries(p, &self.libraries)
+                .err()
+                .map(|e| ::packages::Refused {
+                    name: p.name().to_string(),
+                    version: p.manifest.plugin.version.clone(),
+                    reason: e.to_string(),
+                })
+        }));
         if refused.is_empty() {
             return CheckResult::ok("every installed plugin loads");
         }

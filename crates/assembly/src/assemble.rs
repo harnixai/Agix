@@ -68,6 +68,11 @@ pub struct Assembly {
     pub host_policy: Option<Arc<dyn PermissionPolicy>>,
     /// Rust plugins every session this pool builds is built with, in order.
     pub plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
+    /// The host's own plugin packages, each an unpacked package directory:
+    /// checked like an install and loaded in place of an installed package
+    /// of the same name. One that does not load fails the assembly; with
+    /// plugins switched off by settings none is loaded.
+    pub host_plugins: Vec<PathBuf>,
     /// The host's last word on every session engine — see
     /// [`SessionCustomizer`].
     pub customize_session: Option<SessionCustomizer>,
@@ -172,24 +177,16 @@ pub async fn pool(
     .credentials(credentials)
     .managed_settings(managed_path, managed)
     .host_changes(&own_settings_on_disk(config), config)
-    .plugins(assembly.plugins);
+    .plugins(assembly.plugins)
+    .host_libraries(Vec::new());
     if let Some(customize) = assembly.customize_session {
         pool = pool.session_customizer(customize);
     }
     pool = pool.mcp(assembly.mcp.resolve(config)?);
     let pool = pool.build();
 
-    for scene in assembly.scenes {
-        pool.register_scene(scene);
-    }
-    for extra in &assembly.extra_scenes {
-        if extra == pool.scene_id() {
-            continue; // already active; not an error to repeat it
-        }
-        pool.activate_scene(extra)
-            .await
-            .map_err(|e| anyhow::anyhow!("scene `{extra}`: {e}"))?;
-    }
+    take_up_scenes(&pool, assembly.scenes, &assembly.extra_scenes).await?;
+    register_host_plugins(&pool, &assembly.host_plugins).await?;
 
     // Before anything can create a session: a session built while this is
     // still running would be missing every plugin tool, with nothing to
@@ -205,6 +202,45 @@ pub async fn pool(
     pool.start_scheduler();
 
     Ok(pool)
+}
+
+async fn take_up_scenes(
+    pool: &SessionPool,
+    scenes: Vec<Arc<SceneSpec>>,
+    extra_scenes: &[String],
+) -> anyhow::Result<()> {
+    for scene in scenes {
+        pool.register_scene(scene);
+    }
+    for extra in extra_scenes {
+        if extra == pool.scene_id() {
+            continue; // already active; not an error to repeat it
+        }
+        pool.activate_scene(extra)
+            .await
+            .map_err(|e| anyhow::anyhow!("scene `{extra}`: {e}"))?;
+    }
+    Ok(())
+}
+
+async fn register_host_plugins(pool: &SessionPool, dirs: &[PathBuf]) -> anyhow::Result<()> {
+    if dirs.is_empty() {
+        return Ok(());
+    }
+    if pool.plugin_status() != crate::plugins::PluginStatus::Enabled {
+        warn!(
+            count = dirs.len(),
+            status = pool.plugin_status().as_str(),
+            "plugins are off; the host's own plugin packages are not loaded"
+        );
+        return Ok(());
+    }
+    for dir in dirs {
+        pool.register_host_plugin(dir)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    }
+    Ok(())
 }
 
 /// The daemon's own pair's settings as they are on disk, read the way
