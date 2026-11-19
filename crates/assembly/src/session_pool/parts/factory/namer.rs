@@ -71,6 +71,7 @@ impl SessionNamer {
             )),
             input_map: None,
             provider_search: None,
+            usage_tap: Default::default(),
         };
 
         let stream = match self

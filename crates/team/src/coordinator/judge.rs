@@ -134,6 +134,7 @@ async fn drain(
         }),
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     let mut stream = model
         .stream(blocks, vec![], messages, params, cancel.clone())

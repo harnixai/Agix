@@ -99,6 +99,7 @@ async fn chat_completions_is_reachable_from_behind_an_allowlist() {
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     let answer = m
         .stream(

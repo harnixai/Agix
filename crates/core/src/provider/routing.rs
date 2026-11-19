@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use super::{ApiType, ProviderConfig, QuotaLedger, ResolvedTiers, TaskTiers, Tier};
 use crate::interface::model::{
     Model, ModelError, ModelErrorKind, ModelEvent, ModelMessage, ModelStream, StreamParams,
-    ToolDef, Usage,
+    ToolDef, Usage, UsageTap,
 };
 use crate::prompt::PromptBlock;
 
@@ -131,7 +131,7 @@ pub struct TaskRouter {
     order: Arc<Vec<String>>,
     tasks: TaskTiers,
     health: Arc<Health>,
-    quota: Option<Arc<dyn QuotaLedger>>,
+    quota: Option<Arc<QuotaKeeper>>,
     session: Arc<SessionRoute>,
 }
 
@@ -183,7 +183,10 @@ impl TaskRouter {
     }
 
     pub fn with_quota(mut self, ledger: Arc<dyn QuotaLedger>) -> Self {
-        self.quota = Some(ledger);
+        self.quota = Some(Arc::new(QuotaKeeper {
+            ledger,
+            unwritten: Arc::default(),
+        }));
         self
     }
 
@@ -393,6 +396,10 @@ struct RoutedModel {
     router: TaskRouter,
     task: String,
     tier: Tier,
+    /// The provider the last call went to. Reasoning is stamped with it, and
+    /// reasoning stamped with another is kept from each provider, by the
+    /// router rather than by each client: a host's own client may do
+    /// neither.
     served: Mutex<Option<String>>,
 }
 
@@ -411,9 +418,11 @@ impl Model for RoutedModel {
 
     fn provenance(&self) -> Option<String> {
         let served = self.served.lock().unwrap_or_else(|e| e.into_inner());
-        served
-            .clone()
-            .or_else(|| self.router.head().client.provenance())
+        Some(
+            served
+                .clone()
+                .unwrap_or_else(|| self.router.head().config.id.clone()),
+        )
     }
 
     async fn stream(
@@ -445,15 +454,15 @@ impl Model for RoutedModel {
                 false => whole,
             };
             let id = provider.config.id.clone();
-            match self.send(&provider, this, &params, &cancel).await {
+            let tap = UsageTap::new();
+            match self.send(&provider, this, &params, &tap, &cancel).await {
                 Ok(stream) => {
                     router.health.recovered(&id);
-                    *self.served.lock().unwrap_or_else(|e| e.into_inner()) =
-                        provider.client.provenance();
+                    *self.served.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.clone());
                     router
                         .session
                         .served(&id, &self.task, || switch_reason(&passed_over, &id));
-                    return Ok(self.counting(stream, &provider));
+                    return Ok(self.counting(stream, &provider, tap));
                 }
                 Err(error) if !takes_provider_out(error.kind) => return Err(error),
                 Err(error) => {
@@ -503,9 +512,11 @@ impl RoutedModel {
         provider: &RoutedProvider,
         request: Request,
         params: &StreamParams,
+        tap: &UsageTap,
         cancel: &CancellationToken,
     ) -> Result<ModelStream, ModelError> {
         let mut params = params.clone();
+        params.usage_tap = tap.clone();
         params.model = self.router.model_at(provider, &params.model, self.tier);
         if let Some(cap) = provider
             .config
@@ -514,20 +525,31 @@ impl RoutedModel {
         {
             params.max_tokens = params.max_tokens.min(cap);
         }
+        let mut messages = request.messages;
+        for message in &mut messages {
+            message
+                .content
+                .retain(|block| !block.is_foreign_reasoning(Some(provider.id())));
+        }
         provider
             .client
             .stream(
                 request.prompt_blocks,
                 request.tools,
-                request.messages,
+                messages,
                 params,
                 cancel.clone(),
             )
             .await
     }
 
-    fn counting(&self, stream: ModelStream, provider: &RoutedProvider) -> ModelStream {
-        let Some(ledger) = self
+    fn counting(
+        &self,
+        stream: ModelStream,
+        provider: &RoutedProvider,
+        tap: UsageTap,
+    ) -> ModelStream {
+        let Some(keeper) = self
             .router
             .quota
             .clone()
@@ -535,13 +557,124 @@ impl RoutedModel {
         else {
             return stream;
         };
-        let id = provider.config.id.clone();
-        Box::new(stream.inspect(move |event| {
-            if let Ok(ModelEvent::EndTurn { usage, .. }) = event {
-                ledger.record(&id, counted(usage));
-            }
-        }))
+        Box::new(Counting {
+            inner: stream,
+            keeper,
+            provider: provider.config.id.clone(),
+            tap,
+            counted: false,
+        })
     }
+}
+
+/// A call's stream that counts its usage against its provider's quota once:
+/// at [`ModelEvent::EndTurn`], or — for a call that broke off, failed or was
+/// dropped before it — when it goes, with what the client reported so far.
+struct Counting {
+    inner: ModelStream,
+    keeper: Arc<QuotaKeeper>,
+    provider: String,
+    tap: UsageTap,
+    counted: bool,
+}
+
+impl Counting {
+    fn count_once(&mut self, usage: &Usage) {
+        if !std::mem::replace(&mut self.counted, true) {
+            self.keeper.record(&self.provider, counted(usage));
+        }
+    }
+}
+
+impl futures::Stream for Counting {
+    type Item = Result<ModelEvent, ModelError>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let polled = self.inner.poll_next_unpin(cx);
+        if let std::task::Poll::Ready(Some(Ok(ModelEvent::EndTurn { usage, .. }))) = &polled {
+            let usage = *usage;
+            self.count_once(&usage);
+        }
+        polled
+    }
+}
+
+impl Drop for Counting {
+    fn drop(&mut self) {
+        if let Some(usage) = self.tap.reported() {
+            self.count_once(&usage);
+        }
+    }
+}
+
+/// How many times a write of usage is tried before it is given up on. Each
+/// try already waits for the ledger's lock.
+const QUOTA_WRITE_ATTEMPTS: u32 = 3;
+
+/// A router's quota ledger, written off the thread that polls the call: a
+/// write can wait seconds on another instance's lock. Usage recorded but not
+/// yet written counts in [`Self::status`] meanwhile, so the next call sees it.
+struct QuotaKeeper {
+    ledger: Arc<dyn QuotaLedger>,
+    unwritten: Arc<Mutex<HashMap<String, u64>>>,
+}
+
+impl QuotaKeeper {
+    fn status(&self, provider: &str, quota: &super::Quota) -> super::QuotaStatus {
+        let mut status = self.ledger.status(provider, quota);
+        let unwritten = lock(&self.unwritten).get(provider).copied().unwrap_or(0);
+        for period in [&mut status.day, &mut status.week, &mut status.month] {
+            period.used = period.used.saturating_add(unwritten);
+        }
+        status
+    }
+
+    fn record(&self, provider: &str, tokens: u64) {
+        if tokens == 0 {
+            return;
+        }
+        *lock(&self.unwritten)
+            .entry(provider.to_string())
+            .or_default() += tokens;
+        let (ledger, unwritten, provider) = (
+            self.ledger.clone(),
+            self.unwritten.clone(),
+            provider.to_string(),
+        );
+        let write = move || {
+            let mut failed = None;
+            for _ in 0..QUOTA_WRITE_ATTEMPTS {
+                match ledger.record(&provider, tokens) {
+                    Ok(()) => {
+                        failed = None;
+                        break;
+                    }
+                    Err(error) => failed = Some(error),
+                }
+            }
+            let mut unwritten = lock(&unwritten);
+            if let Some(left) = unwritten.get_mut(&provider) {
+                *left = left.saturating_sub(tokens);
+                if *left == 0 {
+                    unwritten.remove(&provider);
+                }
+            }
+            if let Some(error) = failed {
+                tracing::warn!(provider, tokens, %error, "quota usage not recorded");
+            }
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => drop(runtime.spawn_blocking(write)),
+            Err(_) => drop(std::thread::spawn(write)),
+        }
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn switch_reason(passed_over: &[(String, String)], to: &str) -> String {

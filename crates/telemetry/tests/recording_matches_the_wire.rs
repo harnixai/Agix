@@ -257,6 +257,7 @@ async fn every_recorded_call_matches_what_crossed_the_boundary() {
                     ),
                     input_map: None,
                     provider_search: None,
+                    usage_tap: Default::default(),
                 },
                 CancellationToken::new(),
             )
@@ -377,6 +378,7 @@ async fn token_boundaries_and_argument_fragments_survive_the_round_trip() {
                 origin: None,
                 input_map: None,
                 provider_search: None,
+                usage_tap: Default::default(),
             },
             CancellationToken::new(),
         )
@@ -449,6 +451,7 @@ async fn replaying_a_recording_reproduces_the_boundary_traffic() {
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
 
     let recorder = RecorderModel::new(tap, Some(config(RecorderMode::Record)), "test");

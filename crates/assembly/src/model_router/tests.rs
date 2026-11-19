@@ -34,8 +34,18 @@ fn keyed(api: &str, extra: serde_json::Value) -> serde_json::Value {
     entry
 }
 
+/// Where the quota would be kept for settings that set none: never written.
+fn unused_quota_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("agix-model-router-tests-no-quota")
+}
+
 fn build(settings: &Settings) -> Result<TaskRouter, String> {
-    build_task_router_with(settings, &builtin(), &model::factory::builtin_registry())
+    build_task_router_with(
+        settings,
+        &builtin(),
+        &model::factory::builtin_registry(),
+        unused_quota_dir(),
+    )
 }
 
 #[test]
@@ -108,6 +118,7 @@ fn params() -> StreamParams {
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     }
 }
 
@@ -167,7 +178,8 @@ async fn a_provider_without_a_key_hands_its_calls_to_a_registered_protocol() {
         ]),
         &["keyless", "mine"],
     );
-    let router = build_task_router_with(&settings, &builtin(), &factories).unwrap();
+    let router =
+        build_task_router_with(&settings, &builtin(), &factories, unused_quota_dir()).unwrap();
     let mut stream = router
         .model_for("main")
         .stream(
@@ -185,7 +197,8 @@ async fn a_provider_without_a_key_hands_its_calls_to_a_registered_protocol() {
     }
 
     let alone = settings_with_only_keyless();
-    let router = build_task_router_with(&alone, &builtin(), &factories).unwrap();
+    let router =
+        build_task_router_with(&alone, &builtin(), &factories, unused_quota_dir()).unwrap();
     let Err(error) = router
         .model_for("main")
         .stream(
@@ -232,4 +245,191 @@ fn the_router_asks_the_host_for_keys_the_settings_leave_out() {
     assert!(factories
         .missing_credential("other", &ProviderConfig::default())
         .is_some());
+}
+
+/// Which provider was sent what, call by call.
+type Received = Arc<std::sync::Mutex<Vec<(String, Vec<base::interface::model::ModelMessage>)>>>;
+
+/// A protocol of the host's own whose clients stamp nothing on what they
+/// produce: each answers with its provider's id and some usage, keeps the
+/// messages it was sent, and fails while `failing` names its provider.
+#[derive(Default)]
+struct HostProtocol {
+    failing: Arc<std::sync::Mutex<Option<String>>>,
+    received: Received,
+}
+
+struct HostClient {
+    provider: String,
+    failing: Arc<std::sync::Mutex<Option<String>>>,
+    received: Received,
+}
+
+#[async_trait::async_trait]
+impl Model for HostClient {
+    fn api_type(&self) -> ApiType {
+        ApiType::OpenAIChat
+    }
+
+    async fn stream(
+        &self,
+        _prompt_blocks: Vec<base::prompt::PromptBlock>,
+        _tools: Vec<base::interface::model::ToolDef>,
+        messages: Vec<base::interface::model::ModelMessage>,
+        _params: StreamParams,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<base::interface::model::ModelStream, base::interface::model::ModelError> {
+        self.received
+            .lock()
+            .unwrap()
+            .push((self.provider.clone(), messages));
+        if self.failing.lock().unwrap().as_deref() == Some(self.provider.as_str()) {
+            return Err(base::interface::model::ModelError::new(
+                ModelErrorKind::ServerError,
+                "down",
+            ));
+        }
+        Ok(Box::new(futures::stream::iter([
+            Ok(ModelEvent::ThinkingDelta {
+                text: format!("{} thinks", self.provider),
+            }),
+            Ok(ModelEvent::EndTurn {
+                stop_reason: "end_turn".into(),
+                usage: base::interface::model::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    ..Default::default()
+                },
+            }),
+        ])))
+    }
+}
+
+impl base::interface::model_factory::ModelFactory for HostProtocol {
+    fn api_type(&self) -> &str {
+        "host"
+    }
+
+    fn build(
+        &self,
+        provider_id: &str,
+        _cfg: &ProviderConfig,
+        _credentials: &dyn CredentialSource,
+        _network: Option<&Arc<dyn base::interface::exec::Network>>,
+    ) -> Result<Arc<dyn Model>, String> {
+        Ok(Arc::new(HostClient {
+            provider: provider_id.to_string(),
+            failing: self.failing.clone(),
+            received: self.received.clone(),
+        }))
+    }
+}
+
+fn host_providers(first_quota: serde_json::Value) -> Settings {
+    settings(
+        serde_json::json!([
+            {"id": "first", "api": "host", "api_key_env": "PATH", "tiers": {"strong": "f"},
+             "quota": first_quota},
+            {"id": "second", "api": "host", "api_key_env": "PATH", "tiers": {"strong": "s"}},
+        ]),
+        &["first", "second"],
+    )
+}
+
+async fn drain(
+    model: &Arc<dyn Model>,
+    messages: Vec<base::interface::model::ModelMessage>,
+) -> Result<(), base::interface::model::ModelError> {
+    use futures::StreamExt;
+    let mut stream = model
+        .stream(
+            Vec::new(),
+            Vec::new(),
+            messages,
+            params(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await?;
+    while let Some(item) = stream.next().await {
+        item?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_router_built_on_the_hosts_registry_keeps_the_quota_too() {
+    let quota = tempfile::tempdir().unwrap();
+    let protocol = HostProtocol::default();
+    let received = protocol.received.clone();
+    let mut factories = model::factory::builtin_registry();
+    factories.register(Arc::new(protocol));
+    let router = build_task_router_with(
+        &host_providers(serde_json::json!({"day": 10})),
+        &builtin(),
+        &factories,
+        quota.path().join("quota"),
+    )
+    .unwrap()
+    .for_session(None)
+    .unwrap();
+    let main = router.model_for("main");
+    drain(&main, Vec::new()).await.unwrap();
+    drain(&main, Vec::new()).await.unwrap();
+    let served: Vec<String> = received
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(p, _)| p.clone())
+        .collect();
+    assert_eq!(served, ["first", "second"], "15 tokens use up a day of 10");
+}
+
+#[tokio::test]
+async fn reasoning_from_a_client_that_stamps_none_does_not_follow_the_call_to_the_next_provider() {
+    use base::interface::model::{MessageRole, ModelContentBlock, ModelMessage};
+    let protocol = HostProtocol::default();
+    let (failing, received) = (protocol.failing.clone(), protocol.received.clone());
+    let mut factories = model::factory::builtin_registry();
+    factories.register(Arc::new(protocol));
+    let quota = tempfile::tempdir().unwrap();
+    let router = build_task_router_with(
+        &host_providers(serde_json::json!({})),
+        &builtin(),
+        &factories,
+        quota.path().join("quota"),
+    )
+    .unwrap()
+    .for_session(None)
+    .unwrap();
+    let main = router.model_for("main");
+    drain(&main, Vec::new()).await.unwrap();
+    let produced_by = main.provenance();
+    assert_eq!(produced_by.as_deref(), Some("first"));
+
+    let history = vec![ModelMessage {
+        role: MessageRole::Assistant,
+        content: vec![
+            ModelContentBlock::Thinking {
+                text: "first thinks".into(),
+                signature: None,
+                provider: produced_by,
+            },
+            ModelContentBlock::Text {
+                text: "the answer".into(),
+            },
+        ],
+    }];
+    *failing.lock().unwrap() = Some("first".into());
+    drain(&main, history).await.unwrap();
+    let received = received.lock().unwrap();
+    let (provider, sent) = received.last().unwrap();
+    assert_eq!(provider, "second");
+    assert_eq!(
+        sent[0].content,
+        [ModelContentBlock::Text {
+            text: "the answer".into()
+        }],
+        "first's reasoning reached second"
+    );
+    assert_eq!(main.provenance().as_deref(), Some("second"));
 }

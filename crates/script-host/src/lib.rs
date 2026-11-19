@@ -1377,6 +1377,7 @@ mod binding_tests {
                 origin: None,
                 input_map: None,
                 provider_search: None,
+                usage_tap: Default::default(),
             },
         };
         bound.model_interceptors[0].on_request(&mut request);

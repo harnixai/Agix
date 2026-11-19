@@ -39,14 +39,22 @@ pub fn build_task_router(
         .with_network(Arc::new(
             platform::LocalNetwork::default().with_user_agent(layout.user_agent()),
         ));
-    Ok(build_task_router_with(settings, builtin, &factories)?
-        .with_quota(Arc::new(FileQuotaLedger::new(quota_dir))))
+    build_task_router_with(settings, builtin, &factories, quota_dir)
 }
 
 /// [`build_task_router`] against a registry the caller chose — the entry
-/// point for a host that registered a protocol of its own — keeping no
-/// quota.
+/// point for a host that registered a protocol of its own — keeping usage
+/// against quotas under `quota_dir` the same way.
 pub fn build_task_router_with(
+    settings: &Settings,
+    builtin: &Arc<dyn AnthropicClient>,
+    factories: &ModelFactoryRegistry,
+    quota_dir: std::path::PathBuf,
+) -> Result<TaskRouter, String> {
+    Ok(routed(settings, builtin, factories)?.with_quota(Arc::new(FileQuotaLedger::new(quota_dir))))
+}
+
+fn routed(
     settings: &Settings,
     builtin: &Arc<dyn AnthropicClient>,
     factories: &ModelFactoryRegistry,

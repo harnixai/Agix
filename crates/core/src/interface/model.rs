@@ -5,6 +5,7 @@ use crate::provider::ApiType;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 /// Model thinking/reasoning mode.
@@ -81,6 +82,39 @@ pub struct StreamParams {
     /// what it found as [`ModelEvent::SearchResults`]. A provider with no
     /// search of its own refuses the call with [`ModelErrorKind::Unsupported`].
     pub provider_search: Option<ProviderSearch>,
+    /// Where the client reports usage it learns before the call ends, so a
+    /// call that never reaches [`ModelEvent::EndTurn`] is still counted.
+    pub usage_tap: UsageTap,
+}
+
+/// Usage a client has learned of a call so far — the input side, which an
+/// Anthropic stream reports when it opens. [`ModelEvent::EndTurn`]'s usage
+/// supersedes it. Reporting to a tap nobody made does nothing.
+#[derive(Clone, Default)]
+pub struct UsageTap(Option<Arc<Mutex<Option<Usage>>>>);
+
+impl UsageTap {
+    pub fn new() -> Self {
+        Self(Some(Arc::default()))
+    }
+
+    pub fn report(&self, usage: Usage) {
+        if let Some(slot) = &self.0 {
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(usage);
+        }
+    }
+
+    pub fn reported(&self) -> Option<Usage> {
+        self.0
+            .as_ref()
+            .and_then(|slot| *slot.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+impl std::fmt::Debug for UsageTap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("UsageTap").field(&self.reported()).finish()
+    }
 }
 
 /// A web search the provider runs itself, inside the call.

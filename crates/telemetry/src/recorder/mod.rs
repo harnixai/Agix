@@ -930,6 +930,7 @@ mod tests {
             origin: Some(CallOrigin::turn(session, 0, step)),
             input_map: None,
             provider_search: None,
+            usage_tap: Default::default(),
         }
     }
 

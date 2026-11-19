@@ -37,6 +37,7 @@ fn user_blocks_open_the_conversation_and_the_input_map_follows() {
                 spans: vec![],
             }),
             provider_search: None,
+            usage_tap: Default::default(),
         },
     };
     open_conversation_with_user_blocks(&mut request);

@@ -59,6 +59,7 @@ impl Model for AnthropicModel {
         cancel: CancellationToken,
     ) -> Result<ModelStream, ModelError> {
         let system = system_blocks(prompt_blocks);
+        let tap = params.usage_tap.clone();
 
         let mut message_params: Vec<MessageParam> = messages
             .into_iter()
@@ -121,21 +122,7 @@ impl Model for AnthropicModel {
         // for, and returned from here, where a caller's recovery looks.
         let mut raw = self.inner.stream_messages(req);
         let first = first_event(&mut raw, &cancel).await?;
-        // `scan` carries the per-block tool_use JSON accumulator across raw
-        // events (needed because one incoming `StreamEvent` can produce
-        // zero or several `ModelEvent`s — see `map_stream_event`'s doc
-        // comment); `flat_map` then flattens each step's `Vec` back into a
-        // flat event stream.
-        let mapped = futures::stream::once(futures::future::ready(Ok(first)))
-            .chain(raw)
-            .scan(StreamState::default(), |acc, result| {
-                let events = match result {
-                    Ok(event) => map_stream_event(event, acc),
-                    Err(e) => vec![Err(e.into())],
-                };
-                futures::future::ready(Some(events))
-            })
-            .flat_map(futures::stream::iter);
+        let mapped = model_events(first, raw, tap);
         Ok(Box::new(Box::pin(crate::cancel::until_cancelled(
             mapped, cancel,
         ))))
@@ -253,6 +240,32 @@ fn thinking_config(mode: ThinkingMode, max_tokens: u32) -> Option<ThinkingConfig
     }
 }
 
+/// `first` and the rest of `raw` as model events, the opening usage reported
+/// to `tap`. `scan` carries the per-block tool_use JSON accumulator across raw
+/// events (needed because one incoming `StreamEvent` can produce zero or
+/// several `ModelEvent`s — see `map_stream_event`'s doc comment); `flat_map`
+/// then flattens each step's `Vec` back into a flat event stream.
+fn model_events(
+    first: crate::stream::StreamEvent,
+    raw: crate::client::EventStream,
+    tap: base::interface::model::UsageTap,
+) -> impl futures::Stream<Item = Result<ModelEvent, ModelError>> + Send + 'static {
+    let state = StreamState {
+        tap,
+        ..Default::default()
+    };
+    futures::stream::once(futures::future::ready(Ok(first)))
+        .chain(raw)
+        .scan(state, |acc, result| {
+            let events = match result {
+                Ok(event) => map_stream_event(event, acc),
+                Err(e) => vec![Err(e.into())],
+            };
+            futures::future::ready(Some(events))
+        })
+        .flat_map(futures::stream::iter)
+}
+
 async fn first_event(
     raw: &mut crate::client::EventStream,
     cancel: &CancellationToken,
@@ -286,6 +299,7 @@ async fn first_event(
 struct StreamState {
     tool_uses: std::collections::HashMap<u32, PendingToolUse>,
     opening_usage: base::interface::model::Usage,
+    tap: base::interface::model::UsageTap,
 }
 
 struct PendingToolUse {
@@ -407,6 +421,7 @@ fn map_stream_event(event: crate::stream::StreamEvent, acc: &mut StreamState) ->
         StreamEvent::ContentBlockStop { index } => map_block_stop(index, acc),
         StreamEvent::MessageStart { message } => {
             acc.opening_usage = opening_usage(&message);
+            acc.tap.report(acc.opening_usage);
             vec![]
         }
         StreamEvent::MessageDelta { delta, usage } => map_message_delta(delta, usage, acc),
@@ -641,6 +656,41 @@ mod map_stream_event_tests {
                 "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERg=="},
                 "title": "spec.pdf",
             })
+        );
+    }
+
+    #[test]
+    fn the_opening_count_is_reported_before_the_message_ends() {
+        let tap = base::interface::model::UsageTap::new();
+        let mut acc = StreamState {
+            tap: tap.clone(),
+            ..Default::default()
+        };
+        map_stream_event(
+            StreamEvent::MessageStart {
+                message: crate::stream::MessageStartPayload {
+                    id: "msg_1".into(),
+                    model: "m".into(),
+                    role: "assistant".into(),
+                    usage: crate::stream::Usage {
+                        input_tokens: 20,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: Some(7),
+                        cache_read_input_tokens: Some(13),
+                    },
+                    stop_reason: None,
+                },
+            },
+            &mut acc,
+        );
+        let reported = tap.reported().expect("reported at message_start");
+        assert_eq!(
+            (
+                reported.input_tokens,
+                reported.cache_creation_input_tokens,
+                reported.cache_read_input_tokens
+            ),
+            (20, 7, 13)
         );
     }
 
@@ -1278,6 +1328,7 @@ mod provider_search_tests {
             origin: None,
             input_map: None,
             provider_search,
+            usage_tap: Default::default(),
         }
     }
 
@@ -1417,6 +1468,7 @@ mod call_failure_tests {
             origin: None,
             input_map: None,
             provider_search: None,
+            usage_tap: Default::default(),
         }
     }
 

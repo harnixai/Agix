@@ -70,6 +70,7 @@ impl PageExtractor {
             origin: Some(CallOrigin::auxiliary(session_id, call_purpose::WEB_FETCH)),
             input_map: None,
             provider_search: None,
+            usage_tap: Default::default(),
         };
         let mut stream = self
             .model

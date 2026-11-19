@@ -200,6 +200,7 @@ Respond with ONLY valid JSON matching this schema (no markdown, no extra text, n
         }),
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     (request_messages, params)
 }

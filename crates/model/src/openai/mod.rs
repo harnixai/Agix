@@ -429,6 +429,7 @@ mod tests {
                     origin: None,
                     input_map: None,
                     provider_search: Some(base::interface::model::ProviderSearch { max_uses: 1 }),
+                    usage_tap: Default::default(),
                 },
                 CancellationToken::new(),
             )

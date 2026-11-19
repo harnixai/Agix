@@ -150,6 +150,7 @@ fn params_of(request: &CallRecord) -> StreamParams {
             .params
             .search_max_uses
             .map(|max_uses| base::interface::model::ProviderSearch { max_uses }),
+        usage_tap: Default::default(),
     }
 }
 

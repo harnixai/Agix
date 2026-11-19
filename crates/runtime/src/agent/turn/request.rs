@@ -342,6 +342,7 @@ impl Agent {
                 origin,
                 input_map,
                 provider_search: None,
+                usage_tap: Default::default(),
             },
         }
     }
@@ -390,6 +391,7 @@ impl Agent {
                 origin,
                 input_map,
                 provider_search: None,
+                usage_tap: Default::default(),
             },
         }
     }

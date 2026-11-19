@@ -69,6 +69,7 @@ impl SearchProvider for NativeSearchProvider {
             provider_search: Some(ProviderSearch {
                 max_uses: max_results.clamp(1, MAX_SEARCHES) as u32,
             }),
+            usage_tap: Default::default(),
         };
         let mut stream = self
             .model

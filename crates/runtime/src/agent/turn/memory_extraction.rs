@@ -176,6 +176,7 @@ Return only a JSON array of memories. If nothing is worth saving, return []."
         )),
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     let mut full_text = String::new();
     let stream_result = model

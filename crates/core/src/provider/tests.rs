@@ -85,8 +85,29 @@ impl QuotaLedger for Ledger {
         }
     }
 
-    fn record(&self, provider: &str, tokens: u64) {
+    fn record(&self, provider: &str, tokens: u64) -> Result<(), String> {
         *self.0.lock().unwrap().entry(provider.into()).or_default() += tokens;
+        Ok(())
+    }
+}
+
+impl Ledger {
+    fn used(&self, provider: &str) -> u64 {
+        self.0.lock().unwrap().get(provider).copied().unwrap_or(0)
+    }
+
+    /// Wait until what `provider` used reaches `expected`, as the ledger is
+    /// written off the call's thread.
+    async fn settles_at(&self, provider: &str, expected: u64) {
+        let reached = async {
+            while self.used(provider) < expected {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(30), reached)
+            .await
+            .expect("the usage is recorded");
+        assert_eq!(self.used(provider), expected);
     }
 }
 
@@ -95,6 +116,19 @@ enum Answer {
     Ok,
     Fail(ModelErrorKind),
     FailWith(ModelErrorKind, &'static str),
+    /// Reports what the call's opening used, then the stream breaks off.
+    BreaksOff,
+    /// Reports what the call's opening used, sends a little, then nothing.
+    Stalls,
+}
+
+/// What a provider reports when the call opens: the input side of
+/// [`Scripted::usage`].
+fn opening(usage: Usage) -> Usage {
+    Usage {
+        output_tokens: 0,
+        ..usage
+    }
 }
 
 struct Scripted {
@@ -126,13 +160,35 @@ impl Model for Scripted {
             .lock()
             .unwrap()
             .push(format!("{}:{}", self.id, params.model));
+        let text = || {
+            Ok(ModelEvent::TextDelta {
+                text: "partial".into(),
+            })
+        };
         match &self.answer {
-            Answer::Ok => Ok(Box::new(futures::stream::iter([Ok(ModelEvent::EndTurn {
-                stop_reason: "end_turn".into(),
-                usage: self.usage,
-            })]))),
+            Answer::Ok => {
+                params.usage_tap.report(opening(self.usage));
+                Ok(Box::new(futures::stream::iter([Ok(ModelEvent::EndTurn {
+                    stop_reason: "end_turn".into(),
+                    usage: self.usage,
+                })])))
+            }
             Answer::Fail(kind) => Err(ModelError::new(*kind, "scripted")),
             Answer::FailWith(kind, message) => Err(ModelError::new(*kind, *message)),
+            Answer::BreaksOff => {
+                params.usage_tap.report(opening(self.usage));
+                Ok(Box::new(futures::stream::iter([
+                    text(),
+                    Err(ModelError::stream_interrupted("connection reset")),
+                ])))
+            }
+            Answer::Stalls => {
+                params.usage_tap.report(opening(self.usage));
+                Ok(Box::new(futures::StreamExt::chain(
+                    futures::stream::iter([text()]),
+                    futures::stream::pending(),
+                )))
+            }
         }
     }
 }
@@ -170,6 +226,7 @@ fn params(model: &str) -> StreamParams {
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     }
 }
 
@@ -184,7 +241,9 @@ async fn call(model: &Arc<dyn Model>, name: &str) -> Result<(), ModelError> {
             CancellationToken::new(),
         )
         .await?;
-    while stream.next().await.is_some() {}
+    while let Some(item) = stream.next().await {
+        item?;
+    }
     Ok(())
 }
 
@@ -382,6 +441,116 @@ async fn a_provider_out_of_quota_is_skipped_after_the_call_that_used_it_up() {
         ["ds:ds-pro", "ds:ds-pro", "claude:opus"],
         "17 tokens a call, cache reads not counted: over 20 after the second"
     );
+}
+
+fn limited_ds_alone(answer: Answer, ledger: Arc<dyn QuotaLedger>) -> TaskRouter {
+    let mut limited = ds();
+    limited.quota.day = Some(1000);
+    TaskRouter::new(
+        vec![routed(limited, answer, &Arc::default())],
+        vec![],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .with_quota(ledger)
+    .for_session(None)
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_call_that_breaks_off_counts_what_its_opening_used() {
+    let ledger = Arc::new(Ledger::default());
+    let router = limited_ds_alone(Answer::BreaksOff, ledger.clone());
+    let error = call(&router.model_for("main"), "strong").await.unwrap_err();
+    assert_eq!(error.kind, ModelErrorKind::StreamInterrupted);
+    ledger.settles_at("ds", 12).await;
+}
+
+#[tokio::test]
+async fn a_call_dropped_midway_counts_what_its_opening_used() {
+    use futures::StreamExt;
+    let ledger = Arc::new(Ledger::default());
+    let router = limited_ds_alone(Answer::Stalls, ledger.clone());
+    let mut stream = router
+        .model_for("main")
+        .stream(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            params("strong"),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(stream.next().await.is_some());
+    drop(stream);
+    ledger.settles_at("ds", 12).await;
+}
+
+/// Holds every write until it is let go, failing the first `failures` of
+/// them as a lock that could not be had would.
+struct HeldLedger {
+    counted: Ledger,
+    gate: Mutex<std::sync::mpsc::Receiver<()>>,
+    failures: Mutex<u32>,
+}
+
+impl QuotaLedger for HeldLedger {
+    fn status(&self, provider: &str, quota: &Quota) -> QuotaStatus {
+        self.counted.status(provider, quota)
+    }
+
+    fn record(&self, provider: &str, tokens: u64) -> Result<(), String> {
+        self.gate.lock().unwrap().recv().unwrap();
+        let mut failures = self.failures.lock().unwrap();
+        if *failures > 0 {
+            *failures -= 1;
+            return Err("the directory could not be locked".into());
+        }
+        self.counted.record(provider, tokens)
+    }
+}
+
+#[tokio::test]
+async fn recording_usage_holds_up_no_call_and_a_write_that_fails_is_tried_again() {
+    let (release, gate) = std::sync::mpsc::channel();
+    let ledger = Arc::new(HeldLedger {
+        counted: Ledger::default(),
+        gate: Mutex::new(gate),
+        failures: Mutex::new(2),
+    });
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut limited = ds();
+    limited.quota.day = Some(20);
+    let router = TaskRouter::new(
+        vec![
+            routed(limited, Answer::Ok, &asked),
+            routed(claude(), Answer::Ok, &asked),
+        ],
+        vec!["ds".into(), "claude".into()],
+        TaskTiers::default(),
+    )
+    .unwrap()
+    .with_quota(ledger.clone())
+    .for_session(None)
+    .unwrap();
+    let main = router.model_for("main");
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        for _ in 0..3 {
+            call(&main, "strong").await.unwrap();
+        }
+    })
+    .await
+    .expect("the calls finish while the ledger is held");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["ds:ds-pro", "ds:ds-pro", "claude:opus"],
+        "what is not written yet counts against the quota"
+    );
+    for _ in 0..4 {
+        release.send(()).unwrap();
+    }
+    ledger.counted.settles_at("ds", 34).await;
 }
 
 #[tokio::test]

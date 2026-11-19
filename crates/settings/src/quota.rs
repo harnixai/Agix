@@ -178,35 +178,20 @@ impl QuotaLedger for FileQuotaLedger {
         }
     }
 
-    fn record(&self, provider: &str, tokens: u64) {
+    fn record(&self, provider: &str, tokens: u64) -> Result<(), String> {
         if tokens == 0 {
-            return;
+            return Ok(());
         }
-        let _held = match base::dir_lock::DirLock::acquire_within(
-            &self.dir,
-            base::dir_lock::DIR_LOCK_WAIT,
-        ) {
-            Ok(held) => held,
-            Err(error) => {
-                tracing::warn!(provider, %error, "quota usage not recorded: its directory could not be locked");
-                return;
-            }
-        };
+        let _held =
+            base::dir_lock::DirLock::acquire_within(&self.dir, base::dir_lock::DIR_LOCK_WAIT)
+                .map_err(|e| format!("the quota directory could not be locked: {e}"))?;
         let path = self.file(provider);
-        let mut usage = match Self::read(&path) {
-            Ok(usage) => usage,
-            Err(error) => {
-                tracing::warn!(provider, tokens, %error, "quota usage not recorded");
-                return;
-            }
-        };
+        let mut usage = Self::read(&path)?;
         let [day, week, month] = self.starts();
         add_to(&mut usage.day, day, tokens);
         add_to(&mut usage.week, week, tokens);
         add_to(&mut usage.month, month, tokens);
-        if let Err(error) = Self::write(&path, &usage) {
-            tracing::warn!(provider, path = %path.display(), %error, "quota usage not recorded");
-        }
+        Self::write(&path, &usage).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
 
@@ -250,7 +235,7 @@ mod tests {
             week: None,
             month: None,
         };
-        ledger.record("ds", 150);
+        ledger.record("ds", 150).unwrap();
         assert!(ledger.status("ds", &q).exhausted().is_some());
         let today = period_starts(LocalClock.now()).day;
         for bad in [
@@ -275,10 +260,10 @@ mod tests {
     fn recording_onto_a_usage_file_that_does_not_read_leaves_it_alone() {
         let dir = tempfile::tempdir().unwrap();
         let ledger = FileQuotaLedger::new(dir.path().join("quota"));
-        ledger.record("ds", 1);
+        ledger.record("ds", 1).unwrap();
         let path = dir.path().join("quota/ds.json");
         std::fs::write(&path, "{not json").unwrap();
-        ledger.record("ds", 50);
+        assert!(ledger.record("ds", 50).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
         let unlimited = Quota::default();
         assert!(ledger.status("ds", &unlimited).exhausted().is_some());
@@ -297,8 +282,8 @@ mod tests {
             week: Some(1000),
             month: None,
         };
-        ledger.record("ds", 60);
-        ledger.record("ds", 40);
+        ledger.record("ds", 60).unwrap();
+        ledger.record("ds", 40).unwrap();
         let status = ledger.status("ds", &quota);
         assert_eq!(status.day.used, 100);
         assert!(status.exhausted().unwrap().contains("day"));

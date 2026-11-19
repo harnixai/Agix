@@ -61,5 +61,7 @@ impl QuotaStatus {
 /// Where providers' usage is kept.
 pub trait QuotaLedger: Send + Sync {
     fn status(&self, provider: &str, quota: &Quota) -> QuotaStatus;
-    fn record(&self, provider: &str, tokens: u64);
+    /// Add `tokens` to what `provider` used in the periods now. An error
+    /// says the usage was not written.
+    fn record(&self, provider: &str, tokens: u64) -> Result<(), String>;
 }

@@ -121,6 +121,7 @@ async fn run_openai(policy: Arc<dyn BackoffPolicy>) -> usize {
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     let answer = m
         .stream(
@@ -302,6 +303,7 @@ data: [DONE]\n\
         origin: None,
         input_map: None,
         provider_search: None,
+        usage_tap: Default::default(),
     };
     let stream = m
         .stream(
