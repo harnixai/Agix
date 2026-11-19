@@ -1084,6 +1084,22 @@
           "cache_read_input_tokens": 1,
           "input_tokens": 10,
           "output_tokens": 5
+        },
+        "usage_breakdown": {
+          "delegates": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          },
+          "own": {
+            "cache_creation_input_tokens": 2,
+            "cache_read_input_tokens": 1,
+            "input_tokens": 10,
+            "output_tokens": 5
+          },
+          "side": {
+            "input_tokens": 0,
+            "output_tokens": 0
+          }
         }
       },
       "in_turn": {
@@ -1118,6 +1134,26 @@
               "cache_read_input_tokens": 1,
               "input_tokens": 10,
               "output_tokens": 5
+            },
+            "usage_breakdown": {
+              "delegates": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              },
+              "own": {
+                "cache_creation_input_tokens": 2,
+                "cache_read_input_tokens": 1,
+                "input_tokens": 10,
+                "output_tokens": 5
+              },
+              "side": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
             }
           },
           "session_id": "s1",
@@ -1164,6 +1200,26 @@
               "cache_read_input_tokens": 1,
               "input_tokens": 10,
               "output_tokens": 5
+            },
+            "usage_breakdown": {
+              "delegates": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              },
+              "own": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              },
+              "side": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
             }
           },
           "session_id": "s1",
@@ -1987,6 +2043,26 @@
                 "cache_read_input_tokens": 1,
                 "input_tokens": 10,
                 "output_tokens": 5
+              },
+              "usage_breakdown": {
+                "delegates": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                },
+                "own": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                },
+                "side": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                }
               }
             },
             "kind": "subagent_progress",
@@ -2049,6 +2125,26 @@
                 "cache_read_input_tokens": 1,
                 "input_tokens": 10,
                 "output_tokens": 5
+              },
+              "usage_breakdown": {
+                "delegates": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                },
+                "own": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                },
+                "side": {
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "input_tokens": 0,
+                  "output_tokens": 0
+                }
               }
             },
             "kind": "subagent_progress",

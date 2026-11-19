@@ -1082,7 +1082,7 @@
         },
         "token_budget": {
           "default": null,
-          "description": "Maximum cumulative tokens (input + output, summed across every API\ncall in a turn) before the turn is aborted with `budget_exceeded`.\n`None` = unlimited.\n\nDeliberately token-based, not a dollar figure: provider prices change\nover time and per contract, so enforcing a dollar budget needs a\nper-model price table that can silently drift out of date — a stale\nor missing price makes the hard cap wrong in either direction. Token\ncounts come straight from the provider's own usage accounting on\nevery response, so there is nothing to keep in sync.",
+          "description": "Maximum cumulative tokens (input + output, cache not counted) one\nturn may spend, its delegates included: every model call of the turn\nand of the sub-agents and team members it starts or hands work to —\na background sub-agent's after the turn has ended too — counts toward\none total. Each call asks for no more output than is left; with less\nthan 1024 left no call is sent. The turn ends with `budget_exceeded`,\nand a delegate still running ends the same way before its next call.\n`None` = unlimited.\n\nDeliberately token-based, not a dollar figure: provider prices change\nover time and per contract, so enforcing a dollar budget needs a\nper-model price table that can silently drift out of date — a stale\nor missing price makes the hard cap wrong in either direction. Token\ncounts come straight from the provider's own usage accounting on\nevery response, so there is nothing to keep in sync.",
           "format": "uint64",
           "minimum": 0,
           "type": [

@@ -182,6 +182,7 @@ pub enum SessionEventPayload {
         seq: u64,
         last_call_usage: Usage,
         usage: Usage,
+        usage_breakdown: base::event::UsageBreakdown,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -538,6 +539,7 @@ impl SessionEventPayload {
                 api_calls,
                 tool_calls,
                 usage,
+                usage_breakdown,
                 turn_id: _,
                 message,
                 last_call_usage,
@@ -553,6 +555,7 @@ impl SessionEventPayload {
                 seq: *seq,
                 last_call_usage: *last_call_usage,
                 usage: *usage,
+                usage_breakdown: *usage_breakdown,
                 message: message.clone(),
                 context: *context,
                 structured_output: structured_output.clone(),

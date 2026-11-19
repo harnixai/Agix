@@ -292,6 +292,7 @@ fn turn_complete(context: base::event::ContextUsage) -> AgentEvent {
         api_calls: 1,
         tool_calls: 0,
         usage: Default::default(),
+        usage_breakdown: Default::default(),
         turn_id: "t1".into(),
         message: None,
         last_call_usage: Default::default(),

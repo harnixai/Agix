@@ -190,6 +190,7 @@ impl EngineFactory {
             &binding.settings,
             spec.requested_permission_mode(),
             model_name.as_ref(),
+            options,
             session_id,
             req.worktree,
         );
@@ -322,12 +323,13 @@ impl EngineFactory {
     }
 
     /// The pair's settings with this session's permission mode, model,
-    /// scratch workspace and worktree written in.
+    /// turn limits, scratch workspace and worktree written in.
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
         requested_mode: Option<base::permission::PermissionMode>,
         model_name: Option<&String>,
+        options: Option<&SessionOptions>,
         session_id: &str,
         worktree: Option<&base::paths::LinkedWorktree>,
     ) -> Arc<LoadedSettings> {
@@ -341,6 +343,9 @@ impl EngineFactory {
             snap.values.permissions.mode = permission_mode;
             if let Some(name) = model_name {
                 snap.values.model.model_name = name.clone();
+            }
+            if let Some(options) = options {
+                options.tighten_turn(&mut snap.values.turn);
             }
             if let base::paths::Workspace::Scratch(_) = snap.paths.workspace {
                 snap.paths.workspace = base::paths::Workspace::Scratch(

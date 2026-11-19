@@ -232,7 +232,7 @@ systemd(`Restart=on-failure`)。systemd 下要设 `KillMode=process`:`daemon.shu
   └─ UserPromptSubmit hook · 斜杠命令 · 记忆召回 · 先放进空闲期间到的通知(§3.8)
 循环(step):
   ├─ 0. 落盘        checkpoint:上一步写进内存的消息先落盘
-  ├─ 1. 停止判断    TurnPolicy::before_model_call   ← 这一轮还该不该继续
+  ├─ 1. 停止判断    TurnPolicy::before_model_call · BudgetPolicy::remaining  ← 这一轮还该不该继续、这次最多要多少输出
   ├─ 2. 修剪与压缩  fit_context · Compactor::trim_* / should_compact  ← 清哪些旧结果、该不该压
   ├─ 3. 硬顶        over_hard_cap · ContextBudget::hard_cap
   ├─ 4. 装配提示词  PromptAssembler / 注册的块 / 装配钩子
@@ -259,6 +259,17 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 不并发安全的是屏障,等前面那批跑完再单独跑;它跑的时候照样读流,读到的等它跑完再处理。所以第 6、7 步拦不住这一条回复要的工具——
 它们决定的是还走不走下一步。要在工具跑之前拦,用权限、`PreToolUse` hook 或
 `ToolMiddleware`。
+
+**一轮的预算是一份。** 预算记在这一轮的 `TurnSpend`(`base::interface::budget_policy`)上,经
+`ToolContext.turn`(`TurnScope::spend`)传给这一轮起的 delegate:`Agent` 工具、`TeamCreate` 的阶段成员、
+派给持久成员的消息、fork 的 skill 把它放进 `DelegateRequest.spend`,delegate 的那一轮在它下面开一份自己的
+(`TurnSpend::under`)。每次调用的用量记在调用者那一份上并逐级加到上面;`whole_turn` 是根上那一份的读数,
+每个 agent 第 1 步(`remaining`)与第 7 步(`on_usage`)判的都是它,所以根与子同一个上限,后台 delegate 在
+根这一轮结束后照样花在它上面。本 agent 的调用在回复流的 `EndTurn` 处就记上(流里起的子 Agent 先于第 7 步
+跑,得看见这次调用);旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)由 `SpentModel` 记到当时打开的
+那一轮上,两轮之间的不记。delegate 的 `BudgetPolicy` 经 `HostContracts` 继承根会话的。`turn_complete.usage`
+是这一轮那一份的读数,`usage_breakdown` 按自己 / 旁路 / delegate 拆开。`max_model_calls` 不在这里:每个
+agent 一份,在它自己的 `TurnPolicy` 里。
 
 **一条工具管线。** 模型的每次工具调用(`tool_use`)、`RunCode` 程序里的子调用、skill 正文里的
 `` !`cmd` `` 内嵌命令,都走同一条:`PreToolUse` → 输入校验 → 权限 → 中间件 → 工具 → `tool_result`

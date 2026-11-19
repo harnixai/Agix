@@ -28,6 +28,17 @@
 //!
 //! `ContextBudget` is neither: it is about the size of a single request, not
 //! the cost of the turn.
+//!
+//! # One turn, one bill
+//!
+//! A root turn's delegates — sub-agents in the foreground or background, team
+//! members it starts or hands work to — spend into the root turn's
+//! [`TurnSpend`], as do the calls each agent makes on its side, and every one
+//! of them judges its budget against that shared reading
+//! ([`TurnSpend::whole_turn`]). A background delegate keeps spending into it
+//! after the turn that started it has ended.
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::interface::scene::TokenBudget;
 
@@ -76,6 +87,94 @@ impl From<crate::interface::model::Usage> for Spend {
             cache_read_tokens: u.cache_read_input_tokens as u64,
         }
     }
+}
+
+/// What one agent's turn has spent — its own calls, those made on its side
+/// (compaction, memory, web extraction) and those of the delegates it started
+/// — with the turn that delegated it, if any, above it.
+#[derive(Debug, Default)]
+pub struct TurnSpend {
+    all: Tally,
+    delegated: Tally,
+    above: Option<std::sync::Arc<TurnSpend>>,
+}
+
+impl TurnSpend {
+    /// A delegate's turn: what it spends, `above` has spent too.
+    pub fn under(above: std::sync::Arc<TurnSpend>) -> Self {
+        Self {
+            above: Some(above),
+            ..Self::default()
+        }
+    }
+
+    /// One call made in this turn, by its agent or on its side.
+    pub fn add(&self, call: crate::interface::model::Usage) {
+        let call = Spend::from(call);
+        self.all.add(call);
+        let mut above = self.above.as_deref();
+        while let Some(turn) = above {
+            turn.all.add(call);
+            turn.delegated.add(call);
+            above = turn.above.as_deref();
+        }
+    }
+
+    /// This turn and its delegates.
+    pub fn read(&self) -> Spend {
+        self.all.read()
+    }
+
+    /// The part of [`Self::read`] its delegates spent.
+    pub fn delegated(&self) -> Spend {
+        self.delegated.read()
+    }
+
+    /// The root turn and every delegate under it: what a budget is judged by.
+    pub fn whole_turn(&self) -> Spend {
+        let mut turn = self;
+        while let Some(above) = turn.above.as_deref() {
+            turn = above;
+        }
+        turn.read()
+    }
+}
+
+#[derive(Debug, Default)]
+struct Tally {
+    input_tokens: AtomicU64,
+    output_tokens: AtomicU64,
+    cache_creation_tokens: AtomicU64,
+    cache_read_tokens: AtomicU64,
+}
+
+impl Tally {
+    fn add(&self, call: Spend) {
+        for (total, part) in [
+            (&self.input_tokens, call.input_tokens),
+            (&self.output_tokens, call.output_tokens),
+            (&self.cache_creation_tokens, call.cache_creation_tokens),
+            (&self.cache_read_tokens, call.cache_read_tokens),
+        ] {
+            total.fetch_add(part, Ordering::Relaxed);
+        }
+    }
+
+    fn read(&self) -> Spend {
+        Spend {
+            input_tokens: self.input_tokens.load(Ordering::Relaxed),
+            output_tokens: self.output_tokens.load(Ordering::Relaxed),
+            cache_creation_tokens: self.cache_creation_tokens.load(Ordering::Relaxed),
+            cache_read_tokens: self.cache_read_tokens.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// What is left under a ceiling before the next model call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Remaining {
+    pub tokens: u64,
+    pub limit: u64,
 }
 
 /// Whether the turn may keep spending.
@@ -132,9 +231,16 @@ pub struct ContextBudget {
 
 /// What a turn may spend and how much it may carry.
 pub trait BudgetPolicy: Send + Sync {
-    /// After a model call, against the usage the provider reported.
+    /// After a model call, against the turn's [`TurnSpend`] as it reads then.
     fn on_usage(&self, _spend: &Spend) -> Spending {
         Spending::WithinBudget
+    }
+
+    /// Before a model call, against the turn's [`TurnSpend`]. The call is
+    /// not sent when less than [`MIN_CALL_TOKENS`] remain, and otherwise asks
+    /// for no more output than remains. `None`: no ceiling to hold it to.
+    fn remaining(&self, _spend: &Spend) -> Option<Remaining> {
+        None
     }
 
     /// When the model has stopped and a volume of output was asked for.
@@ -160,6 +266,9 @@ pub trait BudgetPolicy: Send + Sync {
         }
     }
 }
+
+/// Below this much remaining budget a model call is not sent.
+pub const MIN_CALL_TOKENS: u64 = 1024;
 
 /// The engine's own numbers.
 #[derive(Default)]
@@ -203,6 +312,13 @@ impl BudgetPolicy for EngineBudget {
             };
         }
         Spending::WithinBudget
+    }
+
+    fn remaining(&self, spend: &Spend) -> Option<Remaining> {
+        self.max_total_tokens.map(|limit| Remaining {
+            tokens: limit.saturating_sub(spend.total_tokens()),
+            limit,
+        })
     }
 
     fn on_output_target(&self, p: &OutputProgress) -> OutputTarget {
@@ -254,6 +370,10 @@ impl<P: BudgetPolicy> BudgetPolicy for Capped<P> {
         self.inner.on_usage(spend)
     }
 
+    fn remaining(&self, spend: &Spend) -> Option<Remaining> {
+        self.inner.remaining(spend)
+    }
+
     fn on_output_target(&self, progress: &OutputProgress) -> OutputTarget {
         self.inner.on_output_target(progress)
     }
@@ -296,6 +416,82 @@ mod tests {
             Spending::Exhausted { limit: 1_000 },
             "the check is `>=`; at the cap the turn is over, not one call later"
         );
+    }
+
+    #[test]
+    fn what_remains_is_the_ceiling_less_the_engines_reading() {
+        let p = engine(5_000);
+        assert_eq!(
+            p.remaining(&spent(1_000, 500)),
+            Some(Remaining {
+                tokens: 3_500,
+                limit: 5_000
+            })
+        );
+        assert_eq!(p.remaining(&spent(4_000, 2_000)).unwrap().tokens, 0);
+        assert_eq!(EngineBudget::new(None).remaining(&spent(1, 1)), None);
+        let capped = Capped {
+            inner: engine(5_000),
+            context_hard_cap: 10,
+        };
+        assert_eq!(capped.remaining(&spent(1_000, 0)).unwrap().tokens, 4_000);
+    }
+
+    #[test]
+    fn delegates_spending_at_once_lose_nothing() {
+        let shared = std::sync::Arc::new(TurnSpend::default());
+        let call = crate::interface::model::Usage {
+            input_tokens: 3,
+            output_tokens: 2,
+            cache_creation_input_tokens: 1,
+            cache_read_input_tokens: 7,
+        };
+        let spenders: Vec<_> = (0..8)
+            .map(|_| {
+                let shared = shared.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..1_000 {
+                        shared.add(call);
+                    }
+                })
+            })
+            .collect();
+        for spender in spenders {
+            spender.join().unwrap();
+        }
+        assert_eq!(
+            shared.read(),
+            Spend {
+                input_tokens: 24_000,
+                output_tokens: 16_000,
+                cache_creation_tokens: 8_000,
+                cache_read_tokens: 56_000,
+            }
+        );
+        assert_eq!(
+            engine(40_000).on_usage(&shared.read()),
+            Spending::Exhausted { limit: 40_000 }
+        );
+    }
+
+    #[test]
+    fn a_delegates_call_is_spent_by_every_turn_above_it() {
+        let root = std::sync::Arc::new(TurnSpend::default());
+        let child = std::sync::Arc::new(TurnSpend::under(root.clone()));
+        let grandchild = TurnSpend::under(child.clone());
+        let call = |n: u32| crate::interface::model::Usage {
+            input_tokens: n,
+            ..Default::default()
+        };
+        root.add(call(1));
+        child.add(call(10));
+        grandchild.add(call(100));
+        assert_eq!(root.read().input_tokens, 111);
+        assert_eq!(root.delegated().input_tokens, 110);
+        assert_eq!(child.read().input_tokens, 110);
+        assert_eq!(child.delegated().input_tokens, 100);
+        assert_eq!(grandchild.read().input_tokens, 100);
+        assert_eq!(grandchild.whole_turn().input_tokens, 111);
     }
 
     #[test]

@@ -292,10 +292,7 @@ impl base::tool::Tool for AgentTool {
         req.agent_type = inp.subagent_type.clone();
         req.model = inp.model.clone();
         req.output_schema = inp.output_schema.clone();
-        req.called_from = Some(CallSite {
-            turn: ctx.turn_no,
-            tool_use_id: ctx.tool_use_id.clone(),
-        });
+        req.started_by(&ctx);
         if inp.team_name.is_some() || inp.name.is_some() {
             return self.message_member(inp, req).await;
         }

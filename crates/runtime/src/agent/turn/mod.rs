@@ -18,6 +18,7 @@ mod reporting;
 mod request;
 mod rewind;
 mod round;
+mod side_spend;
 mod spill;
 mod token_budget;
 mod tool_env;
@@ -37,6 +38,7 @@ pub(crate) use process::hook_permission_mode;
 pub(crate) use prompt::PromptContext;
 pub(crate) use recall::Memory;
 pub(crate) use request::ModelRoute;
+pub(crate) use side_spend::{OpenTurn, SpentModel};
 pub(crate) use tool_env::collect_frozen;
 pub(crate) use tool_exec::resolve_permission_response;
 
@@ -58,11 +60,18 @@ pub(crate) struct TurnState {
 }
 
 impl TurnState {
-    pub(crate) fn opening(turn_id: &str) -> Self {
+    /// `charged_to` is the spend of the turn that delegated this one.
+    pub(crate) fn opening(
+        turn_id: &str,
+        charged_to: Option<std::sync::Arc<base::interface::budget_policy::TurnSpend>>,
+    ) -> Self {
+        let origin = base::context::goal::TurnOrigin::from_turn_id(turn_id);
+        let scope = match charged_to {
+            Some(above) => base::tool::TurnScope::delegated_from(origin, above),
+            None => base::tool::TurnScope::new(origin),
+        };
         Self {
-            scope: std::sync::Arc::new(base::tool::TurnScope::new(
-                base::context::goal::TurnOrigin::from_turn_id(turn_id),
-            )),
+            scope: std::sync::Arc::new(scope),
             ..Self::default()
         }
     }

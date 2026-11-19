@@ -566,4 +566,29 @@ impl Agent {
         )
         .await
     }
+
+    /// [`Self::run_turn`] as a delegate of the turn `spend` belongs to: its
+    /// calls spend into it, and its budget is judged by what it reads.
+    /// `None` is [`Self::run_turn`].
+    pub async fn run_turn_charged_to(
+        &mut self,
+        content: String,
+        turn_id: String,
+        cancel: CancellationToken,
+        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+    ) -> Result<crate::turn::TurnOutcome, crate::turn::TurnError> {
+        self.charged_to = spend;
+        let outcome = self
+            .process_turn(
+                InputMessage::User {
+                    content,
+                    attachments: vec![],
+                    turn_id,
+                },
+                cancel,
+            )
+            .await;
+        self.charged_to = None;
+        outcome
+    }
 }

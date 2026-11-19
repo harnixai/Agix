@@ -7,8 +7,7 @@ use crate::bundled_files::build_bundled_files_injection;
 use async_trait::async_trait;
 use base::error::ToolError;
 use base::interface::delegate::{
-    AskRoute, CallSite, DelegateEnd, DelegateMode, DelegateRequest, Delegated, Delegator,
-    StopsWith, Workdir,
+    AskRoute, DelegateEnd, DelegateMode, DelegateRequest, Delegated, Delegator, StopsWith, Workdir,
 };
 use base::interface::permission::{Grant, GrantScope, PermissionFacts, Reach, Subject};
 use base::interface::skill_catalog::SkillExpansion;
@@ -242,10 +241,7 @@ impl SkillTool {
             .map(|(tool, content)| Grant::new(tool, content, GrantScope::Turn))
             .collect();
         req.workdir = Workdir::At(ctx.cwd.clone());
-        req.called_from = Some(CallSite {
-            turn: ctx.turn_no,
-            tool_use_id: ctx.tool_use_id.clone(),
-        });
+        req.started_by(ctx);
         if ctx.from_code {
             req.asks = AskRoute::Refuse;
         }
@@ -867,6 +863,7 @@ mod dynamic_context_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base::interface::delegate::CallSite;
     use base::skill::{SkillEntry, SkillSource as FrozenSkillSource};
     use base::tool::ToolResultContent;
 

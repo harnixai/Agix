@@ -72,6 +72,18 @@ pub(crate) async fn write_sidechain_terminal_marker(
     }
 }
 
+/// One turn to run on a delegate.
+pub(crate) struct OneTurn {
+    pub(crate) prompt: String,
+    pub(crate) cancel: tokio_util::sync::CancellationToken,
+    /// When set, every event this sub-agent emits is also mirrored onto the
+    /// parent session's channel wrapped in `AgentEvent::SubagentProgress`, so
+    /// the host can render sub-agent activity live.
+    pub(crate) tag: Option<SubagentTag>,
+    /// The delegating turn's spend, which this turn spends into.
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+}
+
 /// Run one turn against a sub-agent and collect its response text — the
 /// shared core of every one-shot delegate and of the persistent member loop.
 /// Takes `event_rx` **borrowed**, not owned, specifically so a persistent
@@ -98,15 +110,10 @@ pub(crate) async fn write_sidechain_terminal_marker(
 pub(crate) async fn run_one_turn(
     agent: &mut Agent,
     event_rx: &mut EventReceiver,
-    prompt: String,
-    cancel: tokio_util::sync::CancellationToken,
-    // When set, every event this sub-agent emits is also mirrored onto the
-    // parent session's channel wrapped in `AgentEvent::SubagentProgress`, so
-    // the host can render sub-agent activity live. Purely additive: the
-    // text return value is identical either way.
-    tag: Option<SubagentTag>,
+    turn: OneTurn,
     task: Option<&base::context::RunningTask>,
 ) -> (String, DelegateEnd) {
+    let tag = turn.tag;
     let turn_id = uuid::Uuid::new_v4().to_string();
 
     if let Some(tag) = &tag {
@@ -114,7 +121,7 @@ pub(crate) async fn run_one_turn(
     }
 
     let mut text = String::new();
-    let run_turn_fut = agent.run_turn(prompt, turn_id, cancel);
+    let run_turn_fut = agent.run_turn_charged_to(turn.prompt, turn_id, turn.cancel, turn.spend);
     tokio::pin!(run_turn_fut);
     let outcome = loop {
         tokio::select! {
@@ -168,6 +175,7 @@ pub(crate) async fn run_one_turn(
         Ok(o) => {
             let end = match o.stop_reason.as_str() {
                 "max_turns" | "host_ceiling" => DelegateEnd::CutShort("max_turns"),
+                "budget_exceeded" => DelegateEnd::CutShort("budget_exceeded"),
                 "max_structured_output_retries" => {
                     DelegateEnd::CutShort("max_structured_output_retries")
                 }
@@ -207,6 +215,10 @@ pub(crate) fn with_stop_note(text: String, stop_reason: &str) -> String {
         "max_structured_output_retries" => {
             "The sub-agent stopped after too many attempts at its structured output"
         }
+        "budget_exceeded" => {
+            "The sub-agent stopped when the turn's token budget, which it shares with the \
+             agent that started it, ran out (budget_exceeded)"
+        }
         _ => return text,
     };
     if text.trim().is_empty() {
@@ -229,31 +241,24 @@ pub(crate) async fn run_one_turn_detached(
     mut agent: Agent,
     mut event_rx: EventReceiver,
     input_tx: InputSender,
-    prompt: String,
-    cancel: tokio_util::sync::CancellationToken,
-    tag: Option<SubagentTag>,
+    turn: OneTurn,
     task: Option<Arc<base::context::RunningTask>>,
     run: DelegateRun,
     grace: std::time::Duration,
 ) -> (String, DelegateEnd) {
     use tracing::Instrument;
     let span = tracing::info_span!("subagent", session = %session_id);
-    let stop = cancel.child_token();
+    let stop = turn.cancel.child_token();
     let _stop_when_dropped = stop.clone().drop_guard();
-    let completes = tag.clone();
+    let completes = turn.tag.clone();
     let turn = {
-        let stop = stop.clone();
+        let turn = OneTurn {
+            cancel: stop.clone(),
+            ..turn
+        };
         tokio::spawn(
             async move {
-                let outcome = run_one_turn(
-                    &mut agent,
-                    &mut event_rx,
-                    prompt,
-                    stop,
-                    tag,
-                    task.as_deref(),
-                )
-                .await;
+                let outcome = run_one_turn(&mut agent, &mut event_rx, turn, task.as_deref()).await;
                 drop(input_tx);
                 outcome
             }

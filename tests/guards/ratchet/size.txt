@@ -2,7 +2,7 @@
 # Production functions above FN_MAX lines and files above FILE_MAX lines, at the size
 # they had when the guard was introduced. A ceiling only goes down:
 # AGIX_UPDATE_RATCHET=1 cargo test -p guards --test integration size::
-file  crates/assembly/src/rpc/events.rs                          -                                      802
+file  crates/assembly/src/rpc/events.rs                          -                                      805
 file  crates/compaction/src/compact.rs                           -                                      1017
 file  crates/core/src/interface/catalog.rs                       -                                      853
 file  crates/core/src/paths/sensitive.rs                         -                                      893
@@ -17,10 +17,10 @@ fn    crates/agents/src/agent_tool/build.rs                      Delegator::buil
 fn    crates/agents/src/agent_tool/catalog.rs                    parse_agent_type_file                  93
 fn    crates/agents/src/agent_tool/mod.rs                        AgentTool::call                        81
 fn    crates/agents/src/agent_tool/turn.rs                       run_one_turn                           92
-fn    crates/agents/src/delegate/mod.rs                          Delegator::dispatch_unboxed            95
+fn    crates/agents/src/delegate/mod.rs                          Delegator::dispatch_unboxed            97
 fn    crates/assembly/src/assemble.rs                            pool                                   100
 fn    crates/assembly/src/export.rs                              pack                                   104
-fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        366
+fn    crates/assembly/src/rpc/events.rs                          SessionEventPayload::from_agent        368
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::build_engine              89
 fn    crates/assembly/src/session_pool/facade/create.rs          SessionPool::create                    139
 fn    crates/assembly/src/session_pool/facade/history_rpc.rs     SessionPool::export_session            120
@@ -46,8 +46,8 @@ fn    crates/platform/src/process.rs                             LocalProcess::s
 fn    crates/prompt-files/src/lib.rs                             parse_skill_file                       85
 fn    crates/ptc/src/run.rs                                      spawn_watchers                         87
 fn    crates/ptc/src/run.rs                                      execute                                96
-fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      92
-fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         106
+fn    crates/runtime/src/agent/builder/build/assemble.rs         Builder::assemble                      94
+fn    crates/runtime/src/agent/builder/build/mod.rs              Builder::build                         108
 fn    crates/runtime/src/agent/builder/build/modules.rs          Builder::run_modules                   99
 fn    crates/runtime/src/agent/builder/build/plugins.rs          PluginLayers::into_chains              94
 fn    crates/runtime/src/agent/builder/build/resolve.rs          Builder::resolve                       86

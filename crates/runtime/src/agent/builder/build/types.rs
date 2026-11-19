@@ -103,4 +103,5 @@ pub(super) struct Wired {
     pub(super) agent_depth: u32,
     pub(super) chains: Chains,
     pub(super) checkpoints: Option<Arc<crate::checkpoint::Checkpoints>>,
+    pub(super) open_turn: crate::turn::OpenTurn,
 }

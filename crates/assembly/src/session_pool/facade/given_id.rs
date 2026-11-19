@@ -61,6 +61,7 @@ impl SessionPool {
                     &holder.scene,
                     holder.project.as_deref(),
                     &holder.binding,
+                    options,
                     true,
                 ))
             })

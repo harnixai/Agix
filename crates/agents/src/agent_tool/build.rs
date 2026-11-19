@@ -20,6 +20,8 @@ pub(crate) struct Spec {
     /// Where a worktree at `cwd` commits to, as its maker found it.
     pub(crate) git: Option<base::paths::WorktreeGit>,
     pub(crate) called_from: Option<CallSite>,
+    /// The turn it spends into; `None` gives each of its turns its own.
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
 }
 
 pub(crate) struct Delegate {
@@ -236,18 +238,16 @@ impl Delegator {
         let agent_type = spec.agent_type.as_deref();
         let prompt = self.opening_prompt(def.as_ref(), prompt, &start_context);
         let tag = SubagentTag::new(self, &sid, agent_type, called_from).for_task(task.as_ref());
+        let turn = OneTurn {
+            prompt,
+            cancel,
+            tag: Some(tag),
+            spend: spec.spend.clone(),
+        };
 
         if background {
             open_inbox(task.as_deref(), &agent);
-            let (text, end) = run_one_turn(
-                &mut agent,
-                &mut event_rx,
-                prompt,
-                cancel,
-                Some(tag),
-                task.as_deref(),
-            )
-            .await;
+            let (text, end) = run_one_turn(&mut agent, &mut event_rx, turn, task.as_deref()).await;
             drop(input_tx);
             run.finish(&end, StopReason::OfTheEnd).await;
             (text, end)
@@ -257,9 +257,7 @@ impl Delegator {
                 agent,
                 event_rx,
                 input_tx,
-                prompt,
-                cancel,
-                Some(tag),
+                turn,
                 task,
                 run,
                 self.env.config.tool_cancel_grace,

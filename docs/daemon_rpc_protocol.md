@@ -572,8 +572,17 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 | `max_turns_reached` | 触到本轮 API 调用次数上限(引擎自己发的,不来自 API) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
-| `budget_exceeded` | 触到花费上限 |
+| `budget_exceeded` | 触到这一轮的 token 预算(`turn.token_budget` 或 `options.turn.token_budget`,见下) |
 | `unknown` | 反序列化兜底,遇到未知取值时的落点 |
+
+**一轮的 token 预算含子 Agent。** 预算按输入加输出计(缓存读写不计),算的是这一轮的全部模型调用:
+会话自己的、它在这一轮里起的子 Agent(前台、后台)与团队成员(`TeamCreate` 的成员、这一轮派了活的持久成员)的,
+以及这些 agent 各自在旁边发的调用(压缩写摘要、记忆召回与轮末的记忆抽取、`WebSearch`、`WebFetch` 的抽取)。
+首轮之后的自动命名与手动压缩(`/compact`、`session.compact`)不在任何一轮的模型循环里,不计。每次调用发出前,`max_tokens` 压到不超过预算的
+剩余;剩余不到 1024 时这次调用不发,这一轮以 `budget_exceeded` 结束。一次调用之后合计到达预算时同样结束;
+到达 90% 时往对话里加一条提醒,让模型收尾。子 Agent 判的是同一份合计:别的 agent 把预算用完后,在跑的子
+Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果末尾写明是这个原因。这一轮起的后台子 Agent
+在这一轮结束之后仍记在这份合计上,照样会被它截停;下一轮有自己的一份。
 
 ---
 
@@ -831,6 +840,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `calls_preview` | `session.calls` 的 `output.text_preview`、`output.tool_uses[].input_preview` 与 `result_is_error`(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
+| `session_turn_limits` | `options.turn` 按会话收紧 `token_budget` / `max_model_calls`,`session.create` 报 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
@@ -1347,6 +1357,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
     "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
+    "turn": { "token_budget": 2000000, "max_model_calls": 40 },  // 可选,只能比设置的 turn.* 更紧,见下
     "host_tools": [ ] } }                 // 可选,宿主自己实现的工具,见下
 // ← result
 { "session_id": "…", "scene": "code", "session_kind": "primary",
@@ -1459,6 +1470,16 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 自动建会话、`session.resume`、重建同理)返回 `INVALID_PARAMS`,`error.data.invalid_options` 里是
 `{"field":"output_schema","error":"scene \"x\" denies StructuredOutput, …"}`,不建一个交不回结果的会话。
 子 Agent、`session.startAgent` 带 `output_schema` 同样。
+
+**`turn`——按会话收紧一轮的上限。** `token_budget` 与 `max_model_calls` 与设置里同名的
+`turn.token_budget`、`turn.max_model_calls` 含义相同,都至少是 1(给 0 进 `invalid_options`,`field` 为
+`turn.token_budget` / `turn.max_model_calls`,未知的键同样)。会话用的是两者中较小的那个:选项比设置宽时按设置,
+不报错,`session.create` 的结果另带 `clamped_options` 列出这一项(`requested` 是选项给的,`applied` 是生效的,
+如 `[{"field":"turn.token_budget","requested":2000000,"applied":500000}]`;没有被压低的就没有这个键);
+设置没有 `turn.token_budget`(不限)时选项的值直接生效。每次重建引擎都按这时的设置重新取较小值,所以设置后来收得
+更紧时按设置,放宽时仍守着选项。会话的子 Agent 与团队成员随它:`max_model_calls` 是每个 agent 自己一轮的
+调用上限,各算各的,子 Agent 继承收紧后的值(agent 类型的 `max_turns` 照旧覆盖它);`token_budget` 是这一轮
+连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
 
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
 列了 `question`,有人值守的会话(`attended`,缺省取场景的 `interactive`,`ARCHITECTURE.md` §3.2.3,如 `code`)才有
@@ -2771,7 +2792,8 @@ Shell 命令与监视器,被 MCP server 转成任务的工具调用,以及安排
 worktree 与分支在子 Agent 结束时已删,不记。前台子 Agent 留下的 worktree 写在 `Agent` 的结果里。
 
 `usage` 只算这个子 Agent 自己的调用,与它的侧链会话各次调用之和相等;它再起的子 Agent
-另算在它们各自的任务上。父会话 `turn_complete` 的 `usage` 也不含子 Agent(§7.2)。
+另算在它们各自的任务上。前台子 Agent 的用量在父会话这一轮 `turn_complete` 的 `usage` 里(`usage_breakdown.delegates`,
+§7.2),后台的算到父会话这一轮结束为止的那部分。
 
 子 Agent 有询问在等宿主回答(§10)时是 `waiting`,`waiting_for` 列出这些询问的
 `prompt_id`;答完(或超时)回到 `running`。它仍在跑:`stopTask`、`messageTask` 照常。
@@ -4060,7 +4082,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 | `user_message_delivered` | `{message_id,content}` | 运行中送来的消息(`on_busy:"steer"`)已加进对话,模型下一次调用会读到 |
 | `user_message_refused` | `{message_id,content,message}` | 运行中送来的消息被 `UserPromptSubmit` 拒收,不在 transcript 里;`message` 是 hook 给的理由,可为 `null` |
 | `user_messages_returned` | `{messages:[{message_id,content}]}` | 运行中送来、但本轮结束前没读到的消息,不在 transcript 里,交还客户端 |
-| `turn_complete` | `{stop_reason,api_calls,tool_calls,seq,usage,last_call_usage,context?,structured_output?,message?,truncated?,persisted}` | 本轮结束,`persisted` 为 `true` 时 transcript 已落盘,`seq` 是此刻的消息数;最终响应随后到达 |
+| `turn_complete` | `{stop_reason,api_calls,tool_calls,seq,usage,usage_breakdown,last_call_usage,context?,structured_output?,message?,truncated?,persisted}` | 本轮结束,`persisted` 为 `true` 时 transcript 已落盘,`seq` 是此刻的消息数;最终响应随后到达 |
 | `error` | `{code,message,retryable,retry_after_ms,persisted}` | 本轮出错结束。只发给**发起这一轮之外**的订阅者 —— 发起者从 `run_turn` 的错误响应得知。`code`、`message`、`retryable`、`retry_after_ms` 与发起者收到的 `ENGINE_ERROR` 的 `data.kind`、`message`、`data.retryable`、`data.retry_after_ms` 相同(§9.1;字段叫 `code` 是因为帧里已经有 `kind:"error"`),`message` 同样是 "<kind>: <描述>";`persisted` 同 `turn_complete` 的(§7.2)。会话在这一轮中途被关闭或删除时 `code` 为 `session_closed`,引擎在一轮中途退出时为 `engine_stopped`,这两种 `persisted` 为 `false`(引擎没来得及报这一轮写到了哪里) |
 | `task_started` | `{task}` | 这个会话的一件任务开始了(`task` 同 `session.tasks` 的条目)。Shell 命令与监视器只在跑过 1 秒后才报,短命令不报;MCP 任务在 server 建任务时立即报;不属于任何一轮,`turn_id` 为 `null` |
 | `task_updated` | `{task}` | 一件报过开始、还没结束的任务变了:子 Agent 每调完一次模型(`task.usage`),有询问开始或结束等待(`task.status` 在 `waiting` 与 `running` 之间);`turn_id` 为 `null` |
@@ -4141,7 +4163,8 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 
 ```jsonc
 { "kind":"turn_complete", "stop_reason":"end_turn", "api_calls":2, "tool_calls":1, "seq":14,
-  "usage":{…},                 // 本轮所有调用的合计
+  "usage":{…},                 // 本轮所有调用的合计,含子 Agent 与旁路调用
+  "usage_breakdown":{ "own":{…}, "side":{…}, "delegates":{…} },  // usage 的拆分
   "last_call_usage":{…},       // 本轮最后一次调用
   "context":{ "tokens":120000, "compact_threshold":150000, "window":200000 },
   "structured_output":{…},     // 可选
@@ -4159,8 +4182,13 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 **是这一轮所有模型调用的合计**,不是最后一趟。一轮可能来回好几趟
 (`api_calls` 就是趟数),按最后一趟计费会少算——用它做预算的宿主尤其要看清这一点。
 
-它**只算这个会话自己的调用**,不含这一轮里起的子 Agent。子 Agent 的用量在它的任务上
-(`session.tasks`、`task_finished` 的 `task.usage`);要一轮的总花费,把两者加起来。
+它与 `turn.token_budget` 算的是同一组调用(§4.8):这个会话自己的、它在旁边发的(压缩、记忆、
+`WebSearch` / `WebFetch` 的模型调用)、以及这一轮起的子 Agent 与团队成员的(连同它们各自的旁路调用与再起的
+子 Agent)。`usage_breakdown` 把它分成三份,各是四字段用量,三份相加等于 `usage`:`own` 是这一轮主循环
+自己的调用,`side` 是旁路调用,`delegates` 是子 Agent 与团队成员的。拿 `usage` 的输入加输出就能和预算对上。
+`turn_complete` 发出时还没结束的调用不在里面:轮末起的记忆抽取、这一轮起的后台子 Agent 此后的调用照样算进
+这一轮的预算,但报不进已经发出的这一帧;它们的用量在各自的任务上(`session.tasks`、`task_finished` 的
+`task.usage`)。
 
 `structured_output` 是本轮模型最后一次成功交给 `StructuredOutput` 的内容,会话带
 `output_schema` 时它一定满足那份 schema;本轮没有调用这个工具就没有这个键。

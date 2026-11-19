@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// How a turn's `usage` divides: its agent's own model calls, the calls made
+/// on its side (compaction, memory, web search and extraction), and its
+/// delegates' (sub-agents, team members, theirs included).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct UsageBreakdown {
+    pub own: crate::interface::model::Usage,
+    pub side: crate::interface::model::Usage,
+    pub delegates: crate::interface::model::Usage,
+}
+
 /// How much of the context window a session is using, after a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextUsage {
@@ -273,7 +285,12 @@ pub enum AgentEvent {
         stop_reason: String,
         api_calls: u32,
         tool_calls: u32,
+        /// Every call of the turn as it ends: its own, its side calls' and
+        /// its delegates', split in `usage_breakdown`. A background
+        /// delegate's calls after the turn ended are not in it.
         usage: Usage,
+        #[serde(default)]
+        usage_breakdown: UsageBreakdown,
         turn_id: String,
         /// Why the turn was stopped, when whatever stopped it said so — a
         /// hook's `message`, for instance.

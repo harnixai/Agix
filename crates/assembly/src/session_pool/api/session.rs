@@ -17,6 +17,10 @@ pub struct SessionCreated {
     /// `true`: the `session_id` asked for was already a session, and this is
     /// it; nothing was created.
     pub existing: bool,
+    /// The limits in `options` the settings hold lower than asked: the
+    /// session runs on `applied`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clamped_options: Vec<super::ClampedOption>,
 }
 
 /// What a session already under an id is, for the `SESSION_EXISTS` that

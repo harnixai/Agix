@@ -27,6 +27,9 @@ struct ModelCall {
     started: std::time::Instant,
     images: Arc<std::sync::Mutex<Vec<PendingToolImage>>>,
     discontinued: Arc<std::sync::atomic::AtomicBool>,
+    /// Its usage is in the turn's spend already: it was added as the reply
+    /// ended, before the reply's tool calls had finished.
+    spent_early: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Agent {
@@ -46,6 +49,9 @@ impl Agent {
         {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
+        let ControlFlow::Continue(headroom) = self.budget_before_call() else {
+            return Ok(ControlFlow::Break(StopReason::BudgetExceeded));
+        };
 
         self.fit_context(cancel).await;
         if cancel.is_cancelled() {
@@ -56,7 +62,7 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::ContextExceeded));
         }
 
-        let call = self.call_model(state, cancel).await?;
+        let call = self.call_model(state, headroom, cancel).await?;
         self.account_call(state, &call).await;
         if call.result.cancelled {
             return Ok(ControlFlow::Continue(()));
@@ -88,7 +94,7 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
 
-        if self.charge_budget(state).is_break() {
+        if self.charge_budget().is_break() {
             return Ok(ControlFlow::Break(StopReason::BudgetExceeded));
         }
 
@@ -122,7 +128,11 @@ impl Agent {
         false
     }
 
-    async fn start_step(&mut self, state: &mut TurnLoopState) -> (u32, ModelRequest) {
+    async fn start_step(
+        &mut self,
+        state: &mut TurnLoopState,
+        headroom: Option<u32>,
+    ) -> (u32, ModelRequest) {
         let step = state.api_calls;
         state.api_calls += 1;
         self.emit(AgentEvent::StepStart {
@@ -141,8 +151,9 @@ impl Agent {
             )
             .with_turn_id(self.current_turn_id.clone()),
         );
+        let max_tokens = headroom.map_or(state.max_tokens, |left| state.max_tokens.min(left));
         let request = self
-            .prepare_request(&state.model, state.max_tokens, origin.clone())
+            .prepare_request(&state.model, max_tokens, origin.clone())
             .await;
         (step, request)
     }
@@ -150,9 +161,10 @@ impl Agent {
     async fn call_model(
         &mut self,
         state: &mut TurnLoopState,
+        headroom: Option<u32>,
         cancel: &CancellationToken,
     ) -> Result<ModelCall, TurnError> {
-        let (step, mut request) = self.start_step(state).await;
+        let (step, mut request) = self.start_step(state, headroom).await;
         // Taken before the request is handed on: accounting needs the size
         // of what went out.
         let sent_message_count = request.messages.len();
@@ -164,6 +176,7 @@ impl Agent {
         let call_started = std::time::Instant::now();
         state.turn_no = self.session.turn_count;
         let discontinued = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let spent_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let tool_images: Arc<std::sync::Mutex<Vec<PendingToolImage>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let template = self.tool_exec_ctx(cancel, &discontinued, &tool_images);
@@ -171,7 +184,9 @@ impl Agent {
         let (result, messages_before_step) = loop {
             let messages_before_step = self.session.messages().len();
             let sent = request.clone();
-            let attempt = self.stream_once(request, &template, cancel).await;
+            let attempt = self
+                .stream_once(request, &template, &spent_early, cancel)
+                .await;
             let (failure, after_first_byte) = match attempt {
                 Ok(result) => break (result, messages_before_step),
                 Err(failure) => failure,
@@ -218,6 +233,7 @@ impl Agent {
             started: call_started,
             images: tool_images,
             discontinued,
+            spent_early,
         })
     }
 
@@ -226,11 +242,24 @@ impl Agent {
         &mut self,
         request: ModelRequest,
         template: &ToolExecCtx,
+        spent_early: &Arc<std::sync::atomic::AtomicBool>,
         cancel: &CancellationToken,
     ) -> Result<crate::streaming::StreamResult, (crate::streaming::StreamFailure, bool)> {
         let stream = match self.send(request, cancel.clone()).await {
             Ok(stream) => stream,
             Err(error) => return Err((crate::streaming::StreamFailure::refused(error), false)),
+        };
+        // A delegate the reply starts runs before `execute_stream` returns;
+        // it has to see this call's spend.
+        let stream: base::interface::model::ModelStream = {
+            let (spend, spent_early) = (self.turn.scope.spend().clone(), spent_early.clone());
+            Box::new(futures::StreamExt::map(stream, move |item| {
+                if let Ok(base::interface::model::ModelEvent::EndTurn { usage, .. }) = &item {
+                    spend.add(*usage);
+                    spent_early.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                item
+            }))
         };
         let tools_for_safety = Arc::clone(&template.tools);
         let cancel_grace = template.config.tool_cancel_grace;
@@ -335,6 +364,9 @@ impl Agent {
         // Not beside the budget check below: a turn can end between the two,
         // and a call that happened has to be counted.
         state.spent = state.spent.plus(usage);
+        if !call.spent_early.load(std::sync::atomic::Ordering::Relaxed) {
+            self.turn.scope.spend().add(usage);
+        }
     }
 
     async fn after_reply(&mut self, call: &ModelCall, cancel: &CancellationToken) {
@@ -365,10 +397,35 @@ impl Agent {
         }
     }
 
-    fn charge_budget(&mut self, state: &TurnLoopState) -> ControlFlow<()> {
+    /// How much output the next call may ask for under the budget, or the
+    /// turn's end when what remains of it cannot pay for a call.
+    fn budget_before_call(&mut self) -> ControlFlow<(), Option<u32>> {
+        let spend = self.turn.scope.spend().whole_turn();
+        let Some(remaining) = self.policies.budget_policy().remaining(&spend) else {
+            return ControlFlow::Continue(None);
+        };
+        if remaining.tokens < base::interface::budget_policy::MIN_CALL_TOKENS {
+            let total_tokens_used = spend.total_tokens();
+            tracing::warn!(
+                total_tokens_used,
+                budget = remaining.limit,
+                left = remaining.tokens,
+                "token budget too low for another call"
+            );
+            self.record_budget_enforced(
+                telemetry::BudgetEnforcedAction::TurnStopped,
+                total_tokens_used,
+                remaining.limit,
+            );
+            return ControlFlow::Break(());
+        }
+        ControlFlow::Continue(Some(u32::try_from(remaining.tokens).unwrap_or(u32::MAX)))
+    }
+
+    fn charge_budget(&mut self) -> ControlFlow<()> {
         // The engine hands the policy all four figures; which count as
         // spent is its judgement.
-        let spend = base::interface::budget_policy::Spend::from(state.spent);
+        let spend = self.turn.scope.spend().whole_turn();
         let total_tokens_used = spend.total_tokens();
         match self.policies.budget_policy().on_usage(&spend) {
             base::interface::budget_policy::Spending::WithinBudget => {}
@@ -378,17 +435,11 @@ impl Agent {
                     budget = limit,
                     "approaching token budget limit; injecting continue reminder"
                 );
-                self.telemetry
-                    .record(telemetry::TelemetryEvent::budget_enforced(
-                        &self.session.session_id,
-                        self.session.turn_count,
-                        Some(self.current_turn_id.clone()),
-                        telemetry::BudgetEnforcedPayload {
-                            action: telemetry::BudgetEnforcedAction::WarningInjected,
-                            total_tokens_used,
-                            budget: limit,
-                        },
-                    ));
+                self.record_budget_enforced(
+                    telemetry::BudgetEnforcedAction::WarningInjected,
+                    total_tokens_used,
+                    limit,
+                );
                 self.session.push_message(ModelMessage {
                     role: MessageRole::User,
                     content: vec![ModelContentBlock::Text { text: reminder }],
@@ -396,21 +447,34 @@ impl Agent {
             }
             base::interface::budget_policy::Spending::Exhausted { limit } => {
                 tracing::warn!(total_tokens_used, budget = limit, "token budget exceeded");
-                self.telemetry
-                    .record(telemetry::TelemetryEvent::budget_enforced(
-                        &self.session.session_id,
-                        self.session.turn_count,
-                        Some(self.current_turn_id.clone()),
-                        telemetry::BudgetEnforcedPayload {
-                            action: telemetry::BudgetEnforcedAction::TurnStopped,
-                            total_tokens_used,
-                            budget: limit,
-                        },
-                    ));
+                self.record_budget_enforced(
+                    telemetry::BudgetEnforcedAction::TurnStopped,
+                    total_tokens_used,
+                    limit,
+                );
                 return ControlFlow::Break(());
             }
         }
         ControlFlow::Continue(())
+    }
+
+    fn record_budget_enforced(
+        &self,
+        action: telemetry::BudgetEnforcedAction,
+        total_tokens_used: u64,
+        budget: u64,
+    ) {
+        self.telemetry
+            .record(telemetry::TelemetryEvent::budget_enforced(
+                &self.session.session_id,
+                self.session.turn_count,
+                Some(self.current_turn_id.clone()),
+                telemetry::BudgetEnforcedPayload {
+                    action,
+                    total_tokens_used,
+                    budget,
+                },
+            ));
     }
 
     async fn between_tool_steps(&mut self, state: &mut TurnLoopState, cancel: &CancellationToken) {

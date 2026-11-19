@@ -4,6 +4,7 @@
 
 use super::*;
 
+use base::interface::budget_policy::BudgetPolicy;
 use base::interface::environment::Environment;
 use base::interface::exec::ExecProviders;
 use base::interface::instruction_provider::{InstructionProvider, RuleProvider};
@@ -66,6 +67,9 @@ pub struct HostLayers {
     pub model_interceptors: Vec<Arc<dyn ModelInterceptor>>,
     /// `None` is the engine's default for the session's own settings.
     pub recovery_policy: Option<Arc<dyn RecoveryPolicy>>,
+    /// `None` is the engine's default for the session's own settings. A
+    /// delegate judges the spend it shares with its root turn by the same one.
+    pub budget_policy: Option<Arc<dyn BudgetPolicy>>,
     pub compactor: Option<Arc<dyn Compactor>>,
 }
 
@@ -77,6 +81,7 @@ impl Builder {
             result_transformers: self.host.result_transformers.clone(),
             model_interceptors: self.host.model_interceptors.clone(),
             recovery_policy: self.host.recovery_policy.clone(),
+            budget_policy: self.ext.budget_policy.clone(),
             compactor: self.host.compactor.clone(),
         }
     }
@@ -110,6 +115,7 @@ impl Builder {
                     result_transformers,
                     model_interceptors,
                     recovery_policy,
+                    budget_policy,
                     compactor,
                 },
             attended,
@@ -137,6 +143,7 @@ impl Builder {
         self.host.result_transformers = result_transformers;
         self.host.model_interceptors = model_interceptors;
         self.host.recovery_policy = recovery_policy;
+        self.ext.budget_policy = budget_policy;
         self.host.compactor = compactor;
         self.host.attended = Some(attended);
         self.host.skill_dirs = skill_dirs;

@@ -2,8 +2,8 @@
 //! stage's concurrency limit, with its own mailbox and team-memory tools.
 
 use base::interface::delegate::{
-    CallSite, DelegateEnd, DelegateMode, DelegateRequest, Delegated, Delegator, MemberLifetime,
-    StopsWith, TeamSeat, Workdir,
+    DelegateEnd, DelegateMode, DelegateRequest, Delegated, Delegator, MemberLifetime, StopsWith,
+    TeamSeat, Workdir,
 };
 use base::tool::ToolContext;
 use std::sync::Arc;
@@ -131,10 +131,7 @@ async fn run_member(
     let mut req = DelegateRequest::new(call.prompt, mode, StopsWith::Call(ctx.cancel.clone()));
     req.agent_type = call.agent_type;
     req.workdir = Workdir::At(ctx.cwd.clone());
-    req.called_from = Some(CallSite {
-        turn: ctx.turn_no,
-        tool_use_id: ctx.tool_use_id.clone(),
-    });
+    req.started_by(ctx);
     match delegator.delegate(req).await {
         Ok(Delegated::Finished(outcome)) => match outcome.end {
             DelegateEnd::Completed | DelegateEnd::CutShort(_) => (outcome.text, MemberEnd::Done),

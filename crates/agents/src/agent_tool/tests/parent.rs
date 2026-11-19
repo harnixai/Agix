@@ -321,6 +321,7 @@ impl AgentTool {
             cwd,
             git: None,
             called_from: None,
+            spend: None,
         };
         let built = d
             .build_delegate(

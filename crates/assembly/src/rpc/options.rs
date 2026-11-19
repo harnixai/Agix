@@ -24,6 +24,7 @@ impl SessionOptions {
         "attended",
         "auto_name",
         "skill_dirs",
+        "turn",
     ];
 
     /// The fields whose value is a list. Each entry is read on its own, so
@@ -79,6 +80,7 @@ impl SessionOptions {
                 Ok(()) if name == "recorder" && !recorder_reads(&value, &mut ignored) => {}
                 Ok(()) if name == "thinking_mode" && !thinking_mode_reads(&value, &mut ignored) => {
                 }
+                Ok(()) if name == "turn" && !turn_reads(&value, &mut ignored) => {}
                 Ok(()) => {
                     readable.insert(name.clone(), value);
                 }
@@ -143,6 +145,23 @@ fn recorder_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
     for (field, error) in &problems {
         ignored.push(IgnoredOption {
             field: Some(format!("recorder.{field}")),
+            error: error.clone(),
+        });
+    }
+    problems.is_empty()
+}
+
+/// Whether `options.turn` holds usable limits; what does not is added to
+/// `ignored` by field.
+fn turn_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
+    use crate::session_pool::api::TurnOptions;
+    let Ok(turn) = serde_json::from_value::<TurnOptions>(value.clone()) else {
+        return true;
+    };
+    let problems = turn.problems();
+    for (field, error) in &problems {
+        ignored.push(IgnoredOption {
+            field: Some(format!("turn.{field}")),
             error: error.clone(),
         });
     }
@@ -289,6 +308,10 @@ mod tests {
             skill_dirs: vec![crate::session_pool::api::SkillDirOption {
                 path: "/skills".into(),
             }],
+            turn: Some(crate::session_pool::api::TurnOptions {
+                token_budget: Some(1),
+                max_model_calls: None,
+            }),
         };
         let serialized = serde_json::to_value(&every_field).unwrap();
         let mut names: Vec<&str> = serialized

@@ -84,6 +84,87 @@ pub struct SessionOptions {
     /// every session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_dirs: Vec<SkillDirOption>,
+    /// Tighter limits on this session's turns than the settings' `turn`
+    /// block. Its sub-agents and team members are held to them as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<TurnOptions>,
+}
+
+/// `options.turn`: each limit given is the lower of it and the setting of
+/// the same name. A value above the setting's leaves the setting's in force.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
+#[serde(default, deny_unknown_fields)]
+pub struct TurnOptions {
+    /// Under `turn.token_budget`: what one turn and its delegates may spend
+    /// together. At least 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_budget: Option<u64>,
+    /// Under `turn.max_model_calls`: each agent's own model calls in a turn.
+    /// At least 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_model_calls: Option<u32>,
+}
+
+/// A limit in `options` the settings held lower than it was asked for.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+pub struct ClampedOption {
+    /// Dotted, as in `options`: `turn.token_budget`.
+    pub field: String,
+    pub requested: u64,
+    pub applied: u64,
+}
+
+impl TurnOptions {
+    /// `turn` held to these, and the fields of these it held lower instead.
+    pub fn tighten(&self, turn: &mut settings::TurnSettings) -> Vec<ClampedOption> {
+        let mut clamped = Vec::new();
+        if let Some(asked) = self.token_budget {
+            match turn.token_budget {
+                Some(set) if set < asked => clamped.push(ClampedOption {
+                    field: "turn.token_budget".into(),
+                    requested: asked,
+                    applied: set,
+                }),
+                _ => turn.token_budget = Some(asked),
+            }
+        }
+        if let Some(asked) = self.max_model_calls {
+            if turn.max_model_calls < asked {
+                clamped.push(ClampedOption {
+                    field: "turn.max_model_calls".into(),
+                    requested: asked.into(),
+                    applied: turn.max_model_calls.into(),
+                });
+            } else {
+                turn.max_model_calls = asked;
+            }
+        }
+        clamped
+    }
+
+    /// What is wrong with the values given, by field.
+    pub fn problems(&self) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        if self.token_budget == Some(0) {
+            out.push(("token_budget", "must be at least 1".to_string()));
+        }
+        if self.max_model_calls == Some(0) {
+            out.push(("max_model_calls", "must be at least 1".to_string()));
+        }
+        out
+    }
 }
 
 /// One entry of `options.skill_dirs` and `session.setSkillDirs`.
@@ -218,6 +299,12 @@ pub struct TelemetryOptions {
 }
 
 impl SessionOptions {
+    /// What `options.turn` asks the settings' `turn` limits be held to, and
+    /// those it asked for above the settings'.
+    pub fn tighten_turn(&self, turn: &mut settings::TurnSettings) -> Vec<ClampedOption> {
+        self.turn.map(|t| t.tighten(turn)).unwrap_or_default()
+    }
+
     /// Whether the session may be named after its first turn: unless
     /// `auto_name` says no.
     pub fn names_itself(&self) -> bool {

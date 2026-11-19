@@ -282,15 +282,27 @@ impl Agent {
     pub fn model_for_task(&self, task: &str) -> (Arc<dyn base::interface::model::Model>, String) {
         match &self.llm.task_router {
             Some(router) => (
-                self.accounted(router.model_for(task)),
+                self.spent_in_turn(self.accounted(router.model_for(task))),
                 router
                     .model_name_for(task)
                     .unwrap_or_else(|| self.settings.values.model.model_name.clone()),
             ),
             None => (
-                self.llm.model.clone(),
+                self.spent_in_turn(self.llm.model.clone()),
                 self.settings.values.model.model_name.clone(),
             ),
+        }
+    }
+
+    /// `model`, its calls spent into the turn in progress; as it is between
+    /// turns.
+    pub(crate) fn spent_in_turn(
+        &self,
+        model: Arc<dyn base::interface::model::Model>,
+    ) -> Arc<dyn base::interface::model::Model> {
+        match self.open_turn.spend() {
+            Some(turn) => super::SpentModel::into_turn(model, turn),
+            None => model,
         }
     }
 

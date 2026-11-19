@@ -22,9 +22,9 @@ struct TurnLoopState {
     api_calls: u32,
     tool_calls: u32,
     structured_output_calls: u32,
-    // What the turn has spent, kept once. The budget reads it through
-    // `Spend` and a caller reads it whole; a second accumulator beside it
-    // would let the two disagree about the cache.
+    // What this agent's own calls have spent this turn, as its outcome
+    // reports it. The budget reads the turn's shared spend instead
+    // (`TurnScope::spend`), which the delegates of the turn add to as well.
     spent: Usage,
     last_call: Usage,
     had_tool_uses: bool,

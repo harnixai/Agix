@@ -41,6 +41,9 @@ pub struct DelegateRequest {
     pub asks: AskRoute,
     /// The caller's own label, carried on the delegate's task untouched.
     pub tag: Option<String>,
+    /// The turn the delegate spends into and judges its budget by; `None`
+    /// gives each of its turns a spend of its own.
+    pub spend: Option<Arc<crate::interface::budget_policy::TurnSpend>>,
     pub mode: DelegateMode,
 }
 
@@ -63,8 +66,18 @@ impl DelegateRequest {
             called_from: None,
             asks: AskRoute::Host,
             tag: None,
+            spend: None,
             mode,
         }
+    }
+
+    /// Started by the tool call of `ctx`: called from it, spending into its turn.
+    pub fn started_by(&mut self, ctx: &super::tool::ToolContext) {
+        self.called_from = Some(CallSite {
+            turn: ctx.turn_no,
+            tool_use_id: ctx.tool_use_id.clone(),
+        });
+        self.spend = Some(ctx.turn.spend().clone());
     }
 }
 

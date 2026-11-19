@@ -80,6 +80,8 @@ impl Builder {
             ),
             settings,
             turn: Default::default(),
+            charged_to: None,
+            open_turn: w.open_turn,
             last_had_tool_uses: true,
             repeat_guard: Default::default(),
             telemetry: Telemetry::new(w.resolved.telemetry_handle),

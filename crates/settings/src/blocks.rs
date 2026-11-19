@@ -100,8 +100,13 @@ pub struct TurnSettings {
     /// detects a *lack of progress* — a model repeating the same failing
     /// tool call burns the whole allowance either way.
     pub max_model_calls: u32,
-    /// Maximum cumulative tokens (input + output, summed across every API
-    /// call in a turn) before the turn is aborted with `budget_exceeded`.
+    /// Maximum cumulative tokens (input + output, cache not counted) one
+    /// turn may spend, its delegates included: every model call of the turn
+    /// and of the sub-agents and team members it starts or hands work to —
+    /// a background sub-agent's after the turn has ended too — counts toward
+    /// one total. Each call asks for no more output than is left; with less
+    /// than 1024 left no call is sent. The turn ends with `budget_exceeded`,
+    /// and a delegate still running ends the same way before its next call.
     /// `None` = unlimited.
     ///
     /// Deliberately token-based, not a dollar figure: provider prices change

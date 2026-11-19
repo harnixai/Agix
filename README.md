@@ -639,6 +639,7 @@ A few switches whose effect the rest of this README does not mention:
 | `telemetry.enabled` | `true` | one telemetry JSONL file per session under the project's `.agix/state/telemetry/` (the state directory's `telemetry/` without a project) |
 | `telemetry.otlp_endpoint` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |
 | `prompt.instruction_files` | `[]` | more instruction files, read in order when the session is built and given to the model like `AGENTS.md` |
+| `turn.token_budget` | none (unlimited) | the input plus output tokens (cache not counted) one turn may spend, together with the sub-agents and team members it starts or hands work to and the calls made on the side (compaction, memory, `WebSearch`, `WebFetch` extraction); each call asks for no more output than is left, and the turn ends with `budget_exceeded` once it is spent. A session can only lower it, with `session.create`'s `options.turn` |
 | `hooks` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |
 | `skills.allow_shell` | `true` | `false` replaces a skill body's `` !`cmd` `` with a notice instead of running it |
 | `team.enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |

@@ -144,6 +144,7 @@ impl Delegator {
             called_from,
             asks,
             tag,
+            spend,
             mode,
             ..
         } = req;
@@ -159,6 +160,7 @@ impl Delegator {
             cwd,
             git,
             called_from,
+            spend,
         };
         let stop = match stops_with {
             StopsWith::Call(token) => token.child_token(),

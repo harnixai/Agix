@@ -45,7 +45,8 @@ pub use mcp::{
     McpServerWritten, McpStatusList,
 };
 pub use options::{
-    ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption, TelemetryOptions,
+    ClampedOption, ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption,
+    TelemetryOptions, TurnOptions,
 };
 pub use plugin::{
     CommandConflict, CommandShadow, PluginCommand, PluginDisclosure, PluginFunctionEntry,

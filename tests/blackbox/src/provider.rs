@@ -123,6 +123,14 @@ pub enum Reply {
     /// name is each event's `type`). For a project whose provider is
     /// `openai_responses` with this stub as its `base_url`.
     Responses(Vec<serde_json::Value>),
+    /// [`Blocks`](Self::Blocks) or [`Ended`](Self::Ended) reporting `input`
+    /// and `output` tokens and no cache, in place of the stub's usual usage:
+    /// what a token budget is measured against.
+    Spent {
+        input: u64,
+        output: u64,
+        reply: Box<Reply>,
+    },
 }
 
 impl Reply {
@@ -145,6 +153,14 @@ impl Reply {
         Self::Ended {
             blocks,
             stop_reason: stop_reason.into(),
+        }
+    }
+
+    pub fn spent(input: u64, output: u64, reply: Reply) -> Self {
+        Self::Spent {
+            input,
+            output,
+            reply: Box::new(reply),
         }
     }
 
@@ -224,6 +240,32 @@ impl Reply {
     fn render(&self) -> (Duration, Vec<u8>) {
         match self {
             Self::Blocks(blocks) => (Duration::ZERO, sse_response(blocks, None).into_bytes()),
+            Self::Spent {
+                input,
+                output,
+                reply,
+            } => {
+                let usage = StubUsage {
+                    input: *input,
+                    output: *output,
+                    cache_creation: 0,
+                    cache_read: 0,
+                };
+                match reply.as_ref() {
+                    Self::Blocks(blocks) => (
+                        Duration::ZERO,
+                        sse_spending(blocks, None, usage).into_bytes(),
+                    ),
+                    Self::Ended {
+                        blocks,
+                        stop_reason,
+                    } => (
+                        Duration::ZERO,
+                        sse_spending(blocks, Some(stop_reason), usage).into_bytes(),
+                    ),
+                    other => other.render(),
+                }
+            }
             Self::Ended {
                 blocks,
                 stop_reason,
@@ -749,6 +791,27 @@ pub(crate) fn http_response(code: u16, body: &str) -> String {
 /// streaming response is framed and what lets the deltas below be a stream
 /// rather than one blob the client sees all at once.
 fn sse_response(blocks: &[Block], stop_reason: Option<&str>) -> String {
+    sse_spending(
+        blocks,
+        stop_reason,
+        StubUsage {
+            input: INPUT_TOKENS,
+            output: OUTPUT_TOKENS,
+            cache_creation: CACHE_CREATION_TOKENS,
+            cache_read: CACHE_READ_TOKENS,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct StubUsage {
+    input: u64,
+    output: u64,
+    cache_creation: u64,
+    cache_read: u64,
+}
+
+fn sse_spending(blocks: &[Block], stop_reason: Option<&str>, usage: StubUsage) -> String {
     let mut out = String::from(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncache-control: no-cache\r\nconnection: close\r\n\r\n",
     );
@@ -764,10 +827,10 @@ fn sse_response(blocks: &[Block], stop_reason: Option<&str>) -> String {
             "model": "claude-sonnet-4-6",
             "role": "assistant",
             "usage": {
-                "input_tokens": INPUT_TOKENS,
+                "input_tokens": usage.input,
                 "output_tokens": 0,
-                "cache_creation_input_tokens": CACHE_CREATION_TOKENS,
-                "cache_read_input_tokens": CACHE_READ_TOKENS
+                "cache_creation_input_tokens": usage.cache_creation,
+                "cache_read_input_tokens": usage.cache_read
             }
         }
     })));
@@ -835,7 +898,7 @@ fn sse_response(blocks: &[Block], stop_reason: Option<&str>) -> String {
     out.push_str(&event(&serde_json::json!({
         "type": "message_delta",
         "delta": { "stop_reason": stop_reason },
-        "usage": { "output_tokens": OUTPUT_TOKENS }
+        "usage": { "output_tokens": usage.output }
     })));
     out.push_str(&event(&serde_json::json!({ "type": "message_stop" })));
     out

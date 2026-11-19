@@ -53,5 +53,6 @@ mod settings_take_effect;
 mod skills_and_memory;
 mod stream_recovery;
 mod team_lifecycle;
+mod turn_limits;
 mod turn_throughput;
 mod worktree_location;

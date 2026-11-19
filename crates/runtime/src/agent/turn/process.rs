@@ -484,7 +484,8 @@ impl Agent {
         cancel: CancellationToken,
         origin: history::entry::MessageOrigin,
     ) -> Result<TurnOutcome, TurnError> {
-        self.turn = super::TurnState::opening(&self.current_turn_id);
+        self.turn = super::TurnState::opening(&self.current_turn_id, self.charged_to.take());
+        self.open_turn.open(self.turn.scope.spend().clone());
         crate::steering::lock(&self.channels.steering).open();
         let outcome = self
             .run_user_turn_inner(content, attachments, cancel, origin)
@@ -496,7 +497,9 @@ impl Agent {
                 turn_id: self.current_turn_id.clone(),
             });
         }
-        self.finish_turn(outcome).await
+        let outcome = self.finish_turn(outcome).await;
+        self.open_turn.close();
+        outcome
     }
 
     /// Add the messages the user sent during this turn to the conversation.
@@ -736,11 +739,22 @@ impl Agent {
                 spent.api_calls = spent.api_calls.saturating_add(o.api_calls);
                 spent.tool_calls = spent.tool_calls.saturating_add(o.tool_calls);
             }
+            let (usage, usage_breakdown) = match self.open_turn.spend() {
+                Some(spend) => super::side_spend::turn_usage(&spend, o.total_usage),
+                None => (
+                    o.total_usage,
+                    base::event::UsageBreakdown {
+                        own: o.total_usage,
+                        ..Default::default()
+                    },
+                ),
+            };
             self.emit(AgentEvent::TurnComplete {
                 stop_reason: o.stop_reason.clone(),
                 api_calls: o.api_calls,
                 tool_calls: o.tool_calls,
-                usage: o.total_usage,
+                usage,
+                usage_breakdown,
                 turn_id: self.current_turn_id.clone(),
                 message: o.message.clone(),
                 last_call_usage: self.turn.last_call_usage.unwrap_or_default(),

@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use super::{DelegateRun, Delegator, SlotRule, Start, StopReason};
 use crate::agent_tool::{
     bg_task_id, conclude, failed, open_inbox, panic_message, run_one_turn, task_notification,
-    Delegate, Spec,
+    Delegate, OneTurn, Spec,
 };
 use futures::FutureExt as _;
 
@@ -41,6 +41,23 @@ pub(crate) struct PersistentMember {
 pub(crate) struct PersistentMessage {
     pub(crate) prompt: String,
     pub(crate) lease: TaskLease,
+    /// The spend of the turn that handed it over, which running it spends into.
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+}
+
+impl PersistentMessage {
+    /// No `SubagentTag`: a member outlives any one parent turn, so there is
+    /// no turn to attribute its events to; it shows through `TeamProgress`
+    /// and `TeamList` instead.
+    fn into_turn(self) -> (OneTurn, TaskLease) {
+        let turn = OneTurn {
+            prompt: self.prompt,
+            cancel: self.lease.task().cancel.clone(),
+            tag: None,
+            spend: self.spend,
+        };
+        (turn, self.lease)
+    }
 }
 
 /// A member's queue. A message is its task's lease: queuing one registers
@@ -86,6 +103,7 @@ impl MemberInbox {
         seat: &TeamSeat,
         member_cancel: &CancellationToken,
         prompt: String,
+        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
     ) -> Option<String> {
         let lease = TaskLease::new(
             delegator.env.parent.state.clone(),
@@ -101,7 +119,11 @@ impl MemberInbox {
             unfinished.retain(|task| !task.has_ended());
             unfinished.push(lease.task().clone());
         }
-        match self.tx.send(PersistentMessage { prompt, lease }) {
+        match self.tx.send(PersistentMessage {
+            prompt,
+            lease,
+            spend,
+        }) {
             Ok(()) => Some(task_id),
             Err(refused) => {
                 refused
@@ -172,7 +194,7 @@ impl Delegator {
         let key = (seat.team.clone(), seat.member.clone());
         self.reclaim_idle_members(Some(&key));
 
-        if let Some(started) = self.message_live_member(&key, &seat, &prompt) {
+        if let Some(started) = self.message_live_member(&key, &seat, &prompt, spec.spend.clone()) {
             return Ok(started);
         }
         let live = &self.members.live;
@@ -222,6 +244,7 @@ impl Delegator {
         key: &(String, String),
         seat: &TeamSeat,
         prompt: &str,
+        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
     ) -> Option<Delegated> {
         let live = &self.members.live;
         let (inbox, cancel, session_id, idle_since, idle_seq) = live
@@ -237,7 +260,7 @@ impl Delegator {
                     m.idle_seq.clone(),
                 )
             })?;
-        let Some(task_id) = inbox.deliver(self, seat, &cancel, prompt.to_string()) else {
+        let Some(task_id) = inbox.deliver(self, seat, &cancel, prompt.to_string(), spend) else {
             // Its loop has ended since; the caller spawns afresh under the same key.
             live.write().unwrap_or_else(|e| e.into_inner()).remove(key);
             return None;
@@ -304,7 +327,7 @@ impl Delegator {
             },
         );
         let task_id = inbox
-            .deliver(self, &seat, &cancel, prompt)
+            .deliver(self, &seat, &cancel, prompt, spec.spend.clone())
             .ok_or_else(|| DelegateError::Build("the new member's inbox closed".into()))?;
         tokio::spawn(member_loop(MemberLoop {
             id,
@@ -483,9 +506,10 @@ async fn member_loop(mut m: MemberLoop) {
             message = m.messages.recv() => message,
             _ = tokio::time::sleep(m.idle_bound) => m.leave_unless_messaged().await,
         };
-        let Some(PersistentMessage { prompt, lease }) = message else {
+        let Some(message) = message else {
             break;
         };
+        let (turn, lease) = message.into_turn();
         m.idle_since.store(i64::MAX, Ordering::SeqCst);
         m.idle_seq.store(u64::MAX, Ordering::SeqCst);
         m.lifecycle(TeammateLifecycle::Active, None);
@@ -496,15 +520,10 @@ async fn member_loop(mut m: MemberLoop) {
             Ok(slot) => {
                 let d = &mut m.delegate;
                 open_inbox(Some(&task), &d.agent);
-                // No `SubagentTag`: a member outlives any one parent turn, so
-                // there is no turn to attribute its events to; it shows
-                // through `TeamProgress` and `TeamList` instead.
                 let ran = std::panic::AssertUnwindSafe(run_one_turn(
                     &mut d.agent,
                     &mut d.event_rx,
-                    prompt,
-                    task.cancel.clone(),
-                    None,
+                    turn,
                     Some(&task),
                 ))
                 .catch_unwind()

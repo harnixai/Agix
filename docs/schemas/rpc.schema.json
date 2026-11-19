@@ -1047,6 +1047,31 @@
       ],
       "type": "string"
     },
+    "ClampedOption": {
+      "description": "A limit in `options` the settings held lower than it was asked for.",
+      "properties": {
+        "applied": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "field": {
+          "description": "Dotted, as in `options`: `turn.token_budget`.",
+          "type": "string"
+        },
+        "requested": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "field",
+        "requested",
+        "applied"
+      ],
+      "type": "object"
+    },
     "ClockOptions": {
       "properties": {
         "start": {
@@ -7481,6 +7506,13 @@
     },
     "SessionCreated": {
       "properties": {
+        "clamped_options": {
+          "description": "The limits in `options` the settings hold lower than asked: the\nsession runs on `applied`.",
+          "items": {
+            "$ref": "#/$defs/ClampedOption"
+          },
+          "type": "array"
+        },
         "created_at": {
           "type": "string"
         },
@@ -7899,6 +7931,17 @@
             }
           ],
           "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking`. Its sub-agents keep the settings'."
+        },
+        "turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tighter limits on this session's turns than the settings' `turn`\nblock. Its sub-agents and team members are held to them as it is."
         }
       },
       "type": "object"
@@ -9216,6 +9259,31 @@
           "type": "string"
         }
       ]
+    },
+    "TurnOptions": {
+      "additionalProperties": false,
+      "description": "`options.turn`: each limit given is the lower of it and the setting of\nthe same name. A value above the setting's leaves the setting's in force.",
+      "properties": {
+        "max_model_calls": {
+          "description": "Under `turn.max_model_calls`: each agent's own model calls in a turn.\nAt least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "token_budget": {
+          "description": "Under `turn.token_budget`: what one turn and its delegates may spend\ntogether. At least 1.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "TurnReply": {
       "anyOf": [

@@ -79,6 +79,7 @@ const INHERITED: &[(&str, &str)] = &[
     ("result_transformers", "host_layers.result_transformers"),
     ("model_interceptors", "host_layers.model_interceptors"),
     ("recovery_policy", "host_layers.recovery_policy"),
+    ("budget_policy", "host_layers.budget_policy"),
     ("compactor", "host_layers.compactor"),
     ("attended", "attended"),
     ("skill_dirs", "skill_dirs"),
@@ -195,7 +196,6 @@ const NOT_FOR_DELEGATES: &[(&str, &str)] = &[
         "assembles the root's prompt; a delegate keeps the engine's",
     ),
     ("turn_policy", "a delegate has its own ceilings"),
-    ("budget_policy", "a delegate has its own ceilings"),
     ("health_checks", "the host asks the root"),
     (
         "event_sinks",

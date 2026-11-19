@@ -15,14 +15,18 @@ pub(in crate::session_pool) struct NewPlace {
 }
 
 /// `session.create`'s answer for `core`, a primary session in `scene` on
-/// `project`.
+/// `project`, created with `options`.
 pub(in crate::session_pool) fn created_answer(
     core: &SessionCore,
     scene: &str,
     project: Option<&Path>,
     binding: &ProjectBinding,
+    options: Option<&SessionOptions>,
     existing: bool,
 ) -> api::SessionCreated {
+    let clamped_options = options.map_or_else(Vec::new, |o| {
+        o.tighten_turn(&mut binding.settings.values.turn.clone())
+    });
     api::SessionCreated {
         session_id: core.id().to_string(),
         scene: scene.to_string(),
@@ -32,6 +36,7 @@ pub(in crate::session_pool) fn created_answer(
         trust_source: binding.settings.trust_source(),
         created_at: format_time(core.created_at()),
         existing,
+        clamped_options,
     }
 }
 
@@ -182,6 +187,7 @@ impl SessionPool {
             &place.scene.id,
             place.project.as_deref(),
             &place.binding,
+            options,
             false,
         ))
     }

@@ -51,12 +51,14 @@ impl Builder {
         &self,
         r: &Resolved,
         session_state: &Arc<session_state::SessionState>,
+        open_turn: &crate::turn::OpenTurn,
     ) -> CronWiring {
         let (tools, settings, telemetry_handle) = (&r.tools, &r.settings, &r.telemetry_handle);
         register_task_tools(tools);
         let agent_depth = self.spec.agent_depth;
         let (search_model, search_model_name) =
             self.web_search_model(settings, &r.model, telemetry_handle, session_state);
+        let search_model = crate::turn::SpentModel::into_open(search_model, open_turn.clone());
         tools::register_web_search(tools, search_model, search_model_name);
 
         // Extraction runs only on a model routed for it: the session's own
@@ -68,7 +70,10 @@ impl Builder {
                 telemetry_handle.clone(),
                 settings.values.model.model_name.clone(),
             )) as Arc<dyn Model>;
-            Some((model, name.to_string()))
+            Some((
+                crate::turn::SpentModel::into_open(model, open_turn.clone()),
+                name.to_string(),
+            ))
         });
         tools::register_web_fetch(tools, fetch_extraction);
 
