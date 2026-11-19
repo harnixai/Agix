@@ -5789,6 +5789,13 @@
         "day": {
           "$ref": "#/$defs/PeriodUsage"
         },
+        "error": {
+          "description": "Why the usage could not be read. The provider counts as used up until\nsomeone repairs or removes what is kept: reading it as no usage\nwould hand the provider a fresh quota.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "month": {
           "$ref": "#/$defs/PeriodUsage"
         },

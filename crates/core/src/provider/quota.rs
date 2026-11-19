@@ -27,11 +27,19 @@ pub struct QuotaStatus {
     pub day: PeriodUsage,
     pub week: PeriodUsage,
     pub month: PeriodUsage,
+    /// Why the usage could not be read. The provider counts as used up until
+    /// someone repairs or removes what is kept: reading it as no usage
+    /// would hand the provider a fresh quota.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl QuotaStatus {
     /// Why no more calls go to the provider this period, if none do.
     pub fn exhausted(&self) -> Option<String> {
+        if let Some(error) = &self.error {
+            return Some(error.clone());
+        }
         [
             ("day", &self.day),
             ("week", &self.week),

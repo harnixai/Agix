@@ -116,11 +116,23 @@ impl FileQuotaLedger {
         self.dir.join(format!("{name}.json"))
     }
 
-    fn read(path: &Path) -> UsageFile {
-        std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    /// No file is no usage; a file that is there and does not read is an
+    /// error, never no usage.
+    fn read(path: &Path) -> Result<UsageFile, String> {
+        let unreadable = |e: &dyn std::fmt::Display| {
+            format!("the quota usage file {} does not read: {e}", path.display())
+        };
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(UsageFile::default()),
+            Err(e) => return Err(unreadable(&e)),
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| unreadable(&e))?;
+        if !value.is_object() {
+            return Err(unreadable(&"not a JSON object"));
+        }
+        serde_json::from_value(value).map_err(|e| unreadable(&e))
     }
 
     fn starts(&self) -> [String; 3] {
@@ -138,7 +150,13 @@ impl FileQuotaLedger {
 
 impl QuotaLedger for FileQuotaLedger {
     fn status(&self, provider: &str, quota: &Quota) -> QuotaStatus {
-        let usage = Self::read(&self.file(provider));
+        let (usage, error) = match Self::read(&self.file(provider)) {
+            Ok(usage) => (usage, None),
+            Err(error) => {
+                tracing::warn!(provider, %error, "provider counted as out of quota");
+                (UsageFile::default(), Some(error))
+            }
+        };
         let [day, week, month] = self.starts();
         QuotaStatus {
             day: PeriodUsage {
@@ -156,6 +174,7 @@ impl QuotaLedger for FileQuotaLedger {
                 start: month,
                 limit: quota.month,
             },
+            error,
         }
     }
 
@@ -174,7 +193,13 @@ impl QuotaLedger for FileQuotaLedger {
             }
         };
         let path = self.file(provider);
-        let mut usage = Self::read(&path);
+        let mut usage = match Self::read(&path) {
+            Ok(usage) => usage,
+            Err(error) => {
+                tracing::warn!(provider, tokens, %error, "quota usage not recorded");
+                return;
+            }
+        };
         let [day, week, month] = self.starts();
         add_to(&mut usage.day, day, tokens);
         add_to(&mut usage.week, week, tokens);
@@ -214,6 +239,52 @@ mod tests {
         fn now(&self) -> OffsetDateTime {
             *self.0.lock().unwrap()
         }
+    }
+
+    #[test]
+    fn a_usage_file_that_does_not_read_does_not_reopen_the_quota() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FileQuotaLedger::new(dir.path().join("quota"));
+        let q = Quota {
+            day: Some(100),
+            week: None,
+            month: None,
+        };
+        ledger.record("ds", 150);
+        assert!(ledger.status("ds", &q).exhausted().is_some());
+        let today = period_starts(LocalClock.now()).day;
+        for bad in [
+            "{not json".to_string(),
+            format!(r#"{{"day":{{"start":"{today}","used":-1}}}}"#),
+            format!(r#"{{"day":{{"start":"{today}","used":1.5}}}}"#),
+            format!(r#"{{"day":{{"start":"{today}","used":18446744073709551616}}}}"#),
+            format!(r#"{{"day":{{"start":"{today}"}}}}"#),
+            format!(r#"{{"day":{{"start":"{today}","used":"7"}}}}"#),
+            "[]".to_string(),
+        ] {
+            std::fs::write(dir.path().join("quota/ds.json"), &bad).unwrap();
+            let status = ledger.status("ds", &q);
+            let why = status.exhausted();
+            assert!(why.is_some(), "{bad}: quota reopened");
+            assert!(why.unwrap().contains("ds.json"), "{bad}");
+            assert!(status.error.is_some(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn recording_onto_a_usage_file_that_does_not_read_leaves_it_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FileQuotaLedger::new(dir.path().join("quota"));
+        ledger.record("ds", 1);
+        let path = dir.path().join("quota/ds.json");
+        std::fs::write(&path, "{not json").unwrap();
+        ledger.record("ds", 50);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+        let unlimited = Quota::default();
+        assert!(ledger.status("ds", &unlimited).exhausted().is_some());
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(ledger.status("ds", &unlimited).exhausted(), None);
     }
 
     #[test]

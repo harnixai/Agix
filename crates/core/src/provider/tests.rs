@@ -81,6 +81,7 @@ impl QuotaLedger for Ledger {
             day: usage(quota.day),
             week: usage(quota.week),
             month: usage(quota.month),
+            error: None,
         }
     }
 
