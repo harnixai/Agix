@@ -125,18 +125,17 @@ impl Tool for BashTool {
             }
             Ok(ref p) if is_long_sleep(&p.command) => {
                 let running = background_tasks_besides_the_caller(ctx);
-                if running.is_empty() {
-                    ValidationResult::err(
-                        "sleep >= 2s is blocked — use the Monitor tool for polling, or sleep 1 if \
-                         you must",
-                        4,
-                    )
-                } else {
-                    ValidationResult::err(
-                        format!("sleep >= 2s is blocked. {}", wait_with_task_wait(&running)),
-                        4,
-                    )
-                }
+                let message = match (running.is_empty(), ctx.from_code) {
+                    (true, false) => "sleep >= 2s is blocked — use the Monitor tool for polling, \
+                                      or sleep 1 if you must"
+                        .to_string(),
+                    (true, true) => "sleep >= 2s is blocked — to poll from a program, check in \
+                                     a loop with sleep 1 between checks, or return and leave the \
+                                     waiting to whoever called it"
+                        .to_string(),
+                    (false, _) => format!("sleep >= 2s is blocked. {}", wait_for(ctx, &running)),
+                };
+                ValidationResult::err(message, 4)
             }
             Ok(ref p) if is_sleep_loop(&p.command) => {
                 let running = background_tasks_besides_the_caller(ctx);
@@ -146,7 +145,7 @@ impl Tool for BashTool {
                     ValidationResult::err(
                         format!(
                             "a sleep loop cannot wait for background tasks. {}",
-                            wait_with_task_wait(&running)
+                            wait_for(ctx, &running)
                         ),
                         6,
                     )
@@ -387,13 +386,22 @@ fn started_by_a_caller_of(ctx: &ToolContext, task_id: &str) -> bool {
 
 /// Background tasks report their end as a notice delivered once the current
 /// tool call returns, so a command that sleeps until they finish never sees
-/// them finish.
-fn wait_with_task_wait(running: &[String]) -> String {
+/// them finish. A program cannot call TaskWait, so it is told to hand the
+/// waiting back.
+fn wait_for(ctx: &ToolContext, running: &[String]) -> String {
     let ids = serde_json::to_string(running).unwrap_or_default();
+    let instead = match ctx.from_code {
+        true => "A program cannot wait for them: return, and leave the waiting to whoever \
+                 called it."
+            .to_string(),
+        false => format!(
+            "Wait with TaskWait {{\"task_ids\": {ids}, \"mode\": \"all\", \"timeout_ms\": \
+             600000}} instead."
+        ),
+    };
     format!(
         "Background tasks are still running ({}); their completion notices arrive only after \
-         this tool call returns, so sleeping here cannot see them end. Wait with TaskWait \
-         {{\"task_ids\": {ids}, \"mode\": \"all\", \"timeout_ms\": 600000}} instead.",
+         this tool call returns, so sleeping here cannot see them end. {instead}",
         running.join(", ")
     )
 }

@@ -1131,8 +1131,56 @@ async fn a_sleep_loop_does_not_wait_for_the_program_it_is_called_from() {
         ctx.from_code = from_code;
         ctx.tool_use_id = id.into();
         match BashTool.validate_input(&input, &ctx).await {
-            ValidationResult::Err(msg, 6) => assert!(msg.contains("\"ext-own\""), "{msg}"),
+            ValidationResult::Err(msg, 6) => assert!(msg.contains("(ext-own)"), "{msg}"),
             other => panic!("{id} (from code: {from_code}): {other:?}"),
+        }
+    }
+}
+
+/// A program cannot call Monitor or TaskWait, so a sleep refused to it says
+/// what it can do instead.
+#[tokio::test]
+async fn a_long_sleep_refused_to_a_program_names_nothing_it_cannot_call() {
+    let dir = TempDir::new().unwrap();
+    let mut ctx = ctx_in(dir.path());
+    ctx.from_code = true;
+    ctx.tool_use_id = "call_1.1".into();
+    let refused = |msg: &str| {
+        assert!(
+            !msg.contains("Monitor") && !msg.contains("TaskWait"),
+            "{msg}"
+        );
+        assert!(msg.contains("sleep 1"), "{msg}");
+    };
+    match BashTool
+        .validate_input(&json!({ "command": "sleep 3" }), &ctx)
+        .await
+    {
+        ValidationResult::Err(msg, 4) => refused(&msg),
+        other => panic!("{other:?}"),
+    }
+
+    let session = session_state::SessionState::for_tests(dir.path().to_path_buf());
+    session.register_task(
+        "agent-other".into(),
+        base::context::task::TaskType::Agent,
+        tokio_util::sync::CancellationToken::new(),
+        json!({ "tool_use_id": "call_9" }),
+    );
+    ctx.session = std::sync::Arc::new(session);
+    for (command, code) in [("sleep 3", 4), ("for i in 1; do sleep 2; done", 6)] {
+        match BashTool
+            .validate_input(&json!({ "command": command }), &ctx)
+            .await
+        {
+            ValidationResult::Err(msg, c) if c == code => {
+                assert!(
+                    !msg.contains("Monitor") && !msg.contains("Wait with TaskWait"),
+                    "{command}: {msg}"
+                );
+                assert!(msg.contains("agent-other"), "{command}: {msg}");
+            }
+            other => panic!("{command}: {other:?}"),
         }
     }
 }

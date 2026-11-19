@@ -427,6 +427,10 @@ async fn a_functions_own_task_is_not_a_background_task_its_shell_must_wait_for(
             !long.contains("TaskWait") && !long.contains("Background tasks"),
             "the call is not told to wait for itself: {result}"
         );
+        assert!(
+            !long.contains("Monitor") && long.contains("sleep 1"),
+            "the call is told what a program can do instead: {result}"
+        );
     }
     run.finish().await;
     Ok(())

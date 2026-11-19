@@ -1027,6 +1027,10 @@ async fn a_commands_own_task_is_not_a_background_task_its_shell_must_wait_for() 
         !text.contains("TaskWait") && !text.contains("Background tasks"),
         "the command is not told to wait for itself: {command:?}"
     );
+    assert!(
+        !long.contains("Monitor") && long.contains("sleep 1"),
+        "the command is told what a program can do instead: {command:?}"
+    );
     run.finish().await;
     Ok(())
 }
