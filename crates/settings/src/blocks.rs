@@ -208,11 +208,21 @@ pub struct McpSettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[non_exhaustive]
 pub struct McpServerEntry {
-    /// Unset is on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Unset is on. `null` is a bad value rather than unset: it would
+    /// otherwise override a lower tier's `false` and read as on.
+    #[serde(
+        default,
+        deserialize_with = "present_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "bool")]
     pub enabled: Option<bool>,
     #[serde(flatten)]
     pub config: Map<String, Value>,
+}
+
+fn present_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(d).map(Some)
 }
 
 impl McpServerEntry {

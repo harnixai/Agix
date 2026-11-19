@@ -242,11 +242,8 @@
       "description": "One `mcp.servers` entry: a server's configuration (`mcp::config::McpServerConfig`,\nread by the MCP module, which this crate cannot depend on), and whether it is on.",
       "properties": {
         "enabled": {
-          "description": "Unset is on.",
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "description": "Unset is on. `null` is a bad value rather than unset: it would\notherwise override a lower tier's `false` and read as on.",
+          "type": "boolean"
         }
       },
       "type": "object"

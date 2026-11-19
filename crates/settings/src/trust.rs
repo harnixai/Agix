@@ -617,25 +617,33 @@ impl Order {
     /// whole of what is merged beneath, for an order that looks elsewhere in
     /// it.
     ///
-    /// A scalar of the wrong type is kept: the merge refuses it as not
-    /// fitting its setting and reports it among the ignored values, where a
-    /// typo belongs — trusting the project would not make it take effect.
-    /// A list that is not a list is not kept: what it would do is unknown.
+    /// A value of a type the order does not expect is not kept, `null`
+    /// included: whether it tightens depends on how its setting reads it,
+    /// and an `Option` setting reads `null` as unset — which may be wider
+    /// than what is beneath.
     fn keeps(self, value: &Value, below: &Value, lower: &Value) -> bool {
         match self {
-            Self::TrueTighter => value.as_bool() != Some(false) || below.as_bool() == Some(false),
-            Self::FalseTighter => value.as_bool() != Some(true) || below.as_bool() == Some(true),
+            Self::TrueTighter => match value.as_bool() {
+                Some(true) => true,
+                Some(false) => below.as_bool() == Some(false),
+                None => false,
+            },
+            Self::FalseTighter => match value.as_bool() {
+                Some(false) => true,
+                Some(true) => below.as_bool() == Some(true),
+                None => false,
+            },
             Self::Mode => {
                 let parse = |v: &Value| serde_json::from_value::<PermissionMode>(v.clone()).ok();
                 let below = parse(below).unwrap_or_default();
-                parse(value).is_none_or(|m| m.permissiveness() <= below.permissiveness())
+                parse(value).is_some_and(|m| m.permissiveness() <= below.permissiveness())
             }
             Self::NetworkMode => {
                 let parse = |v: &Value| serde_json::from_value::<NetworkMode>(v.clone()).ok();
                 let below = parse(below).unwrap_or_default();
                 // `proxy` and `allowlist` are each narrower than `unrestricted`
                 // and wider than `deny_all`, but not than each other.
-                parse(value).is_none_or(|mode| {
+                parse(value).is_some_and(|mode| {
                     mode == below
                         || mode == NetworkMode::DenyAll
                         || below == NetworkMode::Unrestricted
@@ -643,9 +651,12 @@ impl Order {
             }
             Self::EnvMode => {
                 let parse = |v: &Value| serde_json::from_value::<SubprocessEnvMode>(v.clone()).ok();
-                parse(value) != Some(SubprocessEnvMode::Inherit)
-                    || parse(below).unwrap_or_default() == SubprocessEnvMode::Inherit
+                parse(value).is_some_and(|mode| {
+                    mode != SubprocessEnvMode::Inherit
+                        || parse(below).unwrap_or_default() == SubprocessEnvMode::Inherit
+                })
             }
+            Self::Subset if value.is_null() => below.is_null(),
             Self::Subset => is_subset(value, Some(below)),
             Self::SubsetEmptyIsAll => {
                 is_empty_list(below) || (!is_empty_list(value) && is_subset(value, Some(below)))
@@ -653,12 +664,14 @@ impl Order {
             Self::Superset => is_subset(below, Some(value)),
             Self::Lower => match (value, below.as_f64()) {
                 (Value::Null, _) => below.is_null(),
-                (Value::Number(n), Some(b)) => n.as_f64().is_none_or(|v| v <= b),
-                _ => true,
+                (Value::Number(n), Some(b)) => n.as_f64().is_some_and(|v| v <= b),
+                (Value::Number(_), None) => true,
+                _ => false,
             },
             Self::LowerZeroIsWidest => match (value.as_u64(), below.as_u64().unwrap_or(0)) {
-                (Some(_), 0) | (None, _) => true,
+                (Some(_), 0) => true,
                 (Some(v), b) => v != 0 && v <= b,
+                (None, _) => false,
             },
             Self::ProviderDefinedBelow => {
                 let defined_below = |name: &str| {
@@ -676,7 +689,7 @@ impl Order {
                         .iter()
                         .all(|name| name.as_str().is_some_and(defined_below)),
                     Value::Null => below.is_null(),
-                    _ => true,
+                    _ => false,
                 }
             }
         }
@@ -793,6 +806,26 @@ mod tests {
         assert_eq!(
             Value::Object(layer),
             json!({"mcp": {"servers": {"gh": {}, "fs": {"enabled": false}}}})
+        );
+    }
+
+    #[test]
+    fn a_switch_that_is_not_a_bool_loosens() {
+        let mut lower = lower();
+        lower["mcp"] = json!({"servers": {"gh": {"command": "gh", "enabled": false}}});
+        lower["sandbox"]["require"] = json!(true);
+        let mut layer = json!({
+            "mcp": {"servers": {"gh": {"enabled": null}}},
+            "sandbox": {"require": null},
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let found = gate_layer(&mut layer, &lower, true, &sections());
+        assert_eq!(found, ["mcp.servers.gh.enabled", "sandbox.require"]);
+        assert_eq!(
+            Value::Object(layer),
+            json!({"mcp": {"servers": {"gh": {}}}, "sandbox": {}})
         );
     }
 
@@ -1122,16 +1155,35 @@ mod tests {
     }
 
     #[test]
-    fn a_scalar_of_the_wrong_type_is_left_for_the_merge_to_refuse() {
-        let layer = json!({
+    fn a_value_of_the_wrong_type_waits_for_trust() {
+        let mut lower = lower();
+        lower["providers"] = json!([{"id": "onprem"}]);
+        let mut layer = json!({
             "permissions": {"mode": "careful", "prompt_timeout_secs": -1},
             "telemetry": {"enabled": "yes"},
-            "agents": {"max_depth": "2"},
-            "model": {"max_tokens": "many"},
-        });
-        let (left, found) = gate(layer.clone(), true);
-        assert!(found.is_empty(), "{found:?}");
-        assert_eq!(left, layer);
+            "agents": {"max_depth": "2", "max_concurrent": null},
+            "sandbox": {"network": {"mode": null}, "env": {"mode": 1}},
+            "model": {"max_tokens": "many", "order": "onprem"},
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let found = gate_layer(&mut layer, &lower, true, &sections());
+        assert_eq!(
+            found,
+            [
+                "agents.max_concurrent",
+                "agents.max_depth",
+                "model.order",
+                "permissions.mode",
+                "permissions.prompt_timeout_secs",
+                "sandbox.env.mode",
+                "sandbox.network.mode",
+                "telemetry.enabled",
+            ]
+            .map(String::from)
+        );
+        assert_eq!(layer["model"], json!({"max_tokens": "many"}));
     }
 
     #[test]
