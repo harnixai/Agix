@@ -45,7 +45,7 @@ rust-version = "1.88"
 license = "Apache-2.0"
 publish = false
 authors = ["Agix contributors"]
-repository = "https://github.com/openatta/agix"
+repository = "https://github.com/harnixai/agix"
 
 [workspace.dependencies]
 # Async runtime

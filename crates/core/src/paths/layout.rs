@@ -52,7 +52,7 @@ pub const PROJECT_SKILLS_DIR: &str = ".agents/skills";
 pub const DEFAULT_PRODUCT_NAME: &str = "Agix";
 
 /// Where the product of that name is published.
-pub const DEFAULT_PRODUCT_URL: &str = "https://github.com/openatta/agix";
+pub const DEFAULT_PRODUCT_URL: &str = "https://github.com/harnixai/agix";
 
 /// The directory in a git directory holding the linked worktrees' entries.
 pub const GIT_WORKTREES_DIR: &str = "worktrees";
@@ -1019,7 +1019,7 @@ mod tests {
         );
         assert_eq!(
             agix.attribution(),
-            "[Agix](https://github.com/openatta/agix)"
+            "[Agix](https://github.com/harnixai/agix)"
         );
         for layout in [&agix, &codix] {
             assert!(layout.machine_dir().is_absolute());

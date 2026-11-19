@@ -1,7 +1,7 @@
 # Agix
 
-[![CI](https://github.com/openatta/agix/actions/workflows/ci.yml/badge.svg)](https://github.com/openatta/agix/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/openatta/agix?display_name=tag&sort=semver)](https://github.com/openatta/agix/releases)
+[![CI](https://github.com/harnixai/agix/actions/workflows/ci.yml/badge.svg)](https://github.com/harnixai/agix/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/harnixai/agix?display_name=tag&sort=semver)](https://github.com/harnixai/agix/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](#build-and-test)
 
@@ -343,7 +343,7 @@ example plugin in `examples/plugins/rust` — 35 workspace members in total.
 ### Run the daemon
 
 ```sh
-git clone https://github.com/openatta/agix && cd agix
+git clone https://github.com/harnixai/agix && cd agix
 export ANTHROPIC_AUTH_TOKEN=sk-...        # or ANTHROPIC_API_KEY; ANTHROPIC_BASE_URL for a compatible endpoint
 cargo run --release -p daemon --bin agixd # listens on ~/.agix/scenes/code/daemon.sock
 ```

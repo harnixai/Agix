@@ -52,7 +52,7 @@
 
 不属于这两类的，按 §2 处理。
 
-下游项目提的需求不进 `docs/`，走 GitHub Issues（`openatta/Agix`），见 §5。
+下游项目提的需求不进 `docs/`，走 GitHub Issues（`harnixai/Agix`），见 §5。
 
 文档被代码注释引用是常态，删除或重命名前先 `grep` 一遍引用点，别留悬空链接。
 
@@ -86,7 +86,7 @@
 
 ## 5. 下游需求：GitHub Issues
 
-用 Agix 的项目提过来的缺陷、要加的能力，一个需求一个 issue，在 `openatta/Agix` 上。
+用 Agix 的项目提过来的缺陷、要加的能力，一个需求一个 issue，在 `harnixai/Agix` 上。
 
 - **标签**：提出的项目一个（`harnix`、`ipdrun`、`grabix`，新项目新建一个），类型一个（`bug` / `enhancement`）。
 - **标题**：`[<项目> <编号>] <一句话>`，编号是那个项目自己的，如 `[Harnix 09]`、`[ipdrun-03]`。

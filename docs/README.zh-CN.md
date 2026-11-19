@@ -263,7 +263,7 @@ deny 永远优先。设计全文——一轮、会话与场景、历史日志、
 ### 运行 daemon
 
 ```sh
-git clone https://github.com/openatta/agix && cd agix
+git clone https://github.com/harnixai/agix && cd agix
 export ANTHROPIC_AUTH_TOKEN=sk-...        # 或 ANTHROPIC_API_KEY;兼容端点另设 ANTHROPIC_BASE_URL
 cargo run --release -p daemon --bin agixd # 监听 ~/.agix/scenes/code/daemon.sock
 ```

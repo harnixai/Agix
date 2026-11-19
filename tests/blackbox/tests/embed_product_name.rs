@@ -268,7 +268,7 @@ async fn without_a_product_the_engine_calls_itself_agix() -> anyhow::Result<()> 
 
     assert!(the_turn(&seen).system_contains("You are Agix"));
     assert!(after_the_guide(&seen)
-        .messages_contain("Generated with [Agix](https://github.com/openatta/agix)"));
+        .messages_contain("Generated with [Agix](https://github.com/harnixai/agix)"));
     for request in &seen.stub {
         assert_eq!(request.header("user-agent"), Some(user_agent.as_str()));
     }

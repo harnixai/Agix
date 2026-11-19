@@ -560,7 +560,7 @@ fn main() -> anyhow::Result<()> {
 | 调插件函数 | `plugin.call` / `plugin.functions`，取消用 `plugin.cancel {run_id}` | `pool.call_plugin(PluginCall::new(function, input, PluginCallTarget::Session(id) \| Project(cwd)), cancel)`，`pool.plugin_functions(Option<&PluginCallTarget>)`；取消就是 `cancel.cancel()`（`runext.md` §12） |
 | 关停 | `daemon.shutdown` | `pool.shutdown_all()` 加 §7 |
 
-RPC 层多做、池不替你做的检查：认证；`turn_id` 的形式（§3）；消息与附件都为空时拒绝；`options` 里未知字段的告警；宿主工具回答里图片的 `media_type` 与大小（`ImageSource::check`）：直接给 `ToolResultBlock::image` 不经这道检查。其余方法在 `SessionPool` 上多半同名（见 rustdoc）；它们的参数类型门面没收的，需要时到 `openatta/Agix` 提 issue。
+RPC 层多做、池不替你做的检查：认证；`turn_id` 的形式（§3）；消息与附件都为空时拒绝；`options` 里未知字段的告警；宿主工具回答里图片的 `media_type` 与大小（`ImageSource::check`）：直接给 `ToolResultBlock::image` 不经这道检查。其余方法在 `SessionPool` 上多半同名（见 rustdoc）；它们的参数类型门面没收的，需要时到 `harnixai/Agix` 提 issue。
 
 进程内说 RPC：`DaemonServer::new(pool, CancellationToken)`，`accept_connection(sink)`（`sink` 是实现 `FrameSink` 的帧出口），`dispatch_public(RpcRequest, client)`，用完 `drop_connection(client.id())`。进程内分派不走认证，只给与池同进程的代码用。不必亲手装池、只要一条进程内协议连接的，用 §10 的 `Embedded::serve_stream`，回复与事件走同一条有序的流。
 
@@ -658,7 +658,7 @@ assert!(matches!(outcome, TurnOutcome::Completed { .. }));
 
 升级：把子模块挪到新标签，编译，读两个标签之间每条标签消息（门面有变化的发布在消息里单列「嵌入面」）。
 
-门面里没有的东西：到 `openatta/Agix` 提 issue（标签是项目名加 `enhancement`，标题 `[<项目> <编号>] …`），说明哪段代码要它。门面按需增长，不预先收：进门面的每一条都对应一个下游用法或本指南的一个片段，导出总数钉在 `tests/guards/tests/facade.rs`，加一条删一条都要在提交里写依据。
+门面里没有的东西：到 `harnixai/Agix` 提 issue（标签是项目名加 `enhancement`，标题 `[<项目> <编号>] …`），说明哪段代码要它。门面按需增长，不预先收：进门面的每一条都对应一个下游用法或本指南的一个片段，导出总数钉在 `tests/guards/tests/facade.rs`，加一条删一条都要在提交里写依据。
 
 ## 10. 嵌入入口：`agix::embed`
 
