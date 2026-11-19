@@ -525,14 +525,26 @@ impl SessionPool {
         sid: &str,
         options: Option<&SessionOptions>,
     ) -> Result<String, CreateError> {
+        self.with_live_ensured(sid, options, |_| ())
+            .await
+            .map(|_| sid.to_string())
+    }
+
+    /// [`Self::ensure_live`], then `f` on the entry, both under the session
+    /// lock: eviction passes over a session whose lock is held, so `f` sees
+    /// the entry just brought back.
+    pub(in crate::session_pool) async fn with_live_ensured<T>(
+        &self,
+        sid: &str,
+        options: Option<&SessionOptions>,
+        f: impl FnOnce(&LiveSession) -> T,
+    ) -> Result<Option<T>, CreateError> {
         self.live
             .with_session_lock(sid, async {
-                if self.live.contains(sid).await {
-                    return Ok(sid.to_string());
+                if !self.live.contains(sid).await {
+                    self.resume_or_create(sid.to_string(), options).await?;
                 }
-                self.resume_or_create(sid.to_string(), options)
-                    .await
-                    .map(|core| core.id().to_string())
+                Ok(self.live.with_live(sid, f).await)
             })
             .await
     }

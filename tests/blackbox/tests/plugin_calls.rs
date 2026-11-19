@@ -1027,3 +1027,77 @@ async fn a_session_running_a_call_is_not_rebuilt_under_it() -> anyhow::Result<()
     run.finish().await;
     Ok(())
 }
+
+/// A call into a session runs on it while other sessions crowd a pool that
+/// holds one: the session is not evicted between being brought into memory
+/// and the call taking hold of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_holds_the_session_it_brought_back_while_others_crowd_the_pool() -> anyhow::Result<()>
+{
+    use daemon::embed::{EmbedConfig, Embedded};
+    use daemon::session_pool::ProjectSelector;
+    let stub = ProviderStub::start().await?;
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?;
+    let (data, package) = (root.join("data"), root.join("host-xflow"));
+    let project = project_in(&root)?;
+    std::fs::create_dir_all(&data)?;
+    write_package(&package)?;
+    let settings = json!({
+        "providers": { "stub": {
+            "api_type": "anthropic",
+            "base_url": stub.base_url().as_str(),
+            "api_key": "stub-key",
+            "default_model": "claude-sonnet-4-6",
+            "models": ["claude-sonnet-4-6"]
+        }},
+        "default_provider": "stub"
+    });
+    std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;
+    let mut config = EmbedConfig::new(&data);
+    config.cwd = Some(project);
+    config.plugins = vec![package];
+    config.session_cap = 1;
+    let embedded = Embedded::start(config).await?;
+    let pool = embedded.pool().clone();
+    let target = pool
+        .create_session(None, ProjectSelector::Default, None)
+        .await?
+        .session_id;
+
+    let crowded = tokio_util::sync::CancellationToken::new();
+    let crowds: Vec<_> = (0..4)
+        .map(|_| {
+            let (crowd, crowded) = (pool.clone(), crowded.clone());
+            tokio::spawn(async move {
+                while !crowded.is_cancelled() {
+                    let _ = crowd
+                        .create_session(None, ProjectSelector::Default, None)
+                        .await;
+                }
+            })
+        })
+        .collect();
+    let mut failures = Vec::new();
+    for round in 0..100 {
+        let call = PluginCall::new(
+            "xflow.check",
+            json!({ "change": format!("r{round}") }),
+            PluginCallTarget::Session(target.clone()),
+        );
+        match pool
+            .call_plugin(call, tokio_util::sync::CancellationToken::new())
+            .await
+        {
+            Ok(result) if result.ok => {}
+            other => failures.push(format!("round {round}: {other:?}")),
+        }
+    }
+    crowded.cancel();
+    for crowd in crowds {
+        crowd.await?;
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    embedded.shutdown().await;
+    Ok(())
+}

@@ -130,15 +130,13 @@ impl SessionPool {
         if !self.session_exists(id).await {
             return Err(PoolError::no_session(id));
         }
-        self.ensure_live(id, None).await?;
-        self.live
-            .with_live(id, |live| {
-                let runner = live.engine.host_tool_runner.clone()?;
-                Some((runner, live.core.host_calls().hold()))
-            })
-            .await
-            .flatten()
-            .ok_or_else(|| PoolError::no_session(id))
+        self.with_live_ensured(id, None, |live| {
+            let runner = live.engine.host_tool_runner.clone()?;
+            Some((runner, live.core.host_calls().hold()))
+        })
+        .await?
+        .flatten()
+        .ok_or_else(|| PoolError::no_session(id))
     }
 
     /// One call on an engine of its own in `dir`: the default scene's tools
