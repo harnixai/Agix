@@ -97,6 +97,7 @@ async fn a_project_bound_sessions_memories_land_in_its_own_project() {
 
     let own = other_project
         .join(".agix")
+        .join("state")
         .join("memory")
         .join("merge-freeze.md");
     let pools = srv
@@ -104,6 +105,7 @@ async fn a_project_bound_sessions_memories_land_in_its_own_project() {
         .path()
         .join("work")
         .join(".agix")
+        .join("state")
         .join("memory")
         .join("merge-freeze.md");
     for _ in 0..60 {
