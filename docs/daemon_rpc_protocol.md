@@ -2490,7 +2490,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
 `session.history` 与原会话一样长、一样的内容;只改结构化的几项:每行的 `session_id`、`Meta` 的
 `parent_session_id` / `cwd` / `project_root`(换成目标的;无项目会话的 `cwd` 是 daemon 的全局数据目录)。
 消息正文、工具结果里提到的旧 id、旧路径**不改**;唯一的例外是外置标记行:归档带了 `tool_results` 时,
-文件落到新根会话的结果目录(`<local_data_dir>/tool-results/<新根 id>/`),标记行改指那里;归档里没有
+文件落到新根会话的结果目录(`<local_data_dir>/state/tool-results/<新根 id>/`,无项目时没有 `state/`),标记行改指那里;归档里没有
 的文件,标记不改,`warnings` 记一条。会话记忆一并带上。不带:`runtime.json`、`history.json`、
 `entries.json`(它们是转录的派生视图)、附件文件(图片本来就在转录里)、录像、checkpoint 的写前内容与
 `agix.checkpoint` 记录——所以装进来的会话里,`session.rewind` 碰不到归档之前写的文件;也不带会话的

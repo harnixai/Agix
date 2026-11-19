@@ -414,7 +414,7 @@ let pool = agix::pool::assemble(
   系统提示词与工具定义之后剩下的大小。`compaction` 设置里可以打开两项:带熔断的预测式
   提前清理(`reactive`),以及每小时一次、以 cache edit 下发、不白扔已付过钱的提示缓存的
   清理(`cached_microcompact`)。超过 30,000 字符的工具结果(`Read`、`WebFetch`、`TaskOutput`
-  自己分页的除外)整个存进项目的 `.agix/tool-results/`,模型拿到头尾预览和路径,用 `Read` 的 `offset`
+  自己分页的除外)整个存进项目的 `.agix/state/tool-results/`,模型拿到头尾预览和路径,用 `Read` 的 `offset`
   读后续;阈值是 `compaction.tool_result_inline_chars`(`0` 关闭)。
 - **遥测**:22 种结构化事件,可导出到 OpenTelemetry,每次调用四个 token 计数,不属于任何
   一轮的调用——压缩、记忆、hooks、搜索——也算进去。
@@ -449,7 +449,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `model.fallback_model` | 无 | 主模型一直过载(529)时改用这个模型重试 |
 | `model.max_output_tokens` | 按模型名查 | 回复在 `max_tokens` 处被截断后,重试时 `max_tokens` 最多抬到多少 |
 | `memory_enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
-| `telemetry_enabled` | `true` | 每个会话在状态目录的 `telemetry/` 下写一份遥测 JSONL |
+| `telemetry_enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
 | `telemetry_url` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |
 | `instruction_file` | 无 | 再加一份指令文件,会话构建时读入,与 `AGENTS.md` 一样交给模型 |
 | `hooks_config` | 无 | 生命周期 hook:事件名 → hook 列表([extension_points.md](extension_points.md)) |

@@ -2201,27 +2201,40 @@ warn。全局层 `settings.json` 与 `settings.local.json` 的
 | `projects/<sanitized-cwd>/` | 项目 | `<session-id>.jsonl` transcript |
 | `projects/_no-project/` | ——(保留) | 无项目会话的 transcript |
 | `sessions/<session-id>/` | 会话 | 会话记忆、metadata、输入历史、`writer.lock`(§1.3);根会话的 `checkpoints/objects/<sha256>`:文件工具写之前的内容(目录 0700、文件 0600,子 Agent 的写也在这里),随会话删除一起删;`checkpoints` 设置段限单文件(`max_bytes_per_file`)与总量(`max_total_bytes`),超总量按最旧清并在转录里记 `pruned` |
-| `<项目>/.agix/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,`.agix/.gitignore` 的引擎条目里有它,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删;`session.resume` 清无引用的,`session.fork` 硬链接复制,`session.export` / `session.import` 带过去 |
-| `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
+| `<项目>/.agix/state/tool-results/<根会话 id>/` | 会话 | 超长工具结果的完整文本(`<写它的会话 id>-<tool_use_id>.txt`,同名已在时加 `-<n>`),子 Agent 的也在这里;无项目的会话在 `<状态目录>/tool-results/`;不在沙箱可写的 `scratchpad/` 下(引擎在沙箱外写它,不能让沙箱内的命令把目录换成符号链接);目录 0700、文件 0600,随 `state/` 不进仓库,带一个内容为 `*` 的 `.ignore` 让 `Grep` / `Glob` 不扫进去;随 `session.delete` 一起删;`session.resume` 清无引用的,`session.fork` 硬链接复制,`session.export` / `session.import` 带过去 |
+| `memory/` | 全局 | 跨会话记忆,模型照提示词写在这里;项目级的(抽取出的 `type: project`)在 `<项目>/.agix/state/memory/`。两处只由 `MemoryStore::for_paths` 推出,提示词里的索引是两处合并的;写入按目录加锁(`base::dir_lock`:进程内一把锁,unix 上再对目录 `flock`,别的 daemon / CLI 进程也排队)、先写临时文件再改名;存到 200 条(`MAX_MEMORIES`)就不再抽取新的,不自动删,`daemon.doctor` 的 `memory` 检查报 `degraded`(报的是磁盘上的实数);`Write` 工具直接写进目录的不经这道检查,所以读取时也只读最近的 200 条、索引只列 200 条,多出的打一条 warn |
 | `scenes/<id>/` | 场景 | 该场景的设置层(`settings.json`、skills、agents);声明式场景在这里放 `scene.json` + `prompt.md` |
 | `scenes/<id>/mcp/oauth/` | MCP server URL | 远端 MCP server 的 OAuth 凭据,一个 server 一个 0600 文件(§6.5) |
 | `daemon/groups/<instance>.json` | 实例 | 在跑命令的进程组,供崩溃后下次启动清理;嵌入时 `EmbedConfig.groups_file` 可另给位置;拥有者是另一个活着的进程时 `start` 拒绝(`GroupsHeld`),`shutdown`/drop 删文件并停止登记 |
 | `daemon/crashes/` | 进程 | 崩溃记录 |
 
-项目里的 `<项目>/.agix/teams/<team_id>/` 是一个 `TeamCreate` 团队的全部状态:`team.json`、
+项目里的 `<项目>/.agix/state/teams/<team_id>/` 是一个 `TeamCreate` 团队的全部状态:`team.json`、
 `state.json`、`events.jsonl`、`SCRATCHPAD.md`、`mailbox/`、`memory/`(团队共享记忆,
 格式同个人记忆)。每个阶段开始时成员读到 `memory/` 的索引;`TeamDelete` 删掉整个目录。
 
 项目的 `.agix/` 在用户的仓库里。其中只有协作者共用的东西随仓库提交(`settings.json`、agents、
-hooks、commands、rules、output-styles 等配置);引擎为这台机器、这个用户写的都不提交。有项目的
-会话建起来时,以及引擎往一个设置目录写 `settings.local.json` / `mcp.local.json`(里面是 key 与
-MCP headers)、往项目 `.agix/telemetry/` 录遥测、写导入标记时,往那个目录的 `.gitignore` 里补上缺的
-引擎条目(`base::paths::local_data_gitignore`:`settings.local.json`、`mcp.local.json`、
-`.imported.json`、`memory/`、`scratchpad/`、`teams/`、`telemetry/`、`tool-results/`),没有就新建。
+hooks、commands、rules、output-styles 等配置);引擎为这台机器、这个用户写的都不提交:本机数据与
+过程数据全在 `.agix/state/` 下(`Layout::project_state_dir`:`memory/`、`scratchpad/`、`teams/`、
+`telemetry/`、`tool-results/`、导入标记 `.imported.json`),个人配置 `settings.local.json` /
+`mcp.local.json` 留在 `.agix/` 里、与 `settings.json` 并列。有项目的会话建起来时,以及引擎往一个
+设置目录写 `settings.local.json` / `mcp.local.json`(里面是 key 与 MCP headers)、往项目
+`state/telemetry/` 录遥测、写导入标记时,往那个目录的 `.gitignore` 里补上缺的引擎条目
+(`base::paths::local_data_gitignore`:`state/`、`settings.local.json`、`mcp.local.json`),没有就新建。
 已有的 `.gitignore` 是用户的,只追加缺的行,别的不动;它是符号链接时不动,也不动它指向的文件。会话建起来与
 写导入标记时,项目层目录本身是符号链接或落在项目之外,也不写(`ensure_project_data_gitignore`)——克隆来的
 仓库能把它们指到别处。状态目录与场景目录写 `settings.local.json`
-时同样会生成,无害。`scratchpad/` 自己另有一份 `*`。引擎往项目目录里新加本地的东西,要同时进这张表。
+时同样会生成,无害。`scratchpad/` 自己另有一份 `*`。引擎往项目里新加本地的东西放进 `state/`,
+`.gitignore` 不加行。没有项目的会话没有 `state/` 这一层,本机数据就在状态目录下
+(`ConfigPaths::local_state_dir`)。
+
+`state/<产品名的小写>/` 归嵌入方(`Layout::host_state_dir`,如 `.codix/state/codix/`):引擎不读不写,
+与 `state/` 的其余部分一样受保护(§8.1)。产品名小写后不能是引擎在 `state/` 下用的名字
+(`STATE_RESERVED_NAMES`,`history` 给按项目存放的会话历史留着),`Layout::with_product_name` 在启动时拒。
+
+**旧位置。** 读一个项目的设置就是打开它(`settings_source::read_pair`,在一切用到本机数据之前):直接放在
+`.agix/` 下的 `PROJECT_STATE_ENTRIES`(上面那六项)一次性改名进 `state/`,之后只读新位置。项目层目录是
+符号链接、落在项目之外,或 `state/` 不是自己的目录时什么都不挪;旧项是符号链接的不挪;`state/` 里已有同名的,
+旧的留着、不再读(记一条 info)。挪不动的记 warn,不影响打开。`.gitignore` 里旧的条目不替人删。
 
 **会话进哪个项目目录由它自己的 `Meta.project_root` 决定**,不是由 daemon 的 cwd
 决定 —— 一个 daemon 同时服务多个项目时,后者会把所有项目的 transcript 堆进一个
@@ -2250,8 +2263,8 @@ sidecar 答得出**:`Meta` 在 transcript 里,而要读 transcript 先得知道�
 
 | 类型(`base::paths`) | 管什么 | 谁持有 |
 |---|---|---|
-| `Layout` | 项目层目录名(缺省 `.agix`,`Layout::new` 校验)与 worktree 目录名(缺省 `.wkts`,`Layout::with_worktrees_dir` 校验);由名字算出、不碰磁盘的东西:`project_dir(root)`、`worktrees_dir`、`teams_dir`、仓库 `.gitignore` 条目、配置根(`config_roots`)、worktree 别名(`main_checkout_copies`、`worktree_of`) | 按值传:`EmbedConfig` → `StaticDaemonPaths::with_layout` → `DaemonPaths::layout()` → `settings_source::read_pair` → `LoadedSettings::load_from`(按全局 / 场景层的 `worktree_dir` 定 worktree 目录)→ `PathSettings.layout`,再到 `EngineConfig`、`PermissionSettings`、`SandboxPolicy`、`SensitivePaths`。没有进程级的值:一个进程里两个池可以用两个名字,一个池里两个会话也可以有两个 worktree 目录 |
-| `ConfigPaths` | 一个会话的三层根(状态根、场景目录、项目)与其下全部派生路径:各层的 `settings*.json`、skills / agents / hooks / rules / output-styles、memory、telemetry、`tool-results`、scratchpad、导入标记、`scheduled_tasks.json`、`mcp/oauth` | 会话的 `PathSettings::config_paths()`;池里没有会话时 `DaemonPaths::paths_for` |
+| `Layout` | 项目层目录名(缺省 `.agix`,`Layout::new` 校验)与 worktree 目录名(缺省 `.wkts`,`Layout::with_worktrees_dir` 校验);由名字算出、不碰磁盘的东西:`project_dir(root)`、`project_state_dir(root)`、`host_state_dir(root)`、`worktrees_dir`、`teams_dir`、仓库 `.gitignore` 条目、配置根(`config_roots`)、worktree 别名(`main_checkout_copies`、`worktree_of`) | 按值传:`EmbedConfig` → `StaticDaemonPaths::with_layout` → `DaemonPaths::layout()` → `settings_source::read_pair` → `LoadedSettings::load_from`(按全局 / 场景层的 `worktree_dir` 定 worktree 目录)→ `PathSettings.layout`,再到 `EngineConfig`、`PermissionSettings`、`SandboxPolicy`、`SensitivePaths`。没有进程级的值:一个进程里两个池可以用两个名字,一个池里两个会话也可以有两个 worktree 目录 |
+| `ConfigPaths` | 一个会话的三层根(状态根、场景目录、项目)与其下全部派生路径:各层的 `settings*.json`、skills / agents / hooks / rules / output-styles、本机数据的目录(`local_state_dir`:有项目是项目层的 `state/`,没有是状态根)与其中的 memory、telemetry、`tool-results`、scratchpad、导入标记、`scheduled_tasks.json`、`mcp/oauth` | 会话的 `PathSettings::config_paths()`;池里没有会话时 `DaemonPaths::paths_for` |
 | `StateRoot` | 状态根下不随项目层名字变的目录:`scenes/`、`plugins/`、`projects/`、`sessions/`、`daemon/`(`instances.d`、`auth`、`groups`、`crashes`) | 池与 agixd 的启动代码 |
 | `SensitivePaths` | **唯一的安全判定点**:凭据(`is_credential`)、拒写的引擎设置文件(`is_engine_settings_file`)、不走静默放行的配置(`names_configuration`)、沙箱要保护的目录(`config_roots_in`、`engine_dirs_in`、`worktree_dirs_in`)、提示词读文件(`PromptFiles`) | 会话的 `SandboxSettings.paths`;门禁、写路径检查、规则别名、两个沙箱后端、hook 执行器、rewind、记忆、插件包的路径解析都问它,不各认目录名 |
 
@@ -2275,9 +2288,14 @@ Seatbelt 在不分大小写的卷上按卷的语义匹配规则(实测,`macos_li
 沙箱命令的命名空间时再把 bwrap 留下的空挂载点删掉,项目里不留痕迹——删早了,还活着的那个命名空间里的进程就能
 建出它);其中的 `settings.local.json` / `mcp.local.json` 仍算凭据。理由有二:漏改的读配置点仍读 `.agix/hooks` 时,保护把"模型给自己装 hook"降成
 "功能读错目录";同一项目也可能被缺省名字的 agixd 打开,改 `.agix/settings.json` 等于给它的下一个会话授权。
-门禁上只有本实例自己的目录有工作区豁免(`scratchpad/`、`memory/` 写入不问),外来根里一切都算配置。
-沙箱与门禁用同一个判定(`ConfigRootAt::writable_entry`):本实例目录里沙箱命令也只写得了这两项,`teams/`、
-`telemetry/`、导入标记等由引擎自己(不在沙箱里)写。
+门禁上只有本实例自己的目录有工作区豁免:项目层目录里是 `state/scratchpad/`、`state/memory/`,会话的状态根里
+是直下的 `scratchpad/`、`memory/`,写入不问;外来根里一切都算配置。直接放在项目层目录下的 `scratchpad/`、
+`memory/` 不是工作区。沙箱与门禁用同一个判定(`ConfigRootAt::writable_state_entry`):本实例目录里沙箱命令
+也只写得了 `state/` 的这两项;`state/` 本身与其中的 `teams/`、`telemetry/`、`tool-results/`、`history/`、
+导入标记由引擎自己(不在沙箱里)写,`state/<产品名的小写>/` 归嵌入方,写工具写它们要问,沙箱命令写不了;
+引擎从中导出、分叉、恢复的 `tool-results/`、`history/`(`PROJECT_STATE_ENGINE_DIRS`)与嵌入方的目录,
+策略点名的可写根在 `state/` 里时 macOS 上也写不了。门禁按文本认状态根,命令里写成 `~/.agix/memory`
+或 `$HOME/...` 的认不出,按配置要问。
 缺省名字下自己与外来去重,行为与改名之前相同。
 
 **worktree 目录。** 引擎建的 worktree 在仓库根的 `<worktree 目录>/<名>`,缺省 `.wkts`;第一次建

@@ -513,7 +513,7 @@ names a provider does that provider's model read the page and answer the call's
   emits cache edits so the prompt cache is not thrown away
   (`cached_microcompact`). A tool result over 30,000 characters (except those of
   `Read`, `WebFetch` and `TaskOutput`, which page themselves) is saved whole to the
-  project's `.agix/tool-results/`; the model gets a head and tail preview with the path and
+  project's `.agix/state/tool-results/`; the model gets a head and tail preview with the path and
   reads on with `Read` `offset`. The limit is
   `compaction.tool_result_inline_chars` (`0` turns it off).
 - **Telemetry**: 22 structured event types (`EventPayload` (22)) with
@@ -558,7 +558,7 @@ A few switches whose effect the rest of this README does not mention:
 | `model.fallback_model` | none | the model a call is retried on when the main one stays overloaded (529) |
 | `model.max_output_tokens` | by model name | the most `max_tokens` a reply cut off at its limit is retried with |
 | `memory_enabled` | `true` | file-based memory: the memory prompt, the index in each turn's reminder, recall |
-| `telemetry_enabled` | `true` | one telemetry JSONL file per session under the state directory's `telemetry/` |
+| `telemetry_enabled` | `true` | one telemetry JSONL file per session under the project's `.agix/state/telemetry/` (the state directory's `telemetry/` without a project) |
 | `telemetry_url` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |
 | `instruction_file` | none | one more instruction file, read when the session is built and given to the model like `AGENTS.md` |
 | `hooks_config` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |

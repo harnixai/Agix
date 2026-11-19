@@ -11,10 +11,11 @@
 
 | 文件 | 内容 |
 |---|---|
-| `<local_data_dir>/telemetry/<session-id>.jsonl` | 一个会话的事件,一个会话一个文件 |
-| `<local_data_dir>/telemetry/pool.jsonl` | 不属于任何会话的事件:daemon 启动、MCP server 连上或没连上、落空的恢复请求 |
+| `<local_data_dir>/state/telemetry/<session-id>.jsonl` | 一个会话的事件,一个会话一个文件 |
+| `<local_data_dir>/state/telemetry/pool.jsonl` | 不属于任何会话的事件:daemon 启动、MCP server 连上或没连上、落空的恢复请求 |
 
-- `local_data_dir` 缺省是项目的 `.agix/`(`AGIX_LOCAL_DATA_DIR` 可改);会话文件用会话自己那个
+- `local_data_dir` 缺省是项目的 `.agix/`(`AGIX_LOCAL_DATA_DIR` 可改),其中本机的数据都在 `state/`
+  下;没有项目时它是状态目录,没有 `state/` 这一层(`<状态目录>/telemetry/`)。会话文件用会话自己那个
   项目的,`pool.jsonl` 用 daemon 自己那一层的。它不是绝对路径时(测试、没配 `paths` 的
   嵌入方)什么都不记,而不是写进进程的当前目录。
 - `session.create` 的 `options.telemetry.output` 把这个会话的文件放到指定路径。

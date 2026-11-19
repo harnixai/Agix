@@ -115,7 +115,7 @@ token 用量。改了 `tests/blackbox` 后 lint 也要带上 feature：
 | `live_context.rs` | 手动压缩由模型写摘要（`FullCompact`），压缩前给的事实之后还答得出；一轮里读的文件撑过 `compaction.threshold_tokens` 时自己压缩、照样做完这一轮；`session.fork` 的分叉记得分叉前的、不知道源会话之后的；带 `output_schema` 建的会话一轮以符合 schema 的 `structured_output` 结束；`/compact` 之后的第一个请求里有「计划模式仍在」和还在跑的监视器 `task:<id>` 两条提醒；开了 `compaction.reactive` 的长一轮里，最早几次读的结果在轮内被清掉、最新的留着，宿主收到那一趟的 `compact` 帧；阈值低到没有可丢的东西时不压缩、不发帧、不把读过的文件一遍遍补回去 |
 | `live_sessions.rs` | 宿主驱动一个会话的一生：Bash 跑到一半 `session.interrupt`，这一轮几秒内收尾、命令的进程被停掉，下一轮照常且请求里那次调用有结果；中断父会话不停后台子 agent，宿主 `session.stopTask` 后它是 `stopped`；忙时 `on_busy: reject` 得 `-32015`（带 `current_turn_id`）、`setModel` 同样被拒，`steer` 进了这一轮（`user_message_delivered`），`queue` 等它结束才开始并读到它写的文件；`session.setModel` 后下一轮的请求落在第二个 Flash 名字上、记得上一轮；`session.compact` / `session.clear` / `session.rename`（unicode 名字、清除）；`session.export` 的 zip 与目录带着侧链的转录，导出不覆盖已有路径，`session.delete` 先 dry run、再连侧链一起删并发 `session_deleted`；宿主暂停、改、清除目标，暂停时不再开轮；另起的 daemon 重启后会话 resume、没有任务还挂在 running、后台命令没活过它的 daemon；文本与图片附件；20 万字节的消息整段到达；中文、emoji、RTL 的消息、文件名与内容逐字节保持；模型一轮改了三个文件后宿主 `session.rewind` 回到上一轮，三个文件与上一轮末逐字节相同、推 `rewound`，下一轮的请求里没有被回滚那一轮的内容、模型重新读过文件再改 |
 | `live_commands.rs` | `/help`、`/skills`、`/cost`（消息数与 `session.history` 的 `total` 相同）、`/clear` 只有 `turn_start`/`turn_complete`、代理一个请求都没收到，`/compact` 只有一次压缩调用、命令文本不进模型；`commands.list` 报出内建命令（`local`/`builtin`）与项目 skill（`prompt`/`project`）；不认识的斜杠命令原样进模型；`/stamp <参数>` 把参数代进 skill 正文、写出的文件里两者都在 |
-| `live_memory.rs` | `memory_enabled` 时模型照 `# Memory` 一节在 `global_memory_dir()` 写下记忆与 `MEMORY.md` 索引，新会话的提示词里有索引、第一个请求前就被召回（不到 5 条时不起选择调用）；7 条记忆时恰有一次 `MemoryRecall` 调用、用会话的模型、只拿名字和描述；项目 `.agix/memory/` 里的记忆和全局的一起进提示词的索引、一起被召回；关了记忆就没有 `# Memory` 一节、没有召回与抽取 |
+| `live_memory.rs` | `memory_enabled` 时模型照 `# Memory` 一节在 `global_memory_dir()` 写下记忆与 `MEMORY.md` 索引，新会话的提示词里有索引、第一个请求前就被召回（不到 5 条时不起选择调用）；7 条记忆时恰有一次 `MemoryRecall` 调用、用会话的模型、只拿名字和描述；项目 `.agix/state/memory/` 里的记忆和全局的一起进提示词的索引、一起被召回；关了记忆就没有 `# Memory` 一节、没有召回与抽取 |
 | `live_transport.rs` | 另起的 daemon 带 `--listen` / `--listen-ws` / `--token`：同一个会话 Unix 上建、TCP 上跑一轮、WebSocket 上跑下一轮读前一轮写的文件，三条连接读到的历史一样长；错 token、外站 `Origin` 被拒，没握手的 TCP 连接得 `-32003` |
 | `live_scenes.rs` | `scene.register` 运行时登记的声明式场景：请求里只有它列的 `Read` / `Write`，`prompt.md` 的令牌在系统提示里，照样把活干完；同 id 再登记得 `-32602`；`scene.describe` / `scene.list` 报出它和会话数；有会话时 `scene.deactivate`、`scene.unregister` 都得 `-32009`，关掉会话后才停得掉、撤得掉 |
 | `live_providers.rs` | `harnix` 场景里 `task_models.title` 与 `task_models.compact` 各指向另一个 Flash 名字：命名请求、压缩请求各恰一次、落在各自的模型上，对话请求都留在默认厂商的模型上 |
@@ -226,7 +226,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 （不分大小写的卷上规则盖住各种大小写的路径、经悬空符号链接写出项目要问、项目里尚未建出的目录下的读取不问）。
 `mcp_project_root.rs` 钉住 MCP 服务怎么知道自己服务哪个项目（`roots` 与 `AGIX_PROJECT_ROOT`，远端服务两样都没有）。`skills_and_memory.rs` 同样用桩钉住
 `/name` 展开项目 skill(执行 `` !`cmd` ``、不带 frontmatter)、两轮之间新加的 skill 在下一轮
-发 `skills_changed`、项目 `.agix/memory/` 的索引与全局的一起进提示词。`plugin_commands.rs` 用
+发 `skills_changed`、项目 `.agix/state/memory/` 的索引与全局的一起进提示词。`plugin_commands.rs` 用
 `tests/fixtures/ext_plugin` 钉住 `RunExt` 本身（授权、`writes`、`via`、斜杠形式）；`forge.rs` 用桩把
 `examples/plugins/forge` 从安装走到归档（每个写子命令问一次、plan 模式、守卫拦与不拦的边界、`mcp` 后端
 与本地答得一样、`RunCode` 批量、`/forge` 不经模型；规格条目写进文件后读回来一致、两个变更改同一条目时后归档的
