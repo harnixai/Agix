@@ -221,3 +221,63 @@ async fn a_project_whose_providers_do_not_route_gets_no_session_and_nothing_is_s
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_whose_id_is_not_a_plain_name_is_left_out_and_the_doctor_says_why(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let provider = |id: &str, path: &str| {
+        json!({
+            "id": id,
+            "api": "anthropic",
+            "base_url": format!("{}{path}/", stub.base_url()),
+            "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+            "tiers": {"strong": format!("{path}-model")},
+        })
+    };
+    let global = json!({
+        "providers": [provider("first.one", "dotted"), provider("first_one", "underscored")],
+    });
+    let mut run = LiveRun::builder("provider-id")
+        .config(LiveConfig::for_endpoint(
+            &stub.base_url(),
+            blackbox::ModelEndpoint::model(&stub),
+        ))
+        .before_start(move |world, _| world.write_global_settings(&global))
+        .start()
+        .await?;
+    let session = run
+        .session_with(json!({"options": {"auto_name": false}}))
+        .await?;
+    stub.script([Reply::text("UNDERSCORED-ANSWER")]);
+    let turn = run.turn(&session, "one").await?;
+    assert!(turn.text.contains("UNDERSCORED-ANSWER"), "{}", turn.text);
+    assert_eq!(turn_calls_by_provider(&stub), ["underscored"]);
+
+    let doctor = run
+        .client
+        .call("daemon.doctor", json!({}))
+        .await?
+        .result
+        .unwrap_or_default();
+    let tiers = doctor["health"]["checks"]
+        .as_array()
+        .and_then(|c| c.iter().find(|c| c["name"] == "settings.tiers"))
+        .map(|c| c["details"].clone())
+        .unwrap_or_default();
+    let global_tier = tiers
+        .as_array()
+        .and_then(|t| t.iter().find(|t| t["tier"] == "global"))
+        .cloned()
+        .unwrap_or_default();
+    let ignored = &global_tier["ignored_values"];
+    assert_eq!(ignored[0]["key"], "providers[0]", "{tiers}");
+    assert!(
+        ignored[0]["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("first.one")),
+        "{ignored}"
+    );
+    run.finish().await;
+    Ok(())
+}

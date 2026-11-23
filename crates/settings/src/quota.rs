@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base::provider::{PeriodUsage, Quota, QuotaLedger, QuotaStatus};
+use base::provider::{PeriodUsage, ProviderConfig, Quota, QuotaLedger, QuotaStatus};
 use serde::{Deserialize, Serialize};
 use time::{Date, Duration, OffsetDateTime, UtcOffset};
 
@@ -105,15 +105,13 @@ impl FileQuotaLedger {
         Self { dir, clock }
     }
 
-    fn file(&self, provider: &str) -> PathBuf {
-        let name: String = provider
-            .chars()
-            .map(|c| match c {
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
-                _ => '_',
-            })
-            .collect();
-        self.dir.join(format!("{name}.json"))
+    /// Named by the id as it is; what is not an id names no file, so it can
+    /// neither reach outside `dir` nor share another provider's.
+    fn file(&self, provider: &str) -> Result<PathBuf, String> {
+        match ProviderConfig::id_problem(provider) {
+            Some(problem) => Err(problem),
+            None => Ok(self.dir.join(format!("{provider}.json"))),
+        }
     }
 
     /// No file is no usage; a file that is there and does not read is an
@@ -150,7 +148,7 @@ impl FileQuotaLedger {
 
 impl QuotaLedger for FileQuotaLedger {
     fn status(&self, provider: &str, quota: &Quota) -> QuotaStatus {
-        let (usage, error) = match Self::read(&self.file(provider)) {
+        let (usage, error) = match self.file(provider).and_then(|path| Self::read(&path)) {
             Ok(usage) => (usage, None),
             Err(error) => {
                 tracing::warn!(provider, %error, "provider counted as out of quota");
@@ -182,10 +180,10 @@ impl QuotaLedger for FileQuotaLedger {
         if tokens == 0 {
             return Ok(());
         }
+        let path = self.file(provider)?;
         let _held =
             base::dir_lock::DirLock::acquire_within(&self.dir, base::dir_lock::DIR_LOCK_WAIT)
                 .map_err(|e| format!("the quota directory could not be locked: {e}"))?;
-        let path = self.file(provider);
         let mut usage = Self::read(&path)?;
         let [day, week, month] = self.starts();
         add_to(&mut usage.day, day, tokens);
@@ -295,5 +293,31 @@ mod tests {
         assert_eq!(status.month.used, 0, "a new month");
         assert_eq!(status.exhausted(), None);
         assert_eq!(ledger.status("other", &quota).day.used, 0);
+    }
+
+    #[test]
+    fn each_provider_id_has_a_usage_file_of_its_own_and_what_is_no_id_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FileQuotaLedger::new(dir.path().join("quota"));
+        let quota = Quota {
+            day: Some(100),
+            week: None,
+            month: None,
+        };
+        ledger.record("a_b", 100).unwrap();
+        assert!(ledger.status("a_b", &quota).exhausted().is_some());
+        assert_eq!(ledger.status("a-b", &quota).day.used, 0);
+        assert!(dir.path().join("quota/a_b.json").is_file());
+
+        for bad in ["a.b", "../ds", "a/b"] {
+            assert!(ledger.record(bad, 1).is_err(), "{bad}");
+            let status = ledger.status(bad, &quota);
+            assert!(status.error.is_some(), "{bad}: counted as usable");
+        }
+        let names: Vec<_> = std::fs::read_dir(dir.path().join("quota"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["a_b.json"], "nothing else was written");
     }
 }

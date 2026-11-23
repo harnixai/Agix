@@ -210,9 +210,11 @@ impl Quota {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
-    /// Unique. When the tiers define the same id twice, the first in load
-    /// order (global, scene, project; each tier's `settings.local.json`
-    /// after its `settings.json`) is used and the rest ignored.
+    /// Unique, of ASCII letters, digits, `-` and `_`. When the tiers define
+    /// the same id twice, the first in load order (global, scene, project;
+    /// each tier's `settings.local.json` after its `settings.json`) is used
+    /// and the rest ignored.
+    #[schemars(pattern(r"^[A-Za-z0-9_-]+$"))]
     pub id: String,
     /// `anthropic`, `openai`, `deepseek`, `qwen`, `vllm`, `sglang` or
     /// `generic` (default). Decides how thinking is switched, whether
@@ -348,6 +350,20 @@ impl ProviderConfig {
             builtin: true,
             ..Default::default()
         }
+    }
+
+    /// Why `id` cannot name a provider, if it cannot. The id is the name of
+    /// the provider's quota usage file as it stands, so it holds nothing a
+    /// file name would have to change.
+    pub fn id_problem(id: &str) -> Option<String> {
+        if id.is_empty() {
+            return Some("a provider needs an `id`".to_string());
+        }
+        let fits = id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        (!fits)
+            .then(|| format!("provider id `{id}` may hold only ASCII letters, digits, `-` and `_`"))
     }
 
     /// `api`, defaulted.
@@ -504,6 +520,9 @@ pub fn routing_order<'a>(
 ) -> Result<Vec<(&'a ProviderConfig, ResolvedTiers)>, String> {
     let mut resolved = Vec::with_capacity(providers.len());
     for provider in providers {
+        if let Some(problem) = ProviderConfig::id_problem(&provider.id) {
+            return Err(problem);
+        }
         resolved.push((provider, provider.resolved_tiers()?));
     }
     let Some(first) = providers.first() else {

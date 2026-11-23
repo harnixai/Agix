@@ -53,6 +53,28 @@ fn providers_add_up_across_tiers_and_a_repeated_id_is_ignored() {
 }
 
 #[test]
+fn a_provider_whose_id_is_not_letters_digits_dashes_and_underscores_is_ignored() {
+    let settings = load_global(
+        r#"{"providers": [{"id": "a.b", "tiers": {"strong": "dotted"}},
+                          {"id": "a_b", "tiers": {"strong": "underscored"}},
+                          {"tiers": {"strong": "anonymous"}}]}"#,
+    );
+    let ids: Vec<&str> = settings
+        .values
+        .providers
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a_b"]);
+    assert_eq!(ignored_keys(&settings), ["providers[0]", "providers[2]"]);
+    assert!(
+        settings.ignored[0].error.contains("`a.b`"),
+        "{:?}",
+        settings.ignored
+    );
+}
+
+#[test]
 fn missing_tiers_are_filled_from_the_tier_above() {
     let settings = load_global(
         r#"{"providers": [{"id": "ds", "models": ["pro", "flash"],

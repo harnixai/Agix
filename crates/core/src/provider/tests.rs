@@ -56,6 +56,17 @@ fn the_order_names_defined_providers_and_defaults_to_the_first() {
 }
 
 #[test]
+fn a_provider_id_is_ascii_letters_digits_dashes_and_underscores() {
+    assert_eq!(ProviderConfig::id_problem("deep-seek_2"), None);
+    for bad in ["a.b", "a/b", "..", "dé", "a b", ""] {
+        assert!(ProviderConfig::id_problem(bad).is_some(), "{bad:?}");
+    }
+    let providers = vec![provider("a.b", &[], [Some("m"), None, None])];
+    let err = routing_order(&providers, &[]).unwrap_err();
+    assert!(err.contains("a.b"), "{err}");
+}
+
+#[test]
 fn deepseek_spells_effort_its_own_way() {
     use crate::interface::model::Effort;
     assert_eq!(Vendor::Deepseek.effort(Effort::Medium), Effort::High);

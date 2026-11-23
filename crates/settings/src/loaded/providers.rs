@@ -74,11 +74,13 @@ impl LayerFold<'_> {
                 continue;
             }
             let provider = match serde_json::from_value::<ProviderConfig>(entry) {
-                Ok(provider) if provider.id.is_empty() => {
-                    self.ignore(tier, origin, key, "a provider needs an `id`".into());
-                    continue;
-                }
-                Ok(provider) => provider,
+                Ok(provider) => match ProviderConfig::id_problem(&provider.id) {
+                    Some(problem) => {
+                        self.ignore(tier, origin, key, problem);
+                        continue;
+                    }
+                    None => provider,
+                },
                 Err(e) => {
                     self.ignore(tier, origin, key, e.to_string());
                     continue;
