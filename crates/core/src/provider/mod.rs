@@ -363,8 +363,9 @@ impl ProviderConfig {
         let fits = id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
-        (!fits)
-            .then(|| format!("provider id `{id}` may hold only lowercase ASCII letters, digits, `-` and `_`"))
+        (!fits).then(|| {
+            format!("provider id `{id}` may hold only lowercase ASCII letters, digits, `-` and `_`")
+        })
     }
 
     /// `api`, defaulted.

@@ -484,6 +484,30 @@ mod tests {
     }
 
     #[test]
+    fn a_tighter_value_beneath_the_managed_layer_stands() {
+        let tight = loaded(|s| s.turn.token_budget = Some(500)).with_managed(Some(
+            crate::managed::from_value(
+                "it",
+                json!({"turn": {"token_budget": 1000}, "model": {"effort": "low"}}),
+                &Sections::none(),
+            ),
+        ));
+        assert_eq!(tight.values.turn.token_budget, Some(500));
+        let (out, held) = over(&tight, json!({"turn": {"token_budget": 200}}));
+        assert_eq!(out.values.turn.token_budget, Some(200));
+        assert!(held.is_empty(), "{held:?}");
+
+        let loose = loaded(|s| s.turn.token_budget = Some(5000)).with_managed(Some(
+            crate::managed::from_value(
+                "it",
+                json!({"turn": {"token_budget": 1000}}),
+                &Sections::none(),
+            ),
+        ));
+        assert_eq!(loose.values.turn.token_budget, Some(1000));
+    }
+
+    #[test]
     fn a_host_layer_is_taken_as_it_is_and_its_providers_go_first() {
         let settings = loaded(|s| s.turn.token_budget = Some(1000));
         let (out, held) = settings.overlay(

@@ -46,8 +46,10 @@ pub(super) fn trust_under(
 
 impl LoadedSettings {
     /// Put the deployment's layer on top of these settings, replacing any
-    /// managed layer they already carry: every value it sets over theirs, its
-    /// providers ahead of theirs. With bypass disabled, a `bypassPermissions`
+    /// managed layer they already carry: every value it sets over theirs,
+    /// except one the trust table orders as looser than theirs (a tighter
+    /// budget or a stricter sandbox below it stands), its providers ahead of
+    /// theirs. With bypass disabled, a `bypassPermissions`
     /// the lower tiers configured becomes `default`. A layer that cannot be
     /// honoured sets nothing; the permission gate refuses every call under it.
     pub fn with_managed(mut self, managed: Option<ManagedSettings>) -> Self {
@@ -85,6 +87,7 @@ impl LoadedSettings {
             }
             merged[PROVIDERS] = providers_first(&providers, &merged);
         }
+        crate::trust::tighten_layer(&mut layer, &merged, &Sections::none());
         for (name, server) in mcp_servers_declared(&layer) {
             if server.get("command").is_some() {
                 self.mcp_server_dirs
