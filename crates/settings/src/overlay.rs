@@ -552,6 +552,23 @@ mod tests {
     }
 
     #[test]
+    fn the_engines_own_provider_stays_the_engines_through_an_overlay() {
+        let managed = crate::managed::from_value(
+            "it",
+            json!({"turn": {"max_model_calls": 20}}),
+            &Sections::none(),
+        );
+        let settings = loaded(|_| {}).with_managed(Some(managed), &Sections::none());
+        let layer = json!({"turn": {"max_model_calls": 3}});
+        for subject in [Subject::Session, Subject::Host] {
+            let (out, _) = settings.overlay(layer.as_object().unwrap(), subject, &Sections::none());
+            assert_eq!(out.values.providers.len(), 1);
+            assert!(out.values.providers[0].builtin, "{subject:?}");
+            assert_eq!(out.values.builtin_model(), Some("m"));
+        }
+    }
+
+    #[test]
     fn a_tighter_section_value_beneath_the_managed_layer_stands() {
         let sections = Sections::none().with::<Members>();
         let managed = crate::managed::from_value("it", json!({"members": {"max": 20}}), &sections);
