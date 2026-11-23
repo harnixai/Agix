@@ -265,3 +265,70 @@ async fn a_product_named_like_what_the_engine_keeps_in_state_is_refused_at_start
     }
     Ok(())
 }
+
+/// Asking about a project reads it and changes nothing: what an older engine
+/// left directly in its project directory stays there through `config.get`,
+/// `config.explain`, `scene.describe`, `mcp.status` and `session.list`
+/// naming it, and moves into `state/` once a session is created in it.
+#[tokio::test(flavor = "multi_thread")]
+async fn reading_a_projects_settings_moves_nothing_and_a_session_in_it_does() -> anyhow::Result<()>
+{
+    let stub = ProviderStub::start().await?;
+    let root = root(&stub)?;
+    let other = root.project.parent().expect("a parent").join("other");
+    std::fs::create_dir_all(&other)?;
+    std::fs::write(
+        root.data.join("settings.local.json"),
+        serde_json::to_vec(&json!({ "app": { "trusted_projects": [&root.project, &other] } }))?,
+    )?;
+    let own = other.join(".agix");
+    an_old_layout(&own)?;
+
+    let mut config = EmbedConfig::new(&root.data);
+    config.credentials = Some(blackbox::stub_credentials());
+    config.cwd = Some(root.project.clone());
+    let embedded = Embedded::start(config).await?;
+    let mut client = connect(&embedded);
+
+    let at = other.to_string_lossy().to_string();
+    for (method, params) in [
+        (
+            "config.get",
+            json!({ "scene": "code", "project_root": at, "tier": "effective" }),
+        ),
+        (
+            "config.get",
+            json!({ "scene": "code", "project_root": at, "tier": "cli" }),
+        ),
+        (
+            "config.explain",
+            json!({ "key": "memory.enabled", "project_root": at }),
+        ),
+        (
+            "scene.describe",
+            json!({ "scene": "code", "project_root": at }),
+        ),
+        ("mcp.status", json!({ "scene": "code", "project_root": at })),
+        ("session.list", json!({ "project_root": at })),
+    ] {
+        let answered = client.call(method, params).await?;
+        assert!(answered.error.is_none(), "{method}: {answered:?}");
+        assert_eq!(
+            read(own.join("memory/old-fact.md")),
+            "OLD-FACT",
+            "{method} moved the old layout"
+        );
+        assert!(
+            own.join("state").symlink_metadata().is_err(),
+            "{method} made state/"
+        );
+    }
+
+    client
+        .session_create(json!({ "project_root": at, "options": { "attended": false } }))
+        .await?;
+    assert_eq!(read(own.join("state/memory/old-fact.md")), "OLD-FACT");
+    assert!(own.join("memory").symlink_metadata().is_err());
+    embedded.shutdown().await;
+    Ok(())
+}

@@ -216,6 +216,7 @@ impl EngineFactory {
             .question_prompts(options.is_some_and(SessionOptions::answers_questions))
             .mcp_prompts(options.is_some_and(SessionOptions::answers_mcp_elicitation));
         if !req.transient {
+            open_project_state(&binding.settings);
             builder = self.kept(builder, &settings_snapshot, options, session_id);
         }
         if let Some(clock) = clock {
@@ -438,6 +439,19 @@ fn recorder_config(
         } else {
             Divergence::Warn
         },
+    }
+}
+
+/// The pair's project opened for a session: its older local data moved into
+/// `state/`, where the session's memory, scratchpad and telemetry are.
+fn open_project_state(settings: &LoadedSettings) {
+    let paths = &settings.paths;
+    if let Some(project) = paths.workspace.project_root() {
+        crate::settings_source::move_into_state(
+            project,
+            &paths.layout,
+            [&paths.global_data_dir, &paths.user_data_dir],
+        );
     }
 }
 

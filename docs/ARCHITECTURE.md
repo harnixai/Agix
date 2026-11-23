@@ -2408,8 +2408,11 @@ hooks、commands、rules、output-styles 等配置);引擎为这台机器、这�
 与 `state/` 的其余部分一样受保护(§8.1)。产品名小写后不能是引擎在 `state/` 下用的名字
 (`STATE_RESERVED_NAMES`,其中 `history` 是按项目存放的会话历史,§8.2),`Layout::with_product_name` 在启动时拒。
 
-**旧位置。** 读一个项目的设置就是打开它(`settings_source::read_pair`,在一切用到本机数据之前):直接放在
-`.agix/` 下的 `PROJECT_STATE_ENTRIES`(上面那六项)一次性改名进 `state/`,之后只读新位置。项目层目录是
+**旧位置。** 打开一个项目时(daemon 启动时它自己的项目,`load_daemon_config`;别的项目在其中建会话的引擎时,
+`EngineFactory::build`——都在用到本机数据之前,`settings_source::move_into_state`):直接放在
+`.agix/` 下的 `PROJECT_STATE_ENTRIES`(上面那六项)一次性改名进 `state/`,之后只读新位置。只读不写的请求
+(`config.get`、`config.explain`、`scene.describe`、`mcp.status`、`session.list` 这些点名一个项目的查询)读它的设置,
+但不挪任何东西。项目层目录是
 符号链接、落在项目之外,或 `state/` 不是自己的目录时什么都不挪;旧项是符号链接的不挪;`state/` 里已有同名的,
 旧的留着、不再读(记一条 info)。挪不动的记 warn,不影响打开。`.gitignore` 里旧的条目不替人删。
 项目层目录就是状态根或场景目录、包含它或落在它里面时也不挪(在 `$HOME` 里启动,`~/.agix` 既是项目层又是

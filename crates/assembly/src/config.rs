@@ -284,7 +284,8 @@ impl DaemonConfig {
 /// every scene) → scene (`config_root()/settings.json`) → project
 /// (`settings.json` in `layout()`'s directory of `project_root()`) → `cli_settings`
 /// — delegates entirely to `LoadedSettings::load_from()`; see its doc comment
-/// for the merge algorithm.
+/// for the merge algorithm. The project is opened first: what an older engine
+/// left directly in its project directory moves into `state/`.
 pub fn load_daemon_config(
     cli_model: &str,
     cli_settings: Option<serde_json::Value>,
@@ -296,6 +297,11 @@ pub fn load_daemon_config(
     let project_root = paths.project_root();
     let global_root = paths.global_root();
 
+    crate::settings_source::move_into_state(
+        &project_root,
+        &paths.layout(),
+        [&global_root, &config_root],
+    );
     let settings = crate::settings_source::read_pair(crate::settings_source::PairRead {
         global_root: global_root.clone(),
         scene_root: config_root.clone(),

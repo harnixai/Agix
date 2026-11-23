@@ -1,8 +1,10 @@
 //! The one way the assembly reads a (project, scene) pair's settings from disk,
 //! and the same read with some of its files replaced by what a write would put
 //! there; both with the `cli` layer above the files and the managed layer above
-//! everything. Reading a project's is opening it: what an older engine left
-//! directly in its project directory is moved into `state/` first.
+//! everything. A read writes nothing: what an older engine left directly in a
+//! project's project directory is moved into `state/` by [`move_into_state`]
+//! when the project is opened — the daemon's own at start, any other when a
+//! session's engine is built in it.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -77,10 +79,7 @@ fn read(request: PairRead<'_>, seen: Option<&Mutex<Vec<ConfigLayer>>>) -> Loaded
     } = request;
     let sections = crate::settings_sections::all();
     let local_dir = match project {
-        Some(root) => {
-            move_into_state(root, layout, [&global_root, &scene_root]);
-            layout.project_dir(root)
-        }
+        Some(root) => layout.project_dir(root),
         None => global_root.clone(),
     };
     let files = FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone());
@@ -224,7 +223,7 @@ pub(crate) fn read_pair_as_if(
 /// A project directory that is one of `state_roots`, holds one or lies in one
 /// is left alone: what lies there is the instance's own, not an older
 /// engine's project data.
-fn move_into_state(project: &Path, layout: &Layout, state_roots: [&Path; 2]) {
+pub(crate) fn move_into_state(project: &Path, layout: &Layout, state_roots: [&Path; 2]) {
     let dir = layout.project_dir(project);
     let real_dir = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_dir());
     let Ok(real) = dir.canonicalize() else {
