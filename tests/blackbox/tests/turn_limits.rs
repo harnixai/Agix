@@ -719,9 +719,11 @@ async fn an_uncached_prompt_counts_again_on_the_next_call() -> anyhow::Result<()
     Ok(())
 }
 
-/// Three reads leave 2900 of 30000 and the conversation over the compaction
+/// Three reads leave 3400 of 30000 and the conversation over the compaction
 /// threshold: the summary is a call of the turn like any other, asking for no
-/// more than is left once its input is paid.
+/// more than is left once its input is paid. What is left keeps the summary
+/// well above the 1024 a call needs, so whether it is sent does not hang on
+/// a few tokens of estimate.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_compaction_summary_asks_for_no_more_than_the_turn_has_left() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
@@ -743,7 +745,7 @@ async fn a_compaction_summary_asks_for_no_more_than_the_turn_has_left() -> anyho
             .map(|l| format!("part {i} line {l}: routine reading, all values nominal\n"))
             .collect();
         let path = run.write_file(&format!("part{i}.log"), &body)?;
-        let spent = [1000, 10000, 15900][i - 1];
+        let spent = [1000, 10000, 15300][i - 1];
         script.push(Reply::spent_cached(
             spent,
             5000,
@@ -769,8 +771,8 @@ async fn a_compaction_summary_asks_for_no_more_than_the_turn_has_left() -> anyho
         .map(max_tokens)
         .collect();
     assert!(
-        !summaries.is_empty() && summaries.iter().all(|&asked| asked < 2900),
-        "a summary went out on 2900 tokens left asking for {summaries:?}: {events:?}"
+        !summaries.is_empty() && summaries.iter().all(|&asked| asked < 3400),
+        "a summary went out on 3400 tokens left asking for {summaries:?}: {events:?}"
     );
     run.finish().await;
     Ok(())
