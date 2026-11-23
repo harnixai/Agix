@@ -115,14 +115,14 @@ impl HookEvent {
             ),
             HookEvent::SessionStart => (
                 "会话开始运行,紧接在 `Setup` 之后",
-                "`source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带",
+                "`source`:宿主为什么启动这个引擎——`new`(`session.create`、第一条消息建的会话)、`resume`(从日志接回来,包括重启或被驱逐之后再用)、`rebuild`(`setPrompt`、跨 provider 或改推理设置的 `setModel`、设置变了而给还在内存里的会话换引擎);嵌入方启动时没给原因的不带",
                 Acts(
                     "`additional_context`:这段文字在模型的下一步之前,放进一个 system-reminder 交给它(第一轮开头、第一条用户消息之前;会话重建、恢复时再发一次就再注入一次)",
                 ),
             ),
             HookEvent::SessionEnd => (
                 "会话的主循环退出:收到关闭、输入通道关闭、被取消,三种都发",
-                "`reason`:宿主为什么停下这个引擎——`close`(`session.close` / `session.delete`)、`evict`(空闲回收或池满挤出)、`rebuild`(`setPrompt`、跨 provider 的 `setModel`、设置变了而换引擎)、`shutdown`(daemon 关停);引擎自己结束的(输入通道关闭、收到 `Shutdown` 命令)、嵌入方停下时没给原因的不带",
+                "`reason`:宿主为什么停下这个引擎——`close`(`session.close` / `session.delete`)、`evict`(空闲回收或池满挤出)、`rebuild`(`setPrompt`、跨 provider 或改推理设置的 `setModel`、设置变了而换引擎)、`shutdown`(daemon 关停);引擎自己结束的(输入通道关闭、收到 `Shutdown` 命令)、嵌入方停下时没给原因的不带",
                 Ignored,
             ),
             HookEvent::Stop => (
