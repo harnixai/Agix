@@ -117,14 +117,15 @@ pub(in crate::agent) fn hook_run_recorder(
     })
 }
 
-/// The session's id, cwd, depth and permission mode, read each time a
-/// payload is built. Holds the state weakly: the closure lives in tasks and
-/// watchers that must not keep the session alive.
+/// The session's id, cwd, depth, permission mode and open turn, read each
+/// time a payload is built. Holds the state weakly: the closure lives in tasks
+/// and watchers that must not keep the session alive.
 pub(in crate::agent) fn hook_ambient(
     session_id: String,
     cwd: String,
     depth: u32,
     state: Arc<session_state::SessionState>,
+    open_turn: crate::turn::OpenTurn,
 ) -> hooks::payload::Ambient {
     let state = Arc::downgrade(&state);
     Arc::new(move || {
@@ -134,5 +135,6 @@ pub(in crate::agent) fn hook_ambient(
             .unwrap_or_else(|| "default".into());
         hooks::HookInput::lifecycle(String::new(), session_id.clone(), cwd.clone(), mode)
             .with_depth(depth)
+            .spending_into(open_turn.spend())
     })
 }

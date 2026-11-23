@@ -317,13 +317,13 @@ impl GoalSlot {
         std::mem::replace(&mut self.armed, false)
     }
 
-    /// Mark an active goal whose rounds have spent its token budget blocked,
-    /// as one whose rounds are all used is. Whether it changed.
-    pub fn block_if_spent(&mut self, spent: u64) -> bool {
+    /// Mark an active goal blocked whose budget its rounds have spent, `next`
+    /// input included, as one whose rounds are all used is. Whether it changed.
+    pub fn block_if_spent(&mut self, spent: u64, next: u64) -> bool {
         let Some(goal) = self.goal.as_mut() else {
             return false;
         };
-        let Some(budget) = goal.token_budget.filter(|&b| spent_out(b, spent)) else {
+        let Some(budget) = goal.token_budget.filter(|&b| spent_out(b, spent + next)) else {
             return false;
         };
         if goal.phase != GoalPhase::Active {
@@ -356,7 +356,7 @@ impl GoalSlot {
             self.armed = false;
             return (None, true);
         }
-        if self.block_if_spent(spent) {
+        if self.block_if_spent(spent, 0) {
             return (None, true);
         }
         let Some(goal) = self.goal.as_mut() else {
@@ -827,7 +827,8 @@ mod tests {
         )
         .unwrap();
         assert!(start_round(&mut slot).is_some());
-        assert!(!slot.block_if_spent(3_976), "1024 left pays for a call");
+        assert!(!slot.block_if_spent(3_976, 0), "1024 left pays for a call");
+        assert!(!slot.block_if_spent(3_000, 976), "nor with the input");
         let (round, changed) = slot.next_round(4_000);
         assert!(round.is_none() && changed);
         let goal = slot.goal.as_ref().unwrap();

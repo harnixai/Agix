@@ -71,6 +71,11 @@ pub struct HookInput {
     /// `TaskCompleted` / `TeammateIdle`: the member's own name in it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub teammate_name: Option<String>,
+
+    /// The turn a hook that calls a model spends into; `None` between turns.
+    /// Never part of what a hook is sent.
+    #[serde(skip)]
+    pub spend: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,
 }
 
 /// The fields every payload of a session carries, read when the hook fires:
@@ -160,6 +165,14 @@ impl HookInput {
         self
     }
 
+    pub fn spending_into(
+        mut self,
+        spend: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,
+    ) -> Self {
+        self.spend = spend;
+        self
+    }
+
     pub fn with_team(
         mut self,
         team_name: impl Into<String>,
@@ -170,17 +183,18 @@ impl HookInput {
         self
     }
 
-    /// `ambient`'s session, cwd, permission mode and depth under another
-    /// event name.
+    /// `ambient`'s session, cwd, permission mode, depth and spend under
+    /// another event name.
     pub fn from_ambient(ambient: &Ambient, event: impl Into<String>) -> Self {
         Self::lifecycle_of(ambient(), event)
     }
 
-    /// `base`'s session, cwd, permission mode and depth under another event
-    /// name.
+    /// `base`'s session, cwd, permission mode, depth and spend under another
+    /// event name.
     pub fn lifecycle_of(base: HookInput, event: impl Into<String>) -> Self {
         Self::lifecycle(event, base.session_id, base.cwd, base.permission_mode)
             .with_depth(base.depth)
+            .spending_into(base.spend)
     }
 }
 

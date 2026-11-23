@@ -470,6 +470,7 @@ impl Agent {
             hook_permission_mode(self.session_state.permission_mode()),
         )
         .with_depth(self.identity.agent_depth())
+        .spending_into(self.open_turn.spend())
     }
 
     /// Run a full turn from a user message.
@@ -672,6 +673,7 @@ impl Agent {
             depth: self.identity.agent_depth(),
             user_prompt: Some(content.clone()),
             delivery: Some(delivery.as_str().to_string()),
+            spend: self.open_turn.spend(),
             ..Default::default()
         };
         let hook_result = self

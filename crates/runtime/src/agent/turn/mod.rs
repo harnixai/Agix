@@ -3,6 +3,7 @@
 //! 在 agent 的协议无关类型之上的核心处理逻辑；按职责分成子模块，本文件留回合的公共类型与对外再导出。
 
 mod attachments;
+pub(crate) mod call_input;
 mod caller;
 mod compact;
 mod frozen;

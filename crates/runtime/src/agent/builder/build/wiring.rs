@@ -144,11 +144,13 @@ impl Builder {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(session_state::SessionState::new()), 0, false),
         };
+        let open_turn = crate::turn::OpenTurn::default();
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
             settings.paths.working_dir().display().to_string(),
             agent_depth,
             session_state.clone(),
+            open_turn.clone(),
         );
 
         // One watcher per session tree, started by its root: a delegate shares
@@ -175,6 +177,7 @@ impl Builder {
             )),
             exec,
             ambient: hook_ambient,
+            open_turn,
         })
     }
 

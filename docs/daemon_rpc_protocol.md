@@ -579,9 +579,12 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 
 **一轮的 token 预算含子 Agent。** 预算按未命中缓存的输入、缓存写入与输出计(缓存命中不计,同 provider 配额),算的是这一轮的全部模型调用:
 会话自己的、它在这一轮里起的子 Agent(前台、后台)与团队成员(`TeamCreate` 的成员、这一轮派了活的持久成员)的,
-以及这些 agent 各自在旁边发的调用(压缩写摘要、记忆召回与轮末的记忆抽取、`WebSearch`、`WebFetch` 的抽取)。
-首轮之后的自动命名与手动压缩(`/compact`、`session.compact`)不在任何一轮的模型循环里,不计。每次调用发出前,`max_tokens` 压到不超过预算的
-剩余;剩余不到 1024 时这次调用不发,这一轮以 `budget_exceeded` 结束。一次调用之后合计到达预算时同样结束;
+以及这些 agent 各自在旁边发的调用(压缩写摘要、记忆召回与轮末的记忆抽取、`WebSearch`、`WebFetch` 的抽取)
+和它们触发的 `prompt` hook(记在 `usage_breakdown.side`)、`agent` hook 的子 Agent(记在 `delegates`)。
+首轮之后的自动命名与手动压缩(`/compact`、`session.compact`)不在任何一轮的模型循环里,不计。每次调用发出前,
+先估计这次请求里不会由 provider 缓存供给的输入(上一次调用读到了缓存时只算那之后新加的,没读到时连上一次被计的
+输入一起算,见 ARCHITECTURE「调用之前估输入」),从剩余里扣掉,`max_tokens` 压到不超过扣完的数;扣完不到 1024
+时这次调用不发,这一轮以 `budget_exceeded` 结束,`turn_complete.message` 写明剩余与估计的输入。一次调用之后合计到达预算时同样结束;
 到达 90% 时往对话里加一条提醒,让模型收尾。子 Agent 判的是同一份合计:别的 agent 把预算用完后,在跑的子
 Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果末尾写明是这个原因。这一轮起的后台子 Agent
 在这一轮结束之后仍记在这份合计上,照样会被它截停;下一轮有自己的一份。一次调用中途断开或失败、这一轮
@@ -590,8 +593,8 @@ Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果
 
 **会话的 token 预算。** 设置 `session.token_budget`(缺省不限)给一个会话从创建起的累计设上限,口径与
 算的调用同一轮的预算,只是不按轮清零:会话所有的轮(宿主的、定时任务的、目标的)都在内,跨重建、驱逐与
-daemon 重启(累计即 `session.get` 的 `usage`,§6.3)。每次调用的 `max_tokens` 同样压到不超过它的剩余,
-剩余不到 1024 时不发;用完时这一轮以 `budget_exceeded` 结束,`turn_complete.message` 为
+daemon 重启(累计即 `session.get` 的 `usage`,§6.3)。每次调用同样先从它的剩余里扣掉输入的估计,`max_tokens`
+压到不超过扣完的数,扣完不到 1024 时不发;用完时这一轮以 `budget_exceeded` 结束,`turn_complete.message` 为
 `this session's token budget of <N> is used up`,到达 90% 时同样提醒收尾。之后每一次 `run_turn` 都在
 第一次调用前以 `budget_exceeded` 结束,不调模型;要接着用,宿主调高设置(或换一个会话)。子 Agent 与
 团队成员判的是根会话的这份累计。
@@ -1947,8 +1950,8 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 - `phase`:`active` / `paused` / `blocked` / `complete`。只有 `active` 且 `armed` 的目标
   会自动开轮。
 - `token_budget` 是目标各轮能花的 token(未命中缓存的输入、缓存写入与输出;各轮起的子 Agent、团队成员与
-  旁路调用都在内),从目标设下起算,设它的那一轮和期间宿主、定时任务的轮不算。剩余付不起一次调用(不到
-  1024)时,那一轮在调用前以 `budget_exceeded` 结束,目标转 `blocked`,`blocked_reason` 形如
+  旁路调用都在内),从目标设下起算,设它的那一轮和期间宿主、定时任务的轮不算。剩余付不起一次调用(扣掉这次
+  输入的估计后不到 1024)时,那一轮在调用前以 `budget_exceeded` 结束,目标转 `blocked`,`blocked_reason` 形如
   `token budget: 2400 of 3000 tokens used`,不再开下一轮;`resume` 之前要先 `edit` 把 `token_budget`
   调高(同 `max_rounds` 用完)。`tokens_used` 跨重启;会话不在内存里时 `session.goal` 从日志读出。
   `token_budget` 给 0 → `INVALID_PARAMS`。会话自己的 `session.token_budget` 照样约束目标的轮。

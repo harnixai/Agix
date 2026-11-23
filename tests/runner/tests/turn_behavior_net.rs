@@ -902,7 +902,8 @@ async fn a_user_prompt_submit_hook_can_block_the_turn() {
 }
 
 /// **The token budget warns at 90% and stops at 100%.** Two calls: the first
-/// lands at 18000 of 20000 and injects the reminder, the second crosses the cap.
+/// lands at 18000 of 20000 and injects the reminder, the second — its input
+/// resent uncached, still within what is left — crosses the cap.
 #[tokio::test]
 async fn the_token_budget_warns_then_stops_the_turn() {
     let mut case = Case::new(
@@ -914,7 +915,7 @@ async fn the_token_budget_warns_then_stops_the_turn() {
             Reply::Text("never reached"),
         ],
     );
-    case.usage = vec![(15_000, 3_000), (1_000, 1_000)];
+    case.usage = vec![(500, 17_500), (1_000, 1_000)];
     case.token_budget = Some(20_000);
     check(case).await;
 }

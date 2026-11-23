@@ -266,13 +266,15 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 失败 / 被丢弃时按 client 已经报的,同时记进 provider 配额和这次调用的 `UsageTap` 所记的那个
 `SpendNode`(`base::interface::budget_policy`)。调用方只说记到哪:这一轮的主循环在发出前把 tap 指向
 这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮,
-两轮之间的不记。
+`prompt` hook 的调用指向 payload 带的那一轮(`HookInput.spend`:工具管线里的 hook 是那次工具调用所在的
+一轮,其余是触发时打开的那一轮),两轮之间的不记。
 
 节点连成链:delegate 那一轮的节点在起它的那一轮下面(`Agent` 工具、`TeamCreate` 的阶段成员、派给持久
-成员的消息、fork 的 skill 把起它的那一轮放进 `DelegateRequest.spend`;宿主 `session.startAgent` 起的放
+成员的消息、fork 的 skill、`agent` hook 把起它的那一轮放进 `DelegateRequest.spend`;宿主 `session.startAgent` 起的放
 会话的节点),根轮在会话的节点下面,目标轮在两者之间插一层目标的节点。一次调用逐级加到链上每个节点。
 引擎自己的上限挂在节点上——一轮的(`turn.token_budget`,挂在根轮,delegate 共用)、目标的、会话的——
-第 1 步取整条链上最小的剩余(`SpendNode::remaining`)压低 `max_tokens`、不到 `MIN_CALL_TOKENS` 不发,
+第 1 步取整条链上最小的剩余(`SpendNode::remaining`),减去这次请求输入的估计(见下)后压低 `max_tokens`、
+不到 `MIN_CALL_TOKENS` 不发(付不起的是目标的上限时目标转 `blocked`),
 第 7 步(`SpendNode::judge`)任何一层到顶即以 `budget_exceeded` 结束,最近的一层到 90% 时提醒收尾;
 `turn_complete.message` 写明是谁的预算。宿主的 `BudgetPolicy` 在这之外再判一次(`remaining` / `on_usage`
 拿根轮的读数 `whole_turn`),两边都要过,注入 policy 不会让引擎的上限失效。所有上限和 provider 配额用同一个
@@ -284,13 +286,25 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 
 | 层 | 上限 | 量的是什么 | 到顶时 |
 |---|---|---|---|
-| 一次调用 | `max_tokens`(`model.max_tokens`、模型的 `max_output`),压到链上最小的剩余 | 这次调用的输出 | 回复以 `max_tokens` 截断 |
-| 一轮 | `turn.token_budget`(`options.settings.turn` 只能收紧) | 根轮与它的 delegate、旁路调用 | 这一轮 `budget_exceeded`,下一轮重新算 |
+| 一次调用 | `max_tokens`(`model.max_tokens`、模型的 `max_output`),压到链上最小的剩余减去这次输入的估计 | 这次调用的输出 | 回复以 `max_tokens` 截断 |
+| 一轮 | `turn.token_budget`(`options.settings.turn` 只能收紧) | 根轮与它的 delegate、旁路调用、`prompt` / `agent` hook | 这一轮 `budget_exceeded`,下一轮重新算 |
 | 目标 | 目标的 `token_budget` | 目标各轮(含 delegate、旁路) | 这一轮 `budget_exceeded`,目标转 `blocked`(`blocked_reason` 以 `token budget` 开头),同轮数用完 |
 | 会话 | `session.token_budget` | 会话从创建起所有的轮,跨重启 | 这一轮与之后每一轮 `budget_exceeded`,不调模型 |
 | provider 配额 | `providers[].quota` | 每个 provider 按日 / 周 / 月,跨会话 | 路由跳过它,换下一个;都用尽报 `providers_unavailable` |
 
 后四层同一个口径(`Spend::counted_tokens`),由同一次计量记账;前四层判在调用前后,配额判在路由选 provider 时。
+
+**调用之前估输入,预算是估计,不是预留。** 一次调用的输入要发出去才知道 provider 怎么计,而缓存命中不计:
+按整个请求估会让走缓存的会话还没花什么就被拦下。所以发出前估的是预计不由缓存供给的那部分
+(`runtime/src/agent/turn/call_input.rs`,用会话的 `TokenCounter`):这个 agent 上一次调用的请求是这次的
+前缀时,是那之后新加的消息,上一次没有读到缓存(provider 报的 `cache_read` 为 0)时再加上它被计的整个输入
+(未命中缓存的输入 + 缓存写入,下一次原样再发一遍);不是前缀时(压缩、修剪、宿主改了上下文、系统提示词或
+工具变了)是整个请求;这个 agent 还没调过(新会话、恢复后、新起的 delegate)时是模型上一次说话之后的
+消息,系统提示词、工具与模型看过的部分当作已缓存。`prompt` hook 的请求整个算。估计从剩余里先扣掉,
+剩下的才是 `max_tokens` 的上限。同时在跑的 agent(并发的子 Agent、团队成员、后台子 Agent)判的是同一份
+剩余,彼此不预留,所以一层上限可能被超出,超出的量至多是同时在跑的每个 agent 各一次调用的输出,加上
+估计的误差(本地计数与 provider 计数的差、第一次调用当作已缓存而实际没有缓存的部分);超出之后下一次调用
+之前一定停。
 
 **一条工具管线。** 模型的每次工具调用(`tool_use`)、`RunCode` 程序里的子调用、skill 正文里的
 `` !`cmd` `` 内嵌命令,都走同一条:`PreToolUse` → 输入校验 → 权限 → 中间件 → 工具 → `tool_result`
@@ -905,8 +919,8 @@ release 构建记一条 error。
   hook 中止、预算耗尽或出错结束,也解除武装。
 - **目标的预算**:目标的各轮在用量链上插一层目标的节点(`SessionLedger::goal_spent`),`token_budget`
   是它的上限,目标设下时从零算,只算目标的轮(不算设它的那一轮、也不算期间宿主或定时任务的轮)。
-  剩余付不起一次调用(不到 `MIN_CALL_TOKENS`)时,这一轮在调用前以 `budget_exceeded` 结束,目标转
-  `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复。节点的累计随 `agix.spend`
+  剩余付不起一次调用(减去这次调用输入的估计后不到 `MIN_CALL_TOKENS`)时,这一轮在调用前以
+  `budget_exceeded` 结束,目标转 `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复。节点的累计随 `agix.spend`
   落盘,恢复时按目标 `id` 取回。模型设或改的目标,`max_rounds` 不超过设置的 `goal.max_rounds`
   (`ModelAutonomy`,经 `EngineConfig` 给工具),宿主设的只受格式上限 10000 约束。模型经 `CronCreate`
   建的定时任务同样由 `ModelAutonomy` 约束(`schedule.*`),判在工具里、不在宿主也用的 `CronStore` 里;

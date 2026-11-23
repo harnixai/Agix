@@ -432,10 +432,20 @@ impl SessionState {
     pub fn goal_disarm(&self) {
         let spent = self.goal_spent();
         let mut slot = lock(&self.goal);
-        if slot.block_if_spent(spent) {
+        if slot.block_if_spent(spent, 0) {
             self.goal_changed(&slot, true);
         } else if slot.disarm() {
             self.goal_changed(&slot, false);
+        }
+    }
+
+    /// Block the goal on its token budget when what is left cannot pay for
+    /// its round's next call, `input` of which is estimated.
+    pub fn goal_block_unaffordable(&self, input: u64) {
+        let spent = self.goal_spent();
+        let mut slot = lock(&self.goal);
+        if slot.block_if_spent(spent, input) {
+            self.goal_changed(&slot, true);
         }
     }
 

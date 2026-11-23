@@ -156,7 +156,8 @@ impl Delegator {
         if let Some(store) = &history_store {
             write_sidechain_meta(store, &sid, parent_session_id, &scene_id, cwd, &settings).await;
         }
-        let payload = SubagentPayload::of(&sid, cwd, depth, &settings.values, agent_type);
+        let payload = SubagentPayload::of(&sid, cwd, depth, &settings.values, agent_type)
+            .spending_into(spec.spend.clone());
         Ok(Delegate {
             agent,
             event_rx,

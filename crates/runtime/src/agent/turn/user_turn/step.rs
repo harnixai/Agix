@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 struct ModelCall {
     step: u32,
     result: crate::streaming::StreamResult,
+    prompt: crate::turn::call_input::SentPrompt,
     messages_before_step: usize,
     sent_message_count: usize,
     sent_tool_count: usize,
@@ -46,12 +47,11 @@ impl Agent {
         {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
-        let headroom = match self.budget_before_call() {
-            ControlFlow::Continue(headroom) => headroom,
-            ControlFlow::Break(why) => {
-                return Ok(ControlFlow::Break(StopReason::BudgetExceeded(why)))
-            }
-        };
+        // Judged before compacting too: a compaction may call the model,
+        // which a spent budget cannot pay for either.
+        if let ControlFlow::Break(why) = self.budget_before_call(0) {
+            return Ok(ControlFlow::Break(StopReason::BudgetExceeded(why)));
+        }
 
         self.fit_context(cancel).await;
         if cancel.is_cancelled() {
@@ -62,7 +62,12 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::ContextExceeded));
         }
 
-        let call = self.call_model(state, headroom, cancel).await?;
+        let request = match self.affordable_request(state).await {
+            Ok(request) => request,
+            Err(stop) => return Ok(ControlFlow::Break(stop)),
+        };
+
+        let call = self.call_model(state, request, cancel).await?;
         self.account_call(state, &call).await;
         if call.result.cancelled {
             return Ok(ControlFlow::Continue(()));
@@ -129,22 +134,35 @@ impl Agent {
         false
     }
 
-    async fn start_step(
+    /// The step's request, asking for no more output than the budget leaves
+    /// once its input is paid, or the turn's end when that is too little.
+    async fn affordable_request(
         &mut self,
-        state: &mut TurnLoopState,
-        headroom: Option<u32>,
-    ) -> (u32, ModelRequest) {
-        let step = state.api_calls;
-        state.api_calls += 1;
-        self.emit(AgentEvent::StepStart {
-            step,
-            turn_id: self.current_turn_id.clone(),
-        });
+        state: &TurnLoopState,
+    ) -> Result<ModelRequest, StopReason> {
+        let mut request = self.step_request(state).await;
+        let input = crate::turn::call_input::counted_input(
+            &**self.session.token_counter(),
+            &request.messages,
+            self.compaction.overhead(),
+            self.llm.last_call.as_ref(),
+        );
+        match self.budget_before_call(input) {
+            ControlFlow::Continue(left) => {
+                let asked = request.params.max_tokens;
+                request.params.max_tokens = left.map_or(asked, |left| asked.min(left));
+                Ok(request)
+            }
+            ControlFlow::Break(why) => Err(StopReason::BudgetExceeded(why)),
+        }
+    }
+
+    async fn step_request(&mut self, state: &TurnLoopState) -> ModelRequest {
         let origin = Some(
             base::interface::model::CallOrigin::turn(
                 self.session.session_id.clone(),
                 self.session.turn_count,
-                step,
+                state.api_calls,
             )
             .with_lineage(
                 self.session.parent_session_id().map(str::to_string),
@@ -152,20 +170,35 @@ impl Agent {
             )
             .with_turn_id(self.current_turn_id.clone()),
         );
-        let max_tokens = headroom.map_or(state.max_tokens, |left| state.max_tokens.min(left));
-        let request = self
-            .prepare_request(&state.model, max_tokens, origin.clone())
-            .await;
-        (step, request)
+        self.prepare_request(&state.model, state.max_tokens, origin)
+            .await
+    }
+
+    fn sent_prompt(&self, request: &ModelRequest) -> crate::turn::call_input::SentPrompt {
+        crate::turn::call_input::SentPrompt::of(
+            &**self.session.token_counter(),
+            &request.messages,
+            self.compaction.overhead(),
+        )
+    }
+
+    fn start_step(&mut self, state: &mut TurnLoopState) -> u32 {
+        let step = state.api_calls;
+        state.api_calls += 1;
+        self.emit(AgentEvent::StepStart {
+            step,
+            turn_id: self.current_turn_id.clone(),
+        });
+        step
     }
 
     async fn call_model(
         &mut self,
         state: &mut TurnLoopState,
-        headroom: Option<u32>,
+        mut request: ModelRequest,
         cancel: &CancellationToken,
     ) -> Result<ModelCall, TurnError> {
-        let (step, mut request) = self.start_step(state, headroom).await;
+        let step = self.start_step(state);
         // Taken before the request is handed on: accounting needs the size
         // of what went out.
         let sent_message_count = request.messages.len();
@@ -181,12 +214,13 @@ impl Agent {
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let template = self.tool_exec_ctx(cancel, &discontinued, &tool_images);
         let mut recovering = crate::turn::request::RecoveringCall::after(state.had_tool_uses);
-        let (result, messages_before_step) = loop {
+        let (result, messages_before_step, prompt) = loop {
             let messages_before_step = self.session.messages().len();
+            let prompt = self.sent_prompt(&request);
             let sent = request.clone();
             let attempt = self.stream_once(request, &template, cancel).await;
             let (failure, after_first_byte) = match attempt {
-                Ok(result) => break (result, messages_before_step),
+                Ok(result) => break (result, messages_before_step, prompt),
                 Err(failure) => failure,
             };
             self.record_api_error(&state.model, &failure.error, call_started);
@@ -194,6 +228,7 @@ impl Agent {
                 break (
                     crate::streaming::StreamResult::cancelled(),
                     messages_before_step,
+                    prompt,
                 );
             }
             request = match self
@@ -213,6 +248,7 @@ impl Agent {
                     break (
                         crate::streaming::StreamResult::cancelled(),
                         messages_before_step,
+                        prompt,
                     )
                 }
             };
@@ -225,6 +261,7 @@ impl Agent {
         Ok(ModelCall {
             step,
             result,
+            prompt,
             messages_before_step,
             sent_message_count,
             sent_tool_count,
@@ -307,6 +344,12 @@ impl Agent {
         state.tool_calls += stream_result.tool_calls;
         let stop_reason = &stream_result.stop_reason;
         let usage = stream_result.usage;
+        if usage.input_tokens > 0
+            || usage.cache_read_input_tokens > 0
+            || usage.cache_creation_input_tokens > 0
+        {
+            self.llm.last_call = Some(call.prompt.answered(usage));
+        }
         state.last_call = usage;
         self.turn.last_call_usage = Some(usage);
         self.turn.truncated |= stream_result.truncated;
@@ -387,10 +430,10 @@ impl Agent {
     }
 
     /// How much output the next call may ask for under the tightest of the
-    /// engine's ceilings and the policy's, or the turn's end, saying whose,
-    /// when what remains cannot pay for a call.
-    pub(super) fn budget_before_call(&mut self) -> ControlFlow<String, Option<u32>> {
-        use base::interface::budget_policy::{Scope, MIN_CALL_TOKENS};
+    /// engine's ceilings and the policy's once `input` of it is paid, or the
+    /// turn's end, saying whose, when what remains cannot pay for the call.
+    pub(super) fn budget_before_call(&mut self, input: u64) -> ControlFlow<String, Option<u32>> {
+        use base::interface::budget_policy::Scope;
         let node = self.turn.scope.spend().clone();
         let spend = node.whole_turn();
         let policy = self
@@ -403,29 +446,29 @@ impl Agent {
             .into_iter()
             .chain(policy)
             .min_by_key(|(_, left)| left.tokens);
-        let Some((scope, remaining)) = tightest else {
-            return ControlFlow::Continue(None);
-        };
-        if remaining.tokens < MIN_CALL_TOKENS {
-            let used = remaining.limit.saturating_sub(remaining.tokens);
-            tracing::warn!(
-                ?scope,
-                used,
-                budget = remaining.limit,
-                left = remaining.tokens,
-                "token budget too low for another call"
-            );
-            self.record_budget_enforced(
-                telemetry::BudgetEnforcedAction::TurnStopped,
-                used,
-                remaining.limit,
-            );
-            return ControlFlow::Break(base::interface::budget_policy::exhausted_message(
-                scope,
-                remaining.limit,
-            ));
+        match crate::turn::call_input::headroom(tightest, input) {
+            Ok(headroom) => ControlFlow::Continue(headroom),
+            Err(refused) => {
+                let used = refused.left.limit.saturating_sub(refused.left.tokens);
+                tracing::warn!(
+                    scope = ?refused.scope,
+                    used,
+                    budget = refused.left.limit,
+                    left = refused.left.tokens,
+                    input,
+                    "token budget too low for another call"
+                );
+                self.record_budget_enforced(
+                    telemetry::BudgetEnforcedAction::TurnStopped,
+                    used,
+                    refused.left.limit,
+                );
+                if refused.scope == Scope::Goal {
+                    self.session_state.goal_block_unaffordable(input);
+                }
+                ControlFlow::Break(refused.message())
+            }
         }
-        ControlFlow::Continue(Some(u32::try_from(remaining.tokens).unwrap_or(u32::MAX)))
     }
 
     fn charge_budget(&mut self) -> ControlFlow<String> {

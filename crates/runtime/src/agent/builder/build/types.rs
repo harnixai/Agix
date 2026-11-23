@@ -30,6 +30,9 @@ pub(super) struct SessionWiring {
     pub(super) exec: base::interface::exec::ExecProviders,
     pub(super) engine_git: Arc<base::engine_exec::EngineExec>,
     pub(super) ambient: hooks::payload::Ambient,
+    /// The turn in progress, which hooks and the calls made on its side
+    /// spend into.
+    pub(super) open_turn: crate::turn::OpenTurn,
 }
 
 pub(super) struct CronWiring {

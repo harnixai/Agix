@@ -217,15 +217,31 @@ async fn blocked_goal(
 /// so the goal is blocked on its token budget and no round runs after.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hosts_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> anyhow::Result<()> {
+    a_goal_is_blocked_on_its_budget("goal-budget-host", true, 2400, 2).await
+}
+
+/// The first round spends 1200 of 3000 and its prompt was not cached: the
+/// second resends that much and more, which the 1800 left cannot pay for
+/// with a reply, so it is not sent and the goal is blocked on its budget.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_goal_whose_next_round_cannot_pay_for_its_input_is_blocked() -> anyhow::Result<()> {
+    a_goal_is_blocked_on_its_budget("goal-budget-input", false, 1200, 1).await
+}
+
+async fn a_goal_is_blocked_on_its_budget(
+    name: &str,
+    cached: bool,
+    used: u64,
+    calls: usize,
+) -> anyhow::Result<()> {
+    let cache_read = if cached { 5000 } else { 0 };
     let stub = ProviderStub::start().await?;
-    let mut run = stubbed("goal-budget-host", &stub, json!({}))
-        .start()
-        .await?;
+    let mut run = stubbed(name, &stub, json!({})).start().await?;
     let s = session(&mut run, json!({})).await?;
     let host = run.watch(&s, false).await?;
     stub.script([
-        Reply::spent(1000, 200, Reply::text("round one")),
-        Reply::spent(1000, 200, Reply::text("round two")),
+        Reply::spent_cached(1000, cache_read, 200, Reply::text("round one")),
+        Reply::spent_cached(1000, cache_read, 200, Reply::text("round two")),
         Reply::text("never sent"),
     ]);
     let set = run
@@ -239,7 +255,7 @@ async fn a_hosts_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> anyh
     assert_eq!(set.result.unwrap_or_default()["goal"]["token_budget"], 3000);
 
     let goal = blocked_goal(&mut run, &host, &s).await?;
-    assert_eq!(goal["tokens_used"], 2400, "{goal}");
+    assert_eq!(goal["tokens_used"], used, "{goal}");
     assert!(
         goal["blocked_reason"]
             .as_str()
@@ -249,7 +265,7 @@ async fn a_hosts_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> anyh
     );
     assert_eq!(
         stub.call_count(),
-        2,
+        calls,
         "a round called past the goal's budget"
     );
     drop(host);
@@ -268,7 +284,8 @@ async fn a_models_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> any
     let s = session(&mut run, json!({})).await?;
     let host = run.watch(&s, false).await?;
     stub.script([
-        Reply::spent(
+        Reply::spent_cached(
+            5000,
             5000,
             500,
             Reply::calls(
@@ -277,9 +294,9 @@ async fn a_models_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> any
                 json!({ "objective": "keep at it", "token_budget": 2500 }),
             ),
         ),
-        Reply::spent(5000, 500, Reply::text("goal set")),
-        Reply::spent(1000, 200, Reply::text("round one")),
-        Reply::spent(1000, 200, Reply::text("round two")),
+        Reply::spent_cached(5000, 5000, 500, Reply::text("goal set")),
+        Reply::spent_cached(1000, 5000, 200, Reply::text("round one")),
+        Reply::spent_cached(1000, 5000, 200, Reply::text("round two")),
         Reply::text("never sent"),
     ]);
     run.turn(&s, "set yourself a goal").await?;

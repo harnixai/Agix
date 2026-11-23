@@ -120,7 +120,7 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn whose(self) -> &'static str {
+    pub fn whose(self) -> &'static str {
         match self {
             Self::Turn => "this turn's",
             Self::Goal => "the goal's",

@@ -124,11 +124,13 @@ pub enum Reply {
     /// `openai_responses` with this stub as its `base_url`.
     Responses(Vec<serde_json::Value>),
     /// [`Blocks`](Self::Blocks) or [`Ended`](Self::Ended) reporting `input`
-    /// and `output` tokens and no cache, in place of the stub's usual usage:
-    /// what a token budget is measured against.
+    /// and `output` tokens and `cache_read` tokens read from the cache, in
+    /// place of the stub's usual usage: what a token budget is measured
+    /// against.
     Spent {
         input: u64,
         output: u64,
+        cache_read: u64,
         reply: Box<Reply>,
     },
 }
@@ -156,10 +158,18 @@ impl Reply {
         }
     }
 
+    /// `reply`, reporting no cache.
     pub fn spent(input: u64, output: u64, reply: Reply) -> Self {
+        Self::spent_cached(input, 0, output, reply)
+    }
+
+    /// `reply`, reporting `cache_read` tokens of its prompt served from the
+    /// cache besides the `input` that was not.
+    pub fn spent_cached(input: u64, cache_read: u64, output: u64, reply: Reply) -> Self {
         Self::Spent {
             input,
             output,
+            cache_read,
             reply: Box::new(reply),
         }
     }
@@ -243,13 +253,14 @@ impl Reply {
             Self::Spent {
                 input,
                 output,
+                cache_read,
                 reply,
             } => {
                 let usage = StubUsage {
                     input: *input,
                     output: *output,
                     cache_creation: 0,
-                    cache_read: 0,
+                    cache_read: *cache_read,
                 };
                 match reply.as_ref() {
                     Self::Blocks(blocks) => (

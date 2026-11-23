@@ -171,6 +171,28 @@ pub(super) fn lifecycle_input(ctx: &ToolExecCtx, event: hooks::HookEvent) -> hoo
     )
     .with_depth(ctx.agent_depth)
     .with_turn_id(ctx.turn_id.clone())
+    .spending_into(Some(ctx.turn.spend().clone()))
+}
+
+/// The payload of `PreToolUse` / `PostToolUse` for the call `name(input)`.
+pub(super) fn tool_hook_input(
+    ctx: &ToolExecCtx,
+    event: hooks::HookEvent,
+    name: &str,
+    input: serde_json::Value,
+) -> hooks::HookInput {
+    hooks::HookInput {
+        hook_event_name: format!("{event:?}"),
+        session_id: ctx.session_id.clone(),
+        cwd: ctx.cwd.display().to_string(),
+        permission_mode: hook_permission_mode(ctx.session_state.permission_mode()),
+        depth: ctx.agent_depth,
+        tool_name: Some(name.to_string()),
+        tool_input: Some(input),
+        tool_use_id: Some(ctx.tool_use_id.clone()),
+        spend: Some(ctx.turn.spend().clone()),
+        ..Default::default()
+    }
 }
 
 /// A call past its `PreToolUse` that is dropped before it ends — its batch
@@ -631,17 +653,14 @@ async fn post_tool_use(
             Err(e) => (serde_json::Value::String(e.clone()), true),
         };
         let post_input = hooks::HookInput {
-            hook_event_name: "PostToolUse".into(),
-            session_id: ctx.session_id.clone(),
-            cwd: ctx.cwd.display().to_string(),
-            permission_mode: hook_permission_mode(ctx.session_state.permission_mode()),
-            depth: ctx.agent_depth,
-            tool_name: Some(name.to_string()),
-            tool_input: Some(input_for_post_hook.clone()),
-            tool_use_id: Some(ctx.tool_use_id.clone()),
             tool_result: Some(result_json),
             is_error: Some(is_error_flag),
-            ..Default::default()
+            ..tool_hook_input(
+                ctx,
+                hooks::HookEvent::PostToolUse,
+                name,
+                input_for_post_hook.clone(),
+            )
         };
         // Not the turn's token: the tool already ran, and a turn cancelled
         // since still owes its hooks the news.

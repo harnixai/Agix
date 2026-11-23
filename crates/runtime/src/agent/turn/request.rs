@@ -15,6 +15,9 @@ pub(crate) struct ModelRoute {
     task_router: Option<Arc<dyn base::provider::TaskRouting>>,
     recovery_policy: Arc<dyn base::interface::recovery_policy::RecoveryPolicy>,
     model_interceptors: Arc<Vec<Arc<dyn base::interface::model_interceptor::ModelInterceptor>>>,
+    /// What the next call's input is estimated from; outlives the turn, as
+    /// the provider's cache does.
+    pub(crate) last_call: Option<super::call_input::LastCall>,
 }
 
 impl ModelRoute {
@@ -29,6 +32,7 @@ impl ModelRoute {
             task_router,
             recovery_policy,
             model_interceptors: Arc::new(model_interceptors),
+            last_call: None,
         }
     }
 

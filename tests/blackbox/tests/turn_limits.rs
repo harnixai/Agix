@@ -1,7 +1,8 @@
 //! A turn's limits, from `session.create`'s `options.settings.turn` and the
 //! settings' `turn` block: the token budget is one for the turn and every delegate it
 //! starts — a background one after the turn has ended too — each call asks
-//! for no more output than is left, and a session's options only tighten what
+//! for no more output than is left once its input is paid — the part of it
+//! not read from the provider's cache — and a session's options only tighten what
 //! the settings allow, surviving a restart. `turn_complete.usage` is every
 //! call the turn made, its delegates' and the ones made on its side included.
 
@@ -83,7 +84,11 @@ async fn a_tight_session_budget_ends_the_turn_on_what_was_reported() -> anyhow::
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
     let calls = stub.calls();
     assert_eq!(calls.len(), 1, "a call went out past the budget");
-    assert_eq!(max_tokens(&calls[0]), 2000);
+    assert!(
+        (1024..2000).contains(&max_tokens(&calls[0])),
+        "the budget less the opening message: {}",
+        max_tokens(&calls[0])
+    );
     run.finish().await;
     Ok(())
 }
@@ -98,16 +103,16 @@ async fn each_call_asks_for_what_is_left_and_none_goes_out_under_1024() -> anyho
     )
     .await?;
     stub.script([
-        Reply::spent(2000, 1000, glob("g1")),
-        Reply::spent(1800, 700, glob("g2")),
+        Reply::spent_cached(2000, 8000, 1000, glob("g1")),
+        Reply::spent_cached(1800, 8000, 700, glob("g2")),
     ]);
     let events = run.turn(&s, "look twice").await?;
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
     let asked: Vec<u64> = stub.calls().iter().map(max_tokens).collect();
-    assert_eq!(
-        asked,
-        [6000, 3000],
-        "500 tokens left is no call; each one asks for at most what is left"
+    assert!(
+        asked.len() == 2 && (5000..6000).contains(&asked[0]) && (2800..3000).contains(&asked[1]),
+        "500 tokens left is no call; each one asks for at most what is left after its \
+         input: {asked:?}"
     );
     run.finish().await;
     Ok(())
@@ -128,8 +133,8 @@ async fn a_sub_agent_spends_its_parents_budget(
         [Reply::spent(1000, 100, delegate("look around", false))],
     );
     stub.script([
-        Reply::spent(4000, 500, glob("c1")),
-        Reply::spent(3500, 500, glob("c2")),
+        Reply::spent_cached(4000, 1000, 500, glob("c1")),
+        Reply::spent_cached(3500, 1000, 500, glob("c2")),
     ]);
     let events = run.turn(&s, &format!("{ROOT} delegate it")).await?;
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
@@ -204,8 +209,8 @@ async fn a_background_sub_agent_spends_its_starting_turns_budget_after_it_ended(
     );
     stub.script([
         Reply::spent(100, 50, Reply::calls("h1", "HostGate", json!({}))),
-        Reply::spent(4000, 500, glob("c1")),
-        Reply::spent(4000, 500, glob("c2")),
+        Reply::spent_cached(4000, 1000, 500, glob("c1")),
+        Reply::spent_cached(4000, 1000, 500, glob("c2")),
     ]);
     let events = run.turn(&s, &format!("{ROOT} start it")).await?;
     assert_eq!(stop_reason(&events), "end_turn", "{events:?}");
@@ -291,7 +296,11 @@ async fn options_wider_than_the_settings_are_held_to_them_and_reported() -> anyh
     assert_eq!(stop_reason(&events), "max_turns", "{events:?}");
     let calls = stub.calls();
     assert_eq!(calls.len(), 3, "the option's tighter call limit holds");
-    assert_eq!(max_tokens(&calls[0]), 5000, "the settings' budget holds");
+    assert!(
+        (4000..=5000).contains(&max_tokens(&calls[0])),
+        "the settings' budget holds: {}",
+        max_tokens(&calls[0])
+    );
 
     let within = run
         .client
@@ -368,7 +377,11 @@ async fn a_session_budget_holds_after_a_restart() -> anyhow::Result<()> {
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
     let calls = stub.calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(max_tokens(&calls[1]), 2000);
+    assert!(
+        (1024..2000).contains(&max_tokens(&calls[1])),
+        "{}",
+        max_tokens(&calls[1])
+    );
     run.finish().await;
     Ok(())
 }
@@ -474,8 +487,8 @@ async fn a_team_member_handed_work_spends_the_turns_budget() -> anyhow::Result<(
         ],
     );
     stub.script([
-        Reply::spent(4000, 500, glob("c1")),
-        Reply::spent(4000, 500, glob("c2")),
+        Reply::spent_cached(4000, 1000, 500, glob("c1")),
+        Reply::spent_cached(4000, 1000, 500, glob("c2")),
     ]);
     run.turn(&s, &format!("{ROOT} hand it over")).await?;
     let tasks = run.wait_tasks_settled(&s, WAIT).await?;
@@ -501,6 +514,207 @@ async fn a_team_member_handed_work_spends_the_turns_budget() -> anyhow::Result<(
         .unwrap_or_default();
     let text = output["output"].as_str().unwrap_or_default();
     assert!(text.contains("budget_exceeded"), "{output}");
+    run.finish().await;
+    Ok(())
+}
+
+const HOOK: &str = "HOOK-MARK";
+
+fn completed(events: &TurnEvents) -> Value {
+    events.turn_complete_event.clone().unwrap_or_default()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_hooks_call_is_spent_into_the_turn() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let settings = json!({ "hooks": { "UserPromptSubmit": [
+        { "type": "prompt", "prompt": format!("{HOOK} judge this prompt") }
+    ] } });
+    let mut run = stubbed("hook-spend", &stub, settings).start().await?;
+    let s = session(&mut run, json!({})).await?;
+    stub.script_when(
+        HOOK,
+        [Reply::spent(700, 50, Reply::text(r#"{"ok": true}"#))],
+    );
+    stub.script_when(ROOT, [Reply::spent(1000, 100, Reply::text("done"))]);
+    let events = run.turn(&s, ROOT).await?;
+    assert_eq!(stub.call_count(), 2);
+    let done = completed(&events);
+    assert_eq!(done["usage"]["input_tokens"], 1700, "{done}");
+    assert_eq!(done["usage"]["output_tokens"], 150, "{done}");
+    assert_eq!(
+        done["usage_breakdown"]["own"]["input_tokens"], 1000,
+        "{done}"
+    );
+    assert_eq!(
+        done["usage_breakdown"]["side"]["input_tokens"], 700,
+        "{done}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_hook_asks_for_no_more_than_the_turn_has_left() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let settings = json!({ "hooks": { "PostToolUse": [
+        { "type": "prompt", "prompt": format!("{HOOK} judge this call") }
+    ] } });
+    let mut run = stubbed("hook-headroom", &stub, settings).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
+    stub.script_when(HOOK, [Reply::spent(100, 10, Reply::text("{}"))]);
+    stub.script_when(
+        ROOT,
+        [
+            Reply::spent_cached(100, 2000, 2900, glob("g1")),
+            Reply::text("done"),
+        ],
+    );
+    run.turn(&s, ROOT).await?;
+    let hook = stub
+        .calls()
+        .into_iter()
+        .find(|c| c.system_contains(HOOK))
+        .expect("the hook's call");
+    let asked = max_tokens(&hook);
+    assert!(
+        (1024..3000).contains(&asked),
+        "3000 of the turn's budget is left, less the hook's input: {asked}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// The agent hook's sub-agent spends 1600 of the turn's 2000 after the
+/// root's first call spent 250: what is left pays for no further call.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_hook_spends_the_turns_budget() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let settings = json!({ "hooks": { "PostToolUse": [
+        { "type": "agent", "prompt": format!("{HOOK} check this call"), "if": "Glob", "timeout": 30000 }
+    ] } });
+    let mut run = stubbed("agent-hook-spend", &stub, settings).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 2000 } } }),
+    )
+    .await?;
+    stub.script_when(
+        HOOK,
+        [Reply::spent(1500, 100, Reply::text(r#"{"ok": true}"#))],
+    );
+    stub.script_when(
+        ROOT,
+        [
+            Reply::spent_cached(200, 1000, 50, glob("g1")),
+            Reply::text("done"),
+        ],
+    );
+    let events = run.turn(&s, &format!("{ROOT} look")).await?;
+    assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
+    assert_eq!(
+        stub.call_count(),
+        2,
+        "the root called past the hook's spend"
+    );
+    let done = completed(&events);
+    assert_eq!(done["usage"]["input_tokens"], 1700, "{done}");
+    assert_eq!(
+        done["usage_breakdown"]["delegates"]["input_tokens"], 1500,
+        "{done}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+fn read(run: &LiveRun, name: &str) -> anyhow::Result<Reply> {
+    let lines: String = (0..400)
+        .map(|i| format!("line {i} word word word word word\n"))
+        .collect();
+    let file = run.write_file(name, &lines)?;
+    Ok(Reply::calls(
+        "r1",
+        "Read",
+        json!({ "file_path": file.to_string_lossy() }),
+    ))
+}
+
+/// 3000 of 6000 is left, and the file just read is more than 2000 tokens of
+/// new input on its own: the call it would go out with is not sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_whose_input_alone_passes_what_is_left_is_not_sent() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("input-estimate", &stub, json!({})).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
+    stub.script([
+        Reply::spent_cached(1000, 4000, 2000, read(&run, "big.md")?),
+        Reply::spent(21000, 10, Reply::text("done")),
+    ]);
+    let events = run.turn(&s, "read it").await?;
+    assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
+    assert_eq!(stub.calls().len(), 1, "the call went out on what was left");
+    let message = completed(&events)["message"].clone();
+    assert!(
+        message.as_str().is_some_and(|m| m.contains("this turn's")),
+        "{message}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// The first call's prompt was served from the cache: the next one is
+/// judged by the little it adds, not by the whole conversation.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cached_prefix_does_not_count_against_what_is_left() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("input-cached", &stub, json!({})).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
+    stub.script([
+        Reply::spent_cached(1000, 20000, 2000, glob("g1")),
+        Reply::spent(100, 10, Reply::text("done")),
+    ]);
+    let events = run.turn(&s, "look").await?;
+    assert_eq!(stop_reason(&events), "end_turn", "{events:?}");
+    let asked: Vec<u64> = stub.calls().iter().map(max_tokens).collect();
+    assert_eq!(asked.len(), 2);
+    assert!(
+        (2800..3000).contains(&asked[1]),
+        "3000 left, less the little the glob added: {asked:?}"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// The provider read nothing from its cache: the next call resends all the
+/// last one was billed for, and that does not fit in what is left.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_uncached_prompt_counts_again_on_the_next_call() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("input-uncached", &stub, json!({})).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
+    stub.script([
+        Reply::spent(2500, 500, glob("g1")),
+        Reply::spent(100, 10, Reply::text("done")),
+    ]);
+    let events = run.turn(&s, "look").await?;
+    assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
+    assert_eq!(stub.calls().len(), 1);
     run.finish().await;
     Ok(())
 }

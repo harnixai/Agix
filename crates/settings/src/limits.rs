@@ -13,9 +13,10 @@ pub struct SessionSettings {
     /// created, counted as `turn.token_budget` is (input not read from the
     /// cache, cache writes and output) over every turn — its delegates', the
     /// calls made on their side, scheduled and goal turns included — and
-    /// across restarts. Each call asks for no more output than is left; with
-    /// less than 1024 left no call is sent, and the turn, and every turn
-    /// after it, ends with `budget_exceeded`. `None` = unlimited.
+    /// across restarts. Each call is judged as under `turn.token_budget`,
+    /// its input estimated and taken off what is left; with less than 1024
+    /// remaining no call is sent, and the turn, and every turn after it,
+    /// ends with `budget_exceeded`. `None` = unlimited.
     pub token_budget: Option<u64>,
 }
 

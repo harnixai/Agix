@@ -78,6 +78,8 @@ pub(crate) struct SubagentPayload {
     pub(crate) permission_mode: base::permission::PermissionMode,
     pub(crate) agent_type: Option<String>,
     pub(crate) stop_reason: Option<String>,
+    /// The turn that started the sub-agent, which its hooks spend into.
+    pub(crate) spend: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,
 }
 
 impl SubagentPayload {
@@ -95,7 +97,16 @@ impl SubagentPayload {
             permission_mode: settings.permissions.mode,
             agent_type: agent_type.map(str::to_string),
             stop_reason: None,
+            spend: None,
         }
+    }
+
+    pub(crate) fn spending_into(
+        mut self,
+        spend: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,
+    ) -> Self {
+        self.spend = spend;
+        self
     }
 
     pub(crate) fn stopped(mut self, reason: &str) -> Self {
@@ -125,7 +136,8 @@ impl SubagentPayload {
                 .unwrap_or_else(|| "default".into()),
         )
         .with_depth(self.depth)
-        .with_agent_type(self.agent_type.clone());
+        .with_agent_type(self.agent_type.clone())
+        .spending_into(self.spend.clone());
         if let (hooks::HookEvent::SubagentStop, Some(reason)) = (event, &self.stop_reason) {
             input = input.with_stop_reason(reason.clone());
         }

@@ -510,8 +510,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 |---|---|---|
 | `providers[].models[].max_output` | 按模型名查 | 调用这个模型时 `max_tokens` 最多发多少,回复在上限处被截断后重试也最多抬到这么多 |
 | `memory.enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
-| `turn.token_budget` | 无(不限) | 一轮能花的 token(未命中缓存的输入、缓存写入与输出,缓存命中不计,同 provider 配额),连同这一轮起的或派了活的子 Agent、团队成员,以及旁路调用(压缩、记忆、`WebSearch`、`WebFetch` 的抽取)一起算;每次调用要的输出不超过剩余,用完以 `budget_exceeded` 结束这一轮。会话只能经 `session.create` 的 `options.settings.turn` 把它调低 |
-| `session.token_budget` | 无(不限) | 一个会话从创建起能花的 token,口径同 `turn.token_budget`,算它所有的轮——子 Agent、团队成员、旁路调用、定时任务与目标的轮都在内——跨 daemon 重启(累计记在会话日志里,`session.get` 的 `usage` 报它)。用完时这一轮在下一次调用前以 `budget_exceeded` 结束,之后的每一轮都不调模型、同样以它结束 |
+| `turn.token_budget` | 无(不限) | 一轮能花的 token(未命中缓存的输入、缓存写入与输出,缓存命中不计,同 provider 配额),连同这一轮起的或派了活的子 Agent、团队成员,以及旁路调用(压缩、记忆、`WebSearch`、`WebFetch` 的抽取、`prompt` 与 `agent` hook)一起算;每次调用前先估计它会被计的输入(预计不由 provider 缓存供给的部分)并从剩余里扣掉,要的输出不超过扣完的数,扣完付不起一次调用时以 `budget_exceeded` 结束这一轮。这是估计不是预留:同时在跑的子 Agent 各自至多超出一次调用。会话只能经 `session.create` 的 `options.settings.turn` 把它调低 |
+| `session.token_budget` | 无(不限) | 一个会话从创建起能花的 token,口径同 `turn.token_budget`,算它所有的轮——子 Agent、团队成员、旁路调用、定时任务与目标的轮都在内——跨 daemon 重启(累计记在会话日志里,`session.get` 的 `usage` 报它)。每次调用同 `turn.token_budget` 一样先扣掉输入的估计再判;剩余付不起一次调用时这一轮以 `budget_exceeded` 结束,之后的每一轮都不调模型、同样以它结束 |
 | `schedule.max_model_jobs` | `20` | 一个会话里模型自己经 `CronCreate` 建的、还在的定时任务最多几个;再建被拒,理由在工具结果里。宿主经 `schedule.create` 建的不计也不受限 |
 | `schedule.min_model_interval_minutes` | `1` | 模型建的周期任务两次触发至少隔几分钟(按它存活的 7 天算);`1` 即不在 cron 自己的分钟精度之外再加限制 |
 | `goal.max_rounds` | `10000` | 模型设或改的目标(`GoalCreate`、`GoalUpdate`)最多能有几轮;给多了压到它。目标自己的 `token_budget`(经 `session.setGoal` 或 `GoalCreate` 设)在目标各轮花完时让目标转 `blocked` |

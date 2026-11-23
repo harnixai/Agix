@@ -105,10 +105,13 @@ pub struct TurnSettings {
     /// turn may spend, its delegates included: every model call of the turn
     /// and of the sub-agents and team members it starts or hands work to —
     /// a background sub-agent's after the turn has ended too — counts toward
-    /// one total. Each call asks for no more output than is left; with less
-    /// than 1024 left no call is sent. The turn ends with `budget_exceeded`,
-    /// and a delegate still running ends the same way before its next call.
-    /// `None` = unlimited.
+    /// one total, hook model calls too. Before each call its input not
+    /// expected from the cache is estimated and taken off what is left; the
+    /// call asks for no more output than remains, and with less than 1024
+    /// remaining it is not sent. The turn ends with `budget_exceeded`, and a
+    /// delegate still running ends the same way before its next call. An
+    /// estimate, not a reservation: delegates running at once can each
+    /// overshoot by one call. `None` = unlimited.
     ///
     /// Deliberately token-based, not a dollar figure: provider prices change
     /// over time and per contract, so enforcing a dollar budget needs a

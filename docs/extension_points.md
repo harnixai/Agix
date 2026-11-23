@@ -841,8 +841,9 @@ Builder::new().budget_policy(Arc::new(Capped {
 停掉,而不是等到结束才知道花了多少。`TurnOutcome.total_usage` 回答的是"花了多少",
 这里回答的是"还能不能继续花"。这份累计是整轮的:根会话这一轮、它起的子 Agent 与团队成员、
 各自的旁路调用(压缩、记忆、web)共用一份(`SpendNode::whole_turn`),子 Agent 用同一个 policy
-判它。`remaining` 在**每次调用之前**被调:它与引擎各层上限的剩余取最小,不到 `MIN_CALL_TOKENS` 就不发这次调用、
-以 `budget_exceeded` 结束,否则这次调用的 `max_tokens` 压到剩余;不实现它(缺省 `None`)就只有调用之后的判断。
+判它。`remaining` 在**每次调用之前**被调:它与引擎各层上限的剩余取最小,减去引擎对这次请求输入的估计
+(不由缓存供给的部分,ARCHITECTURE「调用之前估输入」)后不到 `MIN_CALL_TOKENS` 就不发这次调用、以
+`budget_exceeded` 结束,否则这次调用的 `max_tokens` 压到扣完的数;不实现它(缺省 `None`)就只有调用之后的判断。
 
 **`Spend` 把 provider 报的四项分开给,不给一个和。** 引擎自己的上限与 provider 配额都按
 `Spend::counted_tokens()` 计——未命中缓存的输入 + 缓存写入 + 输出,缓存命中不计(缓存读按普通输入的

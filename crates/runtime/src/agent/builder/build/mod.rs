@@ -41,8 +41,7 @@ impl Builder {
             &r.instruction_files,
             exec,
         )?;
-        let open_turn = crate::turn::OpenTurn::default();
-        let cron = self.register_session_tools(&r, &state.state, &open_turn);
+        let cron = self.register_session_tools(&r, &state.state, &state.open_turn);
 
         let events = self.wire_events();
         hooks
@@ -122,7 +121,7 @@ impl Builder {
             agent_depth,
             chains,
             checkpoints,
-            open_turn,
+            open_turn: state.open_turn,
         }))
     }
 

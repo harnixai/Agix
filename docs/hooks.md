@@ -113,7 +113,9 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 一次不带工具的模型调用:`prompt` 作为系统提示词,payload 的 JSON 作为用户消息,模型回的
 文本当作 JSON 回答解析(包在 ```` ```json ```` 里也认);解析不出来等于什么都不说。走会话
 自己的 provider,`model` 换的是模型名。这次调用在遥测里记为 `api_request`,`purpose` 为
-`hook`。
+`hook`。触发它的那一轮正开着时,这次调用记在那一轮上(`turn_complete.usage_breakdown` 的
+`side`),受它的 token 预算约束:`max_tokens` 压到预算的剩余减去这次请求的输入,剩下不到 1024 就
+不调,这个 hook 记为失败、放行;两轮之间触发的不记在任何一轮上。
 
 **模型只能拦,不能批。** 模型回的 `"decision": "approve"` 缺省被丢掉,只有写了
 `"may_approve": true` 的 hook 才算替人答应权限询问(见"回答")。理由:模型读的 payload 里有
@@ -152,7 +154,8 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 ```
 
 用会话的 delegator 起一个子 Agent,任务是 `prompt` 后接 `Context:` 和 payload 的
-JSON。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:`ok: false` 或缺 `ok` 记为
+JSON。触发它的那一轮正开着时,这个子 Agent 是那一轮的 delegate:它的调用记在那一轮上
+(`usage_breakdown` 的 `delegates`),判的是那一轮的预算。子 Agent 的最终回答应当是 `{"ok": true|false, "reason": "…"}`:`ok: false` 或缺 `ok` 记为
 `block`,`reason` 作 `message`;`ok: true` 缺省什么都不说,写了 `"may_approve": true` 的记为
 `approve`(配在 `PreToolUse` 上就是替人答应权限询问,见"回答";为什么缺省不算见 `prompt`)。
 不是 JSON 的回答只当 `message`,不拦不改。写了 `model` 的,子 Agent 跑在这个模型上,provider

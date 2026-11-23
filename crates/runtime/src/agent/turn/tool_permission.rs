@@ -2,9 +2,10 @@
 //! policy's conclusion on the call's facts, the question put to whoever can
 //! answer it, and the conclusion recorded.
 
-use super::process::hook_permission_mode;
 use super::reporting::record_permission_decision;
-use super::tool_exec::{fire_ctx_lifecycle_hook, lifecycle_input, Caller, ToolExecCtx};
+use super::tool_exec::{
+    fire_ctx_lifecycle_hook, lifecycle_input, tool_hook_input, Caller, ToolExecCtx,
+};
 use base::context::Session;
 use std::sync::Arc;
 
@@ -25,20 +26,7 @@ pub(super) async fn pre_tool_use(
     if !ctx.hooks.has_hooks_for(hooks::HookEvent::PreToolUse) {
         return (input, HookAnswer::None, Vec::new());
     }
-    let pre_input = hooks::HookInput {
-        hook_event_name: "PreToolUse".into(),
-        session_id: ctx.session_id.clone(),
-        cwd: ctx.cwd.display().to_string(),
-        permission_mode: hook_permission_mode(ctx.session_state.permission_mode()),
-        depth: ctx.agent_depth,
-        tool_name: Some(name.to_string()),
-        tool_input: Some(input.clone()),
-        tool_use_id: Some(ctx.tool_use_id.clone()),
-        tool_result: None,
-        is_error: None,
-        user_prompt: None,
-        ..Default::default()
-    };
+    let pre_input = tool_hook_input(ctx, hooks::HookEvent::PreToolUse, name, input.clone());
     match answer_of_pre_tool_use(&ctx.hooks, &pre_input, input, &ctx.cancel).await {
         (input, HookAnswer::Approve { .. }, reminders) if ctx.caller == Caller::InlineCommand => {
             (input, HookAnswer::None, reminders)
