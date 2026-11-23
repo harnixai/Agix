@@ -775,3 +775,34 @@ async fn a_compaction_summary_asks_for_no_more_than_the_turn_has_left() -> anyho
     run.finish().await;
     Ok(())
 }
+
+/// Each attempt's stream breaks off after the provider counted its 2500
+/// input tokens. The resend is judged by what is left as the first attempt
+/// was: it asks for no more than the 3500 left, and a third attempt, with
+/// 1000 left, is not sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resent_call_is_judged_by_what_the_broken_attempt_left() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("retry-budget", &stub, json!({})).start().await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
+    let broken = || {
+        Reply::cut_after_first_delta(Reply::spent(
+            2500,
+            0,
+            Reply::text(format!("PARTIAL {}", "x".repeat(200))),
+        ))
+    };
+    stub.script([broken(), broken(), broken(), Reply::text("never whole")]);
+    let events = run.turn(&s, "go").await;
+    let asked: Vec<u64> = stub.calls().iter().map(max_tokens).collect();
+    assert!(
+        asked.len() <= 2 && asked.get(1).is_none_or(|&n| n <= 3500),
+        "each resend went out on what the first attempt was given: {asked:?}: {events:?}"
+    );
+    run.finish().await;
+    Ok(())
+}

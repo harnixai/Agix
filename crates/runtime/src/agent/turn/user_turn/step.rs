@@ -62,12 +62,15 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::ContextExceeded));
         }
 
-        let request = match self.affordable_request(state).await {
-            Ok(request) => request,
-            Err(stop) => return Ok(ControlFlow::Break(stop)),
-        };
+        let mut request = self.step_request(state).await;
+        if let Err(stop) = self.afford(&mut request) {
+            return Ok(ControlFlow::Break(stop));
+        }
 
-        let call = self.call_model(state, request, cancel).await?;
+        let call = match self.call_model(state, request, cancel).await? {
+            ControlFlow::Continue(call) => call,
+            ControlFlow::Break(stop) => return Ok(ControlFlow::Break(stop)),
+        };
         self.account_call(state, &call).await;
         if call.result.cancelled {
             return Ok(ControlFlow::Continue(()));
@@ -134,13 +137,9 @@ impl Agent {
         false
     }
 
-    /// The step's request, asking for no more output than the budget leaves
-    /// once its input is paid, or the turn's end when that is too little.
-    async fn affordable_request(
-        &mut self,
-        state: &TurnLoopState,
-    ) -> Result<ModelRequest, StopReason> {
-        let mut request = self.step_request(state).await;
+    /// `request` asking for no more output than the budget leaves once its
+    /// input is paid, or the turn's end when that is too little.
+    fn afford(&mut self, request: &mut ModelRequest) -> Result<(), StopReason> {
         let input = crate::turn::call_input::counted_input(
             &**self.session.token_counter(),
             &request.messages,
@@ -151,7 +150,7 @@ impl Agent {
             ControlFlow::Continue(left) => {
                 let asked = request.params.max_tokens;
                 request.params.max_tokens = left.map_or(asked, |left| asked.min(left));
-                Ok(request)
+                Ok(())
             }
             ControlFlow::Break(why) => Err(StopReason::BudgetExceeded(why)),
         }
@@ -197,7 +196,7 @@ impl Agent {
         state: &mut TurnLoopState,
         mut request: ModelRequest,
         cancel: &CancellationToken,
-    ) -> Result<ModelCall, TurnError> {
+    ) -> Result<ControlFlow<StopReason, ModelCall>, TurnError> {
         let step = self.start_step(state);
         // Taken before the request is handed on: accounting needs the size
         // of what went out.
@@ -252,13 +251,19 @@ impl Agent {
                     )
                 }
             };
+            // The broken attempt has spent what the provider counted of it,
+            // so the resend is judged again rather than on what the first
+            // attempt was given.
+            if let Err(stop) = self.afford(&mut request) {
+                return Ok(ControlFlow::Break(stop));
+            }
             self.emit(AgentEvent::StepStart {
                 step,
                 turn_id: self.current_turn_id.clone(),
             });
         };
 
-        Ok(ModelCall {
+        Ok(ControlFlow::Continue(ModelCall {
             step,
             result,
             prompt,
@@ -268,7 +273,7 @@ impl Agent {
             started: call_started,
             images: tool_images,
             discontinued,
-        })
+        }))
     }
 
     /// The error carries whether the stream had opened.
