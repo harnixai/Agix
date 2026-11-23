@@ -400,6 +400,46 @@ async fn an_agent_types_max_turns_is_held_to_the_managed_call_limit() -> anyhow:
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_agent_types_max_turns_is_held_to_the_sessions_own_call_limit() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("session-agent-type", &stub, json!({}))
+        .start()
+        .await?;
+    run.write_file(
+        ".agix/agents/digger.md",
+        "---\ndescription: Digs\nmax_turns: 50\n---\nDIG-ROLE.\n",
+    )?;
+    let parent = session(
+        &mut run,
+        json!({ "settings": { "turn": { "max_model_calls": 2 } } }),
+    )
+    .await?;
+    stub.script_when(
+        ROOT,
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "description": "dig", "prompt": "Dig.", "subagent_type": "digger" }),
+            ),
+            Reply::text("ROOT-DONE"),
+        ],
+    );
+    stub.script([glob("c1"), glob("c2"), glob("c3"), Reply::text("DUG")]);
+    let events = run.turn(&parent, &format!("{ROOT} delegate it")).await?;
+    assert!(events.text.contains("ROOT-DONE"), "{events:?}");
+    assert_eq!(
+        child_calls(&stub).len(),
+        2,
+        "the agent type's max_turns passed the session's own limit"
+    );
+    let result = agent_result(&events);
+    assert!(result.contains("max_turns"), "{result}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_session_budget_holds_after_a_restart() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("budget-restart", &stub, json!({})).start().await?;

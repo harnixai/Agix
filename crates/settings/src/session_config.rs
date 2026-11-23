@@ -113,20 +113,30 @@ impl SessionConfig {
     }
 
     /// These settings as a delegate of an agent type runs on them: the
-    /// effective settings with what the type sets over them, and the managed
-    /// layer over that — a tighter value the type asks for stands, a looser
-    /// one is held to the managed layer's. The shared settings and the
-    /// session layer are the parent's.
+    /// effective settings with what the type sets over them, held to what the
+    /// session layer asks for and then to the managed layer — a tighter value
+    /// the type asks for stands, a looser one is held to the session's and the
+    /// managed layer's. The shared settings and the session layer are the
+    /// parent's.
     pub fn tuned_for_delegate(mut self, tuning: &DelegateTuning) -> Self {
         if *tuning == DelegateTuning::default() {
             return self;
         }
         let mut effective = (*self.effective).clone();
         if let Some(effort) = tuning.effort {
-            effective.values.model.effort = Some(effort);
+            let own = self
+                .requested("model.effort")
+                .and_then(|v| serde_json::from_value::<Effort>(v).ok());
+            effective.values.model.effort = Some(own.map_or(effort, |own| {
+                std::cmp::min_by_key(effort, own, |e| work(*e))
+            }));
         }
         if let Some(calls) = tuning.max_model_calls {
-            effective.values.turn.max_model_calls = calls;
+            let own = self
+                .requested("turn.max_model_calls")
+                .and_then(|v| v.as_u64())
+                .map(|n| u32::try_from(n).unwrap_or(u32::MAX));
+            effective.values.turn.max_model_calls = own.map_or(calls, |own| calls.min(own));
         }
         effective.hold_to_managed(&["model.effort", "turn.max_model_calls"]);
         self.effective = Arc::new(effective);
@@ -219,6 +229,16 @@ impl SessionConfig {
     }
 }
 
+fn work(effort: Effort) -> u8 {
+    match effort {
+        Effort::Low => 0,
+        Effort::Medium => 1,
+        Effort::High => 2,
+        Effort::Xhigh => 3,
+        Effort::Max => 4,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +326,30 @@ mod tests {
         });
         assert_eq!(lowered.settings().values.turn.max_model_calls, 5);
         assert!(lowered.settings().values.providers[0].builtin);
+    }
+
+    #[test]
+    fn a_delegates_tuning_stays_under_the_session_layer() {
+        let config = SessionConfig::with_session_layer(
+            shared(|s| s.turn.max_model_calls = 50),
+            Some(&layer(
+                json!({"turn": {"max_model_calls": 10}, "model": {"effort": "medium"}}),
+            )),
+            &Sections::none(),
+        );
+        let raised = config.clone().tuned_for_delegate(&DelegateTuning {
+            effort: Some(Effort::High),
+            max_model_calls: Some(40),
+        });
+        assert_eq!(raised.settings().values.turn.max_model_calls, 10);
+        assert_eq!(raised.settings().values.model.effort, Some(Effort::Medium));
+
+        let lowered = config.tuned_for_delegate(&DelegateTuning {
+            effort: Some(Effort::Low),
+            max_model_calls: Some(5),
+        });
+        assert_eq!(lowered.settings().values.turn.max_model_calls, 5);
+        assert_eq!(lowered.settings().values.model.effort, Some(Effort::Low));
     }
 
     #[test]

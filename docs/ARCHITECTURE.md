@@ -550,9 +550,10 @@ managed 为准。启动时对守护进程自己那一对
   `LoadedSettings::main_model` 是设置给的对话模型。`PathSettings` 也只有这一对的目录,没有 worktree。
 
 子 Agent 的配置照拿父会话的共享设置与会话层,换上自己的模型、模式与 worktree;agent 类型的 `effort` /
-`max_turns` 经 `SessionConfig::tuned_for_delegate` 落在派生出的 `settings()` 上,managed 层再按同一套判定压回这两个键
-(`model.effort` 以 managed 的为准;`turn.max_model_calls` 有松紧次序,agent 类型要得比 managed 更少时留下,更多时
-取 managed 的)。`Settings` 与它的块只放设置文件
+`max_turns` 经 `SessionConfig::tuned_for_delegate` 落在派生出的 `settings()` 上,先不超过会话层自己写的这两个键
+(会话层写了 `model.effort` / `turn.max_model_calls` 时,agent 类型要得更多就取会话层的,`effort` 按 low < medium < high <
+xhigh < max 比),managed 层再按同一套判定压回这两个键(`model.effort` 以 managed 的为准;`turn.max_model_calls` 有松紧
+次序,agent 类型要得比 managed 更少时留下,更多时取 managed 的)。`Settings` 与它的块只放设置文件
 写得出的字段,`tests/guards` 的 A7 守着(这些类型里不许有 `#[serde(skip)]` 字段)。
 
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
@@ -1596,7 +1597,8 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   也换不掉这一段;managed 自己写的 `prompt.override` 照样压过下层的。`LoadedSettings::with_managed`
   是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
   会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍;子 Agent 的 agent 类型改过 `effort` / `max_turns`
-  之后,`SessionConfig::tuned_for_delegate` 用同一段(`lay_managed_values`)把 managed 对这两个键的值再压一遍。`app` 也照收:它的 `app.trust_all_projects`
+  之后,`SessionConfig::tuned_for_delegate` 先把它们压在会话层写的值之下,再用同一段(`lay_managed_values`)把
+  managed 对这两个键的值压一遍。`app` 也照收:它的 `app.trust_all_projects`
   与 `app.trusted_projects`(整张表替换,不与用户的并)在加载时就决定项目信任;`app.session_cap`、
   `app.worker_threads` 等进程级的键在启动时读(`process_settings` 也读它)。provider 按 id 排在各层之前,
   同 id 以它的为准。
@@ -1658,7 +1660,9 @@ MCP 工具不管 server 报不报 `readOnlyHint` 都询问——那是 server �
 `bypassPermissions` 也不带它走(`Delegate::tightens_only`,经一层层转发的父会话都照此判)。子 Agent 自己的模式起点是父会话的设置给的模式;宿主经
 `session.setPermissionMode` 给父会话切过 `plan` 以外的模式之后,起点是切到的那个(`Session::host_permission_mode`),
 已经在跑的子 Agent 不变。agent 类型 frontmatter 的 `permission_mode` 可以比父会话
-宽也可以严,插件带来的、未信任项目里的类型只能收紧(§6.6);模型在 `Agent` 调用、`TeamCreate` /
+宽也可以严,但宽不过 managed 层的 `permissions.mode`,managed 关掉 bypass 时也不会是 `bypassPermissions`
+(`LoadedSettings::hold_mode_to_managed`);它的 `max_turns` / `effort` 同样不越过会话层与 managed 层写的值。
+插件带来的、未信任项目里的类型只能收紧(§6.6);模型在 `Agent` 调用、`TeamCreate` /
 `Agent(team_name)` 里自己要的 `permission_mode` 只能收紧。子 Agent 的询问经父会话的通道到宿主,等待上限就是会话的
 `permissions.prompt_timeout_secs`;在那里答"永久允许",记下的是这一条命令或路径,不是整个工具。
 

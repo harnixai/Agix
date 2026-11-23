@@ -1521,7 +1521,7 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 设过的推理强度、思考开关与提示词同样按这一层的键,`null` 即去掉那个键。
 
 `turn.max_model_calls` 是每个 agent 自己一轮的调用上限,子 Agent 继承会话的值(agent 类型的 `max_turns` 照旧
-覆盖它,但不超过部署方 managed 层写的上限);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
+覆盖它,但不超过这一层与部署方 managed 层写的上限;agent 类型的 `effort` 同样不高过这一层写的 `model.effort`);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
 
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
 列了 `question`,有人值守的会话(`attended`,缺省取场景的 `interactive`,`ARCHITECTURE.md` §3.2.3,如 `code`)才有
@@ -4736,7 +4736,7 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 
 `permission_mode: "bubble"` 不是另一条路:子 Agent 的询问无论它是什么模式,到宿主的都是
 上面这条父会话的 `prompt` 帧,团队成员也一样。判的模式是子 Agent 自己的:agent 类型的 `permission_mode` 可以比父会话宽(插件带来的类型
-只能更严),团队的 `permission_mode` 只能更严;父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话
+只能更严),但宽不过 managed 层的 `permissions.mode`,managed 关掉 bypass 时也不是 `bypassPermissions`;团队的 `permission_mode` 只能更严;父会话在 `plan` 或 `dontAsk` 时取两者中更严的那个,父会话
 是 `bypassPermissions` 时随父会话。插件带来的、未信任项目里的 agent 类型写了 `permission_mode` 的不随:每次
 调用都取它与父会话此刻模式中更严的那个,父会话起它之后被切成 `bypassPermissions` 也一样。它的询问等多久同父会话的(`permissions.prompt_timeout_secs`);答 `permit_always`
 记下的是这一条命令或路径。
