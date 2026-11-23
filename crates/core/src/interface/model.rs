@@ -746,6 +746,11 @@ impl ModelError {
         Self::new(ModelErrorKind::Overloaded, "")
     }
 
+    /// A call not sent: the budget it would spend into cannot pay for it.
+    pub fn unaffordable(why: &str) -> Self {
+        Self::new(ModelErrorKind::InvalidRequest, format!("not sent: {why}"))
+    }
+
     pub fn auth(message: impl Into<String>) -> Self {
         Self::new(ModelErrorKind::Auth, message)
     }

@@ -84,22 +84,8 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::ToolHookDiscontinued));
         }
 
-        state.structured_output_calls += self
-            .session
-            .messages()
-            .get(call.messages_before_step..)
-            .map_or(0, count_structured_output_calls);
-        if let base::interface::turn_policy::TurnStep::Stop { reason } = self
-            .policies
-            .turn_policy()
-            .after_model_call(&state.progress(&call.result.stop_reason))
-        {
-            tracing::warn!(
-                structured_output_calls = state.structured_output_calls,
-                %reason,
-                "turn policy ended the turn"
-            );
-            return Ok(ControlFlow::Break(StopReason::Policy(reason)));
+        if let Some(stop) = self.policy_after_call(state, &call) {
+            return Ok(ControlFlow::Break(stop));
         }
 
         if let ControlFlow::Break(why) = self.charge_budget() {
@@ -112,6 +98,29 @@ impl Agent {
         }
 
         Ok(self.reply_stopped(state, call.result, cancel).await)
+    }
+
+    /// What the turn policy says once a reply is in, the structured-output
+    /// calls it made counted first.
+    fn policy_after_call(&self, state: &mut TurnLoopState, call: &ModelCall) -> Option<StopReason> {
+        state.structured_output_calls += self
+            .session
+            .messages()
+            .get(call.messages_before_step..)
+            .map_or(0, count_structured_output_calls);
+        let base::interface::turn_policy::TurnStep::Stop { reason } = self
+            .policies
+            .turn_policy()
+            .after_model_call(&state.progress(&call.result.stop_reason))
+        else {
+            return None;
+        };
+        tracing::warn!(
+            structured_output_calls = state.structured_output_calls,
+            %reason,
+            "turn policy ended the turn"
+        );
+        Some(StopReason::Policy(reason))
     }
 
     async fn checkpoint(&mut self) {
@@ -251,16 +260,9 @@ impl Agent {
                     )
                 }
             };
-            // The broken attempt has spent what the provider counted of it,
-            // so the resend is judged again rather than on what the first
-            // attempt was given.
-            if let Err(stop) = self.afford(&mut request) {
+            if let Err(stop) = self.ready_to_resend(&mut request, step) {
                 return Ok(ControlFlow::Break(stop));
             }
-            self.emit(AgentEvent::StepStart {
-                step,
-                turn_id: self.current_turn_id.clone(),
-            });
         };
 
         Ok(ControlFlow::Continue(ModelCall {
@@ -274,6 +276,17 @@ impl Agent {
             images: tool_images,
             discontinued,
         }))
+    }
+
+    /// The broken attempt has spent what the provider counted of it, so the
+    /// resend is judged again rather than on what the first attempt was given.
+    fn ready_to_resend(&mut self, request: &mut ModelRequest, step: u32) -> Result<(), StopReason> {
+        self.afford(request)?;
+        self.emit(AgentEvent::StepStart {
+            step,
+            turn_id: self.current_turn_id.clone(),
+        });
+        Ok(())
     }
 
     /// The error carries whether the stream had opened.

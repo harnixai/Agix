@@ -7,8 +7,7 @@
 use base::event::UsageBreakdown;
 use base::interface::budget_policy::SpendNode;
 use base::interface::model::{
-    Model, ModelError, ModelErrorKind, ModelMessage, ModelStream, StreamParams, ToolDef, Usage,
-    UsageTap,
+    Model, ModelError, ModelMessage, ModelStream, StreamParams, ToolDef, Usage, UsageTap,
 };
 use base::prompt::PromptBlock;
 use base::provider::ApiType;
@@ -110,12 +109,7 @@ impl Model for SpentModel {
             match super::call_input::headroom(spend.remaining(), input) {
                 Ok(Some(left)) => params.max_tokens = params.max_tokens.min(left),
                 Ok(None) => {}
-                Err(refused) => {
-                    return Err(ModelError::new(
-                        ModelErrorKind::InvalidRequest,
-                        format!("not sent: {}", refused.message()),
-                    ))
-                }
+                Err(refused) => return Err(ModelError::unaffordable(&refused.message())),
             }
             params.usage_tap = UsageTap::charging(spend);
         }

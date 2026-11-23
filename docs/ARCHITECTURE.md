@@ -79,7 +79,7 @@ RPC 服务和会话池在同一个 crate 里是体积上的取舍:两者共用�
 tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大约 2.8 MB。
 
 **`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定(生产代码的行数有
-棘轮,`tests/guards/ratchet/base.txt`,现值 21953 行:变少时用 `AGIX_UPDATE_RATCHET=1` 压下去;要上调就在同一个
+棘轮,`tests/guards/ratchet/base.txt`,现值 21958 行:变少时用 `AGIX_UPDATE_RATCHET=1` 压下去;要上调就在同一个
 提交里改这个文件,并在提交说明里写清为什么这些代码只能放在 `core`),并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
 `resolve_physically`、`truncate_chars` 等);别的 crate 实现它的 trait。
 这条约束是整个扩展面成立的前提:一个宿主要替换某个子系统时,面对的是 `core` 里的
