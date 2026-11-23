@@ -395,6 +395,13 @@ async fn documented_daemon_scene_and_config_results_are_real() {
         serde_json::json!({"scene": "code", "tier": "effective"}),
     )
     .await;
+    verify(
+        &doc,
+        &daemon,
+        "config.explain",
+        serde_json::json!({"key": "turn.max_model_calls"}),
+    )
+    .await;
     verify(&doc, &daemon, "config.getProvider", serde_json::json!({})).await;
     verify(&doc, &daemon, "config.reload", serde_json::json!({})).await;
 

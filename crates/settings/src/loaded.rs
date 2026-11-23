@@ -422,14 +422,14 @@ pub(crate) fn seed_section_defaults(merged: &mut serde_json::Value, sections: &S
 /// Two tiers sharing a directory are read once, at the higher tier: a project
 /// rooted at `$HOME` reads `~/.agix` as its project tier, and those files are
 /// still the user's global settings.
-struct TierView {
+pub(crate) struct TierView {
     own_project: bool,
     scene_is_global: bool,
     project_is_global: bool,
 }
 
 impl TierView {
-    fn of(
+    pub(crate) fn of(
         global_dir: &std::path::Path,
         scene_dir: &std::path::Path,
         local_dir: &std::path::Path,
@@ -442,7 +442,7 @@ impl TierView {
         }
     }
 
-    fn is_global(&self, tier: Tier) -> bool {
+    pub(crate) fn is_global(&self, tier: Tier) -> bool {
         match tier {
             Tier::Global | Tier::Cli => true,
             Tier::Scene => self.scene_is_global,
@@ -451,7 +451,7 @@ impl TierView {
         }
     }
 
-    fn is_own_project(&self, tier: Tier) -> bool {
+    pub(crate) fn is_own_project(&self, tier: Tier) -> bool {
         tier == Tier::Project && self.own_project
     }
 }

@@ -285,7 +285,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 一轮在跑时,`session.event` 帧不断推回来(文字增量、工具调用、工具结果、询问、任务
 进度);这一轮结束时响应到达。常见的客户端用一条连接订阅会话(`session.subscribe`),
 用另一条驱动它。协议参考 [`daemon_rpc_protocol.md`](daemon_rpc_protocol.md) 里记了
-九十二个方法——会话、历史与上下文、任务与子 Agent、场景、配置、项目信任、MCP、插件、定时任务
+九十三个方法——会话、历史与上下文、任务与子 Agent、场景、配置、项目信任、MCP、插件、定时任务
 ——每个文档里写的响应形状都有测试拿真实 daemon 的回答对照。
 
 常用参数:`--scene` / `--scenes`(服务哪些场景)、`--listen` / `--listen-ws` 加
@@ -501,6 +501,10 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | 宿主在内存里改的值(`HostOverrides`) | 嵌入方 | 守护进程自己那一对照原样;别的对只带宿主新加的 | — |
 | `session.create` 的 `options.settings` | RPC 客户端 | 这个会话,连同它的子 Agent、团队成员 | 只收会话作用域的键;不开 `permissions.client_may_loosen` 只能收紧 |
 | managed 文件 | 部署方 | 全部 | 压过以上各层;有松紧次序的键下层更严时留下层的;读不了就拒绝所有工具调用 |
+
+要知道一个键为什么是现在这个值,调 `config.explain {key}`(也可以给一个块,如 `turn`;加 `session_id`
+看会话的):逐层列出这一层写了什么、结局如何——生效、被更高层盖过、未受信项目被扣下、只认全局层而被丢掉、
+值放不进、被 managed 文件改掉,或在会话上被夹住。
 
 `session.create` 的 `model`、`provider` 不是设置:只选这个会话的对话用哪个模型。推理强度、思考开关与提示词是设置:
 `options.settings` 的 `model.effort`、`model.thinking`、`prompt.append` / `prompt.override`,会话与它的子 Agent 一样用;

@@ -24,6 +24,7 @@ pub use blocks::{
 };
 pub mod edit;
 mod egress;
+pub mod explain;
 mod limits;
 pub use egress::EgressProxySetting;
 pub use limits::{GoalSettings, ScheduleSettings, SessionSettings};

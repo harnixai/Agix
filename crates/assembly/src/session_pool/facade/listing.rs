@@ -39,10 +39,9 @@ impl SessionPool {
     ///
     /// Reports what the daemon can actually answer: the scene's capability
     /// bits, its tool surface, and the settings a session created here would
-    /// resolve to. It deliberately does **not** report which tier each field
-    /// came from — settings are merged tier by tier and the provenance is not
-    /// retained, so a `sources` map would have to be reconstructed by
-    /// re-reading and re-merging every tier. That is a feature, not a field.
+    /// resolve to. Which layer each field came from is not kept through the
+    /// merge; `config.explain` reads the layers again to say
+    /// ([`Self::explain_setting`]).
     pub async fn describe_scene(
         &self,
         scene_id: &str,

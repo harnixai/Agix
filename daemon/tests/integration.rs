@@ -9,6 +9,7 @@ mod assemble_defaults;
 mod bash_read_only_lane;
 mod command_line_settings;
 mod compaction_and_trim;
+mod config_explain;
 mod config_reload_and_doctor;
 mod config_set;
 mod credentials_in_file_tools;

@@ -365,7 +365,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"session.run_turn",
 While the turn runs, `session.event` frames stream back (text deltas, tool
 calls, tool results, prompts, task progress); the response arrives when the turn
 ends. A typical client subscribes to a session on one connection
-(`session.subscribe`) and drives it from another. Ninety-two methods are
+(`session.subscribe`) and drives it from another. Ninety-three methods are
 documented in [`docs/daemon_rpc_protocol.md`](docs/daemon_rpc_protocol.md) —
 sessions, history and context, tasks and sub-agents, scenes, configuration,
 project trust, MCP, plugins, scheduling — and every documented response shape is compared
@@ -636,6 +636,11 @@ Where a value can come from, lowest priority first:
 | a host's in-memory changes (`HostOverrides`) | an embedder | the daemon's own pair as written; another pair gets only what the host added | — |
 | `session.create` `options.settings` | an RPC client | that session, its sub-agents and team members | session-scope keys only; only tightens unless `permissions.client_may_loosen` |
 | the managed file | the deployment | everything | beats all of the above, except that a stricter value beneath it stands for a key with a tighter/looser order; a file that does not read refuses every tool call |
+
+To find out why a key has its value, `config.explain {key}` (or a block, such as `turn`; add
+`session_id` for a session's) lists each of these layers with what it set and what became of it there:
+applied, overridden, withheld from an untrusted project, dropped as global-only, ignored, overruled by
+the managed file, or clamped for the session.
 
 `session.create`'s `model` and `provider` are not settings: they choose the model the session's
 conversation runs on. Its effort, thinking and prompt are: `options.settings.model.effort`,

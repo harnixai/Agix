@@ -9,6 +9,7 @@
 mod binding;
 mod host_dirs;
 mod host_overrides;
+mod trace;
 
 pub(in crate::session_pool) use binding::{
     tier_covers, BindingStamp, ProjectBinding, ProjectSceneKey,
@@ -346,32 +347,7 @@ impl BindingCache {
     }
 
     async fn load_pair_as(&self, project: Option<&Path>, scene: &str, own: bool) -> LoadedSettings {
-        let startup_scene = self.startup_scene().await;
-        let default_model = self.settings.read().await.default_model.clone();
-        let (global_root, scene_root, scene, project, cli, managed) = (
-            self.paths.global_root(),
-            self.scene_root(scene, &startup_scene),
-            scene.to_string(),
-            project.map(Path::to_path_buf),
-            self.layers.cli.clone(),
-            self.layers.managed.settings.clone(),
-        );
-        let layout = self.paths.layout();
-        let loaded = off_the_runtime(move || {
-            read_pair(PairRead {
-                global_root,
-                scene_root,
-                project: project.as_deref(),
-                layout: &layout,
-                scene: &scene,
-                default_model: &default_model,
-                above: Above {
-                    cli: cli.as_ref(),
-                    managed: managed.as_ref(),
-                },
-            })
-        })
-        .await;
+        let (loaded, _) = self.read_pair_files(project, scene, false).await;
         self.layers.over(loaded, own)
     }
 

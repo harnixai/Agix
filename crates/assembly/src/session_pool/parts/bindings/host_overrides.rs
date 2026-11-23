@@ -68,15 +68,10 @@ impl HostOverrides {
     /// added: a list is the pair's own followed by what the host added to
     /// it.
     pub(in crate::session_pool) fn apply(&self, settings: LoadedSettings) -> LoadedSettings {
-        let Some(added) = &self.added else {
-            return settings;
-        };
-        let mut layer = added.clone();
-        self.drop_project_providers(&mut layer, &[]);
-        if let Ok(Value::Object(theirs)) = serde_json::to_value(&settings.values) {
-            extend_lists(&mut layer, &theirs);
+        match self.layer_for_other(&settings) {
+            Some(layer) => overlay(&settings, &layer),
+            None => settings,
         }
-        overlay(&settings, &layer)
     }
 
     /// This daemon's own pair, read from disk, as the host made it: every
@@ -84,20 +79,45 @@ impl HostOverrides {
     /// it did not add and the disk no longer has, then what the disk has that
     /// the host neither had nor took out.
     pub(in crate::session_pool) fn apply_to_own(&self, settings: LoadedSettings) -> LoadedSettings {
-        let mut settings = match &self.own {
-            Some(own) => {
-                let mut layer = own.clone();
-                if let Ok(Value::Object(now)) = serde_json::to_value(&settings.values) {
-                    follow_disk(&mut layer, &now, self.added.as_ref(), self.removed.as_ref());
-                    let on_disk = now.get("providers").and_then(Value::as_array);
-                    self.drop_project_providers(&mut layer, on_disk.map_or(&[], Vec::as_slice));
-                }
-                overlay(&settings, &layer)
-            }
+        let mut settings = match self.layer_for_own(&settings) {
+            Some(layer) => overlay(&settings, &layer),
             None => settings,
         };
         settings.rules.extend(self.rules.iter().cloned());
         settings
+    }
+
+    /// The layer [`apply_to_own`](Self::apply_to_own) (`own`) or
+    /// [`apply`](Self::apply) lays over `settings`, without the rules.
+    pub(in crate::session_pool) fn layer_over(
+        &self,
+        settings: &LoadedSettings,
+        own: bool,
+    ) -> Option<Map<String, Value>> {
+        if own {
+            self.layer_for_own(settings)
+        } else {
+            self.layer_for_other(settings)
+        }
+    }
+
+    fn layer_for_other(&self, settings: &LoadedSettings) -> Option<Map<String, Value>> {
+        let mut layer = self.added.clone()?;
+        self.drop_project_providers(&mut layer, &[]);
+        if let Ok(Value::Object(theirs)) = serde_json::to_value(&settings.values) {
+            extend_lists(&mut layer, &theirs);
+        }
+        Some(layer)
+    }
+
+    fn layer_for_own(&self, settings: &LoadedSettings) -> Option<Map<String, Value>> {
+        let mut layer = self.own.clone()?;
+        if let Ok(Value::Object(now)) = serde_json::to_value(&settings.values) {
+            follow_disk(&mut layer, &now, self.added.as_ref(), self.removed.as_ref());
+            let on_disk = now.get("providers").and_then(Value::as_array);
+            self.drop_project_providers(&mut layer, on_disk.map_or(&[], Vec::as_slice));
+        }
+        Some(layer)
     }
 }
 

@@ -19,7 +19,10 @@ use serde_json::{Map, Value};
 use crate::schema::schema_keys;
 use crate::section::Sections;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     /// Read once, when the process starts or its pool is built.
     Process,

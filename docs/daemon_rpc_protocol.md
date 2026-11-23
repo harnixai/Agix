@@ -861,6 +861,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
 | `provider_tiers` | `config.setProvider` 接受 `tier`(`project` / `global`)与 `dry_run`,结果带 `tier`、`dry_run`(§6.4) |
 | `host_call_context` | `host_tool_call` 与 `hook_call` 帧带 `cwd`(发起调用的会话的工作目录)与 `depth`(根会话 0,子 Agent 逐层加 1);hook 的 payload 带 `depth`(§7.4、§7.6) |
+| `config_explain` | 有 `config.explain`:一个设置键为什么是现在这个值,逐层列出值与结局(§6.4) |
 | `mcp_oauth_jwt` | 这个构建能用 `oauth.private_key_jwt`(feature `mcp-oauth-jwt`);没有这一项的构建,配了 `private_key_jwt` 的 MCP server 连接时报明确的错(`docs/mcp_auth.md`) |
 | `ptc` | 这个构建带 `RunCode`,模型能写程序调本会话的工具(`docs/ptc.md`) |
 | `runext` | 这个构建带插件命令:包的 `[[command]]` 经 `RunExt` 与 `/name args` 跑,`plugin.list` 带 `commands` / `command_conflicts`,`commands.list` 有 `kind:"ext"`,任务有 `kind:"ext"`(`docs/runext.md`) |
@@ -1341,7 +1342,7 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 才展开"的那批工具。
 
 `settings` 是各层(三层设置文件与 `cli` 层)合并后的完整结果,**不带溯源信息** —— merge 之后不保留每个字段来自
-哪层。要看某一层的原样内容用 `config.get` 的 `tier`。
+哪层。要看某一层的原样内容用 `config.get` 的 `tier`,要看某个键为什么是这个值用 `config.explain`。
 
 `include_secrets` 默认 `false`:`api_key` / `auth_token` / `token` / `secret` /
 `password` / `authorization`,以及以 `_token` / `_secret` / `_password` 结尾的键(键名不分
@@ -3172,6 +3173,69 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 **该层没有文件时 `settings` 是 `null`,不是 `{}`** —— "这层没配"和"这层配了个空的"
 是两种状态,配置界面得能区分。`tier: "project"` 而没给 `project_root` 同理。
 `tier` 取值非法 → `INVALID_PARAMS`。脱敏规则同 `scene.describe`,`local` 也一样脱敏。
+
+#### `config.explain`
+
+一个设置键为什么是现在这个值:它经过的每一层、在那一层的值和结局。`config.get` 给的是各层原样或合并结果,
+回答不了"这个值是从哪来的、为什么没用上我写的"。
+
+```jsonc
+// → params
+{ "key": "turn.max_model_calls",       // 必填,点分;给一个块(如 "turn")就逐个解释其下的键
+  "scene": "code",                     // 可选,省略 = 这个 daemon 的场景
+  "project_root": "/Users/x/repo",     // 可选,省略 = 这个 daemon 自己的项目;null → INVALID_PARAMS
+  "include_secrets": false }           // 可选,同 config.get
+// → params(连会话自己那一层一起解释;这时不带 scene / project_root,用会话的)
+{ "key": "turn", "session_id": "…" }
+// ← result
+{ "key": "turn.max_model_calls",
+  "keys": [
+    { "key": "turn.max_model_calls", "value": 25,
+      "scope": "session",              // process | pair | session:在哪一级定下(键表 settings::keys)
+      "read_at_start": false,          // 只在进程启动时读;为 true 时另有 restart_pending
+      "layers": [
+        { "tier": "default", "origin": "built-in", "value": 25, "outcome": "applied" } ] } ],
+  "truncated": false }
+```
+
+每次调用都照加载时的样子把这一对 `(项目, 场景)` 的设置文件重读一遍(与 `config.reload` 读到的相同,但不替换
+daemon 手里的那份),各层的判法就是加载器自己的判法,不另算一套。
+
+`keys` 里每个键:
+
+- `value`:现在生效的值;给了 `session_id` 时是会话的,否则是这一对的。
+- `layers`:由低到高——`default`(内置缺省,`origin` 为 `built-in`)、各层设置文件按加载器折叠的顺序
+  (`global` / `scene` / `project`,每层的 `settings.json` 在前、`settings.local.json` 在后,后者带
+  `machine_local: true`;场景层或项目层的目录就是全局目录时按 `global` 报)、`cli`(`agixd --set` 与
+  `EmbedConfig.settings`)、`host`(嵌入方在内存里改过的值,只在有改动时出现)。`origin` 是文件路径,或
+  `built-in` / `cli` / `host`;`value` 是这一层写的值,没写时不带。
+- `managed`:部署方的 managed 层写了这个键时才有,`{origin, value, outcome}`。
+- `session`:给了 `session_id` 时才有,`{requested, applied, outcome}`:`requested` 是会话自己那一层
+  (`options.settings`,及 `session.setModel` / `session.setPrompt` 改过的)要的值,没要时为 `null`;
+  `applied` 是会话实际用的。
+- `restart_pending`:只对 `read_at_start` 的键(`app.history`、`app.session_cap` 等):`value` 与这个进程
+  启动时读到的不同,重启后才生效。
+- `truncated`:块里的键超过 64 个,只解释了前 64 个。
+
+`outcome`:
+
+| `outcome` | 出现在 | 意思 |
+|---|---|---|
+| `applied` | 各层、`managed`、`session` | 生效的就是这一层的值。`providers` 与 `permissions` 的规则列表(`allow`、`allow_exact`、`ask`、`deny`)各层拼接,写了的层都是 `applied` |
+| `overridden` | 各层、`session` | 更高的一层写了这个键;在 `session` 上是会话之后另有决定(`session.setPermissionMode`) |
+| `merged` | 各层 | 对象值,更高的层把自己的键并了进来;解释里面的键看每个来自哪层 |
+| `not_set` | 各层、`session` | 这一层没写 |
+| `withheld_untrusted` | `project` | 项目未受信(§3.6),这是只有受信项目才能写(或放宽)的值,被扣下 |
+| `dropped_not_global` | `scene`、`project` | 只从全局层读的键(`app.*`),写在了场景层或项目层 |
+| `ignored` | 各层、`managed`、`session` | 值放不进这个设置,带 `error` 说明;managed 上是放不进它下面的值 |
+| `managed_overrode` | 各层、`session` | managed 层把它换成了自己的值 |
+| `held_tighter_below` | `managed` | managed 的值比下面的更松,有松紧次序的键留下层更严的那个 |
+| `clamped` | `session` | 会话要的值比设置更松,而设置不许客户端放宽(`permissions.client_may_loosen`),夹回设置的值 |
+| `not_session_scope` | `session` | 这个键按进程或按 `(项目, 场景)` 定,会话那一层不收 |
+
+没有设置读这个键 → `INVALID_PARAMS`(改过名的键,消息里给出新名字);同时给 `session_id` 与 `scene` /
+`project_root` → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`;场景未知 → `SCENE_NOT_FOUND`。
+值的脱敏同 `config.get`。
 
 #### `config.set`
 

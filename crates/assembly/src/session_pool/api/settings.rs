@@ -55,6 +55,19 @@ pub struct ConfigTier {
     pub managed: serde_json::Value,
 }
 
+/// Whose settings `config.explain` explains: a (project, scene) pair's, or a
+/// session's over those of its pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExplainTarget {
+    /// `None` for the scene with no project.
+    Pair {
+        project_root: Option<PathBuf>,
+        scene: String,
+    },
+    Session(String),
+}
+
 /// What `config.set` is asked to write.
 #[derive(Debug, Clone)]
 pub struct SettingsChange {

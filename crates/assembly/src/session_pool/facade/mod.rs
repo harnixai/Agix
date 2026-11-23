@@ -3,6 +3,7 @@
 
 mod background;
 mod bindings;
+mod config_explain;
 mod config_set;
 mod create;
 mod doctor;

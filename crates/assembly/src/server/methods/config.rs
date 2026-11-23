@@ -2,17 +2,18 @@
 
 use super::*;
 use crate::rpc::methods::config::{
-    ConfigGetParams, ConfigGetProviderParams, ConfigListModelsParams, ConfigSetParams,
-    ConfigSetProviderParams,
+    ConfigExplainParams, ConfigGetParams, ConfigGetProviderParams, ConfigListModelsParams,
+    ConfigSetParams, ConfigSetProviderParams,
 };
 use crate::rpc::methods::ConfigTarget;
 use crate::session_pool::api::{
-    ConfigTier, ModelList, ProviderConfigView, ProviderPatch, ProviderSaved, SettingsChange,
-    SettingsReloaded, SettingsWritten,
+    ConfigTier, ExplainTarget, ModelList, ProviderConfigView, ProviderPatch, ProviderSaved,
+    SettingsChange, SettingsReloaded, SettingsWritten,
 };
 
 rpc_methods! {
     "config.get" => get(ConfigGetParams) -> ConfigTier;
+    "config.explain" => explain(ConfigExplainParams) -> settings::explain::SettingExplanation;
     "config.set" => set(ConfigSetParams) -> SettingsWritten;
     "config.getProvider" => get_provider(ConfigGetProviderParams) -> ProviderConfigView;
     "config.setProvider" => set_provider(ConfigSetProviderParams) -> ProviderSaved;
@@ -28,6 +29,32 @@ async fn get(s: &DaemonServer, _: &Call, params: ConfigGetParams) -> Result<Conf
             params.tier,
             params.include_secrets,
         )
+        .await
+}
+
+async fn explain(
+    s: &DaemonServer,
+    _: &Call,
+    params: ConfigExplainParams,
+) -> Result<settings::explain::SettingExplanation, PoolError> {
+    let target = match params.session_id {
+        Some(_) if params.target.scene.is_some() || params.target.project_root.is_some() => {
+            return Err(PoolError::InvalidRequest(
+                "`session_id` names the project and scene; leave out `scene` and `project_root`"
+                    .into(),
+            ))
+        }
+        Some(session_id) => ExplainTarget::Session(session_id),
+        None => {
+            let (project_root, scene) = s.target_of(params.target);
+            ExplainTarget::Pair {
+                project_root: Some(project_root.unwrap_or_else(|| s.pool.cwd().to_path_buf())),
+                scene,
+            }
+        }
+    };
+    s.pool
+        .explain_setting(&params.key, target, params.include_secrets)
         .await
 }
 

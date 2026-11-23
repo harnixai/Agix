@@ -69,9 +69,10 @@ pub use session::{
     ShadowedSkill, SkillDirReport, SkillDirState, TurnState,
 };
 pub use settings::{
-    ConfigTier, ConfigTierName, ImportRun, ModelList, ProjectStatus, ProjectTrustSet,
-    ProviderConfigView, ProviderPatch, ProviderSaved, ProviderView, RejectKind, RoutingStatus,
-    SettingRejected, SettingsChange, SettingsReloaded, SettingsTier, SettingsWritten, TrustState,
+    ConfigTier, ConfigTierName, ExplainTarget, ImportRun, ModelList, ProjectStatus,
+    ProjectTrustSet, ProviderConfigView, ProviderPatch, ProviderSaved, ProviderView, RejectKind,
+    RoutingStatus, SettingRejected, SettingsChange, SettingsReloaded, SettingsTier,
+    SettingsWritten, TrustState,
 };
 pub use tasks::{AgentStarted, ContextReport, MessageDelivery, SessionTasks, TaskOutput};
 pub use turn::{Initiator, TurnOutcome, TurnRequest};

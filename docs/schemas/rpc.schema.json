@@ -1322,6 +1322,45 @@
       ],
       "type": "object"
     },
+    "ConfigExplainParams": {
+      "description": "A key, or a block, of a `(scene, project_root)` pair or of a session.",
+      "properties": {
+        "include_secrets": {
+          "default": false,
+          "type": "boolean"
+        },
+        "key": {
+          "description": "Dotted; a block (`turn`) explains each key in it.",
+          "type": "string"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scene": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "description": "The pair is the session's: `scene` and `project_root` are left out.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "ConfigGetParams": {
       "properties": {
         "include_secrets": {
@@ -3722,6 +3761,106 @@
       ],
       "type": "object"
     },
+    "KeyExplanation": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "layers": {
+          "description": "Lowest first: `default`, then each file and the `cli` layer in the\norder the loader folded them, then `host`.",
+          "items": {
+            "$ref": "#/$defs/LayerOutcome"
+          },
+          "type": "array"
+        },
+        "managed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManagedOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "read_at_start": {
+          "description": "The engine reads it only when the process starts.",
+          "type": "boolean"
+        },
+        "restart_pending": {
+          "description": "For a key read only at start: `value` is not what the process started\nwith, and takes effect after a restart.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the key is decided; `None` only for a key no row of the key\ntable names."
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "description": "What is in force: the session's when one was named, else the pair's."
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "read_at_start",
+        "layers"
+      ],
+      "type": "object"
+    },
+    "LayerOutcome": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "machine_local": {
+          "description": "The tier's `settings.local.json`.",
+          "type": "boolean"
+        },
+        "origin": {
+          "description": "The file, `built-in`, `cli` or `host`.",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/SettingOutcome"
+        },
+        "tier": {
+          "description": "`default`, `global`, `scene`, `project`, `cli` or `host`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "What the layer says, absent when it says nothing."
+        }
+      },
+      "required": [
+        "tier",
+        "origin",
+        "outcome"
+      ],
+      "type": "object"
+    },
     "ListParams": {
       "properties": {
         "include_children": {
@@ -3798,6 +3937,24 @@
       },
       "required": [
         "behind"
+      ],
+      "type": "object"
+    },
+    "ManagedOutcome": {
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/SettingOutcome",
+          "description": "`applied`, `held_tighter_below`, or `ignored` when the value does\nnot fit."
+        },
+        "value": true
+      },
+      "required": [
+        "origin",
+        "value",
+        "outcome"
       ],
       "type": "object"
     },
@@ -7292,6 +7449,25 @@
       },
       "type": "object"
     },
+    "Scope": {
+      "oneOf": [
+        {
+          "const": "process",
+          "description": "Read once, when the process starts or its pool is built.",
+          "type": "string"
+        },
+        {
+          "const": "pair",
+          "description": "Read when a (project, scene) pair is bound, for every session on it.",
+          "type": "string"
+        },
+        {
+          "const": "session",
+          "description": "Read when a session's engine is built.",
+          "type": "string"
+        }
+      ]
+    },
     "ScriptCall": {
       "properties": {
         "detail": {
@@ -7939,6 +8115,29 @@
       },
       "type": "object"
     },
+    "SessionOutcome": {
+      "properties": {
+        "applied": true,
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/SettingOutcome",
+          "description": "`not_set`, `applied`, `clamped`, `managed_overrode`,\n`not_session_scope`, `ignored`, or `overridden` when the session\ndecided otherwise since (`session.setPermissionMode`)."
+        },
+        "requested": {
+          "description": "What the session's own layer asks for; `null` when it asks nothing."
+        }
+      },
+      "required": [
+        "applied",
+        "outcome"
+      ],
+      "type": "object"
+    },
     "SessionPersistence": {
       "properties": {
         "history_store_wired": {
@@ -8203,6 +8402,91 @@
         "skill_dirs"
       ],
       "type": "object"
+    },
+    "SettingExplanation": {
+      "properties": {
+        "key": {
+          "description": "As asked: a key, or a block whose keys are explained one by one.",
+          "type": "string"
+        },
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/KeyExplanation"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "description": "The block holds more than [`MAX_KEYS`] keys; the first are explained.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "keys",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "SettingOutcome": {
+      "description": "What became of a key in one layer.",
+      "oneOf": [
+        {
+          "enum": [
+            "not_set"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "applied",
+          "description": "This layer's value is the one in force. For the lists that join\nacross layers (`providers`, the `permissions` rule lists) every layer\nthat sets one is.",
+          "type": "string"
+        },
+        {
+          "const": "overridden",
+          "description": "A higher layer set the key.",
+          "type": "string"
+        },
+        {
+          "const": "merged",
+          "description": "An object a higher layer merged its own keys into; explain a key\ninside it to see which layer each comes from.",
+          "type": "string"
+        },
+        {
+          "const": "withheld_untrusted",
+          "description": "The project is not trusted, and this is what only a trusted project\nmay set (or loosen).",
+          "type": "string"
+        },
+        {
+          "const": "dropped_not_global",
+          "description": "Only the global tier's files (and the layers over every file) may set\nit.",
+          "type": "string"
+        },
+        {
+          "const": "ignored",
+          "description": "The value does not fit its setting; `error` says why.",
+          "type": "string"
+        },
+        {
+          "const": "managed_overrode",
+          "description": "The managed layer set it to its own value.",
+          "type": "string"
+        },
+        {
+          "const": "held_tighter_below",
+          "description": "The managed layer's value: a value beneath it is stricter, and stands.",
+          "type": "string"
+        },
+        {
+          "const": "clamped",
+          "description": "The session's value: it would loosen the settings, which do not let a\nclient loosen them (`permissions.client_may_loosen`); held to theirs.",
+          "type": "string"
+        },
+        {
+          "const": "not_session_scope",
+          "description": "The session's value: the key is decided for the process or the\n(project, scene) pair, not for a session.",
+          "type": "string"
+        }
+      ]
     },
     "SettingRejected": {
       "properties": {
@@ -9652,6 +9936,14 @@
       },
       "result": {
         "$ref": "#/$defs/CommandList"
+      }
+    },
+    "config.explain": {
+      "params": {
+        "$ref": "#/$defs/ConfigExplainParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SettingExplanation"
       }
     },
     "config.get": {

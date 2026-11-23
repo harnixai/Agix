@@ -38,6 +38,20 @@ pub struct ConfigGetParams {
     pub include_secrets: bool,
 }
 
+/// A key, or a block, of a `(scene, project_root)` pair or of a session.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct ConfigExplainParams {
+    /// Dotted; a block (`turn`) explains each key in it.
+    pub key: String,
+    /// The pair is the session's: `scene` and `project_root` are left out.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(flatten)]
+    pub target: ConfigTarget,
+    #[serde(default)]
+    pub include_secrets: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 pub struct ConfigSetParams {
     #[serde(flatten)]

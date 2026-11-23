@@ -5,9 +5,9 @@
 //! directly in its project directory is moved into `state/` first.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use base::interface::config_source::{Chain, InMemoryLayers, Tier};
+use base::interface::config_source::{Chain, ConfigLayer, ConfigSource, InMemoryLayers, Tier};
 use base::paths::{Layout, PROJECT_STATE_ENTRIES};
 use base::permission::ManagedSettings;
 
@@ -36,6 +36,36 @@ pub(crate) struct PairRead<'a> {
 }
 
 pub(crate) fn read_pair(request: PairRead<'_>) -> LoadedSettings {
+    read(request, None)
+}
+
+/// [`read_pair`], and the layers the loader folded as the source handed
+/// them over: what `config.explain` reads each key's story off.
+pub(crate) fn trace_pair(request: PairRead<'_>) -> (LoadedSettings, Vec<ConfigLayer>) {
+    let seen = Mutex::new(Vec::new());
+    let loaded = read(request, Some(&seen));
+    (loaded, seen.into_inner().unwrap_or_default())
+}
+
+/// A source that keeps a copy of the layers it hands over.
+struct Recorded<'a> {
+    source: Chain,
+    seen: Option<&'a Mutex<Vec<ConfigLayer>>>,
+}
+
+impl ConfigSource for Recorded<'_> {
+    fn layers(&self) -> Vec<ConfigLayer> {
+        let layers = self.source.layers();
+        if let Some(seen) = self.seen {
+            if let Ok(mut seen) = seen.lock() {
+                seen.clone_from(&layers);
+            }
+        }
+        layers
+    }
+}
+
+fn read(request: PairRead<'_>, seen: Option<&Mutex<Vec<ConfigLayer>>>) -> LoadedSettings {
     let PairRead {
         global_root,
         scene_root,
@@ -54,7 +84,10 @@ pub(crate) fn read_pair(request: PairRead<'_>) -> LoadedSettings {
         None => global_root.clone(),
     };
     let files = FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone());
-    let source = above.over(files);
+    let source = Recorded {
+        source: above.over(files),
+        seen,
+    };
     let loaded = match project {
         Some(_) => LoadedSettings::load_from(LoadRequest {
             source: &source,
