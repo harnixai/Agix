@@ -517,7 +517,7 @@ managed 为准。启动时对守护进程自己那一对
 模块的段落在 `Section::SCOPE` 里登记,完备性由 `scope_gaps` 的测试守着):进程(`app`、`plugins`、
 `telemetry.otlp_endpoint`)、`(项目, 场景)` 对(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
 `scripts`、`permissions.client_may_loosen`——路由、MCP 连接、hook 来源都按绑定建),其余是会话。`options.settings`
-只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按未受信项目层那张表(`trust::PROJECT_TIER`)的比较
+只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按未受信项目层那张表(`tier_gate::PROJECT_TIER`)的比较
 方向判:只许更严的键给宽了就留设置的值、报在 `clamped_options`,allow 规则扣下;设置开了
 `permissions.client_may_loosen` 时照样放宽。表里的 Withheld 名单不用——会话能给什么由作用域定。这是安全缺省,不是
 边界:连得上 socket 的客户端能 `config.set`,本来就是设置的所有者。会话层之后权限模式再过一遍
@@ -2184,7 +2184,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 **未信任的项目层按插件级信任处理**——复用插件包已有的那条"网上来的东西只能新增、只能收紧"
 的规则(`plugin_packages.md` §信任),不另造一套权限体系。
 
-**这是白名单,不是扣一份名单。** `settings::trust::PROJECT_TIER` 登记项目层设置文件里的每一个键,
+**这是白名单,不是扣一份名单。** `settings::tier_gate::PROJECT_TIER` 登记项目层设置文件里的每一个键,
 每条是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合出来的值一样紧或更紧时保留,次序
 按键的类型:布尔取真或取假为紧、数值取小为紧、列表取子集或超集为紧、模式与网络模式按宽松度排……)、
 `Withheld`(整个扣下)。项目层的每个叶子路径取最长匹配的条目;**没有条目的键一律扣下**,并记入

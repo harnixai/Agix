@@ -9,7 +9,7 @@
 //!
 //! A session's layer holds only keys decided per session ([`crate::scope`]);
 //! [`session_layer_problems`] names the rest. By default it may only tighten:
-//! a value the project tier's table ([`crate::trust::PROJECT_TIER`]) orders as
+//! a value the project tier's table ([`crate::tier_gate::PROJECT_TIER`]) orders as
 //! looser than the settings' is held to the settings', and its allow rules are
 //! held back — unless the settings set `permissions.client_may_loosen`. That
 //! is a safe default, not a boundary: whoever reaches the socket may change
@@ -24,7 +24,7 @@ use crate::merge::merge_fitting;
 use crate::permissions::{self, read_rule_list, take_rule_lists, RULE_LISTS};
 use crate::scope::{keys_outside, Scope};
 use crate::section::Sections;
-use crate::{renamed, trust, IgnoredValue, LoadedSettings, SchemaKeys, Settings};
+use crate::{renamed, tier_gate, IgnoredValue, LoadedSettings, SchemaKeys, Settings};
 
 /// Whose layer [`LoadedSettings::overlay`] lays over the settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,7 +157,7 @@ impl LoadedSettings {
             }
         }
         if !loosen {
-            for key in trust::tighten_layer(&mut layer, &lower, sections) {
+            for key in tier_gate::tighten_layer(&mut layer, &lower, sections) {
                 held.push(HeldKey {
                     requested: value_at(&requested, &key),
                     applied: value_at(&lower, &key),

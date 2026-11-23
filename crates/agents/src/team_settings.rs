@@ -3,9 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use settings::section::Section;
-use settings::trust::Order::{FalseTighter, Lower};
-use settings::trust::ProjectKey;
-use settings::trust::ProjectKey::Tighten;
+use settings::tier_gate::Order::{FalseTighter, Lower};
+use settings::tier_gate::ProjectKey;
+use settings::tier_gate::ProjectKey::Tighten;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]

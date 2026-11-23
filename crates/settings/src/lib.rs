@@ -41,6 +41,7 @@ mod schema;
 pub mod scope;
 pub mod section;
 mod source;
+pub mod tier_gate;
 pub mod trust;
 
 #[cfg(test)]

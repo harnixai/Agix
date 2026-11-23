@@ -67,7 +67,7 @@ impl Default for ScheduleSettings {
 #[cfg(test)]
 mod tests {
     use crate::section::Sections;
-    use crate::trust::gate_layer;
+    use crate::tier_gate::gate_layer;
     use serde_json::{json, Value};
 
     fn settings(json: Value) -> crate::Settings {

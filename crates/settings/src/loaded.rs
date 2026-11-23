@@ -23,6 +23,7 @@ mod managed_layer;
 mod providers;
 use crate::permissions::{self, read_rule_list, take_rule_lists};
 use crate::section::Sections;
+use crate::tier_gate;
 use crate::trust::{self, ProjectLayer, ProjectTrustSettings};
 use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
 pub(crate) use managed_layer::providers_first;
@@ -477,7 +478,8 @@ impl LayerFold<'_> {
                         .or_insert(serde_json::Value::Null);
                     merge_json_values(entry, server);
                 }
-                let gated = trust::gate_layer(obj, &self.merged_json, self.withhold, self.sections);
+                let gated =
+                    tier_gate::gate_layer(obj, &self.merged_json, self.withhold, self.sections);
                 if self.withhold && !gated.is_empty() {
                     tracing::warn!(origin = %layer.origin, withheld = ?gated, "project is not trusted; settings only a trusted project may set are ignored");
                 }

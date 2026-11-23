@@ -3,7 +3,7 @@
 
 use base::interface::script::ScriptBinding;
 use settings::section::{Section, Sections};
-use settings::trust::ProjectKey;
+use settings::tier_gate::ProjectKey;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]

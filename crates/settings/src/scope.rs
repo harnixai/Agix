@@ -4,7 +4,7 @@
 //! for a pair, the turn limits and the sandbox for a session — so a layer that
 //! applies to less than that scope cannot set it: a session's own settings
 //! ([`crate::overlay`]) hold only [`Scope::Session`] keys. [`SCOPES`] names
-//! every key, as [`crate::trust::PROJECT_TIER`] does.
+//! every key, as [`crate::tier_gate::PROJECT_TIER`] does.
 
 use serde_json::Value;
 

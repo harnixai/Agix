@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use settings::section::Section;
-use settings::trust::Order::{FalseTighter, Lower};
-use settings::trust::ProjectKey::{self, Tighten};
+use settings::tier_gate::Order::{FalseTighter, Lower};
+use settings::tier_gate::ProjectKey::{self, Tighten};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -62,7 +62,7 @@ mod tests {
         .as_object()
         .unwrap()
         .clone();
-        let found = settings::trust::gate_layer(&mut layer, &lower, true, &sections);
+        let found = settings::tier_gate::gate_layer(&mut layer, &lower, true, &sections);
         assert_eq!(found, ["checkpoints.max_total_bytes"]);
         assert_eq!(
             layer["checkpoints"],

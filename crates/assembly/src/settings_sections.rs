@@ -4,7 +4,7 @@
 
 use base::interface::script::ScriptBinding;
 use settings::section::{Section, Sections};
-use settings::trust::ProjectKey;
+use settings::tier_gate::ProjectKey;
 
 /// Scripts bound to extension points — see [`ScriptBinding`]. Empty by
 /// default, and inert in a build without a script engine.

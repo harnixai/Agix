@@ -267,7 +267,7 @@ fn write_settings_schema() {
 fn every_settings_key_has_a_project_tier_entry() {
     let schema = settings_json_schema(&settings_sections::all());
     assert_eq!(
-        settings::trust::project_tier_gaps(&schema, &settings_sections::all()),
+        settings::tier_gate::project_tier_gaps(&schema, &settings_sections::all()),
         Vec::<String>::new()
     );
 }

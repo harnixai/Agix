@@ -43,9 +43,9 @@ impl PluginsConfig {
 
 impl settings::section::Section for PluginsConfig {
     const KEY: &'static str = "plugins";
-    const PROJECT_TIER: &'static [(&'static str, settings::trust::ProjectKey)] = {
-        use settings::trust::Order::{FalseTighter, SubsetEmptyIsAll};
-        use settings::trust::ProjectKey::Tighten;
+    const PROJECT_TIER: &'static [(&'static str, settings::tier_gate::ProjectKey)] = {
+        use settings::tier_gate::Order::{FalseTighter, SubsetEmptyIsAll};
+        use settings::tier_gate::ProjectKey::Tighten;
         &[
             ("allow", Tighten(SubsetEmptyIsAll)),
             ("enable_on_install", Tighten(FalseTighter)),

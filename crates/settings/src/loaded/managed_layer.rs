@@ -87,7 +87,7 @@ impl LoadedSettings {
             }
             merged[PROVIDERS] = providers_first(&providers, &merged);
         }
-        crate::trust::tighten_layer(&mut layer, &merged, &Sections::none());
+        crate::tier_gate::tighten_layer(&mut layer, &merged, &Sections::none());
         for (name, server) in mcp_servers_declared(&layer) {
             if server.get("command").is_some() {
                 self.mcp_server_dirs

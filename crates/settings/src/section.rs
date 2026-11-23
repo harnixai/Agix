@@ -9,11 +9,11 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::scope::Scope;
-use crate::trust::ProjectKey;
+use crate::tier_gate::ProjectKey;
 
 pub trait Section: Serialize + DeserializeOwned + schemars::JsonSchema + Default + 'static {
     const KEY: &'static str;
-    /// Relative to `KEY` (`""` is the key itself); the grammar of `trust::PROJECT_TIER`.
+    /// Relative to `KEY` (`""` is the key itself); the grammar of `tier_gate::PROJECT_TIER`.
     const PROJECT_TIER: &'static [(&'static str, ProjectKey)];
     /// Where the section is read — see `scope::SCOPES`.
     const SCOPE: Scope;
