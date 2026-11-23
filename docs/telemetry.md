@@ -19,7 +19,8 @@
   项目的,`pool.jsonl` 用 daemon 自己那一层的。它不是绝对路径时(测试、没配 `paths` 的
   嵌入方)什么都不记,而不是写进进程的当前目录。
 - `session.create` 的 `options.telemetry.output` 把这个会话的文件放到指定路径。
-- **开关**:`settings.json` 的 `telemetry.enabled`,缺省 `true`。关掉后会话与池都不记。
+- **开关**:`settings.json` 的 `telemetry.enabled`,缺省 `true`。关掉后会话与池都不记。未受信项目写的
+  `false` 不生效(项目不能关掉审计记录),`options.settings` 里的 `false` 同样被夹回(`clamped_options`,协议文档 §6.3)。
 - **轮转**:一个文件写到 64 MiB(`telemetry::file_recorder::DEFAULT_MAX_BYTES`)就改名为
   `<文件>.1`(覆盖上一个 `.1`),再开一个新的;一个文件最多占两份的空间。
 - **文件权限**:只有属主可读写(0600),已有的文件打开时也收紧;为它们新建的那一层目录是

@@ -572,6 +572,8 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 | `pause_turn` | 模型请求暂停。引擎把这条回复原样发回去让它接着写,所以一轮通常不以它结束;只有恢复策略不续(如 `NeverRecover`)时才会 |
 | `cancelled` | 这一轮被 `session.interrupt` 取消;已经推过的那段回复留在 transcript 里 |
 | `max_turns` | 触到本轮模型调用次数上限(`turn.max_model_calls`,引擎自己发的,不来自 API) |
+| `max_structured_output_retries` | 带 `options.output_schema` 的会话,结构化输出调用的重试次数用完仍不合 schema(引擎自己发的) |
+| `command_executed` | 这一轮是斜杠命令,在本地执行完,不调模型(§6.3 `session.run_turn`、`commands.*`) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
 | `budget_exceeded` | 触到一个 token 预算:这一轮的(`turn.token_budget` 或 `options.settings.turn.token_budget`,见下)、会话的或目标的;是谁的在 `turn_complete.message`(如 `this turn's token budget of 2000 is used up`) |
@@ -4108,6 +4110,8 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 { "job": { "id": "…", "cron": "…", "prompt": "…", "recurring": true, "durable": true,
            "session_id": "…", "created_ms": 0 } }
 ```
+
+job 里没写在例子中的字段只在有值时出现:`last_fired_ms`(上次触发的 Unix 毫秒)、`expires_ms`(此后的下一次触发是最后一次;模型建的周期任务才有)、`agent_id`(团队成员建的)、`by_model`。
 
 `cron` 不合法 → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`。
 
