@@ -1591,7 +1591,9 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
 - **最高的一层。** 除规则列表外,它写的每个键都是会话拿到的值:压过三层文件、`cli` 层(`agixd --set`)、
   宿主在内存里改的值(`HostOverrides`)和会话自带的 `options.settings`——即使设置开了
   `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。唯一的例外是键表信任列
-  给了松紧次序的键:下层写得比它更严时下层的值留下(会话要更小的预算、项目要更严的沙箱),managed 定的是最宽能到哪。`LoadedSettings::with_managed`
+  给了松紧次序的键:下层写得比它更严时下层的值留下(会话要更小的预算、项目要更严的沙箱),managed 定的是最宽能到哪。它写的
+  `prompt.append` 总接在系统提示词末尾:下层(会话、宿主、项目、用户)的 `prompt.override` 换掉了基础提示词,
+  也换不掉这一段;managed 自己写的 `prompt.override` 照样压过下层的。`LoadedSettings::with_managed`
   是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
   会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍;子 Agent 的 agent 类型改过 `effort` / `max_turns`
   之后,`SessionConfig::tuned_for_delegate` 用同一段(`lay_managed_values`)把 managed 对这两个键的值再压一遍。`app` 也照收:它的 `app.trust_all_projects`

@@ -98,6 +98,12 @@ fn fold_system_blocks(blocks: Vec<PromptBlock>, separator: &str, name: &str) -> 
     out
 }
 
+fn appended(text: &str) -> PromptBlock {
+    PromptBlock::system(text.to_string())
+        .named(names::CONFIG_PROMPT_APPEND)
+        .from_origin(BlockOrigin::Config)
+}
+
 /// Builds the system prompt, merging in whatever registered a contribution.
 ///
 /// The kernel's own stages are registrations too — they are placed at the
@@ -108,13 +114,15 @@ fn fold_system_blocks(blocks: Vec<PromptBlock>, separator: &str, name: &str) -> 
 ///
 /// `prompt.override` still wins over all of it. Overriding the prompt means
 /// overriding the prompt; a contribution surviving it would make the setting
-/// mean something narrower than it says.
+/// mean something narrower than it says. The managed layer's `prompt.append`
+/// is the one exception: what the deployment appends no lower layer removes.
 fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     let AssemblyRequest {
         registry,
         scene,
         prompt_override,
         prompt_append,
+        managed_append,
         memory_prompt,
         ctx,
         rules,
@@ -123,11 +131,13 @@ fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
     } = *request;
     use base::interface::prompt_registry::orders;
 
-    // If override is set, return it as the sole system block.
     if let Some(ov) = prompt_override {
-        return vec![PromptBlock::system(ov.to_string())
+        let overridden = PromptBlock::system(ov.to_string())
             .named(names::CONFIG_PROMPT_OVERRIDE)
-            .from_origin(BlockOrigin::Config)];
+            .from_origin(BlockOrigin::Config);
+        return std::iter::once(overridden)
+            .chain(managed_append.map(appended))
+            .collect();
     }
 
     let mut kernel: Vec<(i32, PromptBlock)> = Vec::new();
@@ -172,12 +182,7 @@ fn assemble(request: &AssemblyRequest<'_>) -> Vec<PromptBlock> {
 
     // 5. User append
     if let Some(append) = prompt_append {
-        kernel.push((
-            orders::CONFIG_PROMPT_APPEND,
-            PromptBlock::system(append.to_string())
-                .named(names::CONFIG_PROMPT_APPEND)
-                .from_origin(BlockOrigin::Config),
-        ));
+        kernel.push((orders::CONFIG_PROMPT_APPEND, appended(append)));
     }
 
     // Registered contributions join the kernel's stages and the whole lot

@@ -103,3 +103,62 @@ async fn a_sessions_prompt_is_its_own_and_changes_from_its_next_turn() -> anyhow
     daemon.stop().await;
     Ok(())
 }
+
+/// The managed layer's `prompt.append` stays in the prompt whatever replaced
+/// the base prompt below it: the project's `prompt.override`, then the
+/// session's own from `session.setPrompt`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_managed_append_stays_under_any_lower_override() -> anyhow::Result<()> {
+    let world = World::new()?;
+    let project = world.project("managed-append")?;
+    world.trust_project(&project)?;
+    world.write_project_settings(
+        "managed-append",
+        &json!({ "memory": { "enabled": false }, "prompt": { "override": "PROJECT-OVERRIDE" } }),
+    )?;
+    let managed = tempfile::tempdir()?;
+    let managed_file = managed.path().join("managed-settings.json");
+    std::fs::write(
+        &managed_file,
+        json!({ "prompt": { "append": "MANAGED-APPEND" } }).to_string(),
+    )?;
+    let provider = ProviderStub::start().await?;
+    let options = DaemonOptions::new(project.clone())
+        .mode(blackbox::Mode::Spawned)
+        .arg("--managed-settings")
+        .arg(managed_file.to_string_lossy().to_string());
+    let daemon = Daemon::start(&world, &provider, options).await?;
+    let mut client = daemon.connect().await?;
+    let session = client
+        .session_create(json!({
+            "project_root": project.to_string_lossy(),
+            "options": { "auto_name": false }
+        }))
+        .await?;
+
+    provider.script([Reply::text("one")]);
+    client
+        .session_run_turn(&session, "first", "t1", None)
+        .await?;
+    let first = provider.calls()[0].system_text();
+    assert!(first.starts_with("PROJECT-OVERRIDE"), "{first}");
+    assert!(first.contains("MANAGED-APPEND"), "{first}");
+
+    let set = client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": session, "override": "SESSION-OVERRIDE" }),
+        )
+        .await?;
+    assert!(set.error.is_none(), "{set:?}");
+    provider.script([Reply::text("two")]);
+    client
+        .session_run_turn(&session, "second", "t2", None)
+        .await?;
+    let second = provider.calls()[1].system_text();
+    assert!(second.starts_with("SESSION-OVERRIDE"), "{second}");
+    assert!(second.contains("MANAGED-APPEND"), "{second}");
+
+    daemon.stop().await;
+    Ok(())
+}

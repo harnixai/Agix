@@ -52,6 +52,17 @@ impl LoadedSettings {
         self
     }
 
+    /// The `prompt.append` of a managed layer that can be honoured.
+    pub fn managed_prompt_append(&self) -> Option<&str> {
+        self.managed
+            .as_ref()
+            .filter(|m| m.error.is_none())?
+            .values
+            .get("prompt")?
+            .get("append")?
+            .as_str()
+    }
+
     /// `mode` held to the managed layer: no wider than the `permissions.mode`
     /// it sets, and `default` for a `bypassPermissions` it disables.
     pub fn hold_mode_to_managed(&self, mode: PermissionMode) -> PermissionMode {

@@ -608,6 +608,7 @@ impl Agent {
                 scene: self.scene.as_ref(),
                 prompt_override: values.prompt.override_text.as_deref(),
                 prompt_append: values.prompt.append.as_deref(),
+                managed_append: self.settings().managed_prompt_append(),
                 memory_prompt: memory_prompt.as_deref(),
                 ctx: &ctx,
                 rules: &rules,

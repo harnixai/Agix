@@ -12,7 +12,7 @@
 //!
 //! # The inputs are a value
 //!
-//! Assembly reads eight things. Passing them as a struct is not a style
+//! Assembly reads nine things. Passing them as a struct is not a style
 //! preference: an implementation that wants only two should not have to
 //! restate the other five, and a new input should not break every
 //! implementation that never asked for one.
@@ -30,6 +30,9 @@ pub struct AssemblyRequest<'a> {
     pub prompt_override: Option<&'a str>,
     /// `settings.prompt.append`.
     pub prompt_append: Option<&'a str>,
+    /// The managed layer's `prompt.append`: appended under
+    /// `prompt_override` too, which no lower layer can take away.
+    pub managed_append: Option<&'a str>,
     /// The memory section, already rendered; `None` when memory is off.
     pub memory_prompt: Option<&'a str>,
     pub ctx: &'a ScenePromptContext<'a>,

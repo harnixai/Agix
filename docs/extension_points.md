@@ -1028,7 +1028,7 @@ handle.dispose();
 | `rules` | `.agix/rules/` 的发现索引 |
 | `mcp.instructions` | 来自已连接 MCP server 的指令 |
 | `config.prompt_append` | `settings.prompt.append` |
-| `config.prompt_override` | `settings.prompt.override`,它把一切都替掉 |
+| `config.prompt_override` | `settings.prompt.override`,它把一切都替掉——managed 层写的 `prompt.append` 除外,那一段仍以 `config.prompt_append` 接在它后面 |
 
 块的 `role` 决定它送到哪里：`System` 进系统提示；`User` 不进系统提示，而是每次调用都作为
 对话开头的一条 `<system-reminder>` 消息送出。有的端点（DeepSeek）按 system → tools →
@@ -1105,7 +1105,8 @@ assembler,把它的系统块折成一个——提示贡献者比一个请求允�
 断点还多的部署要的正是这个:一个缓存前缀,而不是随便凑出来的四个。
 
 assembler 收到的是一个 `AssemblyRequest`——registry、scene、settings、记忆 store、
-scene 上下文,以及已经渲染好的 skill 清单和 MCP 指令。它是个 struct,这样只读其中
+scene 上下文,以及已经渲染好的 skill 清单和 MCP 指令;managed 层的 `prompt.append` 单独给出
+(`managed_append`),有 `prompt_override` 时也要接上。它是个 struct,这样只读其中
 两项的实现不必把另外五项重述一遍。
 
 ---

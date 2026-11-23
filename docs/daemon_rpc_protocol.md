@@ -2098,7 +2098,8 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 
 这个会话自己那层设置(`options.settings` 那一层)里的 `prompt.append` / `prompt.override`:一段追加文字
 与一份整体替换,优先于 settings.json 的同名键。`session.create` 的 `options.settings.prompt` 给初值,
-这个方法在会话进行中改,判法与 `options.settings` 相同。
+这个方法在会话进行中改,判法与 `options.settings` 相同。managed 层写了 `prompt.append` 时,那一段在
+`override` 之下仍接在系统提示词末尾。
 
 ```jsonc
 // → params

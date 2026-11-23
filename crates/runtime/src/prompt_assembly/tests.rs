@@ -6,6 +6,7 @@ use std::borrow::Cow;
 struct TestSettings {
     prompt_append: Option<String>,
     prompt_override: Option<String>,
+    managed_append: Option<String>,
     memory_enabled: bool,
 }
 
@@ -54,6 +55,7 @@ fn assemble_for_test(
         scene,
         prompt_override: settings.prompt_override.as_deref(),
         prompt_append: settings.prompt_append.as_deref(),
+        managed_append: settings.managed_append.as_deref(),
         memory_prompt: memory,
         ctx,
         rules,
@@ -83,6 +85,7 @@ fn test_settings() -> TestSettings {
     TestSettings {
         prompt_append: None,
         prompt_override: None,
+        managed_append: None,
         memory_enabled: true,
     }
 }
@@ -108,6 +111,21 @@ fn override_replaces_all() {
     let blocks = assemble_prompt(&scene, &test_loaded(settings), &ctx, None, None);
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].content, "OVERRIDE");
+}
+
+#[test]
+fn the_managed_append_follows_an_override() {
+    let scene = test_scene();
+    let mut settings = test_settings();
+    settings.prompt_override = Some("OVERRIDE".into());
+    settings.prompt_append = Some("LOWER".into());
+    settings.managed_append = Some("MANAGED".into());
+    let ctx = test_ctx();
+
+    let blocks = assemble_prompt(&scene, &test_loaded(settings), &ctx, None, None);
+    let contents: Vec<&str> = blocks.iter().map(|b| b.content.as_str()).collect();
+    assert_eq!(contents, ["OVERRIDE", "MANAGED"]);
+    assert_eq!(blocks[1].name.as_deref(), Some(names::CONFIG_PROMPT_APPEND));
 }
 
 /// Every block the kernel assembles must be addressable. An unnamed block
