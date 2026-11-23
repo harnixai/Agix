@@ -399,7 +399,7 @@ impl LoadedSettings {
 
 /// A section's defaults are in the merge from the start, so a project that is
 /// not trusted is held to them as it is to every core default.
-fn seed_section_defaults(merged: &mut serde_json::Value, sections: &Sections) {
+pub(crate) fn seed_section_defaults(merged: &mut serde_json::Value, sections: &Sections) {
     for spec in sections.iter() {
         let default = spec.default_value();
         if !default.is_null() {
@@ -436,7 +436,7 @@ impl TierView {
             Tier::Global | Tier::Cli => true,
             Tier::Scene => self.scene_is_global,
             Tier::Project => self.project_is_global,
-            Tier::Managed => false,
+            Tier::Session | Tier::Managed => false,
         }
     }
 

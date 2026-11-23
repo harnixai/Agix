@@ -16,11 +16,11 @@ impl SessionPool {
     /// the session takes from now on, a call later in a running turn
     /// included.
     ///
-    /// Clamped as `options.permission_mode` is, against the settings the
+    /// Clamped as `options.settings.permissions.mode` is, against the settings the
     /// session runs under. Into `plan` it enters plan from the current mode,
     /// which `ExitPlanMode` returns to; to any other mode it leaves plan. A
     /// mode other than plan is recorded in the session's spec, over
-    /// `options.permission_mode`, and plan state in its durable state, so a
+    /// `options.settings.permissions.mode`, and plan state in its durable state, so a
     /// rebuild, an eviction or a restart keeps both. A session that is not in
     /// memory only has its log changed.
     pub async fn set_permission_mode(

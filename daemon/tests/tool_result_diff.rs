@@ -46,6 +46,7 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory.enabled = false;
+        config.settings.values.permissions.client_may_loosen = true;
         let pool = daemon::assemble::pool(
             &config,
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
@@ -97,12 +98,10 @@ impl Daemon {
         let session = self
             .ok(
                 "session.create",
-                json!({"options": {"permission_mode": "default", "permission_rules": [
-                    {"source": "session", "behavior": "allow", "tool_name": "Write"},
-                    {"source": "session", "behavior": "allow", "tool_name": "Edit"},
-                    {"source": "session", "behavior": "allow", "tool_name": "Agent"},
-                    {"source": "session", "behavior": "allow", "tool_name": "Bash"},
-                ]}}),
+                json!({"options": {"settings": {"permissions": {
+                    "mode": "default",
+                    "allow": ["Write", "Edit", "Agent", "Bash"],
+                }}}}),
             )
             .await["session_id"]
             .as_str()

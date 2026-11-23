@@ -18,6 +18,7 @@ pub struct ScriptBindings(pub Vec<ScriptBinding>);
 impl Section for ScriptBindings {
     const KEY: &'static str = "scripts";
     const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[("", ProjectKey::Withheld)];
+    const SCOPE: settings::scope::Scope = settings::scope::Scope::Pair;
 }
 
 impl ScriptBindings {

@@ -47,6 +47,8 @@ pub enum Tier {
     Project,
     /// `agixd --set`, `EmbedConfig::settings`: above every file, read as the global tier is.
     Cli,
+    /// A session's own `options.settings`, over the tiers its project and scene merge.
+    Session,
     /// The deployment's — see `settings::managed`. Only the `permissions`
     /// rule lists and `permissions.disable_bypass` are read from it, and
     /// nothing below it can override them.
@@ -60,6 +62,7 @@ impl Tier {
             Self::Scene => "scene",
             Self::Project => "project",
             Self::Cli => "cli",
+            Self::Session => "session",
             Self::Managed => "managed",
         }
     }

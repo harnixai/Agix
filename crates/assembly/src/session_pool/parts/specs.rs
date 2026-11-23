@@ -31,7 +31,7 @@ pub(in crate::session_pool) struct SessionSpec {
     /// Set by `session.setSkillDirs`; over `options.skill_dirs` once set.
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
     /// Set by `session.setPermissionMode` to a mode other than plan; over
-    /// `options.permission_mode` once set. Clamped as the session is built.
+    /// `options.settings.permissions.mode` once set. Clamped as the session is built.
     pub(in crate::session_pool) permission_mode: Option<base::permission::PermissionMode>,
     /// Shared by every Agent this process builds for the session, so a
     /// rebuild appends to the recording it was writing and continues a replay
@@ -89,8 +89,11 @@ impl SessionSpec {
     pub(in crate::session_pool) fn requested_permission_mode(
         &self,
     ) -> Option<base::permission::PermissionMode> {
-        self.permission_mode
-            .or_else(|| self.options.as_ref().and_then(|o| o.permission_mode))
+        self.permission_mode.or_else(|| {
+            self.options
+                .as_ref()
+                .and_then(SessionOptions::requested_permission_mode)
+        })
     }
 
     /// The conversation's model, by the same precedence as `provider`.
@@ -111,7 +114,7 @@ impl SessionSpec {
             },
             thinking_mode: match &self.thinking_mode {
                 Some(set) => set.clone(),
-                None => options.and_then(|o| o.thinking_mode.clone()),
+                None => options.and_then(|o| o.thinking.clone()),
             },
         }
     }
@@ -417,10 +420,62 @@ fn last_recorded(entries: &[history::entry::EnvelopedEntry]) -> Option<RecordedS
         history::entry::LogEntry::Extension { ns, event, payload }
             if ns == SPEC_NS && event == SPEC_EVENT =>
         {
-            serde_json::from_value::<RecordedSpec>(payload.clone()).ok()
+            let mut payload = payload.clone();
+            if let Some(serde_json::Value::Object(options)) = payload.get_mut("options") {
+                options_of_0_3(options);
+            }
+            serde_json::from_value::<RecordedSpec>(payload).ok()
         }
         _ => None,
     })
+}
+
+/// `options` a 0.3 engine recorded, as they are written now: its
+/// `thinking_mode` is `thinking`, and its `turn`, `permission_mode` and
+/// `permission_rules` are `settings.turn`, `settings.permissions.mode` and the
+/// rule lists of `settings.permissions`. A session keeps the limits it was
+/// created with; options sent in that shape are refused.
+pub(in crate::session_pool) fn options_of_0_3(
+    options: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    use serde_json::Value;
+    if let Some(mode) = options.remove("thinking_mode") {
+        options.entry("thinking").or_insert(mode);
+    }
+    let (turn, mode, rules) = (
+        options.remove("turn"),
+        options.remove("permission_mode"),
+        options.remove("permission_rules"),
+    );
+    if turn.is_none() && mode.is_none() && rules.is_none() {
+        return;
+    }
+    let layer = options
+        .entry("settings")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(turn) = turn {
+        layer["turn"] = turn;
+    }
+    if let Some(mode) = mode {
+        layer["permissions"]["mode"] = mode;
+    }
+    for rule in rules.iter().filter_map(Value::as_array).flatten() {
+        let (Some(list), Some(tool)) = (
+            rule.get("behavior").and_then(Value::as_str),
+            rule.get("tool_name").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let text = match rule.get("rule_content").and_then(Value::as_str) {
+            Some(content) => format!("{tool}({content})"),
+            None => tool.to_string(),
+        };
+        let entries = &mut layer["permissions"][list];
+        match entries.as_array_mut() {
+            Some(entries) => entries.push(Value::String(text)),
+            None => *entries = Value::Array(vec![Value::String(text)]),
+        }
+    }
 }
 
 /// The spec entry a fork appends after copying `copied`: the last spec it

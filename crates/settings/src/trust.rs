@@ -520,14 +520,35 @@ pub fn gate_layer(
 ) -> Vec<String> {
     let entries = entries(sections);
     let mut found = Vec::new();
+    let keep = |path: &[&str], value: &Value| keeps(&entries, value, path, lower);
     gate_section(
         &entries,
         layer,
         &mut Vec::new(),
-        lower,
+        &keep,
         withhold,
         &mut found,
     );
+    found
+}
+
+/// Remove from `layer` each value [`PROJECT_TIER`] (or a section) orders as
+/// looser than what is merged beneath it in `lower`, and return it as
+/// [`gate_layer`] reports it. Keys the table only withholds from an untrusted
+/// project, or has no entry for, are left as they are: their scope is not
+/// this table's to judge.
+pub fn tighten_layer(
+    layer: &mut Map<String, Value>,
+    lower: &Value,
+    sections: &Sections,
+) -> Vec<String> {
+    let entries = entries(sections);
+    let mut found = Vec::new();
+    let keep = |path: &[&str], value: &Value| match governing_entry(&entries, path) {
+        Some((_, ProjectKey::Tighten(_))) => keeps(&entries, value, path, lower),
+        _ => true,
+    };
+    gate_section(&entries, layer, &mut Vec::new(), &keep, true, &mut found);
     found
 }
 
@@ -535,7 +556,7 @@ fn gate_section(
     entries: &Entries,
     section: &mut Map<String, Value>,
     path: &mut Vec<String>,
-    lower: &Value,
+    keep: &dyn Fn(&[&str], &Value) -> bool,
     withhold: bool,
     found: &mut Vec<String>,
 ) {
@@ -546,9 +567,9 @@ fn gate_section(
         let value = &section[&key];
         if value.is_object() && has_entries_beneath(entries, &segments) {
             if let Some(Value::Object(inner)) = section.get_mut(&key) {
-                gate_section(entries, inner, path, lower, withhold, found);
+                gate_section(entries, inner, path, keep, withhold, found);
             }
-        } else if !keeps(entries, value, &segments, lower) {
+        } else if !keep(&segments, value) {
             let reported = withheld_as(entries, &segments);
             if !found.contains(&reported) {
                 found.push(reported);
@@ -741,6 +762,7 @@ mod tests {
             ),
             ("enabled", ProjectKey::Tighten(Order::FalseTighter)),
         ];
+        const SCOPE: crate::scope::Scope = crate::scope::Scope::Process;
     }
 
     fn sections() -> Sections {

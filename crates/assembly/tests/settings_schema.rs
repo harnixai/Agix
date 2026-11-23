@@ -273,6 +273,15 @@ fn every_settings_key_has_a_project_tier_entry() {
 }
 
 #[test]
+fn every_settings_key_has_a_scope() {
+    let schema = settings_json_schema(&settings_sections::all());
+    assert_eq!(
+        settings::scope::scope_gaps(&schema, &settings_sections::all()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
     use base::interface::config_source::Tier;
     let layers = |global: Value, project: Value| {

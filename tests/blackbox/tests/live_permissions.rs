@@ -333,7 +333,7 @@ async fn dont_ask_keeps_to_its_rules_even_inside_a_compound_command() -> anyhow:
 async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyhow::Result<()> {
     let mut run = LiveRun::builder("perm-tiers")
         .settings(json!({
-            "permissions": {"mode": "acceptEdits", "allow": ["Write"]}
+            "permissions": {"mode": "acceptEdits", "allow": ["Write"], "client_may_loosen": true}
         }))
         .before_start(|world, project| {
             world.write_global_settings(&json!({
@@ -352,9 +352,9 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
         .await?;
     let token = format!("TOKEN-{}", nonce());
     let session = run
-        .session_with(json!({ "options": { "permission_rules": [
-            { "source": "session", "behavior": "allow", "tool_name": "Write", "rule_content": "**/.env" }
-        ] } }))
+        .session_with(json!({ "options": { "settings": {
+            "permissions": { "allow": ["Write(**/.env)"] }
+        } } }))
         .await?;
     let events = run
         .turn(

@@ -194,7 +194,7 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("tiers", &stub)
         .settings(json!({
-            "permissions": {"mode": "acceptEdits", "allow": ["Write"]}
+            "permissions": {"mode": "acceptEdits", "allow": ["Write"], "client_may_loosen": true}
         }))
         .before_start(|world, project| {
             world.write_global_settings(&json!({
@@ -220,9 +220,9 @@ async fn rules_from_every_tier_apply_together_and_a_deny_anywhere_wins() -> anyh
         .start()
         .await?;
     let session = run
-        .session_with(json!({ "options": { "permission_rules": [
-            { "source": "session", "behavior": "allow", "tool_name": "Write" }
-        ] } }))
+        .session_with(json!({ "options": { "settings": {
+            "permissions": { "allow": ["Write"] }
+        } } }))
         .await?;
     stub.script([
         write("w1", "global-locked/a.txt", "x"),
@@ -841,7 +841,9 @@ async fn a_session_created_in_plan_mode_leaves_it_only_when_the_host_permits() -
             .start()
             .await?;
         let session = run
-            .session_with(json!({ "options": { "permission_mode": "plan" } }))
+            .session_with(
+                json!({ "options": { "settings": { "permissions": { "mode": "plan" } } } }),
+            )
             .await?;
         let watcher = run
             .watch_with(&session, move |e| {

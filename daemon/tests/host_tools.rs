@@ -44,11 +44,7 @@ fn host_echo(extra: Value) -> Value {
 
 fn allowing(tools: Vec<Value>) -> Value {
     json!({
-        "permission_mode": "default",
-        "permission_rules": [
-            {"source": "session", "behavior": "allow", "tool_name": "HostEcho"},
-            {"source": "session", "behavior": "allow", "tool_name": "Agent"},
-        ],
+        "settings": {"permissions": {"mode": "default", "allow": ["HostEcho", "Agent"]}},
         "host_tools": tools,
     })
 }
@@ -144,6 +140,7 @@ impl Daemon {
             &StaticDaemonPaths::new(dir.path().to_path_buf()),
         );
         config.settings.values.memory.enabled = false;
+        config.settings.values.permissions.client_may_loosen = true;
         let pool = daemon::assemble::pool(
             &config,
             Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
@@ -606,7 +603,7 @@ async fn a_host_call_passes_the_same_gate() {
     let asking = daemon
         .session(
             &conn,
-            json!({"permission_mode": "default",
+            json!({"settings": {"permissions": {"mode": "default"}},
                    "host_tools": [host_echo(json!({"read_only": false}))]}),
         )
         .await;
@@ -636,10 +633,7 @@ async fn a_host_call_passes_the_same_gate() {
         .session(
             &conn,
             json!({
-                "permission_mode": "default",
-                "permission_rules": [
-                    {"source": "session", "behavior": "deny", "tool_name": "HostEcho"},
-                ],
+                "settings": {"permissions": {"mode": "default", "deny": ["HostEcho"]}},
                 "host_tools": [host_echo(json!({}))],
             }),
         )
@@ -800,10 +794,10 @@ async fn sub_agents_get_host_tools_only_when_declared() {
     let shared = host_echo(json!({"name": "HostShared", "subagents": true}));
     let mine = host_echo(json!({}));
     let mut options = allowing(vec![shared, mine]);
-    options["permission_rules"]
+    options["settings"]["permissions"]["allow"]
         .as_array_mut()
         .unwrap()
-        .push(json!({"source": "session", "behavior": "allow", "tool_name": "HostShared"}));
+        .push(json!("HostShared"));
     let session = daemon.session(&conn, options).await;
     let turn = conn
         .send(

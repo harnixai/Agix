@@ -1,5 +1,5 @@
-//! A turn's limits, from `session.create`'s `options.turn` and the settings'
-//! `turn` block: the token budget is one for the turn and every delegate it
+//! A turn's limits, from `session.create`'s `options.settings.turn` and the
+//! settings' `turn` block: the token budget is one for the turn and every delegate it
 //! starts — a background one after the turn has ended too — each call asks
 //! for no more output than is left, and a session's options only tighten what
 //! the settings allow, surviving a restart. `turn_complete.usage` is every
@@ -73,7 +73,11 @@ fn child_calls(stub: &ProviderStub) -> Vec<SeenRequest> {
 async fn a_tight_session_budget_ends_the_turn_on_what_was_reported() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("tight-budget", &stub, json!({})).start().await?;
-    let s = session(&mut run, json!({ "turn": { "token_budget": 2000 } })).await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 2000 } } }),
+    )
+    .await?;
     stub.script([Reply::spent(1800, 700, glob("g1"))]);
     let events = run.turn(&s, "look").await?;
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
@@ -88,7 +92,11 @@ async fn a_tight_session_budget_ends_the_turn_on_what_was_reported() -> anyhow::
 async fn each_call_asks_for_what_is_left_and_none_goes_out_under_1024() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("budget-headroom", &stub, json!({})).start().await?;
-    let s = session(&mut run, json!({ "turn": { "token_budget": 6000 } })).await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 6000 } } }),
+    )
+    .await?;
     stub.script([
         Reply::spent(2000, 1000, glob("g1")),
         Reply::spent(1800, 700, glob("g2")),
@@ -150,7 +158,7 @@ async fn a_sub_agents_calls_count_toward_the_sessions_budget() -> anyhow::Result
     a_sub_agent_spends_its_parents_budget(
         "shared-option",
         json!({}),
-        json!({ "turn": { "token_budget": 10000 } }),
+        json!({ "settings": { "turn": { "token_budget": 10000 } } }),
     )
     .await
 }
@@ -183,7 +191,7 @@ async fn a_background_sub_agent_spends_its_starting_turns_budget_after_it_ended(
     });
     let s = session(
         &mut run,
-        json!({ "turn": { "token_budget": 10000 }, "host_tools": [gate] }),
+        json!({ "settings": { "turn": { "token_budget": 10000 } }, "host_tools": [gate] }),
     )
     .await?;
     let host = run.watch(&s, true).await?;
@@ -264,14 +272,14 @@ async fn options_wider_than_the_settings_are_held_to_them_and_reported() -> anyh
             "session.create",
             json!({ "project_root": project, "options": {
                 "auto_name": false,
-                "turn": { "token_budget": 9000, "max_model_calls": 3 }
+                "settings": { "turn": { "token_budget": 9000, "max_model_calls": 3 } }
             } }),
         )
         .await?;
     let result = created.result.unwrap_or_default();
     assert_eq!(
         result["clamped_options"],
-        json!([{ "field": "turn.token_budget", "requested": 9000, "applied": 5000 }]),
+        json!([{ "field": "settings.turn.token_budget", "requested": 9000, "applied": 5000 }]),
         "{result}"
     );
     let s = result["session_id"]
@@ -289,7 +297,7 @@ async fn options_wider_than_the_settings_are_held_to_them_and_reported() -> anyh
         .client
         .call(
             "session.create",
-            json!({ "project_root": project, "options": { "turn": { "token_budget": 100 } } }),
+            json!({ "project_root": project, "options": { "settings": { "turn": { "token_budget": 100 } } } }),
         )
         .await?
         .result
@@ -303,13 +311,21 @@ async fn options_wider_than_the_settings_are_held_to_them_and_reported() -> anyh
 async fn a_session_call_limit_holds_for_it_and_its_sub_agents() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("call-limit", &stub, json!({})).start().await?;
-    let own = session(&mut run, json!({ "turn": { "max_model_calls": 2 } })).await?;
+    let own = session(
+        &mut run,
+        json!({ "settings": { "turn": { "max_model_calls": 2 } } }),
+    )
+    .await?;
     stub.script([glob("g1"), glob("g2")]);
     let events = run.turn(&own, "keep looking").await?;
     assert_eq!(stop_reason(&events), "max_turns", "{events:?}");
     assert_eq!(stub.call_count(), 2, "a third call went out");
 
-    let parent = session(&mut run, json!({ "turn": { "max_model_calls": 2 } })).await?;
+    let parent = session(
+        &mut run,
+        json!({ "settings": { "turn": { "max_model_calls": 2 } } }),
+    )
+    .await?;
     stub.script_when(
         ROOT,
         [delegate("look around", false), Reply::text("ROOT-DONE")],
@@ -333,7 +349,11 @@ async fn a_session_call_limit_holds_for_it_and_its_sub_agents() -> anyhow::Resul
 async fn a_session_budget_holds_after_a_restart() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("budget-restart", &stub, json!({})).start().await?;
-    let s = session(&mut run, json!({ "turn": { "token_budget": 2000 } })).await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 2000 } } }),
+    )
+    .await?;
     stub.script([Reply::text("hello")]);
     run.turn(&s, "hi").await?;
 
@@ -432,7 +452,11 @@ async fn a_team_member_handed_work_spends_the_turns_budget() -> anyhow::Result<(
     )
     .start()
     .await?;
-    let s = session(&mut run, json!({ "turn": { "token_budget": 10000 } })).await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 10000 } } }),
+    )
+    .await?;
     stub.script_when(
         ROOT,
         [

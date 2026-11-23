@@ -295,20 +295,21 @@ async fn output_schema_reaches_a_whitelisted_scene() -> anyhow::Result<()> {
 async fn a_sub_agent_of_an_attended_session_asks_on_the_parent() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     stub.script_when(TITLE_MARK, (0..2).map(|_| Reply::text("子代理")));
-    let mut run = stubbed("attended-sub-agent", &stub).start().await?;
+    let mut run = stubbed("attended-sub-agent", &stub)
+        .settings(json!({
+            "permissions": {"mode": "default", "allow": ["Agent"]},
+            "memory": {"enabled": false},
+        }))
+        .start()
+        .await?;
     let outside = tempfile::tempdir()?;
     let target = outside
         .path()
         .join("sub.txt")
         .to_string_lossy()
         .into_owned();
-    let allow_agent = json!([{ "source": "session", "behavior": "allow", "tool_name": "Agent" }]);
-
     let attended = run
-        .scene_session(
-            "harnix",
-            json!({ "options": { "attended": true, "permission_rules": allow_agent } }),
-        )
+        .scene_session("harnix", json!({ "options": { "attended": true } }))
         .await?;
     let host = run
         .watch_with(&attended, |e| {
@@ -344,12 +345,7 @@ async fn a_sub_agent_of_an_attended_session_asks_on_the_parent() -> anyhow::Resu
     assert!(message.starts_with("[sub-agent "), "{message}");
     assert!(!outside.path().join("sub.txt").exists());
 
-    let control = run
-        .scene_session(
-            "harnix",
-            json!({ "options": { "permission_rules": allow_agent } }),
-        )
-        .await?;
+    let control = run.scene_session("harnix", json!({})).await?;
     let silent = run.watch(&control, true).await?;
     stub.script_when(
         "CONTROL-MARK",

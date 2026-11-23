@@ -3,6 +3,15 @@
 use super::*;
 use base::recorder::Divergence;
 
+fn asking_for(mode: &str) -> SessionOptions {
+    SessionOptions {
+        settings: serde_json::json!({"permissions": {"mode": mode}})
+            .as_object()
+            .cloned(),
+        ..Default::default()
+    }
+}
+
 fn defaults() -> settings::LoadedSettings {
     settings::LoadedSettings::new(
         Settings::defaults_for("claude-sonnet-4-6"),
@@ -91,12 +100,9 @@ fn a_session_clock_is_the_hosts_start_else_the_recordings_else_the_machines() {
 /// configured with gets clamped, not obeyed.
 #[test]
 fn session_options_cannot_loosen_an_asking_settings_default() {
-    let opts = SessionOptions {
-        permission_mode: Some(base::permission::PermissionMode::BypassPermissions),
-        ..Default::default()
-    };
+    let opts = asking_for("bypassPermissions");
     assert_eq!(
-        effective_permission_mode(&defaults(), opts.permission_mode),
+        effective_permission_mode(&defaults(), opts.requested_permission_mode()),
         base::permission::PermissionMode::Default,
         "the request should clamp down to the configured mode"
     );
@@ -108,12 +114,9 @@ fn session_options_cannot_loosen_an_asking_settings_default() {
 fn allow_client_permission_override_restores_client_wins() {
     let mut settings = defaults();
     settings.values.permissions.client_may_loosen = true;
-    let opts = SessionOptions {
-        permission_mode: Some(base::permission::PermissionMode::BypassPermissions),
-        ..Default::default()
-    };
+    let opts = asking_for("bypassPermissions");
     assert_eq!(
-        effective_permission_mode(&settings, opts.permission_mode),
+        effective_permission_mode(&settings, opts.requested_permission_mode()),
         base::permission::PermissionMode::BypassPermissions
     );
 }
@@ -125,12 +128,9 @@ fn allow_client_permission_override_restores_client_wins() {
 fn a_client_may_always_tighten() {
     let mut settings = defaults();
     settings.values.permissions.mode = base::permission::PermissionMode::BypassPermissions;
-    let opts = SessionOptions {
-        permission_mode: Some(base::permission::PermissionMode::Plan),
-        ..Default::default()
-    };
+    let opts = asking_for("plan");
     assert_eq!(
-        effective_permission_mode(&settings, opts.permission_mode),
+        effective_permission_mode(&settings, opts.requested_permission_mode()),
         base::permission::PermissionMode::Plan
     );
 }
@@ -138,21 +138,22 @@ fn a_client_may_always_tighten() {
 #[test]
 fn auto_and_yolo_are_no_session_mode() {
     for spelling in ["auto", "yolo"] {
-        let opts = serde_json::from_value::<SessionOptions>(
-            serde_json::json!({ "permission_mode": spelling }),
-        );
-        assert!(opts.is_err(), "{spelling} was read as a mode");
+        let opts = asking_for(spelling);
+        assert_eq!(opts.requested_permission_mode(), None);
+        let fields: Vec<_> = opts
+            .settings_problems()
+            .into_iter()
+            .map(|(f, _)| f)
+            .collect();
+        assert_eq!(fields, ["settings.permissions.mode"], "{spelling}");
     }
 }
 
 #[test]
 fn settings_ask_default_is_overridable_per_session_without_becoming_allow_all() {
-    let opts = SessionOptions {
-        permission_mode: Some(base::permission::PermissionMode::DontAsk),
-        ..Default::default()
-    };
+    let opts = asking_for("dontAsk");
     assert_eq!(
-        effective_permission_mode(&defaults(), opts.permission_mode),
+        effective_permission_mode(&defaults(), opts.requested_permission_mode()),
         base::permission::PermissionMode::DontAsk
     );
 }
@@ -173,12 +174,9 @@ fn effective_mode_prefers_session_options_then_settings_then_ask() {
         PermissionMode::BypassPermissions
     );
 
-    let opts = SessionOptions {
-        permission_mode: Some(PermissionMode::Plan),
-        ..Default::default()
-    };
+    let opts = asking_for("plan");
     assert_eq!(
-        effective_permission_mode(&settings, opts.permission_mode),
+        effective_permission_mode(&settings, opts.requested_permission_mode()),
         PermissionMode::Plan,
         "a per-session mode wins over the settings default"
     );

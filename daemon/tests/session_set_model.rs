@@ -347,12 +347,12 @@ async fn a_thinking_budget_under_the_minimum_is_invalid_params() {
     let refused = daemon
         .call(
             "session.create",
-            serde_json::json!({"options": {"thinking_mode": {"on_budget": 0}}}),
+            serde_json::json!({"options": {"thinking": {"on_budget": 0}}}),
         )
         .await;
     assert_eq!(refused["error"]["code"], -32602, "{refused}");
     assert_eq!(
-        refused["error"]["data"]["invalid_options"][0]["field"], "thinking_mode",
+        refused["error"]["data"]["invalid_options"][0]["field"], "thinking",
         "{refused}"
     );
 
@@ -380,7 +380,7 @@ async fn a_thinking_budget_is_kept_under_the_calls_max_tokens() {
     })
     .await;
     let roomy = daemon
-        .create(serde_json::json!({"options": {"thinking_mode": {"on_budget": 8000}}}))
+        .create(serde_json::json!({"options": {"thinking": {"on_budget": 8000}}}))
         .await;
     daemon.turn(&roomy, "MSG-BUDGET").await;
     let request = daemon.request_carrying("MSG-BUDGET");
@@ -397,7 +397,7 @@ async fn a_thinking_budget_is_kept_under_the_calls_max_tokens() {
 async fn the_effort_options_ask_for_is_what_the_session_calls_with() {
     let daemon = start_reasoning_daemon(1).await;
     let session = daemon
-        .create(serde_json::json!({"options": {"effort": "max", "thinking_mode": "on"}}))
+        .create(serde_json::json!({"options": {"effort": "max", "thinking": "on"}}))
         .await;
     daemon.turn(&session, "MSG-OPTIONS").await;
     let request = daemon.request_carrying("MSG-OPTIONS");

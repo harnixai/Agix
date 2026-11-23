@@ -49,6 +49,7 @@ mod session_calls;
 mod session_permission_mode;
 mod session_prompt;
 mod session_rewind;
+mod session_settings;
 mod settings_take_effect;
 mod skills_and_memory;
 mod stream_recovery;

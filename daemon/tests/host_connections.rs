@@ -322,8 +322,11 @@ impl Daemon {
     }
 
     async fn bypass_session(&self, conn: &Conn) -> String {
-        self.session(conn, json!({"permission_mode": "bypassPermissions"}))
-            .await
+        self.session(
+            conn,
+            json!({"settings": {"permissions": {"mode": "bypassPermissions"}}}),
+        )
+        .await
     }
 
     fn marker(&self) -> PathBuf {
@@ -474,7 +477,10 @@ async fn a_connections_tool_reaches_it_though_it_does_not_watch_the_session() {
     assert_eq!(set["refused"], json!([]), "{set}");
 
     let session = daemon
-        .session(&client, json!({"permission_mode": "default"}))
+        .session(
+            &client,
+            json!({"settings": {"permissions": {"mode": "default"}}}),
+        )
         .await;
     let turn = daemon.run(&client, &session, "go").await;
     let call = provider.kind("host_tool_call").await;

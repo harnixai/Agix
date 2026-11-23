@@ -1048,22 +1048,14 @@
       "type": "string"
     },
     "ClampedOption": {
-      "description": "A limit in `options` the settings held lower than it was asked for.",
+      "description": "A key of `options.settings` the settings held to their own value: the\nsession runs on `applied`.",
       "properties": {
-        "applied": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
+        "applied": true,
         "field": {
-          "description": "Dotted, as in `options`: `turn.token_budget`.",
+          "description": "Dotted, as in `options`: `settings.turn.token_budget`.",
           "type": "string"
         },
-        "requested": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
+        "requested": true
       },
       "required": [
         "field",
@@ -6768,7 +6760,7 @@
         },
         {
           "const": "session",
-          "description": "会话内通过 `/permissions` 命令设置",
+          "description": "这个会话自己的：建会话时 `options.settings` 里的规则串，与会话里答应的「本会话都允许」",
           "type": "string"
         },
         {
@@ -7851,24 +7843,6 @@
           "default": null,
           "description": "JSON Schema the session's structured output must satisfy — see\n`runtime::agent::Builder::output_schema`."
         },
-        "permission_mode": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PermissionMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "This session's permission mode. `None` takes the settings'\n`permissions.mode`. A session may always ask for a stricter mode than\nthe settings'; a looser one is clamped unless the settings set\n`permissions.client_may_loosen`."
-        },
-        "permission_rules": {
-          "description": "Allow/deny/ask rules for the `Policy` this session's\n`permission_mode` (if set) constructs. Ignored when `permission_mode`\nis `None`.",
-          "items": {
-            "$ref": "#/$defs/PermissionRule"
-          },
-          "type": "array"
-        },
         "prompt": {
           "anyOf": [
             {
@@ -7904,6 +7878,14 @@
             }
           ]
         },
+        "settings": {
+          "additionalProperties": true,
+          "description": "Settings for this session, its sub-agents and its team members, in\nthe shape of a settings file, over the settings of its project and\nscene. Judged as an untrusted project's settings are, against the\nsettings as they are each time the engine is built — see\n`settings::overlay` and [`Self::settings_problems`].",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "skill_dirs": {
           "description": "Skill directories of the host's for this session, merged over the\ntiers by name: a built-in, a package's or an untrusted project's skill\nyields to one of these; the user's tiers and a trusted project's do\nnot. Of two listed directories the first wins a name. Read-only to\nevery session.",
           "items": {
@@ -7921,7 +7903,7 @@
             }
           ]
         },
-        "thinking_mode": {
+        "thinking": {
           "anyOf": [
             {
               "$ref": "#/$defs/ThinkingMode"
@@ -7931,17 +7913,6 @@
             }
           ],
           "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking`. Its sub-agents keep the settings'."
-        },
-        "turn": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TurnOptions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Tighter limits on this session's turns than the settings' `turn`\nblock. Its sub-agents and team members are held to them as it is."
         }
       },
       "type": "object"
@@ -9259,31 +9230,6 @@
           "type": "string"
         }
       ]
-    },
-    "TurnOptions": {
-      "additionalProperties": false,
-      "description": "`options.turn`: each limit given is the lower of it and the setting of\nthe same name. A value above the setting's leaves the setting's in force.",
-      "properties": {
-        "max_model_calls": {
-          "description": "Under `turn.max_model_calls`: each agent's own model calls in a turn.\nAt least 1.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "token_budget": {
-          "description": "Under `turn.token_budget`: what one turn and its delegates may spend\ntogether. At least 1.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
     },
     "TurnReply": {
       "anyOf": [

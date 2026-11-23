@@ -240,7 +240,7 @@ impl SessionPool {
             cron_store: self.scheduler.store(),
             packages: self.plugins.for_session(),
             mcp_module: None,
-            process_groups: super::create::groups_to_reap(&core, &binding),
+            process_groups: Some(core.process_groups().clone()),
             skill_dirs: core.skill_dirs(),
             protected_dirs: self.bindings.host_dirs().0.protected().clone(),
             transient: true,

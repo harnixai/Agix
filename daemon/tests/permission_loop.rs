@@ -127,7 +127,7 @@ async fn per_session_bypass_option_is_clamped_to_the_configured_mode() {
 
     let (frames, response) = rpc_streaming(
         &srv.sock,
-        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"permission_mode":"bypassPermissions"}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"settings":{"permissions":{"mode":"bypassPermissions"}}}},"id":1}"#,
     )
     .await;
 
@@ -154,7 +154,7 @@ async fn allow_client_permission_override_lets_a_client_opt_out() {
 
     let (frames, response) = rpc_streaming(
         &srv.sock,
-        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"permission_mode":"bypassPermissions"}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"settings":{"permissions":{"mode":"bypassPermissions"}}}},"id":1}"#,
     )
     .await;
 
@@ -254,7 +254,7 @@ async fn a_bad_settings_rule_leaves_the_deny_rules_beside_it_in_force() {
     srv.stop().await;
 }
 
-/// A rule in `options.permission_rules` that does not read refuses the turn
+/// A rule in `options.settings.permissions` that does not read refuses the turn
 /// instead of running it without that rule.
 #[tokio::test]
 async fn a_bad_session_rule_refuses_the_turn() {
@@ -269,13 +269,10 @@ async fn a_bad_session_rule_refuses_the_turn() {
         &srv.sock,
         &serde_json::json!({"jsonrpc": "2.0", "method": "session.run_turn", "id": 1, "params": {
             "message": "make a file",
-            "options": {
-                "permission_mode": "default",
-                "permission_rules": [
-                    {"source": "session", "behavior": "allwo", "tool_name": "Read"},
-                    {"source": "session", "behavior": "deny", "tool_name": "Bash"},
-                ],
-            },
+            "options": {"settings": {"permissions": {
+                "mode": "default",
+                "deny": ["Read(", "Bash"],
+            }}},
         }})
         .to_string(),
     )
@@ -284,9 +281,12 @@ async fn a_bad_session_rule_refuses_the_turn() {
     assert_eq!(response["error"]["code"], -32602, "{response}");
     let invalid = &response["error"]["data"]["invalid_options"];
     assert_eq!(invalid.as_array().map(Vec::len), Some(1), "{response}");
-    assert_eq!(invalid[0]["field"], "permission_rules[0]", "{response}");
+    assert_eq!(
+        invalid[0]["field"], "settings.permissions.deny[0]",
+        "{response}"
+    );
     assert!(
-        invalid[0]["error"].as_str().unwrap().contains("allwo"),
+        invalid[0]["error"].as_str().unwrap().contains("unbalanced"),
         "{response}"
     );
     assert!(

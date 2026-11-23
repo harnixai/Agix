@@ -354,7 +354,7 @@ async fn read_only_subcommands_run_in_plan_mode_and_write_ones_do_not() -> anyho
         Reply::text("done"),
     ]);
     let session = run
-        .session_with(json!({ "options": { "permission_mode": "plan" } }))
+        .session_with(json!({ "options": { "settings": { "permissions": { "mode": "plan" } } } }))
         .await?;
     let watcher = run.watch(&session, true).await?;
     let events = run.turn(&session, "look").await?;
@@ -1196,7 +1196,7 @@ async fn help_and_odd_input_are_answered_plainly() -> anyhow::Result<()> {
         Reply::text("done"),
     ]);
     let planning = run
-        .session_with(json!({ "options": { "permission_mode": "plan" } }))
+        .session_with(json!({ "options": { "settings": { "permissions": { "mode": "plan" } } } }))
         .await?;
     let results = ran(&run.turn(&planning, "help").await?);
     let help = results[0].as_ref().expect("forge --help in plan mode");

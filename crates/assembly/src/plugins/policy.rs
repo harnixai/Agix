@@ -52,6 +52,7 @@ impl settings::section::Section for PluginsConfig {
             ("enabled", Tighten(FalseTighter)),
         ]
     };
+    const SCOPE: settings::scope::Scope = settings::scope::Scope::Process;
 }
 
 #[cfg(test)]

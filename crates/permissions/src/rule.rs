@@ -161,6 +161,7 @@ fn source_of(rule: &base::permission::LoadedRule) -> RuleSource {
         Tier::Global | Tier::Scene => RuleSource::UserSettings,
         Tier::Project => RuleSource::ProjectSettings,
         Tier::Cli => RuleSource::CliArg,
+        Tier::Session => RuleSource::Session,
         Tier::Managed => RuleSource::PolicySettings,
     }
 }

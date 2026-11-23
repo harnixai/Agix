@@ -469,6 +469,22 @@ MCP 连接、脚本绑定的 root、记忆目录、transcript 目录。
 非零退出并报出是哪个 `--set`。`config.get {tier:"cli"}` 返回这一层,`daemon.doctor` 的 `settings_tiers`
 里有一项 `tier: "cli"`,列出它设的键。
 
+**内存里的覆盖只有一条路。** 宿主在内存里改过的值(`HostOverrides`)与会话自带的设置(`session.create` 的
+`options.settings`)都经 `settings::LoadedSettings::overlay` 叠到读好的设置上:规则串并进各层的规则(会话的记为
+`Tier::Session`、来源 `RuleSource::Session`)、provider 收尾、放不进的值进 `ignored`、managed 层重新压顶,只写在
+这一处。宿主的改动对守护进程自己那一对照原样叠;对别的对只带它新加的——列表只带宿主新加的元素,接在那一对
+自己的列表后面,守护进程自己项目层来的 provider、`files.extra_dirs` 之类不跨对。
+
+**会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键有一个作用域(`settings::scope::SCOPES`,
+模块的段落在 `Section::SCOPE` 里登记,完备性由 `scope_gaps` 的测试守着):进程(`app`、`plugins`、
+`telemetry.otlp_endpoint`)、`(项目, 场景)` 对(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
+`scripts`、`permissions.client_may_loosen`——路由、MCP 连接、hook 来源都按绑定建),其余是会话。`options.settings`
+只收会话作用域的键,别的进 `invalid_options`。收下的键缺省按未受信项目层那张表(`trust::PROJECT_TIER`)的比较
+方向判:只许更严的键给宽了就留设置的值、报在 `clamped_options`,allow 规则扣下;设置开了
+`permissions.client_may_loosen` 时照样放宽。表里的 Withheld 名单不用——会话能给什么由作用域定。这是安全缺省,不是
+边界:连得上 socket 的客户端能 `config.set`,本来就是设置的所有者。会话层之后权限模式再过一遍
+`effective_permission_mode`,managed 层的 `disable_bypass` 与规则压得住它。每次建引擎都对这时的设置重新判。
+
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
 `(项目, 场景)` 的会话共享;宿主按会话给的目录(`options.skill_dirs` / `session.setSkillDirs`)不进
 绑定,而是每个会话一个 `skills::host::HostSkillLayer`(一组 `HostSkillDir`,各自带自己的 skill 与监视
@@ -1053,7 +1069,7 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
   不在 `plan` 里的会话,权限模式由规格(`session.setPermissionMode` 设的,否则 `options` 的)按恢复时的
   设置夹紧决定,不由这条决定。`exit_to` 也不照单全收:这条可能来自更宽的设置,或经 `session.import` /
   `session.fork` 从别处来,引擎挂上会话状态时(`SessionState::attach`)与读回这条时都把它按引擎设置的
-  `session_state::ModeCeiling` 夹紧,同 `options.permission_mode`;只能由程序设的模式(`bubble`)除非就是
+  `session_state::ModeCeiling` 夹紧,同 `options.settings.permissions.mode`;只能由程序设的模式(`bubble`)除非就是
   引擎自己的模式,否则换成引擎的模式。
   `ExtensionsAreVisible::all()` 不分 `ns` 地把扩展条目渲染给模型,这些也在其内——
   要让模型读到某个扩展的条目,按 `ns` 列名单
@@ -1368,9 +1384,9 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
    禁止、小范围例外",写法是 `dontAsk` 模式加只列允许范围的 allow,而不是一条宽 deny
    加一条窄 allow。
 2. **各层的规则并存。** 全局、scene、项目三层(以及各自的 `settings.local.json`)、`cli` 层
-   (`agixd --set`,§3.2.1)与部署方的 managed 层的 `permissions` 规则列表拼在一起生效,不像普通
+   (`agixd --set`,§3.2.1)、会话的 `options.settings` 与部署方的 managed 层的 `permissions` 规则列表拼在一起生效,不像普通
    设置项那样后层盖前层。每条规则记着自己来自哪一层——全局与 scene 层是 `UserSettings`,项目层是
-   `ProjectSettings`,local 是 `LocalSettings`,`cli` 层是 `CliArg`,managed 层是 `PolicySettings`——只用来报出命中的是哪一条
+   `ProjectSettings`,local 是 `LocalSettings`,`cli` 层是 `CliArg`,会话的是 `Session`,managed 层是 `PolicySettings`——只用来报出命中的是哪一条
    (几条同样具体时先报 managed 层的)。
 3. **路径先规整再匹配。** 读写路径的工具,路径按会话 cwd 解析成绝对路径并去掉 `.` /
    `..`,`~` 在规则与路径两边都展开;符号链接解析后的路径算作别名——按原样写法解析的
@@ -1495,7 +1511,7 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   让 managed allow 盖过用户 deny,等于让部署方替用户撤销用户自己的边界,这不是 managed 层
   要解决的问题。
 - **关掉 bypass。** `permissions.disable_bypass: true` 时,`bypassPermissions` 不管从
-  哪来(设置文件、`options.permission_mode`、agent 类型 frontmatter、团队)都按 `default`
+  哪来(设置文件、`options.settings.permissions.mode`、agent 类型 frontmatter、团队)都按 `default`
   判;会话创建时报出的模式也是 `default`。
 - **读不了就全拒。** 文件读不了、不是合法 JSON、有上面以外的键(`permisions` 这样的
   拼写错误不会被当成"没写")、值的形状不对、规则写不成规则——一律当作 managed 层在、但
@@ -2107,7 +2123,8 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 `scripts`)由定义它的 crate 在 `Section::PROJECT_TIER` 里声明条目,加载时并进同一张表;没有登记的段
 没有条目,按 `Withheld` 处理。新加一个设置字段忘了归类,`settings` 与 `assembly` 里从
 `settings_json_schema()` 枚举叶子路径的测试(`every_settings_key_has_an_entry`、
-`every_settings_key_has_a_project_tier_entry`)就过不了——白名单因此由构造保证,而不是靠人记得。`permissions` 的规则列表在表里是 `Free`,因为 `allow` 与 `allow_exact` 由加载器自己丢弃。
+`every_settings_key_has_a_project_tier_entry`)就过不了——白名单因此由构造保证,而不是靠人记得。作用域表
+(§3.2.1 会话覆盖层)同理:`Section::SCOPE` 必填,`every_settings_key_has_a_scope` 守着核心键。`permissions` 的规则列表在表里是 `Free`,因为 `allow` 与 `allow_exact` 由加载器自己丢弃。
 
 | 项目层内容 | 未信任时 |
 |---|---|

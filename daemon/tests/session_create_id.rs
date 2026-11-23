@@ -329,7 +329,8 @@ async fn the_same_id_asked_for_with_other_options_is_refused_and_keeps_its_own()
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path(), "d", 0).await;
     let id = fresh_id();
-    let options = serde_json::json!({"permission_mode": "default", "attended": false});
+    let options =
+        serde_json::json!({"settings": {"permissions": {"mode": "default"}}, "attended": false});
     let first = daemon
         .ok(
             "session.create",
@@ -354,7 +355,7 @@ async fn the_same_id_asked_for_with_other_options_is_refused_and_keeps_its_own()
         .call(
             "session.create",
             serde_json::json!({"session_id": id, "options": {
-                "permission_mode": "plan", "attended": false,
+                "settings": {"permissions": {"mode": "plan"}}, "attended": false,
                 "output_schema": {"type": "object"}}}),
         )
         .await;
@@ -364,7 +365,7 @@ async fn the_same_id_asked_for_with_other_options_is_refused_and_keeps_its_own()
     );
     assert_eq!(
         refused["error"]["data"]["options_differ"],
-        serde_json::json!(["output_schema", "permission_mode"]),
+        serde_json::json!(["output_schema", "settings"]),
         "{refused}"
     );
     assert_eq!(refused["error"]["data"]["scene"], "code", "{refused}");
@@ -374,7 +375,7 @@ async fn the_same_id_asked_for_with_other_options_is_refused_and_keeps_its_own()
         .await;
     assert_eq!(
         bare["error"]["data"]["options_differ"],
-        serde_json::json!(["attended", "permission_mode"]),
+        serde_json::json!(["attended", "settings"]),
         "{bare}"
     );
 
@@ -395,7 +396,8 @@ async fn the_same_id_asked_for_with_other_options_is_refused_and_keeps_its_own()
 async fn after_a_restart_the_same_request_finds_the_session_created_when_it_was() {
     let dir = tempfile::tempdir().unwrap();
     let id = fresh_id();
-    let options = serde_json::json!({"permission_mode": "plan", "auto_name": false});
+    let options =
+        serde_json::json!({"settings": {"permissions": {"mode": "plan"}}, "auto_name": false});
     let before = Daemon::start(dir.path(), "before", 1).await;
     let first = before
         .ok(
@@ -416,7 +418,7 @@ async fn after_a_restart_the_same_request_finds_the_session_created_when_it_was(
     let refused = after
         .call(
             "session.create",
-            serde_json::json!({"session_id": id, "options": {"permission_mode": "plan"}}),
+            serde_json::json!({"session_id": id, "options": {"settings": {"permissions": {"mode": "plan"}}}}),
         )
         .await;
     assert_eq!(

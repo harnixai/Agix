@@ -564,12 +564,15 @@ async fn wait_for_task(
 async fn in_a_session_a_call_runs_beside_its_turn_and_stays_out_of_its_history(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
-    let mut run = with_xflow("fn-session", &stub).await?;
+    let mut run = with_xflow_settings(
+        "fn-session",
+        &stub,
+        json!({ "permissions": { "client_may_loosen": true } }),
+    )
+    .await?;
     let session = run
         .session_with(json!({ "options": {
-            "permission_rules": [
-                { "source": "session", "behavior": "allow", "tool_name": "HostWait" }
-            ],
+            "settings": { "permissions": { "allow": ["HostWait"] } },
             "host_tools": [{
                 "name": "HostWait",
                 "description": "Waits for the host.",

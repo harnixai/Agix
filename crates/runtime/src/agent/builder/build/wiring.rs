@@ -251,7 +251,7 @@ pub(super) fn bind_tools(
 }
 
 /// The widest mode a host could put a session in under `settings`, as the
-/// daemon clamps `options.permission_mode` and `session.setPermissionMode`.
+/// daemon clamps `options.settings.permissions.mode` and `session.setPermissionMode`.
 fn mode_ceiling(settings: &LoadedSettings) -> session_state::ModeCeiling {
     let widest = if settings.values.permissions.client_may_loosen {
         base::permission::PermissionMode::BypassPermissions

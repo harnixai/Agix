@@ -36,6 +36,7 @@ impl Section for CheckpointSettings {
         ("max_bytes_per_file", Tighten(Lower)),
         ("max_total_bytes", Tighten(Lower)),
     ];
+    const SCOPE: settings::scope::Scope = settings::scope::Scope::Session;
 }
 
 #[cfg(test)]

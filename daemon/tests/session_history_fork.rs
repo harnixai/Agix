@@ -748,7 +748,7 @@ async fn a_rebuilt_session_keeps_the_options_it_was_created_with() {
 
     let (frames, response) = rpc_streaming(
         &srv.sock,
-        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"permission_mode":"bypassPermissions"}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"session.run_turn","params":{"message":"make a file","options":{"settings":{"permissions":{"mode":"bypassPermissions"}}}},"id":1}"#,
     )
     .await;
     assert!(response["result"].is_object(), "turn failed: {response}");
@@ -796,7 +796,7 @@ async fn a_rebuilt_session_keeps_the_options_it_was_created_with() {
     assert_eq!(
         recorded
             .as_ref()
-            .map(|p| p["options"]["permission_mode"].clone()),
+            .map(|p| p["options"]["settings"]["permissions"]["mode"].clone()),
         Some(serde_json::json!("bypassPermissions")),
         "the session's log does not carry its options: {recorded:?}"
     );

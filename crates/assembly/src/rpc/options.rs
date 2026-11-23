@@ -11,31 +11,23 @@ impl SessionOptions {
         "recorder",
         "clock",
         "telemetry",
-        "permission_mode",
-        "permission_rules",
         "output_schema",
         "provider",
         "model",
         "effort",
-        "thinking_mode",
+        "thinking",
         "prompt",
         "prompt_types",
         "host_tools",
         "attended",
         "auto_name",
         "skill_dirs",
-        "turn",
+        "settings",
     ];
 
     /// The fields whose value is a list. Each entry is read on its own, so
-    /// one bad entry is left out without the rest — a bad allow rule must not
-    /// take the deny rules beside it along.
-    pub const LIST_FIELDS: &'static [&'static str] = &[
-        "permission_rules",
-        "prompt_types",
-        "host_tools",
-        "skill_dirs",
-    ];
+    /// each bad entry is reported by its index.
+    pub const LIST_FIELDS: &'static [&'static str] = &["prompt_types", "host_tools", "skill_dirs"];
 
     /// `params.options` as far as it can be read, and what in it could not
     /// be: a field this daemon does not know, one whose value does not
@@ -64,9 +56,13 @@ impl SessionOptions {
         let mut readable = serde_json::Map::new();
         for (name, value) in fields {
             if !Self::FIELDS.contains(&name.as_str()) {
+                let error = match RENAMED.iter().find(|(old, _)| old == name) {
+                    Some((_, new)) => format!("unknown field; it is now `{new}`"),
+                    None => "unknown field".to_string(),
+                };
                 ignored.push(IgnoredOption {
                     field: Some(name.clone()),
-                    error: "unknown field".to_string(),
+                    error,
                 });
                 continue;
             }
@@ -78,9 +74,8 @@ impl SessionOptions {
             };
             match Self::read_alone(name, &value) {
                 Ok(()) if name == "recorder" && !recorder_reads(&value, &mut ignored) => {}
-                Ok(()) if name == "thinking_mode" && !thinking_mode_reads(&value, &mut ignored) => {
-                }
-                Ok(()) if name == "turn" && !turn_reads(&value, &mut ignored) => {}
+                Ok(()) if name == "thinking" && !thinking_reads(&value, &mut ignored) => {}
+                Ok(()) if name == "settings" && !settings_read(&value, &mut ignored) => {}
                 Ok(()) => {
                     readable.insert(name.clone(), value);
                 }
@@ -134,6 +129,17 @@ impl SessionOptions {
     }
 }
 
+/// Fields `options` no longer has, with what took their place.
+const RENAMED: &[(&str, &str)] = &[
+    ("thinking_mode", "thinking"),
+    ("permission_mode", "settings.permissions.mode"),
+    (
+        "permission_rules",
+        "settings.permissions.allow / allow_exact / ask / deny",
+    ),
+    ("turn", "settings.turn"),
+];
+
 /// Whether `options.recorder` names a usable place; what does not is added to
 /// `ignored` by field.
 fn recorder_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
@@ -151,26 +157,26 @@ fn recorder_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
     problems.is_empty()
 }
 
-/// Whether `options.turn` holds usable limits; what does not is added to
-/// `ignored` by field.
-fn turn_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
-    use crate::session_pool::api::TurnOptions;
-    let Ok(turn) = serde_json::from_value::<TurnOptions>(value.clone()) else {
-        return true;
+/// Whether `options.settings` holds only what a session may be given; what
+/// it does not is added to `ignored` by field.
+fn settings_read(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
+    let options = SessionOptions {
+        settings: value.as_object().cloned(),
+        ..Default::default()
     };
-    let problems = turn.problems();
+    let problems = options.settings_problems();
     for (field, error) in &problems {
         ignored.push(IgnoredOption {
-            field: Some(format!("turn.{field}")),
+            field: Some(field.clone()),
             error: error.clone(),
         });
     }
     problems.is_empty()
 }
 
-/// Whether `options.thinking_mode` is one a call can carry; what is not is
-/// added to `ignored`.
-fn thinking_mode_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
+/// Whether `options.thinking` is one a call can carry; what is not is added
+/// to `ignored`.
+fn thinking_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
     let Ok(mode) = serde_json::from_value::<base::interface::model::ThinkingMode>(value.clone())
     else {
         return true;
@@ -178,7 +184,7 @@ fn thinking_mode_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool 
     match model::adapter::thinking_mode_problem(&mode) {
         Some(error) => {
             ignored.push(IgnoredOption {
-                field: Some("thinking_mode".into()),
+                field: Some("thinking".into()),
                 error,
             });
             false
@@ -280,16 +286,11 @@ mod tests {
             telemetry: Some(TelemetryOptions {
                 output: "/tmp/t.jsonl".into(),
             }),
-            permission_mode: Some(base::permission::PermissionMode::Plan),
-            permission_rules: vec![serde_json::from_value(serde_json::json!({
-                "source": "session", "behavior": "allow", "tool_name": "Read"
-            }))
-            .unwrap()],
             output_schema: Some(serde_json::json!({})),
             provider: Some("p".into()),
             model: Some("m".into()),
             effort: Some(base::interface::model::Effort::High),
-            thinking_mode: Some(base::interface::model::ThinkingMode::Off),
+            thinking: Some(base::interface::model::ThinkingMode::Off),
             prompt: Some(Default::default()),
             prompt_types: vec![AskKind::Question.as_str().into()],
             host_tools: vec![crate::session_pool::api::HostToolOption {
@@ -308,10 +309,9 @@ mod tests {
             skill_dirs: vec![crate::session_pool::api::SkillDirOption {
                 path: "/skills".into(),
             }],
-            turn: Some(crate::session_pool::api::TurnOptions {
-                token_budget: Some(1),
-                max_model_calls: None,
-            }),
+            settings: serde_json::json!({"turn": {"token_budget": 1}})
+                .as_object()
+                .cloned(),
         };
         let serialized = serde_json::to_value(&every_field).unwrap();
         let mut names: Vec<&str> = serialized
@@ -339,29 +339,71 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_entry_of_a_list_field_is_left_out_alone() {
-        let params = serde_json::json!({"options": {
-            "permission_rules": [
-                {"source": "session", "behavior": "allwo", "tool_name": "Read"},
-                {"source": "session", "behavior": "deny", "tool_name": "Bash"},
-            ],
-            "prompt_types": [7, "question"],
-        }});
+    fn a_bad_entry_of_a_list_field_is_reported_by_its_index() {
+        let params = serde_json::json!({"options": {"prompt_types": [7, "question"]}});
         let (options, ignored) = SessionOptions::from_params(&params);
-        let options = options.unwrap();
-        assert_eq!(options.permission_rules.len(), 1);
-        assert_eq!(options.permission_rules[0].tool_name, "Bash");
-        assert!(options.answers_questions());
-        let mut fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
-        fields.sort();
-        assert_eq!(
-            fields,
-            [Some("permission_rules[0]"), Some("prompt_types[0]")]
-        );
+        assert!(options.unwrap().answers_questions());
+        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        assert_eq!(fields, [Some("prompt_types[0]")]);
 
         let (_, ignored) =
-            SessionOptions::from_params(&serde_json::json!({"options": {"permission_rules": {}}}));
-        assert_eq!(ignored[0].field.as_deref(), Some("permission_rules"));
+            SessionOptions::from_params(&serde_json::json!({"options": {"prompt_types": {}}}));
+        assert_eq!(ignored[0].field.as_deref(), Some("prompt_types"));
+    }
+
+    #[test]
+    fn settings_a_session_may_not_be_given_are_reported_by_their_key() {
+        let (_, mut ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "settings": {
+                "hooks": {"Stop": []},
+                "mcp": {"servers": {"gh": {"command": "gh"}}},
+                "model": {"order": ["a"], "effort": "low"},
+                "permissions": {"deny": ["Bash(rm"], "mode": "plan"},
+                "turn": {"token_budget": 10},
+            },
+        }}));
+        ignored.sort_by(|a, b| a.field.cmp(&b.field));
+        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        assert_eq!(
+            fields,
+            [
+                Some("settings.hooks"),
+                Some("settings.mcp"),
+                Some("settings.model.order"),
+                Some("settings.permissions.deny[0]"),
+            ]
+        );
+
+        let (options, ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "settings": {"permissions": {"mode": "plan", "deny": ["Write"]}},
+        }}));
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert_eq!(
+            options.unwrap().requested_permission_mode(),
+            Some(base::permission::PermissionMode::Plan)
+        );
+        let (_, ignored) =
+            SessionOptions::from_params(&serde_json::json!({"options": {"settings": []}}));
+        assert_eq!(ignored[0].field.as_deref(), Some("settings"));
+    }
+
+    #[test]
+    fn a_field_that_moved_says_where_to() {
+        let (_, mut ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "thinking_mode": "off", "turn": {}, "permission_mode": "plan", "permission_rules": [],
+        }}));
+        ignored.sort_by(|a, b| a.field.cmp(&b.field));
+        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        assert_eq!(
+            fields,
+            [
+                Some("permission_mode"),
+                Some("permission_rules"),
+                Some("thinking_mode"),
+                Some("turn"),
+            ]
+        );
+        assert!(ignored[0].error.contains("settings.permissions.mode"));
     }
 
     #[test]
@@ -430,17 +472,17 @@ mod tests {
     #[test]
     fn a_bad_option_field_is_reported_and_the_rest_still_apply() {
         let params = serde_json::json!({"options": {
-            "permission_mode": "plann",
+            "effort": "hihg",
             "model": "m",
-            "permision_rules": [],
+            "promt": {},
         }});
         let (options, mut ignored) = SessionOptions::from_params(&params);
         assert_eq!(options.unwrap().model.as_deref(), Some("m"));
         ignored.sort_by(|a, b| a.field.cmp(&b.field));
         let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
-        assert_eq!(fields, [Some("permision_rules"), Some("permission_mode")]);
-        assert_eq!(ignored[0].error, "unknown field");
-        assert!(ignored[1].error.contains("plann"), "{:?}", ignored[1]);
+        assert_eq!(fields, [Some("effort"), Some("promt")]);
+        assert!(ignored[0].error.contains("hihg"), "{:?}", ignored[0]);
+        assert_eq!(ignored[1].error, "unknown field");
 
         let (options, ignored) = SessionOptions::from_params(&serde_json::json!({}));
         assert!(options.is_none() && ignored.is_empty());

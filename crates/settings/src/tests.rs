@@ -1583,6 +1583,7 @@ mod project_trust {
                 ("limit", Tighten(Lower)),
             ]
         };
+        const SCOPE: crate::scope::Scope = crate::scope::Scope::Session;
     }
 
     fn fleet_sections() -> Sections {

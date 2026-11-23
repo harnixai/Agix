@@ -694,7 +694,7 @@ async fn a_host_edits_what_the_session_carries_and_sees_the_next_call_first() ->
     // edits cannot reach — does not carry the stale codename forward.
     let mut run = LiveRun::start(
         "context",
-        json!({ "model": { "thinking_mode": "off" } }),
+        json!({ "model": { "thinking": "off" } }),
         Mode::InProcess,
     )
     .await?;
@@ -819,7 +819,7 @@ async fn a_host_edits_what_the_session_carries_and_sees_the_next_call_first() ->
 async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "host_tool",
-        json!({ "permissions": {"mode": "default"} }),
+        json!({ "permissions": {"mode": "default", "client_may_loosen": true} }),
         Mode::InProcess,
     )
     .await?;
@@ -827,10 +827,7 @@ async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
     let secret = format!("V-{}", nonce().chars().rev().collect::<String>());
     let session = run
         .session_with(json!({ "options": {
-            "permission_mode": "default",
-            "permission_rules": [
-                { "source": "session", "behavior": "allow", "tool_name": "HostLookup" }
-            ],
+            "settings": { "permissions": { "mode": "default", "allow": ["HostLookup"] } },
             "host_tools": [{
                 "name": "HostLookup",
                 "description": "Look a key up in the host's own table and return its value.",
@@ -898,7 +895,7 @@ async fn a_host_declared_tool_answers_the_model() -> anyhow::Result<()> {
 async fn a_connection_provides_a_tool_and_a_hook_that_blocks_bash() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "host_provider",
-        json!({ "permissions": {"mode": "default"} }),
+        json!({ "permissions": {"mode": "default", "client_may_loosen": true} }),
         Mode::InProcess,
     )
     .await?;
@@ -928,11 +925,7 @@ async fn a_connection_provides_a_tool_and_a_hook_that_blocks_bash() -> anyhow::R
 
     let session = run
         .session_with(json!({ "options": {
-            "permission_mode": "default",
-            "permission_rules": [
-                { "source": "session", "behavior": "allow", "tool_name": "HostNote" },
-                { "source": "session", "behavior": "allow", "tool_name": "Bash" }
-            ]
+            "settings": { "permissions": { "mode": "default", "allow": ["HostNote", "Bash"] } }
         }}))
         .await?;
 

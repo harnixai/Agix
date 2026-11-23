@@ -2,7 +2,7 @@
 //! 挂上、读日志、插表、起转发器）和原地重建（给同一个 `SessionCore` 换下一代引擎：
 //! 先造好，再停旧的，旧的停下之后才挂新的）。
 
-use crate::session_pool::parts::factory::{Restore, SessionSeed};
+use crate::session_pool::parts::factory::{session_settings, Restore, SessionSeed};
 use crate::session_pool::parts::live::{EngineSlot, Naming, SessionCore, Workplace};
 use crate::session_pool::*;
 use base::context::Session;
@@ -24,9 +24,8 @@ pub(in crate::session_pool) fn created_answer(
     options: Option<&SessionOptions>,
     existing: bool,
 ) -> api::SessionCreated {
-    let clamped_options = options.map_or_else(Vec::new, |o| {
-        o.tighten_turn(&mut binding.settings.values.turn.clone())
-    });
+    let requested = options.and_then(SessionOptions::requested_permission_mode);
+    let (_, clamped_options) = session_settings(&binding.settings, options, requested);
     api::SessionCreated {
         session_id: core.id().to_string(),
         scene: scene.to_string(),
@@ -47,20 +46,6 @@ fn created_on(log: Option<&[history::entry::EnvelopedEntry]>) -> time::OffsetDat
         .iter()
         .find(|env| matches!(env.entry, history::entry::LogEntry::Meta { .. }))
         .map_or_else(time::OffsetDateTime::now_utc, |env| env.ts)
-}
-
-/// Where `core`'s commands record their process groups, when `binding`'s
-/// settings have them stopped as the session ends.
-pub(in crate::session_pool) fn groups_to_reap(
-    core: &SessionCore,
-    binding: &ProjectBinding,
-) -> Option<Arc<platform::GroupLedger>> {
-    binding
-        .settings
-        .values
-        .sandbox
-        .reap_on_close
-        .then(|| core.process_groups().clone())
 }
 
 /// A caller's `session_id`, in the one spelling the engine gives its own.
@@ -600,7 +585,7 @@ impl SessionPool {
             cron_store: self.scheduler.store(),
             packages: self.plugins.for_session(),
             mcp_module,
-            process_groups: groups_to_reap(core, binding),
+            process_groups: Some(core.process_groups().clone()),
             skill_dirs: core.skill_dirs(),
             protected_dirs: self.bindings.host_dirs().0.protected().clone(),
             transient: false,

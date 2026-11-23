@@ -1,15 +1,22 @@
 //! 宿主在内存里改过的设置：宿主拿到守护进程自己那一对的设置之后、交给池之前改掉的值，
-//! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置；宿主加的权限规则只回到守护进程自己那一对上。
+//! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置。守护进程自己那一对拿到宿主改的全部；
+//! 别的对只拿宿主新加的——列表里只有它新加的元素，守护进程自己项目层里来的不跨对；宿主加的权限
+//! 规则只回到守护进程自己那一对上。
 
 use base::permission::LoadedRule;
-use serde_json::Value;
-use settings::{LoadedSettings, Settings};
+use serde_json::{Map, Value};
+use settings::overlay::Subject;
+use settings::LoadedSettings;
 
 /// What the host's settings hold that the same pair read from disk does not:
-/// the values it set in memory, as a JSON layer, and the rules it added.
+/// the values it set in memory, as JSON layers, and the rules it added.
 #[derive(Debug, Default, Clone)]
 pub(in crate::session_pool) struct HostOverrides {
-    values: Option<Value>,
+    /// Every value the host set differently, a list as the host has it.
+    own: Option<Map<String, Value>>,
+    /// The values the host set differently, a list only with the entries the
+    /// host added to it.
+    added: Option<Map<String, Value>>,
     rules: Vec<LoadedRule>,
 }
 
@@ -18,12 +25,15 @@ impl HostOverrides {
     /// map, or a rule it removed, is not carried: a layer can only add or
     /// replace.
     pub(in crate::session_pool) fn between(disk: &LoadedSettings, host: &LoadedSettings) -> Self {
-        let values = match (
+        let (own, added) = match (
             serde_json::to_value(&disk.values),
             serde_json::to_value(&host.values),
         ) {
-            (Ok(disk), Ok(host)) => changed(&disk, &host),
-            _ => None,
+            (Ok(disk), Ok(host)) => (
+                changed(&disk, &host, Lists::AsTheHostHasThem),
+                changed(&disk, &host, Lists::WhatTheHostAdded),
+            ),
+            _ => (None, None),
         };
         let on_disk: Vec<_> = disk.rules.iter().map(rule_key).collect();
         let rules = host
@@ -32,57 +42,67 @@ impl HostOverrides {
             .filter(|rule| !on_disk.contains(&rule_key(rule)))
             .cloned()
             .collect();
-        Self { values, rules }
+        Self {
+            own: own.and_then(into_object),
+            added: added.and_then(into_object),
+            rules,
+        }
     }
 
-    /// `settings` with the values this layer holds merged over its own.
-    pub(in crate::session_pool) fn apply(&self, mut settings: LoadedSettings) -> LoadedSettings {
-        let Some(layer) = &self.values else {
+    /// `settings` of a pair other than this daemon's own, with what the host
+    /// added: a list is the pair's own followed by what the host added to
+    /// it.
+    pub(in crate::session_pool) fn apply(&self, settings: LoadedSettings) -> LoadedSettings {
+        let Some(added) = &self.added else {
             return settings;
         };
-        let Ok(mut merged) = serde_json::to_value(&settings.values) else {
-            return settings;
-        };
-        let providers = with_the_hosts_providers(&merged, layer);
-        settings::merge_json_values(&mut merged, layer.clone());
-        if let Some(providers) = providers {
-            merged["providers"] = providers;
+        let mut layer = added.clone();
+        if let Ok(Value::Object(theirs)) = serde_json::to_value(&settings.values) {
+            extend_lists(&mut layer, &theirs);
         }
-        match serde_json::from_value::<Settings>(merged) {
-            Ok(values) => {
-                let disk = std::mem::replace(&mut settings.values, values);
-                settings.settle_providers();
-                if let Err(e) = settings.place_worktrees() {
-                    tracing::warn!(error = %e, "the host's app.worktree_dir is not allowed; left out");
-                    settings.values.app.worktree_dir = disk.app.worktree_dir;
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "the host's settings do not apply here; left out"),
-        }
-        settings
+        overlay(&settings, &layer)
     }
 
-    /// [`Self::apply`], and the rules the host added after it: what the host
-    /// made of this daemon's own pair, on that pair read from disk.
+    /// This daemon's own pair, read from disk, as the host made it: every
+    /// value it set, and the rules it added.
     pub(in crate::session_pool) fn apply_to_own(&self, settings: LoadedSettings) -> LoadedSettings {
-        let mut settings = self.apply(settings);
+        let mut settings = match &self.own {
+            Some(own) => overlay(&settings, own),
+            None => settings,
+        };
         settings.rules.extend(self.rules.iter().cloned());
         settings
     }
 }
 
-/// The host's providers followed by those of `merged` with an id the host's
-/// do not have, when the host set any: the list adds up as the tiers' do.
-fn with_the_hosts_providers(merged: &Value, layer: &Value) -> Option<Value> {
-    let hosts = layer.get("providers")?.as_array()?;
-    let ids: Vec<&Value> = hosts.iter().filter_map(|p| p.get("id")).collect();
-    let rest = merged
-        .get("providers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|p| p.get("id").is_none_or(|id| !ids.contains(&id)));
-    Some(Value::Array(hosts.iter().chain(rest).cloned().collect()))
+fn overlay(settings: &LoadedSettings, layer: &Map<String, Value>) -> LoadedSettings {
+    settings
+        .overlay(layer, Subject::Host, &crate::settings_sections::all())
+        .0
+}
+
+fn into_object(value: Value) -> Option<Map<String, Value>> {
+    match value {
+        Value::Object(map) => Some(map),
+        _ => None,
+    }
+}
+
+/// Each list of `layer` but `providers` — which the overlay puts first itself
+/// — after the one at the same place in `theirs`, without what that already
+/// holds.
+fn extend_lists(layer: &mut Map<String, Value>, theirs: &Map<String, Value>) {
+    for (key, value) in layer.iter_mut() {
+        match (value, theirs.get(key)) {
+            (Value::Object(inner), Some(Value::Object(below))) => extend_lists(inner, below),
+            (Value::Array(added), Some(Value::Array(below))) if key != "providers" => {
+                let mut list = below.clone();
+                list.extend(added.drain(..).filter(|item| !below.contains(item)));
+                *added = list;
+            }
+            _ => {}
+        }
+    }
 }
 
 fn rule_key(
@@ -95,20 +115,34 @@ fn rule_key(
     (&rule.rule, rule.tier, rule.machine_local)
 }
 
-fn changed(from: &Value, to: &Value) -> Option<Value> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lists {
+    AsTheHostHasThem,
+    WhatTheHostAdded,
+}
+
+fn changed(from: &Value, to: &Value, lists: Lists) -> Option<Value> {
     match (from, to) {
         (Value::Object(from), Value::Object(to)) => {
-            let layer: serde_json::Map<String, Value> = to
+            let layer: Map<String, Value> = to
                 .iter()
                 .filter_map(|(key, value)| {
                     let diff = match from.get(key) {
-                        Some(old) => changed(old, value)?,
+                        Some(old) => changed(old, value, lists)?,
                         None => value.clone(),
                     };
                     Some((key.clone(), diff))
                 })
                 .collect();
             (!layer.is_empty()).then_some(Value::Object(layer))
+        }
+        (Value::Array(from), Value::Array(to)) if lists == Lists::WhatTheHostAdded => {
+            let added: Vec<Value> = to
+                .iter()
+                .filter(|item| !from.contains(item))
+                .cloned()
+                .collect();
+            (!added.is_empty()).then_some(Value::Array(added))
         }
         _ => (from != to).then(|| to.clone()),
     }
@@ -119,6 +153,7 @@ mod tests {
     use super::*;
     use base::interface::config_source::Tier;
     use base::permission::PermissionRuleEntry;
+    use settings::Settings;
 
     fn loaded(values: Settings) -> LoadedSettings {
         LoadedSettings::new(values, Default::default())
@@ -143,10 +178,14 @@ mod tests {
         host.memory.enabled = false;
         host.model.max_tokens = 7;
         let overrides = HostOverrides::between(&loaded(disk.clone()), &loaded(host));
-        assert_eq!(
-            overrides.values,
-            Some(serde_json::json!({"memory": {"enabled": false}, "model": {"max_tokens": 7}}))
+        let layer = Some(
+            serde_json::json!({"memory": {"enabled": false}, "model": {"max_tokens": 7}})
+                .as_object()
+                .cloned()
+                .unwrap(),
         );
+        assert_eq!(overrides.own, layer);
+        assert_eq!(overrides.added, layer);
 
         let mut other = Settings::defaults_for("other-model");
         other.prompt.language = Some("fr".into());
@@ -157,7 +196,65 @@ mod tests {
         assert_eq!(applied.values.prompt.language.as_deref(), Some("fr"));
 
         let same = HostOverrides::between(&loaded(disk.clone()), &loaded(disk));
-        assert!(same.values.is_none());
+        assert!(same.own.is_none() && same.added.is_none());
+    }
+
+    fn provider(id: &str) -> base::provider::ProviderConfig {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "base_url": "https://x.invalid",
+            "tiers": {"strong": "m"},
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_own_projects_providers_stay_on_the_own_pair() {
+        let mut disk = Settings::defaults_for("m");
+        disk.providers = vec![provider("own-project")];
+        let mut disk = loaded(disk);
+        disk.provider_origins.insert(
+            "own-project".into(),
+            settings::ProviderOrigin {
+                tier: Tier::Project,
+                origin: "/p/.agix/settings.json".into(),
+                machine_local: false,
+            },
+        );
+        let mut host = disk.clone();
+        host.values.providers.push(provider("host"));
+        let overrides = HostOverrides::between(&disk, &host);
+
+        let ids = |settings: &LoadedSettings| -> Vec<String> {
+            settings
+                .values
+                .providers
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+        let other = overrides.apply(loaded(Settings::defaults_for("m")));
+        assert_eq!(ids(&other), ["host"]);
+        assert_eq!(ids(&overrides.apply_to_own(disk)), ["own-project", "host"]);
+    }
+
+    #[test]
+    fn another_pair_keeps_its_own_list_and_gets_what_the_host_added() {
+        let mut disk = Settings::defaults_for("m");
+        disk.files.extra_dirs = vec!["/own-project/extra".into()];
+        let mut host = disk.clone();
+        host.files.extra_dirs.push("/host/extra".into());
+        let overrides = HostOverrides::between(&loaded(disk), &loaded(host));
+
+        let mut other = Settings::defaults_for("m");
+        other.files.extra_dirs = vec!["/other/extra".into()];
+        let applied = overrides.apply(loaded(other));
+        assert_eq!(
+            applied.values.files.extra_dirs,
+            [
+                std::path::PathBuf::from("/other/extra"),
+                std::path::PathBuf::from("/host/extra"),
+            ]
+        );
     }
 
     #[test]

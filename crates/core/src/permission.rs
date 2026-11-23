@@ -118,7 +118,7 @@ pub enum RuleSource {
     LocalSettings,
     /// 设置的 `cli` 层：`agixd --set permissions.allow=…` 或 `EmbedConfig::settings`
     CliArg,
-    /// 会话内通过 `/permissions` 命令设置
+    /// 这个会话自己的：建会话时 `options.settings` 里的规则串，与会话里答应的「本会话都允许」
     Session,
     /// 部署方的 managed settings（`settings::managed`）
     PolicySettings,

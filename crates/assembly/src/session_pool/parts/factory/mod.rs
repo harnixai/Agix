@@ -98,6 +98,9 @@ pub(in crate::session_pool) struct BuildRequest<'a> {
     pub(in crate::session_pool) cron_store: Arc<tools::cron::CronStore>,
     pub(in crate::session_pool) packages: crate::plugins::SessionPackages,
     pub(in crate::session_pool) mcp_module: Option<Arc<dyn runtime::module::Module>>,
+    /// Where the session's commands record their process groups, for them to
+    /// be stopped as it ends; used while its settings' `sandbox.reap_on_close`
+    /// is on.
     pub(in crate::session_pool) process_groups: Option<Arc<platform::GroupLedger>>,
     /// The session's host skill directories, and every session's.
     pub(in crate::session_pool) skill_dirs: &'a crate::session_pool::SessionSkillDirs,
@@ -194,8 +197,7 @@ impl EngineFactory {
             session_id,
             req.worktree,
         );
-        let permission =
-            resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot, options);
+        let permission = resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot);
 
         let mut builder = self
             .sharing_scripts(Builder::new())
@@ -246,8 +248,11 @@ impl EngineFactory {
         builder = builder
             .host_tools(self.host_tools_of(session_id, options))
             .host_hooks(Arc::new(self.hosts.clone()));
-        if let Some(ledger) = &req.process_groups {
-            builder = builder.process_groups(ledger.clone());
+        if let Some(ledger) = req
+            .process_groups
+            .filter(|_| settings_snapshot.values.sandbox.reap_on_close)
+        {
+            builder = builder.process_groups(ledger);
         }
         for plugin in &self.rust_plugins {
             builder = builder.plugin(plugin.clone());
@@ -322,8 +327,9 @@ impl EngineFactory {
         decls
     }
 
-    /// The pair's settings with this session's permission mode, model,
-    /// turn limits, scratch workspace and worktree written in.
+    /// The pair's settings with this session's `options.settings` laid over
+    /// them, and its permission mode, model, scratch workspace and worktree
+    /// written in.
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
@@ -337,24 +343,17 @@ impl EngineFactory {
         // the gate, the hook payloads and `Meta` all read it from there, and a
         // snapshot still holding the settings-file mode made every one of them
         // report a mode the session was not running in.
-        let permission_mode = effective_permission_mode(base_settings, requested_mode);
-        {
-            let mut snap = base_settings.clone();
-            snap.values.permissions.mode = permission_mode;
-            if let Some(name) = model_name {
-                snap.values.model.model_name = name.clone();
-            }
-            if let Some(options) = options {
-                options.tighten_turn(&mut snap.values.turn);
-            }
-            if let base::paths::Workspace::Scratch(_) = snap.paths.workspace {
-                snap.paths.workspace = base::paths::Workspace::Scratch(
-                    base::paths::session_scratch_dir(&snap.paths.global_data_dir, session_id),
-                );
-            }
-            snap.paths.worktree = worktree.cloned();
-            Arc::new(snap)
+        let (mut snap, _) = session_settings(base_settings, options, requested_mode);
+        if let Some(name) = model_name {
+            snap.values.model.model_name = name.clone();
         }
+        if let base::paths::Workspace::Scratch(_) = snap.paths.workspace {
+            snap.paths.workspace = base::paths::Workspace::Scratch(
+                base::paths::session_scratch_dir(&snap.paths.global_data_dir, session_id),
+            );
+        }
+        snap.paths.worktree = worktree.cloned();
+        Arc::new(snap)
     }
 }
 

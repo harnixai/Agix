@@ -22,17 +22,6 @@ pub struct SessionOptions {
     pub clock: Option<ClockOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryOptions>,
-    /// This session's permission mode. `None` takes the settings'
-    /// `permissions.mode`. A session may always ask for a stricter mode than
-    /// the settings'; a looser one is clamped unless the settings set
-    /// `permissions.client_may_loosen`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<base::permission::PermissionMode>,
-    /// Allow/deny/ask rules for the `Policy` this session's
-    /// `permission_mode` (if set) constructs. Ignored when `permission_mode`
-    /// is `None`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub permission_rules: Vec<base::permission::PermissionRule>,
     /// JSON Schema the session's structured output must satisfy — see
     /// `runtime::agent::Builder::output_schema`.
     pub output_schema: Option<serde_json::Value>,
@@ -53,7 +42,7 @@ pub struct SessionOptions {
     /// The conversation's thinking mode; `None` takes the settings'
     /// `model.thinking`. Its sub-agents keep the settings'.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_mode: Option<base::interface::model::ThinkingMode>,
+    pub thinking: Option<base::interface::model::ThinkingMode>,
     /// A system-prompt append / override for this session's own agent, over
     /// the settings files'. Its delegates do not get it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,87 +73,25 @@ pub struct SessionOptions {
     /// every session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_dirs: Vec<SkillDirOption>,
-    /// Tighter limits on this session's turns than the settings' `turn`
-    /// block. Its sub-agents and team members are held to them as it is.
+    /// Settings for this session, its sub-agents and its team members, in
+    /// the shape of a settings file, over the settings of its project and
+    /// scene. Judged as an untrusted project's settings are, against the
+    /// settings as they are each time the engine is built — see
+    /// `settings::overlay` and [`Self::settings_problems`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn: Option<TurnOptions>,
+    pub settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// `options.turn`: each limit given is the lower of it and the setting of
-/// the same name. A value above the setting's leaves the setting's in force.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Deserialize,
-    serde::Serialize,
-    schemars::JsonSchema,
-)]
-#[serde(default, deny_unknown_fields)]
-pub struct TurnOptions {
-    /// Under `turn.token_budget`: what one turn and its delegates may spend
-    /// together. At least 1.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token_budget: Option<u64>,
-    /// Under `turn.max_model_calls`: each agent's own model calls in a turn.
-    /// At least 1.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_model_calls: Option<u32>,
-}
-
-/// A limit in `options` the settings held lower than it was asked for.
+/// A key of `options.settings` the settings held to their own value: the
+/// session runs on `applied`.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
 )]
 pub struct ClampedOption {
-    /// Dotted, as in `options`: `turn.token_budget`.
+    /// Dotted, as in `options`: `settings.turn.token_budget`.
     pub field: String,
-    pub requested: u64,
-    pub applied: u64,
-}
-
-impl TurnOptions {
-    /// `turn` held to these, and the fields of these it held lower instead.
-    pub fn tighten(&self, turn: &mut settings::TurnSettings) -> Vec<ClampedOption> {
-        let mut clamped = Vec::new();
-        if let Some(asked) = self.token_budget {
-            match turn.token_budget {
-                Some(set) if set < asked => clamped.push(ClampedOption {
-                    field: "turn.token_budget".into(),
-                    requested: asked,
-                    applied: set,
-                }),
-                _ => turn.token_budget = Some(asked),
-            }
-        }
-        if let Some(asked) = self.max_model_calls {
-            if turn.max_model_calls < asked {
-                clamped.push(ClampedOption {
-                    field: "turn.max_model_calls".into(),
-                    requested: asked.into(),
-                    applied: turn.max_model_calls.into(),
-                });
-            } else {
-                turn.max_model_calls = asked;
-            }
-        }
-        clamped
-    }
-
-    /// What is wrong with the values given, by field.
-    pub fn problems(&self) -> Vec<(&'static str, String)> {
-        let mut out = Vec::new();
-        if self.token_budget == Some(0) {
-            out.push(("token_budget", "must be at least 1".to_string()));
-        }
-        if self.max_model_calls == Some(0) {
-            out.push(("max_model_calls", "must be at least 1".to_string()));
-        }
-        out
-    }
+    pub requested: serde_json::Value,
+    pub applied: serde_json::Value,
 }
 
 /// One entry of `options.skill_dirs` and `session.setSkillDirs`.
@@ -299,10 +226,27 @@ pub struct TelemetryOptions {
 }
 
 impl SessionOptions {
-    /// What `options.turn` asks the settings' `turn` limits be held to, and
-    /// those it asked for above the settings'.
-    pub fn tighten_turn(&self, turn: &mut settings::TurnSettings) -> Vec<ClampedOption> {
-        self.turn.map(|t| t.tighten(turn)).unwrap_or_default()
+    /// The permission mode `options.settings` asks for, before the settings
+    /// clamp it.
+    pub fn requested_permission_mode(&self) -> Option<base::permission::PermissionMode> {
+        let mode = self.settings.as_ref()?.get("permissions")?.get("mode")?;
+        serde_json::from_value(mode.clone()).ok()
+    }
+
+    /// What in `options.settings` no session may be given, by its field in
+    /// `options` (`settings.hooks`), with why.
+    pub fn settings_problems(&self) -> Vec<(String, String)> {
+        let Some(layer) = &self.settings else {
+            return Vec::new();
+        };
+        let layer = serde_json::Value::Object(layer.clone());
+        settings::overlay::session_layer_problems(&layer, &crate::settings_sections::all())
+            .into_iter()
+            .map(|(key, why)| match key.as_str() {
+                "" => ("settings".to_string(), why),
+                _ => (format!("settings.{key}"), why),
+            })
+            .collect()
     }
 
     /// Whether the session may be named after its first turn: unless

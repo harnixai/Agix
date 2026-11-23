@@ -1478,12 +1478,13 @@ async fn a_turn_cut_off_by_close_ends_with_a_terminal_frame_for_its_watchers() -
 async fn a_host_tool_reply_with_a_bad_image_is_refused_and_can_be_given_again() -> anyhow::Result<()>
 {
     let stub = ProviderStub::start().await?;
-    let mut run = stubbed("host-image", &stub).start().await?;
+    let mut run = stubbed("host-image", &stub)
+        .settings(json!({ "permissions": { "mode": "default", "client_may_loosen": true } }))
+        .start()
+        .await?;
     let session = run
         .session_with(json!({ "options": {
-            "permission_rules": [
-                { "source": "session", "behavior": "allow", "tool_name": "HostShot" }
-            ],
+            "settings": { "permissions": { "allow": ["HostShot"] } },
             "host_tools": [{
                 "name": "HostShot",
                 "description": "A screenshot from the host.",
@@ -1550,7 +1551,10 @@ async fn a_host_tool_name_with_hyphens_is_accepted_and_reaches_the_host_unchange
 ) -> anyhow::Result<()> {
     const NAME: &str = "ext__hello-app__echo";
     let stub = ProviderStub::start().await?;
-    let mut run = stubbed("host-hyphen", &stub).start().await?;
+    let mut run = stubbed("host-hyphen", &stub)
+        .settings(json!({ "permissions": { "mode": "default", "client_may_loosen": true } }))
+        .start()
+        .await?;
     let decl = json!({
         "name": NAME,
         "description": "Echo from the host.",
@@ -1579,9 +1583,7 @@ async fn a_host_tool_name_with_hyphens_is_accepted_and_reaches_the_host_unchange
 
     let session = run
         .session_with(json!({ "options": {
-            "permission_rules": [
-                { "source": "session", "behavior": "allow", "tool_name": NAME }
-            ],
+            "settings": { "permissions": { "allow": [NAME] } },
             "host_tools": [decl]
         }}))
         .await?;

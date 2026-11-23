@@ -223,7 +223,9 @@ async fn a_switched_mode_outlives_a_restart() -> anyhow::Result<()> {
         .start()
         .await?;
     let edits = run
-        .session_with(json!({ "options": { "permission_mode": "default" } }))
+        .session_with(
+            json!({ "options": { "settings": { "permissions": { "mode": "default" } } } }),
+        )
         .await?;
     let planning = run.session().await?;
     stub.script([Reply::text("one")]);
@@ -238,7 +240,7 @@ async fn a_switched_mode_outlives_a_restart() -> anyhow::Result<()> {
         resumed_mode(
             &mut run,
             &edits,
-            json!({ "options": { "permission_mode": "default" } })
+            json!({ "options": { "settings": { "permissions": { "mode": "default" } } } })
         )
         .await?,
         "acceptEdits"
@@ -367,7 +369,9 @@ async fn a_session_not_in_memory_takes_the_mode_up_when_it_comes_back() -> anyho
         .start()
         .await?;
     let session = run
-        .session_with(json!({ "options": { "permission_mode": "default" } }))
+        .session_with(
+            json!({ "options": { "settings": { "permissions": { "mode": "default" } } } }),
+        )
         .await?;
     stub.script([Reply::text("one")]);
     run.turn(&session, "hello").await?;

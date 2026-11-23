@@ -8,18 +8,22 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::scope::Scope;
 use crate::trust::ProjectKey;
 
 pub trait Section: Serialize + DeserializeOwned + schemars::JsonSchema + Default + 'static {
     const KEY: &'static str;
     /// Relative to `KEY` (`""` is the key itself); the grammar of `trust::PROJECT_TIER`.
     const PROJECT_TIER: &'static [(&'static str, ProjectKey)];
+    /// Where the section is read — see `scope::SCOPES`.
+    const SCOPE: Scope;
 }
 
 #[derive(Clone, Copy)]
 pub struct SectionSpec {
     pub key: &'static str,
     pub project_tier: &'static [(&'static str, ProjectKey)],
+    pub scope: Scope,
     check: fn(&Value) -> Result<(), String>,
     schema: fn(&mut schemars::SchemaGenerator) -> schemars::Schema,
     default: fn() -> Value,
@@ -30,6 +34,7 @@ impl SectionSpec {
         Self {
             key: S::KEY,
             project_tier: S::PROJECT_TIER,
+            scope: S::SCOPE,
             check: |value| {
                 serde_json::from_value::<S>(value.clone())
                     .map(drop)
@@ -41,12 +46,13 @@ impl SectionSpec {
     }
 
     /// A section this build does not read (its module is compiled out): the
-    /// key is known and takes any value, and a project that is not trusted
-    /// cannot set it.
+    /// key is known and takes any value, and neither a project that is not
+    /// trusted nor a session can set it.
     pub fn inert(key: &'static str) -> Self {
         Self {
             key,
             project_tier: &[],
+            scope: Scope::Pair,
             check: |_| Ok(()),
             schema: |_| schemars::Schema::from(true),
             default: || Value::Null,
@@ -114,6 +120,7 @@ mod tests {
     impl Section for Probe {
         const KEY: &'static str = "probe";
         const PROJECT_TIER: &'static [(&'static str, ProjectKey)] = &[("flag", ProjectKey::Free)];
+        const SCOPE: Scope = Scope::Session;
     }
 
     #[test]

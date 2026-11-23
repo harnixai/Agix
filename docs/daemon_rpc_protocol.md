@@ -399,8 +399,8 @@ glob 清单),项目自己写的忽略。三态:
 
 ### 4.5 `PermissionMode`
 
-`session.create` / `session.run_turn` / `session.resume` 的 `options.permission_mode`、
-`session.setPermissionMode` 的 `mode`,和 settings.json 的 `permission_mode` 共用这一组取值(camelCase):
+`session.create` / `session.run_turn` / `session.resume` 的 `options.settings.permissions.mode`、
+`session.setPermissionMode` 的 `mode`,和 settings.json 的 `permissions.mode` 共用这一组取值(camelCase):
 
 | 值 | 含义 |
 |---|---|
@@ -409,7 +409,7 @@ glob 清单),项目自己写的忽略。三态:
 | `default` | 未显式放行的工具调用都发 `prompt` 询问(**默认**) |
 | `bubble` | 把询问上抛给父 Agent —— 程序专用,写进 settings.json 会被退回 `default` |
 | `acceptEdits` | 自动放行项目内的文件写入与只读调用,其余询问。"项目内"指会话的工作目录、`files.extra_dirs`,读还包括 `files.read_dirs`(含 `"/"` 时不限):项目外的写入照样询问,`Read` / `Glob` / `Grep` 读项目外、只读的 `Bash` / `Monitor` 命令参数指向项目外(含 `~`、`$VAR` 这类展开不了的写法)也照样询问,与 `default` 一致(`.ssh` 一类的凭据仍被拒)。项目内的 `.git`、项目层目录(缺省 `.agix`;改了名时 `.agix` 也算)、`.claude`、`.agents/skills` 下的写入也照样询问(改它们等于改 agent 自己的规则)。只读的 `Bash` / `Monitor` 命令只要跑 `git`,就还要求每一次 `git` 找到的仓库就是会话目录自己所在的那个(不能是裸仓库;`cd` 进项目自带的嵌套 `.git`、或 `cd` 到去向不明的目录再跑 `git`,都要询问),因为仓库配置(`core.fsmonitor`、`diff.external` 一类)会让 git 自己去启动程序,会话自己的仓库是用户的,项目里带来的是别人写的。`WebFetch` / `Ping` 只放行 `web.allowed_domains` 列出的主机;MCP 工具一律询问,server 自报的 `readOnlyHint` 不算(有 allow 规则的照常放行) |
-| `bypassPermissions` | 不询问、不看用户各层(设置文件、`options.permission_rules`)的规则 —— 那些规则里的 `deny`、`/etc/passwd` 一类路径、`rm -rf /` 一类命令都放行。凭据(`.ssh` / `.aws` / `.gnupg`、沙箱拒读的家目录凭据库如 `.git-credentials` / `.config/gh` / `.kube`、状态目录里的设置与 token 等,§6.1)任何模式都拒,部署方 managed 层的 `deny` / `ask`、宿主策略的 `deny` 照样生效;`PreToolUse` hook 的拦截、委派带来的 deny 照样拒;`sandbox.require` 打开而沙箱兜不住的命令照样拒(没装 `bwrap` 的 Linux 上即每条 `Bash`);除此之外只有不合法的输入(没读过就改、超出上限、会被读错的路径)被拒,`Bash` 仍在 OS 沙箱里 |
+| `bypassPermissions` | 不询问、不看用户各层(设置文件、`options.settings.permissions`)的规则 —— 那些规则里的 `deny`、`/etc/passwd` 一类路径、`rm -rf /` 一类命令都放行。凭据(`.ssh` / `.aws` / `.gnupg`、沙箱拒读的家目录凭据库如 `.git-credentials` / `.config/gh` / `.kube`、状态目录里的设置与 token 等,§6.1)任何模式都拒,部署方 managed 层的 `deny` / `ask`、宿主策略的 `deny` 照样生效;`PreToolUse` hook 的拦截、委派带来的 deny 照样拒;`sandbox.require` 打开而沙箱兜不住的命令照样拒(没装 `bwrap` 的 Linux 上即每条 `Bash`);除此之外只有不合法的输入(没读过就改、超出上限、会被读错的路径)被拒,`Bash` 仍在 OS 沙箱里 |
 
 表格是按**宽松程度从严到宽**排的,这个顺序就是会话级取值被夹紧的依据:会话只能
 比 settings 更严,不能更宽,除非 settings 里开了 `permissions.client_may_loosen`。
@@ -426,20 +426,22 @@ glob 清单),项目自己写的忽略。三态:
 每轮结束时有变化就记进会话日志(扩展条目 `ns:"agix.session_state"`,ARCHITECTURE §4)。会话被
 驱逐(空闲超时、池子满了)后再用、daemon 重启后恢复、原地重建,回来都还在 `plan` 里,退出后
 回到进入前的那个模式,但不宽于这时的设置:设置收紧了,或日志是 `session.import` 带进来、`session.fork`
-拷过去的,退出后要回到的模式同样按这时的设置夹紧(同 `options.permission_mode`,managed 层关了
+拷过去的,退出后要回到的模式同样按这时的设置夹紧(同 `options.settings.permissions.mode`,managed 层关了
 `bypassPermissions` 时得 `default`),只能由程序设的 `bubble` 换成会话这时按设置得到的模式。不在 `plan`
 里的会话恢复时取 `session.setPermissionMode` 设的模式,没设过就取 `options` 给的,没给就取设置的,都按
 恢复时的设置夹紧。
 
-**`options` 越界不报错。** `options.permission_mode` 无论是什么,都不会被拒绝:比
-settings 宽的被**静默夹到 settings 允许的最宽处**并记一条 warn 日志,程序专用的 `bubble`
-也只是这样被夹掉,不会有错误响应。要确认实际生效的模式,读 `session.resume` 响应里的
-`permission.mode`。`session.setPermissionMode` 不同:回执里的 `mode` 就是实际生效的模式,`clamped`
+**`options` 越界不报错,报在 `clamped_options` 里。** `options.settings.permissions.mode` 比
+settings 宽的被夹到 settings 允许的最宽处,`session.create` 的结果带 `clamped_options`(§6.3)说
+要的是什么、生效的是什么;managed 层关了 `bypassPermissions` 时即使设置开了 `client_may_loosen` 也得
+`default`,同样报在那里。程序专用的 `bubble` 不是会话能要的模式,进 `invalid_options`。要确认会话此刻的
+模式,读 `session.resume` 响应里的 `permission.mode`。`session.setPermissionMode` 不同:回执里的 `mode` 就是实际生效的模式,`clamped`
 说它有没有被夹窄,`bubble` 得 `INVALID_PARAMS`。
 
 ### 4.6 `PermissionRule`
 
-`options.permission_rules[]`:
+`session.startAgent` 与 `plugin.call` 的 `permission_rules[]`(会话的规则写在 `options.settings.permissions`
+里,是设置文件的规则串,§6.3):
 
 ```jsonc
 { "source": "session",              // 见下表
@@ -572,7 +574,7 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 | `max_turns_reached` | 触到本轮 API 调用次数上限(引擎自己发的,不来自 API) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
-| `budget_exceeded` | 触到这一轮的 token 预算(`turn.token_budget` 或 `options.turn.token_budget`,见下) |
+| `budget_exceeded` | 触到这一轮的 token 预算(`turn.token_budget`,会话可经 `options.settings.turn.token_budget` 收紧,见下) |
 | `unknown` | 反序列化兜底,遇到未知取值时的落点 |
 
 **一轮的 token 预算含子 Agent。** 预算按输入加输出计(缓存读写不计),算的是这一轮的全部模型调用:
@@ -840,7 +842,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `calls_preview` | `session.calls` 的 `output.text_preview`、`output.tool_uses[].input_preview` 与 `result_is_error`(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
-| `session_turn_limits` | `options.turn` 按会话收紧 `token_budget` / `max_model_calls`,`session.create` 报 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
+| `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
@@ -1342,8 +1344,9 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
   "project_root": "/Users/x/repo-a",      // 见 §3.1 的三态
   "session_id": "…",                      // 可选,用这个 id 建;已有就答那个会话,见下
   "options": {                            // 可选,只在创建时生效
-    "permission_mode": "default",
-    "permission_rules": [ ],
+    "settings": {                         // 可选,这个会话(含子 Agent、团队成员)的设置覆盖层,见下
+      "permissions": { "mode": "default", "deny": ["Bash(rm:*)"] },
+      "turn": { "token_budget": 2000000, "max_model_calls": 40 } },
     "recorder": { "mode":"replay", "name":"…", "dir":"/abs/recordings", "strict":true },
     "clock": { "start": "2026-10-28T09:00:00Z" },  // 可选,记下来的时间从这里起
     "telemetry": { "output":"/abs/path.jsonl" },
@@ -1353,11 +1356,10 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
     "effort": "high",                     // 可选,low | medium | high | xhigh | max,省略 = 设置的 model.effort
-    "thinking_mode": "on",                // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking
+    "thinking": "on",                     // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking
     "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
     "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
-    "turn": { "token_budget": 2000000, "max_model_calls": 40 },  // 可选,只能比设置的 turn.* 更紧,见下
     "host_tools": [ ] } }                 // 可选,宿主自己实现的工具,见下
 // ← result
 { "session_id": "…", "scene": "code", "session_kind": "primary",
@@ -1365,7 +1367,8 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
   "project_trust": "untrusted",         // trusted | untrusted | none,§3.6
   "trust_source": "default",            // default | user | host | null,§3.6
   "created_at": "…",
-  "existing": false }                   // true = session_id 已经是一个会话,答的就是它,没有新建
+  "existing": false }                   // true = session_id 已经是一个会话,答的就是它,没有新建;
+                                        // options.settings 有被夹住的值时另带 clamped_options,见下
 ```
 
 `scene` 必须是**当前激活**的场景,否则 `SCENE_NOT_FOUND`。场景的 `requires_project`
@@ -1408,16 +1411,17 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用(`run_tur
 `session.setModel` 选的模型、推理强度与思考开关,`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
 
 `options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
-会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"permission_mode": "plann"`)、`options`
-本身不是对象。`permission_rules`、`prompt_types`、`host_tools`、`skill_dirs` 这几个列表字段逐条读,`field` 写成
-`permission_rules[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
+会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"effort": "hihg"`)、`options`
+本身不是对象,以及 `options.settings` 里会话不能给的键(见下)。0.4.0 以前的 `thinking_mode`、`turn`、
+`permission_mode`、`permission_rules` 是不认识的字段,`error` 写明换成了哪个。`prompt_types`、`host_tools`、`skill_dirs`
+这几个列表字段逐条读,`field` 写成 `prompt_types[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
 `options` 读不出来。`session.create`、`session.run_turn`、`session.resume` 都这样。
 
 ```jsonc
-{ "code": -32602, "message": "options that do not read: model, permission_rules[0]",
+{ "code": -32602, "message": "options that do not read: model, settings.hooks",
   "data": { "invalid_options": [
     { "field": "model", "error": "invalid type: integer `3`, expected a string" },
-    { "field": "permission_rules[0]", "error": "unknown variant `allwo`, expected one of `allow`, `deny`, `ask`" } ] } }
+    { "field": "settings.hooks", "error": "it is decided for each project and scene, not each session: set it in the settings, not in a session's options" } ] } }
 ```
 
 `recorder.mode` 取 `record` / `replay` / `rerun`。`dir` 是录像根目录,必须是绝对路径;省略时用
@@ -1471,15 +1475,33 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 `{"field":"output_schema","error":"scene \"x\" denies StructuredOutput, …"}`,不建一个交不回结果的会话。
 子 Agent、`session.startAgent` 带 `output_schema` 同样。
 
-**`turn`——按会话收紧一轮的上限。** `token_budget` 与 `max_model_calls` 与设置里同名的
-`turn.token_budget`、`turn.max_model_calls` 含义相同,都至少是 1(给 0 进 `invalid_options`,`field` 为
-`turn.token_budget` / `turn.max_model_calls`,未知的键同样)。会话用的是两者中较小的那个:选项比设置宽时按设置,
-不报错,`session.create` 的结果另带 `clamped_options` 列出这一项(`requested` 是选项给的,`applied` 是生效的,
-如 `[{"field":"turn.token_budget","requested":2000000,"applied":500000}]`;没有被压低的就没有这个键);
-设置没有 `turn.token_budget`(不限)时选项的值直接生效。每次重建引擎都按这时的设置重新取较小值,所以设置后来收得
-更紧时按设置,放宽时仍守着选项。会话的子 Agent 与团队成员随它:`max_model_calls` 是每个 agent 自己一轮的
-调用上限,各算各的,子 Agent 继承收紧后的值(agent 类型的 `max_turns` 照旧覆盖它);`token_budget` 是这一轮
-连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
+**`options` 的两类。** `model`、`provider`、`effort`、`thinking`、`prompt` 是这个会话自己那段对话的选择:
+只作用于会话自己的对话,子 Agent 与团队成员不随它,`session.setModel`、`session.setPrompt` 之后还能改。
+`settings` 是这个会话的设置覆盖层,作用于会话连同它的子 Agent 与团队成员。
+
+**`settings`——按会话给的设置。** 形状就是 settings.json 的形状(`{"turn": {...}, "permissions": {...},
+"agents": {...}, "sandbox": {...}, ...}`),叠在会话所在项目与场景合并好的设置之上,managed 层仍压在它上面。
+只收按会话决定的键:按项目与场景决定的(`providers`、`model.order`、`model.tasks`、`mcp`、`hooks`、`recorder`、
+`scripts`、`permissions.client_may_loosen`)、按进程决定的(`app`、`plugins`、`telemetry.otlp_endpoint`)写在这里
+进 `invalid_options`,`field` 为 `settings.<键>`,`error` 写明它按什么决定;不认识的键、改过名的键、值不合
+设置的类型、程序专用的 `permissions.mode: "bubble"`、读不出来的规则串(`field` 带下标,如
+`settings.permissions.deny[0]`)同样。被拒时什么都不建、不跑。
+
+缺省只能收紧:未受信项目层那张表(`ARCHITECTURE.md` 设置分层)里只许更严的键,值比设置的宽时不生效、留着
+设置的值,`session.create` 的结果带 `clamped_options` 列出每一项(`field` 是 `options` 里的点分全路径,
+`requested` 是给的,`applied` 是生效的,如 `[{"field":"settings.turn.token_budget","requested":2000000,"applied":500000}]`;
+没有被夹住的就没有这个键)。`permissions.allow` / `allow_exact` 同样被扣下(`applied` 为 `[]`);`ask` / `deny`
+照加,与各层的规则并列。设置开了 `permissions.client_may_loosen: true` 时放宽照样生效,含 allow 规则,与
+`session.setPermissionMode` 的放宽同一个开关。这是安全缺省,不是安全边界:连得上 socket 的客户端本来就能
+`config.set` 改设置。`permissions.mode` 的夹紧见 §4.5;managed 层关了 `bypassPermissions` 时会话得不到它。
+
+`options` 随会话记下,`settings` 不记判定结果:每次重建引擎都按这时的设置重新判,设置后来收紧了按设置,
+放宽了仍守着会话给的值。0.4.0 以前的会话在日志里记的 `thinking_mode`、`turn`、`permission_mode`、
+`permission_rules`,恢复时按 `thinking`、`settings.turn`、`settings.permissions.mode` 与 `settings.permissions`
+的规则串读(allow 规则随之按上面的规矩扣下)。
+
+`turn.max_model_calls` 是每个 agent 自己一轮的调用上限,子 Agent 继承会话的值(agent 类型的 `max_turns` 照旧
+覆盖它);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
 
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
 列了 `question`,有人值守的会话(`attended`,缺省取场景的 `interactive`,`ARCHITECTURE.md` §3.2.3,如 `code`)才有
@@ -1568,7 +1590,8 @@ hooks、中间件与遥测;模型调用一个,宿主收到 `host_tool_call` 帧(
 
 权限上它和 MCP 工具同一档:缺省模式下每次调用都先问(`prompt_type:"permission"`);无人值守的
 会话(如没给 `attended` 的 `harnix`)里这样的询问直接被拒绝,宿主要自己回答就给 `attended:true`,
-想免问就在 `permission_rules` 里给 `{"source":"session","behavior":"allow","tool_name":"HostEcho"}`;
+想免问就在设置的 `permissions.allow` 里写 `HostEcho`(经 `options.settings.permissions.allow` 给时,设置得开着
+`permissions.client_may_loosen`,否则被扣下);
 deny 规则同样管得住它。宿主只会收到符合 `input_schema` 的 `input`,不符合的调用以校验错误
 退回给模型,不发帧。
 
@@ -1763,7 +1786,7 @@ summary 为 `did not answer within 5s`,`session.get` 不再等它。
 都订阅一次,默认恢复就等于替它把整页会话全恢复了,而它以为自己只是在看。
 
 `resume: true` 不接 `options`:要给一个没有记录过 `options` 的旧会话指定
-`permission_mode` 之类再恢复,显式调 `session.resume`。恢复失败的错误跟 `session.resume` 完全一致 —— 跨场景仍然
+`settings` 之类再恢复,显式调 `session.resume`。恢复失败的错误跟 `session.resume` 完全一致 —— 跨场景仍然
 `SCENE_MISMATCH`(§3.4),终态侧链仍然 `SIDECHAIN_TERMINAL`,池子满了仍然按恢复那边
 的规矩来。
 
@@ -1962,7 +1985,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
   "model": "claude-opus-4-6",     // model / provider / effort / thinking_mode 至少给一个
   "provider": "anthropic",        // 可选,providers 里的 id
   "effort": "high",               // 可选,同 options.effort;null = 回到设置的值
-  "thinking_mode": "off" }        // 可选,同 options.thinking_mode;null = 回到设置的值
+  "thinking_mode": "off" }        // 可选,取值同 options.thinking;null = 回到设置的值
 // ← result
 { "session_id": "…", "model": "claude-opus-4-6", "provider": "anthropic",
   "effort": "high", "thinking_mode": "off",   // 会话自己的,null = 随设置
@@ -1985,7 +2008,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。
 不重建会话;键不给就不动,给 `null` 就去掉会话自己的值、回到设置的 `model.effort` /
 `model.thinking`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
-(`options.thinking_mode` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
+(`options.thinking` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
 就降到 `max_tokens - 1`,`max_tokens` 留不出 1024 时这次调用关掉思考,都记一条 warn。当前生效值与来源见 `session.get` 的 `reasoning`。
 
 **有 turn 在跑时返回 `SESSION_BUSY`**(`reason: "turn_running"`),不排队。选择记在会话上,
@@ -2066,7 +2089,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 答了照常算数;只有 `ExitPlanMode` 例外 —— 判定它(权限脚本、hook)或它的询问悬着时模式被切过,之后的
 `permit` 也不再改模式,模型得到一个拒绝,说模式已被切成了什么。模型在下一步读到一条提醒,说用户把模式切成了什么。
 
-夹紧同 `options.permission_mode`(§4.5):不宽于会话所在项目与场景的设置,除非设置开了
+夹紧同 `options.settings.permissions.mode`(§4.5):不宽于会话所在项目与场景的设置,除非设置开了
 `permissions.client_may_loosen`;managed 层关了 `bypassPermissions` 时它得 `default`。`mode` 是会话
 此刻所在的模式,`requested` 是请求的,`clamped` 为 `true` 表示设置把它夹窄了。`mode` 不是 §4.5 的取值、
 或是只能由程序设的 `bubble` → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`;场景不符 → `SCENE_MISMATCH`。
@@ -2078,10 +2101,10 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 切到 `plan` 等于从当前模式进入 `plan`,之后模型的 `ExitPlanMode` 获准时回到那个模式;已经在 `plan`
 里就什么都不变。从 `plan` 切到别的模式就离开了 `plan`,不再记得进入前的模式。
 
-`plan` 以外的模式记进会话的规格(`agix.session/spec` 条目,优先于 `options.permission_mode`,同
+`plan` 以外的模式记进会话的规格(`agix.session/spec` 条目,优先于 `options.settings.permissions.mode`,同
 `session.setModel`;记的是夹紧后得到的模式,设置之后放宽也不会把它放宽),在不在 `plan`、退出后回到哪个记进 `agix.session_state`(§4.5);会话重建、驱逐后
 再用、daemon 重启后恢复都保持,恢复时规格里的模式与 `plan` 退出后要回到的模式都按当时的设置重新夹紧。冷恢复时 `session.resume` 的
-`options.permission_mode` 只在会话没记下 `options` 时采用,这里设的模式仍优先于它。会话不在内存里时只改
+`options.settings.permissions.mode` 只在会话没记下 `options` 时采用,这里设的模式仍优先于它。会话不在内存里时只改
 它的日志,不把它带回内存,下一次 `run_turn` / `session.resume` 照它来。
 
 模式变了就给订阅者推 `permission_mode_changed`(§7,`source: "host"`);模型自己 `EnterPlanMode` /
@@ -2911,7 +2934,7 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
   "subagent_type": "reviewer",       // 可选,按 agent 目录取模型、工具、skills、scene、permission_mode(可放宽,插件带来的类型只能更严)
   "model": "…",                      // 可选,压过 agent 类型与 model.tasks.subagent 的 model(模型 id、档位名,或 opus / sonnet / haiku、inherit);不接受 provider,子 Agent 的 provider 按 model.order 路由
   "allowed_tools": [ ], "disallowed_tools": [ ],  // 可选,在 agent 类型之上再收窄,只会更少
-  "permission_rules": [ ],           // 可选,同 options.permission_rules 的写法;只有 deny 生效
+  "permission_rules": [ ],           // 可选,写法见 §4.6;只有 deny 生效
   "output_schema": { },              // 可选,同 session.create;交上来的进任务的 structured_output
   "notify_parent": true,             // 可选,默认 true:结束时给父会话投 <task-notification>
   "tag": "…" }                       // 可选,宿主的关联串,原样出现在 task.detail.tag
@@ -3801,7 +3824,7 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
   "input": { "change": "c1" },           // 交给函数的 input,省略为 null;有 input_schema 时先校验
   "session_id": "…",                     // 在这个会话的环境里跑;不带会话时换成 "cwd": "/abs/project"(绝对路径),两者只给一个
   "writes": false,                       // 缺省 false
-  "permission_rules": [ ],               // 写法同 session.create 的 options.permission_rules
+  "permission_rules": [ ],               // 写法见 §4.6
   "timeout_ms": 30000,                   // 缺省并至多 120000
   "run_id": "gate-7" }                   // 可选:plugin.cancel 用它指这次调用,同一连接内唯一
 // ← result
@@ -4476,7 +4499,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 { "session_id": "S1c1", "parent_session_id": "S1", "final_state": "completed" }  // completed | failed
 
 // INVALID_PARAMS,只在 options 里有读不出来的字段时
-{ "invalid_options": [ { "field": "permission_mode", "error": "…" } ] }
+{ "invalid_options": [ { "field": "settings.permissions.mode", "error": "…" } ] }
 // 另有只有建出引擎才知道的:host_tools 的重名,以及场景 tools.deny 了 StructuredOutput 时的 output_schema;
 // 还有 skill_dirs 通不过的检查(session.create 等建新会话时,以及 session.setSkillDirs,field 为 skill_dirs[i].path)
 // INVALID_PARAMS,session.calls / session.call 带的 generation 不是录像当前的时
@@ -4499,7 +4522,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 { "session_id": "S1" }
 // session.create 带的 session_id 是别的会话时,多出那个会话是什么;只是 options 不同时另带 options_differ
 { "session_id": "S1", "scene": "code", "project_root": "/abs/repo", "session_kind": "primary",
-  "options_differ": [ "permission_mode" ] }
+  "options_differ": [ "settings" ] }
 
 // REWIND_FAILED
 { "rewind_id": "…", "failed": { "path": "b/b.txt", "error": "…" }, "rolled_back": [ "a.txt" ],
@@ -4595,7 +4618,7 @@ MCP server 的询问(`prompt_type:"mcp_elicitation"`)也用这个计时;超时�
 记下的是这一条命令或路径。
 
 宿主自己已做沙箱、不需要第二层权限时显式声明放行:任意层 settings.json 的
-`"permission_mode": "bypassPermissions"`(daemon 范围),或 `options.permission_mode:
+`"permissions": {"mode": "bypassPermissions"}`(daemon 范围),或 `options.settings.permissions.mode:
 "bypassPermissions"`(单会话范围)。
 
 会话级只能**收紧**、不能放宽,除非 settings 里开了 `permissions.client_may_loosen`

@@ -6,7 +6,7 @@ use crate::settings_sections::ScriptBindings;
 /// The permission mode a session will actually run under.
 ///
 /// The caller's mode — `session.setPermissionMode`'s, else
-/// `options.permission_mode` — is honored, but **clamped** to the
+/// `options.settings.permissions.mode` — is honored, but **clamped** to the
 /// daemon's configured `permissions.mode`: a client may tighten the
 /// mode for its own session and may not loosen it, since there is no
 /// per-method authorization on this socket (see `server/mod.rs`).
@@ -28,6 +28,50 @@ pub(in crate::session_pool) fn effective_permission_mode(
         return base::permission::PermissionMode::Default;
     }
     mode
+}
+
+/// `base` with the session's `options.settings` laid over it and its
+/// permission mode — `requested` clamped against `base` — written in, and the
+/// fields of `options.settings` held to the settings' value. The mode is
+/// decided by [`effective_permission_mode`] after the layer, so the managed
+/// layer has the last word over it.
+pub(in crate::session_pool) fn session_settings(
+    base: &settings::LoadedSettings,
+    options: Option<&SessionOptions>,
+    requested: Option<base::permission::PermissionMode>,
+) -> (settings::LoadedSettings, Vec<api::ClampedOption>) {
+    let layer = options.and_then(|o| o.settings.as_ref());
+    let (mut laid, held) = match layer {
+        Some(layer) => base.overlay(
+            layer,
+            settings::overlay::Subject::Session,
+            &crate::settings_sections::all(),
+        ),
+        None => (base.clone(), Vec::new()),
+    };
+    let mode = effective_permission_mode(base, requested);
+    laid.values.permissions.mode = mode;
+    let mut clamped: Vec<api::ClampedOption> = held
+        .into_iter()
+        .filter(|held| held.key != "permissions.mode")
+        .map(|held| api::ClampedOption {
+            field: format!("settings.{}", held.key),
+            requested: held.requested,
+            applied: held.applied,
+        })
+        .collect();
+    let asked = options.and_then(SessionOptions::requested_permission_mode);
+    if let Some(asked) = asked.filter(|asked| requested == Some(*asked) && mode != *asked) {
+        clamped.insert(
+            0,
+            api::ClampedOption {
+                field: "settings.permissions.mode".into(),
+                requested: serde_json::to_value(asked).unwrap_or_default(),
+                applied: serde_json::to_value(mode).unwrap_or_default(),
+            },
+        );
+    }
+    (laid, clamped)
 }
 
 fn clamped_permission_mode(
@@ -194,18 +238,14 @@ pub(in crate::session_pool) fn bind_scripts(
 }
 
 /// Which permission a new session gets: a `Policy` over every tier's rules
-/// plus `options.permission_rules` and the host's policy, keeping its own
-/// grants.
+/// — its `options.settings` among them — and the host's policy, keeping its
+/// own grants.
 pub(in crate::session_pool) fn resolve_session_permission(
     host: Option<&Arc<dyn PermissionPolicy>>,
     settings: &settings::LoadedSettings,
-    options: Option<&SessionOptions>,
 ) -> PermissionSet {
-    let extra = options
-        .map(|o| o.permission_rules.clone())
-        .unwrap_or_default();
     PermissionSet::of(Arc::new(
-        permissions::policy::Policy::from_settings(&settings.permission_settings(), extra)
+        permissions::policy::Policy::from_settings(&settings.permission_settings(), Vec::new())
             .with_host(host.cloned()),
     ))
 }

@@ -77,6 +77,14 @@ impl Daemon {
     /// A daemon whose own settings say `bypassPermissions`, reading its managed
     /// settings from `managed` (written to a file first) when given.
     async fn start(managed: Option<&str>, prompt_timeout: Duration) -> Self {
+        Self::start_with(managed, prompt_timeout, |_| {}).await
+    }
+
+    async fn start_with(
+        managed: Option<&str>,
+        prompt_timeout: Duration,
+        configure: impl FnOnce(&mut daemon::config::DaemonConfig),
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (home, work) = (dir.path().join("home"), dir.path().join("work"));
         std::fs::create_dir_all(&home).unwrap();
@@ -95,6 +103,7 @@ impl Daemon {
             path
         });
         config.managed_settings_path = managed.clone();
+        configure(&mut config);
 
         let rounds = touch_rounds(&work.join("marker").display().to_string());
         let client = Arc::new(Scripted {
@@ -203,7 +212,7 @@ async fn without_managed_settings_a_bypass_session_runs_the_command() {
 async fn a_managed_deny_refuses_the_call_in_a_bypass_session() {
     let d = Daemon::start(Some(DENY_TOUCH), Duration::from_secs(30)).await;
     let frames = d
-        .run_turn(json!({"permission_mode": "bypassPermissions"}))
+        .run_turn(json!({"settings": {"permissions": {"mode": "bypassPermissions"}}}))
         .await;
     let results = tool_results(&frames);
     assert!(!d.marker().exists(), "the command ran: {results}");
@@ -264,7 +273,41 @@ async fn disabling_bypass_turns_a_bypass_session_into_one_that_asks() {
     )
     .await;
     let frames = d
-        .run_turn(json!({"permission_mode": "bypassPermissions"}))
+        .run_turn(json!({"settings": {"permissions": {"mode": "bypassPermissions"}}}))
+        .await;
+    assert!(!d.marker().exists(), "{}", tool_results(&frames));
+    assert!(!events(&frames, "prompt").is_empty(), "{frames:?}");
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn disabled_bypass_holds_over_a_session_the_settings_let_loosen() {
+    let d = Daemon::start_with(
+        Some(r#"{"permissions": {"disable_bypass": true}}"#),
+        Duration::from_secs(1),
+        |config| {
+            config.settings.values.permissions.mode = PermissionMode::Default;
+            config.settings.values.permissions.client_may_loosen = true;
+        },
+    )
+    .await;
+    let (_, created) = d
+        .call(
+            "session.create",
+            json!({"options": {"settings": {"permissions": {"mode": "bypassPermissions"}}}}),
+        )
+        .await;
+    assert_eq!(
+        created["result"]["clamped_options"],
+        json!([{
+            "field": "settings.permissions.mode",
+            "requested": "bypassPermissions",
+            "applied": "default",
+        }]),
+        "{created}"
+    );
+    let frames = d
+        .run_turn(json!({"settings": {"permissions": {"mode": "bypassPermissions"}}}))
         .await;
     assert!(!d.marker().exists(), "{}", tool_results(&frames));
     assert!(!events(&frames, "prompt").is_empty(), "{frames:?}");

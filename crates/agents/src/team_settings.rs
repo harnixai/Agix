@@ -53,4 +53,5 @@ impl Section for TeamSettings {
         ("member_idle_secs", Tighten(Lower)),
         ("stage_concurrency", Tighten(Lower)),
     ];
+    const SCOPE: settings::scope::Scope = settings::scope::Scope::Session;
 }

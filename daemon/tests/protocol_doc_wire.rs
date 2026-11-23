@@ -1561,20 +1561,22 @@ async fn a_question_to_the_user(obs: &mut Observed) {
 }
 
 async fn a_tool_the_host_runs(obs: &mut Observed) {
-    let h = start_code(scripted(vec![
-        tool_round("HostEcho", "tool-1", json!({"text": "ping"})),
-        text_round("echoed"),
-    ]))
+    let h = start(
+        scripted(vec![
+            tool_round("HostEcho", "tool-1", json!({"text": "ping"})),
+            text_round("echoed"),
+        ]),
+        Arc::new(scene::code::spec(scene::code::Interaction::Interactive)),
+        8,
+        |config| config.settings.values.permissions.client_may_loosen = true,
+    )
     .await;
     let mut conn = Conn::open(&h.sock).await;
     let id = conn
         .send(
             "session.run_turn",
             json!({"message": "echo", "options": {
-                "permission_mode": "default",
-                "permission_rules": [
-                    {"source": "session", "behavior": "allow", "tool_name": "HostEcho"},
-                ],
+                "settings": {"permissions": {"mode": "default", "allow": ["HostEcho"]}},
                 "host_tools": [{
                     "name": "HostEcho",
                     "description": "Echo text back from the host.",

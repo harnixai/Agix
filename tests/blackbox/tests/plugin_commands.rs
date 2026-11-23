@@ -212,7 +212,7 @@ async fn a_read_only_subcommand_runs_in_plan_mode_and_a_write_one_does_not() -> 
         Reply::text("done"),
     ]);
     let session = run
-        .session_with(json!({ "options": { "permission_mode": "plan" } }))
+        .session_with(json!({ "options": { "settings": { "permissions": { "mode": "plan" } } } }))
         .await?;
     let watcher = run.watch(&session, true).await?;
     let events = run.turn(&session, "look at the notes").await?;
