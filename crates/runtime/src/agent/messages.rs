@@ -282,8 +282,8 @@ pub struct ContextReport {
 pub struct ReasoningReport {
     pub effort: Option<base::interface::model::Effort>,
     pub effort_source: ChoiceSource,
-    pub thinking_mode: base::interface::model::ThinkingMode,
-    pub thinking_mode_source: ChoiceSource,
+    pub thinking: base::interface::model::ThinkingMode,
+    pub thinking_source: ChoiceSource,
 }
 
 impl ReasoningReport {
@@ -301,11 +301,11 @@ impl ReasoningReport {
         Self {
             effort: choice.effort.or(settings.effort),
             effort_source: source(choice.effort.is_some()),
-            thinking_mode: choice
+            thinking: choice
                 .thinking_mode
                 .clone()
                 .unwrap_or_else(|| settings.thinking_mode.clone()),
-            thinking_mode_source: source(choice.thinking_mode.is_some()),
+            thinking_source: source(choice.thinking_mode.is_some()),
         }
     }
 }

@@ -112,7 +112,7 @@ pub struct RenameParams {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SetModelParams {
     pub session_id: String,
-    /// At least one of `model`, `provider`, `effort` and `thinking_mode`.
+    /// At least one of `model`, `provider`, `effort` and `thinking`.
     /// A tier — `strong`, `balanced`, `fast` — or a model id.
     #[serde(default)]
     pub model: Option<String>,
@@ -126,7 +126,7 @@ pub struct SetModelParams {
     /// `null` takes the session back to the settings' `model.thinking`.
     #[serde(default, deserialize_with = "Patch::present")]
     #[schemars(with = "Option<base::interface::model::ThinkingMode>")]
-    pub thinking_mode: Patch<base::interface::model::ThinkingMode>,
+    pub thinking: Patch<base::interface::model::ThinkingMode>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

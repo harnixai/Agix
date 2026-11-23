@@ -204,7 +204,7 @@ impl Opened {
                 provider: request.provider.clone(),
                 model: request.params.model.clone(),
                 max_tokens: request.params.max_tokens,
-                thinking_mode: request.params.thinking_mode.clone(),
+                thinking: request.params.thinking_mode.clone(),
                 effort: request.params.effort,
                 system,
                 tools,

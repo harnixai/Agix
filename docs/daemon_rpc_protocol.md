@@ -571,7 +571,7 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 | `stop_sequence` | 命中停止序列 |
 | `pause_turn` | 模型请求暂停。引擎把这条回复原样发回去让它接着写,所以一轮通常不以它结束;只有恢复策略不续(如 `NeverRecover`)时才会 |
 | `cancelled` | 这一轮被 `session.interrupt` 取消;已经推过的那段回复留在 transcript 里 |
-| `max_turns_reached` | 触到本轮 API 调用次数上限(引擎自己发的,不来自 API) |
+| `max_turns` | 触到本轮模型调用次数上限(`turn.max_model_calls`,引擎自己发的,不来自 API) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
 | `budget_exceeded` | 触到一个 token 预算:这一轮的(`turn.token_budget` 或 `options.settings.turn.token_budget`,见下)、会话的或目标的;是谁的在 `turn_complete.message`(如 `this turn's token budget of 2000 is used up`) |
@@ -1662,7 +1662,7 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
   "turn_state": "idle",            // idle | running | rebuilding | operating
   "current_turn_id": null,
   "reasoning": { "effort": "high", "effort_source": "settings",
-                 "thinking_mode": "on", "thinking_mode_source": "settings" } }
+                 "thinking": "on", "thinking_source": "settings" } }
 ```
 
 比 `session.list` 的条目多 `scene_active` / `turn_state` / `current_turn_id` 三项 ——
@@ -2011,13 +2011,13 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 ```jsonc
 // → params
 { "session_id": "…",
-  "model": "claude-opus-4-6",     // model / provider / effort / thinking_mode 至少给一个
+  "model": "claude-opus-4-6",     // model / provider / effort / thinking 至少给一个
   "provider": "anthropic",        // 可选,providers 里的 id
   "effort": "high",               // 可选,同 options.effort;null = 回到设置的值
-  "thinking_mode": "off" }        // 可选,取值同 options.thinking;null = 回到设置的值
+  "thinking": "off" }             // 可选,取值同 options.thinking;null = 回到设置的值
 // ← result
 { "session_id": "…", "model": "claude-opus-4-6", "provider": "anthropic",
-  "effort": "high", "thinking_mode": "off",   // 会话自己的,null = 随设置
+  "effort": "high", "thinking": "off",        // 会话自己的,null = 随设置
   "applies": "next_turn" }
 ```
 
@@ -2033,7 +2033,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 类型都没指定模型时,取 `model.tasks.subagent` 那一档的模型,与对话用的是同一个模型时跟随这里换上的模型。
 `WebSearch` 搜索用 `model.tasks.web_search` 那一档的模型。
 
-`effort` / `thinking_mode` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
+`effort` / `thinking` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
 这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。
 不重建会话;键不给就不动,给 `null` 就去掉会话自己的值、回到设置的 `model.effort` /
 `model.thinking`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
@@ -2270,7 +2270,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
   "request": { "session_id": "…", "parent_session_id": null, "agent_type": null,
                "turn_id": "…", "turn": 1, "step": 0, "purpose": null,
                "provider": "anthropic", "model": "…", "max_tokens": 8192,
-               "thinking_mode": "off", "effort": null,
+               "thinking": "off", "effort": null,
                "system": [ { "role": "system", "cache": "ephemeral", "source": "identity",
                              "origin": "kernel", "text": "…" },
                            { "blob": "s.0123456789abcdef", "bytes": 70000 } ],
@@ -2646,7 +2646,7 @@ primary、不成环;根会话的场景要在这个 daemon 上可用;`project_roo
   "provider": "…",                          // 下一次调用路由到的厂商 id;会话指名的厂商优先;没有可用的路由(没有配置厂商,或路由没建起来)时为 null
   "max_tokens": 0,
   "reasoning": { "effort": "high", "effort_source": "settings",   // 同 session.get 的 reasoning;sidechain 见下
-                 "thinking_mode": "on", "thinking_mode_source": "settings" },
+                 "thinking": "on", "thinking_source": "settings" },
   "system": [ { "name": "skills.catalog",   // 块名,见引擎的扩展点文档
                 "role": "user",             // system:进系统提示;user:作为对话开头的一条消息
                 "origin": "kernel",         // kernel | config | {"plugin":"…"} | {"script":"…"}

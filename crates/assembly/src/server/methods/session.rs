@@ -91,17 +91,17 @@ async fn set_model(s: &DaemonServer, _: &Call, p: SetModelParams) -> Result<Mode
     let (model, provider) = (named(&p.model), named(&p.provider));
     let reasoning = ReasoningChange {
         effort: change_of(p.effort),
-        thinking_mode: change_of(p.thinking_mode),
+        thinking: change_of(p.thinking),
     };
-    if let Some(Some(problem)) = reasoning.thinking_mode.as_ref().map(|mode| {
+    if let Some(Some(problem)) = reasoning.thinking.as_ref().map(|mode| {
         mode.as_ref()
             .and_then(model::adapter::thinking_mode_problem)
     }) {
-        return Err(invalid(format!("thinking_mode: {problem}")));
+        return Err(invalid(format!("thinking: {problem}")));
     }
     if model.is_none() && provider.is_none() && reasoning.is_empty() {
         return Err(invalid(
-            "give `model`, `provider`, `effort` and/or `thinking_mode`",
+            "give `model`, `provider`, `effort` and/or `thinking`",
         ));
     }
     Ok(s.pool

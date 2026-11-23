@@ -1100,7 +1100,7 @@ async fn the_documented_set_model_result_is_real() {
         "session.setModel",
         serde_json::json!({"session_id": created["session_id"],
                            "model": "claude-opus-4-6", "provider": "anthropic",
-                           "effort": "high", "thinking_mode": "off"}),
+                           "effort": "high", "thinking": "off"}),
     )
     .await;
 }

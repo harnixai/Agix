@@ -273,7 +273,7 @@ impl SessionPool {
             model: spec.model(),
             provider: spec.provider(),
             effort: reasoning.effort,
-            thinking_mode: reasoning.thinking_mode,
+            thinking: reasoning.thinking_mode,
             applies: api::Applies::NextTurn,
         })
     }
@@ -424,8 +424,8 @@ fn choose_reasoning(spec: &mut SessionSpec, change: api::ReasoningChange) {
     if let Some(effort) = change.effort {
         spec.effort = Some(effort);
     }
-    if let Some(thinking_mode) = change.thinking_mode {
-        spec.thinking_mode = Some(thinking_mode);
+    if let Some(thinking) = change.thinking {
+        spec.thinking_mode = Some(thinking);
     }
 }
 

@@ -607,7 +607,7 @@
           },
           "type": "array"
         },
-        "thinking_mode": {
+        "thinking": {
           "$ref": "#/$defs/ThinkingMode"
         },
         "tools": {
@@ -633,7 +633,7 @@
         "provider",
         "model",
         "max_tokens",
-        "thinking_mode",
+        "thinking",
         "system",
         "tools",
         "messages"
@@ -4457,7 +4457,7 @@
         "session_id": {
           "type": "string"
         },
-        "thinking_mode": {
+        "thinking": {
           "anyOf": [
             {
               "$ref": "#/$defs/ThinkingMode"
@@ -5872,17 +5872,17 @@
         "effort_source": {
           "$ref": "#/$defs/ChoiceSource"
         },
-        "thinking_mode": {
+        "thinking": {
           "$ref": "#/$defs/ThinkingMode"
         },
-        "thinking_mode_source": {
+        "thinking_source": {
           "$ref": "#/$defs/ChoiceSource"
         }
       },
       "required": [
         "effort_source",
-        "thinking_mode",
-        "thinking_mode_source"
+        "thinking",
+        "thinking_source"
       ],
       "type": "object"
     },
@@ -8146,7 +8146,7 @@
         },
         "model": {
           "default": null,
-          "description": "At least one of `model`, `provider`, `effort` and `thinking_mode`.\nA tier — `strong`, `balanced`, `fast` — or a model id.",
+          "description": "At least one of `model`, `provider`, `effort` and `thinking`.\nA tier — `strong`, `balanced`, `fast` — or a model id.",
           "type": [
             "string",
             "null"
@@ -8163,7 +8163,7 @@
         "session_id": {
           "type": "string"
         },
-        "thinking_mode": {
+        "thinking": {
           "anyOf": [
             {
               "$ref": "#/$defs/ThinkingMode"
@@ -8704,8 +8704,8 @@
           "type": "string"
         },
         {
-          "const": "max_turns_reached",
-          "description": "+**: agent hit `EngineConfig.max_api_calls_per_turn`. Not from\nthe Anthropic API — emitted by our engine when the configured per-\nturn budget is exhausted. Caller (e.g. `AgentTool` for sub-agents)\nshould handle gracefully: return whatever partial work exists,\nflagged but **not** is_error=true. Carries the same\n`max_turns_reached` attachment + early-return semantics.",
+          "const": "max_turns",
+          "description": "The turn reached its model-call limit (`turn.max_model_calls`). Not\nfrom the API: the engine ends the turn with it, keeping what was done.",
           "type": "string"
         },
         {

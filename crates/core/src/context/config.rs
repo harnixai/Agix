@@ -21,7 +21,7 @@ pub struct EngineConfig {
     pub max_parallelism: usize,
     /// +** — per-turn API call budget. Default **200**.
     ///   When exceeded, engine returns gracefully with
-    ///   `StopReason::MaxTurnsReached` instead of an error — partial work
+    ///   `StopReason::MaxTurns` instead of an error — partial work
     ///   is preserved and surfaced to the caller. Lower this for sub-
     ///   agents you want to cap (e.g. compactors at 1, memory-extractors
     ///   at 5).

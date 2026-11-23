@@ -142,13 +142,9 @@ pub enum StopReason {
     ToolUse,
     StopSequence,
     PauseTurn,
-    /// +**: agent hit `EngineConfig.max_api_calls_per_turn`. Not from
-    /// the Anthropic API — emitted by our engine when the configured per-
-    /// turn budget is exhausted. Caller (e.g. `AgentTool` for sub-agents)
-    /// should handle gracefully: return whatever partial work exists,
-    /// flagged but **not** is_error=true. Carries the same
-    /// `max_turns_reached` attachment + early-return semantics.
-    MaxTurnsReached,
+    /// The turn reached its model-call limit (`turn.max_model_calls`). Not
+    /// from the API: the engine ends the turn with it, keeping what was done.
+    MaxTurns,
     /// 兜底未来新增：避免反序列化失败
     #[serde(other)]
     Unknown,
@@ -255,12 +251,17 @@ mod tests {
             StopReason::ToolUse,
             StopReason::StopSequence,
             StopReason::PauseTurn,
-            StopReason::MaxTurnsReached,
+            StopReason::MaxTurns,
         ] {
             let json = serde_json::to_value(reason).unwrap();
             let back: StopReason = serde_json::from_value(json).unwrap();
             assert_eq!(reason, back);
         }
+        assert_eq!(
+            serde_json::to_value(StopReason::MaxTurns).unwrap(),
+            "max_turns",
+            "the name the engine ends a turn with"
+        );
     }
 
     #[test]

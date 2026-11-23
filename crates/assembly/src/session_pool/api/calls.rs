@@ -174,7 +174,7 @@ pub struct CallRequest {
     pub provider: String,
     pub model: String,
     pub max_tokens: u32,
-    pub thinking_mode: base::interface::model::ThinkingMode,
+    pub thinking: base::interface::model::ThinkingMode,
     pub effort: Option<base::interface::model::Effort>,
     /// The assembled system blocks, in order, each as it was sent.
     pub system: Vec<CallPart<SystemBlockView>>,

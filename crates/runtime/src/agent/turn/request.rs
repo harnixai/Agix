@@ -348,7 +348,7 @@ impl Agent {
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
                 max_tokens: self.output_cap(model, max_tokens),
-                thinking_mode: reasoning.thinking_mode,
+                thinking_mode: reasoning.thinking,
                 effort: reasoning.effort,
                 cache_edits: self.compaction.lend_cache_edits(),
                 origin,
@@ -397,7 +397,7 @@ impl Agent {
             params: base::interface::model::StreamParams {
                 model: model.to_string(),
                 max_tokens: self.output_cap(model, max_tokens),
-                thinking_mode: reasoning.thinking_mode,
+                thinking_mode: reasoning.thinking,
                 effort: reasoning.effort,
                 cache_edits,
                 origin,

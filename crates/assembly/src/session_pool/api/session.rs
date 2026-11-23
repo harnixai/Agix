@@ -240,7 +240,7 @@ pub struct ModelChoice {
     pub provider: Option<String>,
     /// The session's own; `None` follows the settings.
     pub effort: Option<base::interface::model::Effort>,
-    pub thinking_mode: Option<base::interface::model::ThinkingMode>,
+    pub thinking: Option<base::interface::model::ThinkingMode>,
     pub applies: Applies,
 }
 
@@ -249,12 +249,12 @@ pub struct ModelChoice {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReasoningChange {
     pub effort: Option<Option<base::interface::model::Effort>>,
-    pub thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
+    pub thinking: Option<Option<base::interface::model::ThinkingMode>>,
 }
 
 impl ReasoningChange {
     pub fn is_empty(&self) -> bool {
-        self.effort.is_none() && self.thinking_mode.is_none()
+        self.effort.is_none() && self.thinking.is_none()
     }
 }
 

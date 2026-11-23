@@ -266,11 +266,11 @@ async fn an_effort_set_on_one_session_is_what_its_next_call_carries_and_no_other
     let answer = daemon
         .ok(
             "session.setModel",
-            serde_json::json!({"session_id": chosen, "effort": "high", "thinking_mode": "off"}),
+            serde_json::json!({"session_id": chosen, "effort": "high", "thinking": "off"}),
         )
         .await;
     assert_eq!(answer["effort"], "high", "{answer}");
-    assert_eq!(answer["thinking_mode"], "off", "{answer}");
+    assert_eq!(answer["thinking"], "off", "{answer}");
     assert_eq!(answer["model"], serde_json::Value::Null, "{answer}");
 
     daemon.turn(&chosen, "MSG-CHOSEN").await;
@@ -300,7 +300,7 @@ async fn an_effort_set_on_one_session_is_what_its_next_call_carries_and_no_other
         got["reasoning"],
         serde_json::json!({
             "effort": "high", "effort_source": "session",
-            "thinking_mode": "off", "thinking_mode_source": "session",
+            "thinking": "off", "thinking_source": "session",
         })
     );
     let got = daemon
@@ -310,7 +310,7 @@ async fn an_effort_set_on_one_session_is_what_its_next_call_carries_and_no_other
         got["reasoning"],
         serde_json::json!({
             "effort": "low", "effort_source": "settings",
-            "thinking_mode": "auto", "thinking_mode_source": "settings",
+            "thinking": "auto", "thinking_source": "settings",
         })
     );
     let inspected = daemon
@@ -330,7 +330,7 @@ async fn an_effort_set_on_one_session_is_what_its_next_call_carries_and_no_other
         .await;
     assert_eq!(answer["effort"], serde_json::Value::Null, "{answer}");
     assert_eq!(
-        answer["thinking_mode"], "off",
+        answer["thinking"], "off",
         "only the named field is taken back"
     );
     daemon.turn(&chosen, "MSG-TAKEN-BACK").await;
@@ -360,14 +360,14 @@ async fn a_thinking_budget_under_the_minimum_is_invalid_params() {
     let refused = daemon
         .call(
             "session.setModel",
-            serde_json::json!({"session_id": session, "thinking_mode": {"on_budget": 1023}}),
+            serde_json::json!({"session_id": session, "thinking": {"on_budget": 1023}}),
         )
         .await;
     assert_eq!(refused["error"]["code"], -32602, "{refused}");
     daemon
         .ok(
             "session.setModel",
-            serde_json::json!({"session_id": session, "thinking_mode": {"on_budget": 1024}}),
+            serde_json::json!({"session_id": session, "thinking": {"on_budget": 1024}}),
         )
         .await;
 }
