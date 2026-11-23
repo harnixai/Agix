@@ -624,6 +624,22 @@ How layers combine:
   `recorder` wait for trust, and its `model.order` may name only providers
   defined above it.
 
+Where a value can come from, lowest priority first:
+
+| Entry | Set by | Reaches | Held to |
+|---|---|---|---|
+| built-in defaults | the engine | everything | — |
+| `~/.agix/settings.json` (+ `.local`) | the user | every project and scene | the only file layer that may set `app` |
+| `~/.agix/scenes/<scene>/settings.json` (+ `.local`) | the user | that scene | — |
+| `<project>/.agix/settings.json` (+ `.local`) | the project | that project | only tightens until the user trusts the project |
+| `cli` layer: `agixd --set`, `EmbedConfig.settings` | whoever starts the daemon | every project and scene | not gated by trust |
+| a host's in-memory changes (`HostOverrides`) | an embedder | the daemon's own pair as written; another pair gets only what the host added | — |
+| `session.create` `options.settings` | an RPC client | that session, its sub-agents and team members | session-scope keys only; only tightens unless `permissions.client_may_loosen` |
+| the managed file | the deployment | everything | beats all of the above, except that a stricter value beneath it stands for a key with a tighter/looser order; a file that does not read refuses every tool call |
+
+`session.create`'s `model`, `provider`, `effort`, `thinking` and `prompt` are not settings: they choose
+for the session's own conversation only, and its sub-agents do not inherit them.
+
 The blocks:
 
 | Block | What it holds |
@@ -702,6 +718,7 @@ recording proxy. How each layer works and how to run it:
 | Document | For |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the engine is put together — layers, modules, the turn, sessions and scenes, history, execution, concurrency, disk layout |
+| [docs/upgrading-0.4.md](docs/upgrading-0.4.md) | upgrading an application from 0.3.x: the settings renames, `options.settings`, the protocol and budget changes, `EmbedConfig` |
 | [docs/agix-sdk.md](docs/agix-sdk.md) | embedding the engine in your own Rust process: the facade crate, one pool, one turn, events, host tools, shutdown, and the `agix::embed` entry |
 | [docs/extension_points.md](docs/extension_points.md) | every seam: what you can replace, contribute to or intercept, what it costs, who may |
 | [docs/hooks.md](docs/hooks.md) | the hook protocol: configuration, the four backends, exit codes, timeouts, payloads, answers, and when each event fires |

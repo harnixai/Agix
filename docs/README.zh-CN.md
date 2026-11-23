@@ -483,10 +483,27 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 - `app` 只认全局层(和 `cli` 层);scene、项目层写了会被忽略并告警。
 - `cli` 层按全局层的规矩合并,不受项目信任限制;`config.reload` 重读的是它下面的文件。
   `config.get {tier:"cli"}` 和 `daemon.doctor` 把它报成 `cli`。
-- 部署的 managed 文件只许写 `permissions`(规则列表和 `disable_bypass`),优先于所有层。
+- 部署的 managed 文件能写任何键(外加 `permissions.disable_bypass`),它写的压过各层、`cli` 层、宿主在内存里改的值和会话自带的
+  `options.settings`;它的规则列表与各层并列,deny、ask 在 `bypassPermissions` 下照样生效。文件读不了就一个值都不套、拒绝所有工具调用。
 - 用户没信任的项目只能收紧(见工作区信任):`providers`、`hooks`、`mcp.servers` 条目、
   `prompt.instruction_files`、`prompt.override`、`sandbox.network.proxy`、`telemetry.otlp_endpoint`、
   `recorder` 都等信任之后才生效,它的 `model.order` 只能排在它之上已定义的 provider。
+
+值可能从哪来,优先级从低到高:
+
+| 入口 | 谁写 | 作用到 | 约束 |
+|---|---|---|---|
+| 内建默认 | 引擎 | 全部 | — |
+| `~/.agix/settings.json`(+ `.local`) | 用户 | 所有项目、所有场景 | 文件层里只有它能写 `app` |
+| `~/.agix/scenes/<scene>/settings.json`(+ `.local`) | 用户 | 这个场景 | — |
+| `<项目>/.agix/settings.json`(+ `.local`) | 项目 | 这个项目 | 用户信任之前只能收紧 |
+| `cli` 层:`agixd --set`、`EmbedConfig.settings` | 启动 daemon 的人 | 所有项目、所有场景 | 不受项目信任限制 |
+| 宿主在内存里改的值(`HostOverrides`) | 嵌入方 | 守护进程自己那一对照原样;别的对只带宿主新加的 | — |
+| `session.create` 的 `options.settings` | RPC 客户端 | 这个会话,连同它的子 Agent、团队成员 | 只收会话作用域的键;不开 `permissions.client_may_loosen` 只能收紧 |
+| managed 文件 | 部署方 | 全部 | 压过以上各层;有松紧次序的键下层更严时留下层的;读不了就拒绝所有工具调用 |
+
+`session.create` 的 `model`、`provider`、`effort`、`thinking`、`prompt` 不是设置:只决定这个会话自己的对话,
+子 Agent 不继承。
 
 各块:
 
@@ -563,6 +580,7 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | 文档 | 用途 |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 引擎怎么拼起来——分层、模块、一轮、会话与场景、历史、执行、并发、磁盘布局 |
+| [upgrading-0.4.md](upgrading-0.4.md) | 从 0.3.x 升级应用:设置改名表、`options.settings`、协议与预算的变化、`EmbedConfig` |
 | [agix-sdk.md](agix-sdk.md) | 把引擎嵌进自己的 Rust 进程:门面 crate、一个池、一轮、事件、宿主工具、关停,以及 `agix::embed` 入口 |
 | [extension_points.md](extension_points.md) | 每个接缝:能换什么、能往哪里贡献、能拦截什么,代价与谁能用 |
 | [hooks.md](hooks.md) | hook 协议:配置、四种后端、退出码、超时、payload、回答,每个事件在何时触发 |
