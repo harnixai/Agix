@@ -284,7 +284,7 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 | 层 | 上限 | 量的是什么 | 到顶时 |
 |---|---|---|---|
 | 一次调用 | `max_tokens`(`model.max_tokens`、模型的 `max_output`),压到链上最小的剩余 | 这次调用的输出 | 回复以 `max_tokens` 截断 |
-| 一轮 | `turn.token_budget`(`options.turn` 只能收紧) | 根轮与它的 delegate、旁路调用 | 这一轮 `budget_exceeded`,下一轮重新算 |
+| 一轮 | `turn.token_budget`(`options.settings.turn` 只能收紧) | 根轮与它的 delegate、旁路调用 | 这一轮 `budget_exceeded`,下一轮重新算 |
 | 目标 | 目标的 `token_budget` | 目标各轮(含 delegate、旁路) | 这一轮 `budget_exceeded`,目标转 `blocked`(`blocked_reason` 以 `token budget` 开头),同轮数用完 |
 | 会话 | `session.token_budget` | 会话从创建起所有的轮,跨重启 | 这一轮与之后每一轮 `budget_exceeded`,不调模型 |
 | provider 配额 | `providers[].quota` | 每个 provider 按日 / 周 / 月,跨会话 | 路由跳过它,换下一个;都用尽报 `providers_unavailable` |
