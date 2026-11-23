@@ -1,4 +1,4 @@
-//! Builds the [`TaskRouter`] a pair's settings describe: one live client per
+//! Builds the [`ProviderSet`] a pair's settings describe: one live client per
 //! `providers` entry, the order of `model.order`, the tiers of `model.tasks`,
 //! and the quota ledger under the state root.
 //!
@@ -11,14 +11,14 @@
 use base::interface::credentials::CredentialSource;
 use base::interface::model::Model;
 use base::interface::model_factory::ModelFactoryRegistry;
-use base::provider::{RoutedProvider, TaskRouter};
 use model::adapter::AnthropicModel;
 use model::client::{AnthropicClient, NoCredentialsClient};
+use model::routing::{ProviderSet, RoutedProvider};
 use settings::quota::FileQuotaLedger;
 use settings::Settings;
 use std::sync::Arc;
 
-/// Build the router `settings` describe. The provider the engine supplies
+/// Build the providers `settings` describe. The provider the engine supplies
 /// when the settings define none talks through `builtin`; the rest are built
 /// by the protocols this crate ships, with keys from `credentials`. Usage
 /// against quotas is kept under `quota_dir`.
@@ -33,7 +33,7 @@ pub fn build_task_router(
     credentials: &Arc<dyn CredentialSource>,
     layout: &base::paths::Layout,
     quota_dir: std::path::PathBuf,
-) -> Result<TaskRouter, String> {
+) -> Result<ProviderSet, String> {
     let factories = model::factory::builtin_registry()
         .with_credentials(credentials.clone())
         .with_network(Arc::new(
@@ -50,7 +50,7 @@ pub fn build_task_router_with(
     builtin: &Arc<dyn AnthropicClient>,
     factories: &ModelFactoryRegistry,
     quota_dir: std::path::PathBuf,
-) -> Result<TaskRouter, String> {
+) -> Result<ProviderSet, String> {
     Ok(routed(settings, builtin, factories)?.with_quota(Arc::new(FileQuotaLedger::new(quota_dir))))
 }
 
@@ -58,7 +58,7 @@ fn routed(
     settings: &Settings,
     builtin: &Arc<dyn AnthropicClient>,
     factories: &ModelFactoryRegistry,
-) -> Result<TaskRouter, String> {
+) -> Result<ProviderSet, String> {
     let order = settings.routing()?;
     let mut providers = Vec::with_capacity(settings.providers.len());
     for config in &settings.providers {
@@ -87,7 +87,7 @@ fn routed(
             client,
         });
     }
-    TaskRouter::new(
+    ProviderSet::new(
         providers,
         order.iter().map(|(p, _)| p.id.clone()).collect(),
         settings.model.tasks.clone(),

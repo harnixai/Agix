@@ -1,9 +1,9 @@
 use super::*;
 use base::interface::model::{ModelErrorKind, ModelEvent, StreamParams, ThinkingMode};
-use base::provider::{ApiType, ProviderConfig};
+use base::provider::{ApiType, ProviderConfig, TaskRouting};
 
 /// `Result::unwrap_err()` requires the `Ok` type to be `Debug`, which
-/// `TaskRouter` is not.
+/// `ProviderSet` is not.
 fn err_of<T>(r: Result<T, String>) -> String {
     match r {
         Ok(_) => panic!("expected Err"),
@@ -39,7 +39,7 @@ fn unused_quota_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("agix-model-router-tests-no-quota")
 }
 
-fn build(settings: &Settings) -> Result<TaskRouter, String> {
+fn build(settings: &Settings) -> Result<ProviderSet, String> {
     build_task_router_with(
         settings,
         &builtin(),
@@ -178,8 +178,10 @@ async fn a_provider_without_a_key_hands_its_calls_to_a_registered_protocol() {
         ]),
         &["keyless", "mine"],
     );
-    let router =
-        build_task_router_with(&settings, &builtin(), &factories, unused_quota_dir()).unwrap();
+    let router = build_task_router_with(&settings, &builtin(), &factories, unused_quota_dir())
+        .unwrap()
+        .session(None)
+        .unwrap();
     let mut stream = router
         .model_for("main")
         .stream(
@@ -192,13 +194,19 @@ async fn a_provider_without_a_key_hands_its_calls_to_a_registered_protocol() {
         .await
         .expect("the second provider takes the call");
     match stream.next().await {
+        Some(Ok(ModelEvent::Served { provider })) => assert_eq!(provider, "mine"),
+        other => panic!("{other:?}"),
+    }
+    match stream.next().await {
         Some(Ok(ModelEvent::TextDelta { text })) => assert_eq!(text, "fic-strong"),
         other => panic!("{other:?}"),
     }
 
     let alone = settings_with_only_keyless();
-    let router =
-        build_task_router_with(&alone, &builtin(), &factories, unused_quota_dir()).unwrap();
+    let router = build_task_router_with(&alone, &builtin(), &factories, unused_quota_dir())
+        .unwrap()
+        .session(None)
+        .unwrap();
     let Err(error) = router
         .model_for("main")
         .stream(
@@ -336,10 +344,11 @@ fn host_providers(first_quota: serde_json::Value) -> Settings {
     )
 }
 
+/// Reads a call through `model` to the end; the provider it says served it.
 async fn drain(
     model: &Arc<dyn Model>,
     messages: Vec<base::interface::model::ModelMessage>,
-) -> Result<(), base::interface::model::ModelError> {
+) -> Result<Option<String>, base::interface::model::ModelError> {
     use futures::StreamExt;
     let mut stream = model
         .stream(
@@ -350,10 +359,13 @@ async fn drain(
             tokio_util::sync::CancellationToken::new(),
         )
         .await?;
+    let mut served = None;
     while let Some(item) = stream.next().await {
-        item?;
+        if let ModelEvent::Served { provider } = item? {
+            served = Some(provider);
+        }
     }
-    Ok(())
+    Ok(served)
 }
 
 #[tokio::test]
@@ -370,7 +382,7 @@ async fn a_router_built_on_the_hosts_registry_keeps_the_quota_too() {
         quota.path().join("quota"),
     )
     .unwrap()
-    .for_session(None)
+    .session(None)
     .unwrap();
     let main = router.model_for("main");
     drain(&main, Vec::new()).await.unwrap();
@@ -399,11 +411,10 @@ async fn reasoning_from_a_client_that_stamps_none_does_not_follow_the_call_to_th
         quota.path().join("quota"),
     )
     .unwrap()
-    .for_session(None)
+    .session(None)
     .unwrap();
     let main = router.model_for("main");
-    drain(&main, Vec::new()).await.unwrap();
-    let produced_by = main.provenance();
+    let produced_by = drain(&main, Vec::new()).await.unwrap();
     assert_eq!(produced_by.as_deref(), Some("first"));
 
     let history = vec![ModelMessage {
@@ -420,7 +431,7 @@ async fn reasoning_from_a_client_that_stamps_none_does_not_follow_the_call_to_th
         ],
     }];
     *failing.lock().unwrap() = Some("first".into());
-    drain(&main, history).await.unwrap();
+    let served = drain(&main, history).await.unwrap();
     let received = received.lock().unwrap();
     let (provider, sent) = received.last().unwrap();
     assert_eq!(provider, "second");
@@ -431,5 +442,5 @@ async fn reasoning_from_a_client_that_stamps_none_does_not_follow_the_call_to_th
         }],
         "first's reasoning reached second"
     );
-    assert_eq!(main.provenance().as_deref(), Some("second"));
+    assert_eq!(served.as_deref(), Some("second"));
 }

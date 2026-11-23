@@ -182,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn a_side_call_is_spent_into_the_turn_open_when_it_is_made() {
         let open = OpenTurn::default();
-        let metered = Arc::new(base::provider::Metered(Arc::new(OneCall)));
+        let metered = Arc::new(crate::agent::turn::Metered(Arc::new(OneCall)));
         let model = SpentModel::into_open(metered, open.clone());
         call(&model).await;
 

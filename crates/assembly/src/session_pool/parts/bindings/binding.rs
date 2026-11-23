@@ -53,7 +53,7 @@ pub(in crate::session_pool) struct ProjectBinding {
     /// Where a session on this pair sends its model calls. `providers` and
     /// `model` are settings like any other, so they are decided by the pair: a
     /// project that configures its own provider is served by it.
-    pub(in crate::session_pool) task_router: Arc<base::provider::TaskRouter>,
+    pub(in crate::session_pool) task_router: Arc<model::routing::ProviderSet>,
     /// What building `task_router` had to say — reported by `config.reload`
     /// and `config.setProvider` for the pair they targeted.
     pub(in crate::session_pool) routing: RoutingReport,
@@ -80,7 +80,7 @@ impl ProjectBinding {
         plugins: &crate::plugins::Contributions,
         watch: Vec<crate::watch_hub::WatchToken>,
         client: &Arc<dyn AnthropicClient>,
-        last_good_router: Option<Arc<base::provider::TaskRouter>>,
+        last_good_router: Option<Arc<model::routing::ProviderSet>>,
         credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
     ) -> Self {
         let (task_router, routing) =
@@ -119,8 +119,8 @@ impl ProjectBinding {
         &mut self,
         model: Arc<dyn base::interface::model::Model>,
     ) {
-        self.task_router = Arc::new(base::provider::TaskRouter::single(
-            base::provider::RoutedProvider::new(
+        self.task_router = Arc::new(model::routing::ProviderSet::single(
+            model::routing::RoutedProvider::new(
                 base::provider::ProviderConfig::BUILTIN_ID,
                 base::provider::ResolvedTiers::all(&self.settings.values.model.model_name),
                 model,
@@ -148,7 +148,7 @@ impl ProjectBinding {
     ) -> Result<(), String> {
         let router = self
             .task_router
-            .for_session(provider)
+            .session(provider)
             .map_err(|e| format!("{e} for this session's project"))?;
         let head = &router.head().config;
         match model {
@@ -236,10 +236,10 @@ impl base::interface::model::Model for Unrouted {
 /// none is served by the provider the engine supplies.
 pub(in crate::session_pool) fn resolve_router(
     loaded: &LoadedSettings,
-    last_good: Option<Arc<base::provider::TaskRouter>>,
+    last_good: Option<Arc<model::routing::ProviderSet>>,
     client: &Arc<dyn AnthropicClient>,
     credentials: &Arc<dyn base::interface::credentials::CredentialSource>,
-) -> (Arc<base::provider::TaskRouter>, RoutingReport) {
+) -> (Arc<model::routing::ProviderSet>, RoutingReport) {
     let mut report = RoutingReport::default();
     if let Err(e) = loaded.values.routing() {
         report.error = Some(e);
@@ -267,8 +267,8 @@ pub(in crate::session_pool) fn resolve_router(
     if let Some(defined) = loaded.values.providers.iter().find(|p| !p.builtin) {
         let problem = problem.unwrap_or_default().to_string();
         warn!(error = %problem, "the providers do not route; refusing sessions on this pair");
-        let router = base::provider::TaskRouter::single(
-            base::provider::RoutedProvider::new(
+        let router = model::routing::ProviderSet::single(
+            model::routing::RoutedProvider::new(
                 &defined.id,
                 base::provider::ResolvedTiers::all(&loaded.default_model),
                 Arc::new(Unrouted(problem.clone())),
@@ -280,8 +280,8 @@ pub(in crate::session_pool) fn resolve_router(
     }
     warn!(error = ?problem, "the providers do not route; serving the built-in provider");
     let builtin = base::provider::ProviderConfig::builtin(&loaded.default_model);
-    let router = base::provider::TaskRouter::single(
-        base::provider::RoutedProvider {
+    let router = model::routing::ProviderSet::single(
+        model::routing::RoutedProvider {
             tiers: base::provider::ResolvedTiers::all(&loaded.default_model),
             config: builtin,
             client: Arc::new(model::adapter::AnthropicModel::new(client.clone())),

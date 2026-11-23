@@ -20,6 +20,7 @@ use crate::session_pool::pool_telemetry::{otel_sink, recordings_root, session_cl
 use crate::session_pool::{CreateError, SessionCtx, SessionCustomizer};
 use base::interface::permission::PermissionPolicy;
 use base::interface::scene::SceneSpec;
+use base::provider::TaskRouting;
 use base::recorder::{Divergence, RecorderConfig, RecorderMode};
 use runtime::agent::{Agent, Builder, EventReceiver, InputSender};
 use settings::LoadedSettings;
@@ -368,7 +369,7 @@ fn models(
 ) -> Result<
     (
         Arc<dyn base::interface::model::Model>,
-        Arc<base::provider::TaskRouter>,
+        Arc<dyn base::provider::TaskRouting>,
         Option<String>,
         Option<Arc<dyn base::interface::environment::Environment>>,
     ),
@@ -383,24 +384,15 @@ fn models(
     if let Some(refusal) = &binding.routing.refusal {
         return Err(CreateError::Unroutable(refusal.clone()));
     }
-    let router = binding
-        .task_router
-        .for_session(spec.provider().as_deref())?;
-    let model_name = match spec.model() {
-        Some(name) => router.resolve_model(&name),
-        None => router
-            .model_name_for(base::provider::TaskTiers::MAIN)
-            .unwrap_or_else(|| base_settings.values.model.model_name.clone()),
-    };
     // Every provider's client is wrapped, sharing one `Recorder`, so
     // sub-agents, compaction and memory extraction — everything reached
     // through the router — record into the same recording as the
     // conversation.
-    let router = match recorder_config {
-        None => router,
+    let providers = match recorder_config {
+        None => (*binding.task_router).clone(),
         Some(config) => {
             let shared = spec.recorder.clone().unwrap_or_default();
-            router.map_models(|provider_id, inner| {
+            binding.task_router.map_models(|provider_id, inner| {
                 Arc::new(
                     RecorderModel::shared(
                         inner,
@@ -412,6 +404,13 @@ fn models(
                 ) as Arc<dyn base::interface::model::Model>
             })
         }
+    };
+    let router = providers.session(spec.provider().as_deref())?;
+    let model_name = match spec.model() {
+        Some(name) => router.resolve_model(&name),
+        None => router
+            .model_name_for(base::provider::TaskTiers::MAIN)
+            .unwrap_or_else(|| base_settings.values.model.model_name.clone()),
     };
     let model = router.model_for(base::provider::TaskTiers::MAIN);
     Ok((model, Arc::new(router), Some(model_name), clock))

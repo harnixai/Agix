@@ -1,12 +1,12 @@
 //! Model providers as `settings.json` describes them — the `providers` list,
-//! each entry's vendor, protocol, models, tiers and quota — and the routing
-//! built over them ([`TaskRouter`]): which provider a call goes to, falling
-//! back along `model.order` when one is unavailable.
+//! each entry's vendor, protocol, models, tiers and quota — the contract a
+//! session's code routes its calls through ([`TaskRouting`]), and where
+//! quota usage is kept ([`QuotaLedger`]).
 //!
-//! Lives in `core` so `Settings` can carry these types directly. Building a
-//! live client from a [`ProviderConfig`] needs a concrete protocol and is the
-//! assembly's job (`assembly::model_router`); the router only holds the
-//! clients it is given.
+//! Lives in `base` so `Settings` can carry these types directly. The router
+//! that falls back along `model.order` is `model::routing`; building a live
+//! client from a [`ProviderConfig`] needs a concrete protocol and is the
+//! assembly's job (`assembly::model_router`).
 
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +16,7 @@ mod quota;
 mod routing;
 
 pub use quota::{PeriodUsage, QuotaLedger, QuotaStatus};
-pub use routing::{Metered, ProviderSwitch, RouteObserver, RoutedProvider, TaskRouter};
+pub use routing::{ProviderSwitch, RouteObserver, TaskRouting};
 
 /// The wire protocol a provider speaks.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]

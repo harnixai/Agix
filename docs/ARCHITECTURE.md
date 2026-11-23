@@ -110,7 +110,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `core`(包名 `base`) | 契约 | trait、共享数据、纯判定,以及 fs/clock/path/text 小工具;消息与提示词类型、扩展点清单、`SkillCatalog` / `McpServers` 等内核面向模块的接口 |
 | `platform` | 本机 | 执行层四个契约的本机实现(`LocalProcess`、`LocalFileSystem`、`LocalNetwork`、`PlatformSandbox`)与 `local_providers*`;进程组台账与孤儿收尾、崩溃钩子、进程身份 |
 | `runtime` | 内核 | 轮次循环、流式解析、工具调度、`Module` / `SessionContext` |
-| `model` | 内核 | 模型协议适配(Anthropic Messages / OpenAI Chat Completions),重试与退避 |
+| `model` | 内核 | 模型协议适配(Anthropic Messages / OpenAI Chat Completions),重试与退避;provider 路由(`routing`:沿 `model.order` 回退、冷却、配额记账、每次调用计一次量),runtime 经 `base::provider::TaskRouting` 用它 |
 | `tools` | 内核 | 内建工具;`web`、`structured-output` 两组是 feature |
 | `scene` | 内核 | 内建场景、`SceneRegistry`、声明式场景(§3.7) |
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
@@ -126,7 +126,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `js-lib` | 契约 | 每个内嵌 QuickJS 运行时都装的全局 `agix`(`docs/agix_js.md`):YAML、glob、路径、JSON Schema、SHA-256、UUID、参数解析;纯计算,不碰 I/O;只被 `script-host`(`quickjs` feature)与 `ptc` 依赖 |
 | `ptc` | 内核 | `RunCode`:模型写的一次性程序,与 `RunExt`:插件包声明的命令(`docs/runext.md`),在同一套内嵌 QuickJS 运行时里跑,经 `ToolContext::dispatch` 调本会话的工具(`docs/ptc.md`);`ptc` feature,与脚本载体用同一套 QuickJS,两者各自独立开关 |
 | `packages` | 模块 | 插件包:manifest、获取、缓存、披露;包里的 MCP、脚本、场景、agent 类型 |
-| `assembly` | 装配 | 会话池、配置加载、provider 路由、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |
+| `assembly` | 装配 | 会话池、配置加载、按设置建 provider 集、自检、模块清单,以及其上的 JSON-RPC 服务、实例发现与嵌入入口 `embed` |
 | `agix` | 外壳 | 嵌入门面:按主题再导出嵌入方用到的类型与函数,自身不含逻辑(`tests/guards/tests/facade.rs`);用法见 `agix-sdk.md` |
 | `daemon` | 外壳 | `agixd` 二进制:参数、信号、日志,建在 `embed` 上;库部分按旧路径重新导出 assembly |
 
@@ -260,8 +260,8 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 它们决定的是还走不走下一步。要在工具跑之前拦,用权限、`PreToolUse` hook 或
 `ToolMiddleware`。
 
-**用量只在一处计,预算是一条链。** 一次调用的用量由路由它的那一层计一次:`TaskRouter` 的每次调用
-(没有路由的会话由 `Builder` 在根上套的 `provider::Metered`)在回复流的 `EndTurn` 处、或调用中途断开 /
+**用量只在一处计,预算是一条链。** 一次调用的用量由路由它的那一层计一次:`model::routing` 的每次调用
+(没有路由的会话由 `Builder` 在根上套的 `Metered`)经 `UsageTap::metered` 在回复流的 `EndTurn` 处、或调用中途断开 /
 失败 / 被丢弃时按 client 已经报的,同时记进 provider 配额和这次调用的 `UsageTap` 所记的那个
 `SpendNode`(`base::interface::budget_policy`)。调用方只说记到哪:这一轮的主循环在发出前把 tap 指向
 这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮,
@@ -688,12 +688,18 @@ provider,一个 provider 也没定义时引擎自己提供 `anthropic`(密钥取
 三档都是 `--model`)。`model.tasks` 给每类调用(`main`、`subagent`、`compact`、`memory`、`title`、`web_search`、
 `web_fetch`)指定要的档位;`web_fetch` 缺省不设,`WebFetch` 不用模型。
 
-`base::provider::TaskRouter` 在每次模型调用时从 `order` 的头开始找可用的 provider,所以前面的恢复了就自动切回去。
+路由在 `model::routing`:`ProviderSet` 是一个 (项目, 场景) 的 provider、顺序、档位,连同它们的健康(冷却期)
+和配额记账,绑定建一个、它上面的会话共用;`SessionRouter` 是一个会话的视图——它自己的顺序(会话指定的
+provider 排第一)和上一次调用去了哪(只用来判断要不要报 `provider_switched`)。runtime 和模块只认 `base` 里的
+`TaskRouting`(`model_for`、`model_name_for`、`resolve_model`、`observe`),不依赖 `model`。
+每次模型调用从 `order` 的头开始找可用的 provider,所以前面的恢复了就自动切回去。
 一个 provider 配额用尽、没有凭据、凭据被拒(401 / 403)、连不上或超时、5xx / 529 / 429 在客户端重试用尽后,
 或回 402 时交给下一个;连接类故障记一个冷却期,期间不再试它。400 一类是请求本身的问题,不换别家。只有一个
 provider 时报它自己的错误种类;`order` 里的 provider 都不行时这一轮以 `providers_unavailable` 失败,
 `message` 逐个列出原因。回退发生在调用边界:切换时去掉上一家私有的推理内容(thinking 签名、
-`reasoning_content`),会话收到一条 `session.event` 的 `provider_switched`,遥测记同名事件。子 Agent、压缩、
+`reasoning_content`),会话收到一条 `session.event` 的 `provider_switched`,遥测记同名事件。哪家接了一次调用由这次
+调用自己的流说(第一个事件 `ModelEvent::Served`),推理内容按它打标;同一个模型上同时在跑的几次调用(主循环和后台
+prompt hook)互不相干。子 Agent、压缩、
 记忆、标题、搜索走同一个路由;会话或 `session.setModel` 指定的模型 id 落到别家时,先查它在原 provider 里是哪一档,
 再取新 provider 里同一档的模型。
 

@@ -7,7 +7,8 @@ use base::interface::model::{
     Usage,
 };
 use base::prompt::PromptBlock;
-use base::provider::{ApiType, ResolvedTiers, RoutedProvider, TaskRouter, TaskTiers};
+use base::provider::{ApiType, ResolvedTiers, TaskTiers};
+use model::routing::{ProviderSet, RoutedProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Answers every call: a naming call with `title`, anything else with a
@@ -105,7 +106,7 @@ async fn bind(
     project: &Path,
     scene: &str,
     model: Arc<dyn Model>,
-    task_router: Option<TaskRouter>,
+    task_router: Option<ProviderSet>,
 ) {
     let mut settings = (*pool.bindings.pool_settings().await).clone();
     settings.values.memory.enabled = false;
@@ -250,7 +251,7 @@ async fn a_session_is_named_through_its_own_projects_title_route() {
     std::fs::create_dir_all(&project).unwrap();
 
     let model = Answering::new("发布清单");
-    let router = TaskRouter::single(
+    let router = ProviderSet::single(
         RoutedProvider::new(
             "p",
             ResolvedTiers {

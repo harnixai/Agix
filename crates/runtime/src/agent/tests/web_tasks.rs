@@ -94,8 +94,8 @@ async fn web_search_goes_through_the_sessions_own_model() {
 async fn a_router_sends_web_search_to_its_provider() {
     let (session, session_asked) = search_spy("https://from.session.example");
     let (searcher, searcher_asked) = search_spy("https://from.searcher.example");
-    let router = base::provider::TaskRouter::new(
-        vec![base::provider::RoutedProvider::new(
+    let router = model::routing::ProviderSet::new(
+        vec![model::routing::RoutedProvider::new(
             "searcher",
             base::provider::ResolvedTiers {
                 strong: "main-model".into(),
@@ -107,6 +107,8 @@ async fn a_router_sends_web_search_to_its_provider() {
         Vec::new(),
         base::provider::TaskTiers::default(),
     )
+    .unwrap()
+    .session(None)
     .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(
@@ -232,8 +234,8 @@ pub(super) fn templated() -> Arc<InMemoryToolRegistry> {
 async fn a_web_fetch_tier_extracts_pages_on_the_routed_model() {
     let (session, session_asked) = extract_spy("from the session");
     let (fetcher, fetcher_asked) = extract_spy("from the fetcher");
-    let router = base::provider::TaskRouter::new(
-        vec![base::provider::RoutedProvider::new(
+    let router = model::routing::ProviderSet::new(
+        vec![model::routing::RoutedProvider::new(
             "fetcher",
             base::provider::ResolvedTiers::all("fetch-model"),
             fetcher as Arc<dyn Model>,
@@ -244,6 +246,8 @@ async fn a_web_fetch_tier_extracts_pages_on_the_routed_model() {
             ..Default::default()
         },
     )
+    .unwrap()
+    .session(None)
     .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(
@@ -285,8 +289,8 @@ async fn a_web_fetch_tier_extracts_pages_on_the_routed_model() {
 async fn without_a_web_fetch_tier_no_model_reads_the_page() {
     let (session, session_asked) = extract_spy("from the session");
     let (other, other_asked) = extract_spy("from another task's model");
-    let router = base::provider::TaskRouter::new(
-        vec![base::provider::RoutedProvider::new(
+    let router = model::routing::ProviderSet::new(
+        vec![model::routing::RoutedProvider::new(
             "other",
             base::provider::ResolvedTiers::all("search-model"),
             other as Arc<dyn Model>,
@@ -294,6 +298,8 @@ async fn without_a_web_fetch_tier_no_model_reads_the_page() {
         Vec::new(),
         base::provider::TaskTiers::default(),
     )
+    .unwrap()
+    .session(None)
     .unwrap();
     let (agent, _rx, _tx) = Builder::new()
         .scene(Arc::new(scene::code::spec(

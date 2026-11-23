@@ -111,7 +111,7 @@ pub(in crate::session_pool) struct BindingCache {
     /// The last router each pair was successfully served by, kept across
     /// invalidation so a provider config that stops resolving — or stops
     /// producing a buildable client — leaves working routing in place.
-    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<base::provider::TaskRouter>>>,
+    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<model::routing::ProviderSet>>>,
     watch: Watching,
     /// The host's skill directories of every session in memory.
     host_dirs: HostDirTable,

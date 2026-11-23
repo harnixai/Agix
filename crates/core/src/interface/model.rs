@@ -8,6 +8,9 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
+mod metering;
+pub use metering::OnSpent;
+
 /// Model thinking/reasoning mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -39,12 +42,12 @@ pub trait Model: Send + Sync {
     /// Which API protocol this model client uses.
     fn api_type(&self) -> ApiType;
 
-    /// The provider id this client was built for — for one that routes
-    /// between providers, the one its last call went to — stamped on the
-    /// reasoning it produces so a later request to a different provider does
-    /// not echo it back. `None` for a client built outside a provider route;
-    /// reasoning from such a client carries no provenance and is sent
-    /// wherever it goes.
+    /// The provider id this client was built for, stamped on the reasoning
+    /// it produces so a later request to a different provider does not echo
+    /// it back. A client that routes between providers has none of its own:
+    /// each of its calls names its provider with [`ModelEvent::Served`].
+    /// `None` for a client built outside a provider route; reasoning from
+    /// such a client carries no provenance and is sent wherever it goes.
     fn provenance(&self) -> Option<String> {
         None
     }
@@ -93,9 +96,9 @@ pub struct StreamParams {
 /// to. [`ModelEvent::EndTurn`]'s usage supersedes what was reported.
 /// Reporting to a tap nobody made does nothing.
 ///
-/// The charge is counted once, by whoever routes the call
-/// (`provider::TaskRouter`, or `provider::Metered` where nothing routes):
-/// everything above the client only says where it goes.
+/// The charge is counted once, by whoever routes the call, through
+/// [`UsageTap::metered`]: everything above the client only says where it
+/// goes.
 #[derive(Clone, Default)]
 pub struct UsageTap {
     reported: Option<Arc<Mutex<Option<Usage>>>>,
@@ -476,6 +479,11 @@ pub type ModelStream =
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelEvent {
+    /// The provider this call went to, first in the stream of a call that
+    /// was routed; the call's reasoning is stamped with it.
+    Served {
+        provider: String,
+    },
     TextDelta {
         text: String,
     },

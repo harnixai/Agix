@@ -124,15 +124,16 @@ pub struct ToolExec {
     /// something stricter; it cannot loosen the turn's, because a child token
     /// fires when its parent does no matter what.
     cancel: CancellationToken,
-    /// Ends the timers `with_timeout` started once the call is over.
-    deadlines: Vec<tokio_util::sync::DropGuard>,
+    /// The earliest deadline a wrapper set; `cancel` fires there while the
+    /// call runs.
+    deadline: Option<tokio::time::Instant>,
 }
 
 impl ToolExec {
     pub fn new(cancel: CancellationToken) -> Self {
         Self {
             cancel,
-            deadlines: Vec::new(),
+            deadline: None,
         }
     }
 
@@ -147,16 +148,25 @@ impl ToolExec {
     /// later, so a wrapper cannot extend a call past the point the session
     /// gave up on it.
     pub fn with_timeout(&mut self, after: Duration) {
-        let child = self.cancel.child_token();
-        let fires = child.clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = tokio::time::sleep(after) => fires.cancel(),
-                _ = fires.cancelled() => {}
+        let at = tokio::time::Instant::now() + after;
+        self.deadline = Some(self.deadline.map_or(at, |earlier| earlier.min(at)));
+        self.cancel = self.cancel.child_token();
+    }
+
+    /// `call` under this signal, which fires at the deadline if the call is
+    /// still running then.
+    async fn run<F: Future<Output = ToolOutcome>>(&self, call: F) -> ToolOutcome {
+        let Some(deadline) = self.deadline else {
+            return call.await;
+        };
+        tokio::pin!(call);
+        tokio::select! {
+            outcome = &mut call => outcome,
+            _ = tokio::time::sleep_until(deadline) => {
+                self.cancel.cancel();
+                call.await
             }
-        });
-        self.deadlines.push(child.clone().drop_guard());
-        self.cancel = child;
+        }
     }
 }
 
@@ -185,7 +195,7 @@ impl<'a> NextDispatch<'a> {
                 };
                 next.around(call, exec, inner).await
             }
-            None => (self.terminal)(exec.cancel.clone()).await,
+            None => exec.run((self.terminal)(exec.cancel.clone())).await,
         }
     }
 }

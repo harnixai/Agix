@@ -105,7 +105,7 @@ impl Builder {
         events: &crate::agent::messages::EventSender,
         telemetry: &telemetry::TelemetryHandle,
         session_id: &str,
-    ) -> Option<Arc<base::provider::TaskRouter>> {
+    ) -> Option<Arc<dyn base::provider::TaskRouting>> {
         let router = self.host.task_router.take()?;
         router.observe(Arc::new(crate::agent::instruments::SwitchReporter {
             events: events.clone(),

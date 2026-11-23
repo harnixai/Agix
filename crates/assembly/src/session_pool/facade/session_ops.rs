@@ -301,8 +301,8 @@ impl SessionPool {
                     let provider = spec.as_ref().and_then(SessionSpec::provider);
                     let resolved = binding
                         .task_router
-                        .for_session(provider.as_deref())
-                        .map(|router| router.resolve_model(&name));
+                        .session(provider.as_deref())
+                        .map(|router| base::provider::TaskRouting::resolve_model(&router, &name));
                     Some(resolved.unwrap_or(name))
                 }
                 other => other,

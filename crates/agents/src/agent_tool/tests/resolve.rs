@@ -68,8 +68,8 @@ fn model_for_subagent_uses_parent_model_when_no_router_configured() {
 }
 
 fn tiered_parent(strong: &str, balanced: &str, fast: &str) -> AgentTool {
-    let router = base::provider::TaskRouter::new(
-        vec![base::provider::RoutedProvider::new(
+    let router = model::routing::ProviderSet::new(
+        vec![model::routing::RoutedProvider::new(
             "p",
             base::provider::ResolvedTiers {
                 strong: strong.into(),
@@ -81,6 +81,8 @@ fn tiered_parent(strong: &str, balanced: &str, fast: &str) -> AgentTool {
         Vec::new(),
         base::provider::TaskTiers::default(),
     )
+    .unwrap()
+    .session(None)
     .unwrap();
     TestParent {
         host: Some(runtime::agent::HostContracts {

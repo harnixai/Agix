@@ -11,8 +11,9 @@
 //! three to the crates that ask for them.
 //!
 //! base's production code only shrinks (a line ratchet), reaches the filesystem
-//! only in the files listed in `BASE_FS`, and calls no model: I/O and model
-//! calls belong to the crate that owns the decision.
+//! only in the files listed in `BASE_FS`, calls no model and starts no thread
+//! or task: I/O, model calls and the machinery that runs a contract belong to
+//! the crate that owns the decision.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,14 +26,14 @@ const BASE_TOKIO_FEATURES: &[(&str, &str)] = &[
     ("io-util", "the workspace default"),
     ("macros", "select! and the tests"),
     ("parking_lot", "the workspace default"),
-    ("rt", "spawn, spawn_blocking and the runtime handle"),
+    ("rt", "the workspace default"),
     ("rt-multi-thread", "the workspace default"),
     ("sync", "channels and locks"),
     ("time", "timeouts"),
 ];
 
 const BASE_MAY_DEPEND_ON: &[(&str, &str)] = &[
-    ("tokio", "the dir lock, timers and the runtime handle"),
+    ("tokio", "the dir lock and timers"),
     ("tokio-util", "CancellationToken in the contracts"),
     ("futures", "the streaming contracts"),
     ("async-trait", "the contracts"),
@@ -159,12 +160,11 @@ const BASE_FS: &[(&str, &str)] = &[
 ];
 
 /// Production files of base that call a model, each with why.
-const BASE_MODEL_CALLS: &[(&str, &str)] = &[(
-    "crates/core/src/provider/routing.rs",
-    "the task router is the `Model` every routed call goes through: it passes the call to a \
-     provider's client and on to the next when one cannot take it; runtime and agents reach it \
-     through `base`, so it cannot live in `model`",
-)];
+const BASE_MODEL_CALLS: &[(&str, &str)] = &[];
+
+/// Production calls in base that start a thread or a task or reach for the
+/// runtime handle, each with why.
+const MAY_START_THREADS: &[(&str, &str)] = &[];
 
 const FS_METHODS: &[&str] = &[
     "canonicalize",
@@ -247,5 +247,55 @@ fn base_calls_no_model() {
         BASE_MODEL_CALLS,
         "a model call is an implementation: put it in the crate that owns the decision (memory's \
          select_memories_from is the example), or list the file with why",
+    );
+}
+
+/// The calls in `f` that start a thread or a task or reach for the runtime
+/// handle, named as written.
+fn thread_starts(f: &SourceFile) -> Vec<(String, Hit)> {
+    const BANNED: &[&str] = &[
+        "spawn_blocking",
+        "try_current",
+        "thread::spawn",
+        "tokio::spawn",
+    ];
+    scan::calls(f, View::Prod)
+        .into_iter()
+        .filter_map(|call| {
+            let name = match &call.callee {
+                Callee::Path(path) => path.join("::"),
+                Callee::Method(method) => method.clone(),
+            };
+            BANNED
+                .iter()
+                .any(|banned| name.ends_with(banned))
+                .then_some((name, call.hit))
+        })
+        .collect()
+}
+
+#[test]
+fn base_starts_no_threads() {
+    let router_quota = ws()
+        .production()
+        .filter(|f| f.rel == "crates/model/src/routing/quota.rs")
+        .map(|f| thread_starts(f).len())
+        .sum();
+    allow::non_vacuous("base::MAY_START_THREADS", router_quota, 3);
+    let found = par_flat_map(base_files(), |f| {
+        thread_starts(f)
+            .into_iter()
+            .map(|(name, hit)| Finding {
+                key: format!("{} {name}", f.rel),
+                hit,
+            })
+            .collect()
+    });
+    allow::check(
+        "base::MAY_START_THREADS",
+        found,
+        MAY_START_THREADS,
+        "base holds contracts, shared data and judgements: the machinery that runs them \
+         (threads, a runtime handle) goes to the crate that implements the contract",
     );
 }

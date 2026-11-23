@@ -26,7 +26,7 @@ pub struct HostContracts {
     pub permission: PermissionSet,
     pub history_store: Option<Arc<dyn history::store::HistoryStore>>,
     pub telemetry: TelemetryHandle,
-    pub task_router: Option<Arc<base::provider::TaskRouter>>,
+    pub task_router: Option<Arc<dyn base::provider::TaskRouting>>,
     pub scene_registry: Option<Arc<scene::SceneRegistry>>,
     pub memory_store: Arc<MemoryStore>,
     /// `None` is the engine's own retriever.

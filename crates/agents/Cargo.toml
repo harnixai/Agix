@@ -31,6 +31,7 @@ futures       = { workspace = true }
 
 [dev-dependencies]
 session-state = { workspace = true, features = ["testing"] }
+model    = { workspace = true }
 permissions = { workspace = true }
 platform = { workspace = true }
 skills   = { workspace = true }

@@ -705,13 +705,13 @@ impl Builder {
     }
 
     /// Multi-provider per-task-type model routing (see
-    /// `base::provider::TaskRouter`). When set, forwarded to the
+    /// `base::provider::TaskRouting`). When set, forwarded to the
     /// `AgentTool` this session's engine builds so its sub-agent spawn
     /// points (`Delegator::delegate`, resume) route through
-    /// `TaskRouter::model_for("subagent")` instead of always inheriting
+    /// `TaskRouting::model_for("subagent")` instead of always inheriting
     /// this session's own `model`. Unset (the default) preserves prior
     /// behavior exactly — sub-agents always use the parent's model.
-    pub fn task_router(mut self, r: Arc<base::provider::TaskRouter>) -> Self {
+    pub fn task_router(mut self, r: Arc<dyn base::provider::TaskRouting>) -> Self {
         self.host.task_router = Some(r);
         self
     }

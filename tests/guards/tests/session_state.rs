@@ -417,11 +417,7 @@ fn nothing_carries_state_from_one_engine_to_the_next() {
 /// Production code outside the model crate that makes a `ModelErrorKind` or
 /// reads a provider's words for "too long". Comparing against a kind reads
 /// it; anything else makes one.
-const CLASSIFIED_AT: &[(&str, &str)] = &[(
-    "crates/core/src/provider/routing.rs",
-    "`providers_unavailable` is the router's own verdict that no provider in the order took \
-     the call; no provider said it, so there is nothing for the model crate to classify",
-)];
+const CLASSIFIED_AT: &[(&str, &str)] = &[];
 
 /// Where a model error is classified: the model crate, and the constructors
 /// next to the type.

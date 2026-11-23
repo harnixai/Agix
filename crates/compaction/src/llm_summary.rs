@@ -130,7 +130,7 @@ Output only the summary. No preamble, no closing remarks.";
 /// Wraps a [`Model`] with the summarization prompt, output cap and timeout.
 ///
 /// The model is supplied by the caller, which routes it through the task-model
-/// router (`TaskRouter::model_for("compact")`) so summarization can run on a
+/// router (`TaskRouting::model_for("compact")`) so summarization can run on a
 /// cheaper/faster model than the conversation — the same mechanism post-turn
 /// memory extraction uses for `"memory"`.
 pub struct LlmSummarizer {

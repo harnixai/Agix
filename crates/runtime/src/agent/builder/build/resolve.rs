@@ -18,7 +18,7 @@ impl Builder {
             .take()
             .ok_or_else(|| EngineError::Internal("model required".into()))?;
         Ok(match (&self.host.task_router, self.spec.agent_depth) {
-            (None, 0) => Arc::new(base::provider::Metered(model)),
+            (None, 0) => Arc::new(crate::agent::turn::Metered(model)),
             _ => model,
         })
     }

@@ -12,7 +12,7 @@ pub(crate) struct ModelRoute {
     model: Arc<dyn base::interface::model::Model>,
     /// Kept here, not only forwarded to `AgentTool`, so the turn's own
     /// background calls (memory extraction, web tasks) route the same way.
-    task_router: Option<Arc<base::provider::TaskRouter>>,
+    task_router: Option<Arc<dyn base::provider::TaskRouting>>,
     recovery_policy: Arc<dyn base::interface::recovery_policy::RecoveryPolicy>,
     model_interceptors: Arc<Vec<Arc<dyn base::interface::model_interceptor::ModelInterceptor>>>,
 }
@@ -20,7 +20,7 @@ pub(crate) struct ModelRoute {
 impl ModelRoute {
     pub(crate) fn new(
         model: Arc<dyn base::interface::model::Model>,
-        task_router: Option<Arc<base::provider::TaskRouter>>,
+        task_router: Option<Arc<dyn base::provider::TaskRouting>>,
         recovery_policy: Arc<dyn base::interface::recovery_policy::RecoveryPolicy>,
         model_interceptors: Vec<Arc<dyn base::interface::model_interceptor::ModelInterceptor>>,
     ) -> Self {

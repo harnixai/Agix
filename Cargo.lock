@@ -18,6 +18,7 @@ dependencies = [
  "futures",
  "history",
  "hooks",
+ "model",
  "notify",
  "permissions",
  "platform",

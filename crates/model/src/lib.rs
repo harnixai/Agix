@@ -13,6 +13,10 @@
 //! `ModelMessage` inputs into their own request format and normalize the
 //! response back into a single `ModelEvent` stream, so nothing above this
 //! crate needs to know which protocol is in use.
+//!
+//! Over those clients, [`routing`] sends each call to the first provider of
+//! `model.order` that can take it and meters it there, once; runtime reaches
+//! it only as [`base::provider::TaskRouting`].
 
 pub mod adapter;
 mod cancel;
@@ -25,6 +29,7 @@ pub mod mock;
 pub mod openai;
 pub mod parser;
 mod retry_after;
+pub mod routing;
 pub mod stream;
 pub mod tokens;
 pub mod types;

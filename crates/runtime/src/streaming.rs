@@ -97,6 +97,9 @@ impl StreamFailure {
 /// A reply that fails before it asked for a tool is dropped whole (see
 /// [`StreamFailure::resendable`]); one that fails after is written with its
 /// results, since those tools have run.
+///
+/// Reasoning is stamped with `provenance`, the client's own provider, unless
+/// the stream names the provider that served it ([`ModelEvent::Served`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_stream<F, Fut, G>(
     stream: ModelStream,
@@ -141,7 +144,7 @@ struct StreamState<'a, F, G> {
     turn_id: String,
     execute_tool: F,
     is_concurrency_safe: G,
-    provenance: Option<&'a str>,
+    provenance: Option<String>,
     ended: Option<(String, Usage)>,
     has_tool_uses: bool,
     tool_calls: u32,
@@ -190,7 +193,7 @@ where
             turn_id,
             execute_tool,
             is_concurrency_safe,
-            provenance,
+            provenance: provenance.map(str::to_owned),
             ended: None,
             has_tool_uses: false,
             tool_calls: 0,
@@ -263,12 +266,13 @@ where
 
     async fn on_event(&mut self, event: ModelEvent) {
         match event {
+            ModelEvent::Served { provider } => self.provenance = Some(provider),
             ModelEvent::TextDelta { text } => {
                 close_thinking(
                     &mut self.pending_thinking,
                     &mut self.reply,
                     None,
-                    self.provenance,
+                    self.provenance.as_deref(),
                 );
                 self.pending_text.push_str(&text);
                 let _ = self.event_tx.send(AgentEvent::TextDelta {
@@ -289,7 +293,7 @@ where
                     &mut self.pending_thinking,
                     &mut self.reply,
                     Some(signature),
-                    self.provenance,
+                    self.provenance.as_deref(),
                 );
             }
             ModelEvent::RedactedThinking { data } => {
@@ -298,11 +302,11 @@ where
                     &mut self.pending_thinking,
                     &mut self.reply,
                     None,
-                    self.provenance,
+                    self.provenance.as_deref(),
                 );
                 self.reply.push(ModelContentBlock::RedactedThinking {
                     data,
-                    provider: self.provenance.map(str::to_owned),
+                    provider: self.provenance.clone(),
                 });
             }
             ModelEvent::ToolUseStart { id, name } => {
@@ -341,7 +345,7 @@ where
             &mut self.pending_thinking,
             &mut self.reply,
             None,
-            self.provenance,
+            self.provenance.as_deref(),
         );
         close_text(&mut self.pending_text, &mut self.reply);
         self.has_tool_uses = true;
@@ -460,7 +464,7 @@ where
             &mut self.pending_thinking,
             &mut self.reply,
             None,
-            self.provenance,
+            self.provenance.as_deref(),
         );
         close_text(&mut self.pending_text, &mut self.reply);
         self.has_tool_uses = true;
@@ -522,7 +526,7 @@ where
             &mut self.pending_thinking,
             &mut self.reply,
             None,
-            self.provenance,
+            self.provenance.as_deref(),
         );
         close_text(&mut self.pending_text, &mut self.reply);
         drain_batch(
@@ -947,6 +951,63 @@ mod tests {
                 },
                 ModelContentBlock::Text {
                     text: "Done.".into(),
+                },
+            ]
+        );
+    }
+
+    /// A routed call's reasoning is stamped with the provider its own stream
+    /// names, not with anything the client says about itself.
+    #[tokio::test]
+    async fn reasoning_is_stamped_with_the_provider_the_call_says_served_it() {
+        let events: Vec<Result<ModelEvent, ModelError>> = vec![
+            Ok(ModelEvent::Served {
+                provider: "ds".into(),
+            }),
+            Ok(ModelEvent::ThinkingDelta {
+                text: "think".into(),
+            }),
+            Ok(ModelEvent::RedactedThinking { data: "x".into() }),
+            Ok(ModelEvent::EndTurn {
+                stop_reason: "end_turn".into(),
+                usage: Usage::default(),
+            }),
+        ];
+        let stream: base::interface::model::ModelStream = Box::new(futures::stream::iter(events));
+        let mut session = session::transcript::Transcript::in_memory(None);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let tx = crate::event_bus::EventBus::new(tx);
+        execute_stream(
+            stream,
+            &mut session,
+            &tx,
+            "test-turn".into(),
+            |_id, _name, _input| async move { Ok(ToolAnswer::text("ok")) },
+            |_name, _input| true,
+            CancellationToken::new(),
+            GRACE,
+            &[],
+            None,
+        )
+        .await
+        .expect("execute_stream should succeed");
+
+        let assistant = session
+            .messages()
+            .iter()
+            .find(|m| m.role == MessageRole::Assistant)
+            .expect("an assistant message");
+        assert_eq!(
+            assistant.content,
+            vec![
+                ModelContentBlock::Thinking {
+                    text: "think".into(),
+                    signature: None,
+                    provider: Some("ds".into()),
+                },
+                ModelContentBlock::RedactedThinking {
+                    data: "x".into(),
+                    provider: Some("ds".into()),
                 },
             ]
         );

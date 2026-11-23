@@ -16,7 +16,7 @@ pub(super) struct HostSetup {
     /// Rust plugins, in the order added — see [`Builder::plugin`].
     pub(super) plugins: Vec<Arc<dyn crate::plugin::Plugin>>,
     /// Multi-provider per-task-type model routing — see `Builder::task_router`.
-    pub(super) task_router: Option<Arc<base::provider::TaskRouter>>,
+    pub(super) task_router: Option<Arc<dyn base::provider::TaskRouting>>,
     /// Every scene this host registered, so an agent type's `scene:` id can
     /// name one beyond the built-in four (plugin scenes, in particular), in
     /// this session and in every delegate under it.

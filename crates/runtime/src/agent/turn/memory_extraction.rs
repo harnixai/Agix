@@ -38,7 +38,7 @@ pub(crate) async fn finish_within(
 /// each complete turn — failures are silently logged, never block the user.
 ///
 /// `model`/`model_name` are resolved by the caller — normally via
-/// `TaskRouter::model_for("memory")` / `model_name_for("memory")` when a
+/// `TaskRouting::model_for("memory")` / `model_name_for("memory")` when a
 /// router is configured, falling
 /// back to the main conversation model otherwise, mirroring
 /// `agents::delegate::Delegator::model_for_subagent`'s pattern for the `"subagent"`
