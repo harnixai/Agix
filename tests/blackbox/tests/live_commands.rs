@@ -87,8 +87,8 @@ async fn local_commands_answer_without_a_conversation_call() -> anyhow::Result<(
     let cost = run.turn(&session, "/cost").await?;
     let reported: usize = cost
         .text
-        .strip_prefix("Since this session was loaded: ")
-        .and_then(|rest| rest.split(' ').next())
+        .split_once("its own agent made ")
+        .and_then(|(_, rest)| rest.split(' ').next())
         .and_then(|n| n.parse().ok())
         .unwrap_or(0);
     assert!(

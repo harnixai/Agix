@@ -962,7 +962,9 @@ async fn unicode_in_messages_file_names_and_contents_survives_byte_for_byte() ->
         run.provider.calls()[0].messages_contain(&message),
         "the message changed on the way to the model"
     );
-    run.finish().await;
+    // Models sometimes reach for Bash to look at the bytes they wrote; the
+    // case checks the files itself, so that call going unanswered is fine.
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 
