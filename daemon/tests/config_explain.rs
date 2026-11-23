@@ -416,14 +416,22 @@ async fn the_env_of_a_server_named_sandbox_is_redacted_too() {
     })
     .await;
 
-    for key in ["mcp.servers.sandbox.env", "mcp.servers.sandbox.env.GITHUB_PAT"] {
+    for key in [
+        "mcp.servers.sandbox.env",
+        "mcp.servers.sandbox.env.GITHUB_PAT",
+    ] {
         let explained = d.explain(json!({"key": key})).await;
         let shown = explained.to_string();
         assert!(!shown.contains("supersecret"), "{shown}");
     }
     let block = call(&d.sock, "config.explain", json!({"key": "mcp"})).await;
     assert!(!block.to_string().contains("supersecret"), "{block}");
-    let tier = call(&d.sock, "config.get", json!({"tier": "global", "scene": "code"})).await;
+    let tier = call(
+        &d.sock,
+        "config.get",
+        json!({"tier": "global", "scene": "code"}),
+    )
+    .await;
     assert!(!tier.to_string().contains("supersecret"), "{tier}");
     d.stop().await;
 }
@@ -447,7 +455,12 @@ async fn headers_or_env_written_as_one_string_are_redacted() {
 
     let block = call(&d.sock, "config.explain", json!({"key": "mcp"})).await;
     assert!(!block.to_string().contains("supersecret"), "{block}");
-    let tier = call(&d.sock, "config.get", json!({"tier": "global", "scene": "code"})).await;
+    let tier = call(
+        &d.sock,
+        "config.get",
+        json!({"tier": "global", "scene": "code"}),
+    )
+    .await;
     assert!(!tier.to_string().contains("supersecret"), "{tier}");
     d.stop().await;
 }
