@@ -20,7 +20,7 @@ uses = ["codix"]               # 可选;见下面「宿主库」
 name = "github-tools"          # 必填
 version = "1.2.0"              # 必填
 api_version = "0.1"            # 必填;必须是这个构建实现了的版本
-requires_engine = ">=0.3.12, <0.4"  # 可选;引擎版本要满足的 semver 条件
+requires_engine = ">=0.4.0, <0.5"  # 可选;引擎版本要满足的 semver 条件
 description = "GitHub tools"   # 会到达模型——安装时披露
 author = ""
 homepage = ""
@@ -101,14 +101,14 @@ panel = "ui/panel.js"
   (`packages::manifest::SUPPORTED_API_VERSIONS`)。没有默认值,漏掉它解析不过;写了这个构建
   没实现的代际会被拒,消息里给出支持的集合。
 - **`requires_engine`** 是包用到的增量能力从哪个引擎版本起才有,比如某个新的脚本点。可选,
-  不写就只受 `api_version` 约束。写法是 semver 版本条件(`">=0.3.12"`、`"^0.3.12"`、
-  `">=0.3.12, <0.4"`)。
+  不写就只受 `api_version` 约束。写法是 semver 版本条件(`">=0.4.0"`、`"^0.4.0"`、
+  `">=0.4.0, <0.5"`)。
 
-比较时引擎版本只取 `x.y.z`:发布版本号带日期序号(`0.3.12-2026111001`),semver 会把这段
-当成 pre-release,`0.3.12-2026111001` 排在 `0.3.12` 前面,`>=0.3.12` 就会误判不满足。同一
-个原因,条件里写 pre-release(`>=0.3.12-2026111001`)的直接拒,不去猜它的意思。
+比较时引擎版本只取 `x.y.z`:发布版本号带日期序号(`0.4.0-2026112201`),semver 会把这段
+当成 pre-release,`0.4.0-2026112201` 排在 `0.4.0` 前面,`>=0.4.0` 就会误判不满足。同一
+个原因,条件里写 pre-release(`>=0.4.0-2026112201`)的直接拒,不去猜它的意思。
 
-不满足时报 ``requires engine `>=0.3.13`, this is 0.3.12 (0.3.12-2026111001)``,在三处检查:
+不满足时报 ``requires engine `>=0.5.0`, this is 0.4.0 (0.4.0-2026112201)``,在三处检查:
 
 - **解析时**:每条加载路径都过 manifest 校验,所以哪里都绕不开。
 - **安装时**:`plugin.install` 在暂存包上就失败,缓存里什么都不写,错误消息带出要求的版本
@@ -363,7 +363,7 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 `plugin.install` 的结果带 `enabled`,是装完之后这个包解析出的启用状态。`settings.json` 的
 `plugins.enable_on_install` 缺省 `true`,装完即启用;设为 `false` 时,这一层还没有它启用
 记录的新包装完保持禁用,要宿主读过披露后显式 `plugin.enable`。`daemon.doctor` 的
-`plugins.enable_on_install` 检查在开关为 `true` 时提示:计划在后续 0.3.x 把缺省改成
+`plugins.enable_on_install` 检查在开关为 `true` 时提示:缺省计划改成
 `false`。
 
 插件的场景装上就是 active,不需要 `scene.activate`;进入它仍然要显式的

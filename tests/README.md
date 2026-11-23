@@ -19,10 +19,11 @@
 每个文件声明成一个模块（`autotests = false`），共用的辅助模块（如 `tests/runner/tests/support`）
 也只在那里声明一次。这样整张依赖图每个 crate 只链接一次，而不是每个文件一次；代价是新加的
 测试文件要在 `integration.rs` 里补一行 `mod`，同一程序里的测试共用一个进程。只跑其中一个
-文件，用模块名过滤：`cargo test -p daemon --test integration session_lifecycle::`。例外有三个：LIVE 层的
+文件，用模块名过滤：`cargo test -p daemon --test integration session_resume::`。例外有四处：LIVE 层的
 `live_*` 合成另一个程序 `real_model`（要 `real-model` feature），`compare_dsh` 单独一个，
 `crates/platform/tests` 里除 `integration` 外的两个文件各自一个——它们动的是进程级的状态（只构建一次的 HTTP 客户端
-读到的代理环境变量、本进程领的全部进程组），和别的测试同进程就不成立。
+读到的代理环境变量、本进程领的全部进程组），和别的测试同进程就不成立；`daemon/tests/mcp_oauth_logs.rs` 也单独一个，
+它要装进程全局的 `tracing` subscriber 抓日志，共用的 `integration` 里别的测试也在装。
 
 有几条要的不是同一个 daemon：「没有脚本引擎的构建拿到 `scripts` 段怎么办」只能由
 另一个构建回答。用例会说清楚怎么建、往哪个环境变量里塞：`AGIX_TEST_DAEMON_BIN_NO_CARRIER`
@@ -271,7 +272,7 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 - `test_runner::scripted_model::ScriptedModel` —— 回答写在测试里。问的是「引擎拿到
   这串回答会怎么决策」，包括 529 过载、`prompt_too_long`、`max_tokens` 续写这些
   没有哪个 provider 会按需产出的结局。
-- `daemon/tests/session_lifecycle.rs` 的脚本化 `AnthropicClient` —— 扎在 adapter
+- `daemon/tests/support/mod.rs` 的 `ScriptedClient`（脚本化的 `AnthropicClient`）—— 扎在 adapter
   **下面**，所以工具循环、权限门、流式帧都是真的在跑，只有网络那一端是假的。
 - `telemetry` 的 `RecorderModel` —— 录制真实对话再按位置回放。它是**产品能力**
   （运维者可以录自己的会话拿去排查），不再是测试基础设施：本仓库不再录制、也不再
@@ -323,8 +324,8 @@ OAuth 请求）不走 shell 的 `HTTP(S)_PROXY`，不用另设 `NO_PROXY`。
 
 这条是有来历的：`plugin.reload` 的两个调用点分别在两个互斥的 `#[cfg]` 里，没有哪个
 构建能同时编进去，而 CI 当时对这两种配置**只 `cargo check` 不 `cargo test`**——方法
-在，文档在，测试也在，就是从来没跑过。所以 `carriers` job 里那两步现在跑的是
-`cargo test`。
+在，文档在，测试也在，就是从来没跑过。所以 `carriers` job 里的 `no carrier` 一步现在跑的是
+`cargo test`；`packages without a carrier` 仍只 `cargo check`，因为依赖包方案的测试同样编进缺省构建，由 `test` job 跑。
 
 **单元测试里的会话与工具上下文。** 要一个带真会话状态的 `ToolContext`，用
 `session_state::testing::tool_context_for_test(..)`（一个真的 `SessionState` 加调用方给的 provider），
@@ -385,7 +386,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | DOC-* | 扩展点、hook、README、遥测、ptc 限额、ARCHITECTURE §1 的文档对账 | 文档用文本，代码一侧用运行时常量或 `guards::scan` | **不在 `tests/guards`**，在上面「文档不许漂移」表里各自的位置 |
 | CI-1 | base 和 platform 没有 http 栈（传递依赖） | `cargo tree` | `.github/workflows/ci.yml` |
 
-`cargo test -p guards` 当前共 129 个测试。支撑库自己的行为在 `support_selftest.rs` 里用
+`cargo test -p guards` 当前共 143 个测试。支撑库自己的行为在 `support_selftest.rs` 里用
 `tests/guards/fixtures` 钉住。
 
 ## fixture 项目

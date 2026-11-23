@@ -200,7 +200,7 @@ async function main(argv, input, ctx) {
   由模型自己发起那次写入，照常询问。子 Agent 里跑的命令同样如此。别的工具会执行的文件——
   `.husky/` 里的钩子、`.vscode/tasks.json`、`Makefile`、`package.json` 的 scripts——不是配置路径，
   `writes` 写进来就能写；`.envrc` 例外，它对任何写入都受保护（不论谁写都被拒，除非
-  `sandbox.allow_write` 放开）。装包时看 `writes`，要把这类路径当作"能让别的程序执行代码"来看。
+  `files.allow_write` 放开）。装包时看 `writes`，要把这类路径当作"能让别的程序执行代码"来看。
 - 项目内的读取照常允许；其它工具（`Bash`、`WebFetch`、MCP 工具）按会话的判定走，询问即失败。
   所以 `writes` 是文件工具的边界，不是命令能做什么的边界：会话里有 `Bash` 的 allow 规则（或场景
   不问就放行的命令），命令经 `Bash` 能写的就不限于 `writes`；沙箱照常约束那条命令。
@@ -382,7 +382,7 @@ async function check(input, ctx) {
   （缺省）时经文件工具的写入、会改东西的命令（`Bash` 之类被判为写的）一律失败；让写时经文件工具只写得了 `writes`
   之内，配置路径照样不让写；命令的写入不受 `writes` 限制，按会话与这次调用的规则走（同 §6，`writes` 是文件工具的边界）。
   MCP 工具、`WebFetch` 这类不经文件工具也不跑命令的调用同样按规则走，对外的副作用由那些规则管。**要问人的一律失败**，
-  错误说明哪次调用、为什么；要放行就在这次调用的 `permissions.allow` 里写规则。函数里也不能调
+  错误说明哪次调用、为什么；要放行就在这次调用的 `permission_rules` 里写规则（`daemon_rpc_protocol.md` §4.6）。函数里也不能调
   `Agent` / `RunCode` / `RunExt`。
 - **在哪跑**：带会话时用那个会话的工具、MCP、规则、目录与信任，不开新一轮，可以与正在跑的一轮并发，
   调用是会话的一件 `ext` 任务（`session.tasks` 看得到，`session.stopTask` 能停），调用没完时会话不算

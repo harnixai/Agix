@@ -1,12 +1,12 @@
 # `agix`：脚本里的基础库
 
-Agix 里跑 JavaScript 的地方有三处，三处都有一个全局对象 `agix`，带着一组纯计算的函数：
+Agix 里跑 JavaScript 的地方有三类，都有一个全局对象 `agix`，带着一组纯计算的函数：
 
 | 载体 | 谁写的代码 | 文档 |
 |---|---|---|
 | 扩展点上的脚本（`[[script]]`、`settings.json` 的 `scripts`） | 运维者、插件包 | `extending_quickjs.md` |
 | `RunCode` | 模型 | `ptc.md` |
-| `RunExt` 跑的插件命令（`[[command]]`） | 插件包 | `runext.md` |
+| `RunExt` 跑的插件命令（`[[command]]`）与宿主调的插件函数（`[[function]]`） | 插件包 | `runext.md` |
 
 有了它，写插件的人不必各自打包一份 YAML 解析器、glob 匹配、JSON Schema 校验；更要紧的是，
 脚本里的匹配与解析和引擎自己用的是同一套实现——一条 glob 在脚本里匹配的结果，和 `Glob` 工具、
