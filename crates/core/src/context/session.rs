@@ -37,7 +37,8 @@ pub struct SessionEnv {
     /// Nobody answers this session's questions or permission prompts — see
     /// `SceneSpec::interactive`.
     pub unattended: bool,
-    /// The permission mode the engine is configured to run in.
+    /// The permission mode the engine runs the session in: the one decided
+    /// for the session, not necessarily its settings' `permissions.mode`.
     pub base_mode: PermissionMode,
     /// The host's skill directories this session lists: readable without
     /// asking, like `read_directories`, and changed without a rebuild.

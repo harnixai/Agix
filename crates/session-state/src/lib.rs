@@ -86,11 +86,13 @@ pub enum ModeChangeSource {
     Model,
 }
 
-/// The widest mode a host could put a session in under an engine's settings:
-/// the configured one, or any where clients may override it; a
-/// `bypassPermissions` the managed layer turns off is `default`. A mode the
-/// session did not get from that engine — the one plan mode returns to, as a
-/// log or an earlier engine left it — is held to it.
+/// The widest mode plan mode may return a session to under an engine: the
+/// mode the engine was built to run the session in — decided for the session,
+/// so possibly tighter than its settings' `permissions.mode` — or any where
+/// the settings let clients loosen them; a `bypassPermissions` the managed
+/// layer turns off is `default`. A mode the session did not get from that
+/// engine — the one plan mode returns to, as a log or an earlier engine left
+/// it — is held to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModeCeiling {
     widest: PermissionMode,
@@ -106,7 +108,7 @@ impl ModeCeiling {
     }
 
     /// `mode` held to the ceiling; one only the engine sets is `base`, the
-    /// mode the engine is configured with, unless it is that mode.
+    /// mode the engine runs the session in, unless it is that mode.
     fn hold(self, mode: PermissionMode, base: PermissionMode) -> PermissionMode {
         if mode == base {
             return mode;
@@ -194,10 +196,9 @@ impl ModeSlot {
         changed
     }
 
-    /// Take up `base`, the mode an engine is configured with, unless in plan
+    /// Take up `base`, the mode an engine runs the session in, unless in plan
     /// mode: that stays on, exiting to where it would have as far as
-    /// `ceiling` allows. The engine's settings already hold what a host
-    /// chose.
+    /// `ceiling` allows. `base` already holds what a host chose.
     fn rebase(&mut self, base: PermissionMode, ceiling: Option<ModeCeiling>) {
         self.host_choice = None;
         self.bounds = ceiling.map(|ceiling| (base, ceiling));
@@ -265,7 +266,7 @@ impl SessionState {
     }
 
     /// Hang `engine` on this state: its [`SessionEnv`] replaces the one
-    /// before, and the permission mode becomes the one it is configured with
+    /// before, and the permission mode becomes the one it runs the session in
     /// unless the session is in plan mode, which returns to no wider than the
     /// engine's [`ModeCeiling`].
     pub fn attach(&self, engine: EngineAttachment) {
