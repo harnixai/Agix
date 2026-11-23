@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Reply, SeenRequest};
+use blackbox::{LiveConfig, LiveRun, LiveRunBuilder, ProviderStub, Purpose, Reply, SeenRequest};
 use rpc_client::{ToolCallReply, TurnEvents};
 use serde_json::{json, Value};
 
@@ -715,6 +715,63 @@ async fn an_uncached_prompt_counts_again_on_the_next_call() -> anyhow::Result<()
     let events = run.turn(&s, "look").await?;
     assert_eq!(stop_reason(&events), "budget_exceeded", "{events:?}");
     assert_eq!(stub.calls().len(), 1);
+    run.finish().await;
+    Ok(())
+}
+
+/// Three reads leave 2900 of 30000 and the conversation over the compaction
+/// threshold: the summary is a call of the turn like any other, asking for no
+/// more than is left once its input is paid.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compaction_summary_asks_for_no_more_than_the_turn_has_left() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed(
+        "compact-budget",
+        &stub,
+        json!({ "compaction": { "threshold_tokens": 22000, "keep_recent": 2 } }),
+    )
+    .start()
+    .await?;
+    let s = session(
+        &mut run,
+        json!({ "settings": { "turn": { "token_budget": 30000 } } }),
+    )
+    .await?;
+    let mut script = Vec::new();
+    for i in 1..=3 {
+        let body: String = (0..600)
+            .map(|l| format!("part {i} line {l}: routine reading, all values nominal\n"))
+            .collect();
+        let path = run.write_file(&format!("part{i}.log"), &body)?;
+        let spent = [1000, 10000, 15900][i - 1];
+        script.push(Reply::spent_cached(
+            spent,
+            5000,
+            100,
+            Reply::calls(
+                &format!("p{i}"),
+                "Read",
+                json!({ "file_path": path.to_string_lossy() }),
+            ),
+        ));
+    }
+    script.push(Reply::text("DONE"));
+    stub.script(script);
+    stub.script_when(
+        "You are compacting an AI coding agent's conversation",
+        [Reply::text("1. User intent - read the parts.")],
+    );
+    let events = run.turn(&s, "read the parts").await?;
+    let summaries: Vec<u64> = stub
+        .calls()
+        .iter()
+        .filter(|c| c.purpose() == Purpose::Compact)
+        .map(max_tokens)
+        .collect();
+    assert!(
+        !summaries.is_empty() && summaries.iter().all(|&asked| asked < 2900),
+        "a summary went out on 2900 tokens left asking for {summaries:?}: {events:?}"
+    );
     run.finish().await;
     Ok(())
 }

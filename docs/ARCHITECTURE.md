@@ -266,6 +266,7 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 失败 / 被丢弃时按 client 已经报的,同时记进 provider 配额和这次调用的 `UsageTap` 所记的那个
 `SpendNode`(`base::interface::budget_policy`)。调用方只说记到哪:这一轮的主循环在发出前把 tap 指向
 这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮,
+发出前同样按链上剩余减去整个请求输入的估计压低 `max_tokens`、不够 `MIN_CALL_TOKENS` 就不发,
 `prompt` hook 的调用指向 payload 带的那一轮(`HookInput.spend`:工具管线里的 hook 是那次工具调用所在的
 一轮,其余是触发时打开的那一轮),两轮之间的不记。
 

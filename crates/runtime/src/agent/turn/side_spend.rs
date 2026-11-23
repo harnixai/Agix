@@ -1,13 +1,14 @@
 //! The model calls a turn makes on its side — compaction, memory recall and
 //! extraction, web search and page extraction — charged to that turn's
-//! `SpendNode` as its own calls are, so the turn's budget and its reported
-//! usage see them. What a call spent is counted where it is routed; this only
-//! says where it goes.
+//! `SpendNode` and judged by what is left up its chain as its own calls are,
+//! so the turn's budget and its reported usage see them. What a call spent
+//! is counted where it is routed; this only says where it goes.
 
 use base::event::UsageBreakdown;
 use base::interface::budget_policy::SpendNode;
 use base::interface::model::{
-    Model, ModelError, ModelMessage, ModelStream, StreamParams, ToolDef, Usage, UsageTap,
+    Model, ModelError, ModelErrorKind, ModelMessage, ModelStream, StreamParams, ToolDef, Usage,
+    UsageTap,
 };
 use base::prompt::PromptBlock;
 use base::provider::ApiType;
@@ -38,7 +39,9 @@ enum SpentInto {
 }
 
 /// `inner`, each call it makes charged to a turn unless its caller already
-/// charged it somewhere.
+/// charged it somewhere — and then asking for no more output than the turn's
+/// chain has left once the call's input is paid, and not sent when that is
+/// too little. None of a side call's prompt is assumed cached.
 pub(crate) struct SpentModel {
     inner: Arc<dyn Model>,
     into: SpentInto,
@@ -85,12 +88,43 @@ impl Model for SpentModel {
             SpentInto::Open(open) => open.spend(),
         };
         if let (Some(spend), None) = (spend, params.usage_tap.charge()) {
+            let input = input_tokens(&prompt_blocks, &tools, &messages);
+            match super::call_input::headroom(spend.remaining(), input) {
+                Ok(Some(left)) => params.max_tokens = params.max_tokens.min(left),
+                Ok(None) => {}
+                Err(refused) => {
+                    return Err(ModelError::new(
+                        ModelErrorKind::InvalidRequest,
+                        format!("not sent: {}", refused.message()),
+                    ))
+                }
+            }
             params.usage_tap = UsageTap::charging(spend);
         }
         self.inner
             .stream(prompt_blocks, tools, messages, params, cancel)
             .await
     }
+}
+
+fn input_tokens(
+    prompt_blocks: &[PromptBlock],
+    tools: &[ToolDef],
+    messages: &[ModelMessage],
+) -> u64 {
+    let counter = base::interface::token_counter::default_counter();
+    let prompt: usize = prompt_blocks
+        .iter()
+        .map(|block| counter.count_text(&block.content))
+        .sum();
+    let tools: usize = tools
+        .iter()
+        .map(|tool| {
+            counter.count_text(&tool.description)
+                + counter.count_text(&tool.input_schema.to_string())
+        })
+        .sum();
+    (prompt + tools + counter.count_messages(messages)) as u64
 }
 
 /// What a turn spent as its `turn_complete` reports it, `own` being its
