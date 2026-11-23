@@ -511,7 +511,7 @@ managed 为准。启动时对守护进程自己那一对
 这一处。合并设置 JSON 的原语(`merge_json_values`、`merge_fitting`)在生产代码里只出现在登记过的地方:加载器的
 `LayerFold`、`LoadedSettings::overlay`、managed 层的 `with_managed`,以及写设置文件、校验与拼 `--set` 层这几处不合
 读好设置的地方;`tests/guards/tests/sources.rs` 的 SRC-6(`SETTINGS_OVERLAY_SITES`)守着,新加一处不在表里就失败。宿主的改动对守护进程自己那一对照原样叠,只有列表跟着盘:宿主没加的元素盘上没了(撤销信任后项目自己的 provider、改掉的项目设置)就不再有,盘上后加的、宿主没去掉的照样有;对别的对只带它新加的——列表只带宿主新加的元素,接在那一对
-自己的列表后面,守护进程自己项目层来的 provider、`files.extra_dirs` 之类不跨对。
+自己的列表后面,守护进程自己项目层来的 provider(宿主改过的也是)、`files.extra_dirs` 之类不跨对。
 
 **会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键有一个作用域(`settings::scope::SCOPES`,
 模块的段落在 `Section::SCOPE` 里登记,完备性由 `scope_gaps` 的测试守着):进程(`app`、`plugins`、

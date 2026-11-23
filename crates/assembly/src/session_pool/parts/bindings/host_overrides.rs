@@ -1,7 +1,8 @@
 //! 宿主在内存里改过的设置：宿主拿到守护进程自己那一对的设置之后、交给池之前改掉的值，
 //! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置。守护进程自己那一对拿到宿主改的全部，
 //! 但列表跟着盘：宿主没加的元素盘上没了就不再有（撤销信任后项目自己的 provider 不回来），盘上后加的照样有；
-//! 别的对只拿宿主新加的——列表里只有它新加的元素，守护进程自己项目层里来的不跨对；宿主加的权限
+//! 别的对只拿宿主新加的——列表里只有它新加的元素，守护进程自己项目层里来的不跨对（宿主改过的项目
+//! provider 也不跨）；宿主加的权限
 //! 规则只回到守护进程自己那一对上。
 
 use base::permission::LoadedRule;
@@ -20,6 +21,8 @@ pub(in crate::session_pool) struct HostOverrides {
     added: Option<Map<String, Value>>,
     /// The entries the host took out of a list.
     removed: Option<Map<String, Value>>,
+    /// The ids of the providers this daemon's own project defined.
+    project_providers: Vec<String>,
     rules: Vec<LoadedRule>,
 }
 
@@ -46,10 +49,17 @@ impl HostOverrides {
             .filter(|rule| !on_disk.contains(&rule_key(rule)))
             .cloned()
             .collect();
+        let project_providers = disk
+            .provider_origins
+            .iter()
+            .filter(|(_, origin)| origin.tier == base::interface::config_source::Tier::Project)
+            .map(|(id, _)| id.clone())
+            .collect();
         Self {
             own: own.and_then(into_object),
             added: added.and_then(into_object),
             removed: removed.and_then(into_object),
+            project_providers,
             rules,
         }
     }
@@ -62,6 +72,7 @@ impl HostOverrides {
             return settings;
         };
         let mut layer = added.clone();
+        self.drop_project_providers(&mut layer, &[]);
         if let Ok(Value::Object(theirs)) = serde_json::to_value(&settings.values) {
             extend_lists(&mut layer, &theirs);
         }
@@ -78,6 +89,8 @@ impl HostOverrides {
                 let mut layer = own.clone();
                 if let Ok(Value::Object(now)) = serde_json::to_value(&settings.values) {
                     follow_disk(&mut layer, &now, self.added.as_ref(), self.removed.as_ref());
+                    let on_disk = now.get("providers").and_then(Value::as_array);
+                    self.drop_project_providers(&mut layer, on_disk.map_or(&[], Vec::as_slice));
                 }
                 overlay(&settings, &layer)
             }
@@ -85,6 +98,26 @@ impl HostOverrides {
         };
         settings.rules.extend(self.rules.iter().cloned());
         settings
+    }
+}
+
+impl HostOverrides {
+    /// `layer` without the providers of this daemon's own project, but those
+    /// still `on_disk`.
+    fn drop_project_providers(&self, layer: &mut Map<String, Value>, on_disk: &[Value]) {
+        let Some(Value::Array(providers)) = layer.get_mut("providers") else {
+            return;
+        };
+        let id_of = |p: &Value| p.get("id").and_then(Value::as_str).map(str::to_string);
+        providers.retain(|p| {
+            id_of(p).is_none_or(|id| {
+                !self.project_providers.contains(&id)
+                    || on_disk.iter().any(|d| id_of(d).as_ref() == Some(&id))
+            })
+        });
+        if providers.is_empty() {
+            layer.remove("providers");
+        }
     }
 }
 
@@ -327,6 +360,43 @@ mod tests {
         let other = overrides.apply(loaded(Settings::defaults_for("m")));
         assert_eq!(ids(&other), ["host"]);
         assert_eq!(ids(&overrides.apply_to_own(disk)), ["own-project", "host"]);
+    }
+
+    #[test]
+    fn a_provider_of_the_own_project_the_host_changed_stays_on_the_own_pair() {
+        let mut disk = Settings::defaults_for("m");
+        disk.providers = vec![provider("own-project")];
+        let mut disk = loaded(disk);
+        disk.provider_origins.insert(
+            "own-project".into(),
+            settings::ProviderOrigin {
+                tier: Tier::Project,
+                origin: "/p/.agix/settings.json".into(),
+                machine_local: false,
+            },
+        );
+        let mut host = disk.clone();
+        host.values.providers[0].quota.day = Some(5);
+        let overrides = HostOverrides::between(&disk, &host);
+
+        let other = overrides.apply(loaded(Settings::defaults_for("m")));
+        assert!(
+            other.values.providers.iter().all(|p| p.id != "own-project"),
+            "{:?}",
+            other.values.providers
+        );
+        let own = overrides.apply_to_own(disk);
+        assert_eq!(own.values.providers[0].quota.day, Some(5));
+        let untrusted_now = overrides.apply_to_own(loaded(Settings::defaults_for("m")));
+        assert!(
+            untrusted_now
+                .values
+                .providers
+                .iter()
+                .all(|p| p.id != "own-project"),
+            "{:?}",
+            untrusted_now.values.providers
+        );
     }
 
     #[test]
