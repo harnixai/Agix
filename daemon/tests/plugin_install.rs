@@ -71,7 +71,7 @@ async fn a_script_only_package_installs_and_discloses_what_it_will_run() {
     let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
     let plugins = v["result"]["plugins"].as_array().unwrap();
     let it = plugins.iter().find(|p| p["name"] == "annotator").unwrap();
-    assert_eq!(it["enabled"], true);
+    assert_eq!(it["enabled"], false);
     let root = std::path::Path::new(it["root"].as_str().expect("list carries the root: {it}"));
     assert!(
         root.join("annotate.js").is_file(),
@@ -324,18 +324,13 @@ fn build_scene_plugin_zip(dir: &std::path::Path, name: &str) -> (PathBuf, String
     (archive_path, hex::encode(hasher.finalize()))
 }
 
-/// With `plugins.enable_on_install` off, `plugin.install` reports
-/// `enabled: false` and the package contributes nothing (here: its scene
-/// cannot host a session) until the host calls `plugin.enable`.
+/// By default `plugin.install` reports `enabled: false` and the package
+/// contributes nothing (here: its scene cannot host a session) until the
+/// host calls `plugin.enable`.
 #[cfg(feature = "plugin-packages")]
 #[tokio::test]
-async fn plugin_install_leaves_a_package_off_when_enable_on_install_is_false() {
+async fn plugin_install_leaves_a_package_off_by_default() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("settings.json"),
-        r#"{"plugins": {"enable_on_install": false}}"#,
-    )
-    .unwrap();
     let (archive_path, checksum) = build_scene_plugin_zip(dir.path(), "held-scene");
     let (server, sock, _dir, handle) = start_server_in(dir).await;
 
@@ -403,13 +398,19 @@ async fn plugin_install_leaves_a_package_off_when_enable_on_install_is_false() {
     let _ = handle.await;
 }
 
-/// Installing is the default and still enables: the result says so, and the
-/// doctor announces that the default is going to change.
+/// With `plugins.enable_on_install` on, installing enables: the result says
+/// so, and the doctor reports the setting.
 #[cfg(feature = "plugin-packages")]
 #[tokio::test]
-async fn plugin_install_enables_by_default_and_doctor_announces_the_coming_change() {
-    let (server, sock, dir, handle) = start_server().await;
+async fn plugin_install_enables_when_enable_on_install_is_true() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"plugins": {"enable_on_install": true}}"#,
+    )
+    .unwrap();
     let (archive_path, checksum) = build_scene_plugin_zip(dir.path(), "eager-scene");
+    let (server, sock, _dir, handle) = start_server_in(dir).await;
     let resp = rpc_call(
         &sock,
         &format!(
@@ -428,8 +429,8 @@ async fn plugin_install_enables_by_default_and_doctor_announces_the_coming_chang
     )
     .await;
     assert!(
-        resp.contains("planned to default to false"),
-        "doctor is silent about the coming default: {resp}"
+        resp.contains("enables a package as soon as it is installed"),
+        "doctor does not say the package is enabled on install: {resp}"
     );
 
     server.shutdown_token().cancel();

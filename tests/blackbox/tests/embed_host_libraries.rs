@@ -119,8 +119,7 @@ async fn install(
         .collect();
     let (archive, _) = zip_with_entries(&root.data.join("archives"), name, &entries)?;
     let answer = client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": name, "version": "1.0.0", "download_url": file_url(&archive) }),
         )
         .await?;

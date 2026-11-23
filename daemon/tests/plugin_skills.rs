@@ -217,6 +217,11 @@ async fn a_packaged_skill_follows_its_package_and_gives_way_to_the_disk() {
             "`{origin}` is disclosed: {disclosure}"
         );
     }
+    assert!(daemon.command("tour").await.is_none());
+    let enabled = daemon
+        .call("plugin.enable", json!({"name": "touring"}))
+        .await;
+    assert_eq!(enabled["result"]["enabled"], true, "{enabled}");
 
     let listed = daemon
         .command("tour")

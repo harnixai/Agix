@@ -38,15 +38,12 @@ async fn a_model_works_through_both_demo_plugins() -> anyhow::Result<()> {
     let (archive, checksum) = package_demo(run.world.root())?;
     let installed = run
         .client
-        .call(
-            "plugin.install",
-            json!({
-                "name": DEMO_PACKAGE,
-                "version": DEMO_PACKAGE_VERSION,
-                "download_url": format!("file://{}", archive.display()),
-                "checksum": checksum,
-            }),
-        )
+        .plugin_install_and_enable(json!({
+            "name": DEMO_PACKAGE,
+            "version": DEMO_PACKAGE_VERSION,
+            "download_url": format!("file://{}", archive.display()),
+            "checksum": checksum,
+        }))
         .await?;
     anyhow::ensure!(installed.error.is_none(), "plugin.install: {installed:?}");
 
@@ -206,7 +203,7 @@ async fn a_package_disabled_enabled_reloaded_and_uninstalled_changes_the_session
 ) -> anyhow::Result<()> {
     let mut run = LiveRun::builder("lifecycle").start().await?;
     let (archive, checksum) = package_demo(run.world.root())?;
-    plugin_call(
+    let installed = plugin_call(
         &mut run,
         "plugin.install",
         json!({
@@ -217,6 +214,9 @@ async fn a_package_disabled_enabled_reloaded_and_uninstalled_changes_the_session
         }),
     )
     .await?;
+    assert_eq!(installed["enabled"], false, "{installed}");
+    assert!(!plugin_scene_listed(&mut run).await?);
+    plugin_call(&mut run, "plugin.enable", json!({ "name": DEMO_PACKAGE })).await?;
     assert!(plugin_scene_listed(&mut run).await?);
     let (first, written, ruled) = write_generated(&mut run, "a.txt").await?;
     assert!(!written && ruled, "installed: guarded and ruled");

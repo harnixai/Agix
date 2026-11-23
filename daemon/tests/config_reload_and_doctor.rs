@@ -67,24 +67,35 @@ async fn doctor_warns_when_unattended_commands_may_reach_an_open_network() {
             .unwrap_or_else(|| panic!("no sandbox.unattended_network check: {v}"))
     }
 
-    let warned = check(spec(Interaction::Unattended), None).await;
+    let not_required = r#"{"sandbox": {"unattended_needs_network_policy": false}}"#;
+    let warned = check(spec(Interaction::Unattended), Some(not_required)).await;
     assert_eq!(warned["status"], "degraded", "{warned}");
     let summary = warned["summary"].as_str().unwrap();
-    assert!(summary.contains("later 0.3.x"), "{summary}");
+    assert!(
+        summary.contains("unattended_needs_network_policy is set to false"),
+        "{summary}"
+    );
     assert_eq!(
         warned["details"]["unattended_scenes"][0], "code",
         "{warned}"
     );
 
-    let attended = check(spec(Interaction::Interactive), None).await;
+    let attended = check(spec(Interaction::Interactive), Some(not_required)).await;
     assert_eq!(attended["status"], "ok", "{attended}");
-    for settings in [
-        r#"{"sandbox": {"network": {"mode": "deny_all"}}}"#,
-        r#"{"sandbox": {"unattended_needs_network_policy": true}}"#,
-    ] {
-        let held = check(spec(Interaction::Unattended), Some(settings)).await;
-        assert_eq!(held["status"], "ok", "{settings}: {held}");
-    }
+    let by_default = check(spec(Interaction::Unattended), None).await;
+    assert_eq!(by_default["status"], "ok", "{by_default}");
+    assert_eq!(
+        by_default["details"]["unattended_needs_network_policy"], true,
+        "{by_default}"
+    );
+    let restricted = check(
+        spec(Interaction::Unattended),
+        Some(
+            r#"{"sandbox": {"unattended_needs_network_policy": false, "network": {"mode": "deny_all"}}}"#,
+        ),
+    )
+    .await;
+    assert_eq!(restricted["status"], "ok", "{restricted}");
 }
 
 #[tokio::test]

@@ -36,6 +36,7 @@ fn root(stub: &ProviderStub, mode: &str) -> anyhow::Result<Root> {
             "models": ["claude-sonnet-4-6"]
         }],
         "permissions": {"mode": mode},
+        "sandbox": {"network": {"mode": "deny_all"}},
         "memory": { "enabled": false }
     });
     std::fs::write(data.join("settings.json"), serde_json::to_vec(&settings)?)?;

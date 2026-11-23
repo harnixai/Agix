@@ -67,15 +67,12 @@ async fn stage_with(
     let (archive, checksum) = package_demo(world.root())?;
     let mut client = daemon.connect().await?;
     let installed = client
-        .call(
-            "plugin.install",
-            json!({
-                "name": DEMO_PACKAGE,
-                "version": DEMO_PACKAGE_VERSION,
-                "download_url": format!("file://{}", archive.display()),
-                "checksum": checksum,
-            }),
-        )
+        .plugin_install_and_enable(json!({
+            "name": DEMO_PACKAGE,
+            "version": DEMO_PACKAGE_VERSION,
+            "download_url": format!("file://{}", archive.display()),
+            "checksum": checksum,
+        }))
         .await?;
     let disclosure = installed
         .result

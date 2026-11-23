@@ -387,12 +387,20 @@ async fn the_capability_is_advertised() -> anyhow::Result<()> {
 
 /// `attended:false` makes a session unattended as an unattended scene is,
 /// S15 included: a sandboxed `Bash` command an attended `code` session asks
-/// about is, unattended, run confined without anyone asked.
+/// about is, unattended and under a restricted network, run confined without
+/// anyone asked.
 #[tokio::test(flavor = "multi_thread")]
 async fn attended_false_runs_a_confined_command_unasked_as_an_unattended_scene_does(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
-    let mut run = stubbed("code-attended-false-runs", &stub).start().await?;
+    let mut run = stubbed("code-attended-false-runs", &stub)
+        .settings(json!({
+            "permissions": {"mode": "default"},
+            "memory": { "enabled": false },
+            "sandbox": {"network": {"mode": "deny_all"}}
+        }))
+        .start()
+        .await?;
     let prompt_types = json!(["permission", "question"]);
     let command = |file: &str| format!("sh -c 'printf x > {file}'; echo rc=$?");
 
@@ -424,6 +432,35 @@ async fn attended_false_runs_a_confined_command_unasked_as_an_unattended_scene_d
         "{:?}",
         events.tool_results
     );
+    run.finish_allowing_refusals().await;
+    Ok(())
+}
+
+/// By default an unattended command the sandbox holds still needs a
+/// restricted network: under the default `unrestricted` one, nobody is asked
+/// and the command is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unattended_command_is_refused_under_an_open_network_by_default() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("code-unattended-open-network", &stub)
+        .start()
+        .await?;
+    let unattended = run
+        .session_with(json!({ "options": { "attended": false } }))
+        .await?;
+    let host = run.watch(&unattended, true).await?;
+    stub.script([
+        Reply::calls(
+            "b1",
+            "Bash",
+            json!({ "command": "sh -c 'printf x > open.txt'; echo rc=$?" }),
+        ),
+        Reply::text("finished"),
+    ]);
+    let events = run.turn(&unattended, "write a file").await?;
+    assert!(host.events("prompt").is_empty(), "{:?}", host.frames());
+    assert!(events.tool_results[0].2, "{:?}", events.tool_results);
+    assert!(!run.project.join("open.txt").exists());
     run.finish_allowing_refusals().await;
     Ok(())
 }

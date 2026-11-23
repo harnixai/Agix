@@ -223,7 +223,7 @@ mod tests {
             s.files.deny_write = vec![".secret".into()];
             s.files.allow_write = vec![PathBuf::from("/tmp/w")];
             s.sandbox.require = true;
-            s.sandbox.unattended_needs_network_policy = true;
+            s.sandbox.unattended_needs_network_policy = false;
             s.sandbox.enabled = false;
         });
         let c = config_of(&s);
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(c.sandbox.deny_write, [".secret"]);
         assert_eq!(c.sandbox.allow_write, [PathBuf::from("/tmp/w")]);
         assert!(c.sandbox.require_enforcement);
-        assert!(c.sandbox.unattended_requires_network_policy);
+        assert!(!c.sandbox.unattended_requires_network_policy);
         assert!(c.sandbox.disabled);
     }
 

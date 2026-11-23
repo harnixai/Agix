@@ -125,7 +125,9 @@ async fn a_no_project_session_works_in_its_own_scratch_directory() {
         ),
         text_round("done"),
     ];
-    let (srv, seen) = start_scripted_server(rounds, ask_settings(), Duration::ZERO).await;
+    let mut settings = ask_settings();
+    settings.sandbox.network.mode = base::interface::exec::NetworkMode::DenyAll;
+    let (srv, seen) = start_scripted_server(rounds, settings, Duration::ZERO).await;
     let state_root = srv._dir.path().to_path_buf();
     std::fs::write(state_root.join("AGENTS.md"), "STATE-ROOT-AGENTS-MARKER").unwrap();
     std::fs::write(state_root.join("repo-marker.txt"), "x").unwrap();

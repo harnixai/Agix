@@ -25,7 +25,8 @@
 //!   replaying every service against a stub of the new helper.
 //!
 //! Agix runs the `harnix` scene — unattended, like DSH headless — under the
-//! default permission policy, not with checks bypassed.
+//! default permission policy, not with checks bypassed, and with the sandbox
+//! network closed (`sandbox.network.mode: deny_all`).
 //!
 //! Token counts are what DeepSeek reported on each response, and tool calls
 //! are the `tool_use` blocks in those responses, both read off the proxy —
@@ -983,10 +984,14 @@ impl Outcome {
 
 async fn run_agix(case: Case, seed: u64) -> anyhow::Result<Outcome> {
     // As a host runs it: the harnix scene, unattended, under the default
-    // permission policy rather than with checks bypassed.
+    // permission policy rather than with checks bypassed, the sandbox network
+    // closed as an unattended command needs.
     let mut run = LiveRun::start(
         &format!("agix-{}", case.name()),
-        json!({ "permissions": {"mode": "default"} }),
+        json!({
+            "permissions": {"mode": "default"},
+            "sandbox": {"network": {"mode": "deny_all"}}
+        }),
         Mode::Spawned,
     )
     .await?;

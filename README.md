@@ -491,8 +491,9 @@ and `PushNotification`; `StructuredOutput` is there only
 when the host sets an output schema. A scene is interactive (someone answers
 prompts) or unattended: `harnix` and `mini` are unattended, `code` is created
 either way, and a session can override its scene's choice (`options.attended`). An unattended session has no `AskUserQuestion` or plan mode, refuses
-what would need approval instead of asking, and runs `Bash` only inside the OS
-sandbox — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
+what would need approval instead of asking, and runs a `Bash` command no allow
+rule covers only when the OS sandbox fully holds it and the sandbox network is
+restricted (`sandbox.network.mode`) — see `docs/ARCHITECTURE.md` §3.2.3 and §6.3.
 
 ### Model routing
 
@@ -661,12 +662,12 @@ The blocks:
 | `providers`, `model` | the model providers, the tier each kind of call asks for, the fallback order ([Model routing](#model-routing)); `model.effort`, `model.thinking` (`auto`, `on`, `off`), `model.max_tokens` |
 | `permissions` | `mode`, the rule lists as strings (`allow`, `ask`, `deny`; `allow_exact` compares its content as written and is where "allow every time" records), `prompt_timeout_secs` (an unanswered prompt is denied), `client_may_loosen` (whether an RPC client may ask for a looser mode than `mode`) |
 | `files` | `extra_dirs` (read and write like the project), `read_dirs` (read without asking; `"/"` reads anywhere), `allow_write`, `deny_write` |
-| `sandbox` | `enabled`, `require` (refuse to run a command when the platform cannot enforce the sandbox), `allow_read`, `deny_read` (added to the built-in credential list), `network`, `env`, `cache_dirs`, `reap_on_close`, `unattended_needs_network_policy` |
+| `sandbox` | `enabled`, `require` (refuse to run a command when the platform cannot enforce the sandbox), `allow_read`, `deny_read` (added to the built-in credential list), `network`, `env`, `cache_dirs`, `reap_on_close`, `unattended_needs_network_policy` (on by default: an unattended command with no allow rule also needs `network.mode` other than `unrestricted`) |
 | `web` | `allowed_domains` for `WebFetch` and `Ping`, and the list `sandbox.network.mode: "allowlist"` reads |
 | `turn`, `session`, `goal`, `schedule`, `agents`, `team` | `turn.max_model_calls`, `turn.token_budget`, `turn.parallel_tools`; `session.token_budget`; `goal.max_rounds`; `schedule.max_model_jobs`, `schedule.min_model_interval_minutes`; `agents.max_depth`, `agents.max_concurrent`; `team.enabled`, `team.stage_concurrency`, `team.max_members`, `team.member_idle_secs` |
 | `compaction` | `threshold_tokens`, `keep_recent`, `reactive`, `clear_on_cache_expiry`, `inline_result_chars` |
 | `prompt` | `append`, `override`, `instruction_files`, `language`, `path_style` (`absolute`, `relative`) |
-| `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches, `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
+| `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches (`plugins.enable_on_install` is off by default: the host calls `plugin.enable` after reading the install's disclosure), `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
 | `memory`, `telemetry`, `checkpoints`, `recorder` | `memory.enabled`; `telemetry.enabled`, `telemetry.otlp_endpoint`; file checkpoints; LLM recording |
 | `app` | the global file layer, the `cli` layer and the managed file only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir`, `session_cap`, `session_idle_timeout_secs`, `worker_threads` |
 

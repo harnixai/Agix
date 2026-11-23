@@ -1,10 +1,10 @@
 //! An unattended session with a real model, as a host that runs one headless
-//! sees it: the `harnix` scene under the default permission policy, with no
-//! one to answer a prompt. Work inside the project gets done — files edited,
-//! commands run in the OS sandbox — and a write outside it is refused rather
-//! than put to a person, and the model is told so instead of left waiting. A
-//! shell command that writes outside the roots — a redirect, a copy — is
-//! stopped the same way.
+//! sees it: the `harnix` scene under the default permission policy and a
+//! closed sandbox network, with no one to answer a prompt. Work inside the
+//! project gets done — files edited, commands run in the OS sandbox — and a
+//! write outside it is refused rather than put to a person, and the model is
+//! told so instead of left waiting. A shell command that writes outside the
+//! roots — a redirect, a copy — is stopped the same way.
 
 use std::time::Duration;
 
@@ -27,7 +27,10 @@ async fn an_unattended_session_works_inside_its_roots_and_is_refused_outside() -
 {
     let mut run = LiveRun::start(
         "unattended",
-        json!({ "permissions": {"mode": "default"} }),
+        json!({
+            "permissions": {"mode": "default"},
+            "sandbox": {"network": {"mode": "deny_all"}}
+        }),
         Mode::InProcess,
     )
     .await?;
@@ -109,7 +112,10 @@ async fn an_unattended_session_works_inside_its_roots_and_is_refused_outside() -
 async fn a_shell_command_writing_outside_the_roots_is_refused_unattended() -> anyhow::Result<()> {
     let mut run = LiveRun::start(
         "unattended-shell",
-        json!({ "permissions": {"mode": "default"} }),
+        json!({
+            "permissions": {"mode": "default"},
+            "sandbox": {"network": {"mode": "deny_all"}}
+        }),
         Mode::InProcess,
     )
     .await?;

@@ -309,11 +309,11 @@ pub struct SandboxConfig {
     /// background. Off by default: such a service outlives the session.
     pub reap_on_close: bool,
     /// In an unattended session, a `Bash` / `Monitor` command nobody can be
-    /// asked about runs without an allow rule when the sandbox fully holds
-    /// it. With this on, it also needs `network.mode` other than
-    /// `unrestricted`: the sandbox holds writes, and an open network is a way
-    /// out it does not cover. Off by default in 0.3.x, which keeps the
-    /// earlier behavior; a later 0.3.x release is planned to turn it on.
+    /// asked about runs without an allow rule only when the sandbox fully
+    /// holds it and `network.mode` is not `unrestricted`: the sandbox holds
+    /// writes, and an open network is a way out it does not cover. On by
+    /// default; `false` drops the network condition, so a fully held command
+    /// runs under an open network too.
     pub unattended_needs_network_policy: bool,
 }
 
@@ -328,7 +328,7 @@ impl Default for SandboxConfig {
             env: Default::default(),
             cache_dirs: CacheDirectories::default(),
             reap_on_close: false,
-            unattended_needs_network_policy: false,
+            unattended_needs_network_policy: true,
         }
     }
 }

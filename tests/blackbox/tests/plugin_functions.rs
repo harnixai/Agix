@@ -164,7 +164,7 @@ async fn an_installed_package_discloses_and_lists_its_functions() -> anyhow::Res
 
     let plugins = daemon.listed().await?;
     let xflow = named(&plugins, "xflow", "installed");
-    assert_eq!(xflow["enabled"], true, "{xflow}");
+    assert_eq!(xflow["enabled"], false, "{xflow}");
     assert_eq!(
         xflow["functions"],
         json!([

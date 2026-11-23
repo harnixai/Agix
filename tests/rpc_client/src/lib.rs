@@ -973,6 +973,26 @@ impl DaemonRpcClient {
         self.call("plugin.install", params).await
     }
 
+    /// `plugin.install`, then `plugin.enable` when it succeeded — what a host
+    /// does once it has read the disclosure. Returns the install's response.
+    pub async fn plugin_install_and_enable(
+        &mut self,
+        params: Value,
+    ) -> anyhow::Result<RpcResponse> {
+        let installed = self.plugin_install(params.clone()).await?;
+        if installed.error.is_some() {
+            return Ok(installed);
+        }
+        let name = params["name"].as_str().unwrap_or_default();
+        let enabled = self.plugin_set_enabled(name, true).await?;
+        anyhow::ensure!(
+            enabled.error.is_none(),
+            "plugin.enable {name}: {:?}",
+            enabled.error
+        );
+        Ok(installed)
+    }
+
     pub async fn plugin_uninstall(&mut self, params: Value) -> anyhow::Result<RpcResponse> {
         self.call("plugin.uninstall", params).await
     }

@@ -175,8 +175,7 @@ impl HealthCheck for DefaultEngineNameCheck {
     }
 }
 
-/// Says which way `plugins.enable_on_install` is set, and, while it is
-/// still `true`, that its default is planned to change.
+/// Says which way `plugins.enable_on_install` is set.
 pub(super) struct EnableOnInstallCheck(pub(super) bool);
 
 impl HealthCheck for EnableOnInstallCheck {
@@ -188,9 +187,8 @@ impl HealthCheck for EnableOnInstallCheck {
         let details = serde_json::json!({"enable_on_install": self.0});
         if self.0 {
             CheckResult::ok(
-                "plugin.install enables a package as soon as it is installed; \
-                 plugins.enable_on_install is planned to default to false in a later \
-                 0.3.x release, after which the host must call plugin.enable",
+                "plugin.install enables a package as soon as it is installed, before the \
+                 host has read its disclosure",
             )
         } else {
             CheckResult::ok(

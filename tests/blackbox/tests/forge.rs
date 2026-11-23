@@ -22,8 +22,7 @@ fn stubbed(name: &str, stub: &ProviderStub) -> LiveRunBuilder {
 async fn install(run: &mut LiveRun, archive: &Path) -> anyhow::Result<Value> {
     let resp = run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": FORGE_PACKAGE, "version": FORGE_PACKAGE_VERSION,
                     "download_url": file_url(archive) }),
         )

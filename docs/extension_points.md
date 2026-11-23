@@ -441,7 +441,7 @@ scene.prompt = Arc::new(MyPrompt { base: scene::harnix::HarnixPrompt });
 
 | 字段 | 缺省 | 决定什么 |
 |---|---|---|
-| `interactive` | `false` | 有没有人在场的缺省答案,会话自己给了 `Builder::attended` / `options.attended` 的以它为准。`false` 时权限询问直接变成写明怎么授权的拒绝、只在实例授权的根内读写、`Bash` 只在 OS 沙箱完整生效时放行(`ARCHITECTURE.md` §3.2.3、§6.3)。要等人回答的工具(`AskUserQuestion`、`EnterPlanMode` / `ExitPlanMode`,`base::interface::scene::NEEDS_A_USER`)由 `Builder::build()` 统一不注册,场景不必自己从白名单里拿掉;`true` 时 `AskUserQuestion` 还要宿主能回答提问才注册(见[向人提问](#向人提问--elicitationask)) |
+| `interactive` | `false` | 有没有人在场的缺省答案,会话自己给了 `Builder::attended` / `options.attended` 的以它为准。`false` 时权限询问直接变成写明怎么授权的拒绝、只在实例授权的根内读写、没有 allow 规则的 `Bash` 只在 OS 沙箱完整生效、网络受限(`sandbox.network.mode`)时放行(`ARCHITECTURE.md` §3.2.3、§6.3)。要等人回答的工具(`AskUserQuestion`、`EnterPlanMode` / `ExitPlanMode`,`base::interface::scene::NEEDS_A_USER`)由 `Builder::build()` 统一不注册,场景不必自己从白名单里拿掉;`true` 时 `AskUserQuestion` 还要宿主能回答提问才注册(见[向人提问](#向人提问--elicitationask)) |
 | `ScenePrompt::session_context` | 空 | 本会话的事实(工作目录、平台、草稿目录),由内核在会话开头连同项目说明作为一条上下文消息注入一次,压缩与 `/clear` 之后重新注入。**随会话而变的东西放这里,不要放进系统提示**:系统提示逐字节相同,厂商的前缀缓存才能跨会话命中 |
 | `bundled_skills` | `["skillify"]` | 列出哪些内置技能;依赖的工具不被允许的自动不列 |
 | `attended_skills` | 空 | 除 `bundled_skills` 外再列的内置技能,只在会话有人值守时列 |

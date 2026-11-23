@@ -89,6 +89,20 @@
   managed 写了 `permissions.mode` 时,它是会话模式的上限,`permissions.client_may_loosen` 与 `session.setPermissionMode`
   也越不过。
 
+## 两个缺省值(0.4.0)
+
+0.3.x 说过"后续版本改"的两个缺省在 0.4.0 改了,应用要跟着改:
+
+- **`plugins.enable_on_install` 缺省 `false`。** `plugin.install` 装好并返回披露,新包保持禁用,结果的 `enabled`
+  是 `false`。宿主读过披露后调 `plugin.enable`,包才往会话里贡献东西。要沿用装完即启用,在全局设置里写
+  `plugins.enable_on_install: true`。已有启用记录的包(包括升级同名包)不受影响。
+- **`sandbox.unattended_needs_network_policy` 缺省 `true`。** 无人值守的会话(场景不交互,或
+  `options.attended: false`)里,没有 allow 规则的 `Bash` / `Monitor` 命令要沙箱完全兜得住、并且
+  `sandbox.network.mode` 不是 `unrestricted` 才执行,否则按无人可问拒绝。缺省的 `unrestricted` 下,这类命令在 0.3.x
+  能跑、在 0.4.0 被拒。三种改法任选:把 `sandbox.network.mode` 设成 `deny_all` / `allowlist`;给要跑的命令写
+  `permissions.allow` 规则;或者接受开着的网络,把这个开关设为 `false`(`daemon.doctor` 的
+  `sandbox.unattended_network` 这时报 `degraded`)。
+
 ## agixd 命令行
 
 - `agixd --set KEY=VALUE`(可重复):值按 JSON 读,读不成 JSON 就当字符串;不认识的键、旧键、类型不对时启动失败。

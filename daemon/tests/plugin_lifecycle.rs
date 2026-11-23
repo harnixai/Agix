@@ -43,7 +43,15 @@ async fn plugin_lifecycle_install_list_disable_enable_uninstall() {
     let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
     let plugins = v["result"]["plugins"].as_array().unwrap();
     let demo = plugins.iter().find(|p| p["name"] == "demo-plugin").unwrap();
-    assert_eq!(demo["enabled"], true);
+    assert_eq!(demo["enabled"], false);
+
+    let resp = rpc_call(
+        &sock,
+        r#"{"jsonrpc":"2.0","method":"plugin.enable","id":3,"params":{"name":"demo-plugin"}}"#,
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    assert_eq!(v["result"]["enabled"], true, "resp: {v}");
 
     let resp = rpc_call(
         &sock,

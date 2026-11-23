@@ -539,8 +539,8 @@
           "type": "array"
         },
         "enable_on_install": {
-          "default": true,
-          "description": "Whether `plugin.install` turns a package on once it is installed.\nWith `false` the host reads the disclosure the install returns and\ncalls `plugin.enable` itself. Defaults to `true`, which a later 0.3.x\nrelease is planned to change to `false`.",
+          "default": false,
+          "description": "Whether `plugin.install` turns a package on once it is installed.\nOff by default: the host reads the disclosure the install returns and\ncalls `plugin.enable` itself. `true` enables it as part of the install.",
           "type": "boolean"
         },
         "enabled": {
@@ -829,8 +829,8 @@
           "type": "boolean"
         },
         "unattended_needs_network_policy": {
-          "default": false,
-          "description": "In an unattended session, a `Bash` / `Monitor` command nobody can be\nasked about runs without an allow rule when the sandbox fully holds\nit. With this on, it also needs `network.mode` other than\n`unrestricted`: the sandbox holds writes, and an open network is a way\nout it does not cover. Off by default in 0.3.x, which keeps the\nearlier behavior; a later 0.3.x release is planned to turn it on.",
+          "default": true,
+          "description": "In an unattended session, a `Bash` / `Monitor` command nobody can be\nasked about runs without an allow rule only when the sandbox fully\nholds it and `network.mode` is not `unrestricted`: the sandbox holds\nwrites, and an open network is a way out it does not cover. On by\ndefault; `false` drops the network condition, so a fully held command\nruns under an open network too.",
           "type": "boolean"
         }
       },
@@ -1268,7 +1268,7 @@
     "plugins": {
       "$ref": "#/$defs/PluginsConfig",
       "default": {
-        "enable_on_install": true,
+        "enable_on_install": false,
         "enabled": true
       }
     },
@@ -1354,7 +1354,7 @@
         },
         "reap_on_close": false,
         "require": false,
-        "unattended_needs_network_policy": false
+        "unattended_needs_network_policy": true
       }
     },
     "schedule": {

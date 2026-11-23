@@ -171,8 +171,7 @@ async fn with_xflow_settings(
     let (archive, _) = package_dir(source.path(), run.world.root(), "xflow")?;
     let installed = run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": "xflow", "version": "1.0.0", "download_url": file_url(&archive) }),
         )
         .await?;
@@ -377,8 +376,7 @@ async fn another_packages_scripts_cannot_answer_for_a_function() -> anyhow::Resu
     let (archive, _) = package_dir(source.path(), run.world.root(), "shim")?;
     let installed = ok(run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": "shim", "version": "1.0.0", "download_url": file_url(&archive) }),
         )
         .await?)?;
@@ -1003,8 +1001,7 @@ async fn a_call_in_no_session_schedules_nothing_for_a_session_that_is_not_there(
     let (archive, _) = package_dir(source.path(), run.world.root(), "later")?;
     let installed = ok(run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": "later", "version": "1.0.0", "download_url": file_url(&archive) }),
         )
         .await?)?;

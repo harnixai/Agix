@@ -688,7 +688,7 @@ async fn a_packaged_script_runs_beside_the_projects_own(mode: Mode) -> anyhow::R
     // bindings when it is built, so one opened first would not have them.
     let mut client = daemon.connect().await?;
     let installed = client
-        .plugin_install(json!({
+        .plugin_install_and_enable(json!({
             "name": "annotator",
             "version": "1.0.0",
             "download_url": test_runner::plugin_fixture::file_url(&archive),
@@ -788,7 +788,7 @@ async fn a_package_may_add_to_the_prompt_but_not_rewrite_it(mode: Mode) -> anyho
 
     let mut client = daemon.connect().await?;
     let installed = client
-        .plugin_install(json!({
+        .plugin_install_and_enable(json!({
             "name": "rewriter",
             "version": "1.0.0",
             "download_url": test_runner::plugin_fixture::file_url(&archive),
@@ -1032,7 +1032,7 @@ async fn a_package_with_a_wasm_component_is_refused(mode: Mode) -> anyhow::Resul
     .await?;
     let mut client = daemon.connect().await?;
     let installed = client
-        .plugin_install(json!({
+        .plugin_install_and_enable(json!({
             "name": "echo-plugin",
             "version": "1.0.0",
             "download_url": test_runner::plugin_fixture::file_url(&archive),
@@ -1353,15 +1353,12 @@ async fn an_installed_package_outlives_the_daemon_that_installed_it() -> anyhow:
     .await?;
     let mut client = first.connect().await?;
     let installed = client
-        .call(
-            "plugin.install",
-            json!({
-                "name": test_runner::plugin_fixture::DEMO_PACKAGE,
-                "version": test_runner::plugin_fixture::DEMO_PACKAGE_VERSION,
-                "download_url": format!("file://{}", archive.display()),
-                "checksum": checksum,
-            }),
-        )
+        .plugin_install_and_enable(json!({
+            "name": test_runner::plugin_fixture::DEMO_PACKAGE,
+            "version": test_runner::plugin_fixture::DEMO_PACKAGE_VERSION,
+            "download_url": format!("file://{}", archive.display()),
+            "checksum": checksum,
+        }))
         .await?;
     anyhow::ensure!(
         installed.error.is_none(),

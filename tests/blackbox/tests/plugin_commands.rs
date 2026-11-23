@@ -26,8 +26,7 @@ async fn install(
 ) -> anyhow::Result<Value> {
     let resp = run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": name, "version": "1.0.0", "download_url": file_url(archive) }),
         )
         .await?;

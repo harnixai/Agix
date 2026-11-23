@@ -361,10 +361,9 @@ cd my-plugin && zip -r ../my-plugin.zip . && shasum -a 256 ../my-plugin.zip
 写进去的,写到一半不会留下坏文件。
 
 `plugin.install` 的结果带 `enabled`,是装完之后这个包解析出的启用状态。`settings.json` 的
-`plugins.enable_on_install` 缺省 `true`,装完即启用;设为 `false` 时,这一层还没有它启用
-记录的新包装完保持禁用,要宿主读过披露后显式 `plugin.enable`。`daemon.doctor` 的
-`plugins.enable_on_install` 检查在开关为 `true` 时提示:缺省计划改成
-`false`。
+`plugins.enable_on_install` 缺省 `false`:这一层还没有它启用记录的新包装完保持禁用,宿主读过
+安装返回的披露后显式调 `plugin.enable`,包才往会话里贡献东西。设为 `true` 时装完即启用。
+`daemon.doctor` 的 `plugins.enable_on_install` 检查报出开关的取值。
 
 插件的场景装上就是 active,不需要 `scene.activate`;进入它仍然要显式的
 `session.create {"scene": "plugin:<name>"}`。

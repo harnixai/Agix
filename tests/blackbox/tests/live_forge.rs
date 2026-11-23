@@ -30,8 +30,7 @@ async fn with_forge(builder: LiveRunBuilder) -> anyhow::Result<LiveRun> {
     let (archive, checksum) = package_forge(run.world.root())?;
     let installed = run
         .client
-        .call(
-            "plugin.install",
+        .plugin_install_and_enable(
             json!({ "name": FORGE_PACKAGE, "version": FORGE_PACKAGE_VERSION,
                     "download_url": file_url(&archive), "checksum": checksum }),
         )

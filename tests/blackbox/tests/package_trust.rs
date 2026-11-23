@@ -28,15 +28,12 @@ async fn install(
 ) -> anyhow::Result<daemon::rpc::RpcResponse> {
     let (archive, checksum) = zip_with_entries(run.world.root(), name, entries)?;
     run.client
-        .call(
-            "plugin.install",
-            json!({
-                "name": name,
-                "version": "1.0.0",
-                "download_url": file_url(&archive),
-                "checksum": checksum,
-            }),
-        )
+        .plugin_install_and_enable(json!({
+            "name": name,
+            "version": "1.0.0",
+            "download_url": file_url(&archive),
+            "checksum": checksum,
+        }))
         .await
 }
 

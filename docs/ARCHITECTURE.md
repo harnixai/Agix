@@ -1385,7 +1385,7 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 | S13 | S8 记下的 allow | `Permit(Rule)` |
 | S14 | 模式分派 | `acceptEdits` 且只读、非 `strict_unheld`、`reach` 属于 `SessionOnly`、`Inside`、`Host { listed: true }` → `Permit(AcceptEdits)`;`bubble` → `Ask`;其余 → `Ask(ModeDefault)`,写引擎配置的标 `Ask(Configuration)`,措辞取 `facts.question` |
 | S14b | delegate 自己的 `allow`(fork 的 skill 的 `allowed-tools`、它自己跑的 skill)盖住了 S14 的询问 | `Permit(Rule)`;只覆盖 `ModeDefault` / `Configuration` 的询问,deny、规则 ask、managed 的问都不受它影响 |
-| S15 | 无人值守的受限命令:`Ask(ModeDefault)`、无人值守、`runs`、`reach` 是 `Unknown` 或 `Inside`、会话沙箱 `Full`,并且(没开 `sandbox.unattended_needs_network_policy` 或网络受限) | `Permit(UnattendedConfined)` |
+| S15 | 无人值守的受限命令:`Ask(ModeDefault)`、无人值守、`runs`、`reach` 是 `Unknown` 或 `Inside`、会话沙箱 `Full`,并且(网络受限,或 `sandbox.unattended_needs_network_policy` 设成了 `false`) | `Permit(UnattendedConfined)` |
 | S16 | hook 的 approve | 对 `HookOrPerson` 的询问 `Permit(HookApproved)`;managed 的问(`PersonOnly`)不吃它 |
 | S17 | 在场性 | 无人值守 → `Deny(Attendance)`,附"授权走设置"的提示;没有任何渠道能问人(`NoOneToAsk`:宿主没给权限也没接问人的通道、程序起的子 Agent、skill 的内联命令、`RunCode` 的子调用)→ `Deny(Attendance)`,附原因;有人值守 → `Prompt` |
 | S18 | 输出 | 每个 `Permit` 带 `basis`、`profile`、`obligations`(见下) |
@@ -1761,9 +1761,9 @@ skill 自己的 `allowed-tools` 这时还没生效,不能给自己的命令开�
 `Bash` 不能事先知道一条命令会写哪里,所以无人值守时它靠 OS 沙箱:沙箱完整生效
 (`Enforcement::Full`)就放行(S15,依据 `UnattendedConfined`,profile 是 `Unattended`),写入被限制在可写根之内;沙箱不可用(关掉了,或 Linux 上没有
 bubblewrap)就和别的未授权调用一样被拒。沙箱只限写不限网,网络缺省是 `Unrestricted`,一条被关在
-项目目录里的命令照样能往外连;`sandbox.unattended_needs_network_policy: true` 时自动放行另外
-要求 `sandbox.network.mode` 是 `deny_all` / `allowlist`,否则回到 allow 规则。这个开关 0.3.x 缺省
-关(保持原来的行为),计划在后续 0.3.x 改为缺省开。沙箱在 `assembly` / `daemon` 缺省编译进来。会话的 profile 只限写,不限读——读的限制落在文件工具上(只读通道里的命令另按 strict profile 限读,见下),
+项目目录里的命令照样能往外连;所以自动放行另外要求 `sandbox.network.mode` 不是 `unrestricted`
+(`sandbox.unattended_needs_network_policy`,缺省 `true`),否则回到 allow 规则;设为 `false`
+去掉这一条。沙箱在 `assembly` / `daemon` 缺省编译进来。会话的 profile 只限写,不限读——读的限制落在文件工具上(只读通道里的命令另按 strict profile 限读,见下),
 `Bash` 从环境变量里读得到什么由 §5 第 5 条决定,设置里点名的密钥都不在其中;读项目外的文件只受凭据黑名单约束:内建的家目录凭据清单(`base::interface::exec::default_deny_read`)加上 `sandbox.deny_read`,
 减去 `sandbox.allow_read`,再加上权限规则里点名具体路径的
 `Read` deny(下一段)。`deny_read` 里的目录,里面的符号链接指到目录外的,链接指向的地方也一并拒读。

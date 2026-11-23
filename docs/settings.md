@@ -176,7 +176,7 @@
 | `sandbox.env.allow` | 无 | 会话 | 只能收紧(只能是下层的子集) | 立即 | 无论模式都放行的变量:`allowlist` 下是多保留的名字,`inherit` 下是有意把引擎自己的凭据(provider 的 `api_key_env`、MCP 配置读的变量)交给每个子进程的办法 |
 | `sandbox.cache_dirs.<工具链>` | 无 | 会话 | 只能收紧(只能是下层的子集) | 立即 | 工具链名 → 缓存路径列表,让沙箱里的构建工具能写自己的缓存 |
 | `sandbox.reap_on_close` | `false` | 会话 | 只能收紧(只能设为 true) | 立即 | 会话结束(关闭、被逐出、daemon 关停)时停掉它的命令起的、仍在跑的所有进程组,包括有意留在后台的服务;关着时那些服务比会话活得久 |
-| `sandbox.unattended_needs_network_policy` | `false` | 会话 | 只能收紧(只能设为 true) | 立即 | 无人值守的会话里,沙箱完全兜得住的命令无需 allow 规则即可执行;打开后还要求 `network.mode` 不是 `unrestricted` |
+| `sandbox.unattended_needs_network_policy` | `true` | 会话 | 只能收紧(只能设为 true) | 立即 | 无人值守的会话里,没有 allow 规则的 `Bash` / `Monitor` 命令要沙箱完全兜得住、并且 `network.mode` 不是 `unrestricted` 才执行;设为 `false` 去掉网络这一条,出网不受限时沙箱兜得住的命令照样执行 |
 
 ### `web`
 
@@ -275,7 +275,7 @@
 |---|---|---|---|---|---|
 | `plugins.enabled` | `true` | 进程 | 只能收紧(只能设为 false) | 立即 | 是否加载已安装的插件 |
 | `plugins.allow` | 无 | 进程 | 只能收紧(只能是下层的子集(空表示全部)) | 立即 | 非空时只加载列出名字的插件(白名单,不在其上的被拒) |
-| `plugins.enable_on_install` | `true` | 进程 | 只能收紧(只能设为 false) | 立即 | `plugin.install` 装好后是否直接启用;`false` 时宿主读完安装返回的披露,再自己调 `plugin.enable` |
+| `plugins.enable_on_install` | `false` | 进程 | 只能收紧(只能设为 false) | 立即 | `plugin.install` 装好后是否直接启用;`false` 时宿主读完安装返回的披露,再自己调 `plugin.enable`;`true` 时装完即启用 |
 
 ### `mcp`
 

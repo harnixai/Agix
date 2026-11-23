@@ -391,7 +391,8 @@ let pool = agix::pool::assemble(
 `NotebookEdit`、worktree 两个工具、`Ping`、`Sleep` 和 `PushNotification`;
 `StructuredOutput` 只在宿主给了输出 schema 时才有。场景分有人值守
 (有人应答提示)和无人值守:`harnix`、`mini` 无人值守,`code` 创建时二选一,会话也能用 `options.attended` 改场景的缺省。无人值守的会话
-没有 `AskUserQuestion` 和计划模式,需要批准的调用直接拒绝而不是去问,`Bash` 只在 OS 沙箱里跑——
+没有 `AskUserQuestion` 和计划模式,需要批准的调用直接拒绝而不是去问,没有 allow 规则的 `Bash` 命令
+只在 OS 沙箱完全兜得住、并且沙箱网络受限(`sandbox.network.mode`)时跑——
 见 `docs/ARCHITECTURE.md` §3.2.3、§6.3。
 
 ### 模型路由
@@ -515,12 +516,12 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `providers`、`model` | 模型 provider、每类调用要的档位、回退顺序([模型路由](#模型路由));`model.effort`、`model.thinking`(`auto`、`on`、`off`)、`model.max_tokens` |
 | `permissions` | `mode`;字符串写的规则列表(`allow`、`ask`、`deny`;`allow_exact` 按字面比对内容,"每次都允许"记在这里);`prompt_timeout_secs`(提问没人答就拒绝);`client_may_loosen`(RPC 客户端能否要求比 `mode` 更宽的模式) |
 | `files` | `extra_dirs`(像项目一样读写)、`read_dirs`(不问就能读;写 `"/"` 即任意处可读)、`allow_write`、`deny_write` |
-| `sandbox` | `enabled`、`require`(平台没法强制沙箱时拒绝执行命令)、`allow_read`、`deny_read`(追加到内建的凭据列表)、`network`、`env`、`cache_dirs`、`reap_on_close`、`unattended_needs_network_policy` |
+| `sandbox` | `enabled`、`require`(平台没法强制沙箱时拒绝执行命令)、`allow_read`、`deny_read`(追加到内建的凭据列表)、`network`、`env`、`cache_dirs`、`reap_on_close`、`unattended_needs_network_policy`(缺省开:无人值守时没有 allow 规则的命令还要 `network.mode` 不是 `unrestricted`) |
 | `web` | `WebFetch`、`Ping` 的 `allowed_domains`,也是 `sandbox.network.mode: "allowlist"` 读的那份名单 |
 | `turn`、`session`、`goal`、`schedule`、`agents`、`team` | `turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`;`session.token_budget`;`goal.max_rounds`;`schedule.max_model_jobs`、`schedule.min_model_interval_minutes`;`agents.max_depth`、`agents.max_concurrent`;`team.enabled`、`team.stage_concurrency`、`team.max_members`、`team.member_idle_secs` |
 | `compaction` | `threshold_tokens`、`keep_recent`、`reactive`、`clear_on_cache_expiry`、`inline_result_chars` |
 | `prompt` | `append`、`override`、`instruction_files`、`language`、`path_style`(`absolute`、`relative`) |
-| `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
+| `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关(`plugins.enable_on_install` 缺省关:宿主读完安装返回的披露再调 `plugin.enable`)、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
 | `memory`、`telemetry`、`checkpoints`、`recorder` | `memory.enabled`;`telemetry.enabled`、`telemetry.otlp_endpoint`;文件检查点;LLM 录制 |
 | `app` | 只认全局文件层、`cli` 层与 managed 文件:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir`、`session_cap`、`session_idle_timeout_secs`、`worker_threads` |
 

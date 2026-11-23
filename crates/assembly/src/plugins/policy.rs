@@ -18,9 +18,8 @@ pub struct PluginsConfig {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
     /// Whether `plugin.install` turns a package on once it is installed.
-    /// With `false` the host reads the disclosure the install returns and
-    /// calls `plugin.enable` itself. Defaults to `true`, which a later 0.3.x
-    /// release is planned to change to `false`.
+    /// Off by default: the host reads the disclosure the install returns and
+    /// calls `plugin.enable` itself. `true` enables it as part of the install.
     pub enable_on_install: bool,
 }
 
@@ -29,7 +28,7 @@ impl Default for PluginsConfig {
         Self {
             enabled: true,
             allow: Vec::new(),
-            enable_on_install: true,
+            enable_on_install: false,
         }
     }
 }

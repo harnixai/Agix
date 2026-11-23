@@ -135,10 +135,10 @@ impl HealthCheck for UnattendedNetworkCheck {
         } else {
             CheckResult::degraded(format!(
                 "unattended scenes ({}) run sandboxed Bash / Monitor commands without asking \
-                 while sandbox.network.mode is unrestricted: such a command can send what it \
-                 reads anywhere. Set sandbox.unattended_needs_network_policy to true, or \
-                 sandbox.network.mode to deny_all / allowlist; the setting is planned to \
-                 default to true in a later 0.3.x release",
+                 while sandbox.network.mode is unrestricted, because \
+                 sandbox.unattended_needs_network_policy is set to false: such a command can \
+                 send what it reads anywhere. Remove that setting, or set sandbox.network.mode \
+                 to deny_all / allowlist",
                 self.unattended_scenes.join(", ")
             ))
         }
@@ -500,22 +500,23 @@ mod tests {
                 .status
                 .label()
         };
-        assert_eq!(status(settings_with(|_| {}), unattended()), "degraded");
-        assert_eq!(status(settings_with(|_| {}), Vec::new()), "ok");
+        let not_required = |s: &mut Settings| s.sandbox.unattended_needs_network_policy = false;
+        assert_eq!(
+            status(settings_with(not_required), unattended()),
+            "degraded"
+        );
+        assert_eq!(status(settings_with(not_required), Vec::new()), "ok");
         assert_eq!(
             status(
-                settings_with(|s| s.sandbox.network.mode = NetworkMode::Allowlist),
+                settings_with(|s| {
+                    not_required(s);
+                    s.sandbox.network.mode = NetworkMode::Allowlist;
+                }),
                 unattended()
             ),
             "ok"
         );
-        assert_eq!(
-            status(
-                settings_with(|s| s.sandbox.unattended_needs_network_policy = true),
-                unattended()
-            ),
-            "ok"
-        );
+        assert_eq!(status(settings_with(|_| {}), unattended()), "ok");
     }
 
     #[test]

@@ -1056,17 +1056,17 @@ MCP server 都被拒绝。
 
 `plugins.refused`:磁盘上有发现阶段挡下来、因而不会加载的插件包(披露超限、manifest 读不了等)时是
 `degraded`,`details.refused` 是 `[{name,version,reason}]`;`plugins.enable_on_install` 说明
-`plugins.enable_on_install` 设置是真是假(`plugin.install` 是否装完就启用),总是 `ok`,为真时 `summary`
-提示缺省计划在后续 0.3.x 版本改为 `false`。引擎名（`EmbedConfig.engine`）不是 `agix` 时还有一项
+`plugins.enable_on_install` 设置是真是假(`plugin.install` 是否装完就启用,缺省否),总是 `ok`。引擎名（`EmbedConfig.engine`）不是 `agix` 时还有一项
 `plugins.engine_name`：已启用的包里，命令入口或 `[[script]]` 的源码写了 `agix.` 时是 `degraded`——
 基础库在这个引擎里叫引擎名，这些调用跑不通；`details` 是 `{"engine": "…", "plugins": [{plugin, files}]}`。
 只看源码文本，不运行。
 
 daemon 自己的会话池还有一项 `sandbox.unattended_network`:这个 daemon 服务的场景里有无人值守的
 (没人回答提问与权限询问),`sandbox.network.mode` 是 `unrestricted`,而
-`sandbox.unattended_needs_network_policy` 关着——三条同时成立时是 `degraded`:无人值守会话里
-沙箱完整生效的 `Bash` / `Monitor` 命令不问就跑,网络又是开着的。`summary` 提示这个开关计划在
-后续 0.3.x 版本改为缺省开;其余情况是 `ok`。这一项按场景缺省的 `interactive` 报;`options.attended` 把某个会话改成有人或无人值守,不反映在这里。
+`sandbox.unattended_needs_network_policy` 被设成了 `false`(缺省 `true`)——三条同时成立时是
+`degraded`:无人值守会话里沙箱完整生效的 `Bash` / `Monitor` 命令不问就跑,网络又是开着的;
+`summary` 给出两种改法(去掉这项设置,或把 `sandbox.network.mode` 改成 `deny_all` / `allowlist`)。
+其余情况是 `ok`。这一项按场景缺省的 `interactive` 报;`options.attended` 把某个会话改成有人或无人值守,不反映在这里。
 
 ```jsonc
 { "name":"sandbox.unattended_network", "status":"degraded", "summary":"unattended scenes (code) run …",
@@ -1540,7 +1540,7 @@ MCP server 在工具调用中要问用户的(2026-07-28 server 的 `input_requir
 `attended_skills` 只在有人值守时列)、权限询问送给宿主还是直接拒绝(「项目之外」的收紧、MCP
 询问回 `cancel`、`Bash` 要求沙箱也一样)。`attended:false` 的会话就按无人值守的场景对待:询问直接
 拒绝,无人值守的沙箱规则也一样适用(`ARCHITECTURE.md` 权限顺序 S15:有人值守时要问的受限命令,在会话
-沙箱完整时不问、在沙箱里跑);`attended:true` 让询问送给宿主。规则与托管设置照旧判。子 Agent 与团队成员随根会话(§10)。随 `options` 记在会话日志里,重建、恢复、
+沙箱完整、网络受限时不问、在沙箱里跑);`attended:true` 让询问送给宿主。规则与托管设置照旧判。子 Agent 与团队成员随根会话(§10)。随 `options` 记在会话日志里,重建、恢复、
 `session.fork` 都保留。
 
 `auto_name` 为 `false` 时首轮之后不调模型起名,`name` 一直是 `null`,直到 `session.rename`;省略或
@@ -3882,11 +3882,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 `checksum`、或标记是旧版本留下的空标记)就按"已装过"处理,同样读回、同样披露,读不回来就
 报错,但不删它。
 
-响应:`{ "success": true, "message": "…", "enabled": true, "disclosure": … }`。
-`enabled` 是装完之后这个包按启用状态解析出的结果:`plugins.enable_on_install` 缺省 `true`,
-装完即启用;设为 `false` 时,新装的包(这一层没有它的启用记录)装完保持禁用,宿主读过
-披露后要显式调 `plugin.enable`,包才会往会话里贡献东西。已经有启用记录的名字(包括升级
-同名包)保持原状。`disclosure` 是这个插件会往模型上下文里塞的文本(含它带的 skill 的
+响应:`{ "success": true, "message": "…", "enabled": false, "disclosure": … }`。
+`enabled` 是装完之后这个包按启用状态解析出的结果:`plugins.enable_on_install` 缺省 `false`,
+新装的包(这一层没有它的启用记录)装完保持禁用,宿主读过披露后要显式调 `plugin.enable`,
+包才会往会话里贡献东西;设为 `true` 时装完即启用。已经有启用记录的名字(包括升级同名包)
+保持原状。`disclosure` 是这个插件会往模型上下文里塞的文本(含它带的 skill 的
 描述与正文)、它带的 skill 名(`skills`)与命令名(`commands`)和它要起的 MCP 服务器(命令行或地址),让调用方
 在依赖它之前先看见;字段见 `plugin_packages.md`。包里有一个 `SKILL.md` 校验不过,同样在
 改名之前被拒,报 `INVALID_PARAMS`,消息里写明是哪个 skill、哪一项;`[[command]]` 或 `[[function]]`

@@ -175,8 +175,7 @@ async fn engine_name_check(engine: &str) -> anyhow::Result<Value> {
             EXT_PACKAGE_VERSION
         };
         let installed = client
-            .call(
-                "plugin.install",
+            .plugin_install_and_enable(
                 json!({ "name": name, "version": version, "download_url": file_url(&archive) }),
             )
             .await?;
