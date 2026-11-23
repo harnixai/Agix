@@ -197,7 +197,9 @@ async fn more_than_five_memories_go_through_a_selection_call() -> anyhow::Result
     } else {
         eprintln!("[live memory-select] the selection missed the 2 s recall budget");
     }
-    run.finish().await;
+    // Models sometimes reach for Bash to look around before writing t.txt;
+    // the case is about the selection call, so that going unanswered is fine.
+    run.finish_allowing_refusals().await;
     Ok(())
 }
 
