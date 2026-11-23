@@ -353,6 +353,12 @@ let settings = LoadedSettings::load_from(LoadRequest {
 都剥掉 `paths`,每层 `permissions` 里的规则列表单独拎出来按层拼接(不参与覆盖),其余
 靠后的层递归盖在靠前的上面——所以把配置从磁盘上搬走,改不了一个配置文件的含义。
 
+每层的 `ConfigLayer.tier` 说它是哪一级:`Global`、`Scene`、`Project` 是三级文件层(`Project` 层受项目信任
+闸门约束,`settings::tier_gate`);`Cli` 排在三级之上、按全局层的规矩读(`app` 照收),`agixd --set` 就是它;
+`Managed` 的层不进合并,加载器先把它们拎出来合成部署方的托管层,压在所有值之上、可以写任何键
+(`settings::managed`,`ARCHITECTURE.md` §6.1)。`Session` 不由 source 给:会话自己的 `options.settings` 在读好的
+设置上经 `LoadedSettings::overlay` 叠加。
+
 那几个目录参数即使 source 一个字节都不从里面读也得留着:它们是 scene 的*数据*待
 的地方,而这件事从来轮不到配置文件来决定。
 
@@ -1106,8 +1112,8 @@ assembler,把它的系统块折成一个——提示贡献者比一个请求允�
 
 assembler 收到的是一个 `AssemblyRequest`——registry、scene、settings、记忆 store、
 scene 上下文,以及已经渲染好的 skill 清单和 MCP 指令;managed 层的 `prompt.append` 单独给出
-(`managed_append`),有 `prompt_override` 时也要接上。它是个 struct,这样只读其中
-两项的实现不必把另外五项重述一遍。
+(`managed_append`),有 `prompt_override` 时也要接上。它是个 struct(十个字段),这样只读其中
+两项的实现不必把其余的重述一遍。
 
 ---
 
@@ -1442,7 +1448,8 @@ let req = DelegateRequest::new(
     StopsWith::Session,              // 随父会话结束;或 Call(token) 随你的令牌
 );
 // 其余按需改:agent_type、model、tools(只能收窄)、deny_rules(只有 deny 生效)、
-// grants、output_schema、workdir、asks、tag
+// grants、output_schema、workdir、asks、tag;spend 缺省 None:这个子 Agent 每轮自己一份预算,
+// 工具里起 delegate 要让它记进当前这一轮的,填 ctx.turn.spend()(ARCHITECTURE「用量只在一处计」)
 match agent.delegator().delegate(req).await? {
     Delegated::Started(s) => { /* s.task_id、s.agent_session_id */ }
     Delegated::Finished(outcome) => { /* outcome.text、outcome.end */ }
@@ -1477,8 +1484,8 @@ match agent.delegator().delegate(req).await? {
 
 ### 会话目标
 
-目标让一个会话一轮轮自己推进,直到模型标完成或受阻、或者轮数用完(`ARCHITECTURE.md`
-§3.4.1)。下一轮由谁来开,取决于谁拥有这个会话的输入循环:
+目标让一个会话一轮轮自己推进,直到模型标完成或受阻、轮数用完、或目标的 `token_budget` 用完(目标转
+`blocked`)(`ARCHITECTURE.md` §3.4.1)。下一轮由谁来开,取决于谁拥有这个会话的输入循环:
 
 - **直接用 `Agent::run` 驱动的**:什么都不用做,它自己在一轮正常结束后开下一轮。
 - **自己调度 turn 的**(会话池、自己的队列):`Builder::goal_rounds_from_owner()`,每轮结束

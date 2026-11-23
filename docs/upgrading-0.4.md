@@ -9,13 +9,16 @@
 ## 先做的检查
 
 1. **握手看协议版本。** 0.4.0 的 `protocol_version` 是 **5**(0.3.x 是 4)。宿主应在 `daemon.auth` 这一步就
-   拒绝它不认识的版本。
+   拒绝它不认识的版本。0.4.0 新增两个能力位:`session_settings`(`options.settings`,`session.setModel` /
+   `session.setPrompt` 的 `clamped_options`)与 `config_explain`(`config.explain`);用到这些的应用在 `daemon.ping`
+   / `daemon.auth` 的 `capabilities` 里查它们,不要靠版本号推。
 2. **跑一次 `daemon.doctor`。** `settings_tiers` 的每一层报出 `renamed_keys`(写了旧键的,连同取代它的新键)与
    `ignored_values`(放不进的值、不合格的 provider id 等)。旧键一律不读:管权限、沙箱、信任、MCP 开关的旧键还在时
    检查报 `failing`,其余报 `degraded`。加载时的告警也会点出新键名。
-3. **值不是预期的,调 `config.explain {key}`。** 它逐层列出这个键在每一层写了什么、结局如何(生效、被盖过、
-   未受信项目被扣下、只认全局层被丢掉、值放不进、被 managed 文件改掉;加 `session_id` 时还有会话那一层是否被夹住),
-   能力位 `config_explain`。迁移后某个值没生效,多半是旧键还在、写错了层,或被信任门禁扣下,这里一眼可见。
+3. **值不是预期的,调 `config.explain {key}`。** 它逐层列出这个键在每一层写了什么、结局如何(`applied` 生效、`overridden` 被盖过、`merged`、`not_set`、
+   `withheld_untrusted` 未受信项目被扣下、`dropped_not_global` 只认全局层被丢掉、`ignored` 值放不进、
+   `managed_overrode` 被 managed 文件改掉、`held_tighter_below` managed 的值比下层松、下层更严的留下;
+   加 `session_id` 时还有会话那一层:`clamped` 被夹住、`not_session_scope` 这个键不按会话定),能力位 `config_explain`。迁移后某个值没生效,多半是旧键还在、写错了层,或被信任门禁扣下,这里一眼可见。
 
 ## 坏设置怎么处理
 
@@ -61,7 +64,7 @@
 | `disable_skill_shell_execution` | `skills.allow_shell`(取反) |
 | `memory_enabled` | `memory.enabled` |
 | `telemetry_enabled`、`telemetry_url` | `telemetry.enabled`、`telemetry.otlp_endpoint` |
-| `providers.<id>`(对象) | `providers[]`(列表,每项带 `id`) |
+| `providers.<id>`(对象) | `providers[]`(列表,每项带 `id`);写成对象的整段不读,`ignored_values` 说明 |
 | `providers[].api_type`(`openai_compatible` 等) | `providers[].api`(`anthropic`、`openai_chat`、`openai_responses`) |
 | `providers[].thinking_toggle`、`reasoning_passback` | 由 `providers[].vendor` 推出 |
 | `providers[].api_key` | 删除:只认 `api_key_env` 或宿主给的凭据 |
@@ -83,6 +86,8 @@
   模型经 `CronCreate` 建的定时任务,宿主的 `schedule.create` 不受限。
 - **provider id 只能是小写字母、数字、`-`、`_`。** 别的 id 整项忽略,`daemon.doctor` 的 `ignored_values` 说明。
 - **managed 文件能写任何键,** 压过所有层(见 README「配置」的优先级表);有松紧次序的键下层更严时留下层的值。
+  managed 写了 `permissions.mode` 时,它是会话模式的上限,`permissions.client_may_loosen` 与 `session.setPermissionMode`
+  也越不过。
 
 ## agixd 命令行
 
@@ -95,7 +100,8 @@
 
 ### `session.create` 的 `options`
 
-`options` 分两类:
+`options` 里与模型、设置有关的字段分两类(`recorder`、`clock`、`telemetry`、`output_schema`、`prompt_types`、
+`host_tools`、`attended`、`auto_name`、`skill_dirs` 不变):
 
 - **选这个会话的对话用哪个模型:** `model`、`provider`。
 - **`options.settings`:** 形状同 settings.json,作用于整个会话,连同它的子 Agent 与团队成员。推理强度、思考开关
@@ -107,7 +113,7 @@
     带 allow 的规则列表被扣下。设置开了 `permissions.client_may_loosen` 才能放宽。managed 层写了的键压过它。
   - 能力位 `session_settings`。
 
-删掉的选项,传了以 `INVALID_PARAMS` 失败,报错里给出新写法:
+`options` 里任何读不出的字段(包括不认识的)都以 `INVALID_PARAMS` 失败,`invalid_options` 逐项列出。0.3 的下列选项已删,报错里给出新写法:
 
 | 0.3 | 0.4 |
 |---|---|
@@ -151,6 +157,10 @@
 
 ### 其他
 
+- `daemon.doctor` 的 `settings.managed` 的 `details.permissions` 换成 `details.settings`(文件的形状);
+  `config.get` 的 `tier` 多一个 `cli`,`effective` 回答多 `managed` 字段;`daemon.doctor` 的 `settings_tiers` 多一项
+  `tier: "cli"`。
+- `/cost` 与 telemetry `session_end` 的 token 合计含子 Agent。
 - `config.reload`、`config.set`、`config.setProvider` 的结果多一个 `restart_required`:只在启动时读的键里值变了的
   (`app.session_cap` 等),managed 文件变了时还有 `managed`。这些改动要重启 daemon 才生效。
 - 0.3.21 起:`provider_switched` 事件(换了 provider 及原因)与 `providers_unavailable` 错误码
@@ -183,3 +193,9 @@
 - provider 路由的实现从 `base` 挪进 `model::routing`(`ProviderSet`、`SessionRouter`),runtime 只见
   `base::provider::TaskRouting`;对 `ModelEvent` 穷举 `match` 的要补 `Served`。其余类型与函数的变化见
   [`agix-sdk.md`](agix-sdk.md)「迁移说明」。
+- `SessionCreated`、`ModelChoice`、`PromptChoice` 多 `clamped_options: Vec<ClampedOption>`;
+  `SessionPool::set_session_model` 收 `ReasoningChange { effort, thinking }`;新增
+  `SessionPool::explain_setting(key, ExplainTarget, include_secrets)`(即 `config.explain`)。
+  对 `base::interface::config_source::Tier` 穷举 `match` 的要补 `Cli` 与 `Session`。
+- 库式用法的 `load_daemon_config` 第二个参数是 `cli_settings: Option<serde_json::Value>`(原 `max_tokens: u32`),
+  `Assembly::permission_prompt_timeout` 删掉,写进 `cli_settings`。

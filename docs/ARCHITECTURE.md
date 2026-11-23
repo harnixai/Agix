@@ -84,7 +84,7 @@ tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大�
 `resolve_physically`、`truncate_chars` 等);别的 crate 实现它的 trait。
 这条约束是整个扩展面成立的前提:一个宿主要替换某个子系统时,面对的是 `core` 里的
 一个 trait,而不是某个具体 crate 的内部结构。`tests/guards/tests/base.rs` 守着它:
-生产行数不超过棘轮,直接碰文件系统的文件有白名单(七个,各写着理由),不调用模型。
+生产行数不超过棘轮,直接碰文件系统的文件有白名单(八个,各写着理由),不调用模型。
 两样带实现的东西留在这里,各有理由:`base::paths::PromptFiles` 的读(`canonicalize` 后过敏感路径
 判定、再读**解析后的**路径)被 `memory`、`settings`、`prompt-files` 等互不依赖的 K1 共用,
 拆成"判定在 core、读在各家"就是让每家自己记得走这道门,正是它要防的检查与使用之间的换路径;
@@ -115,7 +115,7 @@ feature 下(`assembly` / `daemon` 的同名 feature 转发过去)。
 | `tools` | 内核 | 内建工具;`web`、`structured-output` 两组是 feature |
 | `scene` | 内核 | 内建场景、`SceneRegistry`、声明式场景(§3.7) |
 | `history` / `session` / `compaction` / `telemetry` / `hooks` / `permissions` | 内核 | 日志、会话状态、上下文压缩、遥测与录制回放、hooks、权限 |
-| `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、项目信任、托管设置、schema 生成、外部配置导入 |
+| `settings` | 内核 | `Settings` 与设置文件模型:分层加载与合并、键表(`keys`:作用域、信任、启动时读、可写层)与逐键闸门(`tier_gate`)、项目信任(`trust`)、内存覆盖与会话层(`overlay`、`SessionConfig`)、托管设置(`managed`)、溯源(`explain`)、改名键对照(`renamed`)、schema 生成、外部配置导入 |
 | `memory` | 内核 | 文件式长期记忆:存储、密钥扫描、提示词片段、LLM 选取 |
 | `prompt-files` | 内核 | 引擎读的 markdown 指令文件:`SKILL.md` frontmatter、全局层与自工作目录向上到 git 根收集的 `AGENTS.md`、输出风格、指令文件与 `.agix/rules/` 规则目录 |
 | `session-state` | 内核 | 一个会话的可变状态(权限模式、todo、任务表、通知、读缓存、目标、记账),`base::context::Session` 的唯一实现;工具与权限策略经 `Arc<dyn Session>` 看到它,runtime 与会话池持具体类型 |
@@ -419,7 +419,7 @@ trait 再逐个转发方法。
 
 **`SCENE_MISMATCH`** 守的是"这个会话属于哪个场景",不是"这个 daemon 只能跑一个场景"。
 会话的 `Meta.scene` 记录它创建时的场景;操作属于别的场景的会话时拒绝,不跨边界执行。
-旧 transcript 没有 `Meta.scene`(v2 之前没这个字段),此时判定为`SceneCheck::Inferred`——按 pool 的默认场景接上,而不是让整份文件解析失败。
+旧 transcript 没有 `Meta.scene`(v2 之前没这个字段),此时按匹配处理(`SceneCheck::Matches`)——按 pool 的默认场景接上,而不是让整份文件解析失败。
 
 ### 3.2 `project_root` 的三态
 
@@ -661,7 +661,7 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
   引擎在消息到达时记得它已被取消,这一轮以 `cancelled` 结束。
 - **占槽之后的部分由池 spawn 的回合驱动跑。** `run_turn` 只等它的 `JoinHandle`:调用方的 future
   被丢下,这一轮照样跑完、还槽。驱动没还槽就结束(panic)时,`TurnTicket` 的 `Drop` 把这个条目
-  按 `engine_fault` 移出内存 —— 引擎的事件接收端跟着驱动没了,这个引擎不能再用;`run_turn` 得到
+  按 `EvictReason::EngineFault`(线上 `engine_fault`)移出内存 —— 引擎的事件接收端跟着驱动没了,这个引擎不能再用;`run_turn` 得到
   `kind: internal` 的失败。
 - **重建是 `Idle → Rebuilding`。** 先按同一个 `SessionCore` 造好下一代引擎(状态经
   `Builder::session_state` 注入,还没挂上),造不出来就回到 `Idle`、旧引擎照跑;造好了才停旧引擎,
@@ -824,8 +824,8 @@ prompt hook)互不相干。子 Agent、压缩、
 `Builder::new`,它先 `.inherit(env.host.clone())`(`DLG-1`)。`HostContracts` 是宿主为这台机器
 与部署答出的那一整份:`exec`、`token_counter`、`rules`、`environment`、`permission`、
 `history_store`、`telemetry`、`task_router`、`scene_registry`、记忆(存储、召回、召回钩子)、
-`instruction_provider`、`plugins`、`modules`,以及 `HostLayers`(工具与提示中间件、结果变换、
-模型拦截、恢复策略、压缩器)。`Builder::build` 解析一次,交给每个模块看(`SessionContext::host`),
+`instruction_provider`、`plugins`、`modules`、`attended`、`skill_dirs`、`ext_commands`、`host_js_libs`,
+以及 `HostLayers`(工具与提示中间件、结果变换、模型拦截、恢复策略、预算策略、压缩器)。`Builder::build` 解析一次,交给每个模块看(`SessionContext::host`),
 `inherit` 把这一整份设到子会话的 builder 上。
 
 `Builder` 的每个字段恰好属于三类之一(`DLG-3`):由 `HostContracts` 整份继承;由每个委派自己
@@ -834,8 +834,8 @@ prompt hook)互不相干。子 Agent、压缩、
 新增 `Builder` 字段不分类,守卫过不了。`inherit` 必须先于委派自己的 setter 调用——自己的
 (例如收窄后的权限)后设、覆盖继承来的。
 
-工作目录来自请求的 `workdir`。与父会话的不同时(`Agent` 的 `worktree`),它记在子会话设置的
-`PathSettings::worktree` 上:工具的工作目录、提示词里的工作目录、hook payload 与宿主调用帧的
+工作目录来自请求的 `workdir`。与父会话的不同时(`Agent` 的 `worktree`),它记在子会话的
+`SessionConfig::worktree()` 上:工具的工作目录、提示词里的工作目录、hook payload 与宿主调用帧的
 `cwd` 都是它,项目仍是父会话的——项目层设置、`.agix/hooks/`、信任与插件照项目根算;worktree
 里检出的 `.agix` 只是提交进仓库的那一份,不当项目层读。它的可写目录另加仓库 git 目录里在 worktree 里提交
 要写的几处(`base::paths::WorktreeGit::writable`):对象库 `objects/`(其中的 `objects/info/` 除外)、
@@ -853,7 +853,7 @@ worktree 那一项、配置与 hooks。所以它能 `git add`、`git commit`(含
 worktree 的 `.git` 链接与 `commondir` 去找——沙箱里早先起的命令(上一次 `Bash` 留在后台的进程、
 并行的子 Agent 的命令)可能已经改过这两个文件。收下它的每一处都核对:建完时链接要从
 `<git 目录>/worktrees/` 下直属的那一项指回这个 git 目录、分支是松散的 ref(`tools::worktree`),
-委派建设置时与用它时(`PathSettings::worktree_git`)git 目录解析后要等于 `<项目根>/.git`、那一项
+委派建设置时与用它时(`SessionConfig::worktree_git`)git 目录解析后要等于 `<项目根>/.git`、那一项
 在它的 `worktrees/` 下直属、分支名不出 `refs/heads/`;不符就不给,记一条
 警告,子 Agent 只是提交不了。项目在仓库的子目录里时它不等于 `<项目根>/.git`,同样不给——根会话
 那时也写不到仓库的 git 目录。沙箱的守卫拿的也是它(`SandboxPolicy::worktree_git`),不读链接。
@@ -881,8 +881,8 @@ worktree 目录,以及不是它时的缺省 `.wkts`,§8.1),把这两段去掉得
 (`session.resume`,或 `run_turn` 指名它)按记下的项目建绑定,所以它还是在项目里,不会变成无项目
 会话。`cwd` 不是项目根的,是它工作过的 worktree:恢复前再核对一遍(`tools::worktree::reopen_worktree`)——
 它仍直属于 `<仓库>/` 下的 worktree 目录(按恢复时绑定的设置,含缺省 `.wkts`)、项目在这个仓库里、它的 `.git` 链接与 `commondir` 仍指回
-`<仓库>/.git`——通过了才把它连同这个 git 目录记进会话(`SessionCore` 的 worktree,每一代引擎的设置
-`PathSettings::worktree` 都取它),工作目录、可写目录与 `refusal_rule_roots` 于是与当初一样;git
+`<仓库>/.git`——通过了才把它连同这个 git 目录记进会话(`SessionCore` 的 worktree,每一代引擎的
+`SessionConfig::worktree()` 都取它),工作目录、可写目录与 `refusal_rule_roots` 于是与当初一样;git
 目录取的是 `<仓库>/.git`,不是链接里写的,照旧要等于 `<项目根>/.git` 才给。worktree 已经不在或核对
 不过的,恢复被拒,错误里写明原因,不在主检出里接着干。
 
@@ -953,7 +953,7 @@ release 构建记一条 error。
 - **目标的预算**:目标的各轮在用量链上插一层目标的节点(`SessionLedger::goal_spent`),`token_budget`
   是它的上限,目标设下时从零算,只算目标的轮(不算设它的那一轮、也不算期间宿主或定时任务的轮)。
   剩余付不起一次调用(减去这次调用输入的估计后不到 `MIN_CALL_TOKENS`)时,这一轮在调用前以
-  `budget_exceeded` 结束,目标转 `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复。节点的累计随 `agix.spend`
+  `budget_exceeded` 结束,目标转 `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复:模型的 `GoalUpdate` 只能调低,调高要宿主调 `session.updateGoal`。节点的累计随 `agix.spend`
   落盘,恢复时按目标 `id` 取回。模型设或改的目标,`max_rounds` 不超过设置的 `goal.max_rounds`
   (`ModelAutonomy`,经 `EngineConfig` 给工具),宿主设的只受格式上限 10000 约束。模型经 `CronCreate`
   建的定时任务同样由 `ModelAutonomy` 约束(`schedule.*`),判在工具里、不在宿主也用的 `CronStore` 里;
@@ -1145,7 +1145,7 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
 
   | `ns` / `event` | 谁写 | `payload` | 读回 |
   |---|---|---|---|
-  | `agix.session` / `spec` | 会话池,规格变化时 | `{options?, model?, provider?, prompt?, effort?, thinking_mode?, skill_dirs?, permission_mode?}` | 重建、恢复时照它建引擎(§3.2.2) |
+  | `agix.session` / `spec` | 会话池,规格变化时 | `{options?, model?, provider?, settings?, skill_dirs?, permission_mode?}`(`settings` 是会话层,含推理强度、思考开关与提示词) | 重建、恢复时照它建引擎(§3.2.2) |
   | `agix.goal` / `change` | 引擎与会话池,目标变化时 | `{goal}`,清除后为 `null` | 恢复时取回目标,不武装(§3.4) |
   | `agix.session_state` / `change` | 引擎,一轮结束和引擎停下时,有变化才写;宿主经 `session.setPermissionMode` 进出 `plan` 时,空闲的会话当即由引擎写,不在内存里的由会话池写 | `{plan: null \| {exit_to: <模式> \| null}, todos: [{content, status, active_form}]}` | `Agent::restore_state_from_log` 放回 `plan` 模式(`exit_to` 为 `null` 即退出到 `default`)和 todo 列表 |
   | `agix.spend` / `total` | 引擎,每一步之前、一轮结束和引擎停下时;会话池,子 Agent 与团队成员每调完一次模型和结束时;有变化才写 | `{session: <四字段用量>, goal?: {id, spent: <四字段用量>}}`:会话从创建起、目标从设下起的累计(`base::context::SpendRecord`) | `Agent::restore_state_from_log` 取各条的逐项最大值放回(目标的只取同一 `id` 的);回滚不作废它 |
@@ -2227,7 +2227,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 (`*` 代一个 map 键),列是作用域(`Scope`:进程、`(项目, 场景)` 对、会话,§3.2.1)、信任(`Trust`)、
 是否只在启动时读(`read_at_start`,`restart_required` 按它报)、哪些层能写(`Writers`:`app` 是
 `GlobalOnly`,加载器把它从场景层、项目层的文件里丢掉,`config.set` 也只许写全局层)。每一列各自按最长前缀取:
-一个键取它开头的、设了这一列的最长那行。信任是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合
+一个键取它开头的、设了这一列的最长那行。逐键的判定在 `settings::tier_gate`:`gate_layer` 对着这张表扣下未信任项目层里不该生效的东西,`tighten_layer` 只取其中「只许更严」的那一半,给会话层与 managed 层用。信任是三种之一:`Free`(照常)、`Tighten(次序)`(只在比下面几层合
 出来的值一样紧或更紧时保留,次序按键的类型:布尔取真或取假为紧、数值取小为紧、列表取子集或超集为紧、模式与
 网络模式按宽松度排……)、`Withheld`(整个扣下)。**没有信任的键一律扣下**,并记入 `requires_trust`;比它管的
 键还短的行,信任只能是 `Withheld`。模块自己的设置段(`team`、`plugins`、`scripts`、`checkpoints`)由定义它的
