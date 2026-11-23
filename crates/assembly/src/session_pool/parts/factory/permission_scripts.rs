@@ -12,8 +12,8 @@ use crate::settings_sections::ScriptBindings;
 /// per-method authorization on this socket (see `server/mod.rs`).
 ///
 /// `permissions.client_may_loosen` (default `false`) lets the
-/// client win outright, for deployments where every client is as trusted as
-/// the daemon.
+/// client win, for deployments where every client is as trusted as the
+/// daemon — but never past the mode the managed layer sets.
 ///
 /// With nothing configured anywhere the result is `PermissionMode::Default`
 /// — i.e. *ask*. Managed settings that disable bypass turn a
@@ -22,7 +22,10 @@ pub(in crate::session_pool) fn effective_permission_mode(
     settings: &settings::LoadedSettings,
     requested: Option<base::permission::PermissionMode>,
 ) -> base::permission::PermissionMode {
-    let mode = clamped_permission_mode(&settings.values, requested);
+    let mut mode = clamped_permission_mode(&settings.values, requested);
+    if let Some(ceiling) = managed_mode(settings) {
+        mode = mode.min_permissive(ceiling);
+    }
     if mode == base::permission::PermissionMode::BypassPermissions && settings.bypass_disabled() {
         warn!("the managed settings disable bypassPermissions; this session runs in default mode");
         return base::permission::PermissionMode::Default;
@@ -72,6 +75,12 @@ pub(in crate::session_pool) fn session_settings(
         );
     }
     (laid, clamped)
+}
+
+fn managed_mode(settings: &settings::LoadedSettings) -> Option<base::permission::PermissionMode> {
+    let managed = settings.managed.as_ref().filter(|m| m.error.is_none())?;
+    let mode = managed.values.get("permissions")?.get("mode")?;
+    serde_json::from_value(mode.clone()).ok()
 }
 
 fn clamped_permission_mode(

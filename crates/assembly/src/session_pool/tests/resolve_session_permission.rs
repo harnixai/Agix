@@ -181,3 +181,39 @@ fn effective_mode_prefers_session_options_then_settings_then_ask() {
         "a per-session mode wins over the settings default"
     );
 }
+
+/// The mode the managed layer sets is what every session gets, even where the
+/// settings let a client loosen.
+#[test]
+fn a_managed_mode_holds_over_a_session_that_may_loosen() {
+    use base::permission::PermissionMode;
+    let mut settings = defaults();
+    settings.values.permissions.client_may_loosen = true;
+    let settings = settings.with_managed(
+        Some(settings::managed::from_value(
+            "managed",
+            serde_json::json!({"permissions": {"mode": "plan"}}),
+            &crate::settings_sections::all(),
+        )),
+        &crate::settings_sections::all(),
+    );
+    assert_eq!(settings.values.permissions.mode, PermissionMode::Plan);
+    for asked in ["acceptEdits", "bypassPermissions"] {
+        let opts = asking_for(asked);
+        let (laid, clamped) = crate::session_pool::parts::factory::session_settings(
+            &settings,
+            Some(&opts),
+            opts.requested_permission_mode(),
+        );
+        assert_eq!(
+            laid.values.permissions.mode,
+            PermissionMode::Plan,
+            "{asked}"
+        );
+        assert_eq!(
+            clamped.first().map(|c| c.field.as_str()),
+            Some("settings.permissions.mode"),
+            "{asked}"
+        );
+    }
+}
