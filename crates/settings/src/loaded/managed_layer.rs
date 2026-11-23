@@ -52,6 +52,24 @@ impl LoadedSettings {
         self
     }
 
+    /// `mode` held to the managed layer: no wider than the `permissions.mode`
+    /// it sets, and `default` for a `bypassPermissions` it disables.
+    pub fn hold_mode_to_managed(&self, mode: PermissionMode) -> PermissionMode {
+        let Some(managed) = self.managed.as_ref().filter(|m| m.error.is_none()) else {
+            return mode;
+        };
+        let ceiling = managed
+            .values
+            .get(crate::permissions::KEY)
+            .and_then(|block| block.get("mode"))
+            .and_then(|mode| serde_json::from_value::<PermissionMode>(mode.clone()).ok());
+        let mode = ceiling.map_or(mode, |ceiling| mode.min_permissive(ceiling));
+        if managed.disable_bypass && mode == PermissionMode::BypassPermissions {
+            return PermissionMode::Default;
+        }
+        mode
+    }
+
     /// What the managed layer sets at `keys` — dotted, of the core settings —
     /// laid over these settings again, as [`with_managed`](Self::with_managed)
     /// lays it, after something other than a settings layer set them.

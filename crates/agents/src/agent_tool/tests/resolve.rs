@@ -443,6 +443,42 @@ pub(super) fn overridden(settings: Settings, def: &AgentTypeDefinition) -> Sessi
 }
 
 #[test]
+fn a_users_agent_type_cannot_loosen_its_mode_past_the_managed_one() {
+    use base::permission::PermissionMode as M;
+    let sections = ::settings::section::Sections::none();
+    for (managed, asked, applied) in [
+        (M::Default, M::AcceptEdits, M::Default),
+        (M::Default, M::BypassPermissions, M::Default),
+        (M::AcceptEdits, M::BypassPermissions, M::AcceptEdits),
+        (M::AcceptEdits, M::Plan, M::Plan),
+    ] {
+        let layer = ::settings::managed::from_value(
+            "it",
+            serde_json::json!({"permissions": {"mode": managed}}),
+            &sections,
+        );
+        let mut settings = Settings::defaults_for("test-model");
+        settings.permissions.mode = M::BypassPermissions;
+        let parent = LoadedSettings::new(settings, base::paths::PathSettings::default())
+            .with_managed(Some(layer), &sections);
+        assert_eq!(parent.values.permissions.mode, managed);
+        let def = AgentTypeDefinition {
+            name: "mine".into(),
+            source: AgentTypeSource::User,
+            description: "d".into(),
+            permission_mode: Some(asked),
+            ..Default::default()
+        };
+        let config = apply_agent_type_overrides(SessionConfig::of(Arc::new(parent)), &def);
+        assert_eq!(
+            config.permission_mode(),
+            applied,
+            "managed {managed:?} + {asked:?}"
+        );
+    }
+}
+
+#[test]
 fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
     let def = AgentTypeDefinition {
         name: "db-reader".into(),

@@ -46,9 +46,9 @@ pub(crate) fn delegate_selector(
 /// `max_turns` over it — the same step whichever path built `config`.
 ///
 /// A type's mode replaces the parent's, wider or narrower, as
-/// `PermissionMode::for_delegate` allows. A plugin's types arrive over the
-/// network and can only tighten; the API-call cap is clamped the same way for
-/// them.
+/// `PermissionMode::for_delegate` allows, and never past what the managed
+/// layer allows. A plugin's types arrive over the network and can only
+/// tighten; the API-call cap is clamped the same way for them.
 pub(super) fn apply_agent_type_overrides(
     config: SessionConfig,
     def: &AgentTypeDefinition,
@@ -61,13 +61,14 @@ pub(super) fn apply_agent_type_overrides(
         } else {
             mode.min_permissive(inherited)
         };
+        let applied = config.settings().hold_mode_to_managed(applied);
         if applied != mode {
             tracing::warn!(
                 agent_type = %def.name,
                 requested = ?mode,
                 inherited = ?inherited,
                 applied = ?applied,
-                "agent type's permission mode held by its parent's"
+                "agent type's permission mode held by its parent's and the managed layer's"
             );
         }
         config = config.with_permission_mode(applied);

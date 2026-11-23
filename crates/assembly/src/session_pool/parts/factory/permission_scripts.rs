@@ -22,15 +22,15 @@ pub(in crate::session_pool) fn effective_permission_mode(
     settings: &settings::LoadedSettings,
     requested: Option<base::permission::PermissionMode>,
 ) -> base::permission::PermissionMode {
-    let mut mode = clamped_permission_mode(&settings.values, requested);
-    if let Some(ceiling) = managed_mode(settings) {
-        mode = mode.min_permissive(ceiling);
-    }
-    if mode == base::permission::PermissionMode::BypassPermissions && settings.bypass_disabled() {
+    let mode = clamped_permission_mode(&settings.values, requested);
+    let held = settings.hold_mode_to_managed(mode);
+    let bypass_off = mode == base::permission::PermissionMode::BypassPermissions
+        && held == base::permission::PermissionMode::Default
+        && settings.bypass_disabled();
+    if bypass_off {
         warn!("the managed settings disable bypassPermissions; this session runs in default mode");
-        return base::permission::PermissionMode::Default;
     }
-    mode
+    held
 }
 
 /// The session's configuration over `base`: its own settings `layer` laid
@@ -120,12 +120,6 @@ pub(in crate::session_pool) fn reasoning_report(
         report.thinking_source = runtime::agent::ChoiceSource::Session;
     }
     report
-}
-
-fn managed_mode(settings: &settings::LoadedSettings) -> Option<base::permission::PermissionMode> {
-    let managed = settings.managed.as_ref().filter(|m| m.error.is_none())?;
-    let mode = managed.values.get("permissions")?.get("mode")?;
-    serde_json::from_value(mode.clone()).ok()
 }
 
 fn clamped_permission_mode(
