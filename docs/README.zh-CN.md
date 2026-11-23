@@ -531,7 +531,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `session.token_budget` | 无(不限) | 一个会话从创建起能花的 token,口径同 `turn.token_budget`,算它所有的轮——子 Agent、团队成员、旁路调用、定时任务与目标的轮都在内——跨 daemon 重启(累计记在会话日志里,`session.get` 的 `usage` 报它)。每次调用同 `turn.token_budget` 一样先扣掉输入的估计再判;剩余付不起一次调用时这一轮以 `budget_exceeded` 结束,之后的每一轮都不调模型、同样以它结束 |
 | `schedule.max_model_jobs` | `20` | 一个会话里模型自己经 `CronCreate` 建的、还在的定时任务最多几个;再建被拒,理由在工具结果里。宿主经 `schedule.create` 建的不计也不受限 |
 | `schedule.min_model_interval_minutes` | `1` | 模型建的周期任务两次触发至少隔几分钟(按它存活的 7 天算);`1` 即不在 cron 自己的分钟精度之外再加限制 |
-| `goal.max_rounds` | `10000` | 模型设或改的目标(`GoalCreate`、`GoalUpdate`)最多能有几轮;给多了压到它。目标自己的 `token_budget`(经 `session.setGoal` 或 `GoalCreate` 设)在目标各轮花完时让目标转 `blocked` |
+| `goal.max_rounds` | `10000` | 模型设或改的目标(`GoalCreate`、`GoalUpdate`)最多能有几轮;给多了压到它。目标自己的 `token_budget`(经 `session.setGoal` 或 `GoalCreate` 设)在目标各轮花完时让目标转 `blocked`;`GoalUpdate` 只能调低它,调高归宿主(`session.updateGoal`) |
 | `telemetry.enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
 | `telemetry.otlp_endpoint` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |
 | `prompt.instruction_files` | `[]` | 再加几份指令文件,会话构建时按序读入,与 `AGENTS.md` 一样交给模型 |

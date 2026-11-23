@@ -89,6 +89,19 @@ fn rounds_allowed(asked: Option<u32>, ctx: &ToolContext) -> (Option<u32>, u32, S
     }
 }
 
+/// The model may tighten a goal's token budget, not raise it: whoever set
+/// the budget, a larger one is the host's to give (`session.updateGoal`).
+fn raised_budget(asked: Option<u64>, ctx: &ToolContext) -> Option<ToolResult> {
+    let asked = asked?;
+    let current = ctx.session.goal_view()?.goal.token_budget?;
+    (asked > current).then(|| {
+        ToolResult::error_text(format!(
+            "token_budget can only be lowered here: this goal's is {current}. A larger budget is \
+             for the user to give."
+        ))
+    })
+}
+
 fn view_result(view: base::context::goal::GoalView, note: &str) -> ToolResult {
     let view = serde_json::to_value(view).unwrap_or_default();
     let mut result = ToolResult::text(format!(
@@ -225,6 +238,9 @@ impl Tool for GoalUpdateTool {
             Ok(o) => o,
             Err(r) => return Ok(*r),
         };
+        if let Some(refusal) = raised_budget(input.token_budget, &ctx) {
+            return Ok(refusal);
+        }
         let (max_rounds, max_rounds_limit, lowered) = rounds_allowed(input.max_rounds, &ctx);
         let edited = format!("Goal updated.\n{lowered}");
         let (action, note) = match input.action {
@@ -304,6 +320,30 @@ mod tests {
         );
         ctx.session = state.clone();
         ctx
+    }
+
+    #[tokio::test]
+    async fn the_model_lowers_a_goals_token_budget_but_does_not_raise_it() {
+        let state = Arc::new(session_state::SessionState::new());
+        let ctx = context_over(&state);
+        let created = call(
+            &GoalCreateTool,
+            json!({"objective": "tests green", "token_budget": 50000}),
+            &ctx,
+        )
+        .await;
+        assert!(!created.is_error, "{}", text(&created));
+        let edit = |budget: u64| {
+            let view = goal_json(&ctx);
+            json!({"goal_id": view["id"], "revision": view["revision"],
+                   "action": "edit", "token_budget": budget})
+        };
+        let raised = call(&GoalUpdateTool, edit(90000), &ctx).await;
+        assert!(raised.is_error, "{}", text(&raised));
+        assert_eq!(goal_json(&ctx)["token_budget"], 50000);
+        let lowered = call(&GoalUpdateTool, edit(20000), &ctx).await;
+        assert!(!lowered.is_error, "{}", text(&lowered));
+        assert_eq!(goal_json(&ctx)["token_budget"], 20000);
     }
 
     #[tokio::test]
