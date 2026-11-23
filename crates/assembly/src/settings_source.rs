@@ -76,7 +76,7 @@ pub(crate) fn read_pair(request: PairRead<'_>) -> LoadedSettings {
             layout.clone(),
         ),
     };
-    loaded.with_managed(above.managed.cloned())
+    loaded.with_managed(above.managed.cloned(), &sections)
 }
 
 /// The `app` block of the global tier at `global_root` with what is `above`
@@ -94,7 +94,7 @@ pub(crate) fn read_app(global_root: &Path, above: Above<'_>) -> settings::AppSet
         &crate::settings_sections::all(),
         Layout::default(),
     )
-    .with_managed(above.managed.cloned())
+    .with_managed(above.managed.cloned(), &crate::settings_sections::all())
     .values
     .app
 }
@@ -180,7 +180,7 @@ pub(crate) fn read_pair_as_if(
         sections: &crate::settings_sections::all(),
         layout: layout.clone(),
     })
-    .with_managed(above.managed.cloned())
+    .with_managed(above.managed.cloned(), &crate::settings_sections::all())
 }
 
 /// Each of [`PROJECT_STATE_ENTRIES`] lying directly in `project`'s project

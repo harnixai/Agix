@@ -138,7 +138,10 @@ impl Layers {
         } else {
             self.host.apply(loaded)
         };
-        hosted.with_managed(self.managed.settings.clone())
+        hosted.with_managed(
+            self.managed.settings.clone(),
+            &crate::settings_sections::all(),
+        )
     }
 }
 

@@ -327,7 +327,7 @@ impl LoadedSettings {
         if let Err(e) = loaded.place_worktrees() {
             tracing::warn!(error = %e, "app.worktree_dir is not allowed, the worktrees stay where they were");
         }
-        loaded.with_managed(managed)
+        loaded.with_managed(managed, sections)
     }
 
     /// These settings as if the loader had decided `layer` about the project

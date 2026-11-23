@@ -123,7 +123,12 @@ pub async fn pool(
 ) -> anyhow::Result<Arc<SessionPool>> {
     crate::plugins::host_libraries::check(&assembly.js_libs, config.paths.layout().engine())?;
     let (managed_path, required, managed) = managed_settings(config);
-    let settings = Arc::new(config.settings.clone().with_managed(managed.clone()));
+    let settings = Arc::new(
+        config
+            .settings
+            .clone()
+            .with_managed(managed.clone(), &crate::settings_sections::all()),
+    );
     platform::configure_system_proxy(settings.values.app.system_proxy);
     for (section, module) in crate::modules::unassembled_settings(&settings.values) {
         tracing::warn!(

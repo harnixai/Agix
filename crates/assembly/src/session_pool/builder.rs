@@ -208,7 +208,11 @@ fn managed_layer(
 ) -> (ManagedLayer, Arc<LoadedSettings>) {
     match managed {
         Some(layer) => {
-            let settings = Arc::new((*settings).clone().with_managed(layer.settings.clone()));
+            let settings = Arc::new(
+                (*settings)
+                    .clone()
+                    .with_managed(layer.settings.clone(), &crate::settings_sections::all()),
+            );
             (layer, settings)
         }
         None => (

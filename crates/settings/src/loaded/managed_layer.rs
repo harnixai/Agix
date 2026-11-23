@@ -52,9 +52,9 @@ impl LoadedSettings {
     /// theirs. With bypass disabled, a `bypassPermissions`
     /// the lower tiers configured becomes `default`. A layer that cannot be
     /// honoured sets nothing; the permission gate refuses every call under it.
-    pub fn with_managed(mut self, managed: Option<ManagedSettings>) -> Self {
+    pub fn with_managed(mut self, managed: Option<ManagedSettings>, sections: &Sections) -> Self {
         if let Some(m) = managed.as_ref().filter(|m| m.error.is_none()) {
-            self.lay_managed_values(m);
+            self.lay_managed_values(m, sections);
             if m.disable_bypass && self.values.permissions.mode == PermissionMode::BypassPermissions
             {
                 tracing::warn!(origin = %m.origin, "managed settings disable bypassPermissions; permissions.mode falls back to default");
@@ -65,7 +65,7 @@ impl LoadedSettings {
         self
     }
 
-    fn lay_managed_values(&mut self, managed: &ManagedSettings) {
+    fn lay_managed_values(&mut self, managed: &ManagedSettings, sections: &Sections) {
         if managed.values.is_empty() {
             return;
         }
@@ -87,7 +87,7 @@ impl LoadedSettings {
             }
             merged[PROVIDERS] = providers_first(&providers, &merged);
         }
-        crate::tier_gate::tighten_layer(&mut layer, &merged, &Sections::none());
+        crate::tier_gate::tighten_layer(&mut layer, &merged, sections);
         for (name, server) in mcp_servers_declared(&layer) {
             if server.get("command").is_some() {
                 self.mcp_server_dirs
@@ -97,9 +97,7 @@ impl LoadedSettings {
                 base::interface::exec::env::hold_back_credential(&var);
             }
         }
-        // Every value was checked against every section when the layer was
-        // read; here they only have to deserialize together.
-        for (key, error) in merge_fitting(&mut merged, Value::Object(layer), &Sections::none()) {
+        for (key, error) in merge_fitting(&mut merged, Value::Object(layer), sections) {
             tracing::warn!(origin = %managed.origin, key, error, "managed settings value does not fit; ignoring it");
         }
         match serde_json::from_value::<Settings>(merged) {

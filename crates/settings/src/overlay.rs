@@ -188,7 +188,7 @@ impl LoadedSettings {
             }
         }
         let managed = out.managed.take();
-        let out = out.with_managed(managed);
+        let out = out.with_managed(managed, sections);
         if subject == Subject::Session {
             held.extend(held_by_managed(&out, &requested, &held));
         }
@@ -442,10 +442,13 @@ mod tests {
     #[test]
     fn the_managed_layer_stays_on_top_of_a_session_that_may_loosen() {
         let mut trusting = loaded(|s| s.permissions.client_may_loosen = true);
-        trusting = trusting.with_managed(Some(base::permission::ManagedSettings {
-            disable_bypass: true,
-            ..Default::default()
-        }));
+        trusting = trusting.with_managed(
+            Some(base::permission::ManagedSettings {
+                disable_bypass: true,
+                ..Default::default()
+            }),
+            &Sections::none(),
+        );
         let (out, _) = over(
             &trusting,
             json!({"permissions": {"mode": "bypassPermissions"}}),
@@ -456,13 +459,14 @@ mod tests {
 
     #[test]
     fn a_managed_value_holds_over_a_session_that_may_loosen() {
-        let trusting = loaded(|s| s.permissions.client_may_loosen = true).with_managed(Some(
-            crate::managed::from_value(
+        let trusting = loaded(|s| s.permissions.client_may_loosen = true).with_managed(
+            Some(crate::managed::from_value(
                 "it",
                 json!({"turn": {"token_budget": 1000}, "sandbox": {"require": true}}),
                 &Sections::none(),
-            ),
-        ));
+            )),
+            &Sections::none(),
+        );
         assert_eq!(trusting.values.turn.token_budget, Some(1000));
         let (out, held) = over(
             &trusting,
@@ -485,25 +489,27 @@ mod tests {
 
     #[test]
     fn a_tighter_value_beneath_the_managed_layer_stands() {
-        let tight = loaded(|s| s.turn.token_budget = Some(500)).with_managed(Some(
-            crate::managed::from_value(
+        let tight = loaded(|s| s.turn.token_budget = Some(500)).with_managed(
+            Some(crate::managed::from_value(
                 "it",
                 json!({"turn": {"token_budget": 1000}, "model": {"effort": "low"}}),
                 &Sections::none(),
-            ),
-        ));
+            )),
+            &Sections::none(),
+        );
         assert_eq!(tight.values.turn.token_budget, Some(500));
         let (out, held) = over(&tight, json!({"turn": {"token_budget": 200}}));
         assert_eq!(out.values.turn.token_budget, Some(200));
         assert!(held.is_empty(), "{held:?}");
 
-        let loose = loaded(|s| s.turn.token_budget = Some(5000)).with_managed(Some(
-            crate::managed::from_value(
+        let loose = loaded(|s| s.turn.token_budget = Some(5000)).with_managed(
+            Some(crate::managed::from_value(
                 "it",
                 json!({"turn": {"token_budget": 1000}}),
                 &Sections::none(),
-            ),
-        ));
+            )),
+            &Sections::none(),
+        );
         assert_eq!(loose.values.turn.token_budget, Some(1000));
     }
 
@@ -529,5 +535,39 @@ mod tests {
         assert_eq!(out.ignored.len(), 1);
         assert_eq!(out.ignored[0].key, "memory.enabled");
         assert_eq!(out.ignored[0].tier, "host");
+    }
+
+    #[derive(Debug, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+    #[serde(default)]
+    struct Members {
+        max: Option<u64>,
+    }
+
+    impl crate::section::Section for Members {
+        const KEY: &'static str = "members";
+        const PROJECT_TIER: &'static [(&'static str, crate::tier_gate::ProjectKey)] = &[(
+            "max",
+            crate::tier_gate::ProjectKey::Tighten(crate::tier_gate::Order::Lower),
+        )];
+        const SCOPE: Scope = Scope::Session;
+    }
+
+    #[test]
+    fn a_tighter_section_value_beneath_the_managed_layer_stands() {
+        let sections = Sections::none().with::<Members>();
+        let managed = crate::managed::from_value("it", json!({"members": {"max": 20}}), &sections);
+        assert_eq!(managed.error, None);
+        let tight = loaded(|s| s.set_section(&Members { max: Some(5) }))
+            .with_managed(Some(managed.clone()), &sections);
+        assert_eq!(tight.values.section::<Members>().max, Some(5));
+
+        let (out, held) = loaded(|_| {})
+            .with_managed(Some(managed), &sections)
+            .overlay(
+                json!({"members": {"max": 3}}).as_object().unwrap(),
+                Subject::Session,
+                &sections,
+            );
+        assert_eq!(out.values.section::<Members>().max, Some(3), "{held:?}");
     }
 }
