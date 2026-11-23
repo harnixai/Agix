@@ -115,7 +115,7 @@ hook 是写在设置里的外部回调:引擎走到一个具名时刻(调工具�
 自己的 provider,`model` 换的是模型名。这次调用在遥测里记为 `api_request`,`purpose` 为
 `hook`。触发它的那一轮正开着时,这次调用记在那一轮上(`turn_complete.usage_breakdown` 的
 `side`),受它的 token 预算约束:`max_tokens` 压到预算的剩余减去这次请求的输入,剩下不到 1024 就
-不调,这个 hook 记为失败、放行;两轮之间触发的不记在任何一轮上。
+不调,这个 hook 记为失败、放行;两轮之间触发的记在会话上(`session.token_budget`),不在任何一轮上。
 
 **模型只能拦,不能批。** 模型回的 `"decision": "approve"` 缺省被丢掉,只有写了
 `"may_approve": true` 的 hook 才算替人答应权限询问(见"回答")。理由:模型读的 payload 里有

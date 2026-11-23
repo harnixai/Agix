@@ -62,7 +62,7 @@ impl Agent {
             permission_mode: hook_permission_mode(self.session_state.permission_mode()),
             depth: self.identity.agent_depth(),
             stop_hook_active: Some(state.sent_back_by_stop_hook),
-            spend: self.open_turn.spend(),
+            spend: self.open_turn.side_call_node(),
             ..Default::default()
         };
         let hook_result = self

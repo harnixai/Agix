@@ -72,7 +72,8 @@ pub struct HookInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub teammate_name: Option<String>,
 
-    /// The turn a hook that calls a model spends into; `None` between turns.
+    /// The turn a hook that calls a model spends into; the session's node between
+    /// turns.
     /// Never part of what a hook is sent.
     #[serde(skip)]
     pub spend: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,

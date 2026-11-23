@@ -15,21 +15,38 @@ use base::provider::ApiType;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-/// The spend of the turn the session is in; empty between turns.
+/// The spend of the turn the session is in; empty between turns. A side call
+/// made between turns (`session.compact`, say) is charged to the session's
+/// node instead, so `session.token_budget` sees it.
 #[derive(Clone, Default)]
-pub(crate) struct OpenTurn(Arc<Mutex<Option<Arc<SpendNode>>>>);
+pub(crate) struct OpenTurn {
+    turn: Arc<Mutex<Option<Arc<SpendNode>>>>,
+    session: Option<Arc<SpendNode>>,
+}
 
 impl OpenTurn {
+    pub(crate) fn within(session: Arc<SpendNode>) -> Self {
+        Self {
+            turn: Arc::default(),
+            session: Some(session),
+        }
+    }
+
     pub(crate) fn open(&self, spend: Arc<SpendNode>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(spend);
+        *self.turn.lock().unwrap_or_else(|e| e.into_inner()) = Some(spend);
     }
 
     pub(crate) fn close(&self) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.turn.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     pub(crate) fn spend(&self) -> Option<Arc<SpendNode>> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.turn.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Where a side call made now is charged: the open turn, else the session.
+    pub(crate) fn side_call_node(&self) -> Option<Arc<SpendNode>> {
+        self.spend().or_else(|| self.session.clone())
     }
 }
 
@@ -56,7 +73,8 @@ impl SpentModel {
         })
     }
 
-    /// Calls spent into the turn open when each is made; none between turns.
+    /// Calls spent into the turn open when each is made; into the session's
+    /// node between turns.
     pub(crate) fn into_open(inner: Arc<dyn Model>, open: OpenTurn) -> Arc<dyn Model> {
         Arc::new(Self {
             inner,
@@ -85,7 +103,7 @@ impl Model for SpentModel {
     ) -> Result<ModelStream, ModelError> {
         let spend = match &self.into {
             SpentInto::Turn(turn) => Some(turn.clone()),
-            SpentInto::Open(open) => open.spend(),
+            SpentInto::Open(open) => open.side_call_node(),
         };
         if let (Some(spend), None) = (spend, params.usage_tap.charge()) {
             let input = input_tokens(&prompt_blocks, &tools, &messages);

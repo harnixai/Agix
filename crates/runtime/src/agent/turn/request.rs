@@ -298,13 +298,13 @@ impl Agent {
         }
     }
 
-    /// `model`, its calls spent into the turn in progress; as it is between
-    /// turns.
+    /// `model`, its calls spent into the turn in progress; into the session's
+    /// node between turns.
     pub(crate) fn spent_in_turn(
         &self,
         model: Arc<dyn base::interface::model::Model>,
     ) -> Arc<dyn base::interface::model::Model> {
-        match self.open_turn.spend() {
+        match self.open_turn.side_call_node() {
             Some(turn) => super::SpentModel::into_turn(model, turn),
             None => model,
         }

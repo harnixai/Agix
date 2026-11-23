@@ -135,6 +135,6 @@ pub(in crate::agent) fn hook_ambient(
             .unwrap_or_else(|| "default".into());
         hooks::HookInput::lifecycle(String::new(), session_id.clone(), cwd.clone(), mode)
             .with_depth(depth)
-            .spending_into(open_turn.spend())
+            .spending_into(open_turn.side_call_node())
     })
 }

@@ -441,3 +441,49 @@ async fn a_failed_turns_call_is_in_the_sessions_usage() -> anyhow::Result<()> {
     run.finish_allowing_refusals().await;
     Ok(())
 }
+
+/// A summary `session.compact` writes between turns is the session's spend:
+/// `session.token_budget` counts from creation, not only within turns.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compaction_between_turns_is_counted_in_the_sessions_usage() -> anyhow::Result<()> {
+    const SUMMARY: &str = "You are compacting an AI coding agent's conversation";
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("between-turns-spend", &stub, json!({}))
+        .start()
+        .await?;
+    let s = session(&mut run, json!({})).await?;
+    let mut script = Vec::new();
+    for i in 0..4 {
+        let body: String = (0..200)
+            .map(|l| format!("file {i} line {l} of filler\n"))
+            .collect();
+        let path = run.write_file(&format!("f{i}.txt"), &body)?;
+        script.push(Reply::calls(
+            &format!("r{i}"),
+            "Read",
+            json!({ "file_path": path.to_string_lossy() }),
+        ));
+    }
+    script.push(Reply::text("read them"));
+    stub.script(script);
+    run.turn(&s, &format!("{ROOT} read the files")).await?;
+    let before = usage(&mut run, &s).await?;
+
+    stub.script_when(
+        SUMMARY,
+        [Reply::spent(5000, 700, Reply::text("SUMMARY-OF-READS"))],
+    );
+    let compacted = run
+        .client
+        .call("session.compact", json!({ "session_id": s }))
+        .await?;
+    assert!(compacted.error.is_none(), "{compacted:?}");
+    let after = usage(&mut run, &s).await?;
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1),
+        (5000, 700),
+        "before {before:?}, after {after:?}"
+    );
+    run.finish().await;
+    Ok(())
+}

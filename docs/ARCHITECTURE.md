@@ -265,10 +265,11 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 (没有路由的会话由 `Builder` 在根上套的 `Metered`)经 `UsageTap::metered` 在回复流的 `EndTurn` 处、或调用中途断开 /
 失败 / 被丢弃时按 client 已经报的,同时记进 provider 配额和这次调用的 `UsageTap` 所记的那个
 `SpendNode`(`base::interface::budget_policy`)。调用方只说记到哪:这一轮的主循环在发出前把 tap 指向
-这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮,
+这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮(两轮之间的,如
+`session.compact`,指向会话的节点),
 发出前同样按链上剩余减去整个请求输入的估计压低 `max_tokens`、不够 `MIN_CALL_TOKENS` 就不发,
 `prompt` hook 的调用指向 payload 带的那一轮(`HookInput.spend`:工具管线里的 hook 是那次工具调用所在的
-一轮,其余是触发时打开的那一轮),两轮之间的不记。
+一轮,其余是触发时打开的那一轮,两轮之间触发的指向会话的节点)。
 
 节点连成链:delegate 那一轮的节点在起它的那一轮下面(`Agent` 工具、`TeamCreate` 的阶段成员、派给持久
 成员的消息、fork 的 skill、`agent` hook 把起它的那一轮放进 `DelegateRequest.spend`;宿主 `session.startAgent` 起的放

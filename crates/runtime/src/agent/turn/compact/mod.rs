@@ -580,7 +580,7 @@ impl Agent {
                             "tokens_before": tokens_before,
                             "tokens_after": tokens_after,
                         })),
-                        spend: self.open_turn.spend(),
+                        spend: self.open_turn.side_call_node(),
                         ..Default::default()
                     },
                     cancel,
@@ -625,7 +625,7 @@ impl Agent {
                     tool_result: None,
                     is_error: None,
                     user_prompt: None,
-                    spend: self.open_turn.spend(),
+                    spend: self.open_turn.side_call_node(),
                     ..Default::default()
                 },
                 stop,

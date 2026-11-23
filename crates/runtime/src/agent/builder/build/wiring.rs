@@ -144,7 +144,11 @@ impl Builder {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(session_state::SessionState::new()), 0, false),
         };
-        let open_turn = crate::turn::OpenTurn::default();
+        let open_turn = crate::turn::OpenTurn::within(
+            base::context::session::Session::ledger(session_state.as_ref())
+                .spent
+                .clone(),
+        );
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
             settings.paths.working_dir().display().to_string(),
