@@ -450,14 +450,28 @@ pub(in crate::session_pool) fn options_of_0_3(
     if turn.is_none() && mode.is_none() && rules.is_none() {
         return;
     }
-    let layer = options
+    let Some(layer) = options
         .entry("settings")
-        .or_insert_with(|| Value::Object(Default::default()));
+        .or_insert_with(|| Value::Object(Default::default()))
+        .as_object_mut()
+    else {
+        return;
+    };
     if let Some(turn) = turn {
-        layer["turn"] = turn;
+        layer.insert("turn".into(), turn);
     }
+    if mode.is_none() && rules.is_none() {
+        return;
+    }
+    let Some(permissions) = layer
+        .entry("permissions")
+        .or_insert_with(|| Value::Object(Default::default()))
+        .as_object_mut()
+    else {
+        return;
+    };
     if let Some(mode) = mode {
-        layer["permissions"]["mode"] = mode;
+        permissions.insert("mode".into(), mode);
     }
     for rule in rules.iter().filter_map(Value::as_array).flatten() {
         let (Some(list), Some(tool)) = (
@@ -470,10 +484,11 @@ pub(in crate::session_pool) fn options_of_0_3(
             Some(content) => format!("{tool}({content})"),
             None => tool.to_string(),
         };
-        let entries = &mut layer["permissions"][list];
-        match entries.as_array_mut() {
+        match permissions.get_mut(list).and_then(Value::as_array_mut) {
             Some(entries) => entries.push(Value::String(text)),
-            None => *entries = Value::Array(vec![Value::String(text)]),
+            None => {
+                permissions.insert(list.into(), Value::Array(vec![Value::String(text)]));
+            }
         }
     }
 }

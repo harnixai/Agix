@@ -74,3 +74,33 @@ fn a_spec_entry_written_by_0_3_reads_back_in_this_shape() {
         })
     );
 }
+
+/// A log is read back from the project's `state/`, which a checked-out
+/// repository can ship: a spec in a shape no engine wrote is read without
+/// panicking, and what does not read is not taken.
+#[test]
+fn a_spec_entry_no_engine_wrote_does_not_stop_the_read() {
+    for options in [
+        serde_json::json!({"settings": "x", "turn": {"token_budget": 1}}),
+        serde_json::json!({"settings": {"permissions": 3}, "permission_mode": "plan"}),
+        serde_json::json!({"settings": [], "permission_rules": [
+            {"behavior": "deny", "tool_name": "Write"},
+        ]}),
+    ] {
+        let entry = history::entry::EnvelopedEntry::new(
+            base::session::SessionId::new(),
+            history::entry::LogEntry::Extension {
+                ns: "agix.session".into(),
+                event: "spec".into(),
+                payload: serde_json::json!({ "options": options }),
+            },
+        );
+        let spec = crate::session_pool::parts::specs::recorded_in(&[entry]);
+        let settings = spec.options.and_then(|o| o.settings).unwrap_or_default();
+        assert!(!settings.contains_key("turn"), "{options}");
+        assert!(
+            settings.get("permissions").is_none_or(|p| !p.is_object()),
+            "{options}"
+        );
+    }
+}
