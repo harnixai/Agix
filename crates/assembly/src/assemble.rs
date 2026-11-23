@@ -122,7 +122,7 @@ pub async fn pool(
     assembly: Assembly,
 ) -> anyhow::Result<Arc<SessionPool>> {
     crate::plugins::host_libraries::check(&assembly.js_libs, config.paths.layout().engine())?;
-    let (managed_path, managed) = managed_settings(config);
+    let (managed_path, required, managed) = managed_settings(config);
     let settings = Arc::new(config.settings.clone().with_managed(managed.clone()));
     platform::configure_system_proxy(settings.values.app.system_proxy);
     for (section, module) in crate::modules::unassembled_settings(&settings.values) {
@@ -170,8 +170,8 @@ pub async fn pool(
     };
 
     let mut pool = SessionPool::builder(
-        config.session_cap,
-        config.session_idle_timeout_secs,
+        settings.values.app.session_cap,
+        settings.values.app.session_idle_timeout_secs,
         client,
         settings,
         scene,
@@ -181,7 +181,7 @@ pub async fn pool(
         config.paths.clone(),
     )
     .credentials(credentials)
-    .managed_settings(managed_path, managed)
+    .managed_settings(managed_path, required, managed)
     .host_changes(&own_settings_on_disk(config), config)
     .plugins(assembly.plugins)
     .host_libraries(assembly.js_libs);
@@ -270,17 +270,19 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
 }
 
 /// The managed settings file this pool reads — the one the config names,
-/// which must exist, else the platform's — and what is in it. Settings that
-/// already carry a managed layer (an embedder's `Tier::Managed` source) keep
-/// it when there is no file.
-fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission::ManagedSettings>) {
+/// which must exist, else the platform's — whether it must exist, and what is
+/// in it. Settings that already carry a managed layer (an embedder's
+/// `Tier::Managed` source) keep it when there is no file.
+fn managed_settings(
+    config: &DaemonConfig,
+) -> (PathBuf, bool, Option<base::permission::ManagedSettings>) {
     let (path, required) = match &config.managed_settings_path {
         Some(path) => (path.clone(), true),
         None => (config.paths.layout().managed_settings_file(), false),
     };
     let managed = crate::settings_source::read_managed(&path, required)
         .or_else(|| config.settings.managed.clone());
-    (path, managed)
+    (path, required, managed)
 }
 
 /// Whether the daemon's own pair's providers route and build.

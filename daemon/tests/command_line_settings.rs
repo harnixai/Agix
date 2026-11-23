@@ -5,7 +5,8 @@
 //! `--session-cap` are shorthands; a key no setting reads, an old key or a
 //! value that does not fit keeps the daemon from starting and says which
 //! `--set` it was. `app.session_cap` holds from the global settings too, and
-//! stays what the daemon started with across `config.reload`.
+//! stays what the daemon started with across `config.reload`, which says it
+//! needs a restart.
 
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -488,15 +489,48 @@ async fn session_cap_is_its_set_form_over_the_global_settings() {
 }
 
 #[tokio::test]
-async fn a_reload_leaves_the_session_cap_the_daemon_started_with() {
+async fn a_reload_leaves_the_session_cap_the_daemon_started_with_and_says_so() {
     let world = World::new();
     world.write_global(with_session_cap(1));
     let stub = Stub::start(|_| sse_text("ok")).await;
     let daemon = Agixd::start(&world, &stub, &[]).await;
+    let unchanged = daemon.ok("config.reload", json!({})).await;
+    assert_eq!(unchanged["restart_required"], json!([]), "{unchanged}");
 
     world.write_global(with_session_cap(8));
-    daemon.ok("config.reload", json!({})).await;
+    let reloaded = daemon.ok("config.reload", json!({})).await;
+    assert_eq!(
+        reloaded["restart_required"],
+        json!(["app.session_cap"]),
+        "{reloaded}"
+    );
     assert!(!first_session_stays_with_a_second(&daemon).await);
+}
+
+#[tokio::test]
+async fn a_setting_written_that_is_read_only_at_start_needs_a_restart() {
+    let world = World::new();
+    world.write_global(no_memory());
+    let stub = Stub::start(|_| sse_text("ok")).await;
+    let daemon = Agixd::start(&world, &stub, &[]).await;
+    let written = daemon
+        .ok(
+            "config.set",
+            json!({"tier": "global", "changes": {"app.system_proxy": false, "turn.max_model_calls": 9}}),
+        )
+        .await;
+    assert_eq!(
+        written["restart_required"],
+        json!(["app.system_proxy"]),
+        "{written}"
+    );
+    let back = daemon
+        .ok(
+            "config.set",
+            json!({"tier": "global", "changes": {"app.system_proxy": null}}),
+        )
+        .await;
+    assert_eq!(back["restart_required"], json!([]), "{back}");
 }
 
 #[tokio::test]

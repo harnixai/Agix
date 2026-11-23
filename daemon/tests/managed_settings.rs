@@ -486,6 +486,30 @@ async fn doctor_and_config_get_name_the_managed_layer_and_where_it_came_from() {
 }
 
 #[tokio::test]
+async fn a_changed_managed_file_takes_a_restart_and_is_not_read_again() {
+    let d = Daemon::start(Some(DENY_TOUCH), Duration::from_secs(30)).await;
+    let (_, reloaded) = d.call("config.reload", json!({})).await;
+    assert_eq!(
+        reloaded["result"]["restart_required"],
+        json!([]),
+        "{reloaded}"
+    );
+
+    std::fs::write(d.managed.as_deref().unwrap(), r#"{"permissions": {}}"#).unwrap();
+    let (_, reloaded) = d.call("config.reload", json!({})).await;
+    assert_eq!(
+        reloaded["result"]["restart_required"],
+        json!(["managed"]),
+        "{reloaded}"
+    );
+    let frames = d
+        .run_turn(json!({"settings": {"permissions": {"mode": "bypassPermissions"}}}))
+        .await;
+    assert!(!d.marker().exists(), "{}", tool_results(&frames));
+    d.stop().await;
+}
+
+#[tokio::test]
 async fn doctor_says_where_it_looked_when_there_are_no_managed_settings() {
     let d = Daemon::start(None, Duration::from_secs(30)).await;
     let (_, doctor) = d.call("daemon.doctor", json!({})).await;

@@ -213,7 +213,7 @@ impl Daemon {
             .ok_or_else(|| anyhow::anyhow!("unknown scene `{}`", opts.scene))?;
 
         let mut config = config;
-        config.session_cap = opts.session_cap;
+        config.settings.values.app.session_cap = opts.session_cap;
         config.mcp_policy_path = opts.mcp_policy.clone();
 
         // The same entry point `main.rs` uses, for the same reason a scenario

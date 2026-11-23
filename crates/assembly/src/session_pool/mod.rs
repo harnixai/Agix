@@ -41,7 +41,6 @@ use api::{
 };
 use facade::helpers::*;
 use facade::history_rpc::*;
-use facade::settings_reload::*;
 use mcp_hub::McpHub;
 pub(crate) use mcp_hub::McpSetup;
 pub use mcp_hub::{McpOptions, COMPILED as MCP_COMPILED};

@@ -43,7 +43,7 @@ impl SessionPool {
                 McpEffect::Full { connect_pair: true },
             )
             .await;
-        settings_reloaded(&reloaded.values, report)
+        self.settings_reloaded(&reloaded.values, report).await
     }
 
     /// Everything a change to `changed` (every tier when `None`: an explicit
@@ -119,16 +119,22 @@ impl SessionPool {
     }
 }
 
-pub(in crate::session_pool) fn settings_reloaded(
-    settings: &Settings,
-    routing: api::RoutingStatus,
-) -> api::SettingsReloaded {
-    api::SettingsReloaded {
-        providers: settings.providers.iter().map(|p| p.id.clone()).collect(),
-        order: settings
-            .routing()
-            .map(|order| order.iter().map(|(p, _)| p.id.clone()).collect())
-            .unwrap_or_else(|_| settings.model.order.clone()),
-        routing,
+impl SessionPool {
+    /// What a read of `settings` reports: its providers, their order, how
+    /// they routed, and what of it takes a restart.
+    pub(in crate::session_pool) async fn settings_reloaded(
+        &self,
+        settings: &Settings,
+        routing: api::RoutingStatus,
+    ) -> api::SettingsReloaded {
+        api::SettingsReloaded {
+            providers: settings.providers.iter().map(|p| p.id.clone()).collect(),
+            order: settings
+                .routing()
+                .map(|order| order.iter().map(|(p, _)| p.id.clone()).collect())
+                .unwrap_or_else(|_| settings.model.order.clone()),
+            routing,
+            restart_required: self.bindings.restart_required(settings).await,
+        }
     }
 }

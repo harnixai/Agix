@@ -67,6 +67,33 @@ pub const SCOPES: &[(&str, Scope)] = {
     ]
 };
 
+/// The keys the engine reads only when the process starts or its pool is
+/// built, dotted: a changed value reaches a running process only by
+/// restarting it.
+pub const READ_AT_START: &[&str] = &[
+    "app.history",
+    "app.session_cap",
+    "app.session_idle_timeout_secs",
+    "app.system_proxy",
+    "app.worker_threads",
+];
+
+/// Each of [`READ_AT_START`] as `settings` has it; `null` when unset.
+pub fn read_at_start(settings: &crate::Settings) -> Vec<(&'static str, Value)> {
+    let values = serde_json::to_value(settings).unwrap_or_default();
+    READ_AT_START
+        .iter()
+        .map(|key| {
+            let value = key
+                .split('.')
+                .try_fold(&values, |node, segment| node.get(segment))
+                .cloned()
+                .unwrap_or(Value::Null);
+            (*key, value)
+        })
+        .collect()
+}
+
 type Entries = Vec<(Vec<String>, Scope)>;
 
 fn entries(sections: &Sections) -> Entries {
@@ -164,6 +191,21 @@ pub fn scope_gaps(schema: &Value, sections: &Sections) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn what_is_read_at_start_is_decided_for_the_process() {
+        for key in READ_AT_START {
+            let path: Vec<&str> = key.split('.').collect();
+            assert_eq!(
+                scope_of(&path, &Sections::none()),
+                Some(Scope::Process),
+                "{key}"
+            );
+        }
+        let read = read_at_start(&crate::Settings::defaults_for("m"));
+        assert_eq!(read.len(), READ_AT_START.len());
+        assert_eq!(read[1], ("app.session_cap", json!(32)));
+    }
 
     #[test]
     fn every_settings_key_has_a_scope() {

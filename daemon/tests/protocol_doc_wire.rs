@@ -61,7 +61,7 @@ async fn start(
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.session_cap = session_cap;
+    config.settings.values.app.session_cap = session_cap;
     config.settings.values.memory.enabled = false;
     configure(&mut config);
 

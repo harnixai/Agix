@@ -47,7 +47,7 @@ async fn start_tcp_server(
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.session_cap = 8;
+    config.settings.values.app.session_cap = 8;
 
     let pool = daemon::assemble::pool(
         &config,

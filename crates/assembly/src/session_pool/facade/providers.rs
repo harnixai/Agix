@@ -191,7 +191,9 @@ impl SessionPool {
             dry_run,
             written_to: written.written_to.display().to_string(),
             warnings: written.warnings,
-            reloaded: settings_reloaded(&written.loaded.values, written.routing),
+            reloaded: self
+                .settings_reloaded(&written.loaded.values, written.routing)
+                .await,
         })
     }
 }

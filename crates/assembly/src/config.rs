@@ -200,8 +200,6 @@ pub struct DaemonConfig {
     pub paths: Arc<dyn DaemonPaths>,
     pub socket_path: PathBuf,
     pub lock_path: PathBuf,
-    /// `app.session_cap` as read at start.
-    pub session_cap: usize,
     pub tcp_addr: Option<SocketAddr>,
     /// WebSocket transport address. Shares `tcp_token`, because both are the
     /// same question — is this connection allowed — asked over different
@@ -211,8 +209,6 @@ pub struct DaemonConfig {
     /// Always empty: sessions take their rules from `settings.rules`
     /// (see `resolve_session_permission` in `session_pool::parts::factory`), not from here.
     pub permission_rules: RuleSet,
-    /// `app.session_idle_timeout_secs` as read at start.
-    pub session_idle_timeout_secs: u64,
     /// Where to read the MCP policy instead of the platform's managed path
     /// (`Layout::mcp_policy_file`). A file named here must exist.
     /// Ignored when the host passes `Assembly::mcp`'s `policy`.
@@ -232,7 +228,6 @@ impl std::fmt::Debug for DaemonConfig {
         f.debug_struct("DaemonConfig")
             .field("socket_path", &self.socket_path)
             .field("lock_path", &self.lock_path)
-            .field("session_cap", &self.session_cap)
             .field("model", &self.settings.values.model.model_name)
             .field("max_tokens", &self.settings.values.model.max_tokens)
             .field(
@@ -266,17 +261,14 @@ impl std::fmt::Debug for DaemonConfig {
 impl DaemonConfig {
     pub fn minimal(paths: Arc<dyn DaemonPaths>) -> Self {
         let config_root = paths.config_root();
-        let app = settings::AppSettings::default();
         Self {
             socket_path: socket_path_from_root(&config_root),
             lock_path: lock_path_from_root(&config_root),
             paths,
-            session_cap: app.session_cap,
             tcp_addr: None,
             ws_addr: None,
             tcp_token: None,
             permission_rules: RuleSet::empty(),
-            session_idle_timeout_secs: app.session_idle_timeout_secs,
             mcp_policy_path: None,
             managed_settings_path: None,
             cli_settings: None,
@@ -330,12 +322,10 @@ pub fn load_daemon_config(
                 .with_global(global_root)
                 .with_layout(paths.layout()),
         ),
-        session_cap: settings.values.app.session_cap,
         tcp_addr: None,
         ws_addr: None,
         tcp_token: None,
         permission_rules: RuleSet::empty(),
-        session_idle_timeout_secs: settings.values.app.session_idle_timeout_secs,
         mcp_policy_path: None,
         managed_settings_path: None,
         cli_settings,
@@ -679,7 +669,7 @@ mod tests {
     fn minimal_config_uses_sensible_defaults() {
         let paths = Arc::new(StaticDaemonPaths::new(PathBuf::from("/tmp/test")));
         let config = DaemonConfig::minimal(paths.clone());
-        assert_eq!(config.session_cap, 32);
+        assert_eq!(config.settings.values.app.session_cap, 32);
         assert!(config.settings.values.mcp.servers.is_empty());
         assert!(config.tcp_addr.is_none());
     }

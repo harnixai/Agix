@@ -28,11 +28,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 
-/// Where this pool looked for the deployment's managed settings, and what it
-/// found there: applied on top of every settings it loads.
+/// How `restart_required` names the managed settings file.
+const MANAGED: &str = "managed";
+
+/// Where this pool looked for the deployment's managed settings, whether the
+/// file had to be there, and what it found: applied on top of every settings
+/// it loads.
 pub(in crate::session_pool) struct ManagedLayer {
     pub(in crate::session_pool) path: PathBuf,
+    pub(in crate::session_pool) required: bool,
     pub(in crate::session_pool) settings: Option<base::permission::ManagedSettings>,
+}
+
+impl ManagedLayer {
+    /// Whether the file is not what the pool read at start. A layer that did
+    /// not come from the file — an embedder's `Tier::Managed` source — stays
+    /// while no file appears.
+    fn changed_on_disk(&self) -> bool {
+        match crate::settings_source::read_managed(&self.path, self.required) {
+            Some(now) => self.settings.as_ref() != Some(&now),
+            None => self
+                .settings
+                .as_ref()
+                .is_some_and(|m| m.origin == self.path.display().to_string()),
+        }
+    }
 }
 
 /// What [`BindingCache::cached`] found for a pair.
@@ -48,7 +68,8 @@ pub(in crate::session_pool) enum Cached {
     Missing,
 }
 
-/// The bindings built so far, and every pair's epoch.
+/// The bindings built so far, every pair's epoch, and the router each pair
+/// was last served by.
 struct Cache {
     /// One binding per pair this pool has built a session for, built on
     /// demand and dropped by [`BindingCache::invalidate`]. The pool's own pair
@@ -66,6 +87,10 @@ struct Cache {
     /// Every pair a build has begun for, and how many times it has been
     /// invalidated since. Bumped only while `bindings` is held.
     epochs: std::sync::Mutex<HashMap<ProjectSceneKey, u64>>,
+    /// The last router each pair was successfully served by, kept across
+    /// invalidation so a provider config that stops resolving — or stops
+    /// producing a buildable client — leaves working routing in place.
+    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<model::routing::ProviderSet>>>,
 }
 
 /// What is laid over every settings this pool loads from disk, in order.
@@ -115,11 +140,9 @@ pub(in crate::session_pool) struct BindingCache {
     /// were built with; everything not tied to a session reads this one.
     settings: AsyncRwLock<Arc<LoadedSettings>>,
     layers: Layers,
+    /// What of [`settings::scope::READ_AT_START`] the pool was built with.
+    started_with: Vec<(&'static str, serde_json::Value)>,
     cache: Cache,
-    /// The last router each pair was successfully served by, kept across
-    /// invalidation so a provider config that stops resolving — or stops
-    /// producing a buildable client — leaves working routing in place.
-    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<model::routing::ProviderSet>>>,
     watch: Watching,
     /// The host's skill directories of every session in memory.
     host_dirs: HostDirTable,
@@ -229,13 +252,14 @@ impl BindingCache {
         plugins: Arc<crate::plugins::PluginSubsystem>,
     ) -> Self {
         Self {
+            started_with: settings::scope::read_at_start(&settings.values),
             settings: AsyncRwLock::new(settings),
             layers,
             cache: Cache {
                 bindings: AsyncMutex::new(HashMap::new()),
                 epochs: std::sync::Mutex::new(HashMap::new()),
+                last_good_routers: AsyncMutex::new(HashMap::new()),
             },
-            last_good_routers: AsyncMutex::new(HashMap::new()),
             watch: Watching {
                 hub: watch,
                 own: std::sync::Mutex::new(Vec::new()),
@@ -268,6 +292,30 @@ impl BindingCache {
 
     pub(in crate::session_pool) fn managed_settings_path(&self) -> &Path {
         &self.layers.managed.path
+    }
+
+    /// The keys of `settings` read only at start whose value is not what the
+    /// pool was built with, and `managed` when the managed settings file
+    /// changed since.
+    pub(in crate::session_pool) async fn restart_required(
+        &self,
+        settings: &settings::Settings,
+    ) -> Vec<String> {
+        let mut keys: Vec<String> = settings::scope::read_at_start(settings)
+            .into_iter()
+            .zip(&self.started_with)
+            .filter(|((_, now), (_, then))| now != then)
+            .map(|((key, _), _)| key.to_string())
+            .collect();
+        let managed = ManagedLayer {
+            path: self.layers.managed.path.clone(),
+            required: self.layers.managed.required,
+            settings: self.layers.managed.settings.clone(),
+        };
+        if off_the_runtime(move || managed.changed_on_disk()).await {
+            keys.push(MANAGED.into());
+        }
+        keys
     }
 
     /// The pair's settings read from disk through the one reader, with the
@@ -421,7 +469,7 @@ impl BindingCache {
         };
 
         let (watch, unwatched_settings) = self.watch_tiers_of(&settings, &key);
-        let last_good = self.last_good_routers.lock().await.get(&key).cloned();
+        let last_good = self.cache.last_good_routers.lock().await.get(&key).cloned();
         let (contributions, client, credentials) = (
             self.plugins.contributions(),
             self.client.clone(),
@@ -443,7 +491,8 @@ impl BindingCache {
             .await,
         );
         if built.routing.router_rebuilt {
-            self.last_good_routers
+            self.cache
+                .last_good_routers
                 .lock()
                 .await
                 .insert(key.clone(), built.task_router.clone());

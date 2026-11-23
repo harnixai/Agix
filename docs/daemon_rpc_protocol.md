@@ -792,7 +792,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 发不了 ping —— 网页端要保活就用 `daemon.ping`。
 
 **会话回收**:超过 `app.session_idle_timeout_secs`(`--session-idle-timeout`,默认 3600 秒)没活动的会话,以及池子
-满(`app.session_cap`,`--session-cap`,默认 32)时最久未活动的那个,运行体会被回收;两个值在 daemon 启动时读定,`config.reload` 不改。transcript 不
+满(`app.session_cap`,`--session-cap`,默认 32)时最久未活动的那个,运行体会被回收;两个值在 daemon 启动时读定,`config.reload` 不改,改了的报在它的 `restart_required`。transcript 不
 受影响,下次 `run_turn` / `session.resume` 会自动从磁盘恢复,`plan` 模式与 todo 列表也一起
 回来(§4.5)。
 
@@ -3264,8 +3264,14 @@ revision,什么都不写,重读再写即可。锁等满 10 秒 → `SETTINGS_LOC
     "warnings": [ ], "error": null,
     "router_rebuilt": true,   // 真的建出了一个可用的 router
     "router_error": null,
-    "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] } }
+    "mcp_connected": [ ], "mcp_failed": [ ], "mcp_connecting": [ ] },
+  "restart_required": [ ] }   // 值变了、但只在启动时读的键;重启 daemon 才生效
 ```
+
+`restart_required` 列出只在启动时读的设置(`settings::scope::READ_AT_START`:`app.history`、`app.session_cap`、
+`app.session_idle_timeout_secs`、`app.system_proxy`、`app.worker_threads`)里,现在读到的值与这个进程启动时不同的那些;
+managed 设置文件(§10)也只在启动时读,它和启动时读到的不同时列一项 `managed`。这些键在运行中的进程里仍是启动时的值,
+重启之后才生效;改回去之后就不再列出。`config.set` 与 `config.setProvider` 的结果带同一个字段。
 
 `ok` 与 `router_rebuilt` 是**两件事**:配置可以路由得通(`ok: true`)却建不出客户端
 (`router_rebuilt: false` + `router_error`),`api: openai_chat` 缺 `base_url` 就是这种。

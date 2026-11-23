@@ -251,9 +251,9 @@ pub async fn start_scripted_server_holding(
         scene_id,
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.session_cap = session_cap;
     let Seed(mut settings, rules) = settings.into();
     settings.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
+    settings.app.session_cap = session_cap;
     config.settings.values = settings;
     config.settings.default_model = config.settings.values.model.model_name.clone();
     config.settings.settle_providers();
@@ -536,7 +536,7 @@ pub async fn serve_permitting_all(
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
     if let Some(cap) = serving.session_cap {
-        config.session_cap = cap;
+        config.settings.values.app.session_cap = cap;
     }
     config.settings.values.memory.enabled = false;
     configure(&mut config);
@@ -1127,7 +1127,7 @@ pub async fn start_server_with_history(
         "code",
         &StaticDaemonPaths::new(dir.path().to_path_buf()),
     );
-    config.session_cap = cap;
+    config.settings.values.app.session_cap = cap;
 
     let pool = daemon::assemble::pool(
         &config,

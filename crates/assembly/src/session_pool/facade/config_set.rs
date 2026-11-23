@@ -68,7 +68,9 @@ impl SessionPool {
             overridden,
             revision: written.revision,
             warnings: written.warnings,
-            reloaded: settings_reloaded(&written.loaded.values, written.routing),
+            reloaded: self
+                .settings_reloaded(&written.loaded.values, written.routing)
+                .await,
         })
     }
 }

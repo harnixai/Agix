@@ -14,7 +14,7 @@ pub(crate) struct SessionPoolBuilder {
     history_store: Option<Arc<dyn history::store::HistoryStore>>,
     paths: Arc<dyn crate::config::DaemonPaths>,
     credentials: Arc<dyn base::interface::credentials::CredentialSource>,
-    managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
+    managed: Option<ManagedLayer>,
     cli_settings: Option<serde_json::Value>,
     host_overrides: HostOverrides,
     rust_plugins: Vec<Arc<dyn runtime::plugin::Plugin>>,
@@ -71,14 +71,20 @@ impl SessionPoolBuilder {
         self
     }
 
-    /// The deployment's managed settings, read from `path`: put on top of the
-    /// pool's own settings now and of every settings it loads later.
+    /// The deployment's managed settings, read from `path` — which had to be
+    /// there when `required`: put on top of the pool's own settings now and
+    /// of every settings it loads later.
     pub(crate) fn managed_settings(
         mut self,
         path: PathBuf,
+        required: bool,
         managed: Option<base::permission::ManagedSettings>,
     ) -> Self {
-        self.managed = Some((path, managed));
+        self.managed = Some(ManagedLayer {
+            path,
+            required,
+            settings: managed,
+        });
         self
     }
 
@@ -196,24 +202,19 @@ impl SessionPoolBuilder {
 /// The managed layer the host named, else the platform's file with nothing
 /// read from it, and `settings` with it on top.
 fn managed_layer(
-    managed: Option<(PathBuf, Option<base::permission::ManagedSettings>)>,
+    managed: Option<ManagedLayer>,
     settings: Arc<LoadedSettings>,
     paths: &dyn crate::config::DaemonPaths,
 ) -> (ManagedLayer, Arc<LoadedSettings>) {
     match managed {
-        Some((path, managed)) => {
-            let settings = Arc::new((*settings).clone().with_managed(managed.clone()));
-            (
-                ManagedLayer {
-                    path,
-                    settings: managed,
-                },
-                settings,
-            )
+        Some(layer) => {
+            let settings = Arc::new((*settings).clone().with_managed(layer.settings.clone()));
+            (layer, settings)
         }
         None => (
             ManagedLayer {
                 path: paths.layout().managed_settings_file(),
+                required: false,
                 settings: None,
             },
             settings,

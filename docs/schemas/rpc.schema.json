@@ -5646,6 +5646,13 @@
           },
           "type": "array"
         },
+        "restart_required": {
+          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "routing": {
           "$ref": "#/$defs/RoutingStatus"
         },
@@ -5669,7 +5676,8 @@
         "written_to",
         "providers",
         "order",
-        "routing"
+        "routing",
+        "restart_required"
       ],
       "type": "object"
     },
@@ -8269,6 +8277,13 @@
           },
           "type": "array"
         },
+        "restart_required": {
+          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "routing": {
           "$ref": "#/$defs/RoutingStatus"
         }
@@ -8276,7 +8291,8 @@
       "required": [
         "providers",
         "order",
-        "routing"
+        "routing",
+        "restart_required"
       ],
       "type": "object"
     },
@@ -8345,6 +8361,13 @@
           },
           "type": "array"
         },
+        "restart_required": {
+          "description": "The settings read only at start (`settings::scope::READ_AT_START`)\nwhose value is not what this process started with, dotted, and\n`managed` when the managed settings file is not what it read then:\nthese take effect only after a restart.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "revision": {
           "description": "The tier's revision after the write (now, for `dry_run`).",
           "type": "string"
@@ -8383,7 +8406,8 @@
         "revision",
         "providers",
         "order",
-        "routing"
+        "routing",
+        "restart_required"
       ],
       "type": "object"
     },
