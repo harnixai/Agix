@@ -139,7 +139,7 @@ async fn choose_a_model_while_a_rebuild_takes_the_session(pool: &Arc<SessionPool
     let rebuilt = {
         let (pool, sid) = (pool.clone(), sid.to_string());
         tokio::spawn(async move {
-            pool.set_session_prompt(&sid, |p| p.append = Some("Answer briefly.".into()))
+            pool.set_session_prompt(&sid, super::rebuild::appending("Answer briefly."))
                 .await
                 .map(|_| ())
         })
@@ -200,8 +200,8 @@ async fn a_model_chosen_while_a_rebuild_is_on_its_way_is_the_one_the_log_records
         "the log records the model chosen"
     );
     assert_eq!(
-        recorded.prompt.and_then(|p| p.append).as_deref(),
-        Some("Answer briefly."),
+        recorded.session_setting("prompt.append"),
+        Some(&serde_json::json!("Answer briefly.")),
         "and the prompt the rebuild was for"
     );
 }
@@ -234,7 +234,7 @@ async fn a_failed_rebuild_keeps_a_model_chosen_while_it_was_on_its_way() {
     let rebuilt = {
         let (pool, sid) = (pool.clone(), sid.clone());
         tokio::spawn(async move {
-            pool.set_session_prompt(&sid, |p| p.append = Some("Answer briefly.".into()))
+            pool.set_session_prompt(&sid, super::rebuild::appending("Answer briefly."))
                 .await
                 .map(|_| ())
         })
@@ -262,7 +262,7 @@ async fn a_failed_rebuild_keeps_a_model_chosen_while_it_was_on_its_way() {
         "the log records the model chosen"
     );
     assert_eq!(
-        recorded.prompt.and_then(|p| p.append),
+        recorded.session_setting("prompt.append"),
         None,
         "and not the prompt of the rebuild that failed"
     );
@@ -372,7 +372,7 @@ async fn a_prompt_chosen_behind_a_delete_finds_the_session_gone() {
 
     let chosen = change_queued_behind_a_delete(&pool, &sid, |pool, sid| {
         tokio::spawn(async move {
-            pool.set_session_prompt(&sid, |p| p.append = Some("Answer briefly.".into()))
+            pool.set_session_prompt(&sid, super::rebuild::appending("Answer briefly."))
                 .await
         })
     })

@@ -1,5 +1,9 @@
-//! 对已有会话的元数据操作：重命名、追加与列出扩展条目、换模型、换提示词。
+//! 对已有会话的元数据操作：重命名、追加与列出扩展条目、换模型、换提示词。换模型的
+//! effort / thinking 与换提示词都写进会话自己的那层设置，和 `options.settings` 一样判。
 
+use crate::session_pool::parts::bindings::ProjectBinding;
+use crate::session_pool::parts::factory::held_keys;
+use crate::session_pool::parts::specs::set_in_layer;
 use crate::session_pool::*;
 
 impl SessionPool {
@@ -197,8 +201,10 @@ impl SessionPool {
     /// the session's order takes is refused — sending a name to an endpoint
     /// that does not serve it fails only later, and less legibly.
     ///
-    /// `reasoning` changes the session's own effort and thinking mode, read
-    /// at each of its engine's model calls; neither needs a rebuild.
+    /// `reasoning` changes `model.effort` and `model.thinking` in the
+    /// session's own settings — for its sub-agents and team members too —
+    /// judged as `options.settings` is; the session is rebuilt on them, as
+    /// for a new provider.
     pub async fn set_session_model(
         &self,
         session_id: &str,
@@ -225,7 +231,8 @@ impl SessionPool {
 
         // Under the session lock, as every change to a session's spec is: a
         // rebuild's change and this one land, and are undone, one at a time.
-        let spec = self
+        let reasoning_changes = !reasoning.is_empty();
+        let (spec, clamped_options) = self
             .live
             .with_session_lock(session_id, async {
                 // A close or delete queued ahead of this on the lock has
@@ -246,36 +253,48 @@ impl SessionPool {
                     choose_reasoning(spec, reasoning);
                 };
 
-                // A provider is a different client, which an engine is built
-                // around rather than handed mid-life: rebuild the session on
-                // the new spec. The turn slot is taken before the change is
-                // made, so a turn that started since the check above refuses
-                // both rather than being cut off or finding the change applied
-                // by some later rebuild.
-                if switching_provider {
-                    let held = self
-                        .hold_for_rebuild(session_id)
-                        .await
-                        .map_err(|e| e.into_error(session_id))?;
-                    self.rebuild_on_changed_spec(session_id, held, change)
-                        .await
-                        .map_err(|e| e.into_error(session_id))
-                } else {
-                    let spec = self.update_spec(session_id, change).await;
-                    self.specs.persist(session_id, &spec).await;
-                    Ok(spec)
-                }
+                let rebuild = switching_provider || reasoning_changes;
+                let spec = self.change_model_spec(session_id, rebuild, change).await?;
+                let held = held_keys(&binding.settings, &spec, &[EFFORT, THINKING]);
+                Ok((spec, held))
             })
             .await?;
-        let reasoning = spec.reasoning();
         Ok(api::ModelChoice {
             session_id: session_id.to_string(),
             model: spec.model(),
             provider: spec.provider(),
-            effort: reasoning.effort,
-            thinking: reasoning.thinking_mode,
+            effort: own_setting(&spec, EFFORT),
+            thinking: own_setting(&spec, THINKING),
+            clamped_options,
             applies: api::Applies::NextTurn,
         })
+    }
+
+    /// `change` made to `sid`'s spec and recorded; with `rebuild`, the session
+    /// rebuilt on it. A provider is a different client and the session's
+    /// settings are read as its engine is built, so either is a rebuild
+    /// rather than something an engine is handed mid-life. The turn slot is
+    /// taken before the change is made, so a turn that started since the
+    /// caller's idle check refuses both rather than being cut off or finding
+    /// the change applied by some later rebuild.
+    async fn change_model_spec(
+        &self,
+        sid: &str,
+        rebuild: bool,
+        change: impl FnOnce(&mut SessionSpec),
+    ) -> Result<SessionSpec, PoolError> {
+        if !rebuild {
+            let spec = self.update_spec(sid, change).await;
+            self.specs.persist(sid, &spec).await;
+            return Ok(spec);
+        }
+        let held = self
+            .hold_for_rebuild(sid)
+            .await
+            .map_err(|e| e.into_error(sid))?;
+        self.rebuild_on_changed_spec(sid, held, change)
+            .await
+            .map_err(|e| e.into_error(sid))
     }
 
     /// Change `sid`'s spec, and put the model it now names onto the session's
@@ -290,8 +309,8 @@ impl SessionPool {
         spec
     }
 
-    /// Put `sid`'s model and reasoning choices onto its session's state, a
-    /// tier as the model the session's first provider serves it with.
+    /// Put `sid`'s model choice onto its session's state, a tier as the
+    /// model the session's first provider serves it with.
     pub(in crate::session_pool) async fn project_model_choice(&self, sid: &str) {
         let spec = self.specs.get(sid);
         if let Some(core) = self.live.core_of(sid).await {
@@ -308,22 +327,17 @@ impl SessionPool {
                 other => other,
             };
             core.state().set_model_choice(model);
-            core.state().set_reasoning_choice(
-                spec.as_ref()
-                    .map(SessionSpec::reasoning)
-                    .unwrap_or_default(),
-            );
         }
     }
 
-    /// `session.setPrompt` — this session's own system-prompt append and
-    /// override from its next turn on. A string sets a field, `None` in
-    /// `change` leaves it. Refused while a turn runs, like `setModel`; an
+    /// `session.setPrompt` — `prompt.append` and `prompt.override` in this
+    /// session's own settings from its next turn on, judged as
+    /// `options.settings` is. Refused while a turn runs, like `setModel`; an
     /// idle session is rebuilt on the new prompt at once, its history kept.
     pub async fn set_session_prompt(
         &self,
         session_id: &str,
-        change: impl FnOnce(&mut runtime::agent::SessionPrompt),
+        change: api::PromptChange,
     ) -> Result<api::PromptChoice, PoolError> {
         self.refuse_scene_mismatch(session_id).await?;
         self.wait_out_finishing_turn(session_id).await;
@@ -339,11 +353,15 @@ impl SessionPool {
             return Err(PoolError::session_not_found(session_id));
         }
         let change = |spec: &mut SessionSpec| {
-            let mut prompt = spec.prompt().unwrap_or_default();
-            change(&mut prompt);
-            spec.prompt = Some(prompt);
+            spec.change_layer(|layer| {
+                for (key, text) in [(APPEND, change.append), (OVERRIDE, change.override_text)] {
+                    if let Some(text) = text {
+                        set_in_layer(layer, &dotted(key), text.map(serde_json::Value::String));
+                    }
+                }
+            });
         };
-        let prompt = self
+        let spec = self
             .live
             .with_session_lock(session_id, async {
                 let spec = match self.hold_for_rebuild(session_id).await {
@@ -363,16 +381,30 @@ impl SessionPool {
                     }
                     Err(busy) => return Err(busy),
                 };
-                Ok(spec.prompt().unwrap_or_default())
+                Ok(spec)
             })
             .await
             .map_err(|e| e.into_error(session_id))?;
+        let clamped_options = match self.binding_of_session(session_id).await {
+            Some(binding) => held_keys(&binding.settings, &spec, &[APPEND, OVERRIDE]),
+            None => Vec::new(),
+        };
         Ok(api::PromptChoice {
             session_id: session_id.to_string(),
-            append: prompt.append,
-            override_text: prompt.override_text,
+            append: own_setting(&spec, APPEND),
+            override_text: own_setting(&spec, OVERRIDE),
+            clamped_options,
             applies: api::Applies::NextTurn,
         })
+    }
+
+    /// The binding `session_id` runs on, or would be brought back on.
+    async fn binding_of_session(&self, session_id: &str) -> Option<Arc<ProjectBinding>> {
+        if let Some(binding) = self.live_binding(session_id).await {
+            return Some(binding);
+        }
+        let log = self.directory.load_entries(session_id).await.ok()?;
+        Some(self.binding_of_log(&log).await.0)
     }
 }
 
@@ -420,13 +452,38 @@ impl SessionPool {
     }
 }
 
+const EFFORT: &str = "model.effort";
+const THINKING: &str = "model.thinking";
+const APPEND: &str = "prompt.append";
+const OVERRIDE: &str = "prompt.override";
+
+fn dotted(key: &str) -> Vec<&str> {
+    key.split('.').collect()
+}
+
+/// `key` of `spec`'s own settings, as `T`; `None` when it is not set there or
+/// does not read.
+fn own_setting<T: serde::de::DeserializeOwned>(spec: &SessionSpec, key: &str) -> Option<T> {
+    serde_json::from_value(spec.session_setting(key)?.clone()).ok()
+}
+
 fn choose_reasoning(spec: &mut SessionSpec, change: api::ReasoningChange) {
-    if let Some(effort) = change.effort {
-        spec.effort = Some(effort);
+    if change.is_empty() {
+        return;
     }
-    if let Some(thinking) = change.thinking {
-        spec.thinking_mode = Some(thinking);
-    }
+    let effort = change
+        .effort
+        .map(|effort| effort.and_then(|e| serde_json::to_value(e).ok()));
+    let thinking = change
+        .thinking
+        .map(|thinking| thinking.and_then(|t| serde_json::to_value(t).ok()));
+    spec.change_layer(|layer| {
+        for (key, value) in [(EFFORT, effort), (THINKING, thinking)] {
+            if let Some(value) = value {
+                set_in_layer(layer, &dotted(key), value);
+            }
+        }
+    });
 }
 
 fn choose_model(

@@ -14,9 +14,6 @@ impl SessionOptions {
         "output_schema",
         "provider",
         "model",
-        "effort",
-        "thinking",
-        "prompt",
         "prompt_types",
         "host_tools",
         "attended",
@@ -74,7 +71,6 @@ impl SessionOptions {
             };
             match Self::read_alone(name, &value) {
                 Ok(()) if name == "recorder" && !recorder_reads(&value, &mut ignored) => {}
-                Ok(()) if name == "thinking" && !thinking_reads(&value, &mut ignored) => {}
                 Ok(()) if name == "settings" && !settings_read(&value, &mut ignored) => {}
                 Ok(()) => {
                     readable.insert(name.clone(), value);
@@ -131,7 +127,13 @@ impl SessionOptions {
 
 /// Fields `options` no longer has, with what took their place.
 const RENAMED: &[(&str, &str)] = &[
-    ("thinking_mode", "thinking"),
+    ("effort", "settings.model.effort"),
+    ("thinking", "settings.model.thinking"),
+    ("thinking_mode", "settings.model.thinking"),
+    (
+        "prompt",
+        "settings.prompt.append / settings.prompt.override",
+    ),
     ("permission_mode", "settings.permissions.mode"),
     (
         "permission_rules",
@@ -172,25 +174,6 @@ fn settings_read(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
         });
     }
     problems.is_empty()
-}
-
-/// Whether `options.thinking` is one a call can carry; what is not is added
-/// to `ignored`.
-fn thinking_reads(value: &Value, ignored: &mut Vec<IgnoredOption>) -> bool {
-    let Ok(mode) = serde_json::from_value::<base::interface::model::ThinkingMode>(value.clone())
-    else {
-        return true;
-    };
-    match model::adapter::thinking_mode_problem(&mode) {
-        Some(error) => {
-            ignored.push(IgnoredOption {
-                field: Some("thinking".into()),
-                error,
-            });
-            false
-        }
-        None => true,
-    }
 }
 
 /// What the engine would refuse of `options.host_tools`, by the field of the
@@ -289,9 +272,6 @@ mod tests {
             output_schema: Some(serde_json::json!({})),
             provider: Some("p".into()),
             model: Some("m".into()),
-            effort: Some(base::interface::model::Effort::High),
-            thinking: Some(base::interface::model::ThinkingMode::Off),
-            prompt: Some(Default::default()),
             prompt_types: vec![AskKind::Question.as_str().into()],
             host_tools: vec![crate::session_pool::api::HostToolOption {
                 name: "HostEcho".into(),
@@ -391,19 +371,45 @@ mod tests {
     fn a_field_that_moved_says_where_to() {
         let (_, mut ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
             "thinking_mode": "off", "turn": {}, "permission_mode": "plan", "permission_rules": [],
+            "effort": "high", "thinking": "off", "prompt": {"append": "x"},
         }}));
         ignored.sort_by(|a, b| a.field.cmp(&b.field));
-        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        let moved: Vec<_> = ignored
+            .iter()
+            .map(|i| (i.field.as_deref().unwrap_or_default(), i.error.as_str()))
+            .collect();
         assert_eq!(
-            fields,
+            moved,
             [
-                Some("permission_mode"),
-                Some("permission_rules"),
-                Some("thinking_mode"),
-                Some("turn"),
+                ("effort", "unknown field; it is now `settings.model.effort`"),
+                ("permission_mode", "unknown field; it is now `settings.permissions.mode`"),
+                (
+                    "permission_rules",
+                    "unknown field; it is now `settings.permissions.allow / allow_exact / ask / deny`"
+                ),
+                (
+                    "prompt",
+                    "unknown field; it is now `settings.prompt.append / settings.prompt.override`"
+                ),
+                ("thinking", "unknown field; it is now `settings.model.thinking`"),
+                ("thinking_mode", "unknown field; it is now `settings.model.thinking`"),
+                ("turn", "unknown field; it is now `settings.turn`"),
             ]
         );
-        assert!(ignored[0].error.contains("settings.permissions.mode"));
+    }
+
+    #[test]
+    fn a_thinking_budget_no_call_can_carry_is_refused_in_the_session_layer() {
+        let (_, ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "settings": {"model": {"thinking": {"on_budget": 0}}},
+        }}));
+        let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
+        assert_eq!(fields, [Some("settings.model.thinking")]);
+        let (options, ignored) = SessionOptions::from_params(&serde_json::json!({"options": {
+            "settings": {"model": {"thinking": {"on_budget": 1024}, "effort": "high"}},
+        }}));
+        assert!(ignored.is_empty(), "{ignored:?}");
+        assert!(options.unwrap().settings.is_some());
     }
 
     #[test]
@@ -472,7 +478,7 @@ mod tests {
     #[test]
     fn a_bad_option_field_is_reported_and_the_rest_still_apply() {
         let params = serde_json::json!({"options": {
-            "effort": "hihg",
+            "attended": "hihg",
             "model": "m",
             "promt": {},
         }});
@@ -480,7 +486,7 @@ mod tests {
         assert_eq!(options.unwrap().model.as_deref(), Some("m"));
         ignored.sort_by(|a, b| a.field.cmp(&b.field));
         let fields: Vec<_> = ignored.iter().map(|i| i.field.as_deref()).collect();
-        assert_eq!(fields, [Some("effort"), Some("promt")]);
+        assert_eq!(fields, [Some("attended"), Some("promt")]);
         assert!(ignored[0].error.contains("hihg"), "{:?}", ignored[0]);
         assert_eq!(ignored[1].error, "unknown field");
 

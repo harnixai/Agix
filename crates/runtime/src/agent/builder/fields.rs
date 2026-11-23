@@ -134,7 +134,6 @@ pub(super) struct SpecSetup {
     /// Where this session's commands record their process groups — see
     /// [`Builder::process_groups`].
     pub(super) process_groups: Option<Arc<platform::GroupLedger>>,
-    pub(super) session_prompt: Option<SessionPrompt>,
     /// See [`Builder::session_state`].
     pub(super) session_state: Option<(Arc<session_state::SessionState>, u64)>,
     /// See [`Builder::steering`].
@@ -174,7 +173,6 @@ impl SpecSetup {
             cron_store: None,
             goal_rounds_from_owner: false,
             process_groups: None,
-            session_prompt: None,
             session_state: None,
             steering: None,
             run_slots: None,

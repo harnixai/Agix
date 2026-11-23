@@ -275,7 +275,8 @@ pub struct ContextReport {
 }
 
 /// The reasoning effort and thinking mode the session's next model call
-/// carries, and whether each is the session's own choice or the settings'.
+/// carries, and whether each is the session's own (`model.*` of its own
+/// settings) or the settings'.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -287,25 +288,14 @@ pub struct ReasoningReport {
 }
 
 impl ReasoningReport {
-    pub fn resolve(
-        choice: &session_state::ReasoningChoice,
-        settings: &settings::ModelSettings,
-    ) -> Self {
-        let source = |chosen: bool| {
-            if chosen {
-                ChoiceSource::Session
-            } else {
-                ChoiceSource::Settings
-            }
-        };
+    /// Both `settings`: an engine sees only the settings it was built on;
+    /// whoever laid the session's own settings over them marks those.
+    pub fn of(settings: &settings::ModelSettings) -> Self {
         Self {
-            effort: choice.effort.or(settings.effort),
-            effort_source: source(choice.effort.is_some()),
-            thinking: choice
-                .thinking_mode
-                .clone()
-                .unwrap_or_else(|| settings.thinking_mode.clone()),
-            thinking_source: source(choice.thinking_mode.is_some()),
+            effort: settings.effort,
+            effort_source: ChoiceSource::Settings,
+            thinking: settings.thinking_mode.clone(),
+            thinking_source: ChoiceSource::Settings,
         }
     }
 }
@@ -526,34 +516,6 @@ pub type InputReceiver = mpsc::UnboundedReceiver<InputMessage>;
 /// [`EventBus`]: crate::event_bus::EventBus
 pub type EventSender = crate::event_bus::EventBus;
 pub type EventReceiver = mpsc::UnboundedReceiver<AgentEvent>;
-
-/// What [`Builder::session_prompt`] puts over a session's settings. `None`
-/// leaves the settings' `prompt.append` / `prompt.override` in force.
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct SessionPrompt {
-    pub append: Option<String>,
-    #[serde(rename = "override")]
-    pub override_text: Option<String>,
-}
-
-impl SessionPrompt {
-    pub fn is_empty(&self) -> bool {
-        self.append.is_none() && self.override_text.is_none()
-    }
-
-    pub(super) fn applied_to(&self, settings: &LoadedSettings) -> LoadedSettings {
-        let mut out = settings.clone();
-        if let Some(append) = &self.append {
-            out.values.prompt.append = Some(append.clone());
-        }
-        if let Some(text) = &self.override_text {
-            out.values.prompt.override_text = Some(text.clone());
-        }
-        out
-    }
-}
 
 /// Permission questions awaiting the host's answer, keyed by `prompt_id`. A
 /// sub-agent's questions are registered in its parent's (`agents`'

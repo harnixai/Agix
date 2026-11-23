@@ -7,10 +7,7 @@ impl Builder {
         let chains = w.chains;
         let (recovery_policy, turn_policy, budget_policy) =
             self.policies(&w.resolved.settings, &w.resolved.scene);
-        let settings = match &self.spec.session_prompt {
-            Some(prompt) => Arc::new(prompt.applied_to(&w.resolved.settings)),
-            None => w.resolved.settings,
-        };
+        let settings = w.resolved.settings;
         let gate = self.gate(
             w.resolved.permission,
             &w.events,

@@ -19,7 +19,7 @@ async fn assert_options_kept(pool: &SessionPool, sid: &str, what: &str) {
         recorded
             .options
             .as_ref()
-            .is_some_and(|o| o.effort.is_some()),
+            .is_some_and(|o| o.settings.is_some()),
         "{what} recorded a spec without the session's options: {:?}",
         recorded.options
     );
@@ -72,7 +72,7 @@ async fn a_prompt_set_as_the_session_leaves_memory_keeps_the_rest_of_its_spec() 
         let pool = pool.clone();
         let sid = sid.clone();
         async move {
-            pool.set_session_prompt(&sid, |p| p.append = Some("Briefly.".into()))
+            pool.set_session_prompt(&sid, super::rebuild::appending("Briefly."))
                 .await
                 .map(|_| ())
         }
@@ -81,5 +81,14 @@ async fn a_prompt_set_as_the_session_leaves_memory_keeps_the_rest_of_its_spec() 
         .await
         .expect("the change");
     assert_options_kept(&pool, &sid, "setPrompt").await;
-    assert!(pool.specs.recorded(&sid).await.prompt.is_some());
+    let recorded = pool.specs.recorded(&sid).await;
+    assert_eq!(
+        recorded.session_setting("prompt.append"),
+        Some(&serde_json::json!("Briefly."))
+    );
+    assert_eq!(
+        recorded.session_setting("model.effort"),
+        Some(&serde_json::json!("high")),
+        "the change starts from the settings the session was created with"
+    );
 }

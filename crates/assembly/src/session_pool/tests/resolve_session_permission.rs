@@ -202,7 +202,7 @@ fn a_managed_mode_holds_over_a_session_that_may_loosen() {
         let opts = asking_for(asked);
         let (laid, clamped) = crate::session_pool::parts::factory::session_settings(
             &settings,
-            Some(&opts),
+            opts.settings.as_ref(),
             opts.requested_permission_mode(),
         );
         assert_eq!(
@@ -216,4 +216,44 @@ fn a_managed_mode_holds_over_a_session_that_may_loosen() {
             "{asked}"
         );
     }
+}
+
+/// A session's own effort the managed layer sets otherwise is held, reported
+/// by its key, and not reported as the session's choice.
+#[test]
+fn a_managed_effort_holds_the_session_s_own_and_is_reported() {
+    use crate::session_pool::parts::factory::{held_keys, reasoning_report};
+    use crate::session_pool::parts::specs::SessionSpec;
+    let settings = defaults().with_managed(
+        Some(settings::managed::from_value(
+            "managed",
+            serde_json::json!({"model": {"effort": "low"}}),
+            &crate::settings_sections::all(),
+        )),
+        &crate::settings_sections::all(),
+    );
+    let mut spec = SessionSpec::default();
+    spec.change_layer(|layer| {
+        layer.insert(
+            "model".into(),
+            serde_json::json!({"effort": "high", "thinking": "off"}),
+        );
+    });
+    let held = held_keys(&settings, &spec, &["model.effort", "model.thinking"]);
+    assert_eq!(
+        held,
+        [crate::session_pool::api::ClampedOption {
+            field: "settings.model.effort".into(),
+            requested: serde_json::json!("high"),
+            applied: serde_json::json!("low"),
+        }]
+    );
+    let report = reasoning_report(&settings, &spec);
+    assert_eq!(report.effort, Some(base::interface::model::Effort::Low));
+    assert_eq!(report.effort_source, runtime::agent::ChoiceSource::Settings);
+    assert_eq!(report.thinking, base::interface::model::ThinkingMode::Off);
+    assert_eq!(
+        report.thinking_source,
+        runtime::agent::ChoiceSource::Session
+    );
 }

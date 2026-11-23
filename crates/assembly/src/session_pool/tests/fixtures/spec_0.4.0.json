@@ -6,12 +6,15 @@
     "output_schema": {"type": "object"},
     "provider": "p-options",
     "model": "m-options",
+    "effort": "max",
     "thinking": "off",
     "prompt": {"append": "be brief", "override": null},
     "prompt_types": ["question"],
     "settings": {"permissions": {"mode": "plan", "deny": ["Write"]}, "turn": {"token_budget": 5000}}
   },
   "prompt": {"append": "spec prompt", "override": null},
+  "effort": "xhigh",
+  "thinking_mode": null,
   "model": "m-spec",
   "provider": "p-spec"
 }

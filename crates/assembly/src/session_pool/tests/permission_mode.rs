@@ -10,7 +10,9 @@ use std::sync::atomic::Ordering;
 
 pub(super) fn with_effort() -> SessionOptions {
     SessionOptions {
-        effort: Some(base::interface::model::Effort::High),
+        settings: serde_json::json!({"model": {"effort": "high"}})
+            .as_object()
+            .cloned(),
         ..Default::default()
     }
 }
@@ -83,7 +85,7 @@ async fn a_mode_set_as_the_session_leaves_memory_keeps_the_rest_of_its_spec() {
         recorded
             .options
             .as_ref()
-            .is_some_and(|o| o.effort.is_some()),
+            .is_some_and(|o| o.settings.is_some()),
         "the switch recorded a spec without the session's options: {:?}",
         recorded.options
     );

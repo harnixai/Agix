@@ -7,8 +7,8 @@ use crate::rpc::methods::session::*;
 use crate::rpc::methods::Patch;
 use crate::rpc::{read_options, RpcError};
 use crate::session_pool::api::{
-    DeleteReport, ForkReport, ModelChoice, PermissionModeChoice, PoolError, PromptChoice,
-    ReasoningChange, Renamed, ResumeReport, SessionCreated, SessionDetail, WatcherId,
+    DeleteReport, ForkReport, ModelChoice, PermissionModeChoice, PoolError, PromptChange,
+    PromptChoice, ReasoningChange, Renamed, ResumeReport, SessionCreated, SessionDetail, WatcherId,
 };
 
 rpc_methods! {
@@ -135,14 +135,9 @@ async fn set_prompt(
     if p.append.is_keep() && p.override_text.is_keep() {
         return Err(invalid("give `append` and/or `override`"));
     }
-    let apply = |field: &mut Option<String>, patch: Patch<String>| match patch {
-        Patch::Keep => {}
-        Patch::Clear => *field = None,
-        Patch::Set(text) => *field = Some(text),
-    };
-    let change = move |prompt: &mut runtime::agent::SessionPrompt| {
-        apply(&mut prompt.append, p.append);
-        apply(&mut prompt.override_text, p.override_text);
+    let change = PromptChange {
+        append: change_of(p.append),
+        override_text: change_of(p.override_text),
     };
     Ok(s.pool.set_session_prompt(&p.session_id, change).await?)
 }

@@ -1,5 +1,6 @@
-//! A session's own system prompt: given at creation, changed mid-session,
-//! kept across a rebuild, and never written into a settings file.
+//! A session's own system prompt, `prompt.*` of its own settings: given at
+//! creation, changed mid-session, kept across a rebuild, and never written
+//! into a settings file.
 
 use blackbox::{Daemon, DaemonOptions, ProviderStub, Reply, World};
 use serde_json::json;
@@ -20,7 +21,7 @@ async fn a_sessions_prompt_is_its_own_and_changes_from_its_next_turn() -> anyhow
     let session = client
         .session_create(json!({
             "project_root": root,
-            "options": { "prompt": { "append": "AT-CREATION" } }
+            "options": { "settings": { "prompt": { "append": "AT-CREATION" } } }
         }))
         .await?;
     let other = client

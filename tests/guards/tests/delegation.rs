@@ -214,10 +214,6 @@ const NOT_FOR_DELEGATES: &[(&str, &str)] = &[
         "background_hooks",
         "set on the root's own runner, which its delegates are handed",
     ),
-    (
-        "session_prompt",
-        "the root's own prompt; a delegate keeps its type's",
-    ),
 ];
 
 fn struct_fields(file: &str, name: &str) -> BTreeSet<String> {

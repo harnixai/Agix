@@ -50,12 +50,19 @@ pub(super) async fn slot_and_state(
         .expect("the session is live")
 }
 
-fn append(prompt: &mut runtime::agent::SessionPrompt) {
-    prompt.append = Some("Answer briefly.".into());
+pub(super) fn appending(text: &str) -> api::PromptChange {
+    api::PromptChange {
+        append: Some(Some(text.to_string())),
+        ..Default::default()
+    }
+}
+
+fn append() -> api::PromptChange {
+    appending("Answer briefly.")
 }
 
 async fn refused_prompt_change(pool: &SessionPool, sid: &str) -> Busy {
-    match pool.set_session_prompt(sid, append).await {
+    match pool.set_session_prompt(sid, append()).await {
         Err(PoolError::SessionBusy(busy)) => busy,
         Err(e) => panic!("{e}"),
         Ok(v) => panic!("a rebuild cut off a busy session: {v:?}"),
@@ -105,7 +112,7 @@ async fn a_prompt_change_is_refused_while_a_turn_runs_or_a_rebuild_holds_the_ses
         assert!(turn.abort_rebuild());
     })
     .await;
-    pool.set_session_prompt(&sid, append)
+    pool.set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("an idle session takes the change"));
     let (rebuilt, _) = slot_and_state(&pool, &sid).await;
@@ -166,7 +173,7 @@ async fn a_prompt_set_on_a_session_out_of_memory_leaves_no_spec_behind() {
     assert!(!pool.specs.contains(&sid));
 
     let answer = pool
-        .set_session_prompt(&sid, append)
+        .set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("a session out of memory takes the change"));
     assert_eq!(answer.append.as_deref(), Some("Answer briefly."));
@@ -175,9 +182,9 @@ async fn a_prompt_set_on_a_session_out_of_memory_leaves_no_spec_behind() {
         pool.specs
             .recorded(&sid)
             .await
-            .prompt
-            .and_then(|p| p.append),
-        Some("Answer briefly.".to_string()),
+            .session_setting("prompt.append")
+            .cloned(),
+        Some(serde_json::json!("Answer briefly.")),
         "the log gives the change back"
     );
 }
@@ -197,7 +204,7 @@ async fn a_rebuild_keeps_the_goal_armed_and_the_round_it_was_about_to_start() {
     pool.record_goal_changes(&sid, &before).await;
     let round = before.goal_next_round().expect("a round");
 
-    pool.set_session_prompt(&sid, append)
+    pool.set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("an idle session takes the change"));
     let (rebuilt, after) = slot_and_state(&pool, &sid).await;
@@ -226,7 +233,7 @@ async fn a_rebuild_moves_the_sessions_watchers_and_open_questions_along() {
         Some("task-1"),
     );
 
-    pool.set_session_prompt(&sid, append)
+    pool.set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("an idle session takes the change"));
     let hub = pool.hub_of(&sid).await.unwrap();
@@ -556,7 +563,7 @@ async fn a_session_rebuilt_twice_hands_on_each_task_frame_once() {
     let (pool, _dir, _store) = pool_with_history().await;
     let sid = new_session(&pool).await;
     for _ in 0..2 {
-        pool.set_session_prompt(&sid, append)
+        pool.set_session_prompt(&sid, append())
             .await
             .unwrap_or_else(|_| panic!("an idle session takes the change"));
     }
@@ -589,7 +596,7 @@ async fn every_engine_a_session_runs_on_works_in_the_sessions_directory() {
     assert_eq!(state.env().cwd, project);
     assert!(state.exec().is_some(), "a new session's engine is attached");
 
-    pool.set_session_prompt(&sid, append)
+    pool.set_session_prompt(&sid, append())
         .await
         .unwrap_or_else(|_| panic!("an idle session takes the change"));
     assert!(
@@ -688,7 +695,7 @@ async fn a_session_whose_log_fell_behind_is_neither_rebuilt_nor_evicted_until_it
         events.seen()
     );
 
-    match pool.set_session_prompt(&sid, append).await {
+    match pool.set_session_prompt(&sid, append()).await {
         Err(PoolError::Engine(failure)) => {
             assert_eq!(failure.kind, base::event::FailureKind::PersistFailed);
             assert!(failure.retryable);
@@ -706,7 +713,7 @@ async fn a_session_whose_log_fell_behind_is_neither_rebuilt_nor_evicted_until_it
     assert!(evicted.is_empty(), "the janitor evicted it");
 
     store.down.store(false, Ordering::SeqCst);
-    pool.set_session_prompt(&sid, append)
+    pool.set_session_prompt(&sid, append())
         .await
         .expect("rebuilt once its log has caught up");
     assert_ne!(slot_and_state(&pool, &sid).await.0, generation);
@@ -766,7 +773,7 @@ async fn a_failed_turn_the_log_did_not_take_leaves_the_session_behind_its_log() 
     let core = pool.live.core_of(&sid).await.unwrap();
     assert!(core.log().is_behind(), "the pool knows the log is behind");
 
-    match pool.set_session_prompt(&sid, append).await {
+    match pool.set_session_prompt(&sid, append()).await {
         Err(PoolError::Engine(failure)) => {
             assert_eq!(failure.kind, base::event::FailureKind::PersistFailed)
         }
@@ -801,7 +808,7 @@ async fn a_session_being_rebuilt_reads_as_rebuilding() {
 
     let rebuild = {
         let (pool, sid) = (pool.clone(), sid.clone());
-        tokio::spawn(async move { pool.set_session_prompt(&sid, append).await.is_ok() })
+        tokio::spawn(async move { pool.set_session_prompt(&sid, append()).await.is_ok() })
     };
     tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
         .await
@@ -848,7 +855,7 @@ async fn a_shutdown_during_a_rebuild_keeps_the_new_engine_off_the_session() {
 
     let rebuild = {
         let (pool, sid) = (pool.clone(), sid.clone());
-        tokio::spawn(async move { pool.set_session_prompt(&sid, append).await.is_ok() })
+        tokio::spawn(async move { pool.set_session_prompt(&sid, append()).await.is_ok() })
     };
     tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
         .await
@@ -1000,7 +1007,7 @@ async fn close_during_a_rebuild_is_not_undone_by_the_rebuild() {
         let pool = pool.clone();
         let sid = sid.clone();
         tokio::spawn(async move {
-            pool.set_session_prompt(&sid, |p| p.append = Some("Answer briefly.".into()))
+            pool.set_session_prompt(&sid, appending("Answer briefly."))
                 .await
                 .is_ok()
         })

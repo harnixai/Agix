@@ -2,8 +2,10 @@
 //! a value looser than the settings' is held to them and reported in
 //! `clamped_options`, a key decided for the project and scene or the process
 //! refuses the call; in force for the session and its sub-agents, and still
-//! in force after a restart — a session recorded in the 0.3 shape too. Also the
-//! conversation's own `options.thinking`, and the option names it replaced.
+//! in force after a restart — a session recorded in the 0.3 or 0.4.0 shape too.
+//! Its reasoning and prompt are keys of it, set at creation or by
+//! `session.setModel` / `session.setPrompt`, and the option names they
+//! replaced are refused with the new ones.
 
 use std::io::Write as _;
 
@@ -342,11 +344,15 @@ async fn what_only_a_settings_file_may_set_refuses_the_session() -> anyhow::Resu
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_conversations_thinking_is_options_thinking_and_the_old_names_are_refused(
+async fn the_sessions_thinking_is_a_setting_of_its_own_and_the_old_names_are_refused(
 ) -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("session-thinking", &stub).start().await?;
-    let off = session(&mut run, json!({ "thinking": "off" })).await?;
+    let off = session(
+        &mut run,
+        json!({ "settings": { "model": { "thinking": "off" } } }),
+    )
+    .await?;
     stub.script([Reply::text("hi")]);
     run.turn(&off, "hello").await?;
     let calls = stub.calls();
@@ -360,7 +366,22 @@ async fn the_conversations_thinking_is_options_thinking_and_the_old_names_are_re
         (
             json!({ "thinking_mode": "off" }),
             "thinking_mode",
+            "settings.model.thinking",
+        ),
+        (
+            json!({ "thinking": "off" }),
             "thinking",
+            "settings.model.thinking",
+        ),
+        (
+            json!({ "effort": "high" }),
+            "effort",
+            "settings.model.effort",
+        ),
+        (
+            json!({ "prompt": { "append": "x" } }),
+            "prompt",
+            "settings.prompt.append / settings.prompt.override",
         ),
         (
             json!({ "turn": { "token_budget": 10 } }),
@@ -421,6 +442,131 @@ async fn a_sessions_own_settings_hold_after_a_restart() -> anyhow::Result<()> {
     let events = run.turn(&s, "write it").await?;
     assert!(refused(&events, "Write"), "{:?}", events.tool_results);
     assert!(run.read_file("after.txt").is_none());
+    run.finish().await;
+    Ok(())
+}
+
+fn effort_of(call: &blackbox::SeenRequest) -> &Value {
+    &call.body["output_config"]["effort"]
+}
+
+/// What a session's own settings say about its reasoning holds for the
+/// sub-agents it starts, not only for its own conversation.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sessions_own_effort_and_thinking_reach_its_sub_agents() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("session-effort-agents", &stub)
+        .settings(json!({
+            "model": { "effort": "low" },
+            "permissions": { "mode": "acceptEdits", "allow": ["Agent"] },
+        }))
+        .start()
+        .await?;
+    let parent = session(
+        &mut run,
+        json!({ "settings": { "model": { "effort": "high", "thinking": "off" } } }),
+    )
+    .await?;
+    let _host = run.watch(&parent, true).await?;
+    let before = stub.call_count();
+    stub.script_when(
+        ROOT,
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "description": "helper", "prompt": "say done" }),
+            ),
+            Reply::text("ROOT-DONE"),
+        ],
+    );
+    stub.script([Reply::text("child done")]);
+    let events = run.turn(&parent, &format!("{ROOT} delegate")).await?;
+    assert!(events.text.contains("ROOT-DONE"), "{events:?}");
+    let calls = stub.calls();
+    let child: Vec<_> = calls[before..]
+        .iter()
+        .filter(|c| c.messages_contain("say done") && !c.messages_contain(ROOT))
+        .collect();
+    assert!(!child.is_empty(), "the sub-agent made no call");
+    let root = calls[before..].iter().filter(|c| c.messages_contain(ROOT));
+    for call in child.into_iter().chain(root) {
+        assert_eq!(effort_of(call), "high", "{}", call.body);
+        assert_eq!(call.body["thinking"]["type"], "disabled", "{}", call.body);
+    }
+    run.finish().await;
+    Ok(())
+}
+
+/// `session.setModel`'s effort and `session.setPrompt` write the session's
+/// own settings: in force from the next turn, reported as the session's, and
+/// still in force after the daemon restarts.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_set_model_and_set_prompt_change_holds_after_a_restart() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("session-set-restart", &stub)
+        .settings(json!({ "model": { "effort": "low" } }))
+        .start()
+        .await?;
+    let s = session(&mut run, json!({})).await?;
+    let set = run
+        .client
+        .call(
+            "session.setModel",
+            json!({ "session_id": s, "effort": "max" }),
+        )
+        .await?;
+    let set = set.result.unwrap_or_default();
+    assert_eq!(set["effort"], "max", "{set}");
+    assert!(set.get("clamped_options").is_none(), "{set}");
+    let set = run
+        .client
+        .call(
+            "session.setPrompt",
+            json!({ "session_id": s, "append": "SET-PROMPT-MARK" }),
+        )
+        .await?;
+    let set = set.result.unwrap_or_default();
+    assert_eq!(set["append"], "SET-PROMPT-MARK", "{set}");
+    assert!(set.get("clamped_options").is_none(), "{set}");
+
+    stub.script([Reply::text("one")]);
+    run.turn(&s, "first").await?;
+    let first = stub.calls().pop().expect("a call");
+    assert_eq!(effort_of(&first), "max", "{}", first.body);
+    assert!(first.system_text().contains("SET-PROMPT-MARK"));
+
+    run.restart().await?;
+    let resumed = run
+        .client
+        .call("session.resume", json!({ "session_id": s }))
+        .await?;
+    assert!(resumed.error.is_none(), "{resumed:?}");
+    let got = run.client.session_get(&s).await?.result.unwrap_or_default();
+    assert_eq!(got["reasoning"]["effort"], "max", "{got}");
+    assert_eq!(got["reasoning"]["effort_source"], "session", "{got}");
+    stub.script([Reply::text("two")]);
+    run.turn(&s, "second").await?;
+    let second = stub.calls().pop().expect("a call");
+    assert_eq!(effort_of(&second), "max", "{}", second.body);
+    assert!(second.system_text().contains("SET-PROMPT-MARK"));
+
+    let back = run
+        .client
+        .call(
+            "session.setModel",
+            json!({ "session_id": s, "effort": null }),
+        )
+        .await?;
+    assert_eq!(back.result.unwrap_or_default()["effort"], Value::Null);
+    stub.script([Reply::text("three")]);
+    run.turn(&s, "third").await?;
+    let third = stub.calls().pop().expect("a call");
+    assert_eq!(
+        effort_of(&third),
+        "low",
+        "`null` gives the settings' effort back"
+    );
     run.finish().await;
     Ok(())
 }
@@ -495,6 +641,59 @@ async fn a_session_recorded_in_the_0_3_shape_keeps_its_limits() -> anyhow::Resul
         "max_turns",
         "{events:?}"
     );
+    run.finish().await;
+    Ok(())
+}
+
+/// A session 0.4.0 created with `options.effort`, `options.prompt` and a
+/// thinking mode set since has them beside its settings in its log; brought
+/// back, it keeps them as its own settings.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_recorded_by_0_4_0_keeps_its_effort_thinking_and_prompt() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("session-0-4-0", &stub)
+        .settings(json!({ "model": { "effort": "low" } }))
+        .start()
+        .await?;
+    let s = session(&mut run, json!({})).await?;
+    stub.script([Reply::text("hello")]);
+    run.turn(&s, "hi").await?;
+    run.restart().await?;
+
+    let log = log_of(run.world.root(), &s).expect("the session's log");
+    let recorded = history::entry::EnvelopedEntry::new(
+        base::session::SessionId::parse(&s)?,
+        history::entry::LogEntry::Extension {
+            ns: "agix.session".into(),
+            event: "spec".into(),
+            payload: json!({
+                "options": {
+                    "auto_name": false,
+                    "effort": "high",
+                    "prompt": { "append": "RECORDED-PROMPT-MARK", "override": null },
+                },
+                "thinking_mode": "off",
+            }),
+        },
+    );
+    let mut line = serde_json::to_string(&recorded)?;
+    line.push('\n');
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log)?
+        .write_all(line.as_bytes())?;
+
+    let resumed = run
+        .client
+        .call("session.resume", json!({ "session_id": s }))
+        .await?;
+    assert!(resumed.error.is_none(), "{resumed:?}");
+    stub.script([Reply::text("again")]);
+    run.turn(&s, "again").await?;
+    let call = stub.calls().pop().expect("a call");
+    assert_eq!(effort_of(&call), "high", "{}", call.body);
+    assert_eq!(call.body["thinking"]["type"], "disabled", "{}", call.body);
+    assert!(call.system_text().contains("RECORDED-PROMPT-MARK"));
     run.finish().await;
     Ok(())
 }

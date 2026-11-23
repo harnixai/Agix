@@ -698,7 +698,7 @@ Unix socket 靠文件系统权限(只有 daemon 的用户能连),缺省不握手
              "data": { "session_id": "S1", "reason": "turn_running", "current_turn_id": "t1" } } }
 ```
 
-会话正在原地重建(`session.setPrompt`、换厂商的 `session.setModel`、配置变更后下一轮开始前)时也是这个
+会话正在原地重建(`session.setPrompt`、换厂商或推理设置的 `session.setModel`、配置变更后下一轮开始前)时也是这个
 错误,`reason` 为 `"rebuilding"`、`current_turn_id` 为 `null`;`queue` 等重建结束,`steer`
 没有可以交给的那一轮,同样等重建结束再作为新的一轮执行。`reason` 的取值见 §9.1。
 
@@ -855,7 +855,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 | `calls_preview` | `session.calls` 的 `output.text_preview`、`output.tool_uses[].input_preview` 与 `result_is_error`(§6.3) |
 | `session_search` | 有 `session.search`,按内容找会话(§6.3) |
 | `session_skill_dirs` | `options.skill_dirs` 与 `session.setSkillDirs`:会话自带的宿主 skill 目录;`session.get` 带 `skill_dirs`,`commands.list` 接受 `session_id`(§6.3) |
-| `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
+| `session_settings` | `options.settings`:按会话给的设置覆盖层(形状同 settings.json,只收按会话决定的键,推理强度、思考开关与提示词都在这里),缺省只能收紧,放宽的被夹住并报在 `session.create` 的 `clamped_options`;`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 改的是同一层,被夹住的报在各自结果的 `clamped_options`;一轮的 token 预算与 `turn_complete.usage` 含子 Agent 与旁路调用,带 `usage_breakdown`(§4.8、§6.3、§7.2) |
 | `host_tool_progress` | 有 `session.reportToolProgress`,宿主工具的进度推成 `tool_progress`(§6.3、§7.3) |
 | `host_tool_provider` | 有 `daemon.setHostTools`,连接提供的工具,`host_tool_call` 一定发给提供者(§6.1、§7.4) |
 | `host_hooks` | 有 `daemon.setHooks` / `session.respondHook`,连接登记的 hook,`hook_call` 帧只发给登记者(§6.1、§7.6) |
@@ -1360,7 +1360,9 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
   "options": {                            // 可选,只在创建时生效
     "settings": {                         // 可选,这个会话(含子 Agent、团队成员)的设置覆盖层,见下
       "permissions": { "mode": "default", "deny": ["Bash(rm:*)"] },
-      "turn": { "token_budget": 2000000, "max_model_calls": 40 } },
+      "turn": { "token_budget": 2000000, "max_model_calls": 40 },
+      "model": { "effort": "high", "thinking": "on" },  // low | medium | high | xhigh | max;auto | off | on | {"on_budget": N}(N ≥ 1024)
+      "prompt": { "append": "…" } },     // 系统提示词,见 session.setPrompt
     "recorder": { "mode":"replay", "name":"…", "dir":"/abs/recordings", "strict":true },
     "clock": { "start": "2026-10-28T09:00:00Z" },  // 可选,记下来的时间从这里起
     "telemetry": { "output":"/abs/path.jsonl" },
@@ -1369,9 +1371,6 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
     "auto_name": false,                   // 可选,false = 首轮之后不起名
     "provider": "deepseek",               // 可选,providers 里的 id
     "model": "deepseek-chat",             // 可选
-    "effort": "high",                     // 可选,low | medium | high | xhigh | max,省略 = 设置的 model.effort
-    "thinking": "on",                     // 可选,auto | off | on | {"on_budget": N}(N ≥ 1024),省略 = 设置的 model.thinking
-    "prompt": { "append": "…", "override": null },  // 可选,见 session.setPrompt
     "prompt_types": ["permission", "question"],  // 可选,宿主能回答的提问,默认只有 permission
     "skill_dirs": [ { "path": "/abs/skills" } ],  // 可选,这个会话自带的 skill 目录,见下
     "host_tools": [ ] } }                 // 可选,宿主自己实现的工具,见下
@@ -1401,7 +1400,7 @@ id(BASE58 编码的 UUID,与引擎生成的写法一字不差),否则 `INVALID_P
   只是 `options` 不同时另带 `options_differ`,列出不同的字段名。
 
 **`options` 怎么比。** 比的是建会话时给的那份(记在会话日志里,见下),不是此后 `session.setModel`、
-`session.setSkillDirs` 改出来的当前值,所以原样重发建会话的请求总能得到 `existing: true`。逐字段比,
+`session.setPrompt`、`session.setSkillDirs` 改出来的当前值,所以原样重发建会话的请求总能得到 `existing: true`。逐字段比,
 省略 `options` 与 `{}` 相同,列表字段连顺序一起比;给了与没给不同,任何一项不同都拒绝,不会悄悄忽略。
 例外:
 
@@ -1422,12 +1421,15 @@ daemon 重启后恢复)都按同一份 `options` 重建,之后的调用(`run_tur
 `options` 被忽略;`session.create` 带 `session_id` 时不忽略,与记下的不同就拒绝(见上)。
 会话日志里没有记录过 `options` 的旧会话例外:恢复时采用这次调用带的那份。
 `options` 记在会话日志里一条 `ns` 为 `agix.session`、`event` 为 `spec` 的扩展条目上,
-`session.setModel` 选的模型、推理强度与思考开关,`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
+`session.setModel` 选的模型与厂商、它与 `session.setPrompt` 改过的会话设置(`model.effort`、`model.thinking`、
+`prompt.append`、`prompt.override`),`session.setSkillDirs` 设的 skill 目录也记在那里,所以同样跨重启保留。
 
 `options` 逐字段读,读不出来的任何一项都让这次调用失败:`INVALID_PARAMS`,什么都不做(不建
-会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"effort": "hihg"`)、`options`
-本身不是对象,以及 `options.settings` 里会话不能给的键(见下)。0.4.0 以前的 `thinking_mode`、`turn`、
-`permission_mode`、`permission_rules` 是不认识的字段,`error` 写明换成了哪个。`prompt_types`、`host_tools`、`skill_dirs`
+会话、不跑这一轮),`error.data.invalid_options` 列出每一项。读不出来包括:不认识的字段、值读不出来的字段(如 `"attended": "yes"`)、`options`
+本身不是对象,以及 `options.settings` 里会话不能给的键(见下)。`effort`、`thinking`(更早叫 `thinking_mode`)、
+`prompt`、`turn`、`permission_mode`、`permission_rules` 是不认识的字段,`error` 写明换成了哪个
+(`settings.model.effort`、`settings.model.thinking`、`settings.prompt.append` / `settings.prompt.override`、
+`settings.turn`、`settings.permissions.mode`、`settings.permissions` 的规则串)。`prompt_types`、`host_tools`、`skill_dirs`
 这几个列表字段逐条读,`field` 写成 `prompt_types[0]` 这样带下标;值本身不是数组时 `field` 不带下标。`field` 为 `null` 表示整个
 `options` 读不出来。`session.create`、`session.run_turn`、`session.resume` 都这样。
 
@@ -1489,9 +1491,10 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 `{"field":"output_schema","error":"scene \"x\" denies StructuredOutput, …"}`,不建一个交不回结果的会话。
 子 Agent、`session.startAgent` 带 `output_schema` 同样。
 
-**`options` 的两类。** `model`、`provider`、`effort`、`thinking`、`prompt` 是这个会话自己那段对话的选择:
-只作用于会话自己的对话,子 Agent 与团队成员不随它,`session.setModel`、`session.setPrompt` 之后还能改。
-`settings` 是这个会话的设置覆盖层,作用于会话连同它的子 Agent 与团队成员。
+**`options` 的两类。** `model`、`provider` 选这个会话的对话用哪个模型、先走哪个厂商,`session.setModel`
+之后还能改(子 Agent 怎么跟随见那里)。`settings` 是这个会话的设置覆盖层,作用于会话连同它的子 Agent 与团队成员;
+推理强度、思考开关与系统提示词(`model.effort`、`model.thinking`、`prompt.append`、`prompt.override`)只在这一层给,
+`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 之后改的也是这一层,判法相同。
 
 **`settings`——按会话给的设置。** 形状就是 settings.json 的形状(`{"turn": {...}, "permissions": {...},
 "agents": {...}, "sandbox": {...}, ...}`),叠在会话所在项目与场景合并好的设置之上,managed 层仍压在它上面。
@@ -1499,7 +1502,7 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 `scripts`、`permissions.client_may_loosen`)、按进程决定的(`app`、`plugins`、`telemetry.otlp_endpoint`)写在这里
 进 `invalid_options`,`field` 为 `settings.<键>`,`error` 写明它按什么决定;不认识的键、改过名的键、值不合
 设置的类型、程序专用的 `permissions.mode: "bubble"`、读不出来的规则串(`field` 带下标,如
-`settings.permissions.deny[0]`)同样。被拒时什么都不建、不跑。
+`settings.permissions.deny[0]`)、`model.thinking` 的 `on_budget` 小于 1024 同样。被拒时什么都不建、不跑。
 
 缺省只能收紧:未受信项目层那张表(`ARCHITECTURE.md` 设置分层)里只许更严的键,值比设置的宽时不生效、留着
 设置的值,`session.create` 的结果带 `clamped_options` 列出每一项(`field` 是 `options` 里的点分全路径,
@@ -1510,9 +1513,11 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 `config.set` 改设置。`permissions.mode` 的夹紧见 §4.5;managed 层关了 `bypassPermissions` 时会话得不到它。
 
 `options` 随会话记下,`settings` 不记判定结果:每次重建引擎都按这时的设置重新判,设置后来收紧了按设置,
-放宽了仍守着会话给的值。0.4.0 以前的会话在日志里记的 `thinking_mode`、`turn`、`permission_mode`、
-`permission_rules`,恢复时按 `thinking`、`settings.turn`、`settings.permissions.mode` 与 `settings.permissions`
-的规则串读(allow 规则随之按上面的规矩扣下)。
+放宽了仍守着会话给的值。更早的会话在日志里记的旧形状恢复时按这一层读:`options` 的 `effort`、`thinking` /
+`thinking_mode`、`prompt` 按 `settings.model.effort`、`settings.model.thinking`、`settings.prompt.*`,
+`turn`、`permission_mode`、`permission_rules` 按 `settings.turn`、`settings.permissions.mode` 与
+`settings.permissions` 的规则串(allow 规则随之按上面的规矩扣下);之后用 `session.setModel` / `session.setPrompt`
+设过的推理强度、思考开关与提示词同样按这一层的键,`null` 即去掉那个键。
 
 `turn.max_model_calls` 是每个 agent 自己一轮的调用上限,子 Agent 继承会话的值(agent 类型的 `max_turns` 照旧
 覆盖它);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
@@ -1687,8 +1692,8 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 `shadowed` 是这个目录里被别处同名 skill 遮住的,`by` 是占着名字的一方。不在内存里的会话只有 `path`。
 
 `reasoning` 是这个会话下一次模型调用带的推理强度(`null` = 不发,交给端点)与思考开关,`*_source`
-为 `session`(会话自己的,`options` 或 `session.setModel` 设的)或 `settings`(会话绑定的项目与场景的
-`model.effort` / `model.thinking`)。sidechain 与没记场景的老会话没有这个键。
+为 `session`(会话自己那层设置的 `model.effort` / `model.thinking`,`options.settings` 或 `session.setModel` 设的)
+或 `settings`(会话绑定的项目与场景的,包括会话给了却被 managed 层压住的)。sidechain 与没记场景的老会话没有这个键。
 
 `scene` / `project_root` 与 `session.list` 的条目**同源**(都是那一条 `SessionInfo`),
 所以两个方法对同一个会话不会给出不同的答案。
@@ -2016,12 +2021,12 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 { "session_id": "…",
   "model": "claude-opus-4-6",     // model / provider / effort / thinking 至少给一个
   "provider": "anthropic",        // 可选,providers 里的 id
-  "effort": "high",               // 可选,同 options.effort;null = 回到设置的值
-  "thinking": "off" }             // 可选,取值同 options.thinking;null = 回到设置的值
+  "effort": "high",               // 可选,写会话设置的 model.effort;null = 去掉,回到设置的值
+  "thinking": "off" }             // 可选,写会话设置的 model.thinking;null = 去掉,回到设置的值
 // ← result
 { "session_id": "…", "model": "claude-opus-4-6", "provider": "anthropic",
-  "effort": "high", "thinking": "off",        // 会话自己的,null = 随设置
-  "applies": "next_turn" }
+  "effort": "high", "thinking": "off",        // 会话设置里的,null = 随设置
+  "applies": "next_turn" }                    // 被夹住时另带 clamped_options,见下
 ```
 
 0.3 的 `thinking_mode` 改名为 `thinking`;传 `thinking_mode` 以 `INVALID_PARAMS` 失败,报错里给出新名字。
@@ -2038,11 +2043,14 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 类型都没指定模型时,取 `model.tasks.subagent` 那一档的模型,与对话用的是同一个模型时跟随这里换上的模型。
 `WebSearch` 搜索用 `model.tasks.web_search` 那一档的模型。
 
-`effort` / `thinking` 改这个会话自己的推理强度与思考开关,从下一次模型调用起生效,只影响
-这个会话的对话本身:子 Agent(仍按设置与各自 agent 类型的 `effort`)、压缩、起名等任务不受影响。
-不重建会话;键不给就不动,给 `null` 就去掉会话自己的值、回到设置的 `model.effort` /
-`model.thinking`(也盖过 `options` 里给的)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
-(`options.thinking` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
+`effort` / `thinking` 写进这个会话自己那层设置(`options.settings` 那一层)的 `model.effort` /
+`model.thinking`,与建会话时给的合在一起记下,从下一轮起生效;和那一层的其他键一样作用于会话连同它的
+子 Agent 与团队成员(agent 类型写了 `effort` 的照旧覆盖),判法也相同:managed 层定了别的值时不生效,
+结果带 `clamped_options`(形状同 `session.create` 的,`field` 为 `settings.model.effort` /
+`settings.model.thinking`)。会话在原地按新设置重建,同换厂商(忙时的拒绝也同,见下)。键不给就不动,
+给 `null` 就把这个键从会话的设置里去掉、回到项目与场景设置的 `model.effort` / `model.thinking`
+(建会话时给的也去掉)。取值不认识、`on_budget` 小于 1024 → `INVALID_PARAMS`
+(`options.settings.model.thinking` 同样,进 `invalid_options`)。发出时预算不小于这次调用的 `max_tokens`
 就降到 `max_tokens - 1`,`max_tokens` 留不出 1024 时这次调用关掉思考,都记一条 warn。当前生效值与来源见 `session.get` 的 `reasoning`。
 
 **有 turn 在跑时返回 `SESSION_BUSY`**(`reason: "turn_running"`),不排队。选择记在会话上,
@@ -2050,7 +2058,8 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 换了,却看着旧模型答完这一轮。要换就先 `session.interrupt`,或者等这一轮结束。会话正在原地重建时同样
 `SESSION_BUSY`,`reason` 为 `"rebuilding"`。换厂商要重建会话,会话还有后台任务在跑(子 Agent、
 团队成员、后台程序、Monitor、宿主的 `plugin.call`)时同样 `SESSION_BUSY`,`reason` 为 `"background_tasks"`,`data` 多一个
-`running_task_ids` 列出它们 —— 重建会停掉它们;等它们结束,或先 `session.stopTask`。
+`running_task_ids` 列出它们 —— 重建会停掉它们;等它们结束,或先 `session.stopTask`。改 `effort` / `thinking`
+同样要重建,同样这样拒绝。
 
 重建时旧引擎 5 秒内没停下(卡在不理会取消的工具调用里之类;只通知的 hook 在后台跑,不拖住它),也返回 `SESSION_BUSY`
 (`reason` 为 `"previous_engine"`、`current_turn_id` 为 `null`、没有 `running_task_ids`):这次的选择**没有生效,也不记进日志**;
@@ -2062,7 +2071,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 
 **只对内存里的会话有效**,冷会话返回 `SESSION_NOT_FOUND`(先 `session.resume`)。
 选择记在会话日志里(见 `session.create` 的 `options`):会话被驱逐后重建、
-`config.reload` 之后重建、daemon 重启后恢复,选的都还是这个模型、厂商、推理强度与思考开关;
+`config.reload` 之后重建、daemon 重启后恢复,选的都还是这个模型、厂商,会话设置里的推理强度与思考开关也一样;
 `session.fork` 带过去切点之前记下的规格,其中也有它们。
 
 #### `session.setSkillDirs`
@@ -2086,9 +2095,9 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 
 #### `session.setPrompt`
 
-这个会话自己的系统提示词:一段追加文字与一份整体替换,优先于 settings.json 的
-`prompt.append` / `prompt.override`。`session.create` 的 `options.prompt` 给初值,这个方法
-在会话进行中改。
+这个会话自己那层设置(`options.settings` 那一层)里的 `prompt.append` / `prompt.override`:一段追加文字
+与一份整体替换,优先于 settings.json 的同名键。`session.create` 的 `options.settings.prompt` 给初值,
+这个方法在会话进行中改,判法与 `options.settings` 相同。
 
 ```jsonc
 // → params
@@ -2096,13 +2105,14 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
   "append": "回答一律用中文。",   // 字符串 = 设置
   "override": null }               // null = 清除,回到 settings 文件的值;省略 = 不变
 // ← result
-{ "session_id": "…", "append": "回答一律用中文。", "override": null, "applies": "next_turn" }
+{ "session_id": "…", "append": "回答一律用中文。", "override": null,   // 会话设置里的,null = 随设置
+  "applies": "next_turn" }                    // 被夹住时另带 clamped_options,同 session.setModel
 ```
 
 `override` 替换整份系统提示(场景骨架、规则、MCP 说明都不再出现),`append` 接在最后。
 从下一轮生效:空闲的会话立即按新提示重建,历史不变。和 `options` 一样记在会话日志里,
-重建、空闲回收后再用、daemon 重启后恢复都保留;settings 文件不被改动。只作用于这个会话
-自己的 agent,它派生的子 agent 用各自类型与场景的提示。
+重建、空闲回收后再用、daemon 重启后恢复都保留;settings 文件不被改动。和那一层的其他键一样,
+它派生的子 Agent 与团队成员拿到的也是这一层。
 
 有一轮正在跑、或有后台任务在跑时拒绝,`SESSION_BUSY`,`data` 同 `session.setModel`;重建时旧引擎
 没停下也是 `SESSION_BUSY`,提示词不变,会话被移出内存,同 `session.setModel`。上一轮的日志没写全、
@@ -4275,7 +4285,7 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 `persisted: false` 表示这一轮写日志失败了(磁盘满、存储不可用):这一轮确实跑完了,工具跑过、
 文件改过,所以照样以 `turn_complete` 结束、`run_turn` 照样成功 —— 不要把它当失败重发。但
 transcript、目标、计划模式与 todo 的落盘落在后面,内存里的会话是唯一完整的一份:daemon 不会
-因空闲或腾位置驱逐它,需要重建的调用(`session.setPrompt`、换厂商的 `session.setModel`)先让
+因空闲或腾位置驱逐它,需要重建的调用(`session.setPrompt`、换厂商或推理设置的 `session.setModel`)先让
 引擎补写,补写失败就拒绝,`ENGINE_ERROR`,`kind` 为 `persist_failed`,会话照旧。以 `error`
 结束的一轮写日志失败时也是这样,旁观者收到的 `error` 帧报 `persisted: false`;发起者收到的
 `ENGINE_ERROR` 不带它,要看 `daemon.doctor` 里会话的 `log.behind`。下一轮开头会
@@ -4503,7 +4513,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | -32602 | INVALID_PARAMS | 参数缺失/类型错/取值非法 |
 | -32603 | INTERNAL_ERROR | 服务端内部错误(写盘失败、会话创建失败等) |
 | -32000 | SESSION_NOT_FOUND | 会话不存在,或该方法要求它在内存里而它不在 |
-| -32002 | ENGINE_ERROR | turn 执行期错误,或引擎没有接下、没有回答一个回合之外的请求(`session.inspectContext` / `dropMessages` / `editMessage` / `rewind`),或重建之前补写日志失败(`session.setPrompt`、换厂商的 `session.setModel`);`message` 形如 `"<kind>: <描述>"`,`data` 见 §9.1 |
+| -32002 | ENGINE_ERROR | turn 执行期错误,或引擎没有接下、没有回答一个回合之外的请求(`session.inspectContext` / `dropMessages` / `editMessage` / `rewind`),或重建之前补写日志失败(`session.setPrompt`、换厂商或推理设置的 `session.setModel`);`message` 形如 `"<kind>: <描述>"`,`data` 见 §9.1 |
 | -32003 | UNAUTHORIZED | TCP / WebSocket 握手缺失或失败,开了 `--unix-socket-auth` 时 Unix socket 也一样;Unix socket 上的对端是 daemon 自己起的进程(§5.1)。不需要握手的连接上发 `daemon.auth` 得到的是 `METHOD_NOT_FOUND`(-32601) |
 | -32004 | SCENE_NOT_FOUND | 场景未注册,或(`session.create`)未激活 |
 | -32006 | SCENE_MISMATCH | 会话记录的场景与这个 daemon 的不符 |
@@ -4538,7 +4548,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 
 // SESSION_BUSY
 { "session_id": "S1", "reason": "turn_running", "current_turn_id": "t1" }
-// 需要重建的调用(setPrompt、换厂商的 setModel)被后台任务挡住时,多一项
+// 需要重建的调用(setPrompt、换厂商或推理设置的 setModel)被后台任务挡住时,多一项
 { "session_id": "S1", "reason": "background_tasks", "current_turn_id": null, "running_task_ids": [ "a1" ] }
 
 // SCENE_MISMATCH
@@ -4613,7 +4623,7 @@ id 也不出现在别的帧里。程序自己的进度(`log()` 的输出、调�
 | `reason` | 会话在做什么 | `current_turn_id` |
 |---|---|---|
 | `turn_running` | 有一轮在跑(`run_turn` 的 `reject`、`setModel`、`setPrompt`、`inspectContext` 等都报这一项) | 那一轮的 id,必定有值 |
-| `rebuilding` | 正在原地重建(`setPrompt`、换厂商的 `setModel`、配置变更后下一轮开始前) | `null` |
+| `rebuilding` | 正在原地重建(`setPrompt`、换厂商或推理设置的 `setModel`、配置变更后下一轮开始前) | `null` |
 | `background_tasks` | 空闲,但有后台任务或宿主的 `plugin.call` 在跑,挡住了需要重建的调用或回滚;另带 `running_task_ids`(调用还没起任务时可能为空);有宿主的 `plugin.call` 在跑时 `message` 写明这一点 | `null` |
 | `previous_engine` | 刚被关闭、驱逐或重建,上一个引擎在宽限期内还没停下 | `null` |
 | `context_operation` | 一个 `inspectContext` / `dropMessages` / `editMessage` 还没答完,会话归它独占 | `null` |

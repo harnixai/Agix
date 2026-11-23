@@ -228,8 +228,8 @@ impl SessionPool {
         })
     }
 
-    /// `session.get`'s `reasoning`: the session's own choice over the
-    /// settings of the project and scene it is bound to.
+    /// `session.get`'s `reasoning`: the session's own settings over those of
+    /// the project and scene it is bound to.
     async fn reasoning_report(
         &self,
         info: &crate::session_pool::SessionInfo,
@@ -238,15 +238,15 @@ impl SessionPool {
             return None;
         }
         let scene = info.scene.as_deref()?;
-        let choice = match self.specs.get(&info.session_id) {
-            Some(spec) => spec.reasoning(),
-            None => self.specs.recorded(&info.session_id).await.reasoning(),
+        let spec = match self.specs.get(&info.session_id) {
+            Some(spec) => spec,
+            None => self.specs.recorded(&info.session_id).await,
         };
         let project = info.project_root.as_deref().map(Path::new);
         let binding = self.binding_for(project, scene).await;
-        Some(runtime::agent::ReasoningReport::resolve(
-            &choice,
-            &binding.settings.values.model,
+        Some(crate::session_pool::parts::factory::reasoning_report(
+            &binding.settings,
+            &spec,
         ))
     }
 

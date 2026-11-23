@@ -33,17 +33,16 @@ pub(in crate::session_pool) fn effective_permission_mode(
     mode
 }
 
-/// `base` with the session's `options.settings` laid over it and its
+/// `base` with the session's own settings `layer` laid over it and its
 /// permission mode — `requested` clamped against `base` — written in, and the
-/// fields of `options.settings` held to the settings' value. The mode is
-/// decided by [`effective_permission_mode`] after the layer, so the managed
-/// layer has the last word over it.
+/// keys of `layer` held to the settings' value, as fields of `options`. The
+/// mode is decided by [`effective_permission_mode`] after the layer, so the
+/// managed layer has the last word over it.
 pub(in crate::session_pool) fn session_settings(
     base: &settings::LoadedSettings,
-    options: Option<&SessionOptions>,
+    layer: Option<&serde_json::Map<String, serde_json::Value>>,
     requested: Option<base::permission::PermissionMode>,
 ) -> (settings::LoadedSettings, Vec<api::ClampedOption>) {
-    let layer = options.and_then(|o| o.settings.as_ref());
     let (mut laid, held) = match layer {
         Some(layer) => base.overlay(
             layer,
@@ -63,7 +62,7 @@ pub(in crate::session_pool) fn session_settings(
             applied: held.applied,
         })
         .collect();
-    let asked = options.and_then(SessionOptions::requested_permission_mode);
+    let asked = layer.and_then(api::requested_permission_mode);
     if let Some(asked) = asked.filter(|asked| requested == Some(*asked) && mode != *asked) {
         clamped.insert(
             0,
@@ -75,6 +74,54 @@ pub(in crate::session_pool) fn session_settings(
         );
     }
     (laid, clamped)
+}
+
+/// Those of `keys`, dotted settings keys, that `base` holds `spec`'s own
+/// settings off.
+pub(in crate::session_pool) fn held_keys(
+    base: &settings::LoadedSettings,
+    spec: &SessionSpec,
+    keys: &[&str],
+) -> Vec<api::ClampedOption> {
+    let (_, held) = session_settings(
+        base,
+        spec.settings_layer(),
+        spec.requested_permission_mode(),
+    );
+    held.into_iter()
+        .filter(|h| {
+            h.field
+                .strip_prefix("settings.")
+                .is_some_and(|key| keys.contains(&key))
+        })
+        .collect()
+}
+
+/// The reasoning `spec`'s session runs on over `base`, each value marked
+/// `session` when its own settings set it and `base` did not hold it off.
+pub(in crate::session_pool) fn reasoning_report(
+    base: &settings::LoadedSettings,
+    spec: &SessionSpec,
+) -> runtime::agent::ReasoningReport {
+    let (laid, held) = session_settings(
+        base,
+        spec.settings_layer(),
+        spec.requested_permission_mode(),
+    );
+    let mut report = runtime::agent::ReasoningReport::of(&laid.values.model);
+    let own = |key: &str| {
+        spec.session_setting(key).is_some()
+            && !held
+                .iter()
+                .any(|h| h.field.strip_prefix("settings.") == Some(key))
+    };
+    if own("model.effort") {
+        report.effort_source = runtime::agent::ChoiceSource::Session;
+    }
+    if own("model.thinking") {
+        report.thinking_source = runtime::agent::ChoiceSource::Session;
+    }
+    report
 }
 
 fn managed_mode(settings: &settings::LoadedSettings) -> Option<base::permission::PermissionMode> {

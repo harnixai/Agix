@@ -67,15 +67,6 @@ pub struct SessionState {
     /// The model a host chose for this session since it was built, read by
     /// whichever engine runs the next turn.
     model_choice: std::sync::Mutex<Option<String>>,
-    reasoning_choice: std::sync::Mutex<ReasoningChoice>,
-}
-
-/// The reasoning effort and thinking mode a host chose for this session; a
-/// field left `None` follows the settings.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReasoningChoice {
-    pub effort: Option<base::interface::model::Effort>,
-    pub thinking_mode: Option<base::interface::model::ThinkingMode>,
 }
 
 /// A session's permission mode changed, to `mode`, by `source`.
@@ -251,7 +242,6 @@ impl SessionState {
             read_cache: ReadCache::default(),
             ledger: Default::default(),
             model_choice: std::sync::Mutex::new(None),
-            reasoning_choice: Default::default(),
         }
     }
 
@@ -353,16 +343,6 @@ impl SessionState {
 
     pub fn set_model_choice(&self, model: Option<String>) {
         *lock(&self.model_choice) = model;
-    }
-
-    /// Read at every model call of the session's own engine, never written
-    /// into its settings, so a choice taken back falls through to them.
-    pub fn reasoning_choice(&self) -> ReasoningChoice {
-        lock(&self.reasoning_choice).clone()
-    }
-
-    pub fn set_reasoning_choice(&self, choice: ReasoningChoice) {
-        *lock(&self.reasoning_choice) = choice;
     }
 
     /// A host's switch to `mode`. Into plan it is entering plan from the

@@ -5,6 +5,7 @@
 //! 锁序：`specs` 和 `kept` 是两把 std 叶子锁，互不嵌套，持锁时不 `.await`。
 
 use crate::session_pool::api::SessionOptions;
+use serde_json::{Map, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tracing::warn;
@@ -23,11 +24,11 @@ pub(in crate::session_pool) struct SessionSpec {
     pub(in crate::session_pool) options: Option<SessionOptions>,
     pub(in crate::session_pool) model: Option<String>,
     pub(in crate::session_pool) provider: Option<String>,
-    pub(in crate::session_pool) prompt: Option<runtime::agent::SessionPrompt>,
-    /// Set by `session.setModel`, over `options.effort`; `Some(None)` was
-    /// taken back to the settings'.
-    pub(in crate::session_pool) effort: Option<Option<base::interface::model::Effort>>,
-    pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
+    /// The session's layer as `session.setModel` and `session.setPrompt` left
+    /// it; over `options.settings` once set. Kept apart from `options` so a
+    /// `session.create` under the session's id still compares against what
+    /// it was created with.
+    pub(in crate::session_pool) settings: Option<Map<String, Value>>,
     /// Set by `session.setSkillDirs`; over `options.skill_dirs` once set.
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
     /// Set by `session.setPermissionMode` to a mode other than plan; over
@@ -49,12 +50,28 @@ impl SessionSpec {
             .or_else(|| self.options.as_ref().and_then(|o| o.provider.clone()))
     }
 
-    /// The session's own prompt: set since, else given at creation.
-    pub(in crate::session_pool) fn prompt(&self) -> Option<runtime::agent::SessionPrompt> {
-        self.prompt
-            .clone()
-            .or_else(|| self.options.as_ref().and_then(|o| o.prompt.clone()))
-            .filter(|p| !p.is_empty())
+    /// The session's own settings: changed since, else given at creation.
+    pub(in crate::session_pool) fn settings_layer(&self) -> Option<&Map<String, Value>> {
+        self.settings
+            .as_ref()
+            .or_else(|| self.options.as_ref().and_then(|o| o.settings.as_ref()))
+    }
+
+    /// Change the session's own settings, starting from those in force.
+    pub(in crate::session_pool) fn change_layer(
+        &mut self,
+        change: impl FnOnce(&mut Map<String, Value>),
+    ) {
+        let mut layer = self.settings_layer().cloned().unwrap_or_default();
+        change(&mut layer);
+        self.settings = Some(layer);
+    }
+
+    /// One key of the session's own settings, dotted.
+    pub(in crate::session_pool) fn session_setting(&self, dotted: &str) -> Option<&Value> {
+        let mut segments = dotted.split('.');
+        let first = self.settings_layer()?.get(segments.next()?)?;
+        segments.try_fold(first, |node, segment| node.get(segment))
     }
 
     /// Whether the session is named after its first turn by its scene's
@@ -90,9 +107,8 @@ impl SessionSpec {
         &self,
     ) -> Option<base::permission::PermissionMode> {
         self.permission_mode.or_else(|| {
-            self.options
-                .as_ref()
-                .and_then(SessionOptions::requested_permission_mode)
+            self.settings_layer()
+                .and_then(crate::session_pool::api::requested_permission_mode)
         })
     }
 
@@ -101,22 +117,6 @@ impl SessionSpec {
         self.model
             .clone()
             .or_else(|| self.options.as_ref().and_then(|o| o.model.clone()))
-    }
-
-    /// The session's own effort and thinking mode: set since, else given at
-    /// creation.
-    pub(in crate::session_pool) fn reasoning(&self) -> session_state::ReasoningChoice {
-        let options = self.options.as_ref();
-        session_state::ReasoningChoice {
-            effort: match self.effort {
-                Some(set) => set,
-                None => options.and_then(|o| o.effort),
-            },
-            thinking_mode: match &self.thinking_mode {
-                Some(set) => set.clone(),
-                None => options.and_then(|o| o.thinking.clone()),
-            },
-        }
     }
 }
 
@@ -129,36 +129,15 @@ pub(in crate::session_pool) struct RecordedSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) options: Option<SessionOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(in crate::session_pool) prompt: Option<runtime::agent::SessionPrompt>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) provider: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "taken_back_as_null"
-    )]
-    pub(in crate::session_pool) effort: Option<Option<base::interface::model::Effort>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "taken_back_as_null"
-    )]
-    pub(in crate::session_pool) thinking_mode: Option<Option<base::interface::model::ThinkingMode>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::session_pool) settings: Option<Map<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) skill_dirs: Option<Vec<crate::session_pool::api::SkillDirOption>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::session_pool) permission_mode: Option<base::permission::PermissionMode>,
-}
-
-/// A present `null` is a choice taken back, not an absent one.
-fn taken_back_as_null<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    <Option<T> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 pub(in crate::session_pool) struct SpecStore {
@@ -312,9 +291,7 @@ impl SpecStore {
             }),
             model: spec.model.clone(),
             provider: spec.provider.clone(),
-            prompt: spec.prompt.clone(),
-            effort: spec.effort,
-            thinking_mode: spec.thinking_mode.clone(),
+            settings: spec.settings.clone(),
             skill_dirs: spec.skill_dirs.clone(),
             permission_mode: spec.permission_mode,
         };
@@ -421,8 +398,8 @@ fn last_recorded(entries: &[history::entry::EnvelopedEntry]) -> Option<RecordedS
             if ns == SPEC_NS && event == SPEC_EVENT =>
         {
             let mut payload = payload.clone();
-            if let Some(serde_json::Value::Object(options)) = payload.get_mut("options") {
-                options_of_0_3(options);
+            if let Value::Object(spec) = &mut payload {
+                spec_of_0_3_and_0_4_0(spec);
             }
             serde_json::from_value::<RecordedSpec>(payload).ok()
         }
@@ -430,18 +407,127 @@ fn last_recorded(entries: &[history::entry::EnvelopedEntry]) -> Option<RecordedS
     })
 }
 
-/// `options` a 0.3 engine recorded, as they are written now: its
-/// `thinking_mode` is `thinking`, and its `turn`, `permission_mode` and
-/// `permission_rules` are `settings.turn`, `settings.permissions.mode` and the
-/// rule lists of `settings.permissions`. A session keeps the limits it was
-/// created with; options sent in that shape are refused.
-pub(in crate::session_pool) fn options_of_0_3(
-    options: &mut serde_json::Map<String, serde_json::Value>,
-) {
-    use serde_json::Value;
-    if let Some(mode) = options.remove("thinking_mode") {
-        options.entry("thinking").or_insert(mode);
+/// A spec 0.3 or 0.4.0 recorded, as it is written now. In `options`, the
+/// `effort`, `thinking` (0.3: `thinking_mode`) and `prompt` are
+/// `settings.model.effort`, `settings.model.thinking` and
+/// `settings.prompt.{append, override}`, and 0.3's `turn`, `permission_mode`
+/// and `permission_rules` are `settings.turn`, `settings.permissions.mode` and
+/// the rule lists of `settings.permissions`. The `effort`, `thinking_mode` and
+/// `prompt` set on the session since are those keys of the spec's own
+/// `settings`, a `null` among them a key taken out. A session keeps what it
+/// was created and changed with; options sent in an old shape are refused.
+fn spec_of_0_3_and_0_4_0(spec: &mut Map<String, Value>) {
+    if let Some(Value::Object(options)) = spec.get_mut("options") {
+        options_of_0_4_0(options);
+        options_of_0_3(options);
     }
+    let effort = spec.remove("effort");
+    let thinking = spec.remove("thinking_mode");
+    let prompt = spec.remove("prompt");
+    if effort.is_none() && thinking.is_none() && prompt.is_none() {
+        if spec.get("settings").is_some_and(|layer| !layer.is_object()) {
+            spec.remove("settings");
+        }
+        return;
+    }
+    let created = spec
+        .get("options")
+        .and_then(|options| options.get("settings"))
+        .cloned();
+    let mut layer = match spec.remove("settings").or(created) {
+        Some(Value::Object(layer)) => layer,
+        _ => Map::new(),
+    };
+    for (key, value) in [("effort", effort), ("thinking", thinking)] {
+        if let Some(value) = value {
+            set_in_layer(
+                &mut layer,
+                &["model", key],
+                Some(value).filter(|v| !v.is_null()),
+            );
+        }
+    }
+    if let Some(Value::Object(prompt)) = prompt {
+        for key in ["append", "override"] {
+            let value = prompt.get(key).cloned().filter(|v| !v.is_null());
+            set_in_layer(&mut layer, &["prompt", key], value);
+        }
+    }
+    spec.insert("settings".into(), Value::Object(layer));
+}
+
+fn options_of_0_4_0(options: &mut Map<String, Value>) {
+    let mut model = Vec::new();
+    for (old, key) in [
+        ("effort", "effort"),
+        ("thinking", "thinking"),
+        ("thinking_mode", "thinking"),
+    ] {
+        if let Some(value) = options.remove(old) {
+            model.push((key, value));
+        }
+    }
+    let prompt = options.remove("prompt");
+    if model.is_empty() && prompt.is_none() {
+        return;
+    }
+    let Some(layer) = object_at(options, "settings") else {
+        return;
+    };
+    for (key, value) in model {
+        set_in_layer(layer, &["model", key], Some(value).filter(|v| !v.is_null()));
+    }
+    if let Some(Value::Object(prompt)) = prompt {
+        for key in ["append", "override"] {
+            if let Some(value) = prompt.get(key).filter(|v| !v.is_null()) {
+                set_in_layer(layer, &["prompt", key], Some(value.clone()));
+            }
+        }
+    }
+    if layer.is_empty() {
+        options.remove("settings");
+    }
+}
+
+/// The object under `key`, made when there is none; `None` when something
+/// else is there.
+fn object_at<'a>(map: &'a mut Map<String, Value>, key: &str) -> Option<&'a mut Map<String, Value>> {
+    map.entry(key)
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+}
+
+/// Set the setting at `path` in `layer`, or take it out with `None`; an
+/// object left empty by taking one out goes with it. A segment that holds
+/// something other than an object is left as it is.
+pub(in crate::session_pool) fn set_in_layer(
+    layer: &mut Map<String, Value>,
+    path: &[&str],
+    value: Option<Value>,
+) {
+    let Some((first, rest)) = path.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        match value {
+            Some(value) => layer.insert((*first).to_string(), value),
+            None => layer.remove(*first),
+        };
+        return;
+    }
+    if value.is_none() && !layer.contains_key(*first) {
+        return;
+    }
+    let Some(inner) = object_at(layer, first) else {
+        return;
+    };
+    set_in_layer(inner, rest, value);
+    if inner.is_empty() {
+        layer.remove(*first);
+    }
+}
+
+fn options_of_0_3(options: &mut Map<String, Value>) {
     let (turn, mode, rules) = (
         options.remove("turn"),
         options.remove("permission_mode"),
@@ -450,11 +536,7 @@ pub(in crate::session_pool) fn options_of_0_3(
     if turn.is_none() && mode.is_none() && rules.is_none() {
         return;
     }
-    let Some(layer) = options
-        .entry("settings")
-        .or_insert_with(|| Value::Object(Default::default()))
-        .as_object_mut()
-    else {
+    let Some(layer) = object_at(options, "settings") else {
         return;
     };
     if let Some(turn) = turn {
@@ -463,11 +545,7 @@ pub(in crate::session_pool) fn options_of_0_3(
     if mode.is_none() && rules.is_none() {
         return;
     }
-    let Some(permissions) = layer
-        .entry("permissions")
-        .or_insert_with(|| Value::Object(Default::default()))
-        .as_object_mut()
-    else {
+    let Some(permissions) = object_at(layer, "permissions") else {
         return;
     };
     if let Some(mode) = mode {
@@ -519,9 +597,7 @@ pub(in crate::session_pool) fn recorded_in(
         options: recorded.options,
         model: recorded.model,
         provider: recorded.provider,
-        prompt: recorded.prompt,
-        effort: recorded.effort,
-        thinking_mode: recorded.thinking_mode,
+        settings: recorded.settings,
         skill_dirs: recorded.skill_dirs,
         permission_mode: recorded.permission_mode,
         recorder: None,

@@ -524,6 +524,10 @@ managed 为准。启动时对守护进程自己那一对
 里的 `Withheld` 不用——会话能给什么由作用域定。这是安全缺省,不是
 边界:连得上 socket 的客户端能 `config.set`,本来就是设置的所有者。会话层之后权限模式再过一遍
 `effective_permission_mode`,managed 层的 `disable_bypass` 与规则压得住它。每次建引擎都对这时的设置重新判。
+会话自己的推理强度、思考开关与提示词(`model.effort`、`model.thinking`、`prompt.*`)只在这一层:`session.setModel`
+的 `effort` / `thinking` 与 `session.setPrompt` 改的也是它(规格里的 `settings`,改过就盖过 `options.settings`,
+建会话时的 `options` 留着给同 id 的 `session.create` 比对),一样判、一样作用于子 Agent 与团队成员,一样重建引擎;
+没有第二条只管会话自己那段对话的路。
 
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
 `(项目, 场景)` 的会话共享;宿主按会话给的目录(`options.skill_dirs` / `session.setSkillDirs`)不进
@@ -555,7 +559,7 @@ MCP 工具与宿主工具不报路径,拦不到,同凭据位置)。沙箱的命�
 
 一个会话的 `Agent` 会被重建:它的绑定失效、janitor 回收后再被用到、daemon 重启后恢复。
 重建照的是**会话规格**,不是触发重建的那次调用碰巧带了什么:创建时的 `options`、
-`session.setModel` 选过的模型与厂商、`session.setPrompt` 设的会话提示词、`session.setSkillDirs` 设的宿主 skill 目录、
+`session.setModel` 选过的模型与厂商、它与 `session.setPrompt` 改过的会话设置层、`session.setSkillDirs` 设的宿主 skill 目录、
 `session.setPermissionMode` 设的 `plan` 以外的权限模式(建引擎时按当时的设置夹紧)。规格以 `ns = "agix.session"`、`event = "spec"`
 的扩展条目写进会话日志,每次变化追加一条,最后一条为准,所以跨 daemon 重启也成立。
 因为最后一条为准,宿主改规格的那几个方法都持着会话锁(`LiveSessions::with_session_lock`)改,持着锁的
@@ -565,12 +569,12 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
 重建之前先停掉旧 `Agent` 并等它收尾(有时限),然后才从盘上读 transcript——否则新
 `Agent` 读到的是旧的那个还没写完的历史。关停时同样等所有 `Agent` 收尾。超过时限的旧 `Agent`
 已经取消、不再读输入,它的条目随即移出内存,像被驱逐的会话一样等下一次调用把它从日志
-恢复;所以换规格的调用(`setModel` 换厂商、`setPrompt`)先只改内存里的规格,重建成功之后才
+恢复;所以换规格的调用(`setModel` 换厂商或推理设置、`setPrompt`)先只改内存里的规格,重建成功之后才
 记进日志,失败就退回原来的规格,日志与正在跑的引擎不会各说各的。
 
 会话的后台任务(子 Agent、团队成员、后台程序、Monitor)和宿主的插件函数调用跑在它的运行体之下,停掉旧 `Agent`
 就停掉了它们,所以**还有后台任务在跑的会话不重建**:绑定失效的那种推迟,这一轮照旧用现在的
-引擎,标记留着下次再看;`session.setPrompt`、换厂商的 `session.setModel` 返回 `SESSION_BUSY`
+引擎,标记留着下次再看;`session.setPrompt`、要重建的 `session.setModel` 返回 `SESSION_BUSY`
 (`reason: "background_tasks"`,另带 `running_task_ids`)。
 真重建时,旧 `SessionState` 记着的任务(结束了的那些,`session.tasks` / `TaskOutput` 还查得到)
 和模型还没读到的通知(`<task-notification>` 等)带到新的上面。`plan` 模式与 todo 列表不靠这一步:
@@ -637,7 +641,7 @@ recorder 只有录制的落盘(`dir` 建会话时冻结成绝对路径,`session.
   旧引擎停下之后新引擎 `attach_session`,只读回 transcript,不再从日志恢复状态,最后在同一个
   `LiveSession` 里换掉 `EngineSlot`、回到 `Idle`。同一时刻最多一个引擎挂在一份状态上。任务与目标
   的转发器每个会话只起一次,跟着 `SessionCore` 走;重建期间
-  上下文请求与不换厂商的 `setModel` 报 `SESSION_BUSY`,`on_busy: "steer"` 的 `run_turn` 等重建结束,
+  上下文请求与只换模型的 `setModel` 报 `SESSION_BUSY`,`on_busy: "steer"` 的 `run_turn` 等重建结束,
   不往正在停止的旧引擎里塞。
 - **代际号** `Generation`:`LiveSessions` 上的计数器,每造一个引擎取一个,也是这个引擎挂到会话状态上
   用的号(`detach` 只摘自己那一代)。回合票据 `TurnTicket` 带着 `Arc<SessionCore>` 和代际号:

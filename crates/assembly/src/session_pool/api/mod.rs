@@ -44,6 +44,7 @@ pub use mcp::{
     McpRedirect, McpServerReconnected, McpServerRef, McpServerState, McpServerStatus,
     McpServerWritten, McpStatusList,
 };
+pub(crate) use options::requested_permission_mode;
 pub use options::{
     ClampedOption, ClockOptions, HostToolOption, RecorderOptions, SessionOptions, SkillDirOption,
     TelemetryOptions,
@@ -63,9 +64,9 @@ pub use rewind::{
 pub use scene::{SceneCapabilities, SceneDescription, SceneReload, SceneSummary, SceneTools};
 pub use session::{
     Applies, DeleteReport, ExistingSession, ForkReport, ModelChoice, PermissionModeChoice,
-    PermissionReport, PromptChoice, ReasoningChange, Renamed, ResumeReport, ResumeStatus,
-    ScriptCall, ScriptCallOutcome, ScriptReport, SessionCreated, SessionDetail, ShadowedSkill,
-    SkillDirReport, SkillDirState, TurnState,
+    PermissionReport, PromptChange, PromptChoice, ReasoningChange, Renamed, ResumeReport,
+    ResumeStatus, ScriptCall, ScriptCallOutcome, ScriptReport, SessionCreated, SessionDetail,
+    ShadowedSkill, SkillDirReport, SkillDirState, TurnState,
 };
 pub use settings::{
     ConfigTier, ConfigTierName, ImportRun, ModelList, ProjectStatus, ProjectTrustSet,

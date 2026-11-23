@@ -25,7 +25,8 @@ pub(in crate::session_pool) fn created_answer(
     existing: bool,
 ) -> api::SessionCreated {
     let requested = options.and_then(SessionOptions::requested_permission_mode);
-    let (_, clamped_options) = session_settings(&binding.settings, options, requested);
+    let layer = options.and_then(|o| o.settings.as_ref());
+    let (_, clamped_options) = session_settings(&binding.settings, layer, requested);
     api::SessionCreated {
         session_id: core.id().to_string(),
         scene: scene.to_string(),
@@ -210,7 +211,6 @@ impl SessionPool {
             created_on(log),
         );
         self.take_up_recorded_skill_dirs(&core, &spec, &binding, resume)?;
-        core.state().set_reasoning_choice(spec.reasoning());
         let restore = if resume {
             Restore::FromLog
         } else {

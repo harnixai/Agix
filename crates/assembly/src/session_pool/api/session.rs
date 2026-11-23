@@ -238,14 +238,21 @@ pub struct ModelChoice {
     pub session_id: String,
     pub model: Option<String>,
     pub provider: Option<String>,
-    /// The session's own; `None` follows the settings.
+    /// The session's own `settings.model.effort`; `None` follows the
+    /// settings.
     pub effort: Option<base::interface::model::Effort>,
+    /// The session's own `settings.model.thinking`.
     pub thinking: Option<base::interface::model::ThinkingMode>,
+    /// Of `effort` and `thinking`, those the settings hold to their own
+    /// value: the session runs on `applied`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clamped_options: Vec<super::ClampedOption>,
     pub applies: Applies,
 }
 
-/// A change to a session's own effort and thinking mode: `None` leaves a
-/// field as it is, `Some(None)` takes it back to the settings'.
+/// A change to a session's own `settings.model.effort` and
+/// `settings.model.thinking`: `None` leaves a field as it is, `Some(None)`
+/// takes it back to the settings'.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReasoningChange {
     pub effort: Option<Option<base::interface::model::Effort>>,
@@ -272,8 +279,30 @@ pub struct PermissionModeChoice {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PromptChoice {
     pub session_id: String,
+    /// The session's own `settings.prompt.append`; `None` follows the
+    /// settings.
     pub append: Option<String>,
+    /// The session's own `settings.prompt.override`.
     #[serde(rename = "override")]
     pub override_text: Option<String>,
+    /// Of `append` and `override`, those the settings hold to their own
+    /// value: the session runs on `applied`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clamped_options: Vec<super::ClampedOption>,
     pub applies: Applies,
+}
+
+/// A change to a session's own `settings.prompt.append` and
+/// `settings.prompt.override`: `None` leaves a field as it is, `Some(None)`
+/// takes it back to the settings'.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptChange {
+    pub append: Option<Option<String>>,
+    pub override_text: Option<Option<String>>,
+}
+
+impl PromptChange {
+    pub fn is_empty(&self) -> bool {
+        self.append.is_none() && self.override_text.is_none()
+    }
 }

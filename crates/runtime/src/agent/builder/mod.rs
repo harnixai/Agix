@@ -85,15 +85,6 @@ impl Builder {
         self
     }
 
-    /// A system-prompt append and/or override for this session's own agent,
-    /// over whatever its settings say. Delegates it spawns are not given it:
-    /// modules see the settings without it, so a sub-agent keeps the prompt
-    /// its own type and scene give it.
-    pub fn session_prompt(mut self, prompt: SessionPrompt) -> Self {
-        self.spec.session_prompt = Some(prompt);
-        self
-    }
-
     /// Add `module` to this session. Modules run in the order they are added;
     /// see [`crate::module`].
     pub fn module(mut self, module: Arc<dyn crate::module::Module>) -> Self {

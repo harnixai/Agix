@@ -347,12 +347,12 @@ async fn a_thinking_budget_under_the_minimum_is_invalid_params() {
     let refused = daemon
         .call(
             "session.create",
-            serde_json::json!({"options": {"thinking": {"on_budget": 0}}}),
+            serde_json::json!({"options": {"settings": {"model": {"thinking": {"on_budget": 0}}}}}),
         )
         .await;
     assert_eq!(refused["error"]["code"], -32602, "{refused}");
     assert_eq!(
-        refused["error"]["data"]["invalid_options"][0]["field"], "thinking",
+        refused["error"]["data"]["invalid_options"][0]["field"], "settings.model.thinking",
         "{refused}"
     );
 
@@ -380,7 +380,7 @@ async fn a_thinking_budget_is_kept_under_the_calls_max_tokens() {
     })
     .await;
     let roomy = daemon
-        .create(serde_json::json!({"options": {"thinking": {"on_budget": 8000}}}))
+        .create(serde_json::json!({"options": {"settings": {"model": {"thinking": {"on_budget": 8000}}}}}))
         .await;
     daemon.turn(&roomy, "MSG-BUDGET").await;
     let request = daemon.request_carrying("MSG-BUDGET");
@@ -394,10 +394,10 @@ async fn a_thinking_budget_is_kept_under_the_calls_max_tokens() {
 }
 
 #[tokio::test]
-async fn the_effort_options_ask_for_is_what_the_session_calls_with() {
+async fn the_effort_the_session_s_settings_ask_for_is_what_the_session_calls_with() {
     let daemon = start_reasoning_daemon(1).await;
     let session = daemon
-        .create(serde_json::json!({"options": {"effort": "max", "thinking": "on"}}))
+        .create(serde_json::json!({"options": {"settings": {"model": {"effort": "max", "thinking": "on"}}}}))
         .await;
     daemon.turn(&session, "MSG-OPTIONS").await;
     let request = daemon.request_carrying("MSG-OPTIONS");
@@ -457,6 +457,54 @@ fn agent_call(prompt: &str) -> Vec<StreamEvent> {
             usage: Some(Usage::default()),
         },
     ]
+}
+
+/// The effort and thinking a session's own settings set — at creation or by
+/// `session.setModel` — are its sub-agents' too.
+#[tokio::test]
+async fn a_sub_agent_calls_with_the_effort_its_session_s_settings_set() {
+    let daemon = start_reasoning_daemon(0).await;
+    for _ in 0..2 {
+        daemon.model.push_turn(agent_call("SUB-PROMPT"));
+        daemon.model.push_turn(one_turn());
+        daemon.model.push_turn(one_turn());
+    }
+    let session = daemon
+        .create(serde_json::json!({"options": {
+            "auto_name": false,
+            "settings": {"model": {"effort": "max"}},
+        }}))
+        .await;
+    let sub_agents_calls = || {
+        (0..)
+            .map_while(|i| daemon.model.nth_request(i))
+            .filter(|r| {
+                let rendered = serde_json::to_string(r).unwrap();
+                rendered.contains("SUB-PROMPT") && !rendered.contains("MSG-")
+            })
+            .collect::<Vec<_>>()
+    };
+    daemon.turn(&session, "MSG-CREATED").await;
+    let sub = sub_agents_calls().pop().expect("the sub-agent's call");
+    assert_eq!(sub.effort, Some(Effort::Max));
+    assert!(sub.thinking.is_none(), "{:?}", sub.thinking);
+
+    daemon
+        .ok(
+            "session.setModel",
+            serde_json::json!({"session_id": session, "effort": "xhigh", "thinking": "off"}),
+        )
+        .await;
+    daemon.turn(&session, "MSG-SET").await;
+    let calls = sub_agents_calls();
+    assert_eq!(calls.len(), 2, "one call for each sub-agent");
+    let sub = calls.last().unwrap();
+    assert_eq!(sub.effort, Some(Effort::Xhigh));
+    assert!(
+        matches!(sub.thinking, Some(model::types::ThinkingConfig::Disabled)),
+        "{:?}",
+        sub.thinking
+    );
 }
 
 #[tokio::test]

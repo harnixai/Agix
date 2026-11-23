@@ -194,7 +194,7 @@ impl EngineFactory {
             &binding.settings,
             spec.requested_permission_mode(),
             model_name.as_ref(),
-            options,
+            spec.settings_layer(),
             session_id,
             req.worktree,
         );
@@ -240,9 +240,6 @@ impl EngineFactory {
                 protected: req.protected_dirs.clone(),
             });
 
-        if let Some(prompt) = spec.prompt() {
-            builder = builder.session_prompt(prompt);
-        }
         if let Some(schema) = options.and_then(|o| o.output_schema.clone()) {
             builder = builder.output_schema(schema);
         }
@@ -328,15 +325,15 @@ impl EngineFactory {
         decls
     }
 
-    /// The pair's settings with this session's `options.settings` laid over
-    /// them, and its permission mode, model, scratch workspace and worktree
-    /// written in.
+    /// The pair's settings with this session's own settings `layer` laid
+    /// over them, and its permission mode, model, scratch workspace and
+    /// worktree written in.
     fn snapshot(
         &self,
         base_settings: &LoadedSettings,
         requested_mode: Option<base::permission::PermissionMode>,
         model_name: Option<&String>,
-        options: Option<&SessionOptions>,
+        layer: Option<&serde_json::Map<String, serde_json::Value>>,
         session_id: &str,
         worktree: Option<&base::paths::LinkedWorktree>,
     ) -> Arc<LoadedSettings> {
@@ -344,7 +341,7 @@ impl EngineFactory {
         // the gate, the hook payloads and `Meta` all read it from there, and a
         // snapshot still holding the settings-file mode made every one of them
         // report a mode the session was not running in.
-        let (mut snap, _) = session_settings(base_settings, options, requested_mode);
+        let (mut snap, _) = session_settings(base_settings, layer, requested_mode);
         if let Some(name) = model_name {
             snap.values.model.model_name = name.clone();
         }

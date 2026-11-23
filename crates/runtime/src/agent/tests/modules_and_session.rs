@@ -66,42 +66,6 @@ fn modules_run_in_order_once_the_session_exists() {
     );
 }
 
-pub(super) struct SeesPrompt(pub(super) Arc<std::sync::Mutex<Option<Option<String>>>>);
-
-impl crate::module::Module for SeesPrompt {
-    fn id(&self) -> &'static str {
-        "sees-prompt"
-    }
-    fn on_session(
-        &self,
-        cx: &mut crate::module::SessionContext<'_>,
-    ) -> Result<(), crate::module::ModuleError> {
-        *self.0.lock().unwrap() = Some(cx.settings.values.prompt.append.clone());
-        Ok(())
-    }
-}
-
-#[test]
-fn a_session_prompt_reaches_the_agent_and_not_its_modules() {
-    let saw = Arc::new(std::sync::Mutex::new(None));
-    let (agent, _rx, _tx) = probe_builder(vec![Arc::new(SeesPrompt(saw.clone()))])
-        .session_prompt(SessionPrompt {
-            append: Some("SESSION-ONLY".into()),
-            override_text: None,
-        })
-        .build()
-        .expect("build should succeed");
-    assert_eq!(
-        agent.settings().values.prompt.append.as_deref(),
-        Some("SESSION-ONLY")
-    );
-    assert_eq!(
-        *saw.lock().unwrap(),
-        Some(None),
-        "modules — and the delegates they spawn — must not inherit a session's own prompt"
-    );
-}
-
 #[test]
 fn a_module_whose_requirement_comes_later_is_refused() {
     let saw = Arc::new(std::sync::Mutex::new(Vec::new()));

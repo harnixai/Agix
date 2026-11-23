@@ -1,13 +1,29 @@
-//! `agix.session/spec` 条目的载荷格式：0.4.0 写出的日志要能读回来，且原样写回得到同一份 JSON。
+//! `agix.session/spec` 条目的载荷格式：0.3 与 0.4.0 写出的日志读回成现在的形状，现在写出的
+//! 原样读回得到同一份 JSON，读不懂的条目不让读取失败。
 
-use crate::session_pool::parts::specs::RecordedSpec;
+use crate::session_pool::parts::specs::{recorded_in, RecordedSpec};
+use serde_json::json;
 
 const SPEC_0_4_0: &str = include_str!("fixtures/spec_0.4.0.json");
 
+fn entry(payload: serde_json::Value) -> history::entry::EnvelopedEntry {
+    history::entry::EnvelopedEntry::new(
+        base::session::SessionId::new(),
+        history::entry::LogEntry::Extension {
+            ns: "agix.session".into(),
+            event: "spec".into(),
+            payload,
+        },
+    )
+}
+
+/// 0.4.0 kept the effort, thinking and prompt a session was created and
+/// changed with beside its settings; they come back as keys of its own
+/// settings, so a resumed session keeps them.
 #[test]
-fn a_spec_entry_written_by_0_4_0_reads_back_and_writes_the_same_json() {
+fn a_spec_entry_written_by_0_4_0_reads_back_in_this_shape() {
     let written: serde_json::Value = serde_json::from_str(SPEC_0_4_0).unwrap();
-    let spec: RecordedSpec = serde_json::from_value(written.clone()).unwrap();
+    let spec = recorded_in(&[entry(written)]);
 
     let options = spec.options.as_ref().expect("options");
     assert_eq!(options.model.as_deref(), Some("m-options"));
@@ -17,58 +33,82 @@ fn a_spec_entry_written_by_0_4_0_reads_back_and_writes_the_same_json() {
     );
     assert_eq!(options.recorder.as_ref().unwrap().mode, "record");
     assert_eq!(options.telemetry.as_ref().unwrap().output, "/tmp/t.jsonl");
+    assert_eq!(options.prompt_types, ["question"]);
     assert_eq!(
-        options.requested_permission_mode(),
+        serde_json::Value::Object(options.settings.clone().unwrap()),
+        json!({
+            "permissions": {"mode": "plan", "deny": ["Write"]},
+            "turn": {"token_budget": 5000},
+            "model": {"effort": "max", "thinking": "off"},
+            "prompt": {"append": "be brief"},
+        })
+    );
+    assert_eq!(
+        serde_json::Value::Object(spec.settings.clone().unwrap()),
+        json!({
+            "permissions": {"mode": "plan", "deny": ["Write"]},
+            "turn": {"token_budget": 5000},
+            "model": {"effort": "xhigh"},
+            "prompt": {"append": "spec prompt"},
+        }),
+        "what was set since is over what the session was created with; a `null` is taken out"
+    );
+    assert_eq!(
+        spec.requested_permission_mode(),
         Some(base::permission::PermissionMode::Plan)
     );
-    assert_eq!(
-        options.thinking,
-        Some(base::interface::model::ThinkingMode::Off)
-    );
-    assert_eq!(options.prompt_types, ["question"]);
     assert_eq!(spec.provider.as_deref(), Some("p-spec"));
+    assert_eq!(spec.model.as_deref(), Some("m-spec"));
+}
 
+#[test]
+fn a_spec_entry_written_now_reads_back_and_writes_the_same_json() {
+    let written = json!({
+        "options": {
+            "model": "m",
+            "output_schema": {"type": "object"},
+            "settings": {"model": {"effort": "high"}},
+        },
+        "settings": {"model": {"effort": "low"}, "prompt": {"override": "only this"}},
+        "provider": "p",
+        "permission_mode": "acceptEdits",
+    });
+    let spec: RecordedSpec = serde_json::from_value(written.clone()).unwrap();
     assert_eq!(serde_json::to_value(&spec).unwrap(), written);
+    let read = recorded_in(&[entry(written)]);
+    assert_eq!(
+        read.session_setting("prompt.override"),
+        Some(&json!("only this"))
+    );
 }
 
 #[test]
 fn an_empty_spec_entry_reads_as_no_spec() {
-    let spec: RecordedSpec = serde_json::from_value(serde_json::json!({})).unwrap();
-    assert!(spec.options.is_none() && spec.prompt.is_none());
-    assert_eq!(serde_json::to_value(&spec).unwrap(), serde_json::json!({}));
+    let spec: RecordedSpec = serde_json::from_value(json!({})).unwrap();
+    assert!(spec.options.is_none() && spec.settings.is_none());
+    assert_eq!(serde_json::to_value(&spec).unwrap(), json!({}));
 }
 
 /// A 0.3 session's options, recorded in the shape of the time, come back in
 /// this one: what it was held to then it is held to now.
 #[test]
 fn a_spec_entry_written_by_0_3_reads_back_in_this_shape() {
-    let entry = history::entry::EnvelopedEntry::new(
-        base::session::SessionId::new(),
-        history::entry::LogEntry::Extension {
-            ns: "agix.session".into(),
-            event: "spec".into(),
-            payload: serde_json::json!({"options": {
-                "thinking_mode": "off",
-                "permission_mode": "plan",
-                "permission_rules": [
-                    {"source": "session", "behavior": "deny", "tool_name": "Write"},
-                    {"source": "session", "behavior": "allow", "tool_name": "Bash", "rule_content": "ls:*"},
-                ],
-                "turn": {"token_budget": 5000},
-                "model": "m",
-            }}),
-        },
-    );
-    let spec = crate::session_pool::parts::specs::recorded_in(&[entry]);
+    let spec = recorded_in(&[entry(json!({"options": {
+        "thinking_mode": "off",
+        "permission_mode": "plan",
+        "permission_rules": [
+            {"source": "session", "behavior": "deny", "tool_name": "Write"},
+            {"source": "session", "behavior": "allow", "tool_name": "Bash", "rule_content": "ls:*"},
+        ],
+        "turn": {"token_budget": 5000},
+        "model": "m",
+    }}))]);
     let options = spec.options.expect("options");
-    assert_eq!(
-        options.thinking,
-        Some(base::interface::model::ThinkingMode::Off)
-    );
     assert_eq!(options.model.as_deref(), Some("m"));
     assert_eq!(
         serde_json::Value::Object(options.settings.unwrap()),
-        serde_json::json!({
+        json!({
+            "model": {"thinking": "off"},
             "permissions": {"mode": "plan", "deny": ["Write"], "allow": ["Bash(ls:*)"]},
             "turn": {"token_budget": 5000},
         })
@@ -81,21 +121,16 @@ fn a_spec_entry_written_by_0_3_reads_back_in_this_shape() {
 #[test]
 fn a_spec_entry_no_engine_wrote_does_not_stop_the_read() {
     for options in [
-        serde_json::json!({"settings": "x", "turn": {"token_budget": 1}}),
-        serde_json::json!({"settings": {"permissions": 3}, "permission_mode": "plan"}),
-        serde_json::json!({"settings": [], "permission_rules": [
+        json!({"settings": "x", "turn": {"token_budget": 1}}),
+        json!({"settings": {"permissions": 3}, "permission_mode": "plan"}),
+        json!({"settings": [], "permission_rules": [
             {"behavior": "deny", "tool_name": "Write"},
         ]}),
+        json!({"settings": 7, "effort": "high", "prompt": {"append": "x"}}),
+        json!({"settings": {"model": 3}, "effort": "high", "thinking": {"on_budget": "lots"}}),
+        json!({"settings": {"prompt": "x"}, "prompt": [1, 2]}),
     ] {
-        let entry = history::entry::EnvelopedEntry::new(
-            base::session::SessionId::new(),
-            history::entry::LogEntry::Extension {
-                ns: "agix.session".into(),
-                event: "spec".into(),
-                payload: serde_json::json!({ "options": options }),
-            },
-        );
-        let spec = crate::session_pool::parts::specs::recorded_in(&[entry]);
+        let spec = recorded_in(&[entry(json!({ "options": options }))]);
         let settings = spec.options.and_then(|o| o.settings).unwrap_or_default();
         assert!(!settings.contains_key("turn"), "{options}");
         assert!(
@@ -103,4 +138,19 @@ fn a_spec_entry_no_engine_wrote_does_not_stop_the_read() {
             "{options}"
         );
     }
+    for payload in [
+        json!({"effort": 3, "thinking_mode": [], "prompt": "x"}),
+        json!({"options": {"settings": "x"}, "effort": "high", "prompt": {"append": 5}}),
+        json!({"settings": {"model": "x"}, "effort": "high"}),
+    ] {
+        let spec = recorded_in(&[entry(payload)]);
+        let _ = spec.session_setting("model.effort");
+        let _ = spec.requested_permission_mode();
+    }
+    let kept = recorded_in(&[entry(json!({"settings": "x", "model": "m"}))]);
+    assert_eq!(
+        kept.model.as_deref(),
+        Some("m"),
+        "a session layer that does not read leaves the rest of the spec"
+    );
 }

@@ -4431,6 +4431,13 @@
         "applies": {
           "$ref": "#/$defs/Applies"
         },
+        "clamped_options": {
+          "description": "Of `effort` and `thinking`, those the settings hold to their own\nvalue: the session runs on `applied`.",
+          "items": {
+            "$ref": "#/$defs/ClampedOption"
+          },
+          "type": "array"
+        },
         "effort": {
           "anyOf": [
             {
@@ -4440,7 +4447,7 @@
               "type": "null"
             }
           ],
-          "description": "The session's own; `None` follows the settings."
+          "description": "The session's own `settings.model.effort`; `None` follows the\nsettings."
         },
         "model": {
           "type": [
@@ -4465,7 +4472,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "The session's own `settings.model.thinking`."
         }
       },
       "required": [
@@ -5577,6 +5585,7 @@
     "PromptChoice": {
       "properties": {
         "append": {
+          "description": "The session's own `settings.prompt.append`; `None` follows the\nsettings.",
           "type": [
             "string",
             "null"
@@ -5585,7 +5594,15 @@
         "applies": {
           "$ref": "#/$defs/Applies"
         },
+        "clamped_options": {
+          "description": "Of `append` and `override`, those the settings hold to their own\nvalue: the session runs on `applied`.",
+          "items": {
+            "$ref": "#/$defs/ClampedOption"
+          },
+          "type": "array"
+        },
         "override": {
+          "description": "The session's own `settings.prompt.override`.",
           "type": [
             "string",
             "null"
@@ -5857,7 +5874,7 @@
       "type": "object"
     },
     "ReasoningReport": {
-      "description": "The reasoning effort and thinking mode the session's next model call\ncarries, and whether each is the session's own choice or the settings'.",
+      "description": "The reasoning effort and thinking mode the session's next model call\ncarries, and whether each is the session's own (`model.*` of its own\nsettings) or the settings'.",
       "properties": {
         "effort": {
           "anyOf": [
@@ -7852,17 +7869,6 @@
           ],
           "description": "Where this session's kept time starts (the date in its prompt, its log's timestamps).\nOmitted: the machine's clock — except in replay, where it starts when the recording did."
         },
-        "effort": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Effort"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The conversation's reasoning effort; `None` takes the settings'\n`model.effort`. Its sub-agents keep the settings'."
-        },
         "host_tools": {
           "description": "Tools this session's host runs itself, offered to the model as the\nsession's own; a call to one is a `host_tool_call` frame, answered\nwith `session.respondToolCall`.",
           "items": {
@@ -7880,17 +7886,6 @@
         "output_schema": {
           "default": null,
           "description": "JSON Schema the session's structured output must satisfy — see\n`runtime::agent::Builder::output_schema`."
-        },
-        "prompt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SessionPrompt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "A system-prompt append / override for this session's own agent, over\nthe settings files'. Its delegates do not get it."
         },
         "prompt_types": {
           "description": "The kinds of `prompt` frame this session's host answers: `permission`\nalways, `question` and `mcp_elicitation` when listed. Names this daemon does not know are\nignored rather than voiding the options.",
@@ -7918,7 +7913,7 @@
         },
         "settings": {
           "additionalProperties": true,
-          "description": "Settings for this session, its sub-agents and its team members, in\nthe shape of a settings file, over the settings of its project and\nscene. Judged as an untrusted project's settings are, against the\nsettings as they are each time the engine is built — see\n`settings::overlay` and [`Self::settings_problems`].",
+          "description": "Settings for this session, its sub-agents and its team members, in\nthe shape of a settings file, over the settings of its project and\nscene: its reasoning effort and thinking (`model.effort`,\n`model.thinking`) and system prompt (`prompt.append`,\n`prompt.override`) among them. Judged as an untrusted project's\nsettings are, against the settings as they are each time the engine\nis built — see `settings::overlay` and [`Self::settings_problems`].",
           "type": [
             "object",
             "null"
@@ -7940,17 +7935,6 @@
               "type": "null"
             }
           ]
-        },
-        "thinking": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ThinkingMode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The conversation's thinking mode; `None` takes the settings'\n`model.thinking`. Its sub-agents keep the settings'."
         }
       },
       "type": "object"
@@ -7964,24 +7948,6 @@
       "required": [
         "history_store_wired"
       ],
-      "type": "object"
-    },
-    "SessionPrompt": {
-      "description": "What [`Builder::session_prompt`] puts over a session's settings. `None`\nleaves the settings' `prompt.append` / `prompt.override` in force.",
-      "properties": {
-        "append": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "override": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "SessionRef": {

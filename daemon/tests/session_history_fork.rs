@@ -427,7 +427,7 @@ async fn a_fork_at_the_start_keeps_the_sessions_options_and_chosen_model() {
     .await;
     let created = rpc(
         &srv.sock,
-        r#"{"jsonrpc":"2.0","method":"session.create","params":{"scene":"code","options":{"prompt":{"append":"FORKSPECMARKER"}}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","method":"session.create","params":{"scene":"code","options":{"settings":{"prompt":{"append":"FORKSPECMARKER"}}}},"id":1}"#,
     )
     .await;
     let source = created["result"]["session_id"]

@@ -84,9 +84,10 @@
 
 `options` 分两类:
 
-- **只管这个会话自己的对话:** `model`、`provider`、`effort`、`thinking`(原 `thinking_mode`)、`prompt`。
-  子 Agent 不继承。
-- **`options.settings`:** 形状同 settings.json,作用于整个会话,连同它的子 Agent 与团队成员。
+- **选这个会话的对话用哪个模型:** `model`、`provider`。
+- **`options.settings`:** 形状同 settings.json,作用于整个会话,连同它的子 Agent 与团队成员。推理强度、思考开关
+  与系统提示词也在这里:`model.effort`、`model.thinking`、`prompt.append`、`prompt.override`,所以子 Agent 与团队成员
+  用的也是会话的这几项。`session.setModel` 的 `effort` / `thinking` 与 `session.setPrompt` 改的是同一层,判法相同。
   - 只收按会话决定的键。按 (项目, 场景) 或按进程决定的(`providers`、`model.order`、`model.tasks`、`hooks`、
     `mcp`、`app`……)让请求以 `INVALID_PARAMS` 失败,`error.data.invalid_options` 逐项列出。
   - 缺省只能收紧。比设置宽的值被夹住,报在结果的 `clamped_options`(`{field, requested, applied}`);
@@ -100,13 +101,18 @@
 | `options.turn.{token_budget, max_model_calls}` | `options.settings.turn.{token_budget, max_model_calls}` |
 | `options.permission_mode` | `options.settings.permissions.mode` |
 | `options.permission_rules` | `options.settings.permissions.{allow, allow_exact, ask, deny}` 的规则串 |
-| `options.thinking_mode` | `options.thinking` |
+| `options.effort` | `options.settings.model.effort` |
+| `options.thinking_mode`(0.4.0 的 `options.thinking`) | `options.settings.model.thinking` |
+| `options.prompt.{append, override}` | `options.settings.prompt.{append, override}` |
 
-0.3 的会话日志里记下的旧选项,恢复时按新形状读,限制不会因恢复变松。
+会话日志里记下的旧选项(0.3 与 0.4.0 的),以及 `session.setModel` / `session.setPrompt` 记下的推理强度、思考开关与
+提示词,恢复时按新形状读进会话的设置,限制不会因恢复变松。
 
 ### 改名
 
 - `session.setModel` 的参数与结果:`thinking_mode` → `thinking`;再传 `thinking_mode` 以 `INVALID_PARAMS` 失败。
+  `effort` / `thinking` 写进会话的设置(`model.effort` / `model.thinking`),会话随之原地重建;`session.setPrompt`
+  写 `prompt.append` / `prompt.override`。两者的结果在值被 managed 层压住时多一个 `clamped_options`。
 - `session.get`、`session.inspectContext` 的 `reasoning.{thinking_mode, thinking_mode_source}` →
   `{thinking, thinking_source}`;`session.call` 的 `request.thinking_mode` → `thinking`。
 - `stop_reason` 的 `max_turns_reached` → `max_turns`(引擎实际发的一直是后者)。
@@ -148,8 +154,9 @@
   ```
 
 - 设置写错时 `Embedded::start` 返回 `EmbedError::InvalidSetting { key, reason }`。
-- `SessionOptions` 的变化同上面的 `options`:`settings` 字段,删掉 `permission_mode`、`permission_rules`、`turn`,
-  `thinking_mode` 改名 `thinking`。不经 RPC 直接建会话时,会话不能给的键被略去并告警;要先检查,调
+- `SessionOptions` 的变化同上面的 `options`:`settings` 字段,删掉 `permission_mode`、`permission_rules`、`turn`、
+  `thinking_mode`、`effort`、`prompt`,这些都写进 `settings`。`SessionPool::set_session_prompt` 收
+  `PromptChange`。不经 RPC 直接建会话时,会话不能给的键被略去并告警;要先检查,调
   `SessionOptions::settings_problems()`。
 - provider 路由的实现从 `base` 挪进 `model::routing`(`ProviderSet`、`SessionRouter`),runtime 只见
   `base::provider::TaskRouting`;对 `ModelEvent` 穷举 `match` 的要补 `Served`。其余类型与函数的变化见

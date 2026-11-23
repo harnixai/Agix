@@ -119,10 +119,6 @@ const FIELDS: &[(&str, &str)] = &[
         "SessionState::model_choice",
         "Session: the model a host chose, read by whichever engine runs the next turn",
     ),
-    (
-        "SessionState::reasoning_choice",
-        "Session: the effort and thinking mode a host chose, read at each model call",
-    ),
     ("SessionEnv::cwd", "Engine: from the engine's settings"),
     (
         "SessionEnv::refusal_rule_roots",

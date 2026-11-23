@@ -329,14 +329,26 @@ impl SessionPool {
             .await?
         {
             runtime::agent::ContextAnswer::Inspected(mut report) => {
-                report.provider = self.routed_provider_of(session_id).await;
+                if let Some(binding) = self.live_binding(session_id).await {
+                    let spec = self.specs.get(session_id).unwrap_or_default();
+                    report.provider = Some(binding.routed_provider(spec.provider().as_deref()));
+                    let own = crate::session_pool::parts::factory::reasoning_report(
+                        &binding.settings,
+                        &spec,
+                    );
+                    report.reasoning.effort_source = own.effort_source;
+                    report.reasoning.thinking_source = own.thinking_source;
+                }
                 Ok(report)
             }
             other => Err(unexpected_answer(other)),
         }
     }
 
-    async fn routed_provider_of(&self, session_id: &str) -> Option<String> {
+    pub(in crate::session_pool) async fn live_binding(
+        &self,
+        session_id: &str,
+    ) -> Option<Arc<ProjectBinding>> {
         let (project, scene) = self
             .live
             .with_live(session_id, |live| {
@@ -346,12 +358,7 @@ impl SessionPool {
                 )
             })
             .await?;
-        let named = self.specs.get(session_id).and_then(|spec| spec.provider());
-        Some(
-            self.binding_for(project.as_deref(), &scene)
-                .await
-                .routed_provider(named.as_deref()),
-        )
+        Some(self.binding_for(project.as_deref(), &scene).await)
     }
 
     /// `session.dropMessages`: the positions dropped.

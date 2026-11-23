@@ -637,8 +637,10 @@ Where a value can come from, lowest priority first:
 | `session.create` `options.settings` | an RPC client | that session, its sub-agents and team members | session-scope keys only; only tightens unless `permissions.client_may_loosen` |
 | the managed file | the deployment | everything | beats all of the above, except that a stricter value beneath it stands for a key with a tighter/looser order; a file that does not read refuses every tool call |
 
-`session.create`'s `model`, `provider`, `effort`, `thinking` and `prompt` are not settings: they choose
-for the session's own conversation only, and its sub-agents do not inherit them.
+`session.create`'s `model` and `provider` are not settings: they choose the model the session's
+conversation runs on. Its effort, thinking and prompt are: `options.settings.model.effort`,
+`model.thinking`, `prompt.append` / `prompt.override`, for the session and its sub-agents alike, and
+`session.setModel` / `session.setPrompt` change that same layer.
 
 The blocks:
 

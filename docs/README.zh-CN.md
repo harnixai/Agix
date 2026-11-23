@@ -502,8 +502,9 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `session.create` 的 `options.settings` | RPC 客户端 | 这个会话,连同它的子 Agent、团队成员 | 只收会话作用域的键;不开 `permissions.client_may_loosen` 只能收紧 |
 | managed 文件 | 部署方 | 全部 | 压过以上各层;有松紧次序的键下层更严时留下层的;读不了就拒绝所有工具调用 |
 
-`session.create` 的 `model`、`provider`、`effort`、`thinking`、`prompt` 不是设置:只决定这个会话自己的对话,
-子 Agent 不继承。
+`session.create` 的 `model`、`provider` 不是设置:只选这个会话的对话用哪个模型。推理强度、思考开关与提示词是设置:
+`options.settings` 的 `model.effort`、`model.thinking`、`prompt.append` / `prompt.override`,会话与它的子 Agent 一样用;
+`session.setModel`、`session.setPrompt` 改的也是这一层。
 
 各块:
 

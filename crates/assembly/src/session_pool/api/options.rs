@@ -35,18 +35,6 @@ pub struct SessionOptions {
     /// model id. `None` takes `model.tasks.main`'s tier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// The conversation's reasoning effort; `None` takes the settings'
-    /// `model.effort`. Its sub-agents keep the settings'.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<base::interface::model::Effort>,
-    /// The conversation's thinking mode; `None` takes the settings'
-    /// `model.thinking`. Its sub-agents keep the settings'.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<base::interface::model::ThinkingMode>,
-    /// A system-prompt append / override for this session's own agent, over
-    /// the settings files'. Its delegates do not get it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<runtime::agent::SessionPrompt>,
     /// The kinds of `prompt` frame this session's host answers: `permission`
     /// always, `question` and `mcp_elicitation` when listed. Names this daemon does not know are
     /// ignored rather than voiding the options.
@@ -75,9 +63,11 @@ pub struct SessionOptions {
     pub skill_dirs: Vec<SkillDirOption>,
     /// Settings for this session, its sub-agents and its team members, in
     /// the shape of a settings file, over the settings of its project and
-    /// scene. Judged as an untrusted project's settings are, against the
-    /// settings as they are each time the engine is built — see
-    /// `settings::overlay` and [`Self::settings_problems`].
+    /// scene: its reasoning effort and thinking (`model.effort`,
+    /// `model.thinking`) and system prompt (`prompt.append`,
+    /// `prompt.override`) among them. Judged as an untrusted project's
+    /// settings are, against the settings as they are each time the engine
+    /// is built — see `settings::overlay` and [`Self::settings_problems`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
@@ -229,8 +219,7 @@ impl SessionOptions {
     /// The permission mode `options.settings` asks for, before the settings
     /// clamp it.
     pub fn requested_permission_mode(&self) -> Option<base::permission::PermissionMode> {
-        let mode = self.settings.as_ref()?.get("permissions")?.get("mode")?;
-        serde_json::from_value(mode.clone()).ok()
+        requested_permission_mode(self.settings.as_ref()?)
     }
 
     /// What in `options.settings` no session may be given, by its field in
@@ -240,7 +229,18 @@ impl SessionOptions {
             return Vec::new();
         };
         let layer = serde_json::Value::Object(layer.clone());
-        settings::overlay::session_layer_problems(&layer, &crate::settings_sections::all())
+        let mut problems =
+            settings::overlay::session_layer_problems(&layer, &crate::settings_sections::all());
+        let thinking = layer
+            .pointer("/model/thinking")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        if let Some(problem) = thinking
+            .as_ref()
+            .and_then(model::adapter::thinking_mode_problem)
+        {
+            problems.push(("model.thinking".into(), problem));
+        }
+        problems
             .into_iter()
             .map(|(key, why)| match key.as_str() {
                 "" => ("settings".to_string(), why),
@@ -268,4 +268,13 @@ impl SessionOptions {
             .iter()
             .any(|t| t == AskKind::McpElicitation.as_str())
     }
+}
+
+/// The permission mode a session's own settings ask for, before the settings
+/// clamp it.
+pub(crate) fn requested_permission_mode(
+    layer: &serde_json::Map<String, serde_json::Value>,
+) -> Option<base::permission::PermissionMode> {
+    let mode = layer.get("permissions")?.get("mode")?;
+    serde_json::from_value(mode.clone()).ok()
 }

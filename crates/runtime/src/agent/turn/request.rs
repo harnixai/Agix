@@ -363,12 +363,8 @@ impl Agent {
         }
     }
 
-    /// The session's own reasoning choice over the settings'.
     pub(super) fn reasoning(&self) -> crate::agent::ReasoningReport {
-        crate::agent::ReasoningReport::resolve(
-            &self.session_state.reasoning_choice(),
-            &self.settings.values.model,
-        )
+        crate::agent::ReasoningReport::of(&self.settings.values.model)
     }
 
     /// Reassemble after a recovery changed the model or the message list.
