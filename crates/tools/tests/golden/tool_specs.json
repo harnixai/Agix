@@ -272,7 +272,7 @@
     "description": "Run a shell command (sandboxed by default).",
     "guide": {
       "bytes": 5631,
-      "fnv1a": "53cc88904371da21"
+      "fnv1a": "af3d827e1f97d633"
     },
     "input_schema": {
       "absolute": {
