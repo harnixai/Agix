@@ -158,9 +158,6 @@
 
 ## 构建
 
-- **`mcp-oauth-jwt` 缺省关闭。** MCP 的 `oauth.private_key_jwt` 要打开这个 feature(`agix` 门面的 `mcp-oauth-jwt`,
-  agixd 用 `cargo build -p daemon --features mcp-oauth-jwt`);缺省构建不带第二套加密库,配了 `private_key_jwt` 的
-  server 连接时报错并点名这个 feature。`daemon.auth`、`daemon.ping` 报的能力里有 `mcp_oauth_jwt` 就是这个构建带了它。
 - **RPC schema 生成不进发布二进制。** `docs/schemas/rpc.schema.json` 由测试或 `assembly` 的 `rpc-schema` feature 生成
   (`cargo test -p assembly write_rpc_schema -- --ignored`),agixd 与嵌入方不用管。
 

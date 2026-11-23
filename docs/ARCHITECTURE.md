@@ -185,7 +185,7 @@ fork 型 skill 要 agents 提供的 delegator。委派出去的子会话用父�
 | 档 | 装配的模块 |
 |---|---|
 | `minimal`(`--no-default-features`) | 只有内核:模型、turn loop、场景、会话、遥测、hooks、文件与 shell 工具 |
-| `coding` | + mcp(`oauth.private_key_jwt` 在另开的 `mcp-oauth-jwt` 后面,会带进 aws-lc,缺省不编入,见 `agix-sdk.md` §1)、agents、skills、web 工具、structured-output、ptc(`RunCode`) |
+| `coding` | + mcp(含 `mcp-oauth-jwt`:`oauth.private_key_jwt`,带进 aws-lc;可单独关掉,见 `agix-sdk.md` §1)、agents、skills、web 工具、structured-output、ptc(`RunCode`) |
 | `full` | + WebSocket 监听 |
 
 默认 `full + scripts + plugin-packages + sandbox`。`daemon.ping` / `daemon.status` 的 `modules`

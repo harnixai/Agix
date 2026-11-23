@@ -124,14 +124,14 @@ jobs:
           cargo check -p daemon --no-default-features --features coding
           cargo check -p daemon --no-default-features --features coding,scripts
 
-      # `private_key_jwt` is opt-in: the default build has no second crypto
-      # backend (aws-lc) in its graph, and the opt-in build still compiles.
-      - name: mcp jwt opt-in
+      # MCP without `private_key_jwt`: it compiles, and the second crypto
+      # backend (aws-lc) that rmcp's JWT signing brings is not in the graph.
+      - name: mcp without jwt
         run: |
+          cargo check -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws
           cargo test -p mcp --lib
-          cargo check -p daemon --features mcp-oauth-jwt
-          if cargo tree -p daemon -e normal | grep -q 'aws-lc-rs v'; then
-            echo "default daemon links aws-lc-rs"
+          if cargo tree -p daemon --no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws -e normal | grep -q 'aws-lc-rs v'; then
+            echo "daemon without mcp-oauth-jwt still links aws-lc-rs"
             exit 1
           fi
 

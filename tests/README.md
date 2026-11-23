@@ -30,11 +30,10 @@
 `agixd` 缺省是测试程序旁边那一个，`AGIX_TEST_DAEMON_BIN` 指向别的二进制时改用它——
 载体矩阵就是这么换被测构建的。
 
-`mcp-oauth-jwt` 缺省关闭。CI 检查缺省构建的依赖图里没有 `aws-lc-rs`，并检查
-`cargo check -p daemon --features mcp-oauth-jwt` 能编译；`tests/guards` 的 `deps` 测试从 feature 声明上
-钉住「只有 `mcp-oauth-jwt` 能打开 rmcp 的 JWT feature」，且缺省的 daemon / `agix` 不带它。
-`daemon/tests/mcp_oauth.rs` 里 `private_key_jwt` 的用例由 `--features mcp-oauth-jwt` 打开；
-没有该 feature 时的报错由 `mcp` crate 自己的单测覆盖。
+`mcp-oauth-jwt` 关掉的那一种（daemon 的 `--no-default-features --features mcp,agents,skills,web,structured-output,ptc,ws`）
+由 CI 检查编译，并检查依赖图里没有 `aws-lc-rs`；`tests/guards` 的 `deps` 测试从 feature 声明上
+钉住「只有 `mcp-oauth-jwt` 能打开 rmcp 的 JWT feature」。daemon 的集成测试经 `rpc-client` 的
+dev 依赖总是以缺省 feature 编译，所以关掉时的行为由 `mcp` crate 自己的单测覆盖。
 
 > **手工建别的构建时务必带上自己的 `CARGO_TARGET_DIR`。** 每种构建建出来的都叫
 > `agixd`，而跨进程用例默认捡的就是 `target/debug/agixd` —— 往默认目录建一个

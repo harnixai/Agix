@@ -675,14 +675,30 @@ fn the_aws_lc_backend_is_reachable_only_through_the_mcp_oauth_jwt_feature() {
             .get("mcp")
             .is_some_and(|f| f.contains("mcp-oauth-jwt"))
     };
-    let without = linked_features("daemon", true, &[]);
+    let without = linked_features(
+        "daemon",
+        false,
+        &[
+            "mcp",
+            "agents",
+            "skills",
+            "web",
+            "structured-output",
+            "ptc",
+            "ws",
+        ],
+    );
     allow::non_vacuous("deps::mcp without jwt closure", without.len(), 15);
     assert!(
         without.contains_key("mcp") && !jwt_of(&without),
-        "the default daemon build must not carry `mcp-oauth-jwt`: {without:?}"
+        "{without:?}"
     );
-    for (name, defaults) in [("daemon", true), ("agix", true)] {
-        let on = linked_features(name, defaults, &["mcp-oauth-jwt"]);
-        assert!(jwt_of(&on), "`{name}` lost `mcp-oauth-jwt` when asked for");
+    for (name, features, defaults) in [
+        ("daemon", &["coding"][..], false),
+        ("daemon", &[][..], true),
+        ("agix", &[][..], true),
+    ] {
+        let on = linked_features(name, defaults, features);
+        assert!(jwt_of(&on), "`{name}` {features:?} lost `mcp-oauth-jwt`");
     }
 }

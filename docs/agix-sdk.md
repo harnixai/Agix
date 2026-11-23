@@ -21,12 +21,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 | feature | 含义 |
 |---|---|
 | 缺省 | `coding` + `scripts` + `plugin-packages` + `sandbox` |
-| `coding` | `mcp` `agents` `skills` `web` `structured-output` `ptc` |
-| `mcp-oauth-jwt` | MCP 的 `oauth.private_key_jwt`（RFC 7523）。rmcp 用 jsonwebtoken 签断言，带进第二套加密库 aws-lc，约 1.5 MB；缺省关闭，依赖图里没有 `aws-lc-rs`，配了 `private_key_jwt` 的 server 连接时报错并点名这个 feature，能力位 `mcp_oauth_jwt` 不报；要用就显式打开 |
+| `coding` | `mcp` `mcp-oauth-jwt` `agents` `skills` `web` `structured-output` `ptc` |
+| `mcp-oauth-jwt` | MCP 的 `oauth.private_key_jwt`（RFC 7523）。rmcp 用 jsonwebtoken 签断言，带进第二套加密库 aws-lc，约 1.7 MB；关掉后依赖图里没有 `aws-lc-rs`，配了 `private_key_jwt` 的 server 连接时报错并点名这个 feature，能力位 `mcp_oauth_jwt` 不报 |
 | `--no-default-features` | minimal：只有内核 |
 | `otel` | 另开：把遥测发给 OTLP 收集器 |
 
-打开 `mcp-oauth-jwt`：在缺省 feature 之外加上它，如 `features = ["mcp-oauth-jwt"]`；agixd 用 `cargo build -p daemon --features mcp-oauth-jwt`。
+关掉 `mcp-oauth-jwt`：它在 `coding` 里，所以不用 `coding`，把成员逐个列出来：`default-features = false, features = ["mcp", "agents", "skills", "web", "structured-output", "ptc", "scripts", "plugin-packages", "sandbox"]`。
 
 没有 `ws` 与 `full`：WebSocket 监听是 agixd 的。设置里写了未编入模块的段（如 minimal 下的 `mcp`）启动时警告并忽略；`scripts` 段在没编 `scripts` 时记 error（`ARCHITECTURE.md` §1.2）。`agix::process::identity().modules` 报出这个构建编入了哪些模块。
 
@@ -858,7 +858,7 @@ engine.shutdown().await;
   - `settings::LoadedSettings::load_from` 的八个参数收进 `settings::LoadRequest { source, global_dir, scene_dir, local_dir, scope, default_model, sections, layout }`，调用处改成 `load_from(LoadRequest { .. })`。
   - 会话定下的值不再写进设置：新增 `settings::SessionConfig`——为这一对 (项目, 场景) 读好的设置（`shared()`，`Arc<LoadedSettings>`，不按会话改）、会话设置层（`session_layer()`、被压住的 `held()`、`requested(key)` / `applied(key)`）与两者经 `LoadedSettings::overlay` 得出的 `settings()`，以及会话自己定的 `permission_mode()`、`model_name()`、`workspace()`、`worktree()`（`working_dir()`、`worktree_git()`、`engine_config()` 由它们得出）；构造用 `SessionConfig::of(settings)` 或 `with_session_layer(shared, layer, sections)`，再 `with_permission_mode` / `with_model_name` / `with_workspace` / `with_worktree`。`ModelSettings.model_name` 删掉：设置给的对话模型是 `LoadedSettings.main_model`，会话的是 `SessionConfig::model_name()`、`Agent::session_config().model_name()`；`Settings::defaults()` 是不带 provider 的缺省，`Settings::defaults_for(model)` 改为缺省加上引擎自带的 provider（服务 `model`），`Settings::builtin_model()` 读回它。`base::paths::PathSettings` 的 `worktree` 字段与 `worktree_git()` 删掉，`working_dir()` 改名 `workspace_dir()`（只是项目或 scratch 目录；会话在 worktree 里时用 `SessionConfig::working_dir()`）。`Builder::settings(Arc<LoadedSettings>)` 照旧（即 `SessionConfig::of`），新增 `Builder::session_config(SessionConfig)`；`module::SessionContext` 多 `session_config` 字段，`Agent::session_config()`；`Agent::settings()` 是会话层叠过的设置，其中 `permissions.mode` 是设置说的值，会话按哪个模式跑看 `permission_mode()`。
   - 设置溯源（协议上是 `config.explain`，能力位 `config_explain`）：新增 `SessionPool::explain_setting(key, ExplainTarget, include_secrets) -> Result<settings::explain::SettingExplanation, PoolError>`，`ExplainTarget::{Pair { project_root, scene }, Session(session_id)}`；结果的类型在 `settings::explain`（`SettingExplanation { key, keys, truncated }`、`KeyExplanation`、`LayerOutcome`、`ManagedOutcome`、`SessionOutcome`、`SettingOutcome`），自己有加载输入的嵌入方也可以直接调 `settings::explain::explain(&Sources { layers, host, settings, session }, key, sections)`。`settings::keys::Scope` 实现 `Serialize` / `Deserialize`（`process` / `pair` / `session`）。
-  - 构建与入口：`mcp-oauth-jwt` 不再缺省打开（要 `oauth.private_key_jwt` 的宿主在依赖上加 `features = ["mcp-oauth-jwt"]`，§1）；RPC 的机器可读 schema 只在测试或 `assembly` 的 `rpc-schema` feature 下编译，发布的 agixd 与嵌入方不带。设置的严格程度按写的人分：设置文件里坏的键与值告警并忽略，`EmbedConfig.settings` 里的让 `start` 返回 `EmbedError::InvalidSetting`，`SessionOptions.settings` 经 RPC 的让请求以 `INVALID_PARAMS` 失败，managed 文件里的一个都不套、拒绝所有工具调用（`ARCHITECTURE.md` §3.2.1）。引擎自带的 `anthropic` provider 只在没有定义 `providers` 时存在，模型是 `--model`；要给它配额或档位，在 `providers` 里自己定义。
+  - 构建与入口：RPC 的机器可读 schema 只在测试或 `assembly` 的 `rpc-schema` feature 下编译，发布的 agixd 与嵌入方不带。设置的严格程度按写的人分：设置文件里坏的键与值告警并忽略，`EmbedConfig.settings` 里的让 `start` 返回 `EmbedError::InvalidSetting`，`SessionOptions.settings` 经 RPC 的让请求以 `INVALID_PARAMS` 失败，managed 文件里的一个都不套、拒绝所有工具调用（`ARCHITECTURE.md` §3.2.1）。引擎自带的 `anthropic` provider 只在没有定义 `providers` 时存在，模型是 `--model`；要给它配额或档位，在 `providers` 里自己定义。
 - **0.3.21**
   - 新增 `EmbedConfig.credentials: Option<HostCredentials>`（缺省 `None`）与类型 `agix::embed::HostCredentials`：给 `api_key_env` 指名的变量在环境里没有的 provider 提供密钥；库式用法是 `Assembly::credentials`。
   - 设置按块重排，旧键不再读（读到时告警里给出新键名，对照表是 `settings::renamed::RENAMED_KEYS`）：`Settings` 上的字段随之变成 `permissions`、`files`、`turn`、`agents`、`prompt`、`app`、`web` 等块，`providers` 是带 `id` 的列表，`model.order` 排 provider、`model.tasks` 写档位。下面 0.3.20 条目里的 `history.location`、`worktree_dir` 现在是 `app.history`、`app.worktree_dir`。
