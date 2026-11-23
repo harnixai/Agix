@@ -3274,7 +3274,9 @@ managed 设置文件(§10)也只在启动时读,它和启动时读到的不同�
 重启之后才生效;改回去之后就不再列出。`config.set` 与 `config.setProvider` 的结果带同一个字段。
 
 `ok` 与 `router_rebuilt` 是**两件事**:配置可以路由得通(`ok: true`)却建不出客户端
-(`router_rebuilt: false` + `router_error`),`api: openai_chat` 缺 `base_url` 就是这种。
+(`router_rebuilt: false` + `router_error`),`api: openai_chat` 缺 `base_url` 就是这种。两种情况下
+这一对都照旧用它上一次建成的 router;项目的信任在那之后变了(撤销信任时,受信时建的 router 可能用着项目自己的
+provider),上一次的就不再用,按这时的设置走:定义了 provider 的不建会话,没定义的用引擎自带的。
 
 `api` 取值：`anthropic`、`openai_chat`（Chat Completions）、`openai_responses`（OpenAI Responses API，`/v1/responses`，流式事件按类型解析；PDF 以 `input_file` 送出）。
 

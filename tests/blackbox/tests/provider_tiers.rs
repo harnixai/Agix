@@ -311,3 +311,62 @@ async fn an_untrusted_project_is_served_by_a_provider_written_to_the_global_tier
     run.finish().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_no_longer_trusted_is_not_served_by_the_router_its_trust_built(
+) -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let project_stub = ProviderStub::start().await?;
+    let mut run = stubbed("tier-trust-revoked", &stub).start().await?;
+    let target = Target::project(&run.project);
+    let config = provider_at(project_stub.base_url().as_str(), "anthropic");
+    let saved = run
+        .client
+        .config_set_provider(
+            &target,
+            json!({ "tier": "project", "provider_id": "own", "config": config }),
+        )
+        .await?;
+    let saved = saved.result.expect("a trusted project's provider");
+    assert_eq!(saved["routing"]["router_rebuilt"], true, "{saved}");
+    project_stub.script([Reply::text("served by the project's provider")]);
+    let trusted = run.session().await?;
+    run.turn(&trusted, "hello").await?;
+    let turns_to = |stub: &ProviderStub| {
+        stub.calls()
+            .iter()
+            .filter(|c| c.purpose() == Purpose::Turn)
+            .count()
+    };
+    assert_eq!(
+        turns_to(&project_stub),
+        1,
+        "the project's provider was not used"
+    );
+
+    let global = run.world.global_root().join("settings.json");
+    let mut settings = read_json(&global);
+    if !settings.is_object() {
+        settings = json!({});
+    }
+    settings["model"]["order"] = json!(["nowhere"]);
+    std::fs::write(&global, settings.to_string())?;
+    let reloaded = run.client.config_reload(&target).await?;
+    let reloaded = reloaded.result.expect("config.reload");
+    assert_eq!(reloaded["routing"]["ok"], false, "{reloaded}");
+    let revoked = run.client.project_trust(&target, false).await?;
+    let revoked = revoked.result.expect("project.trust");
+    assert_eq!(revoked["trust"], "untrusted", "{revoked}");
+
+    stub.script([Reply::text("served by the built-in provider")]);
+    let after = run.session().await?;
+    run.turn(&after, "hello again").await?;
+    assert_eq!(
+        turns_to(&project_stub),
+        1,
+        "a session of the untrusted project went to the provider only its trust had defined"
+    );
+    assert!(turns_to(&stub) >= 1, "the built-in provider served nothing");
+    run.finish().await;
+    Ok(())
+}

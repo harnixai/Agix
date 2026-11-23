@@ -55,6 +55,14 @@ impl ManagedLayer {
     }
 }
 
+/// A router a pair was served by, and whether its project was trusted then:
+/// one built from what only trust lets through is not kept once the trust
+/// is gone.
+struct LastGoodRouter {
+    router: Arc<model::routing::ProviderSet>,
+    trust: base::permission::ProjectTrust,
+}
+
 /// What [`BindingCache::cached`] found for a pair.
 pub(in crate::session_pool) enum Cached {
     Ready(Arc<ProjectBinding>),
@@ -90,7 +98,7 @@ struct Cache {
     /// The last router each pair was successfully served by, kept across
     /// invalidation so a provider config that stops resolving — or stops
     /// producing a buildable client — leaves working routing in place.
-    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, Arc<model::routing::ProviderSet>>>,
+    last_good_routers: AsyncMutex<HashMap<ProjectSceneKey, LastGoodRouter>>,
 }
 
 /// What is laid over every settings this pool loads from disk, in order.
@@ -469,7 +477,7 @@ impl BindingCache {
         };
 
         let (watch, unwatched_settings) = self.watch_tiers_of(&settings, &key);
-        let last_good = self.cache.last_good_routers.lock().await.get(&key).cloned();
+        let last_good = self.last_good_router(&key, settings.trust()).await;
         let (contributions, client, credentials) = (
             self.plugins.contributions(),
             self.client.clone(),
@@ -491,16 +499,36 @@ impl BindingCache {
             .await,
         );
         if built.routing.router_rebuilt {
-            self.cache
-                .last_good_routers
-                .lock()
-                .await
-                .insert(key.clone(), built.task_router.clone());
+            self.cache.last_good_routers.lock().await.insert(
+                key.clone(),
+                LastGoodRouter {
+                    router: built.task_router.clone(),
+                    trust: built.settings.trust(),
+                },
+            );
         }
         // Built outside the lock — scanning skill and agent directories is
         // disk work, and holding the map across it would serialize the first
         // session of every project behind the first session of any of them.
         self.finish_build(built).await
+    }
+
+    /// The router `key` was last served by, unless its project's trust is no
+    /// longer `trust`: then it is forgotten.
+    async fn last_good_router(
+        &self,
+        key: &ProjectSceneKey,
+        trust: base::permission::ProjectTrust,
+    ) -> Option<Arc<model::routing::ProviderSet>> {
+        let mut routers = self.cache.last_good_routers.lock().await;
+        match routers.get(key) {
+            Some(good) if good.trust == trust => Some(good.router.clone()),
+            Some(_) => {
+                routers.remove(key);
+                None
+            }
+            None => None,
+        }
     }
 
     /// The stamp a build of `key` that starts now will carry. Taken before
