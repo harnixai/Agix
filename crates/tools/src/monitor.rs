@@ -515,11 +515,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let input = json!({"command": "npm run dev", "description": "dev server"});
         let tool: Arc<dyn Tool> = Arc::new(MonitorTool);
-        let decide = |network, requires_network_policy, attendance| {
+        let decide = |network, requires_network_policy: bool, attendance| {
             let mut ctx = ctx_in(dir.path());
             ctx.sandbox_mut().disabled = false;
             ctx.sandbox_mut().network_mode = network;
-            ctx.sandbox_mut().unattended_requires_network_policy = requires_network_policy;
+            ctx.sandbox_mut().unattended_allows_open_network = !requires_network_policy;
             ctx.exec.sandbox = Arc::new(Holds);
             ctx.attendance = attendance;
             ctx.confinement = ctx

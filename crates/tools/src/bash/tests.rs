@@ -305,17 +305,20 @@ fn report(ctx: &ToolContext) -> base::interface::exec::ConfinementReport {
 }
 
 #[test]
-fn a_holding_sandbox_holds_an_unattended_command_whatever_the_network_by_default() {
+fn a_holding_sandbox_holds_an_unattended_command_only_under_a_restricted_network_by_default() {
     use base::interface::exec::NetworkMode;
     let dir = tempfile::tempdir().unwrap();
-    for network in [
-        NetworkMode::Unrestricted,
-        NetworkMode::DenyAll,
-        NetworkMode::Allowlist,
+    for (network, held) in [
+        (NetworkMode::Unrestricted, false),
+        (NetworkMode::DenyAll, true),
+        (NetworkMode::Allowlist, true),
     ] {
         let ctx = unattended_in_a_holding_sandbox(dir.path(), network);
-        assert!(report(&ctx).holds_unattended(), "{network:?}");
+        assert_eq!(report(&ctx).holds_unattended(), held, "{network:?}");
     }
+    let mut open = unattended_in_a_holding_sandbox(dir.path(), NetworkMode::Unrestricted);
+    open.sandbox_mut().unattended_allows_open_network = true;
+    assert!(report(&open).holds_unattended());
     let mut off = unattended_in_a_holding_sandbox(dir.path(), NetworkMode::DenyAll);
     off.sandbox_mut().disabled = true;
     assert!(!report(&off).holds_unattended());
@@ -327,7 +330,7 @@ fn an_open_network_is_not_held_when_the_setting_says_so() {
     let dir = tempfile::tempdir().unwrap();
     let requiring = |network| {
         let mut ctx = unattended_in_a_holding_sandbox(dir.path(), network);
-        ctx.sandbox_mut().unattended_requires_network_policy = true;
+        ctx.sandbox_mut().unattended_allows_open_network = false;
         ctx
     };
     assert!(!report(&requiring(NetworkMode::Unrestricted)).holds_unattended());

@@ -237,7 +237,8 @@ pub struct SandboxSettings {
     /// credentials the gate and the file tools refuse.
     pub paths: std::sync::Arc<crate::paths::SensitivePaths>,
     pub require_enforcement: bool,
-    pub unattended_requires_network_policy: bool,
+    /// `sandbox.unattended_needs_network_policy: false`.
+    pub unattended_allows_open_network: bool,
     /// `sandbox.enabled`: commands run outside the OS sandbox.
     pub disabled: bool,
     /// [`SandboxPolicy::worktree_git`], for a session working in a linked
@@ -305,7 +306,7 @@ impl SandboxSettings {
     ) -> ConfinementReport {
         let (require, network) = (
             self.require_enforcement,
-            self.unattended_requires_network_policy,
+            self.unattended_allows_open_network,
         );
         if self.disabled {
             return ConfinementReport::disabled(require, network);
@@ -437,7 +438,7 @@ pub struct ConfinementReport {
     /// The model cannot reach whatever host it likes.
     pub network_restricted: bool,
     pub require_enforcement: bool,
-    pub unattended_requires_network_policy: bool,
+    pub unattended_allows_open_network: bool,
 }
 
 impl Default for ConfinementReport {
@@ -450,7 +451,7 @@ impl Default for ConfinementReport {
             strict_unmet: Vec::new(),
             network_restricted: false,
             require_enforcement: false,
-            unattended_requires_network_policy: false,
+            unattended_allows_open_network: false,
         }
     }
 }
@@ -463,7 +464,7 @@ impl ConfinementReport {
         probe: ProcessSpec,
         policy: &SandboxPolicy,
         require_enforcement: bool,
-        unattended_requires_network_policy: bool,
+        unattended_allows_open_network: bool,
     ) -> Self {
         let strict = sandbox.confine(probe.clone(), &policy.strict(Vec::new(), None));
         let session = sandbox.confine(probe, policy);
@@ -474,15 +475,15 @@ impl ConfinementReport {
             strict_unmet: strict.unmet,
             network_restricted: !matches!(policy.network_mode, NetworkMode::Unrestricted),
             require_enforcement,
-            unattended_requires_network_policy,
+            unattended_allows_open_network,
         }
     }
 
     /// No sandbox at all: the session turned it off.
-    pub fn disabled(require_enforcement: bool, unattended_requires_network_policy: bool) -> Self {
+    pub fn disabled(require_enforcement: bool, unattended_allows_open_network: bool) -> Self {
         Self {
             require_enforcement,
-            unattended_requires_network_policy,
+            unattended_allows_open_network,
             ..Self::default()
         }
     }
@@ -491,7 +492,7 @@ impl ConfinementReport {
     /// it, and the network is restricted when the settings ask for that too.
     pub fn holds_unattended(&self) -> bool {
         self.session == Enforcement::Full
-            && (!self.unattended_requires_network_policy || self.network_restricted)
+            && (self.unattended_allows_open_network || self.network_restricted)
     }
 }
 

@@ -155,12 +155,13 @@ async fn an_unattended_command_runs_only_inside_the_sandbox() {
 
     let mut unattended = ctx_in(project.path(), |s| s.unattended = true);
     unattended.sandbox_mut().disabled = false;
+    unattended.sandbox_mut().unattended_allows_open_network = true;
     let holds = tools::bash::sandbox_status().starts_with("available");
     assert_eq!(runs_unattended(&unattended).await, holds);
 
     // Asked to, the network has to be closed as well: the sandbox holds
     // writes, not the network.
-    unattended.sandbox_mut().unattended_requires_network_policy = true;
+    unattended.sandbox_mut().unattended_allows_open_network = false;
     assert!(!runs_unattended(&unattended).await);
     unattended.sandbox_mut().network_mode = base::interface::exec::NetworkMode::DenyAll;
     assert_eq!(runs_unattended(&unattended).await, holds);

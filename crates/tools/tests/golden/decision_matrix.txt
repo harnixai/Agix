@@ -140,12 +140,12 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"echo hi > out.txt"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -167,12 +167,12 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"rm -rf build"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -194,12 +194,12 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"cargo build"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -221,17 +221,17 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"cat /elsewhere/data.txt"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 acceptEdits       managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-plan              none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+plan              none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 plan              ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -248,17 +248,17 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"ls /elsewhere"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 acceptEdits       managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-plan              none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+plan              none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 plan              ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -843,7 +843,7 @@ bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Pr
 ## Monitor
 
 {"command":"tail -f log.txt","description":"watch"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -853,7 +853,7 @@ acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> 
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 acceptEdits       managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-plan              none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+plan              none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 plan              ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -870,12 +870,12 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"cargo watch","description":"watch"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -897,7 +897,7 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"ls","description":"watch"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -907,7 +907,7 @@ acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> 
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 acceptEdits       managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-plan              none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+plan              none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 plan              ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
@@ -924,17 +924,17 @@ bypassPermissions deny        | att Permit -> Permit / Permit | unatt Permit -> 
 bypassPermissions managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
 
 {"command":"tail -f /elsewhere/log","description":"watch"}
-default           none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+default           none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 default           ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 default           deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 default           managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+acceptEdits       none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 acceptEdits       ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 acceptEdits       deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny
 acceptEdits       managed-ask | att Prompt+managed -> Prompt / Prompt | unatt Prompt+managed -> Deny / Deny
-plan              none        | att Prompt -> Prompt / Permit | unatt Permit -> Permit / Permit
+plan              none        | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              allow       | att Permit -> Permit / Permit | unatt Permit -> Permit / Permit
 plan              ask         | att Prompt -> Prompt / Permit | unatt Prompt -> Deny / Permit
 plan              deny        | att Deny -> Deny / Deny | unatt Deny -> Deny / Deny

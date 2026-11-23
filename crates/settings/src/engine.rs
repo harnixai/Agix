@@ -154,7 +154,7 @@ pub fn sandbox_settings(settings: &Settings, paths: &base::paths::ConfigPaths) -
             base::paths::SensitivePaths::for_paths(paths).with_read_denials(&deny_read, allow_read),
         ),
         require_enforcement: *require,
-        unattended_requires_network_policy: *unattended_needs_network_policy,
+        unattended_allows_open_network: !*unattended_needs_network_policy,
         disabled: !*enabled,
         worktree_git: None,
     }
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(c.sandbox.deny_write, [".secret"]);
         assert_eq!(c.sandbox.allow_write, [PathBuf::from("/tmp/w")]);
         assert!(c.sandbox.require_enforcement);
-        assert!(!c.sandbox.unattended_requires_network_policy);
+        assert!(c.sandbox.unattended_allows_open_network);
         assert!(c.sandbox.disabled);
     }
 
