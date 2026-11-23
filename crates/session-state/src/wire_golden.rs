@@ -185,11 +185,16 @@ fn the_goal_view_keeps_its_shape() {
     assert_eq!(wire(&s.goal_view()), Value::Null);
 
     let created = s
-        .goal_create("ship it".into(), Some(5), TurnOrigin::Human)
+        .goal_create(
+            "ship it".into(),
+            base::context::goal::GoalLimits::asked(Some(5), None),
+            TurnOrigin::Human,
+        )
         .unwrap();
     let active = json!({
         "id": "<id>", "revision": 1, "objective": "ship it", "phase": "active",
         "max_rounds": 5, "rounds_started": 0, "rounds_since_armed": 0, "armed": true,
+        "tokens_used": 0,
     });
     assert_eq!(wire(&created), active);
     assert_eq!(wire(&s.goal_view()), active);
@@ -206,6 +211,7 @@ fn the_goal_view_keeps_its_shape() {
                 reason: "no key".into(),
             },
             TurnOrigin::Human,
+            base::context::goal::MAX_ROUNDS_LIMIT,
         )
         .unwrap();
     let blocked_view = wire(&blocked);
@@ -226,6 +232,7 @@ fn the_goal_view_keeps_its_shape() {
             "revision",
             "rounds_since_armed",
             "rounds_started",
+            "tokens_used",
         ]
     );
 

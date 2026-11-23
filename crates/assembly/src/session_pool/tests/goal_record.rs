@@ -65,7 +65,11 @@ async fn session_with_a_goal(pool: &SessionPool) -> (String, Arc<session_state::
         .session_id;
     let state = pool.live_state(&sid).await.expect("a live session");
     state
-        .goal_create("ship it".into(), Some(1), TurnOrigin::Human)
+        .goal_create(
+            "ship it".into(),
+            base::context::goal::GoalLimits::asked(Some(1), None),
+            TurnOrigin::Human,
+        )
         .unwrap();
     pool.record_goal_changes(&sid, &state).await;
     (sid, state)
@@ -325,8 +329,10 @@ impl HoldsTheGoalWriteAfterTheTurn {
                 base::context::goal::GoalAction::Edit {
                     objective: Some("ship it, again".into()),
                     max_rounds: None,
+                    token_budget: None,
                 },
                 TurnOrigin::Human,
+                base::context::goal::MAX_ROUNDS_LIMIT,
             )
             .unwrap();
     }
@@ -398,7 +404,11 @@ async fn an_interrupt_while_an_answered_goal_round_records_the_goal_stops_the_ne
         .session_id;
     let state = pool.live_state(&sid).await.expect("a live session");
     state
-        .goal_create("ship it".into(), Some(5), TurnOrigin::Human)
+        .goal_create(
+            "ship it".into(),
+            base::context::goal::GoalLimits::asked(Some(5), None),
+            TurnOrigin::Human,
+        )
         .unwrap();
     pool.record_goal_changes(&sid, &state).await;
     store.state.set(state.clone()).unwrap();

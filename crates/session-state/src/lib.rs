@@ -9,11 +9,12 @@ mod tasks;
 pub mod testing;
 
 use base::context::goal::{
-    Goal, GoalAction, GoalError, GoalRound, GoalSlot, GoalView, TurnOrigin, UnrecordedGoalChanges,
+    Goal, GoalAction, GoalError, GoalLimits, GoalRound, GoalSlot, GoalView, TurnOrigin,
+    UnrecordedGoalChanges,
 };
 use base::context::{
-    DurableState, PlanState, RunningStatus, RunningTask, Session, SessionEnv, SessionLedger,
-    SpendRecord, TaskEvent, TaskInfo, TaskType, TodoItem, TodoStatus,
+    DurableState, GoalSpendRecord, PlanState, RunningStatus, RunningTask, Session, SessionEnv,
+    SessionLedger, SpendRecord, TaskEvent, TaskInfo, TaskType, TodoItem, TodoStatus,
 };
 use base::interface::exec::{ConfinementReport, ExecProviders};
 use base::permission::PermissionMode;
@@ -406,12 +407,13 @@ impl SessionState {
         durable: Option<DurableState>,
         spent: Option<SpendRecord>,
     ) {
+        let goal_spent = spent.as_ref().and_then(|record| record.goal.clone());
         if let Some(spent) = spent {
             let mut ledger = lock(&self.ledger);
             ledger.spent.restore(spent.session);
             ledger.spent_recorded = Some(spent);
         }
-        self.restore_goal(goal);
+        self.restore_goal(goal, goal_spent);
         if let Some(durable) = durable {
             self.restore_durable_state(durable);
         }
@@ -420,22 +422,36 @@ impl SessionState {
     pub fn goal_clear(&self, origin: TurnOrigin) -> Result<(), GoalError> {
         let mut slot = lock(&self.goal);
         slot.clear(origin)?;
+        lock(&self.ledger).goal_spent = None;
         self.goal_changed(&slot, true);
         Ok(())
     }
 
-    /// Stop automatic rounds, keeping the goal as it is.
+    /// Stop automatic rounds, keeping the goal as it is — unless its rounds
+    /// have spent its token budget, which blocks it.
     pub fn goal_disarm(&self) {
+        let spent = self.goal_spent();
         let mut slot = lock(&self.goal);
-        if slot.disarm() {
+        if slot.block_if_spent(spent) {
+            self.goal_changed(&slot, true);
+        } else if slot.disarm() {
             self.goal_changed(&slot, false);
         }
     }
 
+    /// What the goal's rounds have spent, as its budget counts it.
+    fn goal_spent(&self) -> u64 {
+        lock(&self.ledger)
+            .goal_spent
+            .as_ref()
+            .map_or(0, |goal| goal.node.read().counted_tokens())
+    }
+
     /// The next automatic round — see [`GoalSlot::next_round`].
     pub fn goal_next_round(&self) -> Option<GoalRound> {
+        let spent = self.goal_spent();
         let mut slot = lock(&self.goal);
-        let (round, changed) = slot.next_round();
+        let (round, changed) = slot.next_round(spent);
         if changed {
             self.goal_changed(&slot, true);
         }
@@ -457,8 +473,16 @@ impl SessionState {
         lock(&self.goal).abandon_round(turn_id);
     }
 
-    /// Put back the goal a session log recorded, disarmed.
-    fn restore_goal(&self, goal: Option<Goal>) {
+    /// Put back the goal a session log recorded, disarmed, and what its
+    /// rounds had spent.
+    fn restore_goal(&self, goal: Option<Goal>, spent: Option<GoalSpendRecord>) {
+        if let Some(goal) = &goal {
+            let spent = spent
+                .filter(|record| record.id == goal.id)
+                .map(|record| record.spent)
+                .unwrap_or_default();
+            lock(&self.ledger).open_goal(&goal.id, goal.token_budget, spent);
+        }
         *lock(&self.goal) = GoalSlot::restored(goal);
     }
 
@@ -496,7 +520,7 @@ impl SessionState {
         if record {
             lock(&self.unrecorded_goal_changes).push(slot.goal.clone());
         }
-        let view = slot.view();
+        let view = slot.view(self.goal_spent());
         let _ = self.goal_events.send(view.clone());
         view
     }
@@ -696,17 +720,19 @@ impl Session for SessionState {
     }
 
     fn goal_view(&self) -> Option<GoalView> {
-        lock(&self.goal).view()
+        let spent = self.goal_spent();
+        lock(&self.goal).view(spent)
     }
 
     fn goal_create(
         &self,
         objective: String,
-        max_rounds: Option<u32>,
+        limits: GoalLimits,
         origin: TurnOrigin,
     ) -> Result<GoalView, GoalError> {
         let mut slot = lock(&self.goal);
-        slot.create(objective, max_rounds, origin)?;
+        let goal = slot.create(objective, limits, origin)?;
+        lock(&self.ledger).open_goal(&goal.id, goal.token_budget, Default::default());
         self.goal_changed(&slot, true).ok_or(GoalError::NoGoal)
     }
 
@@ -716,9 +742,14 @@ impl Session for SessionState {
         revision: u64,
         action: GoalAction,
         origin: TurnOrigin,
+        max_rounds_limit: u32,
     ) -> Result<GoalView, GoalError> {
+        let spent = self.goal_spent();
         let mut slot = lock(&self.goal);
-        slot.update(goal_id, revision, action, origin)?;
+        let goal = slot.update(goal_id, revision, action, origin, spent, max_rounds_limit)?;
+        if let Some(own) = &lock(&self.ledger).goal_spent {
+            own.node.set_limit(goal.token_budget);
+        }
         self.goal_changed(&slot, true).ok_or(GoalError::NoGoal)
     }
 }

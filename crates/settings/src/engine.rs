@@ -22,6 +22,7 @@ impl LoadedSettings {
         c.max_parallelism = settings.turn.parallel_tools;
         c.max_api_calls_per_turn = settings.turn.max_model_calls;
         c.max_agent_depth = settings.agents.max_depth;
+        c.model_autonomy.goal_max_rounds = settings.goal.max_rounds;
 
         c.permission_mode = settings.permissions.mode;
         c.sandbox = std::sync::Arc::new(SandboxSettings {

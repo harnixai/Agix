@@ -1,5 +1,6 @@
 //! The limits that hold across turns: what a session may spend over its
-//! whole life (`session`).
+//! whole life (`session`), and how far a goal the model sets may run
+//! (`goal`).
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +17,25 @@ pub struct SessionSettings {
     /// less than 1024 left no call is sent, and the turn, and every turn
     /// after it, ends with `budget_exceeded`. `None` = unlimited.
     pub token_budget: Option<u64>,
+}
+
+/// What the model may give a goal it sets for itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
+pub struct GoalSettings {
+    /// The most automatic rounds a goal the model sets or edits
+    /// (`GoalCreate`, `GoalUpdate`) may have; a larger `max_rounds` is
+    /// lowered to it. A goal a host sets is not held to it.
+    pub max_rounds: u32,
+}
+
+impl Default for GoalSettings {
+    fn default() -> Self {
+        Self {
+            max_rounds: base::context::goal::MAX_ROUNDS_LIMIT,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -47,6 +67,20 @@ mod tests {
         );
         let read = settings(json!({ "session": { "token_budget": 50_000 } }));
         assert_eq!(read.session.token_budget, Some(50_000));
+    }
+
+    #[test]
+    fn the_goal_block_defaults_to_the_most_rounds_a_goal_can_have() {
+        assert_eq!(crate::Settings::defaults_for("m").goal.max_rounds, 10_000);
+        assert_eq!(
+            settings(json!({ "goal": { "max_rounds": 8 } }))
+                .goal
+                .max_rounds,
+            8
+        );
+        let (_, withheld) =
+            kept_by_an_untrusted_project(json!({ "goal": { "max_rounds": 20_000 } }), json!({}));
+        assert_eq!(withheld, ["goal.max_rounds"]);
     }
 
     #[test]

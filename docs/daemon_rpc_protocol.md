@@ -1921,7 +1921,7 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 #### `session.goal` / `session.setGoal` / `session.updateGoal`
 
 会话目标:一个一轮做不完的目标。会话空闲时引擎自动开下一轮(`initiator:"goal"`),注入
-`<goal_round>` 提醒模型目标和轮次,直到模型标记完成或受阻,或者轮数用完(用完即转为
+`<goal_round>` 提醒模型目标和轮次,直到模型标记完成或受阻,或者轮数或 token 预算用完(用完即转为
 `blocked`)。模型经 `GoalCreate` / `GoalGet` / `GoalUpdate` 工具操作同一个目标。
 
 ```jsonc
@@ -1930,18 +1930,29 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
 // ← result;没有目标时 goal 为 null
 { "goal": { "id": "…", "revision": 3, "objective": "迁移到新接口,测试全绿",
             "phase": "active", "armed": true, "max_rounds": 256,
+            "token_budget": 200000,          // 没设时没有这个键
+            "tokens_used": 41000,            // 目标各轮已花的,口径同预算
             "rounds_started": 2, "rounds_since_armed": 2, "blocked_reason": null } }
 
 // session.setGoal → params(会话已有未完成的目标时失败)
-{ "session_id": "…", "objective": "…", "max_rounds": 256 }   // max_rounds 可选,默认 256
+{ "session_id": "…", "objective": "…", "max_rounds": 256,   // max_rounds 可选,默认 256
+  "token_budget": 200000 }                                  // 可选,缺省不限
 // session.updateGoal → params
 { "session_id": "…", "action": "pause" }   // pause | resume | edit | clear
-{ "session_id": "…", "action": "edit", "objective": "…", "max_rounds": 64 }
+{ "session_id": "…", "action": "edit", "objective": "…", "max_rounds": 64, "token_budget": 300000 }
 // ← 二者的 result 同 session.goal
 ```
 
 - `phase`:`active` / `paused` / `blocked` / `complete`。只有 `active` 且 `armed` 的目标
-  会自动开轮。`armed` 不落盘:会话从日志恢复(驱逐后、daemon 重启后)目标一律不武装,要人
+  会自动开轮。
+- `token_budget` 是目标各轮能花的 token(未命中缓存的输入、缓存写入与输出;各轮起的子 Agent、团队成员与
+  旁路调用都在内),从目标设下起算,设它的那一轮和期间宿主、定时任务的轮不算。剩余付不起一次调用(不到
+  1024)时,那一轮在调用前以 `budget_exceeded` 结束,目标转 `blocked`,`blocked_reason` 形如
+  `token budget: 2400 of 3000 tokens used`,不再开下一轮;`resume` 之前要先 `edit` 把 `token_budget`
+  调高(同 `max_rounds` 用完)。`tokens_used` 跨重启;会话不在内存里时 `session.goal` 从日志读出。
+  `token_budget` 给 0 → `INVALID_PARAMS`。会话自己的 `session.token_budget` 照样约束目标的轮。
+- 模型经 `GoalCreate` / `GoalUpdate` 设或改的目标,`max_rounds` 不超过设置 `goal.max_rounds`(缺省
+  10000),给多了压到它并在工具结果里说明;宿主经这里设的只受 1..=10000 约束。`armed` 不落盘:会话从日志恢复(驱逐后、daemon 重启后)目标一律不武装,要人
   `resume` 才继续。会话在内存里原地重建(`session.setPrompt`、`session.setModel` 换厂商、
   配置变化)保留武装;重建之后推一次 `goal_changed`。
 - 宿主经这两个方法的操作都按「用户亲自发起」对待。模型那一侧:设定、修改、暂停、恢复

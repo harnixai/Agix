@@ -275,16 +275,18 @@ pub trait Session: Send + Sync + std::fmt::Debug {
     fn goal_create(
         &self,
         objective: String,
-        max_rounds: Option<u32>,
+        limits: super::goal::GoalLimits,
         origin: TurnOrigin,
     ) -> Result<GoalView, GoalError>;
 
+    /// An edit may give the goal no more than `max_rounds_limit` rounds.
     fn goal_update(
         &self,
         goal_id: &str,
         revision: u64,
         action: GoalAction,
         origin: TurnOrigin,
+        max_rounds_limit: u32,
     ) -> Result<GoalView, GoalError>;
 }
 

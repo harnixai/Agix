@@ -1,6 +1,10 @@
 //! Session goals: an objective the engine keeps working on across turns, one
 //! automatic round at a time, until the model marks it complete or blocked or
-//! its rounds run out.
+//! its rounds or its token budget run out.
+//!
+//! A goal's rounds spend into a node of its own under the session's
+//! (`SessionLedger::goal_spent`); what that node has spent is passed in where
+//! a judgement needs it, as `spent`.
 //!
 //! This module is the state machine and its authority rules. The tools that
 //! drive it from the model live in `tools::goal`; whoever owns the turn loop
@@ -55,6 +59,10 @@ pub struct Goal {
     pub objective: String,
     pub phase: GoalPhase,
     pub max_rounds: u32,
+    /// The most tokens its rounds may spend, counted as every budget is,
+    /// their delegates and side calls included. `None`: no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_budget: Option<u64>,
     pub rounds_started: u32,
     /// Rounds started since the goal was last armed; what the blocked lower
     /// bound counts.
@@ -101,6 +109,7 @@ pub enum GoalAction {
     Edit {
         objective: Option<String>,
         max_rounds: Option<u32>,
+        token_budget: Option<u64>,
     },
     Pause,
     Resume,
@@ -147,13 +156,34 @@ pub struct GoalSlot {
     pub next_revision: u64,
 }
 
-/// A goal as hosts and the model see it: the goal, and whether automatic
-/// rounds are armed.
+/// A goal as hosts and the model see it: the goal, whether automatic rounds
+/// are armed, and what its rounds have spent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct GoalView {
     #[serde(flatten)]
     pub goal: Goal,
     pub armed: bool,
+    pub tokens_used: u64,
+}
+
+/// How large a goal may be made, and by whom: `max_rounds` above
+/// `max_rounds_limit` is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoalLimits {
+    pub max_rounds: Option<u32>,
+    pub token_budget: Option<u64>,
+    pub max_rounds_limit: u32,
+}
+
+impl GoalLimits {
+    /// What a host asks for, held to the format's limit.
+    pub fn asked(max_rounds: Option<u32>, token_budget: Option<u64>) -> Self {
+        Self {
+            max_rounds,
+            token_budget,
+            max_rounds_limit: MAX_ROUNDS_LIMIT,
+        }
+    }
 }
 
 /// The next automatic round to run.
@@ -164,10 +194,11 @@ pub struct GoalRound {
 }
 
 impl GoalSlot {
-    pub fn view(&self) -> Option<GoalView> {
+    pub fn view(&self, spent: u64) -> Option<GoalView> {
         self.goal.clone().map(|goal| GoalView {
             goal,
             armed: self.armed,
+            tokens_used: spent,
         })
     }
 
@@ -182,12 +213,18 @@ impl GoalSlot {
     pub fn create(
         &mut self,
         objective: String,
-        max_rounds: Option<u32>,
+        limits: GoalLimits,
         origin: TurnOrigin,
     ) -> Result<Goal, GoalError> {
         require_human(origin, "create a goal")?;
         let objective = non_empty(objective)?;
-        let max_rounds = checked_max_rounds(max_rounds.unwrap_or(DEFAULT_MAX_ROUNDS))?;
+        let max_rounds = checked_max_rounds(
+            limits
+                .max_rounds
+                .unwrap_or(DEFAULT_MAX_ROUNDS.min(limits.max_rounds_limit)),
+            limits.max_rounds_limit,
+        )?;
+        let token_budget = checked_token_budget(limits.token_budget)?;
         if let Some(goal) = &self.goal {
             if goal.phase != GoalPhase::Complete {
                 return Err(GoalError::AlreadyActive(goal.id.clone()));
@@ -204,6 +241,7 @@ impl GoalSlot {
             objective,
             phase: GoalPhase::Active,
             max_rounds,
+            token_budget,
             rounds_started: 0,
             rounds_since_armed: 0,
             blocked_reason: None,
@@ -214,12 +252,16 @@ impl GoalSlot {
         Ok(goal)
     }
 
+    /// `spent` is what the goal's rounds have spent; `max_rounds_limit` the
+    /// most rounds an edit may give it.
     pub fn update(
         &mut self,
         goal_id: &str,
         revision: u64,
         action: GoalAction,
         origin: TurnOrigin,
+        spent: u64,
+        max_rounds_limit: u32,
     ) -> Result<Goal, GoalError> {
         let goal = self.goal.as_mut().ok_or(GoalError::NoGoal)?;
         if goal.id != goal_id {
@@ -238,9 +280,16 @@ impl GoalSlot {
             GoalAction::Edit {
                 objective,
                 max_rounds,
-            } => edit_goal(goal, origin, objective, max_rounds)?,
+                token_budget,
+            } => {
+                let max_rounds = max_rounds
+                    .map(|n| checked_max_rounds(n, max_rounds_limit))
+                    .transpose()?;
+                let token_budget = checked_token_budget(token_budget)?;
+                edit_goal(goal, origin, objective, max_rounds, token_budget)?
+            }
             GoalAction::Pause => pause_goal(goal, &mut self.armed, origin)?,
-            GoalAction::Resume => resume_goal(goal, &mut self.armed, origin)?,
+            GoalAction::Resume => resume_goal(goal, &mut self.armed, origin, spent)?,
             GoalAction::Complete => complete_goal(goal, &mut self.armed, origin)?,
             GoalAction::Blocked { reason } => block_goal(goal, &mut self.armed, origin, reason)?,
         }
@@ -268,11 +317,32 @@ impl GoalSlot {
         std::mem::replace(&mut self.armed, false)
     }
 
+    /// Mark an active goal whose rounds have spent its token budget blocked,
+    /// as one whose rounds are all used is. Whether it changed.
+    pub fn block_if_spent(&mut self, spent: u64) -> bool {
+        let Some(goal) = self.goal.as_mut() else {
+            return false;
+        };
+        let Some(budget) = goal.token_budget.filter(|&b| spent_out(b, spent)) else {
+            return false;
+        };
+        if goal.phase != GoalPhase::Active {
+            return false;
+        }
+        goal.phase = GoalPhase::Blocked;
+        goal.blocked_reason = Some(format!("token budget: {spent} of {budget} tokens used"));
+        goal.revision += 1;
+        self.armed = false;
+        self.pending_round = None;
+        true
+    }
+
     /// The next automatic round, or `None` when the goal is not active and
-    /// armed or a round is already outstanding. A goal whose rounds are used
-    /// up is marked blocked instead; the second value says whether the goal
-    /// changed. The round counts as started only once it is claimed.
-    pub fn next_round(&mut self) -> (Option<GoalRound>, bool) {
+    /// armed or a round is already outstanding. A goal whose rounds or
+    /// token budget (against `spent`) are used up is marked blocked instead;
+    /// the second value says whether the goal changed. The round counts as
+    /// started only once it is claimed.
+    pub fn next_round(&mut self, spent: u64) -> (Option<GoalRound>, bool) {
         let Some(goal) = self.goal.as_mut() else {
             return (None, false);
         };
@@ -286,6 +356,12 @@ impl GoalSlot {
             self.armed = false;
             return (None, true);
         }
+        if self.block_if_spent(spent) {
+            return (None, true);
+        }
+        let Some(goal) = self.goal.as_mut() else {
+            return (None, false);
+        };
         let number = goal.rounds_started + 1;
         let round = GoalRound {
             turn_id: format!(
@@ -328,8 +404,12 @@ impl GoalSlot {
 }
 
 fn round_message(goal: &Goal, round: u32) -> String {
+    let budget = goal
+        .token_budget
+        .map(|b| format!("Token budget: {b}\n"))
+        .unwrap_or_default();
     format!(
-        "<goal_round>\nObjective: {}\nRound: {}/{}\n\nContinue working toward the objective in this \
+        "<goal_round>\nObjective: {}\nRound: {}/{}\n{budget}\nContinue working toward the objective in this \
          session. Treat the workspace, tool results and session state as authoritative. Before \
          claiming completion, gather evidence that the whole objective is met, then mark it \
          complete with GoalUpdate (goal_id {}, read the current revision with GoalGet). If work \
@@ -375,13 +455,25 @@ fn non_empty(s: String) -> Result<String, GoalError> {
     }
 }
 
-fn checked_max_rounds(n: u32) -> Result<u32, GoalError> {
-    if (1..=MAX_ROUNDS_LIMIT).contains(&n) {
+fn checked_max_rounds(n: u32, limit: u32) -> Result<u32, GoalError> {
+    if (1..=limit).contains(&n) {
         Ok(n)
     } else {
         Err(GoalError::Invalid(format!(
-            "max_rounds must be between 1 and {MAX_ROUNDS_LIMIT}"
+            "max_rounds must be between 1 and {limit}"
         )))
+    }
+}
+
+/// Whether `budget` leaves too little after `spent` for another model call.
+fn spent_out(budget: u64, spent: u64) -> bool {
+    budget.saturating_sub(spent) < crate::interface::budget_policy::MIN_CALL_TOKENS
+}
+
+fn checked_token_budget(budget: Option<u64>) -> Result<Option<u64>, GoalError> {
+    match budget {
+        Some(0) => Err(GoalError::Invalid("token_budget must be at least 1".into())),
+        budget => Ok(budget),
     }
 }
 
@@ -390,6 +482,7 @@ fn edit_goal(
     origin: TurnOrigin,
     objective: Option<String>,
     max_rounds: Option<u32>,
+    token_budget: Option<u64>,
 ) -> Result<(), GoalError> {
     require_human(origin, "edit a goal")?;
     if goal.phase == GoalPhase::Complete {
@@ -402,7 +495,10 @@ fn edit_goal(
         goal.objective = non_empty(objective)?;
     }
     if let Some(max) = max_rounds {
-        goal.max_rounds = checked_max_rounds(max)?;
+        goal.max_rounds = max;
+    }
+    if token_budget.is_some() {
+        goal.token_budget = token_budget;
     }
     goal.rounds_since_armed = 0;
     Ok(())
@@ -421,7 +517,12 @@ fn pause_goal(goal: &mut Goal, armed: &mut bool, origin: TurnOrigin) -> Result<(
     Ok(())
 }
 
-fn resume_goal(goal: &mut Goal, armed: &mut bool, origin: TurnOrigin) -> Result<(), GoalError> {
+fn resume_goal(
+    goal: &mut Goal,
+    armed: &mut bool,
+    origin: TurnOrigin,
+    spent: u64,
+) -> Result<(), GoalError> {
     require_human(origin, "resume a goal")?;
     let resumable = matches!(goal.phase, GoalPhase::Paused | GoalPhase::Blocked)
         || (goal.phase == GoalPhase::Active && !*armed);
@@ -435,6 +536,12 @@ fn resume_goal(goal: &mut Goal, armed: &mut bool, origin: TurnOrigin) -> Result<
         return Err(GoalError::NotAllowed(format!(
             "all {} rounds are used; edit the goal to raise max_rounds before resuming",
             goal.max_rounds
+        )));
+    }
+    if let Some(budget) = goal.token_budget.filter(|&b| spent_out(b, spent)) {
+        return Err(GoalError::NotAllowed(format!(
+            "{spent} of its {budget} tokens are used; edit the goal to raise token_budget \
+             before resuming"
         )));
     }
     goal.phase = GoalPhase::Active;
@@ -490,10 +597,36 @@ fn block_goal(
 mod tests {
     use super::*;
 
+    trait Up {
+        fn up(
+            &mut self,
+            id: &str,
+            rev: u64,
+            action: GoalAction,
+            origin: TurnOrigin,
+        ) -> Result<Goal, GoalError>;
+    }
+
+    impl Up for GoalSlot {
+        fn up(
+            &mut self,
+            id: &str,
+            rev: u64,
+            action: GoalAction,
+            origin: TurnOrigin,
+        ) -> Result<Goal, GoalError> {
+            self.update(id, rev, action, origin, 0, MAX_ROUNDS_LIMIT)
+        }
+    }
+
     fn active() -> GoalSlot {
         let mut slot = GoalSlot::default();
-        slot.create("ship it".into(), Some(5), TurnOrigin::Human)
-            .unwrap();
+        slot.create(
+            "ship it".into(),
+            GoalLimits::asked(Some(5), None),
+            TurnOrigin::Human,
+        )
+        .unwrap();
         slot
     }
 
@@ -503,7 +636,7 @@ mod tests {
     }
 
     fn start_round(slot: &mut GoalSlot) -> Option<GoalRound> {
-        let round = slot.next_round().0?;
+        let round = slot.next_round(0).0?;
         assert!(slot.claim_round(&round.turn_id));
         Some(round)
     }
@@ -518,7 +651,7 @@ mod tests {
     #[test]
     fn a_round_turn_id_reads_back_as_its_origin() {
         let mut slot = active();
-        let (round, changed) = slot.next_round();
+        let (round, changed) = slot.next_round(0);
         let round = round.unwrap();
         assert!(!changed);
         assert_eq!(
@@ -547,7 +680,7 @@ mod tests {
             },
         ] {
             assert!(matches!(
-                slot.create("x".into(), None, origin),
+                slot.create("x".into(), GoalLimits::asked(None, None), origin),
                 Err(GoalError::NotAllowed(_))
             ));
         }
@@ -560,10 +693,11 @@ mod tests {
             GoalAction::Edit {
                 objective: Some("y".into()),
                 max_rounds: None,
+                token_budget: None,
             },
         ] {
             assert!(matches!(
-                slot.update(&id, rev, action, round),
+                slot.up(&id, rev, action, round),
                 Err(GoalError::NotAllowed(_))
             ));
         }
@@ -573,19 +707,19 @@ mod tests {
     #[test]
     fn a_round_may_complete_its_own_revision() {
         let mut slot = active();
-        slot.next_round();
+        slot.next_round(0);
         let (id, rev) = ids(&slot);
         let stale = TurnOrigin::GoalRound {
             revision: rev - 1,
             round: 1,
         };
-        assert!(slot.update(&id, rev, GoalAction::Complete, stale).is_err());
+        assert!(slot.up(&id, rev, GoalAction::Complete, stale).is_err());
         let goal = slot
-            .update(&id, rev, GoalAction::Complete, round_origin(&slot))
+            .up(&id, rev, GoalAction::Complete, round_origin(&slot))
             .unwrap();
         assert_eq!(goal.phase, GoalPhase::Complete);
         assert!(!slot.armed);
-        assert_eq!(slot.next_round(), (None, false));
+        assert_eq!(slot.next_round(0), (None, false));
     }
 
     #[test]
@@ -594,7 +728,7 @@ mod tests {
         for round in 1..=BLOCKED_MIN_ROUNDS {
             start_round(&mut slot);
             let (id, rev) = ids(&slot);
-            let result = slot.update(
+            let result = slot.up(
                 &id,
                 rev,
                 GoalAction::Blocked {
@@ -615,7 +749,7 @@ mod tests {
         let mut slot = active();
         let (id, rev) = ids(&slot);
         let goal = slot
-            .update(
+            .up(
                 &id,
                 rev,
                 GoalAction::Blocked {
@@ -632,11 +766,11 @@ mod tests {
         let mut slot = active();
         let (id, rev) = ids(&slot);
         assert!(matches!(
-            slot.update(&id, rev + 1, GoalAction::Pause, TurnOrigin::Human),
+            slot.up(&id, rev + 1, GoalAction::Pause, TurnOrigin::Human),
             Err(GoalError::StaleRevision { .. })
         ));
         assert!(matches!(
-            slot.update("other", rev, GoalAction::Pause, TurnOrigin::Human),
+            slot.up("other", rev, GoalAction::Pause, TurnOrigin::Human),
             Err(GoalError::WrongGoal { .. })
         ));
     }
@@ -644,10 +778,15 @@ mod tests {
     #[test]
     fn rounds_run_out_into_blocked() {
         let mut slot = GoalSlot::default();
-        slot.create("x".into(), Some(2), TurnOrigin::Human).unwrap();
+        slot.create(
+            "x".into(),
+            GoalLimits::asked(Some(2), None),
+            TurnOrigin::Human,
+        )
+        .unwrap();
         assert!(start_round(&mut slot).is_some());
         assert!(start_round(&mut slot).is_some());
-        let (round, changed) = slot.next_round();
+        let (round, changed) = slot.next_round(0);
         assert!(round.is_none() && changed);
         let goal = slot.goal.as_ref().unwrap();
         assert_eq!(goal.phase, GoalPhase::Blocked);
@@ -658,49 +797,123 @@ mod tests {
             .contains("round limit"));
         let (id, rev) = ids(&slot);
         assert!(matches!(
-            slot.update(&id, rev, GoalAction::Resume, TurnOrigin::Human),
+            slot.up(&id, rev, GoalAction::Resume, TurnOrigin::Human),
             Err(GoalError::NotAllowed(_))
         ));
-        slot.update(
+        slot.up(
             &id,
             rev,
             GoalAction::Edit {
                 objective: None,
                 max_rounds: Some(4),
+                token_budget: None,
             },
             TurnOrigin::Human,
         )
         .unwrap();
         let (id, rev) = ids(&slot);
-        slot.update(&id, rev, GoalAction::Resume, TurnOrigin::Human)
+        slot.up(&id, rev, GoalAction::Resume, TurnOrigin::Human)
             .unwrap();
-        assert!(slot.next_round().0.is_some());
+        assert!(slot.next_round(0).0.is_some());
+    }
+
+    #[test]
+    fn a_spent_token_budget_blocks_the_goal_until_it_is_raised() {
+        let mut slot = GoalSlot::default();
+        slot.create(
+            "x".into(),
+            GoalLimits::asked(None, Some(5_000)),
+            TurnOrigin::Human,
+        )
+        .unwrap();
+        assert!(start_round(&mut slot).is_some());
+        assert!(!slot.block_if_spent(3_976), "1024 left pays for a call");
+        let (round, changed) = slot.next_round(4_000);
+        assert!(round.is_none() && changed);
+        let goal = slot.goal.as_ref().unwrap();
+        assert_eq!(goal.phase, GoalPhase::Blocked);
+        assert_eq!(
+            goal.blocked_reason.as_deref(),
+            Some("token budget: 4000 of 5000 tokens used")
+        );
+        let (id, rev) = ids(&slot);
+        assert!(matches!(
+            slot.update(&id, rev, GoalAction::Resume, TurnOrigin::Human, 4_000, 10),
+            Err(GoalError::NotAllowed(_))
+        ));
+        let edit = GoalAction::Edit {
+            objective: None,
+            max_rounds: None,
+            token_budget: Some(9_000),
+        };
+        slot.update(&id, rev, edit, TurnOrigin::Human, 4_000, 10)
+            .unwrap();
+        let (id, rev) = ids(&slot);
+        slot.update(&id, rev, GoalAction::Resume, TurnOrigin::Human, 4_000, 10)
+            .unwrap();
+        assert!(slot.next_round(4_000).0.is_some());
+    }
+
+    #[test]
+    fn a_goal_is_held_to_the_rounds_its_setter_may_give() {
+        let mut slot = GoalSlot::default();
+        let limits = GoalLimits {
+            max_rounds: Some(50),
+            token_budget: None,
+            max_rounds_limit: 10,
+        };
+        assert!(matches!(
+            slot.create("x".into(), limits, TurnOrigin::Human),
+            Err(GoalError::Invalid(_))
+        ));
+        let limits = GoalLimits {
+            max_rounds: None,
+            ..limits
+        };
+        let goal = slot.create("x".into(), limits, TurnOrigin::Human).unwrap();
+        assert_eq!(goal.max_rounds, 10, "the default is held to the limit too");
+        assert!(matches!(
+            slot.create(
+                "y".into(),
+                GoalLimits::asked(None, Some(0)),
+                TurnOrigin::Human
+            ),
+            Err(GoalError::AlreadyActive(_) | GoalError::Invalid(_))
+        ));
     }
 
     #[test]
     fn a_restored_goal_waits_for_a_person() {
         let mut slot = active();
         let mut restored = GoalSlot::restored(slot.goal.take());
-        assert_eq!(restored.next_round(), (None, false));
+        assert_eq!(restored.next_round(0), (None, false));
         let (id, rev) = ids(&restored);
         restored
-            .update(&id, rev, GoalAction::Resume, TurnOrigin::Human)
+            .up(&id, rev, GoalAction::Resume, TurnOrigin::Human)
             .unwrap();
-        assert!(restored.next_round().0.is_some());
+        assert!(restored.next_round(0).0.is_some());
     }
 
     #[test]
     fn a_new_goal_waits_for_the_last_one_to_finish() {
         let mut slot = active();
         assert!(matches!(
-            slot.create("again".into(), None, TurnOrigin::Human),
+            slot.create(
+                "again".into(),
+                GoalLimits::asked(None, None),
+                TurnOrigin::Human
+            ),
             Err(GoalError::AlreadyActive(_))
         ));
         let (id, rev) = ids(&slot);
-        slot.update(&id, rev, GoalAction::Complete, TurnOrigin::Human)
+        slot.up(&id, rev, GoalAction::Complete, TurnOrigin::Human)
             .unwrap();
         let next = slot
-            .create("again".into(), None, TurnOrigin::Human)
+            .create(
+                "again".into(),
+                GoalLimits::asked(None, None),
+                TurnOrigin::Human,
+            )
             .unwrap();
         assert_eq!(next.max_rounds, DEFAULT_MAX_ROUNDS);
         assert!(next.revision > rev);
@@ -709,11 +922,11 @@ mod tests {
     #[test]
     fn only_one_round_is_outstanding_at_a_time() {
         let mut slot = active();
-        let first = slot.next_round().0.unwrap();
-        assert_eq!(slot.next_round(), (None, false));
+        let first = slot.next_round(0).0.unwrap();
+        assert_eq!(slot.next_round(0), (None, false));
         assert!(slot.claim_round(&first.turn_id));
         assert!(!slot.claim_round(&first.turn_id));
-        let second = slot.next_round().0.unwrap();
+        let second = slot.next_round(0).0.unwrap();
         assert!(second.message.contains("Round: 2/5"));
         assert_ne!(first.turn_id, second.turn_id);
     }
@@ -721,7 +934,7 @@ mod tests {
     #[test]
     fn rounds_count_only_once_claimed() {
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         let goal = slot.goal.as_ref().unwrap();
         assert_eq!((goal.rounds_started, goal.rounds_since_armed), (0, 0));
         assert!(slot.claim_round(&round.turn_id));
@@ -732,36 +945,37 @@ mod tests {
     #[test]
     fn a_round_handed_out_before_a_pause_clear_or_change_cannot_start() {
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         let (id, rev) = ids(&slot);
-        slot.update(&id, rev, GoalAction::Pause, TurnOrigin::Human)
+        slot.up(&id, rev, GoalAction::Pause, TurnOrigin::Human)
             .unwrap();
         assert!(!slot.claim_round(&round.turn_id));
 
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         slot.clear(TurnOrigin::Human).unwrap();
         assert!(!slot.claim_round(&round.turn_id));
 
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         let (id, rev) = ids(&slot);
-        slot.update(
+        slot.up(
             &id,
             rev,
             GoalAction::Edit {
                 objective: Some("ship it twice".into()),
                 max_rounds: None,
+                token_budget: None,
             },
             TurnOrigin::Human,
         )
         .unwrap();
         assert!(!slot.claim_round(&round.turn_id));
-        let next = slot.next_round().0.unwrap();
+        let next = slot.next_round(0).0.unwrap();
         assert!(slot.claim_round(&next.turn_id));
 
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         slot.disarm();
         assert!(!slot.claim_round(&round.turn_id));
         assert_eq!(slot.goal.as_ref().unwrap().rounds_started, 0);
@@ -770,11 +984,11 @@ mod tests {
     #[test]
     fn an_abandoned_round_lets_the_next_one_be_handed_out() {
         let mut slot = active();
-        let round = slot.next_round().0.unwrap();
+        let round = slot.next_round(0).0.unwrap();
         slot.abandon_round("goal-1-1-someone-else");
-        assert_eq!(slot.next_round(), (None, false));
+        assert_eq!(slot.next_round(0), (None, false));
         slot.abandon_round(&round.turn_id);
-        assert!(slot.next_round().0.is_some());
+        assert!(slot.next_round(0).0.is_some());
     }
 
     #[test]
@@ -782,11 +996,15 @@ mod tests {
         let mut slot = active();
         let stale = round_origin(&slot);
         slot.clear(TurnOrigin::Human).unwrap();
-        slot.create("another".into(), None, TurnOrigin::Human)
-            .unwrap();
+        slot.create(
+            "another".into(),
+            GoalLimits::asked(None, None),
+            TurnOrigin::Human,
+        )
+        .unwrap();
         let (id, rev) = ids(&slot);
         assert!(matches!(
-            slot.update(&id, rev, GoalAction::Complete, stale),
+            slot.up(&id, rev, GoalAction::Complete, stale),
             Err(GoalError::NotAllowed(_))
         ));
     }

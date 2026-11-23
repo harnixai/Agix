@@ -188,7 +188,11 @@ async fn a_rebuild_keeps_the_goal_armed_and_the_round_it_was_about_to_start() {
     let sid = new_session(&pool).await;
     let (generation, before) = slot_and_state(&pool, &sid).await;
     before
-        .goal_create("keep going".into(), Some(3), TurnOrigin::Human)
+        .goal_create(
+            "keep going".into(),
+            base::context::goal::GoalLimits::asked(Some(3), None),
+            TurnOrigin::Human,
+        )
         .unwrap();
     pool.record_goal_changes(&sid, &before).await;
     let round = before.goal_next_round().expect("a round");

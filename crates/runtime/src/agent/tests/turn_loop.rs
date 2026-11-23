@@ -199,7 +199,7 @@ async fn run_starts_goal_rounds_until_the_limit() {
     state
         .goal_create(
             "finish".into(),
-            Some(2),
+            base::context::goal::GoalLimits::asked(Some(2), None),
             base::context::goal::TurnOrigin::Human,
         )
         .unwrap();

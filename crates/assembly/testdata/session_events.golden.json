@@ -2443,7 +2443,8 @@
               "phase": "active",
               "revision": 1,
               "rounds_since_armed": 0,
-              "rounds_started": 0
+              "rounds_started": 0,
+              "tokens_used": 0
             },
             "kind": "goal_changed"
           },

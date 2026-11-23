@@ -404,6 +404,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
         ("files.deny_write", Tighten(Superset)),
         ("files.extra_dirs", Tighten(Subset)),
         ("files.read_dirs", Tighten(Subset)),
+        ("goal.max_rounds", Tighten(Lower)),
         ("hooks", Withheld),
         ("mcp.servers.*", Withheld),
         ("mcp.servers.*.enabled", Tighten(FalseTighter)),

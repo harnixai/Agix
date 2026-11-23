@@ -2904,7 +2904,7 @@
       "type": "object"
     },
     "GoalView": {
-      "description": "A goal as hosts and the model see it: the goal, and whether automatic\nrounds are armed.",
+      "description": "A goal as hosts and the model see it: the goal, whether automatic rounds\nare armed, and what its rounds have spent.",
       "properties": {
         "armed": {
           "type": "boolean"
@@ -2945,6 +2945,20 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "token_budget": {
+          "description": "The most tokens its rounds may spend, counted as every budget is,\ntheir delegates and side calls included. `None`: no limit.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokens_used": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -2954,7 +2968,8 @@
         "phase",
         "max_rounds",
         "rounds_started",
-        "armed"
+        "armed",
+        "tokens_used"
       ],
       "type": "object"
     },
@@ -8058,6 +8073,15 @@
         },
         "session_id": {
           "type": "string"
+        },
+        "token_budget": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -9420,6 +9444,16 @@
         },
         "session_id": {
           "type": "string"
+        },
+        "token_budget": {
+          "default": null,
+          "description": "For `edit`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [

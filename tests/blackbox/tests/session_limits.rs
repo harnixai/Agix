@@ -1,6 +1,7 @@
 //! What a session spends over its turns: `session.get`'s `usage` counts its
 //! delegates' calls as they are made, and a failed turn's, and survives a
-//! restart; `session.token_budget` holds it to a ceiling across turns.
+//! restart; `session.token_budget` holds it to a ceiling across turns, and a
+//! goal's `token_budget` blocks the goal once its rounds have spent it.
 
 use std::time::Duration;
 
@@ -12,7 +13,8 @@ const ROOT: &str = "ROOT-MARK";
 const WAIT: Duration = Duration::from_secs(30);
 
 fn stubbed(name: &str, stub: &ProviderStub, settings: Value) -> LiveRunBuilder {
-    let mut merged = json!({ "permissions": { "allow": ["Agent", "Glob", "HostGate"] } });
+    let mut merged =
+        json!({ "permissions": { "allow": ["Agent", "Glob", "HostGate", "GoalCreate"] } });
     if let (Some(base), Some(extra)) = (merged.as_object_mut(), settings.as_object()) {
         base.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
@@ -189,6 +191,109 @@ async fn a_session_budget_holds_across_turns_sub_agents_and_a_restart() -> anyho
         3,
         "a restart gave the session its budget back"
     );
+    run.finish().await;
+    Ok(())
+}
+
+/// What `session.goal` says once `host` has seen the goal blocked.
+async fn blocked_goal(
+    run: &mut LiveRun,
+    host: &blackbox::Watcher,
+    s: &str,
+) -> anyhow::Result<Value> {
+    host.wait_for("the goal blocked", WAIT, |e| {
+        e["kind"] == "goal_changed" && e["goal"]["phase"] == "blocked"
+    })
+    .await?;
+    let got = run
+        .client
+        .call("session.goal", json!({ "session_id": s }))
+        .await?;
+    Ok(got.result.unwrap_or_default()["goal"].clone())
+}
+
+/// Two rounds spend 2400 of 3000; the third has too little left for a call,
+/// so the goal is blocked on its token budget and no round runs after.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hosts_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("goal-budget-host", &stub, json!({}))
+        .start()
+        .await?;
+    let s = session(&mut run, json!({})).await?;
+    let host = run.watch(&s, false).await?;
+    stub.script([
+        Reply::spent(1000, 200, Reply::text("round one")),
+        Reply::spent(1000, 200, Reply::text("round two")),
+        Reply::text("never sent"),
+    ]);
+    let set = run
+        .client
+        .call(
+            "session.setGoal",
+            json!({ "session_id": s, "objective": "keep at it", "token_budget": 3000 }),
+        )
+        .await?;
+    assert!(set.error.is_none(), "{set:?}");
+    assert_eq!(set.result.unwrap_or_default()["goal"]["token_budget"], 3000);
+
+    let goal = blocked_goal(&mut run, &host, &s).await?;
+    assert_eq!(goal["tokens_used"], 2400, "{goal}");
+    assert!(
+        goal["blocked_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("token budget"),
+        "{goal}"
+    );
+    assert_eq!(
+        stub.call_count(),
+        2,
+        "a round called past the goal's budget"
+    );
+    drop(host);
+    run.finish().await;
+    Ok(())
+}
+
+/// The same with the model setting the goal: the turn it sets it in is not
+/// one of the goal's rounds and does not spend its budget.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_models_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("goal-budget-model", &stub, json!({}))
+        .start()
+        .await?;
+    let s = session(&mut run, json!({})).await?;
+    let host = run.watch(&s, false).await?;
+    stub.script([
+        Reply::spent(
+            5000,
+            500,
+            Reply::calls(
+                "g1",
+                "GoalCreate",
+                json!({ "objective": "keep at it", "token_budget": 2500 }),
+            ),
+        ),
+        Reply::spent(5000, 500, Reply::text("goal set")),
+        Reply::spent(1000, 200, Reply::text("round one")),
+        Reply::spent(1000, 200, Reply::text("round two")),
+        Reply::text("never sent"),
+    ]);
+    run.turn(&s, "set yourself a goal").await?;
+    let goal = blocked_goal(&mut run, &host, &s).await?;
+    assert_eq!(goal["tokens_used"], 2400, "{goal}");
+    assert_eq!(goal["token_budget"], 2500, "{goal}");
+    assert!(
+        goal["blocked_reason"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("token budget"),
+        "{goal}"
+    );
+    assert_eq!(stub.call_count(), 4);
+    drop(host);
     run.finish().await;
     Ok(())
 }

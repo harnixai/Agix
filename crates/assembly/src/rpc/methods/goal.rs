@@ -16,6 +16,8 @@ pub struct SetGoalParams {
     pub objective: String,
     #[serde(default)]
     pub max_rounds: Option<u32>,
+    #[serde(default)]
+    pub token_budget: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -38,4 +40,7 @@ pub struct UpdateGoalParams {
     /// For `edit`.
     #[serde(default)]
     pub max_rounds: Option<u32>,
+    /// For `edit`.
+    #[serde(default)]
+    pub token_budget: Option<u64>,
 }

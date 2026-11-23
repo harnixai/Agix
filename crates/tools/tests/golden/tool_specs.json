@@ -1260,7 +1260,7 @@
         "properties": {
           "max_rounds": {
             "default": null,
-            "description": "How many automatic rounds the goal may use (default 256).",
+            "description": "How many automatic rounds the goal may use (default 256, or the most\nthis deployment allows if that is fewer).",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -1271,6 +1271,16 @@
           "objective": {
             "description": "What the session should achieve, stated so that its completion can be\nchecked.",
             "type": "string"
+          },
+          "token_budget": {
+            "default": null,
+            "description": "The most tokens the goal's rounds may spend, sub-agents included; it\nis blocked once they are spent. Leave it out for no limit.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1284,7 +1294,7 @@
         "properties": {
           "max_rounds": {
             "default": null,
-            "description": "How many automatic rounds the goal may use (default 256).",
+            "description": "How many automatic rounds the goal may use (default 256, or the most\nthis deployment allows if that is fewer).",
             "format": "uint32",
             "minimum": 0,
             "type": [
@@ -1295,6 +1305,16 @@
           "objective": {
             "description": "What the session should achieve, stated so that its completion can be\nchecked.",
             "type": "string"
+          },
+          "token_budget": {
+            "default": null,
+            "description": "The most tokens the goal's rounds may spend, sub-agents included; it\nis blocked once they are spent. Leave it out for no limit.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1442,6 +1462,16 @@
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
+          },
+          "token_budget": {
+            "default": null,
+            "description": "With `edit`: the new token budget.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1505,6 +1535,16 @@
             "format": "uint64",
             "minimum": 0,
             "type": "integer"
+          },
+          "token_budget": {
+            "default": null,
+            "description": "With `edit`: the new token budget.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [

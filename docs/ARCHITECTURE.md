@@ -279,6 +279,18 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 经 `HostContracts` 继承根会话的。`turn_complete.usage` 是这一轮节点的读数,`usage_breakdown` 按自己 /
 旁路 / delegate 拆开。`max_model_calls` 不在这里:每个 agent 一份,在它自己的 `TurnPolicy` 里。
 
+预算的几层,由近及远:
+
+| 层 | 上限 | 量的是什么 | 到顶时 |
+|---|---|---|---|
+| 一次调用 | `max_tokens`(`model.max_tokens`、模型的 `max_output`),压到链上最小的剩余 | 这次调用的输出 | 回复以 `max_tokens` 截断 |
+| 一轮 | `turn.token_budget`(`options.turn` 只能收紧) | 根轮与它的 delegate、旁路调用 | 这一轮 `budget_exceeded`,下一轮重新算 |
+| 目标 | 目标的 `token_budget` | 目标各轮(含 delegate、旁路) | 这一轮 `budget_exceeded`,目标转 `blocked`(`blocked_reason` 以 `token budget` 开头),同轮数用完 |
+| 会话 | `session.token_budget` | 会话从创建起所有的轮,跨重启 | 这一轮与之后每一轮 `budget_exceeded`,不调模型 |
+| provider 配额 | `providers[].quota` | 每个 provider 按日 / 周 / 月,跨会话 | 路由跳过它,换下一个;都用尽报 `providers_unavailable` |
+
+后四层同一个口径(`Spend::counted_tokens`),由同一次计量记账;前四层判在调用前后,配额判在路由选 provider 时。
+
 **一条工具管线。** 模型的每次工具调用(`tool_use`)、`RunCode` 程序里的子调用、skill 正文里的
 `` !`cmd` `` 内嵌命令,都走同一条:`PreToolUse` → 输入校验 → 权限 → 中间件 → 工具 → `tool_result`
 转换器 → `PostToolUse`,遥测、panic 兜底与外部内容围栏也各只接一处。后两类经 `SubCallDispatcher`
@@ -867,7 +879,7 @@ release 构建记一条 error。
 
 目标(`base::context::goal`)让一个会话一轮轮自己推进:一轮正常结束(`end_turn`、
 `stop_sequence`、`max_tokens`)时,目标若仍是 `active` 且已武装,就开下一轮,注入
-`<goal_round>` 提醒目标与轮次,直到模型标完成或受阻、或轮数用完(转 `blocked`)。
+`<goal_round>` 提醒目标与轮次,直到模型标完成或受阻、或轮数或 token 预算用完(转 `blocked`)。
 
 - **谁开下一轮**:daemon 下是会话池,和定时任务同一条路径(`run_turn`,`initiator:"goal"`),
   会话用 `Builder::goal_rounds_from_owner()` 建;直接嵌入时 `Agent::run` 自己开。
@@ -879,6 +891,12 @@ release 构建记一条 error。
 - **武装不落盘**:每次变化以扩展条目(`ns:"agix.goal"`)记进会话日志,从日志恢复的目标一律不
   武装,要人说继续;daemon 在内存里原地重建会话时把武装和待开始的那一轮带过去。一轮以取消、
   hook 中止、预算耗尽或出错结束,也解除武装。
+- **目标的预算**:目标的各轮在用量链上插一层目标的节点(`SessionLedger::goal_spent`),`token_budget`
+  是它的上限,目标设下时从零算,只算目标的轮(不算设它的那一轮、也不算期间宿主或定时任务的轮)。
+  剩余付不起一次调用(不到 `MIN_CALL_TOKENS`)时,这一轮在调用前以 `budget_exceeded` 结束,目标转
+  `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复。节点的累计随 `agix.spend`
+  落盘,恢复时按目标 `id` 取回。模型设或改的目标,`max_rounds` 不超过设置的 `goal.max_rounds`
+  (`ModelAutonomy`,经 `EngineConfig` 给工具),宿主设的只受格式上限 10000 约束。
 
 ### 3.5 场景的工具面
 
@@ -2154,7 +2172,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `telemetry.enabled: false` | 丢弃:项目不能关掉审计记录 |
 | `telemetry.otlp_endpoint`、`recorder` | 丢弃:一个把遥测送到项目指定的地址,一个把宿主请求的录像写到项目指定的目录 |
 | `prompt.override` | 丢弃:它整个替换系统提示词(追加用的 `prompt.append` 照常) |
-| `turn`、`session`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`session.token_budget`、`agents.max_depth`、`agents.max_concurrent`) | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
+| `turn`、`session`、`goal`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`session.token_budget`、`goal.max_rounds`、`agents.max_depth`、`agents.max_concurrent`) | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
 | `prompt.instruction_files` | 丢弃:它按路径直接读进系统提示词,不过沙箱也不过 Read 的 `deny_read` |
 | `compaction.inline_result_chars` | 丢弃:项目不能改大结果外置的阈值 |
 | `app` | 整块丢弃:信任、历史位置、代理、worktree 目录都只认全局层 |

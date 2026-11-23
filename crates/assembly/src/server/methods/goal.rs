@@ -25,6 +25,7 @@ async fn set_goal(
     let change = GoalChange::Set {
         objective: params.objective,
         max_rounds: params.max_rounds,
+        token_budget: params.token_budget,
     };
     Ok(GoalResult {
         goal: s
@@ -46,6 +47,7 @@ async fn update_goal(
         GoalActionName::Edit => GoalChange::Edit {
             objective: params.objective,
             max_rounds: params.max_rounds,
+            token_budget: params.token_budget,
         },
     };
     Ok(GoalResult {

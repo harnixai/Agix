@@ -58,6 +58,7 @@ fn a_durable_state_the_log_did_not_take_is_handed_out_again() {
 async fn goal_changes_the_log_did_not_take_go_back_ahead_of_later_ones() {
     let goal = |objective: &str| {
         Some(base::context::goal::Goal {
+            token_budget: None,
             id: "g".into(),
             revision: 1,
             objective: objective.into(),

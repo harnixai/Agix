@@ -252,6 +252,20 @@
       },
       "type": "object"
     },
+    "GoalSettings": {
+      "additionalProperties": false,
+      "description": "What the model may give a goal it sets for itself.",
+      "properties": {
+        "max_rounds": {
+          "default": 10000,
+          "description": "The most automatic rounds a goal the model sets or edits\n(`GoalCreate`, `GoalUpdate`) may have; a larger `max_rounds` is\nlowered to it. A goal a host sets is not held to it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "HistoryLocation": {
       "description": "[`AppSettings::history`].",
       "enum": [
@@ -1197,6 +1211,12 @@
     "files": {
       "$ref": "#/$defs/FilesSettings",
       "default": {}
+    },
+    "goal": {
+      "$ref": "#/$defs/GoalSettings",
+      "default": {
+        "max_rounds": 10000
+      }
     },
     "hooks": {
       "description": "Lifecycle hooks: an object from event name (`PreToolUse`,\n`SessionStart`, … — `hooks::HookEvent`) to a list of hooks, each with\na `type` of `command`, `prompt`, `http` or `agent`. Tiers merge per\nevent: a tier that lists an event replaces the lower tiers' list for\nit. An unknown event name is skipped with a warning; the rest still\napply. Format: `docs/hooks.md`."

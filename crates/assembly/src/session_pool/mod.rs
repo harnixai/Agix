@@ -514,10 +514,12 @@ pub enum GoalChange {
     Set {
         objective: String,
         max_rounds: Option<u32>,
+        token_budget: Option<u64>,
     },
     Edit {
         objective: Option<String>,
         max_rounds: Option<u32>,
+        token_budget: Option<u64>,
     },
     Pause,
     Resume,

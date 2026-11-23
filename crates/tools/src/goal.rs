@@ -16,9 +16,14 @@ pub struct GoalCreateInput {
     /// What the session should achieve, stated so that its completion can be
     /// checked.
     pub objective: String,
-    /// How many automatic rounds the goal may use (default 256).
+    /// How many automatic rounds the goal may use (default 256, or the most
+    /// this deployment allows if that is fewer).
     #[serde(default)]
     pub max_rounds: Option<u32>,
+    /// The most tokens the goal's rounds may spend, sub-agents included; it
+    /// is blocked once they are spent. Leave it out for no limit.
+    #[serde(default)]
+    pub token_budget: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -48,6 +53,9 @@ pub struct GoalUpdateInput {
     /// With `edit`: the new round limit.
     #[serde(default)]
     pub max_rounds: Option<u32>,
+    /// With `edit`: the new token budget.
+    #[serde(default)]
+    pub token_budget: Option<u64>,
     /// With `blocked`: what is in the way.
     #[serde(default)]
     pub blocked_reason: Option<String>,
@@ -65,6 +73,20 @@ fn origin(ctx: &ToolContext) -> Result<TurnOrigin, Box<ToolResult>> {
 
 fn refused(e: GoalError) -> ToolResult {
     ToolResult::error_text(e.to_string())
+}
+
+/// `asked`, held to the most rounds this deployment lets the model give a
+/// goal, and a note saying so when it was lowered.
+fn rounds_allowed(asked: Option<u32>, ctx: &ToolContext) -> (Option<u32>, u32, String) {
+    let limit = ctx.config.model_autonomy.goal_max_rounds;
+    match asked {
+        Some(n) if n > limit => (
+            Some(limit),
+            limit,
+            format!("max_rounds was lowered to {limit}, the most this deployment allows.\n"),
+        ),
+        asked => (asked, limit, String::new()),
+    }
 }
 
 fn view_result(view: base::context::goal::GoalView, note: &str) -> ToolResult {
@@ -111,15 +133,20 @@ impl Tool for GoalCreateTool {
             Ok(o) => o,
             Err(r) => return Ok(*r),
         };
+        let (max_rounds, max_rounds_limit, lowered) = rounds_allowed(input.max_rounds, &ctx);
+        let limits = base::context::goal::GoalLimits {
+            max_rounds,
+            token_budget: input.token_budget,
+            max_rounds_limit,
+        };
         Ok(
-            match ctx
-                .session
-                .goal_create(input.objective, input.max_rounds, origin)
-            {
+            match ctx.session.goal_create(input.objective, limits, origin) {
                 Ok(view) => view_result(
                     view,
-                    "Goal set. Work on it now; when this turn ends, automatic rounds continue \
-                     until you mark it complete.\n",
+                    &format!(
+                        "Goal set. Work on it now; when this turn ends, automatic rounds \
+                         continue until you mark it complete.\n{lowered}"
+                    ),
                 ),
                 Err(e) => refused(e),
             },
@@ -198,13 +225,16 @@ impl Tool for GoalUpdateTool {
             Ok(o) => o,
             Err(r) => return Ok(*r),
         };
+        let (max_rounds, max_rounds_limit, lowered) = rounds_allowed(input.max_rounds, &ctx);
+        let edited = format!("Goal updated.\n{lowered}");
         let (action, note) = match input.action {
             GoalUpdateAction::Edit => (
                 GoalAction::Edit {
                     objective: input.objective,
-                    max_rounds: input.max_rounds,
+                    max_rounds,
+                    token_budget: input.token_budget,
                 },
-                "Goal updated.\n",
+                edited.as_str(),
             ),
             GoalUpdateAction::Pause => (GoalAction::Pause, "Goal paused.\n"),
             GoalUpdateAction::Resume => (
@@ -230,10 +260,13 @@ impl Tool for GoalUpdateTool {
             }
         };
         Ok(
-            match ctx
-                .session
-                .goal_update(&input.goal_id, input.revision, action, origin)
-            {
+            match ctx.session.goal_update(
+                &input.goal_id,
+                input.revision,
+                action,
+                origin,
+                max_rounds_limit,
+            ) {
                 Ok(view) => view_result(view, note),
                 Err(e) => refused(e),
             },

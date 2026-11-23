@@ -113,6 +113,7 @@ impl SessionPool {
             return Ok(state.goal_view());
         }
         let entries = self.directory.load_entries(sid).await?;
+        let spent = runtime::turn::recorded_spend(&entries).and_then(|record| record.goal);
         let goal: Option<base::context::goal::Goal> = entries
             .iter()
             .rev()
@@ -126,7 +127,11 @@ impl SessionPool {
                 _ => None,
             })
             .and_then(|goal| serde_json::from_value(goal).ok());
-        Ok(base::context::goal::GoalSlot::restored(goal).view())
+        let tokens_used = match (&goal, spent) {
+            (Some(goal), Some(spent)) if spent.id == goal.id => spent.spent.counted_tokens(),
+            _ => 0,
+        };
+        Ok(base::context::goal::GoalSlot::restored(goal).view(tokens_used))
     }
 
     /// `session.setGoal` / `session.updateGoal`: a host acts on the goal with
@@ -146,6 +151,7 @@ impl SessionPool {
             .await
             .ok_or_else(|| PoolError::session_not_found(sid))?;
         let human = base::context::goal::TurnOrigin::Human;
+        let rounds_limit = base::context::goal::MAX_ROUNDS_LIMIT;
         let current = || {
             state
                 .goal_view()
@@ -158,39 +164,41 @@ impl SessionPool {
             GoalChange::Set {
                 objective,
                 max_rounds,
+                token_budget,
             } => {
+                let limits = base::context::goal::GoalLimits::asked(max_rounds, token_budget);
                 state
-                    .goal_create(objective, max_rounds, human)
+                    .goal_create(objective, limits, human)
                     .map_err(invalid)?;
             }
             GoalChange::Clear => state.goal_clear(human).map_err(invalid)?,
             GoalChange::Pause => {
                 let (id, rev) = current();
+                let pause = base::context::goal::GoalAction::Pause;
                 state
-                    .goal_update(&id, rev, base::context::goal::GoalAction::Pause, human)
+                    .goal_update(&id, rev, pause, human, rounds_limit)
                     .map_err(invalid)?;
             }
             GoalChange::Resume => {
                 let (id, rev) = current();
+                let resume = base::context::goal::GoalAction::Resume;
                 state
-                    .goal_update(&id, rev, base::context::goal::GoalAction::Resume, human)
+                    .goal_update(&id, rev, resume, human, rounds_limit)
                     .map_err(invalid)?;
             }
             GoalChange::Edit {
                 objective,
                 max_rounds,
+                token_budget,
             } => {
                 let (id, rev) = current();
+                let edit = base::context::goal::GoalAction::Edit {
+                    objective,
+                    max_rounds,
+                    token_budget,
+                };
                 state
-                    .goal_update(
-                        &id,
-                        rev,
-                        base::context::goal::GoalAction::Edit {
-                            objective,
-                            max_rounds,
-                        },
-                        human,
-                    )
+                    .goal_update(&id, rev, edit, human, rounds_limit)
                     .map_err(invalid)?;
             }
         }

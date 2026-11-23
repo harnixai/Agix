@@ -86,6 +86,25 @@ pub struct EngineConfig {
     pub deferred_tools: std::sync::Arc<std::collections::HashSet<String>>,
     /// Where a tool result too long for the conversation is kept.
     pub tool_results: ToolResultLimits,
+    /// What the model may set going for itself beyond the turn it is asked
+    /// in.
+    pub model_autonomy: ModelAutonomy,
+}
+
+/// The ceilings on what the model starts running for itself: the goals it
+/// sets (`goal.*`). A host acting for a person is not held to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelAutonomy {
+    /// The most rounds a goal the model sets or edits may have.
+    pub goal_max_rounds: u32,
+}
+
+impl Default for ModelAutonomy {
+    fn default() -> Self {
+        Self {
+            goal_max_rounds: crate::context::goal::MAX_ROUNDS_LIMIT,
+        }
+    }
 }
 
 /// How long a tool result may be before it is saved to a file and the model
@@ -252,6 +271,7 @@ impl EngineConfig {
             path_style: PathStyle::default(),
             deferred_tools: Default::default(),
             tool_results: ToolResultLimits::default(),
+            model_autonomy: ModelAutonomy::default(),
         }
     }
 }

@@ -321,11 +321,13 @@ fn daemon_frames() -> Vec<(&'static str, Value)> {
             objective: "ship".into(),
             phase: base::context::goal::GoalPhase::Active,
             max_rounds: 256,
+            token_budget: None,
             rounds_started: 0,
             rounds_since_armed: 0,
             blocked_reason: None,
         },
         armed: true,
+        tokens_used: 0,
     };
     vec![
         (
