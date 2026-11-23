@@ -233,7 +233,7 @@ pub enum LockFileError {
 /// Protocol version this daemon speaks, as reported in `instances.d/`
 /// entries and by `daemon.auth`, `daemon.status` and `daemon.ping`
 /// (`docs/daemon_rpc_protocol.md` §5).
-pub const INSTANCE_PROTOCOL_VERSION: u32 = 4;
+pub const INSTANCE_PROTOCOL_VERSION: u32 = 5;
 
 /// What this daemon can do beyond the protocol version, named so a client can
 /// check for one feature rather than infer it from a version number.

@@ -3,7 +3,7 @@
 daemon(`agixd`)把一个多会话 Agent 引擎池暴露成 JSON-RPC 2.0 服务。
 本文回答"怎么用它":怎么连上、有哪些方法、事件怎么读、错误怎么分辨。
 
-**协议版本:4**(`daemon.auth`、`daemon.ping`、`daemon.status` 的 `protocol_version`,以及发现文件里的同名字段)。
+**协议版本:5**(`daemon.auth`、`daemon.ping`、`daemon.status` 的 `protocol_version`,以及发现文件里的同名字段)。
 
 机器可读的接口描述:[`schemas/rpc.schema.json`](schemas/rpc.schema.json)(每个方法的 params 和 result,可选模块的方法带 `module` 字段;`daemon.event` 每个 `kind` 的字段;`session.event` 的 `kind` 名字,其字段只标注"未类型化",以 §7 为准;错误码),由 `cargo test -p assembly write_rpc_schema -- --ignored` 生成。
 
@@ -117,7 +117,7 @@ read-modify-write 同一个索引文件而丢更新。读取方 `read_dir` 汇�
   "unix_socket_auth": true,             // 仅在 --unix-socket-auth 时出现:socket 也要先 daemon.auth
   "token_file": "/Users/x/.agix/daemon/auth/desktop.token", // 仅在 daemon 自己生成了 token 时出现
   "scenes": ["code", "harnix", "mini"],
-  "protocol_version": 4,
+  "protocol_version": 5,
   "started_at": "2026-08-11T10:00:00Z" }
 ```
 
@@ -611,7 +611,7 @@ TCP 与 WebSocket 需要(开了 `--unix-socket-auth` 时 unix socket 也要),都
 ```jsonc
 { "jsonrpc":"2.0", "method":"daemon.auth", "params":{"token":"…"}, "id":0 }
 ← { "jsonrpc":"2.0", "id":0, "result":{"authenticated":true,
-      "version":"…", "protocol_version":4, "capabilities":["…"]} }
+      "version":"…", "protocol_version":5, "capabilities":["…"]} }
 ```
 
 `version` 是 daemon 二进制的版本,`protocol_version` 是本文描述的协议版本,
@@ -811,7 +811,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 
 ```jsonc
 // ← result
-{ "pong": true, "version": "…", "protocol_version": 4,
+{ "pong": true, "version": "…", "protocol_version": 5,
   "capabilities": ["on_busy_steer", "subscription_dropped_notice", "…"],
   "modules": ["mcp", "agents", "skills", "scripts", "plugin-packages"] }
 ```
@@ -873,7 +873,7 @@ tab 不能拖住 turn,也不能拖住其他正在看的 tab。被取消的一方
 ```jsonc
 // ← result
 { "version": "…",         // daemon 二进制版本
-  "protocol_version": 4,
+  "protocol_version": 5,
   "capabilities": ["…"],  // 同 daemon.ping
   "modules": ["…"],       // 同 daemon.ping
   "uptime_secs": "…",     // 数字,秒
@@ -2502,7 +2502,7 @@ tool-results/<name>                      只在 include 列了 "tool_results"(�
 
 ```jsonc
 { "format": "agix.session-export", "format_version": 1,
-  "engine_version": "…", "protocol_version": 4,
+  "engine_version": "…", "protocol_version": 5,
   "cut_at": "…", "root_session_id": "…",
   "include": ["sidechains", "attachments", "tool_results"],
   "importable": true,
