@@ -303,7 +303,7 @@ fn permission(tool: &str, case: RuleCase) -> Policy {
                     action: RuleBehavior::Ask,
                     matching: Default::default(),
                 }],
-                disable_bypass: false,
+                ..base::permission::ManagedSettings::default()
             });
         }
     }
@@ -775,8 +775,7 @@ async fn every_stage_of_the_policy_is_reached() {
     unreadable.managed = Some(base::permission::ManagedSettings {
         origin: "matrix".into(),
         error: Some("not JSON".into()),
-        rules: Vec::new(),
-        disable_bypass: false,
+        ..base::permission::ManagedSettings::default()
     });
     let deny_bash = [PermissionRule {
         source: RuleSource::Session,

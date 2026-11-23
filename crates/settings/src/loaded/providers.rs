@@ -8,7 +8,7 @@ use base::provider::ProviderConfig;
 use super::{LayerFold, LoadedSettings, ProviderOrigin};
 use crate::Settings;
 
-pub(super) const PROVIDERS: &str = "providers";
+pub(crate) const PROVIDERS: &str = "providers";
 
 /// What `model.tasks.main` is at the first provider of `model.order`; `None`
 /// when the providers do not route.
@@ -30,6 +30,58 @@ const PROVIDER_KEYS: &[&str] = &[
     "quota",
 ];
 
+/// Dotted settings keys, each with something about it.
+type Keyed<T> = Vec<(String, T)>;
+
+/// The entries of a layer's `providers` that read, each with its dotted key,
+/// and what in it does not, with why: an entry that does not read is left out
+/// whole.
+pub(crate) fn read_providers(value: serde_json::Value) -> (Keyed<ProviderConfig>, Keyed<String>) {
+    let entries = match value {
+        serde_json::Value::Array(entries) => entries,
+        serde_json::Value::Object(_) => {
+            let error = "`providers` is a list of entries, each with its `id`, not an \
+                         object keyed by id";
+            return (Vec::new(), vec![(PROVIDERS.into(), error.into())]);
+        }
+        _ => {
+            let error = "`providers` is a list of entries";
+            return (Vec::new(), vec![(PROVIDERS.into(), error.into())]);
+        }
+    };
+    let mut read = Vec::new();
+    let mut unread = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let key = format!("{PROVIDERS}[{index}]");
+        let unknown: Vec<String> = entry
+            .as_object()
+            .into_iter()
+            .flat_map(|fields| fields.keys())
+            .filter(|field| !PROVIDER_KEYS.contains(&field.as_str()))
+            .cloned()
+            .collect();
+        if !unknown.is_empty() {
+            for field in unknown {
+                let key = format!("{key}.{field}");
+                let error = crate::renamed::explain(
+                    &key,
+                    "not a provider setting; the entry is ignored".to_string(),
+                );
+                unread.push((key, error));
+            }
+            continue;
+        }
+        match serde_json::from_value::<ProviderConfig>(entry) {
+            Ok(provider) => match ProviderConfig::id_problem(&provider.id) {
+                Some(problem) => unread.push((key, problem)),
+                None => read.push((key, provider)),
+            },
+            Err(e) => unread.push((key, e.to_string())),
+        }
+    }
+    (read, unread)
+}
+
 impl LayerFold<'_> {
     /// A layer's `providers` added to those of the layers before it; an id
     /// they already define is ignored.
@@ -40,52 +92,11 @@ impl LayerFold<'_> {
         machine_local: bool,
         value: serde_json::Value,
     ) {
-        let entries = match value {
-            serde_json::Value::Array(entries) => entries,
-            serde_json::Value::Object(_) => {
-                let error = "`providers` is a list of entries, each with its `id`, not an \
-                             object keyed by id"
-                    .to_string();
-                return self.ignore(tier, origin, PROVIDERS.into(), error);
-            }
-            _ => {
-                let error = "`providers` is a list of entries".to_string();
-                return self.ignore(tier, origin, PROVIDERS.into(), error);
-            }
-        };
-        for (index, entry) in entries.into_iter().enumerate() {
-            let key = format!("{PROVIDERS}[{index}]");
-            let unknown: Vec<String> = entry
-                .as_object()
-                .into_iter()
-                .flat_map(|fields| fields.keys())
-                .filter(|field| !PROVIDER_KEYS.contains(&field.as_str()))
-                .cloned()
-                .collect();
-            if !unknown.is_empty() {
-                for field in unknown {
-                    let key = format!("{key}.{field}");
-                    let error = crate::renamed::explain(
-                        &key,
-                        "not a provider setting; the entry is ignored".to_string(),
-                    );
-                    self.ignore(tier, origin, key, error);
-                }
-                continue;
-            }
-            let provider = match serde_json::from_value::<ProviderConfig>(entry) {
-                Ok(provider) => match ProviderConfig::id_problem(&provider.id) {
-                    Some(problem) => {
-                        self.ignore(tier, origin, key, problem);
-                        continue;
-                    }
-                    None => provider,
-                },
-                Err(e) => {
-                    self.ignore(tier, origin, key, e.to_string());
-                    continue;
-                }
-            };
+        let (providers, unread) = read_providers(value);
+        for (key, error) in unread {
+            self.ignore(tier, origin, key, error);
+        }
+        for (key, provider) in providers {
             if let Some(first) = self.provider_origins.get(&provider.id) {
                 let error = format!(
                     "provider `{}` is already defined in {}; this one is ignored",

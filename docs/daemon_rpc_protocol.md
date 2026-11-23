@@ -1002,18 +1002,19 @@ daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,
 
 ```jsonc
 { "name":"settings.managed", "status":"ok",
-  "summary":"managed settings from /etc/agix/managed-settings.json: 1 permission rule(s)",
+  "summary":"managed settings from /etc/agix/managed-settings.json: 1 permission rule(s), sets sandbox",
   "details": { "present":true,
                "path":"/etc/agix/managed-settings.json",   // 查找的路径(--managed-settings 或系统路径)
                "origin":"/etc/agix/managed-settings.json", // 这一层的来源
                "error":null,                               // 不能执行时的原因
-               "permissions":{ "deny":["Bash(curl:*)"], "disable_bypass":false } } }
+               "settings":{ "sandbox":{ "require":true },  // 它设的一切,设置文件的形状
+                            "permissions":{ "deny":["Bash(curl:*)"], "disable_bypass":false } } } }
 ```
 
 系统路径上没有这个文件时是 `ok`,`details` 只有 `{ "present": false, "path": "…" }`;用 `--managed-settings` 点名的文件不存在时是 `failing`(点名的路径不会悄悄当成没有 managed 设置)。文件读不了、
-不是 JSON、有 `permissions` / `$schema` 以外的键(或 `permissions` 里有 `allow` / `allow_exact` / `ask` / `deny` / `disable_bypass` 以外的键)、
-值的形状不对或有写不成规则的规则时是 `failing`:这时**所有工具调用都被拒绝**,任何权限模式
-都一样。
+不是 JSON、有没有设置读的键(或改了名的旧键)、值放不进它的设置、有写不成规则的规则或写了引擎专用的权限模式时是
+`failing`:这时它**一个值都不生效、所有工具调用都被拒绝**,任何权限模式都一样。它能设任何设置键,写了的键压过
+设置文件、`agixd --set`、宿主在内存里改的值和会话的 `options.settings`(`ARCHITECTURE.md` §6.1)。
 
 编入了 mcp 模块的构建,`health.checks` 里还有一项 `mcp.policy`(排在 `settings.managed` 之后、`project.trust` 之前),说明在执行
 哪一份 MCP 策略(`ARCHITECTURE.md` §6.4):
@@ -3148,9 +3149,10 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 并列生效;`config.reload` 重读的是它下面的文件,它本身不变。`config.set` 不写它。
 
 `managed` 只在 `tier: "effective"` 时有内容:部署方的 managed 层
-(`{ "origin", "permissions": { "allow"?, "allow_exact"?, "ask"?, "deny"?, "disable_bypass" } }`,不能执行时另有
-`error`),没有这一层时是 `null`。它不并进 `settings`——合并后的 `settings` 不含 `permissions` 的规则列表,各层
-设置文件里的规则与 managed 层的规则都在别处单列,裁决时一起生效。
+(`{ "origin", <它设的键,设置文件的形状>, "permissions": { "allow"?, "allow_exact"?, "ask"?, "deny"?, "disable_bypass", … } }`,
+不能执行时另有 `error`、不带别的键),没有这一层时是 `null`。它设的值已经套进 `effective` 的 `settings`,压在各层之上;
+规则列表不并进——合并后的 `settings` 不含 `permissions` 的规则列表,各层设置文件里的规则与 managed 层的规则都在
+别处单列,裁决时一起生效。
 
 **该层没有文件时 `settings` 是 `null`,不是 `{}`** —— "这层没配"和"这层配了个空的"
 是两种状态,配置界面得能区分。`tier: "project"` 而没给 `project_root` 同理。

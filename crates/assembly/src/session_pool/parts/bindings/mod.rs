@@ -18,7 +18,7 @@ pub(in crate::session_pool) use host_dirs::{report_skill_dirs, AcceptedDir, Host
 pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
-use crate::settings_source::{read_pair, read_pair_as_if};
+use crate::settings_source::{read_pair, read_pair_as_if, Above};
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
 use base::paths::{entry, StateRoot};
 use model::client::AnthropicClient;
@@ -88,6 +88,14 @@ impl Layers {
         Self { cli, host, managed }
     }
 
+    /// What a read of a pair's files puts above them.
+    fn above_files(&self) -> Above<'_> {
+        Above {
+            cli: self.cli.as_ref(),
+            managed: self.managed.settings.as_ref(),
+        }
+    }
+
     /// `loaded` with what the host changed in memory, then the managed layer;
     /// `own` also brings back the rules the host added to this daemon's own
     /// pair.
@@ -145,11 +153,12 @@ pub(in crate::session_pool) struct PairReader {
     scene: String,
     default_model: String,
     cli: Option<serde_json::Value>,
+    managed: Option<base::permission::ManagedSettings>,
 }
 
 impl PairReader {
-    /// The pair's settings with each `(path, value)` in place of that file;
-    /// neither the host's nor the managed layer.
+    /// The pair's settings with each `(path, value)` in place of that file,
+    /// the managed layer on top; without the host's.
     pub(in crate::session_pool) fn read_as_if(
         &self,
         in_memory: Vec<(PathBuf, serde_json::Value)>,
@@ -162,7 +171,10 @@ impl PairReader {
             &self.layout,
             &self.scene,
             &self.default_model,
-            self.cli.as_ref(),
+            Above {
+                cli: self.cli.as_ref(),
+                managed: self.managed.as_ref(),
+            },
         )
     }
 
@@ -178,17 +190,18 @@ impl PairReader {
 }
 
 /// The host's settings for this daemon's own pair as the pool serves them:
-/// read again for `cwd` when the host read them for another project, with
-/// what the host changed in memory and `managed` on top, so the pair's project
-/// tier, its `settings.local.json` and the directory its sessions work in are
-/// all `cwd`'s.
+/// read again for `cwd` when the host read them for another project or there
+/// is a managed layer, which they were not read with; then what the host changed in
+/// memory and the managed layer on top, so the pair's project tier, its
+/// `settings.local.json`, the directory its sessions work in and whether the
+/// project is trusted are all as the pool decides them.
 pub(in crate::session_pool) fn own_settings_in(
     cwd: &Path,
     host: Arc<LoadedSettings>,
     paths: &dyn crate::config::DaemonPaths,
     layers: &Layers,
 ) -> Arc<LoadedSettings> {
-    if host.paths.workspace.project_root() == Some(cwd) {
+    if host.paths.workspace.project_root() == Some(cwd) && layers.managed.settings.is_none() {
         return host;
     }
     let loaded = read_pair(
@@ -198,7 +211,7 @@ pub(in crate::session_pool) fn own_settings_in(
         &paths.layout(),
         &host.paths.scope,
         &host.default_model,
-        layers.cli.as_ref(),
+        layers.above_files(),
     );
     Arc::new(layers.over(loaded, true))
 }
@@ -271,12 +284,13 @@ impl BindingCache {
     async fn load_pair_as(&self, project: Option<&Path>, scene: &str, own: bool) -> LoadedSettings {
         let startup_scene = self.startup_scene().await;
         let default_model = self.settings.read().await.default_model.clone();
-        let (global_root, scene_root, scene, project, cli) = (
+        let (global_root, scene_root, scene, project, cli, managed) = (
             self.paths.global_root(),
             self.scene_root(scene, &startup_scene),
             scene.to_string(),
             project.map(Path::to_path_buf),
             self.layers.cli.clone(),
+            self.layers.managed.settings.clone(),
         );
         let layout = self.paths.layout();
         let loaded = off_the_runtime(move || {
@@ -287,7 +301,10 @@ impl BindingCache {
                 &layout,
                 &scene,
                 &default_model,
-                cli.as_ref(),
+                Above {
+                    cli: cli.as_ref(),
+                    managed: managed.as_ref(),
+                },
             )
         })
         .await;
@@ -310,6 +327,7 @@ impl BindingCache {
             scene: scene.to_string(),
             default_model: self.settings.read().await.default_model.clone(),
             cli: self.layers.cli.clone(),
+            managed: self.layers.managed.settings.clone(),
         }
     }
 

@@ -97,6 +97,26 @@ impl ProjectTrustSettings {
         out
     }
 
+    /// These settings with what the managed layer's `app` block says in their
+    /// place: its `trust_all_projects`, and its `trusted_projects` as the
+    /// whole list.
+    pub fn decided_by(mut self, app: &Value) -> Self {
+        match app.get("trust_all_projects") {
+            Some(Value::Bool(true)) => self.default = TrustLevel::Trusted,
+            Some(Value::Bool(false)) => self.default = TrustLevel::Untrusted,
+            _ => {}
+        }
+        if let Some(list) = app.get("trusted_projects").and_then(Value::as_array) {
+            self.trusted = list
+                .iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect();
+            self.recorded_by_host.clear();
+        }
+        self
+    }
+
     /// What the global tier said, over `app`: the `trusted_projects` of both
     /// of its files, not only the higher one's as a merge would leave them.
     pub fn write_into(self, app: &mut crate::AppSettings) {

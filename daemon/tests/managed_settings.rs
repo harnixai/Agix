@@ -1,7 +1,9 @@
 //! The deployment's managed settings over the wire: a `deny` in them holds in a
 //! `bypassPermissions` session, `permissions.disable_bypass` takes that
-//! mode away, a file that cannot be honoured refuses every tool call, and
-//! `daemon.doctor` / `config.get` say where the layer came from.
+//! mode away, any other key they set stands over the user's files, the
+//! command line and a session's own settings, a file that cannot be honoured
+//! refuses every tool call, and `daemon.doctor` / `config.get` say where the
+//! layer came from.
 
 use crate::support::{stop, text_round};
 use std::path::{Path, PathBuf};
@@ -85,14 +87,26 @@ impl Daemon {
         prompt_timeout: Duration,
         configure: impl FnOnce(&mut daemon::config::DaemonConfig),
     ) -> Self {
+        Self::start_on(managed, prompt_timeout, |_| None, configure).await
+    }
+
+    /// [`Self::start_with`] after `prepare` was handed the state root, to
+    /// write the user's settings there; what it returns is the `cli` layer.
+    async fn start_on(
+        managed: Option<&str>,
+        prompt_timeout: Duration,
+        prepare: impl FnOnce(&Path) -> Option<serde_json::Value>,
+        configure: impl FnOnce(&mut daemon::config::DaemonConfig),
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (home, work) = (dir.path().join("home"), dir.path().join("work"));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
+        let cli = prepare(&home);
         let sock = dir.path().join("managed.sock");
         let paths =
             StaticDaemonPaths::with_project(home.clone(), work.clone()).with_global(home.clone());
-        let mut config = load_daemon_config("claude-sonnet-4-6", None, Some(&sock), "code", &paths);
+        let mut config = load_daemon_config("claude-sonnet-4-6", cli, Some(&sock), "code", &paths);
         config.settings.values.memory.enabled = false;
         config.settings.values.permissions.mode = PermissionMode::BypassPermissions;
         config.settings.values.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
@@ -315,9 +329,9 @@ async fn disabled_bypass_holds_over_a_session_the_settings_let_loosen() {
 }
 
 #[tokio::test]
-async fn a_managed_file_with_a_key_it_may_not_set_refuses_every_tool_call() {
+async fn a_managed_file_with_a_key_no_setting_reads_refuses_every_tool_call() {
     let d = Daemon::start(
-        Some(r#"{"permissions": {"mode": "bypassPermissions"}}"#),
+        Some(r#"{"sandbox": {"require": true}, "permissions": {"modes": "default"}}"#),
         Duration::from_secs(30),
     )
     .await;
@@ -333,8 +347,116 @@ async fn a_managed_file_with_a_key_it_may_not_set_refuses_every_tool_call() {
         managed["summary"]
             .as_str()
             .unwrap()
-            .contains("permissions.mode"),
+            .contains("permissions.modes"),
         "{managed}"
+    );
+    let (_, config) = d
+        .call("config.get", json!({"scene": "code", "tier": "effective"}))
+        .await;
+    assert_eq!(
+        config["result"]["settings"]["sandbox"]["require"], false,
+        "{config}"
+    );
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn a_managed_value_that_does_not_fit_refuses_every_tool_call() {
+    let d = Daemon::start(
+        Some(r#"{"turn": {"token_budget": "lots"}}"#),
+        Duration::from_secs(30),
+    )
+    .await;
+    let frames = d.run_turn(json!({})).await;
+    let results = tool_results(&frames);
+    assert!(!d.marker().exists(), "the command ran: {results}");
+    assert!(results.contains("managed settings"), "{results}");
+    d.stop().await;
+}
+
+async fn project_trust(d: &Daemon, project: &Path) -> serde_json::Value {
+    let (_, status) = d
+        .call("project.status", json!({"project_root": project}))
+        .await;
+    status["result"]["trust"].clone()
+}
+
+#[tokio::test]
+async fn a_managed_trust_decision_stands_over_the_users() {
+    let other = tempfile::tempdir().unwrap();
+    let trusting_user = |home: &Path| {
+        std::fs::write(
+            home.join("settings.json"),
+            r#"{"app": {"trust_all_projects": true}}"#,
+        )
+        .unwrap();
+        None
+    };
+    let plain = Daemon::start_on(None, Duration::from_secs(30), trusting_user, |_| {}).await;
+    assert_eq!(project_trust(&plain, &plain.work).await, "trusted");
+    assert_eq!(project_trust(&plain, other.path()).await, "trusted");
+    plain.stop().await;
+
+    let d = Daemon::start_on(
+        Some(r#"{"app": {"trust_all_projects": false}}"#),
+        Duration::from_secs(30),
+        trusting_user,
+        |_| {},
+    )
+    .await;
+    assert_eq!(project_trust(&d, &d.work).await, "untrusted");
+    assert_eq!(project_trust(&d, other.path()).await, "untrusted");
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn a_managed_value_stands_over_the_command_line() {
+    let d = Daemon::start_on(
+        Some(r#"{"sandbox": {"require": true}}"#),
+        Duration::from_secs(30),
+        |_| Some(json!({"sandbox": {"require": false}})),
+        |_| {},
+    )
+    .await;
+    let (_, config) = d
+        .call("config.get", json!({"scene": "code", "tier": "effective"}))
+        .await;
+    assert_eq!(
+        config["result"]["settings"]["sandbox"]["require"], true,
+        "{config}"
+    );
+    let (_, cli) = d
+        .call("config.get", json!({"scene": "code", "tier": "cli"}))
+        .await;
+    assert_eq!(
+        cli["result"]["settings"]["sandbox"]["require"], false,
+        "{cli}"
+    );
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn a_managed_value_stands_over_a_session_the_settings_let_loosen() {
+    let d = Daemon::start_with(
+        Some(r#"{"turn": {"token_budget": 1000}}"#),
+        Duration::from_secs(30),
+        |config| config.settings.values.permissions.client_may_loosen = true,
+    )
+    .await;
+    let (_, created) = d
+        .call(
+            "session.create",
+            json!({"options": {"settings": {"turn": {"token_budget": 5000, "max_model_calls": 3}}}}),
+        )
+        .await;
+    assert_eq!(
+        created["result"]["clamped_options"],
+        json!([{
+            "field": "settings.turn.token_budget",
+            "requested": 5000,
+            "applied": 1000,
+        }]),
+        "{created}"
     );
     d.stop().await;
 }

@@ -311,7 +311,10 @@ pub fn load_daemon_config(
         &paths.layout(),
         scope,
         cli_model,
-        cli_settings.as_ref(),
+        crate::settings_source::Above {
+            cli: cli_settings.as_ref(),
+            managed: None,
+        },
     );
 
     let socket_path = cli_socket
@@ -341,13 +344,29 @@ pub fn load_daemon_config(
 }
 
 /// What the settings' `app` block says for the process at the state root
-/// `root`, its global tier with `cli_settings` over it: read before the
-/// process starts anything, as `agixd` sizes its runtime from it.
+/// `root`: its global tier with `cli_settings` over it and the managed
+/// settings over both — the file at `managed_settings_path`, which must
+/// exist, else the platform's. Read before the process starts anything, as
+/// `agixd` sizes its runtime from it.
 pub fn process_settings(
     root: &Path,
     cli_settings: Option<&serde_json::Value>,
+    managed_settings_path: Option<&Path>,
 ) -> settings::AppSettings {
-    crate::settings_source::read_app(root, cli_settings)
+    let managed = match managed_settings_path {
+        Some(path) => crate::settings_source::read_managed(path, true),
+        None => crate::settings_source::read_managed(
+            &base::paths::Layout::default().managed_settings_file(),
+            false,
+        ),
+    };
+    crate::settings_source::read_app(
+        root,
+        crate::settings_source::Above {
+            cli: cli_settings,
+            managed: managed.as_ref(),
+        },
+    )
 }
 
 /// Where the process at the state root `root` leaves its crash reports.

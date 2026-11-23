@@ -19,12 +19,14 @@ use base::provider::ProviderConfig;
 
 use crate::merge::{merge_fitting, merge_json_values};
 
+mod managed_layer;
 mod providers;
 use crate::permissions::{self, read_rule_list, take_rule_lists};
 use crate::section::Sections;
 use crate::trust::{self, ProjectLayer, ProjectTrustSettings};
 use crate::{unknown_settings_keys, FileTiers, IgnoredValue, Settings};
-use providers::PROVIDERS;
+pub(crate) use managed_layer::providers_first;
+pub(crate) use providers::{read_providers, PROVIDERS};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -229,15 +231,18 @@ impl LoadedSettings {
         let mut merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
         seed_section_defaults(&mut merged_json, sections);
 
-        let layers = source.layers();
+        let (managed, layers) = managed_layer::split_off(source.layers(), sections);
         let tiers = TierView::of(&global_dir, &scene_dir, &local_dir);
         let own_project = tiers.own_project;
 
-        let project_trust = ProjectTrustSettings::from_layers(
-            layers
-                .iter()
-                .filter(|l| tiers.is_global(l.tier))
-                .map(|l| (&l.value, l.machine_local)),
+        let project_trust = managed_layer::trust_under(
+            ProjectTrustSettings::from_layers(
+                layers
+                    .iter()
+                    .filter(|l| tiers.is_global(l.tier))
+                    .map(|l| (&l.value, l.machine_local)),
+            ),
+            managed.as_ref(),
         );
         let project_layer =
             project_trust.decide_tier(own_project, &local_dir, &global_dir, &scene_dir);
@@ -254,7 +259,6 @@ impl LoadedSettings {
             loaded_rules: Vec::new(),
             project_layer,
             ignored: Vec::new(),
-            managed: None,
             mcp_server_dirs: HashMap::new(),
             mcp_secret_vars: Vec::new(),
             providers: Vec::new(),
@@ -269,7 +273,6 @@ impl LoadedSettings {
             loaded_rules,
             mut project_layer,
             ignored,
-            managed,
             mcp_server_dirs,
             mcp_secret_vars,
             provider_origins,
@@ -310,21 +313,6 @@ impl LoadedSettings {
             tracing::warn!(error = %e, "app.worktree_dir is not allowed, the worktrees stay where they were");
         }
         loaded.with_managed(managed)
-    }
-
-    /// Put the deployment's layer on top of these settings, replacing any
-    /// managed layer they already carry. With bypass disabled, a
-    /// `bypassPermissions` the lower tiers configured becomes `default`.
-    pub fn with_managed(mut self, managed: Option<ManagedSettings>) -> Self {
-        if let Some(m) = &managed {
-            if m.disable_bypass && self.values.permissions.mode == PermissionMode::BypassPermissions
-            {
-                tracing::warn!(origin = %m.origin, "managed settings disable bypassPermissions; permissions.mode falls back to default");
-                self.values.permissions.mode = PermissionMode::Default;
-            }
-        }
-        self.managed = managed;
-        self
     }
 
     /// These settings as if the loader had decided `layer` about the project
@@ -457,7 +445,6 @@ struct LayerFold<'a> {
     loaded_rules: Vec<LoadedRule>,
     project_layer: ProjectLayer,
     ignored: Vec<IgnoredValue>,
-    managed: Option<ManagedSettings>,
     mcp_server_dirs: HashMap<String, PathBuf>,
     mcp_secret_vars: Vec<String>,
     providers: Vec<ProviderConfig>,
@@ -467,14 +454,6 @@ struct LayerFold<'a> {
 
 impl LayerFold<'_> {
     fn apply(&mut self, layer: base::interface::config_source::ConfigLayer) {
-        if layer.tier == Tier::Managed {
-            let this = crate::managed::from_value(layer.origin, layer.value);
-            self.managed = Some(match self.managed.take() {
-                Some(earlier) => earlier.followed_by(this),
-                None => this,
-            });
-            return;
-        }
         if layer.tier == Tier::Cli {
             merge_json_values(
                 self.cli_layer.get_or_insert(serde_json::json!({})),
@@ -687,7 +666,7 @@ fn warn_of_keys_not_read(layer: &base::interface::config_source::ConfigLayer, se
 
 /// The entries of a layer's `mcp.servers` that declare a server, without the
 /// `enabled` beside its configuration.
-fn mcp_servers_declared(
+pub(crate) fn mcp_servers_declared(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> Vec<(String, serde_json::Value)> {
     let Some(servers) = obj

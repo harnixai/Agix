@@ -484,7 +484,8 @@ MCP 连接、脚本绑定的 root、记忆目录、transcript 目录。
 (`Tier::Cli`),`settings_source::read_pair` 把它排在三层设置文件之上,读进每一对 `(项目, 场景)`,与文件走
 同一条合并:按全局层的规矩合(`app` 照收,不受项目信任门禁),`permissions` 规则列表与各层并列生效、来源记为
 `CliArg`,放不进的值进 `ignored_values`、层名 `cli`。它是每次读盘的一部分,所以绑定作废、`config.reload`
-之后照样在;宿主在内存里改过的值(`HostOverrides`)与 managed 层仍叠在它上面。启动时对守护进程自己那一对
+之后照样在;宿主在内存里改过的值(`HostOverrides`)与 managed 层仍叠在它上面,managed 写了的键以
+managed 为准。启动时对守护进程自己那一对
 查一次:没有设置读的键、旧键、放不进的值让 `Embedded::start` 返回 `EmbedError::InvalidSetting`,agixd
 非零退出并报出是哪个 `--set`。`config.get {tier:"cli"}` 返回这一层,`daemon.doctor` 的 `settings_tiers`
 里有一项 `tier: "cli"`,列出它设的键。
@@ -1186,8 +1187,8 @@ resume、轮数、durable state 的恢复与回滚后当场的视图是同一个
    `ALL_PROXY` / `NO_PROXY`(回环地址总是直连);`app.system_proxy: false` 让它们全部直连,
    `public_only` 解析器对代理主机的豁免随之取消。沙箱里命令的出网由 `sandbox.network.mode` /
    `sandbox.network.proxy` 管,不受它影响。HTTP 客户端是进程级的,所以这项只认全局与托管层(scene、项目层写了
-   记 warn 并丢弃),值在读设置时(`assembly::settings_source::read_pair`)交给 `platform::configure_system_proxy`,
-   之后的改动要重启 daemon 才生效,`config.reload` 发现不一致只记 warn。`daemon.doctor` 的 `network.proxy`
+   记 warn 并丢弃),值在建池时(`assemble::pool`)交给 `platform::configure_system_proxy`,
+   之后的改动要重启 daemon 才生效,`config.reload` 把它列在 `restart_required`。`daemon.doctor` 的 `network.proxy`
    报当前姿态。
 3. **受约束的策略绝不静默降级为无约束执行。** 后端报告 `Full` / `Partial` / `None`
    并列出兑现不了的部分;`sandbox.require` 决定不足 `Full` 时是否拒绝。
@@ -1526,7 +1527,7 @@ git 已经收口(见 §6.3),剩下的是用户事后在项目里自己跑的 git
 
 **用户规则与部署方规则。** 上面的规则都是用户自己写的(或项目、插件、客户端替用户写的),
 bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值守的托管方——要的是另一回事:
-一层用户改不了、用户选的模式也绕不过的规则。这就是 managed 层(`settings::managed`):
+一层用户改不了、用户选的模式也绕不过的设置。这就是 managed 层(`settings::managed`):
 
 - **来源。** 系统路径上的一个文件:macOS `/Library/Application Support/Agix/managed-settings.json`,
   Linux 等 `/etc/agix/managed-settings.json`,Windows `%ProgramData%\Agix\managed-settings.json`
@@ -1534,10 +1535,19 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   `agixd --managed-settings <路径>`(嵌入方:`DaemonConfig::managed_settings_path`)换成别的
   文件,这个文件**必须存在**。用户数据目录、项目、模型都改不了这条路径:它只来自系统路径
   和启动参数,不从任何设置文件读。嵌入方也可以在 `ConfigSource` 里给一层
-  `Tier::Managed`;装配时有文件就以文件为准。读一次,改了要重启 daemon。
-- **能写什么。** 只认 `permissions` 块,块里只有规则列表 `allow`、`allow_exact`、`ask`、`deny`(与其他层同一格式)和
-  `disable_bypass`(`true` / `false`),外加编辑器的 `$schema`。
-- **压过下层。** managed 的 deny / ask 与其他层的规则一起按第 1 条裁决,下层任何 allow
+  `Tier::Managed`;装配时有文件就以文件为准。读一次,改了要重启 daemon(`config.reload` 的
+  `restart_required` 会列出 `managed`)。
+- **能写什么。** 任何设置键,和设置文件同一格式,外加 `permissions.disable_bypass`(`true` / `false`)
+  与编辑器的 `$schema`。
+- **最高的一层。** 除规则列表外,它写的每个键都是会话拿到的值:压过三层文件、`cli` 层(`agixd --set`)、
+  宿主在内存里改的值(`HostOverrides`)和会话自带的 `options.settings`——即使设置开了
+  `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。`LoadedSettings::with_managed`
+  是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
+  会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍。`app` 也照收:它的 `app.trust_all_projects`
+  与 `app.trusted_projects`(整张表替换,不与用户的并)在加载时就决定项目信任;`app.session_cap`、
+  `app.worker_threads` 等进程级的键在启动时读(`process_settings` 也读它)。provider 按 id 排在各层之前,
+  同 id 以它的为准。
+- **规则压过下层。** managed 的 deny / ask 与其他层的规则一起按第 1 条裁决,下层任何 allow
   都推不翻;在 `bypassPermissions` 下,`Policy` 仍然只拿 managed 层的规则
   判一遍:命中 deny 拒绝,命中 ask(或程序名读不出来的 shell 段)询问,其余照 bypass 放行。
   询问在无人值守会话里就是拒绝。managed 层的询问只有人能答:`PreToolUse` hook 的 `approve` 答得了
@@ -1552,12 +1562,14 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
 - **关掉 bypass。** `permissions.disable_bypass: true` 时,`bypassPermissions` 不管从
   哪来(设置文件、`options.settings.permissions.mode`、agent 类型 frontmatter、团队)都按 `default`
   判;会话创建时报出的模式也是 `default`。
-- **读不了就全拒。** 文件读不了、不是合法 JSON、有上面以外的键(`permisions` 这样的
-  拼写错误不会被当成"没写")、值的形状不对、规则写不成规则——一律当作 managed 层在、但
-  拒绝所有工具调用,任何模式都一样,`daemon.doctor` 的 `settings.managed` 报 `failing`。
+- **读不了就全拒。** 文件读不了、不是合法 JSON、有没有设置读的键或改了名的旧键(`permisions`
+  这样的拼写错误不会被当成"没写")、值放不进它的设置、规则写不成规则、写了引擎专用的权限模式——一律当作
+  managed 层在、但一个值都不套,拒绝所有工具调用,任何模式都一样,`daemon.doctor` 的 `settings.managed`
+  报 `failing`。
   文件不存在(且没用 `--managed-settings` 点名)= 没有 managed 层,一切照旧。
 - **看得见。** `daemon.doctor` 的 `settings.managed` 检查报出查找的路径、是否存在、来源与
-  内容;`config.get` 的 `effective` 回答多一个 `managed` 字段。
+  内容(`details.settings`,文件的形状);`config.get` 的 `effective` 回答多一个 `managed` 字段,
+  `effective` 本身已经套了它。
 
 managed 层管的是权限,不是沙箱:它挡得住模型发起的调用,挡不住能改 daemon 启动参数或
 换掉二进制的人。要防机器的使用者本人,启动方式与二进制也得由部署方控制。

@@ -124,6 +124,7 @@ pub async fn pool(
     crate::plugins::host_libraries::check(&assembly.js_libs, config.paths.layout().engine())?;
     let (managed_path, managed) = managed_settings(config);
     let settings = Arc::new(config.settings.clone().with_managed(managed.clone()));
+    platform::configure_system_proxy(settings.values.app.system_proxy);
     for (section, module) in crate::modules::unassembled_settings(&settings.values) {
         tracing::warn!(
             section,
@@ -249,8 +250,9 @@ async fn register_host_plugins(pool: &SessionPool, dirs: &[PathBuf]) -> anyhow::
 }
 
 /// The daemon's own pair's settings as they are on disk, read the way
-/// `load_daemon_config` read them — the `cli` layer included — so what
-/// differs from `config.settings` is what the host changed afterwards.
+/// `load_daemon_config` read them — the `cli` layer included, the managed
+/// layer not — so what differs from `config.settings` is what the host
+/// changed afterwards.
 fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
     let paths = &config.paths;
     crate::settings_source::read_pair(
@@ -260,7 +262,10 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
         &paths.layout(),
         &config.settings.paths.scope,
         &config.settings.default_model,
-        config.cli_settings.as_ref(),
+        crate::settings_source::Above {
+            cli: config.cli_settings.as_ref(),
+            managed: None,
+        },
     )
 }
 
@@ -269,12 +274,12 @@ fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
 /// already carry a managed layer (an embedder's `Tier::Managed` source) keep
 /// it when there is no file.
 fn managed_settings(config: &DaemonConfig) -> (PathBuf, Option<base::permission::ManagedSettings>) {
-    use settings::managed::read;
     let (path, required) = match &config.managed_settings_path {
         Some(path) => (path.clone(), true),
         None => (config.paths.layout().managed_settings_file(), false),
     };
-    let managed = read(&path, required).or_else(|| config.settings.managed.clone());
+    let managed = crate::settings_source::read_managed(&path, required)
+        .or_else(|| config.settings.managed.clone());
     (path, managed)
 }
 

@@ -168,7 +168,7 @@ impl LoadedSettings {
         let mut out = self.clone();
         out.take_rules(&mut layer, subject, loosen, &mut held);
         if let Some(providers) = layer.remove("providers") {
-            lower["providers"] = providers_first(&providers, &lower);
+            lower["providers"] = crate::loaded::providers_first(&providers, &lower);
         }
         for (key, error) in merge_fitting(&mut lower, Value::Object(layer), sections) {
             out.ignore_overlaid(subject, key, error);
@@ -188,7 +188,11 @@ impl LoadedSettings {
             }
         }
         let managed = out.managed.take();
-        (out.with_managed(managed), held)
+        let out = out.with_managed(managed);
+        if subject == Subject::Session {
+            held.extend(held_by_managed(&out, &requested, &held));
+        }
+        (out, held)
     }
 
     /// The rule lists of `layer`'s `permissions`, taken out of it into these
@@ -248,19 +252,44 @@ impl LoadedSettings {
     }
 }
 
-/// `layer`'s providers followed by those of `lower` with an id they do not
-/// have: the list adds up as the tiers' do.
-fn providers_first(layer: &Value, lower: &Value) -> Value {
-    let first = layer.as_array().cloned().unwrap_or_default();
-    let ids: Vec<&Value> = first.iter().filter_map(|p| p.get("id")).collect();
-    let rest = lower
-        .get("providers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|p| p.get("id").is_none_or(|id| !ids.contains(&id)))
-        .cloned();
-    Value::Array(first.iter().cloned().chain(rest).collect())
+/// The keys of a session's `requested` layer the managed layer set to
+/// something else, beyond those already `held`.
+fn held_by_managed(out: &LoadedSettings, requested: &Value, held: &[HeldKey]) -> Vec<HeldKey> {
+    let Some(managed) = out.managed.as_ref().filter(|m| m.error.is_none()) else {
+        return Vec::new();
+    };
+    let applied = serde_json::to_value(&out.values).unwrap_or_default();
+    let mut keys = Vec::new();
+    leaf_keys(
+        &Value::Object(managed.values.clone()),
+        &mut Vec::new(),
+        &mut keys,
+    );
+    keys.into_iter()
+        .filter(|key| !held.iter().any(|h| h.key == *key))
+        .filter_map(|key| {
+            let requested = value_at(requested, &key);
+            let applied = value_at(&applied, &key);
+            (!requested.is_null() && requested != applied).then_some(HeldKey {
+                key,
+                requested,
+                applied,
+            })
+        })
+        .collect()
+}
+
+fn leaf_keys(value: &Value, path: &mut Vec<String>, out: &mut Vec<String>) {
+    match value.as_object() {
+        Some(fields) if !fields.is_empty() => {
+            for (key, inner) in fields {
+                path.push(key.clone());
+                leaf_keys(inner, path, out);
+                path.pop();
+            }
+        }
+        _ => out.push(path.join(".")),
+    }
 }
 
 fn remove_dotted(layer: &mut Map<String, Value>, dotted: &str) {
@@ -423,6 +452,35 @@ mod tests {
         );
         assert_eq!(out.values.permissions.mode, PermissionMode::Default);
         assert!(out.bypass_disabled());
+    }
+
+    #[test]
+    fn a_managed_value_holds_over_a_session_that_may_loosen() {
+        let trusting = loaded(|s| s.permissions.client_may_loosen = true).with_managed(Some(
+            crate::managed::from_value(
+                "it",
+                json!({"turn": {"token_budget": 1000}, "sandbox": {"require": true}}),
+                &Sections::none(),
+            ),
+        ));
+        assert_eq!(trusting.values.turn.token_budget, Some(1000));
+        let (out, held) = over(
+            &trusting,
+            json!({"turn": {"token_budget": 5000, "max_model_calls": 3}, "sandbox": {"require": false}}),
+        );
+        assert_eq!(out.values.turn.token_budget, Some(1000));
+        assert!(out.values.sandbox.require);
+        assert_eq!(out.values.turn.max_model_calls, 3);
+        let mut keys: Vec<_> = held.iter().map(|h| h.key.as_str()).collect();
+        keys.sort();
+        assert_eq!(keys, ["sandbox.require", "turn.token_budget"]);
+        assert_eq!(
+            held.iter()
+                .find(|h| h.key == "turn.token_budget")
+                .unwrap()
+                .applied,
+            json!(1000)
+        );
     }
 
     #[test]

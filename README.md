@@ -612,8 +612,12 @@ How layers combine:
 - The `cli` layer merges like the global one; it is not gated by project trust,
   and `config.reload` reads the files again beneath it. `config.get
   {tier:"cli"}` and `daemon.doctor` report it as `cli`.
-- A deployment's managed file may hold only `permissions` (the rule lists and
-  `disable_bypass`); it outranks every layer.
+- A deployment's managed file may set any key (plus
+  `permissions.disable_bypass`); what it sets outranks every layer, the `cli`
+  one, a host's in-memory changes and a session's own `options.settings`. Its
+  rule lists stand beside every layer's, and its deny and ask rules hold even
+  in `bypassPermissions`. A file that does not read sets nothing and refuses
+  every tool call.
 - A project the user has not trusted can only tighten (see Workspace trust):
   `providers`, `hooks`, `mcp.servers` entries, `prompt.instruction_files`,
   `prompt.override`, `sandbox.network.proxy`, `telemetry.otlp_endpoint` and

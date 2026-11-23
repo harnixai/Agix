@@ -49,9 +49,8 @@ pub enum Tier {
     Cli,
     /// A session's own `options.settings`, over the tiers its project and scene merge.
     Session,
-    /// The deployment's — see `settings::managed`. Only the `permissions`
-    /// rule lists and `permissions.disable_bypass` are read from it, and
-    /// nothing below it can override them.
+    /// The deployment's — see `settings::managed`: any settings key, over
+    /// every other layer, a session's own included.
     Managed,
 }
 

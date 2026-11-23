@@ -872,7 +872,11 @@ fn with_managed(user: serde_json::Value, managed: serde_json::Value) -> settings
         &settings::section::Sections::none(),
         Default::default(),
     )
-    .with_managed(Some(settings::managed::from_value("it", managed)))
+    .with_managed(Some(settings::managed::from_value(
+        "it",
+        managed,
+        &settings::section::Sections::none(),
+    )))
 }
 
 async fn verdict(
@@ -963,8 +967,9 @@ async fn disabling_bypass_judges_a_bypass_session_as_default() {
 #[tokio::test]
 async fn a_managed_layer_that_cannot_be_honoured_refuses_every_call() {
     for managed in [
-        json!({"permissions": {"mode": "plan"}}),
+        json!({"permissions": {"modes": "plan"}}),
         json!({"permissions": {"deny": ["Bash(rm:*"]}}),
+        json!({"turn": {"token_budget": "lots"}}),
     ] {
         let settings = with_managed(json!({}), managed.clone());
         for mode in [PermissionMode::BypassPermissions, PermissionMode::Default] {

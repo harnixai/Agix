@@ -1,23 +1,30 @@
 //! The one way the assembly reads a (project, scene) pair's settings from disk,
 //! and the same read with some of its files replaced by what a write would put
-//! there; both with the `cli` layer above the files. Reading a project's is
-//! opening it: what an older engine left directly in its project directory is
-//! moved into `state/` first.
+//! there; both with the `cli` layer above the files and the managed layer above
+//! everything. Reading a project's is opening it: what an older engine left
+//! directly in its project directory is moved into `state/` first.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base::interface::config_source::{Chain, InMemoryLayers, Tier};
 use base::paths::{Layout, PROJECT_STATE_ENTRIES};
+use base::permission::ManagedSettings;
 
 use settings::{FileTiers, LoadedSettings};
 
-/// The three tiers merged, then `cli` over them; the project tier is
-/// `layout`'s directory in `project`. The only place in the assembly, with
-/// [`read_pair_as_if`] and [`read_app`], that calls `LoadedSettings::load*`.
-/// It also hands `app.system_proxy` to the process-wide HTTP clients; a later
-/// read that disagrees is the `config.reload` of a setting that needs a
-/// restart.
+/// What a read puts above the settings files: the `cli` layer, then the
+/// deployment's managed layer.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Above<'a> {
+    pub(crate) cli: Option<&'a serde_json::Value>,
+    pub(crate) managed: Option<&'a ManagedSettings>,
+}
+
+/// The three tiers merged, then `cli` over them, then the managed layer; the
+/// project tier is `layout`'s directory in `project`. The only place in the
+/// assembly, with [`read_pair_as_if`] and [`read_app`], that calls
+/// `LoadedSettings::load*`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_pair(
     global_root: PathBuf,
@@ -26,7 +33,7 @@ pub(crate) fn read_pair(
     layout: &Layout,
     scene: &str,
     default_model: &str,
-    cli: Option<&serde_json::Value>,
+    above: Above<'_>,
 ) -> LoadedSettings {
     let sections = crate::settings_sections::all();
     let local_dir = match project {
@@ -37,7 +44,7 @@ pub(crate) fn read_pair(
         None => global_root.clone(),
     };
     let files = FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone());
-    let source = with_cli(files, cli);
+    let source = above.over(files);
     let loaded = match project {
         Some(_) => LoadedSettings::load_from(
             &source,
@@ -59,20 +66,17 @@ pub(crate) fn read_pair(
             layout.clone(),
         ),
     };
-    platform::configure_system_proxy(loaded.values.app.system_proxy);
-    loaded
+    loaded.with_managed(above.managed.cloned())
 }
 
-/// The `app` block of the global tier at `global_root` with `cli` over it,
-/// for what a process decides before it builds anything; configures nothing.
-pub(crate) fn read_app(
-    global_root: &Path,
-    cli: Option<&serde_json::Value>,
-) -> settings::AppSettings {
+/// The `app` block of the global tier at `global_root` with what is `above`
+/// it, for what a process decides before it builds anything; configures
+/// nothing.
+pub(crate) fn read_app(global_root: &Path, above: Above<'_>) -> settings::AppSettings {
     let root = global_root.to_path_buf();
     let files = FileTiers::new(root.clone(), root.clone(), root.clone());
     LoadedSettings::load_without_project_from(
-        &with_cli(files, cli),
+        &above.over(files),
         root.clone(),
         root,
         "",
@@ -80,16 +84,36 @@ pub(crate) fn read_app(
         &crate::settings_sections::all(),
         Layout::default(),
     )
+    .with_managed(above.managed.cloned())
     .values
     .app
 }
 
-/// `files`, with `cli` as one layer above them.
-fn with_cli(files: FileTiers, cli: Option<&serde_json::Value>) -> Chain {
-    let above = cli.map_or_else(InMemoryLayers::new, |layer| {
-        InMemoryLayers::new().with(Tier::Cli, false, Tier::Cli.name(), layer.clone())
-    });
-    Chain(vec![Arc::new(files), Arc::new(above)])
+impl Above<'_> {
+    /// `files` with these layers above them. A managed layer that cannot be
+    /// honoured is left out of the read: it sets nothing, and the permission
+    /// gate refuses every call under it.
+    fn over(self, files: FileTiers) -> Chain {
+        let mut above = InMemoryLayers::new();
+        if let Some(layer) = self.cli {
+            above = above.with(Tier::Cli, false, Tier::Cli.name(), layer.clone());
+        }
+        if let Some(managed) = self.managed.filter(|m| m.error.is_none()) {
+            above = above.with(
+                Tier::Managed,
+                false,
+                managed.origin.clone(),
+                serde_json::Value::Object(settings::managed::as_file(managed)),
+            );
+        }
+        Chain(vec![Arc::new(files), Arc::new(above)])
+    }
+}
+
+/// The managed settings file at `path` — one that must exist when `required`
+/// — read against every settings section this build has.
+pub(crate) fn read_managed(path: &Path, required: bool) -> Option<ManagedSettings> {
+    settings::managed::read(path, required, &crate::settings_sections::all())
 }
 
 /// Why `layer` cannot be the `cli` layer of settings: the first key in it no
@@ -118,8 +142,7 @@ pub(crate) fn cli_layer_refusal(
 }
 
 /// [`read_pair`] of a project with each `(path, value)` of `in_memory` read in
-/// place of that settings file. It writes nothing and leaves the process-wide
-/// proxy choice alone.
+/// place of that settings file. It writes nothing.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_pair_as_if(
     in_memory: Vec<(PathBuf, serde_json::Value)>,
@@ -129,14 +152,14 @@ pub(crate) fn read_pair_as_if(
     layout: &Layout,
     scene: &str,
     default_model: &str,
-    cli: Option<&serde_json::Value>,
+    above: Above<'_>,
 ) -> LoadedSettings {
     let local_dir = layout.project_dir(project);
     let files = in_memory.into_iter().fold(
         FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone()),
         |source, (path, value)| source.with_contents(path, value),
     );
-    let source = with_cli(files, cli);
+    let source = above.over(files);
     LoadedSettings::load_from(
         &source,
         global_root,
@@ -147,6 +170,7 @@ pub(crate) fn read_pair_as_if(
         &crate::settings_sections::all(),
         layout.clone(),
     )
+    .with_managed(above.managed.cloned())
 }
 
 /// Each of [`PROJECT_STATE_ENTRIES`] lying directly in `project`'s project

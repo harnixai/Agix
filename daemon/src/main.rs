@@ -379,7 +379,11 @@ fn default_instance_name(scene: &str, scenes: &[String]) -> String {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let data_root = daemon::config::default_global_root();
-    let app = daemon::config::process_settings(&data_root, settings_layer(&cli.settings).as_ref());
+    let app = daemon::config::process_settings(
+        &data_root,
+        settings_layer(&cli.settings).as_ref(),
+        cli.managed_settings.as_deref(),
+    );
     runtime(app.worker_threads)?.block_on(serve(cli, data_root))
 }
 
@@ -617,11 +621,15 @@ mod tests {
             let mut cli = parse(args);
             cli.settings
                 .insert(0, worker_threads_from_env("5").unwrap());
-            daemon::config::process_settings(root.path(), settings_layer(&cli.settings).as_ref())
-                .worker_threads
-                .map(std::num::NonZeroUsize::get)
+            daemon::config::process_settings(
+                root.path(),
+                settings_layer(&cli.settings).as_ref(),
+                None,
+            )
+            .worker_threads
+            .map(std::num::NonZeroUsize::get)
         };
-        let from_file = daemon::config::process_settings(root.path(), None).worker_threads;
+        let from_file = daemon::config::process_settings(root.path(), None, None).worker_threads;
         assert_eq!(from_file.map(std::num::NonZeroUsize::get), Some(2));
         assert_eq!(threads(&[]), Some(5), "the environment is over the file");
         assert_eq!(threads(&["--worker-threads", "3"]), Some(3));

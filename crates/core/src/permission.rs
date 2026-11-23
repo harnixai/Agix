@@ -188,7 +188,7 @@ impl LoadedRule {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ManagedSettings {
     /// The file (or other source) the layer came from.
     pub origin: String,
@@ -196,19 +196,12 @@ pub struct ManagedSettings {
     pub error: Option<String>,
     pub rules: Vec<PermissionRuleEntry>,
     pub disable_bypass: bool,
+    /// Every other setting the layer sets, shaped as a settings file holds
+    /// it: put over every other layer.
+    pub values: serde_json::Map<String, serde_json::Value>,
 }
 
 impl ManagedSettings {
-    /// Two managed layers as one: both sets of rules, either one's switch,
-    /// and broken if either is.
-    pub fn followed_by(mut self, later: Self) -> Self {
-        self.origin = format!("{}, {}", self.origin, later.origin);
-        self.error = self.error.or(later.error);
-        self.rules.extend(later.rules);
-        self.disable_bypass |= later.disable_bypass;
-        self
-    }
-
     /// Whether a `bypassPermissions` session under this layer can still be
     /// asked about a call: the layer takes bypass away, or holds an `ask` or
     /// `deny` rule. A `deny` counts because a command it cannot read through

@@ -454,20 +454,26 @@ impl HealthCheck for ManagedSettingsCheck {
             "path": self.path.display().to_string(),
             "origin": managed.origin,
             "error": self.unreadable,
-            "permissions": settings::managed::report(managed)["permissions"],
+            "settings": settings::managed::as_file(managed),
         });
         match &self.unreadable {
             Some(why) => CheckResult::failing(format!(
                 "managed settings cannot be honoured, every tool call is refused: {why}"
             )),
             None => CheckResult::ok(format!(
-                "managed settings from {}: {} permission rule(s){}",
+                "managed settings from {}: {} permission rule(s){}{}",
                 managed.origin,
                 managed.rules.len(),
                 if managed.disable_bypass {
                     ", bypassPermissions disabled"
                 } else {
                     ""
+                },
+                if managed.values.is_empty() {
+                    String::new()
+                } else {
+                    let keys: Vec<&str> = managed.values.keys().map(String::as_str).collect();
+                    format!(", sets {}", keys.join(", "))
                 }
             )),
         }
