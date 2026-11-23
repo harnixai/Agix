@@ -181,7 +181,13 @@ monitors and structured output ([table below](#tools--46-built-in)).
   trigger, a circuit breaker and a configurable threshold.
 - Session memory with recall.
 - A skill catalog.
-- Token and output budgets.
+- Token budgets per turn, goal and session — sub-agents, team members and
+  calls on the side included, judged before each call — and per-provider
+  daily, weekly and monthly quotas.
+- Settings in layers (global, scene, project, `agixd --set`, a session's own
+  `options.settings`, the managed file) under one key table, with
+  `config.explain` to show why a key has the value it has
+  ([docs/settings.md](docs/settings.md)).
 
 **Safety**
 - A fixed permission order: credentials are refused first, in every mode; then
@@ -235,8 +241,9 @@ monitors and structured output ([table below](#tools--46-built-in)).
   unreadable policy denies every server
   ([ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.4).
 - Managed settings for the deployment, read from a system path users cannot
-  write (or `--managed-settings`): their deny and ask rules hold even under
-  `bypassPermissions`, and they can switch that mode off; an unreadable file
+  write (or `--managed-settings`): they may set any key and sit above every
+  other layer, their deny and ask rules hold even under `bypassPermissions`,
+  and they can switch that mode off; an unreadable file
   refuses every tool call ([ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.1).
 
 **Records**

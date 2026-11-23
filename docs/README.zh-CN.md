@@ -130,7 +130,10 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
 - 先做 LLM 摘要,再退到更便宜的手段;有预测式触发、熔断,阈值可配。
 - 会话记忆与召回。
 - skill 目录。
-- token 和输出预算。
+- 按轮、按目标、按会话的 token 预算——子 Agent、团队成员和旁路调用都算在内,每次调用前判——以及按 provider
+  的日、周、月配额。
+- 分层的设置(全局、场景、项目、`agixd --set`、会话自带的 `options.settings`、managed 文件),由一张键表管着,
+  `config.explain` 说明一个键为什么是这个值([settings.md](settings.md))。
 
 **安全**
 - 固定的权限顺序:先拒凭据(任何模式都拒),然后是工具自身的检查,再是规则(deny 永远优先),再是路径安全,最后是权限模式。
@@ -166,7 +169,7 @@ MCP、询问、通知、监视、结构化输出(见下文[能力](#能力))。
   令牌存在 0600 文件或宿主自己的存储里([mcp_auth.md](mcp_auth.md))。
 - 企业 MCP 策略:按 server 名、命令、URL 的允许与拒绝列表,从用户写不了的系统路径读
   (或 `--mcp-policy`);策略读不了就拒绝所有 server([ARCHITECTURE.md](ARCHITECTURE.md) §6.4)。
-- 部署方的 managed 设置:从用户写不了的系统路径读(或 `--managed-settings`),其中的 deny / ask
+- 部署方的 managed 设置:从用户写不了的系统路径读(或 `--managed-settings`),能写任何键、压在其他各层之上,其中的 deny / ask
   在 `bypassPermissions` 下照样生效,还能关掉 bypass;读不了就拒绝所有工具调用
   ([ARCHITECTURE.md](ARCHITECTURE.md) §6.1)。
 
