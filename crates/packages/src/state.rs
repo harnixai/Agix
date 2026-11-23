@@ -94,10 +94,16 @@ impl EnableState {
     /// Drop `name`'s entry, so it falls back to the default again.
     pub fn clear(&self, name: &str) -> Result<(), PluginError> {
         let mut map = self.load()?;
-        if map.remove(name).is_some() {
-            self.save(&map)?;
+        if map.remove(name).is_none() {
+            return Ok(());
         }
-        Ok(())
+        if !map.is_empty() {
+            return self.save(&map);
+        }
+        match std::fs::remove_file(&self.path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -122,6 +128,19 @@ mod tests {
         state.set_enabled("my-plugin", true).unwrap();
         assert_eq!(state.get("my-plugin"), Some(true));
         assert_eq!(state.fault(), None);
+    }
+
+    #[test]
+    fn clearing_the_last_entry_leaves_no_file() {
+        let dir = TempDir::new().unwrap();
+        let state = EnableState::new(dir.path().to_path_buf());
+        state.set_enabled("a", false).unwrap();
+        state.set_enabled("b", true).unwrap();
+        state.clear("a").unwrap();
+        assert_eq!(state.get("b"), Some(true));
+        state.clear("b").unwrap();
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+        assert_eq!(state.get("b"), None);
     }
 
     #[test]
