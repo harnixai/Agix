@@ -432,7 +432,8 @@ provider 有 `id`、`vendor`(`anthropic`、`openai`、`deepseek`、`qwen`、`vll
 provider。`config.getProvider` 返回各周期的已用量与上限。
 
 没有配 `providers` 时,引擎自己提供 `anthropic`,密钥取 `ANTHROPIC_AUTH_TOKEN` /
-`ANTHROPIC_API_KEY`,三档都是 `--model`。会话可以把自己选的 provider 排到最前面,也可以指定档位或模型 id。
+`ANTHROPIC_API_KEY`,三档都是 `--model`。这个自带的 provider 只在没有定义任何 `providers` 时存在,它的模型就是
+`--model`;要给它配额或档位,在 `providers` 里自己定义(宿主在内存里对自带 provider 的改动,重载后不保留)。会话可以把自己选的 provider 排到最前面,也可以指定档位或模型 id。
 `WebFetch` 默认返回页面转成的纯文本(超过
 50,000 字符分段,用 `offset` / `limit` 续读,续读会再抓一次页面);只有 `model.tasks.web_fetch` 配了档位时,才由模型读页面、按调用
 的 `prompt` 作答。
@@ -472,6 +473,11 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 [JSON Schema](schemas/settings.schema.json)。值按字面取:`$VAR` / `${VAR}` / `${VAR:-默认}`
 只在 MCP server 的 `command`、`args`、`env`、`url`、`headers` 里展开。引擎不再读的旧键会被忽略,
 加载时的告警会指出取代它的新键。
+
+坏设置按谁写的分别对待:谁在写、谁在场,就给谁报错;文件只告警;安全文件按失败即关闭处理。
+设置文件里不认识的键、改过名的键、放不进的值,告警并忽略(`daemon.doctor` 与 `config.explain` 能看到);
+`agixd --set` 与 `EmbedConfig.settings` 里的让启动失败;`options.settings` 以及其他 RPC 参数里的让这个请求以
+`INVALID_PARAMS` 失败;managed 文件里的一个都不套、拒绝所有工具调用。
 
 层与层怎么合:
 

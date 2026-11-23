@@ -17,6 +17,14 @@
    未受信项目被扣下、只认全局层被丢掉、值放不进、被 managed 文件改掉;加 `session_id` 时还有会话那一层是否被夹住),
    能力位 `config_explain`。迁移后某个值没生效,多半是旧键还在、写错了层,或被信任门禁扣下,这里一眼可见。
 
+## 坏设置怎么处理
+
+谁在写、谁在场,就给谁报错;文件只告警;安全文件按失败即关闭处理。设置文件里不认识的键、旧键、放不进的值,告警并
+忽略(`daemon.doctor`、`config.explain` 报出);`agixd --set` 与 `EmbedConfig.settings` 里的让启动失败;
+`options.settings` 与其他 RPC 参数里的让这个请求以 `INVALID_PARAMS` 失败;managed 文件里的一个值都不套、
+拒绝每一次工具调用。所以升级时旧键留在文件里不会让 daemon 起不来,留在 `--set`、`EmbedConfig.settings`、
+`options.settings` 里则会。
+
 ## 设置文件(0.3.21 起)
 
 设置按块重排,旧键不读。旧键 → 新键(代码里的对照表是 `settings::renamed::RENAMED_KEYS`):
@@ -68,6 +76,8 @@
 
 - **进程参数进 `app`。** `app.session_cap`(缺省 32)、`app.session_idle_timeout_secs`(缺省 3600)、
   `app.worker_threads`。`app` 只认全局层、`cli` 层与 managed 层。
+- **自带 provider。** 引擎自带的 `anthropic` 只在没有定义任何 `providers` 时存在,模型是 `--model`;要给它配额或
+  档位,在 `providers` 里自己定义(宿主在内存里对自带 provider 的改动,重载后不保留)。
 - **新块。** `session.token_budget`(会话从创建起的累计上限,跨重启)、`goal.max_rounds`(模型自己设的目标的轮数
   上限,缺省 10000)、`schedule.max_model_jobs`(缺省 20)与 `schedule.min_model_interval_minutes`(缺省 1):只限
   模型经 `CronCreate` 建的定时任务,宿主的 `schedule.create` 不受限。
@@ -105,17 +115,21 @@
 | `options.permission_mode` | `options.settings.permissions.mode` |
 | `options.permission_rules` | `options.settings.permissions.{allow, allow_exact, ask, deny}` 的规则串 |
 | `options.effort` | `options.settings.model.effort` |
-| `options.thinking_mode`(0.4.0 的 `options.thinking`) | `options.settings.model.thinking` |
+| `options.thinking_mode` | `options.settings.model.thinking` |
 | `options.prompt.{append, override}` | `options.settings.prompt.{append, override}` |
 
-会话日志里记下的旧选项(0.3 与 0.4.0 的),以及 `session.setModel` / `session.setPrompt` 记下的推理强度、思考开关与
-提示词,恢复时按新形状读进会话的设置,限制不会因恢复变松。
+会话日志里记下的旧选项,以及 `session.setModel` / `session.setPrompt` 记下的推理强度、思考开关与提示词,恢复时按新形状读进
+会话的设置,限制不会因恢复变松。
 
 ### 改名
 
 - `session.setModel` 的参数与结果:`thinking_mode` → `thinking`;再传 `thinking_mode` 以 `INVALID_PARAMS` 失败。
-  `effort` / `thinking` 写进会话的设置(`model.effort` / `model.thinking`),会话随之原地重建;`session.setPrompt`
-  写 `prompt.append` / `prompt.override`。两者的结果在值被 managed 层压住时多一个 `clamped_options`。
+  `effort` / `thinking` 写进会话自己那层设置(`model.effort` / `model.thinking`),会话随之原地重建;`session.setPrompt`
+  写 `prompt.append` / `prompt.override`。两者都写进会话日志,重建、驱逐后恢复与重启都保留;值给 `null` 就把这个键从
+  会话层去掉,回到项目与场景设置的值。两者判法同 `options.settings`,值被 managed 层压住时结果多一个
+  `clamped_options`(形状同 `session.create` 的)。只改 `effort` / `thinking` 的 `session.setModel` 也要重建,所以
+  与 `session.setPrompt` 一样:一轮在跑或会话在重建时返回 `SESSION_BUSY`,有后台任务在跑时 `SESSION_BUSY` 的
+  `reason` 是 `background_tasks`。推理强度、思考开关与提示词对子 Agent 与团队成员同样生效。
 - `session.get`、`session.inspectContext` 的 `reasoning.{thinking_mode, thinking_mode_source}` →
   `{thinking, thinking_source}`;`session.call` 的 `request.thinking_mode` → `thinking`。
 - `stop_reason` 的 `max_turns_reached` → `max_turns`(引擎实际发的一直是后者)。
@@ -141,6 +155,14 @@
   (`app.session_cap` 等),managed 文件变了时还有 `managed`。这些改动要重启 daemon 才生效。
 - 0.3.21 起:`provider_switched` 事件(换了 provider 及原因)与 `providers_unavailable` 错误码
   (`model.order` 里的 provider 都接不了)。
+
+## 构建
+
+- **`mcp-oauth-jwt` 缺省关闭。** MCP 的 `oauth.private_key_jwt` 要打开这个 feature(`agix` 门面的 `mcp-oauth-jwt`,
+  agixd 用 `cargo build -p daemon --features mcp-oauth-jwt`);缺省构建不带第二套加密库,配了 `private_key_jwt` 的
+  server 连接时报错并点名这个 feature。`daemon.auth`、`daemon.ping` 报的能力里有 `mcp_oauth_jwt` 就是这个构建带了它。
+- **RPC schema 生成不进发布二进制。** `docs/schemas/rpc.schema.json` 由测试或 `assembly` 的 `rpc-schema` feature 生成
+  (`cargo test -p assembly write_rpc_schema -- --ignored`),agixd 与嵌入方不用管。
 
 ## 嵌入(`agix` crate)
 

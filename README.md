@@ -540,7 +540,10 @@ that crosses a limit finishes, and the provider is skipped from the next one on.
 `config.getProvider` reports usage against each limit.
 
 With no `providers`, the engine supplies `anthropic`, keyed from
-`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`, every tier `--model`. A session can
+`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`, every tier `--model`. That
+built-in provider exists only while no `providers` are defined, and its model is
+`--model`; to give it a quota or tiers, define it in `providers` (a host's
+in-memory edit to the built-in one is not kept across a reload). A session can
 put a provider of its own first, and ask for a tier or a model id.
 `WebFetch` returns the page as plain text in windows of up to 50,000 characters,
 read on with `offset` / `limit` (each continuation fetches the page again); only
@@ -595,6 +598,14 @@ embedder's `EmbedConfig.settings`), over every project and scene. The full surfa
 `$VAR` / `${VAR}` / `${VAR:-default}` are expanded only inside an MCP server's
 `command`, `args`, `env`, `url` and `headers`. A key the engine no longer reads
 is ignored, and the load warning names the key that replaced it.
+
+How strictly a bad setting is treated depends on who wrote it. Whoever is writing
+and present gets an error; a file is warned about; the security file fails
+closed. An unknown or renamed key or a value that does not fit, in a settings
+file, is warned about and ignored (`daemon.doctor` and `config.explain` show it);
+in `agixd --set` or `EmbedConfig.settings` it fails startup; in `options.settings`
+or any other RPC parameter it fails the request with `INVALID_PARAMS`; in the
+managed file it applies nothing and refuses every tool call.
 
 How layers combine:
 

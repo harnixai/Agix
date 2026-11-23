@@ -1505,7 +1505,7 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 设置的类型、程序专用的 `permissions.mode: "bubble"`、读不出来的规则串(`field` 带下标,如
 `settings.permissions.deny[0]`)、`model.thinking` 的 `on_budget` 小于 1024 同样。被拒时什么都不建、不跑。
 
-缺省只能收紧:未受信项目层那张表(`ARCHITECTURE.md` 设置分层)里只许更严的键,值比设置的宽时不生效、留着
+缺省只能收紧:键表(`settings::keys`,`ARCHITECTURE.md` §6.6)的信任列里只许更严的键,值比设置的宽时不生效、留着
 设置的值,`session.create` 的结果带 `clamped_options` 列出每一项(`field` 是 `options` 里的点分全路径,
 `requested` 是给的,`applied` 是生效的,如 `[{"field":"settings.turn.token_budget","requested":2000000,"applied":500000}]`;
 没有被夹住的就没有这个键)。`permissions.allow` / `allow_exact` 同样被扣下(`applied` 为 `[]`);`ask` / `deny`

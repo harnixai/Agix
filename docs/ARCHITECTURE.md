@@ -507,6 +507,13 @@ managed 为准。启动时对守护进程自己那一对
 非零退出并报出是哪个 `--set`。`config.get {tier:"cli"}` 返回这一层,`daemon.doctor` 的 `settings_tiers`
 里有一项 `tier: "cli"`,列出它设的键。
 
+**坏设置按谁写的分别对待:谁在写、谁在场,就给谁报错;文件只告警;安全文件按失败即关闭处理。**
+设置文件(各层的 `settings.json`、`settings.local.json`)里不认识的键、改过名的键、放不进的值,告警并忽略,
+`daemon.doctor` 的 `settings_tiers` 与 `config.explain` 报出来;`agixd --set` 与 `EmbedConfig.settings` 里的让启动失败
+(`EmbedError::InvalidSetting`);`options.settings` 与其他 RPC 参数里的让这个请求以 `INVALID_PARAMS` 失败;managed
+文件里的(读不了、有没有设置读的键、放不进的值)一个都不套、拒绝每一次工具调用。新加的设置入口照这条定:有人
+在场写的就报错,磁盘上的文件不因一个坏值停掉整个会话,安全文件宁可停也不放宽。
+
 **内存里的覆盖只有一条路。** 宿主在内存里改过的值(`HostOverrides`)与会话自带的设置(`session.create` 的
 `options.settings`)都经 `settings::LoadedSettings::overlay` 叠到读好的设置上:规则串并进各层的规则(会话的记为
 `Tier::Session`、来源 `RuleSource::Session`)、provider 收尾、放不进的值进 `ignored`、managed 层重新压顶,只写在
