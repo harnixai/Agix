@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use base::interface::config_source::{ConfigLayer, Tier};
+use base::permission::PermissionMode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -296,6 +297,13 @@ impl<'a> Explainer<'a> {
         let segments: Vec<&str> = key.split('.').collect();
         let mut layers = self.layers(key, &segments);
         let managed = self.managed(key, &segments, &mut layers);
+        for layer in layers.iter_mut() {
+            if layer.outcome == SettingOutcome::Applied
+                && self.is_disabled_bypass(key, layer.value.as_ref())
+            {
+                layer.outcome = SettingOutcome::ManagedOverrode;
+            }
+        }
         let session = self.session(key, &segments);
         let value = match (&self.session, &session) {
             (Some(in_session), Some(_)) => value_at(in_session, key),
@@ -411,6 +419,19 @@ impl<'a> Explainer<'a> {
         }
     }
 
+    /// Whether `key` is the permission mode, one of `values` is
+    /// `bypassPermissions`, and the managed layer turns that into `default`.
+    fn is_disabled_bypass<'v>(
+        &self,
+        key: &str,
+        values: impl IntoIterator<Item = &'v Value>,
+    ) -> bool {
+        let bypass = serde_json::to_value(PermissionMode::BypassPermissions).unwrap_or_default();
+        key == "permissions.mode"
+            && self.sources.settings.bypass_disabled()
+            && values.into_iter().any(|v| *v == bypass)
+    }
+
     fn global_only(&self, segments: &[&str]) -> bool {
         matches!(
             self.table.governing(segments, |k| k.writers),
@@ -513,6 +534,9 @@ impl<'a> Explainer<'a> {
                 SettingOutcome::Clamped
             };
             return (outcome, None);
+        }
+        if asked != applied && self.is_disabled_bypass(key, [asked]) {
+            return (SettingOutcome::ManagedOverrode, None);
         }
         let session = Tier::Session.name();
         if let Some(ignored) = config

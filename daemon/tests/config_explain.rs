@@ -451,3 +451,25 @@ async fn headers_or_env_written_as_one_string_are_redacted() {
     assert!(!tier.to_string().contains("supersecret"), "{tier}");
     d.stop().await;
 }
+
+#[tokio::test]
+async fn a_bypass_the_managed_layer_disables_is_not_reported_applied() {
+    let d = Daemon::start(Setup {
+        projects: vec![(
+            "trusted",
+            json!({"permissions": {"mode": "bypassPermissions"}}),
+        )],
+        managed: Some(json!({"permissions": {"disable_bypass": true}})),
+        ..Default::default()
+    })
+    .await;
+
+    let explained = d
+        .explain(json!({"key": "permissions.mode", "project_root": d.project("trusted")}))
+        .await;
+    assert_eq!(explained["value"], "default", "{explained}");
+    let project = layer(&explained, "project");
+    assert_eq!(project["value"], "bypassPermissions", "{explained}");
+    assert_eq!(project["outcome"], "managed_overrode", "{explained}");
+    d.stop().await;
+}
