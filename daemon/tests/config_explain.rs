@@ -404,3 +404,50 @@ async fn a_credential_is_redacted_unless_secrets_are_asked_for() {
     assert_eq!(explained["value"], "ghp_supersecretvalue", "{explained}");
     d.stop().await;
 }
+
+#[tokio::test]
+async fn the_env_of_a_server_named_sandbox_is_redacted_too() {
+    let d = Daemon::start(Setup {
+        global: json!({"mcp": {"servers": {"sandbox": {
+            "command": "/nonexistent/mcp-server",
+            "env": {"GITHUB_PAT": "ghp_supersecretvalue"},
+        }}}}),
+        ..Default::default()
+    })
+    .await;
+
+    for key in ["mcp.servers.sandbox.env", "mcp.servers.sandbox.env.GITHUB_PAT"] {
+        let explained = d.explain(json!({"key": key})).await;
+        let shown = explained.to_string();
+        assert!(!shown.contains("supersecret"), "{shown}");
+    }
+    let block = call(&d.sock, "config.explain", json!({"key": "mcp"})).await;
+    assert!(!block.to_string().contains("supersecret"), "{block}");
+    let tier = call(&d.sock, "config.get", json!({"tier": "global", "scene": "code"})).await;
+    assert!(!tier.to_string().contains("supersecret"), "{tier}");
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn headers_or_env_written_as_one_string_are_redacted() {
+    let d = Daemon::start(Setup {
+        global: json!({"mcp": {"servers": {
+            "gh": {
+                "url": "https://mcp.example.com",
+                "headers": "Authorization: Bearer ghp_supersecretvalue",
+            },
+            "local": {
+                "command": "/nonexistent/mcp-server",
+                "env": "GITHUB_PAT=ghp_supersecretvalue",
+            },
+        }}}),
+        ..Default::default()
+    })
+    .await;
+
+    let block = call(&d.sock, "config.explain", json!({"key": "mcp"})).await;
+    assert!(!block.to_string().contains("supersecret"), "{block}");
+    let tier = call(&d.sock, "config.get", json!({"tier": "global", "scene": "code"})).await;
+    assert!(!tier.to_string().contains("supersecret"), "{tier}");
+    d.stop().await;
+}

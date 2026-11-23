@@ -8,19 +8,21 @@
 /// returning it in the clear. Key names match case-insensitively, and every
 /// string under a `headers` or `env` object is redacted whatever its key: an
 /// MCP server's `Authorization` header and the variables a stdio server is
-/// started with are credentials as often as not, under names nobody can list.
-/// `sandbox.env` is not one of them: it names variables, it holds no values.
+/// started with are credentials as often as not, under names nobody can list,
+/// and a `headers` or `env` written as one string is no less one. The
+/// top-level `sandbox.env` is not one of them: it names variables, it holds no
+/// values.
 pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::Value) {
-    redact_beneath(value, None);
+    redact_beneath(value, &[]);
 }
 
-fn redact_beneath(value: &mut serde_json::Value, parent: Option<&str>) {
+fn redact_beneath(value: &mut serde_json::Value, path: &[&str]) {
     match value {
         serde_json::Value::Object(map) => {
             for (k, v) in map.iter_mut() {
                 let key = k.to_ascii_lowercase();
-                let sandbox_env = key == "env" && parent == Some("sandbox");
-                if matches!(key.as_str(), "headers" | "env") && v.is_object() && !sandbox_env {
+                let sandbox_env = key == "env" && path == ["sandbox"];
+                if matches!(key.as_str(), "headers" | "env") && !sandbox_env {
                     redact_every_string(v);
                     continue;
                 }
@@ -33,7 +35,7 @@ fn redact_beneath(value: &mut serde_json::Value, parent: Option<&str>) {
                     serde_json::Value::String(s) if s.contains("://") => {
                         *s = scrub_url(s);
                     }
-                    other => redact_beneath(other, Some(&key)),
+                    other => redact_beneath(other, &[path, &[key.as_str()]].concat()),
                 }
             }
         }
@@ -54,7 +56,7 @@ fn redact_beneath(value: &mut serde_json::Value, parent: Option<&str>) {
                     }
                     other => {
                         secret_follows = false;
-                        redact_beneath(other, None);
+                        redact_beneath(other, &[path, &["*"]].concat());
                     }
                 }
             }
