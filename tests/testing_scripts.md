@@ -208,7 +208,7 @@ sidecar 只会让「这一组为什么这么绑」离断言更远。
 | A、B | `tests/runner/tests/script_carrier.rs` |
 | C | `tests/runner/tests/script_boundaries.rs` |
 | D | `tests/runner/tests/script_task_profiles.rs` |
-| daemon 那条路 | `daemon/tests/session_lifecycle.rs` |
+| daemon 那条路 | `daemon/tests/project_binding.rs` |
 | 装配好的那条路 | `tests/blackbox/tests/daemon_surface.rs` |
 
 daemon 的两条单独在那边：从 `.agix/settings.json` 到装到会话上的这一段全是 daemon

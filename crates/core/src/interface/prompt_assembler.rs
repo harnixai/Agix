@@ -12,9 +12,9 @@
 //!
 //! # The inputs are a value
 //!
-//! Assembly reads nine things. Passing them as a struct is not a style
+//! Assembly reads ten things. Passing them as a struct is not a style
 //! preference: an implementation that wants only two should not have to
-//! restate the other five, and a new input should not break every
+//! restate the other eight, and a new input should not break every
 //! implementation that never asked for one.
 
 use crate::interface::prompt_registry::PromptRegistry;
