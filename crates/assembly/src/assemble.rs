@@ -385,6 +385,7 @@ async fn default_history_store(
         location.unwrap_or(settings.values.app.history),
         settings.paths.layout.clone(),
         global_dir.clone(),
+        settings.cli_layer.clone(),
         settings.managed.clone(),
     );
     let roots = history::path::HistoryRoots::under(global_dir);

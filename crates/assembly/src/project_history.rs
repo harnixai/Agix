@@ -1,10 +1,10 @@
 //! The engine's side of keeping history in projects: a project's history
 //! directory (a worktree's is its main checkout's), whether a new session goes
 //! there (`app.history` and the project's trust), and whether a project
-//! is trusted now — the global tier's `app` block under the managed layer's,
-//! read again whenever either global file has changed since, so that taking
-//! trust back stops reads at once while a listing does not read both files
-//! once per session.
+//! is trusted now — the global tier's `app` block under the `cli` layer's and
+//! the managed layer's, read again whenever either global file has changed
+//! since, so that taking trust back stops reads at once while a listing does
+//! not read both files once per session.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -18,6 +18,7 @@ pub(crate) struct ProjectHistoryPolicy {
     location: HistoryLocation,
     layout: Layout,
     global_dir: PathBuf,
+    cli: Option<serde_json::Value>,
     managed: Option<base::permission::ManagedSettings>,
     trust: Mutex<Option<(Stamps, settings::trust::ProjectTrustSettings)>>,
 }
@@ -31,15 +32,39 @@ impl ProjectHistoryPolicy {
         location: HistoryLocation,
         layout: Layout,
         global_dir: PathBuf,
+        cli: Option<serde_json::Value>,
         managed: Option<base::permission::ManagedSettings>,
     ) -> Self {
         Self {
             location,
             layout,
             global_dir,
+            cli,
             managed,
             trust: Mutex::default(),
         }
+    }
+
+    /// Trust as the loader decides it: the global files, the `cli` layer over
+    /// them, the managed layer over both.
+    fn read_trust(&self) -> settings::trust::ProjectTrustSettings {
+        let mut layers: Vec<(serde_json::Value, bool)> = [
+            (base::paths::SETTINGS_FILE, false),
+            (base::paths::SETTINGS_LOCAL_FILE, true),
+        ]
+        .iter()
+        .filter_map(|(file, local)| {
+            let text = std::fs::read_to_string(self.global_dir.join(file)).ok()?;
+            Some((serde_json::from_str(&text).ok()?, *local))
+        })
+        .collect();
+        layers.extend(self.cli.clone().map(|cli| (cli, false)));
+        settings::managed::trust_under(
+            settings::trust::ProjectTrustSettings::from_layers(
+                layers.iter().map(|(value, local)| (value, *local)),
+            ),
+            self.managed.as_ref(),
+        )
     }
 
     fn stamps(&self) -> Stamps {
@@ -136,11 +161,7 @@ impl ProjectHistory for ProjectHistoryPolicy {
         let mut cached = self.trust.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = matches!(&*cached, Some((seen, _)) if *seen == stamps);
         if !fresh {
-            let read = settings::managed::trust_under(
-                settings::trust::ProjectTrustSettings::read_global(&self.global_dir),
-                self.managed.as_ref(),
-            );
-            *cached = Some((stamps, read));
+            *cached = Some((stamps, self.read_trust()));
         }
         cached
             .as_ref()
@@ -165,11 +186,12 @@ mod tests {
             Layout::new(".codix").unwrap(),
             global.to_path_buf(),
             None,
+            None,
         )
     }
 
     #[test]
-    fn a_project_the_managed_layer_does_not_trust_keeps_no_history() {
+    fn a_project_the_command_line_or_the_managed_layer_does_not_trust_keeps_no_history() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap().join("repo");
         std::fs::create_dir_all(&root).unwrap();
@@ -180,21 +202,24 @@ mod tests {
             r#"{"app": {"trust_all_projects": true}}"#,
         )
         .unwrap();
-        let policy = |managed: Option<base::permission::ManagedSettings>| {
+        let policy = |cli: Option<serde_json::Value>, managed| {
             ProjectHistoryPolicy::new(
                 HistoryLocation::Project,
                 Layout::new(".codix").unwrap(),
                 global.clone(),
+                cli,
                 managed,
             )
         };
-        assert!(policy(None).keeps_new(&root));
-        let untrusting = settings::managed::from_value(
+        assert!(policy(None, None).keeps_new(&root));
+        let untrusting = serde_json::json!({"app": {"trust_all_projects": false}});
+        assert!(!policy(Some(untrusting.clone()), None).trusted(&root));
+        let managed = settings::managed::from_value(
             "managed",
-            serde_json::json!({"app": {"trust_all_projects": false}}),
+            untrusting,
             &settings::section::Sections::none(),
         );
-        let p = policy(Some(untrusting));
+        let p = policy(None, Some(managed));
         assert!(!p.trusted(&root));
         assert!(!p.keeps_new(&root));
     }
