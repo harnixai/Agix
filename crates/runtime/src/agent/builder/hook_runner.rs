@@ -16,12 +16,13 @@ use base::context::Session;
 /// `model`/`delegator` back the `"type": "prompt"` / `"type": "agent"`
 /// hook executors (`crate::hook_executors`).
 pub(in crate::agent) fn build_hook_runner(
-    settings: &LoadedSettings,
+    session_config: &settings::SessionConfig,
     model: Arc<dyn Model>,
     delegator: Arc<dyn base::interface::delegate::Delegator>,
     session_id: Option<String>,
     exec: hooks::HookExec,
 ) -> HookRunner {
+    let settings = session_config.settings();
     // Key by key, not whole-map. `HooksSettings` is keyed by `HookEvent`,
     // which has no serde fallback, so one unrecognized event name would
     // otherwise fail the entire map and silently turn off every hook.
@@ -74,7 +75,7 @@ pub(in crate::agent) fn build_hook_runner(
         .collect();
     let prompt_executor = Arc::new(crate::hook_executors::ModelPromptHookExecutor::new(
         model,
-        settings.values.model.model_name.clone(),
+        session_config.model_name().to_string(),
         settings.values.model.max_tokens,
         session_id,
     ));
@@ -82,14 +83,15 @@ pub(in crate::agent) fn build_hook_runner(
         .with_hooks_search_dirs(hooks_search_dirs)
         .with_project_untrusted(project_untrusted)
         .with_prompt_executor(prompt_executor)
-        .with_agent_executor(agent_hook_executor(settings, delegator))
+        .with_agent_executor(agent_hook_executor(session_config, delegator))
 }
 
 fn agent_hook_executor(
-    settings: &LoadedSettings,
+    session_config: &settings::SessionConfig,
     delegator: Arc<dyn base::interface::delegate::Delegator>,
 ) -> Arc<crate::hook_executors::DelegatorHookExecutor> {
-    let cwd = settings.paths.working_dir().to_path_buf();
+    let settings = session_config.settings();
+    let cwd = session_config.working_dir().to_path_buf();
     let project = settings.paths.project_root().map(Into::into);
     Arc::new(
         crate::hook_executors::DelegatorHookExecutor::new(delegator, cwd)

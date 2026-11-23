@@ -243,8 +243,8 @@ impl Agent {
         // pointer to a tool that isn't there is worse than no pointer.
         let can_fetch_guides = selected.iter().any(|t| t.name() == TOOL_SEARCH_NAME);
         let mut prompt_ctx = base::tool::PromptContext::default();
-        prompt_ctx.cwd = self.settings.paths.working_dir().to_path_buf();
-        prompt_ctx.model = self.settings.values.model.model_name.clone();
+        prompt_ctx.cwd = self.session_config.working_dir().to_path_buf();
+        prompt_ctx.model = self.session_config.model_name().to_string();
         prompt_ctx.session_id = self.session.session_id.clone();
         prompt_ctx.all_tool_names = selected.iter().map(|t| t.name().to_string()).collect();
         prompt_ctx.path_style = self.config.path_style;
@@ -289,11 +289,11 @@ impl Agent {
                 self.spent_in_turn(self.accounted(router.model_for(task))),
                 router
                     .model_name_for(task)
-                    .unwrap_or_else(|| self.settings.values.model.model_name.clone()),
+                    .unwrap_or_else(|| self.session_config.model_name().to_string()),
             ),
             None => (
                 self.spent_in_turn(self.llm.model.clone()),
-                self.settings.values.model.model_name.clone(),
+                self.session_config.model_name().to_string(),
             ),
         }
     }
@@ -325,7 +325,7 @@ impl Agent {
         Arc::new(telemetry::model::TelemetryModel::new(
             model,
             self.telemetry.handle().clone(),
-            self.settings.values.model.model_name.clone(),
+            self.session_config.model_name().to_string(),
         ))
     }
 
@@ -364,7 +364,7 @@ impl Agent {
     }
 
     pub(super) fn reasoning(&self) -> crate::agent::ReasoningReport {
-        crate::agent::ReasoningReport::of(&self.settings.values.model)
+        crate::agent::ReasoningReport::of(&self.settings().values.model)
     }
 
     /// Reassemble after a recovery changed the model or the message list.
@@ -470,7 +470,7 @@ impl Agent {
     /// What the `models` entry of the first provider that lists `model` says
     /// about it.
     pub(crate) fn model_spec(&self, model: &str) -> Option<&base::provider::ModelSpec> {
-        self.settings.values.model_spec(model)
+        self.settings().values.model_spec(model)
     }
 
     /// `max_tokens`, held to `model`'s configured `max_output`.

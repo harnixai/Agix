@@ -317,7 +317,7 @@ mod tests {
         let applied = overrides.apply(loaded(other));
         assert!(!applied.values.memory.enabled);
         assert_eq!(applied.values.model.max_tokens, 7);
-        assert_eq!(applied.values.model.model_name, "other-model");
+        assert_eq!(applied.main_model, "other-model");
         assert_eq!(applied.values.prompt.language.as_deref(), Some("fr"));
 
         let same = HostOverrides::between(&loaded(disk.clone()), &loaded(disk));

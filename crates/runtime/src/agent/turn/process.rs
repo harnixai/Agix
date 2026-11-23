@@ -106,10 +106,8 @@ impl Agent {
         let Some(model) = self.session_state.model_choice() else {
             return;
         };
-        if self.settings.values.model.model_name != model {
-            let mut settings = (*self.settings).clone();
-            settings.values.model.model_name = model;
-            self.settings = Arc::new(settings);
+        if self.session_config.model_name() != model {
+            self.session_config = Arc::new((*self.session_config).clone().with_model_name(model));
         }
     }
 
@@ -466,7 +464,7 @@ impl Agent {
         hooks::HookInput::lifecycle(
             event,
             self.session.session_id.clone(),
-            self.settings.paths.working_dir().display().to_string(),
+            self.session_config.working_dir().display().to_string(),
             hook_permission_mode(self.session_state.permission_mode()),
         )
         .with_depth(self.identity.agent_depth())
@@ -487,14 +485,14 @@ impl Agent {
         origin: history::entry::MessageOrigin,
     ) -> Result<TurnOutcome, TurnError> {
         if self.charged_to.is_none() {
-            let session_budget = self.settings.values.session.token_budget;
+            let session_budget = self.settings().values.session.token_budget;
             self.session_state.ledger().spent.set_limit(session_budget);
         }
         self.turn = super::TurnState::opening(
             &self.current_turn_id,
             self.charged_to.take(),
             &self.session_state.ledger(),
-            self.settings.values.turn.token_budget,
+            self.settings().values.turn.token_budget,
         );
         self.open_turn.open(self.turn.scope.spend().clone());
         crate::steering::lock(&self.channels.steering).open();
@@ -668,7 +666,7 @@ impl Agent {
         let prompt_input = hooks::HookInput {
             hook_event_name: "UserPromptSubmit".into(),
             session_id: self.session.session_id.clone(),
-            cwd: self.settings.paths.working_dir().display().to_string(),
+            cwd: self.session_config.working_dir().display().to_string(),
             permission_mode: hook_permission_mode(self.session_state.permission_mode()),
             depth: self.identity.agent_depth(),
             user_prompt: Some(content.clone()),
@@ -782,7 +780,7 @@ impl Agent {
     /// The conversation model's context window: its `models` entry's, else
     /// inferred from its name.
     fn context_window(&self) -> u64 {
-        let model = &self.settings.values.model.model_name;
+        let model = &self.session_config.model_name();
         self.model_spec(model)
             .and_then(|spec| spec.context_window)
             .unwrap_or_else(|| base::context::config::infer_context_window_tokens(model) as u64)

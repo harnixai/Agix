@@ -12,7 +12,7 @@ use base::interface::scene::SceneSpec;
 use base::interface::skill_catalog::SkillCatalog;
 use runtime::agent::{EventSender, HostContracts, PendingPermissions};
 use runtime::module::SessionContext;
-use settings::LoadedSettings;
+use settings::SessionConfig;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct DelegateEnv {
@@ -22,7 +22,8 @@ pub(crate) struct DelegateEnv {
     /// delegates, and a strong edge back would keep both alive past it.
     pub(crate) hooks: Weak<hooks::HookRunner>,
     pub(crate) scene: Arc<SceneSpec>,
-    pub(crate) settings: Arc<LoadedSettings>,
+    /// The parent's settings and what it decided for itself.
+    pub(crate) session_config: Arc<SessionConfig>,
     pub(crate) config: Arc<EngineConfig>,
     pub(crate) model: Arc<dyn Model>,
     /// A share of the parent's connections as the session was built; servers
@@ -73,8 +74,8 @@ impl DelegateEnv {
             },
             hooks: Arc::downgrade(cx.hooks),
             scene: cx.scene.clone(),
-            settings: cx.settings.clone(),
-            config: Arc::new(cx.settings.engine_config()),
+            session_config: cx.session_config.clone(),
+            config: Arc::new(cx.session_config.engine_config()),
             model: cx.model.clone(),
             mcp: cx.mcp_for_delegates(),
             skills: cx.skill_catalog(),

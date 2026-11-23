@@ -23,16 +23,17 @@ pub(crate) async fn write_sidechain_meta(
     parent_session_id: Option<String>,
     scene_id: &str,
     cwd: &Path,
-    settings: &LoadedSettings,
+    session_config: &SessionConfig,
 ) {
+    let settings = session_config.settings();
     let Ok(sid) = base::session::SessionId::parse(session_id) else {
         return;
     };
     let meta = history::entry::LogEntry::Meta {
         cwd: cwd.display().to_string(),
         started_at: store.environment().now(),
-        model: settings.values.model.model_name.clone(),
-        permission_mode: serde_json::to_value(settings.values.permissions.mode)
+        model: session_config.model_name().to_string(),
+        permission_mode: serde_json::to_value(session_config.permission_mode())
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "default".to_string()),

@@ -75,7 +75,7 @@ impl Builder {
                 w.compactor,
                 settings.values.compaction.clear_on_cache_expiry,
             ),
-            settings,
+            session_config: w.resolved.session_config,
             turn: Default::default(),
             charged_to: None,
             open_turn: w.open_turn,

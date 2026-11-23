@@ -8,6 +8,8 @@ pub(super) struct Resolved {
     pub(super) model: Arc<dyn Model>,
     pub(super) template: Arc<dyn base::tool::ToolRegistry>,
     pub(super) tools: Arc<InMemoryToolRegistry>,
+    pub(super) session_config: Arc<settings::SessionConfig>,
+    /// `session_config`'s settings.
     pub(super) settings: Arc<LoadedSettings>,
     pub(super) telemetry_handle: TelemetryHandle,
     pub(super) permission: PermissionSet,

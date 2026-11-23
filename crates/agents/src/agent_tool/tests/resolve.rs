@@ -95,12 +95,7 @@ fn tiered_parent(strong: &str, balanced: &str, fast: &str) -> AgentTool {
 }
 
 fn delegate_model(tool: &AgentTool, named: Option<&str>) -> String {
-    tool.delegator
-        .sub_settings(named)
-        .values
-        .model
-        .model_name
-        .clone()
+    tool.delegator.sub_settings(named).model_name().to_string()
 }
 
 #[test]
@@ -423,15 +418,12 @@ fn custom_agent_type_model_override_is_applied_to_sub_settings() {
     assert_eq!(model_override.as_deref(), Some("claude-opus-4-8"));
 
     let settings = agent_tool.sub_settings(model_override.as_deref());
-    assert_eq!(settings.values.model.model_name, "claude-opus-4-8");
+    assert_eq!(settings.model_name(), "claude-opus-4-8");
 
     // A call with no override (or an unknown type) still falls back to
     // the parent's configured model — this must not regress.
     let settings_default = agent_tool.sub_settings(None);
-    assert_eq!(
-        settings_default.values.model.model_name,
-        "parent-default-model"
-    );
+    assert_eq!(settings_default.model_name(), "parent-default-model");
 }
 
 #[test]
@@ -444,6 +436,12 @@ fn effort_names_parse_to_their_levels() {
     assert_eq!(parse_effort("not-a-level"), None);
 }
 
+/// `settings` as a parent session runs on them, with `def` over them.
+pub(super) fn overridden(settings: Settings, def: &AgentTypeDefinition) -> SessionConfig {
+    let parent = LoadedSettings::new(settings, base::paths::PathSettings::default());
+    apply_agent_type_overrides(SessionConfig::of(Arc::new(parent)), def)
+}
+
 #[test]
 fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
     let def = AgentTypeDefinition {
@@ -454,16 +452,19 @@ fn apply_agent_type_overrides_sets_permission_mode_effort_and_max_turns() {
         max_turns: Some(5),
         ..Default::default()
     };
-    let mut settings = Settings::defaults_for("test-model");
+    let settings = Settings::defaults_for("test-model");
     let original_max_calls = settings.turn.max_model_calls;
-    apply_agent_type_overrides(&mut settings, &def);
+    let settings = overridden(settings, &def);
     assert_eq!(
-        settings.permissions.mode,
+        settings.permission_mode(),
         base::permission::PermissionMode::Plan
     );
-    assert_eq!(settings.model.effort, Some(Effort::Max));
-    assert_eq!(settings.turn.max_model_calls, 5);
-    assert_ne!(settings.turn.max_model_calls, original_max_calls);
+    assert_eq!(settings.settings().values.model.effort, Some(Effort::Max));
+    assert_eq!(settings.settings().values.turn.max_model_calls, 5);
+    assert_ne!(
+        settings.settings().values.turn.max_model_calls,
+        original_max_calls
+    );
 }
 
 /// A plugin ships over the network. Letting its agent type name
@@ -485,15 +486,16 @@ fn plugin_agent_type_cannot_loosen_permissions_or_raise_the_call_cap() {
     settings.permissions.mode = M::Default;
     settings.turn.max_model_calls = 25;
 
-    apply_agent_type_overrides(&mut settings, &def);
+    let settings = overridden(settings, &def);
 
     assert_eq!(
-        settings.permissions.mode,
+        settings.permission_mode(),
         M::Default,
         "a plugin must not be able to switch the permission gate off"
     );
     assert_eq!(
-        settings.turn.max_model_calls, 25,
+        settings.settings().values.turn.max_model_calls,
+        25,
         "a plugin must not be able to raise the API-call cap"
     );
 }
@@ -516,10 +518,10 @@ fn plugin_agent_type_may_still_tighten() {
     settings.permissions.mode = M::AcceptEdits;
     settings.turn.max_model_calls = 25;
 
-    apply_agent_type_overrides(&mut settings, &def);
+    let settings = overridden(settings, &def);
 
-    assert_eq!(settings.permissions.mode, M::Plan);
-    assert_eq!(settings.turn.max_model_calls, 5);
+    assert_eq!(settings.permission_mode(), M::Plan);
+    assert_eq!(settings.settings().values.turn.max_model_calls, 5);
 }
 
 #[test]
@@ -537,10 +539,10 @@ fn a_users_agent_type_may_raise_its_cap_and_loosen_its_mode() {
     settings.permissions.mode = M::Default;
     settings.turn.max_model_calls = 25;
 
-    apply_agent_type_overrides(&mut settings, &def);
+    let settings = overridden(settings, &def);
 
-    assert_eq!(settings.permissions.mode, M::BypassPermissions);
-    assert_eq!(settings.turn.max_model_calls, 200);
+    assert_eq!(settings.permission_mode(), M::BypassPermissions);
+    assert_eq!(settings.settings().values.turn.max_model_calls, 200);
 }
 
 #[test]
@@ -561,8 +563,12 @@ fn a_planning_parent_holds_a_type_to_plan_and_a_bypassing_one_takes_it_along() {
     ] {
         let mut settings = Settings::defaults_for("test-model");
         settings.permissions.mode = parent;
-        apply_agent_type_overrides(&mut settings, &typed(asked));
-        assert_eq!(settings.permissions.mode, applied, "{parent:?} + {asked:?}");
+        let settings = overridden(settings, &typed(asked));
+        assert_eq!(
+            settings.permission_mode(),
+            applied,
+            "{parent:?} + {asked:?}"
+        );
     }
     let mut settings = Settings::defaults_for("test-model");
     settings.permissions.mode = M::Default;
@@ -570,8 +576,8 @@ fn a_planning_parent_holds_a_type_to_plan_and_a_bypassing_one_takes_it_along() {
         source: AgentTypeSource::Plugin,
         ..typed(M::BypassPermissions)
     };
-    apply_agent_type_overrides(&mut settings, &plugin);
-    assert_eq!(settings.permissions.mode, M::Default);
+    let settings = overridden(settings, &plugin);
+    assert_eq!(settings.permission_mode(), M::Default);
 }
 
 #[test]
@@ -581,20 +587,20 @@ fn apply_agent_type_overrides_leaves_settings_untouched_when_fields_absent() {
         description: "d".into(),
         ..Default::default()
     };
-    let mut settings = Settings::defaults_for("test-model");
+    let settings = Settings::defaults_for("test-model");
     let before = (
         settings.permissions.mode,
         settings.model.thinking_mode.clone(),
         settings.model.effort,
         settings.turn.max_model_calls,
     );
-    apply_agent_type_overrides(&mut settings, &def);
+    let settings = overridden(settings, &def);
     assert_eq!(
         (
-            settings.permissions.mode,
-            settings.model.thinking_mode,
-            settings.model.effort,
-            settings.turn.max_model_calls
+            settings.permission_mode(),
+            settings.settings().values.model.thinking_mode.clone(),
+            settings.settings().values.model.effort,
+            settings.settings().values.turn.max_model_calls
         ),
         before
     );
@@ -622,13 +628,12 @@ fn run_sub_applies_permission_mode_and_max_turns_override_end_to_end() {
     .agent_tool();
 
     let def = agent_tool.delegator.agent_type_def("cautious").unwrap();
-    let mut settings = agent_tool.sub_settings(None);
-    apply_agent_type_overrides(&mut settings.values, &def);
+    let settings = apply_agent_type_overrides(agent_tool.sub_settings(None), &def);
     assert_eq!(
-        settings.values.permissions.mode,
+        settings.permission_mode(),
         base::permission::PermissionMode::Plan
     );
-    assert_eq!(settings.values.turn.max_model_calls, 3);
+    assert_eq!(settings.settings().values.turn.max_model_calls, 3);
 }
 
 /// A delegate starts from the mode a host switched the parent to since it was
@@ -642,19 +647,16 @@ fn a_delegate_starts_from_the_mode_a_host_switched_the_parent_to() {
         ..TestParent::new(Arc::new(DummyModel))
     }
     .agent_tool();
-    assert_eq!(
-        agent_tool.sub_settings(None).values.permissions.mode,
-        M::Default
-    );
+    assert_eq!(agent_tool.sub_settings(None).permission_mode(), M::Default);
 
     state.switch_permission_mode(M::AcceptEdits);
     assert_eq!(
-        agent_tool.sub_settings(None).values.permissions.mode,
+        agent_tool.sub_settings(None).permission_mode(),
         M::AcceptEdits
     );
     state.switch_permission_mode(M::Plan);
     assert_eq!(
-        agent_tool.sub_settings(None).values.permissions.mode,
+        agent_tool.sub_settings(None).permission_mode(),
         M::AcceptEdits,
         "in plan the delegate starts from where plan returns to; the relay holds it to plan"
     );

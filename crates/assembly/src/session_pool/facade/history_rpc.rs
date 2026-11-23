@@ -391,7 +391,7 @@ impl SessionPool {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| settings.paths.global_data_dir.display().to_string()),
             started_at,
-            model: settings.values.model.model_name.clone(),
+            model: settings.main_model.clone(),
             permission_mode: serde_json::to_value(settings.values.permissions.mode)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))

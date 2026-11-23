@@ -260,7 +260,7 @@ async fn build_agent(
             base::paths::PathSettings::default(),
         )
     };
-    settings.values.model.model_name = model_name.clone();
+    settings.main_model = model_name.clone();
     settings.values.model.max_tokens = 2000;
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.values.model.effort = None;

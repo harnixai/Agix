@@ -445,7 +445,7 @@ fn an_untrusted_project_cannot_send_anything_elsewhere() {
             settings.values.model.tasks.compact,
             base::provider::Tier::Strong
         );
-        assert_eq!(settings.values.model.model_name, "claude-opus");
+        assert_eq!(settings.main_model, "claude-opus");
         assert_eq!(settings.values.telemetry.otlp_endpoint, None);
         assert!(settings.values.recorder.is_none());
         assert!(settings.values.prompt.instruction_files.is_empty());

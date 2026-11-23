@@ -198,6 +198,7 @@ fn a_managed_mode_holds_over_a_session_that_may_loosen() {
         &crate::settings_sections::all(),
     );
     assert_eq!(settings.values.permissions.mode, PermissionMode::Plan);
+    let settings = Arc::new(settings);
     for asked in ["acceptEdits", "bypassPermissions"] {
         let opts = asking_for(asked);
         let (laid, clamped) = crate::session_pool::parts::factory::session_settings(
@@ -205,11 +206,7 @@ fn a_managed_mode_holds_over_a_session_that_may_loosen() {
             opts.settings.as_ref(),
             opts.requested_permission_mode(),
         );
-        assert_eq!(
-            laid.values.permissions.mode,
-            PermissionMode::Plan,
-            "{asked}"
-        );
+        assert_eq!(laid.permission_mode(), PermissionMode::Plan, "{asked}");
         assert_eq!(
             clamped.first().map(|c| c.field.as_str()),
             Some("settings.permissions.mode"),
@@ -224,14 +221,14 @@ fn a_managed_mode_holds_over_a_session_that_may_loosen() {
 fn a_managed_effort_holds_the_session_s_own_and_is_reported() {
     use crate::session_pool::parts::factory::{held_keys, reasoning_report};
     use crate::session_pool::parts::specs::SessionSpec;
-    let settings = defaults().with_managed(
+    let settings = Arc::new(defaults().with_managed(
         Some(settings::managed::from_value(
             "managed",
             serde_json::json!({"model": {"effort": "low"}}),
             &crate::settings_sections::all(),
         )),
         &crate::settings_sections::all(),
-    );
+    ));
     let mut spec = SessionSpec::default();
     spec.change_layer(|layer| {
         layer.insert(

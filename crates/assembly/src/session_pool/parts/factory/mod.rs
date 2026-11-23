@@ -120,9 +120,9 @@ pub(in crate::session_pool) struct BuiltEngine {
     /// Plugin scripts that could not be bound, by plugin, for the plugin
     /// subsystem's fault records.
     pub(in crate::session_pool) script_faults: Vec<(String, String)>,
-    /// The settings the engine was built with: the pair's, with this
-    /// session's mode and model written in.
-    pub(in crate::session_pool) settings: Arc<LoadedSettings>,
+    /// What the engine was built on: the pair's settings with the session's
+    /// layer over them, and the session's mode, model and workplace.
+    pub(in crate::session_pool) session_config: Arc<settings::SessionConfig>,
 }
 
 impl EngineFactory {
@@ -190,14 +190,14 @@ impl EngineFactory {
         let options = spec.options.as_ref();
         let scene_id = scene.id.clone();
         let (model, task_router, model_name, clock) = models(session_id, binding, spec)?;
-        let settings_snapshot = self.snapshot(
+        let session_config = Arc::new(session_config(
             &binding.settings,
-            spec.requested_permission_mode(),
-            model_name.as_ref(),
-            spec.settings_layer(),
+            spec,
+            model_name,
             session_id,
             req.worktree,
-        );
+        ));
+        let settings_snapshot = session_config.settings().clone();
         let permission = resolve_session_permission(self.host_policy.as_ref(), &settings_snapshot);
 
         let mut builder = self
@@ -205,7 +205,7 @@ impl EngineFactory {
             .scene(scene)
             .model(model)
             .tools(self.tools.clone())
-            .settings(settings_snapshot.clone())
+            .session_config((*session_config).clone())
             .permission(permission)
             .session_id(session_id.to_string())
             .session_state(req.seed.state, req.seed.generation.get())
@@ -278,7 +278,7 @@ impl EngineFactory {
             namer,
             scripts: script_ledger,
             script_faults,
-            settings: settings_snapshot,
+            session_config,
         })
     }
 
@@ -324,35 +324,33 @@ impl EngineFactory {
         }
         decls
     }
+}
 
-    /// The pair's settings with this session's own settings `layer` laid
-    /// over them, and its permission mode, model, scratch workspace and
-    /// worktree written in.
-    fn snapshot(
-        &self,
-        base_settings: &LoadedSettings,
-        requested_mode: Option<base::permission::PermissionMode>,
-        model_name: Option<&String>,
-        layer: Option<&serde_json::Map<String, serde_json::Value>>,
-        session_id: &str,
-        worktree: Option<&base::paths::LinkedWorktree>,
-    ) -> Arc<LoadedSettings> {
-        // The mode is decided once and written into the snapshot as well:
-        // the gate, the hook payloads and `Meta` all read it from there, and a
-        // snapshot still holding the settings-file mode made every one of them
-        // report a mode the session was not running in.
-        let (mut snap, _) = session_settings(base_settings, layer, requested_mode);
-        if let Some(name) = model_name {
-            snap.values.model.model_name = name.clone();
-        }
-        if let base::paths::Workspace::Scratch(_) = snap.paths.workspace {
-            snap.paths.workspace = base::paths::Workspace::Scratch(
-                base::paths::session_scratch_dir(&snap.paths.global_data_dir, session_id),
-            );
-        }
-        snap.paths.worktree = worktree.cloned();
-        Arc::new(snap)
-    }
+/// `spec`'s session over the pair's `base_settings`: its own settings layer
+/// laid over them, the mode it runs in, the model chosen for it, its own
+/// scratch directory when it has no project, and its worktree.
+fn session_config(
+    base_settings: &Arc<LoadedSettings>,
+    spec: &SessionSpec,
+    model_name: String,
+    session_id: &str,
+    worktree: Option<&base::paths::LinkedWorktree>,
+) -> settings::SessionConfig {
+    let (config, _) = session_settings(
+        base_settings,
+        spec.settings_layer(),
+        spec.requested_permission_mode(),
+    );
+    let workspace = match config.workspace() {
+        base::paths::Workspace::Scratch(_) => base::paths::Workspace::Scratch(
+            base::paths::session_scratch_dir(&base_settings.paths.global_data_dir, session_id),
+        ),
+        project => project.clone(),
+    };
+    config
+        .with_model_name(model_name)
+        .with_workspace(workspace)
+        .with_worktree(worktree.cloned())
 }
 
 /// The conversation's model and the session's own router, its clients
@@ -367,7 +365,7 @@ fn models(
     (
         Arc<dyn base::interface::model::Model>,
         Arc<dyn base::provider::TaskRouting>,
-        Option<String>,
+        String,
         Option<Arc<dyn base::interface::environment::Environment>>,
     ),
     CreateError,
@@ -407,10 +405,10 @@ fn models(
         Some(name) => router.resolve_model(&name),
         None => router
             .model_name_for(base::provider::TaskTiers::MAIN)
-            .unwrap_or_else(|| base_settings.values.model.model_name.clone()),
+            .unwrap_or_else(|| base_settings.main_model.clone()),
     };
     let model = router.model_for(base::provider::TaskTiers::MAIN);
-    Ok((model, Arc::new(router), Some(model_name), clock))
+    Ok((model, Arc::new(router), model_name, clock))
 }
 
 /// What the session's `recorder` option asks the model wrapper to do.

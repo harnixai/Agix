@@ -27,13 +27,12 @@ impl Builder {
         let agent_depth = self.spec.agent_depth;
         let mut plugins = self.register_plugins(&session, &r.settings, &r.scene)?;
         let (config, exec) =
-            self.config_and_exec(&r.settings, &r.scene, session.session_id_str())?;
-        let mut hooks =
-            self.wire_hooks(&r.settings, &r.model, &session, &exec, &r.telemetry_handle);
+            self.config_and_exec(&r.session_config, &r.scene, session.session_id_str())?;
+        let mut hooks = self.wire_hooks(&r, &session, &exec);
         let skill_catalog = crate::module::LateSkillCatalog::default();
 
         let state = self.wire_session_state(
-            &r.settings,
+            &r.session_config,
             &config,
             r.attended,
             &session,

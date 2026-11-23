@@ -71,7 +71,11 @@ pub struct SessionContext<'a> {
     /// the modules, the scene and the plugins registered theirs: the tools a
     /// delegate may inherit.
     pub template_tools: &'a Arc<dyn base::tool::ToolRegistry>,
+    /// `session_config`'s settings.
     pub settings: &'a Arc<LoadedSettings>,
+    /// The session's settings and what it decided for itself: what a
+    /// delegate of it starts from.
+    pub session_config: &'a Arc<settings::SessionConfig>,
     pub config: &'a Arc<EngineConfig>,
     pub scene: &'a Arc<SceneSpec>,
     /// Already wrapped for telemetry: what a module calls through it is

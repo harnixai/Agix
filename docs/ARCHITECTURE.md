@@ -437,7 +437,7 @@ serde 的 `Option<Option<T>>` 免费区分前两者,但 `null` 与字符串的�
 
 **无项目就是没有项目,不是"状态目录的上一级"。** 有没有项目记在 `PathSettings::workspace` 上:
 `Project(根)` 或 `Scratch(目录)`。`project_root()` 对后者是 `None`,凡是按项目找东西的地方
-(项目层设置、skills、agents、rules、hooks、git、`AGENTS.md`)都跳过;工具在 `working_dir()` 里
+(项目层设置、skills、agents、rules、hooks、git、`AGENTS.md`)都跳过;工具在 `SessionConfig::working_dir()` 里
 干活——有项目是项目根,无项目是会话自己的 `<状态目录>/scratchpad/sessions/<会话 id>`,建会话时
 由会话池定下,子 Agent 继承父会话的设置,所以用同一个。不能退回"状态目录的上一级":状态目录
 是 `~/.agix` 时那就是家目录,写 `~/.zshrc` 会被当成项目内的写。
@@ -528,6 +528,23 @@ managed 为准。启动时对守护进程自己那一对
 的 `effort` / `thinking` 与 `session.setPrompt` 改的也是它(规格里的 `settings`,改过就盖过 `options.settings`,
 建会话时的 `options` 留着给同 id 的 `session.create` 比对),一样判、一样作用于子 Agent 与团队成员,一样重建引擎;
 没有第二条只管会话自己那段对话的路。
+
+**会话的配置:共享的设置、会话层、会话自己定的值,三样分开放。** 引擎建在 `settings::SessionConfig` 上
+(会话池在 `parts/factory` 里给每次建引擎配一个,子 Agent 从父会话的派生):
+- `shared()`:为这一对 `(项目, 场景)` 读好的设置,`cli` 层、宿主覆盖与 managed 层都在里面;同一对的会话共用
+  同一个 `Arc<LoadedSettings>`,不按会话复制、不按会话改。要"文件里怎么说"的读它。
+- `session_layer()` 与 `settings()`:会话层原样留着,`settings()` 是两者经 `LoadedSettings::overlay` 算出来的,不再
+  手改;读设置值的代码读它。被压住的键在 `held()`,`requested(key)` / `applied(key)` 给出会话层对一个键要了
+  什么、实际用的是什么(`permissions.mode` 的 applied 是会话的模式)。
+- 会话自己定的:`permission_mode()`(`effective_permission_mode` 夹紧后的模式)、`model_name()`(规格或路由选出的
+  对话模型,`session.setModel` 换过的引擎在下一轮从会话状态取)、`workspace()`(无项目会话自己的 scratch 目录)、
+  `worktree()`;`working_dir()`、`worktree_git()`、`engine_config()` 由它们得出。这些不写进 `Settings`:
+  `settings().values.permissions.mode` 是设置(连同会话层)说的值,会话按哪个模式跑只看 `permission_mode()`;
+  `LoadedSettings::main_model` 是设置给的对话模型。`PathSettings` 也只有这一对的目录,没有 worktree。
+
+子 Agent 的配置照拿父会话的共享设置与会话层,换上自己的模型、模式与 worktree;agent 类型的 `effort` /
+`max_turns` 经 `SessionConfig::tuned_for_delegate` 落在派生出的 `settings()` 上。`Settings` 与它的块只放设置文件
+写得出的字段,`tests/guards` 的 A7 守着(这些类型里不许有 `#[serde(skip)]` 字段)。
 
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
 `(项目, 场景)` 的会话共享;宿主按会话给的目录(`options.skill_dirs` / `session.setSkillDirs`)不进

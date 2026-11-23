@@ -53,6 +53,11 @@ pub struct LoadedSettings {
     /// The model every tier of the built-in provider is: the daemon's
     /// `--model`.
     pub default_model: String,
+    /// The conversation's model these settings name: what `model.tasks.main`
+    /// is at the first provider of `model.order`, `default_model` when that
+    /// does not route. A session may run on another
+    /// ([`SessionConfig::model_name`](crate::SessionConfig::model_name)).
+    pub main_model: String,
     /// The `cli` tier's layers as given, merged; `None` without one.
     pub cli_layer: Option<serde_json::Value>,
     project_layer: ProjectLayer,
@@ -86,8 +91,10 @@ impl LoadedSettings {
     /// Settings that were not loaded from any tier: no rules, no managed
     /// layer, and no project tier of their own.
     pub fn new(values: Settings, paths: PathSettings) -> Self {
+        let default_model = values.builtin_model().unwrap_or_default().to_string();
         let mut loaded = Self {
-            default_model: values.model.model_name.clone(),
+            main_model: default_model.clone(),
+            default_model,
             values,
             paths,
             rules: Vec::new(),
@@ -242,7 +249,7 @@ impl LoadedSettings {
             sections,
             layout,
         } = request;
-        let base = Settings::defaults_for(default_model);
+        let base = Settings::defaults();
         let mut merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
         seed_section_defaults(&mut merged_json, sections);
 
@@ -320,6 +327,7 @@ impl LoadedSettings {
             ignored,
             provider_origins,
             default_model: default_model.to_string(),
+            main_model: default_model.to_string(),
             cli_layer,
             project_layer,
         };

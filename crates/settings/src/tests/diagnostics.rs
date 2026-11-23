@@ -35,7 +35,7 @@ fn load_malformed_layer_warns_and_is_skipped_not_fatal() {
         &Sections::none(),
         Default::default(),
     );
-    assert_eq!(settings.values.model.model_name, "fallback-model");
+    assert_eq!(settings.main_model, "fallback-model");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn settings_without_a_project_have_no_project_root() {
         Default::default(),
     );
     assert_eq!(settings.paths.project_root(), None);
-    assert!(settings.paths.working_dir().starts_with(&state));
+    assert!(settings.paths.workspace_dir().starts_with(&state));
     assert_eq!(settings.paths.local_data_dir, state);
 
     let project = LoadedSettings::load(
@@ -85,7 +85,7 @@ fn settings_without_a_project_have_no_project_root() {
         project.paths.project_root(),
         Some(root.path().join("repo").as_path())
     );
-    assert_eq!(project.paths.working_dir(), root.path().join("repo"));
+    assert_eq!(project.paths.workspace_dir(), root.path().join("repo"));
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn load_missing_directories_returns_plain_defaults() {
         &Sections::none(),
         Default::default(),
     );
-    assert_eq!(settings.values.model.model_name, "fallback-model");
+    assert_eq!(settings.main_model, "fallback-model");
     assert_eq!(settings.values.providers.len(), 1);
     assert!(settings.values.providers[0].builtin);
 }

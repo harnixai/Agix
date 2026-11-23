@@ -273,7 +273,7 @@ fn a_session_state_handed_in_is_attached_only_when_the_engine_takes_it_over() {
 
     agent.attach_session();
     assert!(state.exec().is_some());
-    assert_eq!(state.env().cwd, agent.settings().paths.working_dir());
+    assert_eq!(state.env().cwd, agent.session_config().working_dir());
 
     drop(agent);
     assert!(
@@ -471,12 +471,13 @@ async fn the_model_chosen_on_the_sessions_state_is_the_one_the_next_turn_uses() 
         .build()
         .expect("build should succeed");
 
-    assert_eq!(agent.settings.values.model.model_name, "test");
+    assert_eq!(agent.session_config.model_name(), "test");
     agent
         .session_state()
         .set_model_choice(Some("claude-opus-5".into()));
     assert_eq!(
-        agent.settings.values.model.model_name, "test",
+        agent.session_config.model_name(),
+        "test",
         "a turn already running keeps its model"
     );
 
@@ -491,7 +492,7 @@ async fn the_model_chosen_on_the_sessions_state_is_the_one_the_next_turn_uses() 
         )
         .await;
 
-    assert_eq!(agent.settings.values.model.model_name, "claude-opus-5");
+    assert_eq!(agent.session_config.model_name(), "claude-opus-5");
 }
 
 /// The counter a host builds the session with is what its size — the number

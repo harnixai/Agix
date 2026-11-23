@@ -160,7 +160,7 @@ fn unfitting_value(fields: &Map<String, Value>, sections: &Sections) -> Option<(
             "this mode is set by the engine, not by a settings file".into(),
         ));
     }
-    let mut defaults = serde_json::to_value(Settings::defaults_for("")).unwrap_or_default();
+    let mut defaults = serde_json::to_value(Settings::defaults()).unwrap_or_default();
     seed_section_defaults(&mut defaults, sections);
     merge_fitting(&mut defaults, Value::Object(layer), sections)
         .into_iter()

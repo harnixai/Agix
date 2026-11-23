@@ -84,10 +84,7 @@ async fn web_search_goes_through_the_sessions_own_model() {
         .build()
         .expect("build should succeed");
     assert!(search_once(&agent).await.contains("from.session.example"));
-    assert_eq!(
-        *asked.lock().unwrap(),
-        [test_settings().values.model.model_name.clone()]
-    );
+    assert_eq!(*asked.lock().unwrap(), [test_settings().main_model.clone()]);
 }
 
 #[tokio::test]

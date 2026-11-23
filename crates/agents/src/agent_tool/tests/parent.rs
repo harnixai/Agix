@@ -121,7 +121,7 @@ impl TestParent {
             },
             hooks: self.hooks,
             scene: self.scene,
-            settings: Arc::new(settings),
+            session_config: Arc::new(SessionConfig::of(Arc::new(settings))),
             config: self.config,
             model: self.model,
             mcp: self.mcp,
@@ -177,7 +177,7 @@ impl AgentTool {
         self.delegator.relay("sub", None, task, None, Vec::new())
     }
 
-    pub(super) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
+    pub(super) fn sub_settings(&self, model_name: Option<&str>) -> SessionConfig {
         self.delegator.sub_settings(model_name)
     }
 

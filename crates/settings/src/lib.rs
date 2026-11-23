@@ -2,7 +2,8 @@
 //! say once merged ([`Settings`]), and what loading them produced
 //! ([`LoadedSettings`] — the values, where this scene's data lives, each
 //! permission rule with its tier, the managed layer and the project-trust
-//! decision).
+//! decision), and what one session runs on ([`SessionConfig`] — those settings
+//! shared, its own layer over them, and what it decided for itself).
 //!
 //! [`LoadedSettings::load`] is the single canonical settings.json loader
 //! (global → scene → project, generic recursive JSON merge). Everything
@@ -40,6 +41,7 @@ pub mod quota;
 pub mod renamed;
 mod schema;
 pub mod section;
+mod session_config;
 mod source;
 pub mod tier_gate;
 pub mod trust;
@@ -51,6 +53,7 @@ pub use loaded::{LoadRequest, LoadedSettings, ProviderOrigin};
 pub use merge::merge_json_values;
 pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};
+pub use session_config::{DelegateTuning, SessionConfig};
 pub use source::{read_settings_file, FileTiers};
 
 /// One settings.json file, and what the settings tiers say once merged. Every
@@ -187,11 +190,6 @@ pub struct ModelSettings {
     #[serde(rename = "thinking")]
     pub thinking_mode: ThinkingMode,
     pub max_tokens: u32,
-    /// The conversation's model: what `tasks.main` is at the first provider
-    /// of `order`, or a session's own choice. Not read from a file.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub model_name: String,
 }
 
 /// Context compaction, over what the scene asks for. A field left out keeps
@@ -469,13 +467,12 @@ impl Settings {
         Ok(())
     }
 
-    /// Quick default for a given model name.
-    pub fn defaults_for(model_name: &str) -> Self {
+    /// The built-in defaults: what no settings file has said anything about.
+    pub fn defaults() -> Self {
         Self {
             model: ModelSettings {
                 order: Vec::new(),
                 tasks: TaskTiers::default(),
-                model_name: model_name.to_string(),
                 max_tokens: DEFAULT_MAX_TOKENS,
                 thinking_mode: ThinkingMode::On,
                 effort: Some(Effort::High),
@@ -501,6 +498,23 @@ impl Settings {
             providers: Vec::new(),
             sections: BTreeMap::new(),
         }
+    }
+
+    /// The defaults with the engine's own provider serving `model`, as
+    /// [`LoadedSettings`] puts it in when no provider is defined.
+    pub fn defaults_for(model: &str) -> Self {
+        Self {
+            providers: vec![ProviderConfig::builtin(model)],
+            ..Self::defaults()
+        }
+    }
+
+    /// The model of the engine's own provider, when these settings hold it.
+    pub fn builtin_model(&self) -> Option<&str> {
+        self.providers
+            .iter()
+            .find(|p| p.builtin)
+            .and_then(|p| p.tiers.strong.as_deref())
     }
 
     /// The providers model calls go through, in `model.order`, each with its

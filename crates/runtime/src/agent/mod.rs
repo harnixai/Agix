@@ -71,8 +71,8 @@ impl Drop for SessionEnd {
 
 pub struct Agent {
     scene: Arc<SceneSpec>,
-    settings: Arc<LoadedSettings>,
-    /// Derived from `settings`; every tool call's `ToolExecCtx.config` is a
+    session_config: Arc<settings::SessionConfig>,
+    /// Derived from `session_config`; every tool call's `ToolExecCtx.config` is a
     /// clone of this, so tools see the configured sandbox/permission/shell
     /// settings rather than defaults.
     config: Arc<base::context::EngineConfig>,

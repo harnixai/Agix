@@ -87,14 +87,14 @@ impl SubagentPayload {
         session_id: &str,
         cwd: &std::path::Path,
         depth: u32,
-        settings: &Settings,
+        permission_mode: base::permission::PermissionMode,
         agent_type: Option<&str>,
     ) -> Self {
         Self {
             session_id: session_id.to_string(),
             cwd: cwd.to_path_buf(),
             depth,
-            permission_mode: settings.permissions.mode,
+            permission_mode,
             agent_type: agent_type.map(str::to_string),
             stop_reason: None,
             spend: None,

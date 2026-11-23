@@ -547,8 +547,15 @@ impl Builder {
         self.spec.tools = Some(t);
         self
     }
+    /// The settings the session runs on, with nothing decided for it beyond
+    /// them: [`SessionConfig::of`](settings::SessionConfig::of).
     pub fn settings(mut self, s: Arc<LoadedSettings>) -> Self {
-        self.spec.settings = Some(s);
+        self.spec.session_config = Some(settings::SessionConfig::of(s));
+        self
+    }
+    /// The session's settings and what it decided for itself.
+    pub fn session_config(mut self, c: settings::SessionConfig) -> Self {
+        self.spec.session_config = Some(c);
         self
     }
     pub fn permission(mut self, p: PermissionSet) -> Self {

@@ -121,10 +121,10 @@ impl LayerFold<'_> {
 }
 
 impl LoadedSettings {
-    /// The built-in provider in place when no provider is defined, and the
-    /// conversation's model what `model.tasks.main` is at the first provider
-    /// of `model.order`. Values that went through JSON lose both; this puts
-    /// them back.
+    /// The built-in provider in place when no provider is defined, and
+    /// [`main_model`](Self::main_model) what `model.tasks.main` is at the first provider
+    /// of `model.order`. Values that went through JSON lose the built-in
+    /// provider; this puts it back.
     pub fn settle_providers(&mut self) {
         let values = &mut self.values;
         values.providers.retain(|p| !p.builtin);
@@ -133,6 +133,6 @@ impl LoadedSettings {
                 .providers
                 .push(ProviderConfig::builtin(&self.default_model));
         }
-        values.model.model_name = main_model(values).unwrap_or_else(|| self.default_model.clone());
+        self.main_model = main_model(values).unwrap_or_else(|| self.default_model.clone());
     }
 }

@@ -34,7 +34,7 @@ async fn run_and_read_log(root: &std::path::Path, fixed: bool) -> String {
         Settings::defaults_for("golden-model"),
         base::paths::PathSettings::default(),
     );
-    settings.values.model.model_name = "golden-model".into();
+    settings.main_model = "golden-model".into();
     settings.values.model.max_tokens = 1024;
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.paths.user_data_dir = root.join("user");

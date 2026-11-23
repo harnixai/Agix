@@ -45,11 +45,11 @@ impl TurnLoopState {
         }
     }
 
-    fn new(settings: &settings::LoadedSettings) -> Self {
+    fn new(session_config: &settings::SessionConfig) -> Self {
         Self {
             started: std::time::Instant::now(),
-            model: settings.values.model.model_name.clone(),
-            max_tokens: settings.values.model.max_tokens,
+            model: session_config.model_name().to_string(),
+            max_tokens: session_config.settings().values.model.max_tokens,
             output_limit_escalations: 0,
             turn_no: 0,
             api_calls: 0,
@@ -78,7 +78,7 @@ impl Agent {
         };
 
         let _timer = self.telemetry.timer("turn", "total");
-        let mut state = TurnLoopState::new(&self.settings);
+        let mut state = TurnLoopState::new(&self.session_config);
 
         self.prepare_turn().await;
         let recall = match self.room_for_a_call() {

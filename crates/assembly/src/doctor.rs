@@ -614,7 +614,7 @@ pub fn run_doctor(
         },
         permission_rules_count: settings.rules.len(),
         model: ModelReport {
-            model_name: settings.values.model.model_name.clone(),
+            model_name: settings.main_model.clone(),
             provider: settings
                 .values
                 .routing()

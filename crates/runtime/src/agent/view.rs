@@ -79,8 +79,14 @@ impl Agent {
         &self.scene
     }
 
+    /// The settings the session runs on.
     pub fn settings(&self) -> &LoadedSettings {
-        &self.settings
+        self.session_config.settings()
+    }
+
+    /// The session's settings and what it decided for itself.
+    pub fn session_config(&self) -> &settings::SessionConfig {
+        &self.session_config
     }
 
     pub fn telemetry(&self) -> &dyn TelemetryRecorder {
@@ -89,7 +95,7 @@ impl Agent {
 
     /// Recorder status — None when no recording is configured.
     pub fn recorder(&self) -> Option<&base::recorder::RecorderConfig> {
-        self.settings.values.recorder.as_ref()
+        self.settings().values.recorder.as_ref()
     }
 
     /// The session's permission: its policy and its grants.

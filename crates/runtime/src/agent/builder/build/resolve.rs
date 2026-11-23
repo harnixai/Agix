@@ -41,11 +41,13 @@ impl Builder {
             .unwrap_or_else(|| Arc::new(InMemoryToolRegistry::new()));
         let tools = session_registry(template.as_ref());
 
-        let settings = self
-            .spec
-            .settings
-            .take()
-            .ok_or_else(|| EngineError::Internal("settings required".into()))?;
+        let session_config = Arc::new(
+            self.spec
+                .session_config
+                .take()
+                .ok_or_else(|| EngineError::Internal("settings required".into()))?,
+        );
+        let settings = session_config.settings().clone();
 
         let telemetry_handle = self
             .host
@@ -60,7 +62,7 @@ impl Builder {
         let model: Arc<dyn Model> = Arc::new(telemetry::model::TelemetryModel::new(
             model,
             telemetry_handle.clone(),
-            settings.values.model.model_name.clone(),
+            session_config.model_name().to_string(),
         ));
         let permission = self.host.permission.take().unwrap_or_else(|| {
             let policy = Policy::from_settings(&settings.permission_settings(), Vec::new());
@@ -93,6 +95,7 @@ impl Builder {
             model,
             template,
             tools,
+            session_config,
             settings,
             telemetry_handle,
             permission,

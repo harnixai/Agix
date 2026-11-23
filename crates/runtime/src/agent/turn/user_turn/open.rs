@@ -156,7 +156,7 @@ impl Agent {
         if collected_this_turn {
             self.prompt.set_frozen(
                 crate::turn::collect_frozen(
-                    &self.settings.paths,
+                    &self.session_config,
                     self.policies.environment().as_ref(),
                     &engine_git,
                 )
@@ -177,8 +177,7 @@ impl Agent {
     fn push_system_reminder(&mut self) {
         if let Some(frozen) = self.prompt.frozen() {
             let mut ctx = base::interface::scene::ReminderContext::new(
-                self.settings
-                    .paths
+                self.session_config
                     .working_dir()
                     .to_string_lossy()
                     .into_owned(),
@@ -187,7 +186,7 @@ impl Agent {
             ctx.memory_summary = frozen
                 .memory_index
                 .as_deref()
-                .filter(|m| self.settings.values.memory.enabled && !m.is_empty())
+                .filter(|m| self.settings().values.memory.enabled && !m.is_empty())
                 .map(std::borrow::Cow::Borrowed);
             let reminder = self.scene.reminder(&ctx);
             if !reminder.is_empty() {
@@ -201,7 +200,7 @@ impl Agent {
 
     pub(super) fn start_skill_discovery(&self) -> Option<SkillDiscovery> {
         let skills = self.tooling.skills().clone();
-        let local_dir = self.settings.paths.local_data_dir.clone();
+        let local_dir = self.settings().paths.local_data_dir.clone();
         let invoked_skills: Vec<String> = self.session_state.ledger().invoked_skills.clone();
         // Only a previous turn with tool calls can have written new skills;
         // `last_had_tool_uses` starts `true` so the first turn scans too.
@@ -251,7 +250,7 @@ impl Agent {
 
         let mut user_blocks = vec![ModelContentBlock::Text { text: content }];
         let files = base::paths::PromptFiles::for_project(
-            &base::paths::ConfigPaths::from_settings(&self.settings.paths),
+            &base::paths::ConfigPaths::from_settings(&self.settings().paths),
         );
         user_blocks.extend(resolve_attachments(attachments, &files).await);
         for block in 1..user_blocks.len() {

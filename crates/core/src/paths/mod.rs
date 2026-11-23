@@ -135,11 +135,6 @@ pub struct PathSettings {
     #[serde(skip)]
     #[schemars(skip)]
     pub project_untrusted: bool,
-    /// The worktree a sub-agent was given: its tools work there, while the
-    /// project stays the workspace's.
-    #[serde(skip)]
-    #[schemars(skip)]
-    pub worktree: Option<LinkedWorktree>,
     /// What the instance names its directories; `local_data_dir` is
     /// [`Layout::project_dir`] of the project.
     #[serde(skip)]
@@ -214,7 +209,6 @@ impl Default for PathSettings {
             workspace: Workspace::Project(PathBuf::new()),
             scope: default_scope(),
             project_untrusted: false,
-            worktree: None,
             layout: Layout::default(),
         }
     }
@@ -275,7 +269,6 @@ impl PathSettings {
             workspace,
             scope,
             project_untrusted: false,
-            worktree: None,
             layout,
         }
     }
@@ -290,12 +283,10 @@ impl PathSettings {
         self.workspace.project_root()
     }
 
-    /// The tools' working directory: the root a write needs no approval in,
-    /// a read none either, and a sandboxed command may write.
-    pub fn working_dir(&self) -> &Path {
-        if let Some(worktree) = &self.worktree {
-            return &worktree.dir;
-        }
+    /// The workspace's directory: the project, or the scratch directory. A
+    /// session given a worktree works there instead
+    /// (`settings::SessionConfig::working_dir`).
+    pub fn workspace_dir(&self) -> &Path {
         match &self.workspace {
             Workspace::Project(dir) | Workspace::Scratch(dir) => dir,
         }
@@ -325,12 +316,6 @@ impl PathSettings {
                 branch: git.branch.clone(),
             },
         )
-    }
-
-    /// What of the repository's git directory a sandboxed command in the
-    /// session's worktree may write, while it is still the project's own.
-    pub fn worktree_git(&self) -> Option<WorktreeGit> {
-        self.project_worktree_git(self.worktree.as_ref()?.git.as_ref()?)
     }
 
     /// The project tier's `settings.local.json` — the file the interactive
@@ -735,7 +720,6 @@ mod tests {
             local_data_dir: p.local_data_dir.clone(),
             scope: "code".into(),
             project_untrusted: false,
-            worktree: None,
             layout: Layout::new(".codix").unwrap(),
         };
         let back = ConfigPaths::from_settings(&carried);

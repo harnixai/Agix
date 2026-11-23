@@ -400,7 +400,7 @@ impl Agent {
                     stop_reason: stop_reason.clone(),
                     input_message_count: call.sent_message_count,
                     tool_count: call.sent_tool_count,
-                    default_model: state.model == self.settings.values.model.model_name,
+                    default_model: state.model == self.session_config.model_name(),
                     // Auxiliary calls are labelled by `TelemetryModel`.
                     purpose: None,
                     truncated: stream_result.truncated,
@@ -425,7 +425,7 @@ impl Agent {
 
         // A git-mutating Bash call makes the frozen git snapshot stale.
         if has_tool_uses
-            && self.settings.paths.project_root().is_some()
+            && self.settings().paths.project_root().is_some()
             && Self::included_git_mutating_bash_call(self.this_step())
         {
             if let Some(frozen) = self.prompt.frozen_mut() {

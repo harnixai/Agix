@@ -12,7 +12,9 @@
 //! type specifies a system prompt and an allowed tool set, which
 //! `delegate_selector()` holds a sub-agent's session to.
 
-use ::settings::{LoadedSettings, Settings};
+#[cfg(test)]
+use ::settings::Settings;
+use ::settings::{LoadedSettings, SessionConfig};
 use anyhow::anyhow;
 use async_trait::async_trait;
 #[cfg(test)]
@@ -180,7 +182,8 @@ impl AgentTool {
         let repo = self
             .delegator
             .env
-            .settings
+            .session_config
+            .settings()
             .paths
             .project_root()
             .map_or_else(|| ctx.session.env().cwd.clone(), Path::to_path_buf);
@@ -189,7 +192,7 @@ impl AgentTool {
             &ctx.engine_git,
             &repo,
             slug,
-            &self.delegator.env.settings.paths.layout,
+            &self.delegator.env.session_config.settings().paths.layout,
         )
         .await
         .map_err(|e| base::error::ToolError::Execution(anyhow!("worktree: {e}")))

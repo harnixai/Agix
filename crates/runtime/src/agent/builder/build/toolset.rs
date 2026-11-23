@@ -11,7 +11,7 @@ impl Builder {
     /// `web_search` task with another model than the conversation's tier.
     fn web_search_model(
         &self,
-        settings: &LoadedSettings,
+        model_name: &str,
         model: &Arc<dyn Model>,
         telemetry_handle: &TelemetryHandle,
         session_state: &Arc<session_state::SessionState>,
@@ -32,12 +32,12 @@ impl Builder {
             let model = telemetry::model::TelemetryModel::new(
                 router.model_for(WEB_SEARCH_TASK),
                 telemetry_handle.clone(),
-                settings.values.model.model_name.clone(),
+                model_name.to_string(),
             );
             return (Arc::new(model), Arc::new(move || name.clone()));
         }
         let state = Arc::downgrade(session_state);
-        let configured = settings.values.model.model_name.clone();
+        let configured = model_name.to_string();
         let asked_for = move || {
             state
                 .upgrade()
@@ -56,8 +56,12 @@ impl Builder {
         let (tools, settings, telemetry_handle) = (&r.tools, &r.settings, &r.telemetry_handle);
         register_task_tools(tools);
         let agent_depth = self.spec.agent_depth;
-        let (search_model, search_model_name) =
-            self.web_search_model(settings, &r.model, telemetry_handle, session_state);
+        let (search_model, search_model_name) = self.web_search_model(
+            r.session_config.model_name(),
+            &r.model,
+            telemetry_handle,
+            session_state,
+        );
         let search_model = crate::turn::SpentModel::into_open(search_model, open_turn.clone());
         tools::register_web_search(tools, search_model, search_model_name);
 
@@ -68,7 +72,7 @@ impl Builder {
             let model = Arc::new(telemetry::model::TelemetryModel::new(
                 router.model_for(WEB_FETCH_TASK),
                 telemetry_handle.clone(),
-                settings.values.model.model_name.clone(),
+                r.session_config.model_name().to_string(),
             )) as Arc<dyn Model>;
             Some((
                 crate::turn::SpentModel::into_open(model, open_turn.clone()),

@@ -343,7 +343,7 @@ impl Agent {
             counter: counter.as_ref(),
             context_limit: budget.compact_threshold,
             keep_recent: budget.compact_keep_recent,
-            enabled: self.settings.values.compaction.reactive,
+            enabled: self.settings().values.compaction.reactive,
             circuit_open: self.compaction.compaction_state.circuit_open,
         };
         match self
@@ -570,7 +570,7 @@ impl Agent {
                     &hooks::HookInput {
                         hook_event_name: "PostCompact".into(),
                         session_id: self.session.session_id.clone(),
-                        cwd: self.settings.paths.working_dir().display().to_string(),
+                        cwd: self.session_config.working_dir().display().to_string(),
                         permission_mode: hook_permission_mode(self.session_state.permission_mode()),
                         depth: self.identity.agent_depth(),
                         tool_input: Some(serde_json::json!({
@@ -611,7 +611,7 @@ impl Agent {
                 &hooks::HookInput {
                     hook_event_name: "PreCompact".into(),
                     session_id: self.session.session_id.clone(),
-                    cwd: self.settings.paths.working_dir().display().to_string(),
+                    cwd: self.session_config.working_dir().display().to_string(),
                     permission_mode: hook_permission_mode(self.session_state.permission_mode()),
                     depth: self.identity.agent_depth(),
                     tool_input: Some(serde_json::json!({

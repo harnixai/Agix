@@ -232,7 +232,7 @@ impl SessionPool {
         // scene/project on a later resume (falls back to inference, same as
         // any other pre-v2 file).
         if !resume {
-            self.write_meta(&core, &built.settings).await;
+            self.write_meta(&core, &built.session_config).await;
             if spec.options.is_some() {
                 self.specs.persist(&session_id, &spec).await;
             }
@@ -593,8 +593,8 @@ impl SessionPool {
         self.plugins
             .note_script_faults(std::mem::take(&mut built.script_faults));
 
-        let settings = &built.settings;
-        let mode_name = serde_json::to_value(settings.values.permissions.mode)
+        let settings = built.session_config.settings();
+        let mode_name = serde_json::to_value(built.session_config.permission_mode())
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "default".to_string());
@@ -608,7 +608,7 @@ impl SessionPool {
                 telemetry::SessionStartPayload {
                     scene: scene_id,
                     permission_mode: mode_name,
-                    model: settings.values.model.model_name.clone(),
+                    model: built.session_config.model_name().to_string(),
                     max_tokens: settings.values.model.max_tokens,
                     thinking_mode: !matches!(
                         settings.values.model.thinking_mode,
@@ -628,7 +628,8 @@ impl SessionPool {
         Ok(built)
     }
 
-    async fn write_meta(&self, core: &SessionCore, settings: &LoadedSettings) {
+    async fn write_meta(&self, core: &SessionCore, session_config: &settings::SessionConfig) {
+        let settings = session_config.settings();
         let session_id = core.id();
         let (Some(store), Ok(sid)) = (
             self.directory.store(),
@@ -642,8 +643,8 @@ impl SessionPool {
                 .clone()
                 .unwrap_or_else(|| settings.paths.global_data_dir.display().to_string()),
             started_at: store.environment().now(),
-            model: settings.values.model.model_name.clone(),
-            permission_mode: serde_json::to_value(settings.values.permissions.mode)
+            model: session_config.model_name().to_string(),
+            permission_mode: serde_json::to_value(session_config.permission_mode())
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| "default".to_string()),

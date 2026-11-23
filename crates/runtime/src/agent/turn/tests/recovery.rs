@@ -470,7 +470,7 @@ async fn the_recovery_policy_is_told_the_limit_the_call_went_out_with() {
     let tmp = tempfile::tempdir().unwrap();
     let mut settings = recall_test_settings(tmp.path());
     settings.values.memory.enabled = false;
-    settings.values.model.model_name = "m".into();
+    settings.main_model = "m".into();
     settings.values.model.max_tokens = 32_000;
     settings.values.providers.push(
         serde_json::from_value(serde_json::json!({

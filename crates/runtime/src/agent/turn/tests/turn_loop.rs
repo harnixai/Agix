@@ -25,7 +25,8 @@ fn prompt_context_includes_os() {
     paths.global_data_dir = "/tmp/global".into();
     paths.workspace = base::paths::Workspace::project_of(std::path::Path::new("/tmp/local"));
     paths.local_data_dir = "/tmp/local".into();
-    let settings = settings::LoadedSettings::new(values, paths);
+    let settings =
+        settings::SessionConfig::of(Arc::new(settings::LoadedSettings::new(values, paths)));
     let ctx = build_prompt_context(
         &settings,
         None,
@@ -55,7 +56,7 @@ fn prompt_context_includes_os() {
     );
     assert_eq!(ctx_with_frozen.shell, "/usr/bin/zsh");
     assert_eq!(ctx_with_frozen.model_name, "fallback-model");
-    assert_ne!(ctx_with_frozen.model_name, settings.values.model.model_name);
+    assert_ne!(ctx_with_frozen.model_name, settings.model_name());
 }
 
 /// Answers directly (no tool calls) and records every message it was sent,

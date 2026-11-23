@@ -433,12 +433,14 @@ async fn a_session_in_a_worktree_works_there_and_writes_what_a_commit_needs_of_t
     let env_for = |git: base::paths::WorktreeGit| {
         let mut settings = test_settings();
         settings.paths.workspace = base::paths::Workspace::Project(repo.clone());
-        settings.paths.worktree = Some(base::paths::LinkedWorktree {
-            dir: worktree.clone(),
-            git: Some(git),
-        });
-        let builder = builder_for(scene_deferring("wt", &[]), template_of(Vec::new()))
-            .settings(Arc::new(settings));
+        let config = settings::SessionConfig::of(Arc::new(settings)).with_worktree(Some(
+            base::paths::LinkedWorktree {
+                dir: worktree.clone(),
+                git: Some(git),
+            },
+        ));
+        let builder =
+            builder_for(scene_deferring("wt", &[]), template_of(Vec::new())).session_config(config);
         let (agent, _rx, _tx) = builder.build().expect("build should succeed");
         let env = agent.session_state.env();
         let sandbox = agent.config.sandbox.worktree_git.clone();

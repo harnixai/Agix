@@ -7,7 +7,7 @@ fn build_hook_runner_defaults_to_empty_without_hooks_config() {
     let settings = test_settings();
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let runner = build_hook_runner(
-        &settings,
+        &settings::SessionConfig::of(Arc::new(settings)),
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
@@ -26,7 +26,7 @@ fn build_hook_runner_parses_hooks_config_into_real_hooks() {
     }));
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let runner = build_hook_runner(
-        &settings,
+        &settings::SessionConfig::of(Arc::new(settings)),
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
@@ -49,7 +49,7 @@ fn a_config_change_hook_is_an_unknown_event_and_the_rest_still_run() {
     }));
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let runner = build_hook_runner(
-        &settings,
+        &settings::SessionConfig::of(Arc::new(settings)),
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,
@@ -66,7 +66,7 @@ fn build_hook_runner_degrades_to_empty_on_malformed_hooks_config() {
     settings.values.hooks = Some(serde_json::json!("not-a-hooks-map"));
     let model: Arc<dyn Model> = Arc::new(DummyModel);
     let runner = build_hook_runner(
-        &settings,
+        &settings::SessionConfig::of(Arc::new(settings)),
         model,
         Arc::new(crate::module::LateDelegator::default()),
         None,

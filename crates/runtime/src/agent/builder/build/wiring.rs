@@ -5,12 +5,11 @@ use super::*;
 impl Builder {
     pub(super) fn wire_hooks(
         &mut self,
-        settings: &LoadedSettings,
-        model: &Arc<dyn Model>,
+        r: &Resolved,
         session: &Transcript,
         exec: &base::interface::exec::ExecProviders,
-        telemetry: &TelemetryHandle,
     ) -> HookWiring {
+        let (session_config, model, telemetry) = (&r.session_config, &r.model, &r.telemetry_handle);
         let delegator = crate::module::LateDelegator::default();
         let session_ended = CancellationToken::new();
         let own_runner = self.ext.hooks.is_none();
@@ -18,11 +17,15 @@ impl Builder {
         let host_hooks = self.ext.host_hooks.take();
         let hooks = self.ext.hooks.take().unwrap_or_else(|| {
             let mut runner = build_hook_runner(
-                settings,
+                session_config,
                 model.clone(),
                 Arc::new(delegator.clone()),
                 Some(session.session_id_str().to_string()),
-                hook_exec(exec, self.host.exec.is_some(), &settings.paths.layout),
+                hook_exec(
+                    exec,
+                    self.host.exec.is_some(),
+                    &session_config.settings().paths.layout,
+                ),
             );
             if let Some(source) = host_hooks {
                 runner = runner.with_hosts(source);
@@ -58,12 +61,13 @@ impl Builder {
 
     pub(super) fn engine_config(
         &self,
-        settings: &LoadedSettings,
+        session_config: &settings::SessionConfig,
         scene: &SceneSpec,
         session_id: &str,
     ) -> Arc<base::context::EngineConfig> {
+        let settings = session_config.settings();
         Arc::new({
-            let mut c = settings.engine_config();
+            let mut c = session_config.engine_config();
             let paths = settings.paths.config_paths();
             c.tool_results.dir = self.spec.tool_results_dir.clone().or_else(|| {
                 (self.spec.agent_depth == 0 && paths.local_data_dir.is_absolute())
@@ -99,7 +103,7 @@ impl Builder {
 
     pub(super) fn config_and_exec(
         &self,
-        settings: &LoadedSettings,
+        session_config: &settings::SessionConfig,
         scene: &SceneSpec,
         session_id: &str,
     ) -> Result<
@@ -109,7 +113,7 @@ impl Builder {
         ),
         EngineError,
     > {
-        let config = self.engine_config(settings, scene, session_id);
+        let config = self.engine_config(session_config, scene, session_id);
         let exec = match (&self.host.exec, &self.spec.process_groups) {
             (Some(_), Some(_)) => Err(EngineError::Internal(
                 "Builder::exec and Builder::process_groups are both set; record groups in \
@@ -125,7 +129,7 @@ impl Builder {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn wire_session_state(
         &self,
-        settings: &LoadedSettings,
+        session_config: &settings::SessionConfig,
         config: &Arc<base::context::EngineConfig>,
         attended: bool,
         session: &Transcript,
@@ -136,10 +140,11 @@ impl Builder {
         let agent_depth = self.spec.agent_depth;
         // One `SessionState` per session, shared by every tool call: none of
         // its state works unless it survives from one call to the next.
+        let settings = session_config.settings();
         prepare_scratchpad(&settings.paths.config_paths().scratchpad_dir());
         prepare_local_data_gitignore(&settings.paths);
-        prepare_working_dir(&settings.paths);
-        let session_env = session_env(settings, config, attended, &self.host.skill_dirs);
+        prepare_working_dir(session_config.workspace());
+        let session_env = session_env(session_config, config, attended, &self.host.skill_dirs);
         let (session_state, generation, injected_state) = match self.spec.session_state.clone() {
             Some((state, generation)) => (state, generation, true),
             None => (Arc::new(session_state::SessionState::new()), 0, false),
@@ -151,7 +156,7 @@ impl Builder {
         );
         let hook_ambient = hook_ambient(
             session.session_id_str().to_string(),
-            settings.paths.working_dir().display().to_string(),
+            session_config.working_dir().display().to_string(),
             agent_depth,
             session_state.clone(),
             open_turn.clone(),
@@ -173,7 +178,7 @@ impl Builder {
             generation,
             injected: injected_state,
             env: session_env,
-            mode_ceiling: mode_ceiling(settings),
+            mode_ceiling: mode_ceiling(session_config),
             engine_git: Arc::new(crate::exec::engine_git_for(
                 config,
                 &exec,
@@ -257,27 +262,29 @@ pub(super) fn bind_tools(
     attachment
 }
 
-/// The widest mode a host could put a session in under `settings`, as the
-/// daemon clamps `options.settings.permissions.mode` and `session.setPermissionMode`.
-fn mode_ceiling(settings: &LoadedSettings) -> session_state::ModeCeiling {
+/// The widest mode plan mode may return the session to: any where clients
+/// may loosen the settings, else the mode the session was decided to run in.
+fn mode_ceiling(session_config: &settings::SessionConfig) -> session_state::ModeCeiling {
+    let settings = session_config.settings();
     let widest = if settings.values.permissions.client_may_loosen {
         base::permission::PermissionMode::BypassPermissions
     } else {
-        settings.values.permissions.mode
+        session_config.permission_mode()
     };
     session_state::ModeCeiling::new(widest, settings.bypass_disabled())
 }
 
 /// What this engine's settings and scene make of the session's env.
 pub(super) fn session_env(
-    settings: &LoadedSettings,
+    session_config: &settings::SessionConfig,
     config: &base::context::EngineConfig,
     attended: bool,
     skill_dirs: &super::super::host::HostSkillDirs,
 ) -> base::context::SessionEnv {
-    let cwd = settings.paths.working_dir().to_path_buf();
+    let settings = session_config.settings();
+    let cwd = session_config.working_dir().to_path_buf();
     let resolve = |dir: &std::path::PathBuf| cwd.join(dir);
-    let worktree_git = settings.paths.worktree_git();
+    let worktree_git = session_config.worktree_git();
     base::context::SessionEnv {
         additional_writable_dirs: settings
             .values
@@ -306,10 +313,8 @@ pub(super) fn session_env(
         base_mode: config.permission_mode,
         skill_dirs: skill_dirs.readable.clone(),
         protected_dirs: skill_dirs.protected.clone(),
-        refusal_rule_roots: settings
-            .paths
-            .worktree
-            .as_ref()
+        refusal_rule_roots: session_config
+            .worktree()
             .and(settings.paths.project_root())
             .map(std::path::Path::to_path_buf)
             .into_iter()
@@ -320,8 +325,8 @@ pub(super) fn session_env(
 
 /// A session without a project works in a directory of its own, which has to
 /// exist before its first command runs there.
-pub(super) fn prepare_working_dir(paths: &base::paths::PathSettings) {
-    if let base::paths::Workspace::Scratch(dir) = &paths.workspace {
+pub(super) fn prepare_working_dir(workspace: &base::paths::Workspace) {
+    if let base::paths::Workspace::Scratch(dir) = workspace {
         if dir.is_absolute() {
             let _ = std::fs::create_dir_all(dir);
         }

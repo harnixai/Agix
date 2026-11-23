@@ -24,7 +24,7 @@ pub fn settings_json_schema(sections: &Sections) -> Value {
     let mut generator = schemars::SchemaGenerator::default();
     let mut schema =
         serde_json::to_value(generator.root_schema_for::<Settings>()).unwrap_or_default();
-    let mut defaults = serde_json::to_value(Settings::defaults_for("")).unwrap_or_default();
+    let mut defaults = serde_json::to_value(Settings::defaults()).unwrap_or_default();
     for spec in sections.iter() {
         let mut property = serde_json::to_value(spec.schema(&mut generator)).unwrap_or_default();
         let default = spec.default_value();

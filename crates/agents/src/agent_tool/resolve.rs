@@ -105,21 +105,22 @@ impl Delegator {
         }
     }
 
-    /// A sub-agent's `Settings`: the parent's, with its own model — the one
-    /// `model_name` names ([`Self::named_delegate_model`]), else
+    /// A sub-agent's configuration: the parent's, with its own model — the
+    /// one `model_name` names ([`Self::named_delegate_model`]), else
     /// [`Self::unnamed_delegate_model`] — and the mode a host switched the
     /// parent to since it was built.
-    pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> LoadedSettings {
-        let c = &self.env.config;
+    pub(crate) fn sub_settings(&self, model_name: Option<&str>) -> SessionConfig {
         let model_name = match model_name {
             Some(name) => self.named_delegate_model(name),
             None => self.unnamed_delegate_model(),
         };
-        let mut settings = settings_from_parent(&self.env.settings, model_name, c.max_tokens);
-        if let Some(mode) = self.env.parent.state.host_permission_mode() {
-            settings.values.permissions.mode = mode;
+        let config = (*self.env.session_config)
+            .clone()
+            .with_model_name(model_name);
+        match self.env.parent.state.host_permission_mode() {
+            Some(mode) => config.with_permission_mode(mode),
+            None => config,
         }
-        settings
     }
 
     /// The model the parent session's next call asks for — a host's choice
@@ -225,6 +226,6 @@ impl Delegator {
         if let Some(registry) = &self.env.host.scene_registry {
             return registry.resolve(id);
         }
-        scene::builtin(id, &self.env.settings.paths.layout).map(Arc::new)
+        scene::builtin(id, &self.env.session_config.settings().paths.layout).map(Arc::new)
     }
 }

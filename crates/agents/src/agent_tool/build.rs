@@ -29,7 +29,7 @@ pub(crate) struct Delegate {
     pub(crate) event_rx: EventReceiver,
     pub(crate) input_tx: InputSender,
     pub(crate) def: Option<AgentTypeDefinition>,
-    pub(crate) settings: Arc<LoadedSettings>,
+    pub(crate) session_config: Arc<SessionConfig>,
     pub(crate) payload: SubagentPayload,
     pub(crate) history_store: Option<Arc<dyn HistoryStore>>,
     /// Held as long as the delegate is: it is in `HookAgents` while it runs.
@@ -54,29 +54,50 @@ pub(crate) struct OneShot {
 }
 
 impl Delegator {
+    /// The parent's configuration for a delegate of type `def`: on the model
+    /// `spec` or the type names, in the mode the type and `spec` hold it to,
+    /// working in the directory `spec` names.
+    fn delegate_config(&self, spec: &Spec, def: Option<&AgentTypeDefinition>) -> SessionConfig {
+        let model_override = spec
+            .model
+            .clone()
+            .or_else(|| def.and_then(|d| d.model.clone()));
+        let mut config = self.delegate_settings(spec, model_override.as_deref());
+        if let Some(d) = def {
+            config = apply_agent_type_overrides(config, d);
+        }
+        match spec.permission_mode {
+            Some(mode) => {
+                let held = mode.min_permissive(config.permission_mode());
+                config.with_permission_mode(held)
+            }
+            None => config,
+        }
+    }
+
     /// The parent's settings for a delegate on `model_name`, working in the
     /// directory `spec` names.
-    fn delegate_settings(&self, spec: &Spec, model_name: Option<&str>) -> LoadedSettings {
-        let mut settings = self.sub_settings(model_name);
-        if spec.cwd != settings.paths.working_dir() {
-            let git = spec.git.as_ref().and_then(|git| {
-                let own = settings.paths.project_worktree_git(git);
-                if own.is_none() {
-                    tracing::warn!(
-                        worktree = %spec.cwd.display(),
-                        git_dir = %git.dir.display(),
-                        "the worktree's git directory is not the project's .git, or its entry \
-                         or branch lies elsewhere in it; a sandboxed sub-agent in it cannot commit"
-                    );
-                }
-                own
-            });
-            settings.paths.worktree = Some(base::paths::LinkedWorktree {
-                dir: spec.cwd.clone(),
-                git,
-            });
+    fn delegate_settings(&self, spec: &Spec, model_name: Option<&str>) -> SessionConfig {
+        let config = self.sub_settings(model_name);
+        if spec.cwd == config.working_dir() {
+            return config;
         }
-        settings
+        let git = spec.git.as_ref().and_then(|git| {
+            let own = config.settings().paths.project_worktree_git(git);
+            if own.is_none() {
+                tracing::warn!(
+                    worktree = %spec.cwd.display(),
+                    git_dir = %git.dir.display(),
+                    "the worktree's git directory is not the project's .git, or its entry \
+                     or branch lies elsewhere in it; a sandboxed sub-agent in it cannot commit"
+                );
+            }
+            own
+        });
+        config.with_worktree(Some(base::paths::LinkedWorktree {
+            dir: spec.cwd.clone(),
+            git,
+        }))
     }
 
     /// `extra_tools` join what the delegate inherits, in its registry only.
@@ -95,21 +116,9 @@ impl Delegator {
         for t in extra_tools {
             tools.register(t);
         }
-        let model_override = spec
-            .model
-            .clone()
-            .or_else(|| def.as_ref().and_then(|d| d.model.clone()));
-        let mut sub_settings = self.delegate_settings(spec, model_override.as_deref());
-        if let Some(d) = &def {
-            apply_agent_type_overrides(&mut sub_settings.values, d);
-        }
-        if let Some(mode) = spec.permission_mode {
-            sub_settings.values.permissions.mode =
-                mode.min_permissive(sub_settings.values.permissions.mode);
-        }
+        let session_config = Arc::new(self.delegate_config(spec, def.as_ref()));
         let scene = self.scene_for_subagent(def.as_ref());
         let scene_id = scene.id.clone();
-        let settings = Arc::new(sub_settings);
         let sid = spec.session_id.clone();
         let parent_session_id = Some(self.env.parent.id.clone());
         // First, so that what the delegate decides for itself below — its
@@ -125,7 +134,7 @@ impl Delegator {
         .tool_selector(selector)
         .model(self.model_for_subagent())
         .tools(tools)
-        .settings(settings.clone())
+        .session_config((*session_config).clone())
         .agent_depth(depth)
         .memory_extraction(extracts_memories)
         .permission(relay.permission)
@@ -154,16 +163,30 @@ impl Delegator {
             .map_err(|e| base::error::ToolError::Execution(anyhow!("build: {e}")))?;
         let cwd = &spec.cwd;
         if let Some(store) = &history_store {
-            write_sidechain_meta(store, &sid, parent_session_id, &scene_id, cwd, &settings).await;
+            write_sidechain_meta(
+                store,
+                &sid,
+                parent_session_id,
+                &scene_id,
+                cwd,
+                &session_config,
+            )
+            .await;
         }
-        let payload = SubagentPayload::of(&sid, cwd, depth, &settings.values, agent_type)
-            .spending_into(spec.spend.clone());
+        let payload = SubagentPayload::of(
+            &sid,
+            cwd,
+            depth,
+            session_config.permission_mode(),
+            agent_type,
+        )
+        .spending_into(spec.spend.clone());
         Ok(Delegate {
             agent,
             event_rx,
             input_tx,
             def,
-            settings,
+            session_config,
             payload,
             history_store,
             under_hook,

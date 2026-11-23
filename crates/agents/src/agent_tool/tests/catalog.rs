@@ -270,8 +270,11 @@ fn a_project_agent_type_cannot_loosen_until_trusted() {
         let mut settings = Settings::defaults_for("test-model");
         settings.permissions.mode = M::Default;
         settings.turn.max_model_calls = 25;
-        apply_agent_type_overrides(&mut settings, def);
-        (settings.permissions.mode, settings.turn.max_model_calls)
+        let settings = overridden(settings, def);
+        (
+            settings.permission_mode(),
+            settings.settings().values.turn.max_model_calls,
+        )
     };
 
     let untrusted = merged_as(false);

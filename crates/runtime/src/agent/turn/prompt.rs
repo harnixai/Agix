@@ -197,7 +197,7 @@ pub(super) fn open_conversation_with_user_blocks(request: &mut ModelRequest) {
 }
 
 pub(super) fn build_prompt_context<'a>(
-    settings: &'a settings::LoadedSettings,
+    session_config: &'a settings::SessionConfig,
     frozen: Option<&'a base::frozen::FrozenContext>,
     mcp_instructions: Option<&'a str>,
     skills_text: Option<&'a str>,
@@ -205,6 +205,7 @@ pub(super) fn build_prompt_context<'a>(
     tool_results_ever_cleared: bool,
     env: &dyn base::interface::environment::Environment,
 ) -> ScenePromptContext<'a> {
+    let settings = session_config.settings();
     let (is_git, git_branch, is_worktree, git_status, memory_index, output_style, shell, home_dir) =
         if let Some(f) = frozen {
             (
@@ -223,7 +224,7 @@ pub(super) fn build_prompt_context<'a>(
             (false, None, false, None, None, None, None, None)
         };
     let mut ctx = ScenePromptContext::default();
-    ctx.cwd = Cow::Owned(settings.paths.working_dir().display().to_string());
+    ctx.cwd = Cow::Owned(session_config.working_dir().display().to_string());
     ctx.os = Cow::Borrowed(std::env::consts::OS);
     // `FrozenContext::collect_environment` always sets `shell` (falls back to
     // `/bin/bash` itself when `$SHELL` is unset), so this fallback only
@@ -448,7 +449,7 @@ impl Agent {
         if let Some(ref own) = self.prompt.claude_md_content {
             let already = sections.iter().any(|(_, c)| c.trim() == own.trim());
             if !already && !own.trim().is_empty() {
-                let label = match self.settings.values.prompt.instruction_files.as_slice() {
+                let label = match self.settings().values.prompt.instruction_files.as_slice() {
                     [] => "instruction file".to_string(),
                     files => files
                         .iter()
@@ -484,10 +485,10 @@ impl Agent {
     /// The conversation's opening `<system-reminder>`: the scene's session
     /// facts, the project instructions and today's date, as one user message.
     pub(super) async fn inject_session_context(&mut self) {
-        let model = self.settings.values.model.model_name.clone();
+        let model = self.session_config.model_name().to_string();
         let facts = {
             let mut ctx = build_prompt_context(
-                &self.settings,
+                &self.session_config,
                 self.prompt.frozen.as_ref(),
                 None,
                 None,
@@ -585,7 +586,7 @@ impl Agent {
             Some(Cow::Owned(tool_names))
         };
         let mut ctx = build_prompt_context(
-            &self.settings,
+            &self.session_config,
             self.prompt.frozen.as_ref(),
             mcp_ref,
             skills_ref,
@@ -596,7 +597,7 @@ impl Agent {
         ctx.available_tools = tools_ref;
         ctx.attended = self.identity.attended();
         let rules = self.prompt.rules.rules();
-        let values = &self.settings.values;
+        let values = &self.settings().values;
         let memory_prompt: Option<String> = values
             .memory
             .enabled
@@ -747,7 +748,7 @@ impl Agent {
                 }],
             }])
         };
-        let model = self.settings.values.model.model_name.clone();
+        let model = self.session_config.model_name().to_string();
         let blocks = self.build_prompt_blocks(&model).await;
         let tools = self.build_tool_defs().await;
         let messages = pair_dangling_tool_uses(self.session.messages().to_vec());
@@ -779,7 +780,7 @@ impl Agent {
             + tools.iter().map(|t| t.tokens).sum::<usize>()
             + message_tokens;
         let budget = self.context_budget();
-        let max_tokens = self.output_cap(&model, self.settings.values.model.max_tokens);
+        let max_tokens = self.output_cap(&model, self.settings().values.model.max_tokens);
         ContextReport {
             basis: "next_step_without_new_input".to_string(),
             model,

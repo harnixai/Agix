@@ -254,8 +254,10 @@ pub async fn start_scripted_server_holding(
     let Seed(mut settings, rules) = settings.into();
     settings.permissions.prompt_timeout_secs = prompt_timeout.as_secs();
     settings.app.session_cap = session_cap;
+    if let Some(model) = settings.builtin_model() {
+        config.settings.default_model = model.to_string();
+    }
     config.settings.values = settings;
-    config.settings.default_model = config.settings.values.model.model_name.clone();
     config.settings.settle_providers();
     config.settings.rules = rules
         .into_iter()

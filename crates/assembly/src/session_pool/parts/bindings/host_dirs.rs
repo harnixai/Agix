@@ -348,7 +348,7 @@ impl Forbidden {
         let paths = &settings.paths;
         let config = paths.config_paths();
         let sensitive = base::paths::SensitivePaths::for_paths(&config);
-        let cwd = paths.working_dir().to_path_buf();
+        let cwd = paths.workspace_dir().to_path_buf();
         let mut roots = vec![
             (config.global_skills_dir(), "the global skill tier"),
             (config.state_root().scenes_dir(), "the scene tiers"),

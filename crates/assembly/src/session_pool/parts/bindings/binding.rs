@@ -122,7 +122,7 @@ impl ProjectBinding {
         self.task_router = Arc::new(model::routing::ProviderSet::single(
             model::routing::RoutedProvider::new(
                 base::provider::ProviderConfig::BUILTIN_ID,
-                base::provider::ResolvedTiers::all(&self.settings.values.model.model_name),
+                base::provider::ResolvedTiers::all(&self.settings.main_model),
                 model,
             ),
             self.settings.values.model.tasks.clone(),

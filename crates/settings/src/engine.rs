@@ -5,18 +5,30 @@
 use base::context::config::EngineConfig;
 use base::interface::budget_policy::EngineBudget;
 use base::interface::exec::SandboxSettings;
-use base::permission::PermissionSettings;
+use base::paths::WorktreeGit;
+use base::permission::{PermissionMode, PermissionSettings};
 
 use crate::file::LocalRules;
 use crate::{LoadedSettings, SandboxConfig, Settings};
 
 impl LoadedSettings {
     /// The engine's read-only configuration: `EngineConfig::defaults_for`
-    /// with every field these settings carry laid over it.
+    /// with every field these settings carry laid over it, on their main
+    /// model and in their permission mode. A session's is
+    /// [`SessionConfig::engine_config`](crate::SessionConfig::engine_config).
     pub fn engine_config(&self) -> EngineConfig {
+        self.engine_config_for(&self.main_model, self.values.permissions.mode, None)
+    }
+
+    pub(crate) fn engine_config_for(
+        &self,
+        model: &str,
+        mode: PermissionMode,
+        worktree_git: Option<WorktreeGit>,
+    ) -> EngineConfig {
         let loaded = self;
         let settings = &loaded.values;
-        let mut c = EngineConfig::defaults_for(settings.model.model_name.clone());
+        let mut c = EngineConfig::defaults_for(model.to_string());
         c.max_tokens = settings.model.max_tokens;
         c.permission_prompt_timeout_secs = settings.permissions.prompt_timeout_secs;
         c.max_parallelism = settings.turn.parallel_tools;
@@ -26,9 +38,9 @@ impl LoadedSettings {
         c.model_autonomy.max_jobs = settings.schedule.max_model_jobs;
         c.model_autonomy.min_job_interval_minutes = settings.schedule.min_model_interval_minutes;
 
-        c.permission_mode = settings.permissions.mode;
+        c.permission_mode = mode;
         c.sandbox = std::sync::Arc::new(SandboxSettings {
-            worktree_git: loaded.paths.worktree_git(),
+            worktree_git,
             ..sandbox_settings(
                 settings,
                 &base::paths::ConfigPaths::from_settings(&loaded.paths),

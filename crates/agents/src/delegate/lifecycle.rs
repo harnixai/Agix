@@ -49,7 +49,7 @@ impl DelegateRun {
                 start.called_from,
                 &delegate.payload.session_id,
                 delegate.payload.agent_type.as_deref(),
-                &delegate.settings.values.model.model_name,
+                delegate.session_config.model_name(),
                 start.background,
                 start.stage,
             ),

@@ -348,7 +348,7 @@ impl Agent {
     }
 
     fn config_working_dir(&self) -> PathBuf {
-        self.settings.paths.working_dir().to_path_buf()
+        self.session_config.working_dir().to_path_buf()
     }
 
     fn rewind_report(

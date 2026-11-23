@@ -42,61 +42,52 @@ pub(crate) fn delegate_selector(
     by_type.and(selector.clone())
 }
 
-/// Apply an `AgentTypeDefinition`'s `permission_mode`/`effort`/`max_turns`
-/// overrides to an already-built subagent `Settings`, in place — the same
-/// step whichever path built the base `Settings`.
+/// `config` with an `AgentTypeDefinition`'s `permission_mode`/`effort`/
+/// `max_turns` over it — the same step whichever path built `config`.
 ///
 /// A type's mode replaces the parent's, wider or narrower, as
 /// `PermissionMode::for_delegate` allows. A plugin's types arrive over the
 /// network and can only tighten; the API-call cap is clamped the same way for
 /// them.
-pub(super) fn apply_agent_type_overrides(settings: &mut Settings, def: &AgentTypeDefinition) {
+pub(super) fn apply_agent_type_overrides(
+    config: SessionConfig,
+    def: &AgentTypeDefinition,
+) -> SessionConfig {
+    let mut config = config;
     if let Some(mode) = def.permission_mode {
+        let inherited = config.permission_mode();
         let applied = if def.source.may_loosen() {
-            settings.permissions.mode.for_delegate(mode)
+            inherited.for_delegate(mode)
         } else {
-            mode.min_permissive(settings.permissions.mode)
+            mode.min_permissive(inherited)
         };
         if applied != mode {
             tracing::warn!(
                 agent_type = %def.name,
                 requested = ?mode,
-                inherited = ?settings.permissions.mode,
+                inherited = ?inherited,
                 applied = ?applied,
                 "agent type's permission mode held by its parent's"
             );
         }
-        settings.permissions.mode = applied;
+        config = config.with_permission_mode(applied);
     }
+    let mut tuning = ::settings::DelegateTuning::default();
     if let Some(effort) = &def.effort {
         if let Some(level) = parse_effort(effort) {
-            settings.model.effort = Some(level);
+            tuning.effort = Some(level);
         } else {
             tracing::warn!(effort = %effort, agent_type = %def.name, "unrecognized effort value, ignoring");
         }
     }
     if let Some(max_turns) = def.max_turns {
-        settings.turn.max_model_calls = if def.source.may_loosen() {
+        tuning.max_model_calls = Some(if def.source.may_loosen() {
             max_turns
         } else {
-            max_turns.min(settings.turn.max_model_calls)
-        };
+            max_turns.min(config.settings().values.turn.max_model_calls)
+        });
     }
-}
-
-/// Build a sub-agent's `Settings` by cloning the parent's real settings and
-/// overriding only the model-selection fields — the sub-agent inherits the
-/// parent's actual scope/paths (skills/hooks/agents/memory all resolve
-/// correctly), auth, sandbox policy, etc.
-pub(super) fn settings_from_parent(
-    parent: &LoadedSettings,
-    model_name: String,
-    max_tokens: u32,
-) -> LoadedSettings {
-    let mut settings = parent.clone();
-    settings.values.model.model_name = model_name;
-    settings.values.model.max_tokens = max_tokens;
-    settings
+    config.tuned_for_delegate(&tuning)
 }
 
 /// A parent's `Settings` for tests that do not care which: scope `code`, the
@@ -107,7 +98,7 @@ pub(super) fn fallback_settings(
     max_tokens: u32,
     local_data_dir: std::path::PathBuf,
 ) -> LoadedSettings {
-    let mut settings = Settings::defaults_for(&model_name);
+    let mut settings = ::settings::Settings::defaults_for(&model_name);
     settings.model.max_tokens = max_tokens;
     settings.model.thinking_mode = ThinkingMode::Auto;
     settings.model.effort = None;

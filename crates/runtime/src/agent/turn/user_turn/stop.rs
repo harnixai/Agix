@@ -58,7 +58,7 @@ impl Agent {
         let stop_hook_input = hooks::HookInput {
             hook_event_name: "Stop".into(),
             session_id: self.session.session_id.to_string(),
-            cwd: self.settings.paths.working_dir().display().to_string(),
+            cwd: self.session_config.working_dir().display().to_string(),
             permission_mode: hook_permission_mode(self.session_state.permission_mode()),
             depth: self.identity.agent_depth(),
             stop_hook_active: Some(state.sent_back_by_stop_hook),

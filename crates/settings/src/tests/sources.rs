@@ -172,7 +172,7 @@ fn load_falls_back_to_cli_default_model_when_no_layer_sets_it() {
         &Sections::none(),
         Default::default(),
     );
-    assert_eq!(settings.values.model.model_name, "cli-default-model");
+    assert_eq!(settings.main_model, "cli-default-model");
 }
 
 #[test]

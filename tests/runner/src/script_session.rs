@@ -299,7 +299,7 @@ pub async fn drive(root: &Path, session: Session) -> Ran {
             base::paths::PathSettings::default(),
         ),
     };
-    settings.values.model.model_name = "script-model".into();
+    settings.main_model = "script-model".into();
     settings.values.model.max_tokens = 1024;
     settings.values.model.thinking_mode = ThinkingMode::Off;
     settings.paths.user_data_dir = root.join("user");

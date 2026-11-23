@@ -156,6 +156,7 @@ fn subagent_inherits_the_parent_instruction_file() {
     assert_eq!(
         agent_tool
             .sub_settings(None)
+            .settings()
             .values
             .prompt
             .instruction_files,

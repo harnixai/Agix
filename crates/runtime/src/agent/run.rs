@@ -170,8 +170,8 @@ impl Agent {
         // never run is not a session. `Setup` comes first so a hook can
         // refuse to start while there is still nothing to undo.
         {
-            let scope = self.settings.paths.scope.clone();
-            let model = self.settings.values.model.model_name.clone();
+            let scope = self.settings().paths.scope.clone();
+            let model = self.session_config.model_name().to_string();
             self.fire_lifecycle_hook(hooks::HookEvent::Setup, |i| {
                 i.with_reason(format!("scene={scope} model={model}"))
             })
@@ -187,7 +187,7 @@ impl Agent {
         // Nothing relocates a live session's cwd, so one event at startup
         // reports where work will happen.
         {
-            let cwd = self.settings.paths.working_dir().display().to_string();
+            let cwd = self.session_config.working_dir().display().to_string();
             self.fire_lifecycle_hook(hooks::HookEvent::CwdChanged, |i| {
                 i.with_reason(format!("session working directory: {cwd}"))
             })
@@ -402,7 +402,7 @@ impl Agent {
 
         let (frozen, _) = tokio::join!(
             crate::turn::collect_frozen(
-                &self.settings.paths,
+                &self.session_config,
                 &*self.policies.environment,
                 &engine_git
             ),

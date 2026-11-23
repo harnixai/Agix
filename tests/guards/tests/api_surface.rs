@@ -12,7 +12,8 @@
 //! with the exhaustive match that must break when a variant is added. A6: the structs an embedder
 //! builds are `#[non_exhaustive]` (a ratcheted list). A7: the
 //! settings types a file is read into hold nothing a file cannot set — such a
-//! field is a load result, which `LoadedSettings` holds. A8: no production
+//! field is a load result, which `LoadedSettings` holds, or what a session
+//! decided, which `SessionConfig` holds. A8: no production
 //! code is `#[deprecated]`; the owner's rule is to change the callers instead.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -243,8 +244,33 @@ fn the_contracts_keep_no_per_thread_state() {
     );
 }
 
-const FILE_SHAPED: &[&str] = &["Settings"];
-const SETTINGS_FILE: &str = "crates/settings/src/lib.rs";
+/// Where `Settings` and its blocks are defined: every struct in them that
+/// derives `Deserialize` is read from a settings file.
+const SETTINGS_FILES: &[&str] = &[
+    "crates/settings/src/lib.rs",
+    "crates/settings/src/blocks.rs",
+    "crates/settings/src/limits.rs",
+    "crates/settings/src/egress.rs",
+    "crates/settings/src/permissions.rs",
+];
+
+fn derives_deserialize(s: &syn::ItemStruct) -> bool {
+    s.attrs.iter().any(|attr| {
+        if !attr.path().is_ident("derive") {
+            return false;
+        }
+        let mut found = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            found |= meta
+                .path
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "Deserialize");
+            Ok(())
+        });
+        found
+    })
+}
 
 fn deprecated_attrs(f: &SourceFile) -> Vec<Hit> {
     struct Find<'a> {
@@ -298,40 +324,44 @@ fn skips_serde(field: &syn::Field) -> bool {
 
 #[test]
 fn the_file_shaped_settings_types_hold_only_what_a_file_sets() {
-    let f = ws().file(SETTINGS_FILE);
-    let tree = f.tree(View::Prod);
     let mut seen = Vec::new();
     let mut found = Vec::new();
-    for item in &tree.items {
-        let syn::Item::Struct(s) = item else { continue };
-        let name = s.ident.to_string();
-        if !FILE_SHAPED.contains(&name.as_str()) {
-            continue;
-        }
-        seen.push(name.clone());
-        for field in &s.fields {
-            if skips_serde(field) {
-                found.push(format!(
-                    "{}: {name}.{}",
-                    f.hit(syn::spanned::Spanned::span(field)),
-                    field
-                        .ident
-                        .as_ref()
-                        .map_or(String::new(), ToString::to_string)
-                ));
+    for path in SETTINGS_FILES {
+        let f = ws().file(path);
+        let tree = f.tree(View::Prod);
+        for item in &tree.items {
+            let syn::Item::Struct(s) = item else { continue };
+            if !derives_deserialize(s) {
+                continue;
+            }
+            let name = s.ident.to_string();
+            seen.push(name.clone());
+            for field in &s.fields {
+                if skips_serde(field) {
+                    found.push(format!(
+                        "{}: {name}.{}",
+                        f.hit(syn::spanned::Spanned::span(field)),
+                        field
+                            .ident
+                            .as_ref()
+                            .map_or(String::new(), ToString::to_string)
+                    ));
+                }
             }
         }
     }
-    seen.sort();
-    assert_eq!(
-        seen, FILE_SHAPED,
-        "[api_surface::A7] {SETTINGS_FILE} no longer defines {FILE_SHAPED:?} at the top level; \
-         point the guard at where they moved"
-    );
+    for expected in ["Settings", "ModelSettings", "TurnSettings"] {
+        assert!(
+            seen.iter().any(|name| name == expected),
+            "[api_surface::A7] none of {SETTINGS_FILES:?} defines `{expected}` at the top \
+             level any more; point the guard at where it moved"
+        );
+    }
     assert!(
         found.is_empty(),
         "[api_surface::A7] a settings file cannot set these, so they belong on \
-         `LoadedSettings`, not on the file-shaped types:\n{}",
+         `LoadedSettings` (what loading produced) or `SessionConfig` (what a session \
+         decided), not on the file-shaped types:\n{}",
         found.join("\n")
     );
 }

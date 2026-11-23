@@ -1198,7 +1198,7 @@ async fn run_session(probe: &Probe, probes: &Probes) -> Ran {
             .build()
             .expect("the session builds");
     let health = agent.health();
-    let cwd = agent.settings().paths.working_dir().to_path_buf();
+    let cwd = agent.session_config().working_dir().to_path_buf();
     let bound = agent.session_state().exec();
     let session = CancellationToken::new();
     let engine = tokio::spawn({

@@ -99,8 +99,8 @@ const OWN: &[(&str, &str)] = &[
         "what it inherits of its parent's template, narrowed by its type and caller",
     ),
     (
-        "settings",
-        "its parent's, with its own model and its type's overrides",
+        "session_config",
+        "its parent's, with its own model, mode and worktree and its type's overrides",
     ),
     (
         "hooks",

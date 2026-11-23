@@ -49,7 +49,7 @@ fn providers_add_up_across_tiers_and_a_repeated_id_is_ignored() {
     assert_eq!(ignored_keys(&settings), ["providers[0]"]);
     assert!(settings.ignored[0].error.contains("already defined"));
     assert!(settings.provider_origins["claude"].machine_local);
-    assert_eq!(settings.values.model.model_name, "opus");
+    assert_eq!(settings.main_model, "opus");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn missing_tiers_are_filled_from_the_tier_above() {
         ),
         ("pro", "flash", "flash")
     );
-    assert_eq!(settings.values.model.model_name, "flash");
+    assert_eq!(settings.main_model, "flash");
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn a_tier_outside_the_models_or_an_order_naming_no_provider_does_not_route() {
     );
     let err = settings.values.routing().unwrap_err();
     assert!(err.contains("tiers.strong") && err.contains("max"), "{err}");
-    assert_eq!(settings.values.model.model_name, "m");
+    assert_eq!(settings.main_model, "m");
 
     let settings = load_global(
         r#"{"providers": [{"id": "ds", "tiers": {"strong": "pro"}}],
@@ -120,7 +120,7 @@ fn without_providers_the_engine_supplies_anthropic_on_the_cli_model() {
     assert_eq!(routing[0].0.id, "anthropic");
     assert!(routing[0].0.builtin);
     assert_eq!(routing[0].1.fast, "cli-model");
-    assert_eq!(settings.values.model.model_name, "cli-model");
+    assert_eq!(settings.main_model, "cli-model");
     assert!(settings.provider_origins.is_empty());
 }
 

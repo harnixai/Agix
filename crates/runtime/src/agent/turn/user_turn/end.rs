@@ -98,7 +98,7 @@ impl Agent {
     }
 
     fn spawn_memory_extraction(&mut self) {
-        if self.settings.values.memory.enabled && self.memory.extracts_after_turn() {
+        if self.settings().values.memory.enabled && self.memory.extracts_after_turn() {
             let messages = self.session.messages().to_vec();
             let (model, model_name) = self.model_for_task("memory");
             self.memory.spawn_extraction(Extraction {

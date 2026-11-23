@@ -11,13 +11,14 @@ use tokio_util::sync::CancellationToken;
 /// The session's frozen environment snapshot, taken in its working directory
 /// — looked up in as a project only when it is one.
 pub(crate) async fn collect_frozen(
-    paths: &base::paths::PathSettings,
+    session_config: &settings::SessionConfig,
     environment: &dyn base::interface::environment::Environment,
     engine_git: &base::engine_exec::EngineExec,
 ) -> base::frozen::FrozenContext {
     use base::frozen::CollectOptions;
+    let paths = &session_config.settings().paths;
     let config_paths = base::paths::ConfigPaths::from_settings(paths);
-    let cwd = paths.working_dir().to_path_buf();
+    let cwd = session_config.working_dir().to_path_buf();
     let opts = CollectOptions {
         outside_project: paths.project_root().is_none(),
         ..CollectOptions::defaults()
@@ -276,12 +277,12 @@ impl Agent {
         ToolExecCtx {
             tool_use_id: String::new(),
             tools: Arc::clone(self.tooling.tools()),
-            cwd: self.settings.paths.working_dir().to_path_buf(),
+            cwd: self.session_config.working_dir().to_path_buf(),
             project_root: self
-                .settings
+                .settings()
                 .paths
                 .project_root()
-                .map(|_| self.settings.paths.working_dir().to_path_buf()),
+                .map(|_| self.session_config.working_dir().to_path_buf()),
             session_id: self.session.session_id.clone(),
             turn_no: self.session.turn_count,
             agent_depth: self.identity.agent_depth(),

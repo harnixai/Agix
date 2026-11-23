@@ -228,7 +228,7 @@ impl std::fmt::Debug for DaemonConfig {
         f.debug_struct("DaemonConfig")
             .field("socket_path", &self.socket_path)
             .field("lock_path", &self.lock_path)
-            .field("model", &self.settings.values.model.model_name)
+            .field("model", &self.settings.main_model)
             .field("max_tokens", &self.settings.values.model.max_tokens)
             .field(
                 "mcp_servers",
@@ -481,7 +481,7 @@ mod tests {
             "code",
             &paths,
         );
-        assert_eq!(config.settings.values.model.model_name, "cli-model");
+        assert_eq!(config.settings.main_model, "cli-model");
         assert_eq!(config.settings.values.model.max_tokens, 5000);
     }
 
@@ -593,7 +593,7 @@ mod tests {
             values.provider("deepseek").unwrap().vendor,
             base::provider::Vendor::Deepseek
         );
-        assert_eq!(values.model.model_name, "qwen");
+        assert_eq!(config.settings.main_model, "qwen");
     }
 
     #[test]

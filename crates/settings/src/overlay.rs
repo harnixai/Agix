@@ -84,7 +84,7 @@ pub fn session_layer_problems(layer: &Value, sections: &Sections) -> Vec<(String
             ),
         );
     }
-    let mut defaults = serde_json::to_value(Settings::defaults_for("")).unwrap_or_default();
+    let mut defaults = serde_json::to_value(Settings::defaults()).unwrap_or_default();
     seed_section_defaults(&mut defaults, sections);
     for (key, error) in merge_fitting(&mut defaults, layer.clone(), sections) {
         problems.add(key, error);
@@ -305,7 +305,7 @@ fn remove_dotted(layer: &mut Map<String, Value>, dotted: &str) {
     }
 }
 
-fn value_at(root: &Value, dotted: &str) -> Value {
+pub(crate) fn value_at(root: &Value, dotted: &str) -> Value {
     dotted
         .split('.')
         .try_fold(root, |node, segment| node.get(segment))
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(out.values.turn.token_budget, Some(1000));
         assert_eq!(out.values.turn.max_model_calls, 3);
         assert_eq!(out.values.agents.max_depth, 0);
-        assert_eq!(out.values.model.model_name, "m");
+        assert_eq!(out.main_model, "m");
     }
 
     #[test]
