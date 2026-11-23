@@ -1520,7 +1520,7 @@ daemon 自己的录制根目录。`name` 是根目录下这份录像的目录名
 设过的推理强度、思考开关与提示词同样按这一层的键,`null` 即去掉那个键。
 
 `turn.max_model_calls` 是每个 agent 自己一轮的调用上限,子 Agent 继承会话的值(agent 类型的 `max_turns` 照旧
-覆盖它);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
+覆盖它,但不超过部署方 managed 层写的上限);`turn.token_budget` 是这一轮连同它起的所有子 Agent 共用的一份(§4.8 `budget_exceeded`)。
 
 `prompt_types` 说宿主能回答哪几种 `prompt` 帧(§7)。`permission` 总是会问,写不写都一样。
 列了 `question`,有人值守的会话(`attended`,缺省取场景的 `interactive`,`ARCHITECTURE.md` §3.2.3,如 `code`)才有

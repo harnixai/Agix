@@ -113,8 +113,10 @@ impl SessionConfig {
     }
 
     /// These settings as a delegate of an agent type runs on them: the
-    /// effective settings with what the type sets over them. The shared
-    /// settings and the session layer are the parent's.
+    /// effective settings with what the type sets over them, and the managed
+    /// layer over that — a tighter value the type asks for stands, a looser
+    /// one is held to the managed layer's. The shared settings and the
+    /// session layer are the parent's.
     pub fn tuned_for_delegate(mut self, tuning: &DelegateTuning) -> Self {
         if *tuning == DelegateTuning::default() {
             return self;
@@ -126,6 +128,7 @@ impl SessionConfig {
         if let Some(calls) = tuning.max_model_calls {
             effective.values.turn.max_model_calls = calls;
         }
+        effective.hold_to_managed(&["model.effort", "turn.max_model_calls"]);
         self.effective = Arc::new(effective);
         self
     }
@@ -276,6 +279,33 @@ mod tests {
         assert_eq!(config.requested("turn.max_model_calls"), Some(json!(500)));
         assert_eq!(config.applied("turn.max_model_calls"), json!(5));
         assert_eq!(config.held()[0].key, "turn.max_model_calls");
+    }
+
+    fn under_managed(managed: Value) -> SessionConfig {
+        let managed = crate::managed::from_value("it", managed, &Sections::none());
+        let settings = shared(|_| {})
+            .as_ref()
+            .clone()
+            .with_managed(Some(managed), &Sections::none());
+        SessionConfig::of(Arc::new(settings))
+    }
+
+    #[test]
+    fn a_delegates_tuning_stays_under_the_managed_layer() {
+        let managed = json!({"turn": {"max_model_calls": 10}, "model": {"effort": "low"}});
+        let raised = under_managed(managed.clone()).tuned_for_delegate(&DelegateTuning {
+            effort: Some(Effort::High),
+            max_model_calls: Some(50),
+        });
+        assert_eq!(raised.settings().values.turn.max_model_calls, 10);
+        assert_eq!(raised.settings().values.model.effort, Some(Effort::Low));
+
+        let lowered = under_managed(managed).tuned_for_delegate(&DelegateTuning {
+            effort: None,
+            max_model_calls: Some(5),
+        });
+        assert_eq!(lowered.settings().values.turn.max_model_calls, 5);
+        assert!(lowered.settings().values.providers[0].builtin);
     }
 
     #[test]

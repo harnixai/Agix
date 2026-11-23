@@ -355,6 +355,51 @@ async fn a_session_call_limit_holds_for_it_and_its_sub_agents() -> anyhow::Resul
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_agent_types_max_turns_is_held_to_the_managed_call_limit() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let managed = tempfile::tempdir()?;
+    let managed_file = managed.path().join("managed-settings.json");
+    std::fs::write(
+        &managed_file,
+        json!({ "turn": { "max_model_calls": 2 } }).to_string(),
+    )?;
+    let managed_arg = managed_file.to_string_lossy().to_string();
+    let mut run = stubbed("managed-agent-type", &stub, json!({}))
+        .mode(blackbox::Mode::Spawned)
+        .options(move |o| o.arg("--managed-settings").arg(managed_arg.clone()))
+        .start()
+        .await?;
+    run.write_file(
+        ".agix/agents/digger.md",
+        "---\ndescription: Digs\nmax_turns: 50\n---\nDIG-ROLE.\n",
+    )?;
+    let parent = session(&mut run, json!({})).await?;
+    stub.script_when(
+        ROOT,
+        [
+            Reply::calls(
+                "a1",
+                "Agent",
+                json!({ "description": "dig", "prompt": "Dig.", "subagent_type": "digger" }),
+            ),
+            Reply::text("ROOT-DONE"),
+        ],
+    );
+    stub.script([glob("c1"), glob("c2"), glob("c3"), Reply::text("DUG")]);
+    let events = run.turn(&parent, &format!("{ROOT} delegate it")).await?;
+    assert!(events.text.contains("ROOT-DONE"), "{events:?}");
+    assert_eq!(
+        child_calls(&stub).len(),
+        2,
+        "the agent type's max_turns passed the managed limit"
+    );
+    let result = agent_result(&events);
+    assert!(result.contains("max_turns"), "{result}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_session_budget_holds_after_a_restart() -> anyhow::Result<()> {
     let stub = ProviderStub::start().await?;
     let mut run = stubbed("budget-restart", &stub, json!({})).start().await?;

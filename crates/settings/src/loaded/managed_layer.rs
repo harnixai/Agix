@@ -5,10 +5,11 @@
 
 use base::interface::config_source::{ConfigLayer, Tier};
 use base::permission::{ManagedSettings, PermissionMode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::{mcp_servers_declared, read_providers, LoadedSettings, ProviderOrigin, PROVIDERS};
 use crate::merge::merge_fitting;
+use crate::overlay::value_at;
 use crate::section::Sections;
 use crate::Settings;
 
@@ -49,6 +50,26 @@ impl LoadedSettings {
         }
         self.managed = managed;
         self
+    }
+
+    /// What the managed layer sets at `keys` — dotted, of the core settings —
+    /// laid over these settings again, as [`with_managed`](Self::with_managed)
+    /// lays it, after something other than a settings layer set them.
+    pub(crate) fn hold_to_managed(&mut self, keys: &[&str]) {
+        let Some(managed) = self.managed.as_ref().filter(|m| m.error.is_none()) else {
+            return;
+        };
+        let all = Value::Object(managed.values.clone());
+        let mut values = Map::new();
+        for key in keys {
+            let value = value_at(&all, key);
+            if !value.is_null() {
+                set_dotted(&mut values, key, value);
+            }
+        }
+        let mut part = managed.clone();
+        part.values = values;
+        self.lay_managed_values(&part, &Sections::none());
     }
 
     fn lay_managed_values(&mut self, managed: &ManagedSettings, sections: &Sections) {
@@ -97,6 +118,21 @@ impl LoadedSettings {
             }
             Err(e) => {
                 tracing::warn!(origin = %managed.origin, error = %e, "managed settings do not read over these settings; they are left as they were");
+            }
+        }
+    }
+}
+
+fn set_dotted(map: &mut Map<String, Value>, dotted: &str, value: Value) {
+    match dotted.split_once('.') {
+        None => {
+            map.insert(dotted.to_string(), value);
+        }
+        Some((head, rest)) => {
+            if let Value::Object(inner) =
+                map.entry(head).or_insert_with(|| Value::Object(Map::new()))
+            {
+                set_dotted(inner, rest, value);
             }
         }
     }

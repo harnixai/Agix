@@ -543,7 +543,9 @@ managed 为准。启动时对守护进程自己那一对
   `LoadedSettings::main_model` 是设置给的对话模型。`PathSettings` 也只有这一对的目录,没有 worktree。
 
 子 Agent 的配置照拿父会话的共享设置与会话层,换上自己的模型、模式与 worktree;agent 类型的 `effort` /
-`max_turns` 经 `SessionConfig::tuned_for_delegate` 落在派生出的 `settings()` 上。`Settings` 与它的块只放设置文件
+`max_turns` 经 `SessionConfig::tuned_for_delegate` 落在派生出的 `settings()` 上,managed 层再按同一套判定压回这两个键
+(`model.effort` 以 managed 的为准;`turn.max_model_calls` 有松紧次序,agent 类型要得比 managed 更少时留下,更多时
+取 managed 的)。`Settings` 与它的块只放设置文件
 写得出的字段,`tests/guards` 的 A7 守着(这些类型里不许有 `#[serde(skip)]` 字段)。
 
 **会话自带的 skill 目录叠在绑定的目录之上。** 绑定里的 skill 目录(`SkillManager`)与命令表对同一对
@@ -1584,7 +1586,8 @@ bypass 是用户对自己规则的放弃。部署方——企业 IT、无人值�
   `permissions.client_may_loosen`;会话要的值被它压住时报在 `clamped_options`。唯一的例外是键表信任列
   给了松紧次序的键:下层写得比它更严时下层的值留下(会话要更小的预算、项目要更严的沙箱),managed 定的是最宽能到哪。`LoadedSettings::with_managed`
   是唯一套它的地方:读盘(`settings_source::read_pair`,它也作为 `Tier::Managed` 一层进加载器)、宿主覆盖与
-  会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍。`app` 也照收:它的 `app.trust_all_projects`
+  会话覆盖层(`LoadedSettings::overlay`)之后都重新套一遍;子 Agent 的 agent 类型改过 `effort` / `max_turns`
+  之后,`SessionConfig::tuned_for_delegate` 用同一段(`lay_managed_values`)把 managed 对这两个键的值再压一遍。`app` 也照收:它的 `app.trust_all_projects`
   与 `app.trusted_projects`(整张表替换,不与用户的并)在加载时就决定项目信任;`app.session_cap`、
   `app.worker_threads` 等进程级的键在启动时读(`process_settings` 也读它)。provider 按 id 排在各层之前,
   同 id 以它的为准。

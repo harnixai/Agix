@@ -481,7 +481,7 @@ const SETTINGS_OVERLAY_SITES: &[(&str, &str)] = &[
     (
         "crates/settings/src/loaded/managed_layer.rs::LoadedSettings::lay_managed_values",
         "`LoadedSettings::with_managed`: the managed layer put over everything, after the \
-         loader and after every overlay",
+         loader, after every overlay, and over what a delegate's agent type tuned",
     ),
     (
         "crates/settings/src/overlay.rs::LoadedSettings::overlay",
