@@ -127,6 +127,10 @@ pub struct SetModelParams {
     #[serde(default, deserialize_with = "Patch::present")]
     #[schemars(with = "Option<base::interface::model::ThinkingMode>")]
     pub thinking: Patch<base::interface::model::ThinkingMode>,
+    /// The 0.3 name of `thinking`, read only to be refused by name.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub thinking_mode: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

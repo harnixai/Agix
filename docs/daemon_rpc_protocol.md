@@ -2024,6 +2024,8 @@ sidecar),不是某个宿主自己的一层覆盖 —— 各宿主各存一份的
   "applies": "next_turn" }
 ```
 
+0.3 的 `thinking_mode` 改名为 `thinking`;传 `thinking_mode` 以 `INVALID_PARAMS` 失败,报错里给出新名字。
+
 换掉这个会话**下一次模型调用**用的模型。transcript 不动 —— 这是换"谁来回答下一
 条",不是改写已经说过的话。所以"这一段用便宜的,接下来换个强的"不再需要新建会话,
 也就不再需要丢掉上下文。

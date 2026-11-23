@@ -530,7 +530,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `turn.token_budget` | 无(不限) | 一轮能花的 token(未命中缓存的输入、缓存写入与输出,缓存命中不计,同 provider 配额),连同这一轮起的或派了活的子 Agent、团队成员,以及旁路调用(压缩、记忆、`WebSearch`、`WebFetch` 的抽取、`prompt` 与 `agent` hook)一起算;每次调用前先估计它会被计的输入(预计不由 provider 缓存供给的部分)并从剩余里扣掉,要的输出不超过扣完的数,扣完付不起一次调用时以 `budget_exceeded` 结束这一轮。这是估计不是预留:同时在跑的子 Agent 各自至多超出一次调用。会话只能经 `session.create` 的 `options.settings.turn` 把它调低 |
 | `session.token_budget` | 无(不限) | 一个会话从创建起能花的 token,口径同 `turn.token_budget`,算它所有的轮——子 Agent、团队成员、旁路调用、定时任务与目标的轮都在内——跨 daemon 重启(累计记在会话日志里,`session.get` 的 `usage` 报它)。每次调用同 `turn.token_budget` 一样先扣掉输入的估计再判;剩余付不起一次调用时这一轮以 `budget_exceeded` 结束,之后的每一轮都不调模型、同样以它结束 |
 | `schedule.max_model_jobs` | `20` | 一个会话里模型自己经 `CronCreate` 建的、还在的定时任务最多几个;再建被拒,理由在工具结果里。宿主经 `schedule.create` 建的不计也不受限 |
-| `schedule.min_model_interval_minutes` | `1` | 模型建的周期任务两次触发至少隔几分钟(按它存活的 7 天算);`1` 即不在 cron 自己的分钟精度之外再加限制 |
+| `schedule.min_model_interval_minutes` | `1` | 模型建的周期任务两次触发至少隔几分钟(按它存活的 7 天算);`1` 即不在 cron 自己的分钟精度之外再加限制。一次性任务不受它限制:同时能有几个由 `max_model_jobs` 管,它们的轮花的算在会话上 |
 | `goal.max_rounds` | `10000` | 模型设或改的目标(`GoalCreate`、`GoalUpdate`)最多能有几轮;给多了压到它。目标自己的 `token_budget`(经 `session.setGoal` 或 `GoalCreate` 设)在目标各轮花完时让目标转 `blocked`;`GoalUpdate` 只能调低它,调高归宿主(`session.updateGoal`) |
 | `telemetry.enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
 | `telemetry.otlp_endpoint` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |

@@ -1685,3 +1685,25 @@ async fn inspect_context_reports_the_provider_the_next_call_goes_to() -> anyhow:
     run.finish().await;
     Ok(())
 }
+
+/// `session.setModel`'s `thinking_mode` was renamed `thinking`; a 0.3 host
+/// that still sends it is told so rather than having it dropped unseen.
+#[tokio::test(flavor = "multi_thread")]
+async fn set_model_refuses_the_old_thinking_mode_by_name() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed("set-model-old-name", &stub).start().await?;
+    let session = run.session().await?;
+    let set = run
+        .client
+        .call(
+            "session.setModel",
+            json!({ "session_id": session, "thinking_mode": "off" }),
+        )
+        .await?;
+    let error = set
+        .error
+        .ok_or_else(|| anyhow::anyhow!("accepted: {:?}", set.result))?;
+    assert!(error.message.contains("thinking_mode"), "{error:?}");
+    run.finish().await;
+    Ok(())
+}

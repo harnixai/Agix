@@ -87,6 +87,11 @@ async fn rename(s: &DaemonServer, _: &Call, p: RenameParams) -> Result<Renamed, 
 }
 
 async fn set_model(s: &DaemonServer, _: &Call, p: SetModelParams) -> Result<ModelChoice, RpcError> {
+    if p.thinking_mode.is_some() {
+        return Err(invalid(
+            "unknown field `thinking_mode`; it is now `thinking`",
+        ));
+    }
     let named = |v: &Option<String>| v.clone().filter(|s| !s.trim().is_empty());
     let (model, provider) = (named(&p.model), named(&p.provider));
     let reasoning = ReasoningChange {
