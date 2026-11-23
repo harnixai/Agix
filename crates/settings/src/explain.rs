@@ -521,9 +521,7 @@ impl<'a> Explainer<'a> {
         if scope.is_some_and(|scope| scope != Scope::Session) {
             return (SettingOutcome::NotSessionScope, None);
         }
-        let held = config.held().iter().any(|h| covers(&h.key, key))
-            || (key == "permissions.mode" && asked != applied);
-        if held {
+        if config.held().iter().any(|h| covers(&h.key, key)) {
             let managed = self
                 .managed
                 .as_ref()

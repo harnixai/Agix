@@ -473,3 +473,37 @@ async fn a_bypass_the_managed_layer_disables_is_not_reported_applied() {
     assert_eq!(project["outcome"], "managed_overrode", "{explained}");
     d.stop().await;
 }
+
+#[tokio::test]
+async fn a_mode_the_host_switched_to_since_is_overridden_not_clamped() {
+    let d = Daemon::start(Setup {
+        global: json!({"permissions": {"mode": "acceptEdits"}}),
+        ..Default::default()
+    })
+    .await;
+    let created = call(
+        &d.sock,
+        "session.create",
+        json!({"options": {"settings": {"permissions": {"mode": "default"}}}}),
+    )
+    .await;
+    let sid = created["session_id"].as_str().unwrap().to_string();
+    let switched = call(
+        &d.sock,
+        "session.setPermissionMode",
+        json!({"session_id": sid, "mode": "acceptEdits"}),
+    )
+    .await;
+    assert_eq!(switched["mode"], "acceptEdits", "{switched}");
+
+    let explained = d
+        .explain(json!({"key": "permissions.mode", "session_id": sid}))
+        .await;
+    assert_eq!(explained["value"], "acceptEdits", "{explained}");
+    assert_eq!(
+        explained["session"],
+        json!({"requested": "default", "applied": "acceptEdits", "outcome": "overridden"}),
+        "{explained}"
+    );
+    d.stop().await;
+}
