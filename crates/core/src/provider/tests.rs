@@ -56,9 +56,9 @@ fn the_order_names_defined_providers_and_defaults_to_the_first() {
 }
 
 #[test]
-fn a_provider_id_is_ascii_letters_digits_dashes_and_underscores() {
+fn a_provider_id_is_lowercase_letters_digits_dashes_and_underscores() {
     assert_eq!(ProviderConfig::id_problem("deep-seek_2"), None);
-    for bad in ["a.b", "a/b", "..", "dé", "a b", ""] {
+    for bad in ["a.b", "a/b", "..", "dé", "a b", "", "Ds"] {
         assert!(ProviderConfig::id_problem(bad).is_some(), "{bad:?}");
     }
     let providers = vec![provider("a.b", &[], [Some("m"), None, None])];

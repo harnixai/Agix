@@ -214,7 +214,7 @@ pub struct ProviderConfig {
     /// the same id twice, the first in load order (global, scene, project;
     /// each tier's `settings.local.json` after its `settings.json`) is used
     /// and the rest ignored.
-    #[schemars(pattern(r"^[A-Za-z0-9_-]+$"))]
+    #[schemars(pattern(r"^[a-z0-9_-]+$"))]
     pub id: String,
     /// `anthropic`, `openai`, `deepseek`, `qwen`, `vllm`, `sglang` or
     /// `generic` (default). Decides how thinking is switched, whether
@@ -354,16 +354,17 @@ impl ProviderConfig {
 
     /// Why `id` cannot name a provider, if it cannot. The id is the name of
     /// the provider's quota usage file as it stands, so it holds nothing a
-    /// file name would have to change.
+    /// file name would have to change — and no capital, since `Ab` and `ab`
+    /// are one file on a case-insensitive file system.
     pub fn id_problem(id: &str) -> Option<String> {
         if id.is_empty() {
             return Some("a provider needs an `id`".to_string());
         }
         let fits = id
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
         (!fits)
-            .then(|| format!("provider id `{id}` may hold only ASCII letters, digits, `-` and `_`"))
+            .then(|| format!("provider id `{id}` may hold only lowercase ASCII letters, digits, `-` and `_`"))
     }
 
     /// `api`, defaulted.

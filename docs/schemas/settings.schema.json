@@ -623,7 +623,7 @@
         },
         "id": {
           "description": "Unique, of ASCII letters, digits, `-` and `_`. When the tiers define\nthe same id twice, the first in load order (global, scene, project;\neach tier's `settings.local.json` after its `settings.json`) is used\nand the rest ignored.",
-          "pattern": "^[A-Za-z0-9_-]+$",
+          "pattern": "^[a-z0-9_-]+$",
           "type": "string"
         },
         "models": {

@@ -704,7 +704,7 @@ prompt hook)互不相干。子 Agent、压缩、
 再取新 provider 里同一档的模型。
 
 配额按 provider id 计,口径是未命中缓存的输入加缓存写入加输出,缓存命中不计;用量落在状态根的 `quota/`
-(§8),文件名就是 id 本身。所以 provider id 只能由 ASCII 字母、数字、`-`、`_` 组成:别的 id 加载时整项忽略,
+(§8),文件名就是 id 本身。所以 provider id 只能由小写 ASCII 字母、数字、`-`、`_` 组成(不区分大小写的文件系统上 `Ab` 与 `ab` 是同一个文件):别的 id 加载时整项忽略,
 `daemon.doctor` 在它所在层的 `ignored_values` 里列出原因,路由也拒绝它。越过上限的那一次调用不被打断,
 下一次调用起这个 provider 不可用,直到周期翻过去。`config.getProvider`
 报各周期的已用量与上限。
