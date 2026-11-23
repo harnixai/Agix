@@ -21,8 +21,6 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("scene", "String"),
     ("scenes", "Vec<String>"),
     ("model", "String"),
-    ("max_tokens", "Option<u32>"),
-    ("permission_prompt_timeout", "Option<Duration>"),
     ("settings", "Option<serde_json::Value>"),
     ("instance", "Option<String>"),
     ("socket", "Option<PathBuf>"),
@@ -34,7 +32,6 @@ const CONFIG_FIELDS: &[(&str, &str)] = &[
     ("engine", "String"),
     ("plugins", "Vec<PathBuf>"),
     ("js_libs", "Vec<HostJsLib>"),
-    ("history", "Option<HistoryLocation>"),
     ("credentials", "Option<HostCredentials>"),
 ];
 

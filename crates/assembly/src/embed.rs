@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use base::interface::host_js::HostJsLib;
 use base::interface::scene::SceneSpec;
-pub use settings::HistoryLocation;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -45,18 +44,13 @@ pub struct EmbedConfig {
     /// Further scenes to activate.
     pub scenes: Vec<String>,
     pub model: String,
-    /// `model.max_tokens` in `settings`, over what `settings` itself says
-    /// there.
-    pub max_tokens: Option<u32>,
-    /// `permissions.prompt_timeout_secs` in `settings`, in whole seconds,
-    /// over what `settings` itself says there.
-    pub permission_prompt_timeout: Option<Duration>,
     /// Settings over every settings file of every project and scene, as
     /// `agixd --set` gives them: a JSON object of settings keys, the `cli`
     /// layer. It merges as a global tier's file would, `app` included (the
-    /// session cap is `app.session_cap`), and its `permissions` rule lists add
-    /// to every pair's. A key no setting reads, an old one, or a value that
-    /// does not fit fails the start with [`EmbedError::InvalidSetting`].
+    /// session cap is `app.session_cap`, where sessions are kept
+    /// `app.history`), and its `permissions` rule lists add to every pair's.
+    /// A key no setting reads, an old one, or a value that does not fit fails
+    /// the start with [`EmbedError::InvalidSetting`].
     pub settings: Option<serde_json::Value>,
     /// `Some`: take the scene's `daemon.lock` and write the `instances.d`
     /// entry under this name; without a `groups_file`, record the commands
@@ -112,12 +106,6 @@ pub struct EmbedConfig {
     /// library's; function paths are dotted identifiers, each once.
     /// Otherwise the start fails with [`EmbedError::InvalidHostLibrary`].
     pub js_libs: Vec<HostJsLib>,
-    /// Where sessions are kept, over the global settings' `app.history`;
-    /// `None` leaves it to them, which is `Global` unless they say otherwise.
-    /// `Project` keeps a trusted project's sessions in its project directory's
-    /// `state/history/` (a worktree's in its main checkout's), with only an
-    /// index under `<data_root>/sessions/`.
-    pub history: Option<HistoryLocation>,
     /// Keys for the providers whose `api_key_env` names no variable the
     /// process has — for a host that keeps them in a vault or keychain.
     pub credentials: Option<HostCredentials>,
@@ -142,8 +130,6 @@ impl EmbedConfig {
             scene: "code".into(),
             scenes: Vec::new(),
             model: "claude-sonnet-4-6".into(),
-            max_tokens: None,
-            permission_prompt_timeout: None,
             settings: None,
             instance: None,
             socket: None,
@@ -155,35 +141,8 @@ impl EmbedConfig {
             engine: base::paths::DEFAULT_ENGINE.into(),
             plugins: Vec::new(),
             js_libs: Vec::new(),
-            history: None,
             credentials: None,
         }
-    }
-
-    /// The `cli` layer: `settings` with `max_tokens` and
-    /// `permission_prompt_timeout` written in; `None` when none of them is
-    /// given. `settings` that is not an object is left as it is.
-    fn cli_settings(&self) -> Option<serde_json::Value> {
-        let mut shorthands = serde_json::Map::new();
-        if let Some(max_tokens) = self.max_tokens {
-            shorthands.insert(
-                "model".into(),
-                serde_json::json!({ "max_tokens": max_tokens }),
-            );
-        }
-        if let Some(timeout) = self.permission_prompt_timeout {
-            shorthands.insert(
-                settings::permissions::KEY.into(),
-                serde_json::json!({ "prompt_timeout_secs": timeout.as_secs() }),
-            );
-        }
-        let mut layer = match (&self.settings, shorthands.is_empty()) {
-            (None, true) => return None,
-            (Some(layer), _) if !layer.is_object() => return Some(layer.clone()),
-            (layer, _) => layer.clone().unwrap_or_else(|| serde_json::json!({})),
-        };
-        settings::merge_json_values(&mut layer, serde_json::Value::Object(shorthands));
-        Some(layer)
     }
 
     /// `groups_file`, else the named instance's own.
@@ -233,10 +192,9 @@ pub enum EmbedError {
     /// A library of `EmbedConfig::js_libs` cannot be installed.
     #[error("host library `{namespace}`: {reason}")]
     InvalidHostLibrary { namespace: String, reason: String },
-    /// `EmbedConfig::settings` (with `max_tokens` and
-    /// `permission_prompt_timeout` written in) holds `key`, dotted, that no
-    /// setting reads or a value there that does not fit; `key` is empty when
-    /// the settings are not an object.
+    /// `EmbedConfig::settings` holds `key`, dotted, that no setting reads or
+    /// a value there that does not fit; `key` is empty when the settings are
+    /// not an object.
     #[error("setting `{key}`: {reason}")]
     InvalidSetting { key: String, reason: String },
 }
@@ -353,7 +311,6 @@ impl Embedded {
                 extra_scenes: config.scenes.clone(),
                 host_plugins: config.plugins.clone(),
                 js_libs: config.js_libs.clone(),
-                history: config.history,
                 credentials: config.credentials.as_ref().map(|c| c.0.clone()),
                 ..Default::default()
             },
@@ -536,7 +493,7 @@ fn daemon_config(config: &EmbedConfig, scope: &str) -> Result<DaemonConfig, Embe
     let paths = StaticDaemonPaths::with_project(state.scene_dir(scope), cwd)
         .with_global(config.data_root.clone())
         .with_layout(layout);
-    let cli_settings = config.cli_settings();
+    let cli_settings = config.settings.clone();
     let mut daemon_config = load_daemon_config(
         &config.model,
         cli_settings.clone(),

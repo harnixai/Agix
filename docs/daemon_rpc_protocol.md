@@ -312,8 +312,8 @@ glob 清单),项目自己写的忽略。三态:
 | `host` | 全局 `settings.local.json` 里的一条命中——`project.trust` 写在这里 |
 | `null` | 没有自己的项目层(`project_trust` 是 `none`) |
 
-**会话历史放进项目时也看信任。** 全局设置 `app.history` 为 `project`(嵌入时
-`EmbedConfig.history`)时,受信项目的会话放在 `<项目>/.agix/state/history/<id>/`(worktree 里的
+**会话历史放进项目时也看信任。** 全局设置 `app.history` 为 `project`(嵌入时也可写在
+`EmbedConfig.settings`)时,受信项目的会话放在 `<项目>/.agix/state/history/<id>/`(worktree 里的
 放在主仓库的这个目录),全局 `sessions/<id>/` 只留索引;不受信项目的照旧放全局。只认全局索引登记过的
 项目内会话,项目里多出来的不进 `session.list`、搜索,`session.resume` 报 `SESSION_NOT_FOUND`。
 项目后来被取消信任,它里面的历史不读:`session.list` 与搜索里没有这些会话,`session.resume`、

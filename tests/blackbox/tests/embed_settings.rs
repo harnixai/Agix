@@ -1,5 +1,5 @@
-//! An embedder that gives settings of its own (`EmbedConfig.settings`, with
-//! `max_tokens` written in), over `Embedded::serve_stream`: they hold over the
+//! An embedder that gives settings of its own (`EmbedConfig.settings`), over
+//! `Embedded::serve_stream`: they hold over the
 //! settings files of the daemon's own project and of another one — the
 //! permission mode a session reports and the `max_tokens` its turns ask for —
 //! and `config.get` reports them as the `cli` tier; `app.session_cap` there
@@ -107,11 +107,10 @@ async fn the_embedders_settings_hold_over_every_pairs_files() -> anyhow::Result<
         root.other.join(".agix/settings.json"),
         r#"{"model": {"max_tokens": 4321}}"#,
     )?;
-    let mut config = config(
+    let config = config(
         &root,
-        json!({"permissions": {"mode": "plan"}, "model": {"max_tokens": 1}}),
+        json!({"permissions": {"mode": "plan"}, "model": {"max_tokens": 1234}}),
     );
-    config.max_tokens = Some(1234);
     let embedded = Embedded::start(config).await?;
     let mut client = connect(&embedded);
 

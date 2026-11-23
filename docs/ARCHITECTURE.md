@@ -2476,8 +2476,8 @@ managed 文件被悄悄跳过而变宽,除非部署方把它放在了旧名字�
 
 ### 8.2 会话历史放进项目(`app.history`)
 
-全局设置 `app.history`(只认全局层,场景层、项目层写了忽略并告警;嵌入时
-`EmbedConfig.history` 优先)缺省 `global`,布局就是上表。设成 `project` 后,**受信项目**的新会话
+全局设置 `app.history`(只认全局层、`cli` 层与 managed 层,场景层、项目层写了忽略并告警;嵌入时
+写在 `EmbedConfig.settings`,`Assembly.history` 优先)缺省 `global`,布局就是上表。设成 `project` 后,**受信项目**的新会话
 整份放进项目:`<主仓库>/.agix/state/history/<id>/` 下是 `<id>.jsonl`、`metadata.json`、
 `session_memory.md`、输入历史与 `checkpoints/`,文件名与全局 `sessions/<id>/` 里的相同;worktree 里
 的会话放进主仓库的这个目录(`Layout::main_checkout_copies`)。全局 `sessions/<id>/` 只留
