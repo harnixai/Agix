@@ -78,12 +78,13 @@ Agix 是一个**库**,不是一个应用。它提供的是"跑一个 agent 会�
 RPC 服务和会话池在同一个 crate 里是体积上的取舍:两者共用大量泛型实例(serde_json、
 tokio、rmcp),分在两个 crate 时各编一份,release 的 `agixd` 因此大约 2.8 MB。
 
-**`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定(生产代码
-约 1.87 万行,守卫的行数棘轮只降不升),并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
+**`core` 不依赖工作区里的任何别的 crate。** 它定义 trait、共享数据类型与纯判定(生产代码的行数有
+棘轮,`tests/guards/ratchet/base.txt`,现值 22065 行:变少时用 `AGIX_UPDATE_RATCHET=1` 压下去;要上调就在同一个
+提交里改这个文件,并在提交说明里写清为什么这些代码只能放在 `core`),并带着每个 crate 都要用的 fs、clock、path、text 小工具(`write_atomic`、`now_rfc3339`、
 `resolve_physically`、`truncate_chars` 等);别的 crate 实现它的 trait。
 这条约束是整个扩展面成立的前提:一个宿主要替换某个子系统时,面对的是 `core` 里的
 一个 trait,而不是某个具体 crate 的内部结构。`tests/guards/tests/base.rs` 守着它:
-生产行数只降不升,直接碰文件系统的文件有白名单(七个,各写着理由),不调用模型。
+生产行数不超过棘轮,直接碰文件系统的文件有白名单(七个,各写着理由),不调用模型。
 两样带实现的东西留在这里,各有理由:`base::paths::PromptFiles` 的读(`canonicalize` 后过敏感路径
 判定、再读**解析后的**路径)被 `memory`、`settings`、`prompt-files` 等互不依赖的 K1 共用,
 拆成"判定在 core、读在各家"就是让每家自己记得走这道门,正是它要防的检查与使用之间的换路径;
@@ -493,7 +494,9 @@ managed 为准。启动时对守护进程自己那一对
 **内存里的覆盖只有一条路。** 宿主在内存里改过的值(`HostOverrides`)与会话自带的设置(`session.create` 的
 `options.settings`)都经 `settings::LoadedSettings::overlay` 叠到读好的设置上:规则串并进各层的规则(会话的记为
 `Tier::Session`、来源 `RuleSource::Session`)、provider 收尾、放不进的值进 `ignored`、managed 层重新压顶,只写在
-这一处。宿主的改动对守护进程自己那一对照原样叠;对别的对只带它新加的——列表只带宿主新加的元素,接在那一对
+这一处。合并设置 JSON 的原语(`merge_json_values`、`merge_fitting`)在生产代码里只出现在登记过的地方:加载器的
+`LayerFold`、`LoadedSettings::overlay`、managed 层的 `with_managed`,以及写设置文件、校验与拼 `--set` 层这几处不合
+读好设置的地方;`tests/guards/tests/sources.rs` 的 SRC-6(`SETTINGS_OVERLAY_SITES`)守着,新加一处不在表里就失败。宿主的改动对守护进程自己那一对照原样叠;对别的对只带它新加的——列表只带宿主新加的元素,接在那一对
 自己的列表后面,守护进程自己项目层来的 provider、`files.extra_dirs` 之类不跨对。
 
 **会话覆盖层:按作用域收键,按未受信项目层的方向判。** 每个设置键有一个作用域(`settings::scope::SCOPES`,

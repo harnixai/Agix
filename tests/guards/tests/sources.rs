@@ -3,8 +3,9 @@
 //! the listed files ask it for a home (SRC-1), a plugin's disclosure
 //! names no script engine (SRC-2), every `.rs` file in a package belongs to a
 //! target (SRC-3), and only the crates in `MAY_SPAWN` start a process
-//! themselves (SRC-4), and this machine's `Process` is built only where a
-//! session's default providers are assembled (SRC-5).
+//! themselves (SRC-4), this machine's `Process` is built only where a
+//! session's default providers are assembled (SRC-5), and settings JSON is
+//! merged only in the places `SETTINGS_OVERLAY_SITES` lists (SRC-6).
 //!
 //! Everything else reaches a process through the session's `&dyn Process`,
 //! which is what puts it on the machine the host chose, inside the session's
@@ -463,4 +464,120 @@ fn the_local_process_scan_sees_the_ways_of_naming_it() {
         .map(|finding| finding.hit.line)
         .collect();
     assert_eq!(lines, BTreeSet::from([2, 4, 5, 6]));
+}
+
+/// Every place production code merges settings JSON, as `<file>::<fn>`,
+/// outside the primitives' own file. A layer laid over loaded settings
+/// anywhere else would skip what these do after the merge — the rule lists
+/// taken apart, the providers settled, the managed layer put back on top — so
+/// a new one goes through `LoadedSettings::overlay` or comes here with why it
+/// cannot.
+const SETTINGS_OVERLAY_SITES: &[(&str, &str)] = &[
+    (
+        "crates/settings/src/loaded.rs::LayerFold::apply",
+        "the loader: each layer of the source folded over the ones below it, the `cli` \
+         layers joined for `config.get`, a project's own MCP server declarations gathered",
+    ),
+    (
+        "crates/settings/src/loaded/managed_layer.rs::LoadedSettings::lay_managed_values",
+        "`LoadedSettings::with_managed`: the managed layer put over everything, after the \
+         loader and after every overlay",
+    ),
+    (
+        "crates/settings/src/overlay.rs::LoadedSettings::overlay",
+        "the one in-memory overlay: a host's changes and a session's own settings",
+    ),
+    (
+        "crates/settings/src/overlay.rs::session_layer_problems",
+        "checks a session's layer against the defaults; the merged copy is thrown away",
+    ),
+    (
+        "crates/settings/src/managed.rs::followed_by",
+        "two managed layers of one source joined before either is laid over anything",
+    ),
+    (
+        "crates/settings/src/managed.rs::unfitting_value",
+        "checks a managed file against the defaults; the merged copy is thrown away",
+    ),
+    (
+        "crates/settings/src/edit.rs::merge",
+        "`config.set` writing one tier's files: the file's own JSON, not loaded settings",
+    ),
+    (
+        "crates/settings/src/edit.rs::merge_entry",
+        "`config.set` writing one entry of a tier's file",
+    ),
+    (
+        "crates/settings/src/edit.rs::extract_all",
+        "`config.set` gathering the credentials it moves into `settings.local.json`",
+    ),
+    (
+        "daemon/src/main.rs::settings_layer",
+        "builds the `cli` layer from `--set` assignments; the loader merges it",
+    ),
+];
+
+const MERGE_PRIMITIVES: &[&str] = &["merge_json_values", "merge_fitting"];
+const MERGE_PRIMITIVES_FILE: &str = "crates/settings/src/merge.rs";
+
+fn settings_merges(files: Vec<&guards::SourceFile>, view: View) -> Vec<Finding> {
+    par_flat_map(files, |f| {
+        let fns = scan::fns(f, view);
+        scan::calls(f, view)
+            .into_iter()
+            .filter(|call| {
+                matches!(&call.callee, Callee::Path(p)
+                    if p.last().is_some_and(|name| MERGE_PRIMITIVES.contains(&name.as_str())))
+            })
+            .map(|call| {
+                let within = fns
+                    .iter()
+                    .filter(|s| (s.hit.line..s.hit.line + s.lines).contains(&call.hit.line))
+                    .min_by_key(|s| s.lines)
+                    .map_or("", |s| s.qual.as_str());
+                Finding {
+                    key: format!("{}::{within}", f.rel),
+                    hit: call.hit,
+                }
+            })
+            .collect()
+    })
+}
+
+#[test]
+fn settings_are_merged_only_where_it_is_listed() {
+    let production: Vec<_> = ws()
+        .production()
+        .filter(|f| !is_test_support(&f.package) && f.rel != MERGE_PRIMITIVES_FILE)
+        .collect();
+    allow::non_vacuous("sources::SETTINGS_OVERLAY_SITES", production.len(), 300);
+    allow::check(
+        "sources::SETTINGS_OVERLAY_SITES",
+        settings_merges(production, View::Prod),
+        SETTINGS_OVERLAY_SITES,
+        "lay the settings over with `LoadedSettings::overlay` (a host's in-memory changes, a \
+         session's own) or `LoadedSettings::with_managed`, which do what has to follow a \
+         merge; a merge that is not an overlay of loaded settings goes on the list with why",
+    );
+}
+
+#[test]
+fn the_settings_merge_scan_sees_each_way_of_calling_it() {
+    let src = r#"
+        use settings::merge_json_values as merge;
+        fn a() {
+            settings::merge_json_values(&mut x, y);
+            crate::merge::merge_fitting(&mut x, y, s);
+            merge_fitting(&mut x, y, s);
+            other::merge(&mut x, y);
+        }
+    "#;
+    let f = guards::source::standalone("fixture.rs", src.to_string()).expect("parses");
+    let found = settings_merges(vec![&f], View::Full);
+    let lines: BTreeSet<usize> = found.iter().map(|finding| finding.hit.line).collect();
+    assert_eq!(lines, BTreeSet::from([4, 5, 6]));
+    assert!(
+        found.iter().all(|finding| finding.key == "fixture.rs::a"),
+        "{found:?}"
+    );
 }

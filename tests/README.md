@@ -376,7 +376,7 @@ target 从根文件出发沿 `mod` 声明走模块树，只有编译器会读的
 | G11 | 只有名单上的几处能改写 `Transcript` 里的对话 | syn | `tests/guards/tests/transcript_writers.rs` |
 | G12 | `live_*.rs` 里出现 `bypassPermissions` / `yolo` / `auto` 即失败，除非同一用例有 `// bypass:` 理由注释 | syn | `tests/guards/tests/blackbox_discipline.rs` |
 | G13 | `every_method_a_client_can_send_is_driven_by_a_test` 不把文档形状比对文件算作"被测试驱动" | 文本 | `daemon/tests/protocol_doc_matches_dispatch.rs` |
-| SRC-1..5 | 只有入口点和机器事实读 `$HOME`；插件披露不提脚本引擎；每个 `.rs` 属于某个 target；只有 `MAY_SPAWN` 里的 crate 起子进程；本机 `Process` 只在装配缺省 provider 处构建 | syn、模块树加 fswalk | `tests/guards/tests/sources.rs` |
+| SRC-1..6 | 只有入口点和机器事实读 `$HOME`；插件披露不提脚本引擎；每个 `.rs` 属于某个 target；只有 `MAY_SPAWN` 里的 crate 起子进程；本机 `Process` 只在装配缺省 provider 处构建；合并设置 JSON 只在 `SETTINGS_OVERLAY_SITES` 登记的函数里 | syn、模块树加 fswalk | `tests/guards/tests/sources.rs` |
 | SZ-1..3 | 生产文件不超过 800 行、函数不超过 80 行，超限的按现值入棘轮 | syn 的行号 | `tests/guards/tests/size.rs`、`tests/guards/ratchet/size.txt` |
 | G1、G2a、G3、G4 | 会话池不认识线格式、池是一组各管一块状态的协作者的门面、`mcp` feature 只在少数几处决定 | syn 加棘轮 | `tests/guards/tests/layering.rs` |
 | RT-1 | 协议文档对账 | 代码一侧读运行时的方法表、schema 和 `ErrorCode::ALL`，文档用文本 | `daemon/tests/protocol_doc_matches_dispatch.rs` |
