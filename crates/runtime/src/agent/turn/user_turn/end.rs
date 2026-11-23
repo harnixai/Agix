@@ -14,7 +14,8 @@ pub(super) enum StopReason {
     Cancelled,
     Policy(String),
     ContextExceeded,
-    BudgetExceeded,
+    /// Whose token budget ran out, and how large it was.
+    BudgetExceeded(String),
     ToolHookDiscontinued,
     StopHookDiscontinued(Option<String>),
 }
@@ -25,7 +26,7 @@ impl StopReason {
             Self::Replied(reason) | Self::Policy(reason) => reason,
             Self::Cancelled => "cancelled",
             Self::ContextExceeded => "context_exceeded",
-            Self::BudgetExceeded => "budget_exceeded",
+            Self::BudgetExceeded(_) => "budget_exceeded",
             Self::ToolHookDiscontinued | Self::StopHookDiscontinued(_) => "stopped_by_hook",
         }
     }
@@ -65,6 +66,7 @@ impl Agent {
         };
         let message = match &stop {
             StopReason::StopHookDiscontinued(message) => message.clone(),
+            StopReason::BudgetExceeded(why) => Some(why.clone()),
             _ => None,
         };
         TurnOutcome::ended(

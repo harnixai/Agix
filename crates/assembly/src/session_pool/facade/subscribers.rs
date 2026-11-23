@@ -28,8 +28,8 @@ impl SessionPool {
 
     /// Push what `core`'s state reports — its tasks, its goal, its permission
     /// mode — to whoever watches the session, for as long as it is in memory.
-    pub(in crate::session_pool) fn forward_state_events(core: &SessionCore) {
-        Self::forward_task_events(core);
+    pub(in crate::session_pool) fn forward_state_events(&self, core: &SessionCore) {
+        Self::forward_task_events(core, self.directory.store().cloned());
         Self::forward_goal_events(core);
         Self::forward_mode_events(core);
     }

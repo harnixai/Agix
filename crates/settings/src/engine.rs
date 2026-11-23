@@ -148,7 +148,6 @@ pub fn sandbox_settings(settings: &Settings, paths: &base::paths::ConfigPaths) -
 impl Settings {
     pub fn engine_budget(&self) -> EngineBudget {
         EngineBudget {
-            max_total_tokens: self.turn.token_budget,
             compact_threshold: self.compaction.threshold_tokens,
             compact_keep_recent: self.compaction.keep_recent,
         }

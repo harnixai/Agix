@@ -47,6 +47,11 @@ pub struct SessionDetail {
     pub current_turn_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<base::event::ContextUsage>,
+    /// What the session has spent since it was created, as of now: its own
+    /// calls, its delegates' and those made on their side. Absent for a
+    /// session not in memory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<base::interface::budget_policy::Spend>,
     /// Shaped like `daemon.doctor`'s `health`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<serde_json::Value>,

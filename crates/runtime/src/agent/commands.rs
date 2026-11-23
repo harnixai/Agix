@@ -46,19 +46,21 @@ impl Agent {
 
     /// `/cost` — report the tokens and calls this session has spent.
     pub(crate) fn handle_cost_command(&self) -> String {
-        let base::context::SessionSpend {
-            usage,
-            api_calls,
-            tool_calls,
-        } = self.session_state.ledger().spent;
+        let (spent, calls) = {
+            let ledger = self.session_state.ledger();
+            (ledger.spent.read(), ledger.calls)
+        };
         format!(
-            "Since this session was loaded: {api_calls} model calls, {tool_calls} tool calls; \
-             {} input tokens, {} output tokens, {} written to and {} read from the prompt \
-             cache, as the provider reported them. Sub-agents' spending is on their own tasks.",
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cache_creation_input_tokens,
-            usage.cache_read_input_tokens,
+            "Since this session was created: {} input tokens, {} output tokens, {} written to \
+             and {} read from the prompt cache, as the provider reported them, its sub-agents, \
+             team members and the calls made on the side included. Since it was loaded, its own \
+             agent made {} model calls and {} tool calls.",
+            spent.input_tokens,
+            spent.output_tokens,
+            spent.cache_creation_tokens,
+            spent.cache_read_tokens,
+            calls.api_calls,
+            calls.tool_calls,
         )
     }
 }

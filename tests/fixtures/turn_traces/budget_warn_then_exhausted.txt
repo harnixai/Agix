@@ -17,12 +17,14 @@ User blocks=1
 Assistant
 User blocks=1
 User blocks=1
+Extension agix.spend/total
 Assistant
 User blocks=1
+Extension agix.spend/total
 
 == model calls ==
 golden-model max_tokens=1024 messages=3 content_bytes=607 truncated_results=0
-golden-model max_tokens=1024 messages=6 content_bytes=729 truncated_results=0
+golden-model max_tokens=1024 messages=6 content_bytes=737 truncated_results=0
 unconsumed_replies=1
 == telemetry ==
 turn_start turn_no=0

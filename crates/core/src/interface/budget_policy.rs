@@ -1,80 +1,101 @@
-//! `BudgetPolicy` — what a turn is allowed to spend, and how much context it
-//! may carry.
-//!
-//! Three judgements: a cumulative token ceiling, an output-volume target
-//! deciding when to stop asking for more, and the context size at which to
-//! compact together with the ceiling no request may exceed.
+//! What a turn is allowed to spend, and how much context it may carry: the
+//! engine's ceilings ([`SpendNode`]) and the deployment's own judgement
+//! ([`BudgetPolicy`]).
 //!
 //! # Two ceilings that look alike and are not
 //!
-//! `Spending` is about the bill, accumulated across the turn and checked
-//! against what the provider actually reported. `OutputTarget` is about the
-//! opposite problem — the model stopping short of the volume of work that was
-//! asked for. One ends a turn that has spent too much, the other prolongs a
-//! turn that has produced too little. They stay separate methods because
-//! merging them would let "write more" and "you have spent enough" argue with
-//! each other inside one verdict.
+//! `Spending` is about the bill, accumulated and checked against what the
+//! provider actually reported. `OutputTarget` is about the opposite problem —
+//! the model stopping short of the volume of work that was asked for. One ends
+//! a turn that has spent too much, the other prolongs a turn that has produced
+//! too little. They stay separate methods because merging them would let
+//! "write more" and "you have spent enough" argue with each other inside one
+//! verdict.
 //!
-//! # What counts as spent is the policy's call, not the engine's
+//! # One count, one chain
 //!
-//! [`Spend`] carries the provider's four figures apart rather than one sum.
-//! There is no reading of them that is right for every deployment: a cache
-//! read is billed at a fraction of ordinary input, so counting it whole
-//! overstates the bill, and dropping it understates a cache-heavy turn by
-//! most of what it read. Both answers are defensible and they are not the
-//! engine's to choose, which is the reason this is a policy at all. The
-//! engine reports; [`Spend::total_tokens`] and [`Spend::all_tokens`] name the
-//! two obvious readings, and a policy that wants a third has the parts.
+//! Every call is counted once, where it is routed: the router (or the meter
+//! that stands in for one) adds its usage to the [`SpendNode`] the call's
+//! [`UsageTap`](crate::interface::model::UsageTap) is charged to. That node is
+//! the turn the call belongs to; above it is the turn that delegated it, and
+//! above a root turn its goal (for a goal round) and its session. A call
+//! spends into every node up the chain, and the engine's ceilings — a turn's,
+//! a goal's, a session's — are judged together: the next call may ask for no
+//! more than the tightest of them leaves ([`SpendNode::remaining`]).
+//!
+//! The engine counts [`Spend::counted_tokens`] — input not read from the cache,
+//! cache writes and output — against every ceiling and provider quota alike. A
+//! cache read is billed at a fraction of ordinary input, and leaving it out is
+//! what keeps a ceiling from moving with the cache hit rate. [`Spend`] keeps
+//! the four figures apart, so a [`BudgetPolicy`] that wants another reading
+//! has the parts; it is judged in addition to the engine's ceilings, never in
+//! their place.
 //!
 //! `ContextBudget` is neither: it is about the size of a single request, not
 //! the cost of the turn.
-//!
-//! # One turn, one bill
-//!
-//! A root turn's delegates — sub-agents in the foreground or background, team
-//! members it starts or hands work to — spend into the root turn's
-//! [`TurnSpend`], as do the calls each agent makes on its side, and every one
-//! of them judges its budget against that shared reading
-//! ([`TurnSpend::whole_turn`]). A background delegate keeps spending into it
-//! after the turn that started it has ended.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::interface::scene::TokenBudget;
 
-/// What the turn has spent so far, as the provider reported it.
-///
-/// Accumulated across every call in this turn, kept apart by kind because
-/// each kind is priced differently and no single sum answers for all of them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What has been spent so far, as the provider reported it, kept apart by
+/// kind because each kind is priced differently.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 pub struct Spend {
     pub input_tokens: u64,
     pub output_tokens: u64,
     /// Tokens written into the prompt cache, and tokens read back from it.
+    #[serde(rename = "cache_creation_input_tokens")]
     pub cache_creation_tokens: u64,
+    #[serde(rename = "cache_read_input_tokens")]
     pub cache_read_tokens: u64,
 }
 
 impl Spend {
-    /// Input plus output, leaving the cache out.
-    ///
-    /// What the engine has always measured a budget against, and what
-    /// [`EngineBudget`] still measures. Neither reading is the correct one —
-    /// see the module docs — but this one is the older, so it keeps the
-    /// shorter name and the existing behaviour.
-    pub fn total_tokens(&self) -> u64 {
-        self.input_tokens.saturating_add(self.output_tokens)
+    /// Input, cache writes and output: what every ceiling and quota of the
+    /// engine counts. Cache reads are left out.
+    pub fn counted_tokens(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.cache_creation_tokens)
+            .saturating_add(self.output_tokens)
     }
 
-    /// Every token the provider reported, cache included.
-    ///
-    /// Counts a cache read the same as an ordinary input token, which is not
-    /// what it costs. A policy that wants the bill rather than the volume has
-    /// to weigh the parts itself.
+    /// Every token the provider reported, cache reads included.
     pub fn all_tokens(&self) -> u64 {
-        self.total_tokens()
-            .saturating_add(self.cache_creation_tokens)
-            .saturating_add(self.cache_read_tokens)
+        self.counted_tokens().saturating_add(self.cache_read_tokens)
+    }
+
+    /// As the four-field usage a turn reports, each figure held at
+    /// `u32::MAX`.
+    pub fn as_usage(&self) -> crate::interface::model::Usage {
+        let narrow = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
+        crate::interface::model::Usage {
+            input_tokens: narrow(self.input_tokens),
+            output_tokens: narrow(self.output_tokens),
+            cache_creation_input_tokens: narrow(self.cache_creation_tokens),
+            cache_read_input_tokens: narrow(self.cache_read_tokens),
+        }
+    }
+
+    /// Figure by figure, the larger of the two.
+    pub fn max(self, other: Self) -> Self {
+        Self {
+            input_tokens: self.input_tokens.max(other.input_tokens),
+            output_tokens: self.output_tokens.max(other.output_tokens),
+            cache_creation_tokens: self.cache_creation_tokens.max(other.cache_creation_tokens),
+            cache_read_tokens: self.cache_read_tokens.max(other.cache_read_tokens),
+        }
     }
 }
 
@@ -89,55 +110,209 @@ impl From<crate::interface::model::Usage> for Spend {
     }
 }
 
-/// What one agent's turn has spent — its own calls, those made on its side
-/// (compaction, memory, web extraction) and those of the delegates it started
-/// — with the turn that delegated it, if any, above it.
-#[derive(Debug, Default)]
-pub struct TurnSpend {
-    all: Tally,
-    delegated: Tally,
-    above: Option<std::sync::Arc<TurnSpend>>,
+/// Whose ceiling a [`SpendNode`] holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    Turn,
+    Goal,
+    Session,
 }
 
-impl TurnSpend {
-    /// A delegate's turn: what it spends, `above` has spent too.
-    pub fn under(above: std::sync::Arc<TurnSpend>) -> Self {
+impl Scope {
+    fn whose(self) -> &'static str {
+        match self {
+            Self::Turn => "this turn's",
+            Self::Goal => "the goal's",
+            Self::Session => "this session's",
+        }
+    }
+}
+
+/// What one turn, goal or session has spent and the engine's ceiling on it,
+/// with the node above it that it spends into as well.
+///
+/// A turn's own calls, those made on its side (compaction, memory, web
+/// extraction) and those of the delegates it started all spend into its node:
+/// a delegate's turn sits under the turn that started it, and keeps spending
+/// into it after that turn has ended. A root turn sits under its goal, for a
+/// goal round, and its session.
+#[derive(Debug)]
+pub struct SpendNode {
+    scope: Scope,
+    /// `0` is no ceiling.
+    limit: AtomicU64,
+    all: Tally,
+    delegated: Tally,
+    above: Option<Arc<SpendNode>>,
+    /// A delegate turn's own session, which it counts into without being
+    /// judged by: the chain it is judged by runs through the turn above it.
+    own_session: Option<Arc<SpendNode>>,
+}
+
+impl Default for SpendNode {
+    fn default() -> Self {
+        Self::turn(None, None)
+    }
+}
+
+impl SpendNode {
+    pub fn session(limit: Option<u64>) -> Self {
+        Self::node(Scope::Session, limit, None)
+    }
+
+    pub fn goal(limit: Option<u64>, session: Arc<SpendNode>) -> Self {
+        Self::node(Scope::Goal, limit, Some(session))
+    }
+
+    /// A root turn under its goal or session, or a delegate's under the
+    /// turn that started it.
+    pub fn turn(limit: Option<u64>, above: Option<Arc<SpendNode>>) -> Self {
+        Self::node(Scope::Turn, limit, above)
+    }
+
+    fn node(scope: Scope, limit: Option<u64>, above: Option<Arc<SpendNode>>) -> Self {
         Self {
-            above: Some(above),
-            ..Self::default()
+            scope,
+            limit: AtomicU64::new(limit.unwrap_or(0)),
+            all: Tally::default(),
+            delegated: Tally::default(),
+            above,
+            own_session: None,
         }
     }
 
-    /// One call made in this turn, by its agent or on its side.
+    /// A delegate turn that also counts into `session`, its own.
+    pub fn counting_into(mut self, session: Arc<SpendNode>) -> Self {
+        self.own_session = Some(session);
+        self
+    }
+
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
+
+    pub fn limit(&self) -> Option<u64> {
+        Some(self.limit.load(Ordering::Relaxed)).filter(|&l| l > 0)
+    }
+
+    pub fn set_limit(&self, limit: Option<u64>) {
+        self.limit.store(limit.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// One call, made by this node's agent or on its side.
     pub fn add(&self, call: crate::interface::model::Usage) {
         let call = Spend::from(call);
         self.all.add(call);
+        if let Some(own) = &self.own_session {
+            own.all.add(call);
+        }
+        let mut delegated = self.scope == Scope::Turn;
         let mut above = self.above.as_deref();
-        while let Some(turn) = above {
-            turn.all.add(call);
-            turn.delegated.add(call);
-            above = turn.above.as_deref();
+        while let Some(node) = above {
+            node.all.add(call);
+            if delegated && node.scope == Scope::Turn {
+                node.delegated.add(call);
+            }
+            delegated &= node.scope == Scope::Turn;
+            above = node.above.as_deref();
         }
     }
 
-    /// This turn and its delegates.
+    /// This node, everything under it included.
     pub fn read(&self) -> Spend {
         self.all.read()
     }
 
-    /// The part of [`Self::read`] its delegates spent.
+    /// The part of a turn's [`Self::read`] its delegates spent.
     pub fn delegated(&self) -> Spend {
         self.delegated.read()
     }
 
-    /// The root turn and every delegate under it: what a budget is judged by.
+    /// Start from what the session log recorded, before anything spends.
+    pub fn restore(&self, spent: Spend) {
+        self.all.set(spent);
+    }
+
+    /// The root turn and every delegate under it; for a node that is not a
+    /// turn, its own reading.
     pub fn whole_turn(&self) -> Spend {
         let mut turn = self;
-        while let Some(above) = turn.above.as_deref() {
+        while let Some(above) = turn.above.as_deref().filter(|a| a.scope == Scope::Turn) {
             turn = above;
         }
         turn.read()
     }
+
+    /// The nearest node up the chain, this one included, that is `scope`'s.
+    pub fn find(&self, scope: Scope) -> Option<&SpendNode> {
+        self.chain().find(|node| node.scope == scope)
+    }
+
+    fn chain(&self) -> impl Iterator<Item = &SpendNode> {
+        std::iter::successors(Some(self), |node| node.above.as_deref())
+    }
+
+    fn ceilings(&self) -> impl Iterator<Item = (Scope, u64, u64)> + '_ {
+        self.chain().filter_map(|node| {
+            let limit = node.limit()?;
+            Some((node.scope, limit, node.read().counted_tokens()))
+        })
+    }
+
+    /// What is left under the tightest ceiling up the chain, and whose it
+    /// is; `None` with no ceiling.
+    pub fn remaining(&self) -> Option<(Scope, Remaining)> {
+        self.ceilings()
+            .map(|(scope, limit, spent)| {
+                let tokens = limit.saturating_sub(spent);
+                (scope, Remaining { tokens, limit })
+            })
+            .min_by_key(|(_, left)| left.tokens)
+    }
+
+    /// Whether to keep spending under the ceilings up the chain: the first
+    /// one reached ends the turn, and the nearest one past 90% has the model
+    /// told to wrap up.
+    pub fn judge(&self) -> (Scope, Spending) {
+        let mut warned = None;
+        for (scope, limit, spent) in self.ceilings() {
+            if spent >= limit {
+                return (scope, Spending::Exhausted { limit });
+            }
+            if warned.is_none() && spent >= limit.saturating_mul(9) / 10 {
+                warned = Some((scope, limit));
+            }
+        }
+        match warned {
+            Some((scope, limit)) => (
+                scope,
+                Spending::Warn {
+                    reminder: format!(
+                        "<system-reminder>\n{} token budget is nearly exhausted. Keep your \
+                         response concise and wrap up.\n</system-reminder>",
+                        capitalized(scope.whose())
+                    ),
+                    limit,
+                },
+            ),
+            None => (Scope::Turn, Spending::WithinBudget),
+        }
+    }
+}
+
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// Why a turn ended `budget_exceeded`: whose ceiling was reached, for the
+/// turn's `message`.
+pub fn exhausted_message(scope: Scope, limit: u64) -> String {
+    format!("{} token budget of {limit} is used up", scope.whose())
 }
 
 #[derive(Debug, Default)]
@@ -158,6 +333,16 @@ impl Tally {
         ] {
             total.fetch_add(part, Ordering::Relaxed);
         }
+    }
+
+    fn set(&self, to: Spend) {
+        self.input_tokens.store(to.input_tokens, Ordering::Relaxed);
+        self.output_tokens
+            .store(to.output_tokens, Ordering::Relaxed);
+        self.cache_creation_tokens
+            .store(to.cache_creation_tokens, Ordering::Relaxed);
+        self.cache_read_tokens
+            .store(to.cache_read_tokens, Ordering::Relaxed);
     }
 
     fn read(&self) -> Spend {
@@ -229,16 +414,20 @@ pub struct ContextBudget {
     pub hard_cap: Option<usize>,
 }
 
-/// What a turn may spend and how much it may carry.
+/// A deployment's judgement of what a turn may spend and how much it may
+/// carry, on top of the engine's own ceilings.
 pub trait BudgetPolicy: Send + Sync {
-    /// After a model call, against the turn's [`TurnSpend`] as it reads then.
+    /// After a model call, against the root turn's reading
+    /// ([`SpendNode::whole_turn`]) then. A turn the engine's ceilings
+    /// already ended does not ask.
     fn on_usage(&self, _spend: &Spend) -> Spending {
         Spending::WithinBudget
     }
 
-    /// Before a model call, against the turn's [`TurnSpend`]. The call is
-    /// not sent when less than [`MIN_CALL_TOKENS`] remain, and otherwise asks
-    /// for no more output than remains. `None`: no ceiling to hold it to.
+    /// Before a model call, against the root turn's reading. The call is not
+    /// sent when less than [`MIN_CALL_TOKENS`] remain under this or any of
+    /// the engine's ceilings, and otherwise asks for no more output than the
+    /// tightest leaves. `None`: no ceiling of the policy's own.
     fn remaining(&self, _spend: &Spend) -> Option<Remaining> {
         None
     }
@@ -270,57 +459,17 @@ pub trait BudgetPolicy: Send + Sync {
 /// Below this much remaining budget a model call is not sent.
 pub const MIN_CALL_TOKENS: u64 = 1024;
 
-/// The engine's own numbers.
+/// The engine's own numbers for what a policy judges: the output target and
+/// the compaction settings. Its token ceilings are on the [`SpendNode`]s.
 #[derive(Default)]
 pub struct EngineBudget {
-    /// `settings.turn.token_budget`. `None` is unlimited, which is
-    /// the default.
-    pub max_total_tokens: Option<u64>,
     /// `settings.compaction`: over the scene's threshold and kept rounds when
     /// set.
     pub compact_threshold: Option<usize>,
     pub compact_keep_recent: Option<usize>,
 }
 
-impl EngineBudget {
-    pub fn new(max_total_tokens: Option<u64>) -> Self {
-        Self {
-            max_total_tokens,
-            ..Self::default()
-        }
-    }
-}
-
 impl BudgetPolicy for EngineBudget {
-    fn on_usage(&self, spend: &Spend) -> Spending {
-        let Some(budget) = self.max_total_tokens else {
-            return Spending::WithinBudget;
-        };
-        // `total_tokens()`, not `all_tokens()`: deployments set this ceiling
-        // against that reading, and counting cache reads too would silently
-        // lower every one of them by roughly the cache hit rate.
-        let spent = spend.total_tokens();
-        if spent >= budget {
-            return Spending::Exhausted { limit: budget };
-        }
-        if spent >= budget * 9 / 10 {
-            return Spending::Warn {
-                reminder: "<system-reminder>\nOutput token budget nearly exhausted. \
-                           Keep your response concise and wrap up.\n</system-reminder>"
-                    .into(),
-                limit: budget,
-            };
-        }
-        Spending::WithinBudget
-    }
-
-    fn remaining(&self, spend: &Spend) -> Option<Remaining> {
-        self.max_total_tokens.map(|limit| Remaining {
-            tokens: limit.saturating_sub(spend.total_tokens()),
-            limit,
-        })
-    }
-
     fn on_output_target(&self, p: &OutputProgress) -> OutputTarget {
         // 90% of the target counts as met, and three consecutive
         // sub-500-token calls count as the model having run out of things to
@@ -390,57 +539,91 @@ impl<P: BudgetPolicy> BudgetPolicy for Capped<P> {
 mod tests {
     use super::*;
 
-    fn engine(budget: u64) -> EngineBudget {
-        EngineBudget::new(Some(budget))
+    fn engine() -> EngineBudget {
+        EngineBudget::default()
     }
 
-    /// Input and output only, the way a caller with no cache reports.
-    fn spent(input: u64, output: u64) -> Spend {
-        Spend {
+    fn call(input: u32, output: u32) -> crate::interface::model::Usage {
+        crate::interface::model::Usage {
             input_tokens: input,
             output_tokens: output,
             ..Default::default()
         }
     }
 
+    fn turn_capped(limit: u64) -> SpendNode {
+        SpendNode::turn(Some(limit), None)
+    }
+
     #[test]
     fn the_bill_warns_at_ninety_percent_and_stops_at_the_cap() {
-        let p = engine(1_000);
-        assert_eq!(p.on_usage(&spent(800, 99)), Spending::WithinBudget);
-        assert!(matches!(
-            p.on_usage(&spent(800, 100)),
-            Spending::Warn { .. }
-        ));
+        let turn = turn_capped(1_000);
+        turn.add(call(800, 99));
+        assert_eq!(turn.judge(), (Scope::Turn, Spending::WithinBudget));
+        turn.add(call(0, 1));
+        assert!(matches!(turn.judge(), (Scope::Turn, Spending::Warn { .. })));
+        turn.add(call(0, 100));
         assert_eq!(
-            p.on_usage(&spent(800, 200)),
-            Spending::Exhausted { limit: 1_000 },
+            turn.judge(),
+            (Scope::Turn, Spending::Exhausted { limit: 1_000 }),
             "the check is `>=`; at the cap the turn is over, not one call later"
         );
     }
 
     #[test]
-    fn what_remains_is_the_ceiling_less_the_engines_reading() {
-        let p = engine(5_000);
+    fn what_remains_is_the_tightest_ceiling_up_the_chain() {
+        let session = Arc::new(SpendNode::session(Some(10_000)));
+        session.restore(Spend {
+            input_tokens: 7_000,
+            ..Default::default()
+        });
+        let goal = Arc::new(SpendNode::goal(Some(5_000), session.clone()));
+        let turn = Arc::new(SpendNode::turn(Some(4_000), Some(goal.clone())));
+        let delegate = SpendNode::turn(None, Some(turn.clone()));
+        delegate.add(call(1_000, 500));
         assert_eq!(
-            p.remaining(&spent(1_000, 500)),
-            Some(Remaining {
-                tokens: 3_500,
-                limit: 5_000
-            })
+            delegate.remaining(),
+            Some((
+                Scope::Session,
+                Remaining {
+                    tokens: 1_500,
+                    limit: 10_000
+                }
+            ))
         );
-        assert_eq!(p.remaining(&spent(4_000, 2_000)).unwrap().tokens, 0);
-        assert_eq!(EngineBudget::new(None).remaining(&spent(1, 1)), None);
-        let capped = Capped {
-            inner: engine(5_000),
-            context_hard_cap: 10,
-        };
-        assert_eq!(capped.remaining(&spent(1_000, 0)).unwrap().tokens, 4_000);
+        assert_eq!(goal.read().counted_tokens(), 1_500);
+        assert_eq!(turn.remaining().unwrap().1.tokens, 1_500);
+        session.set_limit(None);
+        assert_eq!(
+            delegate.remaining(),
+            Some((
+                Scope::Turn,
+                Remaining {
+                    tokens: 2_500,
+                    limit: 4_000
+                }
+            ))
+        );
+        assert_eq!(SpendNode::default().remaining(), None);
+    }
+
+    #[test]
+    fn a_ceiling_reached_anywhere_up_the_chain_ends_the_turn() {
+        let session = Arc::new(SpendNode::session(Some(1_000)));
+        let turn = SpendNode::turn(Some(1_000_000), Some(session.clone()));
+        turn.add(call(1_000, 0));
+        assert_eq!(
+            turn.judge(),
+            (Scope::Session, Spending::Exhausted { limit: 1_000 })
+        );
+        let next = SpendNode::turn(None, Some(session));
+        assert_eq!(next.remaining().unwrap().1.tokens, 0);
     }
 
     #[test]
     fn delegates_spending_at_once_lose_nothing() {
-        let shared = std::sync::Arc::new(TurnSpend::default());
-        let call = crate::interface::model::Usage {
+        let shared = Arc::new(turn_capped(40_000));
+        let usage = crate::interface::model::Usage {
             input_tokens: 3,
             output_tokens: 2,
             cache_creation_input_tokens: 1,
@@ -451,7 +634,7 @@ mod tests {
                 let shared = shared.clone();
                 std::thread::spawn(move || {
                     for _ in 0..1_000 {
-                        shared.add(call);
+                        shared.add(usage);
                     }
                 })
             })
@@ -468,76 +651,69 @@ mod tests {
                 cache_read_tokens: 56_000,
             }
         );
-        assert_eq!(
-            engine(40_000).on_usage(&shared.read()),
-            Spending::Exhausted { limit: 40_000 }
-        );
+        assert_eq!(shared.judge().1, Spending::Exhausted { limit: 40_000 });
     }
 
     #[test]
-    fn a_delegates_call_is_spent_by_every_turn_above_it() {
-        let root = std::sync::Arc::new(TurnSpend::default());
-        let child = std::sync::Arc::new(TurnSpend::under(root.clone()));
-        let grandchild = TurnSpend::under(child.clone());
-        let call = |n: u32| crate::interface::model::Usage {
-            input_tokens: n,
-            ..Default::default()
-        };
-        root.add(call(1));
-        child.add(call(10));
-        grandchild.add(call(100));
+    fn a_delegates_call_is_spent_by_every_node_above_it_once() {
+        let session = Arc::new(SpendNode::session(None));
+        let root = Arc::new(SpendNode::turn(None, Some(session.clone())));
+        let child_session = Arc::new(SpendNode::session(None));
+        let child = Arc::new(
+            SpendNode::turn(None, Some(root.clone())).counting_into(child_session.clone()),
+        );
+        let grandchild = SpendNode::turn(None, Some(child.clone()));
+        root.add(call(1, 0));
+        child.add(call(10, 0));
+        grandchild.add(call(100, 0));
         assert_eq!(root.read().input_tokens, 111);
         assert_eq!(root.delegated().input_tokens, 110);
         assert_eq!(child.read().input_tokens, 110);
         assert_eq!(child.delegated().input_tokens, 100);
-        assert_eq!(grandchild.read().input_tokens, 100);
         assert_eq!(grandchild.whole_turn().input_tokens, 111);
-    }
-
-    #[test]
-    fn no_cap_configured_means_no_ceiling() {
+        assert_eq!(session.read().input_tokens, 111);
+        assert_eq!(session.delegated().input_tokens, 0);
+        assert_eq!(child_session.read().input_tokens, 10);
         assert_eq!(
-            EngineBudget::new(None).on_usage(&spent(u64::MAX, 0)),
-            Spending::WithinBudget
+            grandchild.find(Scope::Session).unwrap().read().input_tokens,
+            111
         );
     }
 
-    /// The two readings, and the gap between them that made this a choice.
-    ///
-    /// A cache-heavy turn reads far more than `input_tokens` says: the figures
-    /// here are one call's worth from a provider with the cache warm, where
-    /// what was read is an order of magnitude past what a budget counting
-    /// input and output would see.
     #[test]
-    fn the_cache_is_most_of_what_a_warm_turn_read() {
+    fn no_ceiling_configured_means_none() {
+        let turn = SpendNode::default();
+        turn.add(call(u32::MAX, 0));
+        assert_eq!(turn.judge().1, Spending::WithinBudget);
+        assert_eq!(turn.remaining(), None);
+    }
+
+    /// The reading every ceiling and quota counts, and what it leaves out.
+    #[test]
+    fn a_cache_read_is_not_counted_and_a_cache_write_is() {
         let spend = Spend {
             input_tokens: 400,
             output_tokens: 600,
             cache_creation_tokens: 2_000,
             cache_read_tokens: 30_000,
         };
-        assert_eq!(spend.total_tokens(), 1_000);
+        assert_eq!(spend.counted_tokens(), 3_000);
         assert_eq!(spend.all_tokens(), 33_000);
     }
 
-    /// A ceiling an operator set stays where they set it.
-    ///
-    /// `EngineBudget` reads `total_tokens()`, so a turn whose cache traffic
-    /// dwarfs its budget is not stopped by it. That is a decision and not an
-    /// oversight — a policy that wants the cache counted overrides `on_usage`
-    /// and reads `all_tokens()`, and the engine does not make that choice for
-    /// deployments that configured the ceiling against the older reading.
+    /// A ceiling an operator set does not move with the cache hit rate, and a
+    /// policy that wants the cache counted has the parts.
     #[test]
     fn the_engines_ceiling_does_not_move_when_the_cache_fills() {
-        let spend = Spend {
+        let turn = turn_capped(1_000);
+        turn.add(crate::interface::model::Usage {
             input_tokens: 400,
             output_tokens: 300,
-            cache_creation_tokens: 5_000,
-            cache_read_tokens: 90_000,
-        };
-        assert_eq!(
-            engine(1_000).on_usage(&spend),
-            Spending::WithinBudget,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 90_000,
+        });
+        assert!(
+            matches!(turn.judge().1, Spending::WithinBudget),
             "the cache moved a 1000-token ceiling that nobody asked to move"
         );
 
@@ -552,14 +728,14 @@ mod tests {
             }
         }
         assert_eq!(
-            CountsTheCache.on_usage(&spend),
+            CountsTheCache.on_usage(&turn.whole_turn()),
             Spending::Exhausted { limit: 1_000 },
             "the parts a policy needs to reach the other answer are not reachable"
         );
     }
 
     #[test]
-    fn a_usage_becomes_a_spend_without_losing_the_cache() {
+    fn a_spend_is_written_with_the_wire_names_of_a_usage() {
         let spend = Spend::from(crate::interface::model::Usage {
             input_tokens: 11,
             output_tokens: 7,
@@ -567,13 +743,8 @@ mod tests {
             cache_read_input_tokens: 23,
         });
         assert_eq!(
-            spend,
-            Spend {
-                input_tokens: 11,
-                output_tokens: 7,
-                cache_creation_tokens: 5,
-                cache_read_tokens: 23,
-            }
+            serde_json::to_value(spend).unwrap(),
+            serde_json::to_value(spend.as_usage()).unwrap()
         );
     }
 
@@ -589,7 +760,7 @@ mod tests {
 
     #[test]
     fn ninety_percent_of_the_output_target_counts_as_reached() {
-        let p = engine(u64::MAX);
+        let p = engine();
         assert!(matches!(
             p.on_output_target(&progress(89_000, 0, 1_000, 0)),
             OutputTarget::KeepGoing { .. }
@@ -604,7 +775,7 @@ mod tests {
     /// to add: three continuations *and* two consecutive small answers.
     #[test]
     fn diminishing_returns_take_all_three_conditions() {
-        let p = engine(u64::MAX);
+        let p = engine();
         assert_eq!(
             p.on_output_target(&progress(10_000, 3, 400, 400)),
             OutputTarget::Reached
@@ -625,7 +796,7 @@ mod tests {
     #[test]
     fn a_long_run_of_substantial_answers_keeps_going() {
         assert!(matches!(
-            engine(u64::MAX).on_output_target(&progress(10_000, 20, 1_000, 1_000)),
+            engine().on_output_target(&progress(10_000, 20, 1_000, 1_000)),
             OutputTarget::KeepGoing { .. }
         ));
     }
@@ -636,7 +807,7 @@ mod tests {
             compact_threshold: 150_000,
             compact_keep_recent: 4,
         };
-        let engine_only = EngineBudget::new(None).context_budget(&scene);
+        let engine_only = EngineBudget::default().context_budget(&scene);
         assert_eq!(engine_only.compact_threshold, 150_000);
         assert_eq!(
             engine_only.hard_cap, None,
@@ -644,7 +815,7 @@ mod tests {
         );
 
         let capped = Capped {
-            inner: EngineBudget::new(None),
+            inner: EngineBudget::default(),
             context_hard_cap: 120_000,
         }
         .context_budget(&scene);
@@ -664,7 +835,6 @@ mod tests {
         let configured = EngineBudget {
             compact_threshold: Some(60_000),
             compact_keep_recent: Some(4),
-            ..EngineBudget::default()
         }
         .context_budget(&scene);
         assert_eq!(

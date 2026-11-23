@@ -27,9 +27,6 @@ struct ModelCall {
     started: std::time::Instant,
     images: Arc<std::sync::Mutex<Vec<PendingToolImage>>>,
     discontinued: Arc<std::sync::atomic::AtomicBool>,
-    /// Its usage is in the turn's spend already: it was added as the reply
-    /// ended, before the reply's tool calls had finished.
-    spent_early: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Agent {
@@ -49,8 +46,11 @@ impl Agent {
         {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
-        let ControlFlow::Continue(headroom) = self.budget_before_call() else {
-            return Ok(ControlFlow::Break(StopReason::BudgetExceeded));
+        let headroom = match self.budget_before_call() {
+            ControlFlow::Continue(headroom) => headroom,
+            ControlFlow::Break(why) => {
+                return Ok(ControlFlow::Break(StopReason::BudgetExceeded(why)))
+            }
         };
 
         self.fit_context(cancel).await;
@@ -94,8 +94,8 @@ impl Agent {
             return Ok(ControlFlow::Break(StopReason::Policy(reason)));
         }
 
-        if self.charge_budget().is_break() {
-            return Ok(ControlFlow::Break(StopReason::BudgetExceeded));
+        if let ControlFlow::Break(why) = self.charge_budget() {
+            return Ok(ControlFlow::Break(StopReason::BudgetExceeded(why)));
         }
 
         if call.result.has_tool_uses {
@@ -113,6 +113,7 @@ impl Agent {
             tracing::warn!(error = %e, "failed to persist session");
         }
         let _ = self.record_goal_changes().await;
+        let _ = self.record_session_spend().await;
     }
 
     fn over_hard_cap(&self) -> bool {
@@ -176,7 +177,6 @@ impl Agent {
         let call_started = std::time::Instant::now();
         state.turn_no = self.session.turn_count;
         let discontinued = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let spent_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let tool_images: Arc<std::sync::Mutex<Vec<PendingToolImage>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
         let template = self.tool_exec_ctx(cancel, &discontinued, &tool_images);
@@ -184,9 +184,7 @@ impl Agent {
         let (result, messages_before_step) = loop {
             let messages_before_step = self.session.messages().len();
             let sent = request.clone();
-            let attempt = self
-                .stream_once(request, &template, &spent_early, cancel)
-                .await;
+            let attempt = self.stream_once(request, &template, cancel).await;
             let (failure, after_first_byte) = match attempt {
                 Ok(result) => break (result, messages_before_step),
                 Err(failure) => failure,
@@ -233,7 +231,6 @@ impl Agent {
             started: call_started,
             images: tool_images,
             discontinued,
-            spent_early,
         })
     }
 
@@ -242,24 +239,11 @@ impl Agent {
         &mut self,
         request: ModelRequest,
         template: &ToolExecCtx,
-        spent_early: &Arc<std::sync::atomic::AtomicBool>,
         cancel: &CancellationToken,
     ) -> Result<crate::streaming::StreamResult, (crate::streaming::StreamFailure, bool)> {
         let stream = match self.send(request, cancel.clone()).await {
             Ok(stream) => stream,
             Err(error) => return Err((crate::streaming::StreamFailure::refused(error), false)),
-        };
-        // A delegate the reply starts runs before `execute_stream` returns;
-        // it has to see this call's spend.
-        let stream: base::interface::model::ModelStream = {
-            let (spend, spent_early) = (self.turn.scope.spend().clone(), spent_early.clone());
-            Box::new(futures::StreamExt::map(stream, move |item| {
-                if let Ok(base::interface::model::ModelEvent::EndTurn { usage, .. }) = &item {
-                    spend.add(*usage);
-                    spent_early.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                item
-            }))
         };
         let tools_for_safety = Arc::clone(&template.tools);
         let cancel_grace = template.config.tool_cancel_grace;
@@ -361,12 +345,7 @@ impl Agent {
                     truncated: stream_result.truncated,
                 },
             ));
-        // Not beside the budget check below: a turn can end between the two,
-        // and a call that happened has to be counted.
         state.spent = state.spent.plus(usage);
-        if !call.spent_early.load(std::sync::atomic::Ordering::Relaxed) {
-            self.turn.scope.spend().add(usage);
-        }
     }
 
     async fn after_reply(&mut self, call: &ModelCall, cancel: &CancellationToken) {
@@ -397,47 +376,73 @@ impl Agent {
         }
     }
 
-    /// How much output the next call may ask for under the budget, or the
-    /// turn's end when what remains of it cannot pay for a call.
-    fn budget_before_call(&mut self) -> ControlFlow<(), Option<u32>> {
-        let spend = self.turn.scope.spend().whole_turn();
-        let Some(remaining) = self.policies.budget_policy().remaining(&spend) else {
+    /// How much output the next call may ask for under the tightest of the
+    /// engine's ceilings and the policy's, or the turn's end, saying whose,
+    /// when what remains cannot pay for a call.
+    pub(super) fn budget_before_call(&mut self) -> ControlFlow<String, Option<u32>> {
+        use base::interface::budget_policy::{Scope, MIN_CALL_TOKENS};
+        let node = self.turn.scope.spend().clone();
+        let spend = node.whole_turn();
+        let policy = self
+            .policies
+            .budget_policy()
+            .remaining(&spend)
+            .map(|left| (Scope::Turn, left));
+        let tightest = node
+            .remaining()
+            .into_iter()
+            .chain(policy)
+            .min_by_key(|(_, left)| left.tokens);
+        let Some((scope, remaining)) = tightest else {
             return ControlFlow::Continue(None);
         };
-        if remaining.tokens < base::interface::budget_policy::MIN_CALL_TOKENS {
-            let total_tokens_used = spend.total_tokens();
+        if remaining.tokens < MIN_CALL_TOKENS {
+            let used = remaining.limit.saturating_sub(remaining.tokens);
             tracing::warn!(
-                total_tokens_used,
+                ?scope,
+                used,
                 budget = remaining.limit,
                 left = remaining.tokens,
                 "token budget too low for another call"
             );
             self.record_budget_enforced(
                 telemetry::BudgetEnforcedAction::TurnStopped,
-                total_tokens_used,
+                used,
                 remaining.limit,
             );
-            return ControlFlow::Break(());
+            return ControlFlow::Break(base::interface::budget_policy::exhausted_message(
+                scope,
+                remaining.limit,
+            ));
         }
         ControlFlow::Continue(Some(u32::try_from(remaining.tokens).unwrap_or(u32::MAX)))
     }
 
-    fn charge_budget(&mut self) -> ControlFlow<()> {
-        // The engine hands the policy all four figures; which count as
-        // spent is its judgement.
-        let spend = self.turn.scope.spend().whole_turn();
-        let total_tokens_used = spend.total_tokens();
-        match self.policies.budget_policy().on_usage(&spend) {
-            base::interface::budget_policy::Spending::WithinBudget => {}
-            base::interface::budget_policy::Spending::Warn { reminder, limit } => {
+    fn charge_budget(&mut self) -> ControlFlow<String> {
+        use base::interface::budget_policy::{Scope, Spending};
+        let node = self.turn.scope.spend().clone();
+        let spend = node.whole_turn();
+        let engine = node.judge();
+        let judged = match engine {
+            (_, Spending::Exhausted { .. }) => engine,
+            _ => match self.policies.budget_policy().on_usage(&spend) {
+                Spending::WithinBudget => engine,
+                policy => (Scope::Turn, policy),
+            },
+        };
+        let used = spend.counted_tokens();
+        match judged {
+            (_, Spending::WithinBudget) => {}
+            (scope, Spending::Warn { reminder, limit }) => {
                 tracing::warn!(
-                    total_tokens_used,
+                    ?scope,
+                    used,
                     budget = limit,
                     "approaching token budget limit; injecting continue reminder"
                 );
                 self.record_budget_enforced(
                     telemetry::BudgetEnforcedAction::WarningInjected,
-                    total_tokens_used,
+                    used,
                     limit,
                 );
                 self.session.push_message(ModelMessage {
@@ -445,14 +450,16 @@ impl Agent {
                     content: vec![ModelContentBlock::Text { text: reminder }],
                 });
             }
-            base::interface::budget_policy::Spending::Exhausted { limit } => {
-                tracing::warn!(total_tokens_used, budget = limit, "token budget exceeded");
+            (scope, Spending::Exhausted { limit }) => {
+                tracing::warn!(?scope, used, budget = limit, "token budget exceeded");
                 self.record_budget_enforced(
                     telemetry::BudgetEnforcedAction::TurnStopped,
-                    total_tokens_used,
+                    used,
                     limit,
                 );
-                return ControlFlow::Break(());
+                return ControlFlow::Break(base::interface::budget_policy::exhausted_message(
+                    scope, limit,
+                ));
             }
         }
         ControlFlow::Continue(())

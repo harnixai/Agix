@@ -86,8 +86,8 @@ impl Agent {
     }
 
     /// Bring the session's log up to what the session holds: the transcript,
-    /// goal changes, the durable state. Each is written even when one before
-    /// it failed; the first failure is what comes back.
+    /// goal changes, the durable state, what it spent. Each is written even
+    /// when one before it failed; the first failure is what comes back.
     pub(crate) async fn flush_log(&mut self) -> Result<(), String> {
         let transcript = self.session.persist().await.map_err(|e| {
             tracing::warn!(error = %e, "failed to persist session");
@@ -95,7 +95,8 @@ impl Agent {
         });
         let goal = self.record_goal_changes().await;
         let state = self.record_session_state().await;
-        transcript.and(goal).and(state)
+        let spend = self.record_session_spend().await;
+        transcript.and(goal).and(state).and(spend)
     }
 
     /// Ask the next turn's model calls for the model the session's state
@@ -484,7 +485,12 @@ impl Agent {
         cancel: CancellationToken,
         origin: history::entry::MessageOrigin,
     ) -> Result<TurnOutcome, TurnError> {
-        self.turn = super::TurnState::opening(&self.current_turn_id, self.charged_to.take());
+        self.turn = super::TurnState::opening(
+            &self.current_turn_id,
+            self.charged_to.take(),
+            &self.session_state.ledger(),
+            self.settings.values.turn.token_budget,
+        );
         self.open_turn.open(self.turn.scope.spend().clone());
         crate::steering::lock(&self.channels.steering).open();
         let outcome = self
@@ -734,10 +740,9 @@ impl Agent {
         }
         if let Ok(o) = &outcome {
             {
-                let spent = &mut self.session_state.ledger().spent;
-                spent.usage = spent.usage.plus(o.total_usage);
-                spent.api_calls = spent.api_calls.saturating_add(o.api_calls);
-                spent.tool_calls = spent.tool_calls.saturating_add(o.tool_calls);
+                let calls = &mut self.session_state.ledger().calls;
+                calls.api_calls = calls.api_calls.saturating_add(o.api_calls);
+                calls.tool_calls = calls.tool_calls.saturating_add(o.tool_calls);
             }
             let (usage, usage_breakdown) = match self.open_turn.spend() {
                 Some(spend) => super::side_spend::turn_usage(&spend, o.total_usage),

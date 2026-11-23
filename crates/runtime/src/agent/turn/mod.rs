@@ -18,6 +18,7 @@ mod reporting;
 mod request;
 mod rewind;
 mod round;
+mod session_spend;
 mod side_spend;
 mod spill;
 mod token_budget;
@@ -38,6 +39,7 @@ pub(crate) use process::hook_permission_mode;
 pub(crate) use prompt::PromptContext;
 pub(crate) use recall::Memory;
 pub(crate) use request::ModelRoute;
+pub use session_spend::recorded_spend;
 pub(crate) use side_spend::{OpenTurn, SpentModel};
 pub(crate) use tool_env::collect_frozen;
 pub(crate) use tool_exec::resolve_permission_response;
@@ -60,18 +62,39 @@ pub(crate) struct TurnState {
 }
 
 impl TurnState {
-    /// `charged_to` is the spend of the turn that delegated this one.
+    /// A turn of the session `ledger` is of, holding `limit` as its ceiling.
+    ///
+    /// `charged_to` is what started it from outside the session: a turn,
+    /// which this one is a delegate of and shares the ceiling of, or the
+    /// session of the host that started it. Otherwise it is a root turn,
+    /// under its goal for a goal round and under its session.
     pub(crate) fn opening(
         turn_id: &str,
-        charged_to: Option<std::sync::Arc<base::interface::budget_policy::TurnSpend>>,
+        charged_to: Option<std::sync::Arc<base::interface::budget_policy::SpendNode>>,
+        ledger: &base::context::SessionLedger,
+        limit: Option<u64>,
     ) -> Self {
+        use base::interface::budget_policy::{Scope, SpendNode};
         let origin = base::context::goal::TurnOrigin::from_turn_id(turn_id);
-        let scope = match charged_to {
-            Some(above) => base::tool::TurnScope::delegated_from(origin, above),
-            None => base::tool::TurnScope::new(origin),
+        let node = match charged_to {
+            Some(above) if above.scope() == Scope::Turn => {
+                SpendNode::turn(None, Some(above)).counting_into(ledger.spent.clone())
+            }
+            Some(above) => SpendNode::turn(limit, Some(above)).counting_into(ledger.spent.clone()),
+            None => {
+                let goal = match origin {
+                    base::context::goal::TurnOrigin::GoalRound { .. } => ledger.goal_spent.as_ref(),
+                    _ => None,
+                };
+                let above = goal.map_or_else(|| ledger.spent.clone(), |goal| goal.node.clone());
+                SpendNode::turn(limit, Some(above))
+            }
         };
         Self {
-            scope: std::sync::Arc::new(scope),
+            scope: std::sync::Arc::new(base::tool::TurnScope::opening(
+                origin,
+                std::sync::Arc::new(node),
+            )),
             ..Self::default()
         }
     }

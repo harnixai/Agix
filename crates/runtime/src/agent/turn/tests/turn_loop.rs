@@ -166,9 +166,9 @@ async fn a_policy_is_told_what_the_cache_cost() {
         "the policy was given a different turn than the one the provider reported"
     );
     assert_eq!(
-        spend.total_tokens(),
-        700,
-        "the older reading has to keep meaning what it meant"
+        spend.counted_tokens(),
+        2_700,
+        "what every ceiling counts leaves the cache reads out"
     );
     assert_eq!(
         spend.all_tokens(),
@@ -237,6 +237,54 @@ async fn max_budget_tokens_stops_the_turn_on_reported_usage() {
     assert!(
         kinds.contains(&"turn_complete".to_string()),
         "got: {kinds:?}"
+    );
+}
+
+/// A deployment's own policy is judged on top of the engine's ceilings,
+/// not in their place: `turn.token_budget` still ends the turn.
+#[tokio::test]
+async fn a_hosts_policy_leaves_the_turn_budget_in_force() {
+    struct Lenient;
+    impl base::interface::budget_policy::BudgetPolicy for Lenient {}
+
+    let tmp = tempfile::tempdir().unwrap();
+    let model: Arc<dyn base::interface::model::Model> = Arc::new(FixedUsageModel {
+        usage: base::interface::model::Usage {
+            input_tokens: 800,
+            output_tokens: 300,
+            ..Default::default()
+        },
+    });
+    let mut settings = recall_test_settings(tmp.path());
+    settings.values.turn.token_budget = Some(1000);
+    let (telemetry_tx, _telemetry_rx) = tokio::sync::mpsc::channel(16);
+    let (mut agent, _event_rx, _input_tx) = crate::agent::Builder::new()
+        .scene(Arc::new(scene::code::spec(
+            scene::code::Interaction::Interactive,
+        )))
+        .model(model)
+        .settings(Arc::new(settings))
+        .telemetry_handle(telemetry::TelemetryHandle::new(telemetry_tx))
+        .budget_policy(Arc::new(Lenient))
+        .skip_warmup(true)
+        .build()
+        .expect("build should succeed");
+
+    let outcome = agent
+        .process_turn(
+            InputMessage::User {
+                content: "hello".into(),
+                attachments: vec![],
+                turn_id: "t1".into(),
+            },
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("process_turn should succeed");
+    assert_eq!(outcome.stop_reason, "budget_exceeded");
+    assert_eq!(
+        outcome.message.as_deref(),
+        Some("this turn's token budget of 1000 is used up")
     );
 }
 

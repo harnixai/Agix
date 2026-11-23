@@ -70,6 +70,8 @@ struct Case {
     interactive: bool,
     /// `(input, output)` tokens the model reports on successive calls.
     usage: Vec<(u32, u32)>,
+    /// `turn.token_budget`.
+    token_budget: Option<u64>,
     budget_policy: Option<Arc<dyn BudgetPolicy>>,
     turn_policy: Option<Arc<dyn TurnPolicy>>,
     recovery_policy: Option<Arc<dyn RecoveryPolicy>>,
@@ -90,6 +92,7 @@ impl Case {
             extra_tools: Vec::new(),
             interactive: true,
             usage: Vec::new(),
+            token_budget: None,
             budget_policy: None,
             turn_policy: None,
             recovery_policy: None,
@@ -161,6 +164,7 @@ async fn trace(case: Case) -> String {
     settings.values.permissions.mode = case.permission_mode;
     settings.values.hooks = case.hooks_config.clone();
     settings.values.compaction.reactive = case.reactive_compact;
+    settings.values.turn.token_budget = case.token_budget;
     let settings = Arc::new(settings);
 
     let registry = Arc::new(InMemoryToolRegistry::new());
@@ -898,7 +902,7 @@ async fn a_user_prompt_submit_hook_can_block_the_turn() {
 }
 
 /// **The token budget warns at 90% and stops at 100%.** Two calls: the first
-/// lands at 900 of 1000 and injects the reminder, the second crosses the cap.
+/// lands at 18000 of 20000 and injects the reminder, the second crosses the cap.
 #[tokio::test]
 async fn the_token_budget_warns_then_stops_the_turn() {
     let mut case = Case::new(
@@ -910,10 +914,8 @@ async fn the_token_budget_warns_then_stops_the_turn() {
             Reply::Text("never reached"),
         ],
     );
-    case.usage = vec![(500, 400), (100, 100)];
-    case.budget_policy = Some(Arc::new(base::interface::budget_policy::EngineBudget::new(
-        Some(1000),
-    )));
+    case.usage = vec![(15_000, 3_000), (1_000, 1_000)];
+    case.token_budget = Some(20_000);
     check(case).await;
 }
 
@@ -927,7 +929,7 @@ async fn the_context_hard_cap_ends_the_turn_before_any_call() {
         vec![Reply::Text("never reached")],
     );
     case.budget_policy = Some(Arc::new(base::interface::budget_policy::Capped {
-        inner: base::interface::budget_policy::EngineBudget::new(None),
+        inner: base::interface::budget_policy::EngineBudget::default(),
         context_hard_cap: 0,
     }));
     check(case).await;

@@ -67,7 +67,7 @@ pub struct TurnScope {
     /// Who started the turn, which decides what goal operations it may perform.
     pub origin: crate::context::goal::TurnOrigin,
     structured_output: std::sync::Mutex<Option<Value>>,
-    spend: Arc<crate::interface::budget_policy::TurnSpend>,
+    spend: Arc<crate::interface::budget_policy::SpendNode>,
 }
 
 impl TurnScope {
@@ -79,18 +79,18 @@ impl TurnScope {
         }
     }
 
-    /// A delegate's turn, its spend under `above`'s.
-    pub fn delegated_from(
+    /// A turn whose calls spend into `spend`.
+    pub fn opening(
         origin: crate::context::goal::TurnOrigin,
-        above: Arc<crate::interface::budget_policy::TurnSpend>,
+        spend: Arc<crate::interface::budget_policy::SpendNode>,
     ) -> Self {
         Self {
-            spend: Arc::new(crate::interface::budget_policy::TurnSpend::under(above)),
+            spend,
             ..Self::new(origin)
         }
     }
 
-    pub fn spend(&self) -> &Arc<crate::interface::budget_policy::TurnSpend> {
+    pub fn spend(&self) -> &Arc<crate::interface::budget_policy::SpendNode> {
         &self.spend
     }
 

@@ -16,7 +16,7 @@ mod quota;
 mod routing;
 
 pub use quota::{PeriodUsage, QuotaLedger, QuotaStatus};
-pub use routing::{ProviderSwitch, RouteObserver, RoutedProvider, TaskRouter};
+pub use routing::{Metered, ProviderSwitch, RouteObserver, RoutedProvider, TaskRouter};
 
 /// The wire protocol a provider speaks.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]

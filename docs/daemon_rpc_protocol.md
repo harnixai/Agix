@@ -574,17 +574,19 @@ bypass(`permissions.disable_bypass`)时,请求 `bypassPermissions` 的会话按 
 | `max_turns_reached` | 触到本轮 API 调用次数上限(引擎自己发的,不来自 API) |
 | `stopped_by_hook` | hook 截停了这一轮(`PostToolUse` / `Stop` hook 要求不再继续),理由在 `turn_complete.message` |
 | `context_exceeded` | 上下文超限且压缩也救不回来 |
-| `budget_exceeded` | 触到这一轮的 token 预算(`turn.token_budget`,会话可经 `options.settings.turn.token_budget` 收紧,见下) |
+| `budget_exceeded` | 触到一个 token 预算:这一轮的(`turn.token_budget` 或 `options.settings.turn.token_budget`,见下)、会话的或目标的;是谁的在 `turn_complete.message`(如 `this turn's token budget of 2000 is used up`) |
 | `unknown` | 反序列化兜底,遇到未知取值时的落点 |
 
-**一轮的 token 预算含子 Agent。** 预算按输入加输出计(缓存读写不计),算的是这一轮的全部模型调用:
+**一轮的 token 预算含子 Agent。** 预算按未命中缓存的输入、缓存写入与输出计(缓存命中不计,同 provider 配额),算的是这一轮的全部模型调用:
 会话自己的、它在这一轮里起的子 Agent(前台、后台)与团队成员(`TeamCreate` 的成员、这一轮派了活的持久成员)的,
 以及这些 agent 各自在旁边发的调用(压缩写摘要、记忆召回与轮末的记忆抽取、`WebSearch`、`WebFetch` 的抽取)。
 首轮之后的自动命名与手动压缩(`/compact`、`session.compact`)不在任何一轮的模型循环里,不计。每次调用发出前,`max_tokens` 压到不超过预算的
 剩余;剩余不到 1024 时这次调用不发,这一轮以 `budget_exceeded` 结束。一次调用之后合计到达预算时同样结束;
 到达 90% 时往对话里加一条提醒,让模型收尾。子 Agent 判的是同一份合计:别的 agent 把预算用完后,在跑的子
 Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果末尾写明是这个原因。这一轮起的后台子 Agent
-在这一轮结束之后仍记在这份合计上,照样会被它截停;下一轮有自己的一份。
+在这一轮结束之后仍记在这份合计上,照样会被它截停;下一轮有自己的一份。一次调用中途断开或失败、这一轮
+以错误结束时,provider 已经报出的那部分用量同样计入。宿主经库式用法注入的 `BudgetPolicy` 在这之外再判,
+两边都要过。
 
 ---
 
@@ -1681,6 +1683,13 @@ turn 期间的引擎错误不是事件,是**这次调用的错误响应**:`ENGIN
 
 **`context`——上下文用了多少。** 形状与 `turn_complete` 的 `context` 相同(§7.2),取最近
 一次调用过模型的那一轮。会话在内存里、且至少有一轮调过模型时才有这个键。
+
+**`usage`——会话从创建起花了多少。** §3.5 的四字段用量,是此刻的读数:会话自己的调用、它起的
+子 Agent(前台、后台)与团队成员的调用、这些 agent 在旁边发的调用(压缩、记忆、`WebSearch`、
+`WebFetch` 的抽取),每次调用一结束就算进去,不等子 Agent 或这一轮结束。首轮之后的自动命名与手动
+压缩不在任何一轮里,不计;宿主 `session.startAgent` 起的子 Agent 计入。它跨重建、驱逐与 daemon 重启
+(记在会话日志的 `agix.spend` 里,见 ARCHITECTURE §4);`session.fork` 出来的会话从源会话在分叉点
+已花的接着算。会话在内存里时才有这个键。
 
 **`health`——这个会话的插件报的健康检查。** 形状与 `daemon.doctor` 的 `health` 相同
 (`status` 取最差的一项,`checks` 每项带 `name`/`status`/`summary`/`details`)。只有插件注册了
@@ -2816,7 +2825,8 @@ worktree 与分支在子 Agent 结束时已删,不记。前台子 Agent 留下�
 
 `usage` 只算这个子 Agent 自己的调用,与它的侧链会话各次调用之和相等;它再起的子 Agent
 另算在它们各自的任务上。前台子 Agent 的用量在父会话这一轮 `turn_complete` 的 `usage` 里(`usage_breakdown.delegates`,
-§7.2),后台的算到父会话这一轮结束为止的那部分。
+§7.2),后台的算到父会话这一轮结束为止的那部分。父会话 `session.get` 的 `usage` 是会话的累计,
+每个子 Agent 的每次调用一结束就在里面,后台的也是。
 
 子 Agent 有询问在等宿主回答(§10)时是 `waiting`,`waiting_for` 列出这些询问的
 `prompt_id`;答完(或超时)回到 `running`。它仍在跑:`stopTask`、`messageTask` 照常。
@@ -4208,7 +4218,8 @@ hook。没有可丢的、或者丢掉的还不如压缩后补回去的提醒多�
 它与 `turn.token_budget` 算的是同一组调用(§4.8):这个会话自己的、它在旁边发的(压缩、记忆、
 `WebSearch` / `WebFetch` 的模型调用)、以及这一轮起的子 Agent 与团队成员的(连同它们各自的旁路调用与再起的
 子 Agent)。`usage_breakdown` 把它分成三份,各是四字段用量,三份相加等于 `usage`:`own` 是这一轮主循环
-自己的调用,`side` 是旁路调用,`delegates` 是子 Agent 与团队成员的。拿 `usage` 的输入加输出就能和预算对上。
+自己的调用,`side` 是旁路调用,`delegates` 是子 Agent 与团队成员的。拿 `usage` 的 `input_tokens` 加 `cache_creation_input_tokens` 加
+`output_tokens` 就能和预算对上。
 `turn_complete` 发出时还没结束的调用不在里面:轮末起的记忆抽取、这一轮起的后台子 Agent 此后的调用照样算进
 这一轮的预算,但报不进已经发出的这一帧;它们的用量在各自的任务上(`session.tasks`、`task_finished` 的
 `task.usage`)。

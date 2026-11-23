@@ -13,7 +13,7 @@ use base::context::goal::{
 };
 use base::context::{
     DurableState, PlanState, RunningStatus, RunningTask, Session, SessionEnv, SessionLedger,
-    TaskEvent, TaskInfo, TaskType, TodoItem, TodoStatus,
+    SpendRecord, TaskEvent, TaskInfo, TaskType, TodoItem, TodoStatus,
 };
 use base::interface::exec::{ConfinementReport, ExecProviders};
 use base::permission::PermissionMode;
@@ -397,9 +397,20 @@ impl SessionState {
         let _ = self.mode_events.send(ModeChange { mode, source });
     }
 
-    /// Put back what the session log recorded: the goal, disarmed, and the
-    /// durable state. For a state no turn has run on yet.
-    pub fn restore_from_log(&self, goal: Option<Goal>, durable: Option<DurableState>) {
+    /// Put back what the session log recorded: the goal, disarmed, the
+    /// durable state, and what the session has spent. For a state no turn has
+    /// run on yet.
+    pub fn restore_from_log(
+        &self,
+        goal: Option<Goal>,
+        durable: Option<DurableState>,
+        spent: Option<SpendRecord>,
+    ) {
+        if let Some(spent) = spent {
+            let mut ledger = lock(&self.ledger);
+            ledger.spent.restore(spent.session);
+            ledger.spent_recorded = Some(spent);
+        }
         self.restore_goal(goal);
         if let Some(durable) = durable {
             self.restore_durable_state(durable);

@@ -328,7 +328,7 @@ fn what_a_session_spent_and_asked_for_outlives_its_engine() {
     first.attach_session();
     {
         let mut ledger = state.ledger();
-        ledger.spent.api_calls = 3;
+        ledger.calls.api_calls = 3;
         ledger.token_target.target = Some(5_000);
         ledger.invoked_skills.push("review".into());
     }

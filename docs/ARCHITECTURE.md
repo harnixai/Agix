@@ -260,16 +260,24 @@ Stop hook 和 `BudgetPolicy::on_output_target` 这一步都不再问;它放弃�
 它们决定的是还走不走下一步。要在工具跑之前拦,用权限、`PreToolUse` hook 或
 `ToolMiddleware`。
 
-**一轮的预算是一份。** 预算记在这一轮的 `TurnSpend`(`base::interface::budget_policy`)上,经
-`ToolContext.turn`(`TurnScope::spend`)传给这一轮起的 delegate:`Agent` 工具、`TeamCreate` 的阶段成员、
-派给持久成员的消息、fork 的 skill 把它放进 `DelegateRequest.spend`,delegate 的那一轮在它下面开一份自己的
-(`TurnSpend::under`)。每次调用的用量记在调用者那一份上并逐级加到上面;`whole_turn` 是根上那一份的读数,
-每个 agent 第 1 步(`remaining`)与第 7 步(`on_usage`)判的都是它,所以根与子同一个上限,后台 delegate 在
-根这一轮结束后照样花在它上面。本 agent 的调用在回复流的 `EndTurn` 处就记上(流里起的子 Agent 先于第 7 步
-跑,得看见这次调用);旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)由 `SpentModel` 记到当时打开的
-那一轮上,两轮之间的不记。delegate 的 `BudgetPolicy` 经 `HostContracts` 继承根会话的。`turn_complete.usage`
-是这一轮那一份的读数,`usage_breakdown` 按自己 / 旁路 / delegate 拆开。`max_model_calls` 不在这里:每个
-agent 一份,在它自己的 `TurnPolicy` 里。
+**用量只在一处计,预算是一条链。** 一次调用的用量由路由它的那一层计一次:`TaskRouter` 的每次调用
+(没有路由的会话由 `Builder` 在根上套的 `provider::Metered`)在回复流的 `EndTurn` 处、或调用中途断开 /
+失败 / 被丢弃时按 client 已经报的,同时记进 provider 配额和这次调用的 `UsageTap` 所记的那个
+`SpendNode`(`base::interface::budget_policy`)。调用方只说记到哪:这一轮的主循环在发出前把 tap 指向
+这一轮的节点,旁路调用(压缩、记忆、`WebSearch` / `WebFetch`)经 `SpentModel` 指向当时打开的那一轮,
+两轮之间的不记。
+
+节点连成链:delegate 那一轮的节点在起它的那一轮下面(`Agent` 工具、`TeamCreate` 的阶段成员、派给持久
+成员的消息、fork 的 skill 把起它的那一轮放进 `DelegateRequest.spend`;宿主 `session.startAgent` 起的放
+会话的节点),根轮在会话的节点下面,目标轮在两者之间插一层目标的节点。一次调用逐级加到链上每个节点。
+引擎自己的上限挂在节点上——一轮的(`turn.token_budget`,挂在根轮,delegate 共用)、目标的、会话的——
+第 1 步取整条链上最小的剩余(`SpendNode::remaining`)压低 `max_tokens`、不到 `MIN_CALL_TOKENS` 不发,
+第 7 步(`SpendNode::judge`)任何一层到顶即以 `budget_exceeded` 结束,最近的一层到 90% 时提醒收尾;
+`turn_complete.message` 写明是谁的预算。宿主的 `BudgetPolicy` 在这之外再判一次(`remaining` / `on_usage`
+拿根轮的读数 `whole_turn`),两边都要过,注入 policy 不会让引擎的上限失效。所有上限和 provider 配额用同一个
+口径 `Spend::counted_tokens`:未命中缓存的输入 + 缓存写入 + 输出,缓存命中不计。delegate 的 `BudgetPolicy`
+经 `HostContracts` 继承根会话的。`turn_complete.usage` 是这一轮节点的读数,`usage_breakdown` 按自己 /
+旁路 / delegate 拆开。`max_model_calls` 不在这里:每个 agent 一份,在它自己的 `TurnPolicy` 里。
 
 **一条工具管线。** 模型的每次工具调用(`tool_use`)、`RunCode` 程序里的子调用、skill 正文里的
 `` !`cmd` `` 内嵌命令,都走同一条:`PreToolUse` → 输入校验 → 权限 → 中间件 → 工具 → `tool_result`
@@ -1061,10 +1069,13 @@ notice)` 说它怎么结束的。租约被丢弃而没有 `conclude`——工作
   | `agix.session` / `spec` | 会话池,规格变化时 | `{options?, model?, provider?, prompt?, effort?, thinking_mode?, skill_dirs?, permission_mode?}` | 重建、恢复时照它建引擎(§3.2.2) |
   | `agix.goal` / `change` | 引擎与会话池,目标变化时 | `{goal}`,清除后为 `null` | 恢复时取回目标,不武装(§3.4) |
   | `agix.session_state` / `change` | 引擎,一轮结束和引擎停下时,有变化才写;宿主经 `session.setPermissionMode` 进出 `plan` 时,空闲的会话当即由引擎写,不在内存里的由会话池写 | `{plan: null \| {exit_to: <模式> \| null}, todos: [{content, status, active_form}]}` | `Agent::restore_state_from_log` 放回 `plan` 模式(`exit_to` 为 `null` 即退出到 `default`)和 todo 列表 |
+  | `agix.spend` / `total` | 引擎,每一步之前、一轮结束和引擎停下时;会话池,子 Agent 与团队成员每调完一次模型和结束时;有变化才写 | `{session: <四字段用量>, goal?: {id, spent: <四字段用量>}}`:会话从创建起、目标从设下起的累计(`base::context::SpendRecord`) | `Agent::restore_state_from_log` 取各条的逐项最大值放回(目标的只取同一 `id` 的);回滚不作废它 |
   | `agix.context` / `drop`、`edit` | 会话池,宿主改上下文时 | `{at, text?, at_ms}` | 投影时套到消息上 |
   | `agix.checkpoint` / `pre`、`post` | 工具管线,文件工具写盘之前(已 sync)与之后;写在**根会话**里,子 Agent 的也是 | `pre`:`{id, files:[{path:{rel\|abs}, before:{state, sha256?, bytes?}}], tool, tool_use_id, rewind_id?, agent?}`;`post`:`{pre, ok, after:[{state, sha256?}]}` | `session.rewind` 算恢复什么、`session.checkpoints` 列每轮写了什么 |
   | `agix.rewind` / `begin`、`commit`、`abort` | 引擎,宿主回滚时 | `{rewind_id, cut_after, conversation, …}` | `commit` 且 `conversation` 时作废一段对话(见下) |
 
+  `agix.spend` 有两个写者(引擎与会话池),各写各看到的累计;累计只增不减,所以读回取逐项最大值,
+  谁后落盘都一样。`session.fork` 照抄分叉点之前的这几条,分叉出来的会话从源会话那时已花的接着算。
   `agix.session_state` 只记会话自己定下、设置里推不出来的那部分(`base::context::DurableState`)。
   不在 `plan` 里的会话,权限模式由规格(`session.setPermissionMode` 设的,否则 `options` 的)按恢复时的
   设置夹紧决定,不由这条决定。`exit_to` 也不照单全收:这条可能来自更宽的设置,或经 `session.import` /

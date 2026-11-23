@@ -81,7 +81,7 @@ pub(crate) struct OneTurn {
     /// the host can render sub-agent activity live.
     pub(crate) tag: Option<SubagentTag>,
     /// The delegating turn's spend, which this turn spends into.
-    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
 }
 
 /// Run one turn against a sub-agent and collect its response text — the
@@ -216,8 +216,8 @@ pub(crate) fn with_stop_note(text: String, stop_reason: &str) -> String {
             "The sub-agent stopped after too many attempts at its structured output"
         }
         "budget_exceeded" => {
-            "The sub-agent stopped when the turn's token budget, which it shares with the \
-             agent that started it, ran out (budget_exceeded)"
+            "The sub-agent stopped when a token budget it shares with the agent that started \
+             it — the turn's, the goal's or the session's — ran out (budget_exceeded)"
         }
         _ => return text,
     };

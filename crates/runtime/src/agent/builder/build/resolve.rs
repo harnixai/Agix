@@ -9,6 +9,20 @@ const NO_HOST_TO_ASK: &str = "this session has no host to ask. Allow the call wi
                               and still guards credentials and the managed settings";
 
 impl Builder {
+    /// The model, its calls counted once: a routed model is counted by its
+    /// router, and a delegate's bare model is the parent's, counted already.
+    fn counted_model(&mut self) -> Result<Arc<dyn Model>, EngineError> {
+        let model = self
+            .spec
+            .model
+            .take()
+            .ok_or_else(|| EngineError::Internal("model required".into()))?;
+        Ok(match (&self.host.task_router, self.spec.agent_depth) {
+            (None, 0) => Arc::new(base::provider::Metered(model)),
+            _ => model,
+        })
+    }
+
     pub(super) fn resolve(&mut self) -> Result<Resolved, EngineError> {
         let scene = self
             .spec
@@ -19,11 +33,7 @@ impl Builder {
         let modules = crate::module::permitted_by(&self.host.modules, scene.as_ref())
             .map_err(|e| EngineError::Internal(e.to_string()))?;
         crate::module::check_order(&modules).map_err(|e| EngineError::Internal(e.to_string()))?;
-        let model = self
-            .spec
-            .model
-            .take()
-            .ok_or_else(|| EngineError::Internal("model required".into()))?;
+        let model = self.counted_model()?;
         let template: Arc<dyn base::tool::ToolRegistry> = self
             .spec
             .tools

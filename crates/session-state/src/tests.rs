@@ -253,12 +253,12 @@ fn the_mode_plan_returns_to_is_held_to_the_engines_settings() {
     ] {
         let restored = SessionState::new();
         restored.attach(held_to("/r", DontAsk, 1, widest, bypass_disabled));
-        restored.restore_from_log(None, Some(planning_to(exit_to)));
+        restored.restore_from_log(None, Some(planning_to(exit_to)), None);
         assert_eq!(restored.exit_plan_mode(), left_to, "{exit_to:?}");
     }
 
     let before_an_engine = SessionState::new();
-    before_an_engine.restore_from_log(None, Some(planning_to(BypassPermissions)));
+    before_an_engine.restore_from_log(None, Some(planning_to(BypassPermissions)), None);
     before_an_engine.attach(held_to("/b", Default, 1, Default, false));
     assert_eq!(before_an_engine.exit_plan_mode(), Default);
 

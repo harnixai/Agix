@@ -304,7 +304,7 @@ impl SessionPool {
                 .stop_removed(&session_id, &replaced, EndReason::Rebuild);
             replaced.turn.idle.notify_waiters();
         }
-        Self::forward_state_events(&core);
+        self.forward_state_events(&core);
 
         let goal = core.state().goal_view();
         if resume && goal.is_some() {

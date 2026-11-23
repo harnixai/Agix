@@ -43,7 +43,7 @@ pub struct DelegateRequest {
     pub tag: Option<String>,
     /// The turn the delegate spends into and judges its budget by; `None`
     /// gives each of its turns a spend of its own.
-    pub spend: Option<Arc<crate::interface::budget_policy::TurnSpend>>,
+    pub spend: Option<Arc<crate::interface::budget_policy::SpendNode>>,
     pub mode: DelegateMode,
 }
 

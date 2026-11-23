@@ -385,13 +385,6 @@ fn is_connection_failure(kind: ModelErrorKind) -> bool {
     )
 }
 
-/// The tokens a call counts against its provider's quota.
-fn counted(usage: &Usage) -> u64 {
-    u64::from(usage.input_tokens)
-        + u64::from(usage.cache_creation_input_tokens)
-        + u64::from(usage.output_tokens)
-}
-
 struct RoutedModel {
     router: TaskRouter,
     task: String,
@@ -454,7 +447,7 @@ impl Model for RoutedModel {
                 false => whole,
             };
             let id = provider.config.id.clone();
-            let tap = UsageTap::new();
+            let tap = params.usage_tap.for_attempt();
             match self.send(&provider, this, &params, &tap, &cancel).await {
                 Ok(stream) => {
                     router.health.recovered(&id);
@@ -549,39 +542,87 @@ impl RoutedModel {
         provider: &RoutedProvider,
         tap: UsageTap,
     ) -> ModelStream {
-        let Some(keeper) = self
+        let quota = self
             .router
             .quota
             .clone()
             .filter(|_| !provider.config.quota.is_unlimited())
-        else {
-            return stream;
-        };
-        Box::new(Counting {
-            inner: stream,
-            keeper,
-            provider: provider.config.id.clone(),
-            tap,
-            counted: false,
-        })
+            .map(|keeper| (keeper, provider.config.id.clone()));
+        Counting::wrap(stream, tap, quota)
     }
 }
 
-/// A call's stream that counts its usage against its provider's quota once:
-/// at [`ModelEvent::EndTurn`], or — for a call that broke off, failed or was
-/// dropped before it — when it goes, with what the client reported so far.
+/// A model nothing routes, counted as a routed call is: what its calls spend
+/// is charged where their tap says. Without it, a session built on a bare
+/// client would count nothing.
+pub struct Metered(pub Arc<dyn Model>);
+
+#[async_trait]
+impl Model for Metered {
+    fn api_type(&self) -> ApiType {
+        self.0.api_type()
+    }
+
+    fn provenance(&self) -> Option<String> {
+        self.0.provenance()
+    }
+
+    async fn stream(
+        &self,
+        prompt_blocks: Vec<PromptBlock>,
+        tools: Vec<ToolDef>,
+        messages: Vec<ModelMessage>,
+        mut params: StreamParams,
+        cancel: CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
+        let tap = params.usage_tap.for_attempt();
+        params.usage_tap = tap.clone();
+        let stream = self
+            .0
+            .stream(prompt_blocks, tools, messages, params, cancel)
+            .await?;
+        Ok(Counting::wrap(stream, tap, None))
+    }
+}
+
+/// A call's stream that counts its usage once — against its provider's
+/// quota and into the node its tap is charged to — at
+/// [`ModelEvent::EndTurn`], or, for a call that broke off, failed or was
+/// dropped before it, when it goes, with what the client reported so far.
 struct Counting {
     inner: ModelStream,
-    keeper: Arc<QuotaKeeper>,
-    provider: String,
+    quota: Option<(Arc<QuotaKeeper>, String)>,
     tap: UsageTap,
     counted: bool,
 }
 
 impl Counting {
+    fn wrap(
+        inner: ModelStream,
+        tap: UsageTap,
+        quota: Option<(Arc<QuotaKeeper>, String)>,
+    ) -> ModelStream {
+        if quota.is_none() && tap.charge().is_none() {
+            return inner;
+        }
+        Box::new(Self {
+            inner,
+            quota,
+            tap,
+            counted: false,
+        })
+    }
+
     fn count_once(&mut self, usage: &Usage) {
-        if !std::mem::replace(&mut self.counted, true) {
-            self.keeper.record(&self.provider, counted(usage));
+        if std::mem::replace(&mut self.counted, true) {
+            return;
+        }
+        if let Some((keeper, provider)) = &self.quota {
+            let spent = crate::interface::budget_policy::Spend::from(*usage);
+            keeper.record(provider, spent.counted_tokens());
+        }
+        if let Some(node) = self.tap.charge() {
+            node.add(*usage);
         }
     }
 }

@@ -200,6 +200,9 @@ impl SessionPool {
             })
             .await
             .unwrap_or_else(|| (api::TurnState::Idle, None, None, Default::default(), None));
+        let usage = core
+            .as_ref()
+            .map(|core| base::context::Session::ledger(&**core.state()).spent.read());
         let health = if health.is_empty() {
             None
         } else {
@@ -217,6 +220,7 @@ impl SessionPool {
             turn_state,
             current_turn_id,
             context,
+            usage,
             health,
             scripts: self.script_report(session_id).await,
             skill_dirs: self.skill_dir_report(session_id, core.as_deref()).await,

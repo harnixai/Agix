@@ -663,7 +663,7 @@ async fn a_context_hard_cap_ends_a_turn_the_scene_would_have_allowed() {
         .settings(Arc::new(test_settings()))
         .tools(tools)
         .budget_policy(Arc::new(Capped {
-            inner: EngineBudget::new(None),
+            inner: EngineBudget::default(),
             context_hard_cap: 0,
         }))
         .skip_warmup(true)

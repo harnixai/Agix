@@ -100,7 +100,8 @@ pub struct TurnSettings {
     /// detects a *lack of progress* — a model repeating the same failing
     /// tool call burns the whole allowance either way.
     pub max_model_calls: u32,
-    /// Maximum cumulative tokens (input + output, cache not counted) one
+    /// Maximum cumulative tokens (input not read from the cache, cache writes
+    /// and output, as provider quotas count them) one
     /// turn may spend, its delegates included: every model call of the turn
     /// and of the sub-agents and team members it starts or hands work to —
     /// a background sub-agent's after the turn has ended too — counts toward

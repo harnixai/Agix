@@ -102,7 +102,7 @@ pub struct Agent {
     compaction: Compaction,
     turn: crate::turn::TurnState,
     /// The delegating turn's spend, for the next turn to open on.
-    charged_to: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+    charged_to: Option<Arc<base::interface::budget_policy::SpendNode>>,
     /// The spend of the turn in progress, for the calls made on its side.
     open_turn: crate::turn::OpenTurn,
     /// Read by the *next* turn, to decide whether to rescan for skills; starts

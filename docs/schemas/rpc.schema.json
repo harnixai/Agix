@@ -7672,6 +7672,17 @@
         },
         "turn_state": {
           "$ref": "#/$defs/TurnState"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Spend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the session has spent since it was created, as of now: its own\ncalls, its delegates' and those made on their side. Absent for a\nsession not in memory."
         }
       },
       "required": [
@@ -8513,6 +8524,39 @@
         "host"
       ],
       "type": "string"
+    },
+    "Spend": {
+      "description": "What has been spent so far, as the provider reported it, kept apart by\nkind because each kind is priced differently.",
+      "properties": {
+        "cache_creation_input_tokens": {
+          "description": "Tokens written into the prompt cache, and tokens read back from it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_read_input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens"
+      ],
+      "type": "object"
     },
     "StartAgentParams": {
       "description": "`session.startAgent`'s params.",

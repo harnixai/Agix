@@ -206,8 +206,10 @@ async fn cost_reports_what_the_provider_counted_and_telemetry_names_the_command(
     run.turn(&session, "say hello").await?;
     let cost = run.turn(&session, "/cost").await?;
     assert!(
-        cost.text
-            .starts_with("Since this session was loaded: 1 model calls, 0 tool calls;"),
+        cost.text.starts_with(
+            "Since this session was created: 11 input tokens, 7 output tokens, 5 written to \
+             and 23 read from the prompt cache"
+        ) && cost.text.contains("made 1 model calls and 0 tool calls"),
         "{}",
         cost.text
     );

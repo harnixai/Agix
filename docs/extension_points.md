@@ -820,8 +820,10 @@ client 各自解析,作为 `FailedAttempt.server_hint` 交给策略;拿它做什
 
 ### 一轮能花多少 — `budget`
 
-`base::interface::budget_policy::BudgetPolicy`。三个本来是常量的判断:累计 token
-上限、带边际递减规则的输出量目标,以及 scene 返回的压缩阈值。
+`base::interface::budget_policy::BudgetPolicy`。部署自己的判断:累计 token 上限、带边际递减规则的
+输出量目标,以及 scene 返回的压缩阈值。引擎自己的 token 上限(`turn.token_budget`、会话与目标的)不在
+policy 里,挂在用量链的节点上(ARCHITECTURE「用量只在一处计,预算是一条链」);policy 判的是这之外的
+那一份,两边都要过,换掉 policy 不会去掉引擎的上限。
 
 原本完全缺席的那一个,是请求*尺寸*的上限。阈值是一个触发器——越过它就开始压缩,而
 压缩要是压不到位,请求照样发出去。`Capped` 把上限补上了:压缩之后仍然超标的一轮以
@@ -829,7 +831,7 @@ client 各自解析,作为 `FailedAttempt.server_hint` 交给策略;拿它做什
 
 ```rust
 Builder::new().budget_policy(Arc::new(Capped {
-    inner: EngineBudget::new(settings.turn.token_budget),
+    inner: settings.engine_budget(),
     context_hard_cap: 120_000,
 }))
 ```
@@ -838,16 +840,14 @@ Builder::new().budget_policy(Arc::new(Capped {
 模型调用之后**被调,拿到的 `Spend` 是这一轮到此为止的累计——所以超了可以当场把这一轮
 停掉,而不是等到结束才知道花了多少。`TurnOutcome.total_usage` 回答的是"花了多少",
 这里回答的是"还能不能继续花"。这份累计是整轮的:根会话这一轮、它起的子 Agent 与团队成员、
-各自的旁路调用(压缩、记忆、web)共用一份(`TurnSpend::whole_turn`),子 Agent 用同一个 policy
-判它。`remaining` 在**每次调用之前**被调:给出剩余时,剩余不到 `MIN_CALL_TOKENS` 就不发这次调用、
+各自的旁路调用(压缩、记忆、web)共用一份(`SpendNode::whole_turn`),子 Agent 用同一个 policy
+判它。`remaining` 在**每次调用之前**被调:它与引擎各层上限的剩余取最小,不到 `MIN_CALL_TOKENS` 就不发这次调用、
 以 `budget_exceeded` 结束,否则这次调用的 `max_tokens` 压到剩余;不实现它(缺省 `None`)就只有调用之后的判断。
 
-**`Spend` 把 provider 报的四项分开给,不给一个和。** 哪些算"花掉了"是策略的判断,
-不是引擎的:缓存读按普通输入的一个零头计费,全额计入会高估账单,不计入又会让一轮
-缓存命中的执行少算掉它读的绝大部分。两种都说得通,所以引擎只负责如实报。
-`Spend::total_tokens()` 是 input + output(引擎自带的 `EngineBudget` 用的就是它,
-`turn.token_budget` 的含义因此不变),`Spend::all_tokens()` 是四项全含,想要第三种
-口径的自己按需加权:
+**`Spend` 把 provider 报的四项分开给,不给一个和。** 引擎自己的上限与 provider 配额都按
+`Spend::counted_tokens()` 计——未命中缓存的输入 + 缓存写入 + 输出,缓存命中不计(缓存读按普通输入的
+一个零头计费,计入会让上限随命中率移动);`Spend::all_tokens()` 是四项全含。policy 想要别的口径,
+自己按需加权:
 
 ```rust
 fn on_usage(&self, spend: &Spend) -> Spending {
@@ -1043,7 +1043,7 @@ store.append(session, LogEntry::Extension {
 
 `agix.` 开头的命名空间是引擎自己的:daemon 把会话规格(创建时的 `options`、选过
 的模型与厂商)记在 `agix.session` 下,引擎把目标记在 `agix.goal` 下、把 `plan` 模式与 todo 列表
-记在 `agix.session_state` 下(全表见 `ARCHITECTURE.md` §4)。这些条目是记账,不是对话内容,
+记在 `agix.session_state` 下、把会话累计用量记在 `agix.spend` 下(全表见 `ARCHITECTURE.md` §4)。这些条目是记账,不是对话内容,
 `ExtensionsAreVisible` 无论开了哪些命名空间都不会把它们交给模型。
 
 ### 东西是不是正常 — `health.check`

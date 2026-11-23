@@ -369,7 +369,10 @@ impl Agent {
         .await;
 
         let duration_ms = run_started.elapsed().as_millis() as i64;
-        let spent = self.session_state.ledger().spent;
+        let (spent, calls) = {
+            let ledger = self.session_state.ledger();
+            (ledger.spent.read(), ledger.calls)
+        };
         self.telemetry
             .record(telemetry::TelemetryEvent::session_end(
                 &self.session.session_id,
@@ -378,13 +381,13 @@ impl Agent {
                 telemetry::SessionEndPayload {
                     duration_ms,
                     total_turns: self.session.turn_count,
-                    total_api_calls: spent.api_calls,
-                    total_tool_calls: spent.tool_calls,
+                    total_api_calls: calls.api_calls,
+                    total_tool_calls: calls.tool_calls,
                     total_permission_denials: self.gate.denials(),
-                    total_input_tokens: spent.usage.input_tokens.into(),
-                    total_output_tokens: spent.usage.output_tokens.into(),
-                    total_cache_creation: spent.usage.cache_creation_input_tokens.into(),
-                    total_cache_read: spent.usage.cache_read_input_tokens.into(),
+                    total_input_tokens: spent.input_tokens,
+                    total_output_tokens: spent.output_tokens,
+                    total_cache_creation: spent.cache_creation_tokens,
+                    total_cache_read: spent.cache_read_tokens,
                     stop_reason: exit_reason.to_string(),
                 },
             ));
@@ -445,10 +448,12 @@ impl Agent {
     }
 
     /// Put back into the session's state what `entries`, the loaded
-    /// transcript's log, recorded of it: the goal, and plan mode and todos.
-    /// Only for a state no engine has run the session on since it was
-    /// created; a state kept across engines already holds all of it.
+    /// transcript's log, recorded of it: the goal, plan mode and todos, and
+    /// what it has spent. Only for a state no engine has run the session on
+    /// since it was created; a state kept across engines already holds all
+    /// of it.
     pub fn restore_state_from_log(&self, entries: &[history::entry::EnvelopedEntry]) {
+        let spent = crate::turn::recorded_spend(entries);
         let goal = session::transcript::latest_extension(
             entries,
             base::context::goal::GOAL_NS,
@@ -461,7 +466,7 @@ impl Agent {
             base::context::SESSION_STATE_EVENT,
         )
         .and_then(|payload| serde_json::from_value(payload).ok());
-        self.session_state.restore_from_log(goal, durable);
+        self.session_state.restore_from_log(goal, durable, spent);
     }
 
     /// The goal round to start now that a turn ended with `stop_reason`, if
@@ -575,7 +580,7 @@ impl Agent {
         content: String,
         turn_id: String,
         cancel: CancellationToken,
-        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+        spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
     ) -> Result<crate::turn::TurnOutcome, crate::turn::TurnError> {
         self.charged_to = spend;
         let outcome = self

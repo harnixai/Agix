@@ -83,29 +83,61 @@ pub struct StreamParams {
     /// search of its own refuses the call with [`ModelErrorKind::Unsupported`].
     pub provider_search: Option<ProviderSearch>,
     /// Where the client reports usage it learns before the call ends, so a
-    /// call that never reaches [`ModelEvent::EndTurn`] is still counted.
+    /// call that never reaches [`ModelEvent::EndTurn`] is still counted, and
+    /// what the call is charged to.
     pub usage_tap: UsageTap,
 }
 
 /// Usage a client has learned of a call so far — the input side, which an
-/// Anthropic stream reports when it opens. [`ModelEvent::EndTurn`]'s usage
-/// supersedes it. Reporting to a tap nobody made does nothing.
+/// Anthropic stream reports when it opens — and the node the call is charged
+/// to. [`ModelEvent::EndTurn`]'s usage supersedes what was reported.
+/// Reporting to a tap nobody made does nothing.
+///
+/// The charge is counted once, by whoever routes the call
+/// (`provider::TaskRouter`, or `provider::Metered` where nothing routes):
+/// everything above the client only says where it goes.
 #[derive(Clone, Default)]
-pub struct UsageTap(Option<Arc<Mutex<Option<Usage>>>>);
+pub struct UsageTap {
+    reported: Option<Arc<Mutex<Option<Usage>>>>,
+    charge: Option<Arc<crate::interface::budget_policy::SpendNode>>,
+}
 
 impl UsageTap {
     pub fn new() -> Self {
-        Self(Some(Arc::default()))
+        Self {
+            reported: Some(Arc::default()),
+            charge: None,
+        }
+    }
+
+    /// A tap whose call is charged to `node`.
+    pub fn charging(node: Arc<crate::interface::budget_policy::SpendNode>) -> Self {
+        Self {
+            reported: None,
+            charge: Some(node),
+        }
+    }
+
+    /// A fresh tap for one attempt at the call, charged where this one is.
+    pub fn for_attempt(&self) -> Self {
+        Self {
+            charge: self.charge.clone(),
+            ..Self::new()
+        }
+    }
+
+    pub fn charge(&self) -> Option<&Arc<crate::interface::budget_policy::SpendNode>> {
+        self.charge.as_ref()
     }
 
     pub fn report(&self, usage: Usage) {
-        if let Some(slot) = &self.0 {
+        if let Some(slot) = &self.reported {
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(usage);
         }
     }
 
     pub fn reported(&self) -> Option<Usage> {
-        self.0
+        self.reported
             .as_ref()
             .and_then(|slot| *slot.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -113,7 +145,10 @@ impl UsageTap {
 
 impl std::fmt::Debug for UsageTap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("UsageTap").field(&self.reported()).finish()
+        f.debug_struct("UsageTap")
+            .field("reported", &self.reported())
+            .field("charged", &self.charge.is_some())
+            .finish()
     }
 }
 

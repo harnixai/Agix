@@ -21,7 +21,7 @@ pub(crate) struct Spec {
     pub(crate) git: Option<base::paths::WorktreeGit>,
     pub(crate) called_from: Option<CallSite>,
     /// The turn it spends into; `None` gives each of its turns its own.
-    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
 }
 
 pub(crate) struct Delegate {

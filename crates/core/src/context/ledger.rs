@@ -1,12 +1,23 @@
 //! What a session has spent and asked for over its turns — kept on its
 //! `SessionState` (in `session-state`), so it outlives the engine that ran
-//! them.
+//! them. Its token total is also in the session log (`agix.spend`), so it
+//! outlives the process.
 
-use crate::interface::budget_policy::OutputProgress;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Default)]
+use crate::interface::budget_policy::{OutputProgress, SpendNode};
+
+#[derive(Debug, Clone)]
 pub struct SessionLedger {
-    pub spent: SessionSpend,
+    /// The session's node: every call of its turns spends into it as it is
+    /// made, their delegates' and those made on their side included, and
+    /// `session.token_budget` is its ceiling.
+    pub spent: Arc<SpendNode>,
+    /// The goal's node, under the session's, that its rounds spend into.
+    pub goal_spent: Option<GoalSpend>,
+    /// What the session log last recorded of the two.
+    pub spent_recorded: Option<SpendRecord>,
+    pub calls: SessionCalls,
     pub token_target: TokenTarget,
     /// Skills invoked or announced so far, re-injected after compaction.
     pub invoked_skills: Vec<String>,
@@ -19,7 +30,58 @@ pub struct SessionLedger {
     pub nested_repos_at_start: Option<std::collections::BTreeMap<std::path::PathBuf, u64>>,
 }
 
+impl Default for SessionLedger {
+    fn default() -> Self {
+        Self {
+            spent: Arc::new(SpendNode::session(None)),
+            goal_spent: None,
+            spent_recorded: None,
+            calls: SessionCalls::default(),
+            token_target: TokenTarget::default(),
+            invoked_skills: Vec::new(),
+            nested_repos: Default::default(),
+            nested_repos_at_start: None,
+        }
+    }
+}
+
 impl SessionLedger {
+    /// [`Self::spend_record`] when the log does not have it yet; a session
+    /// that has spent nothing has nothing to record.
+    pub fn spend_unrecorded(&self) -> Option<SpendRecord> {
+        let record = self.spend_record();
+        let recorded = self.spent_recorded.clone().unwrap_or_default();
+        (record != recorded).then_some(record)
+    }
+
+    /// What the session and its goal have spent, as the log records it.
+    pub fn spend_record(&self) -> SpendRecord {
+        SpendRecord {
+            session: self.spent.read(),
+            goal: self.goal_spent.as_ref().map(|goal| GoalSpendRecord {
+                id: goal.goal_id.clone(),
+                spent: goal.node.read(),
+            }),
+        }
+    }
+
+    /// A node for goal `goal_id` under the session's, holding `limit`, that
+    /// has spent `spent` already.
+    pub fn open_goal(
+        &mut self,
+        goal_id: &str,
+        limit: Option<u64>,
+        spent: crate::interface::budget_policy::Spend,
+    ) -> Arc<SpendNode> {
+        let node = Arc::new(SpendNode::goal(limit, self.spent.clone()));
+        node.restore(spent);
+        self.goal_spent = Some(GoalSpend {
+            goal_id: goal_id.to_string(),
+            node: node.clone(),
+        });
+        node
+    }
+
     pub fn note_skills<'a>(&mut self, names: impl IntoIterator<Item = &'a str>) {
         for name in names {
             if !self.invoked_skills.iter().any(|s| s == name) {
@@ -29,12 +91,60 @@ impl SessionLedger {
     }
 }
 
-/// A session's model calls and tool calls, summed over its turns.
+/// The model calls and tool calls of a session's own agent, summed over the
+/// turns it ran since it was loaded.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SessionSpend {
-    pub usage: crate::interface::model::Usage,
+pub struct SessionCalls {
     pub api_calls: u32,
     pub tool_calls: u32,
+}
+
+/// The node of the goal whose rounds spend into it.
+#[derive(Debug, Clone)]
+pub struct GoalSpend {
+    pub goal_id: String,
+    pub node: Arc<SpendNode>,
+}
+
+/// Log namespace and event under which a [`SpendRecord`] is written.
+pub const SPEND_NS: &str = "agix.spend";
+pub const SPEND_EVENT: &str = "total";
+
+/// What a session has spent since it was created, and its goal since it was
+/// set, as the session log records them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SpendRecord {
+    pub session: crate::interface::budget_policy::Spend,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<GoalSpendRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GoalSpendRecord {
+    pub id: String,
+    pub spent: crate::interface::budget_policy::Spend,
+}
+
+impl SpendRecord {
+    /// The latest of `records`, a session log's in order. Two writers record
+    /// them — the engine and the session pool — and what was spent only
+    /// grows, so each figure is the largest recorded, whichever landed last;
+    /// a goal's, the largest recorded under its id.
+    pub fn latest(records: impl IntoIterator<Item = SpendRecord>) -> Option<SpendRecord> {
+        records.into_iter().reduce(|seen, next| {
+            let goal = match (seen.goal, next.goal) {
+                (Some(a), Some(b)) if a.id == b.id => Some(GoalSpendRecord {
+                    id: a.id,
+                    spent: a.spent.max(b.spent),
+                }),
+                (a, b) => b.or(a),
+            };
+            SpendRecord {
+                session: seen.session.max(next.session),
+                goal,
+            }
+        })
+    }
 }
 
 /// An output token target, kept until it is met, given up on, or cleared —

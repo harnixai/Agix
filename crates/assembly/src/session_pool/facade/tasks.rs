@@ -73,20 +73,43 @@ impl SessionPool {
 
     /// Push the task events of `core` to whoever watches the session, for as
     /// long as the session is in memory — across every engine it runs on.
-    /// Outside any turn, so `turn_id` is `null`.
-    pub(in crate::session_pool) fn forward_task_events(core: &SessionCore) {
+    /// Outside any turn, so `turn_id` is `null`. A delegate's model call, or
+    /// its end, also has what the session spent written to `store`: a
+    /// background delegate goes on spending after the turn that started it
+    /// last wrote it.
+    pub(in crate::session_pool) fn forward_task_events(
+        core: &SessionCore,
+        store: Option<Arc<dyn history::store::HistoryStore>>,
+    ) {
         let mut events = core.state().subscribe_tasks();
         let hub = Arc::downgrade(core.hub());
+        let state = Arc::downgrade(core.state());
         let session_id = core.id().to_string();
         tokio::spawn(async move {
             loop {
                 match events.recv().await {
                     Ok(event) => {
                         let Some(hub) = hub.upgrade() else { return };
+                        let spent_by = match &event {
+                            base::context::TaskEvent::Updated { task }
+                            | base::context::TaskEvent::Finished { task } => Some(task.kind),
+                            _ => None,
+                        };
                         if let base::context::TaskEvent::Finished { task } = &event {
                             hub.forget_asks_of_task(&task.task_id);
                         }
                         hub.publish(&frame_between_turns(&session_id, SessionEvent::Task(event)));
+                        let delegate_spent = matches!(
+                            spent_by,
+                            Some(
+                                base::context::TaskType::Agent | base::context::TaskType::Teammate
+                            )
+                        );
+                        if let (true, Some(store), Some(state)) =
+                            (delegate_spent, &store, state.upgrade())
+                        {
+                            record_session_spend(store.as_ref(), &session_id, &state).await;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
@@ -263,7 +286,7 @@ impl SessionPool {
     pub async fn start_agent(
         &self,
         session_id: &str,
-        request: base::interface::delegate::DelegateRequest,
+        mut request: base::interface::delegate::DelegateRequest,
     ) -> Result<api::AgentStarted, PoolError> {
         use base::interface::delegate::{DelegateMode, Delegated};
         if !matches!(request.mode, DelegateMode::Host { .. }) {
@@ -282,6 +305,11 @@ impl SessionPool {
         else {
             return Err(not_found());
         };
+        if request.spend.is_none() {
+            if let Some(state) = self.live_state(session_id).await {
+                request.spend = Some(state.ledger().spent.clone());
+            }
+        }
         match delegator.delegate(request).await {
             Ok(Delegated::Started(started)) => Ok(api::AgentStarted {
                 task_id: started.task_id,
@@ -476,5 +504,33 @@ fn member_task(
         waiting_for: Vec::new(),
         usage: None,
         structured_output: None,
+    }
+}
+
+/// Write what `state`, session `sid`'s, has spent to its log, when it changed
+/// since the log last had it. Its engine writes the same record
+/// (`SpendRecord::latest` reads them back in either order).
+async fn record_session_spend(
+    store: &dyn history::store::HistoryStore,
+    sid: &str,
+    state: &session_state::SessionState,
+) {
+    let Some(record) = state.ledger().spend_unrecorded() else {
+        return;
+    };
+    let (Ok(parsed), Ok(payload)) = (
+        base::session::SessionId::parse(sid),
+        serde_json::to_value(&record),
+    ) else {
+        return;
+    };
+    let entry = history::entry::LogEntry::Extension {
+        ns: base::context::SPEND_NS.to_string(),
+        event: base::context::SPEND_EVENT.to_string(),
+        payload,
+    };
+    match store.append(parsed, entry).await {
+        Ok(_) => state.ledger().spent_recorded = Some(record),
+        Err(e) => warn!(%sid, error = %e, "failed to record what the session spent"),
     }
 }

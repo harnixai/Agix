@@ -42,7 +42,7 @@ pub(crate) struct PersistentMessage {
     pub(crate) prompt: String,
     pub(crate) lease: TaskLease,
     /// The spend of the turn that handed it over, which running it spends into.
-    pub(crate) spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+    pub(crate) spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
 }
 
 impl PersistentMessage {
@@ -103,7 +103,7 @@ impl MemberInbox {
         seat: &TeamSeat,
         member_cancel: &CancellationToken,
         prompt: String,
-        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+        spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
     ) -> Option<String> {
         let lease = TaskLease::new(
             delegator.env.parent.state.clone(),
@@ -244,7 +244,7 @@ impl Delegator {
         key: &(String, String),
         seat: &TeamSeat,
         prompt: &str,
-        spend: Option<Arc<base::interface::budget_policy::TurnSpend>>,
+        spend: Option<Arc<base::interface::budget_policy::SpendNode>>,
     ) -> Option<Delegated> {
         let live = &self.members.live;
         let (inbox, cancel, session_id, idle_since, idle_seq) = live

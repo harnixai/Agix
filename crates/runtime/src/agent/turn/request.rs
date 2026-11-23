@@ -431,6 +431,8 @@ impl Agent {
             &mut request,
         );
         open_conversation_with_user_blocks(&mut request);
+        request.params.usage_tap =
+            base::interface::model::UsageTap::charging(self.turn.scope.spend().clone());
         let stream = self
             .llm
             .model
