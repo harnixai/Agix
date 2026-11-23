@@ -2337,6 +2337,9 @@ mod tests {
             .with_writer(move || writer.clone())
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
+        // Another test thread may have cached this callsite as uninteresting
+        // before the subscriber above existed.
+        tracing::callsite::rebuild_interest_cache();
 
         let r = on_pre_tool_use(vec![HookConfig::Agent {
             prompt: "judge".into(),
@@ -2382,6 +2385,9 @@ mod tests {
             .with_writer(move || writer.clone())
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
+        // Another test thread may have cached this callsite as uninteresting
+        // before the subscriber above existed.
+        tracing::callsite::rebuild_interest_cache();
 
         let r = on_pre_tool_use(vec![HookConfig::Command {
             command: "echo debug sk-abcdef''1234567890xyz; head -c 5000 /dev/zero | tr '\\0' 'a'"
