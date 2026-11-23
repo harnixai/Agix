@@ -25,16 +25,16 @@ fn a_cli_layer_is_above_the_project_and_read_as_the_global_tier() {
             }),
         );
     let root = tempfile::tempdir().unwrap();
-    let settings = LoadedSettings::load_from(
-        &source,
-        root.path().join("global"),
-        root.path().join("scene"),
-        root.path().join("project"),
-        "code",
-        "m",
-        &Sections::none(),
-        Default::default(),
-    );
+    let settings = LoadedSettings::load_from(crate::LoadRequest {
+        source: &source,
+        global_dir: root.path().join("global"),
+        scene_dir: root.path().join("scene"),
+        local_dir: root.path().join("project"),
+        scope: "code",
+        default_model: "m",
+        sections: &Sections::none(),
+        layout: Default::default(),
+    });
 
     assert_eq!(settings.values.turn.max_model_calls, 2);
     assert_eq!(settings.values.app.history, crate::HistoryLocation::Project);
@@ -119,16 +119,16 @@ fn an_in_memory_source_replaces_the_files_entirely() {
     // Directories that do not exist, so a fall-back to reading files
     // could not produce this result.
     let elsewhere = root.path().join("no-such-tree");
-    let from_memory = LoadedSettings::load_from(
-        &source,
-        elsewhere.join("global"),
-        elsewhere.join("scene"),
-        elsewhere.join("project"),
-        "code",
-        "cli-default",
-        &Sections::none(),
-        Default::default(),
-    );
+    let from_memory = LoadedSettings::load_from(crate::LoadRequest {
+        source: &source,
+        global_dir: elsewhere.join("global"),
+        scene_dir: elsewhere.join("scene"),
+        local_dir: elsewhere.join("project"),
+        scope: "code",
+        default_model: "cli-default",
+        sections: &Sections::none(),
+        layout: Default::default(),
+    });
 
     assert_eq!(
         from_memory.values.model.effort,

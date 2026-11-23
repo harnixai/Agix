@@ -68,6 +68,20 @@ pub struct ProviderOrigin {
     pub machine_local: bool,
 }
 
+/// Everything [`LoadedSettings::load_from`] reads its result from: the layers
+/// in `source`, the directories that say which tiers they are, and the
+/// parameters [`LoadedSettings::load`] documents under the same names.
+pub struct LoadRequest<'a> {
+    pub source: &'a dyn ConfigSource,
+    pub global_dir: PathBuf,
+    pub scene_dir: PathBuf,
+    pub local_dir: PathBuf,
+    pub scope: &'a str,
+    pub default_model: &'a str,
+    pub sections: &'a Sections,
+    pub layout: Layout,
+}
+
 impl LoadedSettings {
     /// Settings that were not loaded from any tier: no rules, no managed
     /// layer, and no project tier of their own.
@@ -142,8 +156,8 @@ impl LoadedSettings {
         layout: Layout,
     ) -> Self {
         let source = FileTiers::new(global_dir.clone(), scene_dir.clone(), local_dir.clone());
-        Self::load_from(
-            &source,
+        Self::load_from(LoadRequest {
+            source: &source,
             global_dir,
             scene_dir,
             local_dir,
@@ -151,7 +165,7 @@ impl LoadedSettings {
             default_model,
             sections,
             layout,
-        )
+        })
     }
 
     /// [`load`](Self::load) for a session without a project: no project tier,
@@ -191,16 +205,16 @@ impl LoadedSettings {
         layout: Layout,
     ) -> Self {
         let scratch = global_dir.join(base::paths::STATE_ROOT_SCRATCHPAD);
-        let mut loaded = Self::load_from(
+        let mut loaded = Self::load_from(LoadRequest {
             source,
-            global_dir.clone(),
+            global_dir: global_dir.clone(),
             scene_dir,
-            global_dir,
+            local_dir: global_dir,
             scope,
             default_model,
             sections,
             layout,
-        );
+        });
         loaded.paths.workspace = Workspace::Scratch(scratch);
         loaded
     }
@@ -217,17 +231,17 @@ impl LoadedSettings {
     /// they are where this scene's *data* lives, which `paths` reports and a
     /// settings file is never allowed to override — and they say which
     /// project the project tier is, and whether it is one of its own.
-    #[allow(clippy::too_many_arguments)]
-    pub fn load_from(
-        source: &dyn ConfigSource,
-        global_dir: PathBuf,
-        scene_dir: PathBuf,
-        local_dir: PathBuf,
-        scope: &str,
-        default_model: &str,
-        sections: &Sections,
-        layout: Layout,
-    ) -> Self {
+    pub fn load_from(request: LoadRequest<'_>) -> Self {
+        let LoadRequest {
+            source,
+            global_dir,
+            scene_dir,
+            local_dir,
+            scope,
+            default_model,
+            sections,
+            layout,
+        } = request;
         let base = Settings::defaults_for(default_model);
         let mut merged_json = serde_json::to_value(&base).unwrap_or_else(|_| serde_json::json!({}));
         seed_section_defaults(&mut merged_json, sections);

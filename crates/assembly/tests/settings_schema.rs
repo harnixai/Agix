@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use assembly::settings_sections;
 use base::interface::config_source::{InMemoryLayers, Tier};
 use serde_json::Value;
-use settings::{settings_json_schema, unknown_settings_keys, LoadedSettings};
+use settings::{settings_json_schema, unknown_settings_keys, LoadRequest, LoadedSettings};
 
 struct Example {
     at: String,
@@ -138,16 +138,16 @@ fn left_out_by_loader(example: &Example) -> Vec<String> {
     let source =
         InMemoryLayers::new().with(Tier::Global, false, &example.at, example.value.clone());
     let dir = PathBuf::from("/nonexistent");
-    let settings = LoadedSettings::load_from(
-        &source,
-        dir.join("global"),
-        dir.join("scene"),
-        dir.join("project/.agix"),
-        "code",
-        "model",
-        &settings_sections::all(),
-        Default::default(),
-    );
+    let settings = LoadedSettings::load_from(LoadRequest {
+        source: &source,
+        global_dir: dir.join("global"),
+        scene_dir: dir.join("scene"),
+        local_dir: dir.join("project/.agix"),
+        scope: "code",
+        default_model: "model",
+        sections: &settings_sections::all(),
+        layout: Default::default(),
+    });
     let mut left_out: Vec<String> = settings
         .ignored
         .into_iter()
@@ -291,16 +291,16 @@ fn an_untrusted_project_may_narrow_what_modules_own_but_not_widen_it() {
     };
     let load = |source: &InMemoryLayers| {
         let dir = std::env::temp_dir().join("agix-settings-schema-test");
-        LoadedSettings::load_from(
+        LoadedSettings::load_from(LoadRequest {
             source,
-            dir.join("global"),
-            dir.join("scene"),
-            dir.join("work/.agix"),
-            "code",
-            "m",
-            &settings_sections::all(),
-            Default::default(),
-        )
+            global_dir: dir.join("global"),
+            scene_dir: dir.join("scene"),
+            local_dir: dir.join("work/.agix"),
+            scope: "code",
+            default_model: "m",
+            sections: &settings_sections::all(),
+            layout: Default::default(),
+        })
     };
     let untrusted = serde_json::json!({"app": {"trust_all_projects": false}});
     let mut global = untrusted.clone();

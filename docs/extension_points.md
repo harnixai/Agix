@@ -337,7 +337,16 @@ let source = config_source::Chain(vec![
     Arc::new(settings::FileTiers::new(global.clone(), scene.clone(), project.clone())),
     Arc::new(control_plane.fetch_layers()?),   // an `InMemoryLayers`
 ]);
-let settings = LoadedSettings::load_from(&source, global, scene, project, "code", "opus", &sections);
+let settings = LoadedSettings::load_from(LoadRequest {
+    source: &source,
+    global_dir: global,
+    scene_dir: scene,
+    local_dir: project,
+    scope: "code",
+    default_model: "opus",
+    sections: &sections,
+    layout: Layout::default(),
+});
 ```
 
 一个 source 只决定有哪些层、顺序如何、每层里是什么 JSON。合并两边是同一套——每层

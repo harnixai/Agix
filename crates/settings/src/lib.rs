@@ -47,7 +47,7 @@ pub mod trust;
 #[cfg(test)]
 mod tests;
 
-pub use loaded::{LoadedSettings, ProviderOrigin};
+pub use loaded::{LoadRequest, LoadedSettings, ProviderOrigin};
 pub use merge::merge_json_values;
 pub use permissions::PermissionsSettings;
 pub use schema::{settings_json_schema, unknown_settings_keys, KeyKind, SchemaKeys};

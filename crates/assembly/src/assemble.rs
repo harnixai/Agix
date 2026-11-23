@@ -255,18 +255,18 @@ async fn register_host_plugins(pool: &SessionPool, dirs: &[PathBuf]) -> anyhow::
 /// changed afterwards.
 fn own_settings_on_disk(config: &DaemonConfig) -> settings::LoadedSettings {
     let paths = &config.paths;
-    crate::settings_source::read_pair(
-        paths.global_root(),
-        paths.config_root(),
-        Some(&paths.project_root()),
-        &paths.layout(),
-        &config.settings.paths.scope,
-        &config.settings.default_model,
-        crate::settings_source::Above {
+    crate::settings_source::read_pair(crate::settings_source::PairRead {
+        global_root: paths.global_root(),
+        scene_root: paths.config_root(),
+        project: Some(&paths.project_root()),
+        layout: &paths.layout(),
+        scene: &config.settings.paths.scope,
+        default_model: &config.settings.default_model,
+        above: crate::settings_source::Above {
             cli: config.cli_settings.as_ref(),
             managed: None,
         },
-    )
+    })
 }
 
 /// The managed settings file this pool reads — the one the config names,

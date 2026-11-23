@@ -11,7 +11,7 @@ use base::interface::config_source::{Chain, InMemoryLayers, Tier};
 use base::paths::{Layout, PROJECT_STATE_ENTRIES};
 use base::permission::ManagedSettings;
 
-use settings::{FileTiers, LoadedSettings};
+use settings::{FileTiers, LoadRequest, LoadedSettings};
 
 /// What a read puts above the settings files: the `cli` layer, then the
 /// deployment's managed layer.
@@ -25,16 +25,26 @@ pub(crate) struct Above<'a> {
 /// project tier is `layout`'s directory in `project`. The only place in the
 /// assembly, with [`read_pair_as_if`] and [`read_app`], that calls
 /// `LoadedSettings::load*`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn read_pair(
-    global_root: PathBuf,
-    scene_root: PathBuf,
-    project: Option<&Path>,
-    layout: &Layout,
-    scene: &str,
-    default_model: &str,
-    above: Above<'_>,
-) -> LoadedSettings {
+pub(crate) struct PairRead<'a> {
+    pub(crate) global_root: PathBuf,
+    pub(crate) scene_root: PathBuf,
+    pub(crate) project: Option<&'a Path>,
+    pub(crate) layout: &'a Layout,
+    pub(crate) scene: &'a str,
+    pub(crate) default_model: &'a str,
+    pub(crate) above: Above<'a>,
+}
+
+pub(crate) fn read_pair(request: PairRead<'_>) -> LoadedSettings {
+    let PairRead {
+        global_root,
+        scene_root,
+        project,
+        layout,
+        scene,
+        default_model,
+        above,
+    } = request;
     let sections = crate::settings_sections::all();
     let local_dir = match project {
         Some(root) => {
@@ -46,16 +56,16 @@ pub(crate) fn read_pair(
     let files = FileTiers::new(global_root.clone(), scene_root.clone(), local_dir.clone());
     let source = above.over(files);
     let loaded = match project {
-        Some(_) => LoadedSettings::load_from(
-            &source,
-            global_root,
-            scene_root,
+        Some(_) => LoadedSettings::load_from(LoadRequest {
+            source: &source,
+            global_dir: global_root,
+            scene_dir: scene_root,
             local_dir,
-            scene,
+            scope: scene,
             default_model,
-            &sections,
-            layout.clone(),
-        ),
+            sections: &sections,
+            layout: layout.clone(),
+        }),
         None => LoadedSettings::load_without_project_from(
             &source,
             global_root,
@@ -160,16 +170,16 @@ pub(crate) fn read_pair_as_if(
         |source, (path, value)| source.with_contents(path, value),
     );
     let source = above.over(files);
-    LoadedSettings::load_from(
-        &source,
-        global_root,
-        scene_root,
+    LoadedSettings::load_from(LoadRequest {
+        source: &source,
+        global_dir: global_root,
+        scene_dir: scene_root,
         local_dir,
-        scene,
+        scope: scene,
         default_model,
-        &crate::settings_sections::all(),
-        layout.clone(),
-    )
+        sections: &crate::settings_sections::all(),
+        layout: layout.clone(),
+    })
     .with_managed(above.managed.cloned())
 }
 

@@ -18,7 +18,7 @@ pub(in crate::session_pool) use host_dirs::{report_skill_dirs, AcceptedDir, Host
 pub(in crate::session_pool) use host_overrides::HostOverrides;
 
 use crate::session_pool::off_the_runtime;
-use crate::settings_source::{read_pair, read_pair_as_if, Above};
+use crate::settings_source::{read_pair, read_pair_as_if, Above, PairRead};
 use crate::watch_hub::{Tier, WatchHub, WatchKey, WatchTarget, WatchToken};
 use base::paths::{entry, StateRoot};
 use model::client::AnthropicClient;
@@ -235,15 +235,15 @@ pub(in crate::session_pool) fn own_settings_in(
     if host.paths.workspace.project_root() == Some(cwd) && layers.managed.settings.is_none() {
         return host;
     }
-    let loaded = read_pair(
-        paths.global_root(),
-        paths.config_root(),
-        Some(cwd),
-        &paths.layout(),
-        &host.paths.scope,
-        &host.default_model,
-        layers.above_files(),
-    );
+    let loaded = read_pair(PairRead {
+        global_root: paths.global_root(),
+        scene_root: paths.config_root(),
+        project: Some(cwd),
+        layout: &paths.layout(),
+        scene: &host.paths.scope,
+        default_model: &host.default_model,
+        above: layers.above_files(),
+    });
     Arc::new(layers.over(loaded, true))
 }
 
@@ -350,18 +350,18 @@ impl BindingCache {
         );
         let layout = self.paths.layout();
         let loaded = off_the_runtime(move || {
-            read_pair(
+            read_pair(PairRead {
                 global_root,
                 scene_root,
-                project.as_deref(),
-                &layout,
-                &scene,
-                &default_model,
-                Above {
+                project: project.as_deref(),
+                layout: &layout,
+                scene: &scene,
+                default_model: &default_model,
+                above: Above {
                     cli: cli.as_ref(),
                     managed: managed.as_ref(),
                 },
-            )
+            })
         })
         .await;
         self.layers.over(loaded, own)

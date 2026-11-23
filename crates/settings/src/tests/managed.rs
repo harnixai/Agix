@@ -20,16 +20,16 @@ fn a_managed_layer_is_held_apart_and_takes_bypass_away() {
             serde_json::json!({"permissions": {"disable_bypass": true, "deny": ["Bash(curl:*)"]}}),
         );
     let root = tempfile::tempdir().unwrap();
-    let settings = LoadedSettings::load_from(
-        &source,
-        root.path().join("global"),
-        root.path().join("scene"),
-        root.path().join("project"),
-        "code",
-        "m",
-        &Sections::none(),
-        Default::default(),
-    );
+    let settings = LoadedSettings::load_from(crate::LoadRequest {
+        source: &source,
+        global_dir: root.path().join("global"),
+        scene_dir: root.path().join("scene"),
+        local_dir: root.path().join("project"),
+        scope: "code",
+        default_model: "m",
+        sections: &Sections::none(),
+        layout: Default::default(),
+    });
 
     assert_eq!(settings.values.permissions.mode, PermissionMode::Default);
     assert!(settings.bypass_disabled());
@@ -59,16 +59,16 @@ fn a_managed_layer_sets_any_key_over_every_tier_and_a_broken_one_none() {
             )
             .with(Tier::Managed, false, "it", managed);
         let root = tempfile::tempdir().unwrap();
-        LoadedSettings::load_from(
-            &source,
-            root.path().join("global"),
-            root.path().join("scene"),
-            root.path().join("project"),
-            "code",
-            "m",
-            &Sections::none(),
-            Default::default(),
-        )
+        LoadedSettings::load_from(crate::LoadRequest {
+            source: &source,
+            global_dir: root.path().join("global"),
+            scene_dir: root.path().join("scene"),
+            local_dir: root.path().join("project"),
+            scope: "code",
+            default_model: "m",
+            sections: &Sections::none(),
+            layout: Default::default(),
+        })
     };
 
     let settings = load(serde_json::json!({"model": {"max_tokens": 5}, "app": {"session_cap": 2}}));
@@ -101,16 +101,16 @@ fn a_managed_trust_decision_stands_over_the_users() {
                 serde_json::json!({"app": {"trust_all_projects": true, "trusted_projects": [project]}}),
             )
             .with(Tier::Managed, false, "it", managed);
-        LoadedSettings::load_from(
-            &source,
-            root.path().join("global"),
-            root.path().join("scene"),
-            project.join(".agix"),
-            "code",
-            "m",
-            &Sections::none(),
-            Default::default(),
-        )
+        LoadedSettings::load_from(crate::LoadRequest {
+            source: &source,
+            global_dir: root.path().join("global"),
+            scene_dir: root.path().join("scene"),
+            local_dir: project.join(".agix"),
+            scope: "code",
+            default_model: "m",
+            sections: &Sections::none(),
+            layout: Default::default(),
+        })
     };
     assert_eq!(load(serde_json::json!({})).trust(), ProjectTrust::Trusted);
     let decided =

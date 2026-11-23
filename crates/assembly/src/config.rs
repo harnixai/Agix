@@ -296,18 +296,18 @@ pub fn load_daemon_config(
     let project_root = paths.project_root();
     let global_root = paths.global_root();
 
-    let settings = crate::settings_source::read_pair(
-        global_root.clone(),
-        config_root.clone(),
-        Some(&project_root),
-        &paths.layout(),
-        scope,
-        cli_model,
-        crate::settings_source::Above {
+    let settings = crate::settings_source::read_pair(crate::settings_source::PairRead {
+        global_root: global_root.clone(),
+        scene_root: config_root.clone(),
+        project: Some(&project_root),
+        layout: &paths.layout(),
+        scene: scope,
+        default_model: cli_model,
+        above: crate::settings_source::Above {
             cli: cli_settings.as_ref(),
             managed: None,
         },
-    );
+    });
 
     let socket_path = cli_socket
         .map(PathBuf::from)
