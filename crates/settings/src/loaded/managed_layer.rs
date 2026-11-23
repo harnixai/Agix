@@ -10,7 +10,6 @@ use serde_json::Value;
 use super::{mcp_servers_declared, read_providers, LoadedSettings, ProviderOrigin, PROVIDERS};
 use crate::merge::merge_fitting;
 use crate::section::Sections;
-use crate::trust::ProjectTrustSettings;
 use crate::Settings;
 
 /// The `Tier::Managed` layers of `layers` read as one managed layer, and the
@@ -29,20 +28,7 @@ pub(super) fn split_off(
     (managed, rest)
 }
 
-/// What the global tier says about trust, with what a managed layer that can
-/// be honoured says in its place.
-pub(super) fn trust_under(
-    global: ProjectTrustSettings,
-    managed: Option<&ManagedSettings>,
-) -> ProjectTrustSettings {
-    match managed
-        .filter(|m| m.error.is_none())
-        .and_then(|m| m.values.get("app"))
-    {
-        Some(app) => global.decided_by(app),
-        None => global,
-    }
-}
+pub(super) use crate::managed::trust_under;
 
 impl LoadedSettings {
     /// Put the deployment's layer on top of these settings, replacing any

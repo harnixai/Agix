@@ -1,9 +1,10 @@
 //! The engine's side of keeping history in projects: a project's history
 //! directory (a worktree's is its main checkout's), whether a new session goes
 //! there (`app.history` and the project's trust), and whether a project
-//! is trusted now — the global tier's `app` block, read again whenever
-//! either of its files has changed since, so that taking trust back stops
-//! reads at once while a listing does not read both files once per session.
+//! is trusted now — the global tier's `app` block under the managed layer's,
+//! read again whenever either global file has changed since, so that taking
+//! trust back stops reads at once while a listing does not read both files
+//! once per session.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -17,6 +18,7 @@ pub(crate) struct ProjectHistoryPolicy {
     location: HistoryLocation,
     layout: Layout,
     global_dir: PathBuf,
+    managed: Option<base::permission::ManagedSettings>,
     trust: Mutex<Option<(Stamps, settings::trust::ProjectTrustSettings)>>,
 }
 
@@ -25,11 +27,17 @@ pub(crate) struct ProjectHistoryPolicy {
 type Stamps = [Option<(u64, u64, SystemTime)>; 2];
 
 impl ProjectHistoryPolicy {
-    pub(crate) fn new(location: HistoryLocation, layout: Layout, global_dir: PathBuf) -> Self {
+    pub(crate) fn new(
+        location: HistoryLocation,
+        layout: Layout,
+        global_dir: PathBuf,
+        managed: Option<base::permission::ManagedSettings>,
+    ) -> Self {
         Self {
             location,
             layout,
             global_dir,
+            managed,
             trust: Mutex::default(),
         }
     }
@@ -128,7 +136,10 @@ impl ProjectHistory for ProjectHistoryPolicy {
         let mut cached = self.trust.lock().unwrap_or_else(|e| e.into_inner());
         let fresh = matches!(&*cached, Some((seen, _)) if *seen == stamps);
         if !fresh {
-            let read = settings::trust::ProjectTrustSettings::read_global(&self.global_dir);
+            let read = settings::managed::trust_under(
+                settings::trust::ProjectTrustSettings::read_global(&self.global_dir),
+                self.managed.as_ref(),
+            );
             *cached = Some((stamps, read));
         }
         cached
@@ -153,7 +164,39 @@ mod tests {
             location,
             Layout::new(".codix").unwrap(),
             global.to_path_buf(),
+            None,
         )
+    }
+
+    #[test]
+    fn a_project_the_managed_layer_does_not_trust_keeps_no_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let global = tmp.path().join("global");
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(
+            global.join(base::paths::SETTINGS_FILE),
+            r#"{"app": {"trust_all_projects": true}}"#,
+        )
+        .unwrap();
+        let policy = |managed: Option<base::permission::ManagedSettings>| {
+            ProjectHistoryPolicy::new(
+                HistoryLocation::Project,
+                Layout::new(".codix").unwrap(),
+                global.clone(),
+                managed,
+            )
+        };
+        assert!(policy(None).keeps_new(&root));
+        let untrusting = settings::managed::from_value(
+            "managed",
+            serde_json::json!({"app": {"trust_all_projects": false}}),
+            &settings::section::Sections::none(),
+        );
+        let p = policy(Some(untrusting));
+        assert!(!p.trusted(&root));
+        assert!(!p.keeps_new(&root));
     }
 
     #[test]

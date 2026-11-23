@@ -182,6 +182,21 @@ pub fn followed_by(mut earlier: ManagedSettings, later: ManagedSettings) -> Mana
     earlier
 }
 
+/// What the global tier says about trust, with what a managed layer that can
+/// be honoured says in its place.
+pub fn trust_under(
+    global: crate::trust::ProjectTrustSettings,
+    managed: Option<&ManagedSettings>,
+) -> crate::trust::ProjectTrustSettings {
+    match managed
+        .filter(|m| m.error.is_none())
+        .and_then(|m| m.values.get("app"))
+    {
+        Some(app) => global.decided_by(app),
+        None => global,
+    }
+}
+
 /// The layer as a settings file would hold it: its values, with the rule
 /// lists and `disable_bypass` back in its `permissions` block.
 pub fn as_file(managed: &ManagedSettings) -> Map<String, Value> {
