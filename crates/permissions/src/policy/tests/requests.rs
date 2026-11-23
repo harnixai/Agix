@@ -872,11 +872,14 @@ fn with_managed(user: serde_json::Value, managed: serde_json::Value) -> settings
         &settings::section::Sections::none(),
         Default::default(),
     )
-    .with_managed(Some(settings::managed::from_value(
-        "it",
-        managed,
+    .with_managed(
+        Some(settings::managed::from_value(
+            "it",
+            managed,
+            &settings::section::Sections::none(),
+        )),
         &settings::section::Sections::none(),
-    )))
+    )
 }
 
 async fn verdict(
