@@ -519,7 +519,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `prompt` | `append`、`override`、`instruction_files`、`language`、`path_style`(`absolute`、`relative`) |
 | `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
 | `memory`、`telemetry`、`checkpoints`、`recorder` | `memory.enabled`;`telemetry.enabled`、`telemetry.otlp_endpoint`;文件检查点;LLM 录制 |
-| `app` | 只认全局层:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir`、`session_cap`、`session_idle_timeout_secs`、`worker_threads` |
+| `app` | 只认全局文件层、`cli` 层与 managed 文件:`trusted_projects`、`trust_all_projects`、`history`、`system_proxy`、`worktree_dir`、`session_cap`、`session_idle_timeout_secs`、`worker_threads` |
 
 几个本文别处没提到的开关:
 
@@ -542,7 +542,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `sandbox.enabled` | `true` | `false` 时命令不进 OS 沙箱运行 |
 | `sandbox.network.mode` | `unrestricted` | 沙箱里命令的出网:`unrestricted`、`deny_all`、`allowlist`(`web.allowed_domains`;后端不按域名放行,沙箱里的命令在 macOS 上只连得到名单里的 localhost,Linux 上整个断网)或 `proxy`——要按域名过滤,在前面放一个代理 |
 | `sandbox.network.proxy` | 无 | `proxy` 模式下沙箱里的命令唯一能连的地址(`"127.0.0.1:3128"`,或 `{"http", "socks", "no_proxy"}`),经 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 告诉命令;代理不在本机时 macOS 只能按端口限,Linux 要 `socat`,没有就整个断网 |
-| `app.system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`;`false` 直连。daemon 启动时生效;与上面沙箱命令的出网无关 |
+| `app.system_proxy` | `true` | 引擎自己的 HTTP(模型调用、`WebFetch` / `Ping`、MCP over HTTP、OAuth)跟随 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`;`false` 直连。daemon 启动时生效;与上面沙箱命令的出网无关 |
 | `app.history` | `global` | 会话放在哪。`global`:状态目录的 `projects/` 与 `sessions/`。`project`:受信项目的会话放进它的 `.agix/state/history/<id>/`(worktree 里的放进主仓库的),`sessions/<id>/` 只留索引;不受信的项目照旧放全局。已经放在任一处的历史原地照读;项目里的历史只在项目受信时读。daemon 启动时生效 |
 | `app.worktree_dir` | `.wkts` | `EnterWorktree` 与 `Agent` 的 `worktree` 把 git worktree 建在仓库根的这个目录下(`<仓库>/.wkts/<名>`),仓库的 `.gitignore` 也只加这一行;一个以 `.` 开头的路径分量,不能以 `.git` 开头,也不能是配置目录或别的工具的目录 |
 | `app.session_cap` | `32` | 内存里留几个会话;再多一个就把最久未活动的空闲会话移出内存,下次用到时从磁盘恢复。daemon 启动时生效,`config.reload` 不改它 |

@@ -47,12 +47,12 @@ impl PermissionMode {
     /// without asking.
     ///
     /// Exists so a host can *clamp* a mode it did not choose: the daemon's
-    /// `session.create` RPC accepts a caller-supplied `permission_mode`, and
+    /// `session.create` RPC accepts `options.settings.permissions.mode`, and
     /// without an ordering there was no way to express "a client may tighten
     /// this, but may not loosen it past what `settings.json` configured".
     /// Anyone who could reach the socket could simply ask for
     /// `bypassPermissions` and get it, whatever the daemon was configured
-    /// with — see `daemon::session_pool::effective_permission_mode`.
+    /// with — see `assembly::session_pool::effective_permission_mode`.
     ///
     /// The ranking:
     /// - `DontAsk` refuses anything not explicitly allowed — nothing is more

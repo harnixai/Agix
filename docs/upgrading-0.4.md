@@ -106,7 +106,7 @@
 
 ### 改名
 
-- `session.setModel` 的参数与结果:`thinking_mode` → `thinking`。
+- `session.setModel` 的参数与结果:`thinking_mode` → `thinking`;再传 `thinking_mode` 以 `INVALID_PARAMS` 失败。
 - `session.get`、`session.inspectContext` 的 `reasoning.{thinking_mode, thinking_mode_source}` →
   `{thinking, thinking_source}`;`session.call` 的 `request.thinking_mode` → `thinking`。
 - `stop_reason` 的 `max_turns_reached` → `max_turns`(引擎实际发的一直是后者)。
@@ -119,9 +119,11 @@
 - **预算是一条链。** 由近及远:子 Agent 的轮 → 根轮(`turn.token_budget`)→ 目标 → 会话(`session.token_budget`)。
   任何一层用完都以 `budget_exceeded` 结束这一轮,`turn_complete.message` 写明是谁的预算。每次调用前先从剩余里
   扣掉这次请求预计会计入的输入,付不起就不发。
-- **`session.get` 多一个 `usage`:** 会话从创建起的累计,含子 Agent(后台的也算),跨重启。
+- **`session.get` 多一个 `usage`:** 会话从创建起的累计,含子 Agent(后台的也算)与两轮之间的调用(如 `session.compact`
+  的摘要、两轮之间触发的 hook),跨重启。
 - **目标:** `session.setGoal` / `updateGoal` 可带 `token_budget`;目标状态多 `token_budget`、`tokens_used`。
-  用完时目标转 `blocked`,`blocked_reason` 以 `token budget` 开头。
+  用完时目标转 `blocked`,`blocked_reason` 以 `token budget` 开头。模型的 `GoalUpdate` 只能调低目标的预算,调高要宿主
+  调 `session.updateGoal`。
 - **定时任务:** `schedule.list` 的任务多一个 `by_model`。
 
 ### 其他

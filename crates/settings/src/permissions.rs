@@ -57,13 +57,13 @@ pub struct PermissionsSettings {
     /// that went unanswered is not consent.
     #[serde(default = "default_prompt_timeout_secs")]
     pub prompt_timeout_secs: u64,
-    /// Whether an RPC client may request a *more permissive* mode than
-    /// `mode` above.
+    /// Whether an RPC client may ask for *looser* settings than these — a more
+    /// permissive `mode` above, higher limits, allow rules.
     ///
-    /// The daemon's `session.create` takes an optional `permission_mode` in
-    /// its options. With this `false` — the default — a client can *tighten*
-    /// the mode for its own session, but a request to loosen it is clamped to
-    /// what is configured here. Otherwise any client that could authenticate
+    /// The daemon's `session.create` takes the session's own settings in
+    /// `options.settings`. With this `false` — the default — a client can
+    /// *tighten* them, but a looser value is clamped to what is configured
+    /// here (`clamped_options`). Otherwise any client that could authenticate
     /// could open a `bypassPermissions` session no matter how the daemon was
     /// configured (`crates/assembly/src/server/mod.rs` notes there is no
     /// per-method authorization on that socket).

@@ -654,7 +654,7 @@ The blocks:
 | `prompt` | `append`, `override`, `instruction_files`, `language`, `path_style` (`absolute`, `relative`) |
 | `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches, `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
 | `memory`, `telemetry`, `checkpoints`, `recorder` | `memory.enabled`; `telemetry.enabled`, `telemetry.otlp_endpoint`; file checkpoints; LLM recording |
-| `app` | global layer only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir`, `session_cap`, `session_idle_timeout_secs`, `worker_threads` |
+| `app` | the global file layer, the `cli` layer and the managed file only: `trusted_projects`, `trust_all_projects`, `history`, `system_proxy`, `worktree_dir`, `session_cap`, `session_idle_timeout_secs`, `worker_threads` |
 
 A few switches whose effect the rest of this README does not mention:
 
@@ -677,7 +677,7 @@ A few switches whose effect the rest of this README does not mention:
 | `sandbox.enabled` | `true` | `false` runs commands without the OS sandbox |
 | `sandbox.network.mode` | `unrestricted` | outbound network of sandboxed commands: `unrestricted`, `deny_all`, `allowlist` (`web.allowed_domains`; no backend filters by domain, so a sandboxed command reaches only localhost on macOS when listed, and nothing on Linux), or `proxy` — to filter by domain, put a proxy in front |
 | `sandbox.network.proxy` | none | under `proxy`, the only address a sandboxed command may connect to (`"127.0.0.1:3128"`, or `{"http", "socks", "no_proxy"}`), named to it in `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; macOS holds a proxy off this machine only to its port, Linux needs `socat` and cuts the network without it |
-| `app.system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`; `false` connects directly. Applied at daemon start; unrelated to the sandboxed commands' network above |
+| `app.system_proxy` | `true` | the engine's own HTTP (model calls, `WebFetch` / `Ping`, MCP over HTTP, OAuth) follows `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`; `false` connects directly. Applied at daemon start; unrelated to the sandboxed commands' network above |
 | `app.history` | `global` | where sessions are kept. `global`: under the state directory's `projects/` and `sessions/`. `project`: a trusted project's sessions go to its `.agix/state/history/<id>/` (a worktree's to its main checkout's) with only an index left under `sessions/<id>/`; untrusted projects stay global. History already kept either way is read where it is; history in a project is read only while the project is trusted. Applied at daemon start |
 | `app.worktree_dir` | `.wkts` | the directory at the repository root that `EnterWorktree` and `Agent`'s `worktree` put git worktrees in (`<repo>/.wkts/<name>`), and the one line added to the repository's `.gitignore`; one path component starting with `.`, not starting with `.git`, and not a configuration directory or another tool's |
 | `app.session_cap` | `32` | sessions kept in memory; one more takes the least recently active idle one out of memory, and its next use brings it back from disk. Applied at daemon start; `config.reload` does not change it |

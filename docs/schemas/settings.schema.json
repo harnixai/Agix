@@ -503,7 +503,7 @@
         },
         "client_may_loosen": {
           "default": false,
-          "description": "Whether an RPC client may request a *more permissive* mode than\n`mode` above.\n\nThe daemon's `session.create` takes an optional `permission_mode` in\nits options. With this `false` — the default — a client can *tighten*\nthe mode for its own session, but a request to loosen it is clamped to\nwhat is configured here. Otherwise any client that could authenticate\ncould open a `bypassPermissions` session no matter how the daemon was\nconfigured (`crates/assembly/src/server/mod.rs` notes there is no\nper-method authorization on that socket).\n\nSet it to `true` only when every client of this daemon is as trusted\nas the daemon itself.",
+          "description": "Whether an RPC client may ask for *looser* settings than these — a more\npermissive `mode` above, higher limits, allow rules.\n\nThe daemon's `session.create` takes the session's own settings in\n`options.settings`. With this `false` — the default — a client can\n*tighten* them, but a looser value is clamped to what is configured\nhere (`clamped_options`). Otherwise any client that could authenticate\ncould open a `bypassPermissions` session no matter how the daemon was\nconfigured (`crates/assembly/src/server/mod.rs` notes there is no\nper-method authorization on that socket).\n\nSet it to `true` only when every client of this daemon is as trusted\nas the daemon itself.",
           "type": "boolean"
         },
         "deny": {
