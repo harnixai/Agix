@@ -524,3 +524,97 @@ async fn naming_a_session_of_a_project_that_lost_its_trust_is_refused_with_its_o
     daemon.stop().await;
     Ok(())
 }
+
+/// A session log planted in an untrusted project's history directory — one
+/// whose recorded spec gives the session its own prompt — is nobody's: it is
+/// not listed, not resumed, not read, and a session created under its id
+/// starts empty with the project's own prompt.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_planted_in_an_untrusted_projects_history_is_not_read() -> anyhow::Result<()> {
+    let world = World::new()?;
+    keep_in_projects(&world)?;
+    let donor = world.project("donor")?;
+    world.trust_project(&donor)?;
+    let provider = ProviderStub::start().await?;
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(donor.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let session = client
+        .session_create(json!({
+            "project_root": donor.to_string_lossy(),
+            "options": {
+                "auto_name": false,
+                "settings": { "prompt": { "override": "PLANTED-OVERRIDE" } }
+            }
+        }))
+        .await?;
+    provider.script([Reply::text("ok")]);
+    let events = client
+        .session_run_turn(&session, "PLANTED-WORDS", "t1", None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    daemon.stop().await;
+
+    let crafted = world.project("crafted")?;
+    let planted = base::session::SessionId::new().to_string();
+    let to = kept_in(&crafted, &planted);
+    std::fs::create_dir_all(&to)?;
+    let from = kept_in(&donor, &session);
+    std::fs::copy(
+        from.join(format!("{session}.jsonl")),
+        to.join(format!("{planted}.jsonl")),
+    )?;
+    std::fs::copy(from.join("metadata.json"), to.join("metadata.json"))?;
+
+    let daemon = Daemon::start(&world, &provider, DaemonOptions::new(crafted.clone())).await?;
+    let mut client = daemon.connect().await?;
+    let in_project = client
+        .call(
+            "session.list",
+            json!({ "project_root": crafted.to_string_lossy() }),
+        )
+        .await?;
+    assert!(
+        !lists(
+            in_project.result.unwrap_or_default()["sessions"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+            &planted
+        ),
+        "the planted session was listed"
+    );
+    assert!(!lists(&listed(&daemon).await?, &planted));
+    let resumed = resume(&daemon, &planted).await?;
+    assert!(resumed.error.is_some(), "{resumed:?}");
+    let history = client
+        .call("session.history", json!({ "session_id": planted }))
+        .await?;
+    assert!(
+        !serde_json::to_string(&history)?.contains("PLANTED-WORDS"),
+        "{history:?}"
+    );
+
+    let taken = client
+        .session_create(json!({
+            "project_root": crafted.to_string_lossy(),
+            "session_id": planted,
+            "options": { "auto_name": false },
+        }))
+        .await?;
+    assert_eq!(taken, planted);
+    provider.script([Reply::text("fresh")]);
+    let events = client
+        .session_run_turn(&planted, "real words", "t2", None)
+        .await?;
+    anyhow::ensure!(events.turn_complete, "{events:?}");
+    let call = provider
+        .calls()
+        .into_iter()
+        .find(|c| c.messages_contain("real words"))
+        .expect("the turn's model call");
+    let system = call.system_text();
+    assert!(!system.contains("PLANTED-OVERRIDE"), "{system}");
+    assert!(!call.messages_contain("PLANTED-WORDS"));
+    daemon.stop().await;
+    Ok(())
+}
