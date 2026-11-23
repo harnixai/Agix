@@ -629,7 +629,7 @@ The blocks:
 | `files` | `extra_dirs` (read and write like the project), `read_dirs` (read without asking; `"/"` reads anywhere), `allow_write`, `deny_write` |
 | `sandbox` | `enabled`, `require` (refuse to run a command when the platform cannot enforce the sandbox), `allow_read`, `deny_read` (added to the built-in credential list), `network`, `env`, `cache_dirs`, `reap_on_close`, `unattended_needs_network_policy` |
 | `web` | `allowed_domains` for `WebFetch` and `Ping`, and the list `sandbox.network.mode: "allowlist"` reads |
-| `turn`, `agents`, `team` | `turn.max_model_calls`, `turn.token_budget`, `turn.parallel_tools`; `agents.max_depth`, `agents.max_concurrent`; `team.enabled`, `team.stage_concurrency`, `team.max_members`, `team.member_idle_secs` |
+| `turn`, `session`, `agents`, `team` | `turn.max_model_calls`, `turn.token_budget`, `turn.parallel_tools`; `session.token_budget`; `agents.max_depth`, `agents.max_concurrent`; `team.enabled`, `team.stage_concurrency`, `team.max_members`, `team.member_idle_secs` |
 | `compaction` | `threshold_tokens`, `keep_recent`, `reactive`, `clear_on_cache_expiry`, `inline_result_chars` |
 | `prompt` | `append`, `override`, `instruction_files`, `language`, `path_style` (`absolute`, `relative`) |
 | `hooks`, `scripts`, `plugins`, `mcp`, `skills` | lifecycle hooks ([docs/hooks.md](docs/hooks.md)), script bindings, the plugin switches, `mcp.servers.<name>` (an entry holding only `enabled` switches a server declared elsewhere), `skills.allow_shell` |
@@ -646,6 +646,7 @@ A few switches whose effect the rest of this README does not mention:
 | `telemetry.otlp_endpoint` | none | OTLP endpoint (else `OTEL_EXPORTER_OTLP_ENDPOINT`); only in a build with the `otel` feature |
 | `prompt.instruction_files` | `[]` | more instruction files, read in order when the session is built and given to the model like `AGENTS.md` |
 | `turn.token_budget` | none (unlimited) | the tokens one turn may spend — input not read from the cache, cache writes and output, as provider quotas count them — together with the sub-agents and team members it starts or hands work to and the calls made on the side (compaction, memory, `WebSearch`, `WebFetch` extraction); each call asks for no more output than is left, and the turn ends with `budget_exceeded` once it is spent. A session can only lower it, with `session.create`'s `options.settings.turn` |
+| `session.token_budget` | none (unlimited) | the tokens a session may spend from when it was created, counted as `turn.token_budget` is, over every turn — its sub-agents', team members', calls on the side, scheduled and goal turns included — and across restarts (the running total is in the session log; `session.get` reports it as `usage`). Once it is spent the turn ends with `budget_exceeded` before its next call, and every later turn does too without calling the model |
 | `hooks` | none | lifecycle hooks: event name → list of hooks ([docs/extension_points.md](docs/extension_points.md)) |
 | `skills.allow_shell` | `true` | `false` replaces a skill body's `` !`cmd` `` with a notice instead of running it |
 | `team.enabled` | `false` | gives `TeamCreate` / `TeamList` / `TeamDelete` to sessions whose scene supports teams (`code`, `harnix`) |

@@ -485,6 +485,10 @@ impl Agent {
         cancel: CancellationToken,
         origin: history::entry::MessageOrigin,
     ) -> Result<TurnOutcome, TurnError> {
+        if self.charged_to.is_none() {
+            let session_budget = self.settings.values.session.token_budget;
+            self.session_state.ledger().spent.set_limit(session_budget);
+        }
         self.turn = super::TurnState::opening(
             &self.current_turn_id,
             self.charged_to.take(),

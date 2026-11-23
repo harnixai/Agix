@@ -81,7 +81,10 @@ impl Agent {
         let mut state = TurnLoopState::new(&self.settings);
 
         self.prepare_turn().await;
-        let recall = self.start_memory_recall(&content);
+        let recall = match self.room_for_a_call() {
+            true => self.start_memory_recall(&content),
+            false => None,
+        };
         state.skill_discovery = self.start_skill_discovery();
         self.push_user_message(content, hook_context, &attachments, origin)
             .await;

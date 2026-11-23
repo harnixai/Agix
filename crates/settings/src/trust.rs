@@ -450,6 +450,7 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
             "sandbox.unattended_needs_network_policy",
             Tighten(TrueTighter),
         ),
+        ("session.token_budget", Tighten(Lower)),
         ("skills.allow_shell", Tighten(FalseTighter)),
         ("telemetry.enabled", Tighten(TrueTighter)),
         ("telemetry.otlp_endpoint", Withheld),

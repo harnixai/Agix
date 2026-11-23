@@ -884,6 +884,23 @@
       ],
       "type": "object"
     },
+    "SessionSettings": {
+      "additionalProperties": false,
+      "description": "The limits of a session over all its turns.",
+      "properties": {
+        "token_budget": {
+          "default": null,
+          "description": "Maximum cumulative tokens a session may spend from when it was\ncreated, counted as `turn.token_budget` is (input not read from the\ncache, cache writes and output) over every turn — its delegates', the\ncalls made on their side, scheduled and goal turns included — and\nacross restarts. Each call asks for no more output than is left; with\nless than 1024 left no call is sent, and the turn, and every turn\nafter it, ends with `budget_exceeded`. `None` = unlimited.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SkillsSettings": {
       "properties": {
         "allow_shell": {
@@ -1305,6 +1322,12 @@
         "$ref": "#/$defs/ScriptBinding"
       },
       "type": "array"
+    },
+    "session": {
+      "$ref": "#/$defs/SessionSettings",
+      "default": {
+        "token_budget": null
+      }
     },
     "skills": {
       "$ref": "#/$defs/SkillsSettings",

@@ -588,6 +588,14 @@ Agent 在下一次调用前以 `budget_exceeded` 收尾,交回父会话的结果
 以错误结束时,provider 已经报出的那部分用量同样计入。宿主经库式用法注入的 `BudgetPolicy` 在这之外再判,
 两边都要过。
 
+**会话的 token 预算。** 设置 `session.token_budget`(缺省不限)给一个会话从创建起的累计设上限,口径与
+算的调用同一轮的预算,只是不按轮清零:会话所有的轮(宿主的、定时任务的、目标的)都在内,跨重建、驱逐与
+daemon 重启(累计即 `session.get` 的 `usage`,§6.3)。每次调用的 `max_tokens` 同样压到不超过它的剩余,
+剩余不到 1024 时不发;用完时这一轮以 `budget_exceeded` 结束,`turn_complete.message` 为
+`this session's token budget of <N> is used up`,到达 90% 时同样提醒收尾。之后每一次 `run_turn` 都在
+第一次调用前以 `budget_exceeded` 结束,不调模型;要接着用,宿主调高设置(或换一个会话)。子 Agent 与
+团队成员判的是根会话的这份累计。
+
 ---
 
 ## 5. 连接、认证、并发与顺序

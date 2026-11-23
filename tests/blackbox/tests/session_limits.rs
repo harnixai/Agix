@@ -1,6 +1,6 @@
 //! What a session spends over its turns: `session.get`'s `usage` counts its
 //! delegates' calls as they are made, and a failed turn's, and survives a
-//! restart.
+//! restart; `session.token_budget` holds it to a ceiling across turns.
 
 use std::time::Duration;
 
@@ -46,6 +46,15 @@ fn gate_tool() -> Value {
         "read_only": true,
         "subagents": true
     })
+}
+
+fn stop_reason(events: &rpc_client::TurnEvents) -> Value {
+    events.turn_complete_event.clone().unwrap_or_default()["stop_reason"].clone()
+}
+
+fn turn_message(events: &rpc_client::TurnEvents) -> String {
+    let done = events.turn_complete_event.clone().unwrap_or_default();
+    done["message"].as_str().unwrap_or_default().to_string()
 }
 
 /// `session.get`'s `usage`, as input and output tokens.
@@ -119,6 +128,66 @@ async fn the_sessions_usage_counts_a_background_sub_agent_as_it_spends() -> anyh
         usage(&mut run, &s).await?,
         (2510, 291),
         "a restart lost what the session had spent"
+    );
+    run.finish().await;
+    Ok(())
+}
+
+/// 4000 in the first turn; 1000 of the root's and 4500 of its sub-agent's in
+/// the second leave 500 of 10000, too little for the root's next call. The
+/// third turn, and a turn after a restart, send nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_budget_holds_across_turns_sub_agents_and_a_restart() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed(
+        "session-budget",
+        &stub,
+        json!({ "session": { "token_budget": 10_000 } }),
+    )
+    .start()
+    .await?;
+    let s = session(&mut run, json!({})).await?;
+    stub.script([Reply::spent(3000, 1000, Reply::text("first"))]);
+    let first = run.turn(&s, "one").await?;
+    assert_eq!(stop_reason(&first), "end_turn", "{first:?}");
+
+    stub.script_when(
+        ROOT,
+        [
+            Reply::spent(1000, 0, delegate("look around", false)),
+            Reply::text("never sent"),
+        ],
+    );
+    stub.script([Reply::spent(4000, 500, Reply::text("CHILD-DONE"))]);
+    let second = run.turn(&s, &format!("{ROOT} delegate it")).await?;
+    assert_eq!(stop_reason(&second), "budget_exceeded", "{second:?}");
+    assert!(
+        turn_message(&second).contains("this session's token budget of 10000"),
+        "{second:?}"
+    );
+    assert_eq!(
+        stub.call_count(),
+        3,
+        "the root called past the session's budget"
+    );
+    assert_eq!(usage(&mut run, &s).await?, (8000, 1500));
+
+    let third = run.turn(&s, "and again").await?;
+    assert_eq!(stop_reason(&third), "budget_exceeded", "{third:?}");
+    assert_eq!(stub.call_count(), 3, "a spent session called the model");
+
+    run.restart().await?;
+    let resumed = run
+        .client
+        .call("session.resume", json!({ "session_id": s }))
+        .await?;
+    assert!(resumed.error.is_none(), "{resumed:?}");
+    let after = run.turn(&s, "after the restart").await?;
+    assert_eq!(stop_reason(&after), "budget_exceeded", "{after:?}");
+    assert_eq!(
+        stub.call_count(),
+        3,
+        "a restart gave the session its budget back"
     );
     run.finish().await;
     Ok(())

@@ -23,7 +23,9 @@ pub use blocks::{
 };
 pub mod edit;
 mod egress;
+mod limits;
 pub use egress::EgressProxySetting;
+pub use limits::SessionSettings;
 mod engine;
 pub use engine::sandbox_settings;
 pub mod file;
@@ -74,6 +76,8 @@ pub struct Settings {
     pub web: WebSettings,
     #[serde(default)]
     pub turn: TurnSettings,
+    #[serde(default)]
+    pub session: SessionSettings,
     #[serde(default)]
     pub agents: AgentsSettings,
     #[serde(default)]
@@ -480,6 +484,7 @@ impl Settings {
             sandbox: SandboxConfig::default(),
             web: WebSettings::default(),
             turn: TurnSettings::default(),
+            session: SessionSettings::default(),
             agents: AgentsSettings::default(),
             compaction: CompactionConfig::default(),
             prompt: PromptSettings::default(),

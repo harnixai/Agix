@@ -376,6 +376,16 @@ impl Agent {
         }
     }
 
+    /// Whether the engine's ceilings leave enough for another call, without
+    /// saying so anywhere.
+    pub(super) fn room_for_a_call(&self) -> bool {
+        self.turn
+            .scope
+            .spend()
+            .remaining()
+            .is_none_or(|(_, left)| left.tokens >= base::interface::budget_policy::MIN_CALL_TOKENS)
+    }
+
     /// How much output the next call may ask for under the tightest of the
     /// engine's ceilings and the policy's, or the turn's end, saying whose,
     /// when what remains cannot pay for a call.

@@ -2154,7 +2154,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `telemetry.enabled: false` | 丢弃:项目不能关掉审计记录 |
 | `telemetry.otlp_endpoint`、`recorder` | 丢弃:一个把遥测送到项目指定的地址,一个把宿主请求的录像写到项目指定的目录 |
 | `prompt.override` | 丢弃:它整个替换系统提示词(追加用的 `prompt.append` 照常) |
-| `turn`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`agents.max_depth`、`agents.max_concurrent`) | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
+| `turn`、`session`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`session.token_budget`、`agents.max_depth`、`agents.max_concurrent`) | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
 | `prompt.instruction_files` | 丢弃:它按路径直接读进系统提示词,不过沙箱也不过 Read 的 `deny_read` |
 | `compaction.inline_result_chars` | 丢弃:项目不能改大结果外置的阈值 |
 | `app` | 整块丢弃:信任、历史位置、代理、worktree 目录都只认全局层 |
