@@ -374,6 +374,8 @@ pub enum Order {
     Superset,
     /// A number, where `null` is no limit.
     Lower,
+    /// A number at least the one beneath: a minimum, where `null` is none.
+    Higher,
     /// A number, where `0` is no limit.
     LowerZeroIsWidest,
     /// A list of providers the tiers beneath already define.
@@ -451,6 +453,8 @@ pub const PROJECT_TIER: &[(&str, ProjectKey)] = {
             "sandbox.unattended_needs_network_policy",
             Tighten(TrueTighter),
         ),
+        ("schedule.max_model_jobs", Tighten(Lower)),
+        ("schedule.min_model_interval_minutes", Tighten(Higher)),
         ("session.token_budget", Tighten(Lower)),
         ("skills.allow_shell", Tighten(FalseTighter)),
         ("telemetry.enabled", Tighten(TrueTighter)),
@@ -697,6 +701,12 @@ impl Order {
             Self::Lower => match (value, below.as_f64()) {
                 (Value::Null, _) => below.is_null(),
                 (Value::Number(n), Some(b)) => n.as_f64().is_some_and(|v| v <= b),
+                (Value::Number(_), None) => true,
+                _ => false,
+            },
+            Self::Higher => match (value, below.as_f64()) {
+                (Value::Null, _) => below.is_null(),
+                (Value::Number(n), Some(b)) => n.as_f64().is_some_and(|v| v >= b),
                 (Value::Number(_), None) => true,
                 _ => false,
             },
@@ -1168,6 +1178,20 @@ mod tests {
             Value::Object(layer),
             json!({"turn": {}, "permissions": {"prompt_timeout_secs": 999_999}})
         );
+    }
+
+    #[test]
+    fn a_minimum_may_only_be_raised() {
+        let below = json!({ "least": 10, "unset": null });
+        let keeps = |value: Value, at: &str| Order::Higher.keeps(&value, &below[at], &below);
+        assert!(keeps(json!(10), "least") && keeps(json!(60), "least"));
+        assert!(
+            !keeps(json!(9), "least"),
+            "a lower minimum lets more through"
+        );
+        assert!(!keeps(Value::Null, "least"), "null reads as no minimum");
+        assert!(keeps(json!(1), "unset") && keeps(Value::Null, "unset"));
+        assert!(!keeps(json!("10"), "least"));
     }
 
     #[test]

@@ -48,6 +48,48 @@ impl CronCreateTool {
     pub fn new(store: Arc<CronStore>) -> Self {
         Self { store }
     }
+
+    /// Why this deployment does not let the model schedule `input`, if it
+    /// does not: `schedule.max_model_jobs`, `schedule.min_model_interval_minutes`.
+    /// The jobs counted are the top-level session's: a delegate schedules
+    /// none.
+    fn within_limits(&self, input: &CronCreateInput, ctx: &ToolContext) -> Result<(), String> {
+        if ctx.in_delegate() {
+            return Err(
+                "scheduled jobs belong to the top-level session; a sub-agent cannot create them"
+                    .into(),
+            );
+        }
+        let limits = ctx.config.model_autonomy;
+        let held = self
+            .store
+            .list_for(&ctx.session_id)
+            .iter()
+            .filter(|job| job.by_model)
+            .count();
+        if held >= limits.max_jobs as usize {
+            return Err(format!(
+                "this session already has {held} scheduled job(s) you created, the most this \
+                 deployment allows (schedule.max_model_jobs: {}); delete one with CronDelete \
+                 before scheduling another",
+                limits.max_jobs
+            ));
+        }
+        if !input.recurring || limits.min_job_interval_minutes <= 1 {
+            return Ok(());
+        }
+        let span = (super::store::MODEL_JOB_LIFETIME_MS / 60_000) as u32 + 24 * 60;
+        let gap =
+            super::parser::shortest_gap_minutes(&input.cron, time::OffsetDateTime::now_utc(), span);
+        match gap {
+            Some(gap) if gap < limits.min_job_interval_minutes => Err(format!(
+                "`{}` fires every {gap} minute(s); a recurring job you schedule may fire at most \
+                 every {} minutes (schedule.min_model_interval_minutes)",
+                input.cron, limits.min_job_interval_minutes
+            )),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[async_trait]
@@ -113,6 +155,9 @@ impl Tool for CronCreateTool {
         _: ProgressSender,
     ) -> Result<ToolResult, ToolError> {
         let input: CronCreateInput = serde_json::from_value(input)?;
+        if let Err(refused) = self.within_limits(&input, &ctx) {
+            return Ok(ToolResult::error_text(refused));
+        }
         let expires_ms = input.recurring.then(|| {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -129,6 +174,7 @@ impl Tool for CronCreateTool {
                 durable: input.durable,
                 session_id: Some(ctx.session_id.clone()),
                 expires_ms,
+                by_model: true,
             })
             .id;
         let where_str = match (input.durable, self.store.file_path()) {

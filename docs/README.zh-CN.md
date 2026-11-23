@@ -373,7 +373,7 @@ let pool = agix::pool::assemble(
 | **Web** | `WebFetch` `WebSearch` |
 | **任务**（运行中的子 Agent、Shell 命令、监视器） | `TaskOutput` `TaskWait` `TaskStop` `TaskMessage` |
 | **规划** | `EnterPlanMode` `ExitPlanMode` `TodoWrite` |
-| **目标** | `GoalCreate` `GoalGet` `GoalUpdate`(目标让会话一轮轮自动推进下去,直到完成或受阻,或 `max_rounds`、可选的 `token_budget` 用完) |
+| **目标** | `GoalCreate` `GoalGet` `GoalUpdate`(目标让会话一轮轮自动推进下去,直到完成或受阻,或轮数上限、可选的 token 预算用完) |
 | **定时** | `CronCreate` `CronDelete` `CronList` |
 | **工作区** | `EnterWorktree` `ExitWorktree`(每个会话独立的 git worktree) |
 | **协作** | `Skill` `Agent` `TeamCreate` `TeamList` `TeamDelete` |
@@ -497,7 +497,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `files` | `extra_dirs`(像项目一样读写)、`read_dirs`(不问就能读;写 `"/"` 即任意处可读)、`allow_write`、`deny_write` |
 | `sandbox` | `enabled`、`require`(平台没法强制沙箱时拒绝执行命令)、`allow_read`、`deny_read`(追加到内建的凭据列表)、`network`、`env`、`cache_dirs`、`reap_on_close`、`unattended_needs_network_policy` |
 | `web` | `WebFetch`、`Ping` 的 `allowed_domains`,也是 `sandbox.network.mode: "allowlist"` 读的那份名单 |
-| `turn`、`session`、`goal`、`agents`、`team` | `turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`;`session.token_budget`;`goal.max_rounds`;`agents.max_depth`、`agents.max_concurrent`;`team.enabled`、`team.stage_concurrency`、`team.max_members`、`team.member_idle_secs` |
+| `turn`、`session`、`goal`、`schedule`、`agents`、`team` | `turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`;`session.token_budget`;`goal.max_rounds`;`schedule.max_model_jobs`、`schedule.min_model_interval_minutes`;`agents.max_depth`、`agents.max_concurrent`;`team.enabled`、`team.stage_concurrency`、`team.max_members`、`team.member_idle_secs` |
 | `compaction` | `threshold_tokens`、`keep_recent`、`reactive`、`clear_on_cache_expiry`、`inline_result_chars` |
 | `prompt` | `append`、`override`、`instruction_files`、`language`、`path_style`(`absolute`、`relative`) |
 | `hooks`、`scripts`、`plugins`、`mcp`、`skills` | 生命周期 hook([hooks.md](hooks.md))、脚本绑定、插件开关、`mcp.servers.<名>`(只写 `enabled` 的条目是对别处声明的 server 的开关)、`skills.allow_shell` |
@@ -512,6 +512,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 | `memory.enabled` | `true` | 文件记忆:记忆提示、每轮提醒里的索引、召回 |
 | `turn.token_budget` | 无(不限) | 一轮能花的 token(未命中缓存的输入、缓存写入与输出,缓存命中不计,同 provider 配额),连同这一轮起的或派了活的子 Agent、团队成员,以及旁路调用(压缩、记忆、`WebSearch`、`WebFetch` 的抽取)一起算;每次调用要的输出不超过剩余,用完以 `budget_exceeded` 结束这一轮。会话只能经 `session.create` 的 `options.settings.turn` 把它调低 |
 | `session.token_budget` | 无(不限) | 一个会话从创建起能花的 token,口径同 `turn.token_budget`,算它所有的轮——子 Agent、团队成员、旁路调用、定时任务与目标的轮都在内——跨 daemon 重启(累计记在会话日志里,`session.get` 的 `usage` 报它)。用完时这一轮在下一次调用前以 `budget_exceeded` 结束,之后的每一轮都不调模型、同样以它结束 |
+| `schedule.max_model_jobs` | `20` | 一个会话里模型自己经 `CronCreate` 建的、还在的定时任务最多几个;再建被拒,理由在工具结果里。宿主经 `schedule.create` 建的不计也不受限 |
+| `schedule.min_model_interval_minutes` | `1` | 模型建的周期任务两次触发至少隔几分钟(按它存活的 7 天算);`1` 即不在 cron 自己的分钟精度之外再加限制 |
 | `goal.max_rounds` | `10000` | 模型设或改的目标(`GoalCreate`、`GoalUpdate`)最多能有几轮;给多了压到它。目标自己的 `token_budget`(经 `session.setGoal` 或 `GoalCreate` 设)在目标各轮花完时让目标转 `blocked` |
 | `telemetry.enabled` | `true` | 每个会话在项目的 `.agix/state/telemetry/` 下写一份遥测 JSONL(无项目时在状态目录的 `telemetry/` 下) |
 | `telemetry.otlp_endpoint` | 无 | OTLP 端点(不设看 `OTEL_EXPORTER_OTLP_ENDPOINT`);只在带 `otel` feature 的构建里生效 |

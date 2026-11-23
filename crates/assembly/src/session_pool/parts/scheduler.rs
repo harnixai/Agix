@@ -53,6 +53,7 @@ impl Scheduler {
             durable: new.durable,
             session_id: Some(session_id),
             expires_ms: None,
+            by_model: false,
         })
     }
 

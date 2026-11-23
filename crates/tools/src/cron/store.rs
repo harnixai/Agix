@@ -34,6 +34,9 @@ pub struct CronJob {
     /// Unix millis after which the job's next fire is its last. `None`: never.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_ms: Option<i64>,
+    /// The model scheduled it (`CronCreate`), not a host.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_model: bool,
 }
 
 /// What [`CronStore::add_job`] needs to know about a new job.
@@ -45,6 +48,7 @@ pub struct NewCronJob {
     pub durable: bool,
     pub session_id: Option<String>,
     pub expires_ms: Option<i64>,
+    pub by_model: bool,
 }
 
 /// How long a recurring job a model creates for itself keeps firing.
@@ -114,6 +118,7 @@ impl CronStore {
             last_fired_ms: None,
             session_id: new.session_id,
             expires_ms: new.expires_ms,
+            by_model: new.by_model,
         };
         self.inner
             .lock()

@@ -857,6 +857,27 @@
       },
       "type": "object"
     },
+    "ScheduleSettings": {
+      "additionalProperties": false,
+      "description": "What the model may schedule for itself with `CronCreate`. Jobs a host\ncreates (`schedule.create`) are not held to these.",
+      "properties": {
+        "max_model_jobs": {
+          "default": 20,
+          "description": "The most jobs the model's own `CronCreate` calls may hold in a session\nat once; one it deletes, or one that has fired its last, makes room.\n`0`: the model schedules none.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_model_interval_minutes": {
+          "default": 1,
+          "description": "The fewest minutes between two fires of a recurring job the model\nschedules, over the seven days it lives. `1` adds nothing to the\ncron expression's own once-a-minute resolution.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ScriptBinding": {
       "description": "One script, bound to one extension point.\n\n```jsonc\n\"scripts\": [\n  { \"path\": \".agix/scripts/prompt.js\", \"point\": \"prompt.assemble\", \"entry\": \"onAssemble\" }\n]\n```\n\nThe point is a catalog id — see `base::interface::catalog` and\n`docs/extension_points.md`. A binding naming a point the engine does not\nhave, or one scripts may not use, is refused at startup with a message\nsaying which; it is not silently ignored, because a script that quietly\nnever runs is worse than one that fails to load.\n\nAuthority follows the file's location, not the configuration: a script\ninside the project is the operator's own and may rewrite anything, while\none that arrived with a plugin may add. Nothing in this struct can change\nthat, which is deliberate — it would otherwise be a field a plugin could\nset for itself.",
       "properties": {
@@ -1333,6 +1354,13 @@
         "reap_on_close": false,
         "require": false,
         "unattended_needs_network_policy": false
+      }
+    },
+    "schedule": {
+      "$ref": "#/$defs/ScheduleSettings",
+      "default": {
+        "max_model_jobs": 20,
+        "min_model_interval_minutes": 1
       }
     },
     "scripts": {

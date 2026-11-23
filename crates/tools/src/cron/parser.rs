@@ -168,6 +168,33 @@ fn day_name_to_num(s: &str) -> Option<u8> {
 /// Accepts numeric values, three-letter names (MON, JAN, etc.),
 /// comma-separated lists, ranges (including name-based like MON-FRI),
 /// and step notation (*/5, 3-59/10).
+/// The fewest minutes between two fires of `expr` from `from` on, over the
+/// next `span_minutes`; `None` when it fires once or never in that span.
+pub fn shortest_gap_minutes(
+    expr: &str,
+    from: time::OffsetDateTime,
+    span_minutes: u32,
+) -> Option<u32> {
+    let start = from.replace_second(0).ok()?.replace_nanosecond(0).ok()?;
+    let mut last = None;
+    let mut shortest: Option<u32> = None;
+    for minute in 0..span_minutes {
+        let at = start + time::Duration::minutes(i64::from(minute));
+        if !cron_matches(expr, &at) {
+            continue;
+        }
+        if let Some(previous) = last {
+            let gap = minute - previous;
+            shortest = Some(shortest.map_or(gap, |s| s.min(gap)));
+            if gap == 1 {
+                break;
+            }
+        }
+        last = Some(minute);
+    }
+    shortest
+}
+
 pub fn cron_expression_valid(expr: &str) -> bool {
     let parts: Vec<&str> = expr.split_whitespace().collect();
     if parts.len() != 5 {
@@ -218,6 +245,32 @@ pub fn cron_expression_valid(expr: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_shortest_gap_is_what_the_expression_fires_at() {
+        let from = time::macros::datetime!(2026-11-02 00:00 UTC);
+        let week = 7 * 24 * 60;
+        assert_eq!(
+            super::shortest_gap_minutes("* * * * *", from, week),
+            Some(1)
+        );
+        assert_eq!(
+            super::shortest_gap_minutes("*/15 * * * *", from, week),
+            Some(15)
+        );
+        assert_eq!(
+            super::shortest_gap_minutes("0 9 * * 1-5", from, week),
+            Some(24 * 60)
+        );
+        assert_eq!(
+            super::shortest_gap_minutes("0,5 9 * * *", from, week),
+            Some(5)
+        );
+        assert_eq!(
+            super::shortest_gap_minutes("30 14 28 2 *", from, week),
+            None
+        );
+    }
+
     use super::*;
     use time::Month;
 

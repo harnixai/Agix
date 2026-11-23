@@ -15,5 +15,5 @@ pub mod store;
 pub use create::{CronCreateInput, CronCreateTool};
 pub use delete::{CronDeleteInput, CronDeleteTool};
 pub use list::CronListTool;
-pub use parser::cron_expression_valid;
+pub use parser::{cron_expression_valid, shortest_gap_minutes};
 pub use store::{CronJob, CronStore, NewCronJob, MODEL_JOB_LIFETIME_MS};

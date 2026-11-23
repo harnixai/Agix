@@ -1,6 +1,6 @@
 //! The limits that hold across turns: what a session may spend over its
-//! whole life (`session`), and how far a goal the model sets may run
-//! (`goal`).
+//! whole life (`session`), how far a goal the model sets may run (`goal`),
+//! and what the model may schedule for itself (`schedule`).
 
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,31 @@ impl Default for GoalSettings {
     fn default() -> Self {
         Self {
             max_rounds: base::context::goal::MAX_ROUNDS_LIMIT,
+        }
+    }
+}
+
+/// What the model may schedule for itself with `CronCreate`. Jobs a host
+/// creates (`schedule.create`) are not held to these.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ScheduleSettings {
+    /// The most jobs the model's own `CronCreate` calls may hold in a session
+    /// at once; one it deletes, or one that has fired its last, makes room.
+    /// `0`: the model schedules none.
+    pub max_model_jobs: u32,
+    /// The fewest minutes between two fires of a recurring job the model
+    /// schedules, over the seven days it lives. `1` adds nothing to the
+    /// cron expression's own once-a-minute resolution.
+    pub min_model_interval_minutes: u32,
+}
+
+impl Default for ScheduleSettings {
+    fn default() -> Self {
+        Self {
+            max_model_jobs: 20,
+            min_model_interval_minutes: 1,
         }
     }
 }
@@ -81,6 +106,47 @@ mod tests {
         let (_, withheld) =
             kept_by_an_untrusted_project(json!({ "goal": { "max_rounds": 20_000 } }), json!({}));
         assert_eq!(withheld, ["goal.max_rounds"]);
+    }
+
+    #[test]
+    fn the_schedule_block_defaults_leave_the_model_twenty_jobs_at_any_interval() {
+        let defaults = crate::Settings::defaults_for("m").schedule;
+        assert_eq!(
+            (defaults.max_model_jobs, defaults.min_model_interval_minutes),
+            (20, 1)
+        );
+        let read = settings(json!({
+            "schedule": { "max_model_jobs": 1, "min_model_interval_minutes": 10 }
+        }));
+        assert_eq!(
+            (
+                read.schedule.max_model_jobs,
+                read.schedule.min_model_interval_minutes
+            ),
+            (1, 10)
+        );
+    }
+
+    #[test]
+    fn an_untrusted_project_may_only_tighten_what_the_model_schedules() {
+        let (kept, withheld) = kept_by_an_untrusted_project(
+            json!({ "schedule": { "max_model_jobs": 2, "min_model_interval_minutes": 30 } }),
+            json!({}),
+        );
+        assert!(withheld.is_empty(), "{withheld:?}");
+        assert_eq!(kept["schedule"]["min_model_interval_minutes"], 30);
+
+        let (_, withheld) = kept_by_an_untrusted_project(
+            json!({ "schedule": { "max_model_jobs": 50, "min_model_interval_minutes": 5 } }),
+            json!({ "schedule": { "min_model_interval_minutes": 10 } }),
+        );
+        assert_eq!(
+            withheld,
+            [
+                "schedule.max_model_jobs",
+                "schedule.min_model_interval_minutes"
+            ]
+        );
     }
 
     #[test]

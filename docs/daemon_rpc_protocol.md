@@ -3994,7 +3994,11 @@ settings.local.json)里声明过,否则 `INVALID_PARAMS` —— 用来换令牌�
 的那段时间里错过的触发**不补**。
 
 模型自己也能经 `CronCreate` / `CronList` / `CronDelete` 工具管理它所在会话的任务,和
-这里是同一份;模型建的周期任务 7 天后最后触发一次就删除,这里建的不会过期。
+这里是同一份;模型建的周期任务 7 天后最后触发一次就删除,这里建的不会过期。模型建的另受设置约束:
+一个会话里它建的、还在的任务不超过 `schedule.max_model_jobs`(缺省 20),周期任务两次触发至少隔
+`schedule.min_model_interval_minutes` 分钟(缺省 1,即不额外限制);超了 `CronCreate` 返回错误、写明
+是哪个设置。子 Agent 建不了定时任务。这里建的不计入、也不受这两项约束。任务带 `by_model: true` 表示
+是模型建的(宿主建的没有这个键)。
 
 #### `schedule.create`
 

@@ -23,6 +23,8 @@ impl LoadedSettings {
         c.max_api_calls_per_turn = settings.turn.max_model_calls;
         c.max_agent_depth = settings.agents.max_depth;
         c.model_autonomy.goal_max_rounds = settings.goal.max_rounds;
+        c.model_autonomy.max_jobs = settings.schedule.max_model_jobs;
+        c.model_autonomy.min_job_interval_minutes = settings.schedule.min_model_interval_minutes;
 
         c.permission_mode = settings.permissions.mode;
         c.sandbox = std::sync::Arc::new(SandboxSettings {

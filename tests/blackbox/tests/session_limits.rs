@@ -1,7 +1,9 @@
 //! What a session spends over its turns: `session.get`'s `usage` counts its
 //! delegates' calls as they are made, and a failed turn's, and survives a
 //! restart; `session.token_budget` holds it to a ceiling across turns, and a
-//! goal's `token_budget` blocks the goal once its rounds have spent it.
+//! goal's `token_budget` blocks the goal once its rounds have spent it; the
+//! `schedule` block holds what the model schedules for itself, not what a
+//! host does.
 
 use std::time::Duration;
 
@@ -13,8 +15,7 @@ const ROOT: &str = "ROOT-MARK";
 const WAIT: Duration = Duration::from_secs(30);
 
 fn stubbed(name: &str, stub: &ProviderStub, settings: Value) -> LiveRunBuilder {
-    let mut merged =
-        json!({ "permissions": { "allow": ["Agent", "Glob", "HostGate", "GoalCreate"] } });
+    let mut merged = json!({ "permissions": { "allow": ["Agent", "Glob", "HostGate", "GoalCreate", "CronCreate"] } });
     if let (Some(base), Some(extra)) = (merged.as_object_mut(), settings.as_object()) {
         base.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
@@ -294,6 +295,105 @@ async fn a_models_goal_is_blocked_once_its_rounds_have_spent_its_budget() -> any
     );
     assert_eq!(stub.call_count(), 4);
     drop(host);
+    run.finish().await;
+    Ok(())
+}
+
+fn cron(id: &str, expr: &str) -> Reply {
+    Reply::calls(
+        id,
+        "CronCreate",
+        json!({ "cron": expr, "prompt": "check on it", "recurring": true }),
+    )
+}
+
+fn cron_results(events: &rpc_client::TurnEvents) -> Vec<(String, bool)> {
+    events
+        .tool_results
+        .iter()
+        .filter(|(name, _, _)| name == "CronCreate")
+        .map(|(_, content, is_error)| (content.clone(), *is_error))
+        .collect()
+}
+
+async fn schedule_from_the_host(run: &mut LiveRun, s: &str, expr: &str) -> anyhow::Result<()> {
+    let created = run
+        .client
+        .call(
+            "schedule.create",
+            json!({ "session_id": s, "cron": expr, "prompt": "from the host", "durable": false }),
+        )
+        .await?;
+    assert!(created.error.is_none(), "{created:?}");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_model_holds_no_more_jobs_than_max_model_jobs() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed(
+        "model-jobs-cap",
+        &stub,
+        json!({ "schedule": { "max_model_jobs": 1 } }),
+    )
+    .start()
+    .await?;
+    let s = session(&mut run, json!({})).await?;
+    stub.script([
+        cron("c1", "0 9 * * *"),
+        cron("c2", "0 10 * * *"),
+        Reply::text("scheduled what I could"),
+    ]);
+    let events = run.turn(&s, "schedule two jobs").await?;
+    let results = cron_results(&events);
+    assert_eq!(results.len(), 2, "{events:?}");
+    assert!(!results[0].1, "{results:?}");
+    assert!(results[1].1, "{results:?}");
+    assert!(
+        results[1].0.contains("schedule.max_model_jobs"),
+        "{results:?}"
+    );
+
+    schedule_from_the_host(&mut run, &s, "0 11 * * *").await?;
+    schedule_from_the_host(&mut run, &s, "0 12 * * *").await?;
+    let jobs = run
+        .client
+        .call("schedule.list", json!({ "session_id": s }))
+        .await?
+        .result
+        .unwrap_or_default();
+    assert_eq!(jobs["jobs"].as_array().map(Vec::len), Some(3), "{jobs}");
+    run.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_model_cannot_schedule_closer_than_min_model_interval_minutes() -> anyhow::Result<()> {
+    let stub = ProviderStub::start().await?;
+    let mut run = stubbed(
+        "model-jobs-interval",
+        &stub,
+        json!({ "schedule": { "min_model_interval_minutes": 10 } }),
+    )
+    .start()
+    .await?;
+    let s = session(&mut run, json!({})).await?;
+    stub.script([
+        cron("c1", "* * * * *"),
+        cron("c2", "*/30 * * * *"),
+        Reply::text("done"),
+    ]);
+    let events = run.turn(&s, "schedule them").await?;
+    let results = cron_results(&events);
+    assert_eq!(results.len(), 2, "{events:?}");
+    assert!(results[0].1, "{results:?}");
+    assert!(
+        results[0].0.contains("schedule.min_model_interval_minutes"),
+        "{results:?}"
+    );
+    assert!(!results[1].1, "{results:?}");
+
+    schedule_from_the_host(&mut run, &s, "* * * * *").await?;
     run.finish().await;
     Ok(())
 }

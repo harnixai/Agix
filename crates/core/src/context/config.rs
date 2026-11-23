@@ -92,17 +92,25 @@ pub struct EngineConfig {
 }
 
 /// The ceilings on what the model starts running for itself: the goals it
-/// sets (`goal.*`). A host acting for a person is not held to them.
+/// sets (`goal.*`) and the jobs it schedules (`schedule.*`). A host acting
+/// for a person is not held to them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelAutonomy {
     /// The most rounds a goal the model sets or edits may have.
     pub goal_max_rounds: u32,
+    /// The most scheduled jobs the model may hold in a session at once.
+    pub max_jobs: u32,
+    /// The fewest minutes between two fires of a recurring job the model
+    /// schedules.
+    pub min_job_interval_minutes: u32,
 }
 
 impl Default for ModelAutonomy {
     fn default() -> Self {
         Self {
             goal_max_rounds: crate::context::goal::MAX_ROUNDS_LIMIT,
+            max_jobs: 20,
+            min_job_interval_minutes: 1,
         }
     }
 }

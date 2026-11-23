@@ -1903,6 +1903,10 @@
             "null"
           ]
         },
+        "by_model": {
+          "description": "The model scheduled it (`CronCreate`), not a host.",
+          "type": "boolean"
+        },
         "created_ms": {
           "description": "Unix millis when the job was created",
           "format": "int64",

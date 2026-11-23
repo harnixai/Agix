@@ -896,7 +896,9 @@ release 构建记一条 error。
   剩余付不起一次调用(不到 `MIN_CALL_TOKENS`)时,这一轮在调用前以 `budget_exceeded` 结束,目标转
   `blocked`;交下一轮前也查一次。要继续,先把 `token_budget` 调高再恢复。节点的累计随 `agix.spend`
   落盘,恢复时按目标 `id` 取回。模型设或改的目标,`max_rounds` 不超过设置的 `goal.max_rounds`
-  (`ModelAutonomy`,经 `EngineConfig` 给工具),宿主设的只受格式上限 10000 约束。
+  (`ModelAutonomy`,经 `EngineConfig` 给工具),宿主设的只受格式上限 10000 约束。模型经 `CronCreate`
+  建的定时任务同样由 `ModelAutonomy` 约束(`schedule.*`),判在工具里、不在宿主也用的 `CronStore` 里;
+  任务按根会话计(子 Agent 没有定时任务工具,`CronCreate` 在 delegate 里也拒绝)。
 
 ### 3.5 场景的工具面
 
@@ -2172,7 +2174,7 @@ daemon 管。设计与用法在 [`mcp_auth.md`](mcp_auth.md);这里只记它在�
 | `telemetry.enabled: false` | 丢弃:项目不能关掉审计记录 |
 | `telemetry.otlp_endpoint`、`recorder` | 丢弃:一个把遥测送到项目指定的地址,一个把宿主请求的录像写到项目指定的目录 |
 | `prompt.override` | 丢弃:它整个替换系统提示词(追加用的 `prompt.append` 照常) |
-| `turn`、`session`、`goal`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`session.token_budget`、`goal.max_rounds`、`agents.max_depth`、`agents.max_concurrent`) | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
+| `turn`、`session`、`goal`、`agents` 的各项上限(`turn.max_model_calls`、`turn.token_budget`、`turn.parallel_tools`、`session.token_budget`、`goal.max_rounds`、`schedule.max_model_jobs`、`agents.max_depth`、`agents.max_concurrent`);`schedule.min_model_interval_minutes` 是下限,只能更大 | 只能比下面几层更小;`permissions.prompt_timeout_secs` 只能更小且不能是 0(0 是不限);`team.enabled` 只能设为假 |
 | `prompt.instruction_files` | 丢弃:它按路径直接读进系统提示词,不过沙箱也不过 Read 的 `deny_read` |
 | `compaction.inline_result_chars` | 丢弃:项目不能改大结果外置的阈值 |
 | `app` | 整块丢弃:信任、历史位置、代理、worktree 目录都只认全局层 |
