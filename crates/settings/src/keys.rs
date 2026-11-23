@@ -316,6 +316,21 @@ pub fn scope_of(key: &[&str], sections: &Sections) -> Option<Scope> {
         .map(|(_, scope)| scope)
 }
 
+/// What a project that is not trusted may do with the dotted `key`.
+pub fn trust_of(key: &[&str], sections: &Sections) -> Option<Trust> {
+    Table::of(sections)
+        .governing(key, |k| k.trust)
+        .map(|(_, trust)| trust)
+}
+
+/// Whether the dotted `key` itself is read only when the process starts or
+/// its pool is built.
+pub fn is_read_at_start(key: &[&str], sections: &Sections) -> bool {
+    Table::of(sections)
+        .governing(key, |k| k.read_at_start.then_some(()))
+        .is_some_and(|(row, _)| row.len() == key.len())
+}
+
 /// The keys of `layer` whose scope is not `scope`, dotted at the row that
 /// gives them theirs (`model.order`, `hooks`), each with that scope. A key no
 /// row gives a scope is not among them.

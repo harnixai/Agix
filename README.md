@@ -593,8 +593,8 @@ Configuration is layered, lowest priority first: built-in defaults →
 `~/.agix/settings.json` → `~/.agix/scenes/<scene>/settings.json` →
 `<project>/.agix/settings.json`, each with an optional `settings.local.json`
 that outranks the file beside it → the `cli` layer (`agixd --set`, or an
-embedder's `EmbedConfig.settings`), over every project and scene. The full surface is the generated
-[JSON Schema](docs/schemas/settings.schema.json). Values are taken literally:
+embedder's `EmbedConfig.settings`), over every project and scene. **Every key with its default, scope, project-trust rule and when a change applies: [docs/settings.md](docs/settings.md)** (Chinese). The generated
+[JSON Schema](docs/schemas/settings.schema.json) is the machine-readable form. Values are taken literally:
 `$VAR` / `${VAR}` / `${VAR:-default}` are expanded only inside an MCP server's
 `command`, `args`, `env`, `url` and `headers`. A key the engine no longer reads
 is ignored, and the load warning names the key that replaced it.
@@ -635,18 +635,7 @@ How layers combine:
   `recorder` wait for trust, and its `model.order` may name only providers
   defined above it.
 
-Where a value can come from, lowest priority first:
-
-| Entry | Set by | Reaches | Held to |
-|---|---|---|---|
-| built-in defaults | the engine | everything | — |
-| `~/.agix/settings.json` (+ `.local`) | the user | every project and scene | the only file layer that may set `app` |
-| `~/.agix/scenes/<scene>/settings.json` (+ `.local`) | the user | that scene | — |
-| `<project>/.agix/settings.json` (+ `.local`) | the project | that project | only tightens until the user trusts the project |
-| `cli` layer: `agixd --set`, `EmbedConfig.settings` | whoever starts the daemon | every project and scene | not gated by trust |
-| a host's in-memory changes (`HostOverrides`) | an embedder | the daemon's own pair as written; another pair gets only what the host added | — |
-| `session.create` `options.settings` | an RPC client | that session, its sub-agents and team members | session-scope keys only; only tightens unless `permissions.client_may_loosen` |
-| the managed file | the deployment | everything | beats all of the above, except that a stricter value beneath it stands for a key with a tighter/looser order; a file that does not read refuses every tool call |
+The table of every place a value can come from, in priority order, is in the [settings reference](docs/settings.md#设置从哪来) (Chinese).
 
 To find out why a key has its value, `config.explain {key}` (or a block, such as `turn`; add
 `session_id` for a session's) lists each of these layers with what it set and what became of it there:
@@ -736,6 +725,7 @@ recording proxy. How each layer works and how to run it:
 | Document | For |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the engine is put together — layers, modules, the turn, sessions and scenes, history, execution, concurrency, disk layout |
+| [docs/settings.md](docs/settings.md) | the settings reference (Chinese): every `settings.json` key with its default, scope, project-trust rule and when a change applies; where values come from and how layers combine |
 | [docs/upgrading-0.4.md](docs/upgrading-0.4.md) | upgrading an application from 0.3.x: the settings renames, `options.settings`, the protocol and budget changes, `EmbedConfig` |
 | [docs/agix-sdk.md](docs/agix-sdk.md) | embedding the engine in your own Rust process: the facade crate, one pool, one turn, events, host tools, shutdown, and the `agix::embed` entry |
 | [docs/extension_points.md](docs/extension_points.md) | every seam: what you can replace, contribute to or intercept, what it costs, who may |

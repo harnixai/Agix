@@ -215,6 +215,11 @@ impl SchemaKeys {
         Self(schema_keys(&settings_json_schema(sections)))
     }
 
+    /// Every key a file can hold, dotted, a map's key as `*`.
+    pub fn leaves(&self) -> Vec<String> {
+        self.0.iter().map(|key| key.join(".")).collect()
+    }
+
     pub fn kind(&self, path: &[&str]) -> KeyKind {
         let agrees = |key: &[String]| key.iter().zip(path).all(|(k, p)| k == "*" || k == p);
         let mut kind = KeyKind::Unknown;

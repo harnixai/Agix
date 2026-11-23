@@ -9,6 +9,9 @@
 //! settings keys, and a default written as one literal must be the built-in one.
 //! Every key the schema has is governed by a row of the key table
 //! (`settings::keys`).
+//!
+//! `docs/settings.md` lists every settings key exactly once, and what its
+//! scope, trust and restart cells say is what the key table says.
 
 #![cfg(feature = "agents")]
 #![allow(clippy::unwrap_used)]
@@ -177,7 +180,7 @@ fn every_documented_settings_example_is_valid_and_loads_whole() {
         .collect();
     let validator = jsonschema::validator_for(&schema).unwrap();
     let examples = examples(&keys);
-    for expected in ["README.md", "docs/hooks.md"] {
+    for expected in ["README.md", "docs/hooks.md", "docs/settings.md"] {
         assert!(
             examples.iter().any(|e| e.at.starts_with(expected)),
             "no settings example found in {expected}; the extraction is broken"
@@ -421,12 +424,10 @@ fn schema_at<'a>(root: &'a Value, key: &str) -> Option<&'a Value> {
     Some(node)
 }
 
-#[test]
-fn the_readme_settings_tables_name_real_keys_and_their_defaults() {
-    let schema = settings_json_schema(&settings_sections::all());
+fn built_in_defaults() -> Value {
     let source = InMemoryLayers::new();
     let dir = PathBuf::from("/nonexistent");
-    let defaults = serde_json::to_value(
+    serde_json::to_value(
         LoadedSettings::load_from(LoadRequest {
             source: &source,
             global_dir: dir.join("global"),
@@ -439,7 +440,13 @@ fn the_readme_settings_tables_name_real_keys_and_their_defaults() {
         })
         .values,
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn the_readme_settings_tables_name_real_keys_and_their_defaults() {
+    let schema = settings_json_schema(&settings_sections::all());
+    let defaults = built_in_defaults();
     let headers = [("Setting", "Default"), ("设置", "缺省")];
     let mut rows = Vec::new();
     for file in ["README.md", "docs/README.zh-CN.md"] {
@@ -478,6 +485,170 @@ fn the_readme_settings_tables_name_real_keys_and_their_defaults() {
                 "{}: `{}` defaults to {built_in}, the table says {stated}",
                 row.at, row.key
             ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+fn scope_cell(scope: settings::keys::Scope) -> &'static str {
+    use settings::keys::Scope;
+    match scope {
+        Scope::Process => "进程",
+        Scope::Pair => "项目与场景",
+        Scope::Session => "会话",
+    }
+}
+
+fn trust_cell(key: &[&str], sections: &settings::section::Sections) -> String {
+    use settings::keys::{Order, Trust};
+    if settings::keys::global_only_at(key, sections).is_some() {
+        return "只认全局文件层、cli 与 managed".into();
+    }
+    match settings::keys::trust_of(key, sections).expect("every key has a trust") {
+        Trust::Free => "照用".into(),
+        Trust::Withheld => "信任之后才生效".into(),
+        Trust::Tighten(order) => {
+            let tighter = match order {
+                Order::TrueTighter => "只能设为 true",
+                Order::FalseTighter => "只能设为 false",
+                Order::Mode => "不得比下层的模式更宽",
+                Order::NetworkMode => {
+                    "deny_all 最严,其次 allowlist 与 proxy(两者不能互换),unrestricted 最宽"
+                }
+                Order::EnvMode => "allowlist 比 inherit 严",
+                Order::Subset => "只能是下层的子集",
+                Order::SubsetEmptyIsAll => "只能是下层的子集(空表示全部)",
+                Order::Superset => "只能是下层的超集",
+                Order::Lower => "只能更小(null 表示不限,最宽)",
+                Order::Higher => "只能更大",
+                Order::LowerZeroIsWidest => "只能更小(0 表示不限,最宽)",
+                Order::ProviderDefinedBelow => "只能列下层已定义的 provider",
+            };
+            format!("只能收紧({tighter})")
+        }
+    }
+}
+
+#[test]
+fn the_settings_manual_lists_every_key_once_as_the_key_table_says() {
+    let sections = settings_sections::all();
+    let schema = settings_json_schema(&sections);
+    let leaves = settings::SchemaKeys::of(&sections).leaves();
+    let defaults = built_in_defaults();
+    let text = std::fs::read_to_string(repo().join("docs/settings.md")).unwrap();
+    let mut wrong = Vec::new();
+    let mut listed: Vec<String> = Vec::new();
+    let mut in_table = false;
+    let mut rows = 0;
+    for (number, line) in text.lines().enumerate() {
+        let at = format!("docs/settings.md:{}", number + 1);
+        if !line.starts_with('|') {
+            in_table = false;
+            continue;
+        }
+        let cells: Vec<String> = line
+            .trim()
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect();
+        if cells[0] == "键" {
+            assert_eq!(
+                cells,
+                ["键", "缺省", "作用域", "未受信项目", "改后", "说明"],
+                "{at}: the header"
+            );
+            in_table = true;
+            continue;
+        }
+        if !in_table || cells[0].starts_with("---") {
+            continue;
+        }
+        rows += 1;
+        if cells.len() != 6 {
+            wrong.push(format!("{at}: {} cells, not 6", cells.len()));
+            continue;
+        }
+        let Some(shown) = cells[0].strip_prefix('`').and_then(|c| c.strip_suffix('`')) else {
+            wrong.push(format!("{at}: the key {} is not in backticks", cells[0]));
+            continue;
+        };
+        if shown.contains("[]") {
+            if schema_at(&schema, shown).is_none() {
+                wrong.push(format!("{at}: `{shown}` is no settings key"));
+            }
+            continue;
+        }
+        let key: Vec<&str> = shown
+            .split('.')
+            .map(|segment| {
+                if segment.starts_with('<') && segment.ends_with('>') {
+                    "*"
+                } else {
+                    segment
+                }
+            })
+            .collect();
+        let dotted = key.join(".");
+        if !leaves.contains(&dotted) {
+            wrong.push(format!("{at}: `{shown}` is no settings key"));
+            continue;
+        }
+        listed.push(dotted);
+
+        let scope = scope_cell(settings::keys::scope_of(&key, &sections).unwrap());
+        if cells[2] != scope {
+            wrong.push(format!(
+                "{at}: `{shown}` scope is {scope}, the table says {}",
+                cells[2]
+            ));
+        }
+        let trust = trust_cell(&key, &sections);
+        if cells[3] != trust {
+            wrong.push(format!(
+                "{at}: `{shown}` trust is {trust}, the table says {}",
+                cells[3]
+            ));
+        }
+        let after = if settings::keys::is_read_at_start(&key, &sections) {
+            "要重启"
+        } else {
+            "立即"
+        };
+        if cells[4] != after {
+            wrong.push(format!(
+                "{at}: `{shown}` applies {after}, the table says {}",
+                cells[4]
+            ));
+        }
+
+        let literal = cells[1]
+            .strip_prefix('`')
+            .and_then(|c| c.strip_suffix('`'))
+            .filter(|c| !c.contains('`'));
+        let built_in = key
+            .iter()
+            .try_fold(&defaults, |node, segment| node.get(segment))
+            .filter(|value| !value.is_null());
+        if let (Some(literal), Some(built_in)) = (literal, built_in) {
+            let stated = serde_json::from_str::<Value>(literal)
+                .unwrap_or_else(|_| Value::String(literal.to_string()));
+            if *built_in != stated {
+                wrong.push(format!(
+                    "{at}: `{shown}` defaults to {built_in}, the table says {stated}"
+                ));
+            }
+        }
+    }
+    assert!(
+        rows > 80,
+        "docs/settings.md: {rows} rows; the extraction is broken"
+    );
+    for leaf in &leaves {
+        match listed.iter().filter(|key| *key == leaf).count() {
+            1 => {}
+            0 => wrong.push(format!("`{leaf}` is in no table of docs/settings.md")),
+            n => wrong.push(format!("`{leaf}` is in {n} rows of docs/settings.md")),
         }
     }
     assert!(wrong.is_empty(), "{wrong:#?}");

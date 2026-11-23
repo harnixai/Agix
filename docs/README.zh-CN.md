@@ -469,8 +469,8 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
 配置按层叠加,优先级从低到高:内建默认 → `~/.agix/settings.json` →
 `~/.agix/scenes/<scene>/settings.json` → `<项目>/.agix/settings.json`,每层可再带一个
 `settings.local.json`,优先于它旁边的文件 → `cli` 层(`agixd --set`,或嵌入方的
-`EmbedConfig.settings`),叠在每个项目、每个场景之上。完整的配置面是生成的
-[JSON Schema](schemas/settings.schema.json)。值按字面取:`$VAR` / `${VAR}` / `${VAR:-默认}`
+`EmbedConfig.settings`),叠在每个项目、每个场景之上。**每个键的缺省、作用域、未受信项目怎么处理、改后何时生效:[设置手册 settings.md](settings.md)。**生成的
+[JSON Schema](schemas/settings.schema.json) 是它的机器可读形式。值按字面取:`$VAR` / `${VAR}` / `${VAR:-默认}`
 只在 MCP server 的 `command`、`args`、`env`、`url`、`headers` 里展开。引擎不再读的旧键会被忽略,
 加载时的告警会指出取代它的新键。
 
@@ -495,18 +495,7 @@ agent 跑的命令各有自己的进程组,daemon 崩了它们还活着,所以 d
   `prompt.instruction_files`、`prompt.override`、`sandbox.network.proxy`、`telemetry.otlp_endpoint`、
   `recorder` 都等信任之后才生效,它的 `model.order` 只能排在它之上已定义的 provider。
 
-值可能从哪来,优先级从低到高:
-
-| 入口 | 谁写 | 作用到 | 约束 |
-|---|---|---|---|
-| 内建默认 | 引擎 | 全部 | — |
-| `~/.agix/settings.json`(+ `.local`) | 用户 | 所有项目、所有场景 | 文件层里只有它能写 `app` |
-| `~/.agix/scenes/<scene>/settings.json`(+ `.local`) | 用户 | 这个场景 | — |
-| `<项目>/.agix/settings.json`(+ `.local`) | 项目 | 这个项目 | 用户信任之前只能收紧 |
-| `cli` 层:`agixd --set`、`EmbedConfig.settings` | 启动 daemon 的人 | 所有项目、所有场景 | 不受项目信任限制 |
-| 宿主在内存里改的值(`HostOverrides`) | 嵌入方 | 守护进程自己那一对照原样;别的对只带宿主新加的 | — |
-| `session.create` 的 `options.settings` | RPC 客户端 | 这个会话,连同它的子 Agent、团队成员 | 只收会话作用域的键;不开 `permissions.client_may_loosen` 只能收紧 |
-| managed 文件 | 部署方 | 全部 | 压过以上各层;有松紧次序的键下层更严时留下层的;读不了就拒绝所有工具调用 |
+值可能从哪来的完整优先级表见[设置手册](settings.md#设置从哪来)。
 
 要知道一个键为什么是现在这个值,调 `config.explain {key}`(也可以给一个块,如 `turn`;加 `session_id`
 看会话的):逐层列出这一层写了什么、结局如何——生效、被更高层盖过、未受信项目被扣下、只认全局层而被丢掉、
@@ -591,6 +580,7 @@ JSON-RPC 驱动整个产品——一次对脚本化的模型服务器,一次(`li
 | 文档 | 用途 |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 引擎怎么拼起来——分层、模块、一轮、会话与场景、历史、执行、并发、磁盘布局 |
+| [settings.md](settings.md) | 设置手册:`settings.json` 的每个键——缺省、作用域、未受信项目怎么处理、改后何时生效;值从哪来、层怎么合 |
 | [upgrading-0.4.md](upgrading-0.4.md) | 从 0.3.x 升级应用:设置改名表、`options.settings`、协议与预算的变化、`EmbedConfig` |
 | [agix-sdk.md](agix-sdk.md) | 把引擎嵌进自己的 Rust 进程:门面 crate、一个池、一轮、事件、宿主工具、关停,以及 `agix::embed` 入口 |
 | [extension_points.md](extension_points.md) | 每个接缝:能换什么、能往哪里贡献、能拦截什么,代价与谁能用 |
