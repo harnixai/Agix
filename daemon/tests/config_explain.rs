@@ -520,3 +520,97 @@ async fn a_mode_the_host_switched_to_since_is_overridden_not_clamped() {
     );
     d.stop().await;
 }
+
+#[tokio::test]
+async fn why_a_credential_does_not_fit_is_said_without_it() {
+    let proxy = "http://u:ghp_supersecretvalue@proxy:3128";
+    let d = Daemon::start(Setup {
+        global: json!({"sandbox": {"network": {"mode": "proxy", "proxy": proxy}}}),
+        ..Default::default()
+    })
+    .await;
+    let key = "sandbox.network.proxy";
+
+    let explained = d.explain(json!({"key": key})).await;
+    let global = layer(&explained, "global");
+    assert_eq!(global["outcome"], "ignored", "{explained}");
+    let error = global["error"].as_str().unwrap_or_default();
+    assert!(error.contains(key), "{error}");
+    assert!(
+        !explained.to_string().contains("supersecret"),
+        "{explained}"
+    );
+
+    let shown = d
+        .explain(json!({"key": key, "include_secrets": true}))
+        .await;
+    let error = layer(&shown, "global")["error"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(error.contains("supersecret"), "{shown}");
+
+    let doctor = call(&d.sock, "daemon.doctor", json!({})).await;
+    assert!(doctor.to_string().contains(key), "{doctor}");
+    assert!(!doctor.to_string().contains("supersecret"), "{doctor}");
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn the_managed_layer_is_shown_redacted() {
+    let d = Daemon::start(Setup {
+        managed: Some(json!({"mcp": {"servers": {"gh": {
+            "command": "/nonexistent/mcp-server",
+            "env": {"GH_TOKEN": "ghp_supersecretvalue"},
+        }}}})),
+        ..Default::default()
+    })
+    .await;
+    let effective = call(
+        &d.sock,
+        "config.get",
+        json!({"tier": "effective", "scene": "code"}),
+    )
+    .await;
+    assert!(effective["managed"]["mcp"].is_object(), "{effective}");
+    assert!(
+        !effective.to_string().contains("supersecret"),
+        "{effective}"
+    );
+    let shown = call(
+        &d.sock,
+        "config.get",
+        json!({"tier": "effective", "scene": "code", "include_secrets": true}),
+    )
+    .await;
+    assert!(shown.to_string().contains("supersecret"), "{shown}");
+    let doctor = call(&d.sock, "daemon.doctor", json!({})).await;
+    assert!(!doctor.to_string().contains("supersecret"), "{doctor}");
+    d.stop().await;
+}
+
+#[tokio::test]
+async fn why_a_managed_layer_cannot_be_honoured_is_said_without_its_credential() {
+    let d = Daemon::start(Setup {
+        managed: Some(json!({"sandbox": {"network": {
+            "mode": "proxy",
+            "proxy": "http://u:ghp_supersecretvalue@proxy:3128",
+        }}})),
+        ..Default::default()
+    })
+    .await;
+    let effective = call(
+        &d.sock,
+        "config.get",
+        json!({"tier": "effective", "scene": "code"}),
+    )
+    .await;
+    let error = effective["managed"]["error"].as_str().unwrap_or_default();
+    assert!(error.contains("sandbox.network.proxy"), "{effective}");
+    assert!(
+        !effective.to_string().contains("supersecret"),
+        "{effective}"
+    );
+    let doctor = call(&d.sock, "daemon.doctor", json!({})).await;
+    assert!(!doctor.to_string().contains("supersecret"), "{doctor}");
+    d.stop().await;
+}

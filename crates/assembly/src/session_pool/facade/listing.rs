@@ -150,6 +150,7 @@ impl SessionPool {
             if let Some(local) = &mut local {
                 redact_settings_secrets(local);
             }
+            redact_managed_report(&mut managed);
         }
 
         Ok(api::ConfigTier {

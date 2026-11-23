@@ -35,6 +35,7 @@ mod pool_telemetry;
 #[cfg(test)]
 mod tests;
 
+use crate::redact::*;
 use api::{
     emitted_outside_turns, AskKind, Busy, Initiator, PoolError, SessionEvent, SessionFrame,
     SessionOptions, SessionWatcher, Subscribed, TurnOutcome, TurnRequest, WatcherId,
@@ -57,7 +58,6 @@ use parts::factory::{
 use parts::hub::SessionHub;
 use parts::live::{LiveSession, LiveSessions, SessionCore};
 use parts::phase::{Generation, RunningTurn, TurnSlot, TurnTicket};
-use parts::redact::*;
 use parts::scenes::SceneCatalog;
 use parts::scheduler::{Scheduler, TurnLauncher};
 use parts::settings_write::*;

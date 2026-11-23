@@ -10,7 +10,6 @@ pub(super) mod hosts;
 pub(super) mod hub;
 pub(super) mod live;
 pub(super) mod phase;
-pub(super) mod redact;
 pub(super) mod scenes;
 pub(super) mod scheduler;
 pub(super) mod settings_write;

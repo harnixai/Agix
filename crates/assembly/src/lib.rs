@@ -26,6 +26,7 @@ pub mod modules;
 pub mod plugins;
 mod project_history;
 mod recording_view;
+mod redact;
 pub mod rpc;
 pub mod server;
 pub mod session_pool;

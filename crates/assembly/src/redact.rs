@@ -1,4 +1,4 @@
-//! settings 内容的脱敏：按键名遮住凭据，只留末四位。
+//! settings 内容的脱敏：按键名遮住凭据，只留末四位；值放不进设置时的报错也不把凭据带出去。
 
 /// Redact every credential-shaped field in a settings blob.
 ///
@@ -12,7 +12,7 @@
 /// and a `headers` or `env` written as one string is no less one. The
 /// top-level `sandbox.env` is not one of them: it names variables, it holds no
 /// values.
-pub(in crate::session_pool) fn redact_settings_secrets(value: &mut serde_json::Value) {
+pub(crate) fn redact_settings_secrets(value: &mut serde_json::Value) {
     redact_beneath(value, &[]);
 }
 
@@ -68,7 +68,7 @@ fn redact_beneath(value: &mut serde_json::Value, path: &[&str]) {
 /// Whether `value`, written at `path`, carries a credential the redaction
 /// would mask: a secret-named key, a password or token in a URL, a token
 /// after a `--token`-like argument.
-pub(in crate::session_pool) fn holds_credential(path: &[&str], value: &serde_json::Value) -> bool {
+pub(crate) fn holds_credential(path: &[&str], value: &serde_json::Value) -> bool {
     let original = path.iter().rev().fold(value.clone(), |inner, key| {
         serde_json::Value::Object(serde_json::Map::from_iter([(key.to_string(), inner)]))
     });
@@ -77,7 +77,35 @@ pub(in crate::session_pool) fn holds_credential(path: &[&str], value: &serde_jso
     shown != original
 }
 
-pub(in crate::session_pool) use base::text::scrub_url;
+pub(crate) use base::text::scrub_url;
+
+/// The managed layer as `config.get` and `daemon.doctor` report it
+/// ([`settings::managed::report`]), its values redacted and its error said
+/// without the credentials a parser's message may quote.
+pub(crate) fn redact_managed_report(report: &mut serde_json::Value) {
+    let error = report.get("error").and_then(|e| e.as_str()).map(scrub_url);
+    redact_settings_secrets(report);
+    if let Some(error) = error {
+        report["error"] = serde_json::Value::String(error);
+    }
+}
+
+/// `error`, said of the value at the dotted `key`, as it can be shown without
+/// the credential in it. When `value` — or, not at hand, any value at `key` —
+/// is one the redaction masks, the message says only that the value does not
+/// fit, since a parser's message quotes the value; otherwise it is the message
+/// with URL passwords and token-like words masked.
+pub(crate) fn shown_error(key: &str, value: Option<&serde_json::Value>, error: &str) -> String {
+    let path: Vec<&str> = key.split('.').collect();
+    let probe = serde_json::Value::String("a credential".into());
+    if holds_credential(&path, value.unwrap_or(&probe)) {
+        return format!(
+            "`{key}`: the value does not fit its setting; the reason is not shown because it \
+             would show the credential in the value"
+        );
+    }
+    scrub_url(error)
+}
 
 fn names_a_secret(lowercase_flag: &str) -> bool {
     ["token", "key", "secret", "passw", "auth"]
@@ -85,7 +113,7 @@ fn names_a_secret(lowercase_flag: &str) -> bool {
         .any(|n| lowercase_flag.contains(n))
 }
 
-pub(in crate::session_pool) fn is_secret_key(lowercase_key: &str) -> bool {
+pub(crate) fn is_secret_key(lowercase_key: &str) -> bool {
     const SECRET_KEYS: &[&str] = &[
         "api_key",
         "auth_token",
@@ -100,7 +128,7 @@ pub(in crate::session_pool) fn is_secret_key(lowercase_key: &str) -> bool {
             .any(|suffix| lowercase_key.ends_with(suffix))
 }
 
-pub(in crate::session_pool) fn redact_every_string(value: &mut serde_json::Value) {
+pub(crate) fn redact_every_string(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::String(s) if !s.is_empty() => {
             *value = serde_json::Value::String(redact_secret(s));
@@ -115,7 +143,7 @@ pub(in crate::session_pool) fn redact_every_string(value: &mut serde_json::Value
 /// `char`, not byte, so this never panics on non-ASCII input); too-short
 /// secrets (≤4 chars) redact to a bare `***` rather than revealing the
 /// whole thing.
-pub(in crate::session_pool) fn redact_secret(s: &str) -> String {
+pub(crate) fn redact_secret(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= 4 {
         return "***".to_string();

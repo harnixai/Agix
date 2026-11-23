@@ -89,7 +89,7 @@ impl SessionPool {
 
 /// Every value of `explained` redacted as `config.get` redacts a settings
 /// file: each put back at its key first, since what is a secret depends on
-/// the keys it sits under.
+/// the keys it sits under. Why a value was ignored is said without it.
 fn redact_explained(explained: &mut KeyExplanation) {
     let key = explained.key.clone();
     let redact = |value: &mut serde_json::Value| {
@@ -104,6 +104,9 @@ fn redact_explained(explained: &mut KeyExplanation) {
     };
     redact(&mut explained.value);
     for layer in &mut explained.layers {
+        if let Some(error) = &mut layer.error {
+            *error = shown_error(&key, layer.value.as_ref(), error);
+        }
         if let Some(value) = &mut layer.value {
             redact(value);
         }
@@ -112,6 +115,9 @@ fn redact_explained(explained: &mut KeyExplanation) {
         redact(&mut managed.value);
     }
     if let Some(session) = &mut explained.session {
+        if let Some(error) = &mut session.error {
+            *error = shown_error(&key, session.requested.as_ref(), error);
+        }
         redact(&mut session.applied);
         if let Some(requested) = &mut session.requested {
             redact(requested);

@@ -187,7 +187,14 @@ impl SettingsTiersCheck {
             scenes,
             project: settings.paths.layout.project_dir(&project),
             cli: settings.cli_layer.clone(),
-            ignored: settings.ignored.clone(),
+            ignored: settings
+                .ignored
+                .iter()
+                .map(|ignored| settings::IgnoredValue {
+                    error: crate::redact::shown_error(&ignored.key, None, &ignored.error),
+                    ..ignored.clone()
+                })
+                .collect(),
         }
     }
 
@@ -431,7 +438,7 @@ impl ManagedSettingsCheck {
             managed: settings.managed.clone(),
             unreadable: permissions::policy::ManagedLayer::from(&settings.managed)
                 .unreadable()
-                .map(str::to_string),
+                .map(crate::redact::scrub_url),
         }
     }
 }
@@ -449,12 +456,14 @@ impl HealthCheck for ManagedSettingsCheck {
                     "path": self.path.display().to_string(),
                 }));
         };
+        let mut shown = serde_json::Value::Object(settings::managed::as_file(managed));
+        crate::redact::redact_settings_secrets(&mut shown);
         let details = serde_json::json!({
             "present": true,
             "path": self.path.display().to_string(),
             "origin": managed.origin,
             "error": self.unreadable,
-            "settings": settings::managed::as_file(managed),
+            "settings": shown,
         });
         match &self.unreadable {
             Some(why) => CheckResult::failing(format!(

@@ -961,7 +961,7 @@ MCP 开关、项目信任)时是 `failing`——它不再读,那道保护就没�
 这个对象本身(`web.allowed_domains` 写成了对象);`permissions.mode` 写了只能由程序设的模式也列在
 这里;`permissions` 的规则串逐条读,读不出来的一条是 `permissions.allow[0]` 这样带下标。被丢的只是这个值,同一个文件里
 其余的值和别的层照常生效。`cli` 层的值在 daemon 自己那一对上放不进时 daemon 根本起不来,别的项目上放不进的
-(与那个项目的设置合起来才不对)照样丢掉,`tier` 与 `origin` 都是 `cli`。有这样的值时 `settings.tiers` 是 `degraded`,`summary` 列出
+(与那个项目的设置合起来才不对)照样丢掉,`tier` 与 `origin` 都是 `cli`。`error` 按 `config.explain` 的规则不带凭据。有这样的值时 `settings.tiers` 是 `degraded`,`summary` 列出
 `<层> (<键>)`。
 
 `providers.ok` 只说明配置**形状**解析得通(每个 `tiers` 里的模型都在它的 `models` 里、`model.order` 里的每个 id 都指向一个存在
@@ -1010,8 +1010,8 @@ daemon 自己的会话池在 `health.checks` 里还有一项 `settings.managed`,
   "details": { "present":true,
                "path":"/etc/agix/managed-settings.json",   // 查找的路径(--managed-settings 或系统路径)
                "origin":"/etc/agix/managed-settings.json", // 这一层的来源
-               "error":null,                               // 不能执行时的原因
-               "settings":{ "sandbox":{ "require":true },  // 它设的一切,设置文件的形状
+               "error":null,                               // 不能执行时的原因(URL 密码与像令牌的词遮住)
+               "settings":{ "sandbox":{ "require":true },  // 它设的一切,设置文件的形状,按 config.get 的规则脱敏
                             "permissions":{ "deny":["Bash(curl:*)"], "disable_bypass":false } } } }
 ```
 
@@ -1346,8 +1346,9 @@ HashMap),客户端要按 `scene` 找条目,不要按下标。
 
 `include_secrets` 默认 `false`:`api_key` / `auth_token` / `token` / `secret` /
 `password` / `authorization`,以及以 `_token` / `_secret` / `_password` 结尾的键(键名不分
-大小写),值一律脱敏为末 4 位(任意嵌套深度);`headers` 与 `env` 对象(MCP server 的请求头
-与 stdio 环境变量)里的值不论键名全部脱敏。
+大小写),值一律脱敏为末 4 位(任意嵌套深度);`headers` 与 `env`(MCP server 的请求头
+与 stdio 环境变量)不论写成对象还是一个字符串,里面的值不论键名全部脱敏,只有顶层的 `sandbox.env`
+不算(它列的是变量名,不带值);URL 里的密码换成 `***`(`https://u:***@host`)。
 
 ### 6.3 `session.*`
 
@@ -3173,7 +3174,8 @@ Shell 命令、监视器没有收件箱。会话不在内存里 → `SESSION_NOT
 
 **该层没有文件时 `settings` 是 `null`,不是 `{}`** —— "这层没配"和"这层配了个空的"
 是两种状态,配置界面得能区分。`tier: "project"` 而没给 `project_root` 同理。
-`tier` 取值非法 → `INVALID_PARAMS`。脱敏规则同 `scene.describe`,`local` 也一样脱敏。
+`tier` 取值非法 → `INVALID_PARAMS`。脱敏规则同 `scene.describe`,`local` 与 `managed` 也一样脱敏
+(`managed.error` 里 URL 的密码与像令牌的词遮住)。
 
 #### `config.explain`
 
@@ -3229,14 +3231,17 @@ daemon 手里的那份),各层的判法就是加载器自己的判法,不另算�
 | `withheld_untrusted` | `project` | 项目未受信(§3.6),这是只有受信项目才能写(或放宽)的值,被扣下 |
 | `dropped_not_global` | `scene`、`project` | 只从全局层读的键(`app.*`),写在了场景层或项目层 |
 | `ignored` | 各层、`managed`、`session` | 值放不进这个设置,带 `error` 说明;managed 上是放不进它下面的值 |
-| `managed_overrode` | 各层、`session` | managed 层把它换成了自己的值 |
+| `managed_overrode` | 各层、`session` | managed 层把它换成了自己的值;managed 关掉 bypass(`permissions.disable_bypass`)时,写了 `bypassPermissions` 的那一层或会话按 `default` 跑,也报这个 |
 | `held_tighter_below` | `managed` | managed 的值比下面的更松,有松紧次序的键留下层更严的那个 |
 | `clamped` | `session` | 会话要的值比设置更松,而设置不许客户端放宽(`permissions.client_may_loosen`),夹回设置的值 |
 | `not_session_scope` | `session` | 这个键按进程或按 `(项目, 场景)` 定,会话那一层不收 |
 
 没有设置读这个键 → `INVALID_PARAMS`(改过名的键,消息里给出新名字);同时给 `session_id` 与 `scene` /
 `project_root` → `INVALID_PARAMS`;会话不存在 → `SESSION_NOT_FOUND`;场景未知 → `SCENE_NOT_FOUND`。
-值的脱敏同 `config.get`。
+值的脱敏同 `config.get`。`ignored` 的 `error` 是解析器的原话,常把值本身引在里面:值属于上面会脱敏的
+(或键本身就在 `headers` / `env` 下、叫 `token` 之类)时,不带 `include_secrets` 的回答只说这个键的值放不进它的
+设置、不给原话;其余的原话里 URL 的密码与像令牌的词遮住。`daemon.doctor` 报的 `ignored_values` 与 managed 层
+同样处理。
 
 #### `config.set`
 
