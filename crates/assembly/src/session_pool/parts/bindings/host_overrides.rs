@@ -1,5 +1,6 @@
 //! 宿主在内存里改过的设置：宿主拿到守护进程自己那一对的设置之后、交给池之前改掉的值，
-//! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置。守护进程自己那一对拿到宿主改的全部；
+//! 作为一层叠在池从盘上读入的每份设置上，和托管层在同一个位置。守护进程自己那一对拿到宿主改的全部，
+//! 但列表跟着盘：宿主没加的元素盘上没了就不再有（撤销信任后项目自己的 provider 不回来），盘上后加的照样有；
 //! 别的对只拿宿主新加的——列表里只有它新加的元素，守护进程自己项目层里来的不跨对；宿主加的权限
 //! 规则只回到守护进程自己那一对上。
 
@@ -17,6 +18,8 @@ pub(in crate::session_pool) struct HostOverrides {
     /// The values the host set differently, a list only with the entries the
     /// host added to it.
     added: Option<Map<String, Value>>,
+    /// The entries the host took out of a list.
+    removed: Option<Map<String, Value>>,
     rules: Vec<LoadedRule>,
 }
 
@@ -25,15 +28,16 @@ impl HostOverrides {
     /// map, or a rule it removed, is not carried: a layer can only add or
     /// replace.
     pub(in crate::session_pool) fn between(disk: &LoadedSettings, host: &LoadedSettings) -> Self {
-        let (own, added) = match (
+        let (own, added, removed) = match (
             serde_json::to_value(&disk.values),
             serde_json::to_value(&host.values),
         ) {
             (Ok(disk), Ok(host)) => (
                 changed(&disk, &host, Lists::AsTheHostHasThem),
                 changed(&disk, &host, Lists::WhatTheHostAdded),
+                changed(&host, &disk, Lists::WhatTheHostAdded).and_then(only_lists),
             ),
-            _ => (None, None),
+            _ => (None, None, None),
         };
         let on_disk: Vec<_> = disk.rules.iter().map(rule_key).collect();
         let rules = host
@@ -45,6 +49,7 @@ impl HostOverrides {
         Self {
             own: own.and_then(into_object),
             added: added.and_then(into_object),
+            removed: removed.and_then(into_object),
             rules,
         }
     }
@@ -64,10 +69,18 @@ impl HostOverrides {
     }
 
     /// This daemon's own pair, read from disk, as the host made it: every
-    /// value it set, and the rules it added.
+    /// value it set, and the rules it added. A list is the host's, less what
+    /// it did not add and the disk no longer has, then what the disk has that
+    /// the host neither had nor took out.
     pub(in crate::session_pool) fn apply_to_own(&self, settings: LoadedSettings) -> LoadedSettings {
         let mut settings = match &self.own {
-            Some(own) => overlay(&settings, own),
+            Some(own) => {
+                let mut layer = own.clone();
+                if let Ok(Value::Object(now)) = serde_json::to_value(&settings.values) {
+                    follow_disk(&mut layer, &now, self.added.as_ref(), self.removed.as_ref());
+                }
+                overlay(&settings, &layer)
+            }
             None => settings,
         };
         settings.rules.extend(self.rules.iter().cloned());
@@ -102,6 +115,85 @@ fn extend_lists(layer: &mut Map<String, Value>, theirs: &Map<String, Value>) {
             }
             _ => {}
         }
+    }
+}
+
+/// Each list of `layer` as [`HostOverrides::apply_to_own`] lays it over
+/// `now`; `added` and `removed` are the host's lists of the same shape.
+fn follow_disk(
+    layer: &mut Map<String, Value>,
+    now: &Map<String, Value>,
+    added: Option<&Map<String, Value>>,
+    removed: Option<&Map<String, Value>>,
+) {
+    for (key, value) in layer.iter_mut() {
+        let added_here = added.and_then(|a| a.get(key));
+        let removed_here = removed.and_then(|r| r.get(key));
+        match (value, now.get(key)) {
+            (Value::Object(inner), Some(Value::Object(below))) => follow_disk(
+                inner,
+                below,
+                added_here.and_then(Value::as_object),
+                removed_here.and_then(Value::as_object),
+            ),
+            (Value::Array(host), below) => {
+                let below = below.and_then(Value::as_array).cloned().unwrap_or_default();
+                let added = added_here
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let removed = removed_here
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                *host = if key == "providers" {
+                    providers_on_disk(host, &below, &added)
+                } else {
+                    let mut list: Vec<Value> = host
+                        .iter()
+                        .filter(|item| added.contains(item) || below.contains(item))
+                        .cloned()
+                        .collect();
+                    let later: Vec<Value> = below
+                        .iter()
+                        .filter(|item| !host.contains(item) && !removed.contains(item))
+                        .cloned()
+                        .collect();
+                    list.extend(later);
+                    list
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The host's providers in its order: one it added as it has it, else the
+/// disk's entry of that id while there is one.
+fn providers_on_disk(host: &[Value], below: &[Value], added: &[Value]) -> Vec<Value> {
+    host.iter()
+        .filter_map(|entry| {
+            if added.contains(entry) {
+                return Some(entry.clone());
+            }
+            let id = entry.get("id")?;
+            below.iter().find(|p| p.get("id") == Some(id)).cloned()
+        })
+        .collect()
+}
+
+/// `value` with only its lists, and the objects that lead to one.
+fn only_lists(value: Value) -> Option<Value> {
+    match value {
+        Value::Object(fields) => {
+            let kept: Map<String, Value> = fields
+                .into_iter()
+                .filter_map(|(key, inner)| Some((key, only_lists(inner)?)))
+                .collect();
+            (!kept.is_empty()).then_some(Value::Object(kept))
+        }
+        Value::Array(items) => Some(Value::Array(items)),
+        _ => None,
     }
 }
 
@@ -235,6 +327,44 @@ mod tests {
         let other = overrides.apply(loaded(Settings::defaults_for("m")));
         assert_eq!(ids(&other), ["host"]);
         assert_eq!(ids(&overrides.apply_to_own(disk)), ["own-project", "host"]);
+    }
+
+    #[test]
+    fn what_left_the_own_projects_files_does_not_come_back_with_the_host_layer() {
+        let mut disk = Settings::defaults_for("m");
+        disk.providers = vec![provider("own-project")];
+        disk.files.extra_dirs = vec!["/own-project/extra".into()];
+        disk.files.deny_write = vec!["secret".into(), "keep".into()];
+        let disk = loaded(disk);
+        let mut host = disk.clone();
+        host.values.providers.push(provider("host"));
+        host.values.files.extra_dirs.push("/host/extra".into());
+        host.values.files.deny_write = vec!["keep".into()];
+        let overrides = HostOverrides::between(&disk, &host);
+
+        let mut untrusted_now = Settings::defaults_for("m");
+        untrusted_now.files.deny_write = vec!["secret".into(), "keep".into(), "added-later".into()];
+        let own = overrides.apply_to_own(loaded(untrusted_now));
+        let ids: Vec<&str> = own.values.providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["host"]);
+        assert_eq!(
+            own.values.files.extra_dirs,
+            [std::path::PathBuf::from("/host/extra")]
+        );
+        assert_eq!(own.values.files.deny_write, ["keep", "added-later"]);
+    }
+
+    #[test]
+    fn the_host_keeps_its_order_of_the_providers_still_on_disk() {
+        let mut disk = Settings::defaults_for("m");
+        disk.providers = vec![provider("a"), provider("b")];
+        let disk = loaded(disk);
+        let mut host = disk.clone();
+        host.values.providers = vec![provider("host"), provider("b"), provider("a")];
+        let overrides = HostOverrides::between(&disk, &host);
+        let own = overrides.apply_to_own(disk);
+        let ids: Vec<&str> = own.values.providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["host", "b", "a"]);
     }
 
     #[test]
